@@ -40,7 +40,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "GENERATE_WITH: npx @tauri-apps/cli signer generate -w ~/.tauri/skillstar.key",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU1Qjg1NjgyRkVCNDhCRDYKUldUV2k3VCtnbGE0NVNxS05SS3dqazA4S2xzNkN1WnZFY1VnS0JWQm1kRk1nM05WWkl6em9qaWUK",
       "endpoints": [
         "https://github.com/xxww0098/SkillStar/releases/latest/download/latest.json"
       ]
