@@ -42,7 +42,7 @@
     "updater": {
       "pubkey": "GENERATE_WITH: npx @tauri-apps/cli signer generate -w ~/.tauri/skillstar.key",
       "endpoints": [
-        "https://github.com/OWNER/REPO/releases/latest/download/latest.json"
+        "https://github.com/xxww0098/SkillStar/releases/latest/download/latest.json"
       ]
     }
   }
