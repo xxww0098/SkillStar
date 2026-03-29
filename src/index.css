@@ -1,0 +1,223 @@
+@plugin "@tailwindcss/typography";
+@import "tailwindcss";
+
+/* ========== SkillStar Dark Glassmorphism Design System ========== */
+
+@theme {
+  --color-background: #0a0a0f;
+  --color-foreground: #f4f4f5;
+  --color-primary: #3b82f6;
+  --color-primary-hover: #60a5fa;
+  --color-primary-foreground: #ffffff;
+  --color-card: rgba(255, 255, 255, 0.05);
+  --color-card-hover: rgba(255, 255, 255, 0.08);
+  --color-card-foreground: #f4f4f5;
+  --color-border: rgba(255, 255, 255, 0.1);
+  --color-border-subtle: rgba(255, 255, 255, 0.06);
+  --color-muted: rgba(255, 255, 255, 0.08);
+  --color-muted-foreground: #a1a1aa;
+  --color-accent: rgba(59, 130, 246, 0.15);
+  --color-accent-foreground: #60a5fa;
+  --color-destructive: #ef4444;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-ai: #8b5cf6;
+  --color-ai-hover: #7c3aed;
+  --color-ai-foreground: #ffffff;
+  --color-ai-text: #c4b5fd;
+  --color-ai-text-hover: #ddd6fe;
+  --color-ai-border: rgba(139, 92, 246, 0.3);
+  --color-ai-border-hover: rgba(139, 92, 246, 0.5);
+  --color-ai-bg-hover: rgba(139, 92, 246, 0.1);
+  --color-ai-shadow: rgba(139, 92, 246, 0.08);
+  --color-sidebar: rgba(255, 255, 255, 0.03);
+  --color-sidebar-hover: rgba(255, 255, 255, 0.06);
+  --color-sidebar-active: rgba(59, 130, 246, 0.15);
+  --color-input: rgba(255, 255, 255, 0.05);
+  --color-input-border: rgba(255, 255, 255, 0.1);
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+}
+
+:root[data-bg-style="paper"] {
+  --color-background: #f5f7fb;
+  --color-foreground: #0f172a;
+  --color-card: #ffffff;
+  --color-card-hover: #f8fafc;
+  --color-card-foreground: #0f172a;
+  --color-border: rgba(15, 23, 42, 0.12);
+  --color-border-subtle: rgba(15, 23, 42, 0.06);
+  --color-muted: rgba(15, 23, 42, 0.06);
+  --color-muted-foreground: #64748b;
+  --color-accent: rgba(59, 130, 246, 0.1);
+  --color-accent-foreground: #2563eb;
+  --color-ai: #7c3aed;
+  --color-ai-hover: #6d28d9;
+  --color-ai-text: #6d28d9;
+  --color-ai-text-hover: #5b21b6;
+  --color-ai-border: rgba(109, 40, 217, 0.4);
+  --color-ai-border-hover: rgba(109, 40, 217, 0.7);
+  --color-ai-bg-hover: rgba(109, 40, 217, 0.1);
+  --color-ai-shadow: rgba(109, 40, 217, 0.15);
+  --color-sidebar: rgba(255, 255, 255, 0.9);
+  --color-sidebar-hover: #ffffff;
+  --color-sidebar-active: rgba(59, 130, 246, 0.15);
+  --color-input: #ffffff;
+  --color-input-border: rgba(15, 23, 42, 0.12);
+  --color-primary-hover: #2563eb;
+}
+
+/* ========== Base ========== */
+
+@layer base {
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background-color: var(--color-background);
+    background-image:
+      radial-gradient(ellipse at 20% 0%, rgba(59, 130, 246, 0.08) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 100%, rgba(139, 92, 246, 0.06) 0%, transparent 50%);
+    color: var(--color-foreground);
+    min-height: 100vh;
+    overflow: hidden;
+  }
+
+  :root[data-bg-style="paper"] body {
+    background-image:
+      radial-gradient(ellipse at 20% 0%, rgba(59, 130, 246, 0.12) 0%, transparent 55%),
+      radial-gradient(ellipse at 100% 100%, rgba(148, 163, 184, 0.14) 0%, transparent 45%);
+  }
+
+  #root {
+    height: 100vh;
+    display: flex;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.25);
+  }
+
+  :root[data-bg-style="paper"] ::-webkit-scrollbar-thumb {
+    background: rgba(15, 23, 42, 0.14);
+  }
+
+  :root[data-bg-style="paper"] ::-webkit-scrollbar-thumb:hover {
+    background: rgba(15, 23, 42, 0.24);
+  }
+
+  :root[data-bg-style="paper"] input.bg-background,
+  :root[data-bg-style="paper"] select.bg-background,
+  :root[data-bg-style="paper"] textarea.bg-background {
+    background-color: var(--color-input);
+    border-color: var(--color-input-border);
+  }
+
+  :root[data-bg-style="paper"] input::placeholder,
+  :root[data-bg-style="paper"] textarea::placeholder {
+    color: rgba(100, 116, 139, 0.9);
+    opacity: 1;
+  }
+}
+
+/* ========== Typography ========== */
+
+@layer utilities {
+  .text-heading-lg {
+    font-size: 1.5rem;
+    font-weight: 600;
+    line-height: 1.3;
+    letter-spacing: -0.02em;
+    color: var(--color-foreground);
+  }
+
+  .text-heading-md {
+    font-size: 1.125rem;
+    font-weight: 600;
+    line-height: 1.4;
+    letter-spacing: -0.01em;
+    color: var(--color-foreground);
+  }
+
+  .text-heading-sm {
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.4;
+    color: var(--color-foreground);
+  }
+
+  .text-body {
+    font-size: 0.875rem;
+    line-height: 1.5;
+    color: var(--color-card-foreground);
+  }
+
+  .text-caption {
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: var(--color-muted-foreground);
+  }
+}
+
+/* ========== Markdown ========== */
+
+@layer components {
+  .markdown-content code {
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-sm);
+    background-color: var(--color-muted);
+    padding: 0.08rem 0.35rem;
+    font-size: 0.88em;
+    font-weight: 500;
+  }
+
+  .markdown-content code::before,
+  .markdown-content code::after {
+    content: "" !important;
+  }
+
+  .markdown-content pre {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background-color: var(--color-muted);
+    padding: 0.75rem;
+  }
+
+  .markdown-content pre code {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    font-size: inherit;
+    font-weight: inherit;
+  }
+}
+
+/* ========== Keyframes ========== */
+
+.animate-ping-limited {
+  animation: ping 1s cubic-bezier(0, 0, 0.2, 1) 3;
+}

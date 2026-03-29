@@ -1,0 +1,186 @@
+name: Release
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: "macos-latest"
+            args: "--target aarch64-apple-darwin"
+          - platform: "macos-latest"
+            args: "--target x86_64-apple-darwin"
+          - platform: "ubuntu-22.04"
+            args: ""
+          - platform: "windows-latest"
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libssl-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf pkg-config
+
+      - name: Rust setup
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ contains(matrix.args, 'aarch64') && 'aarch64-apple-darwin' || '' }}
+
+      - name: Node.js setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Bun setup
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: Read app version
+        id: app_version
+        shell: bash
+        run: |
+          VERSION="$(node -e "console.log(require('./package.json').version)")"
+          echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Validate tag matches version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          EXPECTED_TAG="v${{ steps.app_version.outputs.VERSION }}"
+          if [ "${GITHUB_REF_NAME}" != "${EXPECTED_TAG}" ]; then
+            echo "Tag (${GITHUB_REF_NAME}) does not match package.json version (${EXPECTED_TAG})."
+            exit 1
+          fi
+
+      - name: Build the app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: "v${{ steps.app_version.outputs.VERSION }}"
+          releaseName: "SkillStar v${{ steps.app_version.outputs.VERSION }}"
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+  rebuild-latest-json:
+    name: Build latest.json
+    needs: release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    env:
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Node.js setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Determine version
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          TAG="v${VERSION}"
+          for i in $(seq 1 30); do
+            if gh release download "$TAG" --dir release-assets --pattern "*" --clobber; then
+              echo "Downloaded release assets from $TAG"
+              exit 0
+            fi
+            echo "Assets not ready yet (attempt $i/30). Sleeping 10s..."
+            sleep 10
+          done
+          echo "Failed to download assets after retries."
+          exit 1
+
+      - name: Read release metadata
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release view "v${VERSION}" --json body --jq '.body' > release-notes.md
+          PUBLISHED_AT="$(gh release view "v${VERSION}" --json publishedAt,createdAt --jq '.publishedAt // .createdAt')"
+          if [ -z "${PUBLISHED_AT}" ] || [ "${PUBLISHED_AT}" = "null" ]; then
+            PUBLISHED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          fi
+          echo "PUBLISHED_AT=${PUBLISHED_AT}" >> "$GITHUB_ENV"
+
+      - name: Build latest.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/release/build_merged_latest_json.cjs \
+            --version "${VERSION}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --assets-dir "release-assets" \
+            --notes-file "release-notes.md" \
+            --published-at "${PUBLISHED_AT}" \
+            --output "latest.json"
+
+      - name: Upload latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload "v${VERSION}" latest.json --clobber
+
+  publish-release:
+    name: Publish release
+    needs:
+      - release
+      - rebuild-latest-json
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Determine version
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release edit "v${VERSION}" --repo "${GITHUB_REPOSITORY}" --draft=false --prerelease=false --latest

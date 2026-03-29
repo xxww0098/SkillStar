@@ -1,0 +1,275 @@
+import { memo } from "react";
+import { motion } from "framer-motion";
+import { Download, GitBranch, Check, ExternalLink, Loader2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "../ui/card";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { cn, formatInstalls } from "../../lib/utils";
+import type { Skill, AgentProfile } from "../../types";
+
+interface SkillCardProps {
+  skill: Skill;
+  onClick: () => void;
+  onInstall: (url: string, name: string) => void;
+  onUpdate: (name: string) => void;
+  compact?: boolean;
+  selectable?: boolean;
+  selected?: boolean;
+  onSelect?: (name: string) => void;
+  profiles?: AgentProfile[];
+  onToggleAgent?: (skillName: string, agentId: string, enable: boolean, agentName?: string) => void;
+  pendingAgentToggleKeys?: Set<string>;
+  /** Whether this skill is currently being installed */
+  installing?: boolean;
+  /** Disable mount animation (use with stagger containers) */
+  noAnimate?: boolean;
+}
+
+
+
+/** Get rank badge color based on position */
+function rankStyle(rank: number): string {
+  if (rank === 1) return "bg-amber-400/20 text-amber-600 border-amber-400/40 font-bold";
+  if (rank === 2) return "bg-amber-500/20 text-amber-600 border-amber-500/40 font-bold dark:text-amber-400";
+  if (rank === 3) return "bg-orange-400/15 text-orange-500 border-orange-400/30 font-bold";
+  if (rank <= 10) return "bg-primary/8 text-primary/80 border-primary/20 font-semibold";
+  return "bg-muted text-muted-foreground border-transparent font-medium";
+}
+
+const categoryBadge = (category: string, t: (key: string) => string) => {
+  const map: Record<string, { label: string; variant: "hot" | "popular" | "rising" | "new" }> = {
+    Hot: { label: t("skillCard.hot"), variant: "hot" },
+    Popular: { label: t("skillCard.popular"), variant: "popular" },
+    Rising: { label: t("skillCard.rising"), variant: "rising" },
+    New: { label: t("skillCard.new"), variant: "new" },
+  };
+  return map[category];
+};
+
+function SkillCardInner({
+  skill, onClick, onInstall, onUpdate, compact, selectable, selected, onSelect,
+  profiles, onToggleAgent, pendingAgentToggleKeys, installing, noAnimate
+}: SkillCardProps) {
+  const { t } = useTranslation();
+  const cat = categoryBadge(skill.category, t);
+  const isLocalSkill = !skill.git_url?.trim();
+
+  const handleCheckboxClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onSelect?.(skill.name);
+  };
+
+  const Wrapper = noAnimate ? "div" : motion.div;
+  const wrapperProps = noAnimate ? {} : {
+    initial: { opacity: 0 },
+    animate: { opacity: 1 },
+    transition: { duration: 0.15 },
+  };
+
+  return (
+    <Wrapper {...wrapperProps} className="h-full">
+        <Card
+        className={cn(
+          "h-full flex flex-col cursor-pointer group relative rounded-2xl bg-card/50 backdrop-blur-sm border-white/10 shadow-[0_4px_20px_-8px_rgba(0,0,0,0.3)] hover:bg-card-hover/60 hover:shadow-[0_8px_30px_-10px_rgba(0,0,0,0.4)] transition-all",
+          compact && "p-2",
+          selected && "ring-2 ring-primary/40 border-primary/30"
+        )}
+        onClick={onClick}
+      >
+        {/* Rank badge (top-left) */}
+        {skill.rank && skill.rank <= 100 && (
+          <div className={cn(
+            "absolute top-3 left-3 z-10 w-7 h-7 rounded-lg border flex items-center justify-center text-[11px] tabular-nums",
+            rankStyle(skill.rank)
+          )}>
+            #{skill.rank}
+          </div>
+        )}
+
+
+
+        {/* Status Actions (Top Right) */}
+        <div className="absolute top-3 right-3 z-10 flex items-center">
+          {skill.installed ? (
+            skill.update_available ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 px-2.5 text-xs bg-card/50 backdrop-blur-sm hover:bg-muted/60 font-medium border-warning text-warning-foreground shadow-[0_0_10px_rgba(234,179,8,0.1)] transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onUpdate?.(skill.name);
+                }}
+              >
+                <span className="relative flex h-2 w-2 mr-1.5">
+                  <span className="animate-ping-limited absolute inline-flex h-full w-full rounded-full bg-warning opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-warning"></span>
+                </span>
+                {t("common.update")}
+              </Button>
+            ) : (
+              <motion.div
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ type: "spring", bounce: 0.4, duration: 0.5 }}
+              >
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="h-7 px-2.5 text-xs font-medium pointer-events-none bg-success/10 text-success hover:bg-success/10 border-success/20 disabled:opacity-100"
+                  disabled
+                >
+                  <Check className="w-3 h-3 mr-1.5" />
+                   {t("skillCard.installed")}
+                </Button>
+              </motion.div>
+            )
+          ) : installing ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-2.5 text-xs font-medium pointer-events-none"
+              disabled
+            >
+              <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+               {t("common.installing")}
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="default"
+              className="h-7 px-2.5 text-xs font-medium"
+              onClick={(e) => {
+                e.stopPropagation();
+                onInstall?.(skill.git_url, skill.name);
+              }}
+            >
+              <Download className="w-3 h-3 mr-1.5" />
+               {t("common.install")}
+            </Button>
+          )}
+        </div>
+
+        <CardHeader className={cn(skill.rank ? "pl-12" : undefined, "pr-24")}>
+          <div className="flex items-center gap-2.5">
+            {selectable ? (
+              <button
+                onClick={handleCheckboxClick}
+                className={cn(
+                  "w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-colors cursor-pointer",
+                  selected
+                    ? "bg-primary text-primary-foreground shadow-md shadow-primary/20"
+                    : "bg-primary/10 text-primary hover:bg-primary/20"
+                )}
+              >
+                {selected ? (
+                  <Check className="w-4 h-4" />
+                ) : (
+                  <GitBranch className="w-4 h-4" />
+                )}
+              </button>
+            ) : (
+              <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                <GitBranch className="w-4 h-4 text-primary" />
+              </div>
+            )}
+            <div className="min-w-0">
+              <CardTitle className="truncate">{skill.name}</CardTitle>
+              {isLocalSkill && (
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 mt-0.5 leading-none">
+                  Local
+                </Badge>
+              )}
+              {skill.source && (
+                <span className="text-caption text-xs">{skill.source}</span>
+              )}
+              {!skill.source && skill.author && (
+                <span className="text-caption text-xs">{skill.author}</span>
+              )}
+            </div>
+          </div>
+        </CardHeader>
+
+        <CardContent className="flex-1">
+          <CardDescription className="line-clamp-2">{skill.description || t("skillCard.noDescription")}</CardDescription>
+        </CardContent>
+
+        <CardFooter className="flex items-center justify-between px-4 py-2.5 mt-auto rounded-b-xl min-h-[44px]">
+          {/* Left side: Installs & Category */}
+          <div className="flex items-center gap-2">
+            {skill.stars > 0 && (
+              <div className="flex items-center gap-1">
+                <Download className="w-3.5 h-3.5 text-primary/60" />
+                <span className="text-xs font-medium text-muted-foreground tabular-nums">
+                  {formatInstalls(skill.stars)}
+                </span>
+              </div>
+            )}
+
+            {cat && (
+              <Badge variant={cat.variant} className="text-[10px] px-1.5 py-0 h-4 font-medium opacity-90">
+                {cat.label}
+              </Badge>
+            )}
+          </div>
+
+          {/* Right side: Agent badges or install command hint */}
+          <div className="flex items-center gap-1.5 relative z-10">
+            {profiles && onToggleAgent ? (
+              profiles.map(profile => {
+                const isUsed = skill.agent_links?.includes(profile.display_name) ?? false;
+                const toggleKey = `${skill.name}::${profile.id}`;
+                const isToggling = pendingAgentToggleKeys?.has(toggleKey) ?? false;
+                return (
+                  <button
+                    key={profile.id}
+                    onMouseDown={(e) => {
+                      // Keep mouse clicks from leaving a persistent native focus ring.
+                      e.preventDefault();
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (isToggling) return;
+                      onToggleAgent(skill.name, profile.id, !isUsed, profile.display_name);
+                    }}
+                    disabled={isToggling}
+                    className={cn(
+                      "w-7 h-7 rounded-lg flex items-center justify-center border transition-colors cursor-pointer focus:outline-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-wait",
+                      isUsed
+                        ? "border-primary/40 bg-primary/10 shadow-[0_0_0_1px_rgba(59,130,246,0.15)] hover:shadow-[0_0_0_1px_rgba(59,130,246,0.3)] hover:bg-primary/20"
+                        : "border-transparent bg-transparent hover:bg-muted",
+                      isToggling && "opacity-65"
+                    )}
+                    title={`${profile.display_name} ${isUsed ? '(Remove)' : '(Add)'}`}
+                  >
+                    <img
+                      src={`/${profile.icon}`}
+                      alt={profile.display_name}
+                      className={cn("w-4 h-4 transition-[filter,opacity] drop-shadow-sm", !isUsed && "grayscale opacity-40 hover:opacity-70")}
+                    />
+                  </button>
+                );
+              })
+            ) : skill.source ? (
+              <span className="text-[10px] text-muted-foreground/60 font-mono flex items-center gap-1">
+                <ExternalLink className="w-3 h-3" />
+                skills.sh
+              </span>
+            ) : (
+              skill.agent_links && skill.agent_links.length > 0 && (
+                skill.agent_links.map((agent) => (
+                  <Badge key={agent} variant="outline" className="text-[10px] px-1.5 py-0 h-4 leading-none font-normal text-muted-foreground shadow-sm">
+                    {agent}
+                  </Badge>
+                ))
+              )
+            )}
+          </div>
+        </CardFooter>
+      </Card>
+    </Wrapper>
+  );
+}
+
+export const SkillCard = memo(SkillCardInner);
