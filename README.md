@@ -124,6 +124,13 @@ brew install --cask skillstar
 | Windows | `SkillStar_x.x.x_x64-setup.exe` |
 | Linux | `SkillStar_x.x.x_amd64.AppImage` / `.deb` / `.rpm` |
 
+> [!NOTE]
+> **macOS 用户**：SkillStar 尚未进行 Apple 公证 (Notarization)。如果遇到 _"已损坏，无法打开"_ 的提示，请在终端执行：
+> ```bash
+> xattr -cr /Applications/SkillStar.app
+> ```
+> 通过 Homebrew Cask 安装时会自动处理此问题。
+
 ### 前置要求
 
 至少安装一个 Agent CLI：[Gemini CLI](https://github.com/google-gemini/gemini-cli) / [Claude Code](https://docs.anthropic.com/en/docs/claude-code) / [Codex CLI](https://github.com/openai/codex) / [OpenCode](https://github.com/opencode-ai/opencode) / [OpenClaw](https://github.com/openclaw/openclaw)
