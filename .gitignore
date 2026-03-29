@@ -32,6 +32,9 @@ src-tauri/target/
 # Gemini agent config
 .gemini/
 
+# Claude agent config
+.claude/
+
 # Testing
 proofshot-artifacts/
 
@@ -39,6 +42,7 @@ proofshot-artifacts/
 .env
 .env.*
 !.env.example
-# Video assets
-*.mp4
+
+# Video assets (keep compressed demo.mp4)
 *.mov
+public/演示视频.mp4
