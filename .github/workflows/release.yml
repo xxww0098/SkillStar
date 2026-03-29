@@ -40,7 +40,7 @@ jobs:
       - name: Rust setup
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ contains(matrix.args, 'aarch64') && 'aarch64-apple-darwin' || '' }}
+          targets: ${{ contains(matrix.args, 'aarch64') && 'aarch64-apple-darwin' || contains(matrix.args, 'x86_64') && 'x86_64-apple-darwin' || '' }}
 
       - name: Node.js setup
         uses: actions/setup-node@v4
