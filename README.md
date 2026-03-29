@@ -15,7 +15,7 @@
 
 <br/>
 
-<video src="./public/demo.mp4" width="800" autoplay loop muted playsinline></video>
+<video src="https://github.com/xxww0098/SkillStar/raw/main/public/demo.mp4" width="800" autoplay loop muted playsinline></video>
 
 </div>
 
