@@ -1,7 +1,8 @@
 use anyhow::{anyhow, Context, Result};
 use std::fs;
 use std::path::Path;
-use std::process::Command;
+
+use super::path_env::command_with_path;
 
 /// Compute the tree-hash of a local Git repository using gix
 pub fn compute_tree_hash(repo_path: &Path) -> Result<String> {
@@ -13,7 +14,7 @@ pub fn compute_tree_hash(repo_path: &Path) -> Result<String> {
 
 /// Clone a repository from a URL to a destination path
 pub fn clone_repo(url: &str, dest: &Path) -> Result<()> {
-    let output = Command::new("git")
+    let output = command_with_path("git")
         .arg("clone")
         .arg(url)
         .arg(dest)
@@ -33,7 +34,7 @@ pub fn clone_repo(url: &str, dest: &Path) -> Result<()> {
 /// Only fetches the latest commit – ideal for repo scanning where full
 /// history is unnecessary.
 pub fn clone_repo_shallow(url: &str, dest: &Path) -> Result<()> {
-    let output = Command::new("git")
+    let output = command_with_path("git")
         .args(["clone", "--depth", "1"])
         .arg(url)
         .arg(dest)
@@ -94,7 +95,7 @@ pub fn check_update(repo_path: &Path) -> Result<bool> {
 
 /// Pull (fetch + fast-forward) a repository
 pub fn pull_repo(repo_path: &Path) -> Result<()> {
-    let output = Command::new("git")
+    let output = command_with_path("git")
         .current_dir(repo_path)
         .arg("pull")
         .output()
@@ -108,7 +109,7 @@ pub fn pull_repo(repo_path: &Path) -> Result<()> {
 }
 
 fn run_git(repo_path: &Path, args: &[&str]) -> Result<String> {
-    let output = Command::new("git")
+    let output = command_with_path("git")
         .current_dir(repo_path)
         .args(args)
         .output()

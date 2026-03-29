@@ -2,7 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-use super::{git_ops, lockfile, repo_history, sync};
+use super::{git_ops, lockfile, path_env::command_with_path, repo_history, sync};
 
 // ── Data Types ──────────────────────────────────────────────────────
 
@@ -138,7 +138,7 @@ pub fn clone_or_fetch_repo(repo_url: &str, source: &str) -> Result<PathBuf> {
 
     if repo_dir.join(".git").exists() {
         // Already cached — shallow fetch latest
-        let output = std::process::Command::new("git")
+        let output = command_with_path("git")
             .current_dir(&repo_dir)
             .args(["fetch", "--depth", "1", "--quiet"])
             .output()
@@ -151,7 +151,7 @@ pub fn clone_or_fetch_repo(repo_url: &str, source: &str) -> Result<PathBuf> {
         }
 
         // Reset working tree to match remote HEAD so scanned content is up-to-date
-        let _ = std::process::Command::new("git")
+        let _ = command_with_path("git")
             .current_dir(&repo_dir)
             .args(["reset", "--hard", "origin/HEAD"])
             .output();
@@ -441,7 +441,7 @@ pub fn install_from_repo(
 ///
 /// Uses `git rev-parse HEAD:<folder_path>` to get the tree hash of a subdirectory.
 fn compute_subtree_hash(repo_dir: &Path, folder_path: &str) -> Result<String> {
-    let output = std::process::Command::new("git")
+    let output = command_with_path("git")
         .current_dir(repo_dir)
         .args(["rev-parse", &format!("HEAD:{}", folder_path)])
         .output()
@@ -481,19 +481,19 @@ pub fn check_repo_skill_update(skill_path: &Path) -> bool {
     };
 
     // Shallow-friendly update check: fetch --depth 1 then compare hashes
-    let _ = std::process::Command::new("git")
+    let _ = command_with_path("git")
         .current_dir(&repo_root)
         .args(["fetch", "--depth", "1", "--quiet"])
         .output();
 
-    let local_head = std::process::Command::new("git")
+    let local_head = command_with_path("git")
         .current_dir(&repo_root)
         .args(["rev-parse", "HEAD"])
         .output()
         .ok()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
 
-    let remote_head = std::process::Command::new("git")
+    let remote_head = command_with_path("git")
         .current_dir(&repo_root)
         .args(["rev-parse", "origin/HEAD"])
         .output()

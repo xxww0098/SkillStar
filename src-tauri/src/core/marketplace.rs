@@ -1053,6 +1053,22 @@ mod tests {
         assert!(entries.len() <= DESCRIPTION_CACHE_MAX_ENTRIES);
         assert!(entries.contains_key("source/skill-0"));
     }
+
+    #[test]
+    fn parses_publisher_repos_from_official_ssr_payload() {
+        use super::parse_publisher_repos_from_official_payload;
+
+        // Simulate the SSR payload with backslash-escaped quotes (as seen in real HTML)
+        let html = r#"some prefix{\"owner\":\"github\",\"repos\":[{\"repo\":\"github/awesome-copilot\",\"totalInstalls\":2424777,\"skills\":[{\"name\":\"git-commit\",\"installs\":22757}]},{\"repo\":\"github/gh-aw\",\"totalInstalls\":100,\"skills\":[{\"name\":\"developer\",\"installs\":50},{\"name\":\"console\",\"installs\":50}]},{\"repo\":\"github/copilot-plugins\",\"totalInstalls\":30,\"skills\":[{\"name\":\"spark\",\"installs\":30}]},{\"repo\":\"github/gh-aw-firewall\",\"totalInstalls\":3,\"skills\":[{\"name\":\"awf-skill\",\"installs\":3}]},{\"repo\":\"github/synapsync\",\"totalInstalls\":2,\"skills\":[{\"name\":\"code-analyzer\",\"installs\":2}]}],\"totalInstalls\":2424881}some suffix"#;
+
+        let repos = parse_publisher_repos_from_official_payload(html, "github");
+        assert_eq!(repos.len(), 5, "Should find all 5 repos including low-traffic ones");
+        assert_eq!(repos[0].repo, "awesome-copilot");
+        assert_eq!(repos[0].skill_count, 1); // 1 skill in test data
+        assert_eq!(repos[0].installs, 2424777);
+        assert_eq!(repos[4].repo, "synapsync");
+        assert_eq!(repos[4].installs, 2);
+    }
 }
 
 fn urlencoded(s: &str) -> String {
@@ -1081,12 +1097,40 @@ pub struct PublisherRepo {
     pub url: String,
 }
 
-/// Fetch all repos for a publisher by scraping skills.sh/<publisher_name>.
-/// This returns the complete list (not limited by the search API's 100-result cap).
+/// Fetch all repos for a publisher.
+///
+/// Strategy:
+/// 1. Try `skills.sh/official` — the SSR payload contains every repo for every publisher
+///    (the per-publisher page may omit low-traffic repos).
+/// 2. Fall back to `skills.sh/<publisher>` HTML scraping if the official payload fails.
 pub async fn get_publisher_repos(publisher_name: &str) -> Result<Vec<PublisherRepo>> {
     let client = reqwest::Client::new();
-    let url = format!("https://skills.sh/{}", publisher_name.to_lowercase());
+    let publisher_lower = publisher_name.to_lowercase();
 
+    // Strategy 1: official page SSR payload (complete data)
+    if let Ok(official_html) = client
+        .get("https://skills.sh/official")
+        .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .header("Accept", "text/html,application/xhtml+xml")
+        .send()
+        .await
+        .and_then(|r| Ok(r))
+    {
+        if let Ok(html) = official_html.text().await {
+            let repos = parse_publisher_repos_from_official_payload(&html, &publisher_lower);
+            if !repos.is_empty() {
+                eprintln!(
+                    "[skills.sh] Parsed {} repos for publisher '{}' from official payload",
+                    repos.len(),
+                    publisher_name
+                );
+                return Ok(repos);
+            }
+        }
+    }
+
+    // Strategy 2: fall back to per-publisher page
+    let url = format!("https://skills.sh/{}", publisher_lower);
     let html = client
         .get(&url)
         .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -1100,12 +1144,136 @@ pub async fn get_publisher_repos(publisher_name: &str) -> Result<Vec<PublisherRe
 
     let repos = parse_publisher_repos_html(&html, publisher_name);
     eprintln!(
-        "[skills.sh] Parsed {} repos for publisher '{}'",
+        "[skills.sh] Parsed {} repos for publisher '{}' from detail page",
         repos.len(),
         publisher_name
     );
 
     Ok(repos)
+}
+
+/// Parse repos for a specific publisher from the `skills.sh/official` SSR JSON payload.
+///
+/// The payload contains entries like:
+/// `"owner":"github","repos":[{"repo":"github/awesome-copilot","totalInstalls":N,"skills":[...]}]`
+fn parse_publisher_repos_from_official_payload(html: &str, publisher_lower: &str) -> Vec<PublisherRepo> {
+    // The SSR payload uses backslash-escaped quotes: \"owner\":\"github\",\"repos\":[...]
+    // Try escaped form first, then unescaped form as fallback.
+    let escaped_needle = format!(
+        r#"\"owner\":\"{}\"#,
+        publisher_lower
+    );
+    let unescaped_needle = format!(
+        r#""owner":"{}""#,
+        publisher_lower
+    );
+
+    let owner_pos = html.find(&escaped_needle).or_else(|| html.find(&unescaped_needle));
+    let Some(owner_pos) = owner_pos else {
+        return Vec::new();
+    };
+
+    // Find the start of "repos":[ after the owner match
+    let after_owner = &html[owner_pos..];
+    let repos_key_escaped = r#"\"repos\":["#;
+    let repos_key_plain = r#""repos":["#;
+
+    let repos_offset = after_owner.find(repos_key_escaped)
+        .map(|p| p + repos_key_escaped.len() - 1) // point at '['
+        .or_else(|| after_owner.find(repos_key_plain).map(|p| p + repos_key_plain.len() - 1));
+
+    let Some(repos_offset) = repos_offset else {
+        return Vec::new();
+    };
+
+    let repos_array_start = owner_pos + repos_offset;
+
+    // Find matching ']' — simple bracket counting
+    let slice = &html[repos_array_start..];
+    let mut depth = 0i32;
+    let mut end_pos = 0;
+    for (i, ch) in slice.char_indices() {
+        match ch {
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    end_pos = i + 1;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    if end_pos == 0 {
+        return Vec::new();
+    }
+
+    let repos_json = &slice[..end_pos];
+
+    // The JSON may be escaped in the SSR payload — unescape backslash-escaped quotes
+    let unescaped = repos_json
+        .replace("\\\"", "\"")
+        .replace("\\/", "/");
+
+    // Parse as array of repo objects
+    #[derive(Deserialize)]
+    struct RepoEntry {
+        repo: String,
+        #[serde(rename = "totalInstalls")]
+        total_installs: u32,
+        skills: Vec<SkillEntry>,
+    }
+    #[derive(Deserialize)]
+    struct SkillEntry {
+        #[allow(dead_code)]
+        name: String,
+        #[allow(dead_code)]
+        installs: u32,
+    }
+
+    let entries: Vec<RepoEntry> = match serde_json::from_str(&unescaped) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!(
+                "[skills.sh] Failed to parse official payload repos for '{}': {}",
+                publisher_lower, e
+            );
+            return Vec::new();
+        }
+    };
+
+    let mut repos: Vec<PublisherRepo> = entries
+        .into_iter()
+        .map(|e| {
+            // e.repo is like "github/awesome-copilot"
+            let repo_name = e.repo.split('/').last().unwrap_or(&e.repo).to_string();
+            let installs_label = format_installs_label(e.total_installs);
+
+            PublisherRepo {
+                source: e.repo.clone(),
+                url: format!("https://skills.sh/{}", e.repo),
+                skill_count: e.skills.len() as u32,
+                installs_label,
+                installs: e.total_installs,
+                repo: repo_name,
+            }
+        })
+        .collect();
+
+    repos.sort_by(|a, b| b.installs.cmp(&a.installs));
+    repos
+}
+
+/// Format numeric installs into human-readable labels (e.g. 2424777 → "2.4M")
+fn format_installs_label(n: u32) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}K", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
+    }
 }
 
 fn parse_publisher_repos_html(html: &str, publisher_name: &str) -> Vec<PublisherRepo> {

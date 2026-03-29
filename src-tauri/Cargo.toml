@@ -1,6 +1,6 @@
 [package]
 name = "skillstar"
-version = "0.1.0"
+version = "0.1.1"
 description = "SkillStar — Skill management for AI agents"
 authors = ["SkillStar"]
 edition = "2021"

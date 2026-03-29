@@ -5,6 +5,7 @@ pub mod git_ops;
 pub mod installed_skill;
 pub mod lockfile;
 pub mod marketplace;
+pub mod path_env;
 pub mod project_manifest;
 pub mod proxy;
 pub mod repo_history;

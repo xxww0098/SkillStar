@@ -1,40 +1,8 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
-use super::{lockfile, sync};
-
-/// Build an enriched PATH that includes common macOS binary directories.
-/// GUI apps on macOS don't inherit the shell PATH from .zshrc/.bashrc,
-/// so Homebrew-installed binaries (gh, git) won't be found without this.
-fn enriched_path() -> String {
-    let current = std::env::var("PATH").unwrap_or_default();
-    let extra_dirs = [
-        "/opt/homebrew/bin",
-        "/opt/homebrew/sbin",
-        "/usr/local/bin",
-        "/usr/local/sbin",
-        "/usr/bin",
-        "/usr/sbin",
-        "/bin",
-        "/sbin",
-    ];
-    let mut parts: Vec<&str> = extra_dirs.to_vec();
-    for segment in current.split(':') {
-        if !parts.contains(&segment) {
-            parts.push(segment);
-        }
-    }
-    parts.join(":")
-}
-
-/// Create a Command with enriched PATH so it can find Homebrew binaries.
-fn command_with_path(program: &str) -> Command {
-    let mut cmd = Command::new(program);
-    cmd.env("PATH", enriched_path());
-    cmd
-}
+use super::{lockfile, path_env::command_with_path, sync};
 
 // ── Status ──────────────────────────────────────────────────────────
 

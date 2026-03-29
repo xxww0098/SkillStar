@@ -125,6 +125,7 @@ SkillStar/
 │           ├── proxy.rs           # Proxy config load/save + schema
 │           ├── project_manifest.rs # Project registration + skill list + sync
 │           ├── marketplace.rs     # skills.sh API integration
+│           ├── path_env.rs        # Cross-platform PATH enrichment for GUI binary discovery
 │           ├── git_ops.rs         # Git clone/pull/hash via gitoxide (gix)
 │           ├── sync.rs            # Symlink management (hub ↔ agent dirs)
 │           ├── lockfile.rs        # Skill lockfile (install tracking + source_folder)

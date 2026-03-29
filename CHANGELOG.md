@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-03-30
+
+### Fixed
+- **Publisher Detail missing repos**: parse complete repo list from `skills.sh/official` SSR payload instead of the per-publisher page, which omits low-traffic repos (e.g. GitHub showing 5 repos but only listing 3)
+- **Marketplace tab lost on back**: preserve the active Marketplace category tab (Hot/Trending/Official etc.) when returning from Publisher Detail
+- **Cross-platform git/gh discovery**: extract PATH enrichment into a shared `path_env.rs` module with platform-specific paths (macOS Homebrew, Linux snap/local, Windows Program Files/Scoop); apply to all 12 `Command::new("git"/"gh")` call sites across `gh_manager.rs`, `git_ops.rs`, and `repo_scanner.rs`
+
 ### Changed
 - Rebranded project from AgentHub to `SkillStar` across all documentation and project config
 - Renamed "Skill Groups" to "Decks" in conceptual models to align with card-based UI
@@ -13,7 +20,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Appended standard Commit conventions and definitions to `AGENTS.md`
 
 ### Added
-- Added missing `.gitignore` entries for local cache (`.agents/`) and testing artifacts (`proofshot-artifacts/`)
+- `get_publisher_repos` backend command with two-phase strategy: official SSR payload first, per-publisher page scraping as fallback
+- `parse_publisher_repos_from_official_payload` for extracting publisher repos from Next.js SSR JSON data
+- `format_installs_label` helper to format numeric install counts as human-readable labels (`2.4M`, `100.0K`)
+- Unit test for publisher repos SSR payload parsing
+- Missing `.gitignore` entries for local cache (`.agents/`) and testing artifacts (`proofshot-artifacts/`)
+
 ## [0.1.0] - 2026-03-29
 
 ### Added
