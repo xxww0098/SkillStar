@@ -39,44 +39,11 @@
 
 ## 它解决了什么
 
-```
-  传统方式：碎片化、重复劳动、上下文膨胀
-
-  ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐
-  │ Gemini   │   │ Claude   │   │ Codex    │   │ OpenCode │
-  │   CLI    │   │   Code   │   │   CLI    │   │   CLI    │
-  ├──────────┤   ├──────────┤   ├──────────┤   ├──────────┤
-  │ 独立配置 │   │ 独立配置 │   │ 独立配置 │   │ 独立配置 │
-  │ 独立规范 │   │ 独立规范 │   │ 独立规范 │   │ 独立规范 │
-  │ 手动维护 │   │ 手动维护 │   │ 手动维护 │   │ 手动维护 │
-  └──────────┘   └──────────┘   └──────────┘   └──────────┘
-       ×               ×               ×              ×
-       彼 此 隔 离 ，各 自 为 战
-```
-
-```
-  SkillStar：统一编排、精准分发、零污染
-
-                    ┌─────────────┐
-                    │  SkillStar  │
-                    │  ─────────  │
-                    │  Skill Hub  │
-                    │  Deck 编排  │
-                    │  项目路由   │
-                    └──────┬──────┘
-                           │
-               ┌───────────┼───────────┐
-               │ symlink   │ symlink   │ symlink
-               ▼           ▼           ▼
-          ┌─────────┐ ┌─────────┐ ┌─────────┐
-          │Project A│ │Project B│ │Project C│
-          │Gemini ✓ │ │Claude ✓ │ │All CLIs │
-          │Claude ✓ │ │Codex  ✓ │ │  ✓ ✓ ✓  │
-          │React 套牌│ │Rust 套牌│ │Full 套牌│
-          └─────────┘ └─────────┘ └─────────┘
-
-     ✓ 零文件污染  ✓ 按项目精准投放  ✓ Token 节省
-```
+<div align="center">
+<img src="./public/diagrams/before-fragmented.svg" alt="传统方式：碎片化、重复劳动、上下文膨胀" width="800" />
+<br/><br/>
+<img src="./public/diagrams/after-skillstar.svg" alt="SkillStar：统一编排、精准分发、零污染" width="800" />
+</div>
 
 ---
 

@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" fill="none">
+  <defs>
+    <linearGradient id="bg2" x1="0" y1="0" x2="960" y2="540" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0f0f1a"/>
+      <stop offset="100%" stop-color="#1a1a2e"/>
+    </linearGradient>
+    <linearGradient id="heroBorder" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#06b6d4"/>
+      <stop offset="50%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+    <linearGradient id="heroFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a1a3a"/>
+      <stop offset="100%" stop-color="#12122a"/>
+    </linearGradient>
+    <linearGradient id="projBorder" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2a2a4c"/>
+      <stop offset="100%" stop-color="#1e1e38"/>
+    </linearGradient>
+    <linearGradient id="projFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a1a30"/>
+      <stop offset="100%" stop-color="#141428"/>
+    </linearGradient>
+    <linearGradient id="linkGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#06b6d4"/>
+      <stop offset="100%" stop-color="#8b5cf680"/>
+    </linearGradient>
+    <filter id="heroGlow">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softGlow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <pattern id="grid2" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#ffffff06" stroke-width="0.5"/>
+    </pattern>
+    <!-- Glow circle for hero -->
+    <radialGradient id="heroAura" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#8b5cf620"/>
+      <stop offset="100%" stop-color="#8b5cf600"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="960" height="540" rx="16" fill="url(#bg2)"/>
+  <rect width="960" height="540" rx="16" fill="url(#grid2)"/>
+
+  <!-- Title -->
+  <text x="480" y="48" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="20" font-weight="600" fill="#e0e0e8">SkillStar：统一编排、精准分发、零污染</text>
+
+  <!-- Hero Aura -->
+  <ellipse cx="480" cy="146" rx="180" ry="90" fill="url(#heroAura)"/>
+
+  <!-- Hero Box: SkillStar -->
+  <g transform="translate(355, 76)">
+    <rect width="250" height="140" rx="14" fill="url(#heroFill)" stroke="url(#heroBorder)" stroke-width="2" filter="url(#heroGlow)"/>
+    <!-- Star icon -->
+    <text x="125" y="40" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="22" font-weight="800" fill="#e0e0f0">⭐ SkillStar</text>
+    <line x1="30" y1="56" x2="220" y2="56" stroke="#ffffff15" stroke-width="1"/>
+    <text x="125" y="82" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="14" fill="#06b6d4">Skill Hub</text>
+    <text x="125" y="104" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="14" fill="#8b8baf">Deck 编排</text>
+    <text x="125" y="126" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="14" fill="#8b8baf">项目路由</text>
+  </g>
+
+  <!-- Connection Lines (symlinks) -->
+  <!-- Left line -->
+  <path d="M 480 216 L 480 260 L 190 260 L 190 310" stroke="url(#linkGrad)" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <!-- Center line -->
+  <path d="M 480 216 L 480 310" stroke="url(#linkGrad)" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <!-- Right line -->
+  <path d="M 480 216 L 480 260 L 770 260 L 770 310" stroke="url(#linkGrad)" stroke-width="2" fill="none" stroke-linecap="round"/>
+
+  <!-- Symlink labels -->
+  <g filter="url(#softGlow)">
+    <text x="310" y="248" text-anchor="middle" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#06b6d4" opacity="0.9">symlink</text>
+    <text x="480" y="280" text-anchor="middle" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#06b6d4" opacity="0.9">symlink</text>
+    <text x="650" y="248" text-anchor="middle" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#06b6d4" opacity="0.9">symlink</text>
+  </g>
+
+  <!-- Arrow tips -->
+  <polygon points="185,306 190,316 195,306" fill="#8b5cf6" opacity="0.8"/>
+  <polygon points="475,306 480,316 485,306" fill="#8b5cf6" opacity="0.8"/>
+  <polygon points="765,306 770,316 775,306" fill="#8b5cf6" opacity="0.8"/>
+
+  <!-- Project Boxes -->
+  <!-- Project A -->
+  <g transform="translate(100, 316)">
+    <rect width="180" height="140" rx="12" fill="url(#projFill)" stroke="url(#projBorder)" stroke-width="1.5"/>
+    <text x="90" y="30" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="16" font-weight="700" fill="#c0c0d8">Project A</text>
+    <line x1="16" y1="44" x2="164" y2="44" stroke="#ffffff10" stroke-width="1"/>
+    <text x="90" y="70" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="13" fill="#8b8baf">Gemini <tspan fill="#10b981">✓</tspan></text>
+    <text x="90" y="92" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="13" fill="#8b8baf">Claude <tspan fill="#10b981">✓</tspan></text>
+    <text x="90" y="122" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="12" font-weight="600" fill="#8b5cf6">🃏 React 套牌</text>
+  </g>
+
+  <!-- Project B -->
+  <g transform="translate(390, 316)">
+    <rect width="180" height="140" rx="12" fill="url(#projFill)" stroke="url(#projBorder)" stroke-width="1.5"/>
+    <text x="90" y="30" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="16" font-weight="700" fill="#c0c0d8">Project B</text>
+    <line x1="16" y1="44" x2="164" y2="44" stroke="#ffffff10" stroke-width="1"/>
+    <text x="90" y="70" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="13" fill="#8b8baf">Claude <tspan fill="#10b981">✓</tspan></text>
+    <text x="90" y="92" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="13" fill="#8b8baf">Codex <tspan fill="#10b981">✓</tspan></text>
+    <text x="90" y="122" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="12" font-weight="600" fill="#8b5cf6">🃏 Rust 套牌</text>
+  </g>
+
+  <!-- Project C -->
+  <g transform="translate(680, 316)">
+    <rect width="180" height="140" rx="12" fill="url(#projFill)" stroke="url(#projBorder)" stroke-width="1.5"/>
+    <text x="90" y="30" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="16" font-weight="700" fill="#c0c0d8">Project C</text>
+    <line x1="16" y1="44" x2="164" y2="44" stroke="#ffffff10" stroke-width="1"/>
+    <text x="90" y="70" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="13" fill="#8b8baf">All CLIs <tspan fill="#10b981">✓ ✓ ✓</tspan></text>
+    <text x="90" y="122" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="12" font-weight="600" fill="#8b5cf6">🃏 Full 套牌</text>
+  </g>
+
+  <!-- Bottom benefits -->
+  <g transform="translate(0, 490)">
+    <text x="220" y="20" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="14" font-weight="500" fill="#10b981">✓ 零文件污染</text>
+    <text x="480" y="20" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="14" font-weight="500" fill="#10b981">✓ 按项目精准投放</text>
+    <text x="740" y="20" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="14" font-weight="500" fill="#10b981">✓ Token 节省</text>
+  </g>
+
+  <!-- Subtle bottom accent -->
+  <line x1="280" y1="525" x2="680" y2="525" stroke="#8b5cf620" stroke-width="1"/>
+</svg>

@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="960" y2="420" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0f0f1a"/>
+      <stop offset="100%" stop-color="#1a1a2e"/>
+    </linearGradient>
+    <linearGradient id="boxBorder" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3a3a5c"/>
+      <stop offset="100%" stop-color="#2a2a44"/>
+    </linearGradient>
+    <linearGradient id="boxFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1e1e32"/>
+      <stop offset="100%" stop-color="#16162a"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <!-- Grid pattern -->
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#ffffff06" stroke-width="0.5"/>
+    </pattern>
+  </defs>
+
+  <!-- Background -->
+  <rect width="960" height="420" rx="16" fill="url(#bg)"/>
+  <rect width="960" height="420" rx="16" fill="url(#grid)"/>
+
+  <!-- Title -->
+  <text x="480" y="52" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="20" font-weight="600" fill="#e0e0e8">传统方式：碎片化、重复劳动、上下文膨胀</text>
+
+  <!-- Agent Boxes -->
+  <!-- Box 1: Gemini CLI -->
+  <g transform="translate(60, 90)">
+    <rect width="190" height="220" rx="12" fill="url(#boxFill)" stroke="url(#boxBorder)" stroke-width="1.5"/>
+    <rect width="190" height="48" rx="12" fill="#22223a"/>
+    <rect x="0" y="36" width="190" height="12" fill="#22223a"/>
+    <text x="95" y="34" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="17" font-weight="700" fill="#8b8baf">Gemini CLI</text>
+    <line x1="16" y1="54" x2="174" y2="54" stroke="#2e2e4a" stroke-width="1"/>
+    <text x="95" y="90" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="14" fill="#6a6a8a">独立配置</text>
+    <text x="95" y="126" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="14" fill="#6a6a8a">独立规范</text>
+    <text x="95" y="162" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="14" fill="#6a6a8a">手动维护</text>
+    <!-- Repetition dots -->
+    <circle cx="85" cy="192" r="2" fill="#4a4a6a"/>
+    <circle cx="95" cy="192" r="2" fill="#4a4a6a"/>
+    <circle cx="105" cy="192" r="2" fill="#4a4a6a"/>
+  </g>
+
+  <!-- Box 2: Claude Code -->
+  <g transform="translate(278, 90)">
+    <rect width="190" height="220" rx="12" fill="url(#boxFill)" stroke="url(#boxBorder)" stroke-width="1.5"/>
+    <rect width="190" height="48" rx="12" fill="#22223a"/>
+    <rect x="0" y="36" width="190" height="12" fill="#22223a"/>
+    <text x="95" y="34" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="17" font-weight="700" fill="#8b8baf">Claude Code</text>
+    <line x1="16" y1="54" x2="174" y2="54" stroke="#2e2e4a" stroke-width="1"/>
+    <text x="95" y="90" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="14" fill="#6a6a8a">独立配置</text>
+    <text x="95" y="126" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="14" fill="#6a6a8a">独立规范</text>
+    <text x="95" y="162" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="14" fill="#6a6a8a">手动维护</text>
+    <circle cx="85" cy="192" r="2" fill="#4a4a6a"/>
+    <circle cx="95" cy="192" r="2" fill="#4a4a6a"/>
+    <circle cx="105" cy="192" r="2" fill="#4a4a6a"/>
+  </g>
+
+  <!-- Box 3: Codex CLI -->
+  <g transform="translate(496, 90)">
+    <rect width="190" height="220" rx="12" fill="url(#boxFill)" stroke="url(#boxBorder)" stroke-width="1.5"/>
+    <rect width="190" height="48" rx="12" fill="#22223a"/>
+    <rect x="0" y="36" width="190" height="12" fill="#22223a"/>
+    <text x="95" y="34" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="17" font-weight="700" fill="#8b8baf">Codex CLI</text>
+    <line x1="16" y1="54" x2="174" y2="54" stroke="#2e2e4a" stroke-width="1"/>
+    <text x="95" y="90" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="14" fill="#6a6a8a">独立配置</text>
+    <text x="95" y="126" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="14" fill="#6a6a8a">独立规范</text>
+    <text x="95" y="162" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="14" fill="#6a6a8a">手动维护</text>
+    <circle cx="85" cy="192" r="2" fill="#4a4a6a"/>
+    <circle cx="95" cy="192" r="2" fill="#4a4a6a"/>
+    <circle cx="105" cy="192" r="2" fill="#4a4a6a"/>
+  </g>
+
+  <!-- Box 4: OpenCode CLI -->
+  <g transform="translate(714, 90)">
+    <rect width="190" height="220" rx="12" fill="url(#boxFill)" stroke="url(#boxBorder)" stroke-width="1.5"/>
+    <rect width="190" height="48" rx="12" fill="#22223a"/>
+    <rect x="0" y="36" width="190" height="12" fill="#22223a"/>
+    <text x="95" y="34" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="17" font-weight="700" fill="#8b8baf">OpenCode CLI</text>
+    <line x1="16" y1="54" x2="174" y2="54" stroke="#2e2e4a" stroke-width="1"/>
+    <text x="95" y="90" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="14" fill="#6a6a8a">独立配置</text>
+    <text x="95" y="126" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="14" fill="#6a6a8a">独立规范</text>
+    <text x="95" y="162" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="14" fill="#6a6a8a">手动维护</text>
+    <circle cx="85" cy="192" r="2" fill="#4a4a6a"/>
+    <circle cx="95" cy="192" r="2" fill="#4a4a6a"/>
+    <circle cx="105" cy="192" r="2" fill="#4a4a6a"/>
+  </g>
+
+  <!-- Disconnection marks (×) between boxes -->
+  <text x="263" y="210" text-anchor="middle" font-family="Inter, sans-serif" font-size="28" font-weight="700" fill="#e74c5c" filter="url(#glow)">×</text>
+  <text x="481" y="210" text-anchor="middle" font-family="Inter, sans-serif" font-size="28" font-weight="700" fill="#e74c5c" filter="url(#glow)">×</text>
+  <text x="699" y="210" text-anchor="middle" font-family="Inter, sans-serif" font-size="28" font-weight="700" fill="#e74c5c" filter="url(#glow)">×</text>
+
+  <!-- Dashed disconnection lines -->
+  <line x1="254" y1="200" x2="274" y2="200" stroke="#e74c5c40" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="472" y1="200" x2="492" y2="200" stroke="#e74c5c40" stroke-width="1" stroke-dasharray="4,4"/>
+  <line x1="690" y1="200" x2="710" y2="200" stroke="#e74c5c40" stroke-width="1" stroke-dasharray="4,4"/>
+
+  <!-- Bottom text -->
+  <text x="480" y="370" text-anchor="middle" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="18" font-weight="500" fill="#e74c5c" opacity="0.85">彼此隔离，各自为战</text>
+
+  <!-- Subtle bottom accent line -->
+  <line x1="340" y1="390" x2="620" y2="390" stroke="#e74c5c30" stroke-width="1"/>
+</svg>
