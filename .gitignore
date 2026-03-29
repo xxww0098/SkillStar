@@ -46,3 +46,4 @@ proofshot-artifacts/
 # Video assets (keep compressed demo.mp4)
 *.mov
 public/演示视频.mp4
+homebrew-tap/

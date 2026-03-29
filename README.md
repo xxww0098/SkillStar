@@ -15,7 +15,7 @@
 
 <br/>
 
-<video src="./public/演示视频.mp4" width="800" autoplay loop muted playsinline></video>
+<video src="./public/demo.mp4" width="800" autoplay loop muted playsinline></video>
 
 </div>
 
@@ -104,29 +104,45 @@
 
 ## 快速开始
 
+### 安装
+
+#### 🍺 Homebrew (macOS)
+
+```bash
+brew tap xxww0098/skillstar
+brew install --cask skillstar
+```
+
+#### 📦 手动下载
+
+前往 [GitHub Releases](https://github.com/xxww0098/SkillStar/releases/latest) 下载对应平台的安装包：
+
+| 平台 | 文件 |
+|------|------|
+| macOS (Apple Silicon) | `SkillStar_x.x.x_aarch64.dmg` |
+| macOS (Intel) | `SkillStar_x.x.x_x64.dmg` |
+| Windows | `SkillStar_x.x.x_x64-setup.exe` |
+| Linux | `SkillStar_x.x.x_amd64.AppImage` / `.deb` / `.rpm` |
+
 ### 前置要求
 
-- [Bun](https://bun.sh/) (包管理器)
-- [Rust](https://rustup.rs/) (后端编译)
-- 至少安装一个 Agent CLI：[Gemini CLI](https://github.com/google-gemini/gemini-cli) / [Claude Code](https://docs.anthropic.com/en/docs/claude-code) / [Codex CLI](https://github.com/openai/codex) / [OpenCode](https://github.com/opencode-ai/opencode) / [OpenClaw](https://github.com/openclaw/openclaw)
+至少安装一个 Agent CLI：[Gemini CLI](https://github.com/google-gemini/gemini-cli) / [Claude Code](https://docs.anthropic.com/en/docs/claude-code) / [Codex CLI](https://github.com/openai/codex) / [OpenCode](https://github.com/opencode-ai/opencode) / [OpenClaw](https://github.com/openclaw/openclaw)
 
-### 安装 & 启动
+### 从源码构建
+
+需要 [Bun](https://bun.sh/) + [Rust](https://rustup.rs/)：
 
 ```bash
 # 克隆仓库
-git clone https://github.com/user/skillstar.git && cd skillstar
+git clone https://github.com/xxww0098/SkillStar.git && cd SkillStar
 
 # 安装前端依赖
 bun install
 
 # 🚀 启动开发环境（前端 + Tauri 联合热重载）
 bun run tauri dev
-```
 
-### 打包发布
-
-```bash
-# 构建产物：.dmg (macOS) / .exe (Windows) / .AppImage (Linux)
+# 📦 构建产物：.dmg (macOS) / .exe (Windows) / .AppImage (Linux)
 bun run tauri build
 ```
 
