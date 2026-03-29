@@ -23,7 +23,7 @@ const DetailPanel = lazy(() =>
   }))
 );
 
-type TabId = "all" | "trending" | "hot" | "official";
+export type TabId = "all" | "trending" | "hot" | "official";
 
 const tabIds: TabId[] = ["all", "trending", "hot", "official"];
 
@@ -36,12 +36,14 @@ const tabLabelKeys: Record<TabId, string> = {
 
 interface MarketplaceProps {
   onNavigateToPublisher?: (publisher: OfficialPublisher) => void;
+  activeTab?: TabId;
+  onTabChange?: (tab: TabId) => void;
 }
 
 const INITIAL_MARKETPLACE_VISIBLE_COUNT = 30;
 const EAGER_RENDER_THRESHOLD = INITIAL_MARKETPLACE_VISIBLE_COUNT * 2;
 
-export function Marketplace({ onNavigateToPublisher }: MarketplaceProps) {
+export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, onTabChange }: MarketplaceProps) {
   const { t } = useTranslation();
   const {
     results,
@@ -57,7 +59,12 @@ export function Marketplace({ onNavigateToPublisher }: MarketplaceProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("stars-desc");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
-  const [activeTab, setActiveTab] = useState<TabId>("all");
+  const [internalTab, setInternalTab] = useState<TabId>("all");
+  const activeTab = controlledTab ?? internalTab;
+  const setActiveTab = (tab: TabId) => {
+    onTabChange?.(tab);
+    setInternalTab(tab);
+  };
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [installStatus, setInstallStatus] = useState<string | null>(null);
   const [showBackToTop, setShowBackToTop] = useState(false);

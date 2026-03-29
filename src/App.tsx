@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Sidebar } from "./components/layout/Sidebar";
 import { useUpdater } from "./hooks/useUpdater";
 import type { NavPage, SubPage } from "./types";
+import type { TabId as MarketplaceTabId } from "./pages/Marketplace";
 
 const importMySkillsPage = () => import("./pages/MySkills");
 const importMarketplacePage = () => import("./pages/Marketplace");
@@ -75,6 +76,7 @@ function App() {
   const [projectsPreSelectedSkills, setProjectsPreSelectedSkills] = useState<string[] | null>(null);
   const [skillCardsPreSelectedSkills, setSkillCardsPreSelectedSkills] = useState<string[] | null>(null);
   const [mySkillsFocusSkill, setMySkillsFocusSkill] = useState<string | null>(null);
+  const [marketplaceTab, setMarketplaceTab] = useState<MarketplaceTabId>("all");
 
   const handleNavigate = useCallback((page: NavPage) => {
     setActivePage(page);
@@ -196,6 +198,8 @@ function App() {
       case "marketplace":
         return (
           <MarketplacePage
+            activeTab={marketplaceTab}
+            onTabChange={setMarketplaceTab}
             onNavigateToPublisher={(pub_) =>
               setSubPage({ type: "publisher-detail", publisher: pub_ })
             }
