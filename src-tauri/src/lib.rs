@@ -31,6 +31,7 @@ pub fn run() {
             commands::marketplace::get_skills_sh_leaderboard,
             commands::marketplace::get_official_publishers,
             commands::marketplace::hydrate_marketplace_descriptions,
+            commands::marketplace::get_publisher_repos,
             commands::github::check_gh_installed,
             commands::github::check_gh_status,
             commands::github::publish_skill_to_github,

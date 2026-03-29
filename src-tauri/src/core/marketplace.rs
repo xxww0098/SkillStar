@@ -1061,3 +1061,136 @@ fn urlencoded(s: &str) -> String {
         .replace('>', "%3E")
         .replace('<', "%3C")
 }
+
+// ── Publisher Repos ───────────────────────────────────────────────────
+
+/// A repo belonging to a publisher, scraped from skills.sh/<publisher>
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublisherRepo {
+    /// Repo name (e.g. "github-copilot-for-azure")
+    pub repo: String,
+    /// Full source path (e.g. "microsoft/github-copilot-for-azure")
+    pub source: String,
+    /// Number of skills in this repo
+    pub skill_count: u32,
+    /// Formatted install count string (e.g. "2.9M", "12.8K")
+    pub installs_label: String,
+    /// Numeric install estimate for sorting
+    pub installs: u32,
+    /// URL to the repo page on skills.sh
+    pub url: String,
+}
+
+/// Fetch all repos for a publisher by scraping skills.sh/<publisher_name>.
+/// This returns the complete list (not limited by the search API's 100-result cap).
+pub async fn get_publisher_repos(publisher_name: &str) -> Result<Vec<PublisherRepo>> {
+    let client = reqwest::Client::new();
+    let url = format!("https://skills.sh/{}", publisher_name.to_lowercase());
+
+    let html = client
+        .get(&url)
+        .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .header("Accept", "text/html,application/xhtml+xml")
+        .send()
+        .await
+        .context("Failed to fetch publisher page")?
+        .text()
+        .await
+        .context("Failed to read publisher page HTML")?;
+
+    let repos = parse_publisher_repos_html(&html, publisher_name);
+    eprintln!(
+        "[skills.sh] Parsed {} repos for publisher '{}'",
+        repos.len(),
+        publisher_name
+    );
+
+    Ok(repos)
+}
+
+fn parse_publisher_repos_html(html: &str, publisher_name: &str) -> Vec<PublisherRepo> {
+    let normalized = html.replace('\n', "");
+    let mut repos = Vec::new();
+    let publisher_lower = publisher_name.to_lowercase();
+
+    // Pattern: href="/publisher/repo-name">...<h3>repo-name</h3>...N skills:...installs</a>
+    // We look for each href="/publisher/X" link and extract repo name, skill count, installs
+    let href_pattern = format!(r#"href="/{}/([a-z0-9A-Z_.-]+)""#, regex::escape(&publisher_lower));
+    let re_href = match Regex::new(&href_pattern) {
+        Ok(r) => r,
+        Err(_) => return repos,
+    };
+
+    // For skill count: "N<!-- -->...skills" or just "N skills"
+    static RE_SKILL_COUNT: OnceLock<Regex> = OnceLock::new();
+    let re_skill_count = RE_SKILL_COUNT.get_or_init(|| {
+        Regex::new(r#"(\d+)(?:\s*(?:<!--[^>]*-->)?\s*)*skill"#).expect("skill count regex")
+    });
+
+    // For installs: font-mono text-sm text-foreground">VALUE</span>
+    static RE_INSTALLS: OnceLock<Regex> = OnceLock::new();
+    let re_installs = RE_INSTALLS.get_or_init(|| {
+        Regex::new(r#"font-mono text-sm text-foreground">([^<]+)</span>"#).expect("installs regex")
+    });
+
+    let mut seen = std::collections::HashSet::new();
+
+    for href_cap in re_href.captures_iter(&normalized) {
+        let repo_name = href_cap.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
+        if repo_name.is_empty() || !seen.insert(repo_name.clone()) {
+            continue;
+        }
+
+        // Find the surrounding context for this repo link
+        let match_start = href_cap.get(0).unwrap().start();
+        let context_end = (match_start + 1000).min(normalized.len());
+        let context = &normalized[match_start..context_end];
+
+        // Extract skill count
+        let skill_count = re_skill_count
+            .captures(context)
+            .and_then(|c| c.get(1))
+            .and_then(|m| m.as_str().parse::<u32>().ok())
+            .unwrap_or(0);
+
+        // Extract installs label
+        let installs_label = re_installs
+            .captures(context)
+            .and_then(|c| c.get(1))
+            .map(|m| m.as_str().trim().to_string())
+            .unwrap_or_default();
+
+        let installs = parse_installs_label(&installs_label);
+
+        repos.push(PublisherRepo {
+            source: format!("{}/{}", publisher_lower, repo_name),
+            url: format!("https://skills.sh/{}/{}", publisher_lower, repo_name),
+            repo: repo_name,
+            skill_count,
+            installs_label,
+            installs,
+        });
+    }
+
+    // Sort by installs descending
+    repos.sort_by(|a, b| b.installs.cmp(&a.installs));
+
+    repos
+}
+
+/// Parse install labels like "2.9M", "12.8K", "85" into numeric values
+fn parse_installs_label(label: &str) -> u32 {
+    let trimmed = label.trim();
+    if trimmed.is_empty() {
+        return 0;
+    }
+
+    if let Some(num_str) = trimmed.strip_suffix('M') {
+        num_str.parse::<f64>().map(|n| (n * 1_000_000.0) as u32).unwrap_or(0)
+    } else if let Some(num_str) = trimmed.strip_suffix('K') {
+        num_str.parse::<f64>().map(|n| (n * 1_000.0) as u32).unwrap_or(0)
+    } else {
+        trimmed.replace(',', "").parse::<u32>().unwrap_or(0)
+    }
+}
+

@@ -53,6 +53,14 @@ export interface OfficialPublisher {
   url: string;
 }
 
+export interface PublisherRepo {
+  repo: string;
+  source: string;
+  skill_count: number;
+  installs_label: string;
+  installs: number;
+  url: string;
+}
 export interface AgentProfile {
   id: string;
   display_name: string;

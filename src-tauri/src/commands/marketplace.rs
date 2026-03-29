@@ -82,3 +82,26 @@ pub async fn hydrate_marketplace_descriptions(
         }
     }
 }
+
+#[tauri::command]
+pub async fn get_publisher_repos(
+    publisher_name: String,
+) -> Result<Vec<marketplace::PublisherRepo>, String> {
+    eprintln!(
+        "[get_publisher_repos] Called for publisher: {}",
+        publisher_name
+    );
+    match marketplace::get_publisher_repos(&publisher_name).await {
+        Ok(repos) => {
+            eprintln!(
+                "[get_publisher_repos] Success, got {} repos",
+                repos.len()
+            );
+            Ok(repos)
+        }
+        Err(e) => {
+            eprintln!("[get_publisher_repos] Error: {}", e);
+            Err(e.to_string())
+        }
+    }
+}

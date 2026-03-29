@@ -29,7 +29,7 @@ import {
   hydrateDescriptionsForSkills,
   isMissingMarketplaceDescription,
 } from "../lib/marketplaceDescriptionHydration";
-import type { MarketplaceResult, OfficialPublisher, Skill } from "../types";
+import type { MarketplaceResult, OfficialPublisher, PublisherRepo, Skill } from "../types";
 
 const DetailPanel = lazy(() =>
   import("../components/layout/DetailPanel").then((mod) => ({
@@ -42,27 +42,8 @@ interface PublisherDetailProps {
   onBack: () => void;
 }
 
-/** Group skills by their source repo and sort groups by total installs */
-function groupByRepo(skills: Skill[]): { repo: string; skills: Skill[] }[] {
-  const map = new Map<string, Skill[]>();
-  for (const skill of skills) {
-    const repo = skill.source ?? "unknown";
-    const list = map.get(repo) ?? [];
-    list.push(skill);
-    map.set(repo, list);
-  }
 
-  return Array.from(map.entries())
-    .map(([repo, repoSkills]) => ({
-      repo,
-      skills: repoSkills.sort((a, b) => b.stars - a.stars),
-    }))
-    .sort((a, b) => {
-      const aTotal = a.skills.reduce((sum, s) => sum + s.stars, 0);
-      const bTotal = b.skills.reduce((sum, s) => sum + s.stars, 0);
-      return bTotal - aTotal;
-    });
-}
+
 
 export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
   const { t } = useTranslation();
@@ -87,6 +68,8 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
     [hubSkills]
   );
 
+  const [publisherRepos, setPublisherRepos] = useState<PublisherRepo[]>([]);
+
   // Reset local view state when switching publishers
   useEffect(() => {
     setActiveRepo(null);
@@ -95,37 +78,57 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
     setShowBackToTop(false);
   }, [publisher.name, publisher.repo]);
 
-  // Fetch publisher's skills
+  // Fetch publisher's repo list (complete, not limited by search API)
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
 
     (async () => {
       try {
+        const repos = await invoke<PublisherRepo[]>("get_publisher_repos", {
+          publisherName: publisher.name,
+        });
+        if (cancelled) return;
+        setPublisherRepos(repos);
+      } catch (e) {
+        console.error("Failed to fetch publisher repos:", e);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [publisher.name]);
+
+  // Fetch skills when a specific repo is selected
+  useEffect(() => {
+    if (!activeRepo) {
+      setSkills([]);
+      return;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+
+    (async () => {
+      try {
         const namespace = publisher.name.toLowerCase();
+        const source = `${namespace}/${activeRepo}`;
         const normalizeSource = (s: Skill) =>
           (s.source ?? s.author ?? "").toLowerCase();
-        const belongsToPublisher = (s: Skill) => {
-          const source = normalizeSource(s);
-          return source === namespace || source.startsWith(`${namespace}/`);
+        const belongsToRepo = (s: Skill) => {
+          const src = normalizeSource(s);
+          return src === source;
         };
 
         const result = await invoke<MarketplaceResult>("search_skills_sh", {
-          query: publisher.name,
+          query: source,
         });
         if (cancelled) return;
 
-        let filtered = result.skills.filter(belongsToPublisher);
-
-        // Fallback: some publishers are better matched by owner/repo query.
-        if (filtered.length === 0 && publisher.repo?.trim()) {
-          const repoResult = await invoke<MarketplaceResult>("search_skills_sh", {
-            query: `${publisher.name}/${publisher.repo}`,
-          });
-          if (cancelled) return;
-          filtered = repoResult.skills.filter(belongsToPublisher);
-        }
-
+        const filtered = result.skills.filter(belongsToRepo);
         filtered.sort((a, b) => b.stars - a.stars);
         setSkills(filtered);
 
@@ -141,7 +144,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
           );
         })();
       } catch (e) {
-        console.error("Failed to fetch publisher skills:", e);
+        console.error("Failed to fetch repo skills:", e);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -150,7 +153,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
     return () => {
       cancelled = true;
     };
-  }, [publisher.name, publisher.repo]);
+  }, [publisher.name, activeRepo]);
 
   // Mark session-installed skills
   const displaySkills = useMemo(() => {
@@ -171,51 +174,35 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
     setSelectedSkill((prev) => (prev ? { ...prev, installed } : null));
   }, [selectedSkill, installedNames, installedSkillNames]);
 
-  const repoGroups = useMemo(() => groupByRepo(displaySkills), [displaySkills]);
-  const repoSummaries = useMemo(
-    () =>
-      repoGroups.map(({ repo, skills: repoSkills }) => ({
-        repo,
-        skills: repoSkills,
-        skillCount: repoSkills.length,
-        totalInstalls: repoSkills.reduce((sum, s) => sum + s.stars, 0),
-      })),
-    [repoGroups]
-  );
-  const activeRepoGroup = useMemo(
-    () =>
-      activeRepo
-        ? repoSummaries.find((group) => group.repo === activeRepo) ?? null
-        : null,
-    [activeRepo, repoSummaries]
-  );
-  const visibleRepos = useMemo(() => {
+
+
+  const visiblePublisherRepos = useMemo(() => {
     if (activeRepo) return [];
-    if (!searchQuery.trim()) return repoSummaries;
+    if (!searchQuery.trim()) return publisherRepos;
     const q = searchQuery.toLowerCase();
-    return repoSummaries.filter((group) =>
-      group.repo.toLowerCase().includes(q)
+    return publisherRepos.filter((r) =>
+      r.repo.toLowerCase().includes(q)
     );
-  }, [activeRepo, repoSummaries, searchQuery]);
+  }, [activeRepo, publisherRepos, searchQuery]);
   const visibleSkills = useMemo(() => {
-    if (!activeRepoGroup) return [];
-    if (!searchQuery.trim()) return activeRepoGroup.skills;
+    if (!activeRepo) return [];
+    if (!searchQuery.trim()) return displaySkills;
     const q = searchQuery.toLowerCase();
-    return activeRepoGroup.skills.filter(
+    return displaySkills.filter(
       (s) =>
         s.name.toLowerCase().includes(q) ||
         s.description.toLowerCase().includes(q) ||
         s.source?.toLowerCase().includes(q) ||
         s.author?.toLowerCase().includes(q)
     );
-  }, [activeRepoGroup, searchQuery]);
-  const shownSkillCount = activeRepoGroup
-    ? activeRepoGroup.skillCount
-    : displaySkills.length;
+  }, [activeRepo, displaySkills, searchQuery]);
+  const shownSkillCount = activeRepo
+    ? displaySkills.length
+    : publisherRepos.reduce((sum, r) => sum + r.skill_count, 0);
 
   const totalInstalls = useMemo(
-    () => skills.reduce((sum, s) => sum + s.stars, 0),
-    [skills]
+    () => publisherRepos.reduce((sum, r) => sum + r.installs, 0),
+    [publisherRepos]
   );
 
   // === Handlers ===
@@ -456,14 +443,14 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
           <div className="p-6">
             {loading ? (
               <SkillGridSkeleton count={6} />
-            ) : displaySkills.length === 0 ? (
+            ) : !activeRepo && publisherRepos.length === 0 ? (
               <EmptyState
                 icon={<Package className="w-6 h-6 text-muted-foreground" />}
                 title={searchQuery.trim() ? t("publisherDetail.noMatch") : t("publisherDetail.noSkills")}
                 description={searchQuery.trim() ? t("publisherDetail.tryDifferent") : t("publisherDetail.installDirect", { publisher: publisher.name, repo: publisher.repo })}
               />
             ) : !activeRepo ? (
-              visibleRepos.length === 0 ? (
+              visiblePublisherRepos.length === 0 ? (
                 <EmptyState
                   icon={<Folder className="w-6 h-6 text-muted-foreground" />}
                   title="No repos match your search"
@@ -471,14 +458,14 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
                 />
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 max-w-5xl">
-                  {visibleRepos.map((group) => (
+                  {visiblePublisherRepos.map((r) => (
                     <motion.button
-                      key={group.repo}
+                      key={r.repo}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.2 }}
                       onClick={() => {
-                        setActiveRepo(group.repo);
+                        setActiveRepo(r.repo);
                         setSearchQuery("");
                         setSelectedSkill(null);
                         scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
@@ -487,19 +474,21 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
                     >
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-mono text-sm font-semibold truncate">
-                          {group.repo}
+                          {publisher.name}/{r.repo}
                         </span>
                         <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
                       </div>
                       <div className="mt-3 flex items-center gap-3 text-xs text-muted-foreground">
                         <span className="inline-flex items-center gap-1.5">
                           <Package className="w-3.5 h-3.5" />
-                          {t("publisherDetail.repoSkills", { count: group.skillCount })}
+                          {t("publisherDetail.repoSkills", { count: r.skill_count })}
                         </span>
-                        <span className="inline-flex items-center gap-1.5">
-                          <ArrowUp className="w-3.5 h-3.5" />
-                          {formatInstalls(group.totalInstalls)} installs
-                        </span>
+                        {r.installs_label && (
+                          <span className="inline-flex items-center gap-1.5">
+                            <ArrowUp className="w-3.5 h-3.5" />
+                            {r.installs_label} installs
+                          </span>
+                        )}
                       </div>
                     </motion.button>
                   ))}
@@ -524,17 +513,19 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
                   <div className="w-px h-4 bg-border" />
                   <GitBranch className="w-3.5 h-3.5 text-muted-foreground" />
                   <span className="text-xs font-semibold text-foreground/80 font-mono truncate">
-                    {activeRepoGroup?.repo ?? activeRepo}
+                    {activeRepo}
                   </span>
                   <Badge
                     variant="outline"
                     className="text-[10px] px-1.5 py-0 h-4 font-normal text-muted-foreground bg-muted border-transparent"
                   >
-                    {t("publisherDetail.repoSkills", { count: activeRepoGroup?.skillCount ?? 0 })}
+                    {t("publisherDetail.repoSkills", { count: displaySkills.length })}
                   </Badge>
                 </div>
 
-                {visibleSkills.length === 0 ? (
+                {loading ? (
+                  <SkillGridSkeleton count={6} />
+                ) : visibleSkills.length === 0 ? (
                   <EmptyState
                     icon={<Package className="w-6 h-6 text-muted-foreground" />}
                     title={t("publisherDetail.noMatch")}
