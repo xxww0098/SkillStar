@@ -5,6 +5,37 @@ use std::process::Command;
 
 use super::{lockfile, sync};
 
+/// Build an enriched PATH that includes common macOS binary directories.
+/// GUI apps on macOS don't inherit the shell PATH from .zshrc/.bashrc,
+/// so Homebrew-installed binaries (gh, git) won't be found without this.
+fn enriched_path() -> String {
+    let current = std::env::var("PATH").unwrap_or_default();
+    let extra_dirs = [
+        "/opt/homebrew/bin",
+        "/opt/homebrew/sbin",
+        "/usr/local/bin",
+        "/usr/local/sbin",
+        "/usr/bin",
+        "/usr/sbin",
+        "/bin",
+        "/sbin",
+    ];
+    let mut parts: Vec<&str> = extra_dirs.to_vec();
+    for segment in current.split(':') {
+        if !parts.contains(&segment) {
+            parts.push(segment);
+        }
+    }
+    parts.join(":")
+}
+
+/// Create a Command with enriched PATH so it can find Homebrew binaries.
+fn command_with_path(program: &str) -> Command {
+    let mut cmd = Command::new(program);
+    cmd.env("PATH", enriched_path());
+    cmd
+}
+
 // ── Status ──────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,7 +51,7 @@ pub enum GhStatus {
 
 /// Check if GitHub CLI (gh) is installed
 pub fn is_gh_installed() -> bool {
-    Command::new("gh")
+    command_with_path("gh")
         .arg("--version")
         .output()
         .map(|o| o.status.success())
@@ -29,7 +60,7 @@ pub fn is_gh_installed() -> bool {
 
 /// Check if gh is authenticated
 pub fn is_gh_authenticated() -> Result<bool> {
-    let output = Command::new("gh")
+    let output = command_with_path("gh")
         .args(["auth", "status"])
         .output()
         .context("Failed to run gh auth status")?;
@@ -38,7 +69,7 @@ pub fn is_gh_authenticated() -> Result<bool> {
 
 /// Get the authenticated GitHub username
 fn get_gh_username() -> Option<String> {
-    let output = Command::new("gh")
+    let output = command_with_path("gh")
         .args(["api", "user", "--jq", ".login"])
         .output()
         .ok()?;
@@ -88,7 +119,7 @@ pub struct UserRepo {
 /// Fetches repos owned by the authenticated user and inspects their top-level dirs.
 pub fn list_user_repos(limit: u32) -> Result<Vec<UserRepo>> {
     let owner = get_gh_username();
-    let mut cmd = Command::new("gh");
+    let mut cmd = command_with_path("gh");
     cmd.arg("repo").arg("list");
 
     // `gh repo list` expects owner as a positional argument.
@@ -148,7 +179,7 @@ pub fn list_user_repos(limit: u32) -> Result<Vec<UserRepo>> {
 /// Used to show existing skill folders when the user picks a repo.
 pub fn inspect_repo_folders(repo_full_name: &str) -> Result<Vec<String>> {
     // Use gh api to list contents at the repo root
-    let output = Command::new("gh")
+    let output = command_with_path("gh")
         .args([
             "api",
             &format!("repos/{}/contents", repo_full_name),
@@ -177,7 +208,7 @@ pub fn inspect_repo_folders(repo_full_name: &str) -> Result<Vec<String>> {
 /// Ensure the directory is a git repository with at least one commit.
 pub fn ensure_git_repo(path: &Path) -> Result<()> {
     if path.join(".git").exists() {
-        let has_commits = Command::new("git")
+        let has_commits = command_with_path("git")
             .current_dir(path)
             .args(["rev-parse", "HEAD"])
             .output()
@@ -201,7 +232,7 @@ pub fn ensure_git_repo(path: &Path) -> Result<()> {
 fn stage_and_commit(path: &Path, message: &str) -> Result<()> {
     run_git_in(path, &["add", "-A"])?;
 
-    let status = Command::new("git")
+    let status = command_with_path("git")
         .current_dir(path)
         .args(["diff", "--cached", "--quiet"])
         .output()
@@ -311,7 +342,7 @@ pub fn publish_skill(
         ensure_git_repo(&cache)?;
 
         let visibility = if is_public { "--public" } else { "--private" };
-        let output = Command::new("gh")
+        let output = command_with_path("gh")
             .current_dir(&cache)
             .args([
                 "repo",
@@ -389,7 +420,7 @@ pub fn publish_skill(
 // ── Helpers ─────────────────────────────────────────────────────────
 
 fn run_git_in(cwd: &Path, args: &[&str]) -> Result<String> {
-    let output = Command::new("git")
+    let output = command_with_path("git")
         .current_dir(cwd)
         .args(args)
         .output()
