@@ -2,7 +2,7 @@
 
 <img src="./public/skillstar-icon.svg" alt="SkillStar Logo" width="120" />
 
-# SkillStar
+# SkillStar 技能星球
 
 ### _Your Second Brain for Agent CLIs_
 
