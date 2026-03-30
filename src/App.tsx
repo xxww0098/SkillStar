@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, lazy, Suspense, useRef } from "react"
 import { AnimatePresence, motion } from "framer-motion";
 import { Sidebar } from "./components/layout/Sidebar";
 import { useUpdater } from "./hooks/useUpdater";
+import { looksLikeShareCode } from "./lib/shareCode";
 import type { NavPage, SubPage } from "./types";
 import type { TabId as MarketplaceTabId } from "./pages/Marketplace";
 
@@ -77,6 +78,8 @@ function App() {
   const [skillCardsPreSelectedSkills, setSkillCardsPreSelectedSkills] = useState<string[] | null>(null);
   const [mySkillsFocusSkill, setMySkillsFocusSkill] = useState<string | null>(null);
   const [marketplaceTab, setMarketplaceTab] = useState<MarketplaceTabId>("all");
+  const [clipboardShareCode, setClipboardShareCode] = useState<string | null>(null);
+  const lastClipboardValue = useRef<string>("");
 
   const handleNavigate = useCallback((page: NavPage) => {
     setActivePage(page);
@@ -161,6 +164,29 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [activePage, getLikelyNextPages, prefetchPage]);
 
+  // Clipboard auto-detect: on window focus, read clipboard for share codes
+  useEffect(() => {
+    const handleFocus = async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (!text || text === lastClipboardValue.current) return;
+        lastClipboardValue.current = text;
+        const codeType = looksLikeShareCode(text.trim());
+        if (codeType) {
+          // Navigate to My Skills and open import with the share code
+          setClipboardShareCode(text.trim());
+          setActivePage("my-skills");
+          setSubPage(null);
+        }
+      } catch {
+        // Clipboard read permission denied — silently ignore
+      }
+    };
+
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, []);
+
   const renderPage = () => {
     // Sub-page takes priority when active
     if (activePage === "marketplace" && subPage?.type === "publisher-detail") {
@@ -193,6 +219,8 @@ function App() {
                 handleNavigate("skill-cards");
               }
             }}
+            initialShareCode={clipboardShareCode || undefined}
+            onClearShareCode={() => setClipboardShareCode(null)}
           />
         );
       case "marketplace":
@@ -244,7 +272,9 @@ function App() {
         onToggleCollapse={() => {
           setSidebarCollapsed((prev) => {
             const next = !prev;
-            try { localStorage.setItem("sidebar-collapsed", String(next)); } catch {}
+            try { localStorage.setItem("sidebar-collapsed", String(next)); } catch (e) {
+              console.warn("[App] Failed to persist sidebar collapsed state:", e);
+            }
             return next;
           });
         }}

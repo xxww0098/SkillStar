@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-03-30
+
+### Changed
+- **AI Configuration**: Removed default `https://api.openai.com/v1` prefill for base URL. The input now uses a placeholder system and clears automatically when switching between OpenAI and Anthropic formats.
+- **Settings Version**: The About section now dynamically fetches the app version via Tauri's `getVersion()` API instead of displaying a hardcoded value.
+
+### Fixed
+- **Publisher Detail missing skills**: Bypass the unreliable `search_skills_sh` API (which limits to 100 or drops specific repositories) when viewing a repo. Now uses the already-embedded skills list from the Next.js SSR payload attached to publishers, and falls back to a new `get_publisher_repo_skills` endpoint to scrape directly from `skills.sh/<publisher>/<repo>`.
+- **AI Provider**: Backend HTTP client now securely falls back to official OpenAI or Anthropic API endpoints when the user leaves the `base_url` configuration empty.
+
 ## [0.1.1] - 2026-03-30
 
 ### Fixed

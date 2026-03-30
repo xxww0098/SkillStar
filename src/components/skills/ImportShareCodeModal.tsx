@@ -44,7 +44,7 @@ export function ImportShareCodeModal({
     setLoading(true);
     setError(null);
     try {
-      const data = await parseShareCode(code, password);
+      const { data } = await parseShareCode(code, password);
 
       const skillNames = data.s.map((s) => s.n);
       const sources: Record<string, string> = {};

@@ -1,4 +1,4 @@
-use crate::core::{agent_profile, gh_manager, lockfile, repo_history, repo_scanner, sync};
+use crate::core::{agent_profile, gh_manager, local_skill, lockfile, paths, repo_history, repo_scanner, sync};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -23,7 +23,11 @@ pub async fn publish_skill_to_github(
     folder_name: String,
     repo_name: String,
 ) -> Result<gh_manager::PublishResult, String> {
-    tokio::task::spawn_blocking(move || {
+    let was_local = local_skill::is_local_skill(&skill_name);
+    let skill_name_clone = skill_name.clone();
+    let folder_name_clone = folder_name.clone();
+
+    let result = tokio::task::spawn_blocking(move || {
         gh_manager::publish_skill(
             &skill_name,
             &repo_name,
@@ -35,7 +39,57 @@ pub async fn publish_skill_to_github(
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+
+    // Post-publish graduation: local → hub
+    if was_local {
+        let git_url = result.git_url.clone();
+        let source_folder = folder_name_clone.clone();
+
+        tokio::task::spawn_blocking(move || {
+            // 1. Delete from skills-local/ and remove hub symlink
+            if let Err(e) = local_skill::graduate(&skill_name_clone) {
+                eprintln!("[publish] Failed to graduate local skill: {}", e);
+                return;
+            }
+
+            // 2. Re-clone from GitHub into .repos/ and symlink to skills/
+            let scan = match repo_scanner::scan_repo(&git_url) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("[publish] Failed to scan repo after publish: {}", e);
+                    return;
+                }
+            };
+
+            let target = scan
+                .skills
+                .iter()
+                .find(|s| {
+                    s.id == skill_name_clone
+                        || s.folder_path.ends_with(&source_folder)
+                })
+                .cloned();
+
+            if let Some(target) = target {
+                let install_target = repo_scanner::SkillInstallTarget {
+                    id: target.id,
+                    folder_path: target.folder_path,
+                };
+                if let Err(e) = repo_scanner::install_from_repo(
+                    &scan.source,
+                    &git_url,
+                    &[install_target],
+                ) {
+                    eprintln!("[publish] Failed to re-install from repo: {}", e);
+                }
+            }
+        })
+        .await
+        .map_err(|e| format!("Task join error during graduation: {}", e))?;
+    }
+
+    Ok(result)
 }
 
 #[tauri::command]
@@ -106,8 +160,14 @@ pub struct StorageOverview {
     pub config_bytes: u64,
     /// Skills hub directory total bytes (~/.agents/skills/)
     pub hub_bytes: u64,
-    /// Number of installed skills
+    /// Number of valid installed skills
     pub hub_count: usize,
+    /// Number of broken skills (broken symlinks, orphaned lockfile entries)
+    pub broken_count: usize,
+    /// Number of local skills in skills-local/
+    pub local_count: usize,
+    /// Total bytes of skills-local/ directory
+    pub local_bytes: u64,
     /// Repo cache total bytes (~/.agents/.repos/)
     pub cache_bytes: u64,
     /// Number of cached repos
@@ -123,15 +183,16 @@ pub struct StorageOverview {
 #[tauri::command]
 pub async fn get_storage_overview() -> Result<StorageOverview, String> {
     tokio::task::spawn_blocking(|| {
-        let config_dir = dirs::data_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("skillstar");
+        let config_dir = paths::data_root();
         let config_bytes = dir_size_shallow(&config_dir, Some("repo_history.json"));
 
-        let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-        let hub_dir = home.join(".agents").join("skills");
+        let hub_dir = paths::hub_skills_dir();
         let hub_bytes = dir_size_recursive(&hub_dir);
-        let hub_count = count_children(&hub_dir);
+        let (hub_count, broken_count) = count_hub_skills(&hub_dir);
+
+        let local_dir = paths::local_skills_dir();
+        let local_bytes = dir_size_recursive(&local_dir);
+        let local_count = count_directories(&local_dir);
 
         let cache_info = repo_scanner::get_cache_info();
 
@@ -141,6 +202,9 @@ pub async fn get_storage_overview() -> Result<StorageOverview, String> {
             config_bytes,
             hub_bytes,
             hub_count,
+            broken_count,
+            local_count,
+            local_bytes,
             cache_bytes: cache_info.total_bytes,
             cache_count: cache_info.repo_count,
             cache_unused_count: cache_info.unused_count,
@@ -280,9 +344,7 @@ pub async fn force_delete_repo_caches() -> Result<usize, String> {
 #[tauri::command]
 pub async fn force_delete_app_config() -> Result<usize, String> {
     tokio::task::spawn_blocking(|| {
-        let config_dir = dirs::data_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("skillstar");
+        let config_dir = paths::data_root();
         if !config_dir.exists() {
             return Ok(0usize);
         }
@@ -365,6 +427,106 @@ fn count_children(path: &std::path::Path) -> usize {
         .unwrap_or(0)
 }
 
+/// Count hub skills, returning (valid_count, broken_count).
+///
+/// A skill entry is "broken" if it is a symlink whose target no longer exists.
+/// Uses `symlink_metadata()` to detect symlink entries that `is_dir()` would skip.
+fn count_hub_skills(hub_dir: &Path) -> (usize, usize) {
+    if !hub_dir.exists() {
+        return (0, 0);
+    }
+    let mut valid: usize = 0;
+    let mut broken: usize = 0;
+    if let Ok(entries) = std::fs::read_dir(hub_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(meta) = path.symlink_metadata() else {
+                continue;
+            };
+            if meta.is_symlink() {
+                // Symlink: check if the target still exists
+                if path.exists() {
+                    valid += 1;
+                } else {
+                    broken += 1;
+                }
+            } else if meta.is_dir() {
+                valid += 1;
+            }
+            // Skip regular files (e.g. .DS_Store)
+        }
+    }
+
+    // Also count orphaned lockfile entries (in lockfile but not on disk)
+    let lock_path = lockfile::lockfile_path();
+    if let Ok(lf) = lockfile::Lockfile::load(&lock_path) {
+        for entry in &lf.skills {
+            let skill_path = hub_dir.join(&entry.name);
+            // Entry exists in lockfile but has no directory/symlink at all
+            if skill_path.symlink_metadata().is_err() {
+                broken += 1;
+            }
+        }
+    }
+
+    (valid, broken)
+}
+
+/// Remove broken symlinks from the hub and prune orphaned lockfile entries.
+///
+/// Returns the number of issues fixed.
+#[tauri::command]
+pub async fn clean_broken_skills() -> Result<usize, String> {
+    tokio::task::spawn_blocking(|| {
+        let hub_dir = sync::get_hub_skills_dir();
+        let mut fixed: usize = 0;
+        let mut removed_names: HashSet<String> = HashSet::new();
+
+        // Phase 1: Remove broken symlinks from hub
+        if let Ok(entries) = std::fs::read_dir(&hub_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let Ok(meta) = path.symlink_metadata() else {
+                    continue;
+                };
+                if meta.is_symlink() && !path.exists() {
+                    // Broken symlink — target is gone
+                    if std::fs::remove_file(&path).is_ok() {
+                        if let Some(name) = entry.file_name().to_str() {
+                            removed_names.insert(name.to_string());
+                        }
+                        fixed += 1;
+                    }
+                }
+            }
+        }
+
+        // Phase 2: Clean agent-side symlinks for removed skills
+        for name in &removed_names {
+            let _ = sync::remove_skill_from_all_agents(name);
+        }
+
+        // Phase 3: Prune orphaned lockfile entries
+        let lock_path = lockfile::lockfile_path();
+        let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
+        let before = lf.skills.len();
+        lf.skills.retain(|entry| {
+            let skill_path = hub_dir.join(&entry.name);
+            // Keep entries that have a valid directory or valid symlink
+            skill_path.symlink_metadata().is_ok() && (!skill_path.is_symlink() || skill_path.exists())
+        });
+        let orphans_removed = before - lf.skills.len();
+        if orphans_removed > 0 {
+            let _ = lf.save(&lock_path);
+            fixed += orphans_removed;
+        }
+
+        Ok(fixed)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
 fn count_directories(path: &Path) -> usize {
     if !path.exists() {
         return 0;
@@ -385,8 +547,5 @@ fn resolve_symlink_target(symlink_path: &Path) -> Option<PathBuf> {
 }
 
 fn repos_cache_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".agents")
-        .join(".repos")
+    paths::repos_cache_dir()
 }

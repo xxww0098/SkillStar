@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 /// A single entry in the repo scan history.
 ///
-/// Persisted in `~/Library/Application Support/skillstar/repo_history.json`.
+/// Persisted in `~/.skillstar/repo_history.json`.
 /// Tracks every repo the user has scanned, even if no skills were installed,
 /// so the UI can offer a quick-reuse dropdown.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,10 +23,7 @@ struct RepoHistoryFile {
 }
 
 fn history_path() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("skillstar")
-        .join("repo_history.json")
+    super::paths::data_root().join("repo_history.json")
 }
 
 /// Load all repo history entries, sorted by most-recently-used first.

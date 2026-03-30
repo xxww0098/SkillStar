@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
-import { Layers, RefreshCw, Rocket, Trash2, X, CheckSquare, Square, Link2 } from "lucide-react";
+import { Layers, RefreshCw, Rocket, Trash2, X, Link2, Share2 } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { SelectAllButton } from "../ui/SelectAllButton";
+import { Loader2, Check } from "lucide-react";
 import type { AgentProfile } from "../../types";
 
 interface SkillSelectionBarProps {
@@ -12,8 +14,9 @@ interface SkillSelectionBarProps {
   disabled?: boolean;
   onDeploy: () => void;
   onSaveGroup: () => void;
+  onShare?: () => void;
   onPackSkills?: () => void;
-  onUpdate: () => void;
+  onUpdate: () => Promise<void> | void;
   onUninstall: () => void;
   onSelectAll?: () => void;
   onClear: () => void;
@@ -30,6 +33,7 @@ export function SkillSelectionBar({
   onDeploy,
   onSaveGroup,
   onPackSkills,
+  onShare,
   onUpdate,
   onUninstall,
   onSelectAll,
@@ -39,7 +43,22 @@ export function SkillSelectionBar({
 }: SkillSelectionBarProps) {
   const { t } = useTranslation();
   const [linkMenuOpen, setLinkMenuOpen] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [updateSuccess, setUpdateSuccess] = useState(false);
   const enabledProfiles = agentProfiles?.filter((p) => p.enabled) ?? [];
+
+  const handleUpdate = async () => {
+    if (disabled || isUpdating) return;
+    setIsUpdating(true);
+    setUpdateSuccess(false);
+    try {
+      await onUpdate();
+      setUpdateSuccess(true);
+      setTimeout(() => setUpdateSuccess(false), 2000);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
 
   return (
     <motion.div
@@ -63,17 +82,13 @@ export function SkillSelectionBar({
           </Button>
         )}
         {onSelectAll && totalCount !== undefined && (
-          selectedCount < totalCount ? (
-            <Button size="sm" variant="ghost" onClick={onSelectAll} className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground">
-              <CheckSquare className="w-3.5 h-3.5 mr-1" />
-              {t("selectionBar.selectAll")}
-            </Button>
-          ) : (
-            <Button size="sm" variant="ghost" onClick={onClear} className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground">
-              <Square className="w-3.5 h-3.5 mr-1" />
-              {t("selectionBar.deselectAll")}
-            </Button>
-          )
+          <SelectAllButton
+            allSelected={selectedCount >= totalCount}
+            onToggle={selectedCount < totalCount ? onSelectAll : onClear}
+            showIcon
+            variant="ghost"
+            size="sm"
+          />
         )}
       </div>
       <div className="w-px h-4 bg-border/50 mx-1" />
@@ -132,11 +147,29 @@ export function SkillSelectionBar({
         <Layers className="w-3.5 h-3.5 mr-1.5" />
         {t("selectionBar.saveAsGroup")}
       </Button>
-      <Button size="sm" variant="outline" onClick={onUpdate} disabled={disabled}>
-        <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-        {t("selectionBar.updateAll")}
+      {onShare && (
+        <Button size="sm" variant="outline" onClick={onShare} disabled={disabled || isUpdating}>
+          <Share2 className="w-3.5 h-3.5 mr-1.5" />
+          {t("selectionBar.share")}
+        </Button>
+      )}
+      <Button
+        size="sm"
+        variant={updateSuccess ? "secondary" : "outline"}
+        onClick={handleUpdate}
+        disabled={disabled || isUpdating || updateSuccess}
+        className={updateSuccess ? "bg-success/10 text-success border-success/20 hover:bg-success/10" : ""}
+      >
+        {isUpdating ? (
+          <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+        ) : updateSuccess ? (
+          <Check className="w-3.5 h-3.5 mr-1.5" />
+        ) : (
+          <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+        )}
+        {isUpdating ? t("common.updating", { defaultValue: "更新中..." }) : updateSuccess ? t("common.updated", { defaultValue: "已更新" }) : t("selectionBar.updateAll")}
       </Button>
-      <Button size="sm" variant="destructive" onClick={onUninstall} disabled={disabled}>
+      <Button size="sm" variant="destructive" onClick={onUninstall} disabled={disabled || isUpdating}>
         <Trash2 className="w-3.5 h-3.5 mr-1.5" />
         {t("selectionBar.uninstall")}
       </Button>

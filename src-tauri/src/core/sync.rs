@@ -296,8 +296,5 @@ pub fn resync_existing_links(skill_name: &str) -> Result<Vec<String>> {
 
 /// Get the default skills hub directory.
 pub fn get_hub_skills_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".agents")
-        .join("skills")
+    super::paths::hub_skills_dir()
 }

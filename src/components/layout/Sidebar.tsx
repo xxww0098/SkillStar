@@ -2,6 +2,7 @@ import { useState } from "react";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
+import { invoke } from "@tauri-apps/api/core";
 import {
   Globe,
   Settings,
@@ -197,6 +198,20 @@ export function Sidebar({
 }: SidebarProps) {
   const { t } = useTranslation();
   const [isAnimating, setIsAnimating] = useState(false);
+  const isDev = import.meta.env.DEV;
+
+  const handleLogoClick = async () => {
+    if (!isDev) return;
+    if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
+      return;
+    }
+
+    try {
+      await invoke("plugin:webview|internal_toggle_devtools");
+    } catch (error) {
+      console.warn("[Sidebar] Failed to toggle devtools from logo click", error);
+    }
+  };
 
   const navItems: { id: NavPage; label: string; icon: React.ElementType }[] = [
     { id: "my-skills", label: t("sidebar.skills"), icon: Package },
@@ -226,6 +241,20 @@ export function Sidebar({
             <motion.div
               whileHover="hover"
               initial="idle"
+              onClick={isDev ? handleLogoClick : undefined}
+              onKeyDown={
+                isDev
+                  ? (event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        void handleLogoClick();
+                      }
+                    }
+                  : undefined
+              }
+              role={isDev ? "button" : undefined}
+              tabIndex={isDev ? 0 : undefined}
+              title={isDev ? "Open DevTools" : undefined}
               variants={{
                 idle: { scale: 1 },
                 hover: { scale: 1.06 },

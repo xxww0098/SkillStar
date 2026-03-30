@@ -49,6 +49,7 @@ export function AiProviderSection({
   const { t } = useTranslation();
   const isAnthropicFormat = localAiConfig.api_format === "anthropic";
   const aiApiKeyPlaceholder = isAnthropicFormat ? "sk-ant-..." : "sk-...";
+  const aiBaseUrlPlaceholder = isAnthropicFormat ? "https://api.anthropic.com" : "https://api.openai.com/v1";
   const aiModelPlaceholder = isAnthropicFormat ? "claude-sonnet-4-20250514" : "gpt-5.4";
   const formControlClass =
     "flex h-9 w-full rounded-xl border border-input-border bg-input backdrop-blur-sm px-3 text-sm text-foreground shadow-sm transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:border-primary/60";
@@ -99,14 +100,15 @@ export function AiProviderSection({
                   value={localAiConfig.api_format}
                   onChange={(e) => {
                     const nextFormat = e.target.value as "openai" | "anthropic";
+                    const currentUrl = localAiConfig.base_url.trim();
+                    const urlToSet = (currentUrl === "https://api.openai.com/v1" || currentUrl === "https://api.anthropic.com")
+                      ? ""
+                      : currentUrl;
+                    
                     onConfigChange({
                       ...localAiConfig,
                       api_format: nextFormat,
-                      base_url: localAiConfig.base_url.trim()
-                        ? localAiConfig.base_url
-                        : nextFormat === "anthropic"
-                        ? "https://api.anthropic.com"
-                        : "https://api.openai.com/v1",
+                      base_url: urlToSet,
                       model: localAiConfig.model.trim()
                         ? localAiConfig.model
                         : nextFormat === "anthropic"
@@ -151,6 +153,7 @@ export function AiProviderSection({
                 type="text"
                 value={localAiConfig.base_url}
                 onChange={(e) => onConfigChange({ ...localAiConfig, base_url: e.target.value })}
+                placeholder={aiBaseUrlPlaceholder}
                 className="font-mono"
               />
             </div>

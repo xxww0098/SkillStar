@@ -2,10 +2,11 @@ pub mod agents;
 pub mod ai;
 pub mod github;
 pub mod marketplace;
+pub mod patrol;
 pub mod projects;
 
 use crate::core::{
-    git_ops, installed_skill, lockfile, project_manifest, proxy, repo_scanner,
+    git_ops, installed_skill, local_skill, lockfile, project_manifest, proxy, repo_scanner,
     skill::{
         extract_github_source_from_url, extract_skill_description, parse_skill_content, Skill,
         SkillContent,
@@ -58,6 +59,11 @@ pub async fn install_skill(url: String, name: Option<String>) -> Result<Skill, S
         return Err(format!("Skill '{}' is already installed", name_str));
     }
 
+    // Reject if name exists in skills-local
+    if local_skill::local_skills_dir().join(&name_str).exists() {
+        return Err(format!("Skill '{}' already exists as a local skill", name_str));
+    }
+
     git_ops::clone_repo(&url, &dest).map_err(|e| e.to_string())?;
 
     let tree_hash = git_ops::compute_tree_hash(&dest).map_err(|e| e.to_string())?;
@@ -73,15 +79,14 @@ pub async fn install_skill(url: String, name: Option<String>) -> Result<Skill, S
     });
     let _ = lf.save(&lock_path);
 
-    // New skills default to not being linked to any agent.
-    // Users explicitly toggle per-agent links from the UI.
     let agent_links: Vec<String> = Vec::new();
-
     let description = extract_skill_description(&dest);
+    let source = extract_github_source_from_url(&url);
 
     Ok(Skill {
         name: name_str,
         description,
+        skill_type: "hub".to_string(),
         stars: 0,
         installed: true,
         update_available: false,
@@ -93,20 +98,33 @@ pub async fn install_skill(url: String, name: Option<String>) -> Result<Skill, S
         topics: Vec::new(),
         agent_links: Some(agent_links),
         rank: None,
-        source: None,
+        source,
     })
 }
 
 #[tauri::command]
 pub async fn uninstall_skill(name: String) -> Result<(), String> {
+    // If it's a local skill, delegate to local_skill::delete
+    if local_skill::is_local_skill(&name) {
+        return local_skill::delete(&name).map_err(|e| e.to_string());
+    }
+
     // Remove symlinks from all agents first
     let _ = sync::remove_skill_from_all_agents(&name);
 
     let skills_dir = sync::get_hub_skills_dir();
     let path = skills_dir.join(&name);
 
-    if path.exists() {
-        std::fs::remove_dir_all(&path).map_err(|e| format!("Failed to delete folder: {}", e))?;
+    // Use symlink_metadata() instead of exists() — exists() follows symlinks,
+    // so a broken symlink (target deleted) returns false and is never cleaned up.
+    if let Ok(meta) = path.symlink_metadata() {
+        if meta.is_symlink() {
+            std::fs::remove_file(&path)
+                .map_err(|e| format!("Failed to remove symlink: {}", e))?;
+        } else {
+            std::fs::remove_dir_all(&path)
+                .map_err(|e| format!("Failed to delete folder: {}", e))?;
+        }
     }
 
     let lock_path = lockfile::lockfile_path();
@@ -164,17 +182,20 @@ pub async fn update_skill(name: String) -> Result<Skill, String> {
         .map(|dir| extract_skill_description(&dir))
         .unwrap_or_else(|| extract_skill_description(&path));
 
-    let source = lock_entry.as_ref().and_then(|e| {
-        if e.source_folder.is_some() {
-            extract_github_source_from_url(&e.git_url)
-        } else {
-            None
-        }
-    });
+    let source = lock_entry
+        .as_ref()
+        .and_then(|e| extract_github_source_from_url(&e.git_url));
+
+    let skill_type = if local_skill::is_local_skill(&name) {
+        "local".to_string()
+    } else {
+        "hub".to_string()
+    };
 
     Ok(Skill {
         name,
         description,
+        skill_type,
         stars: 0,
         installed: true,
         update_available: false,
@@ -388,21 +409,41 @@ pub async fn read_skill_file_raw(name: String) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn create_local_skill_from_content(name: String, content: String) -> Result<(), String> {
-    let skills_dir = sync::get_hub_skills_dir();
-    let skill_dir = skills_dir.join(&name);
+    let hub_dir = sync::get_hub_skills_dir();
+    let hub_path = hub_dir.join(&name);
 
     // Don't overwrite existing skills
-    if skill_dir.exists() {
+    if hub_path.symlink_metadata().is_ok() {
         return Ok(()); // Silently skip if already exists
     }
 
-    std::fs::create_dir_all(&skill_dir)
-        .map_err(|e| format!("Failed to create skill directory: {}", e))?;
-
-    let skill_md = skill_dir.join("SKILL.md");
-    std::fs::write(&skill_md, &content).map_err(|e| format!("Failed to write SKILL.md: {}", e))?;
+    // Create in skills-local/ and symlink back to skills/
+    let _ = local_skill::create(&name, Some(&content)).map_err(|e| e.to_string())?;
 
     Ok(())
+}
+
+// ── Local Skills ────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn create_local_skill(
+    name: String,
+    content: Option<String>,
+) -> Result<Skill, String> {
+    local_skill::create(&name, content.as_deref()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_local_skill(name: String) -> Result<(), String> {
+    local_skill::delete(&name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn migrate_local_skills() -> Result<u32, String> {
+    tokio::task::spawn_blocking(|| local_skill::migrate_existing())
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -498,10 +539,10 @@ pub async fn update_skill_content(name: String, content: String) -> Result<(), S
 #[tauri::command]
 pub async fn export_skill_bundle(
     name: String,
-    output_dir: Option<String>,
+    output_path: Option<String>,
 ) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
-        skill_bundle::export_bundle(&name, output_dir.as_deref())
+        skill_bundle::export_bundle(&name, output_path.as_deref())
             .map(|path| path.to_string_lossy().to_string())
     })
     .await
@@ -528,4 +569,30 @@ pub async fn import_skill_bundle(
         .await
         .map_err(|e| format!("Task join error: {}", e))?
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn export_multi_skill_bundle(
+    names: Vec<String>,
+    output_path: String,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        skill_bundle::export_multi_bundle(&names, &output_path)
+            .map(|path| path.to_string_lossy().to_string())
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+    .map_err(|e| e.to_string())
+}
+
+// ── Text File I/O (share code files) ────────────────────────────────
+
+#[tauri::command]
+pub async fn write_text_file(path: String, content: String) -> Result<(), String> {
+    std::fs::write(&path, &content).map_err(|e| format!("Failed to write file: {}", e))
+}
+
+#[tauri::command]
+pub async fn read_text_file(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e))
 }

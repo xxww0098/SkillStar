@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "SkillStar",
-  "version": "0.1.1",
-  "identifier": "com.skillstar.app",
+  "version": "0.1.2",
+  "identifier": "com.skillstar.desktop",
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
@@ -13,6 +13,7 @@
     "windows": [
       {
         "title": "SkillStar",
+        "hiddenTitle": true,
         "width": 1400,
         "height": 800,
         "minWidth": 900,

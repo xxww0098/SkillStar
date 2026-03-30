@@ -34,15 +34,7 @@ struct GroupStore {
 
 /// Path to the JSON file storing groups.
 fn store_path() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| {
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(".local")
-                .join("share")
-        })
-        .join("skillstar")
-        .join("groups.json")
+    super::paths::data_root().join("groups.json")
 }
 
 fn load_store() -> GroupStore {
@@ -188,20 +180,7 @@ pub fn duplicate_group(id: &str) -> Result<SkillGroup> {
     )
 }
 
-/// Simple UUID v4 generator (random-based, no external crate needed).
+/// RFC 4122 UUID v4 generator (cryptographically random).
 fn uuid_v4() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let seed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    // Simple random-ish UUID for local-only use
-    format!(
-        "{:08x}-{:04x}-4{:03x}-{:04x}-{:012x}",
-        (seed & 0xFFFF_FFFF) as u32,
-        ((seed >> 32) & 0xFFFF) as u16,
-        ((seed >> 48) & 0x0FFF) as u16,
-        (0x8000 | ((seed >> 60) & 0x3FFF)) as u16,
-        (seed.wrapping_mul(6_364_136_223_846_793_005) & 0xFFFF_FFFF_FFFF) as u64,
-    )
+    uuid::Uuid::new_v4().to_string()
 }

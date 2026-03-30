@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Plus, Search, Check, AlertCircle } from "lucide-react";
+import { X, Plus, Check, AlertCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../ui/button";
+import { SelectAllButton } from "../ui/SelectAllButton";
+import { SearchInput } from "../ui/SearchInput";
 import { Input } from "../ui/input";
 import { cn } from "../../lib/utils";
 import type { Skill } from "../../types";
@@ -108,6 +110,17 @@ export function CreateGroupModal({
   const isDuplicateName =
     name.trim() !== initialName.trim() && existingNames.includes(name.trim());
   const canSave = name.trim().length > 0 && selectedSkills.length > 0 && !isDuplicateName;
+
+  const isAllSelected = filteredSkills.length > 0 && filteredSkills.every((s) => selectedSkills.includes(s.name));
+
+  const toggleSelectAll = () => {
+    if (isAllSelected) {
+      setSelectedSkills((prev) => prev.filter((n) => !filteredSkills.some((fs) => fs.name === n)));
+    } else {
+      const remainingToAdd = filteredSkills.map((s) => s.name).filter((n) => !selectedSkills.includes(n));
+      setSelectedSkills((prev) => [...prev, ...remainingToAdd]);
+    }
+  };
 
   return (
     <AnimatePresence>
@@ -215,7 +228,7 @@ export function CreateGroupModal({
                       >
                         <p className="text-xs text-destructive font-medium flex items-center gap-1.5 pl-[56px] pt-0.5 pb-0.5">
                           <AlertCircle className="w-3.5 h-3.5" />
-                          {t("createGroupModal.nameExists", "名称已存在")}
+                          {t("createGroupModal.nameExists")}
                         </p>
                       </motion.div>
                     )}
@@ -260,14 +273,23 @@ export function CreateGroupModal({
                   </AnimatePresence>
 
                   {/* Search */}
-                  <div className="relative mb-1.5">
-                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-                    <Input
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <SearchInput
                       value={skillSearch}
                       onChange={(e) => setSkillSearch(e.target.value)}
                       placeholder={t("createGroupModal.searchSkills")}
                       className="pl-8 h-8 text-sm"
+                      iconClassName="w-3.5 h-3.5 left-2.5"
                     />
+                    {filteredSkills.length > 0 && (
+                      <SelectAllButton
+                        allSelected={isAllSelected}
+                        onToggle={toggleSelectAll}
+                        variant="secondary"
+                        size="sm"
+                        className="h-8 px-3 text-xs shrink-0"
+                      />
+                    )}
                   </div>
 
                   {/* Skill list */}

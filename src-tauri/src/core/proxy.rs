@@ -27,10 +27,7 @@ impl Default for ProxyConfig {
 }
 
 fn config_path() -> std::path::PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("skillstar")
-        .join("proxy.json")
+    super::paths::data_root().join("proxy.json")
 }
 
 pub fn load_config() -> Result<ProxyConfig> {

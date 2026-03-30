@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "../ui/button";
+import { SearchInput } from "../ui/SearchInput";
 import {
   X,
   Github,
@@ -19,7 +20,6 @@ import {
   ChevronRight,
   ChevronLeft,
   Plus,
-  Search,
   GitBranch,
 } from "lucide-react";
 import type { GhStatus, PublishResult, UserRepo } from "../../types";
@@ -320,15 +320,13 @@ export function PublishSkillModal({
                     </button>
 
                     {/* Search */}
-                    <div className="relative">
-                      <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                      <input
-                        value={repoSearch}
-                        onChange={(e) => setRepoSearch(e.target.value)}
-                        placeholder={t("publishModal.searchRepos")}
-                        className="flex h-8 w-full rounded-md border border-input bg-transparent pl-9 pr-3 py-1 text-xs shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                      />
-                    </div>
+                    <SearchInput
+                      value={repoSearch}
+                      onChange={(e) => setRepoSearch(e.target.value)}
+                      placeholder={t("publishModal.searchRepos")}
+                      className="h-8 w-full rounded-md border border-input bg-transparent shadow-sm pl-9 pr-3 text-xs"
+                      iconClassName="left-3 w-3.5 h-3.5"
+                    />
 
                     {/* Repo list */}
                     {loadingRepos ? (

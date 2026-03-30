@@ -65,8 +65,5 @@ impl Lockfile {
 
 /// Get the default lockfile path
 pub fn lockfile_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".agents")
-        .join(".skill-lock.json")
+    super::paths::lockfile_path()
 }

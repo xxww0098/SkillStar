@@ -4,9 +4,14 @@ import { X, Sparkles, Check, Loader2 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { Button } from "../ui/button";
-import { cn } from "../../lib/utils";
+import { cn, navigateToAiSettings } from "../../lib/utils";
 import { toast } from "../../lib/toast";
 import type { Skill } from "../../types";
+
+interface AiConfigLike {
+  enabled: boolean;
+  api_key: string;
+}
 
 interface AiPickSkillsModalProps {
   open: boolean;
@@ -29,6 +34,7 @@ export function AiPickSkillsModal({
   const [recommended, setRecommended] = useState<string[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  const [aiConfigured, setAiConfigured] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -37,6 +43,17 @@ export function AiPickSkillsModal({
       setRecommended([]);
       setSelected(new Set());
       setError(null);
+      setAiConfigured(null);
+
+      const loadAiConfig = async () => {
+        try {
+          const config = await invoke<AiConfigLike>("get_ai_config");
+          setAiConfigured(config.enabled && config.api_key.trim().length > 0);
+        } catch {
+          setAiConfigured(false);
+        }
+      };
+      loadAiConfig();
     }
   }, [open]);
 
@@ -127,6 +144,27 @@ export function AiPickSkillsModal({
 
                 {/* Body */}
                 <div className="px-6 py-4">
+                  {aiConfigured === false && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className="mb-4 rounded-xl border border-warning/20 bg-warning/10 px-4 py-3 flex items-start gap-3"
+                    >
+                      <div className="flex-1 text-sm text-warning/90">
+                        {t("aiPickModal.aiNotConfigured")}
+                      </div>
+                      <button
+                        onClick={() => {
+                          onClose();
+                          navigateToAiSettings();
+                        }}
+                        className="text-xs cursor-pointer shrink-0 font-medium text-warning hover:text-warning/80 underline underline-offset-2"
+                      >
+                        {t("skillEditor.configureAI")}
+                      </button>
+                    </motion.div>
+                  )}
+
                   {phase === "input" && (
                     <motion.div
                       initial={{ opacity: 0 }}
@@ -289,7 +327,8 @@ export function AiPickSkillsModal({
                         disabled={
                           !prompt.trim() ||
                           phase === "loading" ||
-                          skills.length === 0
+                          skills.length === 0 ||
+                          aiConfigured !== true
                         }
                         className="bg-violet-600 hover:bg-violet-500 text-white"
                       >

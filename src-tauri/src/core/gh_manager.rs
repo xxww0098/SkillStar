@@ -228,11 +228,7 @@ fn stage_and_commit(path: &Path, message: &str) -> Result<()> {
 
 /// The local clone cache lives at `~/.agents/.publish-repos/<repo-name>/`
 fn get_publish_cache_dir(repo_name: &str) -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".agents")
-        .join(".publish-repos")
-        .join(repo_name)
+    super::paths::publish_cache_dir(repo_name)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -265,12 +261,28 @@ pub fn publish_skill(
         anyhow::bail!("Skill directory '{}' not found", skill_name);
     }
 
-    if skill_source.is_symlink() {
-        anyhow::bail!(
-            "Skill '{}' is a symlink (installed from a repo). Cannot publish.",
-            skill_name
-        );
-    }
+    // Resolve local skill symlinks (skills/ → skills-local/) to their actual directory.
+    // Repo-cached symlinks (.repos/) are still rejected — those should be forked first.
+    let skill_source_resolved = if skill_source.is_symlink() {
+        let target = std::fs::read_link(&skill_source)
+            .with_context(|| format!("Failed to read symlink for '{}'", skill_name))?;
+        let resolved = if target.is_absolute() {
+            target
+        } else {
+            skill_source.parent().unwrap_or(Path::new(".")).join(target)
+        };
+
+        let local_dir = super::paths::local_skills_dir();
+        if !resolved.starts_with(&local_dir) {
+            anyhow::bail!(
+                "Skill '{}' is a repo-cached symlink. Cannot publish.",
+                skill_name
+            );
+        }
+        resolved
+    } else {
+        skill_source.clone()
+    };
 
     // Determine repo URL: either use existing or create new
     let (repo_url, cache_dir) = if let Some(url) = existing_repo_url {
@@ -350,7 +362,7 @@ pub fn publish_skill(
     if dest.exists() {
         std::fs::remove_dir_all(&dest)?;
     }
-    copy_dir_recursive(&skill_source, &dest)?;
+    copy_dir_recursive(&skill_source_resolved, &dest)?;
 
     // Commit and push
     let commit_msg = format!("publish: {}", folder_name);
@@ -366,7 +378,7 @@ pub fn publish_skill(
     };
 
     // Update lockfile
-    let tree_hash = super::git_ops::compute_tree_hash(&skill_source).unwrap_or_default();
+    let tree_hash = super::git_ops::compute_tree_hash(&skill_source_resolved).unwrap_or_default();
     let lock_path = lockfile::lockfile_path();
     let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
     lf.upsert(lockfile::LockEntry {

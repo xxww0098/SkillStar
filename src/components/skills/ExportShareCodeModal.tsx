@@ -1,16 +1,31 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { motion, AnimatePresence } from "framer-motion";
 import { invoke } from "@tauri-apps/api/core";
+import { save } from "@tauri-apps/plugin-dialog";
 import { Button } from "../../components/ui/button";
 import { createShareCode, ShareCodeData } from "../../lib/shareCode";
-import { Copy, KeyRound, Loader2, Check, X, AlertTriangle, Github } from "lucide-react";
+import { toast } from "../../lib/toast";
+import {
+  Copy,
+  KeyRound,
+  Loader2,
+  Check,
+  X,
+  Github,
+  Download,
+  Link2,
+  FileText,
+  Package,
+  Sparkles,
+} from "lucide-react";
 import type { SkillCardDeck, Skill } from "../../types";
 
 interface ExportShareCodeModalProps {
   open: boolean;
   onClose: () => void;
-  group: SkillCardDeck | null;
+  group?: SkillCardDeck | null;
+  skillNames?: string[] | null;
   hubSkills: Skill[];
   onPublishSkill?: (skillName: string) => void;
 }
@@ -18,9 +33,10 @@ interface ExportShareCodeModalProps {
 interface SkillExportStatus {
   name: string;
   gitUrl: string;
-  /** "ok" = has git_url, "embedded" = will inline embed, "too-large" = needs publish, "no-skill-md" = no file */
-  status: "ok" | "embedded" | "too-large" | "no-skill-md";
-  content?: string; // raw SKILL.md content for embedding
+  /** "ok" = has git_url, "embedded" = will inline embed, "bundle" = needs bundle archive */
+  status: "ok" | "embedded" | "bundle";
+  content?: string;
+  fileCount?: number;
 }
 
 const INLINE_SIZE_LIMIT = 4096; // 4KB limit for inline embedding
@@ -29,6 +45,7 @@ export function ExportShareCodeModal({
   open,
   onClose,
   group,
+  skillNames,
   hubSkills,
   onPublishSkill,
 }: ExportShareCodeModalProps) {
@@ -39,10 +56,14 @@ export function ExportShareCodeModal({
   const [code, setCode] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [skillStatuses, setSkillStatuses] = useState<SkillExportStatus[]>([]);
+  const [bundleSaved, setBundleSaved] = useState(false);
+  const [bundleReady, setBundleReady] = useState(false);
+  const [bundleExporting, setBundleExporting] = useState(false);
 
   // Analyze skills when modal opens
   useEffect(() => {
-    if (!open || !group) {
+    const activeSkills = group ? group.skills : (skillNames || []);
+    if (!open || activeSkills.length === 0) {
       setSkillStatuses([]);
       return;
     }
@@ -51,10 +72,10 @@ export function ExportShareCodeModal({
       setAnalyzing(true);
       const statuses: SkillExportStatus[] = [];
 
-      for (const skillName of group.skills) {
+      for (const skillName of activeSkills) {
         const localSkill = hubSkills.find((s) => s.name === skillName);
         const gitUrl =
-          group.skill_sources?.[skillName] || localSkill?.git_url || "";
+          group?.skill_sources?.[skillName] || localSkill?.git_url || "";
 
         if (gitUrl) {
           statuses.push({ name: skillName, gitUrl, status: "ok" });
@@ -66,22 +87,36 @@ export function ExportShareCodeModal({
           const content = await invoke<string>("read_skill_file_raw", {
             name: skillName,
           });
-          if (content.length <= INLINE_SIZE_LIMIT) {
+
+          // Check if this is a multi-file skill
+          let fileCount = 1;
+          try {
+            const files = await invoke<string[]>("list_skill_files", {
+              name: skillName,
+            });
+            fileCount = files.length;
+          } catch {
+            // ignore
+          }
+
+          if (content.length <= INLINE_SIZE_LIMIT && fileCount <= 1) {
             statuses.push({
               name: skillName,
               gitUrl: "",
               status: "embedded",
               content,
+              fileCount,
             });
           } else {
             statuses.push({
               name: skillName,
               gitUrl: "",
-              status: "too-large",
+              status: "bundle",
+              fileCount,
             });
           }
         } catch {
-          statuses.push({ name: skillName, gitUrl: "", status: "no-skill-md" });
+          statuses.push({ name: skillName, gitUrl: "", status: "bundle", fileCount: 0 });
         }
       }
 
@@ -90,21 +125,37 @@ export function ExportShareCodeModal({
     };
 
     analyze();
-  }, [open, group, hubSkills]);
+  }, [open, group, skillNames, hubSkills]);
 
-  const hasIssues = skillStatuses.some(
-    (s) => s.status === "too-large" || s.status === "no-skill-md"
+  // Categorize
+  const shareCodeSkills = useMemo(
+    () => skillStatuses.filter((s) => s.status === "ok" || s.status === "embedded"),
+    [skillStatuses]
+  );
+  const bundleSkills = useMemo(
+    () => skillStatuses.filter((s) => s.status === "bundle"),
+    [skillStatuses]
   );
   const hasEmbedded = skillStatuses.some((s) => s.status === "embedded");
 
-  const handleExport = async () => {
-    if (!group) return;
+  // Determine export mode: if ANY skill requires a bundle, the whole payload is exported as a bundle
+  const mode: "share-code" | "bundle" = bundleSkills.length > 0 ? "bundle" : "share-code";
+
+  const handleGenerateShareCode = async () => {
+    if (shareCodeSkills.length === 0 && mode === "share-code") return;
     setLoading(true);
 
-    const skillsList = skillStatuses.map((ss) => {
-      const entry: ShareCodeData["s"][number] = { n: ss.name, u: ss.gitUrl };
+    const targetSkills = mode === "share-code" ? shareCodeSkills : shareCodeSkills;
 
-      // Inline embed for small local skills
+    if (targetSkills.length === 0) {
+      // All skills need bundle, no share code generated
+      setCode("");
+      setLoading(false);
+      return;
+    }
+
+    const skillsList = targetSkills.map((ss) => {
+      const entry: ShareCodeData["s"][number] = { n: ss.name, u: ss.gitUrl };
       if (ss.status === "embedded" && ss.content) {
         entry.c = btoa(
           new TextEncoder()
@@ -112,19 +163,32 @@ export function ExportShareCodeModal({
             .reduce((acc, b) => acc + String.fromCharCode(b), "")
         );
       }
-
       return entry;
     });
 
-    const data: ShareCodeData = {
-      n: group.name,
-      d: group.description,
-      i: group.icon,
-      s: skillsList,
-    };
+    let data: ShareCodeData;
+    let codeType: "deck" | "skills" = "deck";
+
+    if (group) {
+      data = {
+        n: group.name,
+        d: group.description,
+        i: group.icon,
+        s: skillsList,
+      };
+      codeType = "deck";
+    } else {
+      data = {
+        n: "SkillStar Skills",
+        d: `${targetSkills.length} skills shared from SkillStar`,
+        i: "\u2B50",
+        s: skillsList,
+      };
+      codeType = "skills";
+    }
 
     try {
-      const generated = await createShareCode(data, password);
+      const generated = await createShareCode(data, codeType, password);
       setCode(generated);
     } catch (e) {
       console.error("Export error", e);
@@ -133,17 +197,83 @@ export function ExportShareCodeModal({
     }
   };
 
+  const handleExport = async () => {
+    if (mode === "share-code") {
+      await handleGenerateShareCode();
+    } else {
+      setBundleExporting(true);
+      await new Promise((r) => setTimeout(r, 300));
+      setBundleExporting(false);
+      setBundleReady(true);
+    }
+  };
+
   const handleCopy = async () => {
     if (!code) return;
     await navigator.clipboard.writeText(code);
     setCopied(true);
+    toast.success(t("shareResultCard.copied"));
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleSaveShareFile = async () => {
+    if (!code) return;
+    try {
+      const ext = group ? "agd" : "ags";
+      const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      const defaultName = group
+        ? `${group.name}-${ts}.${ext}`
+        : `skills-share-${ts}.${ext}`;
+      const path = await save({
+        defaultPath: defaultName,
+        filters: [
+          { name: "SkillStar Share", extensions: ["ags", "agd", "agentskills"] },
+        ],
+      });
+      if (!path) return;
+      await invoke("write_text_file", { path, content: code });
+      toast.success(t("shareResultCard.savedToFile"));
+    } catch (e) {
+      toast.error(String(e));
+    }
+  };
+
+  const handleSaveBundleFile = async () => {
+    try {
+      const ext = group ? "agd" : "ags";
+      const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      const defaultName = group
+        ? `${group.name}-bundle-${ts}.${ext}`
+        : `skills-bundle-${ts}.${ext}`;
+      const path = await save({
+        defaultPath: defaultName,
+        filters: [
+          { name: "SkillStar Bundle", extensions: ["ags", "agd", "agentskills"] },
+        ],
+      });
+      if (!path) return;
+      setLoading(true);
+      setBundleExporting(true);
+      await invoke<string>("export_multi_skill_bundle", {
+        names: skillStatuses.map((s) => s.name),
+        outputPath: path,
+      });
+      setBundleSaved(true);
+      toast.success(t("exportShareCodeModal.bundleSaved"));
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setLoading(false);
+      setBundleExporting(false);
+    }
   };
 
   const reset = () => {
     setCode(null);
     setPassword("");
     setSkillStatuses([]);
+    setBundleSaved(false);
+    setBundleReady(false);
   };
 
   const handleClose = () => {
@@ -151,9 +281,8 @@ export function ExportShareCodeModal({
     setTimeout(reset, 200);
   };
 
-  const issueSkills = skillStatuses.filter(
-    (s) => s.status === "too-large" || s.status === "no-skill-md"
-  );
+  // Check if result phase
+  const isResultPhase = code !== null || bundleReady;
 
   return (
     <AnimatePresence>
@@ -173,180 +302,278 @@ export function ExportShareCodeModal({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 12 }}
             transition={{ type: "spring", bounce: 0.1, duration: 0.35 }}
-            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm max-h-[calc(100vh-2rem)] z-50"
+            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-[420px] max-h-[calc(100vh-2rem)] z-50"
           >
             <div className="relative overflow-hidden rounded-[24px] border border-white/10 bg-card/95 shadow-[0_0_80px_-20px_rgba(0,0,0,0.5)] backdrop-blur-3xl ring-1 ring-white/5 max-h-[calc(100vh-2rem)] flex flex-col">
               {/* Top ambient glow */}
               <div className="pointer-events-none absolute -left-20 -top-20 h-48 w-48 rounded-full bg-primary/20 blur-[60px] opacity-70" />
               <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-blue-500/10 blur-[60px] opacity-70" />
-              <div className="relative z-10 flex flex-col min-h-0">
-              <div className="flex items-center justify-between px-6 pt-4 shrink-0">
-                <h2 className="text-heading-sm">{t("exportShareCodeModal.title")}</h2>
-                <button
-                  onClick={handleClose}
-                  className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
+              <div className="relative z-10 flex flex-col min-h-0 flex-1 h-full">
+                {/* Header */}
+                <div className="flex items-center justify-between px-6 pt-5 pb-1">
+                  <h2 className="text-heading-sm">{t("exportShareCodeModal.title")}</h2>
+                  <button
+                    onClick={handleClose}
+                    className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
 
-              <div className="px-6 pb-2 pt-1 text-sm text-muted-foreground leading-relaxed">
-                {t("exportShareCodeModal.description")}
-              </div>
+                <div className="px-6 pb-3 text-sm text-muted-foreground leading-relaxed">
+                  {t("exportShareCodeModal.description")}
+                </div>
 
-              <div className="px-6 py-4 space-y-4 overflow-y-auto min-h-0">
-                {/* Analyzing state */}
-                {analyzing && (
-                  <div className="flex items-center justify-center py-4 text-muted-foreground gap-2">
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span className="text-sm">{t("exportShareCodeModal.analyzing")}</span>
-                  </div>
-                )}
+                <div className="px-6 pb-6 space-y-4 overflow-y-auto min-h-0 flex-1">
+                  {/* Analyzing state */}
+                  {analyzing && (
+                    <div className="flex items-center justify-center py-8 text-muted-foreground gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span className="text-sm">{t("exportShareCodeModal.analyzing")}</span>
+                    </div>
+                  )}
 
-                {/* Skill status warnings */}
-                {!analyzing && !code && (
-                  <>
-                    {hasEmbedded && (
-                      <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-1.5">
-                        <p className="text-xs font-medium text-primary flex items-center gap-1.5">
-                          <Check className="w-3.5 h-3.5" />
-                          {t("exportShareCodeModal.embeddedNotice")}
-                        </p>
-                        <div className="flex flex-wrap gap-1">
-                          {skillStatuses
-                            .filter((s) => s.status === "embedded")
-                            .map((s) => (
-                              <span
-                                key={s.name}
-                                className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium"
-                              >
-                                {s.name}
+                  {/* Analysis result — strategy preview */}
+                  {!analyzing && !isResultPhase && (
+                    <>
+                      {/* Strategy cards */}
+                      <div className="space-y-2.5">
+                        {/* Share Code group */}
+                        {mode === "share-code" && shareCodeSkills.length > 0 && (
+                          <motion.div
+                            initial={{ opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.05 }}
+                            className="rounded-xl border border-primary/15 bg-primary/[0.03] p-3.5"
+                          >
+                            <div className="flex items-center gap-2 mb-2">
+                              <div className="w-6 h-6 rounded-lg bg-primary/10 flex items-center justify-center">
+                                <Link2 className="w-3.5 h-3.5 text-primary" />
+                              </div>
+                              <span className="text-xs font-semibold text-primary">
+                                {t("exportShareCodeModal.shareCodeLabel")}
                               </span>
-                            ))}
-                        </div>
-                        <p className="text-[11px] text-muted-foreground">
-                          {t("exportShareCodeModal.embeddedDesc")}
-                        </p>
-                      </div>
-                    )}
-
-                    {issueSkills.length > 0 && (
-                      <div className="rounded-lg border border-warning/30 bg-warning/5 p-3 space-y-2">
-                        <p className="text-xs font-medium text-warning flex items-center gap-1.5">
-                          <AlertTriangle className="w-3.5 h-3.5" />
-                          {t("exportShareCodeModal.warning")}
-                        </p>
-                        <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
-                          {issueSkills.map((s) => (
-                            <div
-                              key={s.name}
-                              className="flex items-center justify-between gap-2"
-                            >
-                              <div className="min-w-0">
-                                <span className="text-xs font-medium text-foreground">
+                              <span className="text-[10px] text-muted-foreground ml-auto">
+                                {shareCodeSkills.length} {shareCodeSkills.length === 1 ? "skill" : "skills"}
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {shareCodeSkills.map((s) => (
+                                <span
+                                  key={s.name}
+                                  className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-primary/8 text-primary/80 font-medium border border-primary/10"
+                                >
+                                  {s.status === "ok" ? (
+                                    <Link2 className="w-2.5 h-2.5 opacity-60" />
+                                  ) : (
+                                    <FileText className="w-2.5 h-2.5 opacity-60" />
+                                  )}
                                   {s.name}
                                 </span>
-                                <span className="text-[10px] text-muted-foreground ml-1.5">
-                                  {s.status === "too-large"
-                                    ? t("exportShareCodeModal.tooLarge")
-                                    : t("exportShareCodeModal.notFound")}
-                                </span>
-                              </div>
-                              {onPublishSkill && (
-                                <button
-                                  onClick={() => {
-                                    handleClose();
-                                    setTimeout(
-                                      () => onPublishSkill(s.name),
-                                      250
-                                    );
-                                  }}
-                                  className="flex items-center gap-1 text-[10px] font-medium text-primary hover:underline cursor-pointer shrink-0"
-                                >
-                                  <Github className="w-3 h-3" />
-                                  {t("exportShareCodeModal.publish")}
-                                </button>
-                              )}
+                              ))}
                             </div>
+                            {hasEmbedded && (
+                              <p className="text-[10px] text-muted-foreground mt-2 leading-relaxed">
+                                {t("exportShareCodeModal.embeddedDesc")}
+                              </p>
+                            )}
+                          </motion.div>
+                        )}
+
+                        {/* Bundle group */}
+                        {mode === "bundle" && (
+                          <motion.div
+                            initial={{ opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.1 }}
+                            className="rounded-xl border border-blue-500/15 bg-blue-500/[0.03] p-3.5"
+                          >
+                            <div className="flex items-center gap-2 mb-2">
+                              <div className="w-6 h-6 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                                <Package className="w-3.5 h-3.5 text-blue-400" />
+                              </div>
+                              <span className="text-xs font-semibold text-blue-400">
+                                {t("exportShareCodeModal.bundleLabel")}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground ml-auto">
+                                {skillStatuses.length} {skillStatuses.length === 1 ? "skill" : "skills"}
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {skillStatuses.map((s) => (
+                                <span
+                                  key={s.name}
+                                  className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-blue-500/8 text-blue-400/80 font-medium border border-blue-500/10"
+                                >
+                                  <Package className="w-2.5 h-2.5 opacity-60" />
+                                  {s.name}
+                                  {s.fileCount && s.fileCount > 1 && (
+                                    <span className="opacity-50">({s.fileCount})</span>
+                                  )}
+                                </span>
+                              ))}
+                            </div>
+                            <p className="text-[10px] text-muted-foreground mt-2 leading-relaxed">
+                              {t("exportShareCodeModal.bundleDesc")}
+                            </p>
+                          </motion.div>
+                        )}
+                      </div>
+
+                      {/* Publish shortcut for bundle skills */}
+                      {mode === "bundle" && onPublishSkill && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {bundleSkills.map((s) => (
+                            <button
+                              key={s.name}
+                              onClick={() => {
+                                handleClose();
+                                setTimeout(() => onPublishSkill(s.name), 250);
+                              }}
+                              className="inline-flex items-center gap-1 text-[10px] font-medium text-primary hover:text-primary/80 transition-colors cursor-pointer"
+                            >
+                              <Github className="w-3 h-3" />
+                              {t("exportShareCodeModal.publishToSimplify", { name: s.name })}
+                            </button>
                           ))}
                         </div>
-                        <p className="text-[11px] text-muted-foreground">
-                          {t("exportShareCodeModal.warningDesc")}
-                        </p>
-                      </div>
-                    )}
-                  </>
-                )}
-
-                {!analyzing && !code && (
-                  <>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium flex items-center gap-1.5">
-                        <KeyRound className="w-3.5 h-3.5" />
-                        {t("exportShareCodeModal.encryptionPassword")}
-                      </label>
-                      <input
-                        type="password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        placeholder={t("exportShareCodeModal.passwordPlaceholder")}
-                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                      />
-                    </div>
-
-                    <Button
-                      onClick={handleExport}
-                      disabled={loading}
-                      className="w-full mt-2"
-                    >
-                      {loading && (
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                       )}
-                      {t("exportShareCodeModal.generateShareCode")}
-                      {hasIssues && (
-                        <span className="ml-1 text-xs opacity-70">
-                          {t("exportShareCodeModal.partialNotice")}
-                        </span>
-                      )}
-                    </Button>
-                  </>
-                )}
 
-                {code && (
-                  <div className="space-y-4 animate-in fade-in zoom-in-95">
-                    <div className="relative group">
-                      <textarea
-                        readOnly
-                        value={code}
-                        className="flex w-full rounded-md border border-input bg-muted/50 px-3 py-2 text-[11px] font-mono shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-h-[120px] resize-none pr-10"
-                      />
-                      <button
-                        onClick={handleCopy}
-                        className="absolute right-2 top-2 p-1.5 rounded-md hover:bg-card-hover hover:scale-105 bg-card border shadow-sm text-foreground transition-all cursor-pointer"
+                      {/* Password */}
+                      {mode === "share-code" && (
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium flex items-center gap-1.5">
+                            <KeyRound className="w-3.5 h-3.5" />
+                            {t("exportShareCodeModal.encryptionPassword")}
+                          </label>
+                          <input
+                            type="password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            placeholder={t("exportShareCodeModal.passwordPlaceholder")}
+                            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                          />
+                        </div>
+                      )}
+
+                      {/* Export button */}
+                      <Button
+                        onClick={handleExport}
+                        disabled={loading || skillStatuses.length === 0}
+                        className="w-full mt-1"
                       >
-                        {copied ? (
-                          <Check className="w-4 h-4 text-success" />
-                        ) : (
-                          <Copy className="w-4 h-4" />
+                        {loading && (
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                         )}
-                      </button>
+                        <Sparkles className="w-3.5 h-3.5 mr-1.5" />
+                        {t("exportShareCodeModal.generateExport")}
+                      </Button>
+                    </>
+                  )}
+
+                  {/* Result phase */}
+                  {isResultPhase && (
+                    <div className="space-y-4 animate-in fade-in zoom-in-95 pb-4">
+                      {/* Share code result */}
+                      {code && code.length > 0 && (
+                        <div className="space-y-2.5">
+                          <div className="flex items-center gap-2">
+                            <div className="w-5 h-5 rounded-md bg-primary/10 flex items-center justify-center">
+                              <Link2 className="w-3 h-3 text-primary" />
+                            </div>
+                            <span className="text-xs font-semibold text-foreground">
+                              {t("exportShareCodeModal.shareCodeReady")}
+                            </span>
+                          </div>
+                          <div className="relative group">
+                            <textarea
+                              readOnly
+                              value={code}
+                              className="flex w-full rounded-xl border border-input bg-muted/50 px-3 py-2.5 text-[11px] font-mono shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-h-[100px] resize-none pr-20"
+                            />
+                            <div className="absolute right-2 top-2 flex items-center gap-1.5">
+                              <button
+                                onClick={handleSaveShareFile}
+                                title={t("shareResultCard.saveAsFile")}
+                                className="p-1.5 rounded-md hover:bg-card-hover hover:scale-105 bg-card border shadow-sm text-foreground transition-all cursor-pointer"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={handleCopy}
+                                className="p-1.5 rounded-md hover:bg-card-hover hover:scale-105 bg-card border shadow-sm text-foreground transition-all cursor-pointer"
+                              >
+                                {copied ? (
+                                  <Check className="w-3.5 h-3.5 text-success" />
+                                ) : (
+                                  <Copy className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                          {hasEmbedded && (
+                            <p className="text-[10px] text-primary/70">
+                              {t("exportShareCodeModal.embeddedInfo")}
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Bundle save section */}
+                      {mode === "bundle" && (
+                        <div className="space-y-2.5">
+                          <div className="flex items-center gap-2">
+                            <div className="w-5 h-5 rounded-md bg-blue-500/10 flex items-center justify-center">
+                              <Package className="w-3 h-3 text-blue-400" />
+                            </div>
+                            <span className="text-xs font-semibold text-foreground">
+                              {t("exportShareCodeModal.bundleReady")}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground ml-auto">
+                              {skillStatuses.length} {skillStatuses.length === 1 ? "skill" : "skills"}
+                            </span>
+                          </div>
+                          <div className="rounded-xl border border-blue-500/15 bg-blue-500/[0.03] p-3">
+                            <div className="flex flex-wrap gap-1.5 mb-3">
+                              {skillStatuses.map((s) => (
+                                <span
+                                  key={s.name}
+                                  className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-blue-500/8 text-blue-400/80 font-medium border border-blue-500/10"
+                                >
+                                  <Package className="w-2.5 h-2.5 opacity-60" />
+                                  {s.name}
+                                </span>
+                              ))}
+                            </div>
+                            <Button
+                              size="sm"
+                              variant={bundleSaved ? "ghost" : "secondary"}
+                              onClick={handleSaveBundleFile}
+                              disabled={loading || bundleSaved}
+                              className="w-full"
+                            >
+                              {bundleExporting ? (
+                                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                              ) : loading ? (
+                                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                              ) : bundleSaved ? (
+                                <Check className="w-3.5 h-3.5 mr-1.5 text-success" />
+                              ) : (
+                                <Download className="w-3.5 h-3.5 mr-1.5" />
+                              )}
+                              {bundleExporting
+                                ? t("exportShareCodeModal.exporting")
+                                : bundleSaved
+                                ? t("exportShareCodeModal.bundleSavedBtn")
+                                : t("exportShareCodeModal.saveBundleFile")}
+                            </Button>
+                          </div>
+                        </div>
+                      )}
                     </div>
-
-                    {hasEmbedded && (
-                      <p className="text-xs text-primary/70">
-                        {t("exportShareCodeModal.embeddedInfo")}
-                      </p>
-                    )}
-
-                    {code.length > 500 && (
-                      <p className="text-xs text-muted-foreground">
-                        {t("exportShareCodeModal.longCodeNotice")}
-                      </p>
-                    )}
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
-            </div>
             </div>
           </motion.div>
         </>

@@ -4,11 +4,11 @@
 
 Tauri v2 desktop application for managing AI agent skills across multiple coding agents (Claude, Cursor, Windsurf, etc.). The frontend is a React SPA communicating with a Rust backend via Tauri IPC commands.
 
-> **Web UI**: see [AGENTS_UI.md](./AGENTS_UI.md) for frontend framework and conventions.
+> **Web UI**: see [AGENTS-UI.md](./AGENTS-UI.md) for frontend framework and conventions.
 
 - **Tauri IPC** — Frontend invokes Rust commands via `@tauri-apps/api/core` `invoke()`. All backend logic is exposed through `#[tauri::command]` functions in `src-tauri/src/commands.rs`.
 - **Core modules** — Domain logic lives in `src-tauri/src/core/` with dedicated modules for skills, agents, projects, marketplace, git operations, etc.
-- **Data storage** — JSON files in the system data directory (`~/Library/Application Support/skillstar/` on macOS). No database required.
+- **Data storage** — JSON files in the user home directory (`~/.skillstar/`). No database required.
 - **Skill management** — Skills are Git repositories cloned into a central hub directory (`~/.agents/skills/`). Multi-skill repositories are cloned into a repo cache (`~/.agents/.repos/`) with individual skills symlinked from the hub. Symlinks connect skills to agent-specific configuration directories.
 - **Project management** — Project configs are stored in SkillStar's data directory (`skillstar/projects/`). Project directories only receive symlinks — zero file pollution.
 
@@ -79,7 +79,7 @@ SkillStar/
 │       ├── layout/
 │       │   ├── Sidebar.tsx        # Left navigation sidebar
 │       │   ├── Toolbar.tsx        # Page toolbar (search, sort, view mode)
-│       │   └── DetailPanel.tsx    # Right-side skill detail panel
+│       │   └── DetailPanel.tsx    # Right-side skill detail panel + on-demand marketplace detail fetching
 │       ├── skills/
 │       │   ├── SkillCard.tsx      # Individual skill card with agent toggles
 │       │   ├── SkillGrid.tsx      # Grid/list layout for skill cards
@@ -94,10 +94,13 @@ SkillStar/
 │       │   ├── GitHubImportModal.tsx  # GitHub repo scan + batch skill import
 │       │   ├── PublishSkillModal.tsx   # Publish local skill to GitHub
 │       │   ├── ImportBundleModal.tsx   # Import .agentskill bundle file
+│       │   ├── CreateLocalSkillModal.tsx # Create new local skill modal
 │       │   └── RecommendedRow.tsx # Recommended skills row
 │       ├── marketplace/
 │       │   └── OfficialPublishers.tsx # Publisher cards grid
 ├── public/                        # Static assets (agent icons)
+├── docs/
+│   └── Error.md                   # Major bug log (problem + root cause + solution)
 ├── scripts/
 │   └── download_avatars.cjs       # Agent avatar download script
 ├── src-tauri/                     # ━━ Rust backend ━━━━━━━━━━━━━━━━
@@ -110,11 +113,12 @@ SkillStar/
 │       ├── cli.rs                 # CLI argument parsing
 │       ├── commands.rs            # Tauri command root (skills + shared helpers)
 │       ├── commands/              # Split command modules by domain
-│       │   ├── marketplace.rs     # skills.sh search/leaderboard/publishers/description-hydration commands
+│       │   ├── marketplace.rs     # skills.sh search/leaderboard/publishers/description-hydration/detail-fetching commands
 │       │   ├── agents.rs          # Agent profile and per-agent link commands
 │       │   ├── projects.rs        # Project registration/sync/scan/import commands
 │       │   ├── github.rs          # GitHub status/publish/repo scanner/cache commands
-│       │   └── ai.rs              # AI provider config/translate/summarize/test commands
+│       │   ├── ai.rs              # AI provider config/translate/summarize/test commands
+│       │   └── patrol.rs          # Background stealth update monitoring commands
 │       └── core/                  # Domain logic modules
 │           ├── mod.rs             # Module exports
 │           ├── skill.rs           # Skill + OfficialPublisher types
@@ -124,7 +128,7 @@ SkillStar/
 │           ├── ai_provider.rs     # AI config + OpenAI-compatible translate/summarize
 │           ├── proxy.rs           # Proxy config load/save + schema
 │           ├── project_manifest.rs # Project registration + skill list + sync
-│           ├── marketplace.rs     # skills.sh API integration
+│           ├── marketplace.rs     # skills.sh API integration + on-demand skill detail scraping
 │           ├── path_env.rs        # Cross-platform PATH enrichment for GUI binary discovery
 │           ├── git_ops.rs         # Git clone/pull/hash via gitoxide (gix)
 │           ├── sync.rs            # Symlink management (hub ↔ agent dirs)
@@ -132,6 +136,9 @@ SkillStar/
 │           ├── repo_scanner.rs    # GitHub repo clone/scan/batch-install + update detection
 │           ├── repo_history.rs    # Repo scan history persistence
 │           ├── skill_bundle.rs    # .agentskill bundle export/import (tar.gz packaging)
+│           ├── local_skill.rs     # Local skill CRUD, migration, graduation
+│           ├── patrol.rs          # Background single-skill update monitoring loop
+│           ├── paths.rs           # Central path helpers (~/.agents/skills/, ~/.agents/skills-local/, etc.)
 │           └── gh_manager.rs      # GitHub CLI status check + skill publish to GitHub
 └── dist/                          # Vite build output
 ```
@@ -157,7 +164,7 @@ SkillStar/
 
 | Crate | Version | Purpose |
 |-------|---------|---------|
-| `tauri` | 2 | Desktop app framework |
+| `tauri` | 2 | Desktop app framework (features: tray-icon) |
 | `serde` / `serde_json` | 1 | Serialization |
 | `tokio` | 1 | Async runtime |
 | `reqwest` | 0.12 | HTTP client (marketplace + AI API) |
@@ -171,6 +178,7 @@ SkillStar/
 | `toml` | 1.1 | TOML config parsing |
 | `flate2` | 1.1 | Gzip compression/decompression |
 | `tar` | 0.4 | Tar archive packing/unpacking |
+| `html2md` | 0.2 | HTML to Markdown conversion (marketplace detail page scraping) |
 
 ## SkillStar Desktop Backend Addendum
 
@@ -186,15 +194,22 @@ SkillStar/
 - Marketplace skills use a hybrid description strategy: leaderboard/search returns quickly, then missing `Skill.description` values are hydrated in bounded background batches via `hydrate_marketplace_descriptions`. Descriptions are extracted from skills.sh skill pages (`Summary` block) and cached in `marketplace_description_cache.json` under the SkillStar data directory with TTL + size pruning.
 - GitHub repo import uses a two-phase flow: `scan_github_repo` clones/fetches into `~/.agents/.repos/` and scans for SKILL.md files, then `install_from_scan` creates symlinks from `~/.agents/skills/` into the cached repo. Update checking and `git pull` operate on the cached repo, automatically updating all skills from the same source.
 - Local skill publishing uses `gh_manager.rs` to initialize git, create a GitHub repository via `gh` CLI, push code, and update the lockfile with the new `git_url`. The Share Code system supports inline embedding of small SKILL.md content for skills without a git remote.
-- Skill bundles (`.agentskill` files) provide a third sharing tier: `skill_bundle.rs` packs a skill directory into a tar.gz archive with a `manifest.json` (metadata + SHA-256 checksum). Users export via a save dialog and import via the `ImportBundleModal`, which previews manifest info and handles name conflicts. This mechanism is for multi-file local skills that are too large for Share Code inline embedding but don't need GitHub publishing.
+- Skill bundles (`.agentskill` files) provide a third sharing tier: `skill_bundle.rs` packs a skill directory into a tar.gz archive with a `manifest.json` (metadata + SHA-256 checksum). Users export via a save dialog and import via the `ImportBundleModal`, which previews manifest info and handles name conflicts. Multi-skill bundles (`.agentskills` files via `export_multi_bundle`) pack multiple skills into a single archive with per-skill subdirectories and a top-level `multi_manifest.json`.
+- The `ExportShareCodeModal` uses smart routing: it analyzes each skill (git-backed → share code, small local → inline embed, large/multi-file local → bundle), then generates a share code for simple skills and offers a bundle file download for complex ones. This replaces the old single-mode design where complex skills were simply excluded with a warning.
+- Marketplace skill detail pages are fetched on-demand when a user clicks on an uninstalled skill in the DetailPanel. `fetch_marketplace_skill_details` scrapes `https://skills.sh/{source}/{name}`, extracts the Summary and SKILL.md prose blocks from the SSR HTML, converts them to Markdown via `html2md`, and also extracts sidebar metadata (weekly installs, GitHub stars, first seen date, security audit results). Results are cached in-memory on the frontend per session.
+- Local skills are physically stored in `~/.agents/skills-local/<name>/` and symlinked back into the hub (`~/.agents/skills/<name>`). This mirrors the `.repos/` cached-repo pattern. The `local_skill.rs` module owns all CRUD operations: `create` (mkdir + SKILL.md + hub symlink), `delete` (remove agent links, hub symlink, and local directory), `graduate` (delete local + hub symlink after GitHub publish), and `migrate_existing` (move non-git real directories from `skills/` into `skills-local/`).
+- `Skill.skill_type` discriminates `"hub"` (git-backed) from `"local"` (user-authored). The frontend uses this field for filtering (All/Hub/Local toolbar pills), hiding git-only UI (update, reinstall, git info), and showing an indigo "Local" badge on cards and the detail panel.
+- Auto-migration runs at startup via `migrate_local_skills` (fire-and-forget in `useSkills`): any real directory in `~/.agents/skills/` without `.git` metadata is moved to `skills-local/` and replaced with a symlink.
+- Graduation flow: when a local skill is published to GitHub via `publish_skill_to_github`, the command detects `was_local`, calls `local_skill::graduate` (removes local dir + hub symlink), then `repo_scanner::scan_repo` + `install_from_repo` to re-clone from GitHub into `.repos/` and symlink back as a hub skill.
+- Background Update Monitoring (Stealth Mode): `patrol.rs` runs a persistent `tokio::task` in the Rust backend to check skill updates one at a time (configurable interval, e.g., 30s) instead of bursting all skills at once. When active, closing the main window hides it to the system tray instead of quitting the application. The system tray provides a menu to show the window, stop the patrol, or quit entirely. The patrol state (interval, running status) is persisted in `~/.skillstar/patrol.json` and auto-resumes on app launch.
 
 ### Design Philosophy — Page Responsibilities
 
 | Page | Scope | Responsibility |
 |------|-------|----------------|
-| **My Skills** | 全局 | 管理 Hub 中所有已安装 skill，per-agent 链接（全局 symlink） |
-| **Projects** | 项目级 | 管理项目注册、项目内 agent 配置、项目级 skill 部署和同步 |
-| **Decks** | 技能包 | 打包/导入/导出 skill 组合，一键 Deploy 到 Projects |
+| **My Skills** | Global | Manage all installed skills in the Hub, handle per-agent linking (global symlinks) |
+| **Projects** | Project | Manage project registration, in-project agent configs, and project-level skill deployment/sync |
+| **Decks** | Skill Bundles | Package/import/export skill combinations, one-click Deploy to Projects |
 
 - Cross-page navigation: Decks → Deploy → Projects (with pre-selected skills); Projects → click skill → My Skills (auto-open DetailPanel).
 
@@ -290,15 +305,16 @@ https://github.com/<OWNER>/<REPO>/releases/latest/download/latest.json
 ## Maintenance Rules
 
 - **Backend Document-First**: Update `AGENTS.md` with new architectures, flows, or structural changes before writing backend code.
-- **Frontend Document-First**: Update `AGENTS_UI.md` with new components, pages, or structural changes before writing frontend code.
+- **Frontend Document-First**: Update `AGENTS-UI.md` with new components, pages, or structural changes before writing frontend code.
 - **Directory Sync**: The `Project Structure` tree must strictly reflect the actual project. Update it when adding or moving modules.
 - **Dependency Sync**: New Rust crates must be added via `cargo add` and documented in the `Backend Dependencies` table.
+- **Bug Log**: When encountering and resolving a significant bug (e.g. hard-to-diagnose issues, architectural pitfalls, platform-specific gotchas), append an entry to `docs/Error.md` with the symptom, root cause, solution, and affected files. This prevents the same issue from being re-investigated in the future.
 
-### Commit 规范
-遵循 Conventional Commits：`type(scope): description`
-- **type**：`feat` / `fix` / `docs` / `style` / `refactor` / `perf` / `test` / `chore`
-- **scope**：`layout` / `chat` / `vnc` / `event-store` / `debug-panel` / `skills` / `projects` / `agents` 等
-- 允许使用中文 commit message。
+### Commit Guidelines
+Follow Conventional Commits: `type(scope): description`
+- **type**: `feat` / `fix` / `docs` / `style` / `refactor` / `perf` / `test` / `chore`
+- **scope**: `layout` / `chat` / `vnc` / `event-store` / `debug-panel` / `skills` / `projects` / `agents` etc.
+- Chinese is NOT allowed, use English only.
 
 ## Do NOT
 

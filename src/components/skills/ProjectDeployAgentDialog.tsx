@@ -4,6 +4,7 @@ import { Check, FolderKanban, Layers3, Rocket, X, Sparkles, ChevronRight } from 
 import { useTranslation } from "react-i18next";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { SelectAllButton } from "../ui/SelectAllButton";
 import { cn } from "../../lib/utils";
 import type { AgentProfile, ProjectEntry } from "../../types";
 
@@ -201,15 +202,14 @@ export function ProjectDeployAgentDialog({
                         <Badge variant="outline" className="h-5 px-2 text-[10px] font-semibold bg-primary/5 text-primary border-primary/20 rounded-full">
                           {t("projectDeployDialog.selectedCount", { count: selectedAgentIds.length })}
                         </Badge>
-                        <Button
+                        <SelectAllButton
+                          allSelected={allSelected}
+                          onToggle={handleToggleSelectAll}
                           variant="ghost"
                           size="sm"
                           className="h-5 px-2 text-[10px] font-semibold text-muted-foreground hover:text-foreground"
-                          onClick={handleToggleSelectAll}
                           disabled={enabledProfiles.length === 0}
-                        >
-                          {allSelected ? t("common.deselectAll") : t("common.selectAll")}
-                        </Button>
+                        />
                       </div>
                     </div>
 

@@ -78,6 +78,7 @@ SkillStar/
         │   ├── card.tsx
         │   ├── input.tsx
         │   ├── EmptyState.tsx
+        │   ├── ResizablePanel.tsx # Right-anchored panel with drag-to-resize left edge
         │   ├── Skeleton.tsx
         │   └── sonner.tsx
         ├── layout/
@@ -88,6 +89,7 @@ SkillStar/
         │   ├── SkillCard.tsx  # Individual skill card with agent toggles
         │   ├── SkillGrid.tsx  # Grid/list layout for skill cards
         │   ├── SkillEditor.tsx # SKILL.md content editor
+        │   ├── SkillReader.tsx # SKILL.md read-only markdown viewer (for marketplace skills)
         │   ├── SkillSelectionBar.tsx # Batch selection toolbar
         │   ├── CreateGroupModal.tsx  # Create/edit deck
         │   ├── DeployToProjectModal.tsx # Quick deploy modal (used in MySkills)
@@ -245,7 +247,7 @@ Large components (cards, modals) use `rounded-[24px]` or `rounded-3xl`.
 
 ## Maintenance Rules
 
-- **Frontend Document-First**: Update `AGENTS_UI.md` with new components, pages, or structural changes before writing frontend code.
+- **Frontend Document-First**: Update `AGENTS-UI.md` with new components, pages, or structural changes before writing frontend code.
 - **Backend Document-First**: Update `AGENTS.md` with new architectures, flows, or structural changes before writing backend code.
 - **Directory Sync**: Keep the `Project Structure` tree in sync with actual project state.
 

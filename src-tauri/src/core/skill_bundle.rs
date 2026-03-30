@@ -39,12 +39,11 @@ pub struct ImportBundleResult {
 
 // ── Export ───────────────────────────────────────────────────────────
 
-/// Export a skill as a `.agentskill` bundle.
+/// Export a skill as a `.ags` bundle.
 ///
-/// The output file is written next to the skill's hub directory unless
-/// `output_dir` is specified (e.g. from a save-file dialog).
-/// Returns the absolute path of the generated file.
-pub fn export_bundle(skill_name: &str, output_dir: Option<&str>) -> Result<PathBuf> {
+/// The output file is written to the specified path, or defaults to the
+/// downloads directory. Returns the absolute path of the generated file.
+pub fn export_bundle(skill_name: &str, output_path: Option<&str>) -> Result<PathBuf> {
     let hub = sync::get_hub_skills_dir();
     let skill_dir = hub.join(skill_name);
 
@@ -90,14 +89,18 @@ pub fn export_bundle(skill_name: &str, output_dir: Option<&str>) -> Result<PathB
     };
 
     // Determine output path
-    let out_dir = match output_dir {
-        Some(d) => PathBuf::from(d),
-        None => dirs::download_dir()
-            .or_else(dirs::home_dir)
-            .unwrap_or_else(|| PathBuf::from(".")),
+    let out_path = match output_path {
+        Some(p) => PathBuf::from(p),
+        None => {
+            let out_dir = dirs::download_dir()
+                .or_else(dirs::home_dir)
+                .unwrap_or_else(|| PathBuf::from("."));
+            out_dir.join(format!("{}.ags", skill_name))
+        }
     };
-    std::fs::create_dir_all(&out_dir)?;
-    let out_path = out_dir.join(format!("{}.agentskill", skill_name));
+    if let Some(parent) = out_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
 
     // Build tar.gz
     let file = std::fs::File::create(&out_path)
@@ -134,7 +137,7 @@ pub fn export_bundle(skill_name: &str, output_dir: Option<&str>) -> Result<PathB
 
 // ── Preview ─────────────────────────────────────────────────────────
 
-/// Read only the manifest from a `.agentskill` file without extracting.
+/// Read only the manifest from a `.ags` or `.agentskill` file without extracting.
 pub fn preview_bundle(file_path: &str) -> Result<BundleManifest> {
     let file = std::fs::File::open(file_path)
         .with_context(|| format!("Cannot open bundle: {}", file_path))?;
@@ -158,7 +161,7 @@ pub fn preview_bundle(file_path: &str) -> Result<BundleManifest> {
 
 // ── Import ──────────────────────────────────────────────────────────
 
-/// Import a `.agentskill` file into the hub.
+/// Import a `.ags` or `.agentskill` file into the hub.
 ///
 /// If `force` is true, replaces an existing skill with the same name.
 pub fn import_bundle(file_path: &str, force: bool) -> Result<ImportBundleResult> {
@@ -244,6 +247,120 @@ pub fn import_bundle(file_path: &str, force: bool) -> Result<ImportBundleResult>
         file_count: manifest.files.len(),
         replaced,
     })
+}
+
+// ── Multi-skill export ──────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiManifestEntry {
+    pub name: String,
+    pub description: String,
+    pub file_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiManifest {
+    pub format_version: u32,
+    pub created_at: String,
+    pub skills: Vec<MultiManifestEntry>,
+    pub checksum: String,
+}
+
+/// Export multiple skills into a single `.agd` bundle archive.
+///
+/// Each skill is stored under `<skill_name>/` prefix inside the tar.gz.
+/// A top-level `multi_manifest.json` describes all contained skills.
+pub fn export_multi_bundle(
+    skill_names: &[String],
+    output_path: &str,
+) -> Result<PathBuf> {
+    use std::io::Read;
+
+    let hub = sync::get_hub_skills_dir();
+    let out = PathBuf::from(output_path);
+
+    if let Some(parent) = out.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let file = std::fs::File::create(&out)
+        .with_context(|| format!("Cannot create output file: {}", out.display()))?;
+    let encoder = GzEncoder::new(file, Compression::default());
+    let mut tar = Builder::new(encoder);
+
+    let mut manifest_entries: Vec<MultiManifestEntry> = Vec::new();
+    let mut global_hasher = Sha256::new();
+
+    for skill_name in skill_names {
+        let skill_dir = hub.join(skill_name);
+        if !skill_dir.exists() {
+            continue;
+        }
+
+        let effective_dir = if skill_dir.is_symlink() {
+            std::fs::read_link(&skill_dir)
+                .map(|target| {
+                    if target.is_absolute() {
+                        target
+                    } else {
+                        skill_dir.parent().unwrap_or(Path::new(".")).join(target)
+                    }
+                })
+                .unwrap_or_else(|_| skill_dir.clone())
+        } else {
+            skill_dir.clone()
+        };
+
+        let mut files: Vec<String> = Vec::new();
+        collect_files(&effective_dir, &effective_dir, &mut files);
+        files.sort();
+
+        let description = super::skill::extract_skill_description(&effective_dir);
+        manifest_entries.push(MultiManifestEntry {
+            name: skill_name.clone(),
+            description,
+            file_count: files.len(),
+        });
+
+        for rel_path in &files {
+            let abs = effective_dir.join(rel_path);
+            let metadata = std::fs::metadata(&abs)?;
+            let mut f = std::fs::File::open(&abs)?;
+
+            // Read content for checksum
+            let mut content = Vec::new();
+            f.read_to_end(&mut content)?;
+            global_hasher.update(&content);
+
+            let archive_path = format!("{}/{}", skill_name, rel_path);
+            let mut header = tar::Header::new_gnu();
+            header.set_size(metadata.len());
+            header.set_mode(0o644);
+            header.set_cksum();
+            tar.append_data(&mut header, &archive_path, content.as_slice())?;
+        }
+    }
+
+    let hash = global_hasher.finalize();
+    let checksum: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
+
+    let manifest = MultiManifest {
+        format_version: FORMAT_VERSION,
+        created_at: chrono::Utc::now().to_rfc3339(),
+        skills: manifest_entries,
+        checksum: format!("sha256:{}", checksum),
+    };
+
+    let manifest_bytes = serde_json::to_string_pretty(&manifest)?;
+    let manifest_bytes = manifest_bytes.as_bytes();
+    let mut header = tar::Header::new_gnu();
+    header.set_size(manifest_bytes.len() as u64);
+    header.set_mode(0o644);
+    header.set_cksum();
+    tar.append_data(&mut header, "multi_manifest.json", manifest_bytes)?;
+
+    tar.into_inner()?.finish()?;
+    Ok(out)
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────

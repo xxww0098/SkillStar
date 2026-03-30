@@ -108,6 +108,7 @@ export function Settings() {
   const [storageOverview, setStorageOverview] = useState<StorageOverview | null>(null);
   const [fetchingStorage, setFetchingStorage] = useState(false);
   const [cleaningCaches, setCleaningCaches] = useState(false);
+  const [cleaningBroken, setCleaningBroken] = useState(false);
   const [forceDeletingTarget, setForceDeletingTarget] = useState<ForceDeleteTarget | null>(null);
 
   const [confirmDisableId, setConfirmDisableId] = useState<string | null>(null);
@@ -387,6 +388,27 @@ export function Settings() {
     }
   }, [fetchStorageOverview, t]);
 
+  const handleCleanBroken = useCallback(async () => {
+    setCleaningBroken(true);
+    try {
+      const [fixed] = await Promise.all([
+        invoke<number>("clean_broken_skills"),
+        new Promise((resolve) => setTimeout(resolve, 400)),
+      ]);
+      if (fixed > 0) {
+        toast.success(t("settings.repairDone", { count: fixed }));
+      } else {
+        toast.info(t("settings.repairNone"));
+      }
+      await fetchStorageOverview();
+    } catch (e) {
+      console.error("Clean broken skills failed:", e);
+      toast.error(t("settings.forceDeleteFailed"));
+    } finally {
+      setCleaningBroken(false);
+    }
+  }, [fetchStorageOverview, t]);
+
   const formatBytes = useCallback((bytes: number) => {
     if (bytes === 0) return "0 B";
     const k = 1024;
@@ -464,11 +486,13 @@ export function Settings() {
             overview={storageOverview}
             loading={fetchingStorage}
             cleaning={cleaningCaches}
+            cleaningBroken={cleaningBroken}
             forceDeletingTarget={forceDeletingTarget}
             formatBytes={formatBytes}
             onCleanAll={handleCleanAllCaches}
             onForceDeleteHub={() => handleForceDelete("hub")}
             onForceDeleteCache={() => handleForceDelete("cache")}
+            onCleanBroken={handleCleanBroken}
           />
 
           <AboutSection ghInstalled={ghInstalled} />

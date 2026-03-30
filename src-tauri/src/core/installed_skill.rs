@@ -1,6 +1,7 @@
 use super::{
     agent_profile::{self, AgentProfile},
     git_ops,
+    local_skill,
     lockfile::{self, LockEntry},
     repo_scanner,
     skill::{extract_github_source_from_url, extract_skill_description, Skill, SkillCategory},
@@ -20,6 +21,9 @@ pub struct SkillUpdateState {
 }
 
 pub async fn list_installed_skills() -> Result<Vec<Skill>> {
+    // Ensure every skill in skills-local/ has a hub symlink before scanning
+    local_skill::reconcile_hub_symlinks();
+
     let lock_map = Arc::new(load_lock_map());
     let profiles: Arc<[AgentProfile]> = Arc::from(agent_profile::list_profiles());
     let skill_dirs = collect_skill_dirs(&sync::get_hub_skills_dir(), None)?;
@@ -74,6 +78,12 @@ pub async fn refresh_skill_updates(names: Option<Vec<String>>) -> Result<Vec<Ski
         let Some(name) = skill_name_from_path(&path) else {
             continue;
         };
+
+        // Skip local skills — they have no git remote to check
+        if local_skill::is_local_skill(&name) {
+            continue;
+        }
+
         let permit = semaphore
             .clone()
             .acquire_owned()
@@ -187,18 +197,22 @@ fn build_installed_skill(
         .or_else(|| lock_entry.as_ref().map(|entry| entry.tree_hash.clone()));
     let agent_links = detect_agent_links(&name, profiles);
 
-    // Derive source from lock entry for repo-cached skills
-    let source = lock_entry.as_ref().and_then(|entry| {
-        if entry.source_folder.is_some() {
-            extract_github_source_from_url(&entry.git_url)
-        } else {
-            None
-        }
-    });
+    // Derive source from git_url whenever possible (also works for root-level skills).
+    let source = lock_entry
+        .as_ref()
+        .and_then(|entry| extract_github_source_from_url(&entry.git_url));
+
+    // Determine skill type: "local" if symlink points into skills-local/
+    let skill_type = if local_skill::is_local_skill(&name) {
+        "local".to_string()
+    } else {
+        "hub".to_string()
+    };
 
     Ok(Skill {
         name: name.clone(),
         description,
+        skill_type,
         stars: 0,
         installed: true,
         update_available: false,
@@ -232,7 +246,10 @@ fn refresh_single_skill_update(path: &Path) -> bool {
 fn detect_agent_links(skill_name: &str, profiles: &[AgentProfile]) -> Vec<String> {
     let mut links = Vec::with_capacity(2); // most skills link to 1-2 agents
     for profile in profiles {
-        if profile.global_skills_dir.join(skill_name).is_symlink() {
+        let link_path = profile.global_skills_dir.join(skill_name);
+        // Check both is_symlink() AND exists(): exists() follows the symlink,
+        // so a broken symlink (target deleted) returns false — don't report it as linked.
+        if link_path.is_symlink() && link_path.exists() {
             links.push(profile.display_name.clone());
         }
     }

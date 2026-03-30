@@ -29,7 +29,7 @@ import {
   hydrateDescriptionsForSkills,
   isMissingMarketplaceDescription,
 } from "../lib/marketplaceDescriptionHydration";
-import type { MarketplaceResult, OfficialPublisher, PublisherRepo, Skill } from "../types";
+import type { OfficialPublisher, PublisherRepo, Skill } from "../types";
 
 const DetailPanel = lazy(() =>
   import("../components/layout/DetailPanel").then((mod) => ({
@@ -102,7 +102,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
     };
   }, [publisher.name]);
 
-  // Fetch skills when a specific repo is selected
+  // Resolve skills when a specific repo is selected — uses embedded data from publisherRepos
   useEffect(() => {
     if (!activeRepo) {
       setSkills([]);
@@ -116,25 +116,51 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
       try {
         const namespace = publisher.name.toLowerCase();
         const source = `${namespace}/${activeRepo}`;
-        const normalizeSource = (s: Skill) =>
-          (s.source ?? s.author ?? "").toLowerCase();
-        const belongsToRepo = (s: Skill) => {
-          const src = normalizeSource(s);
-          return src === source;
-        };
+        const gitUrl = `https://github.com/${source}`;
 
-        const result = await invoke<MarketplaceResult>("search_skills_sh", {
-          query: source,
-        });
+        // Try embedded skill data from the already-fetched publisherRepos
+        const repo = publisherRepos.find((r) => r.repo === activeRepo);
+        let repoSkills = repo?.skills ?? [];
+
+        // Fallback: scrape the repo detail page if SSR payload had no skills
+        if (repoSkills.length === 0) {
+          try {
+            repoSkills = await invoke<{ name: string; installs: number }[]>(
+              "get_publisher_repo_skills",
+              { publisherName: publisher.name, repoName: activeRepo }
+            );
+          } catch {
+            repoSkills = [];
+          }
+        }
+
         if (cancelled) return;
 
-        const filtered = result.skills.filter(belongsToRepo);
-        filtered.sort((a, b) => b.stars - a.stars);
-        setSkills(filtered);
+        // Convert to Skill objects
+        const resolved: Skill[] = repoSkills.map((s) => ({
+          name: s.name,
+          description: "",
+          skill_type: "hub" as const,
+          stars: s.installs,
+          installed: false,
+          update_available: false,
+          last_updated: new Date().toISOString(),
+          git_url: gitUrl,
+          tree_hash: null,
+          category: "None" as const,
+          author: source,
+          topics: [],
+          agent_links: [],
+          source,
+        }));
 
+        resolved.sort((a, b) => b.stars - a.stars);
+        setSkills(resolved);
+
+        // Hydrate descriptions in background
         void (async () => {
           const patches = await hydrateDescriptionsForSkills(
-            filtered,
+            resolved,
             MARKETPLACE_DESCRIPTION_BATCH_SIZE
           );
           if (cancelled || patches.length === 0) return;
@@ -144,7 +170,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
           );
         })();
       } catch (e) {
-        console.error("Failed to fetch repo skills:", e);
+        console.error("Failed to resolve repo skills:", e);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -153,7 +179,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
     return () => {
       cancelled = true;
     };
-  }, [publisher.name, activeRepo]);
+  }, [publisher.name, activeRepo, publisherRepos]);
 
   // Mark session-installed skills
   const displaySkills = useMemo(() => {

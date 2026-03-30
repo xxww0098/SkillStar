@@ -3,6 +3,8 @@ export type SkillCategory = "Hot" | "Popular" | "Rising" | "New" | "None";
 export interface Skill {
   name: string;
   description: string;
+  /** "hub" for git-backed, "local" for user-authored local skills */
+  skill_type: "hub" | "local";
   stars: number;
   installed: boolean;
   update_available: boolean;
@@ -45,12 +47,31 @@ export interface MarketplaceDescriptionPatch {
   from_cache: boolean;
 }
 
+export interface SecurityAudit {
+  name: string;
+  result: string;
+}
+
+export interface MarketplaceSkillDetails {
+  summary: string | null;
+  readme: string | null;
+  weekly_installs: string | null;
+  github_stars: number | null;
+  first_seen: string | null;
+  security_audits: SecurityAudit[];
+}
+
 export interface OfficialPublisher {
   name: string;
   repo: string;
   repo_count: number;
   skill_count: number;
   url: string;
+}
+
+export interface PublisherRepoSkill {
+  name: string;
+  installs: number;
 }
 
 export interface PublisherRepo {
@@ -60,6 +81,7 @@ export interface PublisherRepo {
   installs_label: string;
   installs: number;
   url: string;
+  skills: PublisherRepoSkill[];
 }
 export interface AgentProfile {
   id: string;

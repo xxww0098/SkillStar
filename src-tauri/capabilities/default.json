@@ -8,6 +8,7 @@
     "shell:allow-execute",
     "shell:allow-open",
     "dialog:default",
-    "updater:default"
+    "updater:default",
+    "process:default"
   ]
 }

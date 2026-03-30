@@ -43,14 +43,7 @@ pub struct SkillsList {
 
 /// Root data directory for SkillStar.
 fn data_root() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| {
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(".local")
-                .join("share")
-        })
-        .join("skillstar")
+    super::paths::data_root()
 }
 
 /// Path to the project index file.
@@ -560,6 +553,10 @@ mod tests {
         let temp_root = make_temp_root("project-sync-remove")?;
         let previous_home = std::env::var_os("HOME");
         std::env::set_var("HOME", temp_root.join("home"));
+        #[cfg(windows)]
+        let previous_userprofile = std::env::var_os("USERPROFILE");
+        #[cfg(windows)]
+        std::env::set_var("USERPROFILE", temp_root.join("home"));
 
         let result = (|| -> Result<()> {
             let hub_skill = sync::get_hub_skills_dir().join("demo-skill");
@@ -627,6 +624,11 @@ mod tests {
             Some(value) => std::env::set_var("HOME", value),
             None => std::env::remove_var("HOME"),
         }
+        #[cfg(windows)]
+        match previous_userprofile {
+            Some(value) => std::env::set_var("USERPROFILE", value),
+            None => std::env::remove_var("USERPROFILE"),
+        }
         let _ = std::fs::remove_dir_all(&temp_root);
 
         result
@@ -641,6 +643,10 @@ mod tests {
         let temp_root = make_temp_root("project-import-register")?;
         let previous_home = std::env::var_os("HOME");
         std::env::set_var("HOME", temp_root.join("home"));
+        #[cfg(windows)]
+        let previous_userprofile = std::env::var_os("USERPROFILE");
+        #[cfg(windows)]
+        std::env::set_var("USERPROFILE", temp_root.join("home"));
 
         let result = (|| -> Result<()> {
             let project_path = temp_root.join("workspace").join("demo-import-project");
@@ -691,6 +697,11 @@ mod tests {
         match previous_home {
             Some(value) => std::env::set_var("HOME", value),
             None => std::env::remove_var("HOME"),
+        }
+        #[cfg(windows)]
+        match previous_userprofile {
+            Some(value) => std::env::set_var("USERPROFILE", value),
+            None => std::env::remove_var("USERPROFILE"),
         }
         let _ = std::fs::remove_dir_all(&temp_root);
 

@@ -109,10 +109,7 @@ pub fn normalize_repo_url(input: &str) -> Result<(String, String)> {
 
 /// Get the repo cache directory: `~/.agents/.repos/`
 fn get_repos_cache_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".agents")
-        .join(".repos")
+    super::paths::repos_cache_dir()
 }
 
 /// Derive a cache directory name from a source identifier.
@@ -124,12 +121,21 @@ fn cache_dir_name(source: &str) -> String {
 
 /// Clone or fetch a repository into the cache.
 ///
-/// Uses shallow clone (`--depth 1`) for initial clones and shallow fetch for
-/// updates to minimise network traffic and disk usage — we only need the latest
-/// tree to scan for SKILL.md files.
+/// Uses a **sparse treeless clone** to minimise network traffic and disk usage:
 ///
-/// If the repo is already cached, runs `git fetch --depth 1`. Otherwise
-/// shallow-clones.  Returns the path to the cached repo directory.
+/// 1. First clone with `--filter=blob:none --depth 1 --no-checkout` — this
+///    downloads only tree metadata (~200KB), not file blobs.
+/// 2. Use `git ls-tree` on the tree objects to discover all `SKILL.md` locations.
+/// 3. Configure sparse-checkout with only the directories containing SKILL.md.
+/// 4. `git checkout` materializes just those directories.
+///
+/// For repos like `pbakaus/impeccable` (~20MB full), this reduces the clone to
+/// ~500KB by skipping `public/`, duplicated agent dirs, tests, etc.
+///
+/// If the repo is already cached, runs `git fetch --depth 1` and updates the
+/// working tree (sparse-checkout rules are preserved).
+///
+/// Falls back to a full shallow clone if sparse operations fail (e.g. old git).
 pub fn clone_or_fetch_repo(repo_url: &str, source: &str) -> Result<PathBuf> {
     let cache_dir = get_repos_cache_dir();
     std::fs::create_dir_all(&cache_dir).context("Failed to create repo cache directory")?;
@@ -156,12 +162,201 @@ pub fn clone_or_fetch_repo(repo_url: &str, source: &str) -> Result<PathBuf> {
             .args(["reset", "--hard", "origin/HEAD"])
             .output();
 
+        // Re-discover SKILL.md dirs and update sparse-checkout (handles new skills added upstream)
+        if is_sparse_checkout(&repo_dir) {
+            if let Ok(dirs) = discover_skill_dirs_from_tree(&repo_dir) {
+                let dir_refs: Vec<&str> = dirs.iter().map(|s| s.as_str()).collect();
+                let _ = git_ops::apply_sparse_checkout(&repo_dir, &dir_refs);
+            }
+        }
+
         Ok(repo_dir)
     } else {
-        // Fresh shallow clone (depth=1)
-        git_ops::clone_repo_shallow(repo_url, &repo_dir)
-            .with_context(|| format!("Failed to shallow-clone {}", repo_url))?;
-        Ok(repo_dir)
+        // Try sparse treeless clone first, fall back to full shallow
+        match clone_sparse_with_skills(repo_url, &repo_dir) {
+            Ok(()) => Ok(repo_dir),
+            Err(sparse_err) => {
+                eprintln!(
+                    "[repo_scanner] sparse clone failed, falling back to shallow: {}",
+                    sparse_err
+                );
+                // Clean up partial sparse clone
+                let _ = std::fs::remove_dir_all(&repo_dir);
+                git_ops::clone_repo_shallow(repo_url, &repo_dir)
+                    .with_context(|| format!("Failed to shallow-clone {}", repo_url))?;
+                Ok(repo_dir)
+            }
+        }
+    }
+}
+
+/// Clone a repo sparsely and configure checkout for only SKILL.md directories.
+fn clone_sparse_with_skills(repo_url: &str, dest: &Path) -> Result<()> {
+    // Phase 1: treeless clone — only tree objects, no file blobs
+    git_ops::clone_repo_sparse(repo_url, dest)?;
+
+    // Phase 2: discover SKILL.md locations from tree objects
+    let skill_dirs = discover_skill_dirs_from_tree(dest)?;
+
+    if skill_dirs.is_empty() {
+        // No skills found — fall back to full checkout
+        let _ = command_with_path("git")
+            .current_dir(dest)
+            .arg("checkout")
+            .output();
+        return Ok(());
+    }
+
+    // Phase 3: sparse-checkout only the needed directories
+    let dir_refs: Vec<&str> = skill_dirs.iter().map(|s| s.as_str()).collect();
+    git_ops::apply_sparse_checkout(dest, &dir_refs)?;
+
+    Ok(())
+}
+
+/// Discover directories containing SKILL.md via `git ls-tree` (no checkout needed).
+///
+/// Returns deduplicated parent directory paths of all SKILL.md files found,
+/// preferring the canonical source path (`source/skills/`) over duplicated
+/// agent-specific copies.
+fn discover_skill_dirs_from_tree(repo_dir: &Path) -> Result<Vec<String>> {
+    let all_paths = git_ops::list_tree_paths(repo_dir)?;
+
+    // Collect parent dirs of all SKILL.md files
+    let skill_dirs: Vec<String> = all_paths
+        .iter()
+        .filter(|p| p.ends_with("/SKILL.md") || *p == "SKILL.md")
+        .filter_map(|p| {
+            // Get parent directory path
+            let parent = Path::new(p).parent()?;
+            let parent_str = parent.to_string_lossy().to_string();
+            if parent_str.is_empty() {
+                // Root-level SKILL.md — need the whole repo root
+                None
+            } else {
+                Some(parent_str)
+            }
+        })
+        .collect();
+
+    if skill_dirs.is_empty() {
+        // Might be a root-level SKILL.md repo
+        if all_paths.iter().any(|p| p == "SKILL.md") {
+            // Need the entire repo — return empty to trigger full checkout
+            return Ok(Vec::new());
+        }
+    }
+
+    // Deduplicate: for skills that appear in multiple agent dirs (e.g.
+    // `.claude/skills/foo`, `.agents/skills/foo`, `source/skills/foo`),
+    // keep only the canonical `source/skills/` or `.agents/skills/` version
+    // to avoid materializing duplicates.
+    let mut canonical_skills: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+
+    for dir in &skill_dirs {
+        // Extract skill name (last path component)
+        let skill_name = Path::new(dir)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        if skill_name.is_empty() {
+            continue;
+        }
+
+        let priority = source_priority(dir);
+        let should_replace = canonical_skills
+            .get(&skill_name)
+            .map(|existing| source_priority(existing) < priority)
+            .unwrap_or(true);
+
+        if should_replace {
+            canonical_skills.insert(skill_name, dir.clone());
+        }
+    }
+
+    // Collect unique dirs, also include any non-skill directories that might be
+    // needed (but for repo scanning, skill dirs are sufficient)
+    let mut result: Vec<String> = canonical_skills.into_values().collect();
+    result.sort();
+    result.dedup();
+
+    // Also find common parent prefixes to reduce sparse-checkout entries.
+    // e.g. if we have `source/skills/foo`, `source/skills/bar`, just use `source/skills`
+    let compacted = compact_to_common_parents(&result);
+
+    Ok(compacted)
+}
+
+/// Compact a list of directories to their common parent prefixes.
+///
+/// e.g. `["source/skills/foo", "source/skills/bar"]` → `["source/skills"]`
+fn compact_to_common_parents(dirs: &[String]) -> Vec<String> {
+    if dirs.is_empty() {
+        return Vec::new();
+    }
+
+    // Group by grandparent (2 levels up from the skill dir)
+    let mut parent_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    let mut parent_to_dirs: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+
+    for dir in dirs {
+        if let Some(parent) = Path::new(dir).parent() {
+            let parent_str = parent.to_string_lossy().to_string();
+            *parent_counts.entry(parent_str.clone()).or_insert(0) += 1;
+            parent_to_dirs
+                .entry(parent_str)
+                .or_default()
+                .push(dir.clone());
+        }
+    }
+
+    let mut result = Vec::new();
+    let mut handled = std::collections::HashSet::new();
+
+    for dir in dirs {
+        if handled.contains(dir) {
+            continue;
+        }
+        if let Some(parent) = Path::new(dir).parent() {
+            let parent_str = parent.to_string_lossy().to_string();
+            if parent_counts.get(&parent_str).copied().unwrap_or(0) >= 2 {
+                // Multiple skills share this parent — use the parent
+                if !handled.contains(&parent_str) {
+                    result.push(parent_str.clone());
+                    // Mark all children as handled
+                    if let Some(children) = parent_to_dirs.get(&parent_str) {
+                        for child in children {
+                            handled.insert(child.clone());
+                        }
+                    }
+                    handled.insert(parent_str);
+                }
+            } else {
+                result.push(dir.clone());
+                handled.insert(dir.clone());
+            }
+        } else {
+            result.push(dir.clone());
+            handled.insert(dir.clone());
+        }
+    }
+
+    result.sort();
+    result
+}
+
+/// Check if a repo directory is using sparse-checkout.
+fn is_sparse_checkout(repo_dir: &Path) -> bool {
+    let output = command_with_path("git")
+        .current_dir(repo_dir)
+        .args(["config", "--get", "core.sparseCheckout"])
+        .output();
+    match output {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).trim() == "true",
+        Err(_) => false,
     }
 }
 
@@ -372,8 +567,20 @@ pub fn install_from_repo(
                 let _ = std::fs::remove_file(&dest);
                 #[cfg(windows)]
                 {
-                    let _ = std::fs::remove_dir(&dest);
-                    let _ = std::fs::remove_file(&dest);
+                    // Directory symlinks (created via symlink_dir) must use
+                    // remove_dir; file symlinks must use remove_file.
+                    if meta.is_dir() {
+                        std::fs::remove_dir(&dest)
+                    } else {
+                        std::fs::remove_file(&dest)
+                    }
+                    .unwrap_or_else(|e| {
+                        eprintln!(
+                            "[repo_scanner] failed to remove symlink {}: {}",
+                            dest.display(),
+                            e
+                        );
+                    });
                 }
             } else {
                 let _ = std::fs::remove_dir_all(&dest);
@@ -781,5 +988,44 @@ mod tests {
     fn cache_dir_name_conversion() {
         assert_eq!(cache_dir_name("vercel-labs/skills"), "vercel-labs--skills");
         assert_eq!(cache_dir_name("anthropics/courses"), "anthropics--courses");
+    }
+
+    #[test]
+    fn compact_parents_groups_siblings() {
+        let dirs = vec![
+            "source/skills/adapt".to_string(),
+            "source/skills/animate".to_string(),
+            "source/skills/bolder".to_string(),
+        ];
+        let compacted = compact_to_common_parents(&dirs);
+        assert_eq!(compacted, vec!["source/skills"]);
+    }
+
+    #[test]
+    fn compact_parents_preserves_singles() {
+        let dirs = vec!["custom/my-skill".to_string()];
+        let compacted = compact_to_common_parents(&dirs);
+        assert_eq!(compacted, vec!["custom/my-skill"]);
+    }
+
+    #[test]
+    fn compact_parents_mixed() {
+        let dirs = vec![
+            "custom/lone-skill".to_string(),
+            "source/skills/adapt".to_string(),
+            "source/skills/animate".to_string(),
+        ];
+        let compacted = compact_to_common_parents(&dirs);
+        assert_eq!(
+            compacted,
+            vec!["custom/lone-skill", "source/skills"]
+        );
+    }
+
+    #[test]
+    fn compact_parents_empty() {
+        let dirs: Vec<String> = Vec::new();
+        let compacted = compact_to_common_parents(&dirs);
+        assert!(compacted.is_empty());
     }
 }

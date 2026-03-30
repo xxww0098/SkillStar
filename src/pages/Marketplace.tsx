@@ -88,7 +88,7 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
     } else {
       fetchLeaderboard(activeTab === "all" ? "all" : activeTab);
     }
-  }, [activeTab]);
+  }, [activeTab, fetchOfficialPublishers, fetchLeaderboard]);
 
   // Search (debounced)
   useEffect(() => {
@@ -173,7 +173,7 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
       await updateSkill(name);
     } catch (e) {
       console.error("Update failed:", e);
-      toast.error("Update failed");
+      toast.error(t("marketplace.updateFailed"));
     }
   }, [updateSkill]);
 
@@ -192,7 +192,7 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
       }
     } catch (e) {
       console.error("[Marketplace] Uninstall failed:", e);
-      toast.error("Uninstall failed");
+      toast.error(t("marketplace.uninstallFailed"));
     }
   }, [uninstallSkill, selectedSkill]);
 
@@ -204,7 +204,7 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
       await handleInstall(url, name);
     } catch (e) {
       console.error("[Marketplace] Reinstall failed:", e);
-      toast.error("Reinstall failed");
+      toast.error(t("marketplace.reinstallFailed"));
     }
   }, [uninstallSkill, handleInstall]);
 

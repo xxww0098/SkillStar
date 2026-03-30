@@ -31,15 +31,12 @@ struct ProfilePrefs {
 }
 
 fn home_dir() -> PathBuf {
-    dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"))
+    super::paths::home_dir()
 }
 
 /// Path to the TOML configuration file storing user preferences.
 fn prefs_path() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| home_dir().join(".local").join("share"))
-        .join("skillstar")
-        .join("profiles.toml")
+    super::paths::data_root().join("profiles.toml")
 }
 
 /// Load persisted user preferences from disk.

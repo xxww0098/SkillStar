@@ -1,7 +1,8 @@
 import { useState, useCallback } from "react";
-import { Search, RefreshCw, Loader2, Sparkles, Download } from "lucide-react";
+import { motion } from "framer-motion";
+import { RefreshCw, Loader2, Sparkles, Download } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Input } from "../ui/input";
+import { SearchInput } from "../ui/SearchInput";
 import { cn } from "../../lib/utils";
 import type { AgentProfile, SortOption, ViewMode } from "../../types";
 
@@ -40,6 +41,12 @@ interface ToolbarProps {
   onAiPick?: () => void;
   /** Optional title node to render at the start of the toolbar */
   titleNode?: React.ReactNode;
+  /** Source type filter: "all" | "hub" | "local" */
+  sourceFilter?: "all" | "hub" | "local";
+  /** Callback when source filter changes */
+  onSourceFilterChange?: (filter: "all" | "hub" | "local") => void;
+  /** Number of local skills */
+  localCount?: number;
 }
 
 export function Toolbar({
@@ -62,6 +69,9 @@ export function Toolbar({
   hideStarsSort,
   onAiPick,
   titleNode,
+  sourceFilter,
+  onSourceFilterChange,
+  localCount,
 }: ToolbarProps) {
   const { t } = useTranslation();
   const enabledProfiles = agentProfiles?.filter((p) => p.enabled) ?? [];
@@ -93,15 +103,14 @@ export function Toolbar({
         </div>
       )}
       
-      <div className="relative w-56 shrink-0">
-        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-        <Input
-          value={searchQuery}
-          onChange={(e) => onSearchChange(e.target.value)}
-          placeholder={t("toolbar.searchPlaceholder")}
-          className="pl-8 h-8 text-xs bg-sidebar/50 focus-visible:bg-background"
-        />
-      </div>
+      <SearchInput
+        containerClassName="w-56 shrink-0"
+        value={searchQuery}
+        onChange={(e) => onSearchChange(e.target.value)}
+        placeholder={t("toolbar.searchPlaceholder")}
+        className="pl-8 h-8 text-xs bg-sidebar/50 focus-visible:bg-background"
+        iconClassName="left-2.5"
+      />
 
       {/* AI Pick Skills */}
       {onAiPick && (
@@ -120,42 +129,87 @@ export function Toolbar({
           <button
             onClick={() => onAgentFilterChange(null)}
             className={cn(
-              "h-full px-2.5 flex items-center justify-center rounded-md text-[11px] font-medium transition-all duration-200 cursor-pointer whitespace-nowrap",
+              "relative h-full px-2.5 flex items-center justify-center rounded-md text-[11px] font-medium transition-colors duration-200 cursor-pointer whitespace-nowrap z-10",
               agentFilter === null
-                ? "bg-accent text-accent-foreground shadow-[0_0_8px_rgba(59,130,246,0.1)]"
+                ? "text-accent-foreground"
                 : "text-muted-foreground hover:text-foreground hover:bg-sidebar-hover"
             )}
           >
+            {agentFilter === null && (
+              <motion.div
+                layoutId="agent-filter-capsule"
+                className="absolute inset-0 bg-accent shadow-[0_0_8px_rgba(59,130,246,0.1)] rounded-md -z-10"
+                transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+              />
+            )}
             {t("toolbar.all")}
           </button>
-          {enabledProfiles.map((profile) => (
-            <button
-              key={profile.id}
-              onClick={() =>
-                onAgentFilterChange(
-                  agentFilter === profile.id ? null : profile.id
-                )
-              }
-              title={profile.display_name}
-              className={cn(
-                "h-full w-7 flex items-center justify-center rounded-md transition-all duration-200 cursor-pointer",
-                agentFilter === profile.id
-                  ? "bg-accent shadow-[0_0_8px_rgba(59,130,246,0.1)]"
-                  : "hover:bg-sidebar-hover"
-              )}
-            >
-              <img
-                src={`/${profile.icon}`}
-                alt={profile.display_name}
+          {enabledProfiles.map((profile) => {
+            const isActive = agentFilter === profile.id;
+            return (
+              <button
+                key={profile.id}
+                onClick={() =>
+                  onAgentFilterChange(
+                    agentFilter === profile.id ? null : profile.id
+                  )
+                }
+                title={profile.display_name}
                 className={cn(
-                  "w-3.5 h-3.5 transition-all duration-200",
-                  agentFilter === profile.id
-                    ? "drop-shadow-sm scale-[1.1]"
-                    : "opacity-60 hover:opacity-90 grayscale-0"
+                  "relative h-full w-7 flex items-center justify-center rounded-md transition-colors duration-200 cursor-pointer z-10",
+                  !isActive && "hover:bg-sidebar-hover"
                 )}
-              />
-            </button>
-          ))}
+              >
+                {isActive && (
+                  <motion.div
+                    layoutId="agent-filter-capsule"
+                    className="absolute inset-0 bg-accent shadow-[0_0_8px_rgba(59,130,246,0.1)] rounded-md -z-10"
+                    transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+                  />
+                )}
+                <img
+                  src={`/${profile.icon}`}
+                  alt={profile.display_name}
+                  className={cn(
+                    "w-3.5 h-3.5 transition-all duration-200",
+                    isActive
+                      ? "drop-shadow-sm scale-[1.1]"
+                      : "opacity-60 hover:opacity-90 grayscale-0"
+                  )}
+                />
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Source type filter (Hub / Local) */}
+      {onSourceFilterChange && (localCount ?? 0) > 0 && (
+        <div className="flex items-center gap-0.5 border border-border rounded-lg overflow-hidden backdrop-blur-sm h-8 p-0.5 bg-sidebar/30 shrink-0">
+          {(["all", "hub", "local"] as const).map((f) => {
+            const isActive = sourceFilter === f;
+            return (
+              <button
+                key={f}
+                onClick={() => onSourceFilterChange(f)}
+                className={cn(
+                  "relative h-full px-2.5 flex items-center justify-center rounded-md text-[11px] font-medium transition-colors duration-200 cursor-pointer whitespace-nowrap z-10",
+                  isActive
+                    ? "text-accent-foreground"
+                    : "text-muted-foreground hover:text-foreground hover:bg-sidebar-hover"
+                )}
+              >
+                {isActive && (
+                  <motion.div
+                    layoutId="source-filter-capsule"
+                    className="absolute inset-0 bg-accent shadow-[0_0_8px_rgba(59,130,246,0.1)] rounded-md -z-10"
+                    transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+                  />
+                )}
+                {f === "all" ? t("toolbar.all") : f === "hub" ? "Hub" : "Local"}
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -231,20 +285,30 @@ export function Toolbar({
 
       {/* Sort pills */}
       <div className="flex items-center gap-0.5 border border-border rounded-lg overflow-hidden backdrop-blur-sm h-8 p-0.5 bg-sidebar/30 shadow-sm ml-auto shrink-0">
-        {sortOptions.map((opt) => (
-          <button
-            key={opt.value}
-            onClick={() => onSortChange(opt.value)}
-            className={cn(
-              "h-full px-3 flex items-center justify-center rounded-md text-[11px] font-medium transition-all duration-200 cursor-pointer whitespace-nowrap",
-              sortBy === opt.value
-                ? "bg-accent text-accent-foreground shadow-[0_0_8px_rgba(59,130,246,0.1)]"
-                : "text-muted-foreground hover:text-foreground hover:bg-sidebar-hover"
-            )}
-          >
-            {opt.label}
-          </button>
-        ))}
+        {sortOptions.map((opt) => {
+          const isActive = sortBy === opt.value;
+          return (
+            <button
+              key={opt.value}
+              onClick={() => onSortChange(opt.value)}
+              className={cn(
+                "relative h-full px-3 flex items-center justify-center rounded-md text-[11px] font-medium transition-colors duration-200 cursor-pointer whitespace-nowrap z-10",
+                isActive
+                  ? "text-accent-foreground"
+                  : "text-muted-foreground hover:text-foreground hover:bg-sidebar-hover"
+              )}
+            >
+              {isActive && (
+                <motion.div
+                  layoutId="sort-filter-capsule"
+                  className="absolute inset-0 bg-accent shadow-[0_0_8px_rgba(59,130,246,0.1)] rounded-md -z-10"
+                  transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+                />
+              )}
+              {opt.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* View toggle */}
@@ -252,23 +316,37 @@ export function Toolbar({
         <button
           onClick={() => onViewModeChange("grid")}
           className={cn(
-            "h-full w-8 flex items-center justify-center rounded-md transition-all duration-200 cursor-pointer",
+            "relative h-full w-8 flex items-center justify-center rounded-md transition-colors duration-200 cursor-pointer z-10",
             viewMode === "grid"
-              ? "bg-accent text-accent-foreground shadow-[0_0_8px_rgba(59,130,246,0.1)]"
+              ? "text-accent-foreground"
               : "text-muted-foreground hover:text-foreground hover:bg-sidebar-hover"
           )}
         >
+          {viewMode === "grid" && (
+            <motion.div
+              layoutId="view-filter-capsule"
+              className="absolute inset-0 bg-accent shadow-[0_0_8px_rgba(59,130,246,0.1)] rounded-md -z-10"
+              transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+            />
+          )}
           <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="1" width="5" height="5" rx="1"/><rect x="8" y="1" width="5" height="5" rx="1"/><rect x="1" y="8" width="5" height="5" rx="1"/><rect x="8" y="8" width="5" height="5" rx="1"/></svg>
         </button>
         <button
           onClick={() => onViewModeChange("list")}
           className={cn(
-            "h-full w-8 flex items-center justify-center rounded-md transition-all duration-200 cursor-pointer",
+            "relative h-full w-8 flex items-center justify-center rounded-md transition-colors duration-200 cursor-pointer z-10",
             viewMode === "list"
-              ? "bg-accent text-accent-foreground shadow-[0_0_8px_rgba(59,130,246,0.1)]"
+              ? "text-accent-foreground"
               : "text-muted-foreground hover:text-foreground hover:bg-sidebar-hover"
           )}
         >
+          {viewMode === "list" && (
+            <motion.div
+              layoutId="view-filter-capsule"
+              className="absolute inset-0 bg-accent shadow-[0_0_8px_rgba(59,130,246,0.1)] rounded-md -z-10"
+              transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+            />
+          )}
           <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="2" width="12" height="2" rx="0.5"/><rect x="1" y="6" width="12" height="2" rx="0.5"/><rect x="1" y="10" width="12" height="2" rx="0.5"/></svg>
         </button>
       </div>

@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { Skill, SkillContent, SkillUpdateState } from "../types";
 import {
   getSkillUpdateRefreshIntervalMs,
@@ -26,6 +27,7 @@ function skillSignature(skill: Skill): string {
   return [
     skill.name,
     skill.description,
+    skill.skill_type ?? "hub",
     String(skill.stars),
     String(skill.installed),
     String(skill.update_available),
@@ -167,6 +169,9 @@ function useSkillsState() {
   }, [refreshUpdateAvailability]);
 
   useEffect(() => {
+    // Auto-migrate local skills on first mount (fire-and-forget)
+    invoke<number>("migrate_local_skills").catch(() => {});
+
     refresh();
     // Background polling for local list snapshot refresh.
     const interval = setInterval(() => refresh(true), SKILL_LIST_REFRESH_INTERVAL_MS);
@@ -199,6 +204,34 @@ function useSkillsState() {
       );
     };
   }, [refreshUpdateAvailability]);
+
+  // ── Patrol backend event listener ────────────────────────────────
+  // The Rust backend emits "patrol://skill-checked" after each single-skill
+  // update check. We merge the result into the local skills state so the UI
+  // reflects updates found during stealth/patrol mode.
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+
+    listen<{ name: string; update_available: boolean }>(
+      "patrol://skill-checked",
+      (event) => {
+        const { name, update_available } = event.payload;
+        setSkills((prev) => {
+          const skill = prev.find((s) => s.name === name);
+          if (!skill || skill.update_available === update_available) return prev;
+          return prev.map((s) =>
+            s.name === name ? { ...s, update_available } : s
+          );
+        });
+      }
+    ).then((fn_) => {
+      unlisten = fn_;
+    });
+
+    return () => {
+      unlisten?.();
+    };
+  }, []);
 
   const installSkill = useCallback(async (url: string, name?: string) => {
     try {
@@ -281,6 +314,25 @@ function useSkillsState() {
     }
   }, []);
 
+  const createLocalSkill = useCallback(async (name: string, content?: string) => {
+    try {
+      const skill = await invoke<Skill>("create_local_skill", { name, content });
+      setSkills((prev) => [...prev, skill]);
+      return skill;
+    } catch (e) {
+      throw new Error(String(e));
+    }
+  }, []);
+
+  const deleteLocalSkill = useCallback(async (name: string) => {
+    try {
+      await invoke("delete_local_skill", { name });
+      setSkills((prev) => prev.filter((s) => s.name !== name));
+    } catch (e) {
+      throw new Error(String(e));
+    }
+  }, []);
+
   return { 
     skills, 
     loading, 
@@ -292,7 +344,9 @@ function useSkillsState() {
     toggleSkillForAgent,
     pendingAgentToggleKeys,
     readSkillContent,
-    updateSkillContent 
+    updateSkillContent,
+    createLocalSkill,
+    deleteLocalSkill,
   };
 }
 

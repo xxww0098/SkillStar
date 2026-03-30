@@ -1,5 +1,11 @@
 /**
  * Utility for generating and parsing SkillStar compressed and encrypted Share Codes.
+ *
+ * Two share-code flavours:
+ *   • Skills sharing  →  prefix "ags-"  (file ext: .ags)
+ *   • Deck sharing    →  prefix "agd-"  (file ext: .agd)
+ *
+ * Legacy prefix "agh-" is accepted during parsing and treated as "deck".
  */
 
 // We use abbreviated keys for max density
@@ -15,12 +21,24 @@ export interface ShareCodeData {
   }[];
 }
 
+export type ShareCodeType = "skills" | "deck";
+
+export interface ParseResult {
+  data: ShareCodeData;
+  type: ShareCodeType;
+}
+
+const PREFIX_MAP: Record<ShareCodeType, string> = {
+  skills: "ags-",
+  deck: "agd-",
+};
+
 const ALGO = "AES-GCM";
 const DEFAULT_PASS = "skillstar-default-share-password";
 const ITERATIONS = 10000;
 const SALT = "agh-share-salt";
 
-/** Derive anAES-GCM encryption/decryption key from an optional password */
+/** Derive an AES-GCM encryption/decryption key from an optional password */
 async function deriveKey(password?: string): Promise<CryptoKey> {
   const encoder = new TextEncoder();
   const pass = password && password.trim().length > 0 ? password : DEFAULT_PASS;
@@ -53,6 +71,7 @@ async function deriveKey(password?: string): Promise<CryptoKey> {
  */
 export async function createShareCode(
   data: ShareCodeData,
+  type: ShareCodeType = "deck",
   password?: string
 ): Promise<string> {
   const jsonStr = JSON.stringify(data);
@@ -92,22 +111,34 @@ export async function createShareCode(
     binaryString += String.fromCharCode(combined[i]);
   }
 
-  return "agh-" + btoa(binaryString);
+  const prefix = PREFIX_MAP[type];
+  return prefix + btoa(binaryString);
 }
 
 
 /** 
- * Decode, decrypt and unpack the share code 
+ * Decode, decrypt and unpack the share code.
+ * Accepts ags-, agd-, and legacy agh- prefixes.
  */
 export async function parseShareCode(
   code: string,
   password?: string
-): Promise<ShareCodeData> {
+): Promise<ParseResult> {
   let cleanCode = code.trim();
-  if (cleanCode.startsWith("agh-")) {
+  let type: ShareCodeType;
+
+  if (cleanCode.startsWith("ags-")) {
+    type = "skills";
+    cleanCode = cleanCode.substring(4);
+  } else if (cleanCode.startsWith("agd-")) {
+    type = "deck";
+    cleanCode = cleanCode.substring(4);
+  } else if (cleanCode.startsWith("agh-")) {
+    // Legacy prefix → treat as deck
+    type = "deck";
     cleanCode = cleanCode.substring(4);
   } else {
-    throw new Error("分享码格式不正确 (Invalid prefix)");
+    throw new Error("Invalid share code prefix (expected ags- or agd-)");
   }
 
   // Base64 decode
@@ -115,7 +146,7 @@ export async function parseShareCode(
   try {
     binaryString = atob(cleanCode);
   } catch (e) {
-    throw new Error("分享码被损坏 (Base64 decode error)");
+    throw new Error("Share code is corrupted (Base64 decode error)");
   }
 
   const combined = new Uint8Array(binaryString.length);
@@ -125,7 +156,7 @@ export async function parseShareCode(
 
   // Need at least 12 IV + 1 flag + minimum AES GCM tag (16)
   if (combined.length < 29) {
-    throw new Error("分享码内容过短，可能已损坏");
+    throw new Error("Share code is too short, possibly corrupted");
   }
 
   const iv = combined.slice(0, 12);
@@ -141,14 +172,14 @@ export async function parseShareCode(
       encryptedBytes
     );
   } catch (e) {
-    throw new Error("加解密失败，可能是密码错误或分享码被篡改");
+    throw new Error("Decryption failed — wrong password or tampered share code");
   }
 
   let bytes = new Uint8Array(decryptedBuf);
 
   if (isCompressed) {
     if (typeof DecompressionStream === "undefined") {
-      throw new Error("当前浏览器不支持解压缩该分享码");
+      throw new Error("Browser does not support decompression for this share code");
     }
     const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
     const decompressedBuffer = await new Response(stream).arrayBuffer();
@@ -160,12 +191,24 @@ export async function parseShareCode(
   try {
     parsed = JSON.parse(jsonStr);
   } catch (e) {
-    throw new Error("分享码内部 JSON 解析失败");
+    throw new Error("Share code internal JSON parse failed");
   }
 
   if (!parsed.n || !Array.isArray(parsed.s)) {
-    throw new Error("分享码数据格式不匹配");
+    throw new Error("Share code data format mismatch");
   }
 
-  return parsed as ShareCodeData;
+  return { data: parsed as ShareCodeData, type };
+}
+
+/**
+ * Quick pattern check without full decryption.
+ * Used for clipboard detection and smart input detection.
+ */
+export function looksLikeShareCode(text: string): ShareCodeType | null {
+  const trimmed = text.trim();
+  if (trimmed.startsWith("ags-") && trimmed.length > 30) return "skills";
+  if (trimmed.startsWith("agd-") && trimmed.length > 30) return "deck";
+  if (trimmed.startsWith("agh-") && trimmed.length > 30) return "deck"; // legacy
+  return null;
 }

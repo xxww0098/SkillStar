@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { useTranslation } from "react-i18next";
 import { Check, CheckCircle, Copy, ExternalLink, Terminal, XCircle } from "lucide-react";
 import { Button } from "../../components/ui/button";
@@ -28,12 +29,20 @@ function detectPlatform(): GhInstallPlatform {
 export function AboutSection({ ghInstalled }: AboutSectionProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
+  const [appVersion, setAppVersion] = useState<string>("...");
+
+  useEffect(() => {
+    getVersion()
+      .then((v) => setAppVersion(v))
+      .catch(() => setAppVersion("unknown"));
+  }, []);
+
   const ghInstallPlatform = useMemo(() => detectPlatform(), []);
   const ghInstallCommand =
     ghInstallPlatform === "unknown" ? null : GH_INSTALL_COMMANDS[ghInstallPlatform];
   const platformPaths = [
-    { platform: "Windows", path: "%APPDATA%\\skillstar\\" },
-    { platform: "Linux", path: "~/.local/share/skillstar/" },
+    { platform: "Windows", path: "~\\.skillstar\\" },
+    { platform: "Linux", path: "~/.skillstar/" },
     { platform: "macOS", path: "~/.skillstar/" },
   ] as const;
 
@@ -113,7 +122,7 @@ export function AboutSection({ ghInstalled }: AboutSectionProps) {
         <div className="px-4 py-3">
           <div className="flex justify-between text-sm">
             <span className="text-muted-foreground font-medium">{t("settings.version")}</span>
-            <span className="font-mono">0.1.0</span>
+            <span className="font-mono">{appVersion}</span>
           </div>
         </div>
 

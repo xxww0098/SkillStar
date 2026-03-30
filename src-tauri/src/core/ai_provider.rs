@@ -26,7 +26,7 @@ impl Default for AiConfig {
         Self {
             enabled: false,
             api_format: default_api_format(),
-            base_url: "https://api.openai.com/v1".to_string(),
+            base_url: String::new(),
             api_key: String::new(),
             model: "gpt-5.4".to_string(),
             target_language: "zh-CN".to_string(),
@@ -35,10 +35,7 @@ impl Default for AiConfig {
 }
 
 fn config_path() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("skillstar")
-        .join("ai_config.json")
+    super::paths::data_root().join("ai_config.json")
 }
 
 fn get_encryption_key() -> aes_gcm::Key<aes_gcm::Aes256Gcm> {
@@ -286,10 +283,7 @@ async fn translate_text_in_chunks(
 /// Build a reqwest client, optionally honouring the user's proxy config.
 fn build_http_client() -> Result<reqwest::Client> {
     // Try to load the proxy configuration
-    let proxy_path = dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("skillstar")
-        .join("proxy.json");
+    let proxy_path = super::paths::data_root().join("proxy.json");
 
     let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(120));
 
@@ -406,7 +400,10 @@ fn is_anthropic_format(config: &AiConfig) -> bool {
 }
 
 fn build_openai_chat_url(base_url: &str) -> String {
-    let base = base_url.trim_end_matches('/');
+    let mut base = base_url.trim_end_matches('/');
+    if base.is_empty() {
+        base = "https://api.openai.com/v1";
+    }
     if base.ends_with("/chat/completions") {
         base.to_string()
     } else {
@@ -415,7 +412,10 @@ fn build_openai_chat_url(base_url: &str) -> String {
 }
 
 fn build_anthropic_messages_url(base_url: &str) -> String {
-    let base = base_url.trim_end_matches('/');
+    let mut base = base_url.trim_end_matches('/');
+    if base.is_empty() {
+        base = "https://api.anthropic.com";
+    }
     if base.ends_with("/v1/messages") || base.ends_with("/messages") {
         base.to_string()
     } else if base.ends_with("/v1") {

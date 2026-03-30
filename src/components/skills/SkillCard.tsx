@@ -53,7 +53,7 @@ function SkillCardInner({
 }: SkillCardProps) {
   const { t } = useTranslation();
   const cat = categoryBadge(skill.category, t);
-  const isLocalSkill = !skill.git_url?.trim();
+  const isLocalSkill = skill.skill_type === "local";
 
   const handleCheckboxClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -92,7 +92,7 @@ function SkillCardInner({
         {/* Status Actions (Top Right) */}
         <div className="absolute top-3 right-3 z-10 flex items-center">
           {skill.installed ? (
-            skill.update_available ? (
+            skill.update_available && !isLocalSkill ? (
               <Button
                 size="sm"
                 variant="outline"
@@ -177,14 +177,12 @@ function SkillCardInner({
             <div className="min-w-0">
               <CardTitle className="truncate">{skill.name}</CardTitle>
               {isLocalSkill && (
-                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 mt-0.5 leading-none">
-                  Local
-                </Badge>
+                <span className="text-caption text-xs">local</span>
               )}
-              {skill.source && (
+              {!isLocalSkill && skill.source && (
                 <span className="text-caption text-xs">{skill.source}</span>
               )}
-              {!skill.source && skill.author && (
+              {!isLocalSkill && !skill.source && skill.author && (
                 <span className="text-caption text-xs">{skill.author}</span>
               )}
             </div>

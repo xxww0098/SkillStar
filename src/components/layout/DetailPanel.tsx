@@ -1,17 +1,22 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { motion, AnimatePresence } from "framer-motion";
 import { useTranslation } from "react-i18next";
-import { X, Download, GitBranch, RefreshCw, Trash2, Edit3, ExternalLink, Copy, Check, Sparkles, Github, Package, Languages, Square } from "lucide-react";
+import { X, Download, GitBranch, RefreshCw, Trash2, Edit3, ExternalLink, Copy, Check, Sparkles, Github, Languages, Square, Star, Calendar, ShieldCheck, BookOpen } from "lucide-react";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { Markdown } from "../ui/Markdown";
+import { Skeleton } from "../ui/Skeleton";
 import { formatInstalls, unwrapOuterMarkdownFence, navigateToAiSettings } from "../../lib/utils";
-import type { Skill, SkillContent } from "../../types";
+import type { Skill, SkillContent, MarketplaceSkillDetails } from "../../types";
 
 const SkillEditor = lazy(() =>
   import("../skills/SkillEditor").then((mod) => ({ default: mod.SkillEditor }))
+);
+
+const SkillReader = lazy(() =>
+  import("../skills/SkillReader").then((mod) => ({ default: mod.SkillReader }))
 );
 
 interface DetailPanelProps {
@@ -25,7 +30,7 @@ interface DetailPanelProps {
   onReadContent?: (name: string) => Promise<SkillContent>;
   onSaveContent?: (name: string, content: string) => Promise<void>;
   onPublish?: (skillName: string) => void;
-  onExportBundle?: (skillName: string) => void;
+
 }
 
 interface AiConfigLike {
@@ -52,10 +57,11 @@ export function DetailPanel({
   onReadContent,
   onSaveContent,
   onPublish,
-  onExportBundle,
+
 }: DetailPanelProps) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
+  const [reading, setReading] = useState(false);
   const [copied, setCopied] = useState(false);
 
   // AI Quick Read
@@ -67,11 +73,19 @@ export function DetailPanel({
   const [quickReadError, setQuickReadError] = useState<string | null>(null);
   const [aiConfigured, setAiConfigured] = useState(false);
   const [translatedDescription, setTranslatedDescription] = useState<string | null>(null);
+  const [descriptionTranslationSource, setDescriptionTranslationSource] = useState<string | null>(null);
   const [descriptionTranslationVisible, setDescriptionTranslationVisible] = useState(false);
   const [translatingDescription, setTranslatingDescription] = useState(false);
   const [descriptionHasDelta, setDescriptionHasDelta] = useState(false);
   const [descriptionWasNonStreaming, setDescriptionWasNonStreaming] = useState(false);
   const [descriptionTranslateError, setDescriptionTranslateError] = useState<string | null>(null);
+
+  // Marketplace detail fetching
+  const [skillDetails, setSkillDetails] = useState<MarketplaceSkillDetails | null>(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const detailsCacheRef = useRef<Map<string, MarketplaceSkillDetails>>(new Map());
+  const quickReadCacheRef = useRef<Map<string, string>>(new Map());
+  const descriptionTranslateCacheRef = useRef<Map<string, string>>(new Map());
 
   // Cancel refs
   const activeTranslateIdRef = useRef<string | null>(null);
@@ -91,22 +105,71 @@ export function DetailPanel({
     loadAiConfig();
   }, []);
 
+  // Cleanup event listeners on unmount
   useEffect(() => {
-    setQuickReadContent(null);
+    return () => {
+      if (translateUnlistenRef.current) {
+        translateUnlistenRef.current();
+        translateUnlistenRef.current = null;
+      }
+      if (quickReadUnlistenRef.current) {
+        quickReadUnlistenRef.current();
+        quickReadUnlistenRef.current = null;
+      }
+    };
+  }, []);
+
+  // Fetch marketplace details for remote skills
+  const fetchDetails = useCallback(async (source: string, name: string) => {
+    const cacheKey = `${source}/${name}`;
+    const cached = detailsCacheRef.current.get(cacheKey);
+    if (cached) {
+      setSkillDetails(cached);
+      return;
+    }
+    setDetailsLoading(true);
+    try {
+      const details = await invoke<MarketplaceSkillDetails>("get_marketplace_skill_details", { source, name });
+      detailsCacheRef.current.set(cacheKey, details);
+      setSkillDetails(details);
+    } catch (e) {
+      console.warn("[DetailPanel] Failed to fetch skill details:", e);
+      setSkillDetails(null);
+    } finally {
+      setDetailsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Restore cached quick-read & description translation, or reset
+    const skillKey = skill?.name ?? "";
+    const cachedQuickRead = quickReadCacheRef.current.get(skillKey) ?? null;
+    setQuickReadContent(cachedQuickRead);
     setQuickReadVisible(false);
     setQuickReadHasDelta(false);
     setQuickReadWasNonStreaming(false);
     setQuickReadError(null);
-    setTranslatedDescription(null);
+    const cachedDescTranslation = descriptionTranslateCacheRef.current.get(skillKey) ?? null;
+    setTranslatedDescription(cachedDescTranslation);
+    setDescriptionTranslationSource(null);
     setDescriptionTranslationVisible(false);
     setDescriptionHasDelta(false);
     setDescriptionWasNonStreaming(false);
     setDescriptionTranslateError(null);
-  }, [skill?.name, skill?.description]);
+    setSkillDetails(null);
+    setReading(false);
+
+    // Fetch details for remote marketplace skills
+    if (skill && !skill.installed && skill.source) {
+      fetchDetails(skill.source, skill.name);
+    }
+  }, [skill?.name, skill?.description, skill?.installed, skill?.source, fetchDetails]);
 
   const handleTranslateDescription = async () => {
-    const rawDescription = skill?.description?.trim() || "";
-    if (!rawDescription || !aiConfigured) return;
+    const renderedDescription = skillDetails?.summary?.trim() || skill?.description?.trim() || "";
+    if (!renderedDescription || !aiConfigured) return;
+    const hasReusableTranslation =
+      translatedDescription != null && descriptionTranslationSource === renderedDescription;
 
     // Cancel in-progress
     if (translatingDescription) {
@@ -122,12 +185,12 @@ export function DetailPanel({
       return;
     }
 
-    if (descriptionTranslationVisible) {
+    if (descriptionTranslationVisible && hasReusableTranslation) {
       setDescriptionTranslationVisible(false);
       return;
     }
 
-    if (translatedDescription) {
+    if (hasReusableTranslation) {
       setDescriptionTranslationVisible(true);
       return;
     }
@@ -144,8 +207,11 @@ export function DetailPanel({
     setDescriptionTranslateError(null);
     setDescriptionHasDelta(false);
     setDescriptionWasNonStreaming(false);
-    setDescriptionTranslationVisible(true);
-    setTranslatedDescription("");
+    setTranslatedDescription(null);
+    setDescriptionTranslationVisible(false);
+    setDescriptionTranslationSource(renderedDescription);
+    // Don't set descriptionTranslationVisible or translatedDescription yet —
+    // keep showing the original description until the first delta or final result arrives.
     try {
       const unlisten = await listen<AiStreamPayload>("ai://translate-stream", (event) => {
         if (activeTranslateIdRef.current !== requestId) return;
@@ -157,6 +223,8 @@ export function DetailPanel({
           if (deltaCount >= 2) setDescriptionHasDelta(true);
           streamedRaw += payload.delta;
           setTranslatedDescription(unwrapOuterMarkdownFence(streamedRaw).trim());
+          // Show translated content now that we have actual data
+          setDescriptionTranslationVisible(true);
           return;
         }
 
@@ -168,22 +236,28 @@ export function DetailPanel({
 
       const result = await invoke<string>("ai_translate_short_text_stream", {
         requestId,
-        content: rawDescription,
+        content: renderedDescription,
       });
 
       if (activeTranslateIdRef.current !== requestId) return;
-      setTranslatedDescription(unwrapOuterMarkdownFence(result).trim());
+      const finalTranslation = unwrapOuterMarkdownFence(result).trim();
+      setTranslatedDescription(finalTranslation);
+      setDescriptionTranslationSource(renderedDescription);
       setDescriptionTranslationVisible(true);
       setDescriptionWasNonStreaming(deltaCount < 2);
+      // Cache completed description translation
+      if (skill) descriptionTranslateCacheRef.current.set(skill.name, finalTranslation);
     } catch (e) {
       if (activeTranslateIdRef.current !== requestId) return;
       setDescriptionHasDelta(deltaCount >= 2);
       setDescriptionWasNonStreaming(false);
       if (!streamedRaw.trim()) {
         setTranslatedDescription(null);
+        setDescriptionTranslationSource(null);
         setDescriptionTranslationVisible(false);
       } else {
         setTranslatedDescription(unwrapOuterMarkdownFence(streamedRaw).trim());
+        setDescriptionTranslationSource(renderedDescription);
         setDescriptionTranslationVisible(true);
       }
       setDescriptionTranslateError(String(e));
@@ -270,6 +344,8 @@ export function DetailPanel({
       setQuickReadContent(result);
       setQuickReadVisible(true);
       setQuickReadWasNonStreaming(deltaCount < 2);
+      // Cache completed summary
+      if (skill) quickReadCacheRef.current.set(skill.name, result);
     } catch (e) {
       if (activeQuickReadIdRef.current !== requestId) return;
       setQuickReadHasDelta(deltaCount >= 2);
@@ -310,9 +386,15 @@ export function DetailPanel({
     ? `https://skills.sh/${skill.source}/${skill.name}`
     : null;
   const rawDescription = skill?.description?.trim() || "";
-  const hasDescription = rawDescription.length > 0;
+  // Use enriched summary from detail fetch when available
+  const enrichedDescription = skillDetails?.summary?.trim() || rawDescription;
+  const hasDescription = enrichedDescription.length > 0;
+  const descriptionTranslationMatches =
+    descriptionTranslationSource != null && descriptionTranslationSource === enrichedDescription;
+  const descriptionTranslationActive =
+    descriptionTranslationVisible && translatedDescription != null && descriptionTranslationMatches;
   const displayDescription =
-    descriptionTranslationVisible && translatedDescription != null ? translatedDescription : rawDescription;
+    descriptionTranslationActive ? translatedDescription : enrichedDescription;
 
   const handleCopy = async () => {
     if (!installCmd) return;
@@ -325,7 +407,7 @@ export function DetailPanel({
     return (
       <Suspense
         fallback={
-          <div className="absolute right-0 top-0 bottom-0 w-[600px] h-full border-l border-border bg-card backdrop-blur-xl shadow-2xl overflow-hidden z-50 rounded-tl-xl rounded-bl-xl flex items-center justify-center">
+          <div className="absolute right-0 top-0 bottom-0 w-[600px] h-full border-l border-border bg-background shadow-2xl overflow-hidden z-50 rounded-tl-xl rounded-bl-xl flex items-center justify-center">
              <span className="text-muted-foreground text-sm">{t("detailPanel.reading")}</span>
           </div>
         }
@@ -340,6 +422,24 @@ export function DetailPanel({
     );
   }
 
+  if (reading && skill && skillDetails?.readme) {
+    return (
+      <Suspense
+        fallback={
+          <div className="absolute right-0 top-0 bottom-0 w-[600px] h-full border-l border-border bg-background shadow-2xl overflow-hidden z-50 rounded-tl-xl rounded-bl-xl flex items-center justify-center">
+             <span className="text-muted-foreground text-sm">{t("detailPanel.reading")}</span>
+          </div>
+        }
+      >
+        <SkillReader
+          skillName={skill.name}
+          content={skillDetails.readme}
+          onClose={() => setReading(false)}
+        />
+      </Suspense>
+    );
+  }
+
   return (
     <AnimatePresence>
       {skill && (
@@ -348,10 +448,10 @@ export function DetailPanel({
           animate={{ x: 0, opacity: 1 }}
           exit={{ x: "100%", opacity: 0 }}
           transition={{ type: "spring", bounce: 0, duration: 0.3 }}
-           className="absolute right-0 top-0 bottom-0 w-[400px] h-full border-l border-border bg-card backdrop-blur-xl shadow-2xl overflow-y-auto z-50 rounded-tl-xl rounded-bl-xl will-change-transform"
+           className="absolute right-0 top-0 bottom-0 w-[400px] h-full border-l border-border bg-card backdrop-blur-xl shadow-2xl overflow-hidden z-50 rounded-tl-xl rounded-bl-xl will-change-transform flex flex-col"
         >
-          {/* Header */}
-           <div className="flex items-center justify-between p-4 border-b border-border">
+          {/* Header — pinned */}
+           <div className="flex items-center justify-between p-4 border-b border-border shrink-0">
             <h2 className="text-heading-sm truncate">{skill.name}</h2>
             <button
               onClick={onClose}
@@ -361,15 +461,12 @@ export function DetailPanel({
             </button>
           </div>
 
-          {/* Content */}
+          {/* Scrollable content */}
+          <div className="flex-1 overflow-y-auto">
           <div className="p-5 space-y-5">
             {/* Meta */}
             <div className="flex items-center gap-3 flex-wrap">
-              {!skill.git_url?.trim() && (
-                <Badge variant="outline" className="font-medium">
-                  Local
-                </Badge>
-              )}
+
               {skill.rank && (
                 <Badge variant="outline" className="tabular-nums font-semibold">
                   #{skill.rank}
@@ -393,8 +490,13 @@ export function DetailPanel({
               {skill.stars > 0 && (
                 <div className="flex items-center gap-1 text-caption">
                   <Download className="w-3.5 h-3.5 text-primary/60" />
-                  {formatInstalls(skill.stars)} installs
+                  {skillDetails?.weekly_installs
+                    ? `${skillDetails.weekly_installs} / week`
+                    : `${formatInstalls(skill.stars)} installs`}
                 </div>
+              )}
+              {skill.skill_type === "local" && (
+                <span className="text-caption">local</span>
               )}
               {skill.source && (
                 <span className="text-caption">by {skill.source}</span>
@@ -402,81 +504,139 @@ export function DetailPanel({
               {!skill.source && skill.author && (
                 <span className="text-caption">by {skill.author}</span>
               )}
+              {skillDetails?.github_stars != null && skillDetails.github_stars > 0 && (
+                <div className="flex items-center gap-1 text-caption">
+                  <Star className="w-3.5 h-3.5 text-amber-400/70" />
+                  {skillDetails.github_stars}
+                </div>
+              )}
+              {skillDetails?.first_seen && (
+                <div className="flex items-center gap-1 text-caption">
+                  <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
+                  {skillDetails.first_seen}
+                </div>
+              )}
             </div>
+
+            {/* Security Audits */}
+            {skillDetails && skillDetails.security_audits.length > 0 && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <ShieldCheck className="w-3.5 h-3.5 text-green-500/70" />
+                {skillDetails.security_audits.map((audit) => (
+                  <Badge
+                    key={audit.name}
+                    variant="outline"
+                    className={`text-[10px] font-mono ${
+                      audit.result === "Pass"
+                        ? "border-green-500/30 text-green-400"
+                        : audit.result === "Fail"
+                        ? "border-red-500/30 text-red-400"
+                        : "border-yellow-500/30 text-yellow-400"
+                    }`}
+                  >
+                    {audit.name}: {audit.result}
+                  </Badge>
+                ))}
+              </div>
+            )}
+
+            {/* Detail loading skeleton */}
+            {detailsLoading && (
+              <div className="space-y-2">
+                <Skeleton className="h-3 w-full" />
+                <Skeleton className="h-3 w-5/6" />
+                <Skeleton className="h-3 w-4/6" />
+                <Skeleton className="h-20 w-full mt-3" />
+              </div>
+            )}
 
             {/* Description */}
             <div className="space-y-2">
-              {hasDescription ? (
-                <Markdown className="text-body leading-relaxed [&_p]:my-0 [&_p]:whitespace-pre-wrap">
-                  {displayDescription}
-                </Markdown>
-              ) : (
-                <p className="text-body leading-relaxed">
-                  {t("detailPanel.noDescription")}
-                </p>
-              )}
-              {hasDescription && (
-                <button
-                  onClick={aiConfigured ? handleTranslateDescription : navigateToAiSettings}
-                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
-                    aiConfigured && translatingDescription
-                      ? "bg-destructive/10 text-destructive border border-destructive/20 backdrop-blur-sm hover:bg-destructive/15"
-                      : aiConfigured && descriptionTranslationVisible
-                      ? "bg-primary/15 text-primary border border-primary/20 backdrop-blur-sm"
-                      : "bg-muted hover:bg-muted text-muted-foreground hover:text-foreground border border-border backdrop-blur-sm"
-                  }`}
-                >
-                  {aiConfigured && translatingDescription ? (
-                    <Square className="w-3.5 h-3.5 fill-current" />
-                  ) : (
-                    <Languages className="w-3.5 h-3.5" />
-                  )}
-                  {!aiConfigured
-                    ? t("detailPanel.goToAiConfig")
-                    : translatingDescription
-                    ? t("common.cancel")
-                    : descriptionTranslationVisible
-                    ? t("detailPanel.showOriginalDescription")
-                    : t("detailPanel.translateDescription")}
-                </button>
-              )}
+              <div className="rounded-xl border border-border/80 bg-muted/25 backdrop-blur-sm px-4 py-3">
+                {hasDescription ? (
+                  <Markdown className="text-body leading-relaxed [&_p]:my-0 [&_p]:whitespace-pre-wrap [&_p+ul]:mt-3 [&_p+ol]:mt-3 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1.5 [&_strong]:text-foreground">
+                    {displayDescription}
+                  </Markdown>
+                ) : (
+                  <p className="text-body leading-relaxed">
+                    {t("detailPanel.noDescription")}
+                  </p>
+                )}
+              </div>
+              {/* AI Actions Row */}
+              <div className="flex items-center gap-2">
+                {hasDescription && (
+                  <button
+                    onClick={aiConfigured ? handleTranslateDescription : navigateToAiSettings}
+                    className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all duration-300 cursor-pointer shadow-sm relative overflow-hidden group ${
+                      aiConfigured && translatingDescription
+                        ? "bg-destructive/10 text-destructive border border-destructive/20"
+                        : aiConfigured && descriptionTranslationActive
+                        ? "bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border border-indigo-500/20"
+                        : "bg-gradient-to-br from-background to-muted/50 border border-border hover:border-indigo-500/40 text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/0 via-indigo-500/5 to-purple-500/0 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                    {aiConfigured && translatingDescription ? (
+                      <Square className="w-3.5 h-3.5 fill-current animate-pulse relative z-10" />
+                    ) : (
+                      <Languages className={`w-3.5 h-3.5 relative z-10 ${aiConfigured && !descriptionTranslationActive ? "text-indigo-500/70" : ""}`} />
+                    )}
+                    <span className="relative z-10">
+                      {!aiConfigured
+                        ? t("detailPanel.goToAiConfig")
+                        : translatingDescription
+                        ? t("common.cancel")
+                        : descriptionTranslationActive
+                        ? t("detailPanel.showOriginalDescription")
+                        : t("detailPanel.translateDescription")}
+                    </span>
+                  </button>
+                )}
+
+                {skill.installed && onReadContent && aiConfigured && (
+                  <button
+                    onClick={handleQuickRead}
+                    className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all duration-300 cursor-pointer shadow-sm relative overflow-hidden group ${
+                      quickReading
+                         ? "bg-destructive/10 text-destructive border border-destructive/20"
+                         : quickReadVisible
+                         ? "bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/20"
+                         : "bg-gradient-to-br from-background to-muted/50 border border-border hover:border-purple-500/40 text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-r from-purple-500/0 via-purple-500/5 to-pink-500/0 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                    {quickReading ? (
+                      <Square className="w-3.5 h-3.5 fill-current animate-pulse relative z-10" />
+                    ) : (
+                      <Sparkles className={`w-3.5 h-3.5 relative z-10 ${!quickReadVisible ? "text-purple-500/70" : ""}`} />
+                    )}
+                    <span className="relative z-10">
+                      {quickReading ? t("common.cancel") : quickReadVisible ? t("detailPanel.hideQuickRead") : t("detailPanel.aiQuickRead")}
+                    </span>
+                  </button>
+                )}
+              </div>
               {descriptionTranslateError && (
                 <div className="text-xs text-destructive bg-destructive/10 backdrop-blur-sm rounded-md px-3 py-2">
                   {descriptionTranslateError}
                 </div>
               )}
-              {translatingDescription && descriptionTranslationVisible && descriptionHasDelta && (
+              {translatingDescription && descriptionTranslationActive && descriptionHasDelta && (
                 <div className="text-xs text-primary bg-primary/10 backdrop-blur-sm rounded-md px-3 py-2 border border-primary/20">
                   {t("detailPanel.streamingDescriptionPreview")}
                 </div>
               )}
-              {!translatingDescription && descriptionTranslationVisible && translatedDescription && descriptionWasNonStreaming && (
+              {!translatingDescription && descriptionTranslationActive && descriptionWasNonStreaming && (
                 <div className="text-xs text-muted-foreground bg-muted/40 backdrop-blur-sm rounded-md px-3 py-2 border border-border">
                   {t("detailPanel.nonStreamingDescriptionNotice")}
                 </div>
               )}
             </div>
 
-            {/* AI Quick Read */}
-            {skill.installed && onReadContent && aiConfigured && (
+            {/* AI Quick Read Content */}
+            {skill.installed && onReadContent && aiConfigured && (quickReadError || quickReading || quickReadVisible) && (
               <div className="space-y-2">
-                <button
-                  onClick={handleQuickRead}
-                   className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer w-full justify-center ${
-                     quickReading
-                       ? "bg-destructive/10 text-destructive border border-destructive/20 backdrop-blur-sm hover:bg-destructive/15"
-                       : quickReadVisible
-                       ? "bg-primary/15 text-primary border border-primary/20 backdrop-blur-sm"
-                       : "bg-muted hover:bg-muted text-muted-foreground hover:text-foreground border border-border backdrop-blur-sm"
-                   }`}
-                >
-                  {quickReading ? (
-                    <Square className="w-3.5 h-3.5 fill-current" />
-                  ) : (
-                    <Sparkles className="w-3.5 h-3.5" />
-                  )}
-                  {quickReading ? t("common.cancel") : quickReadVisible ? t("detailPanel.hideQuickRead") : t("detailPanel.aiQuickRead")}
-                </button>
 
                 {quickReadError && (
                    <div className="text-xs text-destructive bg-destructive/10 backdrop-blur-sm rounded-md px-3 py-2">
@@ -557,7 +717,8 @@ export function DetailPanel({
               </a>
             )}
 
-            {/* Git info */}
+            {/* Git info — only for hub (git-backed) skills */}
+            {skill.skill_type !== "local" && skill.git_url && (
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-caption">
                 <GitBranch className="w-3.5 h-3.5" />
@@ -572,6 +733,7 @@ export function DetailPanel({
                 {t("detailPanel.updated")} {new Date(skill.last_updated).toLocaleDateString()}
               </div>
             </div>
+            )}
 
             {/* Topics */}
             {skill.topics.length > 0 && (
@@ -582,6 +744,18 @@ export function DetailPanel({
                   </Badge>
                 ))}
               </div>
+            )}
+
+            {/* SKILL.md — open in reader */}
+            {skillDetails?.readme && (
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => setReading(true)}
+              >
+                <BookOpen className="w-4 h-4 mr-2" />
+                {t("detailPanel.readSkillMd")}
+              </Button>
             )}
 
             {/* Edit Button (only for installed skills) */}
@@ -596,18 +770,8 @@ export function DetailPanel({
               </Button>
             )}
 
-            {/* Export & Publish Buttons — for local skills without git_url */}
-            {skill.installed && !skill.git_url && onExportBundle && (
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={() => onExportBundle(skill.name)}
-              >
-                <Package className="w-4 h-4 mr-2" />
-                {t("detailPanel.exportBundle")}
-              </Button>
-            )}
-            {skill.installed && !skill.git_url && onPublish && (
+            {/* Publish Button — for local skills */}
+            {skill.installed && skill.skill_type === "local" && onPublish && (
               <Button
                 variant="outline"
                  className="w-full border-primary/30 text-primary hover:bg-primary/15 hover:text-primary backdrop-blur-sm"
@@ -622,7 +786,7 @@ export function DetailPanel({
             <div className="space-y-2 pt-2">
               {skill.installed ? (
                 <>
-                  {skill.update_available && (
+                  {skill.update_available && skill.skill_type !== "local" && (
                     <Button
                       className="w-full"
                       onClick={() => onUpdate(skill.name)}
@@ -633,7 +797,7 @@ export function DetailPanel({
                   )}
 
                   <div className="flex gap-2">
-                    {onReinstall && (
+                    {onReinstall && skill.skill_type !== "local" && (
                       <Button
                         variant="secondary"
                         className="flex-1"
@@ -664,6 +828,7 @@ export function DetailPanel({
                 </Button>
               )}
             </div>
+          </div>
           </div>
         </motion.aside>
       )}

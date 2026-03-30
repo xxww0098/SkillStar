@@ -55,7 +55,7 @@ export function ImportBundleModal({
       const selected = await open({
         multiple: false,
         filters: [
-          { name: "AgentSkill Bundle", extensions: ["agentskill"] },
+          { name: "SkillStar Bundle", extensions: ["ags", "agd", "agentskill", "agentskills"] },
         ],
       });
       if (!selected) return;
@@ -161,7 +161,7 @@ export function ImportBundleModal({
                           : t("importBundleModal.pickFile")}
                       </span>
                       <span className="text-[11px] text-muted-foreground/70">
-                        .agentskill
+                        .ags / .agd
                       </span>
                     </button>
                   </div>

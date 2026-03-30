@@ -26,6 +26,9 @@ impl std::fmt::Display for SkillCategory {
 pub struct Skill {
     pub name: String,
     pub description: String,
+    /// `"hub"` for git-backed skills, `"local"` for user-authored local skills.
+    #[serde(default = "default_skill_type")]
+    pub skill_type: String,
     pub stars: u32,
     pub installed: bool,
     pub update_available: bool,
@@ -44,6 +47,10 @@ pub struct Skill {
     pub source: Option<String>,
 }
 
+fn default_skill_type() -> String {
+    "hub".to_string()
+}
+
 impl Skill {
     /// Create a Skill from skills.sh data.
     ///
@@ -59,6 +66,7 @@ impl Skill {
         let mut skill = Self {
             name,
             description,
+            skill_type: "hub".to_string(),
             stars,
             installed: false,
             update_available: false,

@@ -1,12 +1,15 @@
 import { useTranslation } from "react-i18next";
 import { motion, AnimatePresence } from "framer-motion";
-import { HardDrive, Database, FolderGit2, History, Loader2, Trash2, Globe } from "lucide-react";
+import { HardDrive, Database, FolderGit2, FolderPlus, History, Loader2, Trash2, Globe, Stethoscope, Wrench } from "lucide-react";
 import { Button } from "../../components/ui/button";
 
 export interface StorageOverview {
   config_bytes: number;
   hub_bytes: number;
   hub_count: number;
+  broken_count: number;
+  local_count: number;
+  local_bytes: number;
   cache_bytes: number;
   cache_count: number;
   cache_unused_count: number;
@@ -19,31 +22,37 @@ interface StorageSectionProps {
   loading: boolean;
   cleaning: boolean;
   forceDeletingTarget: "hub" | "cache" | "config" | null;
+  cleaningBroken: boolean;
   formatBytes: (bytes: number) => string;
   onCleanAll: () => void;
   onForceDeleteHub: () => void;
   onForceDeleteCache: () => void;
+  onCleanBroken: () => void;
 }
 
 export function StorageSection({
   overview,
   loading,
   cleaning,
+  cleaningBroken,
   forceDeletingTarget,
   formatBytes,
   onCleanAll,
   onForceDeleteHub,
   onForceDeleteCache,
+  onCleanBroken,
 }: StorageSectionProps) {
   const { t } = useTranslation();
 
   const totalBytes = overview
-    ? overview.config_bytes + overview.hub_bytes + overview.cache_bytes
+    ? overview.config_bytes + overview.hub_bytes + overview.local_bytes + overview.cache_bytes
     : 0;
 
   const hasCleanable = overview
     ? overview.cache_unused_count > 0 || overview.history_count > 0
     : false;
+
+  const hasBroken = overview ? overview.broken_count > 0 : false;
 
   return (
     <section>
@@ -100,11 +109,47 @@ export function StorageSection({
         {/* Breakdown rows */}
         {overview && !loading && (
           <div className="divide-y divide-border/30">
+            {/* Skill Health */}
+            {hasBroken && (
+              <StorageRow
+                icon={<Stethoscope className="w-3.5 h-3.5 text-amber-400" />}
+                label={t("settings.skillHealth")}
+                detail={t("settings.healthIssues", { count: overview.broken_count })}
+                highlight
+                action={
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={onCleanBroken}
+                    disabled={cleaningBroken || forceDeletingTarget !== null}
+                    className="h-7 px-2.5 text-[11px] text-amber-500 hover:bg-amber-500/10 hover:text-amber-400 hover:border-amber-500/30"
+                  >
+                    {cleaningBroken ? (
+                      <>
+                        <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                        {t("settings.repairing")}
+                      </>
+                    ) : (
+                      <>
+                        <Wrench className="w-3 h-3 mr-1" />
+                        {t("settings.repairAll")}
+                      </>
+                    )}
+                  </Button>
+                }
+              />
+            )}
+
             {/* Skills Hub */}
             <StorageRow
               icon={<Database className="w-3.5 h-3.5 text-blue-400" />}
               label={t("settings.storageHub")}
-              detail={`${formatBytes(overview.hub_bytes)} · ${t("settings.storageHubCount", { count: overview.hub_count })}`}
+              detail={
+                hasBroken
+                  ? `${formatBytes(overview.hub_bytes)} · ${t("settings.storageHubCount", { count: overview.hub_count })} (${t("settings.healthBroken", { count: overview.broken_count })})`
+                  : `${formatBytes(overview.hub_bytes)} · ${t("settings.storageHubCount", { count: overview.hub_count })}`
+              }
+              highlight={hasBroken}
               action={
                 <Button
                   size="sm"
@@ -124,6 +169,15 @@ export function StorageSection({
                 </Button>
               }
             />
+
+            {/* Local Skills */}
+            {overview.local_count > 0 && (
+              <StorageRow
+                icon={<FolderPlus className="w-3.5 h-3.5 text-indigo-400" />}
+                label={t("settings.storageLocal")}
+                detail={`${formatBytes(overview.local_bytes)} · ${t("settings.storageLocalCount", { count: overview.local_count })}`}
+              />
+            )}
 
             {/* Repo Cache */}
             <StorageRow

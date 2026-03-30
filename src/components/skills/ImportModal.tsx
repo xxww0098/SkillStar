@@ -13,11 +13,15 @@ import {
   Download,
   RotateCcw,
   Package,
+  KeyRound,
+  Share2,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "../ui/button";
-import { Input } from "../ui/input";
+import { SearchInput } from "../ui/SearchInput";
+import { SelectAllButton } from "../ui/SelectAllButton";
 import { cn } from "../../lib/utils";
+import { looksLikeShareCode, parseShareCode, type ShareCodeData } from "../../lib/shareCode";
 import type {
   DiscoveredSkill,
   ScanResult,
@@ -31,7 +35,9 @@ type Phase =
   | "selectSkills"
   | "installing"
   | "completed"
-  | "error";
+  | "error"
+  | "shareCodePreview"
+  | "shareCodeInstalling";
 
 export interface ImportModalProps {
   open: boolean;
@@ -46,6 +52,10 @@ export interface ImportModalProps {
   onPickLocalFile?: () => void;
   /** Callback to pack installed skills into a deck immediately */
   onPackGroup?: (skillNames: string[]) => void;
+  /** Pre-filled share code from clipboard auto-detect */
+  initialShareCode?: string;
+  /** Called when the share code is consumed */
+  onClearShareCode?: () => void;
 }
 
 export function ImportModal({
@@ -57,6 +67,8 @@ export function ImportModal({
   preSelectedSkill,
   onPickLocalFile,
   onPackGroup,
+  initialShareCode,
+  onClearShareCode,
 }: ImportModalProps) {
   const { t } = useTranslation();
 
@@ -74,17 +86,38 @@ export function ImportModal({
   const [progressMsg, setProgressMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [installedCount, setInstalledCount] = useState(0);
+  // Share code state
+  const [shareCodeData, setShareCodeData] = useState<ShareCodeData | null>(null);
+  const [shareCodePassword, setShareCodePassword] = useState("");
+  const [shareCodeError, setShareCodeError] = useState("");
+  const [shareCodeDetected, setShareCodeDetected] = useState(false);
 
   // ── Reset on open ──────────────────────────────────────────────
   useEffect(() => {
     if (isOpen) {
-      setPhase("inputURL");
-      setUrlInput(initialUrl || "");
+      setShareCodeData(null);
+      setShareCodePassword("");
+      setShareCodeError("");
       setScanResult(null);
       setSelectedSkills(new Set());
       setProgressMsg("");
       setErrorMsg("");
       setInstalledCount(0);
+
+      // If opening with a share code (clipboard detect or prop), go directly to share code flow
+      if (initialShareCode && looksLikeShareCode(initialShareCode)) {
+        setPhase("inputURL");
+        setUrlInput(initialShareCode);
+        setShareCodeDetected(true);
+        // Auto-parse after slight delay for animation
+        setTimeout(() => handleParseShareCode(initialShareCode), 150);
+        return;
+      }
+
+      setPhase("inputURL");
+      setUrlInput(initialUrl || "");
+      setShareCodeDetected(false);
+
       // Load history
       invoke<RepoHistoryEntry[]>("list_repo_history")
         .then(setHistory)
@@ -92,12 +125,90 @@ export function ImportModal({
 
       // Auto-scan if initialUrl is provided
       if (initialUrl && autoScan) {
-        // Slight delay to allow modal animation
         setTimeout(() => handleScan(initialUrl), 100);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
+
+  // ── Share Code Parse ─────────────────────────────────────────
+  const handleParseShareCode = useCallback(async (code: string, pw?: string) => {
+    setShareCodeError("");
+    setProgressMsg(t("shareCodeImport.parsing"));
+    try {
+      const { data } = await parseShareCode(code, pw);
+      setShareCodeData(data);
+      setPhase("shareCodePreview");
+    } catch (e) {
+      const errMsg = String(e);
+      // If decryption failed, it might need a password
+      if (errMsg.includes("Decryption failed") && !pw) {
+        setShareCodeError(t("shareCodeImport.needPassword"));
+        setPhase("shareCodePreview");
+        setShareCodeData(null);
+      } else {
+        setShareCodeError(errMsg);
+        setPhase("shareCodePreview");
+        setShareCodeData(null);
+      }
+    }
+  }, [t]);
+
+  const handleShareCodeInstall = useCallback(async () => {
+    if (!shareCodeData) return;
+    setPhase("shareCodeInstalling");
+    setProgressMsg(t("shareCodeImport.installing"));
+    const installedNames: string[] = [];
+    try {
+      for (const skill of shareCodeData.s) {
+        if (skill.u) {
+          // Git-backed skill: use repo scanner flow
+          try {
+            const result = await invoke<ScanResult>("scan_github_repo", { url: skill.u });
+            const target = result.skills.find((s) => s.id === skill.n) || result.skills[0];
+            if (target) {
+              const installed = await invoke<string[]>("install_from_scan", {
+                repoUrl: result.source_url,
+                source: result.source,
+                skills: [{ id: target.id, folder_path: target.folder_path }],
+              });
+              installedNames.push(...installed);
+            }
+          } catch (e) {
+            console.warn(`[ShareCode] Failed to install ${skill.n} from ${skill.u}:`, e);
+          }
+        } else if (skill.c) {
+          // Embedded skill: decode base64 content and create as local skill
+          try {
+            const binaryStr = atob(skill.c);
+            const bytes = new Uint8Array(binaryStr.length);
+            for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+            const content = new TextDecoder().decode(bytes);
+            await invoke("create_local_skill_from_content", { name: skill.n, content });
+            installedNames.push(skill.n);
+          } catch (e) {
+            console.warn(`[ShareCode] Failed to create embedded skill ${skill.n}:`, e);
+          }
+        }
+      }
+      setInstalledCount(installedNames.length);
+      setPhase("completed");
+      if (installedNames.length > 0) onInstalled(installedNames);
+      onClearShareCode?.();
+    } catch (e) {
+      setErrorMsg(String(e));
+      setPhase("error");
+    }
+  }, [shareCodeData, t, onInstalled, onClearShareCode]);
+
+  // ── Smart input handler: detect share code in URL input ──────
+  const handleUrlInputChange = useCallback((value: string) => {
+    setUrlInput(value);
+    // Auto-detect share code when pasted
+    if (looksLikeShareCode(value.trim())) {
+      setTimeout(() => handleParseShareCode(value.trim()), 50);
+    }
+  }, [handleParseShareCode]);
 
   // ── Scan ───────────────────────────────────────────────────────
   const handleScan = useCallback(
@@ -197,6 +308,11 @@ export function ImportModal({
     setProgressMsg("");
     setErrorMsg("");
     setInstalledCount(0);
+    setShareCodeData(null);
+    setShareCodePassword("");
+    setShareCodeError("");
+    setShareCodeDetected(false);
+    onClearShareCode?.();
   };
 
   const selectAll = (ids?: string[]) => {
@@ -277,7 +393,7 @@ export function ImportModal({
                 {phase === "inputURL" && (
                   <InputURLPhase
                     urlInput={urlInput}
-                    setUrlInput={setUrlInput}
+                    setUrlInput={handleUrlInputChange}
                     onScan={() => handleScan()}
                     history={history}
                     onSelectHistory={(entry) => {
@@ -285,6 +401,7 @@ export function ImportModal({
                       handleScan(entry.source);
                     }}
                     onPickLocalFile={onPickLocalFile}
+                    shareCodeDetected={shareCodeDetected}
                   />
                 )}
 
@@ -319,6 +436,22 @@ export function ImportModal({
                 {phase === "error" && (
                   <ErrorPhase message={errorMsg} onRetry={reset} />
                 )}
+
+                {phase === "shareCodePreview" && (
+                  <ShareCodePreviewPhase
+                    data={shareCodeData}
+                    error={shareCodeError}
+                    password={shareCodePassword}
+                    onPasswordChange={setShareCodePassword}
+                    onRetryWithPassword={(pw) => handleParseShareCode(urlInput.trim(), pw)}
+                    onInstall={handleShareCodeInstall}
+                    onBack={reset}
+                  />
+                )}
+
+                {phase === "shareCodeInstalling" && (
+                  <LoadingPhase message={progressMsg} />
+                )}
               </div>
             </div>
             </div>
@@ -338,6 +471,7 @@ function InputURLPhase({
   history,
   onSelectHistory,
   onPickLocalFile,
+  shareCodeDetected,
 }: {
   urlInput: string;
   setUrlInput: (v: string) => void;
@@ -345,6 +479,7 @@ function InputURLPhase({
   history: RepoHistoryEntry[];
   onSelectHistory: (entry: RepoHistoryEntry) => void;
   onPickLocalFile?: () => void;
+  shareCodeDetected?: boolean;
 }) {
   const { t } = useTranslation();
 
@@ -356,24 +491,30 @@ function InputURLPhase({
           <Download className="w-7 h-7 text-blue-500/80" />
         </div>
         <p className="text-sm text-muted-foreground text-center">
-          {t("githubImportModal.description")}
+          {t("shareCodeImport.smartInputHint")}
         </p>
       </div>
 
+      {/* Clipboard detected banner */}
+      {shareCodeDetected && (
+        <div className="flex items-center gap-2 bg-primary/5 border border-primary/20 rounded-xl px-3 py-2 text-xs text-primary">
+          <Share2 className="w-3.5 h-3.5" />
+          {t("shareCodeImport.detected")}
+        </div>
+      )}
+
       {/* URL input */}
       <div className="flex items-center gap-2.5">
-        <div className="relative flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/80" />
-          <Input
-            value={urlInput}
-            onChange={(e) => setUrlInput(e.target.value)}
-            placeholder={t("githubImportModal.placeholder")}
-            className="h-11 rounded-2xl border-border/80 bg-background/80 pl-9 placeholder:text-muted-foreground/80 shadow-inner"
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && urlInput.trim()) onScan();
-            }}
-          />
-        </div>
+        <SearchInput
+          value={urlInput}
+          onChange={(e) => setUrlInput(e.target.value)}
+          placeholder={t("githubImportModal.placeholder")}
+          className="h-11 rounded-2xl border-border/80 bg-background/80 shadow-inner pl-9"
+          iconClassName="left-3 h-4 w-4"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && urlInput.trim()) onScan();
+          }}
+        />
         <Button
           size="sm"
           onClick={onScan}
@@ -389,7 +530,7 @@ function InputURLPhase({
         <div className="space-y-4 pt-1">
           <div className="flex items-center gap-4">
             <div className="flex-1 h-px bg-border/60"></div>
-            <span className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">{t("common.or", "OR")}</span>
+            <span className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">{t("common.or")}</span>
             <div className="flex-1 h-px bg-border/60"></div>
           </div>
           <Button
@@ -398,7 +539,7 @@ function InputURLPhase({
             onClick={onPickLocalFile}
           >
             <Package className="w-4 h-4 mr-2" />
-            {t("importBundleModal.pickFile", { defaultValue: "Import from Local File (.agentskill)" })}
+            {t("importBundleModal.pickFile", { defaultValue: "Import from Local File (.ags / .agd)" })}
           </Button>
         </div>
       )}
@@ -506,28 +647,26 @@ function SelectSkillsPhase({
                 className="text-xs text-amber-500 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-1 rounded-md transition-colors flex items-center gap-1 cursor-pointer font-medium"
               >
                 <Package className="w-3.5 h-3.5" />
-                {t("githubImportModal.quickPack", "快速打包")}
+                {t("githubImportModal.quickPack")}
               </button>
             )}
-            <button
-              onClick={handleSelectAll}
-              className="text-xs text-primary hover:text-primary/80 transition-colors cursor-pointer"
-            >
-              {allSelected ? t("common.deselectAll", "反选") : t("common.selectAll", "全选")}
-            </button>
+            <SelectAllButton
+              allSelected={allSelected}
+              onToggle={handleSelectAll}
+              variant="ghost"
+              size="sm"
+              className="h-auto p-0 text-primary hover:text-primary/80 hover:bg-transparent"
+            />
           </div>
         </div>
 
-        {/* Search */}
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/80" />
-          <Input
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={t("common.search", "Search skills...")}
-            className="h-8 text-xs rounded-lg border-border/80 bg-background/50 pl-8 placeholder:text-muted-foreground/80 shadow-inner"
-          />
-        </div>
+        <SearchInput
+          containerClassName="mt-3"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder={t("common.search")}
+          className="h-8 text-xs rounded-lg border-border/80 bg-background/50 placeholder:text-muted-foreground/80 shadow-inner pl-8"
+        />
       </div>
 
       {/* Skill list */}
@@ -535,7 +674,7 @@ function SelectSkillsPhase({
         <div className="space-y-0.5">
           {filteredSkills.length === 0 && (
             <div className="py-8 text-center text-xs text-muted-foreground">
-              {t("common.noResults", "No skills found")}
+              {t("common.noResults")}
             </div>
           )}
           {filteredSkills.map((skill) => {
@@ -601,7 +740,7 @@ function SelectSkillsPhase({
                       )}
                       {isSelected && isInstalled && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 font-medium shrink-0">
-                          Reinstall
+                          {t("detailPanel.reinstall")}
                         </span>
                       )}
                     </div>
@@ -650,7 +789,7 @@ function SelectSkillsPhase({
               className="text-xs px-3"
             >
               <RotateCcw className="w-3 h-3 mr-1.5" />
-              {t("githubImportModal.reinstallAll", "Reinstall All")}
+              {t("githubImportModal.reinstallAll")}
             </Button>
           )}
           <Button
@@ -719,6 +858,149 @@ function ErrorPhase({
         <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
         {t("githubImportModal.tryAgain")}
       </Button>
+    </div>
+  );
+}
+
+// ── Share Code Preview Phase ─────────────────────────────────────
+
+function ShareCodePreviewPhase({
+  data,
+  error,
+  password,
+  onPasswordChange,
+  onRetryWithPassword,
+  onInstall,
+  onBack,
+}: {
+  data: ShareCodeData | null;
+  error: string;
+  password: string;
+  onPasswordChange: (v: string) => void;
+  onRetryWithPassword: (pw: string) => void;
+  onInstall: () => void;
+  onBack: () => void;
+}) {
+  const { t } = useTranslation();
+
+  // Error / needs password state
+  if (!data) {
+    return (
+      <div className="px-6 py-6 space-y-4">
+        <div className="flex flex-col items-center gap-3 py-2">
+          <div className="w-14 h-14 rounded-2xl bg-amber-500/10 flex items-center justify-center">
+            <KeyRound className="w-7 h-7 text-amber-500/80" />
+          </div>
+          <p className="text-sm text-destructive text-center">{error}</p>
+        </div>
+
+        {error.includes("password") && (
+          <div className="space-y-3">
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => onPasswordChange(e.target.value)}
+              placeholder={t("importShareCodeModal.passwordPlaceholder")}
+              className="w-full h-11 rounded-2xl border border-input bg-background/80 px-4 text-sm shadow-inner placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && password.trim()) onRetryWithPassword(password);
+              }}
+            />
+            <Button
+              className="w-full h-11 rounded-2xl"
+              onClick={() => onRetryWithPassword(password)}
+              disabled={!password.trim()}
+            >
+              {t("shareCodeImport.retryWithPassword")}
+            </Button>
+          </div>
+        )}
+
+        <Button variant="ghost" size="sm" onClick={onBack} className="w-full">
+          {t("common.back")}
+        </Button>
+      </div>
+    );
+  }
+
+  // Success: show skill preview
+  const hasEmbedded = data.s.some((s) => s.c);
+  const hasPrivate = data.s.some((s) => s.p);
+
+  return (
+    <div className="flex flex-col">
+      {/* Header info */}
+      <div className="px-6 pt-5 pb-3 space-y-3">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary/15 to-emerald-500/15 flex items-center justify-center text-lg">
+            {data.i || "\u2B50"}
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-sm font-semibold truncate">{data.n}</h3>
+            <p className="text-xs text-muted-foreground truncate">{data.d}</p>
+          </div>
+          <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded-md text-muted-foreground/80">
+            {data.s.length} skills
+          </span>
+        </div>
+
+        {hasEmbedded && (
+          <div className="flex items-start gap-2 text-xs text-primary bg-primary/5 border border-primary/20 rounded-lg px-2.5 py-2">
+            <Package className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+            <span>{t("importShareCodeModal.embeddedDesc")}</span>
+          </div>
+        )}
+
+        {hasPrivate && (
+          <div className="flex items-start gap-2 text-xs text-amber-600 bg-amber-500/5 border border-amber-500/20 rounded-lg px-2.5 py-2">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+            <span>{t("importShareCodeModal.privateRepoDesc")}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Skill list */}
+      <div className="px-6 pb-2 max-h-[35vh] overflow-y-auto">
+        <div className="space-y-0.5">
+          {data.s.map((skill) => (
+            <div
+              key={skill.n}
+              className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-muted transition-colors"
+            >
+              <div className="w-4 h-4 rounded border-[1.5px] bg-primary border-primary flex items-center justify-center">
+                <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <span className="text-[13px] font-medium">{skill.n}</span>
+                {skill.c && (
+                  <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 font-medium">
+                    embedded
+                  </span>
+                )}
+                {skill.p && (
+                  <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-500 font-medium">
+                    private
+                  </span>
+                )}
+              </div>
+              {skill.u && (
+                <GitBranch className="w-3 h-3 text-muted-foreground" />
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div className="px-6 py-3.5 border-t border-border/60 flex items-center justify-between">
+        <Button variant="ghost" size="sm" onClick={onBack}>
+          {t("common.back")}
+        </Button>
+        <Button size="sm" onClick={onInstall} className="px-5">
+          <Download className="w-3.5 h-3.5 mr-1.5" />
+          {t("shareCodeImport.installSkills", { count: data.s.length })}
+        </Button>
+      </div>
     </div>
   );
 }

@@ -49,6 +49,108 @@ pub fn clone_repo_shallow(url: &str, dest: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Sparse treeless clone: only downloads tree objects, no file blobs.
+///
+/// Uses `--filter=blob:none --depth 1 --no-checkout --sparse` so the initial
+/// clone is extremely small (typically <500KB even for large repos). Callers
+/// must follow up with `git sparse-checkout set <dirs>` + `git checkout` to
+/// materialize only the directories they need.
+pub fn clone_repo_sparse(url: &str, dest: &Path) -> Result<()> {
+    let output = command_with_path("git")
+        .args([
+            "clone",
+            "--filter=blob:none",
+            "--depth",
+            "1",
+            "--no-checkout",
+            "--sparse",
+        ])
+        .arg(url)
+        .arg(dest)
+        .output()
+        .context("Failed to execute sparse treeless clone")?;
+
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow!("git sparse clone failed: {}", err.trim()));
+    }
+
+    Ok(())
+}
+
+/// List all file paths in the repository tree without a checkout.
+///
+/// Requires at least tree objects to be present (works after a treeless clone
+/// with `--filter=blob:none`). Returns paths relative to the repo root.
+pub fn list_tree_paths(repo_path: &Path) -> Result<Vec<String>> {
+    let output = command_with_path("git")
+        .current_dir(repo_path)
+        .args(["ls-tree", "-r", "--name-only", "HEAD"])
+        .output()
+        .context("Failed to execute git ls-tree")?;
+
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow!("git ls-tree failed: {}", err.trim()));
+    }
+
+    let paths = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|l| l.to_string())
+        .collect();
+    Ok(paths)
+}
+
+/// Configure sparse-checkout for a repo and materialize the given directories.
+///
+/// Expects the repo to have been cloned with `clone_repo_sparse`. Sets cone-mode
+/// sparse-checkout to the given directory patterns then runs `git checkout`.
+pub fn apply_sparse_checkout(repo_path: &Path, dirs: &[&str]) -> Result<()> {
+    // Init sparse-checkout in cone mode
+    let output = command_with_path("git")
+        .current_dir(repo_path)
+        .args(["sparse-checkout", "init", "--cone"])
+        .output()
+        .context("Failed to init sparse-checkout")?;
+
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow!("git sparse-checkout init failed: {}", err.trim()));
+    }
+
+    // Set the directories to materialize
+    let mut cmd = command_with_path("git");
+    cmd.current_dir(repo_path)
+        .args(["sparse-checkout", "set"]);
+    for dir in dirs {
+        cmd.arg(dir);
+    }
+    let output = cmd.output().context("Failed to set sparse-checkout")?;
+
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow!("git sparse-checkout set failed: {}", err.trim()));
+    }
+
+    // Checkout materialized files
+    let output = command_with_path("git")
+        .current_dir(repo_path)
+        .arg("checkout")
+        .output()
+        .context("Failed to execute git checkout after sparse-checkout")?;
+
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        // Non-fatal: some repos may have warnings
+        eprintln!(
+            "[git_ops] sparse checkout warning: {}",
+            err.trim()
+        );
+    }
+
+    Ok(())
+}
+
 /// Ensure repository worktree files are present.
 ///
 /// Some historical installs were fetched without checkout and ended up with only `.git`.

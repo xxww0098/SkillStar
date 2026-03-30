@@ -1,8 +1,8 @@
 import { useState, useMemo, useCallback, useEffect, lazy, Suspense } from "react";
-import { motion } from "framer-motion";
-import { Layers } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Layers, AlertTriangle } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
-import { save } from "@tauri-apps/plugin-dialog";
+
 import { useTranslation } from "react-i18next";
 import { Toolbar } from "../components/layout/Toolbar";
 import { SkillGrid } from "../components/skills/SkillGrid";
@@ -14,6 +14,7 @@ import { ImportModal } from "../components/skills/ImportModal";
 import { PublishSkillModal } from "../components/skills/PublishSkillModal";
 import { ImportBundleModal } from "../components/skills/ImportBundleModal";
 import { AiPickSkillsModal } from "../components/skills/AiPickSkillsModal";
+import { ExportShareCodeModal } from "../components/skills/ExportShareCodeModal";
 import { useSkills } from "../hooks/useSkills";
 import { useSkillCards } from "../hooks/useSkillCards";
 import { useAgentProfiles } from "../hooks/useAgentProfiles";
@@ -30,12 +31,18 @@ interface MySkillsProps {
   initialFocusSkill?: string | null;
   onClearFocus?: () => void;
   onPackSkills?: (skills: string[]) => void;
+  /** Pre-filled share code from clipboard auto-detect */
+  initialShareCode?: string;
+  /** Clear consumed share code */
+  onClearShareCode?: () => void;
 }
 
 export function MySkills({
   initialFocusSkill,
   onClearFocus,
   onPackSkills,
+  initialShareCode,
+  onClearShareCode,
 }: MySkillsProps = {}) {
   const { t } = useTranslation();
   const {
@@ -70,10 +77,27 @@ export function MySkills({
   const [importBundleOpen, setImportBundleOpen] = useState(false);
   const [publishTarget, setPublishTarget] = useState<string | null>(null);
   const [aiPickModalOpen, setAiPickModalOpen] = useState(false);
+  const [brokenCount, setBrokenCount] = useState(0);
+  const [sourceFilter, setSourceFilter] = useState<"all" | "hub" | "local">("all");
+  const [shareCardSkills, setShareCardSkills] = useState<string[] | null>(null);
+  const localCount = useMemo(() => skills.filter((s) => s.skill_type === "local").length, [skills]);
   const pendingUpdateCount = useMemo(
     () => skills.filter((skill) => skill.update_available).length,
     [skills]
   );
+
+  // Fetch broken skill count after skills load (lightweight, one extra field from StorageOverview)
+  useEffect(() => {
+    if (!loading) {
+      let cancelled = false;
+      invoke<{ broken_count: number }>("get_storage_overview")
+        .then((overview) => {
+          if (!cancelled) setBrokenCount(overview.broken_count);
+        })
+        .catch((e) => console.warn("[MySkills] Failed to get storage overview:", e));
+      return () => { cancelled = true; };
+    }
+  }, [loading]);
 
   // Auto-focus a skill when navigating from Projects page
   useEffect(() => {
@@ -83,6 +107,13 @@ export function MySkills({
       onClearFocus?.();
     }
   }, [initialFocusSkill, skills, onClearFocus]);
+
+  // Auto-open import modal when clipboard share code is detected
+  useEffect(() => {
+    if (initialShareCode) {
+      setImportModalOpen(true);
+    }
+  }, [initialShareCode]);
 
   const filtered = useMemo(() => {
     let list = [...skills];
@@ -106,6 +137,13 @@ export function MySkills({
       }
     }
 
+    // Source type filter: hub / local
+    if (sourceFilter === "hub") {
+      list = list.filter((s) => s.skill_type !== "local");
+    } else if (sourceFilter === "local") {
+      list = list.filter((s) => s.skill_type === "local");
+    }
+
     if (showUpdateOnly) {
       list = list.filter((s) => s.update_available);
     }
@@ -126,7 +164,7 @@ export function MySkills({
     });
 
     return list;
-  }, [skills, searchQuery, sortBy, agentFilter, profiles, showUpdateOnly]);
+  }, [skills, searchQuery, sortBy, agentFilter, profiles, showUpdateOnly, sourceFilter]);
 
   const handleInstall = async (url: string) => {
     try {
@@ -260,7 +298,6 @@ export function MySkills({
     <div className="flex-1 flex overflow-hidden relative">
       <div className="flex-1 flex flex-col overflow-hidden">
         <Toolbar
-          titleNode={<h1 className="text-heading-md text-zinc-100">{t("mySkills.title")}</h1>}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           sortBy={sortBy}
@@ -284,13 +321,16 @@ export function MySkills({
           onRefresh={() => refresh(false, true)}
           isRefreshing={loading}
           onAiPick={() => setAiPickModalOpen(true)}
+          sourceFilter={sourceFilter}
+          onSourceFilterChange={setSourceFilter}
+          localCount={localCount}
         />
 
         {/* Selection bar */}
         {hasSelection && (
           <SkillSelectionBar
             selectedCount={selectedSkillNames.size}
-            totalCount={filtered.length} // Filtered skills count so Select All maps to the current list
+            totalCount={filtered.length}
             disabled={batchLoading || uninstalling}
             onDeploy={() => setDeployModalOpen(true)}
             onSaveGroup={() => setGroupModalOpen(true)}
@@ -299,6 +339,7 @@ export function MySkills({
                 ? () => onPackSkills(Array.from(selectedSkillNames))
                 : undefined
             }
+            onShare={() => setShareCardSkills(Array.from(selectedSkillNames))}
             onUpdate={handleBatchUpdate}
             onUninstall={handleBatchUninstall}
             onSelectAll={() => setSelectedSkillNames(new Set(filtered.map(s => s.name)))}
@@ -307,6 +348,45 @@ export function MySkills({
             onBatchLink={handleBatchLink}
           />
         )}
+
+        <ExportShareCodeModal
+          open={!!shareCardSkills && shareCardSkills.length > 0}
+          onClose={() => setShareCardSkills(null)}
+          skillNames={shareCardSkills || undefined}
+          hubSkills={skills}
+          onPublishSkill={(name) => setPublishTarget(name)}
+        />
+
+        {/* Broken skills banner */}
+        <AnimatePresence>
+          {brokenCount > 0 && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="overflow-hidden"
+            >
+              <div className="flex items-center gap-2.5 px-6 py-2 bg-amber-500/8 border-b border-amber-500/20">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span className="text-[12px] text-amber-300/90">
+                  {t("mySkills.brokenBanner", { count: brokenCount })}
+                </span>
+                <button
+                  onClick={() => {
+                    window.dispatchEvent(
+                      new CustomEvent("skillstar:navigate", { detail: { page: "settings" } })
+                    );
+                  }}
+                  className="text-[12px] text-amber-400 hover:text-amber-300 font-medium ml-auto cursor-pointer transition-colors"
+                >
+                  {t("mySkills.brokenBannerAction")} →
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
 
         <motion.main
           initial={{ opacity: 0 }}
@@ -357,26 +437,6 @@ export function MySkills({
             onReadContent={readSkillContent}
             onSaveContent={updateSkillContent}
             onPublish={(name) => setPublishTarget(name)}
-            onExportBundle={async (name) => {
-              try {
-                const outputDir = await save({
-                  defaultPath: `${name}.agentskill`,
-                  filters: [
-                    { name: "AgentSkill Bundle", extensions: ["agentskill"] },
-                  ],
-                });
-                if (!outputDir) return;
-                // Extract directory from the full save path
-                const dir = outputDir.replace(/\/[^/]+$/, "");
-                await invoke<string>("export_skill_bundle", {
-                  name,
-                  outputDir: dir,
-                });
-                toast.success(t("detailPanel.exportSuccess"));
-              } catch (e) {
-                toast.error(String(e));
-              }
-            }}
           />
         </Suspense>
       )}
@@ -429,6 +489,8 @@ export function MySkills({
           setQuickPackSkills(names);
           setGroupModalOpen(true);
         }}
+        initialShareCode={initialShareCode}
+        onClearShareCode={onClearShareCode}
       />
 
       <ImportBundleModal

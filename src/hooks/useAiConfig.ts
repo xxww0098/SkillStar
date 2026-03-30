@@ -5,7 +5,7 @@ import type { AiConfig } from "../types";
 const DEFAULT_CONFIG: AiConfig = {
   enabled: false,
   api_format: "openai",
-  base_url: "https://api.openai.com/v1",
+  base_url: "",
   api_key: "",
   model: "gpt-5.4",
   target_language: "zh-CN",

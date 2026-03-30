@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { X, Save, FileText, Eye, PanelLeftClose, PanelLeftOpen, Globe, Sparkles, Loader2, RotateCcw, Square } from "lucide-react";
 import { Button } from "../ui/button";
 import { Markdown } from "../ui/Markdown";
+import { ResizablePanel } from "../ui/ResizablePanel";
 import { unwrapOuterMarkdownFence, navigateToAiSettings } from "../../lib/utils";
 import type { SkillContent } from "../../types";
 
@@ -252,8 +253,8 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
     setAiError(null);
     setTranslationHasDelta(false);
     setTranslationWasNonStreaming(false);
-    setTranslationVisible(true);
-    setTranslatedContent("");
+    // Don't set translationVisible or translatedContent yet —
+    // keep showing original content until first delta or final result arrives.
     setTranslatedSource(null);
     try {
       const unlisten = await listen<TranslateStreamPayload>("ai://translate-stream", (event) => {
@@ -266,6 +267,8 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
           if (deltaCount >= 2) setTranslationHasDelta(true);
           streamedRaw += payload.delta;
           setTranslatedContent(streamedRaw);
+          // Show translated content now that we have actual data
+          setTranslationVisible(true);
           return;
         }
 
@@ -406,6 +409,20 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
     loadAiConfig();
   }, []);
 
+  // Cleanup event listeners on unmount
+  useEffect(() => {
+    return () => {
+      if (translateUnlistenRef.current) {
+        translateUnlistenRef.current();
+        translateUnlistenRef.current = null;
+      }
+      if (summarizeUnlistenRef.current) {
+        summarizeUnlistenRef.current();
+        summarizeUnlistenRef.current = null;
+      }
+    };
+  }, []);
+
   useEffect(() => {
     const loadContent = async () => {
       setLoading(true);
@@ -455,14 +472,16 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
 
   if (loading) {
     return (
-      <div className="absolute right-0 top-0 bottom-0 w-[600px] h-full border-l border-border bg-card/50 backdrop-blur-sm shadow-[0_4px_20px_-8px_rgba(0,0,0,0.3)] overflow-hidden z-50 rounded-tl-xl rounded-bl-xl flex items-center justify-center">
-        <span className="text-muted-foreground text-sm">{t("skillEditor.loadingContent")}</span>
-      </div>
+      <ResizablePanel defaultWidth={600} storageKey="skill-editor-width">
+        <div className="flex-1 flex items-center justify-center">
+          <span className="text-muted-foreground text-sm">{t("skillEditor.loadingContent")}</span>
+        </div>
+      </ResizablePanel>
     );
   }
 
   return (
-    <div className="absolute right-0 top-0 bottom-0 w-[800px] h-full border-l border-border bg-card/50 backdrop-blur-sm shadow-[0_4px_20px_-8px_rgba(0,0,0,0.3)] overflow-hidden z-50 rounded-tl-xl rounded-bl-xl flex flex-col">
+    <ResizablePanel defaultWidth={800} storageKey="skill-editor-width">
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-border shrink-0">
         <div className="flex items-center gap-2">
@@ -725,6 +744,6 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
           {saving ? t("common.saving") : t("skillEditor.saveChanges")}
         </Button>
       </div>
-    </div>
+    </ResizablePanel>
   );
 }

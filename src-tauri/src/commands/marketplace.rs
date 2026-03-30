@@ -105,3 +105,53 @@ pub async fn get_publisher_repos(
         }
     }
 }
+
+#[tauri::command]
+pub async fn get_publisher_repo_skills(
+    publisher_name: String,
+    repo_name: String,
+) -> Result<Vec<marketplace::PublisherRepoSkill>, String> {
+    eprintln!(
+        "[get_publisher_repo_skills] Called for {}/{}",
+        publisher_name, repo_name
+    );
+    match marketplace::get_publisher_repo_skills(&publisher_name, &repo_name).await {
+        Ok(skills) => {
+            eprintln!(
+                "[get_publisher_repo_skills] Success, got {} skills",
+                skills.len()
+            );
+            Ok(skills)
+        }
+        Err(e) => {
+            eprintln!("[get_publisher_repo_skills] Error: {}", e);
+            Err(e.to_string())
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn get_marketplace_skill_details(
+    source: String,
+    name: String,
+) -> Result<marketplace::MarketplaceSkillDetails, String> {
+    eprintln!(
+        "[get_marketplace_skill_details] Called for {}/{}",
+        source, name
+    );
+    match marketplace::fetch_marketplace_skill_details(&source, &name).await {
+        Ok(details) => {
+            eprintln!(
+                "[get_marketplace_skill_details] Success — summary: {}, readme: {}, audits: {}",
+                details.summary.is_some(),
+                details.readme.is_some(),
+                details.security_audits.len()
+            );
+            Ok(details)
+        }
+        Err(e) => {
+            eprintln!("[get_marketplace_skill_details] Error: {}", e);
+            Err(e.to_string())
+        }
+    }
+}
