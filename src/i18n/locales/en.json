@@ -107,6 +107,8 @@
     "testConnection": "Test Connection",
     "aiConfigTitle": "AI Configuration",
     "scanOptimization": "Security Scan",
+    "aiConcurrency": "AI Concurrency",
+    "aiConcurrencyOverride": "0 = Auto calculate. Override if you hit API rate limits.",
     "contextWindow": "Context Window",
     "contextWindowHint": "Your model's max context window. Scan parameters are auto-calculated from this.",
     "langZhCn": "中文 (简体)",

@@ -126,6 +126,80 @@ function parseFrontmatterEntries(frontmatter: string | null): FrontmatterEntry[]
   return entries;
 }
 
+function stripLeadingDuplicatedMetadata(
+  content: string,
+  allowedKeys: ReadonlySet<string>
+): string {
+  if (allowedKeys.size === 0) {
+    return content;
+  }
+
+  const lines = content.replace(/^\uFEFF/, "").split(/\r?\n/);
+  let start = 0;
+  while (start < lines.length && !lines[start].trim()) {
+    start += 1;
+  }
+  if (start >= lines.length) {
+    return content;
+  }
+
+  const keyRe = /^([a-zA-Z0-9_-]+)\s*:/;
+  const firstLine = lines[start].trimStart();
+  const firstKey = firstLine.match(keyRe)?.[1] ?? null;
+  if (!firstKey || !allowedKeys.has(firstKey)) {
+    return content;
+  }
+
+  // Collapsed one-liner metadata:
+  // name: ... description: ... argument-hint: ... user-invocable: ...
+  const inlineKeys = Array.from(
+    firstLine.matchAll(/([a-zA-Z0-9_-]+)\s*:/g),
+    (m) => m[1]
+  );
+  const inlineKnownCount = inlineKeys.filter((k) => allowedKeys.has(k)).length;
+  if (inlineKnownCount >= 2) {
+    let index = start + 1;
+    while (index < lines.length && !lines[index].trim()) {
+      index += 1;
+    }
+    return lines.slice(index).join("\n");
+  }
+
+  // Multi-line key/value metadata block at document top.
+  let index = start;
+  let consumed = false;
+  while (index < lines.length) {
+    const raw = lines[index];
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      if (consumed) {
+        index += 1;
+        break;
+      }
+      index += 1;
+      continue;
+    }
+
+    const key = raw.trimStart().match(keyRe)?.[1] ?? null;
+    if (key && allowedKeys.has(key)) {
+      consumed = true;
+      index += 1;
+      continue;
+    }
+
+    if (consumed && /^\s+/.test(raw)) {
+      index += 1;
+      continue;
+    }
+    break;
+  }
+
+  if (!consumed) {
+    return content;
+  }
+  return lines.slice(index).join("\n");
+}
+
 function normalizeTranslatedDocument(
   originalContent: string,
   translatedContent: string
@@ -133,6 +207,9 @@ function normalizeTranslatedDocument(
   const translatedRaw = unwrapOuterMarkdownFence(translatedContent);
   const original = splitFrontmatter(originalContent);
   const translated = splitFrontmatter(translatedRaw);
+  const frontmatterKeys = new Set(
+    parseFrontmatterEntries(original.frontmatter).map((entry) => entry.key)
+  );
 
   // No frontmatter: use translated document directly.
   if (!original.frontmatter) {
@@ -146,7 +223,7 @@ function normalizeTranslatedDocument(
     if (originalName) {
       mergedFrontmatter = writeFrontmatterValue(mergedFrontmatter, "name", originalName);
     }
-    const translatedBody = translated.body;
+    const translatedBody = stripLeadingDuplicatedMetadata(translated.body, frontmatterKeys);
     return `---\n${mergedFrontmatter}\n---${translatedBody ? `\n${translatedBody}` : ""}`;
   }
 
@@ -159,7 +236,7 @@ function normalizeTranslatedDocument(
     ? writeFrontmatterValue(original.frontmatter, "description", translatedDescription)
     : original.frontmatter;
 
-  const translatedBody = translatedRaw;
+  const translatedBody = stripLeadingDuplicatedMetadata(translatedRaw, frontmatterKeys);
   return `---\n${mergedFrontmatter}\n---${translatedBody ? `\n${translatedBody}` : ""}`;
 }
 

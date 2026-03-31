@@ -51,6 +51,7 @@ export function AiProviderSection({
   const aiApiKeyPlaceholder = isAnthropicFormat ? "sk-ant-..." : "sk-...";
   const aiBaseUrlPlaceholder = isAnthropicFormat ? "https://api.anthropic.com" : "https://api.openai.com/v1";
   const aiModelPlaceholder = isAnthropicFormat ? "claude-sonnet-4-20250514" : "gpt-5.4";
+  const clampConcurrency = (value: number) => Math.min(20, Math.max(0, value || 0));
   const formControlClass =
     "flex h-9 w-full rounded-xl border border-input-border bg-input backdrop-blur-sm px-3 text-sm text-foreground shadow-sm transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:border-primary/60";
 
@@ -215,34 +216,64 @@ export function AiProviderSection({
               </datalist>
             </div>
 
-            {/* ── Context Window ─── */}
+            {/* ── Context & Concurrency ─── */}
             <div className="pt-2 border-t border-border/40">
               <div className="flex items-center gap-1.5 mb-2.5">
                 <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">{t("settings.scanOptimization", { defaultValue: "Security Scan" })}</span>
               </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">
-                  {t("settings.contextWindow", { defaultValue: "Context Window" })}
-                </label>
-                <div className="flex items-center gap-2.5">
-                  <Input
-                    type="number"
-                    min={1}
-                    max={2048}
-                    step={1}
-                    value={localAiConfig.context_window_k}
-                    onChange={(e) => {
-                      const val = Math.min(2048, Math.max(1, Number(e.target.value) || 128));
-                      onConfigChange({ ...localAiConfig, context_window_k: val });
-                    }}
-                    className="w-24 font-mono tabular-nums"
-                  />
-                  <span className="text-xs font-mono text-foreground tabular-nums shrink-0">
-                    K
-                  </span>
-                  <span className="text-xs text-muted-foreground">tokens</span>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">
+                    {t("settings.contextWindow", { defaultValue: "Context Window" })}
+                  </label>
+                  <div className="flex items-center gap-2.5">
+                    <Input
+                      type="number"
+                      min={1}
+                      max={2048}
+                      step={1}
+                      value={localAiConfig.context_window_k}
+                      onChange={(e) => {
+                        const val = Math.min(2048, Math.max(1, Number(e.target.value) || 128));
+                        onConfigChange({ ...localAiConfig, context_window_k: val });
+                      }}
+                      className="w-24 font-mono tabular-nums"
+                    />
+                    <span className="text-xs font-mono text-foreground tabular-nums shrink-0">
+                      K
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">tokens</span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground/60 mt-1">{t("settings.contextWindowHint", { defaultValue: "Your model's max context window." })}</p>
                 </div>
-                <p className="text-[10px] text-muted-foreground/60 mt-1">{t("settings.contextWindowHint", { defaultValue: "Your model's max context window. Scan parameters are auto-calculated from this." })}</p>
+
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">
+                    {t("settings.aiConcurrency", { defaultValue: "AI Concurrency" })}
+                  </label>
+                  <div className="flex items-center gap-2.5">
+                    <Input
+                      type="number"
+                      min={0}
+                      max={20}
+                      step={1}
+                      value={localAiConfig.max_concurrent_requests}
+                      onChange={(e) =>
+                        onConfigChange({
+                          ...localAiConfig,
+                          max_concurrent_requests: clampConcurrency(Number(e.target.value)),
+                        })
+                      }
+                      className="w-20 font-mono tabular-nums"
+                    />
+                    <span className="text-[10px] text-muted-foreground ml-1">
+                      {localAiConfig.max_concurrent_requests === 0 ? "(Auto)" : ""}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground/60 mt-1">
+                    {t("settings.aiConcurrencyOverride", { defaultValue: "0 = Auto calculate. Override if you hit API rate limits." })}
+                  </p>
+                </div>
               </div>
             </div>
 
