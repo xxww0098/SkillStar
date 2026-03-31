@@ -213,7 +213,7 @@ export function PublishSkillModal({
               phase === "form" ? "max-w-[760px] h-[580px]" : "max-w-md h-auto"
             }`}
           >
-            <div role="dialog" aria-modal="true" aria-label={t("publishModal.title")} className="relative overflow-hidden rounded-[24px] border border-white/10 bg-card/95 shadow-[0_0_80px_-20px_rgba(0,0,0,0.5)] backdrop-blur-3xl ring-1 ring-white/5 flex-1 flex flex-col min-h-0">
+            <div role="dialog" aria-modal="true" aria-label={t("publishModal.title")} className="modal-surface flex-1 flex flex-col min-h-0">
               {/* Top ambient glow */}
               <div className="pointer-events-none absolute -left-20 -top-20 h-48 w-48 rounded-full bg-primary/20 blur-[60px] opacity-70" />
               <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-accent/10 blur-[60px] opacity-70" />

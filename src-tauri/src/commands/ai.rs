@@ -134,6 +134,14 @@ pub async fn ai_translate_skill_stream(
 }
 
 #[tauri::command]
+pub async fn ai_translate_short_text(content: String) -> Result<String, String> {
+    let config = ai_provider::load_config();
+    ai_provider::translate_short_text_with_priority(&config, &content)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn ai_translate_short_text_stream(
     window: tauri::Window,
     request_id: String,

@@ -148,9 +148,8 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const handleExternalNavigate = (event: Event) => {
-      const customEvent = event as CustomEvent<{ page?: NavPage }>;
-      const page = customEvent.detail?.page;
+    const handleExternalNavigate = (event: CustomEvent<{ page?: NavPage }>) => {
+      const page = event.detail?.page;
       if (!page) return;
       setActivePage(page);
       setSubPage(null);

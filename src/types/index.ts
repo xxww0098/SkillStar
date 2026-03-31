@@ -232,6 +232,8 @@ export interface AiConfig {
   api_key: string;
   model: string;
   target_language: string;
+  use_mymemory_for_short_text: boolean;
+  short_text_priority: "ai_first" | "mymemory_first";
   /** Model context window in K tokens (e.g. 128 = 128K tokens) */
   context_window_k: number;
   /** Override: 0 = auto-derive from context_window_k */

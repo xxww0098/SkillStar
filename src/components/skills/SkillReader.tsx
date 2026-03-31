@@ -98,6 +98,18 @@ const translationCache = new Map<string, string>();
 /** Module-level summary cache: content → summaryContent. */
 const summaryCache = new Map<string, string>();
 
+const MAX_CACHE_SIZE = 100;
+
+function trimCache<K, V>(cache: Map<K, V>) {
+  if (cache.size <= MAX_CACHE_SIZE) return;
+  let count = 0;
+  const max = Math.floor(MAX_CACHE_SIZE / 2);
+  for (const key of cache.keys()) {
+    if (count++ >= max) break;
+    cache.delete(key);
+  }
+}
+
 export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
   const { t } = useTranslation();
 
@@ -229,6 +241,7 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
       setTranslationWasNonStreaming(deltaCount < 2);
       // Cache completed translation
       translationCache.set(content, final);
+      trimCache(translationCache);
     } catch (e) {
       if (activeTranslateIdRef.current !== requestId) return;
       setTranslationHasDelta(deltaCount >= 2);
@@ -317,6 +330,7 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
       setSummaryContent(result);
       // Cache completed summary
       summaryCache.set(content, result);
+      trimCache(summaryCache);
     } catch (e) {
       if (activeSummarizeIdRef.current !== requestId) return;
       if (!streamedRaw.trim()) {

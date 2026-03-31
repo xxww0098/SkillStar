@@ -50,6 +50,9 @@ function isSameAiConfig(a: AiConfig, b: AiConfig): boolean {
     a.api_key === b.api_key &&
     a.model === b.model &&
     a.target_language === b.target_language &&
+    a.use_mymemory_for_short_text === b.use_mymemory_for_short_text &&
+    a.short_text_priority === b.short_text_priority &&
+    a.context_window_k === b.context_window_k &&
     a.max_concurrent_requests === b.max_concurrent_requests &&
     a.chunk_char_limit === b.chunk_char_limit &&
     a.scan_max_response_tokens === b.scan_max_response_tokens

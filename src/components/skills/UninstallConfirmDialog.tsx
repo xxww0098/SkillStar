@@ -49,7 +49,7 @@ export function UninstallConfirmDialog({
             }}
             className="fixed left-1/2 top-1/2 w-full max-w-md -translate-x-1/2 -translate-y-1/2 z-50 px-4"
           >
-            <div role="alertdialog" aria-modal="true" aria-label={isBatch ? t("uninstallDialog.title", { count: skillNames.length }) : t("uninstallDialog.titleSingle")} className="relative overflow-hidden rounded-[24px] border border-white/10 bg-card/95 shadow-[0_0_80px_-20px_rgba(0,0,0,0.5)] backdrop-blur-3xl ring-1 ring-white/5">
+            <div role="alertdialog" aria-modal="true" aria-label={isBatch ? t("uninstallDialog.title", { count: skillNames.length }) : t("uninstallDialog.titleSingle")} className="modal-surface">
               {/* Top ambient glow */}
               <div className="pointer-events-none absolute -left-20 -top-20 h-48 w-48 rounded-full bg-primary/20 blur-[60px] opacity-70" />
               <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-accent/10 blur-[60px] opacity-70" />

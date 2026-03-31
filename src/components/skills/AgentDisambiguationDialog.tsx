@@ -95,7 +95,7 @@ export function AgentDisambiguationDialog({
               role="dialog"
               aria-modal="true"
               aria-label={t("projects.disambiguateTitle")}
-              className="relative overflow-hidden rounded-[24px] border border-border bg-card/95 shadow-[0_0_80px_-20px_rgba(0,0,0,0.5)] backdrop-blur-3xl ring-1 ring-border-subtle"
+              className="modal-surface-subtle"
             >
               {/* Ambient glows */}
               <div className="pointer-events-none absolute -left-20 -top-20 h-48 w-48 rounded-full bg-primary/20 blur-[60px] opacity-70" />

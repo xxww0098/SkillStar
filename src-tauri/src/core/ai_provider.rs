@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 const AI_MAX_TOKENS: u32 = 196_608;
-const SHORT_TEXT_MAX_TOKENS: u32 = 2_048;
+const SHORT_TEXT_MAX_TOKENS: u32 = 256;
 const SUMMARY_MAX_TOKENS: u32 = 4_096;
 
 /// Estimate a reasonable max_tokens for translation output.
@@ -41,12 +41,42 @@ impl Default for ApiFormat {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ShortTextPriority {
+    AiFirst,
+    MymemoryFirst,
+}
+
+impl ShortTextPriority {
+    fn parse_loose(raw: &str) -> Self {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "mymemory_first" | "mymemoryfirst" | "my_memory_first" => Self::MymemoryFirst,
+            _ => Self::AiFirst,
+        }
+    }
+}
+
+impl Default for ShortTextPriority {
+    fn default() -> Self {
+        Self::AiFirst
+    }
+}
+
 fn deserialize_api_format<'de, D>(deserializer: D) -> Result<ApiFormat, D::Error>
 where
     D: Deserializer<'de>,
 {
     let raw = String::deserialize(deserializer)?;
     Ok(ApiFormat::parse_loose(&raw))
+}
+
+fn deserialize_short_text_priority<'de, D>(deserializer: D) -> Result<ShortTextPriority, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw = String::deserialize(deserializer)?;
+    Ok(ShortTextPriority::parse_loose(&raw))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,6 +88,10 @@ pub struct AiConfig {
     pub api_key: String,
     pub model: String,
     pub target_language: String,
+    #[serde(default)]
+    pub use_mymemory_for_short_text: bool,
+    #[serde(default, deserialize_with = "deserialize_short_text_priority")]
+    pub short_text_priority: ShortTextPriority,
     /// Model context window in K tokens (e.g. 128 = 128K tokens).
     /// All scan parameters are auto-derived from this value.
     #[serde(default = "default_context_window_k")]
@@ -86,8 +120,10 @@ impl Default for AiConfig {
             api_key: String::new(),
             model: "gpt-5.4".to_string(),
             target_language: "zh-CN".to_string(),
+            use_mymemory_for_short_text: false,
+            short_text_priority: ShortTextPriority::default(),
             context_window_k: default_context_window_k(),
-            max_concurrent_requests: 0,
+            max_concurrent_requests: 4,
             chunk_char_limit: 0,
             scan_max_response_tokens: 0,
         }
@@ -121,11 +157,10 @@ pub fn resolve_scan_params(config: &AiConfig) -> ResolvedScanParams {
     };
 
     // max_concurrent_requests: scale with context window, clamped
-    let auto_concurrency = (ctx_tokens / 32_000).clamp(2, 16) as u32;
     let max_concurrent_requests = if config.max_concurrent_requests > 0 {
         config.max_concurrent_requests
     } else {
-        auto_concurrency
+        4 // User requested default fallback to 4 if 0
     };
 
     // scan_max_response_tokens: small fraction of context, enough for JSON output
@@ -1046,6 +1081,108 @@ where
     }
 }
 
+fn ai_short_text_available(config: &AiConfig) -> bool {
+    config.enabled && !config.api_key.trim().is_empty()
+}
+
+fn normalize_mymemory_lang(code: &str) -> String {
+    let trimmed = code.trim();
+    if trimmed.is_empty() {
+        return "zh-CN".to_string();
+    }
+    match trimmed {
+        "zh-CN" => "zh-CN".to_string(),
+        "zh-TW" => "zh-TW".to_string(),
+        "pt-BR" => "pt-BR".to_string(),
+        _ => trimmed
+            .split('-')
+            .next()
+            .filter(|v| !v.is_empty())
+            .unwrap_or(trimmed)
+            .to_string(),
+    }
+}
+
+fn detect_short_text_source_lang(text: &str) -> &'static str {
+    if text
+        .chars()
+        .any(|c| ('\u{4E00}'..='\u{9FFF}').contains(&c))
+    {
+        return "zh-CN";
+    }
+    if text
+        .chars()
+        .any(|c| ('\u{3040}'..='\u{30FF}').contains(&c))
+    {
+        return "ja";
+    }
+    if text
+        .chars()
+        .any(|c| ('\u{AC00}'..='\u{D7AF}').contains(&c))
+    {
+        return "ko";
+    }
+    "en"
+}
+
+async fn mymemory_translate_short_text(config: &AiConfig, text: &str) -> Result<String> {
+    let client = get_http_client()?;
+    let target = normalize_mymemory_lang(&config.target_language);
+    let source = detect_short_text_source_lang(text);
+
+    if source.eq_ignore_ascii_case(&target) {
+        return Ok(text.to_string());
+    }
+
+    let langpair = format!("{source}|{target}");
+    let url = reqwest::Url::parse_with_params(
+        "https://api.mymemory.translated.net/get",
+        &[("q", text), ("langpair", &langpair)],
+    )
+    .context("Failed to build MyMemory string")?;
+
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .context("Failed to send request to MyMemory API")?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body_text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("MyMemory API returned {} — {}", status, body_text);
+    }
+
+    let payload = resp
+        .json::<serde_json::Value>()
+        .await
+        .context("Failed to parse MyMemory API response")?;
+
+    let api_status = payload
+        .get("responseStatus")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(200);
+    if api_status != 200 {
+        let details = payload
+            .get("responseDetails")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Unknown MyMemory error");
+        anyhow::bail!("MyMemory API responseStatus={} — {}", api_status, details);
+    }
+
+    let translated = payload
+        .pointer("/responseData/translatedText")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .unwrap_or("");
+
+    if translated.is_empty() {
+        anyhow::bail!("MyMemory returned empty translation");
+    }
+
+    Ok(translated.to_string())
+}
+
 // ── Public API ───────────────────────────────────────────────────────
 
 /// Translate a SKILL.md content to the target language.
@@ -1130,6 +1267,80 @@ pub async fn translate_short_text(config: &AiConfig, text: &str) -> Result<Strin
     let lang = language_display_name(&config.target_language);
     let system_prompt = build_short_translation_system_prompt(lang);
     chat_completion_capped(config, &system_prompt, text, SHORT_TEXT_MAX_TOKENS).await
+}
+
+/// Translate short text using configured priority:
+/// - AI first then MyMemory fallback
+/// - MyMemory first then AI fallback
+/// - Or a single available path if only one is enabled.
+pub async fn translate_short_text_with_priority(config: &AiConfig, text: &str) -> Result<String> {
+    let ai_available = ai_short_text_available(config);
+    let mymemory_available = config.use_mymemory_for_short_text;
+
+    if !ai_available && !mymemory_available {
+        anyhow::bail!(
+            "Short-text translation is not configured. Configure AI API key or enable MyMemory in Settings."
+        );
+    }
+
+    match config.short_text_priority {
+        ShortTextPriority::AiFirst => {
+            let mut ai_err: Option<anyhow::Error> = None;
+            if ai_available {
+                match translate_short_text(config, text).await {
+                    Ok(result) if !result.trim().is_empty() => return Ok(result),
+                    Ok(_) => ai_err = Some(anyhow::anyhow!("AI returned empty response")),
+                    Err(err) => ai_err = Some(err),
+                }
+            }
+
+            if mymemory_available {
+                let context = match ai_err {
+                    Some(err) => format!(
+                        "MyMemory short-text translation failed after AI path failed: {}",
+                        err
+                    ),
+                    None => "MyMemory short-text translation failed".to_string(),
+                };
+                return mymemory_translate_short_text(config, text)
+                    .await
+                    .with_context(|| context);
+            }
+
+            if let Some(err) = ai_err {
+                return Err(err);
+            }
+        }
+        ShortTextPriority::MymemoryFirst => {
+            let mut mymemory_err: Option<anyhow::Error> = None;
+            if mymemory_available {
+                match mymemory_translate_short_text(config, text).await {
+                    Ok(result) if !result.trim().is_empty() => return Ok(result),
+                    Ok(_) => mymemory_err = Some(anyhow::anyhow!("MyMemory returned empty response")),
+                    Err(err) => mymemory_err = Some(err),
+                }
+            }
+
+            if ai_available {
+                let context = match mymemory_err {
+                    Some(err) => format!(
+                        "AI short-text translation failed after MyMemory path failed: {}",
+                        err
+                    ),
+                    None => "AI short-text translation failed".to_string(),
+                };
+                return translate_short_text(config, text).await.with_context(|| context);
+            }
+
+            if let Some(err) = mymemory_err {
+                return Err(err);
+            }
+        }
+    }
+
+    anyhow::bail!(
+        "Short-text translation is not configured. Configure AI API key or enable MyMemory in Settings."
+    );
 }
 
 /// Translate a short description with streaming delta callbacks.

@@ -122,6 +122,7 @@ pub fn run() {
             commands::ai::save_ai_config,
             commands::ai::ai_translate_skill,
             commands::ai::ai_translate_skill_stream,
+            commands::ai::ai_translate_short_text,
             commands::ai::ai_translate_short_text_stream,
             commands::ai::ai_summarize_skill,
             commands::ai::ai_summarize_skill_stream,

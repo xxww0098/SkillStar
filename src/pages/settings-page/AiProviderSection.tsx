@@ -51,7 +51,7 @@ export function AiProviderSection({
   const aiApiKeyPlaceholder = isAnthropicFormat ? "sk-ant-..." : "sk-...";
   const aiBaseUrlPlaceholder = isAnthropicFormat ? "https://api.anthropic.com" : "https://api.openai.com/v1";
   const aiModelPlaceholder = isAnthropicFormat ? "claude-sonnet-4-20250514" : "gpt-5.4";
-  const clampConcurrency = (value: number) => Math.min(20, Math.max(0, value || 0));
+  const clampConcurrency = (value: number) => Math.min(20, Math.max(1, value || 1));
   const formControlClass =
     "flex h-9 w-full rounded-xl border border-input-border bg-input backdrop-blur-sm px-3 text-sm text-foreground shadow-sm transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:border-primary/60";
 
@@ -146,6 +146,46 @@ export function AiProviderSection({
                   <option value="fr">{t("settings.langFr")}</option>
                   <option value="de">{t("settings.langDe")}</option>
                   <option value="ko">{t("settings.langKo")}</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-border/70 bg-muted/20 px-3 py-3 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-medium text-foreground">
+                    {t("settings.enableMyMemoryShortText")}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    {t("settings.enableMyMemoryShortTextHint")}
+                  </p>
+                </div>
+                <Switch
+                  checked={localAiConfig.use_mymemory_for_short_text}
+                  onCheckedChange={(checked) =>
+                    onConfigChange({ ...localAiConfig, use_mymemory_for_short_text: checked })
+                  }
+                  disabled={aiSaving}
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">
+                  {t("settings.shortTextPriority")}
+                </label>
+                <select
+                  value={localAiConfig.short_text_priority}
+                  onChange={(e) =>
+                    onConfigChange({
+                      ...localAiConfig,
+                      short_text_priority: e.target.value as "ai_first" | "mymemory_first",
+                    })
+                  }
+                  className={`${formControlClass} pr-8`}
+                  disabled={!localAiConfig.use_mymemory_for_short_text}
+                >
+                  <option value="ai_first">{t("settings.shortTextPriorityAiFirst")}</option>
+                  <option value="mymemory_first">{t("settings.shortTextPriorityMyMemoryFirst")}</option>
                 </select>
               </div>
             </div>
@@ -254,7 +294,7 @@ export function AiProviderSection({
                   <div className="flex items-center gap-2.5">
                     <Input
                       type="number"
-                      min={0}
+                      min={1}
                       max={20}
                       step={1}
                       value={localAiConfig.max_concurrent_requests}
@@ -266,12 +306,9 @@ export function AiProviderSection({
                       }
                       className="w-20 font-mono tabular-nums"
                     />
-                    <span className="text-[10px] text-muted-foreground ml-1">
-                      {localAiConfig.max_concurrent_requests === 0 ? "(Auto)" : ""}
-                    </span>
                   </div>
                   <p className="text-[10px] text-muted-foreground/60 mt-1">
-                    {t("settings.aiConcurrencyOverride", { defaultValue: "0 = Auto calculate. Override if you hit API rate limits." })}
+                    {t("settings.aiConcurrencyOverride", { defaultValue: "Adjust down if you encounter API rate limits." })}
                   </p>
                 </div>
               </div>
