@@ -6,14 +6,14 @@ export function Toaster() {
       position="bottom-right"
       toastOptions={{
         style: {
-          background: "rgba(255, 255, 255, 0.08)",
+          background: "var(--color-card)",
           backdropFilter: "blur(20px)",
           color: "var(--color-foreground)",
-          border: "1px solid rgba(255, 255, 255, 0.1)",
+          border: "1px solid var(--color-border)",
           borderRadius: "var(--radius-xl)",
           fontSize: "0.875rem",
           padding: "12px 16px",
-          boxShadow: "0 8px 32px rgba(0, 0, 0, 0.4)",
+          boxShadow: "0 8px 32px var(--color-shadow)",
         },
         classNames: {
           toast: "shadow-lg",

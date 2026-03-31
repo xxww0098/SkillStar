@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use std::fs;
 use std::path::Path;
 
@@ -12,10 +12,13 @@ pub fn compute_tree_hash(repo_path: &Path) -> Result<String> {
     Ok(tree_id.to_string())
 }
 
-/// Clone a repository from a URL to a destination path
+/// Clone a repository from a URL to a destination path.
+///
+/// Always uses `--depth 1 --single-branch` to minimise network transfer
+/// and disk usage. Skills only need the latest snapshot, not full history.
 pub fn clone_repo(url: &str, dest: &Path) -> Result<()> {
     let output = command_with_path("git")
-        .arg("clone")
+        .args(["clone", "--depth", "1", "--single-branch"])
         .arg(url)
         .arg(dest)
         .output()
@@ -120,8 +123,7 @@ pub fn apply_sparse_checkout(repo_path: &Path, dirs: &[&str]) -> Result<()> {
 
     // Set the directories to materialize
     let mut cmd = command_with_path("git");
-    cmd.current_dir(repo_path)
-        .args(["sparse-checkout", "set"]);
+    cmd.current_dir(repo_path).args(["sparse-checkout", "set"]);
     for dir in dirs {
         cmd.arg(dir);
     }
@@ -142,10 +144,7 @@ pub fn apply_sparse_checkout(repo_path: &Path, dirs: &[&str]) -> Result<()> {
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);
         // Non-fatal: some repos may have warnings
-        eprintln!(
-            "[git_ops] sparse checkout warning: {}",
-            err.trim()
-        );
+        eprintln!("[git_ops] sparse checkout warning: {}", err.trim());
     }
 
     Ok(())
@@ -181,32 +180,40 @@ pub fn ensure_worktree_checked_out(repo_path: &Path) -> Result<bool> {
     Ok(true)
 }
 
-/// Fetch latest changes and check if update is available
+/// Fetch latest changes and check if update is available.
+///
+/// Uses `--depth 1` to keep network transfer minimal — we only need the
+/// tip commit hash, not additional history.
 pub fn check_update(repo_path: &Path) -> Result<bool> {
-    // Keep local remote refs fresh before comparing ahead/behind.
-    run_git(repo_path, &["fetch", "--quiet"])?;
+    // Depth-1 fetch: updates remote refs without downloading extra history.
+    run_git(repo_path, &["fetch", "--depth", "1", "--quiet"])?;
 
-    let counts = run_git(
-        repo_path,
-        &["rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
-    )?;
-    let (_ahead, behind) = parse_ahead_behind_counts(&counts)?;
+    // For shallow repos, rev-list --left-right can be unreliable.
+    // Compare HEAD vs FETCH_HEAD / @{upstream} via rev-parse instead.
+    let local_head = run_git(repo_path, &["rev-parse", "HEAD"])?;
+    let remote_head = run_git(repo_path, &["rev-parse", "@{upstream}"])
+        .or_else(|_| run_git(repo_path, &["rev-parse", "FETCH_HEAD"]))?;
 
-    Ok(behind > 0)
+    Ok(local_head != remote_head)
 }
 
-/// Pull (fetch + fast-forward) a repository
+/// Pull a repository to the latest remote HEAD.
+///
+/// Uses `fetch --depth 1` + `reset --hard` instead of `git pull` so that:
+/// - Shallow clones stay shallow (git pull can re-deepen).
+/// - The result is always exactly at origin HEAD (no merge conflicts).
+/// - Network transfer is bounded to a single commit.
 pub fn pull_repo(repo_path: &Path) -> Result<()> {
-    let output = command_with_path("git")
-        .current_dir(repo_path)
-        .arg("pull")
-        .output()
-        .context("Failed to execute git pull")?;
+    run_git(repo_path, &["fetch", "--depth", "1", "--quiet"])?;
 
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow::anyhow!("git pull failed: {}", err));
-    }
+    // Determine the correct reset target.
+    // Try origin/HEAD first, then the tracking upstream, then FETCH_HEAD.
+    let target = run_git(repo_path, &["rev-parse", "origin/HEAD"])
+        .or_else(|_| run_git(repo_path, &["rev-parse", "@{upstream}"]))
+        .or_else(|_| run_git(repo_path, &["rev-parse", "FETCH_HEAD"]))
+        .unwrap_or_else(|_| "FETCH_HEAD".to_string());
+
+    run_git(repo_path, &["reset", "--hard", &target])?;
     Ok(())
 }
 
@@ -223,26 +230,6 @@ fn run_git(repo_path: &Path, args: &[&str]) -> Result<String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
-fn parse_ahead_behind_counts(output: &str) -> Result<(u32, u32)> {
-    let mut parts = output.split_whitespace();
-    let ahead = parts
-        .next()
-        .ok_or_else(|| anyhow!("git rev-list output missing ahead count"))?
-        .parse::<u32>()
-        .context("Failed to parse ahead count from git rev-list output")?;
-    let behind = parts
-        .next()
-        .ok_or_else(|| anyhow!("git rev-list output missing behind count"))?
-        .parse::<u32>()
-        .context("Failed to parse behind count from git rev-list output")?;
-
-    if parts.next().is_some() {
-        return Err(anyhow!("git rev-list output has unexpected extra fields"));
-    }
-
-    Ok((ahead, behind))
 }
 
 #[cfg(test)]

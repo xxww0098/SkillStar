@@ -47,7 +47,7 @@ export function ProjectListPanel({
             key={project.name}
             onClick={() => onSelectProject(project)}
             className={cn(
-              "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all group cursor-pointer",
+              "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition group cursor-pointer",
               selectedProject?.name === project.name
                 ? "bg-primary/5 border border-primary/20 shadow-sm"
                 : "hover:bg-muted border border-transparent"
@@ -68,12 +68,12 @@ export function ProjectListPanel({
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-sm font-medium truncate">{project.name}</div>
-              <div className="text-[11px] text-muted-foreground truncate font-mono">{project.path}</div>
+              <div className="text-micro text-muted-foreground truncate font-mono">{project.path}</div>
             </div>
             <div className="shrink-0">
               <button
                 onClick={(event) => onRemoveProject(event, project.name)}
-                className="p-1.5 rounded-md opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all cursor-pointer"
+                className="p-1.5 rounded-md opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition cursor-pointer"
               >
                 <Trash2 className="w-4 h-4" />
               </button>

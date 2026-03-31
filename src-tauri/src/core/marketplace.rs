@@ -5,14 +5,18 @@ use std::sync::OnceLock;
 use anyhow::{Context, Result};
 use chrono::{Duration, Utc};
 use regex::Regex;
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use super::skill::{extract_github_source_from_url, OfficialPublisher, Skill, SkillCategory};
+use super::skill::{OfficialPublisher, Skill, SkillCategory, extract_github_source_from_url};
 
 const DESCRIPTION_CACHE_TTL_DAYS: i64 = 14;
 const DESCRIPTION_CACHE_MAX_ENTRIES: usize = 5000;
 const DESCRIPTION_FETCH_CONCURRENCY: usize = 4;
 const DESCRIPTION_MAX_CHARS: usize = 240;
+
+/// Build-time User-Agent string derived from Cargo.toml version.
+const USER_AGENT: &str = concat!("SkillStar/", env!("CARGO_PKG_VERSION"));
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MarketplaceResult {
@@ -51,11 +55,6 @@ struct DescriptionCacheEntry {
     updated_at: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
-struct DescriptionCacheFile {
-    entries: HashMap<String, DescriptionCacheEntry>,
-}
-
 // ── skills.sh Integration ──────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -77,24 +76,24 @@ struct SkillsShSkill {
 }
 
 impl From<SkillsShSkill> for Skill {
-    fn from(s: SkillsShSkill) -> Self {
-        let git_url = s.repo_url.unwrap_or_else(|| {
+    fn from(skill_entry: SkillsShSkill) -> Self {
+        let git_url = skill_entry.repo_url.unwrap_or_else(|| {
             // source is "org/repo" (e.g. "vercel/ai"), the actual GitHub repo
-            format!("https://github.com/{}", s.source)
+            format!("https://github.com/{}", skill_entry.source)
         });
-        let source = Some(s.source.clone());
+        let source = Some(skill_entry.source.clone());
         Skill {
-            name: s.name,
-            description: s.description.unwrap_or_default(),
-            skill_type: "hub".to_string(),
-            stars: s.installs,
+            name: skill_entry.name,
+            description: skill_entry.description.unwrap_or_default(),
+            skill_type: crate::core::skill::SkillType::Hub,
+            stars: skill_entry.installs,
             installed: false,
             update_available: false,
             last_updated: chrono::Utc::now().to_rfc3339(),
             git_url,
             tree_hash: None,
             category: SkillCategory::None,
-            author: Some(s.source),
+            author: Some(skill_entry.source),
             topics: vec![],
             agent_links: Some(Vec::new()),
             rank: None,
@@ -113,13 +112,13 @@ pub async fn search_skills_sh(query: &str, limit: u32) -> Result<MarketplaceResu
     let clamped_limit = limit.min(100);
     let url = format!(
         "https://skills.sh/api/search?q={}&limit={}",
-        urlencoded(query),
+        url_encode_query_component(query),
         clamped_limit
     );
 
     let response: SkillsShSearchResponse = client
         .get(&url)
-        .header("User-Agent", "SkillStar/0.1.0")
+        .header("User-Agent", USER_AGENT)
         .header("Accept", "application/json")
         .send()
         .await
@@ -252,7 +251,7 @@ async fn fetch_description_for_target(
     let url = format!("https://skills.sh/{}/{}", target.source, target.name);
     let response = client
         .get(&url)
-        .header("User-Agent", "SkillStar/0.1.0")
+        .header("User-Agent", USER_AGENT)
         .header("Accept", "text/html,application/xhtml+xml")
         .send()
         .await
@@ -450,77 +449,96 @@ fn is_valid_description(description: &str) -> bool {
     true
 }
 
-fn description_cache_path() -> PathBuf {
-    super::paths::data_root().join("marketplace_description_cache.json")
+fn description_db_path() -> PathBuf {
+    super::paths::data_root().join("marketplace.db")
+}
+
+fn init_marketplace_db() -> Result<Connection, rusqlite::Error> {
+    let path = description_db_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let conn = Connection::open(&path)?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS marketplace_cache (
+            key TEXT PRIMARY KEY,
+            description TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )",
+        (),
+    )?;
+    Ok(conn)
 }
 
 fn load_description_cache() -> HashMap<String, DescriptionCacheEntry> {
-    let path = description_cache_path();
-    if !path.exists() {
-        return HashMap::new();
+    let mut map = HashMap::new();
+    let conn = match init_marketplace_db() {
+        Ok(c) => c,
+        Err(_) => return map,
+    };
+    let mut stmt = match conn.prepare("SELECT key, description, updated_at FROM marketplace_cache")
+    {
+        Ok(s) => s,
+        Err(_) => return map,
+    };
+
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    });
+
+    if let Ok(mapped) = rows {
+        for row_result in mapped.flatten() {
+            let (key, description, updated_at) = row_result;
+            map.insert(
+                key,
+                DescriptionCacheEntry {
+                    description,
+                    updated_at,
+                },
+            );
+        }
     }
-
-    let content = match std::fs::read_to_string(&path) {
-        Ok(content) => content,
-        Err(e) => {
-            eprintln!(
-                "[hydrate_marketplace_descriptions] failed to read cache {}: {}",
-                path.display(),
-                e
-            );
-            return HashMap::new();
-        }
-    };
-
-    let file = match serde_json::from_str::<DescriptionCacheFile>(&content) {
-        Ok(file) => file,
-        Err(e) => {
-            eprintln!(
-                "[hydrate_marketplace_descriptions] failed to parse cache {}: {}",
-                path.display(),
-                e
-            );
-            return HashMap::new();
-        }
-    };
-
-    file.entries
+    map
 }
 
 fn persist_description_cache(entries: &HashMap<String, DescriptionCacheEntry>) {
-    let path = description_cache_path();
+    // Delete legacy json file if exists
+    let legacy_path = super::paths::data_root().join("marketplace_description_cache.json");
+    if legacy_path.exists() {
+        let _ = std::fs::remove_file(legacy_path);
+    }
+
+    let mut conn = match init_marketplace_db() {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
     let mut pruned = entries.clone();
     prune_description_cache(&mut pruned);
 
-    if let Some(parent) = path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            eprintln!(
-                "[hydrate_marketplace_descriptions] failed to create cache dir {}: {}",
-                parent.display(),
-                e
-            );
-            return;
+    if let Ok(tx) = conn.transaction() {
+        {
+            let mut stmt = tx.prepare_cached(
+                "INSERT OR REPLACE INTO marketplace_cache (key, description, updated_at) VALUES (?1, ?2, ?3)"
+            ).expect("SQL prepare failed");
+            for (key, entry) in &pruned {
+                let _ = stmt.execute((key, &entry.description, &entry.updated_at));
+            }
         }
-    }
 
-    let content = match serde_json::to_string_pretty(&DescriptionCacheFile { entries: pruned }) {
-        Ok(content) => content,
-        Err(e) => {
-            eprintln!(
-                "[hydrate_marketplace_descriptions] failed to serialize cache {}: {}",
-                path.display(),
-                e
-            );
-            return;
-        }
-    };
-
-    if let Err(e) = std::fs::write(&path, content) {
-        eprintln!(
-            "[hydrate_marketplace_descriptions] failed to write cache {}: {}",
-            path.display(),
-            e
+        let _ = tx.execute(
+            "DELETE FROM marketplace_cache 
+             WHERE key NOT IN (
+                 SELECT key FROM marketplace_cache 
+                 ORDER BY updated_at DESC LIMIT ?1
+             )",
+            [DESCRIPTION_CACHE_MAX_ENTRIES as i64],
         );
+        let _ = tx.commit();
     }
 }
 
@@ -593,7 +611,7 @@ pub async fn get_skills_sh_leaderboard(category: &str) -> Result<Vec<Skill>> {
         let fallback_url = "https://skills.sh/api/search?q=ai&limit=200";
         let response: SkillsShSearchResponse = client
             .get(fallback_url)
-            .header("User-Agent", "SkillStar/0.1.0")
+            .header("User-Agent", USER_AGENT)
             .send()
             .await
             .context("Fallback failed")?
@@ -677,14 +695,11 @@ fn parse_skills_sh_html(html: &str) -> Vec<Skill> {
         }
     }
 
-    // Deduplicate
+    // Deduplicate while preserving the page order from skills.sh.
     let mut seen = std::collections::HashSet::new();
     skills.retain(|s| seen.insert(s.name.clone()));
 
-    // Sort by stars (installs) descending
-    skills.sort_by(|a, b| b.stars.cmp(&a.stars));
-
-    // Assign ranks
+    // Assign ranks using the original leaderboard order for the current page.
     for (i, skill) in skills.iter_mut().enumerate() {
         skill.rank = Some((i + 1) as u32);
     }
@@ -893,7 +908,7 @@ fn parse_official_publishers_html(html: &str) -> Vec<OfficialPublisher> {
 
 /// Known official publishers as fallback data
 fn known_official_publishers() -> Vec<OfficialPublisher> {
-    let data = vec![
+    let fallback_publishers = vec![
         ("vercel-labs", "agent-skills", 3, 2195),
         ("microsoft", "github-copilot-for-azure", 23, 630),
         ("anthropics", "skills", 11, 256),
@@ -935,7 +950,8 @@ fn known_official_publishers() -> Vec<OfficialPublisher> {
         ("clerk", "skills", 1, 17),
     ];
 
-    data.into_iter()
+    fallback_publishers
+        .into_iter()
         .map(|(name, repo, repo_count, skill_count)| OfficialPublisher {
             name: name.to_string(),
             repo: repo.to_string(),
@@ -953,9 +969,9 @@ mod tests {
     use chrono::{Duration, Utc};
 
     use super::{
+        DESCRIPTION_CACHE_MAX_ENTRIES, DescriptionCacheEntry, MarketplaceDescriptionRequest,
         extract_summary_description_from_html, is_valid_description, normalize_description_target,
-        parse_official_publishers_html, prune_description_cache, DescriptionCacheEntry,
-        MarketplaceDescriptionRequest, DESCRIPTION_CACHE_MAX_ENTRIES,
+        parse_official_publishers_html, prune_description_cache,
     };
 
     #[test]
@@ -1060,7 +1076,11 @@ mod tests {
         let html = r#"some prefix{\"owner\":\"github\",\"repos\":[{\"repo\":\"github/awesome-copilot\",\"totalInstalls\":2424777,\"skills\":[{\"name\":\"git-commit\",\"installs\":22757}]},{\"repo\":\"github/gh-aw\",\"totalInstalls\":100,\"skills\":[{\"name\":\"developer\",\"installs\":50},{\"name\":\"console\",\"installs\":50}]},{\"repo\":\"github/copilot-plugins\",\"totalInstalls\":30,\"skills\":[{\"name\":\"spark\",\"installs\":30}]},{\"repo\":\"github/gh-aw-firewall\",\"totalInstalls\":3,\"skills\":[{\"name\":\"awf-skill\",\"installs\":3}]},{\"repo\":\"github/synapsync\",\"totalInstalls\":2,\"skills\":[{\"name\":\"code-analyzer\",\"installs\":2}]}],\"totalInstalls\":2424881}some suffix"#;
 
         let repos = parse_publisher_repos_from_official_payload(html, "github");
-        assert_eq!(repos.len(), 5, "Should find all 5 repos including low-traffic ones");
+        assert_eq!(
+            repos.len(),
+            5,
+            "Should find all 5 repos including low-traffic ones"
+        );
         assert_eq!(repos[0].repo, "awesome-copilot");
         assert_eq!(repos[0].skill_count, 1); // 1 skill in test data
         assert_eq!(repos[0].installs, 2424777);
@@ -1069,8 +1089,9 @@ mod tests {
     }
 }
 
-fn urlencoded(s: &str) -> String {
-    s.replace(' ', "+")
+fn url_encode_query_component(raw_query: &str) -> String {
+    raw_query
+        .replace(' ', "+")
         .replace(':', "%3A")
         .replace('>', "%3E")
         .replace('<', "%3C")
@@ -1177,9 +1198,7 @@ fn parse_repo_skills_html(html: &str, publisher: &str, repo: &str) -> Vec<Publis
             }
         }
         // Try unescaped
-        let unescaped = json_str
-            .replace("\\\"", "\"")
-            .replace("\\/", "/");
+        let unescaped = json_str.replace("\\\"", "\"").replace("\\/", "/");
         if let Ok(entry) = serde_json::from_str::<SkillJsonEntry>(&unescaped) {
             if entry.source.to_lowercase() == source_match {
                 skills.push(PublisherRepoSkill {
@@ -1217,7 +1236,11 @@ fn parse_repo_skills_html(html: &str, publisher: &str, repo: &str) -> Vec<Publis
 
     let mut seen = HashSet::new();
     for href_cap in re_href.captures_iter(&normalized) {
-        let skill_name = href_cap.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
+        let skill_name = href_cap
+            .get(1)
+            .map(|m| m.as_str())
+            .unwrap_or("")
+            .to_string();
         if skill_name.is_empty() || !seen.insert(skill_name.clone()) {
             continue;
         }
@@ -1269,7 +1292,6 @@ pub async fn get_publisher_repos(publisher_name: &str) -> Result<Vec<PublisherRe
         .header("Accept", "text/html,application/xhtml+xml")
         .send()
         .await
-        .and_then(|r| Ok(r))
     {
         if let Ok(html) = official_html.text().await {
             let repos = parse_publisher_repos_from_official_payload(&html, &publisher_lower);
@@ -1311,19 +1333,18 @@ pub async fn get_publisher_repos(publisher_name: &str) -> Result<Vec<PublisherRe
 ///
 /// The payload contains entries like:
 /// `"owner":"github","repos":[{"repo":"github/awesome-copilot","totalInstalls":N,"skills":[...]}]`
-fn parse_publisher_repos_from_official_payload(html: &str, publisher_lower: &str) -> Vec<PublisherRepo> {
+fn parse_publisher_repos_from_official_payload(
+    html: &str,
+    publisher_lower: &str,
+) -> Vec<PublisherRepo> {
     // The SSR payload uses backslash-escaped quotes: \"owner\":\"github\",\"repos\":[...]
     // Try escaped form first, then unescaped form as fallback.
-    let escaped_needle = format!(
-        r#"\"owner\":\"{}\"#,
-        publisher_lower
-    );
-    let unescaped_needle = format!(
-        r#""owner":"{}""#,
-        publisher_lower
-    );
+    let escaped_needle = format!(r#"\"owner\":\"{}\"#, publisher_lower);
+    let unescaped_needle = format!(r#""owner":"{}""#, publisher_lower);
 
-    let owner_pos = html.find(&escaped_needle).or_else(|| html.find(&unescaped_needle));
+    let owner_pos = html
+        .find(&escaped_needle)
+        .or_else(|| html.find(&unescaped_needle));
     let Some(owner_pos) = owner_pos else {
         return Vec::new();
     };
@@ -1333,9 +1354,14 @@ fn parse_publisher_repos_from_official_payload(html: &str, publisher_lower: &str
     let repos_key_escaped = r#"\"repos\":["#;
     let repos_key_plain = r#""repos":["#;
 
-    let repos_offset = after_owner.find(repos_key_escaped)
+    let repos_offset = after_owner
+        .find(repos_key_escaped)
         .map(|p| p + repos_key_escaped.len() - 1) // point at '['
-        .or_else(|| after_owner.find(repos_key_plain).map(|p| p + repos_key_plain.len() - 1));
+        .or_else(|| {
+            after_owner
+                .find(repos_key_plain)
+                .map(|p| p + repos_key_plain.len() - 1)
+        });
 
     let Some(repos_offset) = repos_offset else {
         return Vec::new();
@@ -1367,9 +1393,7 @@ fn parse_publisher_repos_from_official_payload(html: &str, publisher_lower: &str
     let repos_json = &slice[..end_pos];
 
     // The JSON may be escaped in the SSR payload — unescape backslash-escaped quotes
-    let unescaped = repos_json
-        .replace("\\\"", "\"")
-        .replace("\\/", "/");
+    let unescaped = repos_json.replace("\\\"", "\"").replace("\\/", "/");
 
     // Parse as array of repo objects
     #[derive(Deserialize)]
@@ -1405,7 +1429,8 @@ fn parse_publisher_repos_from_official_payload(html: &str, publisher_lower: &str
             let repo_name = e.repo.split('/').last().unwrap_or(&e.repo).to_string();
             let installs_label = format_installs_label(e.total_installs);
 
-            let skills: Vec<PublisherRepoSkill> = e.skills
+            let skills: Vec<PublisherRepoSkill> = e
+                .skills
                 .into_iter()
                 .map(|s| PublisherRepoSkill {
                     name: s.name,
@@ -1430,13 +1455,13 @@ fn parse_publisher_repos_from_official_payload(html: &str, publisher_lower: &str
 }
 
 /// Format numeric installs into human-readable labels (e.g. 2424777 → "2.4M")
-fn format_installs_label(n: u32) -> String {
-    if n >= 1_000_000 {
-        format!("{:.1}M", n as f64 / 1_000_000.0)
-    } else if n >= 1_000 {
-        format!("{:.1}K", n as f64 / 1_000.0)
+fn format_installs_label(installs_count: u32) -> String {
+    if installs_count >= 1_000_000 {
+        format!("{:.1}M", installs_count as f64 / 1_000_000.0)
+    } else if installs_count >= 1_000 {
+        format!("{:.1}K", installs_count as f64 / 1_000.0)
     } else {
-        n.to_string()
+        installs_count.to_string()
     }
 }
 
@@ -1447,7 +1472,10 @@ fn parse_publisher_repos_html(html: &str, publisher_name: &str) -> Vec<Publisher
 
     // Pattern: href="/publisher/repo-name">...<h3>repo-name</h3>...N skills:...installs</a>
     // We look for each href="/publisher/X" link and extract repo name, skill count, installs
-    let href_pattern = format!(r#"href="/{}/([a-z0-9A-Z_.-]+)""#, regex::escape(&publisher_lower));
+    let href_pattern = format!(
+        r#"href="/{}/([a-z0-9A-Z_.-]+)""#,
+        regex::escape(&publisher_lower)
+    );
     let re_href = match Regex::new(&href_pattern) {
         Ok(r) => r,
         Err(_) => return repos,
@@ -1468,7 +1496,11 @@ fn parse_publisher_repos_html(html: &str, publisher_name: &str) -> Vec<Publisher
     let mut seen = std::collections::HashSet::new();
 
     for href_cap in re_href.captures_iter(&normalized) {
-        let repo_name = href_cap.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
+        let repo_name = href_cap
+            .get(1)
+            .map(|m| m.as_str())
+            .unwrap_or("")
+            .to_string();
         if repo_name.is_empty() || !seen.insert(repo_name.clone()) {
             continue;
         }
@@ -1519,9 +1551,15 @@ fn parse_installs_label(label: &str) -> u32 {
     }
 
     if let Some(num_str) = trimmed.strip_suffix('M') {
-        num_str.parse::<f64>().map(|n| (n * 1_000_000.0) as u32).unwrap_or(0)
+        num_str
+            .parse::<f64>()
+            .map(|n| (n * 1_000_000.0) as u32)
+            .unwrap_or(0)
     } else if let Some(num_str) = trimmed.strip_suffix('K') {
-        num_str.parse::<f64>().map(|n| (n * 1_000.0) as u32).unwrap_or(0)
+        num_str
+            .parse::<f64>()
+            .map(|n| (n * 1_000.0) as u32)
+            .unwrap_or(0)
     } else {
         trimmed.replace(',', "").parse::<u32>().unwrap_or(0)
     }
@@ -1686,7 +1724,7 @@ fn extract_text_after_label(html: &str, label: &str) -> Option<String> {
 
     // The value is typically in the next or nearby div/span with text content.
     // Look for the pattern: label_tag_close ... >VALUE</
-    // Strategy: find the label-enclosing tag close, then scan forward  
+    // Strategy: find the label-enclosing tag close, then scan forward
     // for the first text content in subsequent tags.
 
     // For "Weekly Installs": ...Weekly Installs</span></div><div class="...">103.7K</div>
@@ -1720,11 +1758,7 @@ fn extract_text_after_label(html: &str, label: &str) -> Option<String> {
         .trim()
         .to_string();
 
-    if text.is_empty() {
-        None
-    } else {
-        Some(text)
-    }
+    if text.is_empty() { None } else { Some(text) }
 }
 
 /// Extract security audit results from the page.
@@ -1751,8 +1785,14 @@ fn extract_security_audits(html: &str) -> Vec<SecurityAudit> {
     }
 
     for cap in re_audit_entry().captures_iter(search_window) {
-        let name = cap.get(1).map(|m| m.as_str().trim().to_string()).unwrap_or_default();
-        let result = cap.get(2).map(|m| m.as_str().trim().to_string()).unwrap_or_default();
+        let name = cap
+            .get(1)
+            .map(|m| m.as_str().trim().to_string())
+            .unwrap_or_default();
+        let result = cap
+            .get(2)
+            .map(|m| m.as_str().trim().to_string())
+            .unwrap_or_default();
         if !name.is_empty() {
             audits.push(SecurityAudit { name, result });
         }
@@ -1760,4 +1800,3 @@ fn extract_security_audits(html: &str) -> Vec<SecurityAudit> {
 
     audits
 }
-

@@ -93,10 +93,7 @@ pub async fn get_publisher_repos(
     );
     match marketplace::get_publisher_repos(&publisher_name).await {
         Ok(repos) => {
-            eprintln!(
-                "[get_publisher_repos] Success, got {} repos",
-                repos.len()
-            );
+            eprintln!("[get_publisher_repos] Success, got {} repos", repos.len());
             Ok(repos)
         }
         Err(e) => {

@@ -17,6 +17,7 @@ import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
 import { EmptyState } from "../components/ui/EmptyState";
 import { SkillGridSkeleton } from "../components/ui/Skeleton";
+import { LoadingLogo } from "../components/ui/LoadingLogo";
 import { SkillCard } from "../components/skills/SkillCard";
 import { PublisherAvatar } from "../components/marketplace/OfficialPublishers";
 import { useSkills } from "../hooks/useSkills";
@@ -205,21 +206,21 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
   const visiblePublisherRepos = useMemo(() => {
     if (activeRepo) return [];
     if (!searchQuery.trim()) return publisherRepos;
-    const q = searchQuery.toLowerCase();
-    return publisherRepos.filter((r) =>
-      r.repo.toLowerCase().includes(q)
+    const normalizedQuery = searchQuery.toLowerCase();
+    return publisherRepos.filter((repo) =>
+      repo.repo.toLowerCase().includes(normalizedQuery)
     );
   }, [activeRepo, publisherRepos, searchQuery]);
   const visibleSkills = useMemo(() => {
     if (!activeRepo) return [];
     if (!searchQuery.trim()) return displaySkills;
-    const q = searchQuery.toLowerCase();
+    const normalizedQuery = searchQuery.toLowerCase();
     return displaySkills.filter(
-      (s) =>
-        s.name.toLowerCase().includes(q) ||
-        s.description.toLowerCase().includes(q) ||
-        s.source?.toLowerCase().includes(q) ||
-        s.author?.toLowerCase().includes(q)
+      (skill) =>
+        skill.name.toLowerCase().includes(normalizedQuery) ||
+        skill.description.toLowerCase().includes(normalizedQuery) ||
+        skill.source?.toLowerCase().includes(normalizedQuery) ||
+        skill.author?.toLowerCase().includes(normalizedQuery)
     );
   }, [activeRepo, displaySkills, searchQuery]);
   const shownSkillCount = activeRepo
@@ -430,7 +431,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
                   <h2 className="text-heading-lg truncate">{publisher.name}</h2>
                   <Badge
                     variant="outline"
-                    className="text-[10px] px-2 py-0.5 h-5 font-medium text-primary bg-primary/8 border-primary/20 shrink-0"
+                    className="text-micro px-2 py-0.5 h-5 font-medium text-primary bg-primary/8 border-primary/20 shrink-0"
                   >
                     {t("publisherDetail.official")}
                   </Badge>
@@ -496,7 +497,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
                         setSelectedSkill(null);
                         scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
                       }}
-                      className="text-left rounded-xl border border-white/10 bg-card/40 hover:bg-card/60 hover:border-primary/30 p-4 transition-all group backdrop-blur-sm"
+                      className="text-left rounded-xl border border-white/10 bg-card/40 hover:bg-card/60 hover:border-primary/30 p-4 transition group backdrop-blur-sm"
                     >
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-mono text-sm font-semibold truncate">
@@ -543,7 +544,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
                   </span>
                   <Badge
                     variant="outline"
-                    className="text-[10px] px-1.5 py-0 h-4 font-normal text-muted-foreground bg-muted border-transparent"
+                    className="text-micro px-1.5 py-0 h-4 font-normal text-muted-foreground bg-muted border-transparent"
                   >
                     {t("publisherDetail.repoSkills", { count: displaySkills.length })}
                   </Badge>
@@ -588,7 +589,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
               onClick={() =>
                 scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" })
               }
-              className="absolute bottom-8 right-8 z-40 w-10 h-10 rounded-full bg-background/80 hover:bg-background border border-border/50 text-foreground/80 hover:text-foreground shadow-sm hover:shadow-md backdrop-blur-md flex items-center justify-center transition-all duration-200 cursor-pointer group"
+              className="absolute bottom-8 right-8 z-40 w-10 h-10 rounded-full bg-background/80 hover:bg-background border border-border/50 text-foreground/80 hover:text-foreground shadow-sm hover:shadow-md backdrop-blur-md flex items-center justify-center transition duration-200 cursor-pointer group"
               title={t("publisherDetail.backToTop")}
             >
               <ArrowUp className="w-4 h-4 transition-transform duration-200 group-hover:-translate-y-0.5" />
@@ -601,8 +602,8 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
       {selectedSkill && (
         <Suspense
           fallback={
-            <div className="absolute right-0 top-0 bottom-0 w-[400px] h-full border-l border-white/10 bg-card/60 backdrop-blur-xl shadow-2xl overflow-y-auto z-50 rounded-tl-xl rounded-bl-xl flex items-center justify-center text-sm text-zinc-400">
-              Loading details...
+            <div className="absolute right-0 top-0 bottom-0 w-[400px] h-full border-l border-white/10 bg-card/60 backdrop-blur-xl shadow-2xl overflow-y-auto z-50 rounded-tl-xl rounded-bl-xl flex items-center justify-center">
+              <LoadingLogo size="sm" />
             </div>
           }
         >

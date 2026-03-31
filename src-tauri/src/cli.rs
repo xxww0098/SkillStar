@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 
-use crate::core::{gh_manager, git_ops, lockfile, sync};
+use crate::core::{ai_provider, gh_manager, git_ops, lockfile, security_scan, sync};
 
 #[derive(Parser)]
 #[command(
@@ -30,6 +30,14 @@ pub enum Commands {
     Create,
     /// Publish current directory as a skill to GitHub
     Publish,
+    /// Scan a skill folder for security threats
+    Scan {
+        /// Path to the skill directory to scan
+        path: String,
+        /// Skip AI analysis, run static patterns only
+        #[arg(long)]
+        static_only: bool,
+    },
     /// Force launch GUI mode
     Gui,
 }
@@ -43,6 +51,7 @@ pub fn run(args: Vec<String>) {
         Commands::Update { name } => cmd_update(name.as_deref()),
         Commands::Create => cmd_create(),
         Commands::Publish => cmd_publish(),
+        Commands::Scan { path, static_only } => cmd_scan(&path, static_only),
         Commands::Gui => {
             // Will be handled by main.rs — restart in GUI mode
             println!("Launching SkillStar GUI...");
@@ -212,5 +221,115 @@ fn cmd_publish() {
     ) {
         Ok(result) => println!("✓ Published to: {}", result.url),
         Err(e) => eprintln!("✗ {}", e),
+    }
+}
+
+fn cmd_scan(path: &str, static_only: bool) {
+    let dir = std::path::Path::new(path);
+    if !dir.is_dir() {
+        eprintln!("✗ Not a valid directory: {}", path);
+        std::process::exit(1);
+    }
+
+    let skill_name = dir
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    eprintln!("Scanning '{}' at {}...", skill_name, path);
+
+    // Collect files
+    let (files, _content_hash) = security_scan::collect_scannable_files(dir);
+    eprintln!("  Found {} scannable file(s)", files.len());
+
+    if files.is_empty() {
+        let result = serde_json::json!({
+            "skill_name": skill_name,
+            "risk_level": "Safe",
+            "static_findings": [],
+            "ai_findings": [],
+            "summary": "No scannable files found.",
+            "files_scanned": 0
+        });
+        println!("{}", serde_json::to_string_pretty(&result).unwrap());
+        return;
+    }
+
+    // Classify
+    let classifications = security_scan::classify_files(&files);
+    for (role, idx) in &classifications {
+        eprintln!("  [{}] {}", role, files[*idx].relative_path);
+    }
+
+    // Static scan
+    let static_findings = security_scan::static_pattern_scan(&files);
+    eprintln!("  Static findings: {}", static_findings.len());
+
+    if static_only {
+        let max_severity = static_findings
+            .iter()
+            .fold(security_scan::RiskLevel::Safe, |acc, f| {
+                security_scan::RiskLevel::max(acc, f.severity)
+            });
+        let result = serde_json::json!({
+            "skill_name": skill_name,
+            "risk_level": max_severity,
+            "static_findings": static_findings,
+            "ai_findings": [],
+            "summary": format!("Static-only scan: {} finding(s)", static_findings.len()),
+            "files_scanned": files.len(),
+            "mode": "static-only"
+        });
+        println!("{}", serde_json::to_string_pretty(&result).unwrap());
+        return;
+    }
+
+    // Full AI scan
+    let config = ai_provider::load_config();
+    if !config.enabled || config.api_key.trim().is_empty() {
+        eprintln!("⚠ AI provider not configured. Running static-only scan.");
+        eprintln!("  Configure AI in SkillStar Settings, or use --static-only flag.");
+        let max_severity = static_findings
+            .iter()
+            .fold(security_scan::RiskLevel::Safe, |acc, f| {
+                security_scan::RiskLevel::max(acc, f.severity)
+            });
+        let result = serde_json::json!({
+            "skill_name": skill_name,
+            "risk_level": max_severity,
+            "static_findings": static_findings,
+            "ai_findings": [],
+            "summary": format!("Static-only scan (AI not configured): {} finding(s)", static_findings.len()),
+            "files_scanned": files.len(),
+            "mode": "static-only"
+        });
+        println!("{}", serde_json::to_string_pretty(&result).unwrap());
+        return;
+    }
+
+    eprintln!("  Running AI analysis with chunk-batched sub-agents...");
+
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+    let resolved = ai_provider::resolve_scan_params(&config);
+    let ai_semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(
+        resolved.max_concurrent_requests.max(1) as usize,
+    ));
+    let scan_mode = security_scan::ScanMode::Smart;
+    match rt.block_on(security_scan::scan_single_skill::<fn(&str, Option<&str>)>(
+        &config,
+        &skill_name,
+        dir,
+        scan_mode,
+        ai_semaphore,
+        None,
+    )) {
+        Ok(result) => {
+            println!("{}", serde_json::to_string_pretty(&result).unwrap());
+            eprintln!("\n✓ Scan complete: {:?}", result.risk_level);
+        }
+        Err(e) => {
+            eprintln!("✗ Scan failed: {}", e);
+            std::process::exit(1);
+        }
     }
 }

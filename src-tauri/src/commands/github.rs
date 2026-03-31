@@ -1,4 +1,6 @@
-use crate::core::{agent_profile, gh_manager, local_skill, lockfile, paths, repo_history, repo_scanner, sync};
+use crate::core::{
+    agent_profile, gh_manager, local_skill, lockfile, paths, repo_history, repo_scanner, sync,
+};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -65,10 +67,7 @@ pub async fn publish_skill_to_github(
             let target = scan
                 .skills
                 .iter()
-                .find(|s| {
-                    s.id == skill_name_clone
-                        || s.folder_path.ends_with(&source_folder)
-                })
+                .find(|s| s.id == skill_name_clone || s.folder_path.ends_with(&source_folder))
                 .cloned();
 
             if let Some(target) = target {
@@ -76,12 +75,9 @@ pub async fn publish_skill_to_github(
                     id: target.id,
                     folder_path: target.folder_path,
                 };
-                if let Err(e) = repo_scanner::install_from_repo(
-                    &scan.source,
-                    &git_url,
-                    &[install_target],
-                ) {
-                    eprintln!("[publish] Failed to re-install from repo: {}", e);
+                match repo_scanner::install_from_repo(&scan.source, &git_url, &[install_target]) {
+                    Ok(_) => crate::core::installed_skill::invalidate_cache(),
+                    Err(e) => eprintln!("[publish] Failed to re-install from repo: {}", e),
                 }
             }
         })
@@ -94,8 +90,8 @@ pub async fn publish_skill_to_github(
 
 #[tauri::command]
 pub async fn list_user_repos(limit: Option<u32>) -> Result<Vec<gh_manager::UserRepo>, String> {
-    let n = limit.unwrap_or(30);
-    tokio::task::spawn_blocking(move || gh_manager::list_user_repos(n))
+    let repo_limit = limit.unwrap_or(30);
+    tokio::task::spawn_blocking(move || gh_manager::list_user_repos(repo_limit))
         .await
         .map_err(|e| format!("Task join error: {}", e))?
         .map_err(|e| e.to_string())
@@ -124,7 +120,9 @@ pub async fn install_from_scan(
     skills: Vec<repo_scanner::SkillInstallTarget>,
 ) -> Result<Vec<String>, String> {
     tokio::task::spawn_blocking(move || {
-        repo_scanner::install_from_repo(&source, &repo_url, &skills)
+        let install_result = repo_scanner::install_from_repo(&source, &repo_url, &skills);
+        crate::core::installed_skill::invalidate_cache();
+        install_result
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
@@ -156,10 +154,20 @@ pub async fn clean_repo_cache() -> Result<usize, String> {
 /// Aggregated storage usage info for the Settings page.
 #[derive(serde::Serialize)]
 pub struct StorageOverview {
+    /// Resolved data root path (`SKILLSTAR_DATA_DIR` or default `~/.skillstar`)
+    pub data_root_path: String,
+    /// Resolved hub root path (`SKILLSTAR_HUB_DIR` or default `~/.skillstar/.agents`)
+    pub hub_root_path: String,
+    /// Whether hub root is nested under data root.
+    pub is_hub_under_data: bool,
     /// App config files total bytes (ai_config, proxy, profiles, groups, projects…)
     pub config_bytes: u64,
-    /// Skills hub directory total bytes (~/.agents/skills/)
+    /// Resolved app config directory path.
+    pub config_path: String,
+    /// Skills hub directory total bytes (~/.skillstar/.agents/skills/)
     pub hub_bytes: u64,
+    /// Resolved installed skills directory path.
+    pub hub_path: String,
     /// Number of valid installed skills
     pub hub_count: usize,
     /// Number of broken skills (broken symlinks, orphaned lockfile entries)
@@ -168,8 +176,12 @@ pub struct StorageOverview {
     pub local_count: usize,
     /// Total bytes of skills-local/ directory
     pub local_bytes: u64,
-    /// Repo cache total bytes (~/.agents/.repos/)
+    /// Resolved local skills directory path.
+    pub local_path: String,
+    /// Repo cache total bytes (~/.skillstar/.agents/.repos/)
     pub cache_bytes: u64,
+    /// Resolved repo cache directory path.
+    pub cache_path: String,
     /// Number of cached repos
     pub cache_count: usize,
     /// Number of unused cached repos
@@ -183,7 +195,11 @@ pub struct StorageOverview {
 #[tauri::command]
 pub async fn get_storage_overview() -> Result<StorageOverview, String> {
     tokio::task::spawn_blocking(|| {
-        let config_dir = paths::data_root();
+        let data_root = paths::data_root();
+        let hub_root = paths::hub_root();
+        let is_hub_under_data = hub_root.starts_with(&data_root) && hub_root != data_root;
+
+        let config_dir = data_root.clone();
         let config_bytes = dir_size_shallow(&config_dir, Some("repo_history.json"));
 
         let hub_dir = paths::hub_skills_dir();
@@ -199,13 +215,20 @@ pub async fn get_storage_overview() -> Result<StorageOverview, String> {
         let history_count = repo_history::entry_count();
 
         StorageOverview {
+            data_root_path: data_root.to_string_lossy().to_string(),
+            hub_root_path: hub_root.to_string_lossy().to_string(),
+            is_hub_under_data,
             config_bytes,
+            config_path: config_dir.to_string_lossy().to_string(),
             hub_bytes,
+            hub_path: hub_dir.to_string_lossy().to_string(),
             hub_count,
             broken_count,
             local_count,
             local_bytes,
+            local_path: local_dir.to_string_lossy().to_string(),
             cache_bytes: cache_info.total_bytes,
+            cache_path: paths::repos_cache_dir().to_string_lossy().to_string(),
             cache_count: cache_info.repo_count,
             cache_unused_count: cache_info.unused_count,
             cache_unused_bytes: cache_info.unused_bytes,
@@ -270,11 +293,12 @@ pub async fn force_delete_installed_skills() -> Result<usize, String> {
             .map_err(|e| format!("Failed to recreate hub dir: {}", e))?;
 
         // Clear lockfile entries so UI state and filesystem stay aligned.
+        let _lock = lockfile::get_mutex().blocking_lock();
         let lock_path = lockfile::lockfile_path();
         let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
         lf.skills.clear();
         let _ = lf.save(&lock_path);
-
+        crate::core::installed_skill::invalidate_cache();
         Ok(removed_count)
     })
     .await
@@ -318,11 +342,13 @@ pub async fn force_delete_repo_caches() -> Result<usize, String> {
 
         // Prune lockfile entries for removed cache-backed skills.
         if !removed_skill_names.is_empty() {
+            let _lock = lockfile::get_mutex().blocking_lock();
             let lock_path = lockfile::lockfile_path();
             let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
             lf.skills
                 .retain(|entry| !removed_skill_names.contains(&entry.name));
             let _ = lf.save(&lock_path);
+            crate::core::installed_skill::invalidate_cache();
         }
 
         if cache_dir.exists() {
@@ -387,9 +413,9 @@ fn dir_size_shallow(path: &Path, exclude_file_name: Option<&str>) -> u64 {
                     continue;
                 }
             }
-            let p = entry.path();
-            if p.is_file() {
-                if let Ok(meta) = p.metadata() {
+            let entry_path = entry.path();
+            if entry_path.is_file() {
+                if let Ok(meta) = entry_path.metadata() {
                     total += meta.len();
                 }
             }
@@ -406,10 +432,10 @@ fn dir_size_recursive(path: &std::path::Path) -> u64 {
     let mut total: u64 = 0;
     if let Ok(entries) = std::fs::read_dir(path) {
         for entry in entries.flatten() {
-            let p = entry.path();
-            if p.is_dir() {
-                total += dir_size_recursive(&p);
-            } else if let Ok(meta) = p.metadata() {
+            let entry_path = entry.path();
+            if entry_path.is_dir() {
+                total += dir_size_recursive(&entry_path);
+            } else if let Ok(meta) = entry_path.metadata() {
                 total += meta.len();
             }
         }
@@ -507,17 +533,20 @@ pub async fn clean_broken_skills() -> Result<usize, String> {
         }
 
         // Phase 3: Prune orphaned lockfile entries
+        let _lock = lockfile::get_mutex().blocking_lock();
         let lock_path = lockfile::lockfile_path();
         let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
         let before = lf.skills.len();
         lf.skills.retain(|entry| {
             let skill_path = hub_dir.join(&entry.name);
             // Keep entries that have a valid directory or valid symlink
-            skill_path.symlink_metadata().is_ok() && (!skill_path.is_symlink() || skill_path.exists())
+            skill_path.symlink_metadata().is_ok()
+                && (!skill_path.is_symlink() || skill_path.exists())
         });
         let orphans_removed = before - lf.skills.len();
         if orphans_removed > 0 {
             let _ = lf.save(&lock_path);
+            crate::core::installed_skill::invalidate_cache();
             fixed += orphans_removed;
         }
 

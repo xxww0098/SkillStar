@@ -22,13 +22,26 @@ impl std::fmt::Display for SkillCategory {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SkillType {
+    Hub,
+    Local,
+}
+
+impl Default for SkillType {
+    fn default() -> Self {
+        Self::Hub
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Skill {
     pub name: String,
     pub description: String,
-    /// `"hub"` for git-backed skills, `"local"` for user-authored local skills.
-    #[serde(default = "default_skill_type")]
-    pub skill_type: String,
+    /// Indicates if a skill is git-backed (`Hub`) or user-authored (`Local`).
+    #[serde(default)]
+    pub skill_type: SkillType,
     pub stars: u32,
     pub installed: bool,
     pub update_available: bool,
@@ -47,10 +60,6 @@ pub struct Skill {
     pub source: Option<String>,
 }
 
-fn default_skill_type() -> String {
-    "hub".to_string()
-}
-
 impl Skill {
     /// Create a Skill from skills.sh data.
     ///
@@ -66,7 +75,7 @@ impl Skill {
         let mut skill = Self {
             name,
             description,
-            skill_type: "hub".to_string(),
+            skill_type: SkillType::Hub,
             stars,
             installed: false,
             update_available: false,

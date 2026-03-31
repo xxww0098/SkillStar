@@ -7,13 +7,26 @@ pub mod projects;
 
 use crate::core::{
     git_ops, installed_skill, local_skill, lockfile, project_manifest, proxy, repo_scanner,
+    security_scan,
     skill::{
-        extract_github_source_from_url, extract_skill_description, parse_skill_content, Skill,
-        SkillContent,
+        Skill, SkillContent, extract_github_source_from_url, extract_skill_description,
+        parse_skill_content,
     },
     skill_bundle, sync,
 };
 use std::collections::HashMap;
+
+/// Result of updating a single skill. For repo-cached skills, pulling the
+/// repo also advances all sibling skills from the same repository.
+#[derive(serde::Serialize)]
+pub struct UpdateResult {
+    /// The skill that was explicitly updated.
+    pub skill: Skill,
+    /// Names of sibling skills from the same repo whose update state was
+    /// also cleared by the pull. The frontend should set
+    /// `update_available = false` for these.
+    pub siblings_cleared: Vec<String>,
+}
 
 #[tauri::command]
 pub async fn get_proxy_config() -> Result<proxy::ProxyConfig, String> {
@@ -46,47 +59,140 @@ pub async fn refresh_skill_updates(
 #[tauri::command]
 pub async fn install_skill(url: String, name: Option<String>) -> Result<Skill, String> {
     let skills_dir = sync::get_hub_skills_dir();
-    let name_str = name.unwrap_or_else(|| {
+
+    // Derive a reasonable skill name from the URL if not provided
+    let name_hint = name.clone().unwrap_or_else(|| {
         url.rsplit('/')
             .next()
             .unwrap_or("skill")
             .trim_end_matches(".git")
             .to_string()
     });
-    let dest = skills_dir.join(&name_str);
 
-    if dest.exists() {
-        return Err(format!("Skill '{}' is already installed", name_str));
+    if skills_dir.join(&name_hint).exists() {
+        return Err(format!("Skill '{}' is already installed", name_hint));
     }
 
     // Reject if name exists in skills-local
-    if local_skill::local_skills_dir().join(&name_str).exists() {
-        return Err(format!("Skill '{}' already exists as a local skill", name_str));
+    if local_skill::local_skills_dir().join(&name_hint).exists() {
+        return Err(format!(
+            "Skill '{}' already exists as a local skill",
+            name_hint
+        ));
+    }
+
+    // ── Strategy 1: Sparse repo-cache pipeline ──────────────────────
+    // Clone/fetch into .repos/ using sparse treeless clone (only tree metadata
+    // + skill directories), then symlink the requested skill into the hub.
+    // This is dramatically smaller than a full clone for large repos.
+    if let Ok((repo_url, source)) = repo_scanner::normalize_repo_url(&url) {
+        if let Ok(repo_dir) = repo_scanner::clone_or_fetch_repo(&repo_url, &source) {
+            let skills_found = repo_scanner::scan_skills_in_repo(&repo_dir);
+
+            // Find the requested skill by name, or use the only one if single-skill repo
+            let target = if let Some(ref n) = name {
+                skills_found.iter().find(|s| s.id == *n)
+            } else if skills_found.len() == 1 {
+                skills_found.first()
+            } else {
+                // Multi-skill repo but no name specified — try matching by URL-derived name
+                skills_found.iter().find(|s| s.id == name_hint)
+            };
+
+            if let Some(skill) = target {
+                let targets = vec![repo_scanner::SkillInstallTarget {
+                    id: skill.id.clone(),
+                    folder_path: skill.folder_path.clone(),
+                }];
+
+                match repo_scanner::install_from_repo(&source, &repo_url, &targets) {
+                    Ok(installed) if !installed.is_empty() => {
+                        let installed_name = &installed[0];
+                        let dest = skills_dir.join(installed_name);
+                        let description = extract_skill_description(&dest);
+                        let git_source = extract_github_source_from_url(&repo_url);
+
+                        crate::core::installed_skill::invalidate_cache();
+                        // Read the tree_hash from the lockfile that install_from_repo just wrote
+                        let tree_hash = lockfile::Lockfile::load(&lockfile::lockfile_path())
+                            .ok()
+                            .and_then(|lf| {
+                                lf.skills
+                                    .iter()
+                                    .find(|e| e.name == *installed_name)
+                                    .map(|e| e.tree_hash.clone())
+                            });
+
+                        return Ok(Skill {
+                            name: installed_name.clone(),
+                            description,
+                            skill_type: crate::core::skill::SkillType::Hub,
+                            stars: 0,
+                            installed: true,
+                            update_available: false,
+                            last_updated: chrono::Utc::now().to_rfc3339(),
+                            git_url: repo_url,
+                            tree_hash,
+                            category: crate::core::skill::SkillCategory::None,
+                            author: None,
+                            topics: Vec::new(),
+                            agent_links: Some(Vec::new()),
+                            rank: None,
+                            source: git_source,
+                        });
+                    }
+                    Ok(_) => { /* empty install result — fall through to fallback */ }
+                    Err(e) => {
+                        eprintln!(
+                            "[install_skill] repo-cache install failed, falling back: {}",
+                            e
+                        );
+                    }
+                }
+            } else {
+                eprintln!(
+                    "[install_skill] skill '{}' not found in repo (found: {:?}), falling back to direct clone",
+                    name_hint,
+                    skills_found.iter().map(|s| &s.id).collect::<Vec<_>>()
+                );
+            }
+        }
+    }
+
+    // ── Strategy 2: Direct shallow clone (fallback) ─────────────────
+    // If the repo-cache approach fails (URL format issue, sparse clone not
+    // supported, skill not found in scan, etc.), fall back to a direct
+    // shallow clone into the hub. This is the most resilient path — it
+    // always works as long as the URL is valid.
+    let dest = skills_dir.join(&name_hint);
+    if dest.exists() {
+        return Err(format!("Skill '{}' is already installed", name_hint));
     }
 
     git_ops::clone_repo(&url, &dest).map_err(|e| e.to_string())?;
 
     let tree_hash = git_ops::compute_tree_hash(&dest).map_err(|e| e.to_string())?;
 
+    let _lock = lockfile::get_mutex().lock().await;
     let lock_path = lockfile::lockfile_path();
     let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
     lf.upsert(lockfile::LockEntry {
-        name: name_str.clone(),
+        name: name_hint.clone(),
         git_url: url.clone(),
         tree_hash: tree_hash.clone(),
         installed_at: chrono::Utc::now().to_rfc3339(),
         source_folder: None,
     });
     let _ = lf.save(&lock_path);
+    crate::core::installed_skill::invalidate_cache();
 
-    let agent_links: Vec<String> = Vec::new();
     let description = extract_skill_description(&dest);
     let source = extract_github_source_from_url(&url);
 
     Ok(Skill {
-        name: name_str,
+        name: name_hint,
         description,
-        skill_type: "hub".to_string(),
+        skill_type: crate::core::skill::SkillType::Hub,
         stars: 0,
         installed: true,
         update_available: false,
@@ -96,7 +202,7 @@ pub async fn install_skill(url: String, name: Option<String>) -> Result<Skill, S
         category: crate::core::skill::SkillCategory::None,
         author: None,
         topics: Vec::new(),
-        agent_links: Some(agent_links),
+        agent_links: Some(Vec::new()),
         rank: None,
         source,
     })
@@ -106,7 +212,10 @@ pub async fn install_skill(url: String, name: Option<String>) -> Result<Skill, S
 pub async fn uninstall_skill(name: String) -> Result<(), String> {
     // If it's a local skill, delegate to local_skill::delete
     if local_skill::is_local_skill(&name) {
-        return local_skill::delete(&name).map_err(|e| e.to_string());
+        local_skill::delete(&name).map_err(|e| e.to_string())?;
+        crate::core::installed_skill::invalidate_cache();
+        security_scan::invalidate_skill_cache(&name);
+        return Ok(());
     }
 
     // Remove symlinks from all agents first
@@ -119,18 +228,22 @@ pub async fn uninstall_skill(name: String) -> Result<(), String> {
     // so a broken symlink (target deleted) returns false and is never cleaned up.
     if let Ok(meta) = path.symlink_metadata() {
         if meta.is_symlink() {
-            std::fs::remove_file(&path)
-                .map_err(|e| format!("Failed to remove symlink: {}", e))?;
+            std::fs::remove_file(&path).map_err(|e| format!("Failed to remove symlink: {}", e))?;
         } else {
             std::fs::remove_dir_all(&path)
                 .map_err(|e| format!("Failed to delete folder: {}", e))?;
         }
     }
 
+    let _lock = lockfile::get_mutex().lock().await;
     let lock_path = lockfile::lockfile_path();
     let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
     lf.remove(&name);
     let _ = lf.save(&lock_path);
+
+    let _ = project_manifest::remove_skill_from_all_projects(&name);
+    crate::core::installed_skill::invalidate_cache();
+    security_scan::invalidate_skill_cache(&name);
 
     Ok(())
 }
@@ -141,17 +254,20 @@ pub async fn toggle_skill_for_agent(
     agent_id: String,
     enable: bool,
 ) -> Result<(), String> {
-    sync::toggle_skill_for_agent(&skill_name, &agent_id, enable).map_err(|e| e.to_string())
+    sync::toggle_skill_for_agent(&skill_name, &agent_id, enable).map_err(|e| e.to_string())?;
+    crate::core::installed_skill::invalidate_cache();
+    Ok(())
 }
 
 #[tauri::command]
-pub async fn update_skill(name: String) -> Result<Skill, String> {
+pub async fn update_skill(name: String) -> Result<UpdateResult, String> {
     let skills_dir = sync::get_hub_skills_dir();
     let path = skills_dir.join(&name);
 
     // Check if this is a repo-cached skill (symlink into .repos/)
     let is_repo_skill = repo_scanner::is_repo_cached_skill(&path);
 
+    let _lock = lockfile::get_mutex().lock().await;
     let lock_path = lockfile::lockfile_path();
     let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
     let lock_entry = lf.skills.iter().find(|s| s.name == name).cloned();
@@ -165,10 +281,47 @@ pub async fn update_skill(name: String) -> Result<Skill, String> {
         git_ops::compute_tree_hash(&path).map_err(|e| e.to_string())?
     };
 
-    if let Some(entry) = lf.skills.iter_mut().find(|s| s.name == name) {
+    // For repo-cached skills, updating one skill pulls the entire repo.
+    // Find all sibling skills from the same git_url and update their
+    // lockfile tree_hash too, so they don't stay stale.
+    let mut sibling_names: Vec<String> = Vec::new();
+
+    if is_repo_skill {
+        if let Some(ref entry) = lock_entry {
+            let git_url = &entry.git_url;
+            for sibling in lf.skills.iter_mut().filter(|s| s.git_url == *git_url) {
+                if sibling.name == name {
+                    sibling.tree_hash = tree_hash.clone();
+                } else {
+                    // Recompute sibling's subtree hash from the now-updated repo
+                    let sibling_path = skills_dir.join(&sibling.name);
+                    if sibling_path.exists() {
+                        if let Some(ref folder) = sibling.source_folder {
+                            if let Ok(repo_root) = resolve_repo_root_from_symlink(&sibling_path) {
+                                if let Ok(hash) =
+                                    repo_scanner::compute_subtree_hash_pub(&repo_root, folder)
+                                {
+                                    sibling.tree_hash = hash;
+                                }
+                            }
+                        }
+                        sibling_names.push(sibling.name.clone());
+                    }
+                }
+            }
+        }
+    } else if let Some(entry) = lf.skills.iter_mut().find(|s| s.name == name) {
         entry.tree_hash = tree_hash.clone();
     }
+
     let _ = lf.save(&lock_path);
+    crate::core::installed_skill::invalidate_cache();
+
+    // Invalidate security scan cache — content changed, old results are stale
+    security_scan::invalidate_skill_cache(&name);
+    for sib in &sibling_names {
+        security_scan::invalidate_skill_cache(sib);
+    }
 
     // Re-sync only to agents that already had this skill linked (preserve existing links)
     let agent_links = sync::resync_existing_links(&name).unwrap_or_default();
@@ -187,28 +340,56 @@ pub async fn update_skill(name: String) -> Result<Skill, String> {
         .and_then(|e| extract_github_source_from_url(&e.git_url));
 
     let skill_type = if local_skill::is_local_skill(&name) {
-        "local".to_string()
+        crate::core::skill::SkillType::Local
     } else {
-        "hub".to_string()
+        crate::core::skill::SkillType::Hub
     };
 
-    Ok(Skill {
-        name,
-        description,
-        skill_type,
-        stars: 0,
-        installed: true,
-        update_available: false,
-        last_updated: chrono::Utc::now().to_rfc3339(),
-        git_url,
-        tree_hash: Some(tree_hash),
-        category: crate::core::skill::SkillCategory::None,
-        author: None,
-        topics: Vec::new(),
-        agent_links: Some(agent_links),
-        rank: None,
-        source,
+    Ok(UpdateResult {
+        skill: Skill {
+            name,
+            description,
+            skill_type,
+            stars: 0,
+            installed: true,
+            update_available: false,
+            last_updated: chrono::Utc::now().to_rfc3339(),
+            git_url,
+            tree_hash: Some(tree_hash),
+            category: crate::core::skill::SkillCategory::None,
+            author: None,
+            topics: Vec::new(),
+            agent_links: Some(agent_links),
+            rank: None,
+            source,
+        },
+        siblings_cleared: sibling_names,
     })
+}
+
+/// Resolve the repo root from a symlinked skill path.
+fn resolve_repo_root_from_symlink(
+    skill_path: &std::path::Path,
+) -> Result<std::path::PathBuf, String> {
+    let real_path = std::fs::read_link(skill_path).map_err(|e| e.to_string())?;
+    let absolute_path = if real_path.is_absolute() {
+        real_path
+    } else {
+        skill_path
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .join(real_path)
+    };
+    // Walk up to find .git
+    let mut current = absolute_path;
+    loop {
+        if current.join(".git").exists() {
+            return Ok(current);
+        }
+        if !current.pop() {
+            return Err("Cannot find git repo root".to_string());
+        }
+    }
 }
 
 // ── Skill Groups ────────────────────────────────────────────────────
@@ -419,6 +600,7 @@ pub async fn create_local_skill_from_content(name: String, content: String) -> R
 
     // Create in skills-local/ and symlink back to skills/
     let _ = local_skill::create(&name, Some(&content)).map_err(|e| e.to_string())?;
+    crate::core::installed_skill::invalidate_cache();
 
     Ok(())
 }
@@ -426,16 +608,17 @@ pub async fn create_local_skill_from_content(name: String, content: String) -> R
 // ── Local Skills ────────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn create_local_skill(
-    name: String,
-    content: Option<String>,
-) -> Result<Skill, String> {
-    local_skill::create(&name, content.as_deref()).map_err(|e| e.to_string())
+pub async fn create_local_skill(name: String, content: Option<String>) -> Result<Skill, String> {
+    let skill = local_skill::create(&name, content.as_deref()).map_err(|e| e.to_string())?;
+    crate::core::installed_skill::invalidate_cache();
+    Ok(skill)
 }
 
 #[tauri::command]
 pub async fn delete_local_skill(name: String) -> Result<(), String> {
-    local_skill::delete(&name).map_err(|e| e.to_string())
+    local_skill::delete(&name).map_err(|e| e.to_string())?;
+    crate::core::installed_skill::invalidate_cache();
+    Ok(())
 }
 
 #[tauri::command]
@@ -531,10 +714,12 @@ pub async fn update_skill_content(name: String, content: String) -> Result<(), S
 
     std::fs::rename(&temp_path, &skill_path).map_err(|e| format!("Failed to save file: {}", e))?;
 
+    security_scan::invalidate_skill_cache(&name);
+
     Ok(())
 }
 
-// ── Skill Bundles (.agentskill) ─────────────────────────────────────
+// ── Skill Bundles (.ags) ─────────────────────────────────────
 
 #[tauri::command]
 pub async fn export_skill_bundle(
@@ -595,4 +780,27 @@ pub async fn write_text_file(path: String, content: String) -> Result<(), String
 #[tauri::command]
 pub async fn read_text_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e))
+}
+
+#[tauri::command]
+pub async fn open_folder(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("open")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+
+    #[cfg(target_os = "windows")]
+    std::process::Command::new("explorer")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+
+    #[cfg(target_os = "linux")]
+    std::process::Command::new("xdg-open")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
 }

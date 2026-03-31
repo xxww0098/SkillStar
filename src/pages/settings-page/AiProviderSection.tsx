@@ -52,7 +52,7 @@ export function AiProviderSection({
   const aiBaseUrlPlaceholder = isAnthropicFormat ? "https://api.anthropic.com" : "https://api.openai.com/v1";
   const aiModelPlaceholder = isAnthropicFormat ? "claude-sonnet-4-20250514" : "gpt-5.4";
   const formControlClass =
-    "flex h-9 w-full rounded-xl border border-input-border bg-input backdrop-blur-sm px-3 text-sm text-foreground shadow-sm transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:border-primary/60";
+    "flex h-9 w-full rounded-xl border border-input-border bg-input backdrop-blur-sm px-3 text-sm text-foreground shadow-sm transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:border-primary/60";
 
   return (
     <section>
@@ -82,7 +82,9 @@ export function AiProviderSection({
 
       <div className={cn("rounded-xl border border-border overflow-hidden transition-colors", localAiConfig.enabled ? "bg-card" : "bg-card/50")}>
         <button onClick={onToggleExpanded} className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer">
-          <span className="text-sm font-medium text-foreground">{t("settings.aiConfigTitle", { defaultValue: "AI Configuration" })}</span>
+          <span className="text-sm font-medium text-foreground">
+            {t("settings.aiConfigTitle", { defaultValue: "AI Configuration" })}
+          </span>
           <ChevronDown
             className={cn(
               "w-4 h-4 text-muted-foreground transition-transform duration-200",
@@ -171,7 +173,7 @@ export function AiProviderSection({
                 <button
                   type="button"
                   onClick={onToggleShowApiKey}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer p-1.5 rounded-md focus-ring"
                 >
                   {showApiKey ? (
                     <EyeOff className="w-3.5 h-3.5" />
@@ -212,6 +214,38 @@ export function AiProviderSection({
                 )}
               </datalist>
             </div>
+
+            {/* ── Context Window ─── */}
+            <div className="pt-2 border-t border-border/40">
+              <div className="flex items-center gap-1.5 mb-2.5">
+                <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">{t("settings.scanOptimization", { defaultValue: "Security Scan" })}</span>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">
+                  {t("settings.contextWindow", { defaultValue: "Context Window" })}
+                </label>
+                <div className="flex items-center gap-2.5">
+                  <Input
+                    type="number"
+                    min={1}
+                    max={2048}
+                    step={1}
+                    value={localAiConfig.context_window_k}
+                    onChange={(e) => {
+                      const val = Math.min(2048, Math.max(1, Number(e.target.value) || 128));
+                      onConfigChange({ ...localAiConfig, context_window_k: val });
+                    }}
+                    className="w-24 font-mono tabular-nums"
+                  />
+                  <span className="text-xs font-mono text-foreground tabular-nums shrink-0">
+                    K
+                  </span>
+                  <span className="text-xs text-muted-foreground">tokens</span>
+                </div>
+                <p className="text-[10px] text-muted-foreground/60 mt-1">{t("settings.contextWindowHint", { defaultValue: "Your model's max context window. Scan parameters are auto-calculated from this." })}</p>
+              </div>
+            </div>
+
             <div className="flex items-center justify-end gap-3 pt-1">
               <div className="flex items-center min-h-5">
                 {aiSaving ? (

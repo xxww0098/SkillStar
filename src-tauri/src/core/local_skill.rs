@@ -1,13 +1,13 @@
 //! Local skill management — skills authored by the user with no git remote.
 //!
-//! Physical storage: `~/.agents/skills-local/<name>/`
-//! Hub index:        `~/.agents/skills/<name>` → symlink to `skills-local/<name>`
+//! Physical storage: `~/.skillstar/.agents/skills-local/<name>/`
+//! Hub index:        `~/.skillstar/.agents/skills/<name>` → symlink to `skills-local/<name>`
 //!
 //! This mirrors the `.repos/` pattern used for repo-cached skills.
 
 use super::{
-    lockfile,
-    skill::{extract_skill_description, Skill, SkillCategory},
+    lockfile, project_manifest,
+    skill::{Skill, SkillCategory, extract_skill_description},
     sync,
 };
 use anyhow::{Context, Result};
@@ -34,10 +34,7 @@ pub fn is_local_skill(name: &str) -> bool {
     let resolved = if target.is_absolute() {
         target
     } else {
-        skill_path
-            .parent()
-            .unwrap_or(Path::new("."))
-            .join(&target)
+        skill_path.parent().unwrap_or(Path::new(".")).join(&target)
     };
 
     let local_dir = local_skills_dir();
@@ -64,8 +61,12 @@ pub fn create(name: &str, content: Option<&str>) -> Result<Skill> {
     }
 
     // Create the local skill directory + SKILL.md
-    std::fs::create_dir_all(&skill_local_path)
-        .with_context(|| format!("Failed to create local skill directory: {}", skill_local_path.display()))?;
+    std::fs::create_dir_all(&skill_local_path).with_context(|| {
+        format!(
+            "Failed to create local skill directory: {}",
+            skill_local_path.display()
+        )
+    })?;
 
     let default_content = format!(
         "---\ndescription: {}\n---\n\n# {}\n\nYour skill instructions here.\n",
@@ -86,7 +87,7 @@ pub fn create(name: &str, content: Option<&str>) -> Result<Skill> {
     Ok(Skill {
         name: name.to_string(),
         description,
-        skill_type: "local".to_string(),
+        skill_type: crate::core::skill::SkillType::Local,
         stars: 0,
         installed: true,
         update_available: false,
@@ -156,6 +157,7 @@ pub fn reconcile_hub_symlinks() {
 pub fn delete(name: &str) -> Result<()> {
     // Remove symlinks from all agents
     let _ = sync::remove_skill_from_all_agents(name);
+    let _ = project_manifest::remove_skill_from_all_projects(name);
 
     // Remove hub symlink
     let hub_dir = sync::get_hub_skills_dir();
@@ -226,8 +228,7 @@ pub fn migrate_existing() -> Result<u32> {
     let local_dir = local_skills_dir();
 
     // Ensure local skills directory exists
-    std::fs::create_dir_all(&local_dir)
-        .context("Failed to create skills-local directory")?;
+    std::fs::create_dir_all(&local_dir).context("Failed to create skills-local directory")?;
 
     // Load lockfile to check for git URLs
     let lock_path = lockfile::lockfile_path();
@@ -323,13 +324,19 @@ fn migrate_single_skill(src: &Path, dest: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Recursively copy a directory.
+/// Recursively copy a directory, skipping OS/VCS junk files.
 fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
     std::fs::create_dir_all(dest)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
+        let file_name = entry.file_name();
         let src_path = entry.path();
-        let dest_path = dest.join(entry.file_name());
+        let dest_path = dest.join(&file_name);
+
+        // Skip git metadata and macOS system files
+        if file_name == ".git" || file_name == ".DS_Store" {
+            continue;
+        }
 
         if src_path.is_dir() {
             copy_dir_recursive(&src_path, &dest_path)?;

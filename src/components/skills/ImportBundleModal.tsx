@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Button } from "../ui/button";
@@ -29,6 +29,7 @@ export function ImportBundleModal({
   onImported,
 }: ImportBundleModalProps) {
   const { t } = useTranslation();
+  const prefersReducedMotion = useReducedMotion();
   const [phase, setPhase] = useState<Phase>("pick");
   const [loading, setLoading] = useState(false);
   const [filePath, setFilePath] = useState<string | null>(null);
@@ -64,16 +65,14 @@ export function ImportBundleModal({
       setFilePath(path);
       setLoading(true);
 
-      const m = await invoke<BundleManifest>("preview_skill_bundle", {
+      const previewManifest = await invoke<BundleManifest>("preview_skill_bundle", {
         filePath: path,
       });
-      setManifest(m);
+      setManifest(previewManifest);
       setPhase("preview");
-    } catch (e: any) {
+} catch (e: unknown) {
       setError(String(e));
       setPhase("error");
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -83,14 +82,14 @@ export function ImportBundleModal({
     setError(null);
 
     try {
-      const res = await invoke<ImportBundleResult>("import_skill_bundle", {
+      const importResult = await invoke<ImportBundleResult>("import_skill_bundle", {
         filePath,
         force,
       });
-      setResult(res);
+      setResult(importResult);
       setPhase("done");
       onImported();
-    } catch (e: any) {
+    } catch (e: unknown) {
       const msg = String(e);
       if (msg.startsWith("CONFLICT:")) {
         setPhase("conflict");
@@ -111,7 +110,7 @@ export function ImportBundleModal({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
+            transition={{ duration: prefersReducedMotion ? 0.01 : 0.15 }}
             className="fixed inset-0 bg-black/30 backdrop-blur-[2px] z-50"
             onClick={handleClose}
           />
@@ -120,10 +119,10 @@ export function ImportBundleModal({
             initial={{ opacity: 0, scale: 0.96, y: 12 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 12 }}
-            transition={{ type: "spring", bounce: 0.1, duration: 0.35 }}
+            transition={{ duration: prefersReducedMotion ? 0.01 : 0.3, ease: [0.16, 1, 0.3, 1] }}
             className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm z-50"
           >
-            <div className="bg-card border border-border/80 rounded-2xl shadow-xl flex flex-col overflow-hidden">
+            <div role="dialog" aria-modal="true" aria-label={t("importBundleModal.title")} className="bg-card border border-border/80 rounded-2xl shadow-xl flex flex-col overflow-hidden">
               <div className="flex items-center justify-between px-6 pt-4 shrink-0">
                 <h2 className="text-heading-sm flex items-center gap-2">
                   <Package className="w-4 h-4 text-primary" />
@@ -131,6 +130,7 @@ export function ImportBundleModal({
                 </h2>
                 <button
                   onClick={handleClose}
+                  aria-label={t("common.close")}
                   className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors cursor-pointer"
                 >
                   <X className="w-4 h-4" />
@@ -148,7 +148,7 @@ export function ImportBundleModal({
                     <button
                       onClick={handlePickFile}
                       disabled={loading}
-                      className="w-full flex flex-col items-center gap-3 py-8 rounded-xl border-2 border-dashed border-border hover:border-primary/40 hover:bg-primary/5 transition-all duration-200 cursor-pointer group"
+                      className="w-full flex flex-col items-center gap-3 py-8 rounded-xl border-2 border-dashed border-border hover:border-primary/40 hover:bg-primary/5 transition duration-200 cursor-pointer group"
                     >
                       {loading ? (
                         <Loader2 className="w-8 h-8 text-primary animate-spin" />
@@ -160,7 +160,7 @@ export function ImportBundleModal({
                           ? t("importBundleModal.reading")
                           : t("importBundleModal.pickFile")}
                       </span>
-                      <span className="text-[11px] text-muted-foreground/70">
+                      <span className="text-micro text-muted-foreground/70">
                         .ags / .agd
                       </span>
                     </button>
@@ -202,21 +202,21 @@ export function ImportBundleModal({
                       {/* File list preview */}
                       {manifest.files.length > 0 && (
                         <div className="border-t border-border/50 pt-2">
-                          <p className="text-[11px] text-muted-foreground font-medium mb-1.5">
+                          <p className="text-micro text-muted-foreground font-medium mb-1.5">
                             {t("importBundleModal.contents")}
                           </p>
                           <div className="max-h-32 overflow-y-auto space-y-0.5">
                             {manifest.files.slice(0, 20).map((f) => (
                               <div
                                 key={f}
-                                className="flex items-center gap-1.5 text-[11px] font-mono text-muted-foreground"
+                                className="flex items-center gap-1.5 text-micro font-mono text-muted-foreground"
                               >
                                 <FileText className="w-3 h-3 shrink-0 opacity-50" />
                                 <span className="truncate">{f}</span>
                               </div>
                             ))}
                             {manifest.files.length > 20 && (
-                              <p className="text-[10px] text-muted-foreground/70 pl-4.5">
+                              <p className="text-micro text-muted-foreground/70 pl-4.5">
                                 +{manifest.files.length - 20}{" "}
                                 {t("common.more")}
                               </p>
@@ -251,7 +251,7 @@ export function ImportBundleModal({
                         <AlertTriangle className="w-3.5 h-3.5" />
                         {t("importBundleModal.conflictTitle")}
                       </p>
-                      <p className="text-[11px] text-muted-foreground">
+                      <p className="text-micro text-muted-foreground">
                         {t("importBundleModal.conflictDesc", {
                           name: manifest.name,
                         })}
@@ -299,7 +299,7 @@ export function ImportBundleModal({
                         })}
                       </p>
                       {result.replaced && (
-                        <p className="text-[11px] text-warning mt-1">
+                        <p className="text-micro text-warning mt-1">
                           {t("importBundleModal.replaced")}
                         </p>
                       )}

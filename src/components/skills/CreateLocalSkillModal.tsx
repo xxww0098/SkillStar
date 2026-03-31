@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { X, FolderPlus, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../ui/button";
@@ -21,6 +21,7 @@ export function CreateLocalSkillModal({
   existingSkillNames,
 }: CreateLocalSkillModalProps) {
   const { t } = useTranslation();
+  const prefersReducedMotion = useReducedMotion();
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -91,7 +92,10 @@ export function CreateLocalSkillModal({
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            transition={{ type: "spring", bounce: 0.15, duration: 0.3 }}
+            transition={{ duration: prefersReducedMotion ? 0.01 : 0.3, ease: [0.16, 1, 0.3, 1] }}
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("mySkills.createLocalSkill")}
             className="w-[420px] bg-card border border-border rounded-2xl shadow-2xl p-6"
             onClick={(e) => e.stopPropagation()}
           >
@@ -105,6 +109,7 @@ export function CreateLocalSkillModal({
               </div>
               <button
                 onClick={onClose}
+                aria-label={t("common.close")}
                 className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
@@ -132,7 +137,7 @@ export function CreateLocalSkillModal({
                 <p className="text-xs text-destructive">{error}</p>
               )}
               <p className="text-xs text-muted-foreground/70">
-                Stored in <code className="text-[11px] bg-muted/50 px-1 py-0.5 rounded">~/.agents/skills-local/{name || "..."}/</code>
+                Stored in <code className="text-micro bg-muted/50 px-1 py-0.5 rounded">~/.skillstar/.agents/skills-local/{name || "..."}/</code>
               </p>
             </div>
 

@@ -4,7 +4,8 @@ import { ChevronRight, Plus, Search, X } from "lucide-react";
 import { Badge } from "../../components/ui/badge";
 import { Input } from "../../components/ui/input";
 import { Switch } from "../../components/ui/switch";
-import { cn } from "../../lib/utils";
+import { AgentIcon } from "../../components/ui/AgentIcon";
+import { cn, agentIconCls } from "../../lib/utils";
 import type { AgentProfile, Skill } from "../../types";
 
 interface AgentAccordionProps {
@@ -20,6 +21,8 @@ interface AgentAccordionProps {
   onRemoveSkill: (agentId: string, skillName: string) => void;
   onSkillFilterChange: (value: string) => void;
   onAddSkill: (agentId: string, skillName: string) => void;
+  onAddAllSkills?: (agentId: string, skillNames: string[]) => void;
+  onRemoveAllSkills?: (agentId: string) => void;
 }
 
 export function AgentAccordion({
@@ -35,6 +38,8 @@ export function AgentAccordion({
   onRemoveSkill,
   onSkillFilterChange,
   onAddSkill,
+  onAddAllSkills,
+  onRemoveAllSkills,
 }: AgentAccordionProps) {
   const { t } = useTranslation();
 
@@ -71,24 +76,28 @@ export function AgentAccordion({
                     !isEnabled && "text-muted-foreground/40"
                   )}
                 />
-                <img
-                  src={`/${profile.icon}`}
-                  alt=""
-                  className={cn("w-4 h-4 shrink-0 transition-all", !isEnabled && "grayscale opacity-40")}
+                <AgentIcon
+                  profile={profile}
+                  className={cn(agentIconCls(profile.icon, "w-4 h-4"), "shrink-0 transition", !isEnabled && "grayscale opacity-40")}
                 />
-                <span
-                  className={cn("text-sm font-medium flex-1 truncate", !isEnabled && "text-muted-foreground")}
-                >
-                  {profile.display_name}
-                </span>
+                <div className="flex-1 flex items-center gap-2.5 min-w-0">
+                  <span
+                    className={cn("text-sm font-medium truncate shrink-0", !isEnabled && "text-muted-foreground")}
+                  >
+                    {profile.display_name}
+                  </span>
+                  <span className="text-micro text-muted-foreground/60 font-mono bg-muted/40 px-1.5 py-0.5 rounded-md truncate">
+                    {profile.project_skills_rel}
+                  </span>
+                </div>
                 {isEnabled && skills.length > 0 && (
-                  <Badge variant="outline" className="text-[10px] h-4 px-1.5 shrink-0">
+                  <Badge variant="outline" className="text-micro h-4 px-1.5 shrink-0">
                     {skills.length}
                   </Badge>
                 )}
-                <div onClick={(event) => event.stopPropagation()} className="shrink-0">
+                <label onClick={(event) => event.stopPropagation()} className="shrink-0 cursor-pointer p-2 -mr-2 flex items-center justify-center rounded-lg hover:bg-muted/50 transition-colors">
                   <Switch checked={isEnabled} onCheckedChange={() => onToggleAgent(profile.id)} />
-                </div>
+                </label>
               </button>
 
               <AnimatePresence initial={false}>
@@ -111,29 +120,45 @@ export function AgentAccordion({
                               animate={{ scale: 1, opacity: 1 }}
                               className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-muted text-xs text-foreground group/chip"
                             >
-                              <span
+                              <button
+                                type="button"
                                 onClick={(event) => {
                                   event.stopPropagation();
                                   onNavigateToSkill?.(skillName);
                                 }}
-                                className="cursor-pointer hover:text-primary hover:underline underline-offset-2 transition-colors"
+                                className="text-left cursor-pointer hover:text-primary hover:underline underline-offset-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded px-1"
                               >
                                 {skillName}
-                              </span>
+                              </button>
                               <button
+                                type="button"
                                 onClick={(event) => {
                                   event.stopPropagation();
                                   onRemoveSkill(profile.id, skillName);
                                 }}
-                                className="p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all cursor-pointer opacity-40 hover:opacity-100"
+                                className="p-1 -mr-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition cursor-pointer opacity-40 hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-destructive"
+                                title="Remove"
+                                aria-label={t("common.delete")}
                               >
                                 <X className="w-2.5 h-2.5" />
                               </button>
                             </motion.span>
                           ))}
+                          {skills.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onRemoveAllSkills?.(profile.id);
+                              }}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
+                            >
+                              {t("common.clearAll", "全部清空")}
+                            </button>
+                          )}
                         </div>
                       ) : (
-                        <p className="text-[11px] text-muted-foreground italic mb-2">No skills assigned</p>
+                        <p className="text-micro text-muted-foreground italic mb-2">No skills assigned</p>
                       )}
 
                       <div className="space-y-1.5">
@@ -149,11 +174,22 @@ export function AgentAccordion({
                         <div className="max-h-24 overflow-y-auto">
                           {available.length > 0 ? (
                             <div className="flex flex-wrap gap-1">
+                              {available.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => onAddAllSkills?.(profile.id, available.map(s => s.name))}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-border text-micro text-muted-foreground hover:border-primary/40 hover:text-primary hover:bg-primary/5 transition-colors cursor-pointer"
+                                  title={t("common.selectAll", "全选")}
+                                >
+                                  <Plus className="w-2.5 h-2.5" />
+                                  {t("common.selectAll", "全选")}
+                                </button>
+                              )}
                               {available.map((skill) => (
                                 <button
                                   key={skill.name}
                                   onClick={() => onAddSkill(profile.id, skill.name)}
-                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-border text-[11px] text-muted-foreground hover:border-primary/40 hover:text-primary hover:bg-primary/5 transition-colors cursor-pointer"
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-border text-micro text-muted-foreground hover:border-primary/40 hover:text-primary hover:bg-primary/5 transition-colors cursor-pointer"
                                 >
                                   <Plus className="w-2.5 h-2.5" />
                                   {skill.name}
@@ -161,7 +197,7 @@ export function AgentAccordion({
                               ))}
                             </div>
                           ) : (
-                            <div className="text-[11px] text-muted-foreground text-center py-1">
+                            <div className="text-micro text-muted-foreground text-center py-1">
                               {skillFilter ? t("projects.noMatchingSkills") : t("projects.allAssigned")}
                             </div>
                           )}

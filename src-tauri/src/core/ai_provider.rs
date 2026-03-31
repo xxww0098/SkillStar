@@ -1,36 +1,145 @@
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 const AI_MAX_TOKENS: u32 = 196_608;
+const SHORT_TEXT_MAX_TOKENS: u32 = 2_048;
+const SUMMARY_MAX_TOKENS: u32 = 4_096;
+
+/// Estimate a reasonable max_tokens for translation output.
+/// Translation output is roughly proportional to input length.
+/// Uses chars/3 as a rough token estimate, adds 2x headroom, min 1024, max 32K.
+fn estimate_translation_max_tokens(input: &str) -> u32 {
+    let estimated_input_tokens = (input.len() as u32) / 3;
+    let estimate = (estimated_input_tokens * 2).max(1024);
+    estimate.min(32_768)
+}
 
 // ── Configuration ───────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ApiFormat {
+    Openai,
+    Anthropic,
+}
+
+impl ApiFormat {
+    fn parse_loose(raw: &str) -> Self {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "openai" => Self::Openai,
+            "anthropic" => Self::Anthropic,
+            _ => Self::Openai,
+        }
+    }
+}
+
+impl Default for ApiFormat {
+    fn default() -> Self {
+        Self::Openai
+    }
+}
+
+fn deserialize_api_format<'de, D>(deserializer: D) -> Result<ApiFormat, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw = String::deserialize(deserializer)?;
+    Ok(ApiFormat::parse_loose(&raw))
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiConfig {
     pub enabled: bool,
-    #[serde(default = "default_api_format")]
-    pub api_format: String,
+    #[serde(default, deserialize_with = "deserialize_api_format")]
+    pub api_format: ApiFormat,
     pub base_url: String,
     pub api_key: String,
     pub model: String,
     pub target_language: String,
+    /// Model context window in K tokens (e.g. 128 = 128K tokens).
+    /// All scan parameters are auto-derived from this value.
+    #[serde(default = "default_context_window_k")]
+    pub context_window_k: u32,
+    /// Override: 0 = auto-derive from context_window_k
+    #[serde(default)]
+    pub max_concurrent_requests: u32,
+    /// Override: 0 = auto-derive from context_window_k
+    #[serde(default)]
+    pub chunk_char_limit: usize,
+    /// Override: 0 = auto-derive from context_window_k
+    #[serde(default)]
+    pub scan_max_response_tokens: u32,
 }
 
-fn default_api_format() -> String {
-    "openai".to_string()
+fn default_context_window_k() -> u32 {
+    128
 }
 
 impl Default for AiConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            api_format: default_api_format(),
+            api_format: ApiFormat::default(),
             base_url: String::new(),
             api_key: String::new(),
             model: "gpt-5.4".to_string(),
             target_language: "zh-CN".to_string(),
+            context_window_k: default_context_window_k(),
+            max_concurrent_requests: 0,
+            chunk_char_limit: 0,
+            scan_max_response_tokens: 0,
         }
+    }
+}
+
+// ── Auto-derived scan parameters ────────────────────────────────────
+
+/// Resolved scan parameters — auto-calculated from context_window_k,
+/// with optional manual overrides from AiConfig fields (when > 0).
+#[derive(Debug, Clone, Copy)]
+pub struct ResolvedScanParams {
+    pub chunk_char_limit: usize,
+    pub max_concurrent_requests: u32,
+    pub scan_max_response_tokens: u32,
+}
+
+/// Derive optimal scan parameters from the user's context_window_k setting.
+/// If individual override fields are > 0, they take precedence (power-user escape hatch).
+pub fn resolve_scan_params(config: &AiConfig) -> ResolvedScanParams {
+    let ctx_k = config.context_window_k.max(1) as usize;
+    let ctx_tokens = ctx_k * 1000;
+
+    // chunk_char_limit: use ~40% of context window for file content
+    // 1 token ≈ 2-4 chars; use conservative multiplier of 2
+    let auto_chunk = (ctx_tokens * 2 * 40 / 100).max(10_000);
+    let chunk_char_limit = if config.chunk_char_limit > 0 {
+        config.chunk_char_limit
+    } else {
+        auto_chunk
+    };
+
+    // max_concurrent_requests: scale with context window, clamped
+    let auto_concurrency = (ctx_tokens / 32_000).clamp(2, 16) as u32;
+    let max_concurrent_requests = if config.max_concurrent_requests > 0 {
+        config.max_concurrent_requests
+    } else {
+        auto_concurrency
+    };
+
+    // scan_max_response_tokens: small fraction of context, enough for JSON output
+    let auto_max_response = (ctx_tokens / 20).clamp(2048, 16384) as u32;
+    let scan_max_response_tokens = if config.scan_max_response_tokens > 0 {
+        config.scan_max_response_tokens
+    } else {
+        auto_max_response
+    };
+
+    ResolvedScanParams {
+        chunk_char_limit,
+        max_concurrent_requests,
+        scan_max_response_tokens,
     }
 }
 
@@ -50,10 +159,10 @@ fn get_encryption_key() -> aes_gcm::Key<aes_gcm::Aes256Gcm> {
 
 fn encrypt_api_key(plain: &str) -> String {
     use aes_gcm::{
-        aead::{Aead, AeadCore, OsRng},
         Aes256Gcm, KeyInit,
+        aead::{Aead, AeadCore, OsRng},
     };
-    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
     if plain.is_empty() {
         return String::new();
@@ -72,8 +181,8 @@ fn encrypt_api_key(plain: &str) -> String {
 }
 
 fn decrypt_api_key(encoded: &str) -> String {
-    use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit, Nonce};
-    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    use aes_gcm::{Aes256Gcm, KeyInit, Nonce, aead::Aead};
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
     if encoded.is_empty() {
         return String::new();
@@ -146,47 +255,28 @@ fn language_display_name(code: &str) -> &str {
 const TRANSLATION_CHUNK_SOFT_LIMIT_CHARS: usize = 10_000;
 const TRANSLATION_CHUNK_RETRY_MIN_CHARS: usize = 4_000;
 
+// ── Prompts ─────────────────────────────────────────────────────────
+
+const TRANSLATE_DOCUMENT_PROMPT: &str = include_str!("../../prompts/ai/translate_document.md");
+const TRANSLATE_SHORT_PROMPT: &str = include_str!("../../prompts/ai/translate_short.md");
+const SUMMARY_PROMPT: &str = include_str!("../../prompts/ai/summary.md");
+const TRANSLATE_CHUNK_PROMPT: &str = include_str!("../../prompts/ai/translate_chunk.md");
+const PICK_SKILLS_PROMPT: &str = include_str!("../../prompts/ai/pick_skills.md");
+
 fn is_empty_ai_response_error(err: &anyhow::Error) -> bool {
     err.to_string().contains("AI returned empty response")
 }
 
 fn build_translation_system_prompt(lang: &str) -> String {
-    format!(
-        "You are a professional technical translator. Translate the ENTIRE Markdown document to {}. \
-         Rules:\n\
-         1. Translate all human-readable prose across the whole file (frontmatter values, headings, paragraphs, list text, table text, blockquotes).\n\
-         2. Even when a line contains inline code (text wrapped by backticks), translate the surrounding prose and keep only the inline code span unchanged.\n\
-         3. Keep YAML keys unchanged. Keep the `name` field value exactly as original.\n\
-         4. Do NOT translate code blocks, inline code spans, variable names, file paths, command names, identifiers, URLs, or markdown syntax tokens.\n\
-         5. Preserve document structure exactly: same sections, ordering, markdown constructs, frontmatter delimiters, and overall layout.\n\
-         6. Do not add, delete, or reorder content blocks.\n\
-         7. Output ONLY the translated document content (no commentary, no code fences around the whole output).",
-        lang
-    )
+    TRANSLATE_DOCUMENT_PROMPT.replace("{lang}", lang)
 }
 
 fn build_short_translation_system_prompt(lang: &str) -> String {
-    format!(
-        "Translate the following text to {}. \
-         Output ONLY the translated text, nothing else. \
-         Do not add any explanation, commentary, or surrounding quotes. \
-         Keep technical terms, product names, command names, and code identifiers unchanged.",
-        lang
-    )
+    TRANSLATE_SHORT_PROMPT.replace("{lang}", lang)
 }
 
 fn build_summary_system_prompt(lang: &str) -> String {
-    format!(
-        "You are an AI coding-skill analyst. Analyze the following SKILL.md and produce a concise \
-         structured summary in {}. Output format:\n\n\
-         📌 **Core Capability**: [1-2 sentences describing what this skill does]\n\n\
-         🎯 **Triggers**: [list triggers/commands, or \"No explicit triggers\"]\n\n\
-         📦 **Use Cases**: [2-3 bullet points of when to use this skill]\n\n\
-         🔧 **Tools Used**: [list allowed tools, or \"Not specified\"]\n\n\
-         ⚡ **Key Rules**: [2-3 most important rules or constraints]\n\n\
-         Output ONLY the summary, no extra explanation.",
-        lang
-    )
+    SUMMARY_PROMPT.replace("{lang}", lang)
 }
 
 fn build_translation_chunk_prompt(
@@ -194,14 +284,10 @@ fn build_translation_chunk_prompt(
     chunk_number: usize,
     total: usize,
 ) -> String {
-    format!(
-        "{base_system_prompt}\n\
-         Additional chunk mode rules:\n\
-         - You are translating chunk {chunk_number}/{total} of one Markdown document.\n\
-         - Translate ONLY this chunk.\n\
-         - Keep Markdown syntax, fenced-code boundaries, and line structure intact.\n\
-         - Output only translated chunk content."
-    )
+    TRANSLATE_CHUNK_PROMPT
+        .replace("{base_system_prompt}", base_system_prompt)
+        .replace("{chunk_number}", &chunk_number.to_string())
+        .replace("{total}", &total.to_string())
 }
 
 fn split_translation_chunks(text: &str, soft_limit_chars: usize) -> Vec<String> {
@@ -251,7 +337,7 @@ async fn translate_text_in_chunks(
 ) -> Result<String> {
     let chunks = split_translation_chunks(text, TRANSLATION_CHUNK_SOFT_LIMIT_CHARS);
     if chunks.len() <= 1 {
-        return chat_completion(config, base_system_prompt, text).await;
+        return chat_completion_capped(config, base_system_prompt, text, estimate_translation_max_tokens(text)).await;
     }
 
     let total = chunks.len();
@@ -261,7 +347,7 @@ async fn translate_text_in_chunks(
         let chunk_number = index + 1;
         let chunk_prompt = build_translation_chunk_prompt(base_system_prompt, chunk_number, total);
 
-        let chunk_result = chat_completion(config, &chunk_prompt, chunk)
+        let chunk_result = chat_completion_capped(config, &chunk_prompt, chunk, estimate_translation_max_tokens(chunk))
             .await
             .with_context(|| format!("Failed to translate chunk {chunk_number}/{total}"))?;
 
@@ -280,42 +366,53 @@ async fn translate_text_in_chunks(
 
 // ── HTTP Client Builder ─────────────────────────────────────────────
 
-/// Build a reqwest client, optionally honouring the user's proxy config.
-fn build_http_client() -> Result<reqwest::Client> {
-    // Try to load the proxy configuration
-    let proxy_path = super::paths::data_root().join("proxy.json");
+static SHARED_HTTP_CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
 
+/// Build a reqwest client, optionally honouring the user's proxy config.
+fn build_http_client_inner() -> Result<reqwest::Client> {
     let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(120));
 
-    if proxy_path.exists() {
-        if let Ok(raw) = std::fs::read_to_string(&proxy_path) {
-            if let Ok(proxy_cfg) = serde_json::from_str::<serde_json::Value>(&raw) {
-                if proxy_cfg
-                    .get("enabled")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false)
-                {
-                    let ptype = proxy_cfg
-                        .get("proxy_type")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("http");
-                    let host = proxy_cfg.get("host").and_then(|v| v.as_str()).unwrap_or("");
-                    let port = proxy_cfg
-                        .get("port")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(7897);
+    if let Ok(proxy_cfg) = super::proxy::load_config() {
+        if proxy_cfg.enabled && !proxy_cfg.host.trim().is_empty() {
+            let proxy_url = format!(
+                "{}://{}:{}",
+                proxy_cfg.proxy_type.as_scheme(),
+                proxy_cfg.host.trim(),
+                proxy_cfg.port
+            );
 
-                    if !host.is_empty() {
-                        let proxy_url = format!("{}://{}:{}", ptype, host, port);
-                        let proxy = reqwest::Proxy::all(&proxy_url).context("Invalid proxy URL")?;
-                        builder = builder.proxy(proxy);
-                    }
-                }
+            let mut proxy = reqwest::Proxy::all(&proxy_url).context("Invalid proxy URL")?;
+            if let Some(username) = proxy_cfg
+                .username
+                .as_deref()
+                .filter(|v| !v.trim().is_empty())
+            {
+                proxy =
+                    proxy.basic_auth(username.trim(), proxy_cfg.password.as_deref().unwrap_or(""));
             }
+
+            builder = builder.proxy(proxy);
         }
     }
 
     builder.build().context("Failed to build HTTP client")
+}
+
+/// Get or lazily create the shared HTTP client.  Reuses TLS sessions and
+/// HTTP/2 connections between requests — eliminates ~100-200ms per request.
+fn get_http_client() -> Result<&'static reqwest::Client> {
+    let stored =
+        SHARED_HTTP_CLIENT.get_or_init(|| build_http_client_inner().map_err(|e| e.to_string()));
+    match stored {
+        Ok(client) => Ok(client),
+        Err(e) => anyhow::bail!("Failed to build HTTP client: {}", e),
+    }
+}
+
+/// Reset the cached HTTP client (call after proxy config changes).
+pub fn reset_http_client() {
+    // OnceLock doesn't support reset, so proxy changes take effect on
+    // next app restart.  This is acceptable since proxy changes are rare.
 }
 
 // ── OpenAI-Compatible Chat Completion ────────────────────────────────
@@ -396,7 +493,7 @@ struct AnthropicResponse {
 }
 
 fn is_anthropic_format(config: &AiConfig) -> bool {
-    config.api_format.eq_ignore_ascii_case("anthropic")
+    matches!(config.api_format, ApiFormat::Anthropic)
 }
 
 fn build_openai_chat_url(base_url: &str) -> String {
@@ -430,7 +527,7 @@ async fn openai_chat_completion(
     system_prompt: &str,
     user_content: &str,
 ) -> Result<String> {
-    openai_chat_completion_with_opts(config, system_prompt, user_content, 0.3, None).await
+    openai_chat_completion_with_opts(config, system_prompt, user_content, 0.3, None, None).await
 }
 
 async fn openai_chat_completion_with_opts(
@@ -439,8 +536,9 @@ async fn openai_chat_completion_with_opts(
     user_content: &str,
     temperature: f32,
     seed: Option<u64>,
+    max_tokens_override: Option<u32>,
 ) -> Result<String> {
-    let client = build_http_client()?;
+    let client = get_http_client()?;
     let url = build_openai_chat_url(&config.base_url);
 
     let body = ChatRequest {
@@ -456,7 +554,7 @@ async fn openai_chat_completion_with_opts(
             },
         ],
         temperature,
-        max_tokens: AI_MAX_TOKENS,
+        max_tokens: max_tokens_override.unwrap_or(AI_MAX_TOKENS),
         seed,
     };
 
@@ -497,8 +595,8 @@ where
         return Ok(());
     }
 
-    let data = data_lines.join("\n");
-    let trimmed = data.trim();
+    let joined_data = data_lines.join("\n");
+    let trimmed = joined_data.trim();
     if trimmed.is_empty() || trimmed == "[DONE]" {
         return Ok(());
     }
@@ -535,12 +633,13 @@ async fn openai_chat_completion_stream<F>(
     config: &AiConfig,
     system_prompt: &str,
     user_content: &str,
+    max_tokens: u32,
     on_delta: &mut F,
 ) -> Result<String>
 where
     F: FnMut(&str) -> Result<()>,
 {
-    let client = build_http_client()?;
+    let client = get_http_client()?;
     let url = build_openai_chat_url(&config.base_url);
 
     let body = ChatStreamRequest {
@@ -556,7 +655,7 @@ where
             },
         ],
         temperature: 0.3,
-        max_tokens: AI_MAX_TOKENS,
+        max_tokens,
         stream: true,
     };
 
@@ -640,7 +739,7 @@ where
 {
     let chunks = split_translation_chunks(text, TRANSLATION_CHUNK_SOFT_LIMIT_CHARS);
     if chunks.len() <= 1 {
-        return chat_completion_stream(config, base_system_prompt, text, on_delta).await;
+        return chat_completion_stream(config, base_system_prompt, text, estimate_translation_max_tokens(text), on_delta).await;
     }
 
     let total = chunks.len();
@@ -649,7 +748,7 @@ where
     for (index, chunk) in chunks.iter().enumerate() {
         let chunk_number = index + 1;
         let chunk_prompt = build_translation_chunk_prompt(base_system_prompt, chunk_number, total);
-        let chunk_result = chat_completion_stream(config, &chunk_prompt, chunk, on_delta)
+        let chunk_result = chat_completion_stream(config, &chunk_prompt, chunk, estimate_translation_max_tokens(chunk), on_delta)
             .await
             .with_context(|| format!("Failed to stream-translate chunk {chunk_number}/{total}"))?;
 
@@ -671,13 +770,14 @@ async fn anthropic_messages_completion(
     config: &AiConfig,
     system_prompt: &str,
     user_content: &str,
+    max_tokens: u32,
 ) -> Result<String> {
-    let client = build_http_client()?;
+    let client = get_http_client()?;
     let url = build_anthropic_messages_url(&config.base_url);
 
     let body = AnthropicRequest {
         model: config.model.clone(),
-        max_tokens: AI_MAX_TOKENS,
+        max_tokens,
         system: system_prompt.to_string(),
         messages: vec![AnthropicMessage {
             role: "user".to_string(),
@@ -727,17 +827,18 @@ async fn anthropic_messages_completion_stream<F>(
     config: &AiConfig,
     system_prompt: &str,
     user_content: &str,
+    max_tokens: u32,
     on_delta: &mut F,
 ) -> Result<String>
 where
     F: FnMut(&str) -> Result<()>,
 {
-    let client = build_http_client()?;
+    let client = get_http_client()?;
     let url = build_anthropic_messages_url(&config.base_url);
 
     let body = AnthropicStreamRequest {
         model: config.model.clone(),
-        max_tokens: AI_MAX_TOKENS,
+        max_tokens,
         system: system_prompt.to_string(),
         messages: vec![AnthropicMessage {
             role: "user".to_string(),
@@ -787,10 +888,10 @@ where
             // Empty line = end of SSE event block
             if line.is_empty() {
                 if !event_data_lines.is_empty() {
-                    let data = event_data_lines.join("\n");
+                    let event_payload = event_data_lines.join("\n");
                     process_anthropic_sse_event(
                         &current_event_type,
-                        &data,
+                        &event_payload,
                         &mut translated,
                         on_delta,
                     )?;
@@ -810,8 +911,13 @@ where
 
     // Process any remaining buffered event
     if !event_data_lines.is_empty() {
-        let data = event_data_lines.join("\n");
-        process_anthropic_sse_event(&current_event_type, &data, &mut translated, on_delta)?;
+        let event_payload = event_data_lines.join("\n");
+        process_anthropic_sse_event(
+            &current_event_type,
+            &event_payload,
+            &mut translated,
+            on_delta,
+        )?;
     }
 
     if translated.trim().is_empty() {
@@ -869,15 +975,39 @@ where
     Ok(())
 }
 
-async fn chat_completion(
+pub(crate) async fn chat_completion(
     config: &AiConfig,
     system_prompt: &str,
     user_content: &str,
 ) -> Result<String> {
     if is_anthropic_format(config) {
-        anthropic_messages_completion(config, system_prompt, user_content).await
+        anthropic_messages_completion(config, system_prompt, user_content, AI_MAX_TOKENS).await
     } else {
         openai_chat_completion(config, system_prompt, user_content).await
+    }
+}
+
+/// Chat completion with a capped max_tokens for responses that are known to
+/// be small (e.g. security scan JSON).  Reduces inference latency on providers
+/// that pre-allocate KV cache proportional to max_tokens.
+pub(crate) async fn chat_completion_capped(
+    config: &AiConfig,
+    system_prompt: &str,
+    user_content: &str,
+    max_response_tokens: u32,
+) -> Result<String> {
+    if is_anthropic_format(config) {
+        anthropic_messages_completion(config, system_prompt, user_content, max_response_tokens).await
+    } else {
+        openai_chat_completion_with_opts(
+            config,
+            system_prompt,
+            user_content,
+            0.3,
+            None,
+            Some(max_response_tokens),
+        )
+        .await
     }
 }
 
@@ -887,13 +1017,14 @@ async fn chat_completion_deterministic(
     system_prompt: &str,
     user_content: &str,
     seed: Option<u64>,
+    max_tokens: u32,
 ) -> Result<String> {
     if is_anthropic_format(config) {
         // Anthropic API does not support temperature/seed overrides in this wrapper,
         // but temperature 0 is roughly achieved by using the same prompt.
-        anthropic_messages_completion(config, system_prompt, user_content).await
+        anthropic_messages_completion(config, system_prompt, user_content, max_tokens).await
     } else {
-        openai_chat_completion_with_opts(config, system_prompt, user_content, 0.0, seed).await
+        openai_chat_completion_with_opts(config, system_prompt, user_content, 0.0, seed, Some(max_tokens)).await
     }
 }
 
@@ -902,15 +1033,16 @@ async fn chat_completion_stream<F>(
     config: &AiConfig,
     system_prompt: &str,
     user_content: &str,
+    max_tokens: u32,
     on_delta: &mut F,
 ) -> Result<String>
 where
     F: FnMut(&str) -> Result<()>,
 {
     if is_anthropic_format(config) {
-        anthropic_messages_completion_stream(config, system_prompt, user_content, on_delta).await
+        anthropic_messages_completion_stream(config, system_prompt, user_content, max_tokens, on_delta).await
     } else {
-        openai_chat_completion_stream(config, system_prompt, user_content, on_delta).await
+        openai_chat_completion_stream(config, system_prompt, user_content, max_tokens, on_delta).await
     }
 }
 
@@ -922,7 +1054,7 @@ pub async fn translate_text(config: &AiConfig, text: &str) -> Result<String> {
     let lang = language_display_name(&config.target_language);
     let system_prompt = build_translation_system_prompt(lang);
 
-    match chat_completion(config, &system_prompt, text).await {
+    match chat_completion_capped(config, &system_prompt, text, estimate_translation_max_tokens(text)).await {
         Ok(result) if !result.trim().is_empty() => Ok(result),
         Ok(_) => {
             if text.len() < TRANSLATION_CHUNK_RETRY_MIN_CHARS {
@@ -960,7 +1092,7 @@ where
     let lang = language_display_name(&config.target_language);
     let system_prompt = build_translation_system_prompt(lang);
 
-    match chat_completion_stream(config, &system_prompt, text, on_delta).await {
+    match chat_completion_stream(config, &system_prompt, text, estimate_translation_max_tokens(text), on_delta).await {
         Ok(result) if !result.trim().is_empty() => Ok(result),
         Ok(_) => {
             if text.len() < TRANSLATION_CHUNK_RETRY_MIN_CHARS {
@@ -997,7 +1129,7 @@ where
 pub async fn translate_short_text(config: &AiConfig, text: &str) -> Result<String> {
     let lang = language_display_name(&config.target_language);
     let system_prompt = build_short_translation_system_prompt(lang);
-    chat_completion(config, &system_prompt, text).await
+    chat_completion_capped(config, &system_prompt, text, SHORT_TEXT_MAX_TOKENS).await
 }
 
 /// Translate a short description with streaming delta callbacks.
@@ -1012,7 +1144,7 @@ where
     let lang = language_display_name(&config.target_language);
     let system_prompt = build_short_translation_system_prompt(lang);
 
-    match chat_completion_stream(config, &system_prompt, text, on_delta).await {
+    match chat_completion_stream(config, &system_prompt, text, SHORT_TEXT_MAX_TOKENS, on_delta).await {
         Ok(result) if !result.trim().is_empty() => Ok(result),
         Ok(_) => {
             // Streaming returned empty — fall back to non-streaming
@@ -1030,7 +1162,7 @@ pub async fn summarize_text(config: &AiConfig, text: &str) -> Result<String> {
     let lang = language_display_name(&config.target_language);
     let system_prompt = build_summary_system_prompt(lang);
 
-    chat_completion(config, &system_prompt, text).await
+    chat_completion_capped(config, &system_prompt, text, SUMMARY_MAX_TOKENS).await
 }
 
 /// Generate a structured summary with streaming delta callbacks.
@@ -1046,7 +1178,7 @@ where
     let lang = language_display_name(&config.target_language);
     let system_prompt = build_summary_system_prompt(lang);
 
-    match chat_completion_stream(config, &system_prompt, text, on_delta).await {
+    match chat_completion_stream(config, &system_prompt, text, SUMMARY_MAX_TOKENS, on_delta).await {
         Ok(result) if !result.trim().is_empty() => Ok(result),
         Ok(_) => summarize_text(config, text)
             .await
@@ -1068,24 +1200,7 @@ pub async fn pick_skills(
     prompt: &str,
     skill_catalog: &str,
 ) -> Result<Vec<String>> {
-    let system_prompt = format!(
-        "You are a deterministic skill-matching engine. Given a project description \
-         and a skill catalog, you must decide which skills are relevant.\n\n\
-         ## Evaluation Method\n\
-         For EACH skill in the catalog:\n\
-         1. Read its name and description.\n\
-         2. Decide: Is this skill directly useful or closely related to the described project?\n\
-         3. If YES → include it. If NO → omit it.\n\n\
-         ## Rules\n\
-         - Be INCLUSIVE: when a skill is even somewhat related, include it.\n\
-         - Only exclude skills that have ZERO relevance to the project.\n\
-         - The skill names in your output MUST exactly match the names in the catalog (case-sensitive).\n\
-         - Return a JSON array of selected skill names. Example: [\"skill-a\", \"skill-b\"]\n\
-         - Output ONLY the JSON array. No commentary, no markdown fences, no explanation.\n\
-         - If nothing matches, return [].\n\n\
-         ## Available Skills Catalog\n\n{skill_catalog}",
-        skill_catalog = skill_catalog,
-    );
+    let system_prompt = PICK_SKILLS_PROMPT.replace("{skill_catalog}", skill_catalog);
 
     // Run 3 rounds concurrently with different seeds for consensus
     let seeds = [42u64, 123, 7];
@@ -1094,14 +1209,15 @@ pub async fn pick_skills(
     for &seed in &seeds {
         let cfg = config.clone();
         let sp = system_prompt.clone();
-        let p = prompt.to_string();
+        let user_prompt = prompt.to_string();
         handles.push(tokio::spawn(async move {
-            chat_completion_deterministic(&cfg, &sp, &p, Some(seed)).await
+            chat_completion_deterministic(&cfg, &sp, &user_prompt, Some(seed), 1024).await
         }));
     }
 
     // Collect results
-    let mut vote_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut vote_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
     let mut success_count = 0usize;
 
     for handle in handles {

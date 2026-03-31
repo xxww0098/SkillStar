@@ -37,7 +37,7 @@ export function AppearanceSection({
                 key={option.id}
                 onClick={() => onBackgroundStyleChange(option.id)}
                 className={cn(
-                  "px-4 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer",
+                  "px-4 py-1.5 rounded-md text-xs font-medium transition cursor-pointer",
                   backgroundStyle === option.id
                     ? "bg-background text-foreground shadow-sm ring-1 ring-border/50"
                     : "text-muted-foreground hover:text-foreground hover:bg-muted"

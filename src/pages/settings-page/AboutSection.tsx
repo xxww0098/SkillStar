@@ -41,7 +41,7 @@ export function AboutSection({ ghInstalled }: AboutSectionProps) {
   const ghInstallCommand =
     ghInstallPlatform === "unknown" ? null : GH_INSTALL_COMMANDS[ghInstallPlatform];
   const platformPaths = [
-    { platform: "Windows", path: "~\\.skillstar\\" },
+    { platform: "Windows", path: "%USERPROFILE%\\.skillstar\\" },
     { platform: "Linux", path: "~/.skillstar/" },
     { platform: "macOS", path: "~/.skillstar/" },
   ] as const;
@@ -105,7 +105,7 @@ export function AboutSection({ ghInstalled }: AboutSectionProps) {
                 <code className="font-mono text-xs text-foreground/85 select-all flex-1">{ghInstallCommand}</code>
                 <button
                   onClick={handleCopy}
-                  className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground cursor-pointer"
+                  className="p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground cursor-pointer focus-ring"
                   title={t("settings.ghCopyCommand")}
                 >
                   {copied ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}

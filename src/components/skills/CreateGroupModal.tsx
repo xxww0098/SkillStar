@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { X, Plus, Check, AlertCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../ui/button";
@@ -45,6 +45,7 @@ export function CreateGroupModal({
   onSave,
 }: CreateGroupModalProps) {
   const { t } = useTranslation();
+  const prefersReducedMotion = useReducedMotion();
   const [name, setName] = useState(initialName);
   const [description, setDescription] = useState(initialDescription);
   const [icon, setIcon] = useState(initialIcon);
@@ -76,6 +77,8 @@ export function CreateGroupModal({
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [emojiOpen]);
+
+  const availableNames = new Set(availableSkills.map((s) => s.name));
 
   const handleClose = () => onClose();
 
@@ -130,7 +133,7 @@ export function CreateGroupModal({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
+            transition={{ duration: prefersReducedMotion ? 0.01 : 0.15 }}
             className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm"
             onClick={handleClose}
           />
@@ -139,13 +142,13 @@ export function CreateGroupModal({
             initial={{ opacity: 0, scale: 0.96, y: 12 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 12 }}
-            transition={{ type: "spring", bounce: 0.1, duration: 0.35 }}
+            transition={{ duration: prefersReducedMotion ? 0.01 : 0.3, ease: [0.16, 1, 0.3, 1] }}
             className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg z-50"
           >
-            <div className="relative overflow-hidden rounded-[24px] border border-white/10 bg-card/95 shadow-[0_0_80px_-20px_rgba(0,0,0,0.5)] backdrop-blur-3xl ring-1 ring-white/5">
+            <div role="dialog" aria-modal="true" aria-label={mode === "edit" ? t("createGroupModal.editGroup") : t("createGroupModal.newGroup")} className="relative overflow-hidden rounded-[24px] border border-white/10 bg-card/95 shadow-[0_0_80px_-20px_rgba(0,0,0,0.5)] backdrop-blur-3xl ring-1 ring-white/5">
               {/* Top ambient glow */}
               <div className="pointer-events-none absolute -left-20 -top-20 h-48 w-48 rounded-full bg-primary/20 blur-[60px] opacity-70" />
-              <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-blue-500/10 blur-[60px] opacity-70" />
+              <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-accent/10 blur-[60px] opacity-70" />
               <div className="relative z-10">
               {/* Header */}
               <div className="flex items-center justify-between px-6 pt-4 pb-0 shrink-0">
@@ -154,6 +157,7 @@ export function CreateGroupModal({
                 </h2>
                 <button
                   onClick={handleClose}
+                  aria-label={t("common.close")}
                   className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors cursor-pointer"
                 >
                   <X className="w-4 h-4" />
@@ -168,7 +172,7 @@ export function CreateGroupModal({
                     <button
                       onClick={() => setEmojiOpen(!emojiOpen)}
                       className={cn(
-                        "w-11 h-11 rounded-xl border flex items-center justify-center text-xl shrink-0 transition-all cursor-pointer",
+                        "w-11 h-11 rounded-xl border flex items-center justify-center text-xl shrink-0 transition cursor-pointer",
                         emojiOpen
                           ? "border-primary/50 bg-primary/5"
                           : "border-border hover:bg-muted",
@@ -184,7 +188,7 @@ export function CreateGroupModal({
                           initial={{ opacity: 0, y: -4 }}
                           animate={{ opacity: 1, y: 0 }}
                           exit={{ opacity: 0, y: -4 }}
-                          transition={{ duration: 0.12 }}
+                          transition={{ duration: prefersReducedMotion ? 0.01 : 0.12 }}
                           className="absolute top-full left-0 mt-2 p-2 rounded-xl border border-border bg-card shadow-lg grid grid-cols-4 gap-0.5 z-10 w-[164px]"
                         >
                           {EMOJI_OPTIONS.map((emoji) => (
@@ -251,23 +255,49 @@ export function CreateGroupModal({
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: "auto" }}
                         exit={{ opacity: 0, height: 0 }}
-                        className="flex flex-wrap gap-1 mb-2"
+                        className="overflow-hidden"
                       >
-                        {selectedSkills.map((skillName) => (
-                          <motion.button
-                            key={skillName}
-                            layout
-                            initial={{ scale: 0.85, opacity: 0 }}
-                            animate={{ scale: 1, opacity: 1 }}
-                            exit={{ scale: 0.85, opacity: 0 }}
-                            transition={{ duration: 0.12 }}
-                            onClick={() => toggleSkill(skillName)}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-primary/10 text-primary text-xs font-medium hover:bg-primary/15 transition-colors cursor-pointer"
-                          >
-                            {skillName}
-                            <X className="w-2.5 h-2.5 opacity-50" />
-                          </motion.button>
-                        ))}
+                        <div className="flex flex-wrap gap-1 mb-2 max-h-[140px] overflow-y-auto pr-1">
+                        {/* Render installed first, then orphans */}
+                        {[...selectedSkills]
+                          .sort((a, b) => {
+                            const aOrphan = !availableNames.has(a);
+                            const bOrphan = !availableNames.has(b);
+                            if (aOrphan === bOrphan) return 0;
+                            return aOrphan ? 1 : -1;
+                          })
+                          .map((skillName, idx, arr) => {
+                          const isOrphan = !availableNames.has(skillName);
+                          // Insert a visual separator before the first orphan
+                          const prevIsInstalled = idx > 0 && availableNames.has(arr[idx - 1]);
+                          const showSeparator = isOrphan && prevIsInstalled;
+                          return (
+                            <span key={skillName} className="contents">
+                              {showSeparator && (
+                                <span className="flex items-center w-full basis-full h-0 my-0.5 border-t border-border/40" />
+                              )}
+                              <motion.button
+                                layout
+                                initial={{ scale: 0.85, opacity: 0 }}
+                                animate={{ scale: 1, opacity: 1 }}
+                                exit={{ scale: 0.85, opacity: 0 }}
+                                transition={{ duration: prefersReducedMotion ? 0.01 : 0.12 }}
+                                onClick={() => toggleSkill(skillName)}
+                                title={isOrphan ? t("createGroupModal.skillNotInstalled", { defaultValue: "Not installed — click to remove" }) : undefined}
+                                className={cn(
+                                  "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium transition-colors cursor-pointer",
+                                  isOrphan
+                                    ? "bg-destructive/10 text-destructive/60 line-through hover:bg-destructive/15"
+                                    : "bg-primary/10 text-primary hover:bg-primary/15"
+                                )}
+                              >
+                                {skillName}
+                                <X className="w-2.5 h-2.5 opacity-50" />
+                              </motion.button>
+                            </span>
+                          );
+                        })}
+                        </div>
                       </motion.div>
                     )}
                   </AnimatePresence>
@@ -309,7 +339,7 @@ export function CreateGroupModal({
                             >
                               <div
                                 className={cn(
-                                  "w-4 h-4 rounded border-[1.5px] flex items-center justify-center shrink-0 transition-all",
+                                  "w-4 h-4 rounded border-[1.5px] flex items-center justify-center shrink-0 transition",
                                   isSelected
                                     ? "bg-primary border-primary"
                                     : "border-muted-foreground/30"
@@ -321,7 +351,7 @@ export function CreateGroupModal({
                               </div>
 
                               <span className={cn(
-                                "text-[13px] truncate",
+                                "text-caption truncate",
                                 isSelected ? "text-primary font-medium" : "text-foreground"
                               )}>
                                 {skill.name}

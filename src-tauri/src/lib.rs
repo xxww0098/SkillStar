@@ -2,7 +2,28 @@ mod cli;
 mod commands;
 mod core;
 
-use tauri::Manager;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::{Emitter, Manager};
+
+pub struct ExitControl {
+    allow_exit: AtomicBool,
+}
+
+impl ExitControl {
+    pub fn new() -> Self {
+        Self {
+            allow_exit: AtomicBool::new(false),
+        }
+    }
+
+    pub fn allow_next_exit(&self) {
+        self.allow_exit.store(true, Ordering::SeqCst);
+    }
+
+    pub fn consume_allow_flag(&self) -> bool {
+        self.allow_exit.swap(false, Ordering::SeqCst)
+    }
+}
 
 pub fn run_cli(args: Vec<String>) {
     cli::run(args);
@@ -23,20 +44,25 @@ pub fn run() {
 
     builder
         .manage(core::patrol::PatrolManager::new())
+        .manage(ExitControl::new())
         .setup(|app| {
             setup_tray(app)?;
-            setup_patrol_auto_resume(app.handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                // If patrol is running, hide window instead of quitting
-                let manager = window.state::<core::patrol::PatrolManager>();
-                let is_running = tauri::async_runtime::block_on(manager.is_running());
-                if is_running {
-                    api.prevent_close();
-                    let _ = window.hide();
+                // Prevent native close and hide the window to background.
+                api.prevent_close();
+                let _ = window.hide();
+                // Hide the Dock icon — keep only the tray icon visible.
+                #[cfg(target_os = "macos")]
+                {
+                    let _ = window
+                        .app_handle()
+                        .set_activation_policy(tauri::ActivationPolicy::Accessory);
                 }
+                // Notify frontend so it can optionally start patrol.
+                let _ = window.emit("skillstar://window-hidden", ());
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -85,10 +111,13 @@ pub fn run() {
             commands::projects::list_projects,
             commands::projects::get_project_skills,
             commands::projects::save_and_sync_project,
+            commands::projects::save_project_skills_list,
             commands::projects::update_project_path,
             commands::projects::remove_project,
             commands::projects::scan_project_skills,
+            commands::projects::rebuild_project_skills_from_disk,
             commands::projects::import_project_skills,
+            commands::projects::detect_project_agents,
             commands::ai::get_ai_config,
             commands::ai::save_ai_config,
             commands::ai::ai_translate_skill,
@@ -98,6 +127,13 @@ pub fn run() {
             commands::ai::ai_summarize_skill_stream,
             commands::ai::ai_test_connection,
             commands::ai::ai_pick_skills,
+            commands::ai::ai_security_scan,
+            commands::ai::estimate_security_scan,
+            commands::ai::cancel_security_scan,
+            commands::ai::get_cached_scan_results,
+            commands::ai::clear_security_scan_cache,
+            commands::ai::list_security_scan_logs,
+            commands::ai::get_security_scan_log_dir,
             commands::github::scan_github_repo,
             commands::github::install_from_scan,
             commands::github::list_repo_history,
@@ -115,26 +151,50 @@ pub fn run() {
             commands::export_multi_skill_bundle,
             commands::write_text_file,
             commands::read_text_file,
+            commands::open_folder,
             commands::patrol::start_patrol,
             commands::patrol::stop_patrol,
             commands::patrol::get_patrol_status,
-            commands::patrol::get_patrol_config,
-            commands::patrol::save_patrol_config,
+            commands::patrol::app_quit,
             commands::patrol::set_dock_visible,
+            update_tray_language,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running SkillStar");
+        .build(tauri::generate_context!())
+        .expect("error while building SkillStar")
+        .run(|app_handle, event| {
+            // Prevent the app from exiting when the last window is hidden.
+            // This keeps the process alive for background patrol and tray icon.
+            if let tauri::RunEvent::ExitRequested { api, .. } = &event {
+                let exit_control = app_handle.state::<ExitControl>();
+                if !exit_control.consume_allow_flag() {
+                    api.prevent_exit();
+                }
+            }
+        });
 }
 
 // ── System Tray ─────────────────────────────────────────────────────
 
-fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    use tauri::menu::{MenuBuilder, MenuItem};
-    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+/// Returns (show_label, stop_patrol_label, quit_label) for the given language.
+fn tray_labels(lang: &str) -> (&'static str, &'static str, &'static str) {
+    if lang.starts_with("zh") {
+        ("显示窗口", "停止后台检查", "退出")
+    } else {
+        ("Show Window", "Stop Background Check", "Quit")
+    }
+}
 
-    let show_i = MenuItem::with_id(app, "show", "显示窗口 / Show", true, None::<&str>)?;
-    let stop_i = MenuItem::with_id(app, "stop_patrol", "退出隐遁 / Stop Patrol", true, None::<&str>)?;
-    let quit_i = MenuItem::with_id(app, "quit", "退出 / Quit", true, None::<&str>)?;
+fn build_tray_menu(
+    app: &impl Manager<tauri::Wry>,
+    lang: &str,
+) -> Result<tauri::menu::Menu<tauri::Wry>, Box<dyn std::error::Error>> {
+    use tauri::menu::{MenuBuilder, MenuItem};
+
+    let (show_label, stop_label, quit_label) = tray_labels(lang);
+
+    let show_i = MenuItem::with_id(app, "show", show_label, true, None::<&str>)?;
+    let stop_i = MenuItem::with_id(app, "stop_patrol", stop_label, true, None::<&str>)?;
+    let quit_i = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
 
     let menu = MenuBuilder::new(app)
         .item(&show_i)
@@ -144,6 +204,25 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .item(&quit_i)
         .build()?;
 
+    Ok(menu)
+}
+
+/// Detect system language at startup — "zh" prefix → Chinese, else English.
+fn detect_system_lang() -> &'static str {
+    let locale = sys_locale::get_locale().unwrap_or_default();
+    if locale.starts_with("zh") {
+        "zh-CN"
+    } else {
+        "en"
+    }
+}
+
+fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+
+    let lang = detect_system_lang();
+    let menu = build_tray_menu(app, lang)?;
+
     TrayIconBuilder::with_id("main-tray")
         .tooltip("SkillStar")
         .icon(app.default_window_icon().unwrap().clone())
@@ -151,6 +230,11 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => {
+                // Restore Dock icon before showing.
+                #[cfg(target_os = "macos")]
+                {
+                    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+                }
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.show();
                     let _ = window.unminimize();
@@ -160,6 +244,11 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             "stop_patrol" => {
                 let manager = app.state::<core::patrol::PatrolManager>();
                 tauri::async_runtime::block_on(manager.stop());
+                // Restore Dock icon before showing.
+                #[cfg(target_os = "macos")]
+                {
+                    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+                }
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.show();
                     let _ = window.unminimize();
@@ -169,6 +258,8 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             "quit" => {
                 let manager = app.state::<core::patrol::PatrolManager>();
                 tauri::async_runtime::block_on(manager.stop());
+                let exit_control = app.state::<ExitControl>();
+                exit_control.allow_next_exit();
                 app.exit(0);
             }
             _ => {}
@@ -181,6 +272,11 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             } = event
             {
                 let app = tray.app_handle();
+                // Restore Dock icon before showing.
+                #[cfg(target_os = "macos")]
+                {
+                    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+                }
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.show();
                     let _ = window.unminimize();
@@ -193,17 +289,14 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-// ── Patrol Auto-Resume ──────────────────────────────────────────────
+// ── Tray language update command ────────────────────────────────────
 
-fn setup_patrol_auto_resume(app: tauri::AppHandle) {
-    let config = core::patrol::load_config();
-    if config.enabled {
-        let interval = config.interval_secs;
-        tauri::async_runtime::spawn(async move {
-            let manager = app.state::<core::patrol::PatrolManager>();
-            if let Err(e) = manager.start(app.clone(), interval).await {
-                eprintln!("[patrol] Auto-resume failed: {}", e);
-            }
-        });
-    }
+#[tauri::command]
+async fn update_tray_language(app: tauri::AppHandle, lang: String) -> Result<(), String> {
+    let menu = build_tray_menu(&app, &lang).map_err(|e| e.to_string())?;
+    let tray = app
+        .tray_by_id("main-tray")
+        .ok_or_else(|| "tray not found".to_string())?;
+    tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;
+    Ok(())
 }

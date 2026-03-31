@@ -29,12 +29,12 @@ export function DeployBanner({ pendingGroupSkills, onDismiss }: DeployBannerProp
             <div className="flex-1" />
             <div className="flex flex-wrap gap-1 max-w-xs">
               {pendingGroupSkills.slice(0, 3).map((skillName) => (
-                <Badge key={skillName} variant="outline" className="text-[10px] h-5">
+                <Badge key={skillName} variant="outline" className="text-micro h-5">
                   {skillName}
                 </Badge>
               ))}
               {pendingGroupSkills.length > 3 && (
-                <Badge variant="outline" className="text-[10px] h-5">
+                <Badge variant="outline" className="text-micro h-5">
                   +{pendingGroupSkills.length - 3}
                 </Badge>
               )}

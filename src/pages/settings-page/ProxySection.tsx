@@ -3,7 +3,7 @@ import { ChevronDown, Globe } from "lucide-react";
 import { Input } from "../../components/ui/input";
 import { Switch } from "../../components/ui/switch";
 import { cn } from "../../lib/utils";
-import type { ProxyConfig } from "../../types";
+import type { ProxyConfig, ProxyType } from "../../types";
 
 interface ProxySectionProps {
   proxyConfig: ProxyConfig;
@@ -26,7 +26,7 @@ export function ProxySection({
 }: ProxySectionProps) {
   const { t } = useTranslation();
   const formControlClass =
-    "flex h-9 w-full rounded-xl border border-input-border bg-input backdrop-blur-sm px-3 text-sm text-foreground shadow-sm transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:border-primary/60";
+    "flex h-9 w-full rounded-xl border border-input-border bg-input backdrop-blur-sm px-3 text-sm text-foreground shadow-sm transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:border-primary/60";
 
   return (
     <section>
@@ -74,7 +74,12 @@ export function ProxySection({
                 </label>
                 <select
                   value={proxyConfig.proxy_type}
-                  onChange={(e) => onConfigChange({ ...proxyConfig, proxy_type: e.target.value })}
+                  onChange={(e) =>
+                    onConfigChange({
+                      ...proxyConfig,
+                      proxy_type: e.target.value as ProxyType,
+                    })
+                  }
                   className={`${formControlClass} pr-8`}
                 >
                   <option value="http">HTTP</option>

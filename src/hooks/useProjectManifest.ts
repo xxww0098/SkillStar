@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { ProjectEntry, SkillsList, ProjectScanResult, ImportTarget, ImportResult } from "../types";
+import type { ProjectEntry, SkillsList, ProjectScanResult, ImportTarget, ImportResult, ProjectAgentDetection } from "../types";
 
 export function useProjectManifest() {
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
@@ -55,6 +55,19 @@ export function useProjectManifest() {
     []
   );
 
+  const saveProjectSkillsList = useCallback(
+    async (projectPath: string, agents: Record<string, string[]>) => {
+      const result = await invoke<SkillsList>("save_project_skills_list", {
+        projectPath,
+        agents,
+      });
+      const updated = await invoke<ProjectEntry[]>("list_projects");
+      setProjects(updated);
+      return result;
+    },
+    []
+  );
+
   const removeProject = useCallback(
     async (name: string) => {
       await invoke("remove_project", { name });
@@ -85,6 +98,15 @@ export function useProjectManifest() {
     []
   );
 
+  const rebuildProjectSkillsFromDisk = useCallback(
+    async (projectPath: string): Promise<SkillsList> => {
+      return await invoke<SkillsList>("rebuild_project_skills_from_disk", {
+        projectPath,
+      });
+    },
+    []
+  );
+
   const importProjectSkills = useCallback(
     async (
       projectPath: string,
@@ -104,6 +126,15 @@ export function useProjectManifest() {
     []
   );
 
+  const detectProjectAgents = useCallback(
+    async (projectPath: string): Promise<ProjectAgentDetection> => {
+      return await invoke<ProjectAgentDetection>("detect_project_agents", {
+        projectPath,
+      });
+    },
+    []
+  );
+
   return {
     projects,
     skillsList,
@@ -112,9 +143,12 @@ export function useProjectManifest() {
     registerProject,
     loadProjectSkills,
     saveAndSync,
+    saveProjectSkillsList,
     updateProjectPath,
     removeProject,
     scanProjectSkills,
+    rebuildProjectSkillsFromDisk,
     importProjectSkills,
+    detectProjectAgents,
   };
 }

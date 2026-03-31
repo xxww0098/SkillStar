@@ -1,9 +1,11 @@
 import { useState, useCallback } from "react";
-import { motion } from "framer-motion";
+
 import { RefreshCw, Loader2, Sparkles, Download } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { SearchInput } from "../ui/SearchInput";
-import { cn } from "../../lib/utils";
+import { HScrollRow } from "../ui/HScrollRow";
+import { AgentIcon } from "../ui/AgentIcon";
+import { cn, agentIconCls } from "../../lib/utils";
 import type { AgentProfile, SortOption, ViewMode } from "../../types";
 
 interface ToolbarProps {
@@ -21,7 +23,7 @@ interface ToolbarProps {
   onAgentFilterChange?: (agentId: string | null) => void;
   /** Optional callback for Import from GitHub button */
   onImport?: () => void;
-  /** Optional callback for Import from File (.agentskill) button */
+  /** Optional callback for Import from File (.ags) button */
   onImportBundle?: () => void;
   /** Optional callback to refresh the data */
   onRefresh?: () => void;
@@ -74,6 +76,7 @@ export function Toolbar({
   localCount,
 }: ToolbarProps) {
   const { t } = useTranslation();
+
   const enabledProfiles = agentProfiles?.filter((p) => p.enabled) ?? [];
   const hasPendingUpdates = (pendingUpdateCount ?? 0) > 0;
   const shouldAnimateUpdateOnly = hasPendingUpdates && !showUpdateOnly;
@@ -116,7 +119,7 @@ export function Toolbar({
       {onAiPick && (
         <button
           onClick={onAiPick}
-          className="flex items-center h-8 px-3 rounded-lg border border-ai-border bg-transparent text-[12px] font-medium text-ai-text hover:text-ai-text-hover hover:bg-ai-bg-hover hover:border-ai-border-hover transition-all duration-300 cursor-pointer shadow-[0_0_8px_var(--color-ai-shadow)] gap-1.5 whitespace-nowrap shrink-0"
+          className="flex items-center h-8 px-3 rounded-lg border border-ai-border bg-transparent text-xs font-medium text-ai-text hover:text-ai-text-hover hover:bg-ai-bg-hover hover:border-ai-border-hover transition duration-300 cursor-pointer shadow-[0_0_8px_var(--color-ai-shadow)] gap-1.5 whitespace-nowrap shrink-0 focus-ring"
         >
           <Sparkles className="w-3.5 h-3.5 shrink-0" />
           {t("toolbar.aiPick")}
@@ -125,25 +128,24 @@ export function Toolbar({
 
       {/* Agent filter */}
       {enabledProfiles.length > 0 && onAgentFilterChange && (
-        <div className="flex items-center gap-0.5 border border-border rounded-lg overflow-hidden backdrop-blur-sm h-8 p-0.5 bg-sidebar/30 shrink-0">
+        <div className="flex items-center gap-0 border border-border rounded-lg overflow-hidden backdrop-blur-sm h-8 p-0.5 bg-sidebar/30 shrink-0">
           <button
             onClick={() => onAgentFilterChange(null)}
+            aria-pressed={agentFilter === null}
             className={cn(
-              "relative h-full px-2.5 flex items-center justify-center rounded-md text-[11px] font-medium transition-colors duration-200 cursor-pointer whitespace-nowrap z-10",
+              "relative h-full px-2.5 flex items-center justify-center rounded-md text-xs font-medium cursor-pointer whitespace-nowrap z-10 shrink-0 focus-ring",
               agentFilter === null
                 ? "text-accent-foreground"
                 : "text-muted-foreground hover:text-foreground hover:bg-sidebar-hover"
             )}
           >
-            {agentFilter === null && (
-              <motion.div
-                layoutId="agent-filter-capsule"
-                className="absolute inset-0 bg-accent shadow-[0_0_8px_rgba(59,130,246,0.1)] rounded-md -z-10"
-                transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
-              />
-            )}
+            <div className={cn(
+              "absolute inset-0 bg-accent rounded-md -z-10 [backface-visibility:hidden]",
+              agentFilter === null ? "opacity-100" : "opacity-0"
+            )} />
             {t("toolbar.all")}
           </button>
+          <HScrollRow count={enabledProfiles.length} maxVisible={4} className="gap-0.5">
           {enabledProfiles.map((profile) => {
             const isActive = agentFilter === profile.id;
             return (
@@ -155,23 +157,21 @@ export function Toolbar({
                   )
                 }
                 title={profile.display_name}
+                aria-pressed={isActive}
                 className={cn(
-                  "relative h-full w-7 flex items-center justify-center rounded-md transition-colors duration-200 cursor-pointer z-10",
+                  "relative h-full w-7 shrink-0 flex items-center justify-center rounded-md cursor-pointer z-10 focus-ring",
                   !isActive && "hover:bg-sidebar-hover"
                 )}
               >
-                {isActive && (
-                  <motion.div
-                    layoutId="agent-filter-capsule"
-                    className="absolute inset-0 bg-accent shadow-[0_0_8px_rgba(59,130,246,0.1)] rounded-md -z-10"
-                    transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
-                  />
-                )}
-                <img
-                  src={`/${profile.icon}`}
-                  alt={profile.display_name}
+                <div className={cn(
+                  "absolute inset-0 bg-accent rounded-md -z-10 [backface-visibility:hidden]",
+                  isActive ? "opacity-100" : "opacity-0"
+                )} />
+                <AgentIcon
+                  profile={profile}
                   className={cn(
-                    "w-3.5 h-3.5 transition-all duration-200",
+                    agentIconCls(profile.icon),
+                    "transition duration-200",
                     isActive
                       ? "drop-shadow-sm scale-[1.1]"
                       : "opacity-60 hover:opacity-90 grayscale-0"
@@ -180,6 +180,7 @@ export function Toolbar({
               </button>
             );
           })}
+          </HScrollRow>
         </div>
       )}
 
@@ -192,20 +193,18 @@ export function Toolbar({
               <button
                 key={f}
                 onClick={() => onSourceFilterChange(f)}
+                aria-pressed={isActive}
                 className={cn(
-                  "relative h-full px-2.5 flex items-center justify-center rounded-md text-[11px] font-medium transition-colors duration-200 cursor-pointer whitespace-nowrap z-10",
+                  "relative h-full px-2.5 flex items-center justify-center rounded-md text-xs font-medium cursor-pointer whitespace-nowrap z-10 focus-ring",
                   isActive
                     ? "text-accent-foreground"
                     : "text-muted-foreground hover:text-foreground hover:bg-sidebar-hover"
                 )}
               >
-                {isActive && (
-                  <motion.div
-                    layoutId="source-filter-capsule"
-                    className="absolute inset-0 bg-accent shadow-[0_0_8px_rgba(59,130,246,0.1)] rounded-md -z-10"
-                    transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
-                  />
-                )}
+                <div className={cn(
+                  "absolute inset-0 bg-accent rounded-md -z-10 [backface-visibility:hidden]",
+                  isActive ? "opacity-100" : "opacity-0"
+                )} />
                 {f === "all" ? t("toolbar.all") : f === "hub" ? "Hub" : "Local"}
               </button>
             );
@@ -217,7 +216,7 @@ export function Toolbar({
       {onImport && (
         <button
           onClick={onImport}
-          className="flex items-center h-8 px-3 gap-1.5 rounded-lg border border-border/80 bg-background/50 shadow-sm backdrop-blur-md text-[12px] font-medium text-foreground/80 hover:text-foreground hover:bg-accent/10 hover:border-accent/50 transition-all duration-200 cursor-pointer group whitespace-nowrap shrink-0"
+          className="flex items-center h-8 px-3 gap-1.5 rounded-lg border border-border/80 bg-background/50 shadow-sm backdrop-blur-md text-xs font-medium text-foreground/80 hover:text-foreground hover:bg-accent/10 hover:border-accent/50 transition duration-200 cursor-pointer group whitespace-nowrap shrink-0 focus-ring"
         >
           <Download className="w-3.5 h-3.5 text-muted-foreground group-hover:text-accent-foreground transition-colors" />
           {t("toolbar.import", { defaultValue: "Import" })}
@@ -230,7 +229,7 @@ export function Toolbar({
           onClick={handleRefresh}
           disabled={isRefreshing || cooldown}
           className={cn(
-            "flex items-center justify-center w-8 h-8 rounded-lg border border-border/80 bg-background/50 shadow-sm backdrop-blur-md text-foreground/80 hover:text-foreground hover:bg-accent/10 hover:border-accent/50 transition-all duration-200 cursor-pointer group shrink-0",
+            "flex items-center justify-center w-8 h-8 rounded-lg border border-border/80 bg-background/50 shadow-sm backdrop-blur-md text-foreground/80 hover:text-foreground hover:bg-accent/10 hover:border-accent/50 transition duration-200 cursor-pointer group shrink-0 focus-ring",
             (isRefreshing || cooldown) && "opacity-50 cursor-not-allowed"
           )}
           title={t("common.refresh", { defaultValue: "Refresh" })}
@@ -244,7 +243,7 @@ export function Toolbar({
       )}
 
       {countText && (
-        <div className="h-8 px-3 flex items-center justify-center rounded-lg border border-border/70 bg-background/50 shadow-sm text-[12px] font-medium text-foreground/80 tabular-nums whitespace-nowrap shrink-0">
+        <div className="h-8 px-3 flex items-center justify-center rounded-lg border border-border/70 bg-background/50 shadow-sm text-xs font-medium text-foreground/80 tabular-nums whitespace-nowrap shrink-0">
           {countText}
         </div>
       )}
@@ -253,12 +252,12 @@ export function Toolbar({
         <button
           onClick={onToggleUpdateOnly}
           className={cn(
-            "h-8 px-3 text-[12px] font-medium rounded-lg border transition-all duration-200 cursor-pointer flex items-center gap-1.5 shadow-sm whitespace-nowrap shrink-0",
+            "h-8 px-3 text-xs font-medium rounded-lg border transition duration-200 cursor-pointer flex items-center gap-1.5 shadow-sm whitespace-nowrap shrink-0 focus-ring",
             showUpdateOnly
-              ? "bg-accent text-accent-foreground border-accent shadow-[0_0_8px_rgba(59,130,246,0.1)]"
+              ? "bg-accent text-accent-foreground border-accent shadow-[0_0_8px_rgba(var(--color-primary-rgb),0.1)]"
               : "border-border/80 bg-background/50 text-foreground/80 hover:text-foreground hover:bg-accent/10 hover:border-accent/50",
             shouldAnimateUpdateOnly &&
-              "border-warning/50 text-warning-foreground bg-warning/10 shadow-[0_0_14px_rgba(245,158,11,0.2)]"
+              "border-warning/50 text-warning-foreground bg-warning/10 shadow-[0_0_14px_rgba(var(--color-warning-rgb),0.2)]"
           )}
         >
           {shouldAnimateUpdateOnly && (
@@ -271,7 +270,7 @@ export function Toolbar({
           {hasPendingUpdates && (
             <span
               className={cn(
-                "min-w-[1.25rem] h-4 px-1 rounded-full text-[10px] leading-4 text-center tabular-nums",
+                "min-w-[1.25rem] h-[1.125rem] px-1 rounded-full text-[11px] leading-[1.125rem] text-center tabular-nums",
                 shouldAnimateUpdateOnly
                   ? "bg-warning/20 text-warning-foreground"
                   : "bg-muted text-muted-foreground"
@@ -291,20 +290,18 @@ export function Toolbar({
             <button
               key={opt.value}
               onClick={() => onSortChange(opt.value)}
+              aria-pressed={isActive}
               className={cn(
-                "relative h-full px-3 flex items-center justify-center rounded-md text-[11px] font-medium transition-colors duration-200 cursor-pointer whitespace-nowrap z-10",
+                "relative h-full px-3 flex items-center justify-center rounded-md text-xs font-medium cursor-pointer whitespace-nowrap z-10 focus-ring",
                 isActive
                   ? "text-accent-foreground"
                   : "text-muted-foreground hover:text-foreground hover:bg-sidebar-hover"
               )}
             >
-              {isActive && (
-                <motion.div
-                  layoutId="sort-filter-capsule"
-                  className="absolute inset-0 bg-accent shadow-[0_0_8px_rgba(59,130,246,0.1)] rounded-md -z-10"
-                  transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
-                />
-              )}
+              <div className={cn(
+                "absolute inset-0 bg-accent rounded-md -z-10 [backface-visibility:hidden]",
+                isActive ? "opacity-100" : "opacity-0"
+              )} />
               {opt.label}
             </button>
           );
@@ -315,38 +312,34 @@ export function Toolbar({
       <div className="flex items-center gap-0.5 border border-border rounded-lg overflow-hidden backdrop-blur-sm h-8 p-0.5 bg-sidebar/30 shadow-sm">
         <button
           onClick={() => onViewModeChange("grid")}
+          aria-label="Grid view"
           className={cn(
-            "relative h-full w-8 flex items-center justify-center rounded-md transition-colors duration-200 cursor-pointer z-10",
+            "relative h-full w-8 flex items-center justify-center rounded-md cursor-pointer z-10 focus-ring",
             viewMode === "grid"
               ? "text-accent-foreground"
               : "text-muted-foreground hover:text-foreground hover:bg-sidebar-hover"
           )}
         >
-          {viewMode === "grid" && (
-            <motion.div
-              layoutId="view-filter-capsule"
-              className="absolute inset-0 bg-accent shadow-[0_0_8px_rgba(59,130,246,0.1)] rounded-md -z-10"
-              transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
-            />
-          )}
+          <div className={cn(
+            "absolute inset-0 bg-accent rounded-md -z-10 [backface-visibility:hidden]",
+            viewMode === "grid" ? "opacity-100" : "opacity-0"
+          )} />
           <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="1" width="5" height="5" rx="1"/><rect x="8" y="1" width="5" height="5" rx="1"/><rect x="1" y="8" width="5" height="5" rx="1"/><rect x="8" y="8" width="5" height="5" rx="1"/></svg>
         </button>
         <button
           onClick={() => onViewModeChange("list")}
+          aria-label="List view"
           className={cn(
-            "relative h-full w-8 flex items-center justify-center rounded-md transition-colors duration-200 cursor-pointer z-10",
+            "relative h-full w-8 flex items-center justify-center rounded-md cursor-pointer z-10 focus-ring",
             viewMode === "list"
               ? "text-accent-foreground"
               : "text-muted-foreground hover:text-foreground hover:bg-sidebar-hover"
           )}
         >
-          {viewMode === "list" && (
-            <motion.div
-              layoutId="view-filter-capsule"
-              className="absolute inset-0 bg-accent shadow-[0_0_8px_rgba(59,130,246,0.1)] rounded-md -z-10"
-              transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
-            />
-          )}
+          <div className={cn(
+            "absolute inset-0 bg-accent rounded-md -z-10 [backface-visibility:hidden]",
+            viewMode === "list" ? "opacity-100" : "opacity-0"
+          )} />
           <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="2" width="12" height="2" rx="0.5"/><rect x="1" y="6" width="12" height="2" rx="0.5"/><rect x="1" y="10" width="12" height="2" rx="0.5"/></svg>
         </button>
       </div>

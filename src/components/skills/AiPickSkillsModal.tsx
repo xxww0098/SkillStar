@@ -1,17 +1,12 @@
 import { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { X, Sparkles, Check, Loader2 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { Button } from "../ui/button";
 import { cn, navigateToAiSettings } from "../../lib/utils";
 import { toast } from "../../lib/toast";
-import type { Skill } from "../../types";
-
-interface AiConfigLike {
-  enabled: boolean;
-  api_key: string;
-}
+import type { AiConfigStatus, Skill } from "../../types";
 
 interface AiPickSkillsModalProps {
   open: boolean;
@@ -29,6 +24,7 @@ export function AiPickSkillsModal({
   onResult,
 }: AiPickSkillsModalProps) {
   const { t } = useTranslation();
+  const prefersReducedMotion = useReducedMotion();
   const [phase, setPhase] = useState<Phase>("input");
   const [prompt, setPrompt] = useState("");
   const [recommended, setRecommended] = useState<string[]>([]);
@@ -47,7 +43,7 @@ export function AiPickSkillsModal({
 
       const loadAiConfig = async () => {
         try {
-          const config = await invoke<AiConfigLike>("get_ai_config");
+          const config = await invoke<AiConfigStatus>("get_ai_config");
           setAiConfigured(config.enabled && config.api_key.trim().length > 0);
         } catch {
           setAiConfigured(false);
@@ -110,7 +106,7 @@ export function AiPickSkillsModal({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
+            transition={{ duration: prefersReducedMotion ? 0.01 : 0.15 }}
             className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm"
             onClick={onClose}
           />
@@ -119,23 +115,24 @@ export function AiPickSkillsModal({
             initial={{ opacity: 0, scale: 0.96, y: 12 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 12 }}
-            transition={{ type: "spring", bounce: 0.1, duration: 0.35 }}
+            transition={{ duration: prefersReducedMotion ? 0.01 : 0.3, ease: [0.16, 1, 0.3, 1] }}
             className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg z-50"
           >
-            <div className="relative overflow-hidden rounded-[24px] border border-white/10 bg-card/95 shadow-[0_0_80px_-20px_rgba(0,0,0,0.5)] backdrop-blur-3xl ring-1 ring-white/5">
+            <div role="dialog" aria-modal="true" aria-label={t("aiPickModal.title")} className="relative overflow-hidden rounded-[24px] border border-white/10 bg-card/95 shadow-[0_0_80px_-20px_rgba(0,0,0,0.5)] backdrop-blur-3xl ring-1 ring-white/5">
               {/* Ambient glow */}
-              <div className="pointer-events-none absolute -left-20 -top-20 h-48 w-48 rounded-full bg-violet-500/20 blur-[60px] opacity-70" />
-              <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-blue-500/15 blur-[60px] opacity-70" />
+              <div className="pointer-events-none absolute -left-20 -top-20 h-48 w-48 rounded-full bg-primary/20 blur-[60px] opacity-70" />
+              <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-accent/10 blur-[60px] opacity-70" />
 
               <div className="relative z-10">
                 {/* Header */}
                 <div className="flex items-center justify-between px-6 pt-4 pb-0 shrink-0">
                   <h2 className="text-heading-sm flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-violet-400" />
+                    <Sparkles className="w-4 h-4 text-primary" />
                     {t("aiPickModal.title")}
                   </h2>
                   <button
                     onClick={onClose}
+                    aria-label={t("common.close")}
                     className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors cursor-pointer"
                   >
                     <X className="w-4 h-4" />
@@ -158,7 +155,7 @@ export function AiPickSkillsModal({
                           onClose();
                           navigateToAiSettings();
                         }}
-                        className="text-xs cursor-pointer shrink-0 font-medium text-warning hover:text-warning/80 underline underline-offset-2"
+                        className="text-xs cursor-pointer shrink-0 font-medium text-warning hover:text-warning/80 underline underline-offset-2 px-2 py-1 rounded focus-ring"
                       >
                         {t("skillEditor.configureAI")}
                       </button>
@@ -178,7 +175,7 @@ export function AiPickSkillsModal({
                         value={prompt}
                         onChange={(e) => setPrompt(e.target.value)}
                         placeholder={t("aiPickModal.placeholder")}
-                        className="w-full h-28 resize-none rounded-xl border border-border bg-sidebar/50 px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/40 transition-all"
+                        className="w-full h-28 resize-none rounded-xl border border-border bg-sidebar/50 px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/40 transition"
                         autoFocus
                         onKeyDown={(e) => {
                           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -207,7 +204,7 @@ export function AiPickSkillsModal({
                       <p className="text-sm text-muted-foreground">
                         {t("aiPickModal.picking")}
                       </p>
-                      <p className="text-[11px] text-muted-foreground/60">
+                      <p className="text-micro text-muted-foreground/60">
                         {t("aiPickModal.pickingDetail")}
                       </p>
                     </motion.div>
@@ -223,7 +220,7 @@ export function AiPickSkillsModal({
                         <p className="text-xs text-muted-foreground">
                           {t("aiPickModal.resultTitle")}
                         </p>
-                        <span className="text-[11px] text-muted-foreground tabular-nums">
+                        <span className="text-micro text-muted-foreground tabular-nums">
                           {selected.size} / {recommended.length}
                         </span>
                       </div>
@@ -245,7 +242,7 @@ export function AiPickSkillsModal({
                                   key={name}
                                   onClick={() => toggleSkill(name)}
                                   className={cn(
-                                    "w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-all cursor-pointer",
+                                    "w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition cursor-pointer",
                                     isSelected
                                       ? "bg-violet-500/8 hover:bg-violet-500/12"
                                       : "hover:bg-muted/50"
@@ -253,7 +250,7 @@ export function AiPickSkillsModal({
                                 >
                                   <div
                                     className={cn(
-                                      "w-4 h-4 rounded border-[1.5px] flex items-center justify-center shrink-0 transition-all",
+                                      "w-4 h-4 rounded border-[1.5px] flex items-center justify-center shrink-0 transition",
                                       isSelected
                                         ? "bg-violet-500 border-violet-500"
                                         : "border-muted-foreground/30"
@@ -269,7 +266,7 @@ export function AiPickSkillsModal({
                                   <div className="flex-1 min-w-0">
                                     <div
                                       className={cn(
-                                        "text-[13px] truncate",
+                                        "text-caption truncate",
                                         isSelected
                                           ? "text-violet-300 font-medium"
                                           : "text-foreground"
@@ -278,7 +275,7 @@ export function AiPickSkillsModal({
                                       {name}
                                     </div>
                                     {skill?.description && (
-                                      <div className="text-[11px] text-muted-foreground truncate mt-0.5">
+                                      <div className="text-micro text-muted-foreground truncate mt-0.5">
                                         {skill.description}
                                       </div>
                                     )}

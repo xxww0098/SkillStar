@@ -1,11 +1,12 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useTranslation } from "react-i18next";
-import { Share2, Plus, Rocket, Copy, Trash2, MoreHorizontal, Edit2, Download, FolderKanban, Package } from "lucide-react";
+import { Share2, Plus, Rocket, Copy, Trash2, MoreHorizontal, Edit2, Download, FolderKanban, Package, AlertTriangle, Loader2 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Card } from "../components/ui/card";
 import { EmptyState } from "../components/ui/EmptyState";
+import { HScrollRow } from "../components/ui/HScrollRow";
 import { CreateGroupModal } from "../components/skills/CreateGroupModal";
 import { ImportShareCodeModal } from "../components/skills/ImportShareCodeModal";
 import { ExportShareCodeModal } from "../components/skills/ExportShareCodeModal";
@@ -13,7 +14,8 @@ import { PublishSkillModal } from "../components/skills/PublishSkillModal";
 import { useSkillCards } from "../hooks/useSkillCards";
 import { useSkills } from "../hooks/useSkills";
 import { useAgentProfiles } from "../hooks/useAgentProfiles";
-import { cn } from "../lib/utils";
+import { AgentIcon } from "../components/ui/AgentIcon";
+import { cn, agentIconCls } from "../lib/utils";
 import type { SkillCardDeck } from "../types";
 
 interface SkillCardsProps {
@@ -30,7 +32,7 @@ export function SkillCards({
   const { t } = useTranslation();
   const { groups, loading, createGroup, updateGroup, deleteGroup, duplicateGroup } =
     useSkillCards();
-  const { skills, toggleSkillForAgent } = useSkills();
+  const { skills, installSkill, toggleSkillForAgent } = useSkills();
   const { profiles } = useAgentProfiles();
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
@@ -39,6 +41,7 @@ export function SkillCards({
   const [quickPackSkills, setQuickPackSkills] = useState<string[]>([]);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [publishTarget, setPublishTarget] = useState<string | null>(null);
+  const [installingMissing, setInstallingMissing] = useState<string | null>(null);
   const enabledProfiles = profiles.filter((p) => p.enabled);
   // Batch-toggle state: { groupId::agentId → "linking" }
   const [linkState, setLinkState] = useState<Record<string, "linking">>({});
@@ -98,6 +101,30 @@ export function SkillCards({
     }
   };
 
+  const handleInstallMissing = async (group: SkillCardDeck) => {
+    if (installingMissing) return;
+    const missing = group.skills.filter(
+      (name) => !skillByName.has(name) && group.skill_sources?.[name]
+    );
+    if (missing.length === 0) return;
+    setInstallingMissing(group.id);
+    setMenuOpenId(null);
+    try {
+      for (const name of missing) {
+        const url = group.skill_sources[name];
+        if (url) {
+          try {
+            await installSkill(url, name);
+          } catch (e) {
+            console.error(`Failed to install ${name}:`, e);
+          }
+        }
+      }
+    } finally {
+      setInstallingMissing(null);
+    }
+  };
+
   useEffect(() => {
     if (!preSelectedSkills || preSelectedSkills.length === 0) return;
     setQuickPackSkills([...new Set(preSelectedSkills)]);
@@ -118,7 +145,7 @@ export function SkillCards({
       {/* Header */}
       <div className="h-14 flex items-center justify-between px-6 border-b border-border bg-card/30 backdrop-blur-sm">
         <div className="flex items-center gap-3">
-          <h1 className="text-heading-md text-zinc-100">{t("sidebar.groups")}</h1>
+          <h1>{t("sidebar.groups")}</h1>
           {!loading && (
             <Badge variant="outline">{t("skillCards.groupsCount", { count: groups.length })}</Badge>
           )}
@@ -171,9 +198,16 @@ export function SkillCards({
               }
             />
           ) : (
-            <div className="grid gap-5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))" }}>
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-5 max-w-6xl mx-auto">
               <AnimatePresence>
                 {groups.map((group) => {
+                  const installedCount = group.skills.filter((n) => skillByName.has(n)).length;
+                  const totalCount = group.skills.length;
+                  const missingCount = totalCount - installedCount;
+                  const installableMissingCount = group.skills.filter(
+                    (n) => !skillByName.has(n) && group.skill_sources?.[n]
+                  ).length;
+                  const isInstallingThis = installingMissing === group.id;
                   return (
                     <motion.div
                       key={group.id}
@@ -185,7 +219,7 @@ export function SkillCards({
                         menuOpenId === group.id ? "z-50" : "z-0 hover:z-10"
                       )}
                     >
-                      <Card className="hover:bg-card/60 flex flex-col h-full relative group shadow-sm hover:shadow-xl transition-all p-0 border border-white/10 bg-card/40 backdrop-blur-sm overflow-hidden">
+                      <Card className="hover:bg-card/60 flex flex-col h-full relative group shadow-sm hover:shadow-xl transition p-0 border border-white/10 bg-card/40 backdrop-blur-sm overflow-hidden">
                         <div className="p-4 flex flex-col flex-1 relative min-h-0">
                           {/* Top Action Row (Context Menu) */}
                           <div className="absolute top-4 right-4 z-20 flex items-center gap-1">
@@ -194,8 +228,9 @@ export function SkillCards({
                                 e.stopPropagation();
                                 setExportGroupTarget(group);
                               }}
-                              className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors cursor-pointer"
+                              className="p-2.5 -mr-1 rounded-lg hover:bg-muted text-muted-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary"
                               title={t("skillCards.exportShareCode")}
+                              aria-label={t("skillCards.exportShareCode")}
                             >
                               <Share2 className="w-4 h-4" />
                             </button>
@@ -207,7 +242,8 @@ export function SkillCards({
                                     menuOpenId === group.id ? null : group.id
                                   );
                                 }}
-                                className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors cursor-pointer"
+                                className="p-2.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary mt-0.5"
+                                aria-label={t("common.more")}
                               >
                                 <MoreHorizontal className="w-4 h-4" />
                               </button>
@@ -242,6 +278,20 @@ export function SkillCards({
                                     <Trash2 className="w-3 h-3" />
                                     {t("common.delete")}
                                   </button>
+                                  {installableMissingCount > 0 && (
+                                    <button
+                                      onClick={() => handleInstallMissing(group)}
+                                      disabled={isInstallingThis}
+                                      className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs text-warning-foreground hover:bg-warning/10 transition-colors cursor-pointer"
+                                    >
+                                      {isInstallingThis ? (
+                                        <Loader2 className="w-3 h-3 animate-spin" />
+                                      ) : (
+                                        <Download className="w-3 h-3" />
+                                      )}
+                                      {t("skillCards.installMissing", { count: installableMissingCount, defaultValue: `Install missing (${installableMissingCount})` })}
+                                    </button>
+                                  )}
                                 </motion.div>
                               )}
                             </div>
@@ -253,8 +303,10 @@ export function SkillCards({
                               {group.icon}
                             </div>
                             <div className="min-w-0 pt-1">
-                              <h3 className="text-base font-semibold leading-tight truncate text-foreground group-hover:text-primary transition-colors cursor-pointer" onClick={() => setEditGroup(group)}>
-                                {group.name}
+                              <h3 className="text-base font-semibold leading-tight truncate text-foreground transition-colors">
+                                <button type="button" onClick={() => setEditGroup(group)} className="w-full text-left truncate rounded outline-none focus-visible:ring-2 focus-visible:ring-primary hover:text-primary cursor-pointer transition-colors">
+                                  {group.name}
+                                </button>
                               </h3>
                               {group.description ? (
                                 <p className="text-xs text-muted-foreground line-clamp-2 mt-1">
@@ -268,16 +320,16 @@ export function SkillCards({
                             </div>
                           </div>
 
-                          {/* Skills Preview Tags (Max 4) */}
-                          <div className="flex flex-wrap gap-1.5 mt-auto overflow-hidden max-h-[46px]">
-                            {group.skills.slice(0, 4).map((skillName) => {
+                          {/* Skills Preview Tags */}
+                          <div className="flex flex-wrap items-center gap-1.5 mt-auto overflow-hidden max-h-[46px]">
+                            {group.skills.slice(0, 5).map((skillName) => {
                               const skill = skills.find((s) => s.name === skillName);
                               return (
                                 <Badge
                                   key={skillName}
-                                  variant={skill ? "outline" : "outline"}
+                                  variant="outline"
                                   className={cn(
-                                    "text-[10px] font-medium px-2 py-0.5 h-5",
+                                    "text-micro font-medium px-2 py-0.5 h-5",
                                     skill ? "bg-muted text-muted-foreground border-transparent" : "text-warning bg-warning/5 border-warning/20 font-normal"
                                   )}
                                 >
@@ -285,111 +337,144 @@ export function SkillCards({
                                 </Badge>
                               );
                             })}
-                            {group.skills.length > 4 && (
+                            {group.skills.length > 5 && (
                               <Badge
                                 variant="outline"
-                                className="text-[10px] font-medium px-2 py-0.5 h-5 bg-muted text-muted-foreground border-transparent"
+                                className="text-micro font-medium px-2 py-0.5 h-5 bg-muted text-muted-foreground border-transparent"
                               >
-                                +{group.skills.length - 4}
+                                +{group.skills.length - 5}
+                              </Badge>
+                            )}
+                            {missingCount > 0 && (
+                              <Badge
+                                variant="outline"
+                                className="text-micro font-medium px-2 py-0.5 h-5 bg-warning/5 text-warning border-warning/20 tabular-nums"
+                              >
+                                {installedCount}/{totalCount}
                               </Badge>
                             )}
                           </div>
                         </div>
 
                         {/* Footer section */}
-                        <div className="px-4 py-2.5 border-t border-border/50 mt-auto flex flex-wrap items-center justify-between rounded-b-xl gap-x-2 gap-y-3 min-h-[44px]">
-                          <div className="flex items-center gap-2 shrink-0">
-                            <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">
-                              {t("skillCards.skillsCount", { count: group.skills.length })}
-                            </span>
-                          </div>
-
-                          {/* Agent link icons + Deploy */}
-                          <div className="flex items-center gap-1.5">
-                            {/* Link to Agent icons */}
-                            {enabledProfiles.map((profile) => {
-                              const key = `${group.id}::${profile.id}`;
-                              const state = linkState[key];
-                              const installedSkillNames = group.skills.filter((name) =>
-                                skillByName.has(name)
-                              );
-                              const linkedCount = installedSkillNames.filter((name) =>
-                                skillByName
-                                  .get(name)
-                                  ?.agent_links?.includes(profile.display_name)
-                              ).length;
-                              const allLinked =
-                                installedSkillNames.length > 0 &&
-                                linkedCount === installedSkillNames.length;
-                              const partialLinked =
-                                linkedCount > 0 && linkedCount < installedSkillNames.length;
-                              const linking = state === "linking";
-                              return (
-                                <button
-                                  key={profile.id}
+                        <div className="px-4 py-2.5 border-t border-border/50 mt-auto flex items-center rounded-b-xl min-h-[44px]">
+                          {installedCount === 0 ? (
+                            /* All skills missing — show warning */
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0" />
+                              <span className="text-xs text-warning-foreground truncate">
+                                {t("skillCards.noSkillsInstalled", { defaultValue: "No skills installed" })}
+                              </span>
+                              {installableMissingCount > 0 && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-6 px-2.5 text-xs ml-auto border-warning/30 text-warning-foreground hover:bg-warning/10 shrink-0"
+                                  disabled={isInstallingThis}
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    void handleToggleGroupAgentLinks(
-                                      group,
-                                      profile.id,
-                                      profile.display_name,
-                                      installedSkillNames,
-                                      allLinked
-                                    );
+                                    handleInstallMissing(group);
                                   }}
-                                  disabled={linking || installedSkillNames.length === 0}
-                                  title={
-                                    allLinked
-                                      ? t("skillCards.unlinkAllFrom", {
-                                          agent: profile.display_name,
-                                        })
-                                      : t("skillCards.linkAllTo", {
-                                          agent: profile.display_name,
-                                        })
-                                  }
-                                  className={cn(
-                                    "w-7 h-7 rounded-lg flex items-center justify-center border transition-all cursor-pointer",
-                                    allLinked
-                                      ? "border-primary/20 bg-primary/5 shadow-sm"
-                                      : linking
-                                        ? "border-primary/30 bg-primary/5 opacity-60"
-                                        : partialLinked
-                                          ? "border-warning/30 bg-warning/5"
-                                        : "border-transparent hover:bg-muted hover:border-border text-muted-foreground"
-                                  )}
                                 >
-                                  <img
-                                    src={`/${profile.icon}`}
-                                    alt={profile.display_name}
+                                  {isInstallingThis ? (
+                                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                  ) : (
+                                    <Download className="w-3 h-3 mr-1" />
+                                  )}
+                                  {t("skillCards.installAll", { defaultValue: "Install all" })}
+                                </Button>
+                              )}
+                            </div>
+                          ) : (
+                            /* Normal footer: Agent icons + Deploy */
+                            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                              {/* Link to Agent icons */}
+                              <HScrollRow count={enabledProfiles.length} maxVisible={6} itemWidth={28} gap={6} className="gap-1.5">
+                              {enabledProfiles.map((profile) => {
+                                const key = `${group.id}::${profile.id}`;
+                                const state = linkState[key];
+                                const installedSkillNames = group.skills.filter((name) =>
+                                  skillByName.has(name)
+                                );
+                                const linkedCount = installedSkillNames.filter((name) =>
+                                  skillByName
+                                    .get(name)
+                                    ?.agent_links?.includes(profile.display_name)
+                                ).length;
+                                const allLinked =
+                                  installedSkillNames.length > 0 &&
+                                  linkedCount === installedSkillNames.length;
+                                const partialLinked =
+                                  linkedCount > 0 && linkedCount < installedSkillNames.length;
+                                const linking = state === "linking";
+                                return (
+                                  <button
+                                    key={profile.id}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      void handleToggleGroupAgentLinks(
+                                        group,
+                                        profile.id,
+                                        profile.display_name,
+                                        installedSkillNames,
+                                        allLinked
+                                      );
+                                    }}
+                                    disabled={linking || installedSkillNames.length === 0}
+                                    title={
+                                      allLinked
+                                        ? t("skillCards.unlinkAllFrom", {
+                                            agent: profile.display_name,
+                                          })
+                                        : t("skillCards.linkAllTo", {
+                                            agent: profile.display_name,
+                                          })
+                                    }
                                     className={cn(
-                                      "w-3.5 h-3.5 transition-[filter,opacity] duration-300",
-                                      linking && "animate-pulse",
-                                      !allLinked && !partialLinked &&
-                                        "grayscale opacity-40 hover:opacity-80 hover:grayscale-0"
+                                      "w-7 h-7 rounded-lg flex items-center justify-center border transition cursor-pointer shrink-0",
+                                      allLinked
+                                        ? "border-primary/20 bg-primary/5 shadow-sm"
+                                        : linking
+                                          ? "border-primary/30 bg-primary/5 opacity-60"
+                                          : partialLinked
+                                            ? "border-warning/30 bg-warning/5"
+                                          : "border-transparent hover:bg-muted hover:border-border text-muted-foreground"
                                     )}
-                                  />
-                                </button>
-                              );
-                            })}
+                                  >
+                                    <AgentIcon
+                                      profile={profile}
+                                      className={cn(
+                                        agentIconCls(profile.icon),
+                                        "transition-[filter,opacity] duration-300",
+                                        linking && "animate-pulse",
+                                        !allLinked && !partialLinked &&
+                                          "grayscale opacity-40 hover:opacity-80 hover:grayscale-0"
+                                      )}
+                                    />
+                                  </button>
+                                );
+                              })}
+                              </HScrollRow>
 
-                            {/* Separator */}
-                            {enabledProfiles.length > 0 && (
-                              <div className="w-px h-4 bg-border mx-0.5" />
-                            )}
+                              {/* Separator */}
+                              {enabledProfiles.length > 0 && (
+                                <div className="w-px h-4 bg-border mx-0.5 ml-auto" />
+                              )}
 
-                            {/* Deploy to project */}
-                            <Button
-                              size="sm"
-                              className="h-7 px-3 text-xs group/btn bg-primary hover:bg-primary/90"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onNavigateToProjects?.(group.skills);
-                              }}
-                            >
-                              <Rocket className="w-3 h-3 mr-1.5 transition-transform group-hover/btn:-translate-y-[1px] group-hover/btn:translate-x-[1px]" />
-                              {t("skillCards.deploy")}
-                            </Button>
-                          </div>
+                              {/* Deploy to project */}
+                              <Button
+                                size="sm"
+                                className="h-7 px-3 text-xs group/btn bg-primary hover:bg-primary/90"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onNavigateToProjects?.(group.skills);
+                                }}
+                              >
+                                <Rocket className="w-3 h-3 mr-1.5 transition-transform group-hover/btn:-translate-y-[1px] group-hover/btn:translate-x-[1px]" />
+                                {t("skillCards.deploy")}
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       </Card>
                     </motion.div>

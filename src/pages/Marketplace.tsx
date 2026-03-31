@@ -14,6 +14,7 @@ import {
   hydrateDescriptionsForSkills,
 } from "../lib/marketplaceDescriptionHydration";
 import { toast } from "../lib/toast";
+import { LoadingLogo } from "../components/ui/LoadingLogo";
 import type { Skill, SortOption, ViewMode, OfficialPublisher } from "../types";
 import { cn } from "../lib/utils";
 
@@ -55,7 +56,13 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
     fetchOfficialPublishers,
     applyDescriptionPatches,
   } = useMarketplace();
-  const { skills: hubSkills, refresh, updateSkill, uninstallSkill } = useSkills();
+  const {
+    skills: hubSkills,
+    refresh,
+    updateSkill,
+    uninstallSkill,
+    pendingUpdateNames,
+  } = useSkills();
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("stars-desc");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
@@ -97,31 +104,39 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
       search(searchQuery);
     }, 400);
     return () => clearTimeout(timer);
-  }, [searchQuery]);
+  }, [searchQuery, search]);
 
   const displaySkills = useMemo(() => {
     let skills: Skill[] = [];
+    const isSearchMode = Boolean(searchQuery.trim() && results);
 
     // Search results override
-    if (searchQuery.trim() && results) {
+    if (isSearchMode && results) {
       skills = [...results.skills];
     } else if (activeTab !== "official") {
       skills = [...leaderboard];
     }
 
-    // Always sort explicitly — backend may not guarantee order
+    // Search results can be freely re-sorted, but leaderboard tabs should
+    // preserve the upstream ranking unless the user explicitly picks a
+    // different sort mode.
     if (sortBy === "name") {
       skills.sort((a, b) => a.name.localeCompare(b.name));
     } else if (sortBy === "updated") {
       skills.sort((a, b) => b.last_updated.localeCompare(a.last_updated));
-    } else {
-      // "stars-desc" — sort by install count descending
+    } else if (isSearchMode) {
+      // "stars-desc" keeps search results sorted by install count.
       skills.sort((a, b) => b.stars - a.stars);
     }
 
     // Produce new objects instead of mutating in-place
     return skills.map((s, i) => {
-      const rank = sortBy === "stars-desc" ? i + 1 : s.rank;
+      const rank =
+        sortBy === "stars-desc"
+          ? isSearchMode
+            ? i + 1
+            : s.rank ?? i + 1
+          : s.rank;
       const installed =
         s.installed || installedNames.has(s.name) || installedSkillNames.has(s.name);
       if (rank === s.rank && installed === s.installed) return s;
@@ -173,9 +188,10 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
       await updateSkill(name);
     } catch (e) {
       console.error("Update failed:", e);
-      toast.error(t("marketplace.updateFailed"));
+      const reason = String(e);
+      toast.error(reason ? `${t("marketplace.updateFailed")}: ${reason}` : t("marketplace.updateFailed"));
     }
-  }, [updateSkill]);
+  }, [t, updateSkill]);
 
   const handleUninstall = useCallback(async (name: string) => {
     try {
@@ -228,7 +244,7 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
     <div className="flex-1 flex overflow-hidden relative">
       <div className="flex-1 flex flex-col overflow-hidden">
         <Toolbar
-          titleNode={<h1 className="text-heading-md text-zinc-100">{t("sidebar.market")}</h1>}
+          titleNode={<h1>{t("sidebar.market")}</h1>}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           sortBy={sortBy}
@@ -238,10 +254,14 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
         />
 
         {/* Category tabs */}
-        <div className="flex items-center gap-1 px-6 py-2 border-b border-white/10 bg-card/30 backdrop-blur-sm">
+        <div className="flex items-center gap-1 px-6 py-2 border-b border-white/10 bg-card/30 backdrop-blur-sm" role="tablist">
           {tabIds.map((id) => (
             <button
               key={id}
+              role="tab"
+              aria-selected={activeTab === id}
+              id={`tab-${id}`}
+              aria-controls={`tabpanel-${id}`}
               onClick={() => {
                 setActiveTab(id);
                 setSearchQuery("");
@@ -295,8 +315,8 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
               onPublisherClick={onNavigateToPublisher}
             />
           ) : loading ? (
-            <div className="flex items-center justify-center py-20 text-zinc-500 text-sm">
-              {t("marketplace.loading")}
+            <div className="flex items-center justify-center py-20">
+              <LoadingLogo size="lg" label={t("marketplace.loading")} />
             </div>
           ) : (
             <SkillGrid
@@ -306,6 +326,7 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
               onSkillClick={(skill) => setSelectedSkill(prev => prev?.name === skill.name ? null : skill)}
               onInstall={handleInstall}
               onUpdate={handleUpdate}
+              pendingUpdateNames={pendingUpdateNames}
               emptyMessage={
                 searchQuery.trim()
                   ? t("marketplace.noResultsSearch")
@@ -324,7 +345,7 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
               exit={{ opacity: 0, scale: 0.8 }}
               transition={{ duration: 0.15 }}
               onClick={() => scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" })}
-              className="absolute bottom-8 right-8 z-40 w-10 h-10 rounded-full bg-background/80 hover:bg-background border border-border/50 text-foreground/80 hover:text-foreground shadow-sm hover:shadow-md backdrop-blur-md flex items-center justify-center transition-all duration-200 cursor-pointer group"
+              className="absolute bottom-8 right-8 z-40 w-10 h-10 rounded-full bg-background/80 hover:bg-background border border-border/50 text-foreground/80 hover:text-foreground shadow-sm hover:shadow-md backdrop-blur-md flex items-center justify-center transition duration-200 cursor-pointer group"
               title={t("marketplace.backToTop")}
             >
               <ArrowUp className="w-4 h-4 transition-transform duration-200 group-hover:-translate-y-0.5" />
@@ -336,8 +357,8 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
       {selectedSkill && (
         <Suspense
           fallback={
-            <div className="absolute right-0 top-0 bottom-0 w-[400px] h-full border-l border-white/10 bg-card/60 backdrop-blur-xl shadow-2xl overflow-y-auto z-50 rounded-tl-xl rounded-bl-xl flex items-center justify-center text-sm text-zinc-400">
-              Loading details...
+            <div className="absolute right-0 top-0 bottom-0 w-[400px] h-full border-l border-white/10 bg-card/60 backdrop-blur-xl shadow-2xl overflow-y-auto z-50 rounded-tl-xl rounded-bl-xl flex items-center justify-center">
+              <LoadingLogo size="sm" />
             </div>
           }
         >

@@ -8,15 +8,15 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
-use tokio::sync::{watch, Mutex};
+use tokio::sync::{Mutex, watch};
 
-use super::installed_skill;
+use super::{installed_skill, local_skill, sync};
 
 // ── Persistent Configuration ────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PatrolConfig {
-    /// Whether patrol should be active (persisted across restarts).
+    /// Whether patrol was last marked active.
     pub enabled: bool,
     /// Per-skill check interval in seconds.
     pub interval_secs: u64,
@@ -164,11 +164,6 @@ impl PatrolManager {
             current_skill: inner.current_skill.clone(),
         }
     }
-
-    /// Check if patrol is currently running.
-    pub async fn is_running(&self) -> bool {
-        self.inner.lock().await.running
-    }
 }
 
 // ── Patrol Loop ─────────────────────────────────────────────────────
@@ -216,13 +211,14 @@ async fn patrol_loop(
             }
 
             // Check this single skill
-            let update_available = match installed_skill::refresh_skill_updates(Some(vec![name.clone()])).await {
-                Ok(states) => states.first().map(|s| s.update_available).unwrap_or(false),
-                Err(e) => {
-                    eprintln!("[patrol] Check failed for {}: {}", name, e);
-                    false
-                }
-            };
+            let update_available =
+                match installed_skill::refresh_skill_updates(Some(vec![name.clone()])).await {
+                    Ok(states) => states.first().map(|s| s.update_available).unwrap_or(false),
+                    Err(e) => {
+                        eprintln!("[patrol] Check failed for {}: {}", name, e);
+                        false
+                    }
+                };
 
             // Update counters
             let event = {
@@ -263,11 +259,37 @@ async fn patrol_loop(
 }
 
 /// Collect names of all installed hub (non-local) skills.
+///
+/// Uses a lightweight directory scan instead of `list_installed_skills` to
+/// avoid the overhead of parsing every SKILL.md on each patrol cycle.
 async fn collect_hub_skill_names() -> Result<Vec<String>> {
-    let skills = installed_skill::list_installed_skills().await?;
-    Ok(skills
-        .into_iter()
-        .filter(|s| s.skill_type != "local")
-        .map(|s| s.name)
-        .collect())
+    let skills_dir = sync::get_hub_skills_dir();
+    tokio::task::spawn_blocking(move || {
+        let entries = match std::fs::read_dir(&skills_dir) {
+            Ok(e) => e,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(err) => return Err(anyhow::anyhow!("Failed to read skills directory: {}", err)),
+        };
+
+        let mut names = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.is_empty() {
+                continue;
+            }
+            // Skip local skills — they have no git remote to check
+            if local_skill::is_local_skill(&name) {
+                continue;
+            }
+            names.push(name);
+        }
+        names.sort();
+        Ok(names)
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("Task join error: {}", e))?
 }

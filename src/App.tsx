@@ -1,8 +1,12 @@
 import { useState, useCallback, useEffect, lazy, Suspense, useRef } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { LoadingLogo } from "./components/ui/LoadingLogo";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Sidebar } from "./components/layout/Sidebar";
 import { useUpdater } from "./hooks/useUpdater";
 import { looksLikeShareCode } from "./lib/shareCode";
+import { Toaster } from "./components/ui/sonner";
+import { readBackgroundRun } from "./pages/settings-page/BackgroundRunSection";
+import { getLanguage } from "./i18n";
 import type { NavPage, SubPage } from "./types";
 import type { TabId as MarketplaceTabId } from "./pages/Marketplace";
 
@@ -11,6 +15,7 @@ const importMarketplacePage = () => import("./pages/Marketplace");
 const importPublisherDetailPage = () => import("./pages/PublisherDetail");
 const importSkillCardsPage = () => import("./pages/SkillCards");
 const importProjectsPage = () => import("./pages/Projects");
+const importSecurityScanPage = () => import("./pages/SecurityScan");
 const importSettingsPage = () => import("./pages/Settings");
 
 const MySkillsPage = lazy(() =>
@@ -28,6 +33,9 @@ const SkillCardsPage = lazy(() =>
 const ProjectsPage = lazy(() =>
   importProjectsPage().then((mod) => ({ default: mod.Projects }))
 );
+const SecurityScanPage = lazy(() =>
+  importSecurityScanPage().then((mod) => ({ default: mod.SecurityScan }))
+);
 const SettingsPage = lazy(() =>
   importSettingsPage().then((mod) => ({ default: mod.Settings }))
 );
@@ -36,7 +44,8 @@ const DEFAULT_NEXT_PAGES: Record<NavPage, NavPage[]> = {
   "my-skills": ["marketplace", "projects"],
   marketplace: ["my-skills", "skill-cards"],
   "skill-cards": ["projects", "my-skills"],
-  projects: ["my-skills", "settings"],
+  projects: ["my-skills", "security-scan"],
+  "security-scan": ["settings", "my-skills"],
   settings: ["my-skills", "projects"],
 };
 
@@ -45,13 +54,14 @@ const ALL_PAGES: NavPage[] = [
   "marketplace",
   "skill-cards",
   "projects",
+  "security-scan",
   "settings",
 ];
 
 function PageFallback() {
   return (
-    <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
-      Loading...
+    <div className="flex-1 flex items-center justify-center">
+      <LoadingLogo size="md" />
     </div>
   );
 }
@@ -62,6 +72,7 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try { return localStorage.getItem("sidebar-collapsed") === "true"; } catch { return false; }
   });
+  const prefersReducedMotion = useReducedMotion();
   const updater = useUpdater();
   const prefetchedPages = useRef<Set<NavPage>>(new Set(["my-skills"]));
   const previousPage = useRef<NavPage>("my-skills");
@@ -70,6 +81,7 @@ function App() {
     marketplace: {},
     "skill-cards": {},
     projects: {},
+    "security-scan": {},
     settings: {},
   });
 
@@ -109,6 +121,9 @@ function App() {
       case "settings":
         void importSettingsPage();
         break;
+      case "security-scan":
+        void importSecurityScanPage();
+        break;
     }
   }, []);
 
@@ -147,6 +162,37 @@ function App() {
     };
   }, []);
 
+  // ── Window hidden handler ─────────────────────────────────────────
+  // Backend hides the window directly on close and emits "skillstar://window-hidden".
+  // We only need to start patrol if the background toggle is ON.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+
+    (async () => {
+      try {
+        const { listen } = await import("@tauri-apps/api/event");
+        const { invoke } = await import("@tauri-apps/api/core");
+
+        unlisten = await listen("skillstar://window-hidden", async () => {
+          if (readBackgroundRun()) {
+            await invoke("start_patrol", { intervalSecs: 30 }).catch(() => {});
+          }
+        });
+      } catch {
+        // Not in Tauri environment (browser preview)
+      }
+    })();
+
+    return () => { unlisten?.(); };
+  }, []);
+
+  // ── Sync saved language to tray on mount ──────────────────────────
+  useEffect(() => {
+    import("@tauri-apps/api/core")
+      .then(({ invoke }) => invoke("update_tray_language", { lang: getLanguage() }))
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     const prev = previousPage.current;
     if (prev !== activePage) {
@@ -164,19 +210,38 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [activePage, getLikelyNextPages, prefetchPage]);
 
-  // Clipboard auto-detect: on window focus, read clipboard for share codes
+  // Clipboard share-code detection: prompt user before acting on detected share codes
   useEffect(() => {
+    let dismissed = false;
+
     const handleFocus = async () => {
       try {
+        const consentKey = "skillstar-clipboard-consent";
+        if (localStorage.getItem(consentKey) !== "true") return;
+
         const text = await navigator.clipboard.readText();
-        if (!text || text === lastClipboardValue.current) return;
-        lastClipboardValue.current = text;
+        if (!text || text === lastClipboardValue.current || dismissed) return;
+
         const codeType = looksLikeShareCode(text.trim());
         if (codeType) {
-          // Navigate to My Skills and open import with the share code
-          setClipboardShareCode(text.trim());
-          setActivePage("my-skills");
-          setSubPage(null);
+          lastClipboardValue.current = text;
+          dismissed = true;
+
+          const { toast } = await import("sonner");
+          toast.info("Share code detected in clipboard", {
+            description: "Click to import it into My Skills",
+            duration: 8000,
+            action: {
+              label: "Import",
+              onClick: () => {
+                setClipboardShareCode(text.trim());
+                setActivePage("my-skills");
+                setSubPage(null);
+                dismissed = false;
+              },
+            },
+            onDismiss: () => { dismissed = false; },
+          });
         }
       } catch {
         // Clipboard read permission denied — silently ignore
@@ -249,14 +314,12 @@ function App() {
           <ProjectsPage
             preSelectedSkills={projectsPreSelectedSkills}
             onClearPreSelected={() => setProjectsPreSelectedSkills(null)}
-            onNavigateToSkill={(name) => {
-              setMySkillsFocusSkill(name);
-              handleNavigate("my-skills");
-            }}
           />
         );
       case "settings":
         return <SettingsPage />;
+      case "security-scan":
+        return <SecurityScanPage />;
       default:
         return <MySkillsPage />;
     }
@@ -264,6 +327,9 @@ function App() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background border border-border/50">
+      <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[200] focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded-lg focus:text-sm">
+        Skip to content
+      </a>
       <Sidebar
         activePage={activePage}
         onNavigate={handleNavigate}
@@ -289,16 +355,21 @@ function App() {
       />
       <AnimatePresence mode="wait">
         <motion.div
+          id="main-content"
           key={activePage}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.15 }}
-          className="flex-1 flex overflow-hidden"
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -4 }}
+          transition={{
+            duration: prefersReducedMotion ? 0.01 : 0.2,
+            ease: [0.22, 1, 0.36, 1],
+          }}
+          className="flex-1 min-h-0 flex overflow-hidden"
         >
           <Suspense fallback={<PageFallback />}>{renderPage()}</Suspense>
         </motion.div>
       </AnimatePresence>
+      <Toaster />
     </div>
   );
 }

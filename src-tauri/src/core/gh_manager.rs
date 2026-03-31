@@ -43,11 +43,7 @@ fn get_gh_username() -> Option<String> {
         .ok()?;
     if output.status.success() {
         let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if name.is_empty() {
-            None
-        } else {
-            Some(name)
-        }
+        if name.is_empty() { None } else { Some(name) }
     } else {
         None
     }
@@ -126,10 +122,10 @@ pub fn list_user_repos(limit: u32) -> Result<Vec<UserRepo>> {
         is_private: bool,
     }
 
-    let items: Vec<GhRepoItem> =
+    let repo_entries: Vec<GhRepoItem> =
         serde_json::from_slice(&output.stdout).context("Failed to parse gh repo list output")?;
 
-    let repos = items
+    let repos = repo_entries
         .into_iter()
         .map(|item| UserRepo {
             full_name: item.name_with_owner,
@@ -319,6 +315,9 @@ pub fn publish_skill(
         );
         std::fs::write(cache.join("README.md"), readme)?;
 
+        // Create .gitignore to exclude OS/editor junk
+        ensure_gitignore(&cache)?;
+
         ensure_git_repo(&cache)?;
 
         let visibility = if is_public { "--public" } else { "--private" };
@@ -356,6 +355,9 @@ pub fn publish_skill(
 
         (url, cache)
     };
+
+    // Ensure .gitignore exists (covers existing repos that were cloned without one)
+    ensure_gitignore(&cache_dir)?;
 
     // Copy skill into the repo as a subfolder
     let dest = cache_dir.join(folder_name);
@@ -398,6 +400,31 @@ pub fn publish_skill(
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
+
+/// Ensure a `.gitignore` exists in the repo root with standard OS/editor exclusions.
+/// If the file already exists it is left untouched so user edits are preserved.
+fn ensure_gitignore(repo_dir: &Path) -> Result<()> {
+    let gitignore = repo_dir.join(".gitignore");
+    if !gitignore.exists() {
+        let content = "\
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Editors
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+";
+        std::fs::write(&gitignore, content).context("Failed to write .gitignore")?;
+    }
+    Ok(())
+}
 
 fn run_git_in(cwd: &Path, args: &[&str]) -> Result<String> {
     let output = command_with_path("git")

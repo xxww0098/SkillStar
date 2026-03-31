@@ -1,6 +1,14 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+use tokio::sync::Mutex;
+
+static LOCKFILE_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
+
+pub fn get_mutex() -> &'static Mutex<()> {
+    LOCKFILE_MUTEX.get_or_init(|| Mutex::new(()))
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LockEntry {

@@ -1,11 +1,16 @@
 /**
- * Utility for generating and parsing SkillStar compressed and encrypted Share Codes.
+ * Utility for generating and parsing SkillStar Share Codes.
  *
  * Two share-code flavours:
  *   • Skills sharing  →  prefix "ags-"  (file ext: .ags)
  *   • Deck sharing    →  prefix "agd-"  (file ext: .agd)
  *
  * Legacy prefix "agh-" is accepted during parsing and treated as "deck".
+ *
+ * Format (v2 — no encryption, with expiration):
+ *   prefix + Base64(Version(1) + CompressedFlag(1) + Timestamp(8) + Payload)
+ *
+ * Share codes expire after TTL_EXPIRE_DAYS (default 7 days).
  */
 
 // We use abbreviated keys for max density
@@ -26,6 +31,7 @@ export type ShareCodeType = "skills" | "deck";
 export interface ParseResult {
   data: ShareCodeData;
   type: ShareCodeType;
+  expiresAt: number; // unix ms
 }
 
 const PREFIX_MAP: Record<ShareCodeType, string> = {
@@ -33,96 +39,59 @@ const PREFIX_MAP: Record<ShareCodeType, string> = {
   deck: "agd-",
 };
 
-const ALGO = "AES-GCM";
-const DEFAULT_PASS = "skillstar-default-share-password";
-const ITERATIONS = 10000;
-const SALT = "agh-share-salt";
+const CODE_VERSION = 2;
+const TTL_EXPIRE_DAYS = 7;
+const TTL_MS = TTL_EXPIRE_DAYS * 24 * 60 * 60 * 1000;
 
-/** Derive an AES-GCM encryption/decryption key from an optional password */
-async function deriveKey(password?: string): Promise<CryptoKey> {
-  const encoder = new TextEncoder();
-  const pass = password && password.trim().length > 0 ? password : DEFAULT_PASS;
-  
-  const keyMaterial = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(pass),
-    { name: "PBKDF2" },
-    false,
-    ["deriveBits", "deriveKey"]
-  );
-
-  return crypto.subtle.deriveKey(
-    {
-      name: "PBKDF2",
-      salt: encoder.encode(SALT),
-      iterations: ITERATIONS,
-      hash: "SHA-256",
-    },
-    keyMaterial,
-    { name: ALGO, length: 256 },
-    false,
-    ["encrypt", "decrypt"]
-  );
-}
-
-/** 
- * Pack and encrypt the object 
- * Steps: JSON stringify -> TextEncode -> Deflate (optional/if supported) -> AES-GCM -> Base64
+/**
+ * Pack data into a share code.
+ * Steps: JSON → TextEncode → Deflate (if supported) → prepend header → Base64
  */
 export async function createShareCode(
   data: ShareCodeData,
   type: ShareCodeType = "deck",
-  password?: string
 ): Promise<string> {
   const jsonStr = JSON.stringify(data);
-  let bytes = new TextEncoder().encode(jsonStr);
+  let payload = new TextEncoder().encode(jsonStr);
   let isCompressed = 0;
 
-  // Try compression if available in browser
   if (typeof CompressionStream !== "undefined") {
     try {
-      const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream("deflate-raw"));
-      const compressedBuffer = await new Response(stream).arrayBuffer();
-      bytes = new Uint8Array(compressedBuffer);
+      const stream = new Blob([payload])
+        .stream()
+        .pipeThrough(new CompressionStream("deflate-raw"));
+      payload = new Uint8Array(await new Response(stream).arrayBuffer());
       isCompressed = 1;
     } catch (e) {
       console.warn("CompressionStream failed, using raw data", e);
     }
   }
 
-  const key = await deriveKey(password);
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  
-  const encryptedBuf = await crypto.subtle.encrypt(
-    { name: ALGO, iv },
-    key,
-    bytes
-  );
+  const timestamp = Date.now();
+  const tsBytes = new Uint8Array(new Float64Array([timestamp]).buffer);
 
-  // Pack: IV (12) + CompressedFlag (1) + Encrypted Payload
-  const combined = new Uint8Array(12 + 1 + encryptedBuf.byteLength);
-  combined.set(iv, 0);
-  combined[12] = isCompressed;
-  combined.set(new Uint8Array(encryptedBuf), 13);
+  // Header: Version(1) + CompressedFlag(1) + Timestamp(8) = 10 bytes
+  const combined = new Uint8Array(10 + payload.length);
+  combined[0] = CODE_VERSION;
+  combined[1] = isCompressed;
+  combined.set(tsBytes, 2);
+  combined.set(payload, 10);
 
-  // btoa with larger arrays is safer via chunking, but array length is very small here.
   let binaryString = "";
   for (let i = 0; i < combined.length; i++) {
     binaryString += String.fromCharCode(combined[i]);
   }
 
-  const prefix = PREFIX_MAP[type];
-  return prefix + btoa(binaryString);
+  return PREFIX_MAP[type] + btoa(binaryString);
 }
 
-
-/** 
- * Decode, decrypt and unpack the share code.
+/**
+ * Decode and unpack a share code.
  * Accepts ags-, agd-, and legacy agh- prefixes.
+ * Throws if the code has expired.
  */
 export async function parseShareCode(
   code: string,
-  password?: string
 ): Promise<ParseResult> {
   let cleanCode = code.trim();
   let type: ShareCodeType;
@@ -134,18 +103,16 @@ export async function parseShareCode(
     type = "deck";
     cleanCode = cleanCode.substring(4);
   } else if (cleanCode.startsWith("agh-")) {
-    // Legacy prefix → treat as deck
     type = "deck";
     cleanCode = cleanCode.substring(4);
   } else {
     throw new Error("Invalid share code prefix (expected ags- or agd-)");
   }
 
-  // Base64 decode
   let binaryString: string;
   try {
     binaryString = atob(cleanCode);
-  } catch (e) {
+  } catch {
     throw new Error("Share code is corrupted (Base64 decode error)");
   }
 
@@ -154,61 +121,102 @@ export async function parseShareCode(
     combined[i] = binaryString.charCodeAt(i);
   }
 
-  // Need at least 12 IV + 1 flag + minimum AES GCM tag (16)
-  if (combined.length < 29) {
+  if (combined.length < 11) {
     throw new Error("Share code is too short, possibly corrupted");
   }
 
-  const iv = combined.slice(0, 12);
-  const isCompressed = combined[12] === 1;
-  const encryptedBytes = combined.slice(13);
-  const key = await deriveKey(password);
+  // Version byte reserved for future format changes
+  combined[0];
+  const isCompressed = combined[1] === 1;
+  const tsBytes = combined.slice(2, 10);
+  const payload = combined.slice(10);
 
-  let decryptedBuf: ArrayBuffer;
-  try {
-    decryptedBuf = await crypto.subtle.decrypt(
-      { name: ALGO, iv },
-      key,
-      encryptedBytes
+  // Parse timestamp
+  const timestamp = new Float64Array(tsBytes.buffer)[0];
+  const expiresAt = timestamp + TTL_MS;
+
+  if (Date.now() > expiresAt) {
+    const days = Math.round((Date.now() - expiresAt) / (24 * 60 * 60 * 1000));
+    throw new Error(
+      `Share code expired ${days > 0 ? days + " day(s) ago" : ""} (valid for ${TTL_EXPIRE_DAYS} days)`
     );
-  } catch (e) {
-    throw new Error("Decryption failed — wrong password or tampered share code");
   }
 
-  let bytes = new Uint8Array(decryptedBuf);
-
+  // Decompress if needed
+  let bytes = payload;
   if (isCompressed) {
     if (typeof DecompressionStream === "undefined") {
       throw new Error("Browser does not support decompression for this share code");
     }
-    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
-    const decompressedBuffer = await new Response(stream).arrayBuffer();
-    bytes = new Uint8Array(decompressedBuffer);
+    const stream = new Blob([bytes])
+      .stream()
+      .pipeThrough(new DecompressionStream("deflate-raw"));
+    bytes = new Uint8Array(await new Response(stream).arrayBuffer());
   }
 
   const jsonStr = new TextDecoder().decode(bytes);
-  let parsed: any;
+  let parsed: unknown;
   try {
     parsed = JSON.parse(jsonStr);
-  } catch (e) {
+  } catch {
     throw new Error("Share code internal JSON parse failed");
   }
 
-  if (!parsed.n || !Array.isArray(parsed.s)) {
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    !("n" in parsed) ||
+    !Array.isArray((parsed as { s?: unknown }).s)
+  ) {
     throw new Error("Share code data format mismatch");
   }
 
-  return { data: parsed as ShareCodeData, type };
+  return { data: parsed as ShareCodeData, type, expiresAt };
 }
 
 /**
- * Quick pattern check without full decryption.
+ * Quick pattern check without full decoding.
  * Used for clipboard detection and smart input detection.
  */
 export function looksLikeShareCode(text: string): ShareCodeType | null {
   const trimmed = text.trim();
   if (trimmed.startsWith("ags-") && trimmed.length > 30) return "skills";
   if (trimmed.startsWith("agd-") && trimmed.length > 30) return "deck";
-  if (trimmed.startsWith("agh-") && trimmed.length > 30) return "deck"; // legacy
+  if (trimmed.startsWith("agh-") && trimmed.length > 30) return "deck";
+  const extracted = extractShareCode(trimmed);
+  if (extracted !== trimmed) {
+    return looksLikeShareCode(extracted);
+  }
   return null;
+}
+
+/**
+ * Format a share code into a human-readable share message.
+ */
+export function formatShareMessage(
+  data: ShareCodeData,
+  code: string,
+  type: ShareCodeType,
+): string {
+  const name = data.n || (type === "deck" ? "Skill Deck" : "Skills");
+  const skillNames = data.s?.map((s) => s.n).join(", ") || "";
+
+  const lines: string[] = [];
+  lines.push(`DecksName: ${name}`);
+  if (data.d) lines.push(data.d);
+  if (skillNames) lines.push(`Skills: ${skillNames}`);
+  lines.push("");
+  lines.push(`💡 Copy this entire message to import / 复制整段消息直接粘贴导入`);
+  lines.push(code);
+
+  return lines.join("\n");
+}
+
+/**
+ * Extract the raw share code from a formatted share message.
+ */
+export function extractShareCode(text: string): string {
+  const trimmed = text.trim();
+  const match = trimmed.match(/(?:ags-|agd-|agh-)[A-Za-z0-9+/=_-]+/);
+  return match ? match[0] : trimmed;
 }

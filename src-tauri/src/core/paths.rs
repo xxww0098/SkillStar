@@ -8,7 +8,7 @@
 //! | Variable | Default | Description |
 //! |---|---|---|
 //! | `SKILLSTAR_DATA_DIR` | `~/.skillstar` | App config & metadata (JSON files) |
-//! | `SKILLSTAR_HUB_DIR` | `~/.agents` | Skill hub, repo cache, lockfile |
+//! | `SKILLSTAR_HUB_DIR` | `~/.skillstar/.agents` | Skill hub, repo cache, lockfile |
 //!
 //! Setting these variables during development keeps dev data completely
 //! separate from the production (installed) app.
@@ -31,16 +31,14 @@ pub fn data_root() -> PathBuf {
 
 /// Hub root — skills, repo cache, lockfile, publish cache live here.
 ///
-/// Default: `~/.agents`
+/// Default: `~/.skillstar/.agents`
 /// Override: `SKILLSTAR_HUB_DIR`
 pub fn hub_root() -> PathBuf {
     if let Ok(dir) = std::env::var("SKILLSTAR_HUB_DIR") {
         let expanded = shellexpand_home(&dir);
         return PathBuf::from(expanded);
     }
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".agents")
+    data_root().join(".agents")
 }
 
 /// User home directory (used for agent profile dirs like `~/.claude/skills`).
@@ -50,27 +48,27 @@ pub fn home_dir() -> PathBuf {
 
 // ── Derived Paths ──────────────────────────────────────────────────
 
-/// `~/.agents/skills/` — the central skill hub.
+/// `~/.skillstar/.agents/skills/` — the central skill hub.
 pub fn hub_skills_dir() -> PathBuf {
     hub_root().join("skills")
 }
 
-/// `~/.agents/.repos/` — cached cloned repositories.
+/// `~/.skillstar/.agents/.repos/` — cached cloned repositories.
 pub fn repos_cache_dir() -> PathBuf {
     hub_root().join(".repos")
 }
 
-/// `~/.agents/.publish-repos/<repo>/` — publish staging area.
+/// `~/.skillstar/.agents/.publish-repos/<repo>/` — publish staging area.
 pub fn publish_cache_dir(repo_name: &str) -> PathBuf {
     hub_root().join(".publish-repos").join(repo_name)
 }
 
-/// `~/.agents/skills-local/` — user-authored local skills.
+/// `~/.skillstar/.agents/skills-local/` — user-authored local skills.
 pub fn local_skills_dir() -> PathBuf {
     hub_root().join("skills-local")
 }
 
-/// `~/.agents/.skill-lock.json`
+/// `~/.skillstar/.agents/.skill-lock.json`
 pub fn lockfile_path() -> PathBuf {
     hub_root().join(".skill-lock.json")
 }

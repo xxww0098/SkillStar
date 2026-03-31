@@ -9,6 +9,10 @@ const DEFAULT_CONFIG: AiConfig = {
   api_key: "",
   model: "gpt-5.4",
   target_language: "zh-CN",
+  context_window_k: 128,
+  max_concurrent_requests: 0,
+  chunk_char_limit: 0,
+  scan_max_response_tokens: 0,
 };
 
 export function useAiConfig() {

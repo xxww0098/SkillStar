@@ -1,14 +1,14 @@
 use anyhow::{Context, Result};
+use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
-use flate2::Compression;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use tar::{Archive, Builder};
 
-use super::sync;
+use super::{security_scan, sync};
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -137,7 +137,7 @@ pub fn export_bundle(skill_name: &str, output_path: Option<&str>) -> Result<Path
 
 // ── Preview ─────────────────────────────────────────────────────────
 
-/// Read only the manifest from a `.ags` or `.agentskill` file without extracting.
+/// Read only the manifest from a `.ags` file without extracting.
 pub fn preview_bundle(file_path: &str) -> Result<BundleManifest> {
     let file = std::fs::File::open(file_path)
         .with_context(|| format!("Cannot open bundle: {}", file_path))?;
@@ -161,7 +161,7 @@ pub fn preview_bundle(file_path: &str) -> Result<BundleManifest> {
 
 // ── Import ──────────────────────────────────────────────────────────
 
-/// Import a `.ags` or `.agentskill` file into the hub.
+/// Import a `.ags` file into the hub.
 ///
 /// If `force` is true, replaces an existing skill with the same name.
 pub fn import_bundle(file_path: &str, force: bool) -> Result<ImportBundleResult> {
@@ -241,6 +241,9 @@ pub fn import_bundle(file_path: &str, force: bool) -> Result<ImportBundleResult>
     }
     std::fs::rename(&temp_dir, &target_dir)?;
 
+    // Invalidate security scan cache — imported content may differ from prior scan
+    security_scan::invalidate_skill_cache(&manifest.name);
+
     Ok(ImportBundleResult {
         name: manifest.name,
         description: manifest.description,
@@ -270,10 +273,7 @@ pub struct MultiManifest {
 ///
 /// Each skill is stored under `<skill_name>/` prefix inside the tar.gz.
 /// A top-level `multi_manifest.json` describes all contained skills.
-pub fn export_multi_bundle(
-    skill_names: &[String],
-    output_path: &str,
-) -> Result<PathBuf> {
+pub fn export_multi_bundle(skill_names: &[String], output_path: &str) -> Result<PathBuf> {
     use std::io::Read;
 
     let hub = sync::get_hub_skills_dir();
@@ -399,13 +399,13 @@ fn compute_content_checksum(root: &Path, sorted_files: &[String]) -> Result<Stri
             .with_context(|| format!("Failed to open file for checksum: {}", abs.display()))?;
         let mut reader = std::io::BufReader::new(file);
         loop {
-            let n = reader
+            let bytes_read = reader
                 .read(&mut buf)
                 .with_context(|| format!("Failed to read {}", abs.display()))?;
-            if n == 0 {
+            if bytes_read == 0 {
                 break;
             }
-            hasher.update(&buf[..n]);
+            hasher.update(&buf[..bytes_read]);
         }
     }
     let hash = hasher.finalize();

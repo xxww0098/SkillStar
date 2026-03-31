@@ -3,13 +3,23 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { motion, AnimatePresence } from "framer-motion";
 import { useTranslation } from "react-i18next";
-import { X, Download, GitBranch, RefreshCw, Trash2, Edit3, ExternalLink, Copy, Check, Sparkles, Github, Languages, Square, Star, Calendar, ShieldCheck, BookOpen } from "lucide-react";
+import { X, Download, GitBranch, RefreshCw, Trash2, Edit3, ExternalLink, Copy, Sparkles, Github, Languages, Square, Star, Calendar, ShieldCheck, BookOpen, Check } from "lucide-react";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { Markdown } from "../ui/Markdown";
 import { Skeleton } from "../ui/Skeleton";
+import { LoadingLogo } from "../ui/LoadingLogo";
+import { SuccessCheckmark } from "../ui/SuccessCheckmark";
 import { formatInstalls, unwrapOuterMarkdownFence, navigateToAiSettings } from "../../lib/utils";
-import type { Skill, SkillContent, MarketplaceSkillDetails } from "../../types";
+import type {
+  AiConfigStatus,
+  AiStreamPayload,
+  MarketplaceSkillDetails,
+  Skill,
+  SkillContent,
+} from "../../types";
+
+const AUTO_TRANSLATE_DESCRIPTION_KEY = "skillstar:auto-translate-description";
 
 const SkillEditor = lazy(() =>
   import("../skills/SkillEditor").then((mod) => ({ default: mod.SkillEditor }))
@@ -32,19 +42,6 @@ interface DetailPanelProps {
   onPublish?: (skillName: string) => void;
 
 }
-
-interface AiConfigLike {
-  enabled: boolean;
-  api_key: string;
-}
-
-interface AiStreamPayload {
-  requestId: string;
-  event: "start" | "delta" | "complete" | "error";
-  delta?: string | null;
-  message?: string | null;
-}
-
 
 export function DetailPanel({
   skill,
@@ -79,6 +76,13 @@ export function DetailPanel({
   const [descriptionHasDelta, setDescriptionHasDelta] = useState(false);
   const [descriptionWasNonStreaming, setDescriptionWasNonStreaming] = useState(false);
   const [descriptionTranslateError, setDescriptionTranslateError] = useState<string | null>(null);
+  const [autoTranslateDescription, setAutoTranslateDescription] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(AUTO_TRANSLATE_DESCRIPTION_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
 
   // Marketplace detail fetching
   const [skillDetails, setSkillDetails] = useState<MarketplaceSkillDetails | null>(null);
@@ -92,11 +96,12 @@ export function DetailPanel({
   const activeQuickReadIdRef = useRef<string | null>(null);
   const translateUnlistenRef = useRef<(() => void) | null>(null);
   const quickReadUnlistenRef = useRef<(() => void) | null>(null);
+  const autoTranslateAttemptedKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     const loadAiConfig = async () => {
       try {
-        const config = await invoke<AiConfigLike>("get_ai_config");
+        const config = await invoke<AiConfigStatus>("get_ai_config");
         setAiConfigured(config.enabled && config.api_key.trim().length > 0);
       } catch {
         setAiConfigured(false);
@@ -165,34 +170,43 @@ export function DetailPanel({
     }
   }, [skill?.name, skill?.description, skill?.installed, skill?.source, fetchDetails]);
 
-  const handleTranslateDescription = async () => {
+  const handleTranslateDescription = useCallback(async (mode: "manual" | "auto" = "manual") => {
     const renderedDescription = skillDetails?.summary?.trim() || skill?.description?.trim() || "";
     if (!renderedDescription || !aiConfigured) return;
     const hasReusableTranslation =
       translatedDescription != null && descriptionTranslationSource === renderedDescription;
 
-    // Cancel in-progress
-    if (translatingDescription) {
-      activeTranslateIdRef.current = null;
-      if (translateUnlistenRef.current) {
-        translateUnlistenRef.current();
-        translateUnlistenRef.current = null;
+    if (mode === "manual") {
+      // Cancel in-progress
+      if (translatingDescription) {
+        activeTranslateIdRef.current = null;
+        if (translateUnlistenRef.current) {
+          translateUnlistenRef.current();
+          translateUnlistenRef.current = null;
+        }
+        setTranslatingDescription(false);
+        if (!translatedDescription) {
+          setDescriptionTranslationVisible(false);
+        }
+        return;
       }
-      setTranslatingDescription(false);
-      if (!translatedDescription) {
+
+      if (descriptionTranslationVisible && hasReusableTranslation) {
         setDescriptionTranslationVisible(false);
+        return;
       }
-      return;
-    }
 
-    if (descriptionTranslationVisible && hasReusableTranslation) {
-      setDescriptionTranslationVisible(false);
-      return;
-    }
-
-    if (hasReusableTranslation) {
-      setDescriptionTranslationVisible(true);
-      return;
+      if (hasReusableTranslation) {
+        setDescriptionTranslationVisible(true);
+        return;
+      }
+    } else {
+      if (translatingDescription) return;
+      if (descriptionTranslationVisible && hasReusableTranslation) return;
+      if (hasReusableTranslation) {
+        setDescriptionTranslationVisible(true);
+        return;
+      }
     }
 
     const requestId =
@@ -271,6 +285,40 @@ export function DetailPanel({
         activeTranslateIdRef.current = null;
       }
     }
+  }, [
+    aiConfigured,
+    descriptionTranslationSource,
+    descriptionTranslationVisible,
+    skill,
+    skillDetails?.summary,
+    translatedDescription,
+    translatingDescription,
+  ]);
+
+  useEffect(() => {
+    if (!skill || !autoTranslateDescription || !aiConfigured) return;
+    const renderedDescription = skillDetails?.summary?.trim() || skill.description?.trim() || "";
+    if (!renderedDescription) return;
+    const autoKey = `${skill.name}::${renderedDescription}`;
+    if (autoTranslateAttemptedKeyRef.current === autoKey) return;
+    autoTranslateAttemptedKeyRef.current = autoKey;
+    void handleTranslateDescription("auto");
+  }, [
+    aiConfigured,
+    autoTranslateDescription,
+    handleTranslateDescription,
+    skill,
+    skillDetails?.summary,
+  ]);
+
+  const toggleAutoTranslateDescription = (enabled: boolean) => {
+    setAutoTranslateDescription(enabled);
+    autoTranslateAttemptedKeyRef.current = null;
+    try {
+      localStorage.setItem(AUTO_TRANSLATE_DESCRIPTION_KEY, String(enabled));
+    } catch {
+      // ignore localStorage write errors
+    }
   };
 
   const handleQuickRead = async () => {
@@ -334,10 +382,10 @@ export function DetailPanel({
       });
       quickReadUnlistenRef.current = unlisten;
 
-      const data = await onReadContent(skill.name);
+      const skillContent = await onReadContent(skill.name);
       const result = await invoke<string>("ai_summarize_skill_stream", {
         requestId,
-        content: data.content,
+        content: skillContent.content,
       });
 
       if (activeQuickReadIdRef.current !== requestId) return;
@@ -403,51 +451,66 @@ export function DetailPanel({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  if (editing && skill && onReadContent && onSaveContent) {
-    return (
-      <Suspense
-        fallback={
-          <div className="absolute right-0 top-0 bottom-0 w-[600px] h-full border-l border-border bg-background shadow-2xl overflow-hidden z-50 rounded-tl-xl rounded-bl-xl flex items-center justify-center">
-             <span className="text-muted-foreground text-sm">{t("detailPanel.reading")}</span>
-          </div>
-        }
-      >
-        <SkillEditor
-          skillName={skill.name}
-          onClose={() => setEditing(false)}
-          onRead={onReadContent}
-          onSave={onSaveContent}
-        />
-      </Suspense>
-    );
-  }
-
-  if (reading && skill && skillDetails?.readme) {
-    return (
-      <Suspense
-        fallback={
-          <div className="absolute right-0 top-0 bottom-0 w-[600px] h-full border-l border-border bg-background shadow-2xl overflow-hidden z-50 rounded-tl-xl rounded-bl-xl flex items-center justify-center">
-             <span className="text-muted-foreground text-sm">{t("detailPanel.reading")}</span>
-          </div>
-        }
-      >
-        <SkillReader
-          skillName={skill.name}
-          content={skillDetails.readme}
-          onClose={() => setReading(false)}
-        />
-      </Suspense>
-    );
-  }
-
   return (
-    <AnimatePresence>
-      {skill && (
+    <AnimatePresence mode="sync">
+      {editing && skill && onReadContent && onSaveContent && (
+        <motion.div
+          key="skill-editor"
+          initial={{ opacity: 0, x: 20 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: 20 }}
+          transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+          className="absolute inset-0 z-50"
+        >
+          <Suspense
+            fallback={
+              <div className="absolute right-0 top-0 bottom-0 w-[600px] h-full border-l border-border bg-background shadow-2xl overflow-hidden z-50 rounded-tl-xl rounded-bl-xl flex items-center justify-center">
+                 <LoadingLogo size="md" label={t("detailPanel.reading")} />
+              </div>
+            }
+          >
+            <SkillEditor
+              skillName={skill.name}
+              onClose={() => setEditing(false)}
+              onRead={onReadContent}
+              onSave={onSaveContent}
+            />
+          </Suspense>
+        </motion.div>
+      )}
+
+      {reading && skill && skillDetails?.readme && (
+        <motion.div
+          key="skill-reader"
+          initial={{ opacity: 0, x: 20 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: 20 }}
+          transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+          className="absolute inset-0 z-50"
+        >
+          <Suspense
+            fallback={
+              <div className="absolute right-0 top-0 bottom-0 w-[600px] h-full border-l border-border bg-background shadow-2xl overflow-hidden z-50 rounded-tl-xl rounded-bl-xl flex items-center justify-center">
+                 <LoadingLogo size="md" label={t("detailPanel.reading")} />
+              </div>
+            }
+          >
+            <SkillReader
+              skillName={skill.name}
+              content={skillDetails.readme}
+              onClose={() => setReading(false)}
+            />
+          </Suspense>
+        </motion.div>
+      )}
+
+      {skill && !editing && !reading && (
         <motion.aside
+          key="skill-detail"
           initial={{ x: "100%", opacity: 0 }}
           animate={{ x: 0, opacity: 1 }}
           exit={{ x: "100%", opacity: 0 }}
-          transition={{ type: "spring", bounce: 0, duration: 0.3 }}
+          transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
            className="absolute right-0 top-0 bottom-0 w-[400px] h-full border-l border-border bg-card backdrop-blur-xl shadow-2xl overflow-hidden z-50 rounded-tl-xl rounded-bl-xl will-change-transform flex flex-col"
         >
           {/* Header — pinned */}
@@ -455,7 +518,7 @@ export function DetailPanel({
             <h2 className="text-heading-sm truncate">{skill.name}</h2>
             <button
               onClick={onClose}
-               className="p-1 rounded-md hover:bg-muted text-muted-foreground transition-colors cursor-pointer"
+               className="p-2 rounded-md hover:bg-muted text-muted-foreground transition-colors cursor-pointer focus-ring"
             >
               <X className="w-4 h-4" />
             </button>
@@ -526,7 +589,7 @@ export function DetailPanel({
                   <Badge
                     key={audit.name}
                     variant="outline"
-                    className={`text-[10px] font-mono ${
+                    className={`text-micro font-mono ${
                       audit.result === "Pass"
                         ? "border-green-500/30 text-green-400"
                         : audit.result === "Fail"
@@ -567,20 +630,37 @@ export function DetailPanel({
               <div className="flex items-center gap-2">
                 {hasDescription && (
                   <button
-                    onClick={aiConfigured ? handleTranslateDescription : navigateToAiSettings}
-                    className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all duration-300 cursor-pointer shadow-sm relative overflow-hidden group ${
+                    onClick={aiConfigured ? () => void handleTranslateDescription("manual") : navigateToAiSettings}
+                    className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition duration-300 cursor-pointer shadow-sm relative overflow-hidden group focus-ring ${
                       aiConfigured && translatingDescription
                         ? "bg-destructive/10 text-destructive border border-destructive/20"
                         : aiConfigured && descriptionTranslationActive
-                        ? "bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border border-indigo-500/20"
-                        : "bg-gradient-to-br from-background to-muted/50 border border-border hover:border-indigo-500/40 text-muted-foreground hover:text-foreground"
+                        ? "bg-primary/10 text-primary border border-primary/20"
+                        : "bg-gradient-to-br from-background to-muted/50 border border-border hover:border-primary/40 text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/0 via-indigo-500/5 to-purple-500/0 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                    <div className="absolute inset-0 bg-gradient-to-r from-primary/0 via-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                    <span
+                      role="checkbox"
+                      aria-checked={autoTranslateDescription}
+                      aria-label={t("detailPanel.autoTranslateDescription")}
+                      title={t("detailPanel.autoTranslateDescription")}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        toggleAutoTranslateDescription(!autoTranslateDescription);
+                      }}
+                      className={`relative z-10 h-4 w-4 rounded-[4px] border flex items-center justify-center transition-colors ${
+                        autoTranslateDescription
+                          ? "border-primary/60 bg-primary/15 text-primary"
+                          : "border-border/90 bg-background text-transparent group-hover:border-primary/35"
+                      }`}
+                    >
+                      <Check className="h-3 w-3" />
+                    </span>
                     {aiConfigured && translatingDescription ? (
                       <Square className="w-3.5 h-3.5 fill-current animate-pulse relative z-10" />
                     ) : (
-                      <Languages className={`w-3.5 h-3.5 relative z-10 ${aiConfigured && !descriptionTranslationActive ? "text-indigo-500/70" : ""}`} />
+                      <Languages className={`w-3.5 h-3.5 relative z-10 ${aiConfigured && !descriptionTranslationActive ? "text-primary/70" : ""}`} />
                     )}
                     <span className="relative z-10">
                       {!aiConfigured
@@ -597,19 +677,19 @@ export function DetailPanel({
                 {skill.installed && onReadContent && aiConfigured && (
                   <button
                     onClick={handleQuickRead}
-                    className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all duration-300 cursor-pointer shadow-sm relative overflow-hidden group ${
+                    className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition duration-300 cursor-pointer shadow-sm relative overflow-hidden group focus-ring ${
                       quickReading
                          ? "bg-destructive/10 text-destructive border border-destructive/20"
                          : quickReadVisible
-                         ? "bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/20"
-                         : "bg-gradient-to-br from-background to-muted/50 border border-border hover:border-purple-500/40 text-muted-foreground hover:text-foreground"
+                         ? "bg-primary/10 text-primary border border-primary/20"
+                         : "bg-gradient-to-br from-background to-muted/50 border border-border hover:border-primary/40 text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    <div className="absolute inset-0 bg-gradient-to-r from-purple-500/0 via-purple-500/5 to-pink-500/0 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                    <div className="absolute inset-0 bg-gradient-to-r from-primary/0 via-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
                     {quickReading ? (
                       <Square className="w-3.5 h-3.5 fill-current animate-pulse relative z-10" />
                     ) : (
-                      <Sparkles className={`w-3.5 h-3.5 relative z-10 ${!quickReadVisible ? "text-purple-500/70" : ""}`} />
+                      <Sparkles className={`w-3.5 h-3.5 relative z-10 ${!quickReadVisible ? "text-primary/70" : ""}`} />
                     )}
                     <span className="relative z-10">
                       {quickReading ? t("common.cancel") : quickReadVisible ? t("detailPanel.hideQuickRead") : t("detailPanel.aiQuickRead")}
@@ -673,7 +753,7 @@ export function DetailPanel({
                 </p>
                 <button
                   onClick={navigateToAiSettings}
-                   className="px-2 py-1 rounded-md text-[11px] font-medium border border-border hover:bg-muted transition-colors cursor-pointer"
+                   className="px-2 py-1 rounded-md text-micro font-medium border border-border hover:bg-muted transition-colors cursor-pointer focus-ring"
                 >
                   {t("detailPanel.goToAiConfig")}
                 </button>
@@ -681,7 +761,7 @@ export function DetailPanel({
             )}
 
             {/* Install Command */}
-            {installCmd && (
+            {installCmd && !skill.installed && (
               <div className="space-y-1.5">
                 <label className="text-caption font-medium uppercase tracking-wider text-xs">
                   {t("detailPanel.installLabel")}
@@ -695,7 +775,7 @@ export function DetailPanel({
                      className="p-1 rounded-md hover:bg-muted text-muted-foreground transition-colors shrink-0 cursor-pointer"
                   >
                     {copied ? (
-                      <Check className="w-3.5 h-3.5 text-success" />
+                      <SuccessCheckmark size={14} className="text-success" />
                     ) : (
                       <Copy className="w-3.5 h-3.5" />
                     )}
@@ -738,9 +818,9 @@ export function DetailPanel({
             {/* Topics */}
             {skill.topics.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
-                {skill.topics.map((t) => (
-                  <Badge key={t} variant="outline">
-                    {t}
+                {skill.topics.map((topic) => (
+                  <Badge key={topic} variant="outline">
+                    {topic}
                   </Badge>
                 ))}
               </div>

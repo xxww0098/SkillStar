@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useReducer, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { toast } from "../../lib/toast";
@@ -11,25 +11,20 @@ import {
   readBackgroundStyle,
   type BackgroundStyle,
 } from "../../lib/backgroundStyle";
-import {
-  readSkillUpdateRefreshMode,
-  writeSkillUpdateRefreshMode,
-  type SkillUpdateRefreshMode,
-} from "../../lib/skillUpdateRefresh";
-import type { AiConfig, ProxyConfig } from "../../types";
+import type {
+  AiConfig,
+  CacheCleanResult,
+  ProxyConfig,
+  StorageOverview,
+} from "../../types";
 import { AgentConnectionsSection } from "./AgentConnectionsSection";
 import { ProxySection } from "./ProxySection";
 import { AiProviderSection } from "./AiProviderSection";
-import { UpdateRefreshSection } from "./UpdateRefreshSection";
+import { BackgroundRunSection, readBackgroundRun, writeBackgroundRun } from "./BackgroundRunSection";
 import { AppearanceSection } from "./AppearanceSection";
 import { LanguageSection } from "./LanguageSection";
-import { StorageSection, type StorageOverview } from "./StorageSection";
+import { StorageSection } from "./StorageSection";
 import { AboutSection } from "./AboutSection";
-
-interface CacheCleanResult {
-  repos_removed: number;
-  history_cleared: number;
-}
 
 type ForceDeleteTarget = "hub" | "cache" | "config";
 
@@ -54,9 +49,171 @@ function isSameAiConfig(a: AiConfig, b: AiConfig): boolean {
     a.base_url === b.base_url &&
     a.api_key === b.api_key &&
     a.model === b.model &&
-    a.target_language === b.target_language
+    a.target_language === b.target_language &&
+    a.max_concurrent_requests === b.max_concurrent_requests &&
+    a.chunk_char_limit === b.chunk_char_limit &&
+    a.scan_max_response_tokens === b.scan_max_response_tokens
   );
 }
+
+// ── Reducers ─────────────────────────────────────────────────────────────────
+
+type ProxyAction =
+  | { type: "SET_FIELD"; field: keyof ProxyConfig; value: ProxyConfig[keyof ProxyConfig] }
+  | { type: "LOAD"; config: ProxyConfig }
+  | { type: "MARK_SAVED_CONFIG"; config: ProxyConfig }
+  | { type: "START_SAVE" }
+  | { type: "FINISH_SAVE" }
+  | { type: "MARK_SAVED_INDICATOR" }
+  | { type: "CLEAR_SAVED_INDICATOR" }
+  | { type: "TOGGLE_EXPANDED" }
+  | { type: "START_LOAD" }
+  | { type: "REVERT"; config: ProxyConfig };
+
+interface ProxyState {
+  config: ProxyConfig;
+  savedConfig: ProxyConfig;
+  saving: boolean;
+  savedIndicator: boolean;
+  expanded: boolean;
+  loaded: boolean;
+}
+
+const initialProxyConfig: ProxyConfig = {
+  enabled: false,
+  proxy_type: "http",
+  host: "",
+  port: 7897,
+  username: null,
+  password: null,
+  bypass: null,
+};
+
+function proxyReducer(state: ProxyState, action: ProxyAction): ProxyState {
+  switch (action.type) {
+    case "SET_FIELD":
+      return { ...state, config: { ...state.config, [action.field]: action.value } };
+    case "LOAD":
+      return { ...state, config: action.config, savedConfig: action.config };
+    case "MARK_SAVED_CONFIG":
+      return { ...state, savedConfig: action.config };
+    case "START_SAVE":
+      return { ...state, saving: true };
+    case "FINISH_SAVE":
+      return { ...state, saving: false };
+    case "MARK_SAVED_INDICATOR":
+      return { ...state, savedIndicator: true };
+    case "CLEAR_SAVED_INDICATOR":
+      return { ...state, savedIndicator: false };
+    case "TOGGLE_EXPANDED":
+      return { ...state, expanded: !state.expanded };
+    case "START_LOAD":
+      return { ...state, loaded: false };
+    case "REVERT":
+      return { ...state, config: action.config, saving: false };
+    default:
+      return state;
+  }
+}
+
+type AiAction =
+  | { type: "SET_FIELD"; field: keyof AiConfig; value: AiConfig[keyof AiConfig] }
+  | { type: "LOAD"; config: AiConfig }
+  | { type: "MARK_SAVED_CONFIG"; config: AiConfig }
+  | { type: "START_SAVE" }
+  | { type: "FINISH_SAVE" }
+  | { type: "MARK_SAVED_INDICATOR" }
+  | { type: "CLEAR_SAVED_INDICATOR" }
+  | { type: "TOGGLE_EXPANDED" }
+  | { type: "START_TEST" }
+  | { type: "FINISH_TEST"; result: "success" | "error" }
+  | { type: "CLEAR_TEST_RESULT" }
+  | { type: "TOGGLE_SHOW_API_KEY" }
+  | { type: "REVERT"; config: AiConfig };
+
+interface AiState {
+  config: AiConfig;
+  savedConfig: AiConfig;
+  saving: boolean;
+  savedIndicator: boolean;
+  expanded: boolean;
+  testing: boolean;
+  testResult: "success" | "error" | null;
+  showApiKey: boolean;
+  loaded: boolean;
+}
+
+function aiReducer(state: AiState, action: AiAction): AiState {
+  switch (action.type) {
+    case "SET_FIELD":
+      return { ...state, config: { ...state.config, [action.field]: action.value } };
+    case "LOAD":
+      return { ...state, config: action.config, savedConfig: action.config, loaded: true };
+    case "MARK_SAVED_CONFIG":
+      return { ...state, savedConfig: action.config };
+    case "START_SAVE":
+      return { ...state, saving: true };
+    case "FINISH_SAVE":
+      return { ...state, saving: false };
+    case "MARK_SAVED_INDICATOR":
+      return { ...state, savedIndicator: true };
+    case "CLEAR_SAVED_INDICATOR":
+      return { ...state, savedIndicator: false };
+    case "TOGGLE_EXPANDED":
+      return { ...state, expanded: !state.expanded };
+    case "START_TEST":
+      return { ...state, testing: true, testResult: null };
+    case "FINISH_TEST":
+      return { ...state, testing: false, testResult: action.result };
+    case "CLEAR_TEST_RESULT":
+      return { ...state, testResult: null };
+    case "TOGGLE_SHOW_API_KEY":
+      return { ...state, showApiKey: !state.showApiKey };
+    case "REVERT":
+      return { ...state, config: action.config, saving: false };
+    default:
+      return state;
+  }
+}
+
+type AgentAction =
+  | { type: "SET_EXPANDED_AGENT"; agentId: string | null }
+  | { type: "SET_LINKED_SKILLS"; agentId: string; skills: string[] }
+  | { type: "REMOVE_LINKED_SKILL"; agentId: string; skillName: string }
+  | { type: "SET_UNLINKING_ID"; id: string | null }
+  | { type: "SET_CONFIRM_DISABLE_ID"; id: string | null };
+
+interface AgentState {
+  expandedAgentId: string | null;
+  linkedSkills: Record<string, string[]>;
+  unlinkingId: string | null;
+  confirmDisableId: string | null;
+}
+
+function agentReducer(state: AgentState, action: AgentAction): AgentState {
+  switch (action.type) {
+    case "SET_EXPANDED_AGENT":
+      return { ...state, expandedAgentId: action.agentId };
+    case "SET_LINKED_SKILLS":
+      return { ...state, linkedSkills: { ...state.linkedSkills, [action.agentId]: action.skills } };
+    case "REMOVE_LINKED_SKILL":
+      return {
+        ...state,
+        linkedSkills: {
+          ...state.linkedSkills,
+          [action.agentId]: (state.linkedSkills[action.agentId] ?? []).filter((s) => s !== action.skillName),
+        },
+      };
+    case "SET_UNLINKING_ID":
+      return { ...state, unlinkingId: action.id };
+    case "SET_CONFIRM_DISABLE_ID":
+      return { ...state, confirmDisableId: action.id };
+    default:
+      return state;
+  }
+}
+
+// ── Component ───────────────────────────────────────────────────────────────
 
 export function Settings() {
   const { t, i18n } = useTranslation();
@@ -64,60 +221,127 @@ export function Settings() {
   const [backgroundStyle, setBackgroundStyle] = useState<BackgroundStyle>(
     () => readBackgroundStyle()
   );
-  const [updateRefreshMode, setUpdateRefreshMode] = useState<SkillUpdateRefreshMode>(
-    () => readSkillUpdateRefreshMode()
-  );
+  const [backgroundRun, setBackgroundRun] = useState(() => readBackgroundRun());
   const { profiles, loading: profilesLoading, toggleProfile, unlinkAllFromAgent } = useAgentProfiles();
-  const [unlinkingId, setUnlinkingId] = useState<string | null>(null);
-  const [expandedAgentId, setExpandedAgentId] = useState<string | null>(null);
-  const [linkedSkills, setLinkedSkills] = useState<Record<string, string[]>>({});
-  const [ghInstalled, setGhInstalled] = useState<boolean | null>(null);
-  const [proxyConfig, setProxyConfig] = useState<ProxyConfig>({
-    enabled: false,
-    proxy_type: "http",
-    host: "",
-    port: 7897,
-    username: null,
-    password: null,
-    bypass: null,
-  });
-  const [proxySaving, setProxySaving] = useState(false);
-  const [proxySaved, setProxySaved] = useState(false);
-  const [proxyExpanded, setProxyExpanded] = useState(false);
-  const [savedProxyConfig, setSavedProxyConfig] = useState<ProxyConfig>({
-    enabled: false,
-    proxy_type: "http",
-    host: "",
-    port: 7897,
-    username: null,
-    password: null,
-    bypass: null,
-  });
-  const [proxyLoaded, setProxyLoaded] = useState(false);
 
+  // Proxy reducer
+  const [proxyState, dispatchProxy] = useReducer(proxyReducer, {
+    config: initialProxyConfig,
+    savedConfig: initialProxyConfig,
+    saving: false,
+    savedIndicator: false,
+    expanded: false,
+    loaded: false,
+  });
+
+  // AI reducer
   const { config: aiConfig, loading: aiLoading, saveConfig: saveAiConfig, testConnection } = useAiConfig();
-  const [localAiConfig, setLocalAiConfig] = useState(aiConfig);
-  const [savedAiConfig, setSavedAiConfig] = useState(aiConfig);
-  const [aiExpanded, setAiExpanded] = useState(false);
-  const [aiSaving, setAiSaving] = useState(false);
-  const [aiSaved, setAiSaved] = useState(false);
-  const [aiTesting, setAiTesting] = useState(false);
-  const [aiTestResult, setAiTestResult] = useState<"success" | "error" | null>(null);
-  const [showApiKey, setShowApiKey] = useState(false);
+  const [aiState, dispatchAi] = useReducer(aiReducer, {
+    config: aiConfig,
+    savedConfig: aiConfig,
+    saving: false,
+    savedIndicator: false,
+    expanded: false,
+    testing: false,
+    testResult: null,
+    showApiKey: false,
+    loaded: false,
+  });
+
+  // Agent connections reducer
+  const [agentState, dispatchAgent] = useReducer(agentReducer, {
+    expandedAgentId: null,
+    linkedSkills: {},
+    unlinkingId: null,
+    confirmDisableId: null,
+  });
 
   const [storageOverview, setStorageOverview] = useState<StorageOverview | null>(null);
   const [fetchingStorage, setFetchingStorage] = useState(false);
   const [cleaningCaches, setCleaningCaches] = useState(false);
   const [cleaningBroken, setCleaningBroken] = useState(false);
   const [forceDeletingTarget, setForceDeletingTarget] = useState<ForceDeleteTarget | null>(null);
+  const [ghInstalled, setGhInstalled] = useState<boolean | null>(null);
 
-  const [confirmDisableId, setConfirmDisableId] = useState<string | null>(null);
+  // ── Proxy effects ─────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    dispatchProxy({ type: "START_LOAD" });
+    invoke<ProxyConfig>("get_proxy_config")
+      .then((config) => dispatchProxy({ type: "LOAD", config }))
+      .catch(() => dispatchProxy({ type: "START_LOAD" }))
+      .finally(() => dispatchProxy({ type: "FINISH_SAVE" }));
+  }, []);
+
+  useEffect(() => {
+    if (!proxyState.loaded || proxyState.saving || isSameProxyConfig(proxyState.config, proxyState.savedConfig)) {
+      return;
+    }
+
+    const previousConfig = proxyState.savedConfig;
+    const timer = setTimeout(() => {
+      dispatchProxy({ type: "START_SAVE" });
+      invoke("save_proxy_config", { config: proxyState.config })
+        .then(() => {
+          dispatchProxy({ type: "MARK_SAVED_CONFIG", config: proxyState.config });
+          dispatchProxy({ type: "MARK_SAVED_INDICATOR" });
+          setTimeout(() => dispatchProxy({ type: "CLEAR_SAVED_INDICATOR" }), 2000);
+        })
+        .catch((e) => {
+          console.error("Failed to save proxy config:", e);
+          dispatchProxy({ type: "REVERT", config: previousConfig });
+          toast.error(t("settings.saveProxyFailed"));
+        })
+        .finally(() => dispatchProxy({ type: "FINISH_SAVE" }));
+    }, AUTO_SAVE_DELAY_MS);
+
+    return () => clearTimeout(timer);
+  }, [proxyState.config, proxyState.loaded, proxyState.saving, proxyState.savedConfig, t]);
+
+  // ── AI effects ────────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!aiLoading) {
+      dispatchAi({ type: "LOAD", config: aiConfig });
+    }
+  }, [aiConfig, aiLoading]);
+
+  useEffect(() => {
+    if (
+      !aiState.loaded ||
+      aiState.saving ||
+      aiState.testing ||
+      isSameAiConfig(aiState.config, aiState.savedConfig)
+    ) {
+      return;
+    }
+
+    const previousConfig = aiState.savedConfig;
+    const timer = setTimeout(() => {
+      dispatchAi({ type: "START_SAVE" });
+      saveAiConfig(aiState.config)
+        .then(() => {
+          dispatchAi({ type: "MARK_SAVED_CONFIG", config: aiState.config });
+          dispatchAi({ type: "MARK_SAVED_INDICATOR" });
+          setTimeout(() => dispatchAi({ type: "CLEAR_SAVED_INDICATOR" }), 2000);
+        })
+        .catch(() => {
+          dispatchAi({ type: "REVERT", config: previousConfig });
+          toast.error(t("settings.saveAiFailed"));
+        })
+        .finally(() => dispatchAi({ type: "FINISH_SAVE" }));
+    }, AUTO_SAVE_DELAY_MS);
+
+    return () => clearTimeout(timer);
+  }, [aiState.config, aiState.loaded, aiState.saving, aiState.testing, aiState.savedConfig, saveAiConfig, t]);
+
+  // ── Storage effects ───────────────────────────────────────────────────────
 
   const fetchStorageOverview = useCallback(async () => {
     setFetchingStorage(true);
     try {
-      const info = await invoke<StorageOverview>("get_storage_overview");
-      setStorageOverview(info);
+      const storageOverview = await invoke<StorageOverview>("get_storage_overview");
+      setStorageOverview(storageOverview);
     } catch (e) {
       console.error("Failed to fetch storage overview:", e);
     } finally {
@@ -133,87 +357,13 @@ export function Settings() {
     invoke<boolean>("check_gh_installed").then(setGhInstalled).catch(() => setGhInstalled(false));
   }, []);
 
-  useEffect(() => {
-    invoke<ProxyConfig>("get_proxy_config")
-      .then((config) => {
-        setProxyConfig(config);
-        setSavedProxyConfig(config);
-      })
-      .catch(() => {})
-      .finally(() => setProxyLoaded(true));
-  }, []);
+  // ── AI focus from localStorage ────────────────────────────────────────────
 
   useEffect(() => {
-    if (!proxyLoaded || proxySaving || isSameProxyConfig(proxyConfig, savedProxyConfig)) {
-      return;
-    }
-
-    const nextConfig = proxyConfig;
-    const previousConfig = savedProxyConfig;
-    const timer = setTimeout(() => {
-      setProxySaving(true);
-      invoke("save_proxy_config", { config: nextConfig })
-        .then(() => {
-          setSavedProxyConfig(nextConfig);
-          setProxySaved(true);
-          setTimeout(() => setProxySaved(false), 2000);
-        })
-        .catch((e) => {
-          console.error("Failed to save proxy config:", e);
-          setProxyConfig(previousConfig);
-          toast.error(t("settings.saveProxyFailed"));
-        })
-        .finally(() => {
-          setProxySaving(false);
-        });
-    }, AUTO_SAVE_DELAY_MS);
-
-    return () => clearTimeout(timer);
-  }, [proxyConfig, proxyLoaded, proxySaving, savedProxyConfig, t]);
-
-  useEffect(() => {
-    if (aiLoading) return;
-    setLocalAiConfig(aiConfig);
-    setSavedAiConfig(aiConfig);
-  }, [aiConfig, aiLoading]);
-
-  useEffect(() => {
-    if (
-      aiLoading ||
-      aiSaving ||
-      aiTesting ||
-      isSameAiConfig(localAiConfig, savedAiConfig)
-    ) {
-      return;
-    }
-
-    const nextConfig = localAiConfig;
-    const previousConfig = savedAiConfig;
-    const timer = setTimeout(() => {
-      setAiSaving(true);
-      saveAiConfig(nextConfig)
-        .then(() => {
-          setSavedAiConfig(nextConfig);
-          setAiSaved(true);
-          setTimeout(() => setAiSaved(false), 2000);
-        })
-        .catch(() => {
-          setLocalAiConfig(previousConfig);
-          toast.error(t("settings.saveAiFailed"));
-        })
-        .finally(() => {
-          setAiSaving(false);
-        });
-    }, AUTO_SAVE_DELAY_MS);
-
-    return () => clearTimeout(timer);
-  }, [aiLoading, aiSaving, aiTesting, localAiConfig, saveAiConfig, savedAiConfig, t]);
-
-  const openAiProviderIfRequested = useCallback(() => {
     try {
       const focus = localStorage.getItem("skillstar:settings-focus");
       if (focus === "ai-provider") {
-        setAiExpanded(true);
+        dispatchAi({ type: "TOGGLE_EXPANDED" });
         localStorage.removeItem("skillstar:settings-focus");
       }
     } catch {
@@ -221,105 +371,124 @@ export function Settings() {
     }
   }, []);
 
-  useEffect(() => {
-    openAiProviderIfRequested();
-  }, [openAiProviderIfRequested]);
+  // ── Agent handlers ─────────────────────────────────────────────────────────
 
-  const handleToggle = async (profile: (typeof profiles)[0]) => {
-    if (profile.enabled && profile.synced_count > 0) {
-      setConfirmDisableId(profile.id);
-      return;
-    }
-    try {
-      await toggleProfile(profile.id);
-    } catch (e) {
-      console.error("Toggle failed:", e);
-      toast.error(t("settings.toggleFailed"));
-    }
-  };
+  const handleToggle = useCallback(
+    async (profile: (typeof profiles)[0]) => {
+      if (profile.enabled && profile.synced_count > 0) {
+        dispatchAgent({ type: "SET_CONFIRM_DISABLE_ID", id: profile.id });
+        return;
+      }
+      try {
+        await toggleProfile(profile.id);
+      } catch (e) {
+        console.error("Toggle failed:", e);
+        toast.error(t("settings.toggleFailed"));
+      }
+    },
+    [profiles, toggleProfile, t]
+  );
 
-  const confirmDisable = async () => {
-    if (!confirmDisableId) return;
-    setUnlinkingId(confirmDisableId);
+  const confirmDisable = useCallback(async () => {
+    const id = agentState.confirmDisableId;
+    if (!id) return;
+    dispatchAgent({ type: "SET_UNLINKING_ID", id });
     try {
-      await unlinkAllFromAgent(confirmDisableId);
-      await toggleProfile(confirmDisableId);
+      await unlinkAllFromAgent(id);
+      await toggleProfile(id);
     } catch (e) {
       console.error("Disable failed:", e);
       toast.error(t("settings.disableFailed"));
     } finally {
-      setUnlinkingId(null);
-      setConfirmDisableId(null);
+      dispatchAgent({ type: "SET_UNLINKING_ID", id: null });
+      dispatchAgent({ type: "SET_CONFIRM_DISABLE_ID", id: null });
     }
-  };
+  }, [agentState.confirmDisableId, unlinkAllFromAgent, toggleProfile, t]);
 
-  const toggleExpand = async (agentId: string) => {
-    if (expandedAgentId === agentId) {
-      setExpandedAgentId(null);
-      return;
-    }
-    setExpandedAgentId(agentId);
-    try {
-      const skills = await invoke<string[]>("list_linked_skills", { agentId });
-      setLinkedSkills((p) => ({ ...p, [agentId]: skills }));
-    } catch (e) {
-      console.error("Failed to list linked skills:", e);
-      toast.error(t("settings.listLinkedFailed"));
-    }
-  };
+  const toggleExpand = useCallback(
+    async (agentId: string) => {
+      if (agentState.expandedAgentId === agentId) {
+        dispatchAgent({ type: "SET_EXPANDED_AGENT", agentId: null });
+        return;
+      }
+      dispatchAgent({ type: "SET_EXPANDED_AGENT", agentId });
+      try {
+        const skills = await invoke<string[]>("list_linked_skills", { agentId });
+        dispatchAgent({ type: "SET_LINKED_SKILLS", agentId, skills });
+      } catch (e) {
+        console.error("Failed to list linked skills:", e);
+        toast.error(t("settings.listLinkedFailed"));
+      }
+    },
+    [agentState.expandedAgentId, t]
+  );
 
-  const handleUnlinkSingle = async (skillName: string, agentId: string) => {
-    try {
-      await invoke("unlink_skill_from_agent", { skillName, agentId });
-      setLinkedSkills((p) => ({
-        ...p,
-        [agentId]: (p[agentId] ?? []).filter((s) => s !== skillName),
-      }));
-    } catch (e) {
-      console.error("Unlink failed:", e);
-      toast.error(t("settings.unlinkFailed"));
-    }
-  };
+  const handleUnlinkSingle = useCallback(
+    async (skillName: string, agentId: string) => {
+      try {
+        await invoke("unlink_skill_from_agent", { skillName, agentId });
+        dispatchAgent({ type: "REMOVE_LINKED_SKILL", agentId, skillName });
+      } catch (e) {
+        console.error("Unlink failed:", e);
+        toast.error(t("settings.unlinkFailed"));
+      }
+    },
+    [t]
+  );
 
-  const handleLanguageChange = (lang: string) => {
-    setLanguage(lang);
-    setCurrentLang(lang);
-  };
+  // ── Language & appearance handlers ───────────────────────────────────────
 
-  const handleBackgroundStyleChange = (style: BackgroundStyle) => {
-    setBackgroundStyle(style);
-    applyBackgroundStyle(style);
-  };
-
-  const handleUpdateRefreshModeChange = useCallback(
-    (mode: SkillUpdateRefreshMode) => {
-      const saved = writeSkillUpdateRefreshMode(mode);
-      setUpdateRefreshMode(saved);
+  const handleLanguageChange = useCallback(
+    (lang: string) => {
+      setLanguage(lang);
+      setCurrentLang(lang);
+      invoke("update_tray_language", { lang }).catch(() => {});
     },
     []
   );
 
-  const handleAiTestConnection = useCallback(async () => {
-    setAiTesting(true);
-    setAiTestResult(null);
-    try {
-      await saveAiConfig(localAiConfig);
-      setSavedAiConfig(localAiConfig);
-      await testConnection();
-      setAiTestResult("success");
-      setTimeout(() => setAiTestResult(null), 3000);
-    } catch (e) {
-      setAiTestResult("error");
-      toast.error(t("settings.connectionFailed", { error: e }));
-      setTimeout(() => setAiTestResult(null), 5000);
-    } finally {
-      setAiTesting(false);
-    }
-  }, [localAiConfig, saveAiConfig, t, testConnection]);
-
-  const handleAiEnabledChange = useCallback((enabled: boolean) => {
-    setLocalAiConfig((prev) => (prev.enabled === enabled ? prev : { ...prev, enabled }));
+  const handleBackgroundStyleChange = useCallback((style: BackgroundStyle) => {
+    setBackgroundStyle(style);
+    applyBackgroundStyle(style);
   }, []);
+
+  const handleBackgroundRunToggle = useCallback(async (enabled: boolean) => {
+    writeBackgroundRun(enabled);
+    setBackgroundRun(enabled);
+    if (!enabled) {
+      try {
+        await invoke("stop_patrol");
+      } catch (e) {
+        console.error("Stop patrol failed:", e);
+      }
+    }
+  }, []);
+
+  // ── AI handlers ───────────────────────────────────────────────────────────
+
+  const handleAiTestConnection = useCallback(async () => {
+    dispatchAi({ type: "START_TEST" });
+    try {
+      await saveAiConfig(aiState.config);
+      dispatchAi({ type: "MARK_SAVED_CONFIG", config: aiState.config });
+      await testConnection();
+      dispatchAi({ type: "FINISH_TEST", result: "success" });
+      setTimeout(() => dispatchAi({ type: "CLEAR_TEST_RESULT" }), 3000);
+    } catch (e) {
+      dispatchAi({ type: "FINISH_TEST", result: "error" });
+      toast.error(t("settings.connectionFailed", { error: e }));
+      setTimeout(() => dispatchAi({ type: "CLEAR_TEST_RESULT" }), 5000);
+    }
+  }, [aiState.config, saveAiConfig, testConnection, t]);
+
+  const handleAiEnabledChange = useCallback(
+    (enabled: boolean) => {
+      dispatchAi({ type: "SET_FIELD", field: "enabled", value: enabled });
+    },
+    []
+  );
+
+  // ── Storage handlers ───────────────────────────────────────────────────────
 
   const handleCleanAllCaches = useCallback(async () => {
     setCleaningCaches(true);
@@ -329,7 +498,6 @@ export function Settings() {
         new Promise((resolve) => setTimeout(resolve, 600)),
       ]);
 
-      // Also clear frontend localStorage caches
       try {
         localStorage.removeItem("publisher-avatar-source-v1");
         localStorage.removeItem("skillstar_skipped_version");
@@ -351,42 +519,45 @@ export function Settings() {
     }
   }, [fetchStorageOverview, t]);
 
-  const handleForceDelete = useCallback(async (target: ForceDeleteTarget) => {
-    setForceDeletingTarget(target);
-    try {
-      let removed = 0;
-      if (target === "hub") {
-        removed = await invoke<number>("force_delete_installed_skills");
-      } else if (target === "cache") {
-        removed = await invoke<number>("force_delete_repo_caches");
-      } else {
-        removed = await invoke<number>("force_delete_app_config");
-      }
-
-      if (removed > 0) {
+  const handleForceDelete = useCallback(
+    async (target: ForceDeleteTarget) => {
+      setForceDeletingTarget(target);
+      try {
+        let removed = 0;
         if (target === "hub") {
-          toast.success(t("settings.forceDeleteHubDone", { count: removed }));
+          removed = await invoke<number>("force_delete_installed_skills");
         } else if (target === "cache") {
-          toast.success(t("settings.forceDeleteCacheDone", { count: removed }));
+          removed = await invoke<number>("force_delete_repo_caches");
         } else {
-          toast.success(t("settings.forceDeleteConfigDone", { count: removed }));
+          removed = await invoke<number>("force_delete_app_config");
         }
-      } else if (target === "hub") {
-        toast.info(t("settings.forceDeleteHubEmpty"));
-      } else if (target === "cache") {
-        toast.info(t("settings.forceDeleteCacheEmpty"));
-      } else {
-        toast.info(t("settings.forceDeleteConfigEmpty"));
-      }
 
-      await fetchStorageOverview();
-    } catch (e) {
-      console.error("Force delete failed:", e);
-      toast.error(t("settings.forceDeleteFailed"));
-    } finally {
-      setForceDeletingTarget(null);
-    }
-  }, [fetchStorageOverview, t]);
+        if (removed > 0) {
+          if (target === "hub") {
+            toast.success(t("settings.forceDeleteHubDone", { count: removed }));
+          } else if (target === "cache") {
+            toast.success(t("settings.forceDeleteCacheDone", { count: removed }));
+          } else {
+            toast.success(t("settings.forceDeleteConfigDone", { count: removed }));
+          }
+        } else if (target === "hub") {
+          toast.info(t("settings.forceDeleteHubEmpty"));
+        } else if (target === "cache") {
+          toast.info(t("settings.forceDeleteCacheEmpty"));
+        } else {
+          toast.info(t("settings.forceDeleteConfigEmpty"));
+        }
+
+        await fetchStorageOverview();
+      } catch (e) {
+        console.error("Force delete failed:", e);
+        toast.error(t("settings.forceDeleteFailed"));
+      } finally {
+        setForceDeletingTarget(null);
+      }
+    },
+    [fetchStorageOverview, t]
+  );
 
   const handleCleanBroken = useCallback(async () => {
     setCleaningBroken(true);
@@ -411,16 +582,32 @@ export function Settings() {
 
   const formatBytes = useCallback((bytes: number) => {
     if (bytes === 0) return "0 B";
-    const k = 1024;
+    const unitBase = 1024;
     const sizes = ["B", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+    const sizeIndex = Math.floor(Math.log(bytes) / Math.log(unitBase));
+    return parseFloat((bytes / Math.pow(unitBase, sizeIndex)).toFixed(2)) + " " + sizes[sizeIndex];
+  }, []);
+
+  // ── Proxy config change handler ────────────────────────────────────────────
+
+  const handleProxyConfigChange = useCallback((next: ProxyConfig) => {
+    Object.entries(next).forEach(([key, value]) => {
+      dispatchProxy({ type: "SET_FIELD", field: key as keyof ProxyConfig, value });
+    });
+  }, []);
+
+  // ── AI config change handler ───────────────────────────────────────────────
+
+  const handleAiConfigChange = useCallback((next: AiConfig) => {
+    Object.entries(next).forEach(([key, value]) => {
+      dispatchAi({ type: "SET_FIELD", field: key as keyof AiConfig, value });
+    });
   }, []);
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-background">
       <div className="h-[60px] flex flex-col justify-center px-8 border-b border-border/40 bg-card/40 backdrop-blur-xl z-10 shrink-0">
-        <h1 className="text-heading-md font-semibold tracking-tight text-foreground">{t("settings.title")}</h1>
+        <h1>{t("settings.title")}</h1>
       </div>
 
       <motion.main
@@ -433,46 +620,46 @@ export function Settings() {
           <AgentConnectionsSection
             profiles={profiles}
             profilesLoading={profilesLoading}
-            confirmDisableId={confirmDisableId}
-            unlinkingId={unlinkingId}
-            expandedAgentId={expandedAgentId}
-            linkedSkills={linkedSkills}
+            confirmDisableId={agentState.confirmDisableId}
+            unlinkingId={agentState.unlinkingId}
+            expandedAgentId={agentState.expandedAgentId}
+            linkedSkills={agentState.linkedSkills}
             onToggleProfile={handleToggle}
             onToggleExpand={toggleExpand}
-            onCancelDisable={() => setConfirmDisableId(null)}
+            onCancelDisable={() => dispatchAgent({ type: "SET_CONFIRM_DISABLE_ID", id: null })}
             onConfirmDisable={confirmDisable}
             onUnlinkSkill={handleUnlinkSingle}
           />
 
           <ProxySection
-            proxyConfig={proxyConfig}
-            ready={proxyLoaded}
-            proxyExpanded={proxyExpanded}
-            proxySaving={proxySaving}
-            proxySaved={proxySaved}
-            onToggleExpanded={() => setProxyExpanded((prev) => !prev)}
-            onConfigChange={setProxyConfig}
+            proxyConfig={proxyState.config}
+            ready={proxyState.loaded}
+            proxyExpanded={proxyState.expanded}
+            proxySaving={proxyState.saving}
+            proxySaved={proxyState.savedIndicator}
+            onToggleExpanded={() => dispatchProxy({ type: "TOGGLE_EXPANDED" })}
+            onConfigChange={handleProxyConfigChange}
           />
 
           <AiProviderSection
-            localAiConfig={localAiConfig}
-            ready={!aiLoading}
-            aiExpanded={aiExpanded}
-            aiSaving={aiSaving}
-            aiSaved={aiSaved}
-            aiTesting={aiTesting}
-            aiTestResult={aiTestResult}
-            showApiKey={showApiKey}
-            onToggleExpanded={() => setAiExpanded((prev) => !prev)}
+            localAiConfig={aiState.config}
+            ready={aiState.loaded}
+            aiExpanded={aiState.expanded}
+            aiSaving={aiState.saving}
+            aiSaved={aiState.savedIndicator}
+            aiTesting={aiState.testing}
+            aiTestResult={aiState.testResult}
+            showApiKey={aiState.showApiKey}
+            onToggleExpanded={() => dispatchAi({ type: "TOGGLE_EXPANDED" })}
             onEnabledChange={handleAiEnabledChange}
-            onConfigChange={setLocalAiConfig}
-            onToggleShowApiKey={() => setShowApiKey((prev) => !prev)}
+            onConfigChange={handleAiConfigChange}
+            onToggleShowApiKey={() => dispatchAi({ type: "TOGGLE_SHOW_API_KEY" })}
             onTestConnection={handleAiTestConnection}
           />
 
-          <UpdateRefreshSection
-            mode={updateRefreshMode}
-            onModeChange={handleUpdateRefreshModeChange}
+          <BackgroundRunSection
+            enabled={backgroundRun}
+            onToggle={handleBackgroundRunToggle}
           />
 
           <AppearanceSection

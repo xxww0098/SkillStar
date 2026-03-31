@@ -1,12 +1,15 @@
 import { memo } from "react";
 import { motion } from "framer-motion";
-import { Download, GitBranch, Check, ExternalLink, Loader2 } from "lucide-react";
+import { Download, GitBranch, Check, ExternalLink, Loader2, ShieldCheck, ShieldAlert, ShieldX } from "lucide-react";
+import { SuccessCheckmark } from "../ui/SuccessCheckmark";
 import { useTranslation } from "react-i18next";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
-import { cn, formatInstalls } from "../../lib/utils";
-import type { Skill, AgentProfile } from "../../types";
+import { AgentIcon } from "../ui/AgentIcon";
+import { HScrollRow } from "../ui/HScrollRow";
+import { cn, formatInstalls, agentIconCls } from "../../lib/utils";
+import type { Skill, AgentProfile, RiskLevel } from "../../types";
 
 interface SkillCardProps {
   skill: Skill;
@@ -22,8 +25,12 @@ interface SkillCardProps {
   pendingAgentToggleKeys?: Set<string>;
   /** Whether this skill is currently being installed */
   installing?: boolean;
+  /** Whether this skill is currently being updated */
+  updating?: boolean;
   /** Disable mount animation (use with stagger containers) */
   noAnimate?: boolean;
+  /** Security scan risk level (undefined = not scanned) */
+  riskLevel?: RiskLevel;
 }
 
 
@@ -49,7 +56,8 @@ const categoryBadge = (category: string, t: (key: string) => string) => {
 
 function SkillCardInner({
   skill, onClick, onInstall, onUpdate, compact, selectable, selected, onSelect,
-  profiles, onToggleAgent, pendingAgentToggleKeys, installing, noAnimate
+  profiles, onToggleAgent, pendingAgentToggleKeys, installing, updating, noAnimate,
+  riskLevel,
 }: SkillCardProps) {
   const { t } = useTranslation();
   const cat = categoryBadge(skill.category, t);
@@ -71,7 +79,7 @@ function SkillCardInner({
     <Wrapper {...wrapperProps} className="h-full">
         <Card
         className={cn(
-          "h-full flex flex-col cursor-pointer group relative rounded-2xl bg-card/50 backdrop-blur-sm border-white/10 shadow-[0_4px_20px_-8px_rgba(0,0,0,0.3)] hover:bg-card-hover/60 hover:shadow-[0_8px_30px_-10px_rgba(0,0,0,0.4)] transition-all",
+          "h-full flex flex-col cursor-pointer group relative rounded-2xl bg-card/50 backdrop-blur-sm border-white/10 shadow-[0_4px_20px_-8px_rgba(0,0,0,0.3)] hover:bg-card-hover/60 hover:shadow-[0_8px_30px_-10px_rgba(0,0,0,0.4)] transition",
           compact && "p-2",
           selected && "ring-2 ring-primary/40 border-primary/30"
         )}
@@ -80,10 +88,31 @@ function SkillCardInner({
         {/* Rank badge (top-left) */}
         {skill.rank && skill.rank <= 100 && (
           <div className={cn(
-            "absolute top-3 left-3 z-10 w-7 h-7 rounded-lg border flex items-center justify-center text-[11px] tabular-nums",
+            "absolute top-3 left-3 z-10 w-7 h-7 rounded-lg border flex items-center justify-center text-micro tabular-nums",
             rankStyle(skill.rank)
           )}>
             #{skill.rank}
+          </div>
+        )}
+
+        {/* Security risk badge (bottom-left) */}
+        {riskLevel && (
+          <div
+            className={cn(
+              "absolute bottom-3 left-3 z-10 w-5 h-5 rounded-md flex items-center justify-center",
+              riskLevel === "Safe" && "bg-emerald-500/15 text-emerald-400",
+              riskLevel === "Low" && "bg-amber-500/15 text-amber-300",
+              riskLevel === "Medium" && "bg-orange-500/15 text-orange-400",
+              riskLevel === "High" && "bg-red-500/15 text-red-400",
+              riskLevel === "Critical" && "bg-red-500/20 text-red-500",
+            )}
+            title={`Security: ${riskLevel}`}
+          >
+            {riskLevel === "Safe" && <ShieldCheck size={12} />}
+            {riskLevel === "Low" && <ShieldAlert size={12} />}
+            {riskLevel === "Medium" && <ShieldAlert size={12} />}
+            {riskLevel === "High" && <ShieldX size={12} />}
+            {riskLevel === "Critical" && <ShieldX size={12} />}
           </div>
         )}
 
@@ -97,22 +126,32 @@ function SkillCardInner({
                 size="sm"
                 variant="outline"
                 className="h-7 px-2.5 text-xs bg-card/50 backdrop-blur-sm hover:bg-muted/60 font-medium border-warning text-warning-foreground shadow-[0_0_10px_rgba(234,179,8,0.1)] transition-colors"
+                disabled={updating}
                 onClick={(e) => {
                   e.stopPropagation();
-                  onUpdate?.(skill.name);
+                  void onUpdate?.(skill.name);
+                }}
+                onMouseDown={(e) => {
+                  e.stopPropagation();
                 }}
               >
-                <span className="relative flex h-2 w-2 mr-1.5">
-                  <span className="animate-ping-limited absolute inline-flex h-full w-full rounded-full bg-warning opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-warning"></span>
-                </span>
-                {t("common.update")}
+                {updating ? (
+                  <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+                ) : (
+                  <span className="relative flex h-2 w-2 mr-1.5">
+                    <span className="animate-ping-limited absolute inline-flex h-full w-full rounded-full bg-warning opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-warning"></span>
+                  </span>
+                )}
+                {updating
+                  ? t("common.updating", { defaultValue: "Updating..." })
+                  : t("common.update")}
               </Button>
             ) : (
               <motion.div
                 initial={{ scale: 0.8, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
-                transition={{ type: "spring", bounce: 0.4, duration: 0.5 }}
+                transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
               >
                 <Button
                   size="sm"
@@ -120,7 +159,7 @@ function SkillCardInner({
                   className="h-7 px-2.5 text-xs font-medium pointer-events-none bg-success/10 text-success hover:bg-success/10 border-success/20 disabled:opacity-100"
                   disabled
                 >
-                  <Check className="w-3 h-3 mr-1.5" />
+                  <SuccessCheckmark size={14} className="text-success mr-1" />
                    {t("skillCard.installed")}
                 </Button>
               </motion.div>
@@ -206,58 +245,65 @@ function SkillCardInner({
             )}
 
             {cat && (
-              <Badge variant={cat.variant} className="text-[10px] px-1.5 py-0 h-4 font-medium opacity-90">
+              <Badge variant={cat.variant} className="text-micro px-1.5 py-0 h-4 font-medium opacity-90">
                 {cat.label}
               </Badge>
             )}
           </div>
 
           {/* Right side: Agent badges or install command hint */}
-          <div className="flex items-center gap-1.5 relative z-10">
+          <div className="flex items-center gap-1.5 relative z-10 flex-1 min-w-0 justify-end">
             {profiles && onToggleAgent ? (
-              profiles.map(profile => {
-                const isUsed = skill.agent_links?.includes(profile.display_name) ?? false;
-                const toggleKey = `${skill.name}::${profile.id}`;
-                const isToggling = pendingAgentToggleKeys?.has(toggleKey) ?? false;
-                return (
-                  <button
-                    key={profile.id}
-                    onMouseDown={(e) => {
-                      // Keep mouse clicks from leaving a persistent native focus ring.
-                      e.preventDefault();
-                    }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (isToggling) return;
-                      onToggleAgent(skill.name, profile.id, !isUsed, profile.display_name);
-                    }}
-                    disabled={isToggling}
-                    className={cn(
-                      "w-7 h-7 rounded-lg flex items-center justify-center border transition-colors cursor-pointer focus:outline-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-wait",
-                      isUsed
-                        ? "border-primary/40 bg-primary/10 shadow-[0_0_0_1px_rgba(59,130,246,0.15)] hover:shadow-[0_0_0_1px_rgba(59,130,246,0.3)] hover:bg-primary/20"
-                        : "border-transparent bg-transparent hover:bg-muted",
-                      isToggling && "opacity-65"
-                    )}
-                    title={`${profile.display_name} ${isUsed ? '(Remove)' : '(Add)'}`}
-                  >
-                    <img
-                      src={`/${profile.icon}`}
-                      alt={profile.display_name}
-                      className={cn("w-4 h-4 transition-[filter,opacity] drop-shadow-sm", !isUsed && "grayscale opacity-40 hover:opacity-70")}
-                    />
-                  </button>
-                );
-              })
+              <HScrollRow
+                count={profiles.length}
+                maxVisible={10}
+                itemWidth={28}
+                gap={6}
+                className="gap-1.5"
+              >
+                {profiles.map((profile) => {
+                  const isUsed = skill.agent_links?.includes(profile.display_name) ?? false;
+                  const toggleKey = `${skill.name}::${profile.id}`;
+                  const isToggling = pendingAgentToggleKeys?.has(toggleKey) ?? false;
+                  return (
+                    <button
+                      key={profile.id}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (isToggling) return;
+                        onToggleAgent(skill.name, profile.id, !isUsed, profile.display_name);
+                      }}
+                      disabled={isToggling}
+                      className={cn(
+                        "w-7 h-7 shrink-0 rounded-lg flex items-center justify-center border transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-wait",
+                        isUsed
+                          ? "border-primary/40 bg-primary/10 shadow-[0_0_0_1px_rgba(var(--color-primary-rgb),0.15)] hover:shadow-[0_0_0_1px_rgba(var(--color-primary-rgb),0.3)] hover:bg-primary/20"
+                          : "border-transparent bg-transparent hover:bg-muted",
+                        isToggling && "opacity-65"
+                      )}
+                      title={`${profile.display_name} ${isUsed ? "(Remove)" : "(Add)"}`}
+                    >
+                      <AgentIcon
+                        profile={profile}
+                        className={cn(
+                          agentIconCls(profile.icon, "w-4 h-4"),
+                          "transition-[filter,opacity] drop-shadow-sm",
+                          !isUsed && "grayscale opacity-40 hover:opacity-70"
+                        )}
+                      />
+                    </button>
+                  );
+                })}
+              </HScrollRow>
             ) : skill.source ? (
-              <span className="text-[10px] text-muted-foreground/60 font-mono flex items-center gap-1">
+              <span className="text-micro text-muted-foreground/60 font-mono flex items-center gap-1">
                 <ExternalLink className="w-3 h-3" />
                 skills.sh
               </span>
             ) : (
               skill.agent_links && skill.agent_links.length > 0 && (
                 skill.agent_links.map((agent) => (
-                  <Badge key={agent} variant="outline" className="text-[10px] px-1.5 py-0 h-4 leading-none font-normal text-muted-foreground shadow-sm">
+                  <Badge key={agent} variant="outline" className="text-micro px-1.5 py-0 h-4 leading-none font-normal text-muted-foreground shadow-sm">
                     {agent}
                   </Badge>
                 ))

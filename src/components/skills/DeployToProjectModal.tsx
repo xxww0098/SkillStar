@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { X, FolderOpen, Rocket, Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -23,6 +23,7 @@ export function DeployToProjectModal({
   onDeploy,
 }: DeployToProjectModalProps) {
   const { t } = useTranslation();
+  const prefersReducedMotion = useReducedMotion();
   const [projectPath, setProjectPath] = useState<string | null>(null);
   const [selectedAgents, setSelectedAgents] = useState<string[]>(["claude"]);
   const [deploying, setDeploying] = useState(false);
@@ -71,7 +72,7 @@ export function DeployToProjectModal({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
+            transition={{ duration: prefersReducedMotion ? 0.01 : 0.15 }}
             className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm"
             onClick={handleClose}
           />
@@ -80,19 +81,20 @@ export function DeployToProjectModal({
             initial={{ opacity: 0, scale: 0.96, y: 12 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 12 }}
-            transition={{ type: "spring", bounce: 0.1, duration: 0.35 }}
+            transition={{ duration: prefersReducedMotion ? 0.01 : 0.3, ease: [0.16, 1, 0.3, 1] }}
             className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md z-50"
           >
-            <div className="relative overflow-hidden rounded-[24px] border border-white/10 bg-card/95 shadow-[0_0_80px_-20px_rgba(0,0,0,0.5)] backdrop-blur-3xl ring-1 ring-white/5">
+            <div role="dialog" aria-modal="true" aria-label={t("deployModal.title")} className="relative overflow-hidden rounded-[24px] border border-white/10 bg-card/95 shadow-[0_0_80px_-20px_rgba(0,0,0,0.5)] backdrop-blur-3xl ring-1 ring-white/5">
               {/* Top ambient glow */}
               <div className="pointer-events-none absolute -left-20 -top-20 h-48 w-48 rounded-full bg-primary/20 blur-[60px] opacity-70" />
-              <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-blue-500/10 blur-[60px] opacity-70" />
+              <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-accent/10 blur-[60px] opacity-70" />
               <div className="relative z-10">
               {/* Header */}
               <div className="flex items-center justify-between px-6 pt-4 pb-0">
                 <h2 className="text-heading-sm">{t("deployModal.title")}</h2>
                 <button
                   onClick={handleClose}
+                  aria-label={t("common.close")}
                   className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors cursor-pointer"
                 >
                   <X className="w-4 h-4" />
@@ -102,7 +104,7 @@ export function DeployToProjectModal({
               <div className="px-6 py-4 space-y-4">
                 {/* Agent selector */}
                 <div className="grid grid-cols-5 gap-1.5">
-                  {profiles.map((profile) => {
+                  {profiles.filter(p => p.id !== "openclaw").map((profile) => {
                     const isSelected = selectedAgents.includes(profile.id);
                     return (
                       <button
@@ -125,8 +127,10 @@ export function DeployToProjectModal({
                             "w-5 h-5 transition-[filter,opacity]",
                             !isSelected && "grayscale opacity-40"
                           )}
+                          loading="lazy"
+                          decoding="async"
                         />
-                        <span className="text-[9px] font-medium truncate w-full text-center leading-tight">
+                        <span className="text-micro font-medium truncate w-full text-center leading-tight">
                           {profile.display_name.split(" ")[0]}
                         </span>
                       </button>
@@ -153,11 +157,11 @@ export function DeployToProjectModal({
                 </div>
 
                 {/* Skills pills */}
-                <div className="flex flex-wrap gap-1">
+                <div className="flex flex-wrap gap-1 max-h-[120px] overflow-y-auto pr-1">
                   {selectedSkills.map((name) => (
                     <span
                       key={name}
-                      className="px-1.5 py-0.5 rounded text-[11px] bg-muted text-muted-foreground"
+                      className="px-1.5 py-0.5 rounded text-micro bg-muted text-muted-foreground"
                     >
                       {name}
                     </span>

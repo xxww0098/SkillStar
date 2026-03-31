@@ -18,7 +18,7 @@ pub struct SkillGroup {
     /// Map of skill names to their git_urls, for downloading when importing from a share code.
     #[serde(default)]
     pub skill_sources: std::collections::HashMap<String, String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub default_agent: String, // Keeping field with default for backwards compatibility but it is ignored now
     /// ISO 8601 timestamp when the group was created.
     pub created_at: String,
@@ -110,7 +110,11 @@ pub fn update_group(
 ) -> Result<SkillGroup> {
     let mut store = load_store();
     if let Some(ref new_name) = name {
-        if store.groups.iter().any(|g| &g.id != &id && &g.name == new_name) {
+        if store
+            .groups
+            .iter()
+            .any(|g| &g.id != &id && &g.name == new_name)
+        {
             anyhow::bail!("A group with the name '{}' already exists", new_name);
         }
     }

@@ -1,4 +1,7 @@
-use crate::core::patrol::{self, PatrolManager, PatrolStatus, PatrolConfig};
+use crate::{
+    ExitControl,
+    core::patrol::{PatrolManager, PatrolStatus},
+};
 use tauri::State;
 
 #[tauri::command]
@@ -11,13 +14,16 @@ pub async fn start_patrol(
         .start(app.clone(), interval_secs)
         .await
         .map_err(|e| e.to_string())?;
-    set_dock_visible(app, true).await
+    Ok(())
 }
 
 #[tauri::command]
-pub async fn stop_patrol(app: tauri::AppHandle, state: State<'_, PatrolManager>) -> Result<(), String> {
+pub async fn stop_patrol(
+    _app: tauri::AppHandle,
+    state: State<'_, PatrolManager>,
+) -> Result<(), String> {
     state.stop().await;
-    set_dock_visible(app, false).await
+    Ok(())
 }
 
 #[tauri::command]
@@ -26,13 +32,15 @@ pub async fn get_patrol_status(state: State<'_, PatrolManager>) -> Result<Patrol
 }
 
 #[tauri::command]
-pub async fn get_patrol_config() -> Result<PatrolConfig, String> {
-    Ok(patrol::load_config())
-}
-
-#[tauri::command]
-pub async fn save_patrol_config(config: PatrolConfig) -> Result<(), String> {
-    patrol::save_config(&config).map_err(|e| e.to_string())
+pub async fn app_quit(
+    app: tauri::AppHandle,
+    state: State<'_, PatrolManager>,
+    exit_control: State<'_, ExitControl>,
+) -> Result<(), String> {
+    state.stop().await;
+    exit_control.allow_next_exit();
+    app.exit(0);
+    Ok(())
 }
 
 #[tauri::command]

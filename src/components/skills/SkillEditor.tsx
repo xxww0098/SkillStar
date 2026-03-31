@@ -7,30 +7,13 @@ import { Button } from "../ui/button";
 import { Markdown } from "../ui/Markdown";
 import { ResizablePanel } from "../ui/ResizablePanel";
 import { unwrapOuterMarkdownFence, navigateToAiSettings } from "../../lib/utils";
-import type { SkillContent } from "../../types";
+import type { AiConfigStatus, AiStreamPayload, FrontmatterEntry, SkillContent } from "../../types";
 
 interface SkillEditorProps {
   skillName: string;
   onClose: () => void;
   onRead: (name: string) => Promise<SkillContent>;
   onSave: (name: string, content: string) => Promise<void>;
-}
-
-interface AiConfigLike {
-  enabled: boolean;
-  api_key: string;
-}
-
-interface FrontmatterEntry {
-  key: string;
-  value: string;
-}
-
-interface TranslateStreamPayload {
-  requestId: string;
-  event: "start" | "delta" | "complete" | "error";
-  delta?: string | null;
-  message?: string | null;
 }
 
 const FRONTMATTER_RE = /^\uFEFF?---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)/;
@@ -257,7 +240,7 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
     // keep showing original content until first delta or final result arrives.
     setTranslatedSource(null);
     try {
-      const unlisten = await listen<TranslateStreamPayload>("ai://translate-stream", (event) => {
+      const unlisten = await listen<AiStreamPayload>("ai://translate-stream", (event) => {
         if (activeTranslateIdRef.current !== requestId) return;
         const payload = event.payload;
         if (payload.requestId !== requestId) return;
@@ -349,7 +332,7 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
     setSummaryHasDelta(false);
     setSummaryContent(null);
     try {
-      const unlisten = await listen<TranslateStreamPayload>("ai://summarize-stream", (event) => {
+      const unlisten = await listen<AiStreamPayload>("ai://summarize-stream", (event) => {
         if (activeSummarizeIdRef.current !== requestId) return;
         const payload = event.payload;
         if (payload.requestId !== requestId) return;
@@ -400,7 +383,7 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
   useEffect(() => {
     const loadAiConfig = async () => {
       try {
-        const config = await invoke<AiConfigLike>("get_ai_config");
+        const config = await invoke<AiConfigStatus>("get_ai_config");
         setAiConfigured(config.enabled && config.api_key.trim().length > 0);
       } catch {
         setAiConfigured(false);
@@ -428,9 +411,9 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
       setLoading(true);
       setLoadError(null);
       try {
-        const data = await onRead(skillName);
-        setContent(data);
-        setEditedContent(data.content);
+        const latestContent = await onRead(skillName);
+        setContent(latestContent);
+        setEditedContent(latestContent.content);
         setTranslatedContent(null);
         setTranslatedSource(null);
         setTranslationVisible(false);
@@ -453,8 +436,8 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
     try {
       await onSave(skillName, editedContent);
       setHasChanges(false);
-      const data = await onRead(skillName);
-      setContent(data);
+      const latestContent = await onRead(skillName);
+      setContent(latestContent);
     } catch (e) {
       console.error("Failed to save:", e);
     } finally {
@@ -534,18 +517,27 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
             </div>
 
             {/* AI Action Buttons */}
-            <div className="ml-auto flex items-center gap-1">
+            <div className="ml-auto flex items-center gap-1 shrink-0">
               <button
-                onClick={handleTranslate}
-                disabled={!aiConfigured || !!loadError}
-                className={`flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
+                onClick={() => {
+                  if (loadError) return;
+                  if (!aiConfigured) {
+                    navigateToAiSettings();
+                    return;
+                  }
+                  void handleTranslate();
+                }}
+                disabled={!!loadError}
+                className={`flex items-center gap-1 px-2 py-1 rounded-md text-micro font-medium transition-colors cursor-pointer ${
                   translating
                     ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
                     : translationVisible
                     ? "bg-primary/15 text-primary"
                     : aiConfigured && !loadError
                     ? "text-muted-foreground hover:text-foreground hover:bg-card-hover"
-                    : "text-muted-foreground/50 cursor-not-allowed"
+                    : loadError
+                    ? "text-muted-foreground/50 cursor-not-allowed"
+                    : "text-primary/80 bg-primary/5 border border-primary/20 hover:bg-primary/10"
                 }`}
                 title={
                   loadError
@@ -575,16 +567,25 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
                   : t("skillEditor.translate")}
               </button>
               <button
-                onClick={handleSummarize}
-                disabled={!aiConfigured || !!loadError}
-                className={`flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
+                onClick={() => {
+                  if (loadError) return;
+                  if (!aiConfigured) {
+                    navigateToAiSettings();
+                    return;
+                  }
+                  void handleSummarize();
+                }}
+                disabled={!!loadError}
+                className={`flex items-center gap-1 px-2 py-1 rounded-md text-micro font-medium transition-colors cursor-pointer ${
                   summarizing
                     ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
                     : summaryContent
                     ? "bg-primary/15 text-primary"
                     : aiConfigured && !loadError
                     ? "text-muted-foreground hover:text-foreground hover:bg-card-hover"
-                    : "text-muted-foreground/50 cursor-not-allowed"
+                    : loadError
+                    ? "text-muted-foreground/50 cursor-not-allowed"
+                    : "text-primary/80 bg-primary/5 border border-primary/20 hover:bg-primary/10"
                 }`}
                 title={
                   loadError
@@ -610,12 +611,12 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
 
           {!aiConfigured && (
             <div className="px-4 py-2 border-b border-border bg-muted/30 flex items-center gap-2">
-              <span className="text-[11px] text-muted-foreground flex-1">
+              <span className="text-micro text-muted-foreground flex-1">
                 {t("skillEditor.aiNotConfigured")}
               </span>
               <button
                 onClick={navigateToAiSettings}
-                className="px-2 py-1 rounded-md text-[11px] font-medium border border-border hover:bg-card-hover transition-colors cursor-pointer"
+                className="px-2 py-1 rounded-md text-micro font-medium border border-border hover:bg-card-hover transition-colors cursor-pointer"
               >
                 {t("skillEditor.configureAI")}
               </button>
@@ -628,7 +629,7 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
               <span className="text-xs text-destructive flex-1">{aiError}</span>
               <button
                 onClick={() => setAiError(null)}
-                className="text-destructive/60 hover:text-destructive cursor-pointer"
+                className="text-destructive/60 hover:text-destructive cursor-pointer p-1.5 rounded focus-ring"
               >
                 <X className="w-3 h-3" />
               </button>
@@ -661,7 +662,7 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
                   <Sparkles className="w-4 h-4 text-primary" />
                   <span className="text-sm font-medium text-primary">{t("skillEditor.aiSummary")}</span>
                   {summarizing && summaryHasDelta && (
-                    <span className="text-[10px] text-primary/70 bg-primary/10 px-1.5 py-0.5 rounded">
+                    <span className="text-micro text-primary/70 bg-primary/10 px-1.5 py-0.5 rounded">
                       {t("skillEditor.streamingPreview")}
                     </span>
                   )}

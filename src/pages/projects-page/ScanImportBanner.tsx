@@ -3,12 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Check, Download, GitBranch, RefreshCw, ScanSearch } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { Badge } from "../../components/ui/badge";
-import type { AgentProfile, ScannedSkill } from "../../types";
-
-interface ImportDone {
-  hub: number;
-  links: number;
-}
+import type { AgentProfile, ImportDone, ScannedSkill } from "../../types";
 
 interface ScanImportBannerProps {
   unmanagedSkills: ScannedSkill[];
@@ -51,7 +46,7 @@ export function ScanImportBanner({
                   <p className="text-sm font-medium">
                     {t("projects.unmanagedSkills", { count: unmanagedSkills.length })}
                   </p>
-                  <p className="text-[11px] text-muted-foreground">{t("projects.scanDesc")}</p>
+                  <p className="text-micro text-muted-foreground">{t("projects.scanDesc")}</p>
                 </div>
                 <Button
                   size="sm"
@@ -99,7 +94,7 @@ export function ScanImportBanner({
                           <div className="flex items-center gap-1.5 shrink-0">
                             {enabledProfilesById.get(skill.agent_id) && (
                               <span
-                                className="text-[10px] font-mono text-muted-foreground/60 px-1.5 py-0.5 bg-muted/40 rounded border border-border/40"
+                                className="text-micro font-mono text-muted-foreground/60 px-1.5 py-0.5 bg-muted/40 rounded border border-border/40"
                                 title={`Found in ${enabledProfilesById.get(skill.agent_id)?.project_skills_rel}`}
                               >
                                 {enabledProfilesById
@@ -108,19 +103,19 @@ export function ScanImportBanner({
                               </span>
                             )}
                             {skill.has_skill_md && (
-                              <Badge variant="outline" className="text-[9px] h-4 px-1">
+                              <Badge variant="outline" className="text-micro h-4 px-1">
                                 {t("projects.skillMd")}
                               </Badge>
                             )}
                             {skill.in_hub ? (
                               <Badge
                                 variant="outline"
-                                className="text-[9px] h-4 px-1 text-muted-foreground"
+                                className="text-micro h-4 px-1 text-muted-foreground"
                               >
                                 {t("projects.inHub")}
                               </Badge>
                             ) : (
-                              <Badge variant="outline" className="text-[9px] h-4 px-1 text-amber-600">
+                              <Badge variant="outline" className="text-micro h-4 px-1 text-amber-600">
                                 {t("projects.new")}
                               </Badge>
                             )}

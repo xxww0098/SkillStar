@@ -7,28 +7,12 @@ import { Button } from "../ui/button";
 import { Markdown } from "../ui/Markdown";
 import { ResizablePanel } from "../ui/ResizablePanel";
 import { unwrapOuterMarkdownFence, navigateToAiSettings } from "../../lib/utils";
+import type { AiConfigStatus, AiStreamPayload, FrontmatterEntry } from "../../types";
 
 interface SkillReaderProps {
   skillName: string;
   content: string;
   onClose: () => void;
-}
-
-interface AiConfigLike {
-  enabled: boolean;
-  api_key: string;
-}
-
-interface FrontmatterEntry {
-  key: string;
-  value: string;
-}
-
-interface TranslateStreamPayload {
-  requestId: string;
-  event: "start" | "delta" | "complete" | "error";
-  delta?: string | null;
-  message?: string | null;
 }
 
 const FRONTMATTER_RE = /^\uFEFF?---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)/;
@@ -147,7 +131,7 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
   useEffect(() => {
     const loadAiConfig = async () => {
       try {
-        const config = await invoke<AiConfigLike>("get_ai_config");
+        const config = await invoke<AiConfigStatus>("get_ai_config");
         setAiConfigured(config.enabled && config.api_key.trim().length > 0);
       } catch {
         setAiConfigured(false);
@@ -212,7 +196,7 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
     // Don't set translationVisible or translatedContent yet —
     // keep showing original content until first delta or final result arrives.
     try {
-      const unlisten = await listen<TranslateStreamPayload>("ai://translate-stream", (event) => {
+      const unlisten = await listen<AiStreamPayload>("ai://translate-stream", (event) => {
         if (activeTranslateIdRef.current !== requestId) return;
         const payload = event.payload;
         if (payload.requestId !== requestId) return;
@@ -305,7 +289,7 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
     setSummaryContent(null);
     setSummaryVisible(true);
     try {
-      const unlisten = await listen<TranslateStreamPayload>("ai://summarize-stream", (event) => {
+      const unlisten = await listen<AiStreamPayload>("ai://summarize-stream", (event) => {
         if (activeSummarizeIdRef.current !== requestId) return;
         const payload = event.payload;
         if (payload.requestId !== requestId) return;
@@ -360,7 +344,7 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
         <div className="flex items-center gap-2">
           <FileText className="w-4 h-4 text-primary" />
           <h2 className="text-heading-sm truncate">{skillName}</h2>
-          <span className="text-[10px] text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded font-mono">
+          <span className="text-micro text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded font-mono">
             SKILL.md
           </span>
         </div>
@@ -383,18 +367,23 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
         </div>
 
         {/* AI Action Buttons */}
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex items-center gap-1 shrink-0">
           <button
-            onClick={handleTranslate}
-            disabled={!aiConfigured}
-            className={`flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
+            onClick={() => {
+              if (!aiConfigured) {
+                navigateToAiSettings();
+                return;
+              }
+              void handleTranslate();
+            }}
+            className={`flex items-center gap-1 px-2 py-1 rounded-md text-micro font-medium transition-colors cursor-pointer ${
               translating
                 ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
                 : translationVisible
                 ? "bg-primary/15 text-primary"
                 : aiConfigured
                 ? "text-muted-foreground hover:text-foreground hover:bg-card-hover"
-                : "text-muted-foreground/50 cursor-not-allowed"
+                : "text-primary/80 bg-primary/5 border border-primary/20 hover:bg-primary/10"
             }`}
             title={
               aiConfigured
@@ -422,16 +411,21 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
               : t("skillEditor.translate")}
           </button>
           <button
-            onClick={handleSummarize}
-            disabled={!aiConfigured}
-            className={`flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
+            onClick={() => {
+              if (!aiConfigured) {
+                navigateToAiSettings();
+                return;
+              }
+              void handleSummarize();
+            }}
+            className={`flex items-center gap-1 px-2 py-1 rounded-md text-micro font-medium transition-colors cursor-pointer ${
               summarizing
                 ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
                 : summaryContent
                 ? "bg-primary/15 text-primary"
                 : aiConfigured
                 ? "text-muted-foreground hover:text-foreground hover:bg-card-hover"
-                : "text-muted-foreground/50 cursor-not-allowed"
+                : "text-primary/80 bg-primary/5 border border-primary/20 hover:bg-primary/10"
             }`}
             title={
               aiConfigured
@@ -455,12 +449,12 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
 
       {!aiConfigured && (
         <div className="px-4 py-2 border-b border-border bg-muted/30 flex items-center gap-2">
-          <span className="text-[11px] text-muted-foreground flex-1">
+          <span className="text-micro text-muted-foreground flex-1">
             {t("skillEditor.aiNotConfigured")}
           </span>
           <button
             onClick={navigateToAiSettings}
-            className="px-2 py-1 rounded-md text-[11px] font-medium border border-border hover:bg-card-hover transition-colors cursor-pointer"
+            className="px-2 py-1 rounded-md text-micro font-medium border border-border hover:bg-card-hover transition-colors cursor-pointer"
           >
             {t("skillEditor.configureAI")}
           </button>
@@ -500,7 +494,7 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
               <Sparkles className="w-4 h-4 text-primary" />
               <span className="text-sm font-medium text-primary">{t("skillEditor.aiSummary")}</span>
               {summarizing && summaryHasDelta && (
-                <span className="text-[10px] text-primary/70 bg-primary/10 px-1.5 py-0.5 rounded">
+                <span className="text-micro text-primary/70 bg-primary/10 px-1.5 py-0.5 rounded">
                   {t("skillEditor.streamingPreview")}
                 </span>
               )}

@@ -10,11 +10,8 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { Skill, SkillContent, SkillUpdateState } from "../types";
-import {
-  getSkillUpdateRefreshIntervalMs,
-  SKILL_UPDATE_REFRESH_CHANGED_EVENT,
-} from "../lib/skillUpdateRefresh";
+import type { Skill, SkillContent, SkillUpdateState, UpdateResult } from "../types";
+import { getSkillUpdateRefreshIntervalMs } from "../lib/skillUpdateRefresh";
 
 const SKILL_LIST_REFRESH_INTERVAL_MS = 30_000;
 
@@ -78,6 +75,8 @@ function useSkillsState() {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [pendingUpdateNames, setPendingUpdateNames] = useState<Set<string>>(new Set());
+  const pendingUpdateRef = useRef<Set<string>>(new Set());
   const [pendingAgentToggleKeys, setPendingAgentToggleKeys] = useState<Set<string>>(
     new Set()
   );
@@ -186,29 +185,12 @@ function useSkillsState() {
     };
   }, [refresh]);
 
-  useEffect(() => {
-    const handleUpdateRefreshConfigChanged = () => {
-      lastUpdateCheckAtRef.current = 0;
-      void refreshUpdateAvailability(true);
-    };
 
-    window.addEventListener(
-      SKILL_UPDATE_REFRESH_CHANGED_EVENT,
-      handleUpdateRefreshConfigChanged as EventListener
-    );
-
-    return () => {
-      window.removeEventListener(
-        SKILL_UPDATE_REFRESH_CHANGED_EVENT,
-        handleUpdateRefreshConfigChanged as EventListener
-      );
-    };
-  }, [refreshUpdateAvailability]);
 
   // ── Patrol backend event listener ────────────────────────────────
   // The Rust backend emits "patrol://skill-checked" after each single-skill
   // update check. We merge the result into the local skills state so the UI
-  // reflects updates found during stealth/patrol mode.
+  // reflects updates found during background patrol checks.
   useEffect(() => {
     let unlisten: UnlistenFn | null = null;
 
@@ -254,13 +236,30 @@ function useSkillsState() {
   }, []);
 
   const updateSkill = useCallback(async (name: string) => {
+    if (pendingUpdateRef.current.has(name)) {
+      throw new Error("Update already in progress");
+    }
+
+    pendingUpdateRef.current.add(name);
+    setPendingUpdateNames(new Set(pendingUpdateRef.current));
+
     try {
-      const updated = await invoke<Skill>("update_skill", { name });
-      setSkills((prev) => prev.map((s) => (s.name === name ? updated : s)));
+      const result = await invoke<UpdateResult>("update_skill", { name });
+      const siblingSet = new Set(result.siblings_cleared);
+      setSkills((prev) =>
+        prev.map((s) => {
+          if (s.name === name) return result.skill;
+          if (siblingSet.has(s.name)) return { ...s, update_available: false };
+          return s;
+        })
+      );
       lastUpdateCheckAtRef.current = 0;
-      return updated;
+      return result.skill;
     } catch (e) {
       throw new Error(String(e));
+    } finally {
+      pendingUpdateRef.current.delete(name);
+      setPendingUpdateNames(new Set(pendingUpdateRef.current));
     }
   }, []);
 
@@ -337,6 +336,7 @@ function useSkillsState() {
     skills, 
     loading, 
     error, 
+    pendingUpdateNames,
     refresh, 
     installSkill, 
     uninstallSkill, 

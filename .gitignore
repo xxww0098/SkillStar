@@ -47,3 +47,7 @@ proofshot-artifacts/
 *.mov
 public/演示视频.mp4
 homebrew-tap/
+
+# Dev scripts / test binaries (keep out of release)
+run-*.sh
+test_parse

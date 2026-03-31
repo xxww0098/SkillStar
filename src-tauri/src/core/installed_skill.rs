@@ -1,18 +1,26 @@
 use super::{
     agent_profile::{self, AgentProfile},
-    git_ops,
-    local_skill,
+    git_ops, local_skill,
     lockfile::{self, LockEntry},
     repo_scanner,
-    skill::{extract_github_source_from_url, extract_skill_description, Skill, SkillCategory},
+    skill::{Skill, SkillCategory, extract_github_source_from_url, extract_skill_description},
     sync,
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::LazyLock;
+use std::sync::{Arc, RwLock};
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
+
+static SKILL_CACHE: LazyLock<RwLock<Option<Vec<Skill>>>> = LazyLock::new(|| RwLock::new(None));
+
+pub fn invalidate_cache() {
+    if let Ok(mut cache) = SKILL_CACHE.write() {
+        *cache = None;
+    }
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SkillUpdateState {
@@ -21,6 +29,12 @@ pub struct SkillUpdateState {
 }
 
 pub async fn list_installed_skills() -> Result<Vec<Skill>> {
+    if let Ok(cache) = SKILL_CACHE.read() {
+        if let Some(skills) = &*cache {
+            return Ok(skills.clone());
+        }
+    }
+
     // Ensure every skill in skills-local/ has a hub symlink before scanning
     local_skill::reconcile_hub_symlinks();
 
@@ -60,6 +74,11 @@ pub async fn list_installed_skills() -> Result<Vec<Skill>> {
     }
 
     skills.sort_by(|left, right| left.name.cmp(&right.name));
+
+    if let Ok(mut cache) = SKILL_CACHE.write() {
+        *cache = Some(skills.clone());
+    }
+
     Ok(skills)
 }
 
@@ -69,6 +88,17 @@ pub async fn refresh_skill_updates(names: Option<Vec<String>>) -> Result<Vec<Ski
 
     if skill_dirs.is_empty() {
         return Ok(Vec::new());
+    }
+
+    // Pre-fetch: deduplicate repo-cached skills by repo root and fetch each
+    // repo once. This avoids N redundant `git fetch` calls when N skills
+    // share the same repository.
+    {
+        let dirs = skill_dirs.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            repo_scanner::prefetch_unique_repos(&dirs);
+        })
+        .await;
     }
 
     let semaphore = Arc::new(Semaphore::new(update_check_concurrency_limit()));
@@ -129,7 +159,7 @@ fn collect_skill_dirs(skills_dir: &Path, names: Option<&HashSet<String>>) -> Res
                     "Failed to read installed skills directory {}",
                     skills_dir.display()
                 )
-            })
+            });
         }
     };
 
@@ -204,9 +234,9 @@ fn build_installed_skill(
 
     // Determine skill type: "local" if symlink points into skills-local/
     let skill_type = if local_skill::is_local_skill(&name) {
-        "local".to_string()
+        crate::core::skill::SkillType::Local
     } else {
-        "hub".to_string()
+        crate::core::skill::SkillType::Hub
     };
 
     Ok(Skill {
@@ -235,9 +265,10 @@ fn build_installed_skill(
 }
 
 fn refresh_single_skill_update(path: &Path) -> bool {
-    // For repo-cached skills, check update via the cached repo
+    // For repo-cached skills, the repo has already been fetched by
+    // prefetch_unique_repos; only compare local HEAD vs origin/HEAD.
     if repo_scanner::is_repo_cached_skill(path) {
-        return repo_scanner::check_repo_skill_update(path);
+        return repo_scanner::check_repo_skill_update_local(path);
     }
     let _ = git_ops::ensure_worktree_checked_out(path);
     git_ops::check_update(path).unwrap_or(false)

@@ -45,6 +45,14 @@ pub async fn save_and_sync_project(
 }
 
 #[tauri::command]
+pub async fn save_project_skills_list(
+    project_path: String,
+    agents: HashMap<String, Vec<String>>,
+) -> Result<project_manifest::SkillsList, String> {
+    project_manifest::save_skills_list_only(&project_path, agents).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn update_project_path(name: String, new_path: String) -> Result<u32, String> {
     project_manifest::update_project_path(&name, &new_path).map_err(|e| e.to_string())
 }
@@ -62,6 +70,13 @@ pub async fn scan_project_skills(
 }
 
 #[tauri::command]
+pub async fn rebuild_project_skills_from_disk(
+    project_path: String,
+) -> Result<project_manifest::SkillsList, String> {
+    project_manifest::rebuild_skills_list_from_disk(&project_path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn import_project_skills(
     project_path: String,
     project_name: String,
@@ -69,4 +84,11 @@ pub async fn import_project_skills(
 ) -> Result<project_manifest::ImportResult, String> {
     project_manifest::import_scanned_skills(&project_path, &project_name, &targets)
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn detect_project_agents(
+    project_path: String,
+) -> Result<project_manifest::ProjectAgentDetection, String> {
+    Ok(project_manifest::detect_project_agents(&project_path))
 }

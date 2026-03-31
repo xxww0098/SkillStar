@@ -13,7 +13,16 @@ pub mod project_manifest;
 pub mod proxy;
 pub mod repo_history;
 pub mod repo_scanner;
+pub mod security_scan;
 pub mod skill;
 pub mod skill_bundle;
 pub mod skill_group;
 pub mod sync;
+
+#[cfg(test)]
+pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {
+    use std::sync::{Mutex, OnceLock};
+
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}

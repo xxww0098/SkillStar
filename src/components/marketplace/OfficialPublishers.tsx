@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { Building2, Folder, Package, ChevronRight } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -124,15 +125,20 @@ function PublisherCard({
   publisher: OfficialPublisher;
   onClick?: () => void;
 }) {
+  const { t } = useTranslation();
+
   return (
     <motion.div variants={itemVariants}>
       <Card
         className={cn(
-          "group transition-all cursor-pointer p-0 border border-border/80",
+          "group transition cursor-pointer p-0 border border-border/80",
           "shadow-sm hover:shadow-md hover:border-primary/20",
           "hover:-translate-y-[1px]"
         )}
         onClick={onClick}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick?.(); }}}
       >
         <div className="flex items-center gap-3.5 p-4">
           {/* Avatar */}
@@ -146,25 +152,25 @@ function PublisherCard({
               </span>
               <Badge
                 variant="outline"
-                className="text-[10px] px-1.5 py-0 h-4 font-normal text-muted-foreground bg-muted border-transparent shrink-0"
+                className="text-micro px-1.5 py-0 h-4 font-normal text-muted-foreground bg-muted border-transparent shrink-0"
               >
-                Official
+                {t("marketplace.officialBadge")}
               </Badge>
             </div>
             <div className="flex items-center gap-3 mt-0.5">
               <span className="text-xs text-muted-foreground flex items-center gap-1">
                 <Folder className="w-3 h-3" />
-                {publisher.repo_count} repos
+                {t("marketplace.repoCount", { count: publisher.repo_count })}
               </span>
               <span className="text-xs text-muted-foreground flex items-center gap-1">
                 <Package className="w-3 h-3" />
-                {publisher.skill_count} skills
+                {t("marketplace.skillCount", { count: publisher.skill_count })}
               </span>
             </div>
           </div>
 
           {/* Navigate arrow */}
-          <ChevronRight className="w-4 h-4 text-muted-foreground/50 group-hover:text-primary/70 transition-all group-hover:translate-x-0.5 shrink-0" />
+          <ChevronRight className="w-4 h-4 text-muted-foreground/50 group-hover:text-primary/70 transition group-hover:translate-x-0.5 shrink-0" />
         </div>
       </Card>
     </motion.div>
@@ -189,13 +195,14 @@ export function OfficialPublishers({
   publishers,
   onPublisherClick,
 }: OfficialPublishersProps) {
+  const { t } = useTranslation();
   const [showAll, setShowAll] = useState(false);
   const visiblePublishers = showAll ? publishers : publishers.slice(0, 12);
 
   if (publishers.length === 0) {
     return (
       <div className="flex items-center justify-center py-20 text-muted-foreground text-sm">
-        Loading official publishers...
+        {t("marketplace.loadingOfficialPublishers")}
       </div>
     );
   }
@@ -205,14 +212,13 @@ export function OfficialPublishers({
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-heading-sm">Official Publishers</h2>
+          <h2 className="text-heading-sm">{t("marketplace.officialPublishersTitle")}</h2>
           <p className="text-caption mt-0.5">
-            Skills from the companies that build the technology — the makers
-            teaching you how to use their products.
+            {t("marketplace.officialPublishersSubtitle")}
           </p>
         </div>
         <Badge variant="outline" className="shrink-0">
-          {publishers.length} publishers
+          {t("marketplace.publishersCount", { count: publishers.length })}
         </Badge>
       </div>
 
@@ -242,8 +248,8 @@ export function OfficialPublishers({
             className="text-xs"
           >
             {showAll
-              ? "Show less"
-              : `Show all ${publishers.length} publishers`}
+              ? t("marketplace.showLess")
+              : t("marketplace.showAllPublishers", { count: publishers.length })}
           </Button>
         </div>
       )}

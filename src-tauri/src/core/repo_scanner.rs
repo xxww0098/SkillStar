@@ -1,8 +1,10 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-use super::{git_ops, lockfile, path_env::command_with_path, repo_history, sync};
+use super::{
+    git_ops, local_skill, lockfile, path_env::command_with_path, repo_history, security_scan, sync,
+};
 
 // ── Data Types ──────────────────────────────────────────────────────
 
@@ -107,7 +109,7 @@ pub fn normalize_repo_url(input: &str) -> Result<(String, String)> {
 
 // ── Repo Cache ──────────────────────────────────────────────────────
 
-/// Get the repo cache directory: `~/.agents/.repos/`
+/// Get the repo cache directory: `~/.skillstar/.agents/.repos/`
 fn get_repos_cache_dir() -> PathBuf {
     super::paths::repos_cache_dir()
 }
@@ -532,7 +534,7 @@ fn extract_frontmatter_description(skill_md_path: &Path) -> String {
 
 /// Install selected skills from a scanned repo.
 ///
-/// For multi-skill repos, creates symlinks from `~/.agents/skills/<name>` to the
+/// For multi-skill repos, creates symlinks from the hub skills directory to the
 /// cached repo's skill subfolder. For single-skill repos (SKILL.md at root),
 /// the entire cached repo is the skill source.
 ///
@@ -552,6 +554,7 @@ pub fn install_from_repo(
         ));
     }
 
+    let _lock = lockfile::get_mutex().blocking_lock();
     let lock_path = lockfile::lockfile_path();
     let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
 
@@ -559,6 +562,17 @@ pub fn install_from_repo(
 
     for target in targets {
         let dest = hub_skills_dir.join(&target.id);
+        let existing_entry = lf.skills.iter().find(|entry| entry.name == target.id);
+
+        if dest.symlink_metadata().is_ok()
+            && !can_replace_existing_skill(&target.id, repo_url, existing_entry)
+        {
+            eprintln!(
+                "[repo_scanner] refusing to replace existing skill '{}' from a different source",
+                target.id
+            );
+            continue;
+        }
 
         // If it already exists, remove it to allow reinstall
         if let Ok(meta) = dest.symlink_metadata() {
@@ -602,7 +616,7 @@ pub fn install_from_repo(
             continue;
         }
 
-        // Create symlink: ~/.agents/skills/<name> → .repos/<cache>/<folder>/
+        // Create symlink: hub/skills/<name> → .repos/<cache>/<folder>/
         #[cfg(unix)]
         std::os::unix::fs::symlink(&source_path, &dest)
             .with_context(|| format!("Failed to symlink {:?} → {:?}", source_path, dest))?;
@@ -641,7 +655,37 @@ pub fn install_from_repo(
     // Save to repo history
     let _ = repo_history::upsert_entry(source, repo_url);
 
+    // Invalidate security scan cache for installed/reinstalled skills
+    for name in &installed_names {
+        security_scan::invalidate_skill_cache(name);
+    }
+
     Ok(installed_names)
+}
+
+fn can_replace_existing_skill(
+    skill_name: &str,
+    repo_url: &str,
+    existing_entry: Option<&lockfile::LockEntry>,
+) -> bool {
+    if local_skill::is_local_skill(skill_name) {
+        return false;
+    }
+
+    existing_entry
+        .map(|entry| same_remote_url(&entry.git_url, repo_url))
+        .unwrap_or(false)
+}
+
+fn same_remote_url(left: &str, right: &str) -> bool {
+    normalize_remote_url(left) == normalize_remote_url(right)
+}
+
+fn normalize_remote_url(url: &str) -> String {
+    url.trim()
+        .trim_end_matches(".git")
+        .trim_end_matches('/')
+        .to_lowercase()
 }
 
 /// Compute the git tree hash for a specific subfolder within a repo.
@@ -662,11 +706,21 @@ fn compute_subtree_hash(repo_dir: &Path, folder_path: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+/// Public wrapper for `compute_subtree_hash`, used by `commands::update_skill`
+/// to recompute sibling lockfile hashes after a shared repo pull.
+pub fn compute_subtree_hash_pub(repo_dir: &Path, folder_path: &str) -> Result<String> {
+    compute_subtree_hash(repo_dir, folder_path)
+}
+
 /// Check if a repo-cached skill has updates available.
 ///
 /// Resolves the symlink to find the source repo, fetches the latest remote
 /// state (shallow), and compares local HEAD vs `origin/HEAD` by hash.
 /// This works correctly with both shallow and full clones.
+///
+/// Note: for batch checks, prefer [`prefetch_unique_repos`] +
+/// [`check_repo_skill_update_local`] to avoid redundant fetches.
+#[allow(dead_code)]
 pub fn check_repo_skill_update(skill_path: &Path) -> bool {
     // Resolve the symlink to find the actual repo cache directory
     let real_path = match std::fs::read_link(skill_path) {
@@ -692,6 +746,82 @@ pub fn check_repo_skill_update(skill_path: &Path) -> bool {
         .current_dir(&repo_root)
         .args(["fetch", "--depth", "1", "--quiet"])
         .output();
+
+    let local_head = command_with_path("git")
+        .current_dir(&repo_root)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+
+    let remote_head = command_with_path("git")
+        .current_dir(&repo_root)
+        .args(["rev-parse", "origin/HEAD"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+
+    match (local_head, remote_head) {
+        (Some(local), Some(remote)) => !local.is_empty() && !remote.is_empty() && local != remote,
+        _ => false,
+    }
+}
+
+/// Resolve a repo-cached skill path to its repository root.
+///
+/// Returns `None` if the skill is not a repo-cached symlink or resolution fails.
+pub fn resolve_skill_repo_root(skill_path: &Path) -> Option<PathBuf> {
+    if !is_repo_cached_skill(skill_path) {
+        return None;
+    }
+    let target = std::fs::read_link(skill_path).ok()?;
+    let real_path = if target.is_absolute() {
+        target
+    } else {
+        skill_path.parent().unwrap_or(Path::new(".")).join(target)
+    };
+    find_repo_root(&real_path)
+}
+
+/// Pre-fetch unique repo roots for a batch of skill paths.
+///
+/// Walks the paths, identifies repo-cached skills, resolves their repo roots,
+/// and issues a single `git fetch --depth 1` per unique repository. This
+/// avoids redundant fetches when multiple skills share the same repo.
+pub fn prefetch_unique_repos(skill_paths: &[PathBuf]) {
+    let mut fetched = std::collections::HashSet::new();
+    for path in skill_paths {
+        if let Some(root) = resolve_skill_repo_root(path) {
+            if fetched.insert(root.clone()) {
+                let _ = command_with_path("git")
+                    .current_dir(&root)
+                    .args(["fetch", "--depth", "1", "--quiet"])
+                    .output();
+            }
+        }
+    }
+}
+
+/// Check if a repo-cached skill has updates **without fetching**.
+///
+/// Compares local HEAD vs `origin/HEAD`. Call [`prefetch_unique_repos`] first
+/// to ensure `origin/HEAD` is up-to-date.
+pub fn check_repo_skill_update_local(skill_path: &Path) -> bool {
+    let real_path = match std::fs::read_link(skill_path) {
+        Ok(target) => {
+            if target.is_absolute() {
+                target
+            } else {
+                skill_path.parent().unwrap_or(Path::new(".")).join(target)
+            }
+        }
+        Err(_) => return false,
+    };
+
+    let repo_root = match find_repo_root(&real_path) {
+        Some(root) => root,
+        None => return false,
+    };
 
     let local_head = command_with_path("git")
         .current_dir(&repo_root)
@@ -741,7 +871,12 @@ pub fn is_repo_cached_skill(skill_path: &Path) -> bool {
 
 /// Pull updates for a repo-cached skill.
 ///
-/// Finds the source repo from the symlink, pulls, and returns the new tree hash.
+/// Finds the source repo from the symlink, updates local refs from origin,
+/// hard-resets to `origin/HEAD`, and returns the new tree hash.
+///
+/// We intentionally use fetch + hard reset (instead of `git pull`) for both
+/// shallow and full clones to guarantee deterministic "exactly at remote HEAD"
+/// behavior for cached repos.
 pub fn pull_repo_skill_update(skill_path: &Path, folder_path: Option<&str>) -> Result<String> {
     let real_path = std::fs::read_link(skill_path).context("Skill is not a symlink")?;
     let absolute_path = if real_path.is_absolute() {
@@ -756,13 +891,52 @@ pub fn pull_repo_skill_update(skill_path: &Path, folder_path: Option<&str>) -> R
     let repo_root = find_repo_root(&absolute_path)
         .ok_or_else(|| anyhow!("Cannot find git repo root for symlinked skill"))?;
 
-    git_ops::pull_repo(&repo_root)?;
+    let fetch_args: Vec<&str> = if is_shallow_repo(&repo_root) {
+        vec!["fetch", "--depth", "1", "--quiet"]
+    } else {
+        vec!["fetch", "--quiet"]
+    };
+
+    let output = command_with_path("git")
+        .current_dir(&repo_root)
+        .args(fetch_args)
+        .output()
+        .context("Failed to execute git fetch for repo-cached update")?;
+
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow!("git fetch failed: {}", err.trim()));
+    }
+
+    let output = command_with_path("git")
+        .current_dir(&repo_root)
+        .args(["reset", "--hard", "origin/HEAD"])
+        .output()
+        .context("Failed to execute git reset for repo-cached update")?;
+
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow!("git reset failed: {}", err.trim()));
+    }
+
+    // Re-apply sparse checkout if enabled (handles newly added skills)
+    if is_sparse_checkout(&repo_root) {
+        if let Ok(dirs) = discover_skill_dirs_from_tree(&repo_root) {
+            let dir_refs: Vec<&str> = dirs.iter().map(|s| s.as_str()).collect();
+            let _ = git_ops::apply_sparse_checkout(&repo_root, &dir_refs);
+        }
+    }
 
     // Compute new tree hash
     match folder_path {
         Some(fp) if !fp.is_empty() => compute_subtree_hash(&repo_root, fp),
         _ => git_ops::compute_tree_hash(&repo_root),
     }
+}
+
+/// Check whether a git repo is a shallow clone.
+fn is_shallow_repo(repo_dir: &Path) -> bool {
+    repo_dir.join(".git/shallow").exists()
 }
 
 // ── Top-level Scan Command ──────────────────────────────────────────
@@ -935,10 +1109,10 @@ fn dir_size(path: &Path) -> u64 {
             Err(_) => continue,
         };
         for entry in entries.flatten() {
-            let p = entry.path();
-            if p.is_dir() {
-                stack.push(p);
-            } else if let Ok(meta) = p.metadata() {
+            let entry_path = entry.path();
+            if entry_path.is_dir() {
+                stack.push(entry_path);
+            } else if let Ok(meta) = entry_path.metadata() {
                 total += meta.len();
             }
         }
@@ -949,6 +1123,22 @@ fn dir_size(path: &Path) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::{local_skill, lockfile, sync};
+    use anyhow::Result;
+    use std::ffi::OsStr;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn env_lock() -> &'static std::sync::Mutex<()> {
+        crate::core::test_env_lock()
+    }
+
+    fn set_env<K: AsRef<OsStr>, V: AsRef<OsStr>>(key: K, value: V) {
+        unsafe { std::env::set_var(key, value) }
+    }
+
+    fn remove_env<K: AsRef<OsStr>>(key: K) {
+        unsafe { std::env::remove_var(key) }
+    }
 
     #[test]
     fn normalize_owner_repo() {
@@ -1016,10 +1206,7 @@ mod tests {
             "source/skills/animate".to_string(),
         ];
         let compacted = compact_to_common_parents(&dirs);
-        assert_eq!(
-            compacted,
-            vec!["custom/lone-skill", "source/skills"]
-        );
+        assert_eq!(compacted, vec!["custom/lone-skill", "source/skills"]);
     }
 
     #[test]
@@ -1027,5 +1214,143 @@ mod tests {
         let dirs: Vec<String> = Vec::new();
         let compacted = compact_to_common_parents(&dirs);
         assert!(compacted.is_empty());
+    }
+
+    #[test]
+    fn install_from_repo_does_not_replace_local_skill() -> Result<()> {
+        let _guard = env_lock()
+            .lock()
+            .expect("environment lock should not be poisoned");
+
+        let stamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let temp_root =
+            std::env::temp_dir().join(format!("skillstar-repo-scanner-local-{}", stamp));
+        let previous_home = std::env::var_os("HOME");
+        set_env("HOME", temp_root.join("home"));
+        #[cfg(windows)]
+        let previous_userprofile = std::env::var_os("USERPROFILE");
+        #[cfg(windows)]
+        set_env("USERPROFILE", temp_root.join("home"));
+
+        let result = (|| -> Result<()> {
+            let _ = local_skill::create("demo-skill", Some("# local"))?;
+
+            let cache_dir = super::get_repos_cache_dir().join(super::cache_dir_name("owner/repo"));
+            let source_dir = cache_dir.join("skills/demo-skill");
+            std::fs::create_dir_all(&source_dir)?;
+            std::fs::write(source_dir.join("SKILL.md"), "# remote")?;
+
+            let installed = install_from_repo(
+                "owner/repo",
+                "https://github.com/owner/repo.git",
+                &[SkillInstallTarget {
+                    id: "demo-skill".to_string(),
+                    folder_path: "skills/demo-skill".to_string(),
+                }],
+            )?;
+
+            assert!(
+                installed.is_empty(),
+                "expected repo install to skip replacing a local skill"
+            );
+            assert!(
+                local_skill::is_local_skill("demo-skill"),
+                "expected local skill link to remain intact"
+            );
+
+            Ok(())
+        })();
+
+        match previous_home {
+            Some(value) => set_env("HOME", value),
+            None => remove_env("HOME"),
+        }
+        #[cfg(windows)]
+        match previous_userprofile {
+            Some(value) => set_env("USERPROFILE", value),
+            None => remove_env("USERPROFILE"),
+        }
+        let _ = std::fs::remove_dir_all(&temp_root);
+
+        result
+    }
+
+    #[test]
+    fn install_from_repo_does_not_replace_different_remote() -> Result<()> {
+        let _guard = env_lock()
+            .lock()
+            .expect("environment lock should not be poisoned");
+
+        let stamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let temp_root =
+            std::env::temp_dir().join(format!("skillstar-repo-scanner-remote-{}", stamp));
+        let previous_home = std::env::var_os("HOME");
+        set_env("HOME", temp_root.join("home"));
+        #[cfg(windows)]
+        let previous_userprofile = std::env::var_os("USERPROFILE");
+        #[cfg(windows)]
+        set_env("USERPROFILE", temp_root.join("home"));
+
+        let result = (|| -> Result<()> {
+            let hub_path = sync::get_hub_skills_dir().join("demo-skill");
+            std::fs::create_dir_all(&hub_path)?;
+            std::fs::write(hub_path.join("SKILL.md"), "# existing")?;
+
+            let lock_path = lockfile::lockfile_path();
+            let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
+            lf.upsert(lockfile::LockEntry {
+                name: "demo-skill".to_string(),
+                git_url: "https://github.com/existing/repo.git".to_string(),
+                tree_hash: "existing-hash".to_string(),
+                installed_at: chrono::Utc::now().to_rfc3339(),
+                source_folder: None,
+            });
+            lf.save(&lock_path)?;
+
+            let cache_dir = super::get_repos_cache_dir().join(super::cache_dir_name("owner/repo"));
+            let source_dir = cache_dir.join("skills/demo-skill");
+            std::fs::create_dir_all(&source_dir)?;
+            std::fs::write(source_dir.join("SKILL.md"), "# incoming")?;
+
+            let installed = install_from_repo(
+                "owner/repo",
+                "https://github.com/owner/repo.git",
+                &[SkillInstallTarget {
+                    id: "demo-skill".to_string(),
+                    folder_path: "skills/demo-skill".to_string(),
+                }],
+            )?;
+
+            assert!(
+                installed.is_empty(),
+                "expected repo install to skip replacing a skill from another remote"
+            );
+            assert!(
+                hub_path.is_dir() && !hub_path.is_symlink(),
+                "expected existing hub skill directory to remain untouched"
+            );
+            let updated_lock = lockfile::Lockfile::load(&lock_path)?;
+            let entry = updated_lock
+                .skills
+                .into_iter()
+                .find(|entry| entry.name == "demo-skill")
+                .expect("expected original lockfile entry to remain");
+            assert_eq!(entry.git_url, "https://github.com/existing/repo.git");
+
+            Ok(())
+        })();
+
+        match previous_home {
+            Some(value) => set_env("HOME", value),
+            None => remove_env("HOME"),
+        }
+        #[cfg(windows)]
+        match previous_userprofile {
+            Some(value) => set_env("USERPROFILE", value),
+            None => remove_env("USERPROFILE"),
+        }
+        let _ = std::fs::remove_dir_all(&temp_root);
+
+        result
     }
 }

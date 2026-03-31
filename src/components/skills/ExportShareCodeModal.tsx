@@ -1,10 +1,10 @@
 import { useState, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { Button } from "../../components/ui/button";
-import { createShareCode, ShareCodeData } from "../../lib/shareCode";
+import { createShareCode, formatShareMessage, ShareCodeData, ShareCodeType } from "../../lib/shareCode";
 import { toast } from "../../lib/toast";
 import {
   Copy,
@@ -50,10 +50,12 @@ export function ExportShareCodeModal({
   onPublishSkill,
 }: ExportShareCodeModalProps) {
   const { t } = useTranslation();
+  const prefersReducedMotion = useReducedMotion();
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [code, setCode] = useState<string | null>(null);
+  const [shareData, setShareData] = useState<{ data: ShareCodeData; type: ShareCodeType } | null>(null);
   const [copied, setCopied] = useState(false);
   const [skillStatuses, setSkillStatuses] = useState<SkillExportStatus[]>([]);
   const [bundleSaved, setBundleSaved] = useState(false);
@@ -157,20 +159,16 @@ export function ExportShareCodeModal({
     const skillsList = targetSkills.map((ss) => {
       const entry: ShareCodeData["s"][number] = { n: ss.name, u: ss.gitUrl };
       if (ss.status === "embedded" && ss.content) {
-        entry.c = btoa(
-          new TextEncoder()
-            .encode(ss.content)
-            .reduce((acc, b) => acc + String.fromCharCode(b), "")
-        );
+        entry.c = btoa(unescape(encodeURIComponent(ss.content)));
       }
       return entry;
     });
 
-    let data: ShareCodeData;
-    let codeType: "deck" | "skills" = "deck";
+    let sharePayload: ShareCodeData;
+    let codeType: ShareCodeType = "deck";
 
     if (group) {
-      data = {
+      sharePayload = {
         n: group.name,
         d: group.description,
         i: group.icon,
@@ -178,7 +176,7 @@ export function ExportShareCodeModal({
       };
       codeType = "deck";
     } else {
-      data = {
+      sharePayload = {
         n: "SkillStar Skills",
         d: `${targetSkills.length} skills shared from SkillStar`,
         i: "\u2B50",
@@ -188,8 +186,9 @@ export function ExportShareCodeModal({
     }
 
     try {
-      const generated = await createShareCode(data, codeType, password);
+      const generated = await createShareCode(sharePayload, codeType);
       setCode(generated);
+      setShareData({ data: sharePayload, type: codeType });
     } catch (e) {
       console.error("Export error", e);
     } finally {
@@ -210,33 +209,17 @@ export function ExportShareCodeModal({
 
   const handleCopy = async () => {
     if (!code) return;
-    await navigator.clipboard.writeText(code);
+    // Copy formatted message with deck name, description and share code
+    const textToCopy = shareData
+      ? formatShareMessage(shareData.data, code, shareData.type)
+      : code;
+    await navigator.clipboard.writeText(textToCopy);
     setCopied(true);
     toast.success(t("shareResultCard.copied"));
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleSaveShareFile = async () => {
-    if (!code) return;
-    try {
-      const ext = group ? "agd" : "ags";
-      const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-      const defaultName = group
-        ? `${group.name}-${ts}.${ext}`
-        : `skills-share-${ts}.${ext}`;
-      const path = await save({
-        defaultPath: defaultName,
-        filters: [
-          { name: "SkillStar Share", extensions: ["ags", "agd", "agentskills"] },
-        ],
-      });
-      if (!path) return;
-      await invoke("write_text_file", { path, content: code });
-      toast.success(t("shareResultCard.savedToFile"));
-    } catch (e) {
-      toast.error(String(e));
-    }
-  };
+
 
   const handleSaveBundleFile = async () => {
     try {
@@ -270,6 +253,7 @@ export function ExportShareCodeModal({
 
   const reset = () => {
     setCode(null);
+    setShareData(null);
     setPassword("");
     setSkillStatuses([]);
     setBundleSaved(false);
@@ -292,7 +276,7 @@ export function ExportShareCodeModal({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
+            transition={{ duration: prefersReducedMotion ? 0.01 : 0.15 }}
             className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm"
             onClick={handleClose}
           />
@@ -301,19 +285,20 @@ export function ExportShareCodeModal({
             initial={{ opacity: 0, scale: 0.96, y: 12 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 12 }}
-            transition={{ type: "spring", bounce: 0.1, duration: 0.35 }}
+            transition={{ duration: prefersReducedMotion ? 0.01 : 0.3, ease: [0.16, 1, 0.3, 1] }}
             className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-[420px] max-h-[calc(100vh-2rem)] z-50"
           >
-            <div className="relative overflow-hidden rounded-[24px] border border-white/10 bg-card/95 shadow-[0_0_80px_-20px_rgba(0,0,0,0.5)] backdrop-blur-3xl ring-1 ring-white/5 max-h-[calc(100vh-2rem)] flex flex-col">
+            <div role="dialog" aria-modal="true" aria-label={t("exportShareCodeModal.title")} className="relative overflow-hidden rounded-[24px] border border-white/10 bg-card/95 shadow-[0_0_80px_-20px_rgba(0,0,0,0.5)] backdrop-blur-3xl ring-1 ring-white/5 max-h-[calc(100vh-2rem)] flex flex-col">
               {/* Top ambient glow */}
               <div className="pointer-events-none absolute -left-20 -top-20 h-48 w-48 rounded-full bg-primary/20 blur-[60px] opacity-70" />
-              <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-blue-500/10 blur-[60px] opacity-70" />
+              <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-accent/10 blur-[60px] opacity-70" />
               <div className="relative z-10 flex flex-col min-h-0 flex-1 h-full">
                 {/* Header */}
                 <div className="flex items-center justify-between px-6 pt-5 pb-1">
                   <h2 className="text-heading-sm">{t("exportShareCodeModal.title")}</h2>
                   <button
                     onClick={handleClose}
+                    aria-label={t("common.close")}
                     className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors cursor-pointer"
                   >
                     <X className="w-4 h-4" />
@@ -353,15 +338,15 @@ export function ExportShareCodeModal({
                               <span className="text-xs font-semibold text-primary">
                                 {t("exportShareCodeModal.shareCodeLabel")}
                               </span>
-                              <span className="text-[10px] text-muted-foreground ml-auto">
+                              <span className="text-micro text-muted-foreground ml-auto">
                                 {shareCodeSkills.length} {shareCodeSkills.length === 1 ? "skill" : "skills"}
                               </span>
                             </div>
-                            <div className="flex flex-wrap gap-1.5">
+                            <div className="flex flex-wrap gap-1.5 max-h-[160px] overflow-y-auto pr-1">
                               {shareCodeSkills.map((s) => (
                                 <span
                                   key={s.name}
-                                  className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-primary/8 text-primary/80 font-medium border border-primary/10"
+                                  className="inline-flex items-center gap-1 text-micro px-2 py-0.5 rounded-md bg-primary/8 text-primary/80 font-medium border border-primary/10"
                                 >
                                   {s.status === "ok" ? (
                                     <Link2 className="w-2.5 h-2.5 opacity-60" />
@@ -373,7 +358,7 @@ export function ExportShareCodeModal({
                               ))}
                             </div>
                             {hasEmbedded && (
-                              <p className="text-[10px] text-muted-foreground mt-2 leading-relaxed">
+                              <p className="text-micro text-muted-foreground mt-2 leading-relaxed">
                                 {t("exportShareCodeModal.embeddedDesc")}
                               </p>
                             )}
@@ -395,15 +380,15 @@ export function ExportShareCodeModal({
                               <span className="text-xs font-semibold text-blue-400">
                                 {t("exportShareCodeModal.bundleLabel")}
                               </span>
-                              <span className="text-[10px] text-muted-foreground ml-auto">
+                              <span className="text-micro text-muted-foreground ml-auto">
                                 {skillStatuses.length} {skillStatuses.length === 1 ? "skill" : "skills"}
                               </span>
                             </div>
-                            <div className="flex flex-wrap gap-1.5">
+                            <div className="flex flex-wrap gap-1.5 max-h-[160px] overflow-y-auto pr-1">
                               {skillStatuses.map((s) => (
                                 <span
                                   key={s.name}
-                                  className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-blue-500/8 text-blue-400/80 font-medium border border-blue-500/10"
+                                  className="inline-flex items-center gap-1 text-micro px-2 py-0.5 rounded-md bg-blue-500/8 text-blue-400/80 font-medium border border-blue-500/10"
                                 >
                                   <Package className="w-2.5 h-2.5 opacity-60" />
                                   {s.name}
@@ -413,7 +398,7 @@ export function ExportShareCodeModal({
                                 </span>
                               ))}
                             </div>
-                            <p className="text-[10px] text-muted-foreground mt-2 leading-relaxed">
+                            <p className="text-micro text-muted-foreground mt-2 leading-relaxed">
                               {t("exportShareCodeModal.bundleDesc")}
                             </p>
                           </motion.div>
@@ -422,7 +407,7 @@ export function ExportShareCodeModal({
 
                       {/* Publish shortcut for bundle skills */}
                       {mode === "bundle" && onPublishSkill && (
-                        <div className="flex flex-wrap gap-1.5">
+                        <div className="flex flex-wrap gap-1.5 max-h-[120px] overflow-y-auto pr-1">
                           {bundleSkills.map((s) => (
                             <button
                               key={s.name}
@@ -430,7 +415,7 @@ export function ExportShareCodeModal({
                                 handleClose();
                                 setTimeout(() => onPublishSkill(s.name), 250);
                               }}
-                              className="inline-flex items-center gap-1 text-[10px] font-medium text-primary hover:text-primary/80 transition-colors cursor-pointer"
+                              className="inline-flex items-center gap-1 text-micro font-medium text-primary hover:text-primary/80 transition-colors cursor-pointer"
                             >
                               <Github className="w-3 h-3" />
                               {t("exportShareCodeModal.publishToSimplify", { name: s.name })}
@@ -488,20 +473,13 @@ export function ExportShareCodeModal({
                           <div className="relative group">
                             <textarea
                               readOnly
-                              value={code}
-                              className="flex w-full rounded-xl border border-input bg-muted/50 px-3 py-2.5 text-[11px] font-mono shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-h-[100px] resize-none pr-20"
+                              value={shareData && code ? formatShareMessage(shareData.data, code, shareData.type) : (code || "")}
+                              className="flex w-full rounded-xl border border-input bg-muted/50 px-3 py-2.5 text-micro font-mono shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-h-[140px] resize-none pr-20"
                             />
                             <div className="absolute right-2 top-2 flex items-center gap-1.5">
                               <button
-                                onClick={handleSaveShareFile}
-                                title={t("shareResultCard.saveAsFile")}
-                                className="p-1.5 rounded-md hover:bg-card-hover hover:scale-105 bg-card border shadow-sm text-foreground transition-all cursor-pointer"
-                              >
-                                <Download className="w-3.5 h-3.5" />
-                              </button>
-                              <button
                                 onClick={handleCopy}
-                                className="p-1.5 rounded-md hover:bg-card-hover hover:scale-105 bg-card border shadow-sm text-foreground transition-all cursor-pointer"
+                                className="p-1.5 rounded-md hover:bg-card-hover hover:scale-105 bg-card border shadow-sm text-foreground transition cursor-pointer"
                               >
                                 {copied ? (
                                   <Check className="w-3.5 h-3.5 text-success" />
@@ -512,7 +490,7 @@ export function ExportShareCodeModal({
                             </div>
                           </div>
                           {hasEmbedded && (
-                            <p className="text-[10px] text-primary/70">
+                            <p className="text-micro text-primary/70">
                               {t("exportShareCodeModal.embeddedInfo")}
                             </p>
                           )}
@@ -529,16 +507,16 @@ export function ExportShareCodeModal({
                             <span className="text-xs font-semibold text-foreground">
                               {t("exportShareCodeModal.bundleReady")}
                             </span>
-                            <span className="text-[10px] text-muted-foreground ml-auto">
+                            <span className="text-micro text-muted-foreground ml-auto">
                               {skillStatuses.length} {skillStatuses.length === 1 ? "skill" : "skills"}
                             </span>
                           </div>
                           <div className="rounded-xl border border-blue-500/15 bg-blue-500/[0.03] p-3">
-                            <div className="flex flex-wrap gap-1.5 mb-3">
+                            <div className="flex flex-wrap gap-1.5 mb-3 max-h-[160px] overflow-y-auto pr-1">
                               {skillStatuses.map((s) => (
                                 <span
                                   key={s.name}
-                                  className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-blue-500/8 text-blue-400/80 font-medium border border-blue-500/10"
+                                  className="inline-flex items-center gap-1 text-micro px-2 py-0.5 rounded-md bg-blue-500/8 text-blue-400/80 font-medium border border-blue-500/10"
                                 >
                                   <Package className="w-2.5 h-2.5 opacity-60" />
                                   {s.name}

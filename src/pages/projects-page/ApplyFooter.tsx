@@ -35,7 +35,7 @@ export function ApplyFooter({
           <motion.span
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="text-[10px] text-success font-medium flex items-center gap-1"
+            className="text-micro text-success font-medium flex items-center gap-1"
           >
             <Check className="w-3 h-3" />
             {syncResult} synced

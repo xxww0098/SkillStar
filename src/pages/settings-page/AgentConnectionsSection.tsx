@@ -3,7 +3,8 @@ import { useTranslation } from "react-i18next";
 import { AlertTriangle, Unlink, X } from "lucide-react";
 import { Badge } from "../../components/ui/badge";
 import { Switch } from "../../components/ui/switch";
-import { cn } from "../../lib/utils";
+import { AgentIcon } from "../../components/ui/AgentIcon";
+import { cn, agentIconCls } from "../../lib/utils";
 import type { AgentProfile } from "../../types";
 
 interface AgentConnectionsSectionProps {
@@ -18,6 +19,17 @@ interface AgentConnectionsSectionProps {
   onCancelDisable: () => void;
   onConfirmDisable: () => void;
   onUnlinkSkill: (skillName: string, agentId: string) => void;
+}
+
+function formatGlobalPath(path: string): string {
+  const normalized = path.replace(/\\/g, "/");
+  const macOrLinux = normalized.match(/^\/(?:Users|home)\/[^/]+\/(.+)$/);
+  if (macOrLinux?.[1]) return `~/${macOrLinux[1]}`;
+
+  const windows = normalized.match(/^[A-Za-z]:\/Users\/[^/]+\/(.+)$/);
+  if (windows?.[1]) return `~/${windows[1]}`;
+
+  return normalized;
 }
 
 export function AgentConnectionsSection({
@@ -54,20 +66,25 @@ export function AgentConnectionsSection({
                 <div className="flex items-center gap-3 px-4 py-3">
                   <div
                     className={cn(
-                      "w-8 h-8 flex items-center justify-center rounded-[10px] transition-all bg-card border border-border shrink-0 shadow-sm",
+                      "w-8 h-8 flex items-center justify-center rounded-[10px] transition bg-card border border-border shrink-0 shadow-sm",
                       profile.enabled ? "" : "grayscale opacity-50 border-transparent bg-muted/50"
                     )}
                   >
-                    <img src={`/${profile.icon}`} alt={profile.display_name} className="w-5 h-5 object-contain" />
+                    <AgentIcon profile={profile} className={cn(agentIconCls(profile.icon, "w-5 h-5"), "object-contain")} />
                   </div>
 
-                  <span className="text-sm font-medium flex-1">{profile.display_name}</span>
+                  <div className="flex-1 flex items-center gap-2.5 min-w-0">
+                    <span className="text-sm font-medium truncate shrink-0">{profile.display_name}</span>
+                    <span className="text-micro text-muted-foreground/60 font-mono bg-muted/40 px-1.5 py-0.5 rounded-md truncate">
+                      {formatGlobalPath(profile.global_skills_dir)}
+                    </span>
+                  </div>
 
                   {profile.enabled && profile.synced_count > 0 && (
                     <button
                       onClick={() => onToggleExpand(profile.id)}
                       className={cn(
-                        "flex items-center gap-1 text-[11px] tabular-nums rounded-md px-1.5 py-0.5 transition-colors cursor-pointer",
+                        "flex items-center gap-1 tabular-nums rounded-md px-1.5 py-0.5 transition-colors cursor-pointer text-[10px] font-medium leading-none",
                         expandedAgentId === profile.id
                           ? "text-primary bg-primary/10"
                           : "text-muted-foreground hover:text-foreground hover:bg-muted"
@@ -107,7 +124,7 @@ export function AgentConnectionsSection({
                         <div className="ml-auto flex items-center gap-1.5">
                           <button
                             onClick={onCancelDisable}
-                            className="px-2 py-1 rounded-md text-[11px] text-muted-foreground hover:bg-muted transition-colors cursor-pointer"
+                            className="px-2 py-1 rounded-md text-micro text-muted-foreground hover:bg-muted transition-colors cursor-pointer"
                           >
                             {t("common.cancel")}
                           </button>
@@ -115,7 +132,7 @@ export function AgentConnectionsSection({
                             onClick={onConfirmDisable}
                             disabled={unlinkingId === profile.id}
                             className={cn(
-                              "px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer",
+                              "px-2.5 py-1 rounded-md text-micro font-medium transition-colors cursor-pointer",
                               "bg-destructive/10 text-destructive hover:bg-destructive/20",
                               unlinkingId === profile.id && "opacity-50 pointer-events-none"
                             )}
@@ -142,7 +159,7 @@ export function AgentConnectionsSection({
                     >
                       <div className="px-4 py-2.5 bg-muted/30 border-t border-border">
                         {(linkedSkills[profile.id] ?? []).length === 0 ? (
-                          <span className="text-[11px] text-muted-foreground italic">
+                          <span className="text-micro text-muted-foreground italic">
                             {t("settings.noSkillsLinked")}
                           </span>
                         ) : (
@@ -150,12 +167,12 @@ export function AgentConnectionsSection({
                             {(linkedSkills[profile.id] ?? []).map((skillName) => (
                               <span
                                 key={skillName}
-                                className="group/chip inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-card border border-border text-[11px] text-foreground transition-colors hover:border-destructive/30"
+                                className="group/chip inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-card border border-border text-micro text-foreground transition-colors hover:border-destructive/30"
                               >
                                 {skillName}
                                 <button
                                   onClick={() => onUnlinkSkill(skillName, profile.id)}
-                                  className="opacity-0 group-hover/chip:opacity-100 p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all cursor-pointer"
+                                  className="opacity-0 group-hover/chip:opacity-100 p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition cursor-pointer focus-ring"
                                   title={t("settings.unlink", { name: skillName })}
                                 >
                                   <X className="w-2.5 h-2.5" />

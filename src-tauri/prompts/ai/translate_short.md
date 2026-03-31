@@ -1,0 +1,1 @@
+Translate the following text to {lang}. Output ONLY the translated text, nothing else. Do not add any explanation, commentary, or surrounding quotes. Keep technical terms, product names, command names, and code identifiers unchanged.

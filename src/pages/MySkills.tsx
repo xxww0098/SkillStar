@@ -18,7 +18,9 @@ import { ExportShareCodeModal } from "../components/skills/ExportShareCodeModal"
 import { useSkills } from "../hooks/useSkills";
 import { useSkillCards } from "../hooks/useSkillCards";
 import { useAgentProfiles } from "../hooks/useAgentProfiles";
+import { useSecurityScan } from "../hooks/useSecurityScan";
 import { toast } from "../lib/toast";
+import { LoadingLogo } from "../components/ui/LoadingLogo";
 import type { Skill, SortOption, ViewMode } from "../types";
 
 const DetailPanel = lazy(() =>
@@ -52,6 +54,7 @@ export function MySkills({
     installSkill,
     uninstallSkill,
     updateSkill,
+    pendingUpdateNames,
     toggleSkillForAgent,
     pendingAgentToggleKeys,
     readSkillContent,
@@ -59,6 +62,7 @@ export function MySkills({
   } = useSkills();
   const { profiles, deploySkillsToProject } = useAgentProfiles();
   const { createGroup, groups } = useSkillCards();
+  const { riskMap } = useSecurityScan();
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("name");
   const [showUpdateOnly, setShowUpdateOnly] = useState(false);
@@ -115,15 +119,15 @@ export function MySkills({
     }
   }, [initialShareCode]);
 
-  const filtered = useMemo(() => {
-    let list = [...skills];
+  const filteredSkills = useMemo(() => {
+    let visibleSkills = [...skills];
 
     if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      list = list.filter(
-        (s) =>
-          s.name.toLowerCase().includes(q) ||
-          s.description.toLowerCase().includes(q)
+      const normalizedQuery = searchQuery.toLowerCase();
+      visibleSkills = visibleSkills.filter(
+        (skill) =>
+          skill.name.toLowerCase().includes(normalizedQuery) ||
+          skill.description.toLowerCase().includes(normalizedQuery)
       );
     }
 
@@ -131,24 +135,24 @@ export function MySkills({
     if (agentFilter) {
       const agentProfile = profiles.find((p) => p.id === agentFilter);
       if (agentProfile) {
-        list = list.filter(
-          (s) => s.agent_links?.includes(agentProfile.display_name)
+        visibleSkills = visibleSkills.filter(
+          (skill) => skill.agent_links?.includes(agentProfile.display_name)
         );
       }
     }
 
     // Source type filter: hub / local
     if (sourceFilter === "hub") {
-      list = list.filter((s) => s.skill_type !== "local");
+      visibleSkills = visibleSkills.filter((skill) => skill.skill_type !== "local");
     } else if (sourceFilter === "local") {
-      list = list.filter((s) => s.skill_type === "local");
+      visibleSkills = visibleSkills.filter((skill) => skill.skill_type === "local");
     }
 
     if (showUpdateOnly) {
-      list = list.filter((s) => s.update_available);
+      visibleSkills = visibleSkills.filter((skill) => skill.update_available);
     }
 
-    list.sort((a, b) => {
+    visibleSkills.sort((a, b) => {
       switch (sortBy) {
         case "stars-desc":
           return b.stars - a.stars || a.name.localeCompare(b.name);
@@ -163,7 +167,7 @@ export function MySkills({
       }
     });
 
-    return list;
+    return visibleSkills;
   }, [skills, searchQuery, sortBy, agentFilter, profiles, showUpdateOnly, sourceFilter]);
 
   const handleInstall = async (url: string) => {
@@ -181,7 +185,8 @@ export function MySkills({
         setSelectedSkill(updated);
       }
     } catch (e) {
-      toast.error(t("mySkills.updateFailed"));
+      const reason = String(e);
+      toast.error(reason ? `${t("mySkills.updateFailed")}: ${reason}` : t("mySkills.updateFailed"));
     }
   };
 
@@ -263,7 +268,7 @@ export function MySkills({
         ? t("mySkills.batchUninstallFailed", { name: failedNames[0], count: 1 })
         : t("mySkills.batchUninstallFailed", { name: failedNames[0], count: failedNames.length })
     );
-  }, [closeUninstallDialog, pendingUninstallNames, removeSkillFromUi, uninstallSkill]);
+  }, [closeUninstallDialog, pendingUninstallNames, removeSkillFromUi, uninstallSkill, t]);
 
   const handleBatchUpdate = async () => {
     setBatchLoading(true);
@@ -287,12 +292,13 @@ export function MySkills({
       });
       // Refresh skills list to update agent_links
       clearSelection();
+      await refresh(true, true);
     } catch (e) {
       toast.error(t("mySkills.batchLinkFailed"));
     } finally {
       setBatchLoading(false);
     }
-  }, [selectedSkillNames, clearSelection]);
+  }, [selectedSkillNames, clearSelection, refresh, t]);
 
   return (
     <div className="flex-1 flex overflow-hidden relative">
@@ -307,7 +313,7 @@ export function MySkills({
           countText={
             <div className="flex items-center gap-1.5 font-medium">
               <Layers className="w-3 h-3 hover:text-muted-foreground/90 transition-colors" />
-              <span>{filtered.length}</span>
+              <span>{filteredSkills.length}</span>
             </div>
           }
           showUpdateOnly={showUpdateOnly}
@@ -327,27 +333,31 @@ export function MySkills({
         />
 
         {/* Selection bar */}
-        {hasSelection && (
-          <SkillSelectionBar
-            selectedCount={selectedSkillNames.size}
-            totalCount={filtered.length}
-            disabled={batchLoading || uninstalling}
-            onDeploy={() => setDeployModalOpen(true)}
-            onSaveGroup={() => setGroupModalOpen(true)}
-            onPackSkills={
-              onPackSkills
-                ? () => onPackSkills(Array.from(selectedSkillNames))
-                : undefined
-            }
-            onShare={() => setShareCardSkills(Array.from(selectedSkillNames))}
-            onUpdate={handleBatchUpdate}
-            onUninstall={handleBatchUninstall}
-            onSelectAll={() => setSelectedSkillNames(new Set(filtered.map(s => s.name)))}
-            onClear={clearSelection}
-            agentProfiles={profiles}
-            onBatchLink={handleBatchLink}
-          />
-        )}
+        <AnimatePresence>
+          {hasSelection && (
+            <SkillSelectionBar
+              selectedCount={selectedSkillNames.size}
+              totalCount={filteredSkills.length}
+              disabled={batchLoading || uninstalling}
+              onDeploy={() => setDeployModalOpen(true)}
+              onSaveGroup={onPackSkills ? undefined : () => setGroupModalOpen(true)}
+              onPackSkills={
+                onPackSkills
+                  ? () => onPackSkills(Array.from(selectedSkillNames))
+                  : undefined
+              }
+              onShare={() => setShareCardSkills(Array.from(selectedSkillNames))}
+              onUpdate={handleBatchUpdate}
+              onUninstall={handleBatchUninstall}
+              onSelectAll={() =>
+                setSelectedSkillNames(new Set(filteredSkills.map((skill) => skill.name)))
+              }
+              onClear={clearSelection}
+              agentProfiles={profiles}
+              onBatchLink={handleBatchLink}
+            />
+          )}
+        </AnimatePresence>
 
         <ExportShareCodeModal
           open={!!shareCardSkills && shareCardSkills.length > 0}
@@ -369,7 +379,7 @@ export function MySkills({
             >
               <div className="flex items-center gap-2.5 px-6 py-2 bg-amber-500/8 border-b border-amber-500/20">
                 <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                <span className="text-[12px] text-amber-300/90">
+                <span className="text-caption text-amber-300/90">
                   {t("mySkills.brokenBanner", { count: brokenCount })}
                 </span>
                 <button
@@ -378,7 +388,7 @@ export function MySkills({
                       new CustomEvent("skillstar:navigate", { detail: { page: "settings" } })
                     );
                   }}
-                  className="text-[12px] text-amber-400 hover:text-amber-300 font-medium ml-auto cursor-pointer transition-colors"
+                  className="text-caption text-amber-400 hover:text-amber-300 font-medium ml-auto cursor-pointer transition-colors"
                 >
                   {t("mySkills.brokenBannerAction")} →
                 </button>
@@ -395,12 +405,12 @@ export function MySkills({
           className="flex-1 overflow-y-auto p-6 bg-gradient-to-br from-transparent via-card/10 to-transparent"
         >
           {loading ? (
-            <div className="flex items-center justify-center py-20 text-zinc-500 text-sm">
-              {t("mySkills.loading")}
+            <div className="flex items-center justify-center py-20">
+              <LoadingLogo size="lg" label={t("mySkills.loading")} />
             </div>
           ) : (
             <SkillGrid
-              skills={filtered}
+              skills={filteredSkills}
               viewMode={viewMode}
               onSkillClick={(skill) => setSelectedSkill(prev => prev?.name === skill.name ? null : skill)}
               onInstall={handleInstall}
@@ -411,7 +421,9 @@ export function MySkills({
               onSelectSkill={handleSelectSkill}
               profiles={profiles.filter((p) => p.enabled)}
               onToggleAgent={toggleSkillForAgent}
+              pendingUpdateNames={pendingUpdateNames}
               pendingAgentToggleKeys={pendingAgentToggleKeys}
+              riskMap={riskMap}
             />
           )}
         </motion.main>
@@ -420,8 +432,8 @@ export function MySkills({
       {selectedSkill && (
         <Suspense
           fallback={
-            <div className="absolute right-0 top-0 bottom-0 w-[400px] h-full border-l border-white/10 bg-card/60 backdrop-blur-xl shadow-2xl overflow-y-auto z-50 rounded-tl-xl rounded-bl-xl flex items-center justify-center text-sm text-zinc-400">
-              Loading details...
+            <div className="absolute right-0 top-0 bottom-0 w-[400px] h-full border-l border-white/10 bg-card/60 backdrop-blur-xl shadow-2xl overflow-y-auto z-50 rounded-tl-xl rounded-bl-xl flex items-center justify-center">
+              <LoadingLogo size="sm" />
             </div>
           }
         >

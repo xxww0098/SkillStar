@@ -1,4 +1,6 @@
 export type SkillCategory = "Hot" | "Popular" | "Rising" | "New" | "None";
+export type ProxyType = "http" | "https" | "socks5";
+export type AiStreamEvent = "start" | "delta" | "complete" | "error";
 
 export interface Skill {
   name: string;
@@ -24,6 +26,15 @@ export interface Skill {
 export interface SkillUpdateState {
   name: string;
   update_available: boolean;
+}
+
+/** Return type of the `update_skill` command. When a repo-cached skill is
+ *  updated the entire repo is pulled, which implicitly updates all siblings. */
+export interface UpdateResult {
+  skill: Skill;
+  /** Names of sibling skills from the same repo whose update_available was
+   *  also cleared by the repo pull. */
+  siblings_cleared: string[];
 }
 
 export interface MarketplaceResult {
@@ -107,7 +118,7 @@ export interface SkillCardDeck {
 
 export type SortOption = "stars-desc" | "updated" | "name";
 export type ViewMode = "grid" | "list";
-export type NavPage = "my-skills" | "marketplace" | "skill-cards" | "projects" | "settings";
+export type NavPage = "my-skills" | "marketplace" | "skill-cards" | "projects" | "security-scan" | "settings";
 
 /** Sub-page navigation for drill-down views */
 export type SubPage =
@@ -123,9 +134,26 @@ export interface SkillContent {
   content: string;
 }
 
+export interface AiConfigStatus {
+  enabled: boolean;
+  api_key: string;
+}
+
+export interface AiStreamPayload {
+  requestId: string;
+  event: AiStreamEvent;
+  delta?: string | null;
+  message?: string | null;
+}
+
+export interface FrontmatterEntry {
+  key: string;
+  value: string;
+}
+
 export interface ProxyConfig {
   enabled: boolean;
-  proxy_type: string;
+  proxy_type: ProxyType;
   host: string;
   port: number;
   username: string | null;
@@ -168,6 +196,35 @@ export interface ImportResult {
   symlink_count: number;
 }
 
+export interface ImportDone {
+  hub: number;
+  links: number;
+}
+
+// ── Project Agent Detection ─────────────────────────────────────────
+
+export interface DetectedAgent {
+  agent_id: string;
+  display_name: string;
+  icon: string;
+  project_skills_rel: string;
+  exists: boolean;
+}
+
+export interface AmbiguousGroup {
+  path: string;
+  agent_ids: string[];
+  agent_names: string[];
+}
+
+export interface ProjectAgentDetection {
+  detected: DetectedAgent[];
+  /** Groups of agents that share the same directory and that directory exists */
+  ambiguous_groups: AmbiguousGroup[];
+  /** Agent IDs with a unique directory that exists — safe to auto-enable */
+  auto_enable: string[];
+}
+
 export interface AiConfig {
   enabled: boolean;
   api_format: "openai" | "anthropic";
@@ -175,6 +232,14 @@ export interface AiConfig {
   api_key: string;
   model: string;
   target_language: string;
+  /** Model context window in K tokens (e.g. 128 = 128K tokens) */
+  context_window_k: number;
+  /** Override: 0 = auto-derive from context_window_k */
+  max_concurrent_requests: number;
+  /** Override: 0 = auto-derive from context_window_k */
+  chunk_char_limit: number;
+  /** Override: 0 = auto-derive from context_window_k */
+  scan_max_response_tokens: number;
 }
 
 // ── GitHub Repo Scanner ─────────────────────────────────────────────
@@ -203,6 +268,32 @@ export interface RepoHistoryEntry {
   last_used: string;
 }
 
+export interface StorageOverview {
+  data_root_path: string;
+  hub_root_path: string;
+  is_hub_under_data: boolean;
+  config_bytes: number;
+  config_path: string;
+  hub_bytes: number;
+  hub_path: string;
+  hub_count: number;
+  broken_count: number;
+  local_count: number;
+  local_bytes: number;
+  local_path: string;
+  cache_bytes: number;
+  cache_path: string;
+  cache_count: number;
+  cache_unused_count: number;
+  cache_unused_bytes: number;
+  history_count: number;
+}
+
+export interface CacheCleanResult {
+  repos_removed: number;
+  history_cleared: number;
+}
+
 // ── GitHub Publish ──────────────────────────────────────────────────
 
 export type GhStatus =
@@ -224,7 +315,7 @@ export interface UserRepo {
   folders: string[];
 }
 
-// ── Skill Bundle (.agentskill) ──────────────────────────────────────
+// ── Skill Bundle (.ags) ──────────────────────────────────────
 
 export interface BundleManifest {
   format_version: number;
@@ -244,3 +335,88 @@ export interface ImportBundleResult {
   replaced: boolean;
 }
 
+// ── Security Scan ───────────────────────────────────────────────────
+
+export type RiskLevel = "Safe" | "Low" | "Medium" | "High" | "Critical";
+
+export interface StaticFinding {
+  file_path: string;
+  line_number: number;
+  pattern_id: string;
+  snippet: string;
+  severity: RiskLevel;
+  description: string;
+}
+
+export interface AiFinding {
+  category: string;
+  severity: RiskLevel;
+  file_path: string;
+  description: string;
+  evidence: string;
+  recommendation: string;
+}
+
+export interface SecurityScanResult {
+  skill_name: string;
+  scanned_at: string;
+  tree_hash: string | null;
+  scan_mode: "static" | "smart" | "deep" | string;
+  scanner_version: string;
+  target_language?: string;
+  risk_level: RiskLevel;
+  static_findings: StaticFinding[];
+  ai_findings: AiFinding[];
+  summary: string;
+  files_scanned: number;
+  total_chars_analyzed: number;
+  incomplete: boolean;
+  ai_files_analyzed: number;
+  chunks_used: number;
+}
+
+export interface SecurityScanEvent {
+  requestId: string;
+  event: "skill-start" | "file-start" | "skill-complete" | "chunk-error" | "error" | "done" | "progress";
+  skillName?: string;
+  fileName?: string;
+  result?: SecurityScanResult;
+  scanned?: number;
+  total?: number;
+  skillFileScanned?: number;
+  skillFileTotal?: number;
+  skillChunkCompleted?: number;
+  skillChunkTotal?: number;
+  activeChunkWorkers?: number;
+  maxChunkWorkers?: number;
+  message?: string;
+  phase?: "collect" | "static" | "triage" | "ai-analyze" | "aggregate" | "done" | "error" | string;
+}
+
+export interface SecurityScanEstimate {
+  requestedMode: "static" | "smart" | "deep" | string;
+  effectiveMode: "static" | "smart" | "deep" | string;
+  totalSkills: number;
+  totalFiles: number;
+  aiEligibleFiles: number;
+  estimatedChunks: number;
+  estimatedApiCalls: number;
+  estimatedTotalChars: number;
+  chunkCharLimit: number;
+}
+
+export interface SecurityScanTrailItem {
+  fileName: string;
+  skillName: string | null;
+  stage: string | null;
+  riskLevel?: RiskLevel;
+  reasonLabels?: string[];
+  timestamp: number;
+}
+
+export interface SecurityScanLogEntry {
+  file_name: string;
+  path: string;
+  created_at: string;
+  size_bytes: number;
+}

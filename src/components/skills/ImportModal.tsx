@@ -1,33 +1,22 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { useTranslation } from "react-i18next";
-import {
-  X,
-  GitBranch,
-  Search,
-  Check,
-  Loader2,
-  CheckCircle2,
-  AlertTriangle,
-  Clock,
-  Download,
-  RotateCcw,
-  Package,
-  KeyRound,
-  Share2,
-} from "lucide-react";
+import { X, Download } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
-import { Button } from "../ui/button";
-import { SearchInput } from "../ui/SearchInput";
-import { SelectAllButton } from "../ui/SelectAllButton";
-import { cn } from "../../lib/utils";
-import { looksLikeShareCode, parseShareCode, type ShareCodeData } from "../../lib/shareCode";
+import { looksLikeShareCode, parseShareCode, extractShareCode, type ShareCodeData } from "../../lib/shareCode";
 import type {
-  DiscoveredSkill,
   ScanResult,
   SkillInstallTarget,
   RepoHistoryEntry,
 } from "../../types";
+import {
+  InputURLPhase,
+  LoadingPhase,
+  SelectSkillsPhase,
+  CompletedPhase,
+  ErrorPhase,
+  ShareCodePreviewPhase,
+} from "./import-modal";
 
 type Phase =
   | "inputURL"
@@ -48,7 +37,7 @@ export interface ImportModalProps {
   autoScan?: boolean;
   /** When set, only pre-select this specific skill after scan (instead of all) */
   preSelectedSkill?: string;
-  /** Callback to trigger local file (.agentskill) import flow */
+  /** Callback to trigger local file (.ags) import flow */
   onPickLocalFile?: () => void;
   /** Callback to pack installed skills into a deck immediately */
   onPackGroup?: (skillNames: string[]) => void;
@@ -71,6 +60,7 @@ export function ImportModal({
   onClearShareCode,
 }: ImportModalProps) {
   const { t } = useTranslation();
+  const prefersReducedMotion = useReducedMotion();
 
   // Keep a ref so handleScan always reads the latest value
   // (avoids stale closure when called from setTimeout)
@@ -132,19 +122,19 @@ export function ImportModal({
   }, [isOpen]);
 
   // ── Share Code Parse ─────────────────────────────────────────
-  const handleParseShareCode = useCallback(async (code: string, pw?: string) => {
+  const handleParseShareCode = useCallback(async (code: string) => {
     setShareCodeError("");
     setProgressMsg(t("shareCodeImport.parsing"));
     try {
-      const { data } = await parseShareCode(code, pw);
+      // Extract raw share code from formatted message or use as-is
+      const rawCode = extractShareCode(code);
+      const { data } = await parseShareCode(rawCode);
       setShareCodeData(data);
       setPhase("shareCodePreview");
     } catch (e) {
       const errMsg = String(e);
-      // If decryption failed, it might need a password
-      if (errMsg.includes("Decryption failed") && !pw) {
-        setShareCodeError(t("shareCodeImport.needPassword"));
-        setPhase("shareCodePreview");
+      if (errMsg.includes("expired")) {
+        setShareCodeError(errMsg.replace(/^Error:\s*/, ""));
         setShareCodeData(null);
       } else {
         setShareCodeError(errMsg);
@@ -204,8 +194,9 @@ export function ImportModal({
   // ── Smart input handler: detect share code in URL input ──────
   const handleUrlInputChange = useCallback((value: string) => {
     setUrlInput(value);
-    // Auto-detect share code when pasted
-    if (looksLikeShareCode(value.trim())) {
+    // Auto-detect share code when pasted (handle formatted messages too)
+    const extracted = extractShareCode(value.trim());
+    if (looksLikeShareCode(extracted)) {
       setTimeout(() => handleParseShareCode(value.trim()), 50);
     }
   }, [handleParseShareCode]);
@@ -354,7 +345,7 @@ export function ImportModal({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
+            transition={{ duration: prefersReducedMotion ? 0.01 : 0.15 }}
             className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm"
             onClick={onClose}
           />
@@ -364,24 +355,25 @@ export function ImportModal({
             initial={{ opacity: 0, scale: 0.96, y: 12 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 12 }}
-            transition={{ type: "spring", bounce: 0.1, duration: 0.35 }}
+            transition={{ duration: prefersReducedMotion ? 0.01 : 0.3, ease: [0.16, 1, 0.3, 1] }}
             className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg z-50"
           >
-            <div className="relative overflow-hidden rounded-[24px] border border-white/10 bg-card/95 shadow-[0_0_80px_-20px_rgba(0,0,0,0.5)] backdrop-blur-3xl ring-1 ring-white/5">
+            <div role="dialog" aria-modal="true" aria-label={t("common.import", { defaultValue: "Import" })} className="relative overflow-hidden rounded-[24px] border border-white/10 bg-card/95 shadow-[0_0_80px_-20px_rgba(0,0,0,0.5)] backdrop-blur-3xl ring-1 ring-white/5">
               {/* Top ambient glow */}
               <div className="pointer-events-none absolute -left-20 -top-20 h-48 w-48 rounded-full bg-primary/20 blur-[60px] opacity-70" />
-              <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-blue-500/10 blur-[60px] opacity-70" />
+              <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-accent/10 blur-[60px] opacity-70" />
               <div className="relative z-10">
               {/* Header */}
               <div className="flex items-center justify-between px-6 pt-4 pb-3 shrink-0 border-b border-border/60">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-blue-500/10 flex items-center justify-center">
-                    <Download className="w-4 h-4 text-blue-500" />
+                  <div className="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center">
+                    <Download className="w-4 h-4 text-primary" />
                   </div>
-                  <h2 className="text-heading-sm">{t("common.import", { defaultValue: "导入" })}</h2>
+                  <h2 className="text-heading-sm">{t("common.import", { defaultValue: "Import" })}</h2>
                 </div>
                 <button
                   onClick={onClose}
+                  aria-label={t("common.close")}
                   className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors cursor-pointer"
                 >
                   <X className="w-4 h-4" />
@@ -443,7 +435,7 @@ export function ImportModal({
                     error={shareCodeError}
                     password={shareCodePassword}
                     onPasswordChange={setShareCodePassword}
-                    onRetryWithPassword={(pw) => handleParseShareCode(urlInput.trim(), pw)}
+                    onRetryWithPassword={() => handleParseShareCode(urlInput.trim())}
                     onInstall={handleShareCodeInstall}
                     onBack={reset}
                   />
@@ -462,545 +454,4 @@ export function ImportModal({
   );
 }
 
-// ── Phase Components ──────────────────────────────────────────────
 
-function InputURLPhase({
-  urlInput,
-  setUrlInput,
-  onScan,
-  history,
-  onSelectHistory,
-  onPickLocalFile,
-  shareCodeDetected,
-}: {
-  urlInput: string;
-  setUrlInput: (v: string) => void;
-  onScan: () => void;
-  history: RepoHistoryEntry[];
-  onSelectHistory: (entry: RepoHistoryEntry) => void;
-  onPickLocalFile?: () => void;
-  shareCodeDetected?: boolean;
-}) {
-  const { t } = useTranslation();
-
-  return (
-    <div className="px-6 py-6 space-y-5">
-      {/* Illustration */}
-      <div className="flex flex-col items-center gap-3 py-2">
-        <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500/15 to-violet-500/15 flex items-center justify-center">
-          <Download className="w-7 h-7 text-blue-500/80" />
-        </div>
-        <p className="text-sm text-muted-foreground text-center">
-          {t("shareCodeImport.smartInputHint")}
-        </p>
-      </div>
-
-      {/* Clipboard detected banner */}
-      {shareCodeDetected && (
-        <div className="flex items-center gap-2 bg-primary/5 border border-primary/20 rounded-xl px-3 py-2 text-xs text-primary">
-          <Share2 className="w-3.5 h-3.5" />
-          {t("shareCodeImport.detected")}
-        </div>
-      )}
-
-      {/* URL input */}
-      <div className="flex items-center gap-2.5">
-        <SearchInput
-          value={urlInput}
-          onChange={(e) => setUrlInput(e.target.value)}
-          placeholder={t("githubImportModal.placeholder")}
-          className="h-11 rounded-2xl border-border/80 bg-background/80 shadow-inner pl-9"
-          iconClassName="left-3 h-4 w-4"
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && urlInput.trim()) onScan();
-          }}
-        />
-        <Button
-          size="sm"
-          onClick={onScan}
-          disabled={!urlInput.trim()}
-          className="h-11 min-w-[108px] rounded-2xl border border-primary/40 bg-primary text-primary-foreground px-4 shadow-[0_10px_24px_-12px_rgba(59,130,246,0.85)] hover:bg-primary-hover"
-        >
-          <Search className="w-3.5 h-3.5 mr-1.5" />
-          {t("githubImportModal.scan")}
-        </Button>
-      </div>
-
-      {onPickLocalFile && (
-        <div className="space-y-4 pt-1">
-          <div className="flex items-center gap-4">
-            <div className="flex-1 h-px bg-border/60"></div>
-            <span className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">{t("common.or")}</span>
-            <div className="flex-1 h-px bg-border/60"></div>
-          </div>
-          <Button
-            variant="outline"
-            className="w-full h-11 rounded-2xl border-dashed border-border hover:border-primary/40 hover:bg-primary/5 transition-all text-muted-foreground hover:text-foreground cursor-pointer shadow-sm"
-            onClick={onPickLocalFile}
-          >
-            <Package className="w-4 h-4 mr-2" />
-            {t("importBundleModal.pickFile", { defaultValue: "Import from Local File (.ags / .agd)" })}
-          </Button>
-        </div>
-      )}
-
-      {/* History */}
-      {history.length > 0 && (
-        <div className="space-y-2">
-          <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">
-            {t("githubImportModal.recentRepos")}
-          </p>
-          <div className="max-h-36 overflow-y-auto rounded-lg space-y-0.5">
-            {history.map((entry) => (
-              <button
-                key={entry.source}
-                onClick={() => onSelectHistory(entry)}
-                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-muted transition-colors text-left cursor-pointer group"
-              >
-                <Clock className="w-3.5 h-3.5 text-muted-foreground shrink-0 group-hover:text-foreground transition-colors" />
-                <span className="text-sm truncate">{entry.source}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function LoadingPhase({ message }: { message: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center py-16 gap-4">
-      <div className="relative">
-        <div className="w-12 h-12 rounded-2xl bg-blue-500/10 flex items-center justify-center">
-          <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
-        </div>
-      </div>
-      <p className="text-sm text-muted-foreground">{message}</p>
-    </div>
-  );
-}
-
-function SelectSkillsPhase({
-  skills,
-  source,
-  selectedSkills,
-  onToggle,
-  onSelectAll,
-  onDeselectAll,
-  onInstall,
-  hasPackGroup,
-}: {
-  skills: DiscoveredSkill[];
-  source: string;
-  selectedSkills: Set<string>;
-  onToggle: (id: string) => void;
-  onSelectAll: (ids?: string[]) => void;
-  onDeselectAll: (ids?: string[]) => void;
-  onInstall: (pack?: boolean) => void;
-  hasPackGroup?: boolean;
-}) {
-  const { t } = useTranslation();
-  const [searchQuery, setSearchQuery] = useState("");
-
-  const filteredSkills = skills.filter(
-    (s) =>
-      s.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (s.description?.toLowerCase() || "").includes(searchQuery.toLowerCase())
-  );
-
-  const installableFiltered = filteredSkills.filter((s) => !s.already_installed);
-  const installableCount = installableFiltered.length;
-  const allSelected =
-    filteredSkills.length > 0 &&
-    (installableCount > 0
-      ? installableFiltered.every((s) => selectedSkills.has(s.id))
-      : filteredSkills.every((s) => selectedSkills.has(s.id)));
-
-  const handleSelectAll = () => {
-    if (allSelected) {
-      onDeselectAll(filteredSkills.map((s) => s.id));
-    } else {
-      const targets = installableCount > 0 ? installableFiltered : filteredSkills;
-      onSelectAll(targets.map((s) => s.id));
-    }
-  };
-
-  return (
-    <div className="flex flex-col">
-      {/* Source info */}
-      <div className="px-6 pt-4 pb-2 space-y-3 shrink-0">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <GitBranch className="w-3.5 h-3.5 text-muted-foreground" />
-            <span className="text-xs text-muted-foreground font-medium">
-              {source}
-            </span>
-            <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded-md text-muted-foreground/80">
-              {skills.length} skill{skills.length !== 1 ? "s" : ""}
-            </span>
-          </div>
-          <div className="flex items-center gap-3">
-            {hasPackGroup && selectedSkills.size > 0 && (
-              <button
-                onClick={() => onInstall(true)}
-                className="text-xs text-amber-500 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-1 rounded-md transition-colors flex items-center gap-1 cursor-pointer font-medium"
-              >
-                <Package className="w-3.5 h-3.5" />
-                {t("githubImportModal.quickPack")}
-              </button>
-            )}
-            <SelectAllButton
-              allSelected={allSelected}
-              onToggle={handleSelectAll}
-              variant="ghost"
-              size="sm"
-              className="h-auto p-0 text-primary hover:text-primary/80 hover:bg-transparent"
-            />
-          </div>
-        </div>
-
-        <SearchInput
-          containerClassName="mt-3"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder={t("common.search")}
-          className="h-8 text-xs rounded-lg border-border/80 bg-background/50 placeholder:text-muted-foreground/80 shadow-inner pl-8"
-        />
-      </div>
-
-      {/* Skill list */}
-      <div className="px-6 pb-2 max-h-[38vh] overflow-y-auto">
-        <div className="space-y-0.5">
-          {filteredSkills.length === 0 && (
-            <div className="py-8 text-center text-xs text-muted-foreground">
-              {t("common.noResults")}
-            </div>
-          )}
-          {filteredSkills.map((skill) => {
-            const isInstalled = skill.already_installed;
-            const isSelected = selectedSkills.has(skill.id);
-            // Use folder_path as key since id may repeat across agent dirs
-            const uniqueKey = skill.folder_path || skill.id;
-
-            return (
-              <motion.div
-                key={uniqueKey}
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.15 }}
-                className={cn(
-                  "w-full flex items-center justify-between px-3 py-2 rounded-xl text-left transition-all group",
-                  isSelected
-                    ? "bg-primary/5"
-                    : "hover:bg-muted"
-                )}
-              >
-                <div
-                  onClick={() => onToggle(skill.id)}
-                  className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer py-0.5"
-                >
-                  {/* Checkbox */}
-                  <div
-                    className={cn(
-                      "w-4 h-4 rounded border-[1.5px] flex items-center justify-center shrink-0 transition-all",
-                      isSelected
-                        ? "bg-primary border-primary"
-                        : isInstalled
-                          ? "bg-emerald-500/20 border-emerald-500/40"
-                          : "border-muted-foreground/30"
-                    )}
-                  >
-                    {(isSelected || (isInstalled && !isSelected)) && (
-                      <Check
-                        className={cn(
-                          "w-2.5 h-2.5",
-                          isSelected ? "text-white" : "text-emerald-500"
-                        )}
-                        strokeWidth={3}
-                      />
-                    )}
-                  </div>
-
-                  {/* Info */}
-                  <div className="flex-1 min-w-0 pr-4">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={cn(
-                          "text-[13px] font-medium truncate",
-                          isSelected ? "text-primary" : "text-foreground"
-                        )}
-                      >
-                        {skill.id}
-                      </span>
-                      {isInstalled && !isSelected && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 font-medium shrink-0">
-                          {t("githubImportModal.installed")}
-                        </span>
-                      )}
-                      {isSelected && isInstalled && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 font-medium shrink-0">
-                          {t("detailPanel.reinstall")}
-                        </span>
-                      )}
-                    </div>
-                    {skill.description && (
-                      <p className="text-xs text-muted-foreground truncate mt-0.5">
-                        {skill.description}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Right side actions */}
-                {isInstalled && (
-                  <Button
-                    variant={isSelected ? "secondary" : "ghost"}
-                    size="sm"
-                    className={cn(
-                      "h-7 text-[11px] px-2.5 transition-opacity whitespace-nowrap cursor-pointer",
-                      !isSelected && "opacity-0 group-hover:opacity-100"
-                    )}
-                    onClick={() => onToggle(skill.id)}
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                  </Button>
-                )}
-              </motion.div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Install bar */}
-      <div className="px-6 py-3.5 border-t border-border/60 flex items-center justify-between">
-        <span className="text-xs text-muted-foreground">
-          {t("githubImportModal.selected", { count: selectedSkills.size })}
-        </span>
-        <div className="flex items-center gap-2">
-          {/* Reinstall All button when every skill is already installed */}
-          {skills.every((s) => s.already_installed) && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                onSelectAll(skills.map((s) => s.id));
-              }}
-              className="text-xs px-3"
-            >
-              <RotateCcw className="w-3 h-3 mr-1.5" />
-              {t("githubImportModal.reinstallAll")}
-            </Button>
-          )}
-          <Button
-            size="sm"
-            onClick={() => onInstall(false)}
-            disabled={selectedSkills.size === 0}
-            className="px-5"
-          >
-            <Download className="w-3.5 h-3.5 mr-1.5" />
-            {t("githubImportModal.install")}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CompletedPhase({
-  count,
-  onDone,
-}: {
-  count: number;
-  onDone: () => void;
-}) {
-  const { t } = useTranslation();
-
-  return (
-    <div className="flex flex-col items-center justify-center py-14 gap-4 px-6">
-      <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 flex items-center justify-center">
-        <CheckCircle2 className="w-7 h-7 text-emerald-500" />
-      </div>
-      <div className="text-center space-y-1">
-        <h3 className="text-heading-sm">{t("githubImportModal.titleComplete")}</h3>
-        <p className="text-sm text-muted-foreground">
-          {t("githubImportModal.descComplete", { count })}
-        </p>
-      </div>
-      <div className="flex gap-2 mt-2">
-        <Button size="sm" onClick={onDone}>
-          {t("githubImportModal.done")}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function ErrorPhase({
-  message,
-  onRetry,
-}: {
-  message: string;
-  onRetry: () => void;
-}) {
-  const { t } = useTranslation();
-
-  return (
-    <div className="flex flex-col items-center justify-center py-14 gap-4 px-6">
-      <div className="w-14 h-14 rounded-2xl bg-amber-500/10 flex items-center justify-center">
-        <AlertTriangle className="w-7 h-7 text-amber-500" />
-      </div>
-      <div className="text-center space-y-1">
-        <h3 className="text-heading-sm">{t("githubImportModal.somethingWrong")}</h3>
-        <p className="text-sm text-muted-foreground max-w-xs">{message}</p>
-      </div>
-      <Button variant="ghost" size="sm" onClick={onRetry} className="mt-1">
-        <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
-        {t("githubImportModal.tryAgain")}
-      </Button>
-    </div>
-  );
-}
-
-// ── Share Code Preview Phase ─────────────────────────────────────
-
-function ShareCodePreviewPhase({
-  data,
-  error,
-  password,
-  onPasswordChange,
-  onRetryWithPassword,
-  onInstall,
-  onBack,
-}: {
-  data: ShareCodeData | null;
-  error: string;
-  password: string;
-  onPasswordChange: (v: string) => void;
-  onRetryWithPassword: (pw: string) => void;
-  onInstall: () => void;
-  onBack: () => void;
-}) {
-  const { t } = useTranslation();
-
-  // Error / needs password state
-  if (!data) {
-    return (
-      <div className="px-6 py-6 space-y-4">
-        <div className="flex flex-col items-center gap-3 py-2">
-          <div className="w-14 h-14 rounded-2xl bg-amber-500/10 flex items-center justify-center">
-            <KeyRound className="w-7 h-7 text-amber-500/80" />
-          </div>
-          <p className="text-sm text-destructive text-center">{error}</p>
-        </div>
-
-        {error.includes("password") && (
-          <div className="space-y-3">
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => onPasswordChange(e.target.value)}
-              placeholder={t("importShareCodeModal.passwordPlaceholder")}
-              className="w-full h-11 rounded-2xl border border-input bg-background/80 px-4 text-sm shadow-inner placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && password.trim()) onRetryWithPassword(password);
-              }}
-            />
-            <Button
-              className="w-full h-11 rounded-2xl"
-              onClick={() => onRetryWithPassword(password)}
-              disabled={!password.trim()}
-            >
-              {t("shareCodeImport.retryWithPassword")}
-            </Button>
-          </div>
-        )}
-
-        <Button variant="ghost" size="sm" onClick={onBack} className="w-full">
-          {t("common.back")}
-        </Button>
-      </div>
-    );
-  }
-
-  // Success: show skill preview
-  const hasEmbedded = data.s.some((s) => s.c);
-  const hasPrivate = data.s.some((s) => s.p);
-
-  return (
-    <div className="flex flex-col">
-      {/* Header info */}
-      <div className="px-6 pt-5 pb-3 space-y-3">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary/15 to-emerald-500/15 flex items-center justify-center text-lg">
-            {data.i || "\u2B50"}
-          </div>
-          <div className="flex-1 min-w-0">
-            <h3 className="text-sm font-semibold truncate">{data.n}</h3>
-            <p className="text-xs text-muted-foreground truncate">{data.d}</p>
-          </div>
-          <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded-md text-muted-foreground/80">
-            {data.s.length} skills
-          </span>
-        </div>
-
-        {hasEmbedded && (
-          <div className="flex items-start gap-2 text-xs text-primary bg-primary/5 border border-primary/20 rounded-lg px-2.5 py-2">
-            <Package className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-            <span>{t("importShareCodeModal.embeddedDesc")}</span>
-          </div>
-        )}
-
-        {hasPrivate && (
-          <div className="flex items-start gap-2 text-xs text-amber-600 bg-amber-500/5 border border-amber-500/20 rounded-lg px-2.5 py-2">
-            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-            <span>{t("importShareCodeModal.privateRepoDesc")}</span>
-          </div>
-        )}
-      </div>
-
-      {/* Skill list */}
-      <div className="px-6 pb-2 max-h-[35vh] overflow-y-auto">
-        <div className="space-y-0.5">
-          {data.s.map((skill) => (
-            <div
-              key={skill.n}
-              className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-muted transition-colors"
-            >
-              <div className="w-4 h-4 rounded border-[1.5px] bg-primary border-primary flex items-center justify-center">
-                <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <span className="text-[13px] font-medium">{skill.n}</span>
-                {skill.c && (
-                  <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 font-medium">
-                    embedded
-                  </span>
-                )}
-                {skill.p && (
-                  <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-500 font-medium">
-                    private
-                  </span>
-                )}
-              </div>
-              {skill.u && (
-                <GitBranch className="w-3 h-3 text-muted-foreground" />
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Actions */}
-      <div className="px-6 py-3.5 border-t border-border/60 flex items-center justify-between">
-        <Button variant="ghost" size="sm" onClick={onBack}>
-          {t("common.back")}
-        </Button>
-        <Button size="sm" onClick={onInstall} className="px-5">
-          <Download className="w-3.5 h-3.5 mr-1.5" />
-          {t("shareCodeImport.installSkills", { count: data.s.length })}
-        </Button>
-      </div>
-    </div>
-  );
-}

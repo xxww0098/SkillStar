@@ -216,6 +216,7 @@ pub fn create_project_skills(
                 .iter()
                 .find(|p| &p.id == id)
                 .map(|p| p.project_skills_rel.clone())
+                .filter(|rel| !rel.is_empty())
         })
         .collect();
 
@@ -281,7 +282,7 @@ pub fn resync_existing_links(skill_name: &str) -> Result<Vec<String>> {
     let profiles = cached_profiles();
     let mut linked_to = Vec::new();
 
-    for profile in profiles.iter().filter(|p| p.enabled) {
+    for profile in profiles.iter() {
         let target = profile.global_skills_dir.join(skill_name);
         // Only re-link if a symlink already exists (preserves user's assignment)
         if target.is_symlink() {

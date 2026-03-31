@@ -1,56 +1,70 @@
 # Changelog
 
-All notable changes to SkillStar will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/).
+All notable changes to SkillStar are listed here.
+Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-## [0.1.2] - 2026-03-30
+## [0.1.2] - 2026-03-31
+
+### Added
+- Security Scan page and backend pipeline (static + AI deep scan) with risk badges.
+- Full i18n (`i18next`) with English and Simplified Chinese locales.
+- Antigravity agent profile and icon support.
+- Local skill lifecycle (`create/edit/delete/migrate/graduate`) backed by `~/.agents/skills-local/`.
+- Background patrol task for update checks plus Settings/tray controls.
+- Treeless sparse clone install flow for large repos (with fallback).
+- Skill bundle import/export (`.ags`, `.agd`) with manifest and checksum.
+- Share code improvements (inline embed + human-readable wrapper + backward-compatible import).
+- Marketplace detail scraping and background description hydration cache.
+- Project agent auto-detection + shared-path disambiguation flow.
+- Streaming AI summary (`ai_summarize_skill_stream`) and reusable UI primitives (ResizablePanel, HScrollRow, AgentIcon, etc.).
 
 ### Changed
-- **AI Configuration**: Removed default `https://api.openai.com/v1` prefill for base URL. The input now uses a placeholder system and clears automatically when switching between OpenAI and Anthropic formats.
-- **Settings Version**: The About section now dynamically fetches the app version via Tauri's `getVersion()` API instead of displaying a hardcoded value.
+- Rust backend upgraded to Edition 2024.
+- Agent icon system unified and moved under `public/agents/`.
+- Settings restructured (background running controls, dynamic version display).
+- Repo update flow standardized to fetch/reset-style deterministic sync.
+- Update checks optimized with per-repo prefetch and bounded concurrency.
+- Window close behavior changed to hide-to-background.
 
 ### Fixed
-- **Publisher Detail missing skills**: Bypass the unreliable `search_skills_sh` API (which limits to 100 or drops specific repositories) when viewing a repo. Now uses the already-embedded skills list from the Next.js SSR payload attached to publishers, and falls back to a new `get_publisher_repo_skills` endpoint to scrape directly from `skills.sh/<publisher>/<repo>`.
-- **AI Provider**: Backend HTTP client now securely falls back to official OpenAI or Anthropic API endpoints when the user leaves the `base_url` configuration empty.
+- CLI argument mismatch compilation issue.
+- UTF-8 unsafe string slicing and AI response parsing robustness.
+- Atomic cache writes for marketplace description cache.
+- Publisher detail missing skills/repo data fallback behavior.
+- Shallow clone update loop causing perpetual "Update Available".
+- Broken symlink detection and uninstall cleanup reliability.
+- Modal overflow behavior for long content.
+
+### Removed
+- Legacy `test_parse` artifact.
+- Deprecated tracked scripts (`run-build.sh`, `run-dev.sh`) from version control.
+- Large `public/demo.mp4` file.
+- `DEVELOPMENT.md` (merged into `AGENTS.md`).
 
 ## [0.1.1] - 2026-03-30
 
-### Fixed
-- **Publisher Detail missing repos**: parse complete repo list from `skills.sh/official` SSR payload instead of the per-publisher page, which omits low-traffic repos (e.g. GitHub showing 5 repos but only listing 3)
-- **Marketplace tab lost on back**: preserve the active Marketplace category tab (Hot/Trending/Official etc.) when returning from Publisher Detail
-- **Cross-platform git/gh discovery**: extract PATH enrichment into a shared `path_env.rs` module with platform-specific paths (macOS Homebrew, Linux snap/local, Windows Program Files/Scoop); apply to all 12 `Command::new("git"/"gh")` call sites across `gh_manager.rs`, `git_ops.rs`, and `repo_scanner.rs`
+### Added
+- `get_publisher_repos` command with SSR-first parsing strategy.
+- Repo parsing helper and unit tests for publisher extraction.
+- Additional `.gitignore` entries for caches/artifacts.
 
 ### Changed
-- Rebranded project from AgentHub to `SkillStar` across all documentation and project config
-- Renamed "Skill Groups" to "Decks" in conceptual models to align with card-based UI
-- Updated `agenthub` CLI references to `skillstar`
-- Appended standard Commit conventions and definitions to `AGENTS.md`
+- Project rebranded from AgentHub to SkillStar.
+- Concept renamed from "Skill Groups" to "Decks".
+- CLI naming updated from `agenthub` to `skillstar`.
 
-### Added
-- `get_publisher_repos` backend command with two-phase strategy: official SSR payload first, per-publisher page scraping as fallback
-- `parse_publisher_repos_from_official_payload` for extracting publisher repos from Next.js SSR JSON data
-- `format_installs_label` helper to format numeric install counts as human-readable labels (`2.4M`, `100.0K`)
-- Unit test for publisher repos SSR payload parsing
-- Missing `.gitignore` entries for local cache (`.agents/`) and testing artifacts (`proofshot-artifacts/`)
+### Fixed
+- Publisher detail repo list incompleteness.
+- Marketplace tab state reset when navigating back.
+- Cross-platform PATH enrichment for `git`/`gh` command discovery.
 
 ## [0.1.0] - 2026-03-29
 
 ### Added
-
-- **My Skills** page: install, update, uninstall local skills with tree-hash change detection
-- **Marketplace** page: browse skills from GitHub, search, filter by All/Trending/Hot/Official
-- **Decks**: create and manage decks for quick project setup
-- **Publisher Detail**: drill-down view for official publisher skill collections
-- **Settings**: agent connection management, proxy config, dependency status
-- **Batch operations**: select multiple skills for batch install/uninstall
-- **Detail panel**: right slide-out with skill info, README preview, install action
-- **CLI + GUI dual mode**: same binary works as terminal commands and desktop app
-- **Provider support**: Claude Code, Codex CLI, Gemini CLI, Cursor, Windsurf, Aider
-- **Symlink sync**: share skills across providers via OS symlinks
-- **Marketplace**: GitHub API integration with stars-based ranking and categorization
-- **Zero system dependency**: pure Rust Git (gix/gitoxide), no `git` CLI required
-- **Toast notifications**: install/uninstall feedback with animated status indicators
-- **Slogan**: "less is more" displayed in sidebar branding
+- Core pages: My Skills, Marketplace, Decks, Publisher Detail, Settings.
+- Local skill install/update/uninstall and batch operations.
+- Project-level symlink sync across supported providers.
+- CLI + GUI dual-mode runtime in one binary.
+- Right-side detail panel, toasts, and base desktop UX skeleton.

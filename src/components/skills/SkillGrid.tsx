@@ -4,7 +4,7 @@ import { Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { SkillCard } from "./SkillCard";
 import { EmptyState } from "../ui/EmptyState";
-import type { AgentProfile, Skill, ViewMode } from "../../types";
+import type { AgentProfile, RiskLevel, Skill, ViewMode } from "../../types";
 import { cn } from "../../lib/utils";
 
 const PAGE_SIZE = 30;
@@ -75,8 +75,12 @@ interface SkillGridProps {
   onToggleAgent?: (skillName: string, agentId: string, enable: boolean, agentName?: string) => void;
   /** Set of skill names currently being installed */
   installingNames?: Set<string>;
+  /** Set of skill names currently being updated */
+  pendingUpdateNames?: Set<string>;
   /** Set of toggle keys currently in-flight: `${skillName}::${agentId}` */
   pendingAgentToggleKeys?: Set<string>;
+  /** Security scan risk map: skill_name → RiskLevel */
+  riskMap?: Record<string, RiskLevel>;
 }
 
 export function SkillGrid({
@@ -93,7 +97,9 @@ export function SkillGrid({
   profiles,
   onToggleAgent,
   installingNames,
+  pendingUpdateNames,
   pendingAgentToggleKeys,
+  riskMap,
 }: SkillGridProps) {
   const { t } = useTranslation();
   const [visibleCount, setVisibleCount] = useState(() => getInitialVisibleCount(skills.length));
@@ -176,6 +182,8 @@ export function SkillGrid({
                 onToggleAgent={onToggleAgent}
                 pendingAgentToggleKeys={pendingAgentToggleKeys}
                 installing={installingNames?.has(skill.name)}
+                updating={pendingUpdateNames?.has(skill.name)}
+                riskLevel={riskMap?.[skill.name]}
                 noAnimate
               />
             </motion.div>
@@ -203,6 +211,8 @@ export function SkillGrid({
                 onToggleAgent={onToggleAgent}
                 pendingAgentToggleKeys={pendingAgentToggleKeys}
                 installing={installingNames?.has(skill.name)}
+                updating={pendingUpdateNames?.has(skill.name)}
+                riskLevel={riskMap?.[skill.name]}
                 noAnimate
               />
             </motion.div>

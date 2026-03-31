@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "../../components/ui/button";
-import { parseShareCode } from "../../lib/shareCode";
+import { parseShareCode, extractShareCode } from "../../lib/shareCode";
 import { Download, KeyRound, Loader2, X, Lock, Info } from "lucide-react";
 
 interface ImportShareCodeModalProps {
@@ -15,7 +15,7 @@ interface ImportShareCodeModalProps {
     icon: string,
     skills: string[],
     sources: Record<string, string>
-  ) => Promise<any>;
+  ) => Promise<void>;
 }
 
 export function ImportShareCodeModal({
@@ -24,6 +24,7 @@ export function ImportShareCodeModal({
   onImport,
 }: ImportShareCodeModalProps) {
   const { t } = useTranslation();
+  const prefersReducedMotion = useReducedMotion();
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -44,23 +45,25 @@ export function ImportShareCodeModal({
     setLoading(true);
     setError(null);
     try {
-      const { data } = await parseShareCode(code, password);
+      // Extract raw share code from formatted message or use as-is
+      const rawCode = extractShareCode(code);
+      const { data: sharePayload } = await parseShareCode(rawCode);
 
-      const skillNames = data.s.map((s) => s.n);
+      const skillNames = sharePayload.s.map((skillEntry) => skillEntry.n);
       const sources: Record<string, string> = {};
       const embeddedSkills: string[] = [];
       const privateSkills: string[] = [];
 
-      for (const s of data.s) {
-        if (s.u) {
-          sources[s.n] = s.u;
+      for (const skillEntry of sharePayload.s) {
+        if (skillEntry.u) {
+          sources[skillEntry.n] = skillEntry.u;
         }
 
         // Handle inline embedded content
-        if (s.c && !s.u) {
+        if (skillEntry.c && !skillEntry.u) {
           try {
             // Decode base64 content
-            const binaryStr = atob(s.c);
+            const binaryStr = atob(skillEntry.c);
             const bytes = new Uint8Array(binaryStr.length);
             for (let i = 0; i < binaryStr.length; i++) {
               bytes[i] = binaryStr.charCodeAt(i);
@@ -69,28 +72,28 @@ export function ImportShareCodeModal({
 
             // Write the skill to local hub via Tauri command
             await invoke("create_local_skill_from_content", {
-              name: s.n,
+              name: skillEntry.n,
               content,
             });
-            embeddedSkills.push(s.n);
+            embeddedSkills.push(skillEntry.n);
           } catch (e) {
-            console.warn(`Failed to create embedded skill ${s.n}:`, e);
+            console.warn(`Failed to create embedded skill ${skillEntry.n}:`, e);
             // Still add it to the group, just won't have content
           }
         }
 
         // Track private repo warnings
-        if (s.p) {
-          privateSkills.push(s.n);
+        if (skillEntry.p) {
+          privateSkills.push(skillEntry.n);
         }
       }
 
       // If there are warnings, show preview; otherwise import directly
       if (privateSkills.length > 0 || embeddedSkills.length > 0) {
         setPreview({
-          name: data.n,
-          desc: data.d,
-          icon: data.i,
+          name: sharePayload.n,
+          desc: sharePayload.d,
+          icon: sharePayload.i,
           skills: skillNames,
           sources,
           embeddedSkills,
@@ -98,11 +101,11 @@ export function ImportShareCodeModal({
         });
         setLoading(false);
       } else {
-        await onImport(data.n, data.d, data.i, skillNames, sources);
+        await onImport(sharePayload.n, sharePayload.d, sharePayload.i, skillNames, sources);
         resetAndClose();
       }
-    } catch (e: any) {
-      setError(e.message || t("importShareCodeModal.parseError"));
+    } catch (e: unknown) {
+      setError(typeof e === 'object' && e !== null && 'message' in e ? String((e as {message?: string}).message) : t("importShareCodeModal.parseError"));
       setLoading(false);
     }
   };
@@ -119,8 +122,8 @@ export function ImportShareCodeModal({
         preview.sources
       );
       resetAndClose();
-    } catch (e: any) {
-      setError(e.message || t("importShareCodeModal.importError"));
+    } catch (e: unknown) {
+      setError(typeof e === 'object' && e !== null && 'message' in e ? String((e as {message?: string}).message) : t("importShareCodeModal.importError"));
       setLoading(false);
     }
   };
@@ -141,7 +144,7 @@ export function ImportShareCodeModal({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
+            transition={{ duration: prefersReducedMotion ? 0.01 : 0.15 }}
             className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm"
             onClick={resetAndClose}
           />
@@ -150,13 +153,13 @@ export function ImportShareCodeModal({
             initial={{ opacity: 0, scale: 0.96, y: 12 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 12 }}
-            transition={{ type: "spring", bounce: 0.1, duration: 0.35 }}
+            transition={{ duration: prefersReducedMotion ? 0.01 : 0.3, ease: [0.16, 1, 0.3, 1] }}
             className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm z-50"
           >
-            <div className="relative overflow-hidden rounded-[24px] border border-white/10 bg-card/95 shadow-[0_0_80px_-20px_rgba(0,0,0,0.5)] backdrop-blur-3xl ring-1 ring-white/5">
+            <div role="dialog" aria-modal="true" aria-label={preview ? t("importShareCodeModal.confirmImport") : t("importShareCodeModal.importGroup")} className="relative overflow-hidden rounded-[24px] border border-white/10 bg-card/95 shadow-[0_0_80px_-20px_rgba(0,0,0,0.5)] backdrop-blur-3xl ring-1 ring-white/5">
               {/* Top ambient glow */}
               <div className="pointer-events-none absolute -left-20 -top-20 h-48 w-48 rounded-full bg-primary/20 blur-[60px] opacity-70" />
-              <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-blue-500/10 blur-[60px] opacity-70" />
+              <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-accent/10 blur-[60px] opacity-70" />
               <div className="relative z-10">
               <div className="flex items-center justify-between px-6 pt-4 shrink-0">
                 <h2 className="text-heading-sm">
@@ -164,6 +167,7 @@ export function ImportShareCodeModal({
                 </h2>
                 <button
                   onClick={resetAndClose}
+                  aria-label={t("common.close")}
                   className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors cursor-pointer"
                 >
                   <X className="w-4 h-4" />
@@ -182,8 +186,8 @@ export function ImportShareCodeModal({
                       <textarea
                         value={code}
                         onChange={(e) => setCode(e.target.value)}
-                        placeholder={t("importShareCodeModal.shareCodePlaceholder")}
-                        className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-h-[80px] resize-y"
+                      placeholder={t("importShareCodeModal.shareCodePlaceholder")}
+                        className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-h-[100px] resize-y font-mono"
                       />
                     </div>
 
@@ -257,17 +261,17 @@ export function ImportShareCodeModal({
                             <Info className="w-3.5 h-3.5" />
                             {t("importShareCodeModal.embeddedCreated")}
                           </p>
-                        <div className="flex flex-wrap gap-1">
+                        <div className="flex flex-wrap gap-1 max-h-[120px] overflow-y-auto pr-1">
                           {preview.embeddedSkills.map((name) => (
                             <span
                               key={name}
-                              className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium"
+                              className="text-micro px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium"
                             >
                               {name}
                             </span>
                           ))}
                         </div>
-                        <p className="text-[11px] text-muted-foreground">
+                        <p className="text-micro text-muted-foreground">
                           {t("importShareCodeModal.embeddedDesc")}
                         </p>
                       </div>
@@ -280,17 +284,17 @@ export function ImportShareCodeModal({
                             <Lock className="w-3.5 h-3.5" />
                             {t("importShareCodeModal.privateRepoWarning")}
                           </p>
-                        <div className="flex flex-wrap gap-1">
+                        <div className="flex flex-wrap gap-1 max-h-[120px] overflow-y-auto pr-1">
                           {preview.privateSkills.map((name) => (
                             <span
                               key={name}
-                              className="text-[10px] px-1.5 py-0.5 rounded bg-warning/10 text-warning font-medium"
+                              className="text-micro px-1.5 py-0.5 rounded bg-warning/10 text-warning font-medium"
                             >
                               {name}
                             </span>
                           ))}
                         </div>
-                        <p className="text-[11px] text-muted-foreground">
+                        <p className="text-micro text-muted-foreground">
                           {t("importShareCodeModal.privateRepoDesc")}
                         </p>
                       </div>

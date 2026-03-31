@@ -49,10 +49,10 @@ export function UninstallConfirmDialog({
             }}
             className="fixed left-1/2 top-1/2 w-full max-w-md -translate-x-1/2 -translate-y-1/2 z-50 px-4"
           >
-            <div className="relative overflow-hidden rounded-[24px] border border-white/10 bg-card/95 shadow-[0_0_80px_-20px_rgba(0,0,0,0.5)] backdrop-blur-3xl ring-1 ring-white/5">
+            <div role="alertdialog" aria-modal="true" aria-label={isBatch ? t("uninstallDialog.title", { count: skillNames.length }) : t("uninstallDialog.titleSingle")} className="relative overflow-hidden rounded-[24px] border border-white/10 bg-card/95 shadow-[0_0_80px_-20px_rgba(0,0,0,0.5)] backdrop-blur-3xl ring-1 ring-white/5">
               {/* Top ambient glow */}
               <div className="pointer-events-none absolute -left-20 -top-20 h-48 w-48 rounded-full bg-primary/20 blur-[60px] opacity-70" />
-              <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-blue-500/10 blur-[60px] opacity-70" />
+              <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-accent/10 blur-[60px] opacity-70" />
               <div className="relative z-10">
               <div className="flex items-start justify-between gap-4 px-6 pt-5">
                 <div className="flex items-start gap-3">
@@ -80,6 +80,7 @@ export function UninstallConfirmDialog({
                 <button
                   onClick={onClose}
                   disabled={uninstalling}
+                  aria-label={t("common.close")}
                   className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <X className="h-4 w-4" />
@@ -88,7 +89,7 @@ export function UninstallConfirmDialog({
 
               <div className="px-6 py-4 space-y-4">
                 <div className="rounded-2xl border border-border/70 bg-muted/40 px-3 py-3">
-                  <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                  <div className="mb-2 flex items-center gap-2 text-micro uppercase tracking-[0.18em] text-muted-foreground">
                     <Trash2 className="h-3.5 w-3.5" />
                     {t("uninstallDialog.removing")}
                   </div>

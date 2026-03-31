@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "../ui/button";
@@ -43,6 +43,7 @@ export function PublishSkillModal({
   onPublished,
 }: PublishSkillModalProps) {
   const { t } = useTranslation();
+  const prefersReducedMotion = useReducedMotion();
   const [phase, setPhase] = useState<Phase>("checking");
   const [ghStatus, setGhStatus] = useState<GhStatus | null>(null);
 
@@ -75,7 +76,7 @@ export function PublishSkillModal({
       setGhStatus(status);
       if (status.status === "Ready") {
         setPhase("pick-repo");
-        loadRepos();
+        loadUserRepos();
       } else {
         setPhase("setup");
       }
@@ -85,12 +86,12 @@ export function PublishSkillModal({
     }
   }, []);
 
-  const loadRepos = async () => {
+  const loadUserRepos = async () => {
     setLoadingRepos(true);
     setError(null);
     try {
-      const list = await invoke<UserRepo[]>("list_user_repos", { limit: 50 });
-      setRepos(list);
+      const userRepos = await invoke<UserRepo[]>("list_user_repos", { limit: 50 });
+      setRepos(userRepos);
     } catch (e) {
       console.warn("Failed to load repos", e);
       setRepos([]);
@@ -149,7 +150,7 @@ export function PublishSkillModal({
     setPhase("publishing");
     setError(null);
     try {
-      const res = await invoke<PublishResult>("publish_skill_to_github", {
+      const publishResult = await invoke<PublishResult>("publish_skill_to_github", {
         skillName,
         repoName: createNew ? newRepoName : (selectedRepo?.full_name.split("/")[1] || "my-skills"),
         description: createNew ? newRepoDesc : (selectedRepo?.description || ""),
@@ -157,9 +158,9 @@ export function PublishSkillModal({
         existingRepoUrl: createNew ? null : (selectedRepo?.url + ".git"),
         folderName,
       });
-      setResult(res);
+      setResult(publishResult);
       setPhase("done");
-      onPublished?.(res.git_url);
+      onPublished?.(publishResult.git_url);
     } catch (e) {
       setError(String(e));
       setPhase("form");
@@ -184,10 +185,10 @@ export function PublishSkillModal({
   };
 
   const filteredRepos = repos.filter(
-    (r) =>
+    (repo) =>
       !repoSearch ||
-      r.full_name.toLowerCase().includes(repoSearch.toLowerCase()) ||
-      r.description.toLowerCase().includes(repoSearch.toLowerCase())
+      repo.full_name.toLowerCase().includes(repoSearch.toLowerCase()) ||
+      repo.description.toLowerCase().includes(repoSearch.toLowerCase())
   );
 
   return (
@@ -198,7 +199,7 @@ export function PublishSkillModal({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
+            transition={{ duration: prefersReducedMotion ? 0.01 : 0.15 }}
             className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm"
             onClick={handleClose}
           />
@@ -207,15 +208,15 @@ export function PublishSkillModal({
             initial={{ opacity: 0, scale: 0.96, y: 12 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 12 }}
-            transition={{ type: "spring", bounce: 0.1, duration: 0.35 }}
-            className={`fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 transition-all duration-300 ease-in-out w-full flex flex-col ${
+            transition={{ duration: prefersReducedMotion ? 0.01 : 0.3, ease: [0.16, 1, 0.3, 1] }}
+            className={`fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 transition duration-300 ease-in-out w-full flex flex-col ${
               phase === "form" ? "max-w-[760px] h-[580px]" : "max-w-md h-auto"
             }`}
           >
-            <div className="relative overflow-hidden rounded-[24px] border border-white/10 bg-card/95 shadow-[0_0_80px_-20px_rgba(0,0,0,0.5)] backdrop-blur-3xl ring-1 ring-white/5 flex-1 flex flex-col min-h-0">
+            <div role="dialog" aria-modal="true" aria-label={t("publishModal.title")} className="relative overflow-hidden rounded-[24px] border border-white/10 bg-card/95 shadow-[0_0_80px_-20px_rgba(0,0,0,0.5)] backdrop-blur-3xl ring-1 ring-white/5 flex-1 flex flex-col min-h-0">
               {/* Top ambient glow */}
               <div className="pointer-events-none absolute -left-20 -top-20 h-48 w-48 rounded-full bg-primary/20 blur-[60px] opacity-70" />
-              <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-blue-500/10 blur-[60px] opacity-70" />
+              <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-accent/10 blur-[60px] opacity-70" />
               <div className="relative z-10 flex flex-col flex-1 h-full min-h-0">
               {/* Header */}
               <div className="flex items-center justify-between px-6 pt-4 shrink-0">
@@ -225,6 +226,7 @@ export function PublishSkillModal({
                 </h2>
                 <button
                   onClick={handleClose}
+                  aria-label={t("common.close")}
                   className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors cursor-pointer"
                 >
                   <X className="w-4 h-4" />
@@ -261,7 +263,7 @@ export function PublishSkillModal({
                         <div className="bg-muted rounded-lg px-3 py-2 font-mono text-xs text-foreground/80 flex items-center gap-2">
                           <Terminal className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                           <code className="flex-1 select-all">brew install gh</code>
-                          <button onClick={() => handleCopy("brew install gh")} className="p-1 rounded hover:bg-card-hover text-muted-foreground cursor-pointer">
+                          <button onClick={() => handleCopy("brew install gh")} className="p-1.5 rounded hover:bg-card-hover text-muted-foreground cursor-pointer focus-ring">
                             {copied ? <Check className="w-3 h-3 text-success" /> : <Copy className="w-3 h-3" />}
                           </button>
                         </div>
@@ -282,7 +284,7 @@ export function PublishSkillModal({
                         <div className="bg-muted rounded-lg px-3 py-2 font-mono text-xs text-foreground/80 flex items-center gap-2">
                           <Terminal className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                           <code className="flex-1 select-all">gh auth login</code>
-                          <button onClick={() => handleCopy("gh auth login")} className="p-1 rounded hover:bg-card-hover text-muted-foreground cursor-pointer">
+                          <button onClick={() => handleCopy("gh auth login")} className="p-1.5 rounded hover:bg-card-hover text-muted-foreground cursor-pointer focus-ring">
                             {copied ? <Check className="w-3 h-3 text-success" /> : <Copy className="w-3 h-3" />}
                           </button>
                         </div>
@@ -308,14 +310,14 @@ export function PublishSkillModal({
                     {/* Create new button */}
                     <button
                       onClick={startCreateNew}
-                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border border-dashed border-primary/30 hover:bg-primary/5 hover:border-primary/50 transition-all cursor-pointer group"
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border border-dashed border-primary/30 hover:bg-primary/5 hover:border-primary/50 transition cursor-pointer group"
                     >
                       <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/15 transition-colors">
                         <Plus className="w-4 h-4 text-primary" />
                       </div>
                       <div className="text-left">
                         <p className="text-sm font-medium text-primary">{t("publishModal.createNewRepo")}</p>
-                        <p className="text-[11px] text-muted-foreground">{t("publishModal.createNewRepoDesc")}</p>
+                        <p className="text-micro text-muted-foreground">{t("publishModal.createNewRepoDesc")}</p>
                       </div>
                     </button>
 
@@ -360,7 +362,7 @@ export function PublishSkillModal({
                                 )}
                               </div>
                               {repo.description && (
-                                <p className="text-[10px] text-muted-foreground truncate">{repo.description}</p>
+                                <p className="text-micro text-muted-foreground truncate">{repo.description}</p>
                               )}
                             </div>
                             <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/30 group-hover:text-muted-foreground/60 shrink-0" />
@@ -389,14 +391,14 @@ export function PublishSkillModal({
                           <div className="min-w-0 flex-1">
                             <p className="text-xs font-medium truncate">{selectedRepo.full_name}</p>
                             {repoFolders.length > 0 && (
-                              <p className="text-[10px] text-muted-foreground">
+                              <p className="text-micro text-muted-foreground">
                                 {t("publishModal.existingSubdirs", { count: repoFolders.length })}
                               </p>
                             )}
                           </div>
                           <button
                             onClick={() => { setPhase("pick-repo"); setSelectedRepo(null); }}
-                            className="text-[10px] text-primary hover:underline cursor-pointer shrink-0"
+                            className="text-micro text-primary hover:underline cursor-pointer shrink-0 px-2 py-1 rounded focus-ring"
                           >
                             {t("publishModal.change")}
                           </button>
@@ -424,13 +426,16 @@ export function PublishSkillModal({
                               rows={3}
                               className="flex min-h-[72px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y custom-scrollbar"
                             />
+                            <p className="text-micro text-muted-foreground">
+                              {t("publishModal.descriptionHint")}
+                            </p>
                           </div>
                           <div className="space-y-2">
                             <label className="text-sm font-medium">{t("publishModal.visibility")}</label>
                             <div className="flex gap-2">
                               <button
                                 onClick={() => setIsPublic(true)}
-                                className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-all cursor-pointer ${
+                                className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition cursor-pointer ${
                                   isPublic ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted text-muted-foreground"
                                 }`}
                               >
@@ -438,7 +443,7 @@ export function PublishSkillModal({
                               </button>
                               <button
                                 onClick={() => setIsPublic(false)}
-                                className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-all cursor-pointer ${
+                                className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition cursor-pointer ${
                                   !isPublic ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted text-muted-foreground"
                                 }`}
                               >
@@ -458,7 +463,7 @@ export function PublishSkillModal({
                           placeholder={skillName}
                           className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                         />
-                        <p className="text-[11px] text-muted-foreground">
+                        <p className="text-micro text-muted-foreground">
                           {t("publishModal.folderHint")}
                         </p>
                       </div>
@@ -475,7 +480,7 @@ export function PublishSkillModal({
                       <div className="flex items-center gap-1.5 text-sm font-medium text-foreground mb-3 shrink-0">
                         {t("publishModal.structurePreview")}
                       </div>
-                      <div className="rounded-xl border border-border/80 bg-muted/20 p-4 font-mono text-[12px] text-foreground/80 space-y-1 shadow-sm overflow-y-auto flex-1 min-h-0 custom-scrollbar">
+                      <div className="rounded-xl border border-border/80 bg-muted/20 p-4 font-mono text-caption text-foreground/80 space-y-1 shadow-sm overflow-y-auto flex-1 min-h-0 custom-scrollbar">
                         <div className="flex items-center gap-1.5 font-semibold text-foreground">
                           <FolderOpen className="w-4 h-4 text-primary/80" />
                           <span>{createNew ? newRepoName || "my-skills" : selectedRepo?.full_name.split("/")[1] || "repo"}/</span>
@@ -491,7 +496,7 @@ export function PublishSkillModal({
                         <div className="flex items-center gap-1.5 pl-5 text-primary font-medium py-1 bg-primary/10 -mx-2 px-2 rounded-md my-0.5">
                           <FolderOpen className="w-3.5 h-3.5" />
                           <span>{folderName || skillName}/</span>
-                          <span className="text-[9.5px] bg-primary/15 text-primary px-1.5 py-0.5 rounded-sm font-normal ml-auto uppercase tracking-wide">
+                          <span className="text-micro bg-primary/15 text-primary px-1.5 py-0.5 rounded-sm font-normal ml-auto uppercase tracking-wide">
                             {repoFolders.includes(folderName) ? t("publishModal.updateLabel") : t("publishModal.newLabel")}
                           </span>
                         </div>
@@ -555,7 +560,7 @@ export function PublishSkillModal({
                       </code>
                       <button
                         onClick={() => handleCopy(result.url)}
-                        className="p-1 rounded hover:bg-card-hover text-muted-foreground cursor-pointer"
+                        className="p-1.5 rounded hover:bg-card-hover text-muted-foreground cursor-pointer focus-ring"
                       >
                         {copied ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
                       </button>
