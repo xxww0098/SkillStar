@@ -125,13 +125,20 @@ function useSkillsState() {
   }, [refresh]);
 
   useEffect(() => {
+    let unlistenTauri: UnlistenFn | null = null;
     const handleExternalRefresh = () => {
       void refresh(true, true);
     };
 
     window.addEventListener("skillstar:refresh-skills", handleExternalRefresh);
+    
+    listen("ai://translations-updated", handleExternalRefresh).then((unlistenFn) => {
+      unlistenTauri = unlistenFn;
+    });
+
     return () => {
       window.removeEventListener("skillstar:refresh-skills", handleExternalRefresh);
+      unlistenTauri?.();
     };
   }, [refresh]);
 
@@ -279,6 +286,29 @@ function useSkillsState() {
     [queryClient, refresh],
   );
 
+  const batchRemoveSkillsFromAllAgents = useCallback(
+    async (skillNames: string[]) => {
+      try {
+        await invoke("batch_remove_skills_from_all_agents", { skillNames });
+        await refresh(true, true);
+      } catch (e) {
+        throw new Error(String(e));
+      }
+    },
+    [refresh],
+  );
+
+  const batchAiProcessSkills = useCallback(
+    async (skillNames: string[]) => {
+      try {
+        await invoke("ai_batch_process_skills", { skillNames });
+      } catch (e) {
+        throw new Error(String(e));
+      }
+    },
+    [],
+  );
+
   const readSkillContent = useCallback(async (name: string) => {
     try {
       return await invoke<SkillContent>("read_skill_content", { name });
@@ -335,11 +365,13 @@ function useSkillsState() {
     uninstallSkill,
     updateSkill,
     toggleSkillForAgent,
+    batchRemoveSkillsFromAllAgents,
     pendingAgentToggleKeys,
     readSkillContent,
     updateSkillContent,
     createLocalSkill,
     deleteLocalSkill,
+    batchAiProcessSkills,
   };
 }
 

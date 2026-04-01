@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
+use tracing::{debug, error, warn};
 
 const AI_MAX_TOKENS: u32 = 196_608;
 const SHORT_TEXT_MAX_TOKENS: u32 = 1024;
@@ -313,19 +314,21 @@ pub fn load_config() -> AiConfig {
                 config
             }
             Err(err) => {
-                eprintln!(
-                    "[ai_provider] Failed to parse AI config '{}': {}. Falling back to defaults.",
-                    path.display(),
-                    err
+                warn!(
+                    target: "ai_provider",
+                    path = %path.display(),
+                    error = %err,
+                    "failed to parse AI config, using defaults"
                 );
                 AiConfig::default()
             }
         },
         Err(err) => {
-            eprintln!(
-                "[ai_provider] Failed to read AI config '{}': {}. Falling back to defaults.",
-                path.display(),
-                err
+            warn!(
+                target: "ai_provider",
+                path = %path.display(),
+                error = %err,
+                "failed to read AI config, using defaults"
             );
             AiConfig::default()
         }
@@ -351,7 +354,7 @@ pub async fn load_config_async() -> AiConfig {
     tokio::task::spawn_blocking(load_config)
         .await
         .unwrap_or_else(|err| {
-            eprintln!("[ai_provider] load_config task failed: {}", err);
+            error!(target: "ai_provider", error = %err, "load_config task failed");
             AiConfig::default()
         })
 }
@@ -802,10 +805,10 @@ async fn openai_chat_completion_with_opts(
         .context("Failed to read AI response body")?;
 
     if !status.is_success() {
-        eprintln!(
-            "[ai_provider] AI API returned {} — {}",
-            status,
-            &body_text[..body_text.len().min(500)]
+        error!(
+            target: "ai_provider",
+            status = %status,
+            "AI API error"
         );
         anyhow::bail!("AI API returned {} — {}", status, body_text);
     }
@@ -813,10 +816,10 @@ async fn openai_chat_completion_with_opts(
     let chat_resp: ChatResponse = match serde_json::from_str(&body_text) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!(
-                "[ai_provider] Failed to parse AI response ({}). Raw body (first 500 chars): {}",
-                e,
-                &body_text[..body_text.len().min(500)]
+            error!(
+                target: "ai_provider",
+                error = %e,
+                "failed to parse AI response"
             );
             anyhow::bail!("Failed to parse AI response: {}", e);
         }
@@ -831,9 +834,9 @@ async fn openai_chat_completion_with_opts(
     match content {
         Some(c) if !c.trim().is_empty() => Ok(c),
         _ => {
-            eprintln!(
-                "[ai_provider] AI returned empty/null content. Raw body (first 500 chars): {}",
-                &body_text[..body_text.len().min(500)]
+            warn!(
+                target: "ai_provider",
+                "AI returned empty/null content"
             );
             anyhow::bail!("AI returned empty response");
         }
@@ -1473,7 +1476,7 @@ fn lock_mymemory_usage() -> MutexGuard<'static, ()> {
     match MYMEMORY_USAGE_LOCK.lock() {
         Ok(guard) => guard,
         Err(poisoned) => {
-            eprintln!("[mymemory] usage lock poisoned; continuing with recovered state");
+            warn!(target: "mymemory", "usage lock poisoned, continuing with recovered state");
             poisoned.into_inner()
         }
     }
@@ -1520,7 +1523,7 @@ async fn get_mymemory_de_async() -> String {
     tokio::task::spawn_blocking(get_mymemory_de)
         .await
         .unwrap_or_else(|err| {
-            eprintln!("[mymemory] get_mymemory_de task failed: {}", err);
+            error!(target: "mymemory", error = %err, "get_mymemory_de task failed");
             String::new()
         })
 }
@@ -1532,7 +1535,7 @@ async fn record_mymemory_sent_chars_async(chars_sent: usize) {
     if let Err(err) =
         tokio::task::spawn_blocking(move || record_mymemory_sent_chars(chars_sent)).await
     {
-        eprintln!("[mymemory] record_mymemory_sent_chars task failed: {}", err);
+        error!(target: "mymemory", error = %err, "record_mymemory_sent_chars task failed");
     }
 }
 
@@ -1541,7 +1544,7 @@ pub async fn get_mymemory_usage_stats_async() -> MymemoryUsageStats {
     tokio::task::spawn_blocking(get_mymemory_usage_stats)
         .await
         .unwrap_or_else(|err| {
-            eprintln!("[mymemory] get_mymemory_usage_stats task failed: {}", err);
+            error!(target: "mymemory", error = %err, "get_mymemory_usage_stats task failed");
             MymemoryUsageStats::default()
         })
 }
@@ -1599,24 +1602,61 @@ async fn mymemory_call(
         anyhow::bail!("MyMemory returned empty translation");
     }
 
+    if translated.contains("PLEASE SELECT TWO DISTINCT LANGUAGES")
+        || translated.contains("MYMEMORY WARNING:")
+        || translated.contains("LIMIT EXCEEDED")
+    {
+        anyhow::bail!("MyMemory returned API warning: {}", translated);
+    }
+
     Ok(translated.to_string())
 }
 
 async fn mymemory_translate_short_text(config: &AiConfig, text: &str) -> Result<String> {
-    let client = get_http_client()?;
+    if text.trim().is_empty() {
+        return Ok(String::new());
+    }
+
+    let source_lang = detect_short_text_source_lang(text);
+    let normalized_source = normalize_mymemory_lang(source_lang);
     let target = normalize_mymemory_lang(&config.target_language);
-    let langpair = format!("autodetect|{target}");
+    debug!(
+        target: "translate",
+        src = %source_lang,
+        pair = %format!("{normalized_source}|{target}"),
+        text_len = text.len(),
+        "mymemory ENTER"
+    );
+
+    if normalized_source == target {
+        debug!(target: "translate", "mymemory SKIP same-language");
+        return Ok(text.to_string());
+    }
+
+    let client = get_http_client()?;
+    let langpair = format!("{}|{}", normalized_source, target);
     let de = get_mymemory_de_async().await;
     let de_param = (!de.trim().is_empty()).then_some(de);
 
-    // 1) Try with de (per-email quota)
-    match mymemory_call(&client, text, &langpair, de_param.as_deref()).await {
-        Ok(result) => return Ok(result),
-        Err(e) => eprintln!("[myemory] de request failed, retrying anonymous: {e}"),
-    }
+    // 1) Parse Markdown to HTML so MyMemory properly preserves the structural tags
+    let parser = pulldown_cmark::Parser::new(text);
+    let mut html_input = String::new();
+    pulldown_cmark::html::push_html(&mut html_input, parser);
 
-    // 2) Fallback: anonymous (no de, per-IP quota)
-    mymemory_call(&client, text, &langpair, None).await
+    // 2) Try with de (per-email quota)
+    let translated_html =
+        match mymemory_call(&client, &html_input, &langpair, de_param.as_deref()).await {
+            Ok(result) => result,
+            Err(e) => {
+                warn!(target: "mymemory", error = %e, "de request failed, retrying anonymous");
+                // 3) Fallback: anonymous (no de, per-IP quota)
+                mymemory_call(&client, &html_input, &langpair, None).await?
+            }
+        };
+
+    // 4) Convert back safely to Markdown
+    let md_output = html2md::parse_html(&translated_html).trim().to_string();
+    Ok(md_output)
 }
 
 // ── Public API ───────────────────────────────────────────────────────
@@ -1628,6 +1668,12 @@ pub async fn translate_text(config: &AiConfig, text: &str) -> Result<String> {
     let source_lang_hint =
         "English (en); technical markdown with possible mixed-language snippets.";
     let system_prompt = build_translation_system_prompt(lang, source_lang_hint);
+    debug!(
+        target: "translate",
+        lang = %lang,
+        text_len = text.len(),
+        "translate_text ENTER"
+    );
 
     match chat_completion_capped(
         config,
@@ -1637,8 +1683,12 @@ pub async fn translate_text(config: &AiConfig, text: &str) -> Result<String> {
     )
     .await
     {
-        Ok(result) if !result.trim().is_empty() => Ok(result),
+        Ok(result) if !result.trim().is_empty() => {
+            debug!(target: "translate", result_len = result.len(), "translate_text → single-pass OK");
+            Ok(result)
+        }
         Ok(_) => {
+            debug!(target: "translate", "translate_text → single-pass returned empty, trying chunks");
             if text.len() < TRANSLATION_CHUNK_RETRY_MIN_CHARS {
                 anyhow::bail!("AI returned empty response");
             }
@@ -1647,6 +1697,7 @@ pub async fn translate_text(config: &AiConfig, text: &str) -> Result<String> {
                 .context("Single-pass translation returned empty response; chunked fallback failed")
         }
         Err(err) => {
+            warn!(target: "translate", error = %err, "translate_text → single-pass FAILED");
             if text.len() < TRANSLATION_CHUNK_RETRY_MIN_CHARS || !is_empty_ai_response_error(&err) {
                 return Err(err);
             }
@@ -1675,6 +1726,12 @@ where
     let source_lang_hint =
         "English (en); technical markdown with possible mixed-language snippets.";
     let system_prompt = build_translation_system_prompt(lang, source_lang_hint);
+    debug!(
+        target: "translate",
+        lang = %lang,
+        text_len = text.len(),
+        "translate_text_streaming ENTER"
+    );
 
     match chat_completion_stream(
         config,
@@ -1685,8 +1742,12 @@ where
     )
     .await
     {
-        Ok(result) if !result.trim().is_empty() => Ok(result),
+        Ok(result) if !result.trim().is_empty() => {
+            debug!(target: "translate", result_len = result.len(), "translate_text_streaming → stream OK");
+            Ok(result)
+        }
         Ok(_) => {
+            debug!(target: "translate", "translate_text_streaming → stream returned empty, trying chunked");
             if text.len() < TRANSLATION_CHUNK_RETRY_MIN_CHARS {
                 anyhow::bail!("AI returned empty response");
             }
@@ -1695,6 +1756,7 @@ where
                 .context("Streaming translation returned empty response; chunked fallback failed")
         }
         Err(err) => {
+            warn!(target: "translate", error = %err, "translate_text_streaming → stream FAILED");
             if text.len() >= TRANSLATION_CHUNK_RETRY_MIN_CHARS && is_empty_ai_response_error(&err) {
                 return translate_text_in_chunks_streaming(config, &system_prompt, text, on_delta)
                     .await
@@ -1726,14 +1788,127 @@ pub async fn translate_short_text(config: &AiConfig, text: &str) -> Result<Strin
     chat_completion_capped(config, &system_prompt, text, SHORT_TEXT_MAX_TOKENS).await
 }
 
-/// Same as `translate_short_text_with_priority`, but also returns
-/// the provider path that produced the final translation.
-pub async fn translate_short_text_with_priority_source(
+/// Batch-translate multiple short texts in a single API call.
+///
+/// Packs texts with numbered delimiters (`[1] text`, `[2] text`, …) and
+/// parses the response back into individual translations.  Falls back to
+/// per-item `translate_short_text` when parsing fails.
+///
+/// Returns a Vec with the same length and order as `texts`.
+pub async fn translate_short_texts_batch(
     config: &AiConfig,
-    text: &str,
-) -> Result<(String, ShortTextSource)> {
-    let mut noop_delta = |_delta: &str| -> Result<()> { Ok(()) };
-    translate_short_text_streaming_with_priority_source(config, text, &mut noop_delta).await
+    texts: &[&str],
+) -> Result<Vec<String>> {
+    if texts.is_empty() {
+        return Ok(vec![]);
+    }
+    if texts.len() == 1 {
+        return Ok(vec![translate_short_text(config, texts[0]).await?]);
+    }
+
+    let lang = language_display_name(&config.target_language);
+    let system_prompt = format!(
+        "You are a translation assistant. Translate each numbered item below into {lang}.\n\
+         Rules:\n\
+         - Preserve the [N] numbering in your output exactly.\n\
+         - Translate ONLY the text after each [N] marker.\n\
+         - Do NOT add, remove, or reorder items.\n\
+         - Keep technical terms, code identifiers, and proper nouns unchanged.\n\
+         - Output nothing else — no preamble, no explanation."
+    );
+
+    let mut user_message = String::new();
+    for (i, text) in texts.iter().enumerate() {
+        user_message.push_str(&format!("[{}] {}\n", i + 1, text.trim()));
+    }
+
+    // Estimate tokens: each short text ~50 tokens, so batch of 10 ≈ 500 output tokens
+    let max_tokens = (texts.len() as u32) * 120 + 200;
+
+    match chat_completion_capped(config, &system_prompt, &user_message, max_tokens).await {
+        Ok(response) => {
+            match parse_batch_translation_response(&response, texts.len()) {
+                Ok(translations) => Ok(translations),
+                Err(parse_err) => {
+                    warn!(
+                        target: "batch_translate",
+                        error = %parse_err,
+                        "parse failed, falling back to per-item"
+                    );
+                    // Fallback: translate individually
+                    let mut results = Vec::with_capacity(texts.len());
+                    for text in texts {
+                        match translate_short_text(config, text).await {
+                            Ok(t) => results.push(t),
+                            Err(_) => results.push(String::new()),
+                        }
+                    }
+                    Ok(results)
+                }
+            }
+        }
+        Err(err) => {
+            warn!(
+                target: "batch_translate",
+                error = %err,
+                "API failed, falling back to per-item"
+            );
+            let mut results = Vec::with_capacity(texts.len());
+            for text in texts {
+                match translate_short_text(config, text).await {
+                    Ok(t) => results.push(t),
+                    Err(_) => results.push(String::new()),
+                }
+            }
+            Ok(results)
+        }
+    }
+}
+
+/// Parse a batch translation response with [N] markers back into individual items.
+fn parse_batch_translation_response(response: &str, expected_count: usize) -> Result<Vec<String>> {
+    // Build regex to split on [1], [2], etc.
+    let re = regex::Regex::new(r"\[(\d+)\]\s*").context("Failed to compile batch parse regex")?;
+
+    let mut items: Vec<(usize, String)> = Vec::new();
+    let mut last_idx: Option<usize> = None;
+    let mut last_start: usize = 0;
+
+    for cap in re.find_iter(response) {
+        if let Some(prev_idx) = last_idx {
+            let text = response[last_start..cap.start()].trim().to_string();
+            items.push((prev_idx, text));
+        }
+        // Extract the number from [N]
+        let num_str = &response[cap.start() + 1..cap.end() - 1].trim();
+        if let Ok(num) = num_str.parse::<usize>() {
+            last_idx = Some(num);
+            last_start = cap.end();
+        }
+    }
+    // Capture the last item
+    if let Some(prev_idx) = last_idx {
+        let text = response[last_start..].trim().to_string();
+        items.push((prev_idx, text));
+    }
+
+    if items.len() < expected_count / 2 {
+        anyhow::bail!(
+            "Parsed only {}/{} items from batch response",
+            items.len(),
+            expected_count
+        );
+    }
+
+    // Build ordered result
+    let mut result = vec![String::new(); expected_count];
+    for (idx, text) in items {
+        if idx >= 1 && idx <= expected_count {
+            result[idx - 1] = text;
+        }
+    }
+
+    Ok(result)
 }
 
 /// Translate short text with provider-priority policy while supporting
@@ -1757,6 +1932,7 @@ where
 
     match config.short_text_priority {
         ShortTextPriority::AiFirst => {
+            debug!(target: "translate", priority = "AiFirst", ai_available, "short text priority");
             let mut ai_err: Option<anyhow::Error> = None;
             if ai_available {
                 match translate_short_text_streaming(config, text, on_delta).await {
@@ -1764,14 +1940,17 @@ where
                         return Ok((result, ShortTextSource::Ai));
                     }
                     Ok(_) => {
-                        eprintln!(
-                            "[short-text] AI returned empty response, falling back to MyMemory"
+                        warn!(
+                            target: "short_text",
+                            "AI returned empty response, falling back to MyMemory"
                         );
                         ai_err = Some(anyhow::anyhow!("AI returned empty response"));
                     }
                     Err(err) => {
-                        eprintln!(
-                            "[short-text] AI translation failed: {err}, falling back to MyMemory"
+                        warn!(
+                            target: "short_text",
+                            error = %err,
+                            "AI translation failed, falling back to MyMemory"
                         );
                         ai_err = Some(err);
                     }
@@ -1797,6 +1976,7 @@ where
             }
         }
         ShortTextPriority::MymemoryFirst => {
+            debug!(target: "translate", priority = "MymemoryFirst", ai_available, "short text priority");
             let mut mymemory_err: Option<anyhow::Error> = None;
             if mymemory_available {
                 match mymemory_translate_short_text(config, text).await {
@@ -1804,14 +1984,17 @@ where
                         return Ok((result, ShortTextSource::Mymemory));
                     }
                     Ok(_) => {
-                        eprintln!(
-                            "[short-text] MyMemory returned empty response, falling back to AI"
+                        warn!(
+                            target: "short_text",
+                            "MyMemory returned empty response, falling back to AI"
                         );
                         mymemory_err = Some(anyhow::anyhow!("MyMemory returned empty response"));
                     }
                     Err(err) => {
-                        eprintln!(
-                            "[short-text] MyMemory translation failed: {err}, falling back to AI"
+                        warn!(
+                            target: "short_text",
+                            error = %err,
+                            "MyMemory translation failed, falling back to AI"
                         );
                         mymemory_err = Some(err);
                     }
@@ -1866,11 +2049,11 @@ where
     {
         Ok(result) if !result.trim().is_empty() => Ok(result),
         Ok(_) => {
-            eprintln!("[short-text] AI streaming returned empty, retrying non-streaming");
+            warn!(target: "short_text", "AI streaming returned empty, retrying non-streaming");
             translate_short_text(config, text).await
         }
         Err(stream_err) => {
-            eprintln!("[short-text] AI streaming failed: {stream_err}, retrying non-streaming");
+            warn!(target: "short_text", error = %stream_err, "AI streaming failed, retrying non-streaming");
             translate_short_text(config, text).await
         }
     }
@@ -2408,12 +2591,12 @@ pub async fn pick_skills(
                         }
                     }
                     Err(err) => {
-                        eprintln!("[ai_pick_skills] Failed to parse round response: {err}");
+                        warn!(target: "ai_pick_skills", error = %err, "failed to parse round response");
                     }
                 }
             }
             Err(err) => {
-                eprintln!("[ai_pick_skills] Round failed: {err}");
+                warn!(target: "ai_pick_skills", error = %err, "round failed");
             }
         }
     }
@@ -2744,5 +2927,103 @@ mod tests {
                 assert_eq!(loaded.target_language, cfg.target_language);
             });
         });
+    }
+
+    // ── MyMemory Formatting Stability Tests ─────────────────────────────
+    // These tests verify that the `Markdown -> HTML -> TranslatedHTML -> Markdown` 
+    // pipeline correctly preserves structural elements regardless of MyMemory's translation.
+
+    fn simulate_mymemory_format_pipeline(original_md: &str, translated_html: &str) -> String {
+        // Step 1: parse Markdown to HTML (what we send)
+        let parser = pulldown_cmark::Parser::new(original_md);
+        let mut html_input = String::new();
+        pulldown_cmark::html::push_html(&mut html_input, parser);
+        
+        // (Mock: MyMemory translates internal text, preserves HTML. `translated_html` is returned.)
+        
+        // Step 2: parse HTML back to Markdown
+        html2md::parse_html(translated_html).trim().to_string()
+    }
+
+    #[test]
+    fn test_mymemory_format_plain_text() {
+        let md = "Hello world";
+        let translated_html = "<p>你好，世界</p>\n";
+        let result = simulate_mymemory_format_pipeline(md, translated_html);
+        assert_eq!(result, "你好，世界");
+    }
+
+    #[test]
+    fn test_mymemory_format_bullet_list() {
+        let md = "- Item 1\n- Item 2";
+        let translated_html = "<ul>\n<li>项目 1</li>\n<li>项目 2</li>\n</ul>\n";
+        let result = simulate_mymemory_format_pipeline(md, translated_html);
+        assert_eq!(result, "* 项目 1\n* 项目 2");
+    }
+
+    #[test]
+    fn test_mymemory_format_numbered_list() {
+        let md = "1. First\n2. Second";
+        let translated_html = "<ol>\n<li>第一</li>\n<li>第二</li>\n</ol>\n";
+        let result = simulate_mymemory_format_pipeline(md, translated_html);
+        assert_eq!(result, "1. 第一\n2. 第二");
+    }
+
+    #[test]
+    fn test_mymemory_format_bold_text() {
+        let md = "This is **bold** text";
+        let translated_html = "<p>这是 <strong>粗体</strong> 文本</p>\n";
+        let result = simulate_mymemory_format_pipeline(md, translated_html);
+        // html2md might use `**` or `__` for strong, but we check if it's correct valid MD
+        assert!(result.contains("**粗体**") || result.contains("__粗体__"));
+    }
+
+    #[test]
+    fn test_mymemory_format_italic_text() {
+        let md = "This is *italic* text";
+        let translated_html = "<p>这是 <em>斜体</em> 文本</p>\n";
+        let result = simulate_mymemory_format_pipeline(md, translated_html);
+        assert!(result.contains("*斜体*") || result.contains("_斜体_"));
+    }
+
+    #[test]
+    fn test_mymemory_format_headers() {
+        let md = "### Section Header\nContent";
+        let translated_html = "<h3>章节标题</h3>\n<p>内容</p>\n";
+        let result = simulate_mymemory_format_pipeline(md, translated_html);
+        assert_eq!(result, "### 章节标题 ###\n\n内容");
+    }
+
+    #[test]
+    fn test_mymemory_format_inline_code() {
+        let md = "Run `npm install`";
+        let translated_html = "<p>运行 <code>npm install</code></p>\n";
+        let result = simulate_mymemory_format_pipeline(md, translated_html);
+        assert_eq!(result, "运行 `npm install`");
+    }
+
+    #[test]
+    fn test_mymemory_format_links() {
+        let md = "[Click here](https://example.com)";
+        let translated_html = "<p><a href=\"https://example.com\">点击这里</a></p>\n";
+        let result = simulate_mymemory_format_pipeline(md, translated_html);
+        assert_eq!(result, "[点击这里](https://example.com)");
+    }
+
+    #[test]
+    fn test_mymemory_format_complex_nested_list() {
+        let md = "- **Feature A**: Description\n- **Feature B**: Desc";
+        let translated_html = "<ul>\n<li><strong>功能 A</strong>: 描述</li>\n<li><strong>功能 B</strong>: 描述</li>\n</ul>\n";
+        let result = simulate_mymemory_format_pipeline(md, translated_html);
+        assert!(result.contains("* **功能 A**: 描述") || result.contains("* __功能 A__: 描述"));
+        assert!(result.contains("* **功能 B**: 描述") || result.contains("* __功能 B__: 描述"));
+    }
+
+    #[test]
+    fn test_mymemory_format_multiline_paragraphs() {
+        let md = "Paragraph 1\n\nParagraph 2";
+        let translated_html = "<p>段落 1</p>\n<p>段落 2</p>\n";
+        let result = simulate_mymemory_format_pipeline(md, translated_html);
+        assert_eq!(result, "段落 1\n\n段落 2");
     }
 }

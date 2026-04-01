@@ -1,11 +1,11 @@
 use crate::core::{
-    git_ops, installed_skill, local_skill, lockfile, repo_scanner,
+    git_ops, installed_skill, lockfile, repo_scanner,
     skill::{
         Skill, SkillCategory, SkillType, extract_github_source_from_url, extract_skill_description,
     },
-    sync,
 };
 use std::path::Path;
+use tracing::warn;
 
 fn derive_name_hint(url: &str, name: Option<&str>) -> String {
     name.map(str::to_string).unwrap_or_else(|| {
@@ -48,10 +48,11 @@ fn load_tree_hash_for(installed_name: &str) -> Option<String> {
             .find(|entry| entry.name == installed_name)
             .map(|entry| entry.tree_hash.clone()),
         Err(err) => {
-            eprintln!(
-                "[install_skill] Failed to read lockfile '{}' for tree hash lookup: {}",
-                lock_path.display(),
-                err
+            warn!(
+                target: "install_skill",
+                path = %lock_path.display(),
+                error = %err,
+                "failed to read lockfile for tree hash lookup"
             );
             None
         }
@@ -67,6 +68,7 @@ fn build_installed_skill(
     Skill {
         name,
         description,
+        localized_description: None,
         skill_type: SkillType::Hub,
         stars: 0,
         installed: true,
@@ -100,10 +102,11 @@ fn try_install_from_repo_cache(
     let target = find_target_skill(&skills_found, requested_name, name_hint);
 
     let Some(skill) = target else {
-        eprintln!(
-            "[install_skill] skill '{}' not found in repo (found: {:?}), falling back to direct clone",
-            name_hint,
-            skills_found.iter().map(|s| &s.id).collect::<Vec<_>>()
+        warn!(
+            target: "install_skill",
+            hint = %name_hint,
+            found = ?skills_found.iter().map(|s| &s.id).collect::<Vec<_>>(),
+            "skill not found in repo, falling back to direct clone"
         );
         return None;
     };
@@ -129,23 +132,20 @@ fn try_install_from_repo_cache(
         }
         Ok(_) => None,
         Err(err) => {
-            eprintln!(
-                "[install_skill] repo-cache install failed, falling back: {}",
-                err
-            );
+            warn!(target: "install_skill", error = %err, "repo-cache install failed, falling back");
             None
         }
     }
 }
 
 pub async fn install_skill(url: String, name: Option<String>) -> Result<Skill, String> {
-    let skills_dir = sync::get_hub_skills_dir();
+    let skills_dir = super::paths::hub_skills_dir();
     let name_hint = derive_name_hint(&url, name.as_deref());
 
     if skills_dir.join(&name_hint).exists() {
         return Err(format!("Skill '{}' is already installed", name_hint));
     }
-    if local_skill::local_skills_dir().join(&name_hint).exists() {
+    if super::paths::local_skills_dir().join(&name_hint).exists() {
         return Err(format!(
             "Skill '{}' already exists as a local skill",
             name_hint

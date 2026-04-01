@@ -4,7 +4,9 @@ import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "../../../components/ui/button";
 import { parseShareCode, extractShareCode } from "../../../lib/shareCode";
-import { Download, KeyRound, Loader2, X, Lock, Info } from "lucide-react";
+import { Download, KeyRound, Loader2, X, Lock, Info, Star } from "lucide-react";
+import type { SkillCardDeck } from "../../../types";
+
 
 interface ImportShareCodeModalProps {
   open: boolean;
@@ -14,17 +16,18 @@ interface ImportShareCodeModalProps {
     desc: string,
     icon: string,
     skills: string[],
-    sources: Record<string, string>
+    sources: Record<string, string>,
+    download: boolean
   ) => Promise<void>;
-  /** Existing group names for duplicate detection */
-  existingGroupNames?: string[];
+  /** Existing groups for duplicate detection */
+  existingGroups?: SkillCardDeck[];
 }
 
 export function ImportShareCodeModal({
   open,
   onClose,
   onImport,
-  existingGroupNames = [],
+  existingGroups = [],
 }: ImportShareCodeModalProps) {
   const { t } = useTranslation();
   const prefersReducedMotion = useReducedMotion();
@@ -32,6 +35,7 @@ export function ImportShareCodeModal({
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [intentInstall, setIntentInstall] = useState(false);
   // Preview state after successful parse
   const [preview, setPreview] = useState<{
     name: string;
@@ -43,8 +47,9 @@ export function ImportShareCodeModal({
     privateSkills: string[];
   } | null>(null);
 
-  const handleParse = async () => {
+  const handleParse = async (install: boolean) => {
     if (!code.trim()) return;
+    setIntentInstall(install);
     setLoading(true);
     setError(null);
     try {
@@ -91,8 +96,32 @@ export function ImportShareCodeModal({
         }
       }
 
-      // Check for duplicate group name before importing
-      if (existingGroupNames.some((n) => n === sharePayload.n)) {
+      // Check for duplicates before importing
+      const getSkillsHash = (skills: { n: string; u?: string }[]) => {
+        const sortedSkills = [...skills].sort((a, b) => a.n.localeCompare(b.n));
+        return JSON.stringify(sortedSkills.map(s => ({ n: s.n, u: s.u || "" })));
+      };
+
+      const importedSkillsHash = getSkillsHash(sharePayload.s);
+
+      // 1. Check if an identical deck (same skills content) already exists
+      const duplicateContentGroup = existingGroups.find(g => {
+        const existingSkillsHash = getSkillsHash(g.skills.map(name => ({
+          n: name,
+          u: g.skill_sources?.[name] || ""
+        })));
+        return existingSkillsHash === importedSkillsHash;
+      });
+
+      if (duplicateContentGroup) {
+        setError(t("importShareCodeModal.alreadyHasGroup", { name: duplicateContentGroup.name, defaultValue: "已导入过本卡组" }));
+        setLoading(false);
+        return;
+      }
+
+      // 2. Check if a deck with the same name already exists
+      const duplicateNameGroup = existingGroups.find((g) => g.name === sharePayload.n);
+      if (duplicateNameGroup) {
         setError(t("importShareCodeModal.duplicateGroup", { name: sharePayload.n }));
         setLoading(false);
         return;
@@ -111,7 +140,7 @@ export function ImportShareCodeModal({
         });
         setLoading(false);
       } else {
-        await onImport(sharePayload.n, sharePayload.d, sharePayload.i, skillNames, sources);
+        await onImport(sharePayload.n, sharePayload.d, sharePayload.i, skillNames, sources, install);
         resetAndClose();
       }
     } catch (e: unknown) {
@@ -130,7 +159,8 @@ export function ImportShareCodeModal({
         preview.desc,
         preview.icon,
         preview.skills,
-        preview.sources
+        preview.sources,
+        intentInstall
       );
       resetAndClose();
     } catch (e: unknown) {
@@ -233,16 +263,30 @@ export function ImportShareCodeModal({
                       {t("importShareCodeModal.cancel")}
                     </Button>
                     <Button
+                      variant="outline"
                       size="sm"
-                      onClick={handleParse}
+                      className="border-primary/20 hover:bg-primary/5 hover:text-primary"
+                      onClick={() => handleParse(false)}
                       disabled={loading || !code.trim()}
                     >
-                      {loading ? (
+                      {loading && !intentInstall ? (
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      ) : (
+                        <Star className="w-4 h-4 mr-2" />
+                      )}
+                      {t("importShareCodeModal.favorite", { defaultValue: "收藏" })}
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => handleParse(true)}
+                      disabled={loading || !code.trim()}
+                    >
+                      {loading && intentInstall ? (
                         <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                       ) : (
                         <Download className="w-4 h-4 mr-2" />
                       )}
-                      {loading ? t("importShareCodeModal.importing") : t("importShareCodeModal.import")}
+                      {t("importShareCodeModal.importAndDownload", { defaultValue: "导入并下载" })}
                     </Button>
                   </div>
                 </>
@@ -334,10 +378,14 @@ export function ImportShareCodeModal({
                     >
                       {loading ? (
                         <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      ) : (
+                      ) : intentInstall ? (
                         <Download className="w-4 h-4 mr-2" />
+                      ) : (
+                        <Star className="w-4 h-4 mr-2" />
                       )}
-                      {loading ? t("importShareCodeModal.creating") : t("importShareCodeModal.confirmImportBtn")}
+                      {loading 
+                        ? t("importShareCodeModal.creating") 
+                        : (intentInstall ? t("importShareCodeModal.confirmImportAndDownload", { defaultValue: "确认导入并下载" }) : t("importShareCodeModal.confirmFavorite", { defaultValue: "确认收藏" }))}
                     </Button>
                   </div>
                 </>

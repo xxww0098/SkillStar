@@ -231,7 +231,7 @@ export function Settings() {
     () => readBackgroundStyle()
   );
   const [backgroundRun, setBackgroundRun] = useState(() => readBackgroundRun());
-  const { profiles, loading: profilesLoading, toggleProfile, unlinkAllFromAgent } = useAgentProfiles();
+  const { profiles, loading: profilesLoading, toggleProfile, unlinkAllFromAgent, addCustomProfile, removeCustomProfile } = useAgentProfiles();
 
   useEffect(() => onBackgroundRunChanged(setBackgroundRun), []);
 
@@ -669,6 +669,8 @@ export function Settings() {
             onCancelDisable={() => dispatchAgent({ type: "SET_CONFIRM_DISABLE_ID", id: null })}
             onConfirmDisable={confirmDisable}
             onUnlinkSkill={handleUnlinkSingle}
+            onAddCustomProfile={addCustomProfile}
+            onRemoveCustomProfile={removeCustomProfile}
           />
 
           <ProxySection

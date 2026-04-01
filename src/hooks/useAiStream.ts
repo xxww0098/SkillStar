@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import type { AiConfigStatus, AiStreamPayload } from "../types";
+import type { AiConfig, AiStreamPayload } from "../types";
 
 /**
  * Shared hook for AI streaming operations (translate / summarize).
@@ -15,6 +15,8 @@ interface AiStreamState {
   wasNonStreaming: boolean;
   error: string | null;
   source: string | null;
+  /** Provider that produced the translation (e.g. "ai" | "mymemory"). */
+  provider: string | null;
 }
 
 const INITIAL_STATE: AiStreamState = {
@@ -25,6 +27,7 @@ const INITIAL_STATE: AiStreamState = {
   wasNonStreaming: false,
   error: null,
   source: null,
+  provider: null,
 };
 
 interface UseAiStreamOptions {
@@ -34,6 +37,12 @@ interface UseAiStreamOptions {
   eventChannel: string;
   /** Optional: transform the final result before storing */
   normalizeResult?: (source: string, result: string) => string;
+  /**
+   * Optional: parse a non-string invoke result into text + optional provider.
+   * For commands that return objects (e.g. `ShortTextTranslationResult`).
+   * If not provided, the invoke result is used as-is (assumed string).
+   */
+  parseInvokeResult?: (raw: unknown) => { text: string; provider?: string };
 }
 
 interface ExecuteAiStreamOptions {
@@ -44,15 +53,19 @@ interface ExecuteAiStreamOptions {
    * result arrive. Useful for "retranslate" flows.
    */
   keepVisibleWhileLoading?: boolean;
+  /** Additional params to pass to the Tauri invoke call. */
+  extraInvokeParams?: Record<string, unknown>;
 }
 
 export function useAiStream({
   command,
   eventChannel,
   normalizeResult,
+  parseInvokeResult,
 }: UseAiStreamOptions) {
   const [state, setState] = useState<AiStreamState>(INITIAL_STATE);
   const [aiConfigured, setAiConfigured] = useState(false);
+  const [targetLanguage, setTargetLanguage] = useState("zh-CN");
 
   const activeIdRef = useRef<string | null>(null);
   const unlistenRef = useRef<(() => void) | null>(null);
@@ -68,9 +81,10 @@ export function useAiStream({
     (async () => {
       try {
         const { invoke } = await import("@tauri-apps/api/core");
-        const config = await invoke<AiConfigStatus>("get_ai_config");
+        const config = await invoke<AiConfig>("get_ai_config");
         if (!mountedRef.current) return;
         setAiConfigured(config.enabled && config.api_key.trim().length > 0);
+        if (config.target_language) setTargetLanguage(config.target_language);
       } catch {
         if (mountedRef.current) setAiConfigured(false);
       }
@@ -98,6 +112,7 @@ export function useAiStream({
       if (!aiConfigured) return null;
       const forceRefresh = options.forceRefresh ?? false;
       const keepVisibleWhileLoading = options.keepVisibleWhileLoading ?? false;
+      const extraInvokeParams = options.extraInvokeParams ?? {};
 
       const snap = stateRef.current;
 
@@ -144,6 +159,7 @@ export function useAiStream({
         wasNonStreaming: false,
         error: null,
         source: keepVisibleWhileLoading ? prev.source : null,
+        provider: keepVisibleWhileLoading ? prev.provider : null,
       }));
 
       try {
@@ -181,25 +197,39 @@ export function useAiStream({
         });
         unlistenRef.current = unlisten;
 
-        const invokePayload = forceRefresh
-          ? { requestId, content: sourceContent, forceRefresh: true }
-          : { requestId, content: sourceContent };
-        const result = await invoke<string>(command, invokePayload);
+        const invokePayload = {
+          requestId,
+          content: sourceContent,
+          ...(forceRefresh ? { forceRefresh: true } : {}),
+          ...extraInvokeParams,
+        };
+        const rawResult = await invoke(command, invokePayload);
 
         if (activeIdRef.current !== requestId) return null;
-        const finalContent = normalizeResult
-          ? normalizeResult(sourceContent, result)
-          : result;
+
+        let finalText: string;
+        let resultProvider: string | null = null;
+        if (parseInvokeResult) {
+          const parsed = parseInvokeResult(rawResult);
+          finalText = parsed.text;
+          resultProvider = parsed.provider ?? null;
+        } else {
+          finalText = rawResult as string;
+        }
+        if (normalizeResult) {
+          finalText = normalizeResult(sourceContent, finalText);
+        }
         setState({
-          content: finalContent,
+          content: finalText,
           visible: true,
           loading: false,
           hasDelta: deltaCount >= 2,
           wasNonStreaming: deltaCount < 2,
           error: null,
           source: sourceContent,
+          provider: resultProvider,
         });
-        return finalContent;
+        return finalText;
       } catch (e) {
         if (activeIdRef.current !== requestId) return null;
         setState({
@@ -210,6 +240,7 @@ export function useAiStream({
           wasNonStreaming: false,
           error: String(e),
           source: null,
+          provider: null,
         });
         return null;
       } finally {
@@ -226,7 +257,7 @@ export function useAiStream({
         }
       }
     },
-    [aiConfigured, cancel, dismiss, command, eventChannel, normalizeResult]
+    [aiConfigured, cancel, dismiss, command, eventChannel, normalizeResult, parseInvokeResult]
   );
 
   // Cleanup on unmount
@@ -245,6 +276,7 @@ export function useAiStream({
   return {
     ...state,
     aiConfigured,
+    targetLanguage,
     execute,
     cancel,
     dismiss,

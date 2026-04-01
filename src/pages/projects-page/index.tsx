@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo, useCallback, lazy, Suspense } from "react";
 import { useTranslation } from "react-i18next";
-import { Plus } from "lucide-react";
+import { Plus, Layers } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Button } from "../../components/ui/button";
-import { Badge } from "../../components/ui/badge";
+import { SearchInput } from "../../components/ui/SearchInput";
 import { LoadingLogo } from "../../components/ui/LoadingLogo";
 import { ProjectDeployAgentDialog } from "../../features/projects/components/ProjectDeployAgentDialog";
 import { AgentDisambiguationDialog } from "../../features/projects/components/AgentDisambiguationDialog";
@@ -762,17 +762,28 @@ export function Projects({
 
   return (
     <div className="flex-1 min-w-0 flex flex-col overflow-hidden relative">
-      <div className="h-14 flex items-center justify-between px-6 border-b border-border bg-sidebar">
-        <div className="flex items-center gap-3">
+      <div className="h-14 flex items-center gap-3 px-6 border-b border-border bg-sidebar overflow-x-auto [&::-webkit-scrollbar]:hidden">
+        <div className="flex items-center shrink-0 h-8 whitespace-nowrap">
           <h1>{t("sidebar.projects")}</h1>
-          {projects.length > 0 && (
-            <Badge variant="outline">{t("projects.projectsCount", { count: projects.length })}</Badge>
-          )}
+          <div className="w-px h-5 ml-4 mr-1 bg-border" />
         </div>
-        <Button size="sm" onClick={handleOpenFolder}>
-          <Plus className="w-3.5 h-3.5" />
-          {t("projects.registerProject")}
-        </Button>
+        <SearchInput
+          value={projectFilter}
+          onChange={(e) => setProjectFilter(e.target.value)}
+          placeholder={t("projects.searchPlaceholder")}
+          className="pl-8 h-8 text-xs bg-sidebar/50 focus-visible:bg-background"
+          iconClassName="left-2.5"
+        />
+        <div className="h-8 px-3 flex items-center justify-center gap-1.5 rounded-lg border border-border/70 bg-background/50 shadow-sm text-xs font-medium text-foreground/80 tabular-nums whitespace-nowrap shrink-0">
+          <Layers className="w-3.5 h-3.5 text-muted-foreground" />
+          {filteredProjects.length}
+        </div>
+        <div className="flex items-center gap-2 ml-auto shrink-0">
+          <Button size="sm" onClick={handleOpenFolder}>
+            <Plus className="w-3.5 h-3.5" />
+            {t("projects.registerProject")}
+          </Button>
+        </div>
       </div>
 
       <DeployBanner
@@ -785,7 +796,6 @@ export function Projects({
           filteredProjects={filteredProjects}
           selectedProject={selectedProject}
           projectFilter={projectFilter}
-          onProjectFilterChange={setProjectFilter}
           onSelectProject={handleSelectProject}
           onRemoveProject={handleRemoveProject}
           onOpenFolder={handleOpenFolder}

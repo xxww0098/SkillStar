@@ -1,6 +1,12 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
+// Re-export frontmatter utilities so existing importers don't break.
+export {
+  unwrapOuterMarkdownFence,
+  normalizeSkillMarkdownForPreview,
+} from "./frontmatter";
+
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
@@ -28,117 +34,6 @@ export function formatInstalls(count: number): string {
   if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
   if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`;
   return count.toLocaleString();
-}
-
-/** Unwrap an AI response that wraps content in a markdown code fence */
-export function unwrapOuterMarkdownFence(text: string): string {
-  const trimmed = text.trim();
-  const fenced = trimmed.match(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```$/i);
-  return (fenced ? fenced[1] : text).replace(/^\uFEFF/, "");
-}
-
-const FRONTMATTER_RE = /^\uFEFF?---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)/;
-
-function splitFrontmatter(content: string): { frontmatter: string | null; body: string } {
-  const match = content.match(FRONTMATTER_RE);
-  if (!match) {
-    return { frontmatter: null, body: content };
-  }
-  return {
-    frontmatter: match[1],
-    body: content.slice(match[0].length),
-  };
-}
-
-function parseFrontmatterKeys(frontmatter: string | null): Set<string> {
-  if (!frontmatter) return new Set<string>();
-
-  const keys = new Set<string>();
-  for (const rawLine of frontmatter.split(/\r?\n/)) {
-    const match = rawLine.trimEnd().match(/^([a-zA-Z0-9_-]+)\s*:\s*(.*)$/);
-    if (match) {
-      keys.add(match[1]);
-    }
-  }
-  return keys;
-}
-
-function stripLeadingDuplicatedMetadata(
-  content: string,
-  allowedKeys: ReadonlySet<string>
-): string {
-  if (allowedKeys.size === 0) return content;
-
-  const lines = content.replace(/^\uFEFF/, "").split(/\r?\n/);
-  let start = 0;
-  while (start < lines.length && !lines[start].trim()) {
-    start += 1;
-  }
-  if (start >= lines.length) return content;
-
-  const keyRe = /^([a-zA-Z0-9_-]+)\s*:/;
-  const firstLine = lines[start].trimStart();
-  const firstKey = firstLine.match(keyRe)?.[1] ?? null;
-  if (!firstKey || !allowedKeys.has(firstKey)) {
-    return content;
-  }
-
-  const inlineKeys = Array.from(
-    firstLine.matchAll(/([a-zA-Z0-9_-]+)\s*:/g),
-    (match) => match[1]
-  );
-  const inlineKnownCount = inlineKeys.filter((key) => allowedKeys.has(key)).length;
-  if (inlineKnownCount >= 2) {
-    let index = start + 1;
-    while (index < lines.length && !lines[index].trim()) {
-      index += 1;
-    }
-    return lines.slice(index).join("\n");
-  }
-
-  let index = start;
-  let consumed = false;
-  while (index < lines.length) {
-    const raw = lines[index];
-    const trimmed = raw.trim();
-    if (!trimmed) {
-      if (consumed) {
-        index += 1;
-        break;
-      }
-      index += 1;
-      continue;
-    }
-
-    const key = raw.trimStart().match(keyRe)?.[1] ?? null;
-    if (key && allowedKeys.has(key)) {
-      consumed = true;
-      index += 1;
-      continue;
-    }
-
-    if (consumed && /^\s+/.test(raw)) {
-      index += 1;
-      continue;
-    }
-    break;
-  }
-
-  return consumed ? lines.slice(index).join("\n") : content;
-}
-
-export function normalizeSkillMarkdownForPreview(content: string): string {
-  const raw = unwrapOuterMarkdownFence(content);
-  const { frontmatter, body } = splitFrontmatter(raw);
-  if (!frontmatter) return raw;
-
-  const frontmatterKeys = parseFrontmatterKeys(frontmatter);
-  if (frontmatterKeys.size === 0) return raw;
-
-  const cleanedBody = stripLeadingDuplicatedMetadata(body, frontmatterKeys);
-  if (cleanedBody === body) return raw;
-
-  return `---\n${frontmatter}\n---${cleanedBody ? `\n${cleanedBody}` : ""}`;
 }
 
 /** Navigate to AI settings page via custom event */
@@ -189,3 +84,32 @@ export function formatAiErrorMessage(error: string | null | undefined, t: Transl
 
   return msg;
 }
+
+export async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (err) {
+    console.warn("navigator.clipboard.writeText failed (likely due to async context loss), falling back to execCommand:", err);
+  }
+  
+  try {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.position = "fixed";
+    textArea.style.left = "-999999px";
+    textArea.style.top = "-999999px";
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    const success = document.execCommand("copy");
+    textArea.remove();
+    return success;
+  } catch (e) {
+    console.error("Fallback execCommand('copy') failed:", e);
+    return false;
+  }
+}
+

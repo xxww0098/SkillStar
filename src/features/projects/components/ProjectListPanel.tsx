@@ -1,8 +1,7 @@
 import type { MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { FolderOpen, Plus, Search, Trash2 } from "lucide-react";
+import { FolderOpen, Plus, Trash2 } from "lucide-react";
 import { CardTemplate } from "../../../components/ui/card-template";
-import { Input } from "../../../components/ui/input";
 import { Button } from "../../../components/ui/button";
 import { cn } from "../../../lib/utils";
 import type { ProjectEntry } from "../../../types";
@@ -11,7 +10,6 @@ interface ProjectListPanelProps {
   filteredProjects: ProjectEntry[];
   selectedProject: ProjectEntry | null;
   projectFilter: string;
-  onProjectFilterChange: (value: string) => void;
   onSelectProject: (project: ProjectEntry) => void;
   onRemoveProject: (event: MouseEvent, name: string) => void;
   onOpenFolder: () => void;
@@ -21,7 +19,6 @@ export function ProjectListPanel({
   filteredProjects,
   selectedProject,
   projectFilter,
-  onProjectFilterChange,
   onSelectProject,
   onRemoveProject,
   onOpenFolder,
@@ -29,20 +26,7 @@ export function ProjectListPanel({
   const { t } = useTranslation();
 
   return (
-    <div className="w-72 min-w-[288px] border-r border-border flex flex-col bg-sidebar/50">
-      <div className="p-3">
-        <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-          <Input
-            value={projectFilter}
-            onChange={(e) => onProjectFilterChange(e.target.value)}
-            placeholder={t("projects.searchPlaceholder")}
-            className="pl-8 h-8 text-xs"
-          />
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto px-3 space-y-1">
+    <div className="w-72 min-w-[288px] border-r border-border flex flex-col bg-sidebar/50 pt-3">      <div className="flex-1 overflow-y-auto px-3 space-y-1">
         {filteredProjects.map((project) => (
           <CardTemplate
             key={project.name}

@@ -3,6 +3,7 @@ use std::fs;
 use std::path::Path;
 
 use super::path_env::command_with_path;
+use tracing::warn;
 
 /// Compute the tree-hash of a local Git repository using gix
 pub fn compute_tree_hash(repo_path: &Path) -> Result<String> {
@@ -158,14 +159,11 @@ pub fn apply_sparse_checkout(repo_path: &Path, dirs: &[&str]) -> Result<()> {
             || err_lower.contains("fatal:");
 
         if is_hard_failure {
-            return Err(anyhow!(
-                "git checkout failed (blob fetch): {}",
-                err.trim()
-            ));
+            return Err(anyhow!("git checkout failed (blob fetch): {}", err.trim()));
         }
 
         // Truly non-fatal: minor warnings, modified-file notices, etc.
-        eprintln!("[git_ops] sparse checkout warning: {}", err.trim());
+        warn!(target: "git_ops", warning = err.trim(), "sparse checkout warning");
     }
 
     Ok(())

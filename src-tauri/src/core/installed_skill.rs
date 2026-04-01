@@ -4,7 +4,7 @@ use super::{
     lockfile::{self, LockEntry},
     repo_scanner,
     skill::{Skill, SkillCategory, extract_github_source_from_url, extract_skill_description},
-    sync,
+    translation_cache::CachedTranslation,
 };
 use anyhow::{Context, Result, anyhow};
 use std::collections::{HashMap, HashSet};
@@ -70,13 +70,35 @@ pub async fn list_installed_skills() -> Result<Vec<Skill>> {
 
     let lock_map = Arc::new(load_lock_map());
     let profiles: Arc<[AgentProfile]> = Arc::from(agent_profile::list_profiles());
-    let skill_dirs = collect_skill_dirs(&sync::get_hub_skills_dir(), None)?;
+    let skill_dirs = collect_skill_dirs(&super::paths::hub_skills_dir(), None)?;
 
     if skill_dirs.is_empty() {
         return Ok(Vec::new());
     }
 
     let semaphore = Arc::new(Semaphore::new(skill_metadata_concurrency_limit()));
+    let mut target_language = None;
+    let config = crate::core::ai_provider::load_config_async().await;
+    if !config.target_language.is_empty() {
+        target_language = Some(config.target_language);
+    }
+
+    // Batch-preload all short translations in a single SQL query.
+    // This replaces N individual DB lookups during concurrent skill building.
+    let preloaded_translations: Arc<HashMap<String, CachedTranslation>> =
+        if let Some(ref lang) = target_language {
+            let lang_clone = lang.clone();
+            let map = tokio::task::spawn_blocking(move || {
+                crate::core::translation_cache::preload_short_translations(&lang_clone)
+                    .unwrap_or_default()
+            })
+            .await
+            .unwrap_or_default();
+            Arc::new(map)
+        } else {
+            Arc::new(HashMap::new())
+        };
+
     let mut tasks = JoinSet::new();
 
     for path in skill_dirs {
@@ -85,6 +107,8 @@ pub async fn list_installed_skills() -> Result<Vec<Skill>> {
         };
         let lock_entry = lock_map.get(&name).cloned();
         let profiles = Arc::clone(&profiles);
+        let target_lang = target_language.clone();
+        let translations = Arc::clone(&preloaded_translations);
         let permit = semaphore
             .clone()
             .acquire_owned()
@@ -93,7 +117,7 @@ pub async fn list_installed_skills() -> Result<Vec<Skill>> {
 
         tasks.spawn_blocking(move || {
             let _permit = permit;
-            build_installed_skill(path, lock_entry, &profiles)
+            build_installed_skill(path, lock_entry, &profiles, target_lang.as_deref(), &translations)
         });
     }
 
@@ -116,7 +140,7 @@ pub async fn list_installed_skills() -> Result<Vec<Skill>> {
 
 pub async fn refresh_skill_updates(names: Option<Vec<String>>) -> Result<Vec<SkillUpdateState>> {
     let name_filter = names.map(|values| values.into_iter().collect::<HashSet<_>>());
-    let skill_dirs = collect_skill_dirs(&sync::get_hub_skills_dir(), name_filter.as_ref())?;
+    let skill_dirs = collect_skill_dirs(&super::paths::hub_skills_dir(), name_filter.as_ref())?;
 
     if skill_dirs.is_empty() {
         return Ok(Vec::new());
@@ -232,6 +256,8 @@ fn build_installed_skill(
     path: PathBuf,
     lock_entry: Option<LockEntry>,
     profiles: &[AgentProfile],
+    target_language: Option<&str>,
+    preloaded_translations: &HashMap<String, CachedTranslation>,
 ) -> Result<Skill> {
     // For repo-cached skills (symlinks into .repos/), resolve the actual path
     let is_repo_skill = repo_scanner::is_repo_cached_skill(&path);
@@ -260,6 +286,25 @@ fn build_installed_skill(
     };
 
     let description = extract_skill_description(&effective_path);
+    let mut localized_description = None;
+
+    // Fast HashMap lookup — zero DB cost (preloaded in bulk).
+    if target_language.is_some() && !description.trim().is_empty() {
+        use sha2::{Digest, Sha256};
+        let digest = Sha256::digest(description.as_bytes());
+        let mut hex = String::with_capacity(64);
+        const HEX_TABLE: &[u8; 16] = b"0123456789abcdef";
+        for &byte in &digest {
+            hex.push(HEX_TABLE[(byte >> 4) as usize] as char);
+            hex.push(HEX_TABLE[(byte & 0xf) as usize] as char);
+        }
+        if let Some(cached) = preloaded_translations.get(&hex) {
+            if !cached.translated_text.trim().is_empty() {
+                localized_description = Some(cached.translated_text.clone());
+            }
+        }
+    }
+
     let tree_hash = git_ops::compute_tree_hash(&effective_path)
         .ok()
         .or_else(|| lock_entry.as_ref().map(|entry| entry.tree_hash.clone()));
@@ -280,6 +325,7 @@ fn build_installed_skill(
     Ok(Skill {
         name: name.clone(),
         description,
+        localized_description,
         skill_type,
         stars: 0,
         installed: true,

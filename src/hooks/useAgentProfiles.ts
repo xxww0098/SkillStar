@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { AgentProfile } from "../types";
+import type { AgentProfile, CustomProfileDef } from "../types";
 
 export function useAgentProfiles() {
   const [profiles, setProfiles] = useState<AgentProfile[]>([]);
@@ -68,6 +68,24 @@ export function useAgentProfiles() {
     []
   );
 
+  const addCustomProfile = useCallback(async (def: CustomProfileDef) => {
+    try {
+      await invoke("add_custom_agent_profile", { def });
+      await refresh();
+    } catch (e) {
+      throw new Error(String(e));
+    }
+  }, [refresh]);
+
+  const removeCustomProfile = useCallback(async (id: string) => {
+    try {
+      await invoke("remove_custom_agent_profile", { id });
+      await refresh();
+    } catch (e) {
+      throw new Error(String(e));
+    }
+  }, [refresh]);
+
   return {
     profiles,
     loading,
@@ -75,5 +93,7 @@ export function useAgentProfiles() {
     toggleProfile,
     deploySkillsToProject,
     unlinkAllFromAgent,
+    addCustomProfile,
+    removeCustomProfile,
   };
 }

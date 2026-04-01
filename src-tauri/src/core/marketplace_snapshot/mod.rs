@@ -7,6 +7,8 @@ use chrono::{DateTime, Duration, Utc};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use tracing::{error, warn};
+#[cfg(test)]
 use std::path::PathBuf;
 #[cfg(not(test))]
 use std::sync::LazyLock;
@@ -86,16 +88,29 @@ enum ScopeSpec {
     SearchSeed { query: String },
 }
 
+#[cfg(test)]
 fn db_path() -> PathBuf {
-    super::paths::data_root().join("marketplace.db")
+    super::paths::marketplace_db_path()
 }
 
-fn open_connection() -> Result<Connection> {
+/// Ensure schema migration runs exactly once via the pool.
+#[cfg(not(test))]
+static SCHEMA_READY: LazyLock<()> = LazyLock::new(|| {
+    let conn = super::db_pool::marketplace_pool()
+        .get()
+        .expect("marketplace DB pool connection for schema migration");
+    migrate_schema(&conn).expect("marketplace DB schema migration failed");
+});
+
+/// Test-only: open a standalone connection with full schema migration.
+/// Pool connections are not used in tests because tests swap
+/// `SKILLSTAR_DATA_DIR`, but the pool path resolves only once at init.
+#[cfg(test)]
+fn create_connection() -> Result<Connection> {
     let path = db_path();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).context("Failed to create marketplace db directory")?;
     }
-
     let conn = Connection::open(&path).context("Failed to open marketplace.db")?;
     conn.execute_batch(
         "PRAGMA journal_mode=WAL;
@@ -103,20 +118,9 @@ fn open_connection() -> Result<Connection> {
          PRAGMA foreign_keys=ON;",
     )
     .context("Failed to configure marketplace db pragmas")?;
-
-    Ok(conn)
-}
-
-fn create_connection() -> Result<Connection> {
-    let conn = open_connection()?;
     migrate_schema(&conn)?;
     Ok(conn)
 }
-
-#[cfg(not(test))]
-static DB_READY: LazyLock<()> = LazyLock::new(|| {
-    create_connection().expect("marketplace DB init failed");
-});
 
 fn with_conn<F, T>(f: F) -> Result<T>
 where
@@ -124,8 +128,10 @@ where
 {
     #[cfg(not(test))]
     {
-        LazyLock::force(&DB_READY);
-        let conn = open_connection()?;
+        LazyLock::force(&SCHEMA_READY);
+        let conn = super::db_pool::marketplace_pool()
+            .get()
+            .map_err(|e| anyhow!("Failed to get marketplace pool connection: {e}"))?;
         f(&conn)
     }
 
@@ -151,7 +157,7 @@ pub async fn schedule_startup_refreshes() {
 
     for scope in scopes {
         if let Err(err) = sync_marketplace_scope(&scope).await {
-            eprintln!("[marketplace_snapshot] startup refresh failed for {scope}: {err}");
+            error!(target: "marketplace_snapshot", scope = %scope, error = %err, "startup refresh failed");
         }
     }
 }
@@ -179,6 +185,7 @@ fn migrate_schema(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_skill_source ON marketplace_skill(source);
         CREATE INDEX IF NOT EXISTS idx_skill_publisher ON marketplace_skill(publisher_name);
         CREATE INDEX IF NOT EXISTS idx_skill_installs ON marketplace_skill(installs DESC);
+        CREATE INDEX IF NOT EXISTS idx_skill_name ON marketplace_skill(name);
 
         CREATE TABLE IF NOT EXISTS marketplace_skill_detail (
             skill_key TEXT PRIMARY KEY REFERENCES marketplace_skill(skill_key) ON DELETE CASCADE,
@@ -1206,8 +1213,10 @@ async fn seed_resolution_names(names: &[String]) {
         let permit = match semaphore.clone().acquire_owned().await {
             Ok(permit) => permit,
             Err(err) => {
-                eprintln!(
-                    "[marketplace_snapshot] failed to acquire source-resolution permit: {err}"
+                warn!(
+                    target: "marketplace_snapshot",
+                    error = %err,
+                    "failed to acquire source-resolution permit"
                 );
                 break;
             }
@@ -1223,13 +1232,16 @@ async fn seed_resolution_names(names: &[String]) {
     while let Some(result) = tasks.join_next().await {
         match result {
             Ok((name, Err(err))) => {
-                eprintln!(
-                    "[marketplace_snapshot] failed to seed source resolution for '{name}': {err}"
+                warn!(
+                    target: "marketplace_snapshot",
+                    name = %name,
+                    error = %err,
+                    "failed to seed source resolution"
                 );
             }
             Ok((_name, Ok(()))) => {}
             Err(err) => {
-                eprintln!("[marketplace_snapshot] source-resolution task failed: {err}");
+                warn!(target: "marketplace_snapshot", error = %err, "source-resolution task failed");
             }
         }
     }
@@ -1322,12 +1334,15 @@ async fn resolve_skill_sources_remote_fallback(
                 }
             }
             Ok((name, Err(err))) => {
-                eprintln!(
-                    "[marketplace_snapshot] remote source fallback failed for '{name}': {err}"
+                warn!(
+                    target: "marketplace_snapshot",
+                    name = %name,
+                    error = %err,
+                    "remote source fallback failed"
                 );
             }
             Err(err) => {
-                eprintln!("[marketplace_snapshot] remote source fallback task join error: {err}");
+                warn!(target: "marketplace_snapshot", error = %err, "remote source fallback task join error");
             }
         }
     }
@@ -1369,7 +1384,7 @@ pub async fn resolve_skill_sources_local_first(
     let mut resolved = match initial {
         Ok(resolved) => resolved,
         Err(err) => {
-            eprintln!("[marketplace_snapshot] source resolution local read failed: {err}");
+            warn!(target: "marketplace_snapshot", error = %err, "source resolution local read failed");
             return resolve_skill_sources_remote_fallback(
                 &requests,
                 &named_sources,
@@ -1394,8 +1409,10 @@ pub async fn resolve_skill_sources_local_first(
             Ok(resolved)
         }
         Err(err) => {
-            eprintln!(
-                "[marketplace_snapshot] source resolution local re-read failed after seed: {err}"
+            warn!(
+                target: "marketplace_snapshot",
+                error = %err,
+                "source resolution local re-read failed after seed"
             );
             resolve_skill_sources_remote_fallback(&requests, &named_sources, &preferred_repos).await
         }
@@ -1751,7 +1768,7 @@ fn cleanup_stale_skills_in_tx(tx: &Transaction<'_>) -> Result<()> {
 fn installed_snapshot_markers() -> HashSet<String> {
     let mut markers = HashSet::new();
 
-    let hub_skills_dir = super::sync::get_hub_skills_dir();
+    let hub_skills_dir = crate::core::paths::hub_skills_dir();
     if let Ok(entries) = std::fs::read_dir(&hub_skills_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -1788,7 +1805,7 @@ async fn apply_installed_state(mut skills: Vec<Skill>) -> Vec<Skill> {
     let installed_skills = match installed_skill::list_installed_skills_fast().await {
         Ok(skills) => skills,
         Err(err) => {
-            eprintln!("[marketplace_snapshot] failed to load installed snapshot: {err}");
+            warn!(target: "marketplace_snapshot", error = %err, "failed to load installed snapshot");
             return skills;
         }
     };
@@ -1894,7 +1911,7 @@ pub async fn get_leaderboard_local(category: &str) -> Result<LocalFirstResult<Ve
             })
         }
         Err(err) => {
-            eprintln!("[marketplace_snapshot] leaderboard local read failed: {err}");
+            warn!(target: "marketplace_snapshot", error = %err, "leaderboard local read failed");
             match marketplace::get_skills_sh_leaderboard(category).await {
                 Ok(skills) => Ok(LocalFirstResult {
                     data: apply_installed_state(skills).await,
@@ -1946,7 +1963,7 @@ pub async fn search_local(query: &str, limit: Option<u32>) -> Result<LocalFirstR
             })
         }
         Err(err) => {
-            eprintln!("[marketplace_snapshot] search local read failed: {err}");
+            warn!(target: "marketplace_snapshot", error = %err, "search local read failed");
             match marketplace::search_skills_sh(query, limit).await {
                 Ok(result) => Ok(LocalFirstResult {
                     data: apply_installed_state(result.skills).await,
@@ -2008,7 +2025,7 @@ pub async fn get_publishers_local() -> Result<LocalFirstResult<Vec<OfficialPubli
             })
         }
         Err(err) => {
-            eprintln!("[marketplace_snapshot] publishers local read failed: {err}");
+            warn!(target: "marketplace_snapshot", error = %err, "publishers local read failed");
             match marketplace::get_official_publishers().await {
                 Ok(publishers) => Ok(LocalFirstResult {
                     data: publishers,
@@ -2074,7 +2091,7 @@ pub async fn get_publisher_repos_local(
             })
         }
         Err(err) => {
-            eprintln!("[marketplace_snapshot] publisher repos local read failed: {err}");
+            warn!(target: "marketplace_snapshot", error = %err, "publisher repos local read failed");
             match marketplace::get_publisher_repos(&publisher_name).await {
                 Ok(repos) => Ok(LocalFirstResult {
                     data: repos,
@@ -2138,7 +2155,7 @@ pub async fn get_repo_skills_local(source: &str) -> Result<LocalFirstResult<Vec<
             })
         }
         Err(err) => {
-            eprintln!("[marketplace_snapshot] repo skills local read failed: {err}");
+            warn!(target: "marketplace_snapshot", error = %err, "repo skills local read failed");
             let (publisher_name, repo_name) = split_source(&source);
             match marketplace::get_publisher_repo_skills(&publisher_name, &repo_name).await {
                 Ok(skills) => {
@@ -2227,7 +2244,7 @@ pub async fn get_skill_detail_local(
             })
         }
         Err(err) => {
-            eprintln!("[marketplace_snapshot] detail local read failed: {err}");
+            warn!(target: "marketplace_snapshot", error = %err, "detail local read failed");
             match marketplace::fetch_marketplace_skill_details(&source, &name).await {
                 Ok(details) => Ok(LocalFirstResult {
                     data: details,
@@ -2737,7 +2754,7 @@ mod tests {
     #[test]
     fn migrates_legacy_marketplace_cache_into_snapshot_schema() {
         with_temp_data_root(|| {
-            let path = crate::core::paths::data_root().join("marketplace.db");
+            let path = crate::core::paths::marketplace_db_path();
             let conn = open_raw_conn(&path);
             conn.execute_batch(
                 "CREATE TABLE marketplace_cache (

@@ -39,6 +39,8 @@ impl Default for SkillType {
 pub struct Skill {
     pub name: String,
     pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub localized_description: Option<String>,
     /// Indicates if a skill is git-backed (`Hub`) or user-authored (`Local`).
     #[serde(default)]
     pub skill_type: SkillType,
@@ -75,6 +77,7 @@ impl Skill {
         let mut skill = Self {
             name,
             description,
+            localized_description: None,
             skill_type: SkillType::Hub,
             stars,
             installed: false,

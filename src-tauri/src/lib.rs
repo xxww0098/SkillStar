@@ -2,6 +2,8 @@ mod cli;
 mod commands;
 mod core;
 
+use tracing::error;
+
 use std::sync::{
     Mutex,
     atomic::{AtomicBool, Ordering},
@@ -59,6 +61,16 @@ pub fn run_cli(args: Vec<String>) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Initialize tracing subscriber — defaults to INFO, override with RUST_LOG env.
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .with_target(true)
+        .without_time()
+        .init();
+
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init());
@@ -76,14 +88,14 @@ pub fn run() {
         .manage(ExitControl::new())
         .setup(|app| {
             if let Err(err) = core::marketplace_snapshot::initialize() {
-                eprintln!("[marketplace_snapshot] init failed: {err}");
+                error!(target: "marketplace_snapshot", "init failed: {err}");
             }
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(err) =
                     core::marketplace_snapshot::refresh_startup_scopes_if_needed().await
                 {
-                    eprintln!("[marketplace_snapshot] startup refresh failed: {err}");
+                    error!(target: "marketplace_snapshot", "startup refresh failed: {err}");
                 }
                 let _ = app_handle.emit("marketplace://ready", ());
             });
@@ -157,6 +169,9 @@ pub fn run() {
             commands::agents::batch_link_skills_to_agent,
             commands::agents::list_linked_skills,
             commands::agents::unlink_skill_from_agent,
+            commands::agents::batch_remove_skills_from_all_agents,
+            commands::agents::add_custom_agent_profile,
+            commands::agents::remove_custom_agent_profile,
             commands::projects::create_project_skills,
             commands::list_skill_groups,
             commands::create_skill_group,
@@ -183,17 +198,15 @@ pub fn run() {
             commands::ai::save_ai_config,
             commands::ai::ai_translate_skill,
             commands::ai::ai_translate_skill_stream,
-            commands::ai::ai_translate_short_text,
-            commands::ai::ai_translate_short_text_with_source,
             commands::ai::get_mymemory_usage_stats,
-            commands::ai::ai_translate_short_text_stream,
             commands::ai::ai_translate_short_text_stream_with_source,
-            commands::ai::ai_retranslate_short_text_with_source,
             commands::ai::ai_retranslate_short_text_stream_with_source,
             commands::ai::ai_summarize_skill,
             commands::ai::ai_summarize_skill_stream,
             commands::ai::ai_test_connection,
             commands::ai::ai_pick_skills,
+            commands::ai::ai_batch_process_skills,
+            commands::ai::check_pending_batch_translate,
             commands::ai::ai_security_scan,
             commands::ai::estimate_security_scan,
             commands::ai::cancel_security_scan,

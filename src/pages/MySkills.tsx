@@ -22,6 +22,7 @@ import { useSecurityScan } from "../features/security/hooks/useSecurityScan";
 import { useViewMode } from "../hooks/useViewMode";
 import { toast } from "../lib/toast";
 import { LoadingLogo } from "../components/ui/LoadingLogo";
+import { BatchTranslationProgress } from "../components/ui/BatchTranslationProgress";
 import type { Skill, SortOption } from "../types";
 
 const DetailPanel = lazy(() =>
@@ -60,6 +61,8 @@ export function MySkills({
     pendingAgentToggleKeys,
     readSkillContent,
     updateSkillContent,
+    batchRemoveSkillsFromAllAgents,
+    batchAiProcessSkills,
   } = useSkills();
   const { profiles, deploySkillsToProject } = useAgentProfiles();
   const { createGroup, groups } = useSkillCards();
@@ -128,7 +131,8 @@ export function MySkills({
       visibleSkills = visibleSkills.filter(
         (skill) =>
           skill.name.toLowerCase().includes(normalizedQuery) ||
-          skill.description.toLowerCase().includes(normalizedQuery)
+          skill.description.toLowerCase().includes(normalizedQuery) ||
+          (skill.localized_description && skill.localized_description.toLowerCase().includes(normalizedQuery))
       );
     }
 
@@ -303,6 +307,25 @@ export function MySkills({
     }
   }, [selectedSkillNames, clearSelection, refresh, t]);
 
+  const handleBatchUnlinkAll = useCallback(async () => {
+    setBatchLoading(true);
+    try {
+      await batchRemoveSkillsFromAllAgents(Array.from(selectedSkillNames));
+      clearSelection();
+      toast.success(t("mySkills.batchUnlinkedAll", { defaultValue: "Unlinked from all agents" }));
+    } catch (e) {
+      toast.error(t("mySkills.batchUnlinkFailed", { defaultValue: "Failed to unlink skills" }));
+    } finally {
+      setBatchLoading(false);
+    }
+  }, [selectedSkillNames, batchRemoveSkillsFromAllAgents, clearSelection, t]);
+
+  const getEmptyMessage = () => {
+    if (skills.length === 0) return t("mySkills.empty");
+    if (showUpdateOnly) return t("mySkills.noUpdates");
+    return t("mySkills.noMatching");
+  };
+
   return (
     <div className="flex-1 min-w-0 flex overflow-hidden relative">
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
@@ -358,6 +381,18 @@ export function MySkills({
               onClear={clearSelection}
               agentProfiles={profiles}
               onBatchLink={handleBatchLink}
+              onBatchUnlinkAll={handleBatchUnlinkAll}
+              onBatchAiProcess={async () => {
+                try {
+                  setBatchLoading(true);
+                  await batchAiProcessSkills(Array.from(selectedSkillNames));
+                  clearSelection();
+                } catch (e) {
+                  toast.error(t("mySkills.batchAiError", { defaultValue: "Failed to start AI processing" }));
+                } finally {
+                  setBatchLoading(false);
+                }
+              }}
             />
           )}
         </AnimatePresence>
@@ -420,7 +455,7 @@ export function MySkills({
               onSkillClick={(skill) => setSelectedSkill(prev => prev?.name === skill.name ? null : skill)}
               onInstall={handleInstall}
               onUpdate={handleUpdate}
-              emptyMessage={t("mySkills.empty")}
+              emptyMessage={getEmptyMessage()}
               selectable
               selectedSkills={selectedSkillNames}
               onSelectSkill={handleSelectSkill}
@@ -539,6 +574,8 @@ export function MySkills({
           setSelectedSkillNames(new Set(names));
         }}
       />
+
+      <BatchTranslationProgress />
     </div>
   );
 }

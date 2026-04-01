@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "../../../components/ui/button";
 import { SearchInput } from "../../../components/ui/SearchInput";
+import { toast } from "../../../lib/toast";
 import {
   X,
   Github,
@@ -23,6 +24,7 @@ import {
   GitBranch,
 } from "lucide-react";
 import type { GhStatus, PublishResult, UserRepo } from "../../../types";
+import { copyToClipboard } from "../../../lib/utils";
 
 interface PublishSkillModalProps {
   open: boolean;
@@ -161,6 +163,14 @@ export function PublishSkillModal({
       setResult(publishResult);
       setPhase("done");
       onPublished?.(publishResult.git_url);
+
+      // Auto-copy the repo URL to clipboard and show toast
+      const copySuccess = await copyToClipboard(publishResult.url);
+      if (copySuccess) {
+        setCopied(true);
+        toast.success(t("publishModal.autoCopied", { defaultValue: "已自动复制链接到剪贴板" }));
+        setTimeout(() => setCopied(false), 2000);
+      }
     } catch (e) {
       setError(String(e));
       setPhase("form");
@@ -168,9 +178,11 @@ export function PublishSkillModal({
   };
 
   const handleCopy = async (text: string) => {
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    const copySuccess = await copyToClipboard(text);
+    if (copySuccess) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   const handleClose = () => {

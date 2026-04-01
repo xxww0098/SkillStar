@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-use super::{lockfile, path_env::command_with_path, sync};
+use super::{lockfile, path_env::command_with_path};
 
 // ── Status ──────────────────────────────────────────────────────────
 
@@ -250,7 +250,7 @@ pub fn publish_skill(
     existing_repo_url: Option<&str>,
     folder_name: &str,
 ) -> Result<PublishResult> {
-    let hub_dir = sync::get_hub_skills_dir();
+    let hub_dir = super::paths::hub_skills_dir();
     let skill_source = hub_dir.join(skill_name);
 
     if !skill_source.exists() {

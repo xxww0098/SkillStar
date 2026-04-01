@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::sync::{Arc, LazyLock, Mutex};
 use tauri::Emitter;
+use tracing::{debug, error, info, warn};
 
 /// Global concurrency limiter — at most 3 different skills translate at once.
 static SKILL_TRANSLATION_GLOBAL: LazyLock<tokio::sync::Semaphore> =
@@ -110,10 +111,16 @@ fn get_cached_skill_translation(
         target_language,
         content,
     ) {
-        Ok(Some(cached)) => Some(cached.translated_text),
-        Ok(None) => None,
+        Ok(Some(cached)) => {
+            debug!(target: "translate", context = %log_context, lang = %target_language, content_len = content.len(), "skill cache HIT");
+            Some(cached.translated_text)
+        }
+        Ok(None) => {
+            debug!(target: "translate", context = %log_context, lang = %target_language, content_len = content.len(), "skill cache MISS");
+            None
+        }
         Err(err) => {
-            eprintln!("[translation_cache] {log_context} failed: {err}");
+            error!(target: "translate", context = %log_context, error = %err, "skill cache read error");
             None
         }
     }
@@ -145,15 +152,23 @@ fn get_cached_short_translation(
         content,
     ) {
         Ok(Some(cached)) if cached_short_translation_usable(&cached, requires_ai) => {
+            debug!(target: "translate", context = %log_context, provider = cached.source_provider.as_deref().unwrap_or("?"), "short cache HIT");
             Some(ShortTextTranslationPayload {
                 text: cached.translated_text,
                 source: short_text_source_from_provider(cached.source_provider.as_deref())
                     .to_string(),
             })
         }
-        Ok(Some(_)) | Ok(None) => None,
+        Ok(Some(_)) => {
+            debug!(target: "translate", context = %log_context, requires_ai, "short cache SKIP (provider mismatch)");
+            None
+        }
+        Ok(None) => {
+            debug!(target: "translate", context = %log_context, "short cache MISS");
+            None
+        }
         Err(err) => {
-            eprintln!("[translation_cache] {log_context} failed: {err}");
+            error!(target: "translate", context = %log_context, error = %err, "short cache read error");
             None
         }
     }
@@ -247,7 +262,7 @@ where
                 }
                 Ok(None) => {}
                 Err(err) => {
-                    eprintln!("[translation_cache] skill section read failed: {err}");
+                    warn!(target: "translate", error = %err, "skill section cache read failed");
                 }
             }
         }
@@ -266,7 +281,7 @@ where
         let fresh = translate(sections[idx].clone()).await?;
         let normalized = maybe_fix_trailing_newline(&sections[idx], &fresh);
         if let Err(err) = store(&sections[idx], &normalized) {
-            eprintln!("[translation_cache] skill section write failed: {err}");
+            warn!(target: "translate", error = %err, "skill section cache write failed");
         }
         fresh_map.insert(idx, normalized);
     }
@@ -300,12 +315,14 @@ async fn translate_skill_with_section_cache(
 ) -> Result<String, String> {
     // Short-circuit: small documents go through a single request.
     if content.len() < SECTION_SPLIT_MIN_CHARS {
+        debug!(target: "translate", chars = content.len(), threshold = SECTION_SPLIT_MIN_CHARS, "small doc → single request");
         return ai_provider::translate_text(config, content)
             .await
             .map_err(|e| e.to_string());
     }
 
     let sections = split_markdown_sections(content);
+    debug!(target: "translate", chars = content.len(), sections = sections.len(), force_refresh, "section_cache split");
     if sections.len() <= 1 {
         return ai_provider::translate_text(config, content)
             .await
@@ -504,27 +521,34 @@ pub async fn ai_translate_skill(
     content: String,
     force_refresh: Option<bool>,
 ) -> Result<String, String> {
+    let force_refresh = force_refresh.unwrap_or(false);
+    debug!(target: "translate", content_len = content.len(), force_refresh, "ai_translate_skill ENTER");
     let config = ensure_ai_config().await?;
 
-    let force_refresh = force_refresh.unwrap_or(false);
     if !force_refresh {
         if let Some(cached) =
             get_cached_skill_translation(&config.target_language, &content, "skill read")
         {
+            debug!(target: "translate", result_len = cached.len(), "ai_translate_skill → cached");
             return Ok(cached);
         }
     }
 
+    debug!(target: "translate", "ai_translate_skill → acquiring session");
     let _session = acquire_skill_translation_session(&content).await?;
+    debug!(target: "translate", "ai_translate_skill → session acquired");
     if !force_refresh {
         if let Some(cached) =
             get_cached_skill_translation(&config.target_language, &content, "skill read after wait")
         {
+            debug!(target: "translate", result_len = cached.len(), "ai_translate_skill → cached after wait");
             return Ok(cached);
         }
     }
 
+    debug!(target: "translate", "ai_translate_skill → calling AI");
     let translated = translate_skill_with_section_cache(&config, &content, force_refresh).await?;
+    debug!(target: "translate", result_len = translated.len(), "ai_translate_skill → AI done");
 
     if let Err(err) = translation_cache::upsert_translation(
         TranslationKind::Skill,
@@ -533,7 +557,7 @@ pub async fn ai_translate_skill(
         &translated,
         None,
     ) {
-        eprintln!("[translation_cache] skill write failed: {err}");
+        warn!(target: "translate", error = %err, "skill cache write failed");
     }
 
     Ok(translated)
@@ -546,31 +570,37 @@ pub async fn ai_translate_skill_stream(
     content: String,
     force_refresh: Option<bool>,
 ) -> Result<String, String> {
+    let force_refresh = force_refresh.unwrap_or(false);
+    debug!(target: "translate", req = %request_id, content_len = content.len(), force_refresh, "ai_translate_skill_stream ENTER");
     let config = ensure_ai_config().await?;
 
     let _ = emit_translate_stream_event(&window, &request_id, "start", None, None);
-    let force_refresh = force_refresh.unwrap_or(false);
     if !force_refresh {
         if let Some(cached) =
             get_cached_skill_translation(&config.target_language, &content, "skill stream read")
         {
+            debug!(target: "translate", result_len = cached.len(), "ai_translate_skill_stream → cached");
             let _ = emit_translate_stream_event(&window, &request_id, "complete", None, None);
             return Ok(cached);
         }
     }
 
+    debug!(target: "translate", "ai_translate_skill_stream → acquiring session");
     let _session = acquire_skill_translation_session(&content).await?;
+    debug!(target: "translate", "ai_translate_skill_stream → session acquired");
     if !force_refresh {
         if let Some(cached) = get_cached_skill_translation(
             &config.target_language,
             &content,
             "skill stream read after wait",
         ) {
+            debug!(target: "translate", "ai_translate_skill_stream → cached after wait");
             let _ = emit_translate_stream_event(&window, &request_id, "complete", None, None);
             return Ok(cached);
         }
     }
 
+    debug!(target: "translate", "ai_translate_skill_stream → streaming from AI");
     match translate_skill_stream_with_section_cache(
         &window,
         &request_id,
@@ -581,6 +611,7 @@ pub async fn ai_translate_skill_stream(
     .await
     {
         Ok(result) => {
+            debug!(target: "translate", result_len = result.len(), "ai_translate_skill_stream → done");
             if let Err(err) = translation_cache::upsert_translation(
                 TranslationKind::Skill,
                 &config.target_language,
@@ -588,13 +619,14 @@ pub async fn ai_translate_skill_stream(
                 &result,
                 None,
             ) {
-                eprintln!("[translation_cache] skill stream write failed: {err}");
+                warn!(target: "translate", error = %err, "skill stream cache write failed");
             }
             let _ = emit_translate_stream_event(&window, &request_id, "complete", None, None);
             Ok(result)
         }
         Err(err) => {
             let message = err.to_string();
+            error!(target: "translate", error = %message, "ai_translate_skill_stream failed");
             let _ = emit_translate_stream_event(
                 &window,
                 &request_id,
@@ -605,60 +637,6 @@ pub async fn ai_translate_skill_stream(
             Err(message)
         }
     }
-}
-
-#[tauri::command]
-pub async fn ai_translate_short_text(
-    content: String,
-    force_ai: Option<bool>,
-) -> Result<String, String> {
-    ai_translate_short_text_with_source(content, force_ai)
-        .await
-        .map(|payload| payload.text)
-}
-
-#[tauri::command]
-pub async fn ai_translate_short_text_with_source(
-    content: String,
-    force_ai: Option<bool>,
-) -> Result<ShortTextTranslationPayload, String> {
-    let requires_ai = force_ai.unwrap_or(false);
-    let config = if requires_ai {
-        ensure_ai_config().await?
-    } else {
-        ai_provider::load_config_async().await
-    };
-    if let Some(cached) =
-        get_cached_short_translation(&config.target_language, &content, "short read", requires_ai)
-    {
-        return Ok(cached);
-    }
-
-    let (text, source) = if requires_ai {
-        (
-            ai_provider::translate_short_text(&config, &content)
-                .await
-                .map_err(|e| e.to_string())?,
-            ai_provider::ShortTextSource::Ai,
-        )
-    } else {
-        ai_provider::translate_short_text_with_priority_source(&config, &content)
-            .await
-            .map_err(|e| e.to_string())?
-    };
-    if let Err(err) = translation_cache::upsert_translation(
-        TranslationKind::Short,
-        &config.target_language,
-        &content,
-        &text,
-        Some(source.as_str()),
-    ) {
-        eprintln!("[translation_cache] short write failed: {err}");
-    }
-    Ok(ShortTextTranslationPayload {
-        text,
-        source: source.as_str().to_string(),
-    })
 }
 
 #[tauri::command]
@@ -673,19 +651,6 @@ pub async fn get_mymemory_usage_stats() -> Result<MymemoryUsagePayload, String> 
 }
 
 #[tauri::command]
-pub async fn ai_translate_short_text_stream(
-    window: tauri::Window,
-    request_id: String,
-    content: String,
-    force_refresh: Option<bool>,
-    force_ai: Option<bool>,
-) -> Result<String, String> {
-    ai_translate_short_text_stream_with_source(window, request_id, content, force_refresh, force_ai)
-        .await
-        .map(|payload| payload.text)
-}
-
-#[tauri::command]
 pub async fn ai_translate_short_text_stream_with_source(
     window: tauri::Window,
     request_id: String,
@@ -694,6 +659,8 @@ pub async fn ai_translate_short_text_stream_with_source(
     force_ai: Option<bool>,
 ) -> Result<ShortTextTranslationPayload, String> {
     let requires_ai = force_ai.unwrap_or(false);
+    let force_refresh = force_refresh.unwrap_or(false);
+    debug!(target: "translate", req = %request_id, force_refresh, requires_ai, "short_text_stream ENTER");
     let config = if requires_ai {
         ensure_ai_config().await?
     } else {
@@ -701,7 +668,6 @@ pub async fn ai_translate_short_text_stream_with_source(
     };
 
     let _ = emit_translate_stream_event(&window, &request_id, "start", None, None);
-    let force_refresh = force_refresh.unwrap_or(false);
     if !force_refresh {
         if let Some(cached) = get_cached_short_translation(
             &config.target_language,
@@ -709,11 +675,13 @@ pub async fn ai_translate_short_text_stream_with_source(
             "short stream read",
             requires_ai,
         ) {
+            debug!(target: "translate", source = %cached.source, "short_text_stream → cached");
             let _ = emit_translate_stream_event(&window, &request_id, "complete", None, None);
             return Ok(cached);
         }
     }
 
+    debug!(target: "translate", "short_text_stream → calling provider");
     let mut on_delta = |delta: &str| -> anyhow::Result<()> {
         emit_translate_stream_event(&window, &request_id, "delta", Some(delta.to_string()), None)
             .map_err(anyhow::Error::msg)
@@ -734,6 +702,7 @@ pub async fn ai_translate_short_text_stream_with_source(
 
     match translate_result {
         Ok((result, source)) => {
+            debug!(target: "translate", source = source.as_str(), result_len = result.len(), "short_text_stream → done");
             if let Err(err) = translation_cache::upsert_translation(
                 TranslationKind::Short,
                 &config.target_language,
@@ -741,7 +710,7 @@ pub async fn ai_translate_short_text_stream_with_source(
                 &result,
                 Some(source.as_str()),
             ) {
-                eprintln!("[translation_cache] short stream write failed: {err}");
+                warn!(target: "translate", error = %err, "short stream cache write failed");
             }
             let _ = emit_translate_stream_event(&window, &request_id, "complete", None, None);
             Ok(ShortTextTranslationPayload {
@@ -751,6 +720,7 @@ pub async fn ai_translate_short_text_stream_with_source(
         }
         Err(err) => {
             let message = err.to_string();
+            error!(target: "translate", error = %message, "short_text_stream failed");
             let _ = emit_translate_stream_event(
                 &window,
                 &request_id,
@@ -761,13 +731,6 @@ pub async fn ai_translate_short_text_stream_with_source(
             Err(message)
         }
     }
-}
-
-#[tauri::command]
-pub async fn ai_retranslate_short_text_with_source(
-    content: String,
-) -> Result<ShortTextTranslationPayload, String> {
-    ai_translate_short_text_with_source(content, Some(true)).await
 }
 
 #[tauri::command]
@@ -783,9 +746,29 @@ pub async fn ai_retranslate_short_text_stream_with_source(
 #[tauri::command]
 pub async fn ai_summarize_skill(content: String) -> Result<String, String> {
     let config = ensure_ai_config().await?;
-    ai_provider::summarize_text(&config, &content)
+    
+    // Check cache
+    if let Ok(Some(cached)) = translation_cache::get_cached_translation(
+        TranslationKind::Summary,
+        &config.target_language,
+        &content,
+    ) {
+        return Ok(cached.translated_text);
+    }
+    
+    let result = ai_provider::summarize_text(&config, &content)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+        
+    let _ = translation_cache::upsert_translation(
+        TranslationKind::Summary,
+        &config.target_language,
+        &content,
+        &result,
+        Some("ai"),
+    );
+    
+    Ok(result)
 }
 
 #[tauri::command]
@@ -797,6 +780,15 @@ pub async fn ai_summarize_skill_stream(
     let config = ensure_ai_config().await?;
 
     let _ = emit_summarize_stream_event(&window, &request_id, "start", None, None);
+    
+    if let Ok(Some(cached)) = translation_cache::get_cached_translation(
+        TranslationKind::Summary,
+        &config.target_language,
+        &content,
+    ) {
+        let _ = emit_summarize_stream_event(&window, &request_id, "complete", None, None);
+        return Ok(cached.translated_text);
+    }
 
     let mut on_delta = |delta: &str| -> anyhow::Result<()> {
         emit_summarize_stream_event(&window, &request_id, "delta", Some(delta.to_string()), None)
@@ -805,6 +797,13 @@ pub async fn ai_summarize_skill_stream(
 
     match ai_provider::summarize_text_streaming(&config, &content, &mut on_delta).await {
         Ok(result) => {
+            let _ = translation_cache::upsert_translation(
+                TranslationKind::Summary,
+                &config.target_language,
+                &content,
+                &result,
+                Some("ai"),
+            );
             let _ = emit_summarize_stream_event(&window, &request_id, "complete", None, None);
             Ok(result)
         }
@@ -820,6 +819,214 @@ pub async fn ai_summarize_skill_stream(
             Err(message)
         }
     }
+}
+
+use tauri::AppHandle;
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BatchProgressPayload {
+    completed: usize,
+    total: usize,
+    current_name: String,
+}
+
+/// Max short descriptions per batch API call.
+const BATCH_DESC_CHUNK_SIZE: usize = 10;
+
+/// Path to the pending batch translation task file.
+fn batch_translate_pending_path() -> std::path::PathBuf {
+    crate::core::paths::data_root().join("batch_translate_pending.json")
+}
+
+fn save_pending_batch(names: &[String]) {
+    let path = batch_translate_pending_path();
+    let _ = std::fs::write(&path, serde_json::to_string(names).unwrap_or_default());
+}
+
+fn clear_pending_batch() {
+    let path = batch_translate_pending_path();
+    let _ = std::fs::remove_file(&path);
+}
+
+/// Returns skill names from a previously interrupted batch, or empty vec.
+#[tauri::command]
+pub async fn check_pending_batch_translate() -> Result<Vec<String>, String> {
+    let path = batch_translate_pending_path();
+    match std::fs::read_to_string(&path) {
+        Ok(content) => {
+            let names: Vec<String> = serde_json::from_str(&content).unwrap_or_default();
+            Ok(names)
+        }
+        Err(_) => Ok(vec![]),
+    }
+}
+
+#[tauri::command]
+pub async fn ai_batch_process_skills(app: AppHandle, skill_names: Vec<String>) -> Result<(), String> {
+    let config = ensure_ai_config().await?;
+    let total = skill_names.len();
+    info!(target: "translate", total, skills = ?&skill_names[..skill_names.len().min(5)], "ai_batch_process_skills ENTER");
+
+    // Persist task so it can be resumed after restart.
+    save_pending_batch(&skill_names);
+    
+    tauri::async_runtime::spawn(async move {
+        use tauri::Emitter;
+        let completed = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
+        // ── Collect all skill content upfront ──────────────────────────
+        let mut skill_contents: Vec<(String, crate::core::skill::SkillContent)> = Vec::new();
+        for name in &skill_names {
+            match crate::commands::read_skill_content(name.clone()).await {
+                Ok(content) => skill_contents.push((name.clone(), content)),
+                Err(err) => {
+                    warn!(target: "ai_batch", skill = %name, error = %err, "failed to read skill");
+                    completed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+        }
+
+        // ── Phase 1: Batch short description translation ──────────────
+        // Collect untranslated descriptions with their indices.
+        let mut desc_items: Vec<(usize, String)> = Vec::new(); // (index_in_skill_contents, description)
+        for (i, (_name, content)) in skill_contents.iter().enumerate() {
+            if let Some(ref desc) = content.description {
+                if desc.trim().is_empty() {
+                    continue;
+                }
+                let cached = translation_cache::get_cached_translation(
+                    TranslationKind::Short,
+                    &config.target_language,
+                    desc,
+                ).unwrap_or(None);
+                let is_usable = cached.as_ref().map_or(false, |c| {
+                    matches!(c.source_provider.as_deref(), Some("ai"))
+                });
+                if !is_usable {
+                    desc_items.push((i, desc.clone()));
+                }
+            }
+        }
+
+        // Translate in chunks of BATCH_DESC_CHUNK_SIZE
+        for chunk in desc_items.chunks(BATCH_DESC_CHUNK_SIZE) {
+            let texts: Vec<&str> = chunk.iter().map(|(_, d)| d.as_str()).collect();
+            match ai_provider::translate_short_texts_batch(&config, &texts).await {
+                Ok(translations) => {
+                    for (j, (_idx, original_desc)) in chunk.iter().enumerate() {
+                        if let Some(translated) = translations.get(j) {
+                            if !translated.trim().is_empty() {
+                                let _ = translation_cache::upsert_translation(
+                                    TranslationKind::Short,
+                                    &config.target_language,
+                                    original_desc,
+                                    translated,
+                                    Some("ai"),
+                                );
+                            }
+                        }
+                        // Emit progress after each description
+                        let _ = app.emit("ai://translations-updated", ());
+                        let _ = app; // keep borrow checker happy
+                    }
+                }
+                Err(err) => {
+                    error!(target: "ai_batch", error = %err, "batch desc translation failed");
+                }
+            }
+        }
+
+        // ── Phase 2: Parallel summary + SKILL.md per skill ────────────
+        let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(3));
+        let config = std::sync::Arc::new(config);
+        let app = std::sync::Arc::new(app);
+
+        let mut handles = Vec::new();
+        for (name, content) in skill_contents {
+            let sem = semaphore.clone();
+            let cfg = config.clone();
+            let app_ref = app.clone();
+            let completed_ref = completed.clone();
+
+            let handle = tokio::spawn(async move {
+                let _permit = sem.acquire().await;
+
+                // Emit progress
+                let done = completed_ref.load(std::sync::atomic::Ordering::Relaxed);
+                let _ = app_ref.emit("ai://batch-progress", BatchProgressPayload {
+                    completed: done,
+                    total,
+                    current_name: name.clone(),
+                });
+
+                // 2a. Summary
+                if !content.content.trim().is_empty() {
+                    let cached = translation_cache::get_cached_translation(
+                        TranslationKind::Summary,
+                        &cfg.target_language,
+                        &content.content,
+                    ).unwrap_or(None);
+
+                    if cached.is_none() {
+                        if let Ok(summary) = ai_provider::summarize_text(&cfg, &content.content).await {
+                            let _ = translation_cache::upsert_translation(
+                                TranslationKind::Summary,
+                                &cfg.target_language,
+                                &content.content,
+                                &summary,
+                                Some("ai"),
+                            );
+                        }
+                    }
+                }
+
+                // 2b. SKILL.md full content translation
+                if !content.content.trim().is_empty() {
+                    let cached = translation_cache::get_cached_translation(
+                        TranslationKind::Skill,
+                        &cfg.target_language,
+                        &content.content,
+                    ).unwrap_or(None);
+
+                    if cached.is_none() {
+                        if let Ok(translated) = translate_skill_with_section_cache(&cfg, &content.content, false).await {
+                            let _ = translation_cache::upsert_translation(
+                                TranslationKind::Skill,
+                                &cfg.target_language,
+                                &content.content,
+                                &translated,
+                                None,
+                            );
+                        }
+                    }
+                }
+
+                completed_ref.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                crate::core::installed_skill::invalidate_cache();
+                let _ = app_ref.emit("ai://translations-updated", ());
+            });
+
+            handles.push(handle);
+        }
+
+        // Wait for all parallel tasks
+        for handle in handles {
+            let _ = handle.await;
+        }
+
+        // Clear pending task file — batch is done.
+        clear_pending_batch();
+
+        // Final progress event
+        let _ = app.emit("ai://batch-progress", BatchProgressPayload {
+            completed: total,
+            total,
+            current_name: String::new(),
+        });
+    });
+
+    Ok(())
 }
 
 #[tauri::command]

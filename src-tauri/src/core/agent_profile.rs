@@ -2,6 +2,22 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+// ── Built-in agent definitions (data table) ────────────────────────
+// (id, display_name, icon, home_subdirs, project_skills_rel)
+//
+// Adding a new agent requires only one line here.
+const BUILTIN_AGENT_DEFS: &[(&str, &str, &str, &[&str], &str)] = &[
+    ("opencode",    "OpenCode",    "agents/opencode.svg",     &[".config", "opencode", "skills"], ".opencode/skills"),
+    ("claude",      "Claude Code", "agents/claude.svg",       &[".claude", "skills"],              ".claude/skills"),
+    ("codex",       "Codex CLI",   "agents/codex.svg",        &[".codex", "skills"],               ".codex/skills"),
+    ("antigravity", "Antigravity", "agents/antigravity.svg",  &[".gemini", "antigravity", "skills"], ".agents/skills"),
+    ("gemini",      "Gemini CLI",  "agents/gemini.svg",       &[".gemini", "skills"],              ".gemini/skills"),
+    ("cursor",      "Cursor",      "agents/cursor.svg",       &[".cursor", "skills"],              ".cursor/skills"),
+    ("qoder",       "Qoder",       "agents/qoder-color.svg",  &[".qoder", "skills"],               ".qoder/skills"),
+    ("trae",        "Trae",        "agents/trae-color.svg",   &[".trae", "skills"],                ".trae/skills"),
+    ("openclaw",    "OpenClaw",    "agents/openclaw.svg",     &[".openclaw", "skills"],            ""),
+];
+
 /// A single Agent profile describing where its skills directory lives.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentProfile {
@@ -23,11 +39,46 @@ pub struct AgentProfile {
     pub synced_count: u32,
 }
 
+impl AgentProfile {
+    /// Whether this agent supports project-level skills.
+    ///
+    /// Global-only agents (e.g. OpenClaw) have an empty `project_skills_rel`.
+    pub fn has_project_skills(&self) -> bool {
+        !self.project_skills_rel.is_empty()
+    }
+}
+
+/// Find an agent profile by its ID from a slice of profiles.
+///
+/// Returns `Err` if no profile matches — this is the canonical
+/// replacement for the `.find(...).ok_or_else(...)` pattern that was
+/// previously duplicated across `sync.rs` and `project_manifest.rs`.
+pub fn find_profile<'a>(
+    profiles: &'a [AgentProfile],
+    agent_id: &str,
+) -> anyhow::Result<&'a AgentProfile> {
+    profiles
+        .iter()
+        .find(|p| p.id == agent_id)
+        .ok_or_else(|| anyhow::anyhow!("Agent profile '{}' not found", agent_id))
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CustomProfileDef {
+    pub id: String,
+    pub display_name: String,
+    pub global_skills_dir: String,
+    pub project_skills_rel: String,
+    pub icon_data_uri: Option<String>,
+}
+
 /// Persisted user preferences (just the enable/disable state per agent).
 #[derive(Debug, Serialize, Deserialize, Default)]
 struct ProfilePrefs {
     /// Map of agent id → enabled.
     enabled: std::collections::HashMap<String, bool>,
+    #[serde(default)]
+    custom_profiles: Vec<CustomProfileDef>,
 }
 
 fn home_dir() -> PathBuf {
@@ -64,70 +115,30 @@ fn save_prefs(prefs: &ProfilePrefs) -> Result<()> {
 }
 
 /// Built-in agent definitions with correct directory paths.
+///
+/// Profile data is driven by `BUILTIN_AGENT_DEFS`; adding a new agent
+/// only requires appending one tuple to the const table.
 fn builtin_profiles() -> Vec<AgentProfile> {
     let home = home_dir();
-    vec![
-        AgentProfile {
-            id: "opencode".into(),
-            display_name: "OpenCode".into(),
-            icon: "agents/opencode.svg".into(),
-            global_skills_dir: home.join(".config").join("opencode").join("skills"),
-            project_skills_rel: ".opencode/skills".into(),
-            installed: false,
-            enabled: false,
-            synced_count: 0,
-        },
-        AgentProfile {
-            id: "claude".into(),
-            display_name: "Claude Code".into(),
-            icon: "agents/claude.svg".into(),
-            global_skills_dir: home.join(".claude").join("skills"),
-            project_skills_rel: ".claude/skills".into(),
-            installed: false,
-            enabled: false,
-            synced_count: 0,
-        },
-        AgentProfile {
-            id: "codex".into(),
-            display_name: "Codex CLI".into(),
-            icon: "agents/codex.svg".into(),
-            global_skills_dir: home.join(".codex").join("skills"),
-            project_skills_rel: ".codex/skills".into(),
-            installed: false,
-            enabled: false,
-            synced_count: 0,
-        },
-        AgentProfile {
-            id: "antigravity".into(),
-            display_name: "Antigravity".into(),
-            icon: "agents/antigravity.svg".into(),
-            global_skills_dir: home.join(".gemini").join("antigravity").join("skills"),
-            project_skills_rel: ".agents/skills".into(),
-            installed: false,
-            enabled: false,
-            synced_count: 0,
-        },
-        AgentProfile {
-            id: "gemini".into(),
-            display_name: "Gemini CLI".into(),
-            icon: "agents/gemini.svg".into(),
-            global_skills_dir: home.join(".gemini").join("skills"),
-            project_skills_rel: ".gemini/skills".into(),
-            installed: false,
-            enabled: false,
-            synced_count: 0,
-        },
-        AgentProfile {
-            id: "openclaw".into(),
-            display_name: "OpenClaw".into(),
-            icon: "agents/openclaw.svg".into(),
-            global_skills_dir: home.join(".openclaw").join("skills"),
-            project_skills_rel: "".into(),
-            installed: false,
-            enabled: false,
-            synced_count: 0,
-        },
-    ]
+    BUILTIN_AGENT_DEFS
+        .iter()
+        .map(|(id, name, icon, subdirs, rel)| {
+            let mut dir = home.clone();
+            for seg in *subdirs {
+                dir = dir.join(seg);
+            }
+            AgentProfile {
+                id: (*id).into(),
+                display_name: (*name).into(),
+                icon: (*icon).into(),
+                global_skills_dir: dir,
+                project_skills_rel: (*rel).into(),
+                installed: false,
+                enabled: false,
+                synced_count: 0,
+            }
+        })
+        .collect()
 }
 
 /// Count how many skill symlinks exist in a directory.
@@ -151,6 +162,27 @@ fn detect_installed(profile: &AgentProfile) -> bool {
 pub fn list_profiles() -> Vec<AgentProfile> {
     let prefs = load_prefs();
     let mut profiles = builtin_profiles();
+    let home = home_dir();
+
+    for cp in &prefs.custom_profiles {
+        let path_str = &cp.global_skills_dir;
+        let pbuf = if let Some(stripped) = path_str.strip_prefix("~/") {
+            home.join(stripped)
+        } else {
+            PathBuf::from(path_str)
+        };
+
+        profiles.push(AgentProfile {
+            id: cp.id.clone(),
+            display_name: cp.display_name.clone(),
+            icon: cp.icon_data_uri.clone().unwrap_or_else(|| "agents/openclaw.svg".into()),
+            global_skills_dir: pbuf,
+            project_skills_rel: cp.project_skills_rel.clone(),
+            installed: false,
+            enabled: false,
+            synced_count: 0,
+        });
+    }
 
     for p in &mut profiles {
         p.installed = detect_installed(p);
@@ -159,6 +191,27 @@ pub fn list_profiles() -> Vec<AgentProfile> {
     }
 
     profiles
+}
+
+pub fn add_custom_profile(def: CustomProfileDef) -> Result<()> {
+    let mut prefs = load_prefs();
+    
+    let mut new_def = def.clone();
+    if new_def.id.is_empty() {
+        new_def.id = format!("custom_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+    }
+    
+    prefs.custom_profiles.retain(|p| p.id != new_def.id);
+    prefs.custom_profiles.push(new_def.clone());
+    prefs.enabled.insert(new_def.id.clone(), true);
+    save_prefs(&prefs)
+}
+
+pub fn remove_custom_profile(id: &str) -> Result<()> {
+    let mut prefs = load_prefs();
+    prefs.custom_profiles.retain(|p| p.id != id);
+    prefs.enabled.remove(id);
+    save_prefs(&prefs)
 }
 
 /// Toggle the enabled state of a single agent profile.

@@ -4,6 +4,7 @@ use std::sync::{LazyLock, OnceLock};
 use anyhow::{Context, Result, anyhow};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use tracing::{debug, info, warn};
 
 use super::skill::{OfficialPublisher, Skill, SkillCategory};
 
@@ -66,6 +67,7 @@ impl From<SkillsShSkill> for Skill {
         Skill {
             name: skill_entry.name,
             description: skill_entry.description.unwrap_or_default(),
+            localized_description: None,
             skill_type: crate::core::skill::SkillType::Hub,
             stars: skill_entry.installs,
             installed: false,
@@ -167,7 +169,7 @@ pub async fn get_skills_sh_leaderboard(category: &str) -> Result<Vec<Skill>> {
     };
 
     let url = format!("https://skills.sh{}", url_path);
-    eprintln!("[skills.sh] Fetching: {}", url);
+    debug!(target: "skills_sh", url = %url, "fetching leaderboard");
 
     let html = client
         .get(&url)
@@ -181,11 +183,11 @@ pub async fn get_skills_sh_leaderboard(category: &str) -> Result<Vec<Skill>> {
         .context("Failed to read HTML")?;
 
     let skills = parse_skills_sh_html(&html);
-    eprintln!("[skills.sh] Parsed {} skills from HTML", skills.len());
+    debug!(target: "skills_sh", count = skills.len(), "parsed skills from HTML");
 
     // If HTML parsing fails, fallback to search API
     if skills.is_empty() {
-        eprintln!("[skills.sh] HTML parsing failed, using search API fallback");
+        warn!(target: "skills_sh", "HTML parsing failed, using search API fallback");
         let fallback_url = "https://skills.sh/api/search?q=ai&limit=200";
         let response: SkillsShSearchResponse = client
             .get(fallback_url)
@@ -259,9 +261,10 @@ fn parse_skills_sh_html(html: &str) -> Vec<Skill> {
     // backslash-escaped JSON objects. Extract, unescape, parse.
     let mut skills = extract_skills_from_escaped_payload(html);
     if !skills.is_empty() {
-        eprintln!(
-            "[skills.sh] Strategy 0 (escaped SSR) matched {} skills",
-            skills.len()
+        debug!(
+            target: "skills_sh",
+            count = skills.len(),
+            "Strategy 0 (escaped SSR) matched"
         );
         let mut seen = std::collections::HashSet::new();
         skills.retain(|s| seen.insert(s.name.clone()));
@@ -390,9 +393,10 @@ pub async fn get_official_publishers() -> Result<Vec<OfficialPublisher>> {
         .context("Failed to read HTML")?;
 
     let publishers = parse_official_publishers_html(&html);
-    eprintln!(
-        "[skills.sh] Parsed {} official publishers",
-        publishers.len()
+    debug!(
+        target: "skills_sh",
+        count = publishers.len(),
+        "parsed official publishers"
     );
 
     Ok(publishers)
@@ -536,7 +540,7 @@ fn parse_official_publishers_html(html: &str) -> Vec<OfficialPublisher> {
 
     // Hardcoded fallback: known major publishers for reliability
     if publishers.is_empty() {
-        eprintln!("[skills.sh] HTML parsing failed, using known publishers");
+        warn!(target: "skills_sh", "HTML parsing failed, using known publishers");
         publishers = known_official_publishers();
     }
 
@@ -702,11 +706,12 @@ pub async fn get_publisher_repo_skills(
         .context("Failed to read repo page HTML")?;
 
     let skills = parse_repo_skills_html(&html, &publisher_lower, &repo_lower);
-    eprintln!(
-        "[skills.sh] Parsed {} skills for repo '{}/{}' from detail page",
-        skills.len(),
-        publisher_lower,
-        repo_lower
+    debug!(
+        target: "skills_sh",
+        count = skills.len(),
+        publisher = %publisher_lower,
+        repo = %repo_lower,
+        "parsed repo skills"
     );
     Ok(skills)
 }
@@ -849,10 +854,11 @@ pub async fn get_publisher_repos(publisher_name: &str) -> Result<Vec<PublisherRe
         if let Ok(html) = official_html.text().await {
             let repos = parse_publisher_repos_from_official_payload(&html, &publisher_lower);
             if !repos.is_empty() {
-                eprintln!(
-                    "[skills.sh] Parsed {} repos for publisher '{}' from official payload",
-                    repos.len(),
-                    publisher_name
+                debug!(
+                    target: "skills_sh",
+                    count = repos.len(),
+                    publisher = %publisher_name,
+                    "parsed repos from official payload"
                 );
                 return Ok(repos);
             }
@@ -873,10 +879,11 @@ pub async fn get_publisher_repos(publisher_name: &str) -> Result<Vec<PublisherRe
         .context("Failed to read publisher page HTML")?;
 
     let repos = parse_publisher_repos_html(&html, publisher_name);
-    eprintln!(
-        "[skills.sh] Parsed {} repos for publisher '{}' from detail page",
-        repos.len(),
-        publisher_name
+    debug!(
+        target: "skills_sh",
+        count = repos.len(),
+        publisher = %publisher_name,
+        "parsed repos from detail page"
     );
 
     Ok(repos)
@@ -967,9 +974,11 @@ fn parse_publisher_repos_from_official_payload(
     let entries: Vec<RepoEntry> = match serde_json::from_str(&unescaped) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!(
-                "[skills.sh] Failed to parse official payload repos for '{}': {}",
-                publisher_lower, e
+            warn!(
+                target: "skills_sh",
+                publisher = %publisher_lower,
+                error = %e,
+                "failed to parse official payload repos"
             );
             return Vec::new();
         }
@@ -1154,7 +1163,7 @@ pub async fn fetch_marketplace_skill_details(
     name: &str,
 ) -> Result<MarketplaceSkillDetails> {
     let url = format!("https://skills.sh/{}/{}", source, name);
-    eprintln!("[fetch_skill_details] Fetching: {}", url);
+    debug!(target: "skills_sh", url = %url, "fetching skill details");
 
     let client = marketplace_client();
 
@@ -1388,7 +1397,7 @@ pub async fn ai_search_by_keywords(keywords: &[String]) -> Result<AiKeywordSearc
                 .acquire_owned()
                 .await
                 .map_err(|_| anyhow!("search semaphore closed"))?;
-            eprintln!("[ai_search] Searching keyword: {}", keyword);
+            debug!(target: "ai_search", keyword = %keyword, "searching keyword");
             let result = search_skills_sh(&keyword, 50).await?;
             Ok((keyword, result))
         });
@@ -1414,10 +1423,10 @@ pub async fn ai_search_by_keywords(keywords: &[String]) -> Result<AiKeywordSearc
                 keyword_skill_map.insert(keyword, names_for_keyword);
             }
             Ok(Err(e)) => {
-                eprintln!("[ai_search] Keyword search error: {}", e);
+                warn!(target: "ai_search", error = %e, "keyword search error");
             }
             Err(e) => {
-                eprintln!("[ai_search] Task join error: {}", e);
+                warn!(target: "ai_search", error = %e, "task join error");
             }
         }
     }
@@ -1429,10 +1438,11 @@ pub async fn ai_search_by_keywords(keywords: &[String]) -> Result<AiKeywordSearc
     }
     let total_count = skills.len() as u32;
 
-    eprintln!(
-        "[ai_search] Merged {} unique skills from {} keywords",
-        total_count,
-        keywords.len()
+    info!(
+        target: "ai_search",
+        unique_skills = total_count,
+        keywords = keywords.len(),
+        "merged search results"
     );
 
     Ok(AiKeywordSearchResult {

@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useTranslation } from "react-i18next";
-import { Share2, Plus, Rocket, Copy, Trash2, MoreHorizontal, Edit2, Download, Package, AlertTriangle, Loader2 } from "lucide-react";
+import { Share2, Plus, Rocket, Copy, Trash2, MoreHorizontal, Edit2, Download, Package, AlertTriangle, Loader2, Layers } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { Button } from "../components/ui/button";
@@ -396,25 +396,25 @@ export function SkillCards({
   return (
     <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="h-14 flex items-center justify-between px-6 border-b border-border bg-sidebar">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="flex items-center gap-3 shrink-0">
-            <h1>{t("sidebar.groups")}</h1>
-            {!loading && (
-              <Badge variant="outline">{t("skillCards.groupsCount", { count: filteredGroups.length })}</Badge>
-            )}
-            <div className="w-px h-5 bg-border" />
-          </div>
-          <SearchInput
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={t("skillCards.searchPlaceholder")}
-            containerClassName="w-56 shrink-0"
-            className="pl-8 h-8 text-xs bg-sidebar/50 focus-visible:bg-background"
-            iconClassName="left-2.5"
-          />
+      <div className="h-14 flex items-center gap-3 px-6 border-b border-border bg-sidebar overflow-x-auto [&::-webkit-scrollbar]:hidden">
+        <div className="flex items-center shrink-0 h-8 whitespace-nowrap">
+          <h1>{t("sidebar.groups")}</h1>
+          <div className="w-px h-5 ml-4 mr-1 bg-border" />
         </div>
-        <div className="flex items-center gap-2">
+        <SearchInput
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder={t("skillCards.searchPlaceholder")}
+          className="pl-8 h-8 text-xs bg-sidebar/50 focus-visible:bg-background"
+          iconClassName="left-2.5"
+        />
+        {!loading && (
+          <div className="h-8 px-3 flex items-center justify-center gap-1.5 rounded-lg border border-border/70 bg-background/50 shadow-sm text-xs font-medium text-foreground/80 tabular-nums whitespace-nowrap shrink-0">
+            <Layers className="w-3.5 h-3.5 text-muted-foreground" />
+            {filteredGroups.length}
+          </div>
+        )}
+        <div className="flex items-center gap-2 ml-auto shrink-0">
           <Button size="sm" variant="secondary" onClick={() => setImportModalOpen(true)}>
             <Download className="w-3.5 h-3.5" />
             {t("common.import")}
@@ -496,87 +496,8 @@ export function SkillCards({
                         menuOpenId === group.id ? "z-50" : "z-0 hover:z-10"
                       )}
                     >
-                      <CardTemplate className={cn("hover:bg-card-hover flex relative group shadow-sm hover:shadow-xl transition p-0 border border-border bg-card overflow-hidden", viewMode === "list" ? "flex-row items-center min-h-[96px]" : "flex-col h-full")}>
+                      <CardTemplate className={cn("hover:bg-card-hover flex relative group shadow-sm hover:shadow-xl transition p-0 border border-border bg-card", viewMode === "list" ? "flex-row items-center min-h-[96px]" : "flex-col h-full")}>
                         <div className={cn("ss-card-body flex flex-1 relative min-h-0", viewMode === "list" ? "flex-row items-center py-4" : "flex-col")}>
-                          {/* Top Action Row (Context Menu) */}
-                          <div className="absolute top-4 right-4 z-20 flex items-center gap-1">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setExportGroupTarget(group);
-                              }}
-                              className="p-2.5 -mr-1 rounded-lg hover:bg-muted text-muted-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                              title={t("skillCards.exportShareCode")}
-                              aria-label={t("skillCards.exportShareCode")}
-                            >
-                              <Share2 className="w-4 h-4" />
-                            </button>
-                            <div className="relative">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setMenuOpenId(
-                                    menuOpenId === group.id ? null : group.id
-                                  );
-                                }}
-                                className="p-2.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary mt-0.5"
-                                aria-label={t("common.more")}
-                              >
-                                <MoreHorizontal className="w-4 h-4" />
-                              </button>
-
-                              {menuOpenId === group.id && (
-                                <motion.div
-                                  initial={{ opacity: 0, scale: 0.95 }}
-                                  animate={{ opacity: 1, scale: 1 }}
-                                  transition={MOTION_TRANSITION.fadeFast}
-                                  className="absolute right-0 top-full mt-1 w-36 p-1 rounded-xl border border-border bg-card backdrop-blur-xl shadow-xl z-30"
-                                >
-                                  <button
-                                    onClick={() => {
-                                      setEditGroup(group);
-                                      setMenuOpenId(null);
-                                    }}
-                                    className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs hover:bg-card-hover transition-colors cursor-pointer"
-                                  >
-                                    <Edit2 className="w-3 h-3" />
-                                    {t("common.edit")}
-                                  </button>
-                                  <button
-                                    onClick={() => handleDuplicate(group.id)}
-                                    className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs hover:bg-card-hover transition-colors cursor-pointer"
-                                  >
-                                    <Copy className="w-3 h-3" />
-                                    {t("common.duplicate")}
-                                  </button>
-                                  <button
-                                    onClick={() => handleDelete(group.id)}
-                                    className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
-                                  >
-                                    <Trash2 className="w-3 h-3" />
-                                    {t("common.delete")}
-                                  </button>
-                                  {missingCount > 0 && (
-                                    <button
-                                      onClick={() => handleInstallMissing(group)}
-                                      disabled={isInstallingThis}
-                                      className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs text-warning-foreground hover:bg-warning/10 transition-colors cursor-pointer"
-                                    >
-                                      {isInstallingThis ? (
-                                        <Loader2 className="w-3 h-3 animate-spin" />
-                                      ) : (
-                                        <Download className="w-3 h-3" />
-                                      )}
-                                      {isInstallingThis && installProgress
-                                        ? `${installProgress.done}/${installProgress.total}`
-                                        : t("skillCards.installMissing", { count: missingCount, defaultValue: `Install missing (${missingCount})` })}
-                                    </button>
-                                  )}
-                                </motion.div>
-                              )}
-                            </div>
-                          </div>
-
                           {/* Header section */}
                           <div className={cn("flex items-start gap-4 pr-8 shrink-0", viewMode === "grid" ? "mb-5" : "w-[300px]")}>
                             <div className="w-12 h-12 rounded-xl bg-primary/5 border border-primary/10 flex items-center justify-center text-2xl shrink-0">
@@ -625,14 +546,70 @@ export function SkillCards({
                                 +{groupSkillNames.length - 5}
                               </Badge>
                             )}
-                            {missingCount > 0 && (
-                              <Badge
-                                variant="outline"
-                                className="text-micro font-medium px-2 py-0.5 h-5 bg-warning/5 text-warning border-warning/20 tabular-nums"
+
+                          </div>
+
+                          {/* Top Action Row (Context Menu) */}
+                          <div className={cn("z-20 flex items-center gap-1 shrink-0", viewMode === "list" ? "pr-4 pl-2" : "absolute top-4 right-4")}>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setExportGroupTarget(group);
+                              }}
+                              className="p-2.5 -mr-1 rounded-lg hover:bg-muted text-muted-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                              title={t("skillCards.exportShareCode")}
+                              aria-label={t("skillCards.exportShareCode")}
+                            >
+                              <Share2 className="w-4 h-4" />
+                            </button>
+                            <div className="relative">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setMenuOpenId(
+                                    menuOpenId === group.id ? null : group.id
+                                  );
+                                }}
+                                className="p-2.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary mt-0.5"
+                                aria-label={t("common.more")}
                               >
-                                {installedCount}/{totalCount}
-                              </Badge>
-                            )}
+                                <MoreHorizontal className="w-4 h-4" />
+                              </button>
+
+                              {menuOpenId === group.id && (
+                                <motion.div
+                                  initial={{ opacity: 0, scale: 0.95 }}
+                                  animate={{ opacity: 1, scale: 1 }}
+                                  transition={MOTION_TRANSITION.fadeFast}
+                                  className="absolute right-0 top-full mt-1 w-32 p-1 rounded-xl border border-border bg-card backdrop-blur-xl shadow-xl z-30"
+                                >
+                                  <button
+                                    onClick={() => {
+                                      setEditGroup(group);
+                                      setMenuOpenId(null);
+                                    }}
+                                    className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs hover:bg-card-hover transition-colors cursor-pointer"
+                                  >
+                                    <Edit2 className="w-3 h-3" />
+                                    {t("common.edit")}
+                                  </button>
+                                  <button
+                                    onClick={() => handleDuplicate(group.id)}
+                                    className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs hover:bg-card-hover transition-colors cursor-pointer"
+                                  >
+                                    <Copy className="w-3 h-3" />
+                                    {t("common.duplicate")}
+                                  </button>
+                                  <button
+                                    onClick={() => handleDelete(group.id)}
+                                    className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                    {t("common.delete")}
+                                  </button>
+                                </motion.div>
+                              )}
+                            </div>
                           </div>
                         </div>
 
@@ -644,6 +621,7 @@ export function SkillCards({
                               <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0" />
                               <span className="text-xs text-muted-foreground truncate">
                                 {t("skillCards.noSkillsInstalled", { defaultValue: "No skills installed" })}
+                                <span className="ml-1.5 opacity-60 tabular-nums">({installedCount}/{totalCount})</span>
                               </span>
                               {missingCount > 0 && (
                                 <Button
@@ -671,7 +649,7 @@ export function SkillCards({
                             /* Normal footer: Agent icons + Deploy */
                             <div className="flex items-center gap-1.5 flex-1 min-w-0">
                               {/* Link to Agent icons */}
-                              <HScrollRow count={enabledProfiles.length} maxVisible={6} itemWidth={28} gap={6} className="gap-1.5">
+                              <HScrollRow count={enabledProfiles.length} itemWidth={28} gap={6} className="gap-1.5 min-w-0">
                               {enabledProfiles.map((profile) => {
                                 const key = `${group.id}::${profile.id}`;
                                 const state = linkState[key];
@@ -737,7 +715,26 @@ export function SkillCards({
 
                               {/* Separator */}
                               {enabledProfiles.length > 0 && (
-                                <div className="w-px h-4 bg-border mx-0.5 ml-auto" />
+                                <div className="w-px h-4 bg-border mx-0.5 ml-auto shrink-0" />
+                              )}
+
+                              {missingCount > 0 && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 px-2 text-xs border-warning/20 bg-warning/5 text-warning hover:bg-warning/10 hover:text-warning shrink-0"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleInstallMissing(group);
+                                  }}
+                                  disabled={isInstallingThis}
+                                  title={t("skillCards.installMissing", { count: missingCount, defaultValue: `Install missing (${missingCount})` })}
+                                >
+                                  {isInstallingThis ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Download className="w-3 h-3 mr-1" />}
+                                  <span className="tabular-nums font-medium">
+                                    {isInstallingThis && installProgress ? `${installProgress.done}/${installProgress.total}` : `${installedCount}/${totalCount}`}
+                                  </span>
+                                </Button>
                               )}
 
                               {/* Deploy to project */}
@@ -798,9 +795,14 @@ export function SkillCards({
       <ImportShareCodeModal
         open={importModalOpen}
         onClose={() => setImportModalOpen(false)}
-        existingGroupNames={groups.map((g) => g.name)}
-        onImport={async (name, desc, icon, skillNames, sources) => {
-          await createGroup(name, desc, icon, skillNames, sources);
+        existingGroups={groups}
+        onImport={async (name, desc, icon, skillNames, sources, download) => {
+          const newGroup = await createGroup(name, desc, icon, skillNames, sources);
+          if (download && newGroup) {
+            setTimeout(() => {
+              handleInstallMissing(newGroup);
+            }, 100);
+          }
         }}
       />
 

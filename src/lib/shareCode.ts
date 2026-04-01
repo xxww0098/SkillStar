@@ -5,8 +5,6 @@
  *   • Skills sharing  →  prefix "ags-"  (file ext: .ags)
  *   • Deck sharing    →  prefix "agd-"  (file ext: .agd)
  *
- * Legacy prefix "agh-" is accepted during parsing and treated as "deck".
- *
  * Format (v2 — no encryption, with expiration):
  *   prefix + Base64(Version(1) + CompressedFlag(1) + Timestamp(8) + Payload)
  *
@@ -102,9 +100,6 @@ export async function parseShareCode(
   } else if (cleanCode.startsWith("agd-")) {
     type = "deck";
     cleanCode = cleanCode.substring(4);
-  } else if (cleanCode.startsWith("agh-")) {
-    type = "deck";
-    cleanCode = cleanCode.substring(4);
   } else {
     throw new Error("Invalid share code prefix (expected ags- or agd-)");
   }
@@ -182,7 +177,7 @@ export function looksLikeShareCode(text: string): ShareCodeType | null {
   const trimmed = text.trim();
   if (trimmed.startsWith("ags-") && trimmed.length > 30) return "skills";
   if (trimmed.startsWith("agd-") && trimmed.length > 30) return "deck";
-  if (trimmed.startsWith("agh-") && trimmed.length > 30) return "deck";
+
   const extracted = extractShareCode(trimmed);
   if (extracted !== trimmed) {
     return looksLikeShareCode(extracted);
@@ -203,7 +198,7 @@ export function formatShareMessage(
 
   const lines: string[] = [];
   lines.push(`DecksName: ${name}`);
-  if (data.d) lines.push(data.d);
+  if (data.d) lines.push(`Description: ${data.d}`);
   if (skillNames) lines.push(`Skills: ${skillNames}`);
   lines.push("");
   lines.push(`💡 Copy this entire message to import / 复制整段消息直接粘贴导入`);
@@ -217,6 +212,6 @@ export function formatShareMessage(
  */
 export function extractShareCode(text: string): string {
   const trimmed = text.trim();
-  const match = trimmed.match(/(?:ags-|agd-|agh-)[A-Za-z0-9+/=_-]+/);
+  const match = trimmed.match(/(?:ags-|agd-)[A-Za-z0-9+/=_-]+/);
   return match ? match[0] : trimmed;
 }

@@ -1,11 +1,13 @@
+import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Unlink, X } from "lucide-react";
+import { AlertTriangle, Plus, Unlink, X } from "lucide-react";
 import { Badge } from "../../../components/ui/badge";
 import { Switch } from "../../../components/ui/switch";
 import { AgentIcon } from "../../../components/ui/AgentIcon";
 import { cn, agentIconCls } from "../../../lib/utils";
-import type { AgentProfile } from "../../../types";
+import type { AgentProfile, CustomProfileDef } from "../../../types";
+import { AddCustomAgentDialog } from "../components/AddCustomAgentDialog";
 
 interface AgentConnectionsSectionProps {
   profiles: AgentProfile[];
@@ -19,6 +21,8 @@ interface AgentConnectionsSectionProps {
   onCancelDisable: () => void;
   onConfirmDisable: () => void;
   onUnlinkSkill: (skillName: string, agentId: string) => void;
+  onAddCustomProfile?: (def: CustomProfileDef) => void;
+  onRemoveCustomProfile?: (id: string) => void;
 }
 
 function formatGlobalPath(path: string): string {
@@ -54,16 +58,31 @@ export function AgentConnectionsSection({
   onCancelDisable,
   onConfirmDisable,
   onUnlinkSkill,
+  onAddCustomProfile,
+  onRemoveCustomProfile,
 }: AgentConnectionsSectionProps) {
   const { t } = useTranslation();
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [editingProfile, setEditingProfile] = useState<CustomProfileDef | null>(null);
 
   return (
     <section>
-      <div className="flex items-center gap-2 mb-3 px-1">
-        <div className="w-7 h-7 rounded-lg bg-indigo-500/10 flex items-center justify-center shrink-0 border border-indigo-500/20">
-          <Unlink className="w-4 h-4 text-indigo-500" />
+      <div className="flex items-center justify-between mb-3 px-1">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-lg bg-indigo-500/10 flex items-center justify-center shrink-0 border border-indigo-500/20">
+            <Unlink className="w-4 h-4 text-indigo-500" />
+          </div>
+          <h2 className="text-sm font-semibold text-foreground tracking-tight">{t("settings.agentConnections")}</h2>
         </div>
-        <h2 className="text-sm font-semibold text-foreground tracking-tight">{t("settings.agentConnections")}</h2>
+        {onAddCustomProfile && (
+          <button
+            onClick={() => setAddModalOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary bg-primary/10 border border-primary/20 hover:bg-primary/20 transition-colors duration-200 rounded-full group cursor-pointer"
+          >
+            <Plus className="w-3.5 h-3.5 transition-transform group-hover:scale-110" />
+            {t("settings.addCustomAgent", { defaultValue: "Add Custom Agent" })}
+          </button>
+        )}
       </div>
       {profilesLoading ? (
         <div className="text-muted-foreground text-sm py-4 px-1">{t("settings.loadingAgents")}</div>
@@ -74,14 +93,33 @@ export function AgentConnectionsSection({
             return (
               <div key={profile.id}>
                 <div className="flex items-center gap-3 px-4 py-3">
-                  <div
-                    className={cn(
-                      "w-8 h-8 flex items-center justify-center rounded-[10px] transition bg-card border border-border shrink-0 shadow-sm",
-                      profile.enabled ? "" : "grayscale opacity-50 border-transparent bg-muted/50"
-                    )}
-                  >
-                    <AgentIcon profile={profile} className={cn(agentIconCls(profile.icon, "w-5 h-5"), "object-contain")} />
-                  </div>
+                  {profile.id.startsWith("custom_") && onAddCustomProfile ? (
+                    <button
+                      onClick={() => setEditingProfile({
+                        id: profile.id,
+                        display_name: profile.display_name,
+                        global_skills_dir: profile.global_skills_dir,
+                        project_skills_rel: profile.project_skills_rel,
+                        icon_data_uri: profile.icon,
+                      })}
+                      title={t("common.edit", { defaultValue: "Edit" })}
+                      className={cn(
+                        "w-8 h-8 flex items-center justify-center rounded-[10px] transition bg-card border border-border shrink-0 shadow-sm cursor-pointer hover:border-primary/50 hover:bg-muted/50",
+                        profile.enabled ? "" : "grayscale opacity-50 border-transparent bg-muted/50 hover:bg-muted/80"
+                      )}
+                    >
+                      <AgentIcon profile={profile} className={cn(agentIconCls(profile.icon, "w-5 h-5"), "object-contain")} />
+                    </button>
+                  ) : (
+                    <div
+                      className={cn(
+                        "w-8 h-8 flex items-center justify-center rounded-[10px] transition bg-card border border-border shrink-0 shadow-sm",
+                        profile.enabled ? "" : "grayscale opacity-50 border-transparent bg-muted/50"
+                      )}
+                    >
+                      <AgentIcon profile={profile} className={cn(agentIconCls(profile.icon, "w-5 h-5"), "object-contain")} />
+                    </div>
+                  )}
 
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium truncate">{profile.display_name}</div>
@@ -112,11 +150,13 @@ export function AgentConnectionsSection({
                   )}
 
                   {profile.installed ? (
-                    <Switch
-                      checked={profile.enabled}
-                      onCheckedChange={() => onToggleProfile(profile)}
-                      disabled={unlinkingId === profile.id}
-                    />
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={profile.enabled}
+                        onCheckedChange={() => onToggleProfile(profile)}
+                        disabled={unlinkingId === profile.id}
+                      />
+                    </div>
                   ) : (
                     <Badge variant="outline" className="text-muted-foreground">
                       {t("settings.notFound")}
@@ -206,6 +246,27 @@ export function AgentConnectionsSection({
             );
           })}
         </div>
+      )}
+
+      {onAddCustomProfile && (
+        <AddCustomAgentDialog
+          open={addModalOpen || !!editingProfile}
+          initialData={editingProfile || undefined}
+          onClose={() => {
+            setAddModalOpen(false);
+            setEditingProfile(null);
+          }}
+          onConfirm={(def) => {
+            onAddCustomProfile(def);
+            setAddModalOpen(false);
+            setEditingProfile(null);
+          }}
+          onRemove={
+            editingProfile && onRemoveCustomProfile
+              ? () => onRemoveCustomProfile(editingProfile.id)
+              : undefined
+          }
+        />
       )}
     </section>
   );

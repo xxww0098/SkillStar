@@ -262,7 +262,7 @@ function SkillCardInner({
         bodyClassName="flex-1"
         body={
           <CardDescription className="ss-card-desc">
-            {skill.description || t("skillCard.noDescription")}
+            {skill.localized_description || skill.description || t("skillCard.noDescription")}
           </CardDescription>
         }
         footerClassName="ss-card-footer flex items-center justify-between mt-auto rounded-b-xl"
@@ -289,10 +289,9 @@ function SkillCardInner({
               {profiles && onToggleAgent ? (
                 <HScrollRow
                   count={profiles.length}
-                  maxVisible={10}
                   itemWidth={28}
                   gap={6}
-                  className="gap-1.5"
+                  className="gap-1.5 min-w-0"
                 >
                   {profiles.map((profile) => {
                     const isUsed = skill.agent_links?.includes(profile.display_name) ?? false;

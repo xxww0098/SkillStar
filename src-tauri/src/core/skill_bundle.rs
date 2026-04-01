@@ -8,7 +8,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use tar::{Archive, Builder};
 
-use super::{security_scan, sync};
+use super::security_scan;
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -44,7 +44,7 @@ pub struct ImportBundleResult {
 /// The output file is written to the specified path, or defaults to the
 /// downloads directory. Returns the absolute path of the generated file.
 pub fn export_bundle(skill_name: &str, output_path: Option<&str>) -> Result<PathBuf> {
-    let hub = sync::get_hub_skills_dir();
+    let hub = super::paths::hub_skills_dir();
     let skill_dir = hub.join(skill_name);
 
     if !skill_dir.exists() {
@@ -176,7 +176,7 @@ pub fn import_bundle(file_path: &str, force: bool) -> Result<ImportBundleResult>
         );
     }
 
-    let hub = sync::get_hub_skills_dir();
+    let hub = super::paths::hub_skills_dir();
     let target_dir = hub.join(&manifest.name);
     let replaced = target_dir.exists();
 
@@ -276,7 +276,7 @@ pub struct MultiManifest {
 pub fn export_multi_bundle(skill_names: &[String], output_path: &str) -> Result<PathBuf> {
     use std::io::Read;
 
-    let hub = sync::get_hub_skills_dir();
+    let hub = super::paths::hub_skills_dir();
     let out = PathBuf::from(output_path);
 
     if let Some(parent) = out.parent() {
@@ -398,7 +398,8 @@ pub fn import_multi_bundle(file_path: &str, force: bool) -> Result<ImportMultiBu
 
         if path == "multi_manifest.json" {
             manifest = Some(
-                serde_json::from_slice(&content).context("Invalid multi_manifest.json in bundle")?,
+                serde_json::from_slice(&content)
+                    .context("Invalid multi_manifest.json in bundle")?,
             );
         } else if path == MANIFEST_NAME {
             // Single-skill bundle opened as multi — fallback to single import
@@ -417,12 +418,9 @@ pub fn import_multi_bundle(file_path: &str, force: bool) -> Result<ImportMultiBu
         anyhow::anyhow!("Bundle does not contain multi_manifest.json or manifest.json")
     })?;
 
-    let hub = sync::get_hub_skills_dir();
-    let known_skills: std::collections::HashSet<String> = manifest
-        .skills
-        .iter()
-        .map(|s| s.name.clone())
-        .collect();
+    let hub = super::paths::hub_skills_dir();
+    let known_skills: std::collections::HashSet<String> =
+        manifest.skills.iter().map(|s| s.name.clone()).collect();
 
     // Check for conflicts if not forcing
     if !force {

@@ -3,20 +3,18 @@ use crate::core::{
     skill::{OfficialPublisher, Skill},
 };
 use std::collections::HashMap;
+use tracing::{debug, error, info};
 
 #[tauri::command]
 pub async fn search_skills_sh(query: String) -> Result<marketplace::MarketplaceResult, String> {
-    eprintln!("[search_skills_sh] Called with query: {}", query);
+    debug!(target: "marketplace", query = %query, "search_skills_sh called");
     match marketplace::search_skills_sh(&query, 200).await {
         Ok(result) => {
-            eprintln!(
-                "[search_skills_sh] Success, got {} skills",
-                result.skills.len()
-            );
+            debug!(target: "marketplace", count = result.skills.len(), "search_skills_sh success");
             Ok(result)
         }
         Err(e) => {
-            eprintln!("[search_skills_sh] Error: {}", e);
+            error!(target: "marketplace", error = %e, "search_skills_sh failed");
             Err(e.to_string())
         }
     }
@@ -24,20 +22,14 @@ pub async fn search_skills_sh(query: String) -> Result<marketplace::MarketplaceR
 
 #[tauri::command]
 pub async fn get_skills_sh_leaderboard(category: String) -> Result<Vec<Skill>, String> {
-    eprintln!(
-        "[get_skills_sh_leaderboard] Called with category: {}",
-        category
-    );
+    debug!(target: "marketplace", category = %category, "get_skills_sh_leaderboard called");
     match marketplace::get_skills_sh_leaderboard(&category).await {
         Ok(result) => {
-            eprintln!(
-                "[get_skills_sh_leaderboard] Success, got {} skills",
-                result.len()
-            );
+            debug!(target: "marketplace", count = result.len(), "get_skills_sh_leaderboard success");
             Ok(result)
         }
         Err(e) => {
-            eprintln!("[get_skills_sh_leaderboard] Error: {}", e);
+            error!(target: "marketplace", error = %e, "get_skills_sh_leaderboard failed");
             Err(e.to_string())
         }
     }
@@ -45,17 +37,14 @@ pub async fn get_skills_sh_leaderboard(category: String) -> Result<Vec<Skill>, S
 
 #[tauri::command]
 pub async fn get_official_publishers() -> Result<Vec<OfficialPublisher>, String> {
-    eprintln!("[get_official_publishers] Called");
+    debug!(target: "marketplace", "get_official_publishers called");
     match marketplace::get_official_publishers().await {
         Ok(result) => {
-            eprintln!(
-                "[get_official_publishers] Success, got {} publishers",
-                result.len()
-            );
+            debug!(target: "marketplace", count = result.len(), "get_official_publishers success");
             Ok(result)
         }
         Err(e) => {
-            eprintln!("[get_official_publishers] Error: {}", e);
+            error!(target: "marketplace", error = %e, "get_official_publishers failed");
             Err(e.to_string())
         }
     }
@@ -65,17 +54,14 @@ pub async fn get_official_publishers() -> Result<Vec<OfficialPublisher>, String>
 pub async fn get_publisher_repos(
     publisher_name: String,
 ) -> Result<Vec<marketplace::PublisherRepo>, String> {
-    eprintln!(
-        "[get_publisher_repos] Called for publisher: {}",
-        publisher_name
-    );
+    debug!(target: "marketplace", publisher = %publisher_name, "get_publisher_repos called");
     match marketplace::get_publisher_repos(&publisher_name).await {
         Ok(repos) => {
-            eprintln!("[get_publisher_repos] Success, got {} repos", repos.len());
+            debug!(target: "marketplace", count = repos.len(), "get_publisher_repos success");
             Ok(repos)
         }
         Err(e) => {
-            eprintln!("[get_publisher_repos] Error: {}", e);
+            error!(target: "marketplace", error = %e, "get_publisher_repos failed");
             Err(e.to_string())
         }
     }
@@ -86,20 +72,14 @@ pub async fn get_publisher_repo_skills(
     publisher_name: String,
     repo_name: String,
 ) -> Result<Vec<marketplace::PublisherRepoSkill>, String> {
-    eprintln!(
-        "[get_publisher_repo_skills] Called for {}/{}",
-        publisher_name, repo_name
-    );
+    debug!(target: "marketplace", publisher = %publisher_name, repo = %repo_name, "get_publisher_repo_skills called");
     match marketplace::get_publisher_repo_skills(&publisher_name, &repo_name).await {
         Ok(skills) => {
-            eprintln!(
-                "[get_publisher_repo_skills] Success, got {} skills",
-                skills.len()
-            );
+            debug!(target: "marketplace", count = skills.len(), "get_publisher_repo_skills success");
             Ok(skills)
         }
         Err(e) => {
-            eprintln!("[get_publisher_repo_skills] Error: {}", e);
+            error!(target: "marketplace", error = %e, "get_publisher_repo_skills failed");
             Err(e.to_string())
         }
     }
@@ -110,22 +90,20 @@ pub async fn get_marketplace_skill_details(
     source: String,
     name: String,
 ) -> Result<marketplace::MarketplaceSkillDetails, String> {
-    eprintln!(
-        "[get_marketplace_skill_details] Called for {}/{}",
-        source, name
-    );
+    debug!(target: "marketplace", source = %source, name = %name, "get_marketplace_skill_details called");
     match marketplace::fetch_marketplace_skill_details(&source, &name).await {
         Ok(details) => {
-            eprintln!(
-                "[get_marketplace_skill_details] Success — summary: {}, readme: {}, audits: {}",
-                details.summary.is_some(),
-                details.readme.is_some(),
-                details.security_audits.len()
+            debug!(
+                target: "marketplace",
+                has_summary = details.summary.is_some(),
+                has_readme = details.readme.is_some(),
+                audits = details.security_audits.len(),
+                "get_marketplace_skill_details success"
             );
             Ok(details)
         }
         Err(e) => {
-            eprintln!("[get_marketplace_skill_details] Error: {}", e);
+            error!(target: "marketplace", error = %e, "get_marketplace_skill_details failed");
             Err(e.to_string())
         }
     }
@@ -136,43 +114,37 @@ pub async fn resolve_skill_sources(
     names: Vec<String>,
     existing_sources: HashMap<String, String>,
 ) -> Result<HashMap<String, String>, String> {
-    eprintln!(
-        "[resolve_skill_sources] Resolving {} skill name(s)",
-        names.len()
-    );
+    debug!(target: "marketplace", count = names.len(), "resolve_skill_sources called");
     let total = names.len();
     let resolved =
         marketplace_snapshot::resolve_skill_sources_local_first(&names, &existing_sources)
             .await
             .map_err(|e| e.to_string())?;
-    eprintln!(
-        "[resolve_skill_sources] Resolved {}/{} sources",
-        resolved.len(),
-        total
-    );
+    info!(target: "marketplace", resolved = resolved.len(), total = total, "resolve_skill_sources done");
     Ok(resolved)
 }
 
 #[tauri::command]
 pub async fn ai_extract_search_keywords(query: String) -> Result<Vec<String>, String> {
-    eprintln!("[ai_extract_search_keywords] Query: {}", query);
+    debug!(target: "marketplace", query = %query, "ai_extract_search_keywords called");
     let config = crate::commands::ai::ensure_ai_config_pub()
         .await
         .map_err(|e| {
-            eprintln!("[ai_extract_search_keywords] Config error: {}", e);
+            error!(target: "marketplace", error = %e, "ai_extract_search_keywords config error");
             e
         })?;
     let keywords = crate::core::ai_provider::extract_search_keywords(&config, &query)
         .await
         .map_err(|e| {
             let msg = format!("AI keyword extraction failed: {}", e);
-            eprintln!("[ai_extract_search_keywords] {}", msg);
+            error!(target: "marketplace", error = %msg, "ai_extract_search_keywords failed");
             msg
         })?;
-    eprintln!(
-        "[ai_extract_search_keywords] ✓ Extracted {} keywords: {:?}",
-        keywords.len(),
-        keywords
+    info!(
+        target: "marketplace",
+        count = keywords.len(),
+        keywords = ?keywords,
+        "ai_extract_search_keywords success"
     );
     Ok(keywords)
 }
@@ -181,22 +153,19 @@ pub async fn ai_extract_search_keywords(query: String) -> Result<Vec<String>, St
 pub async fn ai_search_with_keywords(
     keywords: Vec<String>,
 ) -> Result<marketplace::AiKeywordSearchResult, String> {
-    eprintln!(
-        "[ai_search_with_keywords] Searching {} keywords: {:?}",
-        keywords.len(),
-        keywords
-    );
+    debug!(target: "marketplace", count = keywords.len(), keywords = ?keywords, "ai_search_with_keywords called");
     let result = marketplace::ai_search_by_keywords(&keywords)
         .await
         .map_err(|e| {
             let msg = format!("AI marketplace search failed: {}", e);
-            eprintln!("[ai_search_with_keywords] {}", msg);
+            error!(target: "marketplace", error = %msg, "ai_search_with_keywords failed");
             msg
         })?;
-    eprintln!(
-        "[ai_search_with_keywords] ✓ Found {} skills, keyword_map keys: {:?}",
-        result.skills.len(),
-        result.keyword_skill_map.keys().collect::<Vec<_>>()
+    info!(
+        target: "marketplace",
+        skills = result.skills.len(),
+        keyword_map_keys = ?result.keyword_skill_map.keys().collect::<Vec<_>>(),
+        "ai_search_with_keywords success"
     );
     Ok(result)
 }

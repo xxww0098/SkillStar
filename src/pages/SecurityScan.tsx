@@ -293,7 +293,26 @@ export function SecurityScan() {
   const [scanLogs, setScanLogs] = useState<SecurityScanLogEntry[]>([]);
   const [scanLogDir, setScanLogDir] = useState<string>("");
   const [openingLogFolder, setOpeningLogFolder] = useState(false);
-  const [selectedMode, setSelectedMode] = useState<ScanMode>("smart");
+  const [selectedMode, setSelectedModeState] = useState<ScanMode>(() => {
+    try {
+      const stored = localStorage.getItem("skillstar:scan-mode");
+      if (stored === "static" || stored === "smart" || stored === "deep") {
+        return stored as ScanMode;
+      }
+    } catch {
+      // ignore
+    }
+    return "static";
+  });
+
+  const setSelectedMode = useCallback((mode: ScanMode) => {
+    try {
+      localStorage.setItem("skillstar:scan-mode", mode);
+    } catch {
+      // ignore
+    }
+    setSelectedModeState(mode);
+  }, []);
   const [scanEstimate, setScanEstimate] = useState<SecurityScanEstimate | null>(null);
   const [estimating, setEstimating] = useState(false);
 

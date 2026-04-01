@@ -4,6 +4,8 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   release:
@@ -45,7 +47,7 @@ jobs:
       - name: Node.js setup
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: "lts/*"
 
       - name: Bun setup
         uses: oven-sh/setup-bun@v2
@@ -152,7 +154,7 @@ jobs:
       - name: Node.js setup
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: "lts/*"
 
       - name: Determine version
         shell: bash

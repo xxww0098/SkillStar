@@ -2,17 +2,37 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::sync::RwLock;
+use tracing::{debug, info};
+#[cfg(test)]
 use std::path::PathBuf;
 #[cfg(not(test))]
-use std::sync::{LazyLock, Mutex};
+use std::sync::LazyLock;
 
 const CACHE_SCHEMA_VERSION: &str = "v1";
+
+// ── In-memory cache for short translations ──────────────────────────
+//
+// Keyed by (source_hash, normalized_target_language) → CachedTranslation.
+// Eliminates DB roundtrips during list_skills (which builds 100+ skills
+// concurrently on blocking threads, each needing its description translation).
+
+static SHORT_TRANSLATION_MEM: std::sync::LazyLock<RwLock<HashMap<(String, String), CachedTranslation>>> =
+    std::sync::LazyLock::new(|| RwLock::new(HashMap::new()));
+
+const CORRUPTED_MARKERS: &[&str] = &[
+    "PLEASE SELECT TWO DISTINCT LANGUAGES",
+    "MYMEMORY WARNING:",
+    "LIMIT EXCEEDED",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TranslationKind {
     Short,
     Skill,
     SkillSection,
+    Summary,
 }
 
 impl TranslationKind {
@@ -21,6 +41,7 @@ impl TranslationKind {
             Self::Short => "short",
             Self::Skill => "skill",
             Self::SkillSection => "skill_section",
+            Self::Summary => "summary",
         }
     }
 }
@@ -31,19 +52,12 @@ pub struct CachedTranslation {
     pub source_provider: Option<String>,
 }
 
+#[cfg(test)]
 fn db_path() -> PathBuf {
-    super::paths::data_root().join("translation_cache.db")
+    super::paths::translation_db_path()
 }
 
-fn create_connection() -> Result<Connection> {
-    let path = db_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).context("Failed to create translation cache directory")?;
-    }
-
-    let conn = Connection::open(&path).context("Failed to open translation cache db")?;
-    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")
-        .context("Failed to set WAL mode")?;
+fn migrate_schema(conn: &Connection) -> Result<()> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS translation_cache (
             cache_key TEXT PRIMARY KEY,
@@ -63,29 +77,43 @@ fn create_connection() -> Result<Connection> {
         (),
     )
     .context("Failed to initialize translation_cache indexes")?;
+    Ok(())
+}
 
+/// Ensure schema migration runs exactly once via the pool.
+#[cfg(not(test))]
+static SCHEMA_READY: LazyLock<()> = LazyLock::new(|| {
+    let conn = super::db_pool::translation_pool()
+        .get()
+        .expect("translation cache DB pool connection for schema migration");
+    migrate_schema(&conn).expect("translation cache schema migration failed");
+});
+
+/// Test-only: open a standalone connection with full schema migration.
+#[cfg(test)]
+fn create_connection() -> Result<Connection> {
+    let path = db_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).context("Failed to create translation cache directory")?;
+    }
+    let conn = Connection::open(&path).context("Failed to open translation cache db")?;
+    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")
+        .context("Failed to set WAL mode")?;
+    migrate_schema(&conn)?;
     Ok(conn)
 }
 
-/// Global singleton DB connection for production use.
-/// WAL mode allows concurrent reads without blocking writes.
-#[cfg(not(test))]
-static DB: LazyLock<Mutex<Connection>> =
-    LazyLock::new(|| Mutex::new(create_connection().expect("translation cache DB init failed")));
-
-/// Execute a function with a DB connection.
-/// Production: uses the global singleton.
-/// Tests: opens a fresh connection (because tests swap data dirs via env var).
 fn with_conn<F, T>(f: F) -> Result<T>
 where
     F: FnOnce(&Connection) -> Result<T>,
 {
     #[cfg(not(test))]
     {
-        let guard = DB
-            .lock()
-            .map_err(|e| anyhow::anyhow!("DB lock poisoned: {e}"))?;
-        f(&guard)
+        LazyLock::force(&SCHEMA_READY);
+        let conn = super::db_pool::translation_pool()
+            .get()
+            .map_err(|e| anyhow::anyhow!("Failed to get translation pool connection: {e}"))?;
+        f(&conn)
     }
     #[cfg(test)]
     {
@@ -124,15 +152,30 @@ fn build_cache_key(kind: TranslationKind, target_language: &str, source_text_has
     )
 }
 
+fn is_corrupted_translation(text: &str) -> bool {
+    CORRUPTED_MARKERS.iter().any(|marker| text.contains(marker))
+}
+
 pub fn get_cached_translation(
     kind: TranslationKind,
     target_language: &str,
     source_text: &str,
 ) -> Result<Option<CachedTranslation>> {
     let hash = source_hash(source_text);
-    let cache_key = build_cache_key(kind, target_language, &hash);
+    let normalized_lang = normalize_target_language(target_language);
 
-    with_conn(|conn| {
+    // Fast path: check in-memory cache for Short translations.
+    if kind == TranslationKind::Short {
+        if let Ok(mem) = SHORT_TRANSLATION_MEM.read() {
+            if let Some(cached) = mem.get(&(hash.clone(), normalized_lang.clone())) {
+                return Ok(Some(cached.clone()));
+            }
+        }
+    }
+
+    let cache_key = build_cache_key(kind, &normalized_lang, &hash);
+
+    let result = with_conn(|conn| {
         let entry = conn
             .query_row(
                 "SELECT translated_text, source_provider FROM translation_cache WHERE cache_key = ?1",
@@ -147,8 +190,30 @@ pub fn get_cached_translation(
             .optional()
             .context("Failed to query translation cache")?;
 
-        Ok(entry)
-    })
+        if let Some(e) = entry {
+            if is_corrupted_translation(&e.translated_text) {
+                let _ = conn.execute(
+                    "DELETE FROM translation_cache WHERE cache_key = ?1",
+                    params![cache_key],
+                );
+                return Ok(None);
+            }
+            return Ok(Some(e));
+        }
+
+        Ok(None)
+    })?;
+
+    // Warm the in-memory cache on DB hit for Short translations.
+    if kind == TranslationKind::Short {
+        if let Some(ref cached) = result {
+            if let Ok(mut mem) = SHORT_TRANSLATION_MEM.write() {
+                mem.insert((hash, normalized_lang), cached.clone());
+            }
+        }
+    }
+
+    Ok(result)
 }
 
 pub fn upsert_translation(
@@ -159,6 +224,14 @@ pub fn upsert_translation(
     source_provider: Option<&str>,
 ) -> Result<()> {
     if translated_text.trim().is_empty() {
+        debug!(target: "translate", kind = kind.as_str(), "cache upsert SKIP empty text");
+        return Ok(());
+    }
+
+    // Write-side corruption guard — reject known bad translations before
+    // they reach the DB / memory cache.
+    if is_corrupted_translation(translated_text) {
+        debug!(target: "translate", kind = kind.as_str(), "cache upsert SKIP corrupted");
         return Ok(());
     }
 
@@ -199,21 +272,100 @@ pub fn upsert_translation(
         .context("Failed to upsert translation cache entry")?;
 
         Ok(())
-    })
+    })?;
+
+    // Update in-memory cache for Short translations.
+    if kind == TranslationKind::Short {
+        if let Ok(mut mem) = SHORT_TRANSLATION_MEM.write() {
+            mem.insert(
+                (hash, normalized_lang),
+                CachedTranslation {
+                    translated_text: translated_text.to_string(),
+                    source_provider: provider,
+                },
+            );
+        }
+    }
+
+    Ok(())
 }
 
+#[allow(dead_code)]
 pub fn clear_cache() -> Result<usize> {
-    let path = db_path();
-    if !path.exists() {
-        return Ok(0);
+    // Clear in-memory cache first.
+    if let Ok(mut mem) = SHORT_TRANSLATION_MEM.write() {
+        mem.clear();
     }
 
     with_conn(|conn| {
-        conn.execute("DELETE FROM translation_cache", [])
+        let deleted = conn
+            .execute("DELETE FROM translation_cache", [])
             .context("Failed to clear translation cache rows")?;
 
-        Ok(conn.changes().max(0) as usize)
+        Ok(deleted.max(0))
     })
+}
+
+/// Bulk-load all Short translations for a given target language into a
+/// HashMap keyed by `source_hash`.  Used by `list_installed_skills` to
+/// avoid N+1 DB queries (one per skill) during listing.
+///
+/// Also warms the in-memory cache so subsequent individual lookups are
+/// zero-cost.
+pub fn preload_short_translations(
+    target_language: &str,
+) -> Result<HashMap<String, CachedTranslation>> {
+    let normalized_lang = normalize_target_language(target_language);
+    debug!(target: "translate", lang = %normalized_lang, "preload_short_translations");
+
+    let map = with_conn(|conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT source_hash, translated_text, source_provider
+                 FROM translation_cache
+                 WHERE kind = 'short' AND target_language = ?1",
+            )
+            .context("Failed to prepare short translation preload query")?;
+
+        let rows = stmt
+            .query_map(params![normalized_lang], |row| {
+                let hash: String = row.get(0)?;
+                let text: String = row.get(1)?;
+                let provider: Option<String> = row.get(2)?;
+                Ok((hash, text, provider))
+            })
+            .context("Failed to execute short translation preload query")?;
+
+        let mut result = HashMap::new();
+        for row in rows {
+            if let Ok((hash, text, provider)) = row {
+                if !text.trim().is_empty() && !is_corrupted_translation(&text) {
+                    result.insert(
+                        hash,
+                        CachedTranslation {
+                            translated_text: text,
+                            source_provider: provider,
+                        },
+                    );
+                }
+            }
+        }
+
+        Ok(result)
+    })?;
+
+    // Warm in-memory cache with the bulk-loaded data.
+    if let Ok(mut mem) = SHORT_TRANSLATION_MEM.write() {
+        for (hash, cached) in &map {
+            mem.insert(
+                (hash.clone(), normalized_lang.clone()),
+                cached.clone(),
+            );
+        }
+    }
+    info!(target: "translate", entries = map.len(), "preload_short_translations done");
+
+    Ok(map)
 }
 
 #[cfg(test)]

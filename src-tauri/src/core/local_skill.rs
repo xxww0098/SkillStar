@@ -12,15 +12,12 @@ use super::{
 };
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
+use tracing::{info, warn};
 
-/// Get the local skills directory.
-pub fn local_skills_dir() -> PathBuf {
-    super::paths::local_skills_dir()
-}
 
 /// Check if a skill in the hub is a local skill (symlink pointing into `skills-local/`).
 pub fn is_local_skill(name: &str) -> bool {
-    let hub_dir = sync::get_hub_skills_dir();
+    let hub_dir = super::paths::hub_skills_dir();
     let skill_path = hub_dir.join(name);
 
     if !skill_path.is_symlink() {
@@ -37,13 +34,13 @@ pub fn is_local_skill(name: &str) -> bool {
         skill_path.parent().unwrap_or(Path::new(".")).join(&target)
     };
 
-    let local_dir = local_skills_dir();
+    let local_dir = super::paths::local_skills_dir();
     resolved.starts_with(&local_dir)
 }
 
 fn prepare_new_local_skill_paths(name: &str) -> Result<(PathBuf, PathBuf)> {
-    let hub_dir = sync::get_hub_skills_dir();
-    let local_dir = local_skills_dir();
+    let hub_dir = super::paths::hub_skills_dir();
+    let local_dir = super::paths::local_skills_dir();
     let skill_local_path = local_dir.join(name);
     let skill_hub_path = hub_dir.join(name);
 
@@ -96,7 +93,7 @@ pub fn create(name: &str, content: Option<&str>) -> Result<Skill> {
         .with_context(|| format!("Failed to write SKILL.md for '{}'", name))?;
 
     // Create symlink in hub: skills/<name> → skills-local/<name>
-    create_symlink(&skill_local_path, &skill_hub_path)
+    super::paths::create_symlink(&skill_local_path, &skill_hub_path)
         .with_context(|| format!("Failed to create hub symlink for '{}'", name))?;
 
     let description = extract_skill_description(&skill_local_path);
@@ -104,6 +101,7 @@ pub fn create(name: &str, content: Option<&str>) -> Result<Skill> {
     Ok(Skill {
         name: name.to_string(),
         description,
+        localized_description: None,
         skill_type: crate::core::skill::SkillType::Local,
         stars: 0,
         installed: true,
@@ -143,7 +141,7 @@ pub fn adopt_existing_dir(name: &str, source_dir: &Path) -> Result<PathBuf> {
         )
     })?;
 
-    if let Err(err) = create_symlink(&skill_local_path, &skill_hub_path)
+    if let Err(err) = super::paths::create_symlink(&skill_local_path, &skill_hub_path)
         .with_context(|| format!("Failed to create hub symlink for '{}'", name))
     {
         if let Err(rollback_err) = move_dir(&skill_local_path, source_dir).with_context(|| {
@@ -173,8 +171,8 @@ pub fn adopt_existing_dir(name: &str, source_dir: &Path) -> Result<PathBuf> {
 ///
 /// Safe to call on every refresh — it only creates missing symlinks.
 pub fn reconcile_hub_symlinks() {
-    let local_dir = local_skills_dir();
-    let hub_dir = sync::get_hub_skills_dir();
+    let local_dir = super::paths::local_skills_dir();
+    let hub_dir = super::paths::hub_skills_dir();
 
     let entries = match std::fs::read_dir(&local_dir) {
         Ok(entries) => entries,
@@ -201,10 +199,12 @@ pub fn reconcile_hub_symlinks() {
         }
 
         // Create missing hub symlink
-        if let Err(e) = create_symlink(&path, &hub_path) {
-            eprintln!(
-                "[local_skill::reconcile] Failed to create hub symlink for '{}': {}",
-                name, e
+        if let Err(e) = super::paths::create_symlink(&path, &hub_path) {
+            warn!(
+                target: "local_skill",
+                skill = %name,
+                error = %e,
+                "failed to create hub symlink during reconcile"
             );
         }
     }
@@ -221,7 +221,7 @@ pub fn delete(name: &str) -> Result<()> {
     let _ = project_manifest::remove_skill_from_all_projects(name);
 
     // Remove hub symlink
-    let hub_dir = sync::get_hub_skills_dir();
+    let hub_dir = super::paths::hub_skills_dir();
     let hub_path = hub_dir.join(name);
     if hub_path.symlink_metadata().is_ok() {
         if hub_path.is_symlink() {
@@ -235,7 +235,7 @@ pub fn delete(name: &str) -> Result<()> {
     }
 
     // Delete the local skill directory
-    let local_dir = local_skills_dir();
+    let local_dir = super::paths::local_skills_dir();
     let local_path = local_dir.join(name);
     if local_path.exists() {
         std::fs::remove_dir_all(&local_path)
@@ -256,7 +256,7 @@ pub fn delete(name: &str) -> Result<()> {
 /// Agent symlinks are NOT removed — they will be re-pointed by the re-install.
 pub fn graduate(name: &str) -> Result<()> {
     // Remove hub symlink
-    let hub_dir = sync::get_hub_skills_dir();
+    let hub_dir = super::paths::hub_skills_dir();
     let hub_path = hub_dir.join(name);
     if hub_path.is_symlink() {
         std::fs::remove_file(&hub_path)
@@ -264,7 +264,7 @@ pub fn graduate(name: &str) -> Result<()> {
     }
 
     // Delete local skill directory
-    let local_dir = local_skills_dir();
+    let local_dir = super::paths::local_skills_dir();
     let local_path = local_dir.join(name);
     if local_path.exists() {
         std::fs::remove_dir_all(&local_path)
@@ -285,8 +285,8 @@ pub fn graduate(name: &str) -> Result<()> {
 /// 1. Move `skills/<name>/` → `skills-local/<name>/`
 /// 2. Create symlink `skills/<name>` → `skills-local/<name>`
 pub fn migrate_existing() -> Result<u32> {
-    let hub_dir = sync::get_hub_skills_dir();
-    let local_dir = local_skills_dir();
+    let hub_dir = super::paths::hub_skills_dir();
+    let local_dir = super::paths::local_skills_dir();
 
     // Ensure local skills directory exists
     std::fs::create_dir_all(&local_dir).context("Failed to create skills-local directory")?;
@@ -349,9 +349,11 @@ pub fn migrate_existing() -> Result<u32> {
                 migrated += 1;
             }
             Err(err) => {
-                eprintln!(
-                    "[local_skill::migrate] Failed to migrate '{}': {}",
-                    name, err
+                warn!(
+                    target: "local_skill",
+                    skill = %name,
+                    error = %err,
+                    "failed to migrate skill"
                 );
                 // Continue with other skills
             }
@@ -359,9 +361,10 @@ pub fn migrate_existing() -> Result<u32> {
     }
 
     if migrated > 0 {
-        eprintln!(
-            "[local_skill::migrate] Migrated {} skills to skills-local/",
-            migrated
+        info!(
+            target: "local_skill",
+            count = migrated,
+            "migrated skills to skills-local/"
         );
     }
 
@@ -373,7 +376,7 @@ fn migrate_single_skill(src: &Path, dest: &Path) -> Result<()> {
     move_dir(src, dest)?;
 
     // Create symlink: src (hub) → dest (skills-local)
-    create_symlink(dest, src)
+    super::paths::create_symlink(dest, src)
         .with_context(|| format!("Failed to create migration symlink {:?} → {:?}", src, dest))?;
 
     Ok(())
@@ -414,15 +417,3 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Cross-platform symlink creation.
-fn create_symlink(src: &Path, dst: &Path) -> Result<()> {
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(src, dst)
-        .with_context(|| format!("Failed to symlink {:?} → {:?}", src, dst))?;
-
-    #[cfg(windows)]
-    std::os::windows::fs::symlink_dir(src, dst)
-        .with_context(|| format!("Failed to symlink {:?} → {:?}", src, dst))?;
-
-    Ok(())
-}

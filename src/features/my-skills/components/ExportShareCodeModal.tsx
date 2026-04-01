@@ -6,20 +6,9 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { Button } from "../../../components/ui/button";
 import { createShareCode, formatShareMessage, ShareCodeData, ShareCodeType } from "../../../lib/shareCode";
 import { toast } from "../../../lib/toast";
-import {
-  Copy,
-  KeyRound,
-  Loader2,
-  Check,
-  X,
-  Github,
-  Download,
-  Link2,
-  FileText,
-  Package,
-  Sparkles,
-} from "lucide-react";
+import { Sparkles, Package, FileText, Link2, Download, Check, Copy, KeyRound, Loader2, X, Github } from "lucide-react";
 import type { SkillCardDeck, Skill } from "../../../types";
+import { copyToClipboard } from "../../../lib/utils";
 
 interface ExportShareCodeModalProps {
   open: boolean;
@@ -209,6 +198,16 @@ export function ExportShareCodeModal({
       const generated = await createShareCode(sharePayload, codeType);
       setCode(generated);
       setShareData({ data: sharePayload, type: codeType });
+
+      // Automatically copy to clipboard when generated
+      const textToCopy = formatShareMessage(sharePayload, generated, codeType);
+      
+      const copySuccess = await copyToClipboard(textToCopy);
+      if (copySuccess) {
+        setCopied(true);
+        toast.success(t("exportShareCodeModal.autoCopied", { defaultValue: "已自动复制到剪贴板" }));
+        setTimeout(() => setCopied(false), 2000);
+      }
     } catch (e) {
       console.error("Export error", e);
     } finally {
@@ -233,10 +232,12 @@ export function ExportShareCodeModal({
     const textToCopy = shareData
       ? formatShareMessage(shareData.data, code, shareData.type)
       : code;
-    await navigator.clipboard.writeText(textToCopy);
-    setCopied(true);
-    toast.success(t("shareResultCard.copied"));
-    setTimeout(() => setCopied(false), 2000);
+    const copySuccess = await copyToClipboard(textToCopy);
+    if (copySuccess) {
+      setCopied(true);
+      toast.success(t("shareResultCard.copied"));
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
 

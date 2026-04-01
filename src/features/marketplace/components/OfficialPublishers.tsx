@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { Building2, Folder, Package, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -230,7 +230,7 @@ export function OfficialPublishers({
         initial="hidden"
         animate="show"
         className={cn(viewMode === "grid" ? "ss-cards-grid" : "ss-cards-list")}
-        style={viewMode === "grid" ? { "--ss-card-min": "280px" } as CSSProperties : undefined}
+        style={viewMode === "grid" ? { gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" } : undefined}
       >
         {visiblePublishers.map((pub_) => (
           <PublisherCard

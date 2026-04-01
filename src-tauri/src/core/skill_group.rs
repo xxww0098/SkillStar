@@ -168,11 +168,22 @@ pub fn duplicate_group(id: &str) -> Result<SkillGroup> {
         .find(|g| g.id == id)
         .ok_or_else(|| anyhow::anyhow!("Group '{}' not found", id))?;
 
-    let mut new_name = format!("{} (Copy)", source.name);
+    let re = regex::Regex::new(r"^(.*?)(?:\s*\(Copy[\s\d]*\))+$").unwrap();
+    let base_name = if let Some(caps) = re.captures(&source.name) {
+        if let Some(m) = caps.get(1) {
+            m.as_str().trim_end().to_string()
+        } else {
+            source.name.clone()
+        }
+    } else {
+        source.name.clone()
+    };
+
     let mut counter = 1;
+    let mut new_name = format!("{} (Copy{})", base_name, counter);
     while store.groups.iter().any(|g| g.name == new_name) {
         counter += 1;
-        new_name = format!("{} (Copy {})", source.name, counter);
+        new_name = format!("{} (Copy{})", base_name, counter);
     }
 
     create_group(

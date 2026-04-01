@@ -256,8 +256,9 @@ export function AiPickSkillsModal({
                               );
                               const isSelected = selected.has(item.name);
                               const reason = item.reason.trim();
+                              const displayDesc = skill?.localized_description || skill?.description;
                               const showDescription =
-                                !!skill?.description && skill.description !== reason;
+                                !!displayDesc && displayDesc !== reason;
                               return (
                                 <button
                                   key={item.name}
@@ -307,7 +308,7 @@ export function AiPickSkillsModal({
                                     )}
                                     {showDescription && (
                                       <div className="text-micro text-muted-foreground mt-0.5">
-                                        {skill.description}
+                                        {displayDesc}
                                       </div>
                                     )}
                                   </div>

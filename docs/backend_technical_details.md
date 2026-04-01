@@ -141,6 +141,9 @@ flowchart LR
 | Codex CLI | `~/.codex/skills`<br>*(备用: `~/.agents/skills`)* | `.codex/skills` |
 | Antigravity | `~/.gemini/antigravity/skills` | `.agents/skills` |
 | Gemini CLI | `~/.gemini/skills` | `.gemini/skills` |
+| Cursor | `~/.cursor/skills` | `.cursor/skills` |
+| Qoder | `~/.qoder/skills` | `.qoder/skills` |
+| Trae | `~/.trae/skills` | `.trae/skills` |
 | OpenClaw | `~/.openclaw/skills` | *(global-only)* |
 
 ---

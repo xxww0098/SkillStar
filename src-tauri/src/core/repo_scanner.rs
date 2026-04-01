@@ -1,9 +1,10 @@
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use tracing::warn;
 
 use super::{
-    git_ops, local_skill, lockfile, path_env::command_with_path, repo_history, security_scan, sync,
+    git_ops, local_skill, lockfile, path_env::command_with_path, repo_history, security_scan,
 };
 
 // ── Data Types ──────────────────────────────────────────────────────
@@ -109,10 +110,6 @@ pub fn normalize_repo_url(input: &str) -> Result<(String, String)> {
 
 // ── Repo Cache ──────────────────────────────────────────────────────
 
-/// Get the repo cache directory: `~/.skillstar/.agents/.repos/`
-fn get_repos_cache_dir() -> PathBuf {
-    super::paths::repos_cache_dir()
-}
 
 /// Derive a cache directory name from a source identifier.
 ///
@@ -139,7 +136,7 @@ fn cache_dir_name(source: &str) -> String {
 ///
 /// Falls back to a full shallow clone if sparse operations fail (e.g. old git).
 pub fn clone_or_fetch_repo(repo_url: &str, source: &str) -> Result<PathBuf> {
-    let cache_dir = get_repos_cache_dir();
+    let cache_dir = super::paths::repos_cache_dir();
     std::fs::create_dir_all(&cache_dir).context("Failed to create repo cache directory")?;
 
     let repo_dir = cache_dir.join(cache_dir_name(source));
@@ -155,7 +152,7 @@ pub fn clone_or_fetch_repo(repo_url: &str, source: &str) -> Result<PathBuf> {
         if !output.status.success() {
             let err = String::from_utf8_lossy(&output.stderr);
             // Fetch failure is non-fatal for scanning; the cached version is still usable
-            eprintln!("[repo_scanner] git fetch warning: {}", err.trim());
+            warn!(target: "repo_scanner", warning = err.trim(), "git fetch warning");
         }
 
         // Reset working tree to match remote HEAD so scanned content is up-to-date
@@ -178,10 +175,7 @@ pub fn clone_or_fetch_repo(repo_url: &str, source: &str) -> Result<PathBuf> {
         match clone_sparse_with_skills(repo_url, &repo_dir) {
             Ok(()) => Ok(repo_dir),
             Err(sparse_err) => {
-                eprintln!(
-                    "[repo_scanner] sparse clone failed, falling back to shallow: {}",
-                    sparse_err
-                );
+                warn!(target: "repo_scanner", error = %sparse_err, "sparse clone failed, falling back to shallow");
                 // Clean up partial sparse clone
                 let _ = std::fs::remove_dir_all(&repo_dir);
                 git_ops::clone_repo_shallow(repo_url, &repo_dir)
@@ -366,7 +360,7 @@ fn is_sparse_checkout(repo_dir: &Path) -> bool {
 
 /// Scan a cloned repo directory for all SKILL.md files and extract metadata.
 pub fn scan_skills_in_repo(repo_dir: &Path) -> Vec<DiscoveredSkill> {
-    let hub_skills_dir = sync::get_hub_skills_dir();
+    let hub_skills_dir = super::paths::hub_skills_dir();
 
     // Collect all SKILL.md paths
     let skill_md_paths = find_skill_md_files(repo_dir);
@@ -544,10 +538,10 @@ pub fn install_from_repo(
     repo_url: &str,
     targets: &[SkillInstallTarget],
 ) -> Result<Vec<String>> {
-    let hub_skills_dir = sync::get_hub_skills_dir();
+    let hub_skills_dir = super::paths::hub_skills_dir();
     std::fs::create_dir_all(&hub_skills_dir).context("Failed to create hub skills directory")?;
 
-    let cache_dir = get_repos_cache_dir().join(cache_dir_name(source));
+    let cache_dir = super::paths::repos_cache_dir().join(cache_dir_name(source));
     if !cache_dir.exists() {
         return Err(anyhow!(
             "Repo cache not found. Please scan the repository first."
@@ -569,9 +563,10 @@ pub fn install_from_repo(
         if dest.symlink_metadata().is_ok()
             && !can_replace_existing_skill(&target.id, repo_url, existing_entry)
         {
-            eprintln!(
-                "[repo_scanner] refusing to replace existing skill '{}' from a different source",
-                target.id
+            warn!(
+                target: "repo_scanner",
+                skill = %target.id,
+                "refusing to replace existing skill from a different source"
             );
             continue;
         }
@@ -591,10 +586,11 @@ pub fn install_from_repo(
                         std::fs::remove_file(&dest)
                     }
                     .unwrap_or_else(|e| {
-                        eprintln!(
-                            "[repo_scanner] failed to remove symlink {}: {}",
-                            dest.display(),
-                            e
+                        warn!(
+                            target: "repo_scanner",
+                            path = %dest.display(),
+                            error = %e,
+                            "failed to remove symlink"
                         );
                     });
                 }
@@ -611,9 +607,10 @@ pub fn install_from_repo(
         };
 
         if !source_path.exists() {
-            eprintln!(
-                "[repo_scanner] Skill folder not found: {}",
-                source_path.display()
+            warn!(
+                target: "repo_scanner",
+                path = %source_path.display(),
+                "skill folder not found"
             );
             continue;
         }
@@ -978,7 +975,7 @@ pub struct RepoCacheInfo {
 
 /// Collect information about the repo cache (`.repos/` directory).
 pub fn get_cache_info() -> RepoCacheInfo {
-    let cache_dir = get_repos_cache_dir();
+    let cache_dir = super::paths::repos_cache_dir();
     if !cache_dir.exists() {
         return RepoCacheInfo {
             total_bytes: 0,
@@ -988,7 +985,7 @@ pub fn get_cache_info() -> RepoCacheInfo {
         };
     }
 
-    let hub_skills_dir = sync::get_hub_skills_dir();
+    let hub_skills_dir = super::paths::hub_skills_dir();
     let referenced = collect_referenced_cache_dirs(&hub_skills_dir, &cache_dir);
 
     let mut total_bytes: u64 = 0;
@@ -1025,12 +1022,12 @@ pub fn get_cache_info() -> RepoCacheInfo {
 ///
 /// Returns the number of repos removed.
 pub fn clean_unused_cache() -> Result<usize> {
-    let cache_dir = get_repos_cache_dir();
+    let cache_dir = super::paths::repos_cache_dir();
     if !cache_dir.exists() {
         return Ok(0);
     }
 
-    let hub_skills_dir = sync::get_hub_skills_dir();
+    let hub_skills_dir = super::paths::hub_skills_dir();
     let referenced = collect_referenced_cache_dirs(&hub_skills_dir, &cache_dir);
 
     let mut removed: usize = 0;
@@ -1237,7 +1234,7 @@ mod tests {
         let result = (|| -> Result<()> {
             let _ = local_skill::create("demo-skill", Some("# local"))?;
 
-            let cache_dir = super::get_repos_cache_dir().join(super::cache_dir_name("owner/repo"));
+            let cache_dir = super::paths::repos_cache_dir().join(super::cache_dir_name("owner/repo"));
             let source_dir = cache_dir.join("skills/demo-skill");
             std::fs::create_dir_all(&source_dir)?;
             std::fs::write(source_dir.join("SKILL.md"), "# remote")?;
@@ -1294,7 +1291,7 @@ mod tests {
         set_env("USERPROFILE", temp_root.join("home"));
 
         let result = (|| -> Result<()> {
-            let hub_path = sync::get_hub_skills_dir().join("demo-skill");
+            let hub_path = super::paths::hub_skills_dir().join("demo-skill");
             std::fs::create_dir_all(&hub_path)?;
             std::fs::write(hub_path.join("SKILL.md"), "# existing")?;
 
@@ -1309,7 +1306,7 @@ mod tests {
             });
             lf.save(&lock_path)?;
 
-            let cache_dir = super::get_repos_cache_dir().join(super::cache_dir_name("owner/repo"));
+            let cache_dir = super::paths::repos_cache_dir().join(super::cache_dir_name("owner/repo"));
             let source_dir = cache_dir.join("skills/demo-skill");
             std::fs::create_dir_all(&source_dir)?;
             std::fs::write(source_dir.join("SKILL.md"), "# incoming")?;

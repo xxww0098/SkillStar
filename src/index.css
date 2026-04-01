@@ -217,6 +217,7 @@
     @apply flex-1 overflow-y-auto p-6;
     scrollbar-gutter: stable;
     container-type: inline-size;
+    overscroll-behavior-y: contain;
   }
 
   .ss-page-stack {
@@ -305,6 +306,46 @@
   }
 }
 
+/* ========== HScrollRow Arrows ========== */
+
+@layer components {
+  .hscroll-row-wrapper {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    flex: 1;
+    gap: 2px;
+  }
+
+  .hscroll-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 1px solid var(--color-border);
+    background: var(--color-card);
+    color: var(--color-muted-foreground);
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease, background-color 0.15s ease, color 0.15s ease;
+    flex-shrink: 0;
+  }
+
+  .hscroll-arrow-visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .hscroll-arrow:hover {
+    background: var(--color-card-hover);
+    color: var(--color-foreground);
+    border-color: var(--color-primary);
+  }
+}
+
 /* ========== Markdown ========== */
 
 @layer components {
@@ -325,6 +366,129 @@
     max-width: 75ch; /* Comfortable reading length for long passages */
   }
 
+  /* ── ScrollBox: scroll-isolated container with navigation arrows ── */
+
+  .scroll-box-wrapper {
+    position: relative;
+    /* prevent scroll chaining to parent */
+    overscroll-behavior: contain;
+  }
+
+  .scroll-box-inner {
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  /* Arrow buttons — hidden by default, fade in on wrapper hover */
+  .scroll-box-arrow {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 1px solid var(--color-border);
+    background: var(--color-card);
+    backdrop-filter: blur(8px);
+    color: var(--color-muted-foreground);
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease, background-color 0.15s ease, color 0.15s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  }
+
+  .scroll-box-arrow-visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .scroll-box-arrow:hover {
+    background: var(--color-card-hover);
+    color: var(--color-foreground);
+    border-color: var(--color-primary);
+  }
+
+  .scroll-box-arrow-left { left: 6px; }
+  .scroll-box-arrow-right { right: 6px; }
+
+  /* Gradient fade hints at edges when scrollable */
+  .scroll-box-wrapper::before,
+  .scroll-box-wrapper::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 24px;
+    z-index: 1;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+
+  .scroll-box-wrapper::before {
+    left: 0;
+    background: linear-gradient(to right, var(--color-background), transparent);
+    border-radius: var(--radius-md) 0 0 var(--radius-md);
+  }
+
+  .scroll-box-wrapper::after {
+    right: 0;
+    background: linear-gradient(to left, var(--color-background), transparent);
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  }
+
+  /* Show gradient hints when arrows are visible */
+  .scroll-box-wrapper:hover::before,
+  .scroll-box-wrapper:hover::after {
+    opacity: 1;
+  }
+
+  /* ── Variant: code block ── */
+  .scroll-box-pre .scroll-box-inner {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background-color: var(--color-muted);
+    padding: 0.75rem;
+    max-height: 60vh;
+  }
+
+  .scroll-box-pre .scroll-box-inner code {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    font-size: inherit;
+    font-weight: inherit;
+  }
+
+  /* ── Variant: SVG image ── */
+  .scroll-box-svg .scroll-box-inner {
+    max-height: 70vh;
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-md);
+    padding: 0.5rem;
+    margin-block: 0.5rem;
+  }
+
+  .scroll-box-svg .scroll-box-inner img {
+    display: block;
+    max-width: none; /* allow natural width so horizontal scroll works */
+    height: auto;
+  }
+
+  /* ── Inline SVG fallback (not from <img>) ── */
+  .markdown-content > svg,
+  .markdown-content p > svg,
+  .markdown-content div > svg {
+    display: block;
+    max-width: 100%;
+    height: auto;
+  }
+
   .markdown-content code {
     border: 1px solid var(--color-border-subtle);
     border-radius: var(--radius-sm);
@@ -339,11 +503,15 @@
     content: "" !important;
   }
 
+  /* Regular pre without scroll-box (fallback) */
   .markdown-content pre {
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
     background-color: var(--color-muted);
     padding: 0.75rem;
+    overflow: auto;
+    overscroll-behavior: contain;
+    max-height: 60vh;
   }
 
   .markdown-content pre code {

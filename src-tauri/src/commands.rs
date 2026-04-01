@@ -15,6 +15,7 @@ use crate::core::{
     skill_bundle, skill_install, sync,
 };
 use std::collections::HashMap;
+use tracing::{error, warn};
 
 /// Result of updating a single skill. For repo-cached skills, pulling the
 /// repo also advances all sibling skills from the same repository.
@@ -74,7 +75,7 @@ pub async fn uninstall_skill(name: String) -> Result<(), String> {
     // Remove symlinks from all agents first
     let _ = sync::remove_skill_from_all_agents(&name);
 
-    let skills_dir = sync::get_hub_skills_dir();
+    let skills_dir = crate::core::paths::hub_skills_dir();
     let path = skills_dir.join(&name);
 
     // Use symlink_metadata() instead of exists() — exists() follows symlinks,
@@ -118,7 +119,7 @@ pub async fn toggle_skill_for_agent(
 
 #[tauri::command]
 pub async fn update_skill(name: String) -> Result<UpdateResult, String> {
-    let skills_dir = sync::get_hub_skills_dir();
+    let skills_dir = crate::core::paths::hub_skills_dir();
     let path = skills_dir.join(&name);
 
     // Check if this is a repo-cached skill (symlink into .repos/)
@@ -210,6 +211,7 @@ pub async fn update_skill(name: String) -> Result<UpdateResult, String> {
         skill: Skill {
             name,
             description,
+            localized_description: None,
             skill_type,
             stars: 0,
             installed: true,
@@ -316,7 +318,7 @@ pub async fn deploy_skill_group(
         .ok_or_else(|| format!("Group '{}' not found", group_id))?;
 
     // Download any missing skills before syncing
-    let skills_dir = sync::get_hub_skills_dir();
+    let skills_dir = crate::core::paths::hub_skills_dir();
     let mut sources = group.skill_sources.clone();
 
     // Collect skill names that are missing from the hub and have no known source
@@ -329,8 +331,9 @@ pub async fn deploy_skill_group(
 
     // Resolve missing sources via marketplace search
     if !names_needing_source.is_empty() {
-        eprintln!(
-            "[deploy_skill_group] Resolving {} missing skill source(s) via marketplace snapshot",
+        warn!(
+            target: "deploy_skill_group",
+            "resolving {} missing skill source(s) via marketplace snapshot",
             names_needing_source.len()
         );
         match marketplace_snapshot::resolve_skill_sources_local_first(
@@ -345,9 +348,9 @@ pub async fn deploy_skill_group(
                 }
             }
             Err(err) => {
-                eprintln!(
-                    "[deploy_skill_group] Failed to resolve missing skill sources: {}",
-                    err
+                error!(
+                    target: "deploy_skill_group",
+                    "failed to resolve missing skill sources: {err}"
                 );
             }
         }
@@ -368,7 +371,7 @@ pub async fn deploy_skill_group(
     }
     while let Some(result) = install_tasks.join_next().await {
         if let Err(e) = result {
-            eprintln!("[deploy_skill_group] install task join error: {}", e);
+            error!(target: "deploy_skill_group", "install task join error: {e}");
         }
     }
 
@@ -449,7 +452,7 @@ fn find_nested_skill_dir_by_name(
 }
 
 fn resolve_skill_content_dir(name: &str) -> Option<std::path::PathBuf> {
-    let skills_dir = sync::get_hub_skills_dir();
+    let skills_dir = crate::core::paths::hub_skills_dir();
     let skill_dir = skills_dir.join(name);
     if !skill_dir.exists() {
         return None;
@@ -472,7 +475,7 @@ fn resolve_skill_content_dir(name: &str) -> Option<std::path::PathBuf> {
 
 #[tauri::command]
 pub async fn read_skill_file_raw(name: String) -> Result<String, String> {
-    let skills_dir = sync::get_hub_skills_dir();
+    let skills_dir = crate::core::paths::hub_skills_dir();
     let skill_dir = skills_dir.join(&name);
     let effective_dir =
         resolve_skill_content_dir(&name).unwrap_or_else(|| resolve_skill_dir(&skill_dir));
@@ -487,7 +490,7 @@ pub async fn read_skill_file_raw(name: String) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn create_local_skill_from_content(name: String, content: String) -> Result<(), String> {
-    let hub_dir = sync::get_hub_skills_dir();
+    let hub_dir = crate::core::paths::hub_skills_dir();
     let hub_path = hub_dir.join(&name);
 
     // Don't overwrite existing skills
@@ -528,7 +531,7 @@ pub async fn migrate_local_skills() -> Result<u32, String> {
 
 #[tauri::command]
 pub async fn list_skill_files(name: String) -> Result<Vec<String>, String> {
-    let skills_dir = sync::get_hub_skills_dir();
+    let skills_dir = crate::core::paths::hub_skills_dir();
     let skill_dir = skills_dir.join(&name);
 
     if !skill_dir.exists() {
@@ -571,7 +574,7 @@ fn collect_files_recursive(root: &std::path::Path, dir: &std::path::Path, files:
 
 #[tauri::command]
 pub async fn read_skill_content(name: String) -> Result<SkillContent, String> {
-    let skills_dir = sync::get_hub_skills_dir();
+    let skills_dir = crate::core::paths::hub_skills_dir();
     let skill_dir = skills_dir.join(&name);
     if !skill_dir.exists() {
         return Err(format!("Skill '{}' not found", name));
@@ -592,7 +595,7 @@ pub async fn read_skill_content(name: String) -> Result<SkillContent, String> {
 
 #[tauri::command]
 pub async fn update_skill_content(name: String, content: String) -> Result<(), String> {
-    let skills_dir = sync::get_hub_skills_dir();
+    let skills_dir = crate::core::paths::hub_skills_dir();
     let skill_dir = skills_dir.join(&name);
     if !skill_dir.exists() {
         return Err(format!("Skill '{}' not found", name));

@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
@@ -44,37 +44,34 @@ fn cached_profiles() -> Vec<agent_profile::AgentProfile> {
 
 /// Sync or unsync a single skill to a specific agent profile.
 pub fn toggle_skill_for_agent(skill_name: &str, agent_id: &str, enable: bool) -> Result<()> {
-    let hub_dir = get_hub_skills_dir();
+    let hub_dir = super::paths::hub_skills_dir();
     let skill_path = hub_dir.join(skill_name);
     if enable && !skill_path.exists() {
         anyhow::bail!("Skill '{}' not found in hub", skill_name);
     }
 
     let profiles = cached_profiles();
-    if let Some(profile) = profiles.into_iter().find(|p| p.id == agent_id) {
-        let target = profile.global_skills_dir.join(skill_name);
+    let profile = agent_profile::find_profile(&profiles, agent_id)?;
+    let target = profile.global_skills_dir.join(skill_name);
 
-        if enable {
-            // Ensure parent dir exists
-            std::fs::create_dir_all(&profile.global_skills_dir)?;
+    if enable {
+        // Ensure parent dir exists
+        std::fs::create_dir_all(&profile.global_skills_dir)?;
 
-            // Remove existing symlink if present
-            if target.symlink_metadata().is_ok() {
-                if target.is_symlink() {
-                    std::fs::remove_file(&target)?;
-                } else {
-                    anyhow::bail!("Target cannot be overwritten because it is a real directory");
-                }
-            }
-            create_symlink(&skill_path, &target)?;
-        } else {
-            // Remove symlink
-            if target.symlink_metadata().is_ok() && target.is_symlink() {
+        // Remove existing symlink if present
+        if target.symlink_metadata().is_ok() {
+            if target.is_symlink() {
                 std::fs::remove_file(&target)?;
+            } else {
+                anyhow::bail!("Target cannot be overwritten because it is a real directory");
             }
         }
+        super::paths::create_symlink(&skill_path, &target)?;
     } else {
-        anyhow::bail!("Agent profile '{}' not found", agent_id);
+        // Remove symlink
+        if target.symlink_metadata().is_ok() && target.is_symlink() {
+            std::fs::remove_file(&target)?;
+        }
     }
 
     Ok(())
@@ -99,10 +96,7 @@ pub fn remove_skill_from_all_agents(skill_name: &str) -> Result<Vec<String>> {
 /// Remove all skill symlinks from a specific agent profile.
 pub fn unlink_all_skills_from_agent(agent_id: &str) -> Result<u32> {
     let profiles = cached_profiles();
-    let profile = profiles
-        .iter()
-        .find(|p| p.id == agent_id)
-        .ok_or_else(|| anyhow::anyhow!("Agent profile '{}' not found", agent_id))?;
+    let profile = agent_profile::find_profile(&profiles, agent_id)?;
 
     let skills_dir = &profile.global_skills_dir;
     if !skills_dir.exists() {
@@ -126,10 +120,7 @@ pub fn unlink_all_skills_from_agent(agent_id: &str) -> Result<u32> {
 /// List all skill names currently linked (symlinked) to a specific agent.
 pub fn list_linked_skills(agent_id: &str) -> Result<Vec<String>> {
     let profiles = cached_profiles();
-    let profile = profiles
-        .iter()
-        .find(|p| p.id == agent_id)
-        .ok_or_else(|| anyhow::anyhow!("Agent profile '{}' not found", agent_id))?;
+    let profile = agent_profile::find_profile(&profiles, agent_id)?;
 
     let skills_dir = &profile.global_skills_dir;
     if !skills_dir.exists() {
@@ -153,10 +144,7 @@ pub fn list_linked_skills(agent_id: &str) -> Result<Vec<String>> {
 /// Unlink a single skill from a specific agent.
 pub fn unlink_skill_from_agent(skill_name: &str, agent_id: &str) -> Result<()> {
     let profiles = cached_profiles();
-    let profile = profiles
-        .iter()
-        .find(|p| p.id == agent_id)
-        .ok_or_else(|| anyhow::anyhow!("Agent profile '{}' not found", agent_id))?;
+    let profile = agent_profile::find_profile(&profiles, agent_id)?;
 
     let target = profile.global_skills_dir.join(skill_name);
     if target.is_symlink() {
@@ -170,12 +158,9 @@ pub fn unlink_skill_from_agent(skill_name: &str, agent_id: &str) -> Result<()> {
 ///
 /// Skips skills that are already linked. Returns the number of new links created.
 pub fn batch_link_skills_to_agent(skill_names: &[String], agent_id: &str) -> Result<u32> {
-    let hub_dir = get_hub_skills_dir();
+    let hub_dir = super::paths::hub_skills_dir();
     let profiles = cached_profiles();
-    let profile = profiles
-        .iter()
-        .find(|p| p.id == agent_id)
-        .ok_or_else(|| anyhow::anyhow!("Agent profile '{}' not found", agent_id))?;
+    let profile = agent_profile::find_profile(&profiles, agent_id)?;
 
     std::fs::create_dir_all(&profile.global_skills_dir)?;
 
@@ -193,7 +178,7 @@ pub fn batch_link_skills_to_agent(skill_names: &[String], agent_id: &str) -> Res
         if target.exists() {
             continue;
         }
-        create_symlink(&skill_path, &target)?;
+        super::paths::create_symlink(&skill_path, &target)?;
         linked += 1;
     }
 
@@ -206,7 +191,7 @@ pub fn create_project_skills(
     selected_skills: &[String],
     agent_types: &[String],
 ) -> Result<u32> {
-    let hub_dir = get_hub_skills_dir();
+    let hub_dir = super::paths::hub_skills_dir();
     let profiles = cached_profiles();
 
     let mut rel_dirs: Vec<String> = agent_types
@@ -215,8 +200,8 @@ pub fn create_project_skills(
             profiles
                 .iter()
                 .find(|p| &p.id == id)
+                .filter(|p| p.has_project_skills())
                 .map(|p| p.project_skills_rel.clone())
-                .filter(|rel| !rel.is_empty())
         })
         .collect();
 
@@ -244,7 +229,7 @@ pub fn create_project_skills(
                     continue;
                 }
             }
-            if create_symlink(&source, &target).is_ok() {
+            if super::paths::create_symlink(&source, &target).is_ok() {
                 total_linked += 1;
             }
         }
@@ -253,18 +238,7 @@ pub fn create_project_skills(
     Ok(total_linked)
 }
 
-/// Cross-platform symlink creation.
-fn create_symlink(src: &Path, dst: &Path) -> Result<()> {
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(src, dst)
-        .with_context(|| format!("Failed to symlink {:?} -> {:?}", src, dst))?;
 
-    #[cfg(windows)]
-    std::os::windows::fs::symlink_dir(src, dst)
-        .with_context(|| format!("Failed to symlink {:?} -> {:?}", src, dst))?;
-
-    Ok(())
-}
 
 /// Re-sync a skill only to agents that already have it linked.
 ///
@@ -273,7 +247,7 @@ fn create_symlink(src: &Path, dst: &Path) -> Result<()> {
 /// ensures the link is recreated cleanly and returns the agent display names
 /// that remain linked.
 pub fn resync_existing_links(skill_name: &str) -> Result<Vec<String>> {
-    let hub_dir = get_hub_skills_dir();
+    let hub_dir = super::paths::hub_skills_dir();
     let skill_path = hub_dir.join(skill_name);
     if !skill_path.exists() {
         anyhow::bail!("Skill '{}' not found in hub", skill_name);
@@ -287,15 +261,10 @@ pub fn resync_existing_links(skill_name: &str) -> Result<Vec<String>> {
         // Only re-link if a symlink already exists (preserves user's assignment)
         if target.is_symlink() {
             std::fs::remove_file(&target)?;
-            create_symlink(&skill_path, &target)?;
+            super::paths::create_symlink(&skill_path, &target)?;
             linked_to.push(profile.display_name.clone());
         }
     }
 
     Ok(linked_to)
-}
-
-/// Get the default skills hub directory.
-pub fn get_hub_skills_dir() -> PathBuf {
-    super::paths::hub_skills_dir()
 }

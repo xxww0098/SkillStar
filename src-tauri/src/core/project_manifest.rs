@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use super::{agent_profile, local_skill, sync};
+use super::{agent_profile, local_skill};
 
 // ── Data structures ─────────────────────────────────────────────────
 
@@ -41,19 +41,14 @@ pub struct SkillsList {
 
 // ── Paths ───────────────────────────────────────────────────────────
 
-/// Root data directory for SkillStar.
-fn data_root() -> PathBuf {
-    super::paths::data_root()
-}
-
 /// Path to the project index file.
 fn index_path() -> PathBuf {
-    data_root().join("projects.json")
+    super::paths::data_root().join("projects.json")
 }
 
 /// Directory for a specific project's config files.
 fn project_dir(name: &str) -> PathBuf {
-    data_root().join("projects").join(name)
+    super::paths::data_root().join("projects").join(name)
 }
 
 /// Path to a project's skill list file.
@@ -226,7 +221,7 @@ pub fn remove_skill_from_all_projects(skill_name: &str) -> Result<Vec<String>> {
 
         let project_root = Path::new(&entry.path);
         for profile in &profiles {
-            if profile.project_skills_rel.is_empty() {
+            if !profile.has_project_skills() {
                 continue;
             }
 
@@ -266,13 +261,13 @@ pub fn remove_skill_from_all_projects(skill_name: &str) -> Result<Vec<String>> {
 ///
 /// Returns the total number of symlinks created.
 pub fn full_sync(project_path: &str, skills_list: &SkillsList) -> Result<u32> {
-    let hub_dir = sync::get_hub_skills_dir();
+    let hub_dir = super::paths::hub_skills_dir();
     let profiles = agent_profile::list_profiles();
     let project = Path::new(project_path);
     let mut total = 0u32;
 
     for profile in &profiles {
-        if profile.project_skills_rel.is_empty() {
+        if !profile.has_project_skills() {
             continue;
         }
         clear_project_symlinks(project, profile)?;
@@ -284,7 +279,7 @@ pub fn full_sync(project_path: &str, skills_list: &SkillsList) -> Result<u32> {
             continue;
         };
         // Skip agents that have no project-level skills support
-        if profile.project_skills_rel.is_empty() {
+        if !profile.has_project_skills() {
             continue;
         }
 
@@ -299,7 +294,7 @@ pub fn full_sync(project_path: &str, skills_list: &SkillsList) -> Result<u32> {
                 continue;
             }
             let target = target_dir.join(skill_name);
-            if create_symlink(&source, &target).is_ok() {
+            if super::paths::create_symlink(&source, &target).is_ok() {
                 total += 1;
             }
         }
@@ -370,7 +365,7 @@ pub fn rebuild_skills_list_from_disk(project_path: &str) -> Result<SkillsList> {
     let mut path_order = Vec::new();
     let mut groups: HashMap<String, Vec<agent_profile::AgentProfile>> = HashMap::new();
     for profile in profiles {
-        if profile.project_skills_rel.is_empty() {
+        if !profile.has_project_skills() {
             continue;
         }
         if !groups.contains_key(&profile.project_skills_rel) {
@@ -496,7 +491,7 @@ pub fn detect_project_agents(project_path: &str) -> ProjectAgentDetection {
     // Build detection list
     let detected: Vec<DetectedAgent> = profiles
         .iter()
-        .filter(|p| !p.project_skills_rel.is_empty())
+        .filter(|p| p.has_project_skills())
         .map(|p| {
             let skills_dir = project.join(&p.project_skills_rel);
             DetectedAgent {
@@ -587,7 +582,7 @@ pub struct ImportResult {
 /// whether the hub already has a skill with the same name, and whether the
 /// directory contains a SKILL.md file.
 pub fn scan_project_skills(project_path: &str) -> ProjectScanResult {
-    let hub_dir = sync::get_hub_skills_dir();
+    let hub_dir = super::paths::hub_skills_dir();
     let profiles = agent_profile::list_profiles();
     let project = Path::new(project_path);
 
@@ -595,7 +590,7 @@ pub fn scan_project_skills(project_path: &str) -> ProjectScanResult {
     let mut agents_found = Vec::with_capacity(profiles.len());
 
     for profile in &profiles {
-        if profile.project_skills_rel.is_empty() {
+        if !profile.has_project_skills() {
             continue;
         }
         let skills_dir = project.join(&profile.project_skills_rel);
@@ -664,7 +659,7 @@ pub fn import_scanned_skills(
     let entry = register_project(project_path)?;
     let canonical_project_name = entry.name;
 
-    let hub_dir = sync::get_hub_skills_dir();
+    let hub_dir = super::paths::hub_skills_dir();
     local_skill::reconcile_hub_symlinks();
     let profiles = agent_profile::list_profiles();
     let project = Path::new(project_path);
@@ -691,7 +686,7 @@ pub fn import_scanned_skills(
         let Some(profile) = profiles.iter().find(|p| &p.id == agent_id) else {
             continue;
         };
-        if profile.project_skills_rel.is_empty() {
+        if !profile.has_project_skills() {
             continue;
         }
         owner_by_path
@@ -707,7 +702,7 @@ pub fn import_scanned_skills(
         let Some(source_profile) = profiles.iter().find(|p| p.id == target.agent_id) else {
             continue;
         };
-        if source_profile.project_skills_rel.is_empty() {
+        if !source_profile.has_project_skills() {
             continue;
         }
 
@@ -756,7 +751,7 @@ pub fn import_scanned_skills(
 
         // Step 2b: Point the project entry at the hub entry, which may itself
         // be a symlink into `skills-local/`.
-        create_symlink(&hub_skill_dir, &source_dir)
+        super::paths::create_symlink(&hub_skill_dir, &source_dir)
             .with_context(|| format!("failed to create symlink for skill '{}'", target.name))?;
 
         symlink_count += 1;
@@ -779,21 +774,9 @@ pub fn import_scanned_skills(
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
-/// Cross-platform symlink creation.
-fn create_symlink(src: &Path, dst: &Path) -> Result<()> {
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(src, dst)
-        .with_context(|| format!("failed to symlink {:?} -> {:?}", src, dst))?;
-
-    #[cfg(windows)]
-    std::os::windows::fs::symlink_dir(src, dst)
-        .with_context(|| format!("failed to symlink {:?} -> {:?}", src, dst))?;
-
-    Ok(())
-}
 
 fn clear_project_symlinks(project: &Path, profile: &agent_profile::AgentProfile) -> Result<()> {
-    if profile.project_skills_rel.is_empty() {
+    if !profile.has_project_skills() {
         return Ok(());
     }
     let target_dir = project.join(&profile.project_skills_rel);
@@ -885,7 +868,7 @@ mod tests {
         set_env("USERPROFILE", temp_root.join("home"));
 
         let result = (|| -> Result<()> {
-            let hub_skill = sync::get_hub_skills_dir().join("demo-skill");
+            let hub_skill = super::paths::hub_skills_dir().join("demo-skill");
             std::fs::create_dir_all(&hub_skill)?;
             std::fs::write(hub_skill.join("SKILL.md"), "description: test")?;
 
@@ -1013,7 +996,7 @@ mod tests {
                 "expected imported skill to be present in project's skills list"
             );
             let local_skill_dir = crate::core::paths::local_skills_dir().join("legacy-skill");
-            let hub_skill_dir = sync::get_hub_skills_dir().join("legacy-skill");
+            let hub_skill_dir = super::paths::hub_skills_dir().join("legacy-skill");
             assert!(
                 local_skill_dir.is_dir(),
                 "expected imported skill to be moved into skills-local"
@@ -1214,7 +1197,7 @@ mod tests {
         set_env("USERPROFILE", temp_root.join("home"));
 
         let result = (|| -> Result<()> {
-            let hub_skill = sync::get_hub_skills_dir().join("demo-skill");
+            let hub_skill = super::paths::hub_skills_dir().join("demo-skill");
             std::fs::create_dir_all(&hub_skill)?;
             std::fs::write(hub_skill.join("SKILL.md"), "description: test")?;
 

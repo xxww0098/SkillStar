@@ -5,6 +5,7 @@ export type AiStreamEvent = "start" | "delta" | "complete" | "error";
 export interface Skill {
   name: string;
   description: string;
+  localized_description?: string | null;
   /** "hub" for git-backed, "local" for user-authored local skills */
   skill_type: "hub" | "local";
   stars: number;
@@ -120,6 +121,14 @@ export interface AgentProfile {
   installed: boolean;
   enabled: boolean;
   synced_count: number;
+}
+
+export interface CustomProfileDef {
+  id: string;
+  display_name: string;
+  global_skills_dir: string;
+  project_skills_rel: string;
+  icon_data_uri: string | null;
 }
 
 export interface SkillCardDeck {

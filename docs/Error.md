@@ -14,6 +14,24 @@ Significant bugs and fixes, kept in short form for faster lookup.
 
 ---
 
+### SkillSelectionBar Overlaps Info Sidebar (DetailPanel) — 2026-04-01
+- Symptom: When the side Info Panel (`DetailPanel`) slided out to show skill details, the `SkillSelectionBar` (batch actions bar) rendered on top of it, overlapping the header text and close buttons.
+- Root cause: `SkillSelectionBar` was hardcoded to `z-[60]`, which is higher than the `DetailPanel`'s `z-50` overlay relative to the main container.
+- Fix: Reduced the `SkillSelectionBar` `z-index` from `z-[60]` to `z-40`, allowing it to sit safely beneath the sliding DetailPanel while still maintaining its hover layer above regular content.
+- Files: `SkillSelectionBar.tsx`
+
+### Agent Batch Link / Unlink Commands Did Not Invalidate Skill Cache — 2026-04-01
+- Symptom: "链接到智能体" (Link to Agent) dropdown in selection bar appeared to have no effect; agent icons on cards didn't update after batch linking.
+- Root cause: `batch_link_skills_to_agent`, `unlink_all_skills_from_agent`, and `unlink_skill_from_agent` in `commands/agents.rs` successfully created/removed symlinks but did not call `installed_skill::invalidate_cache()`. The subsequent `list_skills` refresh returned stale cached `agent_links` data, making it look like nothing happened.
+- Fix: Added `installed_skill::invalidate_cache()` calls after each symlink mutation, matching the pattern already established by `toggle_skill_for_agent` in `commands.rs`.
+- Files: `commands/agents.rs`
+
+### OfficialPublishers Layout Toggle Broken — 2026-04-01
+- Symptom: Grid/list view toggle buttons on the "官方发布者" tab had no visible effect; layout stayed single-column regardless.
+- Root cause: `OfficialPublishers` set a CSS variable `--ss-card-min` inline, but `ss-cards-grid` class has no `grid-template-columns` rule consuming it. Grid defaulted to single implicit column, making grid ≡ list.
+- Fix: Replaced unused CSS variable with explicit `gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))"` inline style, matching `SkillGrid`'s approach. Removed unused `CSSProperties` import.
+- Files: `OfficialPublishers.tsx`
+
 ### Marketplace Grid Vertical Gaps & Tab-Switch Artifacts — 2026-04-01
 - Symptom: Switching marketplace tabs caused card vertical gaps to jump; spacing inconsistent with Skills page.
 - Root cause: `@tanstack/react-virtual` rendered each grid row as an absolutely-positioned container; CSS `gap` only worked horizontally. Stale virtualizer measurements persisted across tab changes.

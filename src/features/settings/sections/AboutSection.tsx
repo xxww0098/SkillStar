@@ -1,9 +1,11 @@
 import { useMemo, useState, useEffect } from "react";
 import { getVersion } from "@tauri-apps/api/app";
+import { copyToClipboard } from "../../../lib/utils";
 import { useTranslation } from "react-i18next";
-import { Check, CheckCircle, Copy, ExternalLink, Terminal, XCircle } from "lucide-react";
+import { Check, CheckCircle, Copy, ExternalLink, Terminal, XCircle, RefreshCw } from "lucide-react";
 import { Button } from "../../../components/ui/button";
 import { Badge } from "../../../components/ui/badge";
+import { toast } from "sonner";
 
 interface AboutSectionProps {
   ghInstalled: boolean | null;
@@ -30,6 +32,7 @@ export function AboutSection({ ghInstalled }: AboutSectionProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const [appVersion, setAppVersion] = useState<string>("...");
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
 
   useEffect(() => {
     getVersion()
@@ -48,12 +51,30 @@ export function AboutSection({ ghInstalled }: AboutSectionProps) {
 
   const handleCopy = async () => {
     if (!ghInstallCommand) return;
-    try {
-      await navigator.clipboard.writeText(ghInstallCommand);
+    const copySuccess = await copyToClipboard(ghInstallCommand);
+    if (copySuccess) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
-    } catch {
-      // Ignore clipboard failures.
+    }
+  };
+
+  const handleCheckUpdate = async () => {
+    if (isCheckingUpdate) return;
+    setIsCheckingUpdate(true);
+    try {
+      const { check } = await import("@tauri-apps/plugin-updater");
+      const update = await check();
+      if (update) {
+        toast.success(t("sidebar.newUpdate"), {
+          description: t("sidebar.updateAvailable", { version: update.version }),
+        });
+      } else {
+        toast.info(t("settings.upToDate"));
+      }
+    } catch (e) {
+      toast.error(t("sidebar.updateError"));
+    } finally {
+      setIsCheckingUpdate(false);
     }
   };
 
@@ -119,10 +140,30 @@ export function AboutSection({ ghInstalled }: AboutSectionProps) {
           </div>
         )}
 
-        <div className="px-4 py-3">
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground font-medium">{t("settings.version")}</span>
-            <span className="font-mono">{appVersion}</span>
+        <div className="px-4 py-4 relative overflow-hidden group/version">
+          {/* Subtle gradient background effect */}
+          <div className="absolute inset-0 bg-gradient-to-r from-primary/5 via-transparent to-transparent opacity-0 group-hover/version:opacity-100 transition-opacity duration-500" />
+          
+          <div className="relative flex justify-between items-center text-sm">
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-2.5">
+                <span className="text-foreground font-medium">{t("settings.version")}</span>
+                <div className="px-2 py-0.5 rounded-md bg-zinc-500/10 border border-zinc-500/20 text-zinc-600 dark:text-zinc-400 font-mono text-xs shadow-sm flex items-center gap-1.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+                  {appVersion}
+                </div>
+              </div>
+            </div>
+            <Button 
+              size="sm" 
+              variant="secondary" 
+              className="h-8 text-xs px-3.5 rounded-full shadow-sm hover:shadow-md transition-all active:scale-95" 
+              onClick={handleCheckUpdate} 
+              disabled={isCheckingUpdate}
+            >
+              <RefreshCw className={`w-3.5 h-3.5 mr-2 ${isCheckingUpdate ? "animate-spin text-primary" : "text-muted-foreground"}`} />
+              {isCheckingUpdate ? t("settings.checkingUpdate") : t("settings.checkUpdate")}
+            </Button>
           </div>
         </div>
 

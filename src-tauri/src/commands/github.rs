@@ -1,9 +1,9 @@
 use crate::core::{
     agent_profile, gh_manager, local_skill, lockfile, paths, repo_history, repo_scanner, sync,
-    translation_cache,
 };
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use tracing::error;
 
 #[tauri::command]
 pub async fn check_gh_installed() -> Result<bool, String> {
@@ -52,7 +52,7 @@ pub async fn publish_skill_to_github(
         tokio::task::spawn_blocking(move || {
             // 1. Delete from skills-local/ and remove hub symlink
             if let Err(e) = local_skill::graduate(&skill_name_clone) {
-                eprintln!("[publish] Failed to graduate local skill: {}", e);
+                error!(target: "publish", "failed to graduate local skill: {e}");
                 return;
             }
 
@@ -60,7 +60,7 @@ pub async fn publish_skill_to_github(
             let scan = match repo_scanner::scan_repo(&git_url) {
                 Ok(s) => s,
                 Err(e) => {
-                    eprintln!("[publish] Failed to scan repo after publish: {}", e);
+                    error!(target: "publish", "failed to scan repo after publish: {e}");
                     return;
                 }
             };
@@ -78,7 +78,7 @@ pub async fn publish_skill_to_github(
                 };
                 match repo_scanner::install_from_repo(&scan.source, &git_url, &[install_target]) {
                     Ok(_) => crate::core::installed_skill::invalidate_cache(),
-                    Err(e) => eprintln!("[publish] Failed to re-install from repo: {}", e),
+                    Err(e) => error!(target: "publish", "failed to re-install from repo: {e}"),
                 }
             }
         })
@@ -256,7 +256,6 @@ pub async fn clear_all_caches() -> Result<CacheCleanResult, String> {
     tokio::task::spawn_blocking(|| {
         let repos_removed = repo_scanner::clean_unused_cache().unwrap_or(0);
         let history_cleared = repo_history::clear_history().unwrap_or(0);
-        let translation_cleared = translation_cache::clear_cache().unwrap_or(0);
 
         // Clean up legacy "agenthub" data directory (old app name before rename to "skillstar")
         if let Some(data_dir) = dirs::data_dir() {
@@ -269,7 +268,9 @@ pub async fn clear_all_caches() -> Result<CacheCleanResult, String> {
         CacheCleanResult {
             repos_removed,
             history_cleared,
-            translation_cleared,
+            // Translation cache is intentionally preserved — clearing it would
+            // force expensive re-translation via AI APIs.
+            translation_cleared: 0,
         }
     })
     .await
@@ -282,7 +283,7 @@ pub async fn clear_all_caches() -> Result<CacheCleanResult, String> {
 #[tauri::command]
 pub async fn force_delete_installed_skills() -> Result<usize, String> {
     tokio::task::spawn_blocking(|| {
-        let hub_dir = sync::get_hub_skills_dir();
+        let hub_dir = crate::core::paths::hub_skills_dir();
         let removed_count = count_children(&hub_dir);
 
         // Remove all global skill symlinks from known agents to avoid dangling links.
@@ -320,7 +321,7 @@ pub async fn force_delete_repo_caches() -> Result<usize, String> {
     tokio::task::spawn_blocking(|| {
         let cache_dir = repos_cache_dir();
         let repos_removed = count_directories(&cache_dir);
-        let hub_dir = sync::get_hub_skills_dir();
+        let hub_dir = crate::core::paths::hub_skills_dir();
         let mut removed_skill_names: HashSet<String> = HashSet::new();
 
         // Drop hub symlinks that point into repo cache before deleting cache dirs.
@@ -513,7 +514,7 @@ fn count_hub_skills(hub_dir: &Path) -> (usize, usize) {
 #[tauri::command]
 pub async fn clean_broken_skills() -> Result<usize, String> {
     tokio::task::spawn_blocking(|| {
-        let hub_dir = sync::get_hub_skills_dir();
+        let hub_dir = crate::core::paths::hub_skills_dir();
         let mut fixed: usize = 0;
         let mut removed_names: HashSet<String> = HashSet::new();
 
@@ -575,6 +576,7 @@ fn count_directories(path: &Path) -> usize {
         .map(|entries| entries.flatten().filter(|e| e.path().is_dir()).count())
         .unwrap_or(0)
 }
+
 
 fn resolve_symlink_target(symlink_path: &Path) -> Option<PathBuf> {
     std::fs::read_link(symlink_path).ok().map(|target| {

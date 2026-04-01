@@ -27,12 +27,10 @@ SkillStar 是一个 Tauri 桌面应用（也支持 CLI），用于统一管理 A
 
 <br/>
 
-### 传统工作流 vs SkillStar 工作流
+### SkillStar 是怎么工作的？
 
 <div align="center">
-  <img src="./public/diagrams/legacy-workflow.svg" width="800" alt="Legacy Workflow" />
-  <br/><br/>
-  <img src="./public/diagrams/skillstar-workflow.svg" width="800" alt="SkillStar Workflow" />
+  <img src="./public/diagrams/skillstar-architecture.svg" width="100%" alt="SkillStar Architecture — 技能从哪来 → 怎么管 → 怎么用" />
 </div>
 
 <br/>
@@ -40,7 +38,7 @@ SkillStar 是一个 Tauri 桌面应用（也支持 CLI），用于统一管理 A
 ## 核心能力
 
 ### ⚡️ 核心分发与管理
-- **多 Agent 生态**: 原生支持 Gemini CLI、Claude Code、Codex CLI、OpenCode CLI、OpenClaw、Antigravity。
+- **多 Agent 生态**: 原生支持 Gemini CLI、Claude Code、Codex CLI、OpenCode CLI、OpenClaw、Antigravity，还支持自定义 Agent 无限扩展。
 - **纯 Symlink 注入**: 项目目录不落地副本，完全无侵入，避免触发 `git status` 污染或影响构建产物。
 - **项目级精准调度**: 在 `Projects` 中注册工程，按需为不同 Agent 配置独立技能池，自动处理共享路径和冲突。
 
@@ -55,7 +53,7 @@ SkillStar 是一个 Tauri 桌面应用（也支持 CLI），用于统一管理 A
 ### 🛍️ 生态大市场
 - **Local-first Marketplace**: 基于 SQLite + FTS 全文检索的本地聚合快照，无需等待网络加载，支持离线浏览和秒级响应。
 - **Deck 组合与分发**: 一键将多个技能打包为 `.agd` 套牌，或提取单包 `.ags`。通过 Share Code 在网络/内网无缝流转。
-- **本地创作周期 (Authoring)**: 图形化界面直接创建并编辑技能（`skills-local`），一键发布（Graduate）至 GitHub 开源源。
+- **本地创作周期 (Authoring)**: 图形化界面直接创建并编辑技能（`skills-local`），通过 GitHub CLI 一键发布至 GitHub 开源。
 
 ### 🖥️ 极客体验
 - **Dark Glassmorphism UI**: 基于 Framer Motion 和 TailwindCSS 4 的沉浸式暗黑玻璃质感设计语言，动画无缝串联每个操作。
@@ -148,11 +146,15 @@ SkillStar/
 | Agent | Global Config |
 |------|----------------|
 | Gemini CLI | `~/.gemini/` |
-| Antigravity | `~/.gemini/antigravity` |
+| Antigravity | `~/.gemini/antigravity/` |
 | Claude Code | `~/.claude/` |
 | Codex CLI | `~/.codex/` |
-| OpenCode CLI | `~/.opencode/` |
+| OpenCode CLI | `~/.config/opencode/` |
 | OpenClaw | `~/.openclaw/` |
+| Cursor | `~/.cursor/` |
+| Qoder | `~/.qoder/` |
+| Trae | `~/.trae/` |
+| **自定义 Agent** | 自由配置路径，无限扩展 |
 
 ## 开发与协作
 - 后端结构或流程调整：先更新 `AGENTS.md`

@@ -10,8 +10,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::watch;
+use tracing::{error, warn};
 
-use super::{git_ops, local_skill, repo_scanner, sync};
+use super::{git_ops, local_skill, repo_scanner};
 
 // ── Persistent Configuration ────────────────────────────────────────
 
@@ -208,7 +209,7 @@ async fn patrol_loop(
         let skills = match collect_hub_skills().await {
             Ok(entries) => entries,
             Err(e) => {
-                eprintln!("[patrol] Failed to list skills: {}", e);
+                error!(target: "patrol", error = %e, "failed to list skills");
                 // Wait before retrying
                 tokio::select! {
                     _ = tokio::time::sleep(interval) => continue,
@@ -232,7 +233,7 @@ async fn patrol_loop(
         })
         .await
         {
-            eprintln!("[patrol] Failed to prefetch repos: {}", err);
+            warn!(target: "patrol", error = %err, "failed to prefetch repos");
         }
 
         for entry in &skills {
@@ -255,7 +256,12 @@ async fn patrol_loop(
             })
             .await
             .unwrap_or_else(|err| {
-                eprintln!("[patrol] Update check task failed for {}: {}", entry.name, err);
+                warn!(
+                    target: "patrol",
+                    skill = %entry.name,
+                    error = %err,
+                    "update check task failed"
+                );
                 false
             });
 
@@ -313,7 +319,7 @@ fn check_skill_update_local(skill_name: &str, skill_path: &Path) -> bool {
     match git_ops::check_update(skill_path) {
         Ok(update_available) => update_available,
         Err(err) => {
-            eprintln!("[patrol] Check failed for {}: {}", skill_name, err);
+            warn!(target: "patrol", skill = %skill_name, error = %err, "check failed");
             false
         }
     }
@@ -324,7 +330,7 @@ fn check_skill_update_local(skill_name: &str, skill_path: &Path) -> bool {
 /// Uses a lightweight directory scan instead of `list_installed_skills` to
 /// avoid the overhead of parsing every SKILL.md on each patrol cycle.
 async fn collect_hub_skills() -> Result<Vec<HubSkillEntry>> {
-    let skills_dir = sync::get_hub_skills_dir();
+    let skills_dir = super::paths::hub_skills_dir();
     tokio::task::spawn_blocking(move || {
         let entries = match std::fs::read_dir(&skills_dir) {
             Ok(e) => e,

@@ -6,13 +6,14 @@
 | Layer | Choice | Version |
 |---|---|---|
 | Runtime | Node.js / Bun | latest |
-| Framework | React + TypeScript | 18.x |
+| Framework | React + TypeScript | 19.x |
 | Build | Vite | 5.x |
-| Styling | TailwindCSS | 4.x |
+| Styling | TailwindCSS, shadcn/ui | 4.x |
 | Animation | Framer Motion | 12.x |
 | Icons | Lucide React | 0.436 |
 | Components | Custom primitives + Radix UI | latest |
 | Desktop IPC | `@tauri-apps/api` | 2.x |
+| Data/State | TanStack Query | 5.x |
 | Toasts | Sonner | 2.x |
 
 ## Project Structure (Condensed)

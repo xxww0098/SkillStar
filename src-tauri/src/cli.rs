@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 
-use crate::core::{ai_provider, gh_manager, git_ops, lockfile, security_scan, sync};
+use crate::core::{ai_provider, gh_manager, git_ops, lockfile, security_scan};
 
 #[derive(Parser)]
 #[command(
@@ -84,7 +84,7 @@ fn cmd_list() {
 }
 
 fn cmd_install(url: &str) {
-    let skills_dir = sync::get_hub_skills_dir();
+    let skills_dir = crate::core::paths::hub_skills_dir();
     let name = url
         .rsplit('/')
         .next()
@@ -130,7 +130,7 @@ fn cmd_update(name: Option<&str>) {
         }
     };
 
-    let skills_dir = sync::get_hub_skills_dir();
+    let skills_dir = crate::core::paths::hub_skills_dir();
     let skills_to_update: Vec<_> = if let Some(name) = name {
         lockfile.skills.iter().filter(|s| s.name == name).collect()
     } else {

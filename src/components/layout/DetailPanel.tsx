@@ -18,7 +18,7 @@ import {
   Trash2,
   Edit3,
   ExternalLink,
-  Copy,
+
   Sparkles,
   Github,
   Languages,
@@ -34,15 +34,15 @@ import { Badge } from "../ui/badge";
 import { Markdown } from "../ui/Markdown";
 import { Skeleton } from "../ui/Skeleton";
 import { LoadingLogo } from "../ui/LoadingLogo";
-import { SuccessCheckmark } from "../ui/SuccessCheckmark";
+
 import {
   formatAiErrorMessage,
   formatInstalls,
-  unwrapOuterMarkdownFence,
   navigateToAiSettings,
 } from "../../lib/utils";
+import { unwrapOuterMarkdownFence } from "../../lib/frontmatter";
+import { useAiStream } from "../../hooks/useAiStream";
 import type {
-  AiConfig,
   AiStreamPayload,
   LocalFirstResult,
   MarketplaceSkillDetails,
@@ -90,7 +90,30 @@ export function DetailPanel({
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [reading, setReading] = useState(false);
-  const [copied, setCopied] = useState(false);
+
+  // ── Description Translation (via reusable hook) ─────────────
+  const descriptionStream = useAiStream({
+    command: "ai_translate_short_text_stream_with_source",
+    eventChannel: "ai://translate-stream",
+    parseInvokeResult: (raw) => {
+      const result = raw as ShortTextTranslationResult;
+      return {
+        text: unwrapOuterMarkdownFence(result.text).trim(),
+        provider: result.source,
+      };
+    },
+  });
+
+  // Alias hook state for readability in JSX
+  const translatedDescription = descriptionStream.content;
+  const descriptionTranslationVisible = descriptionStream.visible;
+  const translatingDescription = descriptionStream.loading;
+  const descriptionHasDelta = descriptionStream.hasDelta;
+  const descriptionTranslateError = descriptionStream.error;
+  const descriptionTranslationProvider = descriptionStream.provider as "ai" | "mymemory" | null;
+  const descriptionTranslationSource = descriptionStream.source;
+  const aiConfigured = descriptionStream.aiConfigured;
+  const shortDescriptionTranslationEnabled = true;
 
   // AI Quick Read
   const [quickReadContent, setQuickReadContent] = useState<string | null>(null);
@@ -100,26 +123,8 @@ export function DetailPanel({
   const [quickReadWasNonStreaming, setQuickReadWasNonStreaming] =
     useState(false);
   const [quickReadError, setQuickReadError] = useState<string | null>(null);
-  const [aiConfigured, setAiConfigured] = useState(false);
-  const [targetLanguage, setTargetLanguage] = useState("zh-CN");
-  const [
-    shortDescriptionTranslationEnabled,
-    setShortDescriptionTranslationEnabled,
-  ] = useState(false);
-  const [translatedDescription, setTranslatedDescription] = useState<
-    string | null
-  >(null);
-  const [descriptionTranslationSource, setDescriptionTranslationSource] =
-    useState<string | null>(null);
-  const [descriptionTranslationVisible, setDescriptionTranslationVisible] =
-    useState(false);
-  const [translatingDescription, setTranslatingDescription] = useState(false);
-  const [descriptionHasDelta, setDescriptionHasDelta] = useState(false);
-  const [descriptionTranslationProvider, setDescriptionTranslationProvider] =
-    useState<"ai" | "mymemory" | null>(null);
-  const [descriptionTranslateError, setDescriptionTranslateError] = useState<
-    string | null
-  >(null);
+  const targetLanguage = descriptionStream.targetLanguage;
+
   const [descriptionDeferTimedOut, setDescriptionDeferTimedOut] =
     useState(false);
   const [autoTranslateDescription, setAutoTranslateDescription] =
@@ -137,51 +142,20 @@ export function DetailPanel({
   const [detailsLoading, setDetailsLoading] = useState(false);
   const quickReadCacheRef = useRef<Map<string, string>>(new Map());
 
-  // Cancel refs
-  const activeTranslateIdRef = useRef<string | null>(null);
+  // Cancel refs (quick read only — description translation is managed by useAiStream)
   const activeQuickReadIdRef = useRef<string | null>(null);
-  const translateUnlistenRef = useRef<(() => void) | null>(null);
   const quickReadUnlistenRef = useRef<(() => void) | null>(null);
   const autoTranslateAttemptedKeyRef = useRef<string | null>(null);
-  // Track in-flight status via ref to avoid stale closures in handleTranslateDescription
-  const translatingDescriptionRef = useRef(false);
   // Guard async setState after component unmount
   const mountedRef = useRef(true);
 
-  useEffect(() => {
-    const loadAiConfig = async () => {
-      try {
-        const config = await invoke<AiConfig>("get_ai_config");
-        if (!mountedRef.current) return;
-        const hasAi = config.enabled && config.api_key.trim().length > 0;
-        setAiConfigured(hasAi);
-        setTargetLanguage(config.target_language || "zh-CN");
-        setShortDescriptionTranslationEnabled(true);
-      } catch {
-        if (!mountedRef.current) return;
-        setAiConfigured(false);
-        setTargetLanguage("zh-CN");
-        setShortDescriptionTranslationEnabled(true);
-      }
-    };
-    loadAiConfig();
-  }, []);
 
   // Cleanup event listeners on unmount
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      // Detach any in-flight AI jobs from this panel instance.
-      // Backend invocation keeps running and can still update cache,
-      // while we avoid setState attempts after unmount.
-      activeTranslateIdRef.current = null;
       activeQuickReadIdRef.current = null;
-      translatingDescriptionRef.current = false;
-      if (translateUnlistenRef.current) {
-        translateUnlistenRef.current();
-        translateUnlistenRef.current = null;
-      }
       if (quickReadUnlistenRef.current) {
         quickReadUnlistenRef.current();
         quickReadUnlistenRef.current = null;
@@ -230,6 +204,7 @@ export function DetailPanel({
     }
   }, []);
 
+  // Reset state when skill changes
   useEffect(() => {
     // Restore cached quick-read, and reset description translation state.
     const cacheKey = `${targetLanguage}::${skill?.name ?? ""}`;
@@ -239,12 +214,17 @@ export function DetailPanel({
     setQuickReadHasDelta(false);
     setQuickReadWasNonStreaming(false);
     setQuickReadError(null);
-    setTranslatedDescription(null);
-    setDescriptionTranslationSource(null);
-    setDescriptionTranslationVisible(false);
-    setDescriptionHasDelta(false);
-    setDescriptionTranslationProvider(null);
-    setDescriptionTranslateError(null);
+
+    // Hydrate from localized_description (pre-cached in Rust)
+    if (skill?.localized_description) {
+      descriptionStream.hydrate(skill.localized_description, skill.description?.trim() || "");
+      descriptionStream.setVisible(true);
+    } else {
+      descriptionStream.hydrate(null, null);
+      descriptionStream.setVisible(false);
+    }
+    descriptionStream.setError(null);
+
     setDescriptionDeferTimedOut(false);
     setSkillDetails(null);
     setReading(false);
@@ -256,6 +236,7 @@ export function DetailPanel({
   }, [
     skill?.name,
     skill?.description,
+    skill?.localized_description,
     skill?.installed,
     skill?.source,
     targetLanguage,
@@ -267,260 +248,51 @@ export function DetailPanel({
       const renderedDescription =
         skillDetails?.summary?.trim() || skill?.description?.trim() || "";
       if (!renderedDescription || !shortDescriptionTranslationEnabled) return;
-      const hasReusableTranslation =
-        translatedDescription != null &&
-        descriptionTranslationSource === renderedDescription;
 
-      // Use ref to read in-flight status to avoid stale closure
-      const isInFlight = translatingDescriptionRef.current;
-
-      if (mode === "manual") {
-        // Cancel in-progress
-        if (isInFlight) {
-          activeTranslateIdRef.current = null;
-          if (translateUnlistenRef.current) {
-            translateUnlistenRef.current();
-            translateUnlistenRef.current = null;
-          }
-          translatingDescriptionRef.current = false;
-          setTranslatingDescription(false);
-          if (!translatedDescription) {
-            setDescriptionTranslationVisible(false);
-          }
-          return;
-        }
-
-        if (descriptionTranslationVisible && hasReusableTranslation) {
-          setDescriptionTranslationVisible(false);
-          return;
-        }
-
-        if (hasReusableTranslation) {
-          setDescriptionTranslationVisible(true);
-          return;
-        }
-      } else {
-        if (isInFlight) return;
-        if (descriptionTranslationVisible && hasReusableTranslation) return;
-        if (hasReusableTranslation) {
-          setDescriptionTranslationVisible(true);
+      if (mode === "auto") {
+        // Auto mode: skip if already translating, visible, or has reusable content
+        if (translatingDescription) return;
+        if (descriptionTranslationVisible && descriptionTranslationSource === renderedDescription) return;
+        if (translatedDescription != null && descriptionTranslationSource === renderedDescription) {
+          descriptionStream.setVisible(true);
           return;
         }
       }
-
-      const requestId =
-        typeof crypto !== "undefined" && "randomUUID" in crypto
-          ? crypto.randomUUID()
-          : `detail-translate-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-      activeTranslateIdRef.current = requestId;
-      let streamedRaw = "";
-      let deltaCount = 0;
-
-      translatingDescriptionRef.current = true;
-      setTranslatingDescription(true);
-      setDescriptionTranslateError(null);
-      setDescriptionDeferTimedOut(false);
-      setDescriptionHasDelta(false);
-      setDescriptionTranslationProvider(null);
-      setTranslatedDescription(null);
-      setDescriptionTranslationVisible(false);
-      setDescriptionTranslationSource(renderedDescription);
-
-      let rafId: number | null = null;
-      const flushDelta = () => {
-        rafId = null;
-        if (activeTranslateIdRef.current !== requestId) return;
-        setTranslatedDescription(streamedRaw);
-        setDescriptionTranslationProvider("ai");
-        setDescriptionTranslationVisible(true);
-        if (deltaCount >= 2) setDescriptionHasDelta(true);
-      };
-
-      try {
-        const unlisten = await listen<AiStreamPayload>(
-          "ai://translate-stream",
-          (event) => {
-            if (activeTranslateIdRef.current !== requestId) return;
-            const payload = event.payload;
-            if (payload.requestId !== requestId) return;
-
-            if (payload.event === "delta" && payload.delta) {
-              deltaCount += 1;
-              streamedRaw += payload.delta;
-              if (rafId == null) {
-                rafId = requestAnimationFrame(flushDelta);
-              }
-              return;
-            }
-
-            if (payload.event === "error" && payload.message) {
-              setDescriptionTranslateError(payload.message);
-            }
-          },
-        );
-        translateUnlistenRef.current = unlisten;
-
-        const result = await invoke<ShortTextTranslationResult>(
-          "ai_translate_short_text_stream_with_source",
-          {
-            requestId,
-            content: renderedDescription,
-          },
-        );
-
-        if (activeTranslateIdRef.current !== requestId) return;
-        const finalTranslation = unwrapOuterMarkdownFence(result.text).trim();
-        setTranslatedDescription(finalTranslation);
-        setDescriptionTranslationSource(renderedDescription);
-        setDescriptionTranslationProvider(result.source);
-        setDescriptionTranslationVisible(true);
-        setDescriptionDeferTimedOut(false);
-        setDescriptionHasDelta(deltaCount >= 2);
-      } catch (e) {
-        if (activeTranslateIdRef.current !== requestId) return;
-        setDescriptionHasDelta(deltaCount >= 2);
-        setDescriptionTranslationProvider(null);
-        if (!streamedRaw.trim()) {
-          setTranslatedDescription(null);
-          setDescriptionTranslationSource(null);
-          setDescriptionTranslationVisible(false);
-        } else {
-          setTranslatedDescription(streamedRaw);
-          setDescriptionTranslationSource(renderedDescription);
-          setDescriptionTranslationVisible(true);
-        }
-        setDescriptionTranslateError(String(e));
-      } finally {
-        if (rafId != null) {
-          cancelAnimationFrame(rafId);
-          rafId = null;
-        }
-        if (translateUnlistenRef.current) {
-          translateUnlistenRef.current();
-          translateUnlistenRef.current = null;
-        }
-        if (activeTranslateIdRef.current === requestId) {
-          translatingDescriptionRef.current = false;
-          setTranslatingDescription(false);
-          activeTranslateIdRef.current = null;
-        }
-      }
+      // Manual mode: use the hook's built-in toggle/cancel behavior
+      await descriptionStream.execute(renderedDescription);
     },
     [
       shortDescriptionTranslationEnabled,
       descriptionTranslationSource,
       descriptionTranslationVisible,
+      translatingDescription,
+      translatedDescription,
       skill,
       skillDetails?.summary,
-      targetLanguage,
-      translatedDescription,
+      descriptionStream,
     ],
   );
 
   const handleAiRetranslateDescription = useCallback(async () => {
-    if (!aiConfigured || translatingDescriptionRef.current) return;
+    if (!aiConfigured || translatingDescription) return;
     const renderedDescription =
       skillDetails?.summary?.trim() || skill?.description?.trim() || "";
     if (!renderedDescription) return;
 
-    const requestId =
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : `detail-retranslate-ai-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    activeTranslateIdRef.current = requestId;
-    let streamedRaw = "";
-    let deltaCount = 0;
-
-    translatingDescriptionRef.current = true;
-    setTranslatingDescription(true);
-    setDescriptionTranslateError(null);
-    setDescriptionDeferTimedOut(false);
-    setDescriptionHasDelta(false);
-    setDescriptionTranslationProvider("ai");
-
-    let rafId: number | null = null;
-    const flushDelta = () => {
-      rafId = null;
-      if (activeTranslateIdRef.current !== requestId) return;
-      setTranslatedDescription(streamedRaw);
-      setDescriptionTranslationProvider("ai");
-      setDescriptionTranslationVisible(true);
-      if (deltaCount >= 2) setDescriptionHasDelta(true);
-    };
-
-    try {
-      const unlisten = await listen<AiStreamPayload>(
-        "ai://translate-stream",
-        (event) => {
-          if (activeTranslateIdRef.current !== requestId) return;
-          const payload = event.payload;
-          if (payload.requestId !== requestId) return;
-
-          if (payload.event === "delta" && payload.delta) {
-            deltaCount += 1;
-            streamedRaw += payload.delta;
-            if (rafId == null) {
-              rafId = requestAnimationFrame(flushDelta);
-            }
-            return;
-          }
-
-          if (payload.event === "error" && payload.message) {
-            setDescriptionTranslateError(payload.message);
-          }
-        },
-      );
-      translateUnlistenRef.current = unlisten;
-
-      const result = await invoke<ShortTextTranslationResult>(
-        "ai_retranslate_short_text_stream_with_source",
-        {
-          requestId,
-          content: renderedDescription,
-        },
-      );
-
-      if (activeTranslateIdRef.current !== requestId) return;
-      const finalTranslation = unwrapOuterMarkdownFence(result.text).trim();
-      setTranslatedDescription(finalTranslation);
-      setDescriptionTranslationSource(renderedDescription);
-      setDescriptionTranslationProvider(result.source);
-      setDescriptionTranslationVisible(true);
-      setDescriptionDeferTimedOut(false);
-      setDescriptionHasDelta(deltaCount >= 2);
-    } catch (e) {
-      if (activeTranslateIdRef.current !== requestId) return;
-      setDescriptionHasDelta(deltaCount >= 2);
-      if (streamedRaw.trim()) {
-        setTranslatedDescription(streamedRaw);
-        setDescriptionTranslationSource(renderedDescription);
-        setDescriptionTranslationProvider("ai");
-        setDescriptionTranslationVisible(true);
-      }
-      setDescriptionTranslateError(String(e));
-    } finally {
-      if (rafId != null) {
-        cancelAnimationFrame(rafId);
-        rafId = null;
-      }
-      if (translateUnlistenRef.current) {
-        translateUnlistenRef.current();
-        translateUnlistenRef.current = null;
-      }
-      if (activeTranslateIdRef.current === requestId) {
-        translatingDescriptionRef.current = false;
-        setTranslatingDescription(false);
-        activeTranslateIdRef.current = null;
-      }
-    }
+    await descriptionStream.execute(renderedDescription, {
+      forceRefresh: true,
+      keepVisibleWhileLoading: true,
+      extraInvokeParams: { forceAi: true },
+    });
   }, [
     aiConfigured,
+    translatingDescription,
     skill,
     skillDetails?.summary,
-    targetLanguage,
-    translatingDescription,
+    descriptionStream,
   ]);
 
+  // Deferred timeout for auto-translate
   useEffect(() => {
     if (!autoTranslateDescription || !translatingDescription) return;
     const renderedDescription =
@@ -544,6 +316,7 @@ export function DetailPanel({
     translatingDescription,
   ]);
 
+  // Auto-translate trigger
   useEffect(() => {
     if (
       !skill ||
@@ -696,12 +469,7 @@ export function DetailPanel({
 
   const canEdit = skill?.installed && onReadContent && onSaveContent;
 
-  // Build install command
-  const installCmd = skill?.source
-    ? `npx skills add ${skill.source} --skill ${skill.name}`
-    : skill?.git_url
-      ? `npx skills add ${skill.git_url}`
-      : null;
+
 
   // skills.sh URL
   const skillsShUrl = skill?.source
@@ -713,10 +481,12 @@ export function DetailPanel({
   const hasDescription = enrichedDescription.length > 0;
   const hasTranslationForCurrentDescription =
     translatedDescription != null &&
-    descriptionTranslationSource === enrichedDescription;
+    (descriptionTranslationSource === enrichedDescription ||
+      descriptionTranslationSource === rawDescription);
   const descriptionTranslationMatches =
     descriptionTranslationSource != null &&
-    descriptionTranslationSource === enrichedDescription;
+    (descriptionTranslationSource === enrichedDescription ||
+      descriptionTranslationSource === rawDescription);
   const descriptionTranslationActive =
     descriptionTranslationVisible &&
     translatedDescription != null &&
@@ -740,12 +510,6 @@ export function DetailPanel({
     ? translatedDescription
     : enrichedDescription;
 
-  const handleCopy = async () => {
-    if (!installCmd) return;
-    await navigator.clipboard.writeText(installCmd);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
 
   return (
     <AnimatePresence mode="sync">
@@ -821,7 +585,7 @@ export function DetailPanel({
           </div>
 
           {/* Scrollable content */}
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto overscroll-y-contain">
             <div className="p-5 space-y-5">
               {/* Meta */}
               <div className="flex items-center gap-3 flex-wrap">
@@ -860,10 +624,10 @@ export function DetailPanel({
                   <span className="text-caption">local</span>
                 )}
                 {skill.source && (
-                  <span className="text-caption">by {skill.source}</span>
+                  <span className="text-caption break-all">by {skill.source}</span>
                 )}
                 {!skill.source && skill.author && (
-                  <span className="text-caption">by {skill.author}</span>
+                  <span className="text-caption break-all">by {skill.author}</span>
                 )}
                 {skillDetails?.github_stars != null &&
                   skillDetails.github_stars > 0 && (
@@ -1116,29 +880,7 @@ export function DetailPanel({
                 </div>
               )}
 
-              {/* Install Command */}
-              {installCmd && !skill.installed && (
-                <div className="space-y-1.5">
-                  <label className="text-caption font-medium uppercase tracking-wider text-xs">
-                    {t("detailPanel.installLabel")}
-                  </label>
-                  <div className="flex items-center gap-2 bg-card rounded-lg px-3 py-2.5 border border-border">
-                    <code className="text-xs font-mono text-foreground flex-1 select-all overflow-x-auto whitespace-nowrap">
-                      {installCmd}
-                    </code>
-                    <button
-                      onClick={handleCopy}
-                      className="p-1 rounded-md hover:bg-muted text-muted-foreground transition-colors shrink-0 cursor-pointer"
-                    >
-                      {copied ? (
-                        <SuccessCheckmark size={14} className="text-success" />
-                      ) : (
-                        <Copy className="w-3.5 h-3.5" />
-                      )}
-                    </button>
-                  </div>
-                </div>
-              )}
+
 
               {/* skills.sh link */}
               {skillsShUrl && (
@@ -1171,11 +913,7 @@ export function DetailPanel({
                       {skill.git_url}
                     </span>
                   </a>
-                  {skill.tree_hash && (
-                    <div className="text-caption font-mono text-xs">
-                      {t("detailPanel.tree")} {skill.tree_hash.slice(0, 12)}…
-                    </div>
-                  )}
+
                   <div className="text-caption">
                     {t("detailPanel.updated")}{" "}
                     {new Date(skill.last_updated).toLocaleDateString()}

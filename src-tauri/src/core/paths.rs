@@ -13,7 +13,8 @@
 //! Setting these variables during development keeps dev data completely
 //! separate from the production (installed) app.
 
-use std::path::PathBuf;
+use anyhow::Context;
+use std::path::{Path, PathBuf};
 
 /// App config root — JSON config files live here.
 ///
@@ -71,6 +72,41 @@ pub fn local_skills_dir() -> PathBuf {
 /// `~/.skillstar/.agents/.skill-lock.json`
 pub fn lockfile_path() -> PathBuf {
     hub_root().join(".skill-lock.json")
+}
+
+// ── Database Paths ─────────────────────────────────────────────────
+
+/// `~/.skillstar/marketplace.db` — local-first marketplace snapshot DB.
+pub fn marketplace_db_path() -> PathBuf {
+    data_root().join("marketplace.db")
+}
+
+/// `~/.skillstar/translation_cache.db` — translation cache DB.
+pub fn translation_db_path() -> PathBuf {
+    data_root().join("translation_cache.db")
+}
+
+/// `~/.skillstar/security_scan.db` — security scan cache DB.
+pub fn security_scan_db_path() -> PathBuf {
+    data_root().join("security_scan.db")
+}
+
+// ── Filesystem Utils ──────────────────────────────────────────────
+
+/// Cross-platform symlink creation (shared utility).
+///
+/// All modules that need to create symlinks **must** call this function
+/// instead of using `std::os::unix::fs::symlink` directly.
+pub fn create_symlink(src: &Path, dst: &Path) -> anyhow::Result<()> {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(src, dst)
+        .with_context(|| format!("Failed to symlink {:?} -> {:?}", src, dst))?;
+
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(src, dst)
+        .with_context(|| format!("Failed to symlink {:?} -> {:?}", src, dst))?;
+
+    Ok(())
 }
 
 // ── Helper ─────────────────────────────────────────────────────────

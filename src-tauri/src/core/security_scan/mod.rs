@@ -2506,54 +2506,11 @@ fn compute_fallback_risk(
 // ── Cache ───────────────────────────────────────────────────────────
 
 fn db_path() -> PathBuf {
-    super::paths::data_root().join("security_scan.db")
+    super::paths::security_scan_db_path()
 }
 
-/// Cached SQLite connection for the security scan database.
-///
-/// The connection is opened once on first use and reused across all
-/// cache reads/writes, avoiding the overhead of repeated open +
-/// `CREATE TABLE IF NOT EXISTS` calls during batch scans.
-static SCAN_DB: std::sync::LazyLock<Mutex<Option<Connection>>> =
-    std::sync::LazyLock::new(|| Mutex::new(None));
-
-fn get_db() -> Result<std::sync::MutexGuard<'static, Option<Connection>>> {
-    let mut guard = SCAN_DB
-        .lock()
-        .map_err(|e| anyhow::anyhow!("scan DB mutex poisoned: {}", e))?;
-    if guard.is_none() {
-        let conn = open_and_migrate_db()?;
-        *guard = Some(conn);
-    }
-    Ok(guard)
-}
-
-/// Macro to borrow `&Connection` from a `MutexGuard<Option<Connection>>`.
-/// Keeps borrowing ergonomic and avoids repeating the unwrap.
-macro_rules! conn_ref {
-    ($guard:expr) => {
-        $guard
-            .as_ref()
-            .expect("scan db connection missing after get_db")
-    };
-}
-
-/// Drop the cached connection so the next `get_db()` reopens at the
-/// current `db_path()`.  Used by tests that override `SKILLSTAR_DATA_DIR`.
-#[cfg(test)]
-fn reset_scan_db() {
-    if let Ok(mut guard) = SCAN_DB.lock() {
-        *guard = None;
-    }
-}
-
-/// Open the SQLite database, create tables, and run one-time migrations.
-fn open_and_migrate_db() -> Result<Connection> {
-    let path = db_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).context("Failed to create db directory")?;
-    }
-    let conn = Connection::open(&path)?;
+/// Schema migration for the security scan database.
+fn migrate_scan_schema(conn: &Connection) -> Result<()> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS scan_cache_v2 (
             skill_name TEXT NOT NULL,
@@ -2589,14 +2546,54 @@ fn open_and_migrate_db() -> Result<Connection> {
         [CACHE_SCHEMA_VERSION],
     );
 
-    Ok(conn)
+    Ok(())
 }
 
-/// Standalone init for tests and `clear_cache` — opens a fresh connection
-/// without going through the cached path (avoids poisoned-mutex issues
-/// when tests set `SKILLSTAR_DATA_DIR`).
-fn init_db() -> Result<Connection> {
-    open_and_migrate_db()
+/// Ensure schema migration runs exactly once via the pool.
+#[cfg(not(test))]
+static SCAN_SCHEMA_READY: std::sync::LazyLock<()> = std::sync::LazyLock::new(|| {
+    let conn = super::db_pool::security_scan_pool()
+        .get()
+        .expect("security scan DB pool connection for schema migration");
+    migrate_scan_schema(&conn).expect("security scan DB schema migration failed");
+});
+
+/// Get a connection from the pool.
+/// In test mode, opens a fresh standalone connection that respects the
+/// current `SKILLSTAR_DATA_DIR` env override.
+#[cfg(not(test))]
+fn get_conn() -> Result<r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>> {
+    std::sync::LazyLock::force(&SCAN_SCHEMA_READY);
+    super::db_pool::security_scan_pool()
+        .get()
+        .map_err(|e| anyhow::anyhow!("Failed to get security scan pool connection: {e}"))
+}
+
+/// Test-only: open a standalone connection at the current db_path().
+#[cfg(test)]
+fn get_conn() -> Result<Connection> {
+    init_db_for_test()
+}
+
+/// Test-only: reset is a no-op with pool (tests open standalone connections).
+#[cfg(test)]
+fn reset_scan_db() {
+    // Tests open standalone connections via get_conn() / init_db_for_test()
+    // so there is no cached state to reset.
+}
+
+/// Open a standalone connection with schema migration.
+/// Used by tests and `clear_cache` when the pool might point to a
+/// different `SKILLSTAR_DATA_DIR`.
+fn init_db_for_test() -> Result<Connection> {
+    let path = db_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).context("Failed to create db directory")?;
+    }
+    let conn = Connection::open(&path)?;
+    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
+    migrate_scan_schema(&conn)?;
+    Ok(conn)
 }
 
 fn normalize_target_language_for_cache(target_lang: &str) -> String {
@@ -2623,11 +2620,10 @@ fn split_cache_scan_mode_key(mode_key: &str) -> (&str, Option<&str>) {
 }
 
 pub fn load_all_cached() -> Vec<SecurityScanResult> {
-    let guard = match get_db() {
-        Ok(g) => g,
+    let conn = match get_conn() {
+        Ok(c) => c,
         Err(_) => return vec![],
     };
-    let conn = conn_ref!(guard);
     let mut stmt = match conn.prepare(
         "SELECT json_data FROM scan_cache_v2
          WHERE scanner_version = ?1
@@ -2657,8 +2653,7 @@ pub fn load_cached_result(
     scan_mode_key: &str,
     current_tree_hash: Option<&str>,
 ) -> Option<SecurityScanResult> {
-    let guard = get_db().ok()?;
-    let conn = conn_ref!(guard);
+    let conn = get_conn().ok()?;
     let mut stmt = conn
         .prepare(
             "SELECT tree_hash, json_data FROM scan_cache_v2
@@ -2711,12 +2706,14 @@ pub fn save_to_cache(result: &SecurityScanResult) -> Result<()> {
         return Ok(());
     }
 
-    let guard = get_db()?;
-    let conn = conn_ref!(guard);
+    let conn = get_conn()?;
     let json_data = serde_json::to_string(result)?;
     let scan_mode_key = cache_scan_mode_key(&result.scan_mode, &result.target_language);
 
-    conn.execute(
+    // Wrap INSERT + eviction in a single transaction to avoid 2 fsyncs.
+    let tx = conn.unchecked_transaction()?;
+
+    tx.execute(
         "INSERT OR REPLACE INTO scan_cache_v2
          (skill_name, scan_mode, scanner_version, tree_hash, scanned_at, json_data)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -2730,7 +2727,7 @@ pub fn save_to_cache(result: &SecurityScanResult) -> Result<()> {
         ),
     )?;
 
-    conn.execute(
+    tx.execute(
         "DELETE FROM scan_cache_v2
          WHERE rowid NOT IN (
              SELECT rowid FROM scan_cache_v2
@@ -2739,6 +2736,7 @@ pub fn save_to_cache(result: &SecurityScanResult) -> Result<()> {
         [CACHE_MAX_ENTRIES as i64],
     )?;
 
+    tx.commit()?;
     Ok(())
 }
 
@@ -2749,9 +2747,9 @@ pub fn clear_cache() -> Result<()> {
         let _ = std::fs::remove_file(legacy_path);
     }
 
-    // Use init_db() (not get_db) so tests with overridden SKILLSTAR_DATA_DIR
-    // don't fight with the cached connection from a different env.
-    let conn = init_db()?;
+    // Use init_db_for_test() so tests with overridden SKILLSTAR_DATA_DIR
+    // don't fight with the pool which resolves the path only once.
+    let conn = init_db_for_test()?;
     conn.execute("DELETE FROM scan_cache_v2", [])?;
     let _ = conn.execute("DELETE FROM file_scan_cache", []);
     Ok(())
@@ -2791,13 +2789,11 @@ pub fn clear_logs() -> Result<()> {
 /// Called when a skill is updated or reinstalled so its security badge
 /// resets to "unscanned" until the user runs a new scan.
 pub fn invalidate_skill_cache(skill_name: &str) {
-    if let Ok(guard) = get_db() {
-        if let Some(conn) = guard.as_ref() {
-            let _ = conn.execute(
-                "DELETE FROM scan_cache_v2 WHERE skill_name = ?1",
-                [skill_name],
-            );
-        }
+    if let Ok(conn) = get_conn() {
+        let _ = conn.execute(
+            "DELETE FROM scan_cache_v2 WHERE skill_name = ?1",
+            [skill_name],
+        );
     }
 }
 
@@ -2894,15 +2890,17 @@ fn save_file_scan_results(
     scan_mode: &str,
     target_lang: &str,
 ) {
-    let guard = match get_db() {
-        Ok(g) => g,
+    let conn = match get_conn() {
+        Ok(c) => c,
         Err(_) => return,
     };
-    let conn = conn_ref!(guard);
 
-    // Wrap all inserts + eviction in a single transaction to avoid N
+    // Wrap all inserts + eviction in a proper transaction to avoid N
     // individual fsyncs (was 30x slower for skills with many files).
-    let _ = conn.execute_batch("BEGIN");
+    let tx = match conn.unchecked_transaction() {
+        Ok(t) => t,
+        Err(_) => return,
+    };
 
     let now = chrono::Utc::now().to_rfc3339();
     let file_role_map: HashMap<String, FileRole> = classifications
@@ -2926,7 +2924,7 @@ fn save_file_scan_results(
             serde_json::to_string(&result.findings).unwrap_or_else(|_| "[]".to_string());
         let risk_str = risk_label(result.file_risk);
 
-        let _ = conn.execute(
+        let _ = tx.execute(
             "INSERT OR REPLACE INTO file_scan_cache
              (content_digest, scan_mode, scanner_version, relative_path, file_risk, findings_json, cached_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -2943,7 +2941,7 @@ fn save_file_scan_results(
     }
 
     // LRU eviction: keep only the most recent FILE_CACHE_MAX_ENTRIES
-    let _ = conn.execute(
+    let _ = tx.execute(
         "DELETE FROM file_scan_cache
          WHERE rowid NOT IN (
              SELECT rowid FROM file_scan_cache
@@ -2952,7 +2950,7 @@ fn save_file_scan_results(
         [FILE_CACHE_MAX_ENTRIES as i64],
     );
 
-    let _ = conn.execute_batch("COMMIT");
+    let _ = tx.commit();
 }
 
 /// Partition files into (cached_results, needs_scan_classifications).
@@ -2965,11 +2963,10 @@ fn partition_cached_files(
     target_lang: &str,
     log_ctx: &SkillScanLogCtx,
 ) -> (Vec<FileScanResult>, Vec<(FileRole, usize)>) {
-    let guard = match get_db() {
-        Ok(g) => g,
+    let conn = match get_conn() {
+        Ok(c) => c,
         Err(_) => return (vec![], classifications.to_vec()),
     };
-    let conn = conn_ref!(guard);
 
     let mut cached_results: Vec<FileScanResult> = Vec::new();
     let mut needs_scan: Vec<(FileRole, usize)> = Vec::new();
@@ -3266,7 +3263,7 @@ mod tests {
         save_file_scan_results(&files, &classifications, &results, "smart", "zh-CN");
 
         // Load back by digest
-        let conn = init_db().expect("init db");
+        let conn = init_db_for_test().expect("init db");
         let cached =
             load_cached_file_result(&conn, "digest-abc123", FileRole::Skill, "smart", "zh-CN");
         assert!(cached.is_some(), "should find cached file result");
@@ -3302,7 +3299,7 @@ mod tests {
         save_file_scan_results(&files, &classifications, &results, "deep", "zh-CN");
 
         // Request as "smart" → should hit (deep satisfies smart)
-        let conn = init_db().expect("init db");
+        let conn = init_db_for_test().expect("init db");
         let cached =
             load_cached_file_result(&conn, "digest-deep-001", FileRole::Script, "smart", "zh-CN");
         assert!(cached.is_some(), "deep cache should satisfy smart request");
@@ -3337,7 +3334,7 @@ mod tests {
 
         save_file_scan_results(&files, &classifications, &results, "smart", "zh-CN");
 
-        let conn = init_db().expect("init db");
+        let conn = init_db_for_test().expect("init db");
         let hit =
             load_cached_file_result(&conn, "digest-role-001", FileRole::Skill, "smart", "zh-CN");
         assert!(hit.is_some(), "same role should hit cache");

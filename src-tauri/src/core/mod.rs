@@ -1,5 +1,6 @@
 pub mod agent_profile;
 pub mod ai_provider;
+pub mod db_pool;
 pub mod gh_manager;
 pub mod git_ops;
 pub mod installed_skill;
