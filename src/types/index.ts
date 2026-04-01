@@ -387,6 +387,25 @@ export interface ImportBundleResult {
   replaced: boolean;
 }
 
+export interface MultiManifestEntry {
+  name: string;
+  description: string;
+  file_count: number;
+}
+
+export interface MultiManifest {
+  format_version: number;
+  created_at: string;
+  skills: MultiManifestEntry[];
+  checksum: string;
+}
+
+export interface ImportMultiBundleResult {
+  skill_names: string[];
+  total_file_count: number;
+  replaced_count: number;
+}
+
 // ── Security Scan ───────────────────────────────────────────────────
 
 export type RiskLevel = "Safe" | "Low" | "Medium" | "High" | "Critical";

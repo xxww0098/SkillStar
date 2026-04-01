@@ -10,17 +10,18 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { useTranslation } from "react-i18next";
 import { Toolbar } from "../components/layout/Toolbar";
-import { SkillGrid } from "../components/skills/SkillGrid";
-import { OfficialPublishers } from "../components/marketplace/OfficialPublishers";
+import { SkillGrid } from "../features/my-skills/components/SkillGrid";
+import { OfficialPublishers } from "../features/marketplace/components/OfficialPublishers";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Button } from "../components/ui/button";
-import { useMarketplace } from "../hooks/useMarketplace";
-import { useSkills } from "../hooks/useSkills";
+import { useMarketplace } from "../features/marketplace/hooks/useMarketplace";
+import { useSkills } from "../features/my-skills/hooks/useSkills";
 import { ArrowUp, Sparkles, X, Loader2 } from "lucide-react";
 import { toast } from "../lib/toast";
 import { LoadingLogo } from "../components/ui/LoadingLogo";
-import type { OfficialPublisher, Skill, SortOption, ViewMode } from "../types";
+import type { OfficialPublisher, Skill, SortOption } from "../types";
 import { cn } from "../lib/utils";
+import { useViewMode } from "../hooks/useViewMode";
 
 const DetailPanel = lazy(() =>
   import("../components/layout/DetailPanel").then((mod) => ({
@@ -44,9 +45,6 @@ interface MarketplaceProps {
   activeTab?: TabId;
   onTabChange?: (tab: TabId) => void;
 }
-
-const INITIAL_MARKETPLACE_VISIBLE_COUNT = 30;
-const EAGER_RENDER_THRESHOLD = INITIAL_MARKETPLACE_VISIBLE_COUNT * 2;
 
 export function Marketplace({
   onNavigateToPublisher,
@@ -81,7 +79,7 @@ export function Marketplace({
     useSkills();
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("stars-desc");
-  const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [viewMode, setViewMode] = useViewMode("grid");
   const [internalTab, setInternalTab] = useState<TabId>("all");
   const activeTab = controlledTab ?? internalTab;
   const setActiveTab = (tab: TabId) => {
@@ -91,7 +89,6 @@ export function Marketplace({
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [installStatus, setInstallStatus] = useState<string | null>(null);
   const [showBackToTop, setShowBackToTop] = useState(false);
-  const [visibleSkillCount, setVisibleSkillCount] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   /** Skills currently being installed (for per-card loading state) */
   const [installingNames, setInstallingNames] = useState<Set<string>>(
@@ -130,18 +127,19 @@ export function Marketplace({
     }
 
     // AI keyword toggle filter: only show skills matching active keywords
-    if (
-      isAiMode &&
-      aiActiveKeywords.size > 0 &&
-      Object.keys(aiKeywordSkillMap).length > 0
-    ) {
-      // Build set of skill names matching any active keyword
-      const allowedNames = new Set<string>();
-      for (const kw of aiActiveKeywords) {
-        const names = aiKeywordSkillMap[kw];
-        if (names) names.forEach((n) => allowedNames.add(n));
+    if (isAiMode) {
+      if (aiActiveKeywords.size === 0) {
+        // Allow deselecting all AI keywords; show empty result set.
+        skills = [];
+      } else if (Object.keys(aiKeywordSkillMap).length > 0) {
+        // Build set of skill names matching any active keyword
+        const allowedNames = new Set<string>();
+        for (const kw of aiActiveKeywords) {
+          const names = aiKeywordSkillMap[kw];
+          if (names) names.forEach((n) => allowedNames.add(n));
+        }
+        skills = skills.filter((s) => allowedNames.has(s.name));
       }
-      skills = skills.filter((s) => allowedNames.has(s.name));
     }
 
     // Sort
@@ -327,10 +325,7 @@ export function Marketplace({
     setSearchQuery("");
   }, [clearAiSearch]);
 
-  const totalCount =
-    searchQuery.trim() || aiKeywords
-      ? (results?.total_count ?? 0)
-      : leaderboard.length;
+  const totalCount = displaySkills.length;
   const showOnlineSupplement =
     Boolean(searchQuery.trim()) &&
     !aiKeywords &&
@@ -339,21 +334,9 @@ export function Marketplace({
     displaySkills.length === 0 &&
     snapshotStatus === "miss";
 
-  useEffect(() => {
-    if (activeTab === "official") {
-      setVisibleSkillCount(0);
-      return;
-    }
-    setVisibleSkillCount(
-      displaySkills.length <= EAGER_RENDER_THRESHOLD
-        ? displaySkills.length
-        : INITIAL_MARKETPLACE_VISIBLE_COUNT,
-    );
-  }, [activeTab, displaySkills.length]);
-
   return (
-    <div className="flex-1 flex overflow-hidden relative">
-      <div className="flex-1 flex flex-col overflow-hidden">
+    <div className="flex-1 min-w-0 flex overflow-hidden relative">
+      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         <Toolbar
           titleNode={<h1>{t("sidebar.market")}</h1>}
           searchQuery={searchQuery}
@@ -449,9 +432,7 @@ export function Marketplace({
             )}
             {activeTab !== "official" && (
               <span className="text-caption">
-                {totalCount > 0
-                  ? t("marketplace.skillsCount", { count: visibleSkillCount })
-                  : ""}
+                {t("marketplace.skillsCount", { count: totalCount })}
               </span>
             )}
           </div>
@@ -527,7 +508,7 @@ export function Marketplace({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.2 }}
-          className="flex-1 overflow-y-auto p-6"
+          className="ss-page-scroll"
           onScroll={(e) => {
             const target = e.currentTarget;
             setShowBackToTop(target.scrollTop > 300);
@@ -536,6 +517,7 @@ export function Marketplace({
           {activeTab === "official" ? (
             <OfficialPublishers
               publishers={publishers}
+              viewMode={viewMode}
               onPublisherClick={onNavigateToPublisher}
             />
           ) : loading || aiSearching ? (
@@ -636,7 +618,8 @@ export function Marketplace({
             <SkillGrid
               skills={displaySkills}
               viewMode={viewMode}
-              onVisibleCountChange={(visible) => setVisibleSkillCount(visible)}
+              columnStrategy="auto-fill"
+              minColumnWidth={320}
               onSkillClick={(skill) =>
                 setSelectedSkill((prev) =>
                   prev?.name === skill.name ? null : skill,

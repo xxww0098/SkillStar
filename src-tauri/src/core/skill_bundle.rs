@@ -363,6 +363,176 @@ pub fn export_multi_bundle(skill_names: &[String], output_path: &str) -> Result<
     Ok(out)
 }
 
+// ── Multi-skill import ──────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportMultiBundleResult {
+    /// Names of all skills that were imported
+    pub skill_names: Vec<String>,
+    /// Total number of files extracted
+    pub total_file_count: usize,
+    /// Number of skills that replaced existing ones
+    pub replaced_count: usize,
+}
+
+/// Import a `.agd` multi-bundle into the hub.
+///
+/// Each skill directory inside the archive is extracted into the hub.
+/// If `force` is true, existing skills with the same name are replaced.
+pub fn import_multi_bundle(file_path: &str, force: bool) -> Result<ImportMultiBundleResult> {
+    let file = std::fs::File::open(file_path)
+        .with_context(|| format!("Cannot open bundle: {}", file_path))?;
+    let decoder = GzDecoder::new(file);
+    let mut archive = Archive::new(decoder);
+
+    // First pass: read multi_manifest.json
+    let mut manifest: Option<MultiManifest> = None;
+    let mut entries_data: Vec<(String, Vec<u8>)> = Vec::new();
+
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let path = entry.path()?.to_string_lossy().to_string();
+
+        let mut content = Vec::new();
+        entry.read_to_end(&mut content)?;
+
+        if path == "multi_manifest.json" {
+            manifest = Some(
+                serde_json::from_slice(&content).context("Invalid multi_manifest.json in bundle")?,
+            );
+        } else if path == MANIFEST_NAME {
+            // Single-skill bundle opened as multi — fallback to single import
+            drop(entries_data);
+            return import_bundle(file_path, force).map(|r| ImportMultiBundleResult {
+                skill_names: vec![r.name],
+                total_file_count: r.file_count,
+                replaced_count: if r.replaced { 1 } else { 0 },
+            });
+        } else {
+            entries_data.push((path, content));
+        }
+    }
+
+    let manifest = manifest.ok_or_else(|| {
+        anyhow::anyhow!("Bundle does not contain multi_manifest.json or manifest.json")
+    })?;
+
+    let hub = sync::get_hub_skills_dir();
+    let known_skills: std::collections::HashSet<String> = manifest
+        .skills
+        .iter()
+        .map(|s| s.name.clone())
+        .collect();
+
+    // Check for conflicts if not forcing
+    if !force {
+        for skill_name in &known_skills {
+            let target = hub.join(skill_name);
+            if target.exists() {
+                anyhow::bail!("CONFLICT:{}", skill_name);
+            }
+        }
+    }
+
+    // Extract into temp dirs, then move atomically
+    let mut imported_names: Vec<String> = Vec::new();
+    let mut total_files = 0usize;
+    let mut replaced_count = 0usize;
+
+    // Group entries by skill name (first path component)
+    let mut skill_files: std::collections::HashMap<String, Vec<(String, Vec<u8>)>> =
+        std::collections::HashMap::new();
+    for (path, content) in entries_data {
+        // Security: reject absolute paths and path traversal
+        if path.starts_with('/') || path.contains("..") {
+            continue;
+        }
+        // First component is the skill name
+        if let Some(slash_pos) = path.find('/') {
+            let skill_name = path[..slash_pos].to_string();
+            let rel_path = path[slash_pos + 1..].to_string();
+            if !rel_path.is_empty() && known_skills.contains(&skill_name) {
+                skill_files
+                    .entry(skill_name)
+                    .or_default()
+                    .push((rel_path, content));
+            }
+        }
+    }
+
+    for skill_name in &manifest.skills {
+        let name = &skill_name.name;
+        let files = match skill_files.remove(name) {
+            Some(f) => f,
+            None => continue,
+        };
+
+        let target_dir = hub.join(name);
+        let was_replaced = target_dir.exists();
+
+        let temp_dir = hub.join(format!(".importing-{}", name));
+        if temp_dir.exists() {
+            std::fs::remove_dir_all(&temp_dir)?;
+        }
+        std::fs::create_dir_all(&temp_dir)?;
+
+        for (rel_path, content) in &files {
+            let dest = temp_dir.join(rel_path);
+            if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&dest, content)?;
+        }
+
+        // Replace existing if needed
+        if target_dir.exists() {
+            std::fs::remove_dir_all(&target_dir)?;
+            replaced_count += 1;
+        }
+        std::fs::rename(&temp_dir, &target_dir)?;
+
+        // Invalidate security scan cache
+        security_scan::invalidate_skill_cache(name);
+
+        total_files += files.len();
+        imported_names.push(name.clone());
+
+        if was_replaced {
+            // Already counted above
+        }
+    }
+
+    crate::core::installed_skill::invalidate_cache();
+
+    Ok(ImportMultiBundleResult {
+        skill_names: imported_names,
+        total_file_count: total_files,
+        replaced_count,
+    })
+}
+
+/// Preview a `.agd` multi-bundle manifest without extracting.
+pub fn preview_multi_bundle(file_path: &str) -> Result<MultiManifest> {
+    let file = std::fs::File::open(file_path)
+        .with_context(|| format!("Cannot open bundle: {}", file_path))?;
+    let decoder = GzDecoder::new(file);
+    let mut archive = Archive::new(decoder);
+
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let path = entry.path()?.to_string_lossy().to_string();
+        if path == "multi_manifest.json" {
+            let mut content = String::new();
+            entry.read_to_string(&mut content)?;
+            let manifest: MultiManifest =
+                serde_json::from_str(&content).context("Invalid multi_manifest.json in bundle")?;
+            return Ok(manifest);
+        }
+    }
+
+    anyhow::bail!("Bundle does not contain multi_manifest.json")
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────
 
 fn collect_files(root: &Path, dir: &Path, files: &mut Vec<String>) {

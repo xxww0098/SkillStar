@@ -5,7 +5,7 @@
 ---
 
 ## 1. AI 赋能的超并发聚合安全扫描 (Security Scanning)
-> 文件模块: `src-tauri/src/core/security_scan.rs`
+> 模块位置: `src-tauri/src/core/security_scan/` (原 `security_scan.rs` 已重构解耦)
 
 为了保证安全扫描过程既能捕捉细粒度的潜伏恶意逻辑，又能保证整体性能与防止大模型 API 短时过载引发限流，SkillStar 设计了一套包含“**初筛**”、“**分拣散派**”、“**再汇总**”的微型多智能体 (Multi-Agent) 协同架构。
 
@@ -138,7 +138,45 @@ flowchart LR
 |---|---|---|
 | OpenCode | `~/.config/opencode/skills` | `.opencode/skills` |
 | Claude Code | `~/.claude/skills` | `.claude/skills` |
-| Codex CLI | `~/.codex/skills` | `.codex/skills` |
+| Codex CLI | `~/.codex/skills`<br>*(备用: `~/.agents/skills`)* | `.codex/skills` |
 | Antigravity | `~/.gemini/antigravity/skills` | `.agents/skills` |
 | Gemini CLI | `~/.gemini/skills` | `.gemini/skills` |
 | OpenClaw | `~/.openclaw/skills` | *(global-only)* |
+
+---
+
+## 4. 基于 SQLite 与 FTS5 的 Local-First 市场快照架构
+> 模块位置: `src-tauri/src/core/marketplace_snapshot/`
+
+为了彻底解决此前每次获取 Marketplace 技能列表与搜索均依赖远程网络请求造成的卡顿及请求失败率高的问题，SkillStar Marketplace 从原先的在线抓取模型重构为了“**本地首选 (Local-First) 快照引擎**”。
+
+### 4.1 数据隔离与并发访问模式 (Concurrency & WAL)
+所有的 Marketplace 数据均被缓存于 `~/.skillstar/marketplace.db` 这一独立的 SQLite 库中。
+- 由于前端应用会有诸如“获取流”、“搜索”、“排行榜”、“推荐页”等多维度的并行接口请求，Rust 后端规避了使用进程级单一数据库全局读写锁，转而推荐使用 **WAL (Write-Ahead Logging)** 模式搭配每个操作短暂拉起独立防阻塞连接 (`Connection`)。
+- 当远端（Remote）发来更新包或者按需触发后台刷新时，后端能够保障在全量刷新落库时，前端读取的展示流水线依旧流畅不被挂起。
+
+### 4.2 FTS5 全文搜索与 AI 二次提纯流水线整合
+1. 本地的搜索查询不再盲目等待接口，直接利用 SQLite 原生自带的 `FTS5` 虚拟表对技能名称、描述以及内部 metadata 构建索引倒排，实现极高帧率的键入防抖搜索展示。
+2. 当且仅当用户发起的自然语言（模糊查寻/描述查寻）遇到本地 FTS 无法高度匹配时，才将文本发送进行 AI 模型评估（意图抽取）转化为具象标签后再反馈倒库查询。保证了本地化的高吞吐流与大模型的强大意图理解之间的完美弥合。
+
+### 4.3 渐进式 Schema 自动迁移 (Progressive Migration)
+该 Snapshot 的数据表定义利用了 SQLite 原生的 `PRAGMA user_version` 用于控制客户端的版本迁移。即便之后数据表字段发生变化（如加入新的 Vector 向量字段辅助 Semantic Search 等演进路线），也能依据用户本地版本分发原子化的 ALTER 语句静默流式完成更新，防范崩溃。
+
+---
+
+## 5. “上帝文件”(God Files) 的领域解耦与重构设计
+> 改进节点：2026 年中后期的深层重构
+
+随着各种不同 Agent 支持、不同 AI 服务商协议、以及防篡改检测维度的持续增加，应用后端曾经的 `ai_provider.rs`、`security_scan.rs` 和 `marketplace_snapshot.rs` 等文件一度膨胀为充斥庞大内部业务且极难单元测试的“上帝文件”。
+
+为了保证项目后续架构演进（如引入 TanStack Query 后更复杂的长线流请求等），项目整体进行了大刀阔斧的重构成基于目录级别的 `mod.rs` 设计：
+
+### 5.1 从平面铺排到领域分治模型
+1. 每个超大 `rs` 文件被退化为了同名目录（如 `src-tauri/src/core/ai_provider/`）。
+2. 在通过 `mod.rs` 暴露原先 API 契约的情况下，内部的巨型实现按照功能领域被完全切分为了独立的无状态小模块：
+   - 例如把 `security_scan` 细分为 `static_analyzer.rs`、`cache_validator.rs`、`ai_worker.rs` 和 `aggregator.rs` 等。
+   - 这不仅使得编译速度有定点缓存的提升，更重要的是切断了模块间隐藏的状态污染。
+3. 任何原本静态注入的代码模板（如 Prompt 指令等用 `include_str!` 挂载的文件），被通过统一规整存放进行就近引用（Co-location），极大地保障了 CI 在跑 `cargo check` 和 `test` 时的上下文鲁棒性。
+
+### 5.2 减少嵌套锁死 (Nested Tokio runtime panic) 防护
+在解耦模块时，进一步梳理清退了过去在全局 `ai_provider` 调用链中滥用的 `block_on` 调用，避免将 async 执行体嵌套调用导致的 `Cannot start a runtime from within a runtime` 的恐慌崩溃，保证所有微处理模块（Micro-Modules）均服从于外层的 Tokio Worker Thread。

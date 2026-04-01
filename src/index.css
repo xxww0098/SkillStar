@@ -212,6 +212,97 @@
   .focus-ring {
     @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-1 focus-visible:ring-offset-background;
   }
+
+  .ss-page-scroll {
+    @apply flex-1 overflow-y-auto p-6;
+    scrollbar-gutter: stable;
+    container-type: inline-size;
+  }
+
+  .ss-page-stack {
+    @apply space-y-6;
+    container-type: inline-size;
+  }
+
+  .ss-cards-grid {
+    display: grid;
+    gap: 1rem;
+    align-items: stretch;
+  }
+
+  .ss-cards-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .ss-decks-grid {
+    display: grid;
+    gap: 1rem;
+    align-items: stretch;
+    width: 100%;
+    max-width: 72rem;
+    margin-inline: auto;
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+
+  @container (min-width: 660px) {
+    .ss-decks-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @container (min-width: 1000px) {
+    .ss-decks-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+
+  .ss-decks-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    width: 100%;
+    max-width: 72rem;
+    margin-inline: auto;
+  }
+
+  .ss-card-body {
+    @apply p-4;
+  }
+
+  .ss-card-footer {
+    @apply px-4 py-2.5 border-t border-border/30 min-h-[44px];
+  }
+
+  .ss-card-title {
+    @apply text-sm font-semibold leading-tight tracking-tight;
+  }
+
+  .ss-card-meta {
+    @apply text-xs text-muted-foreground;
+  }
+
+  .ss-card-desc {
+    @apply text-xs text-muted-foreground line-clamp-2;
+  }
+
+  .ss-view-toggle {
+    @apply flex items-center gap-0.5 border border-border rounded-lg overflow-hidden h-8 p-0.5 bg-sidebar/30 shadow-sm;
+  }
+
+  .ss-view-toggle-btn {
+    @apply relative h-full w-8 flex items-center justify-center rounded-md cursor-pointer z-10 text-muted-foreground hover:text-foreground hover:bg-sidebar-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-1 focus-visible:ring-offset-background;
+  }
+
+  .ss-view-toggle-btn-active {
+    @apply text-accent-foreground;
+  }
+
+  .ss-view-toggle-indicator {
+    @apply absolute inset-0 bg-accent rounded-md -z-10;
+    backface-visibility: hidden;
+  }
 }
 
 /* ========== Markdown ========== */

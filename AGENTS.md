@@ -26,16 +26,26 @@ SkillStar is a Tauri v2 desktop app with a React SPA frontend and Rust backend.
 ```text
 SkillStar/
 ├── src/                           # React app
-│   ├── hooks/                     # Data hooks (skills, projects, marketplace, AI, updater)
-│   ├── pages/                     # MySkills, Marketplace, PublisherDetail, SkillCards, Projects, Settings
-│   ├── components/                # ui/, layout/, skills/, marketplace/
+│   ├── features/                  # domain slices (components + hooks)
+│   │   ├── my-skills/             # skill grid, cards, modals, install/export
+│   │   ├── marketplace/           # marketplace browsing
+│   │   ├── projects/              # project registration + agent config
+│   │   ├── security/              # security scanning
+│   │   └── settings/              # app settings sections
+│   ├── hooks/                     # global hooks (useNavigation, useUpdater, useAiConfig)
+│   ├── pages/                     # thin route-level shells
+│   ├── components/                # ui/, layout/, shared/
 │   ├── lib/                       # shared utilities
 │   └── types/                     # shared TS types
 ├── src-tauri/
 │   ├── src/
 │   │   ├── commands.rs            # Tauri command root
 │   │   ├── commands/              # marketplace, agents, projects, github, ai, patrol
-│   │   └── core/                  # domain modules (skills, sync, repo, local, bundles, paths...)
+│   │   └── core/                  # domain modules
+│   │       ├── ai_provider/       # AI config, translation, summarization, skill pick
+│   │       ├── security_scan/     # static/AI scanning, cache, logging
+│   │       ├── marketplace_snapshot/ # local-first marketplace DB
+│   │       └── ...                # skills, sync, repo, local, bundles, paths
 │   ├── Cargo.toml
 │   └── tauri.conf.json
 ├── docs/Error.md
@@ -117,6 +127,7 @@ SkillStar/
 ### Marketplace and Repo Flow
 - Marketplace data is local-first via `~/.skillstar/marketplace.db`; UI reads snapshots first and only syncs remote scopes on-demand/background refresh.
 - `marketplace.db` owns marketplace list/search/publisher/repo/detail snapshots plus FTS; schema changes must be handled through `PRAGMA user_version` migrations.
+- Marketplace snapshot DB access should prefer short-lived WAL connections per operation so local read paths can run concurrently; avoid process-wide single-connection locking.
 - Local marketplace search must prefer the snapshot/FTS corpus and only do explicit remote seeding when the user asks or the scope has never been synced.
 - GitHub repo import is two-phase: `scan_github_repo` then `install_from_scan`.
 - Repo-level updates and checks operate on `~/.skillstar/.agents/.repos/` cached repositories.
@@ -132,7 +143,7 @@ SkillStar/
 - Export flow can route between share code, inline embed, and bundle download by skill complexity.
 
 ### Patrol and Runtime
-- Patrol checks one skill at a time with low overhead delay.
+- Patrol runs in per-cycle batches: prefetch unique repos once, then checks each skill locally with a tiny inter-skill delay; `interval_secs` is the cycle-to-cycle gap.
 - Closing the window hides app to background only when background run is enabled; otherwise window close should quit the app and remove the tray icon.
 - Patrol state persists in `~/.skillstar/patrol.json`.
 - Tray background control must behave as a true start/stop toggle, and its label must stay in sync with the current background-run state shown in Settings.

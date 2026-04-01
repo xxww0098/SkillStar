@@ -134,7 +134,10 @@ pub fn apply_sparse_checkout(repo_path: &Path, dirs: &[&str]) -> Result<()> {
         return Err(anyhow!("git sparse-checkout set failed: {}", err.trim()));
     }
 
-    // Checkout materialized files
+    // Checkout materialized files — this is where blob:none clones actually
+    // fetch file content from the remote.  A failure here (e.g. HTTP/2 framing
+    // error, promisor remote offline) means nothing was materialised; treating
+    // it as non-fatal would leave a broken cache that blocks future retries.
     let output = command_with_path("git")
         .current_dir(repo_path)
         .arg("checkout")
@@ -143,7 +146,25 @@ pub fn apply_sparse_checkout(repo_path: &Path, dirs: &[&str]) -> Result<()> {
 
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);
-        // Non-fatal: some repos may have warnings
+        let err_lower = err.to_lowercase();
+
+        // Hard failures: promisor-remote fetch errors, RPC/HTTP failures,
+        // packfile corruption — the checkout produced no usable files.
+        let is_hard_failure = err_lower.contains("promisor remote")
+            || err_lower.contains("rpc failed")
+            || err_lower.contains("expected 'packfile'")
+            || err_lower.contains("could not fetch")
+            || err_lower.contains("http2 framing")
+            || err_lower.contains("fatal:");
+
+        if is_hard_failure {
+            return Err(anyhow!(
+                "git checkout failed (blob fetch): {}",
+                err.trim()
+            ));
+        }
+
+        // Truly non-fatal: minor warnings, modified-file notices, etc.
         eprintln!("[git_ops] sparse checkout warning: {}", err.trim());
     }
 

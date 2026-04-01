@@ -1,22 +1,27 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useTranslation } from "react-i18next";
-import { Share2, Plus, Rocket, Copy, Trash2, MoreHorizontal, Edit2, Download, FolderKanban, Package, AlertTriangle, Loader2 } from "lucide-react";
+import { Share2, Plus, Rocket, Copy, Trash2, MoreHorizontal, Edit2, Download, Package, AlertTriangle, Loader2 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
-import { Card } from "../components/ui/card";
+import { CardTemplate } from "../components/ui/card-template";
 import { EmptyState } from "../components/ui/EmptyState";
 import { HScrollRow } from "../components/ui/HScrollRow";
-import { CreateGroupModal } from "../components/skills/CreateGroupModal";
-import { ImportShareCodeModal } from "../components/skills/ImportShareCodeModal";
-import { ExportShareCodeModal } from "../components/skills/ExportShareCodeModal";
-import { PublishSkillModal } from "../components/skills/PublishSkillModal";
-import { useSkillCards } from "../hooks/useSkillCards";
-import { useSkills } from "../hooks/useSkills";
+import { SearchInput } from "../components/ui/SearchInput";
+import { CreateGroupModal } from "../features/my-skills/components/CreateGroupModal";
+import { ImportShareCodeModal } from "../features/my-skills/components/ImportShareCodeModal";
+import { ImportDeckBundleModal } from "../features/my-skills/components/ImportDeckBundleModal";
+import { ExportShareCodeModal } from "../features/my-skills/components/ExportShareCodeModal";
+import { PublishSkillModal } from "../features/my-skills/components/PublishSkillModal";
+import { useSkillCards } from "../features/my-skills/hooks/useSkillCards";
+import { useSkills } from "../features/my-skills/hooks/useSkills";
 import { useAgentProfiles } from "../hooks/useAgentProfiles";
 import { AgentIcon } from "../components/ui/AgentIcon";
+import { ViewToggle } from "../components/ui/ViewToggle";
+import { useViewMode } from "../hooks/useViewMode";
+import { MOTION_TRANSITION } from "../comm/motion";
 import { cn, agentIconCls } from "../lib/utils";
 import type { SkillCardDeck, Skill } from "../types";
 
@@ -86,9 +91,12 @@ export function SkillCards({
   const { profiles } = useAgentProfiles();
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importBundleOpen, setImportBundleOpen] = useState(false);
   const [exportGroupTarget, setExportGroupTarget] = useState<SkillCardDeck | null>(null);
   const [editGroup, setEditGroup] = useState<SkillCardDeck | null>(null);
   const [quickPackSkills, setQuickPackSkills] = useState<string[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [viewMode, setViewMode] = useViewMode("grid");
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [publishTarget, setPublishTarget] = useState<string | null>(null);
   const [installingMissing, setInstallingMissing] = useState<string | null>(
@@ -124,6 +132,15 @@ export function SkillCards({
     }
     return next;
   }, [backendInstalledNames, skillByName]);
+  const filteredGroups = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return groups;
+    return groups.filter((group) => {
+      if (group.name.toLowerCase().includes(query)) return true;
+      if ((group.description ?? "").toLowerCase().includes(query)) return true;
+      return group.skills.some((skillName) => skillName.toLowerCase().includes(query));
+    });
+  }, [groups, searchQuery]);
 
   const refreshBackendInstalledNames = useCallback(async () => {
     try {
@@ -377,23 +394,34 @@ export function SkillCards({
   }, [menuOpenId]);
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
+    <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
       {/* Header */}
       <div className="h-14 flex items-center justify-between px-6 border-b border-border bg-sidebar">
-        <div className="flex items-center gap-3">
-          <h1>{t("sidebar.groups")}</h1>
-          {!loading && (
-            <Badge variant="outline">{t("skillCards.groupsCount", { count: groups.length })}</Badge>
-          )}
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center gap-3 shrink-0">
+            <h1>{t("sidebar.groups")}</h1>
+            {!loading && (
+              <Badge variant="outline">{t("skillCards.groupsCount", { count: filteredGroups.length })}</Badge>
+            )}
+            <div className="w-px h-5 bg-border" />
+          </div>
+          <SearchInput
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder={t("skillCards.searchPlaceholder")}
+            containerClassName="w-56 shrink-0"
+            className="pl-8 h-8 text-xs bg-sidebar/50 focus-visible:bg-background"
+            iconClassName="left-2.5"
+          />
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={() => onNavigateToProjects?.()}>
-            <FolderKanban className="w-3.5 h-3.5" />
-            {t("skillCards.manageProject")}
-          </Button>
           <Button size="sm" variant="secondary" onClick={() => setImportModalOpen(true)}>
             <Download className="w-3.5 h-3.5" />
             {t("common.import")}
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => setImportBundleOpen(true)}>
+            <Package className="w-3.5 h-3.5" />
+            {t("toolbar.importFile")}
           </Button>
           <Button
             size="sm"
@@ -406,16 +434,17 @@ export function SkillCards({
             <Plus className="w-3.5 h-3.5" />
             {t("skillCards.newGroup")}
           </Button>
+          <ViewToggle viewMode={viewMode} onViewModeChange={setViewMode} />
         </div>
       </div>
 
       <motion.main
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        transition={{ duration: 0.2 }}
-        className="flex-1 overflow-y-auto p-6"
+        transition={MOTION_TRANSITION.fadeBase}
+        className="ss-page-scroll"
       >
-        <div className="space-y-6">
+        <div className="ss-page-stack">
 
           {loading ? (
             <div className="text-zinc-500 text-sm">
@@ -433,10 +462,19 @@ export function SkillCards({
                 </Button>
               }
             />
+          ) : filteredGroups.length === 0 ? (
+            <EmptyState
+              icon={<Package className="w-6 h-6 text-muted-foreground" />}
+              title={t("skillCards.noMatching")}
+              description={t("skillCards.tryDifferent")}
+              size="lg"
+            />
           ) : (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-5 max-w-6xl mx-auto">
+            <div
+              className={cn(viewMode === "grid" ? "ss-decks-grid" : "ss-decks-list")}
+            >
               <AnimatePresence>
-                {groups.map((group) => {
+                {filteredGroups.map((group) => {
                   const groupSkillNames = uniqueNormalizedSkillNames(group.skills);
                   const groupInstalledSkillNames = groupSkillNames.filter((name) =>
                     installedNameSet.has(name)
@@ -451,13 +489,15 @@ export function SkillCards({
                       initial={{ opacity: 0, scale: 0.95 }}
                       animate={{ opacity: 1, scale: 1 }}
                       exit={{ opacity: 0, scale: 0.95 }}
+                      transition={MOTION_TRANSITION.enter}
                       className={cn(
-                        "relative transition-shadow min-h-[200px]",
+                        "relative transition-shadow",
+                        viewMode === "grid" ? "min-h-[200px]" : "min-h-[140px]",
                         menuOpenId === group.id ? "z-50" : "z-0 hover:z-10"
                       )}
                     >
-                      <Card className="hover:bg-card-hover flex flex-col h-full relative group shadow-sm hover:shadow-xl transition p-0 border border-border bg-card overflow-hidden">
-                        <div className="p-4 flex flex-col flex-1 relative min-h-0">
+                      <CardTemplate className={cn("hover:bg-card-hover flex relative group shadow-sm hover:shadow-xl transition p-0 border border-border bg-card overflow-hidden", viewMode === "list" ? "flex-row items-center min-h-[96px]" : "flex-col h-full")}>
+                        <div className={cn("ss-card-body flex flex-1 relative min-h-0", viewMode === "list" ? "flex-row items-center py-4" : "flex-col")}>
                           {/* Top Action Row (Context Menu) */}
                           <div className="absolute top-4 right-4 z-20 flex items-center gap-1">
                             <button
@@ -489,6 +529,7 @@ export function SkillCards({
                                 <motion.div
                                   initial={{ opacity: 0, scale: 0.95 }}
                                   animate={{ opacity: 1, scale: 1 }}
+                                  transition={MOTION_TRANSITION.fadeFast}
                                   className="absolute right-0 top-full mt-1 w-36 p-1 rounded-xl border border-border bg-card backdrop-blur-xl shadow-xl z-30"
                                 >
                                   <button
@@ -537,22 +578,22 @@ export function SkillCards({
                           </div>
 
                           {/* Header section */}
-                          <div className="flex items-start gap-4 pr-8 mb-5">
+                          <div className={cn("flex items-start gap-4 pr-8 shrink-0", viewMode === "grid" ? "mb-5" : "w-[300px]")}>
                             <div className="w-12 h-12 rounded-xl bg-primary/5 border border-primary/10 flex items-center justify-center text-2xl shrink-0">
                               {group.icon}
                             </div>
                             <div className="min-w-0 pt-1">
-                              <h3 className="text-base font-semibold leading-tight truncate text-foreground transition-colors">
+                              <h3 className="ss-card-title truncate text-foreground transition-colors">
                                 <button type="button" onClick={() => setEditGroup(group)} className="w-full text-left truncate rounded outline-none focus-visible:ring-2 focus-visible:ring-primary hover:text-primary cursor-pointer transition-colors">
                                   {group.name}
                                 </button>
                               </h3>
                               {group.description ? (
-                                <p className="text-xs text-muted-foreground line-clamp-2 mt-1">
+                                <p className="ss-card-desc mt-1">
                                   {group.description}
                                 </p>
                               ) : (
-                                <p className="text-xs text-muted-foreground italic mt-1 opacity-60">
+                                <p className="ss-card-meta italic mt-1 opacity-60">
                                   {t("skillCards.noDescription")}
                                 </p>
                               )}
@@ -560,7 +601,7 @@ export function SkillCards({
                           </div>
 
                           {/* Skills Preview Tags */}
-                          <div className="flex flex-wrap items-center gap-1.5 mt-auto overflow-hidden max-h-[46px]">
+                          <div className={cn("flex flex-wrap items-center gap-1.5 overflow-hidden max-h-[46px]", viewMode === "grid" ? "mt-auto" : "ml-4 flex-1")}>
                             {groupSkillNames.slice(0, 5).map((skillName) => {
                               const skill = skillByName.get(skillName);
                               return (
@@ -596,7 +637,7 @@ export function SkillCards({
                         </div>
 
                         {/* Footer section */}
-                        <div className="px-4 py-2.5 border-t border-border/50 mt-auto flex items-center rounded-b-xl min-h-[44px]">
+                        <div className={cn("border-border/50 flex items-center shrink-0", viewMode === "grid" ? "ss-card-footer mt-auto rounded-b-xl" : "pl-6 pr-16 py-4 border-l")}>
                           {installedCount === 0 ? (
                             /* All skills missing — show warning */
                             <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -714,7 +755,7 @@ export function SkillCards({
                             </div>
                           )}
                         </div>
-                      </Card>
+                      </CardTemplate>
                     </motion.div>
                   );
                 })}
@@ -757,8 +798,18 @@ export function SkillCards({
       <ImportShareCodeModal
         open={importModalOpen}
         onClose={() => setImportModalOpen(false)}
+        existingGroupNames={groups.map((g) => g.name)}
         onImport={async (name, desc, icon, skillNames, sources) => {
           await createGroup(name, desc, icon, skillNames, sources);
+        }}
+      />
+
+      <ImportDeckBundleModal
+        open={importBundleOpen}
+        onClose={() => setImportBundleOpen(false)}
+        onDeckImported={async (skillNames, name, description) => {
+          await createGroup(name, description, "📦", skillNames, buildSkillSources(skillNames));
+          window.dispatchEvent(new Event("skillstar:refresh-skills"));
         }}
       />
 

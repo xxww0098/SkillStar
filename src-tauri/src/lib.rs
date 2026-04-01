@@ -216,6 +216,8 @@ pub fn run() {
             commands::preview_skill_bundle,
             commands::import_skill_bundle,
             commands::export_multi_skill_bundle,
+            commands::preview_multi_skill_bundle,
+            commands::import_multi_skill_bundle,
             commands::write_text_file,
             commands::read_text_file,
             commands::open_folder,

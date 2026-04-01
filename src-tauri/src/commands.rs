@@ -667,6 +667,27 @@ pub async fn export_multi_skill_bundle(
     .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub async fn preview_multi_skill_bundle(
+    file_path: String,
+) -> Result<skill_bundle::MultiManifest, String> {
+    tokio::task::spawn_blocking(move || skill_bundle::preview_multi_bundle(&file_path))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn import_multi_skill_bundle(
+    file_path: String,
+    force: bool,
+) -> Result<skill_bundle::ImportMultiBundleResult, String> {
+    tokio::task::spawn_blocking(move || skill_bundle::import_multi_bundle(&file_path, force))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
+        .map_err(|e| e.to_string())
+}
+
 // ── Text File I/O (share code files) ────────────────────────────────
 
 #[tauri::command]

@@ -1,12 +1,14 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
-import { SkillsProvider } from "./hooks/useSkills";
-import { SecurityScanProvider } from "./hooks/useSecurityScan";
+import { SkillsProvider } from "./features/my-skills/hooks/useSkills";
+import { SecurityScanProvider } from "./features/security/hooks/useSecurityScan";
 import { NavigationProvider } from "./hooks/useNavigation";
 import { SplashScreen } from "./components/ui/SplashScreen";
 import { ErrorBoundary } from "./components/ui/ErrorBoundary";
 import { initializeBackgroundStyle } from "./lib/backgroundStyle";
+import { queryClient } from "./lib/queryClient";
 import "./index.css";
 import "./i18n";
 
@@ -26,13 +28,15 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <ErrorBoundary>
       <SplashScreen>
-        <SkillsProvider>
-          <SecurityScanProvider>
-            <NavigationProvider>
-              <App />
-            </NavigationProvider>
-          </SecurityScanProvider>
-        </SkillsProvider>
+        <QueryClientProvider client={queryClient}>
+          <SkillsProvider>
+            <SecurityScanProvider>
+              <NavigationProvider>
+                <App />
+              </NavigationProvider>
+            </SecurityScanProvider>
+          </SkillsProvider>
+        </QueryClientProvider>
       </SplashScreen>
     </ErrorBoundary>
   </React.StrictMode>,

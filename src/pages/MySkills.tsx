@@ -5,23 +5,24 @@ import { invoke } from "@tauri-apps/api/core";
 
 import { useTranslation } from "react-i18next";
 import { Toolbar } from "../components/layout/Toolbar";
-import { SkillGrid } from "../components/skills/SkillGrid";
-import { DeployToProjectModal } from "../components/skills/DeployToProjectModal";
-import { CreateGroupModal } from "../components/skills/CreateGroupModal";
-import { SkillSelectionBar } from "../components/skills/SkillSelectionBar";
-import { UninstallConfirmDialog } from "../components/skills/UninstallConfirmDialog";
-import { ImportModal } from "../components/skills/ImportModal";
-import { PublishSkillModal } from "../components/skills/PublishSkillModal";
-import { ImportBundleModal } from "../components/skills/ImportBundleModal";
-import { AiPickSkillsModal } from "../components/skills/AiPickSkillsModal";
-import { ExportShareCodeModal } from "../components/skills/ExportShareCodeModal";
-import { useSkills } from "../hooks/useSkills";
-import { useSkillCards } from "../hooks/useSkillCards";
+import { SkillGrid } from "../features/my-skills/components/SkillGrid";
+import { DeployToProjectModal } from "../features/my-skills/components/DeployToProjectModal";
+import { CreateGroupModal } from "../features/my-skills/components/CreateGroupModal";
+import { SkillSelectionBar } from "../features/my-skills/components/SkillSelectionBar";
+import { UninstallConfirmDialog } from "../features/my-skills/components/UninstallConfirmDialog";
+import { ImportModal } from "../features/my-skills/components/ImportModal";
+import { PublishSkillModal } from "../features/my-skills/components/PublishSkillModal";
+import { ImportBundleModal } from "../features/my-skills/components/ImportBundleModal";
+import { AiPickSkillsModal } from "../features/my-skills/components/AiPickSkillsModal";
+import { ExportShareCodeModal } from "../features/my-skills/components/ExportShareCodeModal";
+import { useSkills } from "../features/my-skills/hooks/useSkills";
+import { useSkillCards } from "../features/my-skills/hooks/useSkillCards";
 import { useAgentProfiles } from "../hooks/useAgentProfiles";
-import { useSecurityScan } from "../hooks/useSecurityScan";
+import { useSecurityScan } from "../features/security/hooks/useSecurityScan";
+import { useViewMode } from "../hooks/useViewMode";
 import { toast } from "../lib/toast";
 import { LoadingLogo } from "../components/ui/LoadingLogo";
-import type { Skill, SortOption, ViewMode } from "../types";
+import type { Skill, SortOption } from "../types";
 
 const DetailPanel = lazy(() =>
   import("../components/layout/DetailPanel").then((mod) => ({
@@ -64,9 +65,9 @@ export function MySkills({
   const { createGroup, groups } = useSkillCards();
   const { riskMap } = useSecurityScan();
   const [searchQuery, setSearchQuery] = useState("");
-  const [sortBy, setSortBy] = useState<SortOption>("name");
+  const [sortBy, setSortBy] = useState<SortOption>("updated");
   const [showUpdateOnly, setShowUpdateOnly] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [viewMode, setViewMode] = useViewMode("grid");
   const [agentFilter, setAgentFilter] = useState<string | null>(null);
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [selectedSkillNames, setSelectedSkillNames] = useState<Set<string>>(new Set());
@@ -303,8 +304,8 @@ export function MySkills({
   }, [selectedSkillNames, clearSelection, refresh, t]);
 
   return (
-    <div className="flex-1 flex overflow-hidden relative">
-      <div className="flex-1 flex flex-col overflow-hidden">
+    <div className="flex-1 min-w-0 flex overflow-hidden relative">
+      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         <Toolbar
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
@@ -404,7 +405,7 @@ export function MySkills({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.2 }}
-          className="flex-1 overflow-y-auto p-6"
+          className="ss-page-scroll"
         >
           {loading ? (
             <div className="flex items-center justify-center py-20">
@@ -414,6 +415,8 @@ export function MySkills({
             <SkillGrid
               skills={filteredSkills}
               viewMode={viewMode}
+              columnStrategy="auto-fill"
+              minColumnWidth={320}
               onSkillClick={(skill) => setSelectedSkill(prev => prev?.name === skill.name ? null : skill)}
               onInstall={handleInstall}
               onUpdate={handleUpdate}

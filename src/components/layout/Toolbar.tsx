@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { SearchInput } from "../ui/SearchInput";
 import { HScrollRow } from "../ui/HScrollRow";
 import { AgentIcon } from "../ui/AgentIcon";
+import { ViewToggle } from "../ui/ViewToggle";
 import { cn, agentIconCls } from "../../lib/utils";
 import type { AgentProfile, SortOption, ViewMode } from "../../types";
 
@@ -85,7 +86,9 @@ export function Toolbar({
 
   const enabledProfiles = agentProfiles?.filter((p) => p.enabled) ?? [];
   const hasPendingUpdates = (pendingUpdateCount ?? 0) > 0;
-  const shouldAnimateUpdateOnly = hasPendingUpdates && !showUpdateOnly;
+  const hasUpdateOnlySelector = Boolean(onToggleUpdateOnly);
+  const isUpdateOnlyActive = hasUpdateOnlySelector && Boolean(showUpdateOnly);
+  const shouldAnimateUpdateOnly = hasPendingUpdates && !isUpdateOnlyActive;
 
   const [cooldown, setCooldown] = useState(false);
   const handleRefresh = useCallback(() => {
@@ -100,7 +103,6 @@ export function Toolbar({
   const sortOptions: { value: SortOption; label: string }[] = [
     ...(hideStarsSort ? [] : [{ value: "stars-desc" as SortOption, label: t("toolbar.stars") }]),
     { value: "updated", label: t("toolbar.updated") },
-    { value: "name", label: t("toolbar.name") },
   ];
 
   return (
@@ -275,48 +277,63 @@ export function Toolbar({
         </div>
       )}
 
-      {onToggleUpdateOnly && (
-        <button
-          onClick={onToggleUpdateOnly}
-          className={cn(
-            "h-8 px-3 text-xs font-medium rounded-lg border transition duration-200 cursor-pointer flex items-center gap-1.5 shadow-sm whitespace-nowrap shrink-0 focus-ring",
-            showUpdateOnly
-              ? "bg-accent text-accent-foreground border-accent shadow-[0_0_8px_rgba(var(--color-primary-rgb),0.1)]"
-              : "border-border/80 bg-background/50 text-foreground/80 hover:text-foreground hover:bg-accent/10 hover:border-accent/50",
-            shouldAnimateUpdateOnly &&
-              "border-warning/50 text-warning-foreground bg-warning/10 shadow-[0_0_14px_rgba(var(--color-warning-rgb),0.2)]"
-          )}
-        >
-          {shouldAnimateUpdateOnly && (
-            <span className="relative flex h-2 w-2 shrink-0">
-              <span className="animate-ping-limited absolute inline-flex h-full w-full rounded-full bg-warning opacity-75"></span>
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-warning"></span>
-            </span>
-          )}
-          {t("toolbar.updateOnly")}
-          {hasPendingUpdates && (
-            <span
-              className={cn(
-                "min-w-[1.25rem] h-[1.125rem] px-1 rounded-full text-[11px] leading-[1.125rem] text-center tabular-nums",
-                shouldAnimateUpdateOnly
-                  ? "bg-warning/20 text-warning-foreground"
-                  : "bg-muted text-muted-foreground"
-              )}
-            >
-              {pendingUpdateCount}
-            </span>
-          )}
-        </button>
-      )}
-
-      {/* Sort pills */}
+      {/* Sort + update selector */}
       <div className="flex items-center gap-0.5 border border-border rounded-lg overflow-hidden h-8 p-0.5 bg-sidebar/30 shadow-sm ml-auto shrink-0">
+        {onToggleUpdateOnly && (
+          <button
+            onClick={onToggleUpdateOnly}
+            aria-pressed={isUpdateOnlyActive}
+            className={cn(
+              "relative h-full px-3 flex items-center justify-center rounded-md text-xs font-medium cursor-pointer whitespace-nowrap z-10 focus-ring gap-1.5",
+              isUpdateOnlyActive
+                ? "text-accent-foreground"
+                : "text-muted-foreground hover:text-foreground hover:bg-sidebar-hover",
+              shouldAnimateUpdateOnly &&
+                !isUpdateOnlyActive &&
+                "text-warning-foreground bg-warning/10 shadow-[0_0_14px_rgba(var(--color-warning-rgb),0.2)]"
+            )}
+          >
+            <div
+              className={cn(
+                "absolute inset-0 bg-accent rounded-md -z-10 [backface-visibility:hidden]",
+                isUpdateOnlyActive ? "opacity-100" : "opacity-0"
+              )}
+            />
+            {shouldAnimateUpdateOnly && (
+              <span className="relative flex h-2 w-2 shrink-0">
+                <span className="animate-ping-limited absolute inline-flex h-full w-full rounded-full bg-warning opacity-75"></span>
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-warning"></span>
+              </span>
+            )}
+            {t("toolbar.updateOnly")}
+            {hasPendingUpdates && (
+              <span
+                className={cn(
+                  "min-w-[1.2rem] h-[1.1rem] px-1 rounded-full text-[10px] leading-[1.1rem] text-center tabular-nums",
+                  shouldAnimateUpdateOnly && !isUpdateOnlyActive
+                    ? "bg-warning/20 text-warning-foreground"
+                    : "bg-muted text-muted-foreground"
+                )}
+              >
+                {pendingUpdateCount}
+              </span>
+            )}
+          </button>
+        )}
+
         {sortOptions.map((opt) => {
-          const isActive = sortBy === opt.value;
+          const isActive = hasUpdateOnlySelector
+            ? !isUpdateOnlyActive && sortBy === opt.value
+            : sortBy === opt.value;
           return (
             <button
               key={opt.value}
-              onClick={() => onSortChange(opt.value)}
+              onClick={() => {
+                if (isUpdateOnlyActive) {
+                  onToggleUpdateOnly?.();
+                }
+                onSortChange(opt.value);
+              }}
               aria-pressed={isActive}
               className={cn(
                 "relative h-full px-3 flex items-center justify-center rounded-md text-xs font-medium cursor-pointer whitespace-nowrap z-10 focus-ring",
@@ -336,40 +353,7 @@ export function Toolbar({
       </div>
 
       {/* View toggle */}
-      <div className="flex items-center gap-0.5 border border-border rounded-lg overflow-hidden h-8 p-0.5 bg-sidebar/30 shadow-sm">
-        <button
-          onClick={() => onViewModeChange("grid")}
-          aria-label="Grid view"
-          className={cn(
-            "relative h-full w-8 flex items-center justify-center rounded-md cursor-pointer z-10 focus-ring",
-            viewMode === "grid"
-              ? "text-accent-foreground"
-              : "text-muted-foreground hover:text-foreground hover:bg-sidebar-hover"
-          )}
-        >
-          <div className={cn(
-            "absolute inset-0 bg-accent rounded-md -z-10 [backface-visibility:hidden]",
-            viewMode === "grid" ? "opacity-100" : "opacity-0"
-          )} />
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="1" width="5" height="5" rx="1"/><rect x="8" y="1" width="5" height="5" rx="1"/><rect x="1" y="8" width="5" height="5" rx="1"/><rect x="8" y="8" width="5" height="5" rx="1"/></svg>
-        </button>
-        <button
-          onClick={() => onViewModeChange("list")}
-          aria-label="List view"
-          className={cn(
-            "relative h-full w-8 flex items-center justify-center rounded-md cursor-pointer z-10 focus-ring",
-            viewMode === "list"
-              ? "text-accent-foreground"
-              : "text-muted-foreground hover:text-foreground hover:bg-sidebar-hover"
-          )}
-        >
-          <div className={cn(
-            "absolute inset-0 bg-accent rounded-md -z-10 [backface-visibility:hidden]",
-            viewMode === "list" ? "opacity-100" : "opacity-0"
-          )} />
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="2" width="12" height="2" rx="0.5"/><rect x="1" y="6" width="12" height="2" rx="0.5"/><rect x="1" y="10" width="12" height="2" rx="0.5"/></svg>
-        </button>
-      </div>
+      <ViewToggle viewMode={viewMode} onViewModeChange={onViewModeChange} />
     </div>
   );
 }

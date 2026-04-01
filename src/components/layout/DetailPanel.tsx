@@ -55,11 +55,11 @@ const AUTO_TRANSLATE_DESCRIPTION_KEY = "skillstar:auto-translate-description";
 const AUTO_TRANSLATE_DESCRIPTION_TIMEOUT_MS = 6000;
 
 const SkillEditor = lazy(() =>
-  import("../skills/SkillEditor").then((mod) => ({ default: mod.SkillEditor })),
+  import("../shared/SkillEditor").then((mod) => ({ default: mod.SkillEditor })),
 );
 
 const SkillReader = lazy(() =>
-  import("../skills/SkillReader").then((mod) => ({ default: mod.SkillReader })),
+  import("../shared/SkillReader").then((mod) => ({ default: mod.SkillReader })),
 );
 
 interface DetailPanelProps {
@@ -1156,12 +1156,21 @@ export function DetailPanel({
               {/* Git info — only for hub (git-backed) skills */}
               {skill.skill_type !== "local" && skill.git_url && (
                 <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-caption">
-                    <GitBranch className="w-3.5 h-3.5" />
-                    <span className="truncate font-mono text-xs">
+                  <a
+                    href={
+                      skill.git_url.startsWith("http")
+                        ? skill.git_url
+                        : `https://${skill.git_url}`
+                    }
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 text-xs text-primary/70 hover:text-primary transition-colors"
+                  >
+                    <GitBranch className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate font-mono">
                       {skill.git_url}
                     </span>
-                  </div>
+                  </a>
                   {skill.tree_hash && (
                     <div className="text-caption font-mono text-xs">
                       {t("detailPanel.tree")} {skill.tree_hash.slice(0, 12)}…

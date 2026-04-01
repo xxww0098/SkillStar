@@ -20,10 +20,12 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
+import { CardTemplate } from "../components/ui/card-template";
 
-import { RadarSweep } from "../components/security/RadarSweep";
-import { ScanFilePanel } from "../components/security/ScanFilePanel";
-import { useSecurityScan, type ScanMode } from "../hooks/useSecurityScan";
+import { MOTION_TRANSITION, motionDelay } from "../comm/motion";
+import { RadarSweep } from "../features/security/components/RadarSweep";
+import { ScanFilePanel } from "../features/security/components/ScanFilePanel";
+import { useSecurityScan, type ScanMode } from "../features/security/hooks/useSecurityScan";
 import type { SecurityScanEstimate, SecurityScanLogEntry, SecurityScanResult, RiskLevel } from "../types";
 
 // ── Risk Styling ──────────────────────────────────────────────────
@@ -413,7 +415,7 @@ export function SecurityScan() {
   const showIdlePanel = phase !== "scanning" && results.length === 0;
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+    <div className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden">
       {/* ── Header ── */}
       <div className="flex items-center justify-between px-6 py-3 border-b border-border shrink-0">
         <div className="flex items-center gap-2.5">
@@ -493,7 +495,7 @@ export function SecurityScan() {
                   initial={{ opacity: 0, y: -4, scale: 0.97 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -4, scale: 0.97 }}
-                  transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
+                  transition={MOTION_TRANSITION.fadeFast}
                   className="absolute right-0 top-full mt-1.5 z-50 w-56 rounded-xl border border-border/60 bg-card/95 backdrop-blur-xl shadow-xl shadow-black/30 p-1"
                 >
                   {modeOptions.map((option) => {
@@ -614,6 +616,7 @@ export function SecurityScan() {
                     <motion.div
                       initial={{ opacity: 0, y: 8 }}
                       animate={{ opacity: 1, y: 0 }}
+                      transition={MOTION_TRANSITION.enter}
                       className="w-64"
                     >
                       <div className="h-1 rounded-full bg-muted overflow-hidden">
@@ -622,7 +625,7 @@ export function SecurityScan() {
                           style={{ width: "100%" }}
                           initial={{ scaleX: 0 }}
                           animate={{ scaleX: progressPercent / 100 }}
-                          transition={{ duration: 0.4, ease: "easeOut" }}
+                          transition={MOTION_TRANSITION.progress}
                         />
                       </div>
                       <div className="text-center text-[10px] text-muted-foreground mt-2">
@@ -684,6 +687,7 @@ export function SecurityScan() {
                   <motion.div
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
+                    transition={MOTION_TRANSITION.enter}
                     className="text-center"
                   >
                     <p className="text-muted-foreground text-[11px]">
@@ -705,14 +709,14 @@ export function SecurityScan() {
             key="results"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            transition={{ duration: 0.3, delay: 0.1 }}
+            transition={{ ...MOTION_TRANSITION.fadeMedium, delay: 0.1 }}
             className="p-5 space-y-4"
           >
             {/* ── Top: Score + Summary ── */}
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+              transition={MOTION_TRANSITION.fadeMedium}
               className="flex items-start gap-5"
             >
               {/* Score ring — left */}
@@ -734,7 +738,7 @@ export function SecurityScan() {
                     stroke="currentColor"
                     initial={{ strokeDasharray: "0 100" }}
                     animate={{ strokeDasharray: `${Math.max(overallRisk.safetyScore, 2)} ${100 - Math.max(overallRisk.safetyScore, 2)}` }}
-                    transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1], delay: 0.15 }}
+                    transition={{ ...MOTION_TRANSITION.ring, delay: 0.15 }}
                   />
                 </svg>
                 <div className={`absolute inset-0 flex items-center justify-center text-lg font-bold tabular-nums ${riskColor[overallRisk.level]}`}>
@@ -824,7 +828,7 @@ export function SecurityScan() {
                   key={result.skill_name}
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.2, delay: Math.min(i * 0.03, 0.3), ease: [0.22, 1, 0.36, 1] }}
+                  transition={{ ...MOTION_TRANSITION.enter, delay: motionDelay(i) }}
                 >
                   <SkillResultRow
                     result={result}
@@ -866,7 +870,9 @@ const SkillResultRow = React.memo(function SkillResultRow({
       t("securityScan.summary.noIssues", { defaultValue: "No issues found." });
 
   return (
-    <div className={`rounded-lg transition-colors ${expanded ? "bg-card/80 ring-1 ring-border" : `hover:bg-card/40 ${riskBgSubtle[result.risk_level]}`}`}>
+    <CardTemplate
+      className={`rounded-lg transition-colors hover:-translate-y-0 ${expanded ? "bg-card/80 ring-1 ring-border" : `hover:bg-card/40 ${riskBgSubtle[result.risk_level]}`}`}
+    >
       <button
         onClick={onToggle}
         className="w-full flex items-center gap-3 px-3 py-2.5 text-left cursor-pointer group"
@@ -1003,6 +1009,6 @@ const SkillResultRow = React.memo(function SkillResultRow({
           </div>
         </div>
       </div>
-    </div>
+    </CardTemplate>
   );
 });

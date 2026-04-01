@@ -18,20 +18,20 @@ import type {
   ProxyConfig,
   StorageOverview,
 } from "../../types";
-import { AgentConnectionsSection } from "./AgentConnectionsSection";
-import { ProxySection } from "./ProxySection";
-import { AiProviderSection } from "./AiProviderSection";
-import { ShortTextServiceSection } from "./ShortTextServiceSection";
+import { AgentConnectionsSection } from "../../features/settings/sections/AgentConnectionsSection";
+import { ProxySection } from "../../features/settings/sections/ProxySection";
+import { AiProviderSection } from "../../features/settings/sections/AiProviderSection";
+import { ShortTextServiceSection } from "../../features/settings/sections/ShortTextServiceSection";
 import {
   BackgroundRunSection,
   onBackgroundRunChanged,
   readBackgroundRun,
   writeBackgroundRun,
-} from "./BackgroundRunSection";
-import { AppearanceSection } from "./AppearanceSection";
-import { LanguageSection } from "./LanguageSection";
-import { StorageSection } from "./StorageSection";
-import { AboutSection } from "./AboutSection";
+} from "../../features/settings/sections/BackgroundRunSection";
+import { AppearanceSection } from "../../features/settings/sections/AppearanceSection";
+import { LanguageSection } from "../../features/settings/sections/LanguageSection";
+import { StorageSection } from "../../features/settings/sections/StorageSection";
+import { AboutSection } from "../../features/settings/sections/AboutSection";
 
 type ForceDeleteTarget = "hub" | "cache" | "config";
 
@@ -645,7 +645,7 @@ export function Settings() {
   }, []);
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden bg-background">
+    <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-background">
       <div className="h-[60px] flex flex-col justify-center px-8 border-b border-border/40 bg-card/40 backdrop-blur-xl z-10 shrink-0">
         <h1>{t("settings.title")}</h1>
       </div>

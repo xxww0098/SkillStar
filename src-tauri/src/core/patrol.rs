@@ -1,16 +1,17 @@
 //! Background patrol — low-overhead update monitoring.
 //!
-//! When active, a tokio task checks installed skills one-at-a-time with a
-//! configurable delay between each. Results are emitted as Tauri events so
-//! the frontend can merge them into the UI.
+//! When active, a tokio task checks installed skills in fast per-cycle batches:
+//! prefetch unique repos once, then compare each skill locally. Results are
+//! emitted as Tauri events so the frontend can merge them into the UI.
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::watch;
 
-use super::{installed_skill, local_skill, sync};
+use super::{git_ops, local_skill, repo_scanner, sync};
 
 // ── Persistent Configuration ────────────────────────────────────────
 
@@ -76,6 +77,12 @@ pub struct PatrolCheckEvent {
     pub update_available: bool,
     pub skills_checked: u64,
     pub updates_found: u64,
+}
+
+#[derive(Debug, Clone)]
+struct HubSkillEntry {
+    name: String,
+    path: PathBuf,
 }
 
 // ── Patrol Manager ──────────────────────────────────────────────────
@@ -194,11 +201,12 @@ async fn patrol_loop(
     interval_secs: u64,
 ) {
     let interval = std::time::Duration::from_secs(interval_secs);
+    let per_skill_delay = std::time::Duration::from_millis(10);
 
     loop {
-        // Collect names of hub skills to check
-        let skill_names = match collect_hub_skill_names().await {
-            Ok(names) => names,
+        // Collect hub skills to check this cycle.
+        let skills = match collect_hub_skills().await {
+            Ok(entries) => entries,
             Err(e) => {
                 eprintln!("[patrol] Failed to list skills: {}", e);
                 // Wait before retrying
@@ -209,7 +217,7 @@ async fn patrol_loop(
             }
         };
 
-        if skill_names.is_empty() {
+        if skills.is_empty() {
             // Nothing to check — wait one full interval then retry
             tokio::select! {
                 _ = tokio::time::sleep(interval) => continue,
@@ -217,7 +225,17 @@ async fn patrol_loop(
             }
         }
 
-        for name in &skill_names {
+        // Fetch once per unique repo root to avoid per-skill network fetches.
+        let skill_paths: Vec<PathBuf> = skills.iter().map(|entry| entry.path.clone()).collect();
+        if let Err(err) = tokio::task::spawn_blocking(move || {
+            repo_scanner::prefetch_unique_repos(&skill_paths);
+        })
+        .await
+        {
+            eprintln!("[patrol] Failed to prefetch repos: {}", err);
+        }
+
+        for entry in &skills {
             // Check for cancellation before each skill
             if *cancel_rx.borrow() {
                 break;
@@ -226,18 +244,20 @@ async fn patrol_loop(
             // Update current_skill
             {
                 let mut inner = state.lock().unwrap();
-                inner.current_skill = name.clone();
+                inner.current_skill = entry.name.clone();
             }
 
-            // Check this single skill
-            let update_available =
-                match installed_skill::refresh_skill_updates(Some(vec![name.clone()])).await {
-                    Ok(states) => states.first().map(|s| s.update_available).unwrap_or(false),
-                    Err(e) => {
-                        eprintln!("[patrol] Check failed for {}: {}", name, e);
-                        false
-                    }
-                };
+            let skill_name = entry.name.clone();
+            let skill_path = entry.path.clone();
+            // Check this skill locally after cycle prefetch.
+            let update_available = tokio::task::spawn_blocking(move || {
+                check_skill_update_local(&skill_name, &skill_path)
+            })
+            .await
+            .unwrap_or_else(|err| {
+                eprintln!("[patrol] Update check task failed for {}: {}", entry.name, err);
+                false
+            });
 
             // Update counters
             let event = {
@@ -247,7 +267,7 @@ async fn patrol_loop(
                     inner.updates_found += 1;
                 }
                 PatrolCheckEvent {
-                    name: name.clone(),
+                    name: entry.name.clone(),
                     update_available,
                     skills_checked: inner.skills_checked,
                     updates_found: inner.updates_found,
@@ -257,9 +277,9 @@ async fn patrol_loop(
             // Emit event to frontend
             let _ = app.emit("patrol://skill-checked", &event);
 
-            // Wait before next skill (or cancel)
+            // Keep a tiny inter-skill pause so UI updates remain smooth.
             tokio::select! {
-                _ = tokio::time::sleep(interval) => {},
+                _ = tokio::time::sleep(per_skill_delay) => {},
                 _ = cancel_rx.changed() => break,
             }
         }
@@ -267,6 +287,12 @@ async fn patrol_loop(
         // Check for cancellation after a full cycle
         if *cancel_rx.borrow() {
             break;
+        }
+
+        // Wait between patrol cycles.
+        tokio::select! {
+            _ = tokio::time::sleep(interval) => {},
+            _ = cancel_rx.changed() => break,
         }
     }
 
@@ -277,11 +303,27 @@ async fn patrol_loop(
     inner.cancel_tx = None;
 }
 
-/// Collect names of all installed hub (non-local) skills.
+fn check_skill_update_local(skill_name: &str, skill_path: &Path) -> bool {
+    if repo_scanner::is_repo_cached_skill(skill_path) {
+        return repo_scanner::check_repo_skill_update_local(skill_path);
+    }
+
+    // Fallback for non-repo-cached hub skills.
+    let _ = git_ops::ensure_worktree_checked_out(skill_path);
+    match git_ops::check_update(skill_path) {
+        Ok(update_available) => update_available,
+        Err(err) => {
+            eprintln!("[patrol] Check failed for {}: {}", skill_name, err);
+            false
+        }
+    }
+}
+
+/// Collect all installed hub (non-local) skills and their paths.
 ///
 /// Uses a lightweight directory scan instead of `list_installed_skills` to
 /// avoid the overhead of parsing every SKILL.md on each patrol cycle.
-async fn collect_hub_skill_names() -> Result<Vec<String>> {
+async fn collect_hub_skills() -> Result<Vec<HubSkillEntry>> {
     let skills_dir = sync::get_hub_skills_dir();
     tokio::task::spawn_blocking(move || {
         let entries = match std::fs::read_dir(&skills_dir) {
@@ -290,7 +332,7 @@ async fn collect_hub_skill_names() -> Result<Vec<String>> {
             Err(err) => return Err(anyhow::anyhow!("Failed to read skills directory: {}", err)),
         };
 
-        let mut names = Vec::new();
+        let mut skills = Vec::new();
         for entry in entries.flatten() {
             let path = entry.path();
             if !path.is_dir() {
@@ -304,10 +346,10 @@ async fn collect_hub_skill_names() -> Result<Vec<String>> {
             if local_skill::is_local_skill(&name) {
                 continue;
             }
-            names.push(name);
+            skills.push(HubSkillEntry { name, path });
         }
-        names.sort();
-        Ok(names)
+        skills.sort_by(|left, right| left.name.cmp(&right.name));
+        Ok(skills)
     })
     .await
     .map_err(|e| anyhow::anyhow!("Task join error: {}", e))?

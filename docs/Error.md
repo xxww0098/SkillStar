@@ -14,212 +14,163 @@ Significant bugs and fixes, kept in short form for faster lookup.
 
 ---
 
-### Project Import Stored Discovered Skills In Hub Instead Of Local Storage — 2026-04-01
-- Symptom: Importing unmanaged skills discovered in project agent folders created real directories under `~/.skillstar/.agents/skills/` instead of treating them as local skills.
-- Root cause: `import_scanned_skills` copied project-discovered skills straight into the hub and only replaced the project folder with a symlink afterwards, bypassing `skills-local/`.
-- Fix: Add local-skill adoption flow that moves discovered project skills into `skills-local/`, recreates the hub entry as a symlink, and then points the project folder at that canonical hub link.
-- Files: `src-tauri/src/core/local_skill.rs`, `src-tauri/src/core/project_manifest.rs`, `AGENTS.md`
+### Marketplace Grid Vertical Gaps & Tab-Switch Artifacts — 2026-04-01
+- Symptom: Switching marketplace tabs caused card vertical gaps to jump; spacing inconsistent with Skills page.
+- Root cause: `@tanstack/react-virtual` rendered each grid row as an absolutely-positioned container; CSS `gap` only worked horizontally. Stale virtualizer measurements persisted across tab changes.
+- Fix: Replaced virtualization with progressive infinite-scroll (initial 60, +30 per scroll). Skip `AnimatePresence`/layout animations for >100 items. Unified scroll containers (`ss-page-scroll`).
+- Files: `SkillGrid.tsx`, `Marketplace.tsx`, `PublisherDetail.tsx`
 
-### Marketplace Could Feel Slow And Re-fetch The Same Data On Every View — 2026-04-01
-- Symptom: Marketplace tabs, publisher drill-down, and detail panels depended on direct remote fetches or client-side hydration, so first paint was slow and repeated navigation re-downloaded the same marketplace data.
-- Root cause: Marketplace had no durable local snapshot model; descriptions were hydrated in the browser, search skipped any local index, and publisher/detail flows bypassed a shared cache.
-- Fix: Add `marketplace_snapshot.rs` with SQLite snapshot tables + FTS, expose local-first Tauri commands with freshness status, move Marketplace/PublisherDetail/DetailPanel to snapshot reads plus explicit stale refresh, and seed remote search results back into the local corpus.
-- Files: `src-tauri/src/core/marketplace_snapshot.rs`, `src-tauri/src/commands/marketplace.rs`, `src-tauri/src/lib.rs`, `src/hooks/useMarketplace.ts`, `src/pages/Marketplace.tsx`, `src/pages/PublisherDetail.tsx`, `src/components/layout/DetailPanel.tsx`, `src/types/index.ts`, `AGENTS.md`, `AGENTS-UI.md`
+### SkillGrid ResizeObserver Never Attached — Stuck At 1 Column — 2026-04-01
+- Symptom: Grid showed single-column full-width strips; view toggle had no effect. Recurred across two separate fixes (post-virtualization removal, then post-virtualization re-add).
+- Root cause: `useLayoutEffect([])` ran on mount when `skills` was empty → `containerRef.current` was null → observer never attached → `containerWidth` stayed 0 → column count locked at 1.
+- Fix: Added data-readiness flag (`gridRendered` / `shouldVirtualize`) to effect dependency array so observer re-attaches when the grid div appears.
+- Files: `SkillGrid.tsx`
 
-### Marketplace Stayed In Loading State Forever In React StrictMode — 2026-04-01
-- Symptom: Marketplace page stayed on `正在从 skills.sh 加载技能...` and never rendered data.
-- Root cause: `mountedRef` cleanup set `current = false`, but mount lifecycle never reset it to `true`; in `React.StrictMode` remount checks, async callbacks exited early and skipped `setLoading(false)`.
-- Fix: Reset `mountedRef.current = true` on mount lifecycle, keep `false` on cleanup, and apply the same fix to shared async components using the same guard pattern.
-- Files: `src/hooks/useMarketplace.ts`, `src/hooks/useAiStream.ts`, `src/components/layout/DetailPanel.tsx`
+### Grid `auto-fit` Stretched Solitary Items To Full Width — 2026-04-01
+- Symptom: Single items in grid view stretched full-width, making grid indistinguishable from list.
+- Root cause: `auto-fit` forces standalone items to fill remaining tracks.
+- Fix: Replaced all `auto-fit` with `auto-fill`; standardized `columnStrategy="auto-fill"`.
+- Files: `index.css`, `SkillCards.tsx`, `Marketplace.tsx`, `PublisherDetail.tsx`, `SkillGrid.tsx`
 
-### Deck Card Could Hide Install Action For Missing Skills — 2026-04-01
-- Symptom: Deck cards showed `No skills installed` without an install button, and existing decks could not recover missing skills.
-- Root cause: Deck create/edit flow did not persist `skill_sources` from selected installed skills, and install actions were gated by pre-existing source metadata only.
-- Fix: Persist `skill_sources` on deck create/edit, keep install entry visible when skills are missing, and add marketplace name-based source resolution fallback during install.
-- Files: `src/pages/SkillCards.tsx`, `src/i18n/locales/en.json`, `src/i18n/locales/zh-CN.json`
+### Skill Card Entry Animation Made Text Look Bold — 2026-04-01
+- Symptom: Card title/body text looked thicker during entry animation.
+- Root cause: `scale` transforms caused font rasterization artifacts during interpolation.
+- Fix: Removed `scale` from list item variants (kept `opacity + y`); changed to `layout="position"`.
+- Files: `SkillGrid.tsx`
 
-### Export Analyzer Could Misclassify Uninstalled Simple Skills As Bundle — 2026-04-01
-- Symptom: `分享技能` showed `压缩包` for simple skills that were only missing locally, instead of generating a normal share code.
-- Root cause: Export analysis only trusted local `git_url` and fell back to reading local files; uninstalled skills failed local file reads and were marked as bundle.
-- Fix: Add marketplace name-based `git_url` resolution fallback before local-file fallback so missing-but-remote skills stay in normal share-code export.
-- Files: `src/components/skills/ExportShareCodeModal.tsx`
+### Project Import Stored Skills In Hub Instead Of Local — 2026-04-01
+- Symptom: Importing project-discovered skills created real dirs under `skills/` instead of `skills-local/`.
+- Root cause: `import_scanned_skills` bypassed local-skill adoption flow.
+- Fix: Move discovered skills to `skills-local/` first, then create hub symlink.
+- Files: `local_skill.rs`, `project_manifest.rs`
 
-### AI Smart Pick Could Feel Random And Return Fragile Results — 2026-04-01
-- Symptom: `AI 智能选卡` recommendations could swing between runs, fail on loosely formatted model output, or surface alphabetically sorted results that looked unrelated to the user prompt.
-- Root cause: The picker sent an unbounded YAML-like catalog directly to the model, accepted overly fragile array-only parsing, allowed one successful round to dominate, and discarded relevance information before returning results.
-- Fix: Add deterministic local pre-ranking and bounded candidate catalogs, require structured AI recommendations with score/reason metadata, aggregate multi-round consensus into stable relevance ordering, and fall back to deterministic local ranking when AI output is partial or invalid.
-- Files: `src-tauri/src/core/ai_provider.rs`, `src-tauri/src/commands/ai.rs`, `src-tauri/prompts/ai/pick_skills.md`, `src/components/skills/AiPickSkillsModal.tsx`, `src/types/index.ts`, `src/i18n/locales/en.json`, `src/i18n/locales/zh-CN.json`, `AGENTS.md`, `AGENTS-UI.md`
+### Marketplace Local-First Snapshot Missing — 2026-04-01
+- Symptom: Marketplace tabs felt slow; repeated navigation re-downloaded data.
+- Root cause: No durable local snapshot model; descriptions hydrated in browser; no shared cache.
+- Fix: Added `marketplace_snapshot.rs` with SQLite + FTS; local-first reads with freshness status; seed remote search into local corpus.
+- Files: `marketplace_snapshot.rs`, `commands/marketplace.rs`, `lib.rs`, `useMarketplace.ts`, `Marketplace.tsx`, `PublisherDetail.tsx`, `DetailPanel.tsx`
 
-### Translation Cache Was Split Across Frontend State And Backend DB — 2026-04-01
-- Symptom: Translation reuse behaved inconsistently across panels, `SKILL.md` streaming could run concurrently, and `AI 重译` for short text could still come back from MyMemory.
-- Root cause: Frontend kept extra translation caches outside SQLite, `ai_translate_skill_stream` had no global session gate, and short-text retranslate only bypassed cache without forcing the AI provider path.
-- Fix: Make SQLite the durable translation cache authority, serialize `SKILL.md` streaming translation sessions globally, and add an AI-only retranslate path for short text.
-- Files: `src-tauri/src/commands/ai.rs`, `src/components/skills/SkillReader.tsx`, `src/components/layout/DetailPanel.tsx`, `AGENTS.md`, `AGENTS-UI.md`
+### Marketplace Stuck Loading In React StrictMode — 2026-04-01
+- Symptom: Marketplace stayed on loading spinner forever.
+- Root cause: `mountedRef` cleanup set `false` but mount never reset to `true`; StrictMode remount skipped `setLoading(false)`.
+- Fix: Reset `mountedRef.current = true` on mount.
+- Files: `useMarketplace.ts`, `useAiStream.ts`, `DetailPanel.tsx`
 
-### Tray Stop Patrol Could Be Silently Undone By Auto-Restart — 2026-04-01
-- Symptom: Clicking `停止后台检查` in the tray appeared ineffective because background checks restarted after the window hid again.
-- Root cause: Tray stop only halted the current Rust patrol loop; the frontend still auto-started patrol on `window-hidden` from its local background-run toggle.
-- Fix: Persist patrol auto-start intent in backend status, gate hidden-window auto-start on that backend flag, and sync tray stop back into the shared frontend background-run state.
-- Files: `src-tauri/src/core/patrol.rs`, `src-tauri/src/commands/patrol.rs`, `src-tauri/src/lib.rs`, `src/App.tsx`, `src/pages/settings-page/BackgroundRunSection.tsx`, `src/pages/settings-page/index.tsx`, `AGENTS.md`, `AGENTS-UI.md`
+### Deck Card Hid Install Action For Missing Skills — 2026-04-01
+- Symptom: Deck cards showed `No skills installed` without install button.
+- Root cause: `skill_sources` not persisted on create/edit; install gated by pre-existing source metadata.
+- Fix: Persist `skill_sources`; keep install visible; add marketplace name-based source fallback.
+- Files: `SkillCards.tsx`, `en.json`, `zh-CN.json`
 
-### Window Close Could Still Leave Tray Icon After Background Run Was Stopped — 2026-04-01
-- Symptom: After disabling `后台运行`, clicking the window close button still left the app alive in the macOS menu bar/tray.
-- Root cause: Native close handling always forced `prevent_close + hide`, regardless of whether background run was still enabled.
-- Fix: Make close behavior conditional on patrol enablement: hide to tray only when background run is enabled, otherwise allow the close action to terminate the app; also sync frontend background-run preference into backend state at startup.
-- Files: `src-tauri/src/lib.rs`, `src/App.tsx`, `AGENTS.md`
+### Export Analyzer Misclassified Uninstalled Simple Skills As Bundle — 2026-04-01
+- Symptom: Share showed `压缩包` for simple skills only missing locally.
+- Root cause: Export only trusted local `git_url`; uninstalled skills failed file reads → marked as bundle.
+- Fix: Add marketplace name-based `git_url` resolution fallback before local-file fallback.
+- Files: `ExportShareCodeModal.tsx`
 
-### Tray Background Action Stayed Stuck On `Stop` Instead Of Toggling — 2026-04-01
-- Symptom: The tray menu always showed `停止后台检查`, even after background mode was already stopped.
-- Root cause: Tray menu labels were static, and the tray action only implemented a one-way stop path instead of rebuilding itself from the current patrol enabled state.
-- Fix: Add tray state-aware menu rebuilding, change the tray action into a real start/stop toggle, and broadcast shared patrol enabled state so Settings and tray labels stay aligned.
-- Files: `src-tauri/src/lib.rs`, `src-tauri/src/commands/patrol.rs`, `src/App.tsx`, `AGENTS.md`, `AGENTS-UI.md`
+### AI Smart Pick Fragile And Random — 2026-04-01
+- Symptom: Recommendations swung between runs; loosely formatted output parsed unreliably.
+- Root cause: Unbounded catalog, fragile parsing, single-round dominance, relevance info discarded.
+- Fix: Deterministic local pre-ranking, bounded catalogs, structured AI output with score/reason, multi-round consensus, fallback to local ranking.
+- Files: `ai_provider.rs`, `commands/ai.rs`, `pick_skills.md`, `AiPickSkillsModal.tsx`
 
-### Security Scan Clear Cache Left Log Files Behind — 2026-03-31
-- Symptom: Clicking `清理缓存` in Security Scan cleared cached results but old scan logs remained on disk.
-- Root cause: `clear_security_scan_cache` only deleted DB cache rows and legacy JSON cache, not `security_scan.log` or `security_scan_logs/`.
-- Fix: Add explicit log cleanup (`runtime log + per-run log directory`) and wire it into `clear_security_scan_cache`.
-- Files: `src-tauri/src/core/security_scan.rs`, `src-tauri/src/commands/ai.rs`, `AGENTS.md`
+### Translation Cache Split Across Frontend And Backend — 2026-04-01
+- Symptom: Translation reuse inconsistent; `SKILL.md` streaming ran concurrently; retranslate still hit MyMemory.
+- Root cause: Frontend kept caches outside SQLite; no global session gate; retranslate only bypassed cache without forcing AI.
+- Fix: SQLite as sole durable cache; serialize streaming sessions globally; AI-only retranslate path.
+- Files: `commands/ai.rs`, `SkillReader.tsx`, `DetailPanel.tsx`
 
-### Security Scan Could Reuse Wrong Cache And Hide AI Failures — 2026-03-31
-- Symptom: Static scans could satisfy later AI scans; large-file tail edits could miss re-scan; broken AI responses could still end up cached as safe.
-- Root cause: Cache key only used `skill_name + tree_hash` from truncated content, scan mode was not separated, and AI parse/aggregation failures were downgraded instead of treated as incomplete.
-- Fix: Scope cache by scan mode and scanner version, hash full file contents, surface incomplete AI analysis without caching it, and invalidate scan cache after in-app `SKILL.md` edits.
-- Files: `src-tauri/src/core/security_scan.rs`, `src-tauri/src/commands/ai.rs`, `src-tauri/src/commands.rs`, `AGENTS.md`
+### Tray Patrol Stop/Toggle And Window Close — 2026-04-01
+- Symptom: Three related issues: (1) tray `停止后台检查` ineffective because frontend auto-restarted patrol; (2) window close left tray icon after background run disabled; (3) tray label stuck on `Stop` instead of toggling.
+- Root cause: Tray stop didn't sync to frontend state; close always force-hid regardless of background-run setting; tray menu was static one-way.
+- Fix: Persist patrol intent in backend; gate auto-start on backend flag; make close conditional on patrol enablement; add state-aware tray menu rebuilding with real start/stop toggle.
+- Files: `patrol.rs`, `commands/patrol.rs`, `lib.rs`, `App.tsx`, `BackgroundRunSection.tsx`, `settings-page/index.tsx`
 
-### Security Scan Rollout Left CLI Build Broken — 2026-03-31
+### Security Scan Cache Bugs And Log Cleanup — 2026-03-31
+- Symptom: (1) Static scans satisfied AI scans; tail edits missed re-scan; broken AI cached as safe. (2) `清理缓存` left log files behind.
+- Root cause: Cache key lacked scan mode/version; content hash was truncated; AI failures downgraded; log cleanup missing from clear command.
+- Fix: Scope cache by mode + version; hash full contents; surface incomplete AI without caching; invalidate on in-app edits; add log cleanup to `clear_security_scan_cache`.
+- Files: `security_scan.rs`, `commands/ai.rs`, `commands.rs`
+
+### Security Scan CLI Build Broken — 2026-03-31
 - Symptom: `cargo check` failed after security scan CLI changes.
-- Root cause: CLI still called old `scan_single_skill()` signature.
-- Fix: Pass new args explicitly (`run_ai = true`, `on_progress = None`).
-- Files: `src-tauri/src/cli.rs`
+- Root cause: CLI called old `scan_single_skill()` signature.
+- Fix: Pass new args (`run_ai = true`, `on_progress = None`).
+- Files: `cli.rs`
 
-### Project Import Could Replace Non-Skill Folders And Drift Shared-Path Ownership — 2026-03-31
-- Symptom: `Import All` could import invalid folders and mis-assign owner on shared paths.
-- Root cause: Non-symlink directories were treated as valid without `SKILL.md`; backend trusted unstable `agent_id` on shared paths.
-- Fix: Require `SKILL.md`, skip invalid dirs, preserve persisted owner, and re-canonicalize frontend state.
-- Files: `src-tauri/src/core/project_manifest.rs`, `src/pages/projects-page/index.tsx`
+### Project Import / Shared-Path / Disambiguation Cluster — 2026-03-31
+- Symptom: Cluster of related issues: (1) Import replaced non-skill folders and drifted ownership. (2) Duplicate unmanaged skills for shared paths. (3) Multiple agents auto-enabled on same shared path. (4) Disambiguation destroyed symlinks, allowed multi-select, didn't persist or hydrate skills. (5) Hydration happened too late. (6) OpenClaw incorrectly participated in disambiguation.
+- Root cause: No `SKILL.md` validation; no dedupe by real path; no shared-path ownership canonicalization; disambiguation used checkbox instead of radio; confirm set UI state without saving/syncing; agent enable didn't trigger filesystem hydration; OpenClaw had non-empty `project_skills_rel`.
+- Fix: Require `SKILL.md`; dedupe by `(project_skills_rel, name)`; enforce one owner per shared path; switch to single-select; auto-apply on confirm; re-scan symlinked skills after confirm; set OpenClaw `project_skills_rel` to empty; add `save_project_skills_list` and `rebuild_project_skills_from_disk`.
+- Files: `project_manifest.rs`, `commands/projects.rs`, `lib.rs`, `agent_profile.rs`, `AgentDisambiguationDialog.tsx`, `projects-page/index.tsx`, `useProjectManifest.ts`
 
-### Agent Toggle Default State And Security Scan Cache Could Both Look Stale — 2026-03-31
-- Symptom: First disable click looked ineffective; security badges could show stale data.
-- Root cause: Toggle fallback state mismatched UI default; scan cache was merged without strict pruning.
-- Fix: Align toggle fallback with rendered state; reset/prune scan state and cache to installed skills.
-- Files: `src-tauri/src/core/agent_profile.rs`, `src-tauri/src/commands/ai.rs`, `src/hooks/useSecurityScan.ts`
+### Agent Toggle Default Mismatched UI — 2026-03-31
+- Symptom: First disable click looked ineffective; security badges showed stale data.
+- Root cause: Toggle fallback state mismatched UI default; scan cache merged without pruning.
+- Fix: Align toggle fallback; reset/prune scan state to installed skills.
+- Files: `agent_profile.rs`, `commands/ai.rs`, `useSecurityScan.ts`
 
-### Importing Project Skills Triggered Dev-Mode Page Reload And Route Jump — 2026-03-31
+### Vite Dev Reload On Project Skill Writes — 2026-03-31
 - Symptom: `Import All` caused dev-mode page reload/route jump.
-- Root cause: Vite watcher reacted to writes inside project agent skill folders.
+- Root cause: Vite watcher reacted to writes inside project agent folders.
 - Fix: Ignore `.agents`, `.claude`, `.gemini`, `.opencode` in Vite watch config.
 - Files: `vite.config.ts`
 
-### Unmanaged Skill Scan Showed Duplicate Names For Shared Paths — 2026-03-31
-- Symptom: Same unmanaged skill could appear multiple times.
-- Root cause: No dedupe by real project path for shared directories.
-- Fix: Deduplicate by `(project_skills_rel, skill name)` and add import-target dedupe guard.
-- Files: `src/pages/projects-page/index.tsx`
+### Deck Deployment Duplicate Conflict Flow — 2026-03-31
+- Symptom: Two dialogs appeared; conflicting shared-path agents selectable together.
+- Root cause: Conflict logic split across dialogs; no shared-path exclusion in picker.
+- Fix: Keep flow in deploy picker; enforce mutual exclusion inside shared-path groups.
+- Files: `ProjectDeployAgentDialog.tsx`, `projects-page/index.tsx`
 
-### Shared-Path Scan Hydration Could Auto-Enable Multiple Agents — 2026-03-31
-- Symptom: Multiple agents on same shared path could auto-enable together.
-- Root cause: Scan results were merged by `agent_id` without shared-path ownership canonicalization.
-- Fix: Enforce one owner per shared path across initial load, disambiguation, deploy, and manual toggles.
-- Files: `src/pages/projects-page/index.tsx`
-
-### Disambiguation Auto-Sync Could Destructively Drop Shared-Path Symlinks — 2026-03-31
-- Symptom: Shared-path skills disappeared after disambiguation confirm.
-- Root cause: Confirm path called full sync before complete in-memory hydration.
-- Fix: Add non-destructive `save_project_skills_list`; add `rebuild_project_skills_from_disk` repair flow.
-- Files: `src-tauri/src/core/project_manifest.rs`, `src-tauri/src/commands/projects.rs`, `src-tauri/src/lib.rs`, `src/hooks/useProjectManifest.ts`, `src/pages/projects-page/index.tsx`, `AGENTS.md`
-
-### Conflict Resolution Could Miss Shared-Path Skills After Agent Choice — 2026-03-31
-- Symptom: Chosen owner agent still showed `No skills assigned`.
-- Root cause: Hydration only used selected `agent_id`, not all ids in conflict group.
-- Fix: Hydrate from full conflict-group union and seed initial state from scan index.
-- Files: `src/pages/projects-page/index.tsx`
-
-### Deck Deployment Showed Duplicate Conflict Flow and Allowed Conflicting Picks — 2026-03-31
-- Symptom: Two dialogs appeared; conflicting shared-path agents could be selected together.
-- Root cause: Conflict logic split across dialogs; picker had no shared-path exclusion.
-- Fix: Keep flow in deploy picker and enforce mutual exclusion inside shared-path groups.
-- Files: `src/components/skills/ProjectDeployAgentDialog.tsx`, `src/pages/projects-page/index.tsx`
-
-### Project Skill Hydration Happened Too Late in Selection Flow — 2026-03-31
-- Symptom: Existing symlinked project skills appeared late or empty on first load.
-- Root cause: Early selection flow did not index symlink skills from initial scan.
-- Fix: Scan and merge symlink skill index during first `handleSelectProject` phase.
-- Files: `src/pages/projects-page/index.tsx`
-
-### Disambiguation Confirm Did Not Persist Until Manual Apply — 2026-03-31
-- Symptom: Owner choice stayed local until user pressed Apply.
-- Root cause: Confirm handler set UI state but did not call save/sync.
-- Fix: Auto-apply on confirm with filtered agents and clear dirty state on success.
-- Files: `src/pages/projects-page/index.tsx`
-
-### Disambiguation Enables Agent But Doesn't Hydrate Existing Project Skills — 2026-03-31
-- Symptom: Agent enabled after disambiguation, but skill list remained empty.
-- Root cause: Handler only flipped enabled state, no immediate filesystem hydration.
-- Fix: Re-scan and merge existing symlinked skills for selected agent right after confirm.
-- Files: `src/pages/projects-page/index.tsx`
-
-### Agent Disambiguation Dialog Allowed Multi-Select — 2026-03-31
-- Symptom: Shared-path ownership dialog allowed selecting multiple agents.
-- Root cause: Dialog used checkbox array state instead of single-choice semantics.
-- Fix: Switch to radio-like single selection (`selectedId`) and single-id payload.
-- Files: `src/components/skills/AgentDisambiguationDialog.tsx`, `src/pages/projects-page/index.tsx`
-
-### OpenClaw Incorrectly Participates in Project Path Disambiguation — 2026-03-31
-- Symptom: OpenClaw appeared in project shared-path disambiguation.
-- Root cause: `openclaw.project_skills_rel` was set to `.agents/skills`.
-- Fix: Set OpenClaw `project_skills_rel` to empty string and add regression test.
-- Files: `src-tauri/src/core/agent_profile.rs`, `AGENTS.md`
-
-### Repo-Cached Update Badge Persists After Manual Update — 2026-03-31
-- Symptom: Update badge reappeared right after manual update.
-- Root cause: Shallow/full repos used different update strategies, leading to inconsistent HEAD alignment.
+### Repo-Cached Update Badge Persists After Update — 2026-03-31
+- Symptom: Update badge reappeared after manual update.
+- Root cause: Shallow/full repos used different update strategies → inconsistent HEAD alignment.
 - Fix: Unify to `fetch` + `reset --hard origin/HEAD` (plus sparse rules re-apply).
-- Files: `src-tauri/src/core/repo_scanner.rs`
+- Files: `repo_scanner.rs`
 
-### Framer Motion Layout Stuttering and Jittering — 2026-03-30
-- Symptom: Toolbar flyovers, sidebar snap, and abrupt collapse clipping.
-- Root cause: Global `layoutId` collisions, width vs `min-w` conflicts, and height animations with padding/margin leaks.
-- Fix: Scope `layoutId` via `useId()`, remove conflicting `min-w`, add `overflow-hidden` and move spacing to inner wrappers.
-- Files: `src/components/layout/Toolbar.tsx`, `src/components/layout/Sidebar.tsx`, `src/components/skills/SkillSelectionBar.tsx`, `src/components/skills/CreateGroupModal.tsx`
+### Shallow Clone `git pull` Fails — Skills Stuck on "Update Available" — 2026-03-31
+- Symptom: Skills in endless update-available state.
+- Root cause: `git pull` failed on shallow repos with divergent grafted history.
+- Fix: Detect shallow repos; use `fetch --depth 1` + `reset --hard origin/HEAD`.
+- Files: `repo_scanner.rs`
 
-### Bundle identifier `.app` suffix causes macOS conflict — 2026-03-30
+### Uninstalling Skill Left Stale Project Metadata And Broken Symlinks — 2026-03-31
+- Symptom: Uninstalled skills still appeared in projects with stale links.
+- Root cause: Uninstall only removed hub install, not project metadata/symlinks.
+- Fix: Add `remove_skill_from_all_projects()` cleanup in both uninstall paths.
+- Files: `project_manifest.rs`, `local_skill.rs`, `commands.rs`
+
+### Repo Import Could Overwrite Unrelated Skills — 2026-03-31
+- Symptom: Repo import overwrote local or foreign-remote skills with same name.
+- Root cause: Reinstall accepted name collision without source ownership validation.
+- Fix: Allow replacement only when existing install resolves to same remote.
+- Files: `repo_scanner.rs`
+
+### Framer Motion Layout Stuttering — 2026-03-30
+- Symptom: Toolbar flyovers, sidebar snap, abrupt collapse clipping.
+- Root cause: Global `layoutId` collisions, width vs `min-w` conflicts, height animations with padding/margin leaks.
+- Fix: Scope `layoutId` via `useId()`, remove conflicting `min-w`, add `overflow-hidden`, move spacing to inner wrappers.
+- Files: `Toolbar.tsx`, `Sidebar.tsx`, `SkillSelectionBar.tsx`, `CreateGroupModal.tsx`
+
+### Bundle Identifier `.app` Suffix macOS Conflict — 2026-03-30
 - Symptom: macOS bundle id warning and release instability.
-- Root cause: `identifier` ending with `.app` conflicts with macOS bundle extension.
 - Fix: Change identifier to `com.skillstar.desktop`.
-- Files: `src-tauri/tauri.conf.json`
+- Files: `tauri.conf.json`
 
-### Local DMG packaging fails with `bundle_dmg.sh` error — 2026-03-30
-- Symptom: Build succeeded but DMG packaging failed locally.
-- Root cause: `create-dmg` AppleScript step lacked required macOS permissions.
-- Fix: Use app-only local build (`--bundles app`); keep DMG packaging in CI.
+### Local DMG Packaging Fails — 2026-03-30
+- Symptom: Build succeeded but DMG failed locally.
+- Root cause: `create-dmg` AppleScript lacked macOS permissions.
+- Fix: Use `--bundles app` locally; keep DMG in CI.
 - Files: `run-build.sh`
 
-### CI `Build latest.json` fails after deleting draft release and re-tagging — 2026-03-30
-- Symptom: `latest.json` job missed required updater artifact after re-tag.
-- Root cause: Release asset availability race while matrix jobs were still finalizing uploads.
+### CI `latest.json` Fails After Re-tag — 2026-03-30
+- Symptom: `latest.json` job missed updater artifact after deleting draft and re-tagging.
+- Root cause: Release asset availability race during matrix uploads.
 - Fix: Re-run workflow; avoid deleting draft release between retries.
-- Files: `.github/workflows/release.yml`, `scripts/release/build_merged_latest_json.cjs`
+- Files: `release.yml`, `build_merged_latest_json.cjs`
 
 ### Safari/WebKit SVG Filter Rendering Bug — 2026-03-30
-- Symptom: Complex SVG rendered incorrectly or invisible in WebKit via `<img src>`.
-- Root cause: WebKit sandbox/filter handling dropped masked groups with complex Figma filters.
-- Fix: Inline the SVG as a React component to use DOM SVG rendering path.
-- Files: `public/agents/antigravity.svg`, `src/components/ui/icons/AntigravityIcon.tsx`, `src/components/ui/AgentIcon.tsx`, `src/components/layout/Toolbar.tsx`, `src/components/skills/SkillCard.tsx`, `src/pages/settings-page/AgentConnectionsSection.tsx`, `src/pages/projects-page/AgentAccordion.tsx`, `src/components/skills/ProjectDeployAgentDialog.tsx`
-
-### Shallow Clone `git pull` Fails — All Skills Stuck on "Update Available" — 2026-03-31
-- Symptom: Skills stayed in endless update-available state.
-- Root cause: `git pull` failed on shallow repos with divergent grafted history.
-- Fix: Detect shallow repos and use `fetch --depth 1` + `reset --hard origin/HEAD`.
-- Files: `src-tauri/src/core/repo_scanner.rs`
-
-### Uninstalling A Skill Left Stale Project Metadata And Broken Symlinks — 2026-03-31
-- Symptom: Uninstalled skills still appeared in projects and left stale links.
-- Root cause: Uninstall flow removed hub install only, not project metadata/symlinks.
-- Fix: Add `remove_skill_from_all_projects()` cleanup in both uninstall paths.
-- Files: `src-tauri/src/core/project_manifest.rs`, `src-tauri/src/core/local_skill.rs`, `src-tauri/src/commands.rs`
-
-### Repo Import Reinstall Could Overwrite Local Or Unrelated Skills — 2026-03-31
-- Symptom: Repo import could overwrite local or foreign-remote skills with same name.
-- Root cause: Reinstall path accepted name collision without source ownership validation.
-- Fix: Allow replacement only when existing install resolves to same remote; otherwise reject.
-- Files: `src-tauri/src/core/repo_scanner.rs`
+- Symptom: Complex SVG invisible in WebKit via `<img src>`.
+- Root cause: WebKit sandbox dropped masked groups with complex Figma filters.
+- Fix: Inline SVG as React component for DOM rendering path.
+- Files: `antigravity.svg`, `AntigravityIcon.tsx`, `AgentIcon.tsx`, `Toolbar.tsx`, `SkillCard.tsx`, `AgentConnectionsSection.tsx`, `AgentAccordion.tsx`, `ProjectDeployAgentDialog.tsx`

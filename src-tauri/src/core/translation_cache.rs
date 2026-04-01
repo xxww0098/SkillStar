@@ -57,6 +57,12 @@ fn create_connection() -> Result<Connection> {
         (),
     )
     .context("Failed to initialize translation_cache table")?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_translation_cache_target_kind
+        ON translation_cache(target_language, kind)",
+        (),
+    )
+    .context("Failed to initialize translation_cache indexes")?;
 
     Ok(conn)
 }

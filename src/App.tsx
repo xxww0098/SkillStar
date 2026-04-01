@@ -9,7 +9,7 @@ import { Toaster } from "./components/ui/sonner";
 import {
   readBackgroundRun,
   writeBackgroundRun,
-} from "./pages/settings-page/BackgroundRunSection";
+} from "./features/settings/sections/BackgroundRunSection";
 import { getLanguage } from "./i18n";
 import { useEffect, useRef } from "react";
 
@@ -149,7 +149,7 @@ function AppContent() {
   const renderPage = () => {
     if (nav.activePage === "marketplace" && nav.subPage?.type === "publisher-detail") {
       return (
-        <motion.div key="publisher-detail" initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }} transition={{ duration: 0.2, ease: "easeOut" }} className="flex-1 flex overflow-hidden">
+        <motion.div key="publisher-detail" initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }} transition={{ duration: 0.2, ease: "easeOut" }} className="flex-1 min-w-0 flex overflow-hidden">
           <PublisherDetailPage publisher={nav.subPage.publisher} onBack={() => nav.setSubPage(null)} />
         </motion.div>
       );
@@ -234,7 +234,7 @@ function AppContent() {
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -4 }}
           transition={{ duration: prefersReducedMotion ? 0.01 : 0.2, ease: [0.22, 1, 0.36, 1] }}
-          className="flex-1 min-h-0 flex overflow-hidden"
+          className="flex-1 min-h-0 min-w-0 flex overflow-hidden"
         >
           <Suspense fallback={<PageFallback />}>{renderPage()}</Suspense>
         </motion.div>

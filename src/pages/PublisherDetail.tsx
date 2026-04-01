@@ -26,9 +26,9 @@ import { Input } from "../components/ui/input";
 import { EmptyState } from "../components/ui/EmptyState";
 import { SkillGridSkeleton } from "../components/ui/Skeleton";
 import { LoadingLogo } from "../components/ui/LoadingLogo";
-import { SkillCard } from "../components/skills/SkillCard";
-import { PublisherAvatar } from "../components/marketplace/OfficialPublishers";
-import { useSkills } from "../hooks/useSkills";
+import { SkillGrid } from "../features/my-skills/components/SkillGrid";
+import { PublisherAvatar } from "../features/marketplace/components/OfficialPublishers";
+import { useSkills } from "../features/my-skills/hooks/useSkills";
 import { cn, formatInstalls } from "../lib/utils";
 import type {
   LocalFirstResult,
@@ -50,7 +50,8 @@ interface PublisherDetailProps {
 
 export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
   const { t } = useTranslation();
-  const { installSkill, updateSkill, uninstallSkill } = useSkills();
+  const { installSkill, updateSkill, uninstallSkill, pendingUpdateNames } =
+    useSkills();
   const [skills, setSkills] = useState<Skill[]>([]);
   const [activeRepo, setActiveRepo] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -333,8 +334,8 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
   );
 
   return (
-    <div className="flex-1 flex overflow-hidden relative">
-      <div className="flex-1 flex flex-col overflow-hidden">
+    <div className="flex-1 min-w-0 flex overflow-hidden relative">
+      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         <div className="h-14 flex items-center gap-3 px-6 border-b border-border bg-sidebar">
           <Button
             variant="ghost"
@@ -407,7 +408,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.2 }}
-          className="flex-1 overflow-y-auto"
+          className="ss-page-scroll"
           onScroll={(e) => {
             setShowBackToTop(e.currentTarget.scrollTop > 300);
           }}
@@ -460,7 +461,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
             </div>
           </div>
 
-          <div className="p-6">
+          <div>
             {loading ? (
               <SkillGridSkeleton count={6} />
             ) : !activeRepo && publisherRepos.length === 0 ? (
@@ -488,7 +489,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
                   description="Try a different repo keyword."
                 />
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 max-w-5xl">
+                <div className="ss-decks-grid">
                   {visiblePublisherRepos.map((repo) => (
                     <motion.button
                       key={repo.repo}
@@ -531,7 +532,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
                 </div>
               )
             ) : (
-              <div className="space-y-4 max-w-5xl">
+              <div className="space-y-4">
                 <div className="flex items-center gap-2">
                   <Button
                     variant="ghost"
@@ -568,19 +569,18 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
                     description={t("publisherDetail.tryDifferent")}
                   />
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                    {visibleSkills.map((skill) => (
-                      <SkillCard
-                        key={skill.name + skill.git_url}
-                        skill={skill}
-                        onClick={() => handleSkillClick(skill)}
-                        onInstall={handleInstall}
-                        onUpdate={handleUpdate}
-                        installing={installingNames.has(skill.name)}
-                        noAnimate
-                      />
-                    ))}
-                  </div>
+                  <SkillGrid
+                    skills={visibleSkills}
+                    viewMode="grid"
+                    columnStrategy="auto-fill"
+                    minColumnWidth={320}
+                    onSkillClick={handleSkillClick}
+                    onInstall={handleInstall}
+                    installingNames={installingNames}
+                    onUpdate={handleUpdate}
+                    pendingUpdateNames={pendingUpdateNames}
+                    emptyMessage={t("publisherDetail.noMatch")}
+                  />
                 )}
               </div>
             )}

@@ -20,15 +20,29 @@
 src/
 ├── main.tsx                      # app bootstrap + provider wiring
 ├── App.tsx                       # layout + routing + cross-page state
-├── hooks/                        # useSkills/useProjectManifest/useMarketplace/useAiConfig/useUpdater...
-├── pages/                        # MySkills, Marketplace, PublisherDetail, SkillCards, Projects, Settings
-│   ├── projects-page/            # project page sections
-│   └── settings-page/            # settings page sections
+├── features/                     # domain slices (components + hooks)
+│   ├── my-skills/                # skill grid, cards, modals, install/export
+│   │   ├── components/           # SkillGrid, SkillCard, ImportModal, …
+│   │   └── hooks/                # useSkills, useSkillCards
+│   ├── marketplace/              # marketplace browsing
+│   │   ├── components/           # OfficialPublishers
+│   │   └── hooks/                # useMarketplace
+│   ├── projects/                 # project registration + agent config
+│   │   ├── components/           # AgentAccordion, ProjectDetailPanel, …
+│   │   └── hooks/                # useProjectManifest, useProjectSkills, …
+│   ├── security/                 # security scanning
+│   │   ├── components/           # RadarSweep, ScanFilePanel
+│   │   └── hooks/                # useSecurityScan
+│   └── settings/                 # app settings
+│       └── sections/             # AboutSection, AiProviderSection, …
+├── pages/                        # thin route-level shells (lazy-loaded)
+│   ├── projects-page/            # Projects page shell
+│   └── settings-page/            # Settings page shell
+├── hooks/                        # global-only hooks (useNavigation, useUpdater, useAiConfig)
 ├── components/
-│   ├── ui/                       # shared primitives
+│   ├── ui/                       # shared atomic primitives
 │   ├── layout/                   # Sidebar/Toolbar/DetailPanel
-│   ├── skills/                   # cards, editor, dialogs, import/export/deploy
-│   └── marketplace/              # OfficialPublishers
+│   └── shared/                   # cross-feature: SkillEditor, SkillReader
 ├── lib/                          # utils, toast, share code
 └── types/                        # shared TS types
 ```

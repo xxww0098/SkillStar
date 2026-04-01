@@ -342,7 +342,7 @@
   "skillCards": {
     "title": "卡组",
     "groupsCount": "{{count}} 个卡组",
-    "manageProject": "管理项目",
+    "searchPlaceholder": "搜索卡组...",
     "newGroup": "新建卡组",
     "loading": "正在加载卡组...",
     "emptyTitle": "还没有卡组",
@@ -362,7 +362,9 @@
     "installNoSource": "未找到缺失技能的安装来源",
     "installAllSuccess": "成功安装了 {{count}} 个技能",
     "installPartial": "安装 {{success}} 个成功，{{failed}} 个失败",
-    "installAllFailed": "安装技能失败"
+    "installAllFailed": "安装技能失败",
+    "noMatching": "没有匹配的卡组",
+    "tryDifferent": "请尝试其他搜索词。"
   },
   "projects": {
     "title": "项目",
@@ -559,6 +561,7 @@
     "password": "密码（可选）",
     "passwordPlaceholder": "未设置密码则留空",
     "parseError": "解析分享码失败",
+    "duplicateGroup": "已有同名卡组「{{name}}」，请先删除或重命名。",
     "importError": "导入失败",
     "cancel": "取消",
     "importing": "导入中...",
@@ -573,7 +576,9 @@
   },
   "exportShareCodeModal": {
     "title": "分享技能",
+    "titleDeck": "分享卡组",
     "description": "智能导出：简单技能生成分享码，复杂技能生成技能包。",
+    "descriptionDeck": "智能导出：简单技能生成分享码，复杂技能生成技能包。",
     "analyzing": "正在分析技能...",
     "shareCodeLabel": "分享码",
     "bundleLabel": "压缩包",
@@ -618,6 +623,21 @@
     "success": "导入成功",
     "successDesc": "\"{{name}}\" 已导入，包含 {{count}} 个文件。",
     "replaced": "已替换原有技能。"
+  },
+  "importDeckBundleModal": {
+    "title": "导入卡组文件",
+    "description": "导入 .agd 卡组文件，自动安装技能并创建卡组。",
+    "pickFile": "选择 .agd 文件",
+    "reading": "正在读取...",
+    "deckBundle": "卡组包",
+    "skillsCount": "{{count}} 个技能",
+    "includedSkills": "包含的技能",
+    "importing": "导入中...",
+    "import": "导入卡组",
+    "conflictTitle": "部分技能已存在",
+    "conflictDesc": "卡组中的部分技能已经安装。是否要替换？",
+    "success": "卡组导入成功",
+    "successDesc": "已导入 {{count}} 个技能，共 {{files}} 个文件。卡组已自动创建。"
   },
   "recommendedRow": {
     "title": "推荐技能",
@@ -683,7 +703,17 @@
     "needPassword": "此分享码有密码保护，请输入密码以解密。",
     "retryWithPassword": "解密",
     "installing": "正在从分享码安装技能...",
-    "installSkills": "安装 {{count}} 个技能"
+    "installSkills": "安装 {{count}} 个技能",
+    "alreadyDetected": "检测到已有 {{count}} 个技能已安装，安装时会自动跳过。",
+    "resultSummary": "共请求 {{total}} 个技能：已存在 {{existing}} 个，新安装 {{installed}} 个，未安装 {{skipped}} 个。",
+    "alreadyHadTitle": "已存在（{{count}}）",
+    "installedNowTitle": "新安装（{{count}}）",
+    "skippedTitle": "未安装（{{count}}）",
+    "skipReason": {
+      "repo_missing": "仓库中未找到",
+      "no_source": "缺少安装来源",
+      "install_failed": "安装失败"
+    }
   },
   "shareResultCard": {
     "generating": "正在生成分享码...",

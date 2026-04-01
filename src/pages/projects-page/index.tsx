@@ -5,17 +5,17 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { Button } from "../../components/ui/button";
 import { Badge } from "../../components/ui/badge";
 import { LoadingLogo } from "../../components/ui/LoadingLogo";
-import { ProjectDeployAgentDialog } from "../../components/skills/ProjectDeployAgentDialog";
-import { AgentDisambiguationDialog } from "../../components/skills/AgentDisambiguationDialog";
-import { useProjectManifest } from "../../hooks/useProjectManifest";
-import { useSkills } from "../../hooks/useSkills";
+import { ProjectDeployAgentDialog } from "../../features/projects/components/ProjectDeployAgentDialog";
+import { AgentDisambiguationDialog } from "../../features/projects/components/AgentDisambiguationDialog";
+import { useProjectManifest } from "../../features/projects/hooks/useProjectManifest";
+import { useSkills } from "../../features/my-skills/hooks/useSkills";
 import { useAgentProfiles } from "../../hooks/useAgentProfiles";
 import type { ProjectEntry, ScannedSkill, Skill } from "../../types";
-import { DeployBanner } from "./DeployBanner";
-import { ProjectListPanel } from "./ProjectListPanel";
-import { ProjectDetailPanel } from "./ProjectDetailPanel";
-import { useProjectAgentDetection } from "./useProjectAgentDetection";
-import { useProjectSkills } from "./useProjectSkills";
+import { DeployBanner } from "../../features/projects/components/DeployBanner";
+import { ProjectListPanel } from "../../features/projects/components/ProjectListPanel";
+import { ProjectDetailPanel } from "../../features/projects/components/ProjectDetailPanel";
+import { useProjectAgentDetection } from "../../features/projects/hooks/useProjectAgentDetection";
+import { useProjectSkills } from "../../features/projects/hooks/useProjectSkills";
 
 interface ProjectsProps {
   preSelectedSkills?: string[] | null;
@@ -761,7 +761,7 @@ export function Projects({
 
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden relative">
+    <div className="flex-1 min-w-0 flex flex-col overflow-hidden relative">
       <div className="h-14 flex items-center justify-between px-6 border-b border-border bg-sidebar">
         <div className="flex items-center gap-3">
           <h1>{t("sidebar.projects")}</h1>
@@ -780,7 +780,7 @@ export function Projects({
         onDismiss={() => setPendingGroupSkills(null)}
       />
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 min-w-0 flex overflow-hidden">
         <ProjectListPanel
           filteredProjects={filteredProjects}
           selectedProject={selectedProject}
@@ -791,7 +791,7 @@ export function Projects({
           onOpenFolder={handleOpenFolder}
         />
 
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
           <ProjectDetailPanel
             selectedProject={selectedProject}
             onRelinkPath={handleRelinkPath}

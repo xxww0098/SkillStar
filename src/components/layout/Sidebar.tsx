@@ -23,7 +23,7 @@ import { cn } from "../../lib/utils";
 import { getFileTheme, getRiskTone } from "../../lib/securityScanTheme";
 import type { NavPage } from "../../types";
 import type { UpdateStatus } from "../../hooks/useUpdater";
-import { useSecurityScan } from "../../hooks/useSecurityScan";
+import { useSecurityScan } from "../../features/security/hooks/useSecurityScan";
 
 interface SidebarProps {
   activePage: NavPage;

@@ -341,7 +341,7 @@
   "skillCards": {
     "title": "Decks",
     "groupsCount": "{{count}} decks",
-    "manageProject": "Manage Project",
+    "searchPlaceholder": "Search decks...",
     "newGroup": "New Deck",
     "loading": "Loading decks...",
     "emptyTitle": "No decks yet",
@@ -361,7 +361,9 @@
     "installNoSource": "No install source found for missing skills",
     "installAllSuccess": "Successfully installed {{count}} skill(s)",
     "installPartial": "Installed {{success}}, failed {{failed}}",
-    "installAllFailed": "Failed to install skills"
+    "installAllFailed": "Failed to install skills",
+    "noMatching": "No matching decks",
+    "tryDifferent": "Try a different search term."
   },
   "projects": {
     "title": "Projects",
@@ -558,6 +560,7 @@
     "password": "Password (optional)",
     "passwordPlaceholder": "Leave empty if no password was set",
     "parseError": "Failed to parse share code",
+    "duplicateGroup": "A deck named \"{{name}}\" already exists. Delete or rename it first.",
     "importError": "Import failed",
     "cancel": "Cancel",
     "importing": "Importing...",
@@ -572,7 +575,9 @@
   },
   "exportShareCodeModal": {
     "title": "Share Skills",
+    "titleDeck": "Share Deck",
     "description": "Smart export: simple skills as share code, complex ones as bundle file.",
+    "descriptionDeck": "Smart export: simple cards as share code, complex ones as bundle file.",
     "analyzing": "Analyzing skills...",
     "shareCodeLabel": "Share Code",
     "bundleLabel": "Bundle File",
@@ -617,6 +622,21 @@
     "success": "Import Successful",
     "successDesc": "\"{{name}}\" imported with {{count}} files.",
     "replaced": "Replaced existing card."
+  },
+  "importDeckBundleModal": {
+    "title": "Import Deck File",
+    "description": "Import a .agd deck file to auto-install cards and create a deck.",
+    "pickFile": "Choose .agd file",
+    "reading": "Reading...",
+    "deckBundle": "Deck Bundle",
+    "skillsCount": "{{count}} cards",
+    "includedSkills": "Included Cards",
+    "importing": "Importing...",
+    "import": "Import Deck",
+    "conflictTitle": "Some cards already exist",
+    "conflictDesc": "Some cards in this deck are already installed. Replace them?",
+    "success": "Deck imported",
+    "successDesc": "Imported {{count}} cards with {{files}} files. Deck created automatically."
   },
   "recommendedRow": {
     "title": "Recommended Cards",
@@ -682,7 +702,17 @@
     "needPassword": "This share code is password-protected. Enter the password to decrypt.",
     "retryWithPassword": "Decrypt",
     "installing": "Installing skills from share code...",
-    "installSkills": "Install {{count}} Skills"
+    "installSkills": "Install {{count}} Skills",
+    "alreadyDetected": "{{count}} skills are already installed and will be skipped.",
+    "resultSummary": "Requested {{total}} skills: already had {{existing}}, newly installed {{installed}}, skipped {{skipped}}.",
+    "alreadyHadTitle": "Already Installed ({{count}})",
+    "installedNowTitle": "Installed Now ({{count}})",
+    "skippedTitle": "Not Installed ({{count}})",
+    "skipReason": {
+      "repo_missing": "not found in repo",
+      "no_source": "no install source",
+      "install_failed": "install failed"
+    }
   },
   "shareResultCard": {
     "generating": "Generating share code...",
