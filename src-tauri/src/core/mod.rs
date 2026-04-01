@@ -6,6 +6,7 @@ pub mod installed_skill;
 pub mod local_skill;
 pub mod lockfile;
 pub mod marketplace;
+pub mod marketplace_snapshot;
 pub mod path_env;
 pub mod paths;
 pub mod patrol;
@@ -17,7 +18,9 @@ pub mod security_scan;
 pub mod skill;
 pub mod skill_bundle;
 pub mod skill_group;
+pub mod skill_install;
 pub mod sync;
+pub mod translation_cache;
 
 #[cfg(test)]
 pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {

@@ -36,12 +36,32 @@ interface UseAiStreamOptions {
   normalizeResult?: (source: string, result: string) => string;
 }
 
-export function useAiStream({ command, eventChannel, normalizeResult }: UseAiStreamOptions) {
+interface ExecuteAiStreamOptions {
+  /** Bypass cache/read-toggle logic and force a fresh backend request. */
+  forceRefresh?: boolean;
+  /**
+   * Keep currently visible content while refreshing, until new deltas/final
+   * result arrive. Useful for "retranslate" flows.
+   */
+  keepVisibleWhileLoading?: boolean;
+}
+
+export function useAiStream({
+  command,
+  eventChannel,
+  normalizeResult,
+}: UseAiStreamOptions) {
   const [state, setState] = useState<AiStreamState>(INITIAL_STATE);
   const [aiConfigured, setAiConfigured] = useState(false);
 
   const activeIdRef = useRef<string | null>(null);
   const unlistenRef = useRef<(() => void) | null>(null);
+  // Mirror state in a ref so execute can read latest values without
+  // being re-created on every state change (avoids stale closures).
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  // Guard async setState after component unmount
+  const mountedRef = useRef(true);
 
   // Load AI config on mount
   useEffect(() => {
@@ -49,9 +69,10 @@ export function useAiStream({ command, eventChannel, normalizeResult }: UseAiStr
       try {
         const { invoke } = await import("@tauri-apps/api/core");
         const config = await invoke<AiConfigStatus>("get_ai_config");
+        if (!mountedRef.current) return;
         setAiConfigured(config.enabled && config.api_key.trim().length > 0);
       } catch {
-        setAiConfigured(false);
+        if (mountedRef.current) setAiConfigured(false);
       }
     })();
   }, []);
@@ -70,28 +91,39 @@ export function useAiStream({ command, eventChannel, normalizeResult }: UseAiStr
   }, []);
 
   const execute = useCallback(
-    async (sourceContent: string) => {
-      if (!aiConfigured) return;
+    async (
+      sourceContent: string,
+      options: ExecuteAiStreamOptions = {}
+    ): Promise<string | null> => {
+      if (!aiConfigured) return null;
+      const forceRefresh = options.forceRefresh ?? false;
+      const keepVisibleWhileLoading = options.keepVisibleWhileLoading ?? false;
 
-      // If already loading, cancel
-      if (state.loading) {
-        cancel();
-        if (!state.content) {
-          setState((prev) => ({ ...prev, visible: false }));
+      const snap = stateRef.current;
+
+      if (!forceRefresh) {
+        // If already loading, cancel
+        if (snap.loading) {
+          cancel();
+          if (!snap.content) {
+            setState((prev) => ({ ...prev, visible: false }));
+          }
+          return null;
         }
-        return;
-      }
 
-      // If visible, toggle off
-      if (state.visible) {
-        dismiss();
-        return;
-      }
+        // If visible, toggle off
+        if (snap.visible) {
+          dismiss();
+          return null;
+        }
 
-      // If cached result matches source, show it
-      if (state.content && state.source === sourceContent) {
-        setState((prev) => ({ ...prev, visible: true }));
-        return;
+        // If cached result matches source, show it
+        if (snap.content && snap.source === sourceContent) {
+          setState((prev) => ({ ...prev, visible: true }));
+          return snap.content;
+        }
+      } else if (snap.loading) {
+        return null;
       }
 
       // Start new request
@@ -102,20 +134,32 @@ export function useAiStream({ command, eventChannel, normalizeResult }: UseAiStr
       activeIdRef.current = requestId;
       let streamedRaw = "";
       let deltaCount = 0;
+      let rafId: number | null = null;
 
-      setState({
-        content: null,
-        visible: false,
+      setState((prev) => ({
+        content: keepVisibleWhileLoading ? prev.content : null,
+        visible: keepVisibleWhileLoading ? prev.visible : false,
         loading: true,
         hasDelta: false,
         wasNonStreaming: false,
         error: null,
-        source: null,
-      });
+        source: keepVisibleWhileLoading ? prev.source : null,
+      }));
 
       try {
         const { listen } = await import("@tauri-apps/api/event");
         const { invoke } = await import("@tauri-apps/api/core");
+
+        const flushDelta = () => {
+          rafId = null;
+          if (activeIdRef.current !== requestId) return;
+          setState((prev) => ({
+            ...prev,
+            content: streamedRaw,
+            visible: true,
+            hasDelta: deltaCount >= 2,
+          }));
+        };
 
         const unlisten = await listen<AiStreamPayload>(eventChannel, (event) => {
           if (activeIdRef.current !== requestId) return;
@@ -125,12 +169,9 @@ export function useAiStream({ command, eventChannel, normalizeResult }: UseAiStr
           if (payload.event === "delta" && payload.delta) {
             deltaCount += 1;
             streamedRaw += payload.delta;
-            setState((prev) => ({
-              ...prev,
-              content: streamedRaw,
-              visible: true,
-              hasDelta: deltaCount >= 2,
-            }));
+            if (rafId == null) {
+              rafId = requestAnimationFrame(flushDelta);
+            }
             return;
           }
 
@@ -140,12 +181,12 @@ export function useAiStream({ command, eventChannel, normalizeResult }: UseAiStr
         });
         unlistenRef.current = unlisten;
 
-        const result = await invoke<string>(command, {
-          requestId,
-          content: sourceContent,
-        });
+        const invokePayload = forceRefresh
+          ? { requestId, content: sourceContent, forceRefresh: true }
+          : { requestId, content: sourceContent };
+        const result = await invoke<string>(command, invokePayload);
 
-        if (activeIdRef.current !== requestId) return;
+        if (activeIdRef.current !== requestId) return null;
         const finalContent = normalizeResult
           ? normalizeResult(sourceContent, result)
           : result;
@@ -158,8 +199,9 @@ export function useAiStream({ command, eventChannel, normalizeResult }: UseAiStr
           error: null,
           source: sourceContent,
         });
+        return finalContent;
       } catch (e) {
-        if (activeIdRef.current !== requestId) return;
+        if (activeIdRef.current !== requestId) return null;
         setState({
           content: streamedRaw.trim() ? streamedRaw : null,
           visible: !!streamedRaw.trim(),
@@ -169,7 +211,12 @@ export function useAiStream({ command, eventChannel, normalizeResult }: UseAiStr
           error: String(e),
           source: null,
         });
+        return null;
       } finally {
+        if (rafId != null) {
+          cancelAnimationFrame(rafId);
+          rafId = null;
+        }
         if (unlistenRef.current) {
           unlistenRef.current();
           unlistenRef.current = null;
@@ -179,12 +226,14 @@ export function useAiStream({ command, eventChannel, normalizeResult }: UseAiStr
         }
       }
     },
-    [aiConfigured, state.loading, state.visible, state.content, state.source, cancel, dismiss, command, eventChannel, normalizeResult]
+    [aiConfigured, cancel, dismiss, command, eventChannel, normalizeResult]
   );
 
   // Cleanup on unmount
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
       activeIdRef.current = null;
       if (unlistenRef.current) {
         unlistenRef.current();
@@ -199,6 +248,8 @@ export function useAiStream({ command, eventChannel, normalizeResult }: UseAiStr
     execute,
     cancel,
     dismiss,
+    hydrate: (c: string | null, source: string | null) =>
+      setState((prev) => ({ ...prev, content: c, source })),
     setVisible: (v: boolean) => setState((prev) => ({ ...prev, visible: v })),
     setContent: (c: string | null) => setState((prev) => ({ ...prev, content: c })),
     setError: (e: string | null) => setState((prev) => ({ ...prev, error: e })),

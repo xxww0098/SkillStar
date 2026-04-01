@@ -6,7 +6,7 @@ SkillStar is a Tauri v2 desktop app with a React SPA frontend and Rust backend.
 - Frontend calls backend via `invoke()` and Tauri events.
 - Tauri commands are defined in `src-tauri/src/commands.rs` and split modules under `src-tauri/src/commands/`.
 - Core domain logic lives in `src-tauri/src/core/`.
-- Persistence is JSON-file based under `~/.skillstar/` (config, projects, and skill hub).
+- Persistence is mixed storage under `~/.skillstar/`: JSON for config/project metadata plus SQLite for marketplace and translation caches.
 - Skill distribution is symlink-based to keep project directories clean.
 
 > Frontend-specific conventions live in [AGENTS-UI.md](./AGENTS-UI.md).
@@ -19,6 +19,8 @@ SkillStar is a Tauri v2 desktop app with a React SPA frontend and Rust backend.
 | Repo cache | `~/.skillstar/.agents/.repos/` |
 | SkillStar data root | `~/.skillstar/` |
 | Projects metadata | `~/.skillstar/projects/` |
+| Marketplace snapshot DB | `~/.skillstar/marketplace.db` |
+| Translation cache DB | `~/.skillstar/translation_cache.db` |
 
 ## Project Structure (Condensed)
 ```text
@@ -88,6 +90,14 @@ SkillStar/
 ### AI Integration
 - AI provider config is backend-owned (`ai_config.json`); frontend never stores API keys.
 - Long translation should fallback to chunked translation when full pass returns empty content.
+- Short description translation always includes MyMemory (public API) path; users choose priority (`ai_first` or `mymemory_first`) but no longer toggle MyMemory on/off.
+- Short description translation source must be exposed to frontend (`ai` or `mymemory`) so UI can show where the result came from.
+- AI skill pick must pre-rank installed skills locally before calling the model, keep the AI candidate catalog bounded, aggregate multi-round AI votes/scores into a stable ranking, and fall back to deterministic local ranking when AI output is partial or invalid.
+- AI skill pick responses returned to the frontend must preserve relevance order and expose enough metadata (for example score/reason/fallback state) for the UI to explain why a skill was recommended.
+- All translation entry points must use SQLite (`~/.skillstar/translation_cache.db`) as the durable cache keyed by text hash + target language; frontend may keep transient display state but must not become the source of truth for translation reuse.
+- Short description translation and SKILL.md translation are persisted in SQLite (`~/.skillstar/translation_cache.db`) keyed by text hash + target language; normal translate uses cache and explicit "retranslate" bypasses then overwrites cache.
+- `Retranslate via AI` must mean AI-only refresh (not just cache bypass with provider fallback).
+- `ai_translate_skill_stream` must run as a single global SKILL.md translation session; concurrent requests should serialize so one API-key session is active at a time.
 - Security scan prompts must explicitly enforce `target_language` for model-generated natural language fields (`summary`, `description`, `recommendation`) while keeping schema enums stable.
 - Security scan writes both rolling runtime logs (`~/.skillstar/security_scan.log`) and per-run timestamped reports (`~/.skillstar/security_scan_logs/scan-<timestamp>-<request>.log`).
 - Streaming APIs emit:
@@ -105,13 +115,15 @@ SkillStar/
 - File-level scan cache writes should be batched per skill after chunk work completes to avoid SQLite contention during concurrent scans.
 
 ### Marketplace and Repo Flow
-- Marketplace list uses fast payload first; hydrate missing descriptions in bounded batches.
-- Description cache: `marketplace_description_cache.json` with TTL and size pruning.
+- Marketplace data is local-first via `~/.skillstar/marketplace.db`; UI reads snapshots first and only syncs remote scopes on-demand/background refresh.
+- `marketplace.db` owns marketplace list/search/publisher/repo/detail snapshots plus FTS; schema changes must be handled through `PRAGMA user_version` migrations.
+- Local marketplace search must prefer the snapshot/FTS corpus and only do explicit remote seeding when the user asks or the scope has never been synced.
 - GitHub repo import is two-phase: `scan_github_repo` then `install_from_scan`.
 - Repo-level updates and checks operate on `~/.skillstar/.agents/.repos/` cached repositories.
 
 ### Local Skills and Graduation
 - Local skills live in `~/.skillstar/.agents/skills-local/<name>` and are symlinked into hub.
+- Skills discovered from project-level agent folders and imported into SkillStar must be adopted into `skills-local/` first, then exposed through the hub symlink in `skills/`.
 - `local_skill.rs` owns create/delete/migrate/graduate operations.
 - Publishing local skills to GitHub should graduate them into hub-backed repo installs.
 
@@ -121,8 +133,9 @@ SkillStar/
 
 ### Patrol and Runtime
 - Patrol checks one skill at a time with low overhead delay.
-- Closing the window hides app to background; quit is explicit via tray menu.
+- Closing the window hides app to background only when background run is enabled; otherwise window close should quit the app and remove the tray icon.
 - Patrol state persists in `~/.skillstar/patrol.json`.
+- Tray background control must behave as a true start/stop toggle, and its label must stay in sync with the current background-run state shown in Settings.
 
 ### Storage APIs
 - Storage overview APIs must return resolved real filesystem paths.

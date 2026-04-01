@@ -6,13 +6,13 @@ pub mod patrol;
 pub mod projects;
 
 use crate::core::{
-    git_ops, installed_skill, local_skill, lockfile, project_manifest, proxy, repo_scanner,
-    security_scan,
+    git_ops, installed_skill, local_skill, lockfile, marketplace_snapshot, project_manifest, proxy,
+    repo_scanner, security_scan,
     skill::{
         Skill, SkillContent, extract_github_source_from_url, extract_skill_description,
         parse_skill_content,
     },
-    skill_bundle, sync,
+    skill_bundle, skill_install, sync,
 };
 use std::collections::HashMap;
 
@@ -58,154 +58,7 @@ pub async fn refresh_skill_updates(
 
 #[tauri::command]
 pub async fn install_skill(url: String, name: Option<String>) -> Result<Skill, String> {
-    let skills_dir = sync::get_hub_skills_dir();
-
-    // Derive a reasonable skill name from the URL if not provided
-    let name_hint = name.clone().unwrap_or_else(|| {
-        url.rsplit('/')
-            .next()
-            .unwrap_or("skill")
-            .trim_end_matches(".git")
-            .to_string()
-    });
-
-    if skills_dir.join(&name_hint).exists() {
-        return Err(format!("Skill '{}' is already installed", name_hint));
-    }
-
-    // Reject if name exists in skills-local
-    if local_skill::local_skills_dir().join(&name_hint).exists() {
-        return Err(format!(
-            "Skill '{}' already exists as a local skill",
-            name_hint
-        ));
-    }
-
-    // ── Strategy 1: Sparse repo-cache pipeline ──────────────────────
-    // Clone/fetch into .repos/ using sparse treeless clone (only tree metadata
-    // + skill directories), then symlink the requested skill into the hub.
-    // This is dramatically smaller than a full clone for large repos.
-    if let Ok((repo_url, source)) = repo_scanner::normalize_repo_url(&url) {
-        if let Ok(repo_dir) = repo_scanner::clone_or_fetch_repo(&repo_url, &source) {
-            let skills_found = repo_scanner::scan_skills_in_repo(&repo_dir);
-
-            // Find the requested skill by name, or use the only one if single-skill repo
-            let target = if let Some(ref n) = name {
-                skills_found.iter().find(|s| s.id == *n)
-            } else if skills_found.len() == 1 {
-                skills_found.first()
-            } else {
-                // Multi-skill repo but no name specified — try matching by URL-derived name
-                skills_found.iter().find(|s| s.id == name_hint)
-            };
-
-            if let Some(skill) = target {
-                let targets = vec![repo_scanner::SkillInstallTarget {
-                    id: skill.id.clone(),
-                    folder_path: skill.folder_path.clone(),
-                }];
-
-                match repo_scanner::install_from_repo(&source, &repo_url, &targets) {
-                    Ok(installed) if !installed.is_empty() => {
-                        let installed_name = &installed[0];
-                        let dest = skills_dir.join(installed_name);
-                        let description = extract_skill_description(&dest);
-                        let git_source = extract_github_source_from_url(&repo_url);
-
-                        crate::core::installed_skill::invalidate_cache();
-                        // Read the tree_hash from the lockfile that install_from_repo just wrote
-                        let tree_hash = lockfile::Lockfile::load(&lockfile::lockfile_path())
-                            .ok()
-                            .and_then(|lf| {
-                                lf.skills
-                                    .iter()
-                                    .find(|e| e.name == *installed_name)
-                                    .map(|e| e.tree_hash.clone())
-                            });
-
-                        return Ok(Skill {
-                            name: installed_name.clone(),
-                            description,
-                            skill_type: crate::core::skill::SkillType::Hub,
-                            stars: 0,
-                            installed: true,
-                            update_available: false,
-                            last_updated: chrono::Utc::now().to_rfc3339(),
-                            git_url: repo_url,
-                            tree_hash,
-                            category: crate::core::skill::SkillCategory::None,
-                            author: None,
-                            topics: Vec::new(),
-                            agent_links: Some(Vec::new()),
-                            rank: None,
-                            source: git_source,
-                        });
-                    }
-                    Ok(_) => { /* empty install result — fall through to fallback */ }
-                    Err(e) => {
-                        eprintln!(
-                            "[install_skill] repo-cache install failed, falling back: {}",
-                            e
-                        );
-                    }
-                }
-            } else {
-                eprintln!(
-                    "[install_skill] skill '{}' not found in repo (found: {:?}), falling back to direct clone",
-                    name_hint,
-                    skills_found.iter().map(|s| &s.id).collect::<Vec<_>>()
-                );
-            }
-        }
-    }
-
-    // ── Strategy 2: Direct shallow clone (fallback) ─────────────────
-    // If the repo-cache approach fails (URL format issue, sparse clone not
-    // supported, skill not found in scan, etc.), fall back to a direct
-    // shallow clone into the hub. This is the most resilient path — it
-    // always works as long as the URL is valid.
-    let dest = skills_dir.join(&name_hint);
-    if dest.exists() {
-        return Err(format!("Skill '{}' is already installed", name_hint));
-    }
-
-    git_ops::clone_repo(&url, &dest).map_err(|e| e.to_string())?;
-
-    let tree_hash = git_ops::compute_tree_hash(&dest).map_err(|e| e.to_string())?;
-
-    let _lock = lockfile::get_mutex().lock().await;
-    let lock_path = lockfile::lockfile_path();
-    let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
-    lf.upsert(lockfile::LockEntry {
-        name: name_hint.clone(),
-        git_url: url.clone(),
-        tree_hash: tree_hash.clone(),
-        installed_at: chrono::Utc::now().to_rfc3339(),
-        source_folder: None,
-    });
-    let _ = lf.save(&lock_path);
-    crate::core::installed_skill::invalidate_cache();
-
-    let description = extract_skill_description(&dest);
-    let source = extract_github_source_from_url(&url);
-
-    Ok(Skill {
-        name: name_hint,
-        description,
-        skill_type: crate::core::skill::SkillType::Hub,
-        stars: 0,
-        installed: true,
-        update_available: false,
-        last_updated: chrono::Utc::now().to_rfc3339(),
-        git_url: url,
-        tree_hash: Some(tree_hash),
-        category: crate::core::skill::SkillCategory::None,
-        author: None,
-        topics: Vec::new(),
-        agent_links: Some(Vec::new()),
-        rank: None,
-        source,
-    })
+    skill_install::install_skill(url, name).await
 }
 
 #[tauri::command]
@@ -235,11 +88,15 @@ pub async fn uninstall_skill(name: String) -> Result<(), String> {
         }
     }
 
-    let _lock = lockfile::get_mutex().lock().await;
+    let _lock = lockfile::get_mutex()
+        .lock()
+        .map_err(|_| "Lockfile mutex poisoned".to_string())?;
     let lock_path = lockfile::lockfile_path();
-    let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
+    let mut lf = lockfile::Lockfile::load(&lock_path)
+        .map_err(|e| format!("Failed to load lockfile '{}': {}", lock_path.display(), e))?;
     lf.remove(&name);
-    let _ = lf.save(&lock_path);
+    lf.save(&lock_path)
+        .map_err(|e| format!("Failed to save lockfile '{}': {}", lock_path.display(), e))?;
 
     let _ = project_manifest::remove_skill_from_all_projects(&name);
     crate::core::installed_skill::invalidate_cache();
@@ -267,9 +124,12 @@ pub async fn update_skill(name: String) -> Result<UpdateResult, String> {
     // Check if this is a repo-cached skill (symlink into .repos/)
     let is_repo_skill = repo_scanner::is_repo_cached_skill(&path);
 
-    let _lock = lockfile::get_mutex().lock().await;
+    let _lock = lockfile::get_mutex()
+        .lock()
+        .map_err(|_| "Lockfile mutex poisoned".to_string())?;
     let lock_path = lockfile::lockfile_path();
-    let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
+    let mut lf = lockfile::Lockfile::load(&lock_path)
+        .map_err(|e| format!("Failed to load lockfile '{}': {}", lock_path.display(), e))?;
     let lock_entry = lf.skills.iter().find(|s| s.name == name).cloned();
 
     let tree_hash = if is_repo_skill {
@@ -314,7 +174,8 @@ pub async fn update_skill(name: String) -> Result<UpdateResult, String> {
         entry.tree_hash = tree_hash.clone();
     }
 
-    let _ = lf.save(&lock_path);
+    lf.save(&lock_path)
+        .map_err(|e| format!("Failed to save lockfile '{}': {}", lock_path.display(), e))?;
     crate::core::installed_skill::invalidate_cache();
 
     // Invalidate security scan cache — content changed, old results are stale
@@ -456,10 +317,46 @@ pub async fn deploy_skill_group(
 
     // Download any missing skills before syncing
     let skills_dir = sync::get_hub_skills_dir();
+    let mut sources = group.skill_sources.clone();
+
+    // Collect skill names that are missing from the hub and have no known source
+    let names_needing_source: Vec<String> = group
+        .skills
+        .iter()
+        .filter(|name| !skills_dir.join(name).exists() && !sources.contains_key(*name))
+        .cloned()
+        .collect();
+
+    // Resolve missing sources via marketplace search
+    if !names_needing_source.is_empty() {
+        eprintln!(
+            "[deploy_skill_group] Resolving {} missing skill source(s) via marketplace snapshot",
+            names_needing_source.len()
+        );
+        match marketplace_snapshot::resolve_skill_sources_local_first(
+            &names_needing_source,
+            &sources,
+        )
+        .await
+        {
+            Ok(resolved) => {
+                for (name, url) in resolved {
+                    sources.insert(name, url);
+                }
+            }
+            Err(err) => {
+                eprintln!(
+                    "[deploy_skill_group] Failed to resolve missing skill sources: {}",
+                    err
+                );
+            }
+        }
+    }
+
     let mut install_tasks = tokio::task::JoinSet::new();
     for skill_name in &group.skills {
         if !skills_dir.join(skill_name).exists() {
-            if let Some(git_url) = group.skill_sources.get(skill_name) {
+            if let Some(git_url) = sources.get(skill_name) {
                 let git_url = git_url.clone();
                 let skill_name = skill_name.clone();
                 install_tasks.spawn(async move {

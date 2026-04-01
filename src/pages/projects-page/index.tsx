@@ -10,10 +10,12 @@ import { AgentDisambiguationDialog } from "../../components/skills/AgentDisambig
 import { useProjectManifest } from "../../hooks/useProjectManifest";
 import { useSkills } from "../../hooks/useSkills";
 import { useAgentProfiles } from "../../hooks/useAgentProfiles";
-import type { ProjectEntry, ScannedSkill, AmbiguousGroup, DetectedAgent, Skill } from "../../types";
+import type { ProjectEntry, ScannedSkill, Skill } from "../../types";
 import { DeployBanner } from "./DeployBanner";
 import { ProjectListPanel } from "./ProjectListPanel";
 import { ProjectDetailPanel } from "./ProjectDetailPanel";
+import { useProjectAgentDetection } from "./useProjectAgentDetection";
+import { useProjectSkills } from "./useProjectSkills";
 
 interface ProjectsProps {
   preSelectedSkills?: string[] | null;
@@ -128,20 +130,6 @@ export function Projects({
   const [deployDialogOpen, setDeployDialogOpen] = useState(false);
   const [deployDialogInitialAgents, setDeployDialogInitialAgents] = useState<string[]>([]);
 
-  // Scan & Import state
-  const [unmanagedSkills, setUnmanagedSkills] = useState<ScannedSkill[]>([]);
-  const [importing, setImporting] = useState(false);
-  const [importDone, setImportDone] = useState<{ hub: number; links: number } | null>(null);
-  const [scanExpanded, setScanExpanded] = useState(false);
-
-  // Agent disambiguation state
-  const [disambigOpen, setDisambigOpen] = useState(false);
-  const [disambigGroup, setDisambigGroup] = useState<AmbiguousGroup | null>(null);
-  const [disambigCandidates, setDisambigCandidates] = useState<DetectedAgent[]>([]);
-  const [disambigQueue, setDisambigQueue] = useState<AmbiguousGroup[]>([]);
-  const [scannedSymlinkSkillsByAgent, setScannedSymlinkSkillsByAgent] = useState<
-    Record<string, string[]>
-  >({});
   const [detailSkillName, setDetailSkillName] = useState<string | null>(null);
   const ownerBySharedPath = useMemo(() => {
     const map = new Map<string, string>();
@@ -272,6 +260,56 @@ export function Projects({
     [enabledProfileIdSet, pathByAgentId]
   );
 
+  // ── Extracted hooks ──────────────────────────────────────────────
+
+  const {
+    disambigOpen,
+    disambigGroup,
+    disambigCandidates,
+    setScannedSymlinkSkillsByAgent,
+    resetDisambigState,
+    runAgentDetection,
+    handleDisambigConfirm,
+    handleDisambigClose,
+  } = useProjectAgentDetection({
+    enabledProfileIdSet,
+    pathByAgentId,
+    canonicalizeAgentsBySharedPath,
+    detectProjectAgents,
+    saveProjectSkillsList,
+    filterAgentsByEnabledProfiles,
+    loadProjects,
+    onAgentSkillsChange: useCallback((updater: (prev: Record<string, string[]>) => Record<string, string[]>) => {
+      setAgentSkills(updater);
+    }, []),
+    onDirtyChange: setDirty,
+    onSavingChange: setSaving,
+    onExpandedAgentChange: setExpandedAgent,
+  });
+
+  const {
+    unmanagedSkills,
+    importing,
+    importDone,
+    scanExpanded,
+    setScanExpanded,
+    resetScanState,
+    setUnmanagedAndMaybeExpand,
+    handleImportAll,
+  } = useProjectSkills({
+    pathByAgentId,
+    ownerBySharedPath,
+    canonicalizeAgentsBySharedPath,
+    filterAgentsByEnabledProfiles,
+    filterUnmanagedByEnabledProfiles,
+    importProjectSkills,
+    loadProjectSkills,
+    scanProjectSkills,
+    onAgentSkillsChange: useCallback((updater: (prev: Record<string, string[]>) => Record<string, string[]>) => {
+      setAgentSkills(updater);
+    }, []),
+  });
+
   const buildSymlinkSkillIndex = useCallback(
     (skills: ScannedSkill[]): Record<string, string[]> => {
       const index: Record<string, string[]> = {};
@@ -341,199 +379,14 @@ export function Projects({
     [suggestDeployAgentIds]
   );
 
-  // ── Agent detection flow ───────────────────────────────────────────
-
-  const runAgentDetection = useCallback(
-    async (
-      projectPath: string,
-      currentAgents: Record<string, string[]>,
-      symlinkSkillsByAgent: Record<string, string[]>,
-      suppressDisambiguationDialog = false
-    ) => {
-      try {
-        const detection = await detectProjectAgents(projectPath);
-
-        // Skip detection if the project already has configured agents
-        const hasExistingConfig = Object.keys(currentAgents).length > 0;
-        if (hasExistingConfig) return;
-
-        const autoEnable = new Set(
-          detection.auto_enable.filter((agentId) =>
-            enabledProfileIdSet.has(agentId)
-          )
-        );
-
-        // Queue ambiguous groups for disambiguation.
-        // Only include agents that are enabled in Settings.
-        const relevantGroups: AmbiguousGroup[] = [];
-        for (const group of detection.ambiguous_groups) {
-          const enabledAgentIds = group.agent_ids.filter((id) =>
-            enabledProfileIdSet.has(id)
-          );
-
-          if (enabledAgentIds.length > 1) {
-            relevantGroups.push({
-              path: group.path,
-              agent_ids: enabledAgentIds,
-              agent_names: group.agent_names.filter((_, index) =>
-                enabledProfileIdSet.has(group.agent_ids[index])
-              ),
-            });
-            continue;
-          }
-
-          if (enabledAgentIds.length === 1) {
-            autoEnable.add(enabledAgentIds[0]);
-          }
-        }
-
-        // Auto-enable agents with unique detected paths
-        if (autoEnable.size > 0) {
-          setAgentSkills((prev) => {
-            const next = { ...prev };
-            for (const agentId of autoEnable) {
-              const current = next[agentId] ?? [];
-              const scanned = symlinkSkillsByAgent[agentId] ?? [];
-              const merged = [...new Set([...current, ...scanned])];
-              next[agentId] = merged;
-            }
-            return canonicalizeAgentsBySharedPath(next);
-          });
-          setDirty(true);
-        }
-
-        if (!suppressDisambiguationDialog && relevantGroups.length > 0) {
-          const enabledDetected = detection.detected.filter((agent) =>
-            enabledProfileIdSet.has(agent.agent_id)
-          );
-          setDisambigCandidates(enabledDetected);
-          // Show the first group immediately, queue the rest
-          setDisambigGroup(relevantGroups[0]);
-          setDisambigQueue(relevantGroups.slice(1));
-          setDisambigOpen(true);
-        }
-      } catch (e) {
-        console.error("Agent detection failed:", e);
-      }
-    },
-    [detectProjectAgents, enabledProfileIdSet, canonicalizeAgentsBySharedPath]
-  );
-
-  const handleDisambigConfirm = useCallback(
-    async (selectedAgentId: string) => {
-      const forcedOwnerByPath = new Map<string, string>();
-      const selectedPath = pathByAgentId.get(selectedAgentId);
-      if (selectedPath) {
-        forcedOwnerByPath.set(selectedPath, selectedAgentId);
-      }
-
-      // Hydrate from the whole conflict group (shared path), not just the
-      // selected agent id. This keeps rendering stable even if scan attribution
-      // lands on another agent in the same shared directory group.
-      const conflictAgentIds = disambigGroup?.agent_ids?.length
-        ? disambigGroup.agent_ids
-        : [selectedAgentId];
-      let nextAgents = {
-        ...agentSkills,
-      };
-      for (const conflictAgentId of conflictAgentIds) {
-        if (conflictAgentId !== selectedAgentId) {
-          delete nextAgents[conflictAgentId];
-        }
-      }
-      if (enabledProfileIdSet.has(selectedAgentId) && !(selectedAgentId in nextAgents)) {
-        nextAgents[selectedAgentId] = [];
-      }
-      nextAgents = canonicalizeAgentsBySharedPath(nextAgents, forcedOwnerByPath);
-
-      const preScannedSkills = [
-        ...new Set(
-          conflictAgentIds.flatMap(
-            (agentId) => scannedSymlinkSkillsByAgent[agentId] ?? []
-          )
-        ),
-      ];
-      if (preScannedSkills.length > 0) {
-        const current = nextAgents[selectedAgentId] ?? [];
-        const merged = [...new Set([...current, ...preScannedSkills])];
-        if (merged.length !== current.length) {
-          nextAgents = {
-            ...nextAgents,
-            [selectedAgentId]: merged,
-          };
-          nextAgents = canonicalizeAgentsBySharedPath(
-            nextAgents,
-            forcedOwnerByPath
-          );
-        }
-      }
-      setAgentSkills(nextAgents);
-      setExpandedAgent(selectedAgentId);
-      setDirty(true);
-
-      // "Confirm" in disambiguation should persist immediately, but avoid
-      // destructive full-sync behavior for shared-path resolution.
-      if (selectedProject) {
-        setSaving(true);
-        try {
-          await saveProjectSkillsList(
-            selectedProject.path,
-            filterAgentsByEnabledProfiles(nextAgents)
-          );
-          setDirty(false);
-          loadProjects();
-        } catch (e) {
-          console.error("Auto-persist after disambiguation failed:", e);
-        } finally {
-          setSaving(false);
-        }
-      }
-
-      // Process next group in queue, or close
-      if (disambigQueue.length > 0) {
-        setDisambigGroup(disambigQueue[0]);
-        setDisambigQueue((prev) => prev.slice(1));
-      } else {
-        setDisambigOpen(false);
-        setDisambigGroup(null);
-        setDisambigCandidates([]);
-      }
-    },
-    [
-      agentSkills,
-      enabledProfileIdSet,
-      disambigGroup,
-      disambigQueue,
-      scannedSymlinkSkillsByAgent,
-      selectedProject,
-      saveProjectSkillsList,
-      filterAgentsByEnabledProfiles,
-      canonicalizeAgentsBySharedPath,
-      pathByAgentId,
-      loadProjects,
-    ]
-  );
-
-  const handleDisambigClose = useCallback(() => {
-    setDisambigOpen(false);
-    setDisambigGroup(null);
-    setDisambigQueue([]);
-    setDisambigCandidates([]);
-  }, []);
-
   // ── Project selection ─────────────────────────────────────────────
 
   const handleSelectProject = useCallback(
     async (project: ProjectEntry) => {
       // Reset scan state
       setDetailSkillName(null);
-      setUnmanagedSkills([]);
-      setImportDone(null);
-      setScanExpanded(false);
-      setDisambigOpen(false);
-      setDisambigGroup(null);
-      setDisambigCandidates([]);
-      setDisambigQueue([]);
+      resetScanState();
+      resetDisambigState();
 
       const skills = await loadProjectSkills(project.name);
       let agentsFromConfig: Record<string, string[]> = skills
@@ -617,12 +470,12 @@ export function Projects({
         project.path,
         agents,
         symlinkSkillsByAgent,
+        project,
         Boolean(pendingGroupSkills && pendingGroupSkills.length > 0)
       );
 
       const unmanaged = filterUnmanagedByEnabledProfiles(scannedSkills);
-      setUnmanagedSkills(unmanaged);
-      if (unmanaged.length > 0) setScanExpanded(true);
+      setUnmanagedAndMaybeExpand(unmanaged);
     },
     [
       buildSymlinkSkillIndex,
@@ -636,8 +489,12 @@ export function Projects({
       pendingGroupSkills,
       presentProjectState,
       rebuildProjectSkillsFromDisk,
+      resetScanState,
+      resetDisambigState,
       runAgentDetection,
       scanProjectSkills,
+      setScannedSymlinkSkillsByAgent,
+      setUnmanagedAndMaybeExpand,
       canonicalizeAgentsBySharedPath,
     ]
   );
@@ -878,75 +735,6 @@ export function Projects({
     [hubSkills, agentSkills, skillFilter]
   );
 
-  const handleImportAll = useCallback(async () => {
-    if (!selectedProject || unmanagedSkills.length === 0) return;
-    setImporting(true);
-    setImportDone(null);
-    try {
-      const dedupedTargets = new Map<string, { name: string; agent_id: string }>();
-      for (const skill of unmanagedSkills) {
-        const path = pathByAgentId.get(skill.agent_id) ?? skill.agent_id;
-        const ownerAgentId = ownerBySharedPath.get(path) ?? skill.agent_id;
-        const key = `${path}::${skill.name}`;
-        if (!dedupedTargets.has(key)) {
-          dedupedTargets.set(key, {
-            name: skill.name,
-            agent_id: ownerAgentId,
-          });
-        }
-      }
-      const targets = Array.from(dedupedTargets.values());
-      const result = await importProjectSkills(
-        selectedProject.path,
-        selectedProject.name,
-        targets
-      );
-      setImportDone({
-        hub: result.imported_to_hub.length,
-        links: result.symlink_count,
-      });
-      setUnmanagedSkills([]);
-
-      // Reload project skills to reflect merged state
-      const skills = await loadProjectSkills(selectedProject.name);
-      if (skills) {
-        const filteredAgents = filterAgentsByEnabledProfiles({ ...skills.agents });
-        const preferredOwnerByPath = new Map(ownerBySharedPath);
-        for (const agentId of Object.keys(filteredAgents)) {
-          const path = pathByAgentId.get(agentId) ?? agentId;
-          if (!preferredOwnerByPath.has(path)) {
-            preferredOwnerByPath.set(path, agentId);
-          }
-        }
-        setAgentSkills(
-          canonicalizeAgentsBySharedPath(filteredAgents, preferredOwnerByPath)
-        );
-      }
-
-      // Re-scan to confirm everything is clean
-      const rescan = await scanProjectSkills(selectedProject.path);
-      const remaining = filterUnmanagedByEnabledProfiles(rescan.skills);
-      setUnmanagedSkills(remaining);
-
-      setTimeout(() => setImportDone(null), 4000);
-    } catch (e) {
-      console.error("Import failed:", e);
-    } finally {
-      setImporting(false);
-    }
-  }, [
-    selectedProject,
-    unmanagedSkills,
-    filterAgentsByEnabledProfiles,
-    filterUnmanagedByEnabledProfiles,
-    importProjectSkills,
-    loadProjectSkills,
-    ownerBySharedPath,
-    pathByAgentId,
-    scanProjectSkills,
-    canonicalizeAgentsBySharedPath,
-  ]);
-
   const enabledAgents = useMemo(
     () => Object.keys(agentSkills).filter((agentId) => enabledProfileIdSet.has(agentId)),
     [agentSkills, enabledProfileIdSet]
@@ -974,7 +762,7 @@ export function Projects({
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden relative">
-      <div className="h-14 flex items-center justify-between px-6 border-b border-border bg-card/30 backdrop-blur-sm">
+      <div className="h-14 flex items-center justify-between px-6 border-b border-border bg-sidebar">
         <div className="flex items-center gap-3">
           <h1>{t("sidebar.projects")}</h1>
           {projects.length > 0 && (
@@ -1023,7 +811,7 @@ export function Projects({
             dirty={dirty}
             getAvailableSkills={getAvailableSkills}
             onToggleScanExpanded={() => setScanExpanded((value) => !value)}
-            onImportAll={handleImportAll}
+            onImportAll={() => handleImportAll(selectedProject)}
             onToggleExpand={handleToggleExpand}
             onToggleAgent={handleToggleAgent}
             onNavigateToSkill={handleOpenSkillDetail}
@@ -1052,13 +840,13 @@ export function Projects({
         group={disambigGroup}
         allDetected={disambigCandidates}
         onClose={handleDisambigClose}
-        onConfirm={handleDisambigConfirm}
+        onConfirm={(selectedAgentId: string) => handleDisambigConfirm(selectedAgentId, agentSkills, selectedProject)}
       />
 
       {selectedDetailSkill && (
         <Suspense
           fallback={
-            <div className="absolute right-0 top-0 bottom-0 w-[400px] h-full border-l border-white/10 bg-card/60 backdrop-blur-xl shadow-2xl overflow-y-auto z-50 rounded-tl-xl rounded-bl-xl flex items-center justify-center">
+            <div className="absolute right-0 top-0 bottom-0 w-full max-w-sm h-full border-l border-border bg-card backdrop-blur-xl shadow-2xl overflow-y-auto z-50 rounded-tl-xl rounded-bl-xl flex items-center justify-center">
               <LoadingLogo size="sm" />
             </div>
           }

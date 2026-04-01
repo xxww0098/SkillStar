@@ -1,8 +1,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
-use tokio::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 static LOCKFILE_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
 

@@ -1,13 +1,18 @@
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 import { X, FileText, Eye, Globe, Sparkles, Loader2, RotateCcw, Square } from "lucide-react";
 import { Button } from "../ui/button";
 import { Markdown } from "../ui/Markdown";
 import { ResizablePanel } from "../ui/ResizablePanel";
-import { unwrapOuterMarkdownFence, navigateToAiSettings } from "../../lib/utils";
-import type { AiConfigStatus, AiStreamPayload, FrontmatterEntry } from "../../types";
+import {
+  formatAiErrorMessage,
+  normalizeSkillMarkdownForPreview,
+  unwrapOuterMarkdownFence,
+  navigateToAiSettings,
+} from "../../lib/utils";
+import { useAiStream } from "../../hooks/useAiStream";
+import type { AiConfig, FrontmatterEntry } from "../../types";
 
 interface SkillReaderProps {
   skillName: string;
@@ -93,9 +98,11 @@ function parseFrontmatterEntries(frontmatter: string | null): FrontmatterEntry[]
   return entries;
 }
 
-/** Module-level translation cache: content → translatedContent. Survives component unmount. */
-const translationCache = new Map<string, string>();
-/** Module-level summary cache: content → summaryContent. */
+function buildCacheKey(targetLanguage: string, sourceContent: string): string {
+  return `${targetLanguage}::${sourceContent}`;
+}
+
+/** Module-level summary cache keyed by target language + content. */
 const summaryCache = new Map<string, string>();
 
 const MAX_CACHE_SIZE = 100;
@@ -112,242 +119,121 @@ function trimCache<K, V>(cache: Map<K, V>) {
 
 export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
   const { t } = useTranslation();
+  const [targetLanguage, setTargetLanguage] = useState("zh-CN");
+  const [retranslating, setRetranslating] = useState(false);
 
-  // AI features
-  const [translatedContent, setTranslatedContent] = useState<string | null>(() =>
-    translationCache.get(content) ?? null
+  const translationStream = useAiStream({
+    command: "ai_translate_skill_stream",
+    eventChannel: "ai://translate-stream",
+    normalizeResult: (_source, result) =>
+      normalizeSkillMarkdownForPreview(unwrapOuterMarkdownFence(result).trim()),
+  });
+  const summaryStream = useAiStream({
+    command: "ai_summarize_skill_stream",
+    eventChannel: "ai://summarize-stream",
+  });
+
+  const translatedContent = translationStream.content;
+  const translationVisible = translationStream.visible;
+  const translating = translationStream.loading;
+  const translationHasDelta = translationStream.hasDelta;
+  const translationWasNonStreaming = translationStream.wasNonStreaming;
+  const summaryContent = summaryStream.content;
+  const summaryVisible = summaryStream.visible;
+  const summarizing = summaryStream.loading;
+  const summaryHasDelta = summaryStream.hasDelta;
+  const aiConfigured = translationStream.aiConfigured;
+  const aiError = translationStream.error ?? summaryStream.error;
+  const localizedAiError = formatAiErrorMessage(aiError, t);
+
+  const previewSource = normalizeSkillMarkdownForPreview(
+    translationVisible && translatedContent != null ? translatedContent : content
   );
-  const [translationVisible, setTranslationVisible] = useState(false);
-  const [translating, setTranslating] = useState(false);
-  const [translationHasDelta, setTranslationHasDelta] = useState(false);
-  const [translationWasNonStreaming, setTranslationWasNonStreaming] = useState(false);
-  const [summaryContent, setSummaryContent] = useState<string | null>(() =>
-    summaryCache.get(content) ?? null
-  );
-  const [summaryVisible, setSummaryVisible] = useState(false);
-  const [summarizing, setSummarizing] = useState(false);
-  const [summaryHasDelta, setSummaryHasDelta] = useState(false);
-  const [aiError, setAiError] = useState<string | null>(null);
-  const [aiConfigured, setAiConfigured] = useState(false);
-
-  // Cancel refs
-  const activeTranslateIdRef = useRef<string | null>(null);
-  const activeSummarizeIdRef = useRef<string | null>(null);
-  const translateUnlistenRef = useRef<(() => void) | null>(null);
-  const summarizeUnlistenRef = useRef<(() => void) | null>(null);
-
-  const previewSource = translationVisible && translatedContent != null ? translatedContent : content;
   const previewFrontmatterEntries = parseFrontmatterEntries(splitFrontmatter(previewSource).frontmatter);
   const previewContent = splitFrontmatter(previewSource).body;
 
   useEffect(() => {
+    let cancelled = false;
     const loadAiConfig = async () => {
       try {
-        const config = await invoke<AiConfigStatus>("get_ai_config");
-        setAiConfigured(config.enabled && config.api_key.trim().length > 0);
+        const config = await invoke<AiConfig>("get_ai_config");
+        if (!cancelled) {
+          setTargetLanguage(config.target_language || "zh-CN");
+        }
       } catch {
-        setAiConfigured(false);
+        if (!cancelled) {
+          setTargetLanguage("zh-CN");
+        }
       }
     };
-    loadAiConfig();
+    void loadAiConfig();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  // Cleanup event listeners on unmount
   useEffect(() => {
-    return () => {
-      if (translateUnlistenRef.current) {
-        translateUnlistenRef.current();
-        translateUnlistenRef.current = null;
-      }
-      if (summarizeUnlistenRef.current) {
-        summarizeUnlistenRef.current();
-        summarizeUnlistenRef.current = null;
-      }
-    };
-  }, []);
+    translationStream.hydrate(null, null);
+    translationStream.setVisible(false);
+    translationStream.setError(null);
+
+    const summaryKey = buildCacheKey(targetLanguage, content);
+    const cachedSummary = summaryCache.get(summaryKey) ?? null;
+    summaryStream.hydrate(cachedSummary, cachedSummary ? content : null);
+    summaryStream.setVisible(false);
+    summaryStream.setError(null);
+
+    setRetranslating(false);
+  }, [content, targetLanguage]);
+
+  const clearAiError = () => {
+    translationStream.setError(null);
+    summaryStream.setError(null);
+  };
 
   const handleTranslate = async () => {
     if (!aiConfigured) return;
 
-    // Cancel in-progress translation
     if (translating) {
-      activeTranslateIdRef.current = null;
-      if (translateUnlistenRef.current) {
-        translateUnlistenRef.current();
-        translateUnlistenRef.current = null;
-      }
-      setTranslating(false);
-      if (!translatedContent) {
-        setTranslationVisible(false);
-      }
+      translationStream.cancel();
+      setRetranslating(false);
       return;
     }
 
-    if (translationVisible) {
-      setTranslationVisible(false);
-      return;
-    }
+    setRetranslating(false);
+    clearAiError();
+    await translationStream.execute(content);
+  };
 
-    if (translatedContent) {
-      setTranslationVisible(true);
-      return;
-    }
+  const handleAiRetranslate = async () => {
+    if (!aiConfigured || translating) return;
 
-    const requestId =
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : `reader-translate-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    activeTranslateIdRef.current = requestId;
-    let streamedRaw = "";
-    let deltaCount = 0;
-
-    setTranslating(true);
-    setAiError(null);
-    setTranslationHasDelta(false);
-    setTranslationWasNonStreaming(false);
-    // Don't set translationVisible or translatedContent yet —
-    // keep showing original content until first delta or final result arrives.
+    setRetranslating(true);
+    clearAiError();
     try {
-      const unlisten = await listen<AiStreamPayload>("ai://translate-stream", (event) => {
-        if (activeTranslateIdRef.current !== requestId) return;
-        const payload = event.payload;
-        if (payload.requestId !== requestId) return;
-
-        if (payload.event === "delta" && payload.delta) {
-          deltaCount += 1;
-          if (deltaCount >= 2) setTranslationHasDelta(true);
-          streamedRaw += payload.delta;
-          setTranslatedContent(streamedRaw);
-          // Show translated content now that we have actual data
-          setTranslationVisible(true);
-          return;
-        }
-
-        if (payload.event === "error" && payload.message) {
-          setAiError(payload.message);
-        }
+      await translationStream.execute(content, {
+        forceRefresh: true,
+        keepVisibleWhileLoading: true,
       });
-      translateUnlistenRef.current = unlisten;
-
-      const result = await invoke<string>("ai_translate_skill_stream", {
-        requestId,
-        content,
-      });
-
-      if (activeTranslateIdRef.current !== requestId) return;
-      const final = unwrapOuterMarkdownFence(result).trim();
-      setTranslatedContent(final);
-      setTranslationVisible(true);
-      setTranslationWasNonStreaming(deltaCount < 2);
-      // Cache completed translation
-      translationCache.set(content, final);
-      trimCache(translationCache);
-    } catch (e) {
-      if (activeTranslateIdRef.current !== requestId) return;
-      setTranslationHasDelta(deltaCount >= 2);
-      setTranslationWasNonStreaming(false);
-      if (!streamedRaw.trim()) {
-        setTranslatedContent(null);
-        setTranslationVisible(false);
-      } else {
-        setTranslatedContent(streamedRaw);
-        setTranslationVisible(true);
-      }
-      setAiError(String(e));
     } finally {
-      if (translateUnlistenRef.current) {
-        translateUnlistenRef.current();
-        translateUnlistenRef.current = null;
-      }
-      if (activeTranslateIdRef.current === requestId) {
-        setTranslating(false);
-        activeTranslateIdRef.current = null;
-      }
+      setRetranslating(false);
     }
   };
 
   const handleSummarize = async () => {
     if (!aiConfigured) return;
 
-    // Cancel in-progress summarize
     if (summarizing) {
-      activeSummarizeIdRef.current = null;
-      if (summarizeUnlistenRef.current) {
-        summarizeUnlistenRef.current();
-        summarizeUnlistenRef.current = null;
-      }
-      setSummarizing(false);
-      if (!summaryContent) {
-        setSummaryContent(null);
-      }
+      summaryStream.cancel();
       return;
     }
 
-    if (summaryContent) {
-      setSummaryVisible((v) => !v);
-      return;
-    }
-
-    const requestId =
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : `reader-summary-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    activeSummarizeIdRef.current = requestId;
-    let streamedRaw = "";
-    let deltaCount = 0;
-
-    setSummarizing(true);
-    setAiError(null);
-    setSummaryHasDelta(false);
-    setSummaryContent(null);
-    setSummaryVisible(true);
-    try {
-      const unlisten = await listen<AiStreamPayload>("ai://summarize-stream", (event) => {
-        if (activeSummarizeIdRef.current !== requestId) return;
-        const payload = event.payload;
-        if (payload.requestId !== requestId) return;
-
-        if (payload.event === "delta" && payload.delta) {
-          deltaCount += 1;
-          if (deltaCount >= 2) setSummaryHasDelta(true);
-          streamedRaw += payload.delta;
-          setSummaryContent(streamedRaw);
-          return;
-        }
-
-        if (payload.event === "error" && payload.message) {
-          setAiError(payload.message);
-        }
-      });
-      summarizeUnlistenRef.current = unlisten;
-
-      const result = await invoke<string>("ai_summarize_skill_stream", {
-        requestId,
-        content,
-      });
-
-      if (activeSummarizeIdRef.current !== requestId) return;
-      setSummaryContent(result);
-      // Cache completed summary
-      summaryCache.set(content, result);
+    clearAiError();
+    const result = await summaryStream.execute(content);
+    if (result != null) {
+      const key = buildCacheKey(targetLanguage, content);
+      summaryCache.set(key, result);
       trimCache(summaryCache);
-    } catch (e) {
-      if (activeSummarizeIdRef.current !== requestId) return;
-      if (!streamedRaw.trim()) {
-        setSummaryContent(null);
-      } else {
-        setSummaryContent(streamedRaw);
-      }
-      setAiError(String(e));
-    } finally {
-      if (summarizeUnlistenRef.current) {
-        summarizeUnlistenRef.current();
-        summarizeUnlistenRef.current = null;
-      }
-      if (activeSummarizeIdRef.current === requestId) {
-        setSummarizing(false);
-        activeSummarizeIdRef.current = null;
-      }
     }
   };
 
@@ -424,6 +310,35 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
               ? t("skillEditor.showTranslation")
               : t("skillEditor.translate")}
           </button>
+          {translatedContent && (
+            <button
+              onClick={() => {
+                if (!aiConfigured) {
+                  navigateToAiSettings();
+                  return;
+                }
+                void handleAiRetranslate();
+              }}
+              disabled={translating}
+              className={`flex items-center gap-1 px-2 py-1 rounded-md text-micro font-medium transition-colors cursor-pointer ${
+                translating && retranslating
+                  ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
+                  : aiConfigured
+                  ? "text-muted-foreground hover:text-foreground hover:bg-card-hover"
+                  : "text-primary/80 bg-primary/5 border border-primary/20 hover:bg-primary/10"
+              } disabled:cursor-not-allowed disabled:opacity-60`}
+              title={t("skillEditor.retranslateWithAi")}
+            >
+              {translating && retranslating ? (
+                <Square className="w-3 h-3 fill-current" />
+              ) : (
+                <Sparkles className="w-3 h-3" />
+              )}
+              {translating && retranslating
+                ? t("skillEditor.retranslatingWithAi")
+                : t("skillEditor.retranslateWithAi")}
+            </button>
+          )}
           <button
             onClick={() => {
               if (!aiConfigured) {
@@ -476,11 +391,11 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
       )}
 
       {/* AI Error Banner */}
-      {aiError && (
+      {localizedAiError && (
         <div className="px-4 py-2 bg-destructive/10 border-b border-destructive/20 flex items-center gap-2">
-          <span className="text-xs text-destructive flex-1">{aiError}</span>
+          <span className="text-xs text-destructive flex-1">{localizedAiError}</span>
           <button
-            onClick={() => setAiError(null)}
+            onClick={clearAiError}
             className="text-destructive/60 hover:text-destructive cursor-pointer"
           >
             <X className="w-3 h-3" />
@@ -514,7 +429,7 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
               )}
             </div>
             {summaryContent ? (
-              <Markdown className="text-sm">
+              <Markdown streaming={summarizing} className="text-sm">
                 {summaryContent}
               </Markdown>
             ) : summarizing ? (
@@ -551,7 +466,7 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
         {previewContent.trim().length === 0 && previewFrontmatterEntries.length === 0 ? (
           <div className="text-sm text-muted-foreground">{t("skillEditor.noContent")}</div>
         ) : (
-          <Markdown fallback={<div className="text-sm text-muted-foreground">Loading preview...</div>}>
+          <Markdown streaming={translating && translationVisible} fallback={<div className="text-sm text-muted-foreground">Loading preview...</div>}>
             {previewContent}
           </Markdown>
         )}

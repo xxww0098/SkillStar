@@ -32,6 +32,16 @@ function formatGlobalPath(path: string): string {
   return normalized;
 }
 
+function displayPaths(profile: AgentProfile): string[] {
+  const primary = formatGlobalPath(profile.global_skills_dir);
+  if (profile.id !== "codex") return [primary];
+
+  const codexLegacyPath = "~/.agents/skills";
+  if (primary === codexLegacyPath) return [primary];
+
+  return [primary, codexLegacyPath];
+}
+
 export function AgentConnectionsSection({
   profiles,
   profilesLoading,
@@ -73,11 +83,18 @@ export function AgentConnectionsSection({
                     <AgentIcon profile={profile} className={cn(agentIconCls(profile.icon, "w-5 h-5"), "object-contain")} />
                   </div>
 
-                  <div className="flex-1 flex items-center gap-2.5 min-w-0">
-                    <span className="text-sm font-medium truncate shrink-0">{profile.display_name}</span>
-                    <span className="text-micro text-muted-foreground/60 font-mono bg-muted/40 px-1.5 py-0.5 rounded-md truncate">
-                      {formatGlobalPath(profile.global_skills_dir)}
-                    </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium truncate">{profile.display_name}</div>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5 min-w-0">
+                      {displayPaths(profile).map((path) => (
+                        <span
+                          key={`${profile.id}-${path}`}
+                          className="text-micro text-muted-foreground/60 font-mono bg-muted/40 px-1.5 py-0.5 rounded-md break-all max-w-full"
+                        >
+                          {path}
+                        </span>
+                      ))}
+                    </div>
                   </div>
 
                   {profile.enabled && profile.synced_count > 0 && (

@@ -6,10 +6,12 @@ import React from "react";
 export interface SearchInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   containerClassName?: string;
   iconClassName?: string;
+  /** Optional element rendered at the right edge inside the input container */
+  suffix?: React.ReactNode;
 }
 
 export const SearchInput = React.forwardRef<HTMLInputElement, SearchInputProps>(
-  ({ className, containerClassName, iconClassName, ...props }, ref) => {
+  ({ className, containerClassName, iconClassName, suffix, ...props }, ref) => {
     return (
       <div className={cn("relative flex-1", containerClassName)}>
         <Search 
@@ -20,9 +22,14 @@ export const SearchInput = React.forwardRef<HTMLInputElement, SearchInputProps>(
         />
         <Input 
           ref={ref}
-          className={cn("pl-8", className)} 
+          className={cn("pl-8", suffix ? "pr-9" : undefined, className)} 
           {...props} 
         />
+        {suffix && (
+          <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center">
+            {suffix}
+          </div>
+        )}
       </div>
     );
   }

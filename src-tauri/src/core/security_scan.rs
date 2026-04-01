@@ -2509,7 +2509,46 @@ fn db_path() -> PathBuf {
     super::paths::data_root().join("security_scan.db")
 }
 
-fn init_db() -> Result<Connection> {
+/// Cached SQLite connection for the security scan database.
+///
+/// The connection is opened once on first use and reused across all
+/// cache reads/writes, avoiding the overhead of repeated open +
+/// `CREATE TABLE IF NOT EXISTS` calls during batch scans.
+static SCAN_DB: std::sync::LazyLock<Mutex<Option<Connection>>> =
+    std::sync::LazyLock::new(|| Mutex::new(None));
+
+fn get_db() -> Result<std::sync::MutexGuard<'static, Option<Connection>>> {
+    let mut guard = SCAN_DB
+        .lock()
+        .map_err(|e| anyhow::anyhow!("scan DB mutex poisoned: {}", e))?;
+    if guard.is_none() {
+        let conn = open_and_migrate_db()?;
+        *guard = Some(conn);
+    }
+    Ok(guard)
+}
+
+/// Macro to borrow `&Connection` from a `MutexGuard<Option<Connection>>`.
+/// Keeps borrowing ergonomic and avoids repeating the unwrap.
+macro_rules! conn_ref {
+    ($guard:expr) => {
+        $guard
+            .as_ref()
+            .expect("scan db connection missing after get_db")
+    };
+}
+
+/// Drop the cached connection so the next `get_db()` reopens at the
+/// current `db_path()`.  Used by tests that override `SKILLSTAR_DATA_DIR`.
+#[cfg(test)]
+fn reset_scan_db() {
+    if let Ok(mut guard) = SCAN_DB.lock() {
+        *guard = None;
+    }
+}
+
+/// Open the SQLite database, create tables, and run one-time migrations.
+fn open_and_migrate_db() -> Result<Connection> {
     let path = db_path();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).context("Failed to create db directory")?;
@@ -2540,7 +2579,24 @@ fn init_db() -> Result<Connection> {
         )",
         (),
     )?;
+
+    // ── One-time migrations (P3 + P6) ──────────────────────────────
+    // Drop legacy v1 table if it lingered from an older schema.
+    let _ = conn.execute("DROP TABLE IF EXISTS scan_cache", []);
+    // Prune rows from obsolete scanner versions so they don't accumulate.
+    let _ = conn.execute(
+        "DELETE FROM scan_cache_v2 WHERE scanner_version <> ?1",
+        [CACHE_SCHEMA_VERSION],
+    );
+
     Ok(conn)
+}
+
+/// Standalone init for tests and `clear_cache` — opens a fresh connection
+/// without going through the cached path (avoids poisoned-mutex issues
+/// when tests set `SKILLSTAR_DATA_DIR`).
+fn init_db() -> Result<Connection> {
+    open_and_migrate_db()
 }
 
 fn normalize_target_language_for_cache(target_lang: &str) -> String {
@@ -2567,10 +2623,11 @@ fn split_cache_scan_mode_key(mode_key: &str) -> (&str, Option<&str>) {
 }
 
 pub fn load_all_cached() -> Vec<SecurityScanResult> {
-    let conn = match init_db() {
-        Ok(c) => c,
+    let guard = match get_db() {
+        Ok(g) => g,
         Err(_) => return vec![],
     };
+    let conn = conn_ref!(guard);
     let mut stmt = match conn.prepare(
         "SELECT json_data FROM scan_cache_v2
          WHERE scanner_version = ?1
@@ -2600,7 +2657,8 @@ pub fn load_cached_result(
     scan_mode_key: &str,
     current_tree_hash: Option<&str>,
 ) -> Option<SecurityScanResult> {
-    let conn = init_db().ok()?;
+    let guard = get_db().ok()?;
+    let conn = conn_ref!(guard);
     let mut stmt = conn
         .prepare(
             "SELECT tree_hash, json_data FROM scan_cache_v2
@@ -2653,18 +2711,10 @@ pub fn save_to_cache(result: &SecurityScanResult) -> Result<()> {
         return Ok(());
     }
 
-    let conn = init_db()?;
+    let guard = get_db()?;
+    let conn = conn_ref!(guard);
     let json_data = serde_json::to_string(result)?;
     let scan_mode_key = cache_scan_mode_key(&result.scan_mode, &result.target_language);
-
-    let _ = conn.execute(
-        "DELETE FROM scan_cache WHERE skill_name = ?1",
-        [&result.skill_name],
-    );
-    conn.execute(
-        "DELETE FROM scan_cache_v2 WHERE scanner_version <> ?1",
-        [CACHE_SCHEMA_VERSION],
-    )?;
 
     conn.execute(
         "INSERT OR REPLACE INTO scan_cache_v2
@@ -2699,8 +2749,9 @@ pub fn clear_cache() -> Result<()> {
         let _ = std::fs::remove_file(legacy_path);
     }
 
+    // Use init_db() (not get_db) so tests with overridden SKILLSTAR_DATA_DIR
+    // don't fight with the cached connection from a different env.
     let conn = init_db()?;
-    let _ = conn.execute("DELETE FROM scan_cache", []);
     conn.execute("DELETE FROM scan_cache_v2", [])?;
     let _ = conn.execute("DELETE FROM file_scan_cache", []);
     Ok(())
@@ -2740,12 +2791,13 @@ pub fn clear_logs() -> Result<()> {
 /// Called when a skill is updated or reinstalled so its security badge
 /// resets to "unscanned" until the user runs a new scan.
 pub fn invalidate_skill_cache(skill_name: &str) {
-    if let Ok(conn) = init_db() {
-        let _ = conn.execute("DELETE FROM scan_cache WHERE skill_name = ?1", [skill_name]);
-        let _ = conn.execute(
-            "DELETE FROM scan_cache_v2 WHERE skill_name = ?1",
-            [skill_name],
-        );
+    if let Ok(guard) = get_db() {
+        if let Some(conn) = guard.as_ref() {
+            let _ = conn.execute(
+                "DELETE FROM scan_cache_v2 WHERE skill_name = ?1",
+                [skill_name],
+            );
+        }
     }
 }
 
@@ -2842,10 +2894,11 @@ fn save_file_scan_results(
     scan_mode: &str,
     target_lang: &str,
 ) {
-    let conn = match init_db() {
-        Ok(c) => c,
+    let guard = match get_db() {
+        Ok(g) => g,
         Err(_) => return,
     };
+    let conn = conn_ref!(guard);
 
     // Wrap all inserts + eviction in a single transaction to avoid N
     // individual fsyncs (was 30x slower for skills with many files).
@@ -2912,10 +2965,11 @@ fn partition_cached_files(
     target_lang: &str,
     log_ctx: &SkillScanLogCtx,
 ) -> (Vec<FileScanResult>, Vec<(FileRole, usize)>) {
-    let conn = match init_db() {
-        Ok(c) => c,
+    let guard = match get_db() {
+        Ok(g) => g,
         Err(_) => return (vec![], classifications.to_vec()),
     };
+    let conn = conn_ref!(guard);
 
     let mut cached_results: Vec<FileScanResult> = Vec::new();
     let mut needs_scan: Vec<(FileRole, usize)> = Vec::new();
@@ -3042,6 +3096,8 @@ mod tests {
             unsafe {
                 std::env::set_var("SKILLSTAR_DATA_DIR", dir.path());
             }
+            // Reset the cached DB connection so it reopens at the new data dir
+            reset_scan_db();
             clear_cache().expect("clear test cache");
             Self {
                 _guard: guard,
@@ -3053,6 +3109,8 @@ mod tests {
     impl Drop for TestDataRoot {
         fn drop(&mut self) {
             let _ = clear_cache();
+            // Reset the cached DB connection before restoring the env var
+            reset_scan_db();
             unsafe {
                 std::env::remove_var("SKILLSTAR_DATA_DIR");
             }

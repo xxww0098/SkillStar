@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import { SkillsProvider } from "./hooks/useSkills";
 import { SecurityScanProvider } from "./hooks/useSecurityScan";
+import { NavigationProvider } from "./hooks/useNavigation";
 import { SplashScreen } from "./components/ui/SplashScreen";
 import { ErrorBoundary } from "./components/ui/ErrorBoundary";
 import { initializeBackgroundStyle } from "./lib/backgroundStyle";
@@ -27,7 +28,9 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       <SplashScreen>
         <SkillsProvider>
           <SecurityScanProvider>
-            <App />
+            <NavigationProvider>
+              <App />
+            </NavigationProvider>
           </SecurityScanProvider>
         </SkillsProvider>
       </SplashScreen>

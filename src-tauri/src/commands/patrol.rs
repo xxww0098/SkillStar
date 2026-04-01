@@ -2,7 +2,7 @@ use crate::{
     ExitControl,
     core::patrol::{PatrolManager, PatrolStatus},
 };
-use tauri::State;
+use tauri::{Emitter, State};
 
 #[tauri::command]
 pub async fn start_patrol(
@@ -12,23 +12,43 @@ pub async fn start_patrol(
 ) -> Result<(), String> {
     state
         .start(app.clone(), interval_secs)
-        .await
         .map_err(|e| e.to_string())?;
+    let _ = app.emit("patrol://enabled-changed", true);
+    crate::refresh_tray_menu(&app)?;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn stop_patrol(
-    _app: tauri::AppHandle,
+    app: tauri::AppHandle,
     state: State<'_, PatrolManager>,
 ) -> Result<(), String> {
-    state.stop().await;
+    state.stop();
+    let _ = app.emit("patrol://enabled-changed", false);
+    crate::refresh_tray_menu(&app)?;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn get_patrol_status(state: State<'_, PatrolManager>) -> Result<PatrolStatus, String> {
-    Ok(state.status().await)
+    Ok(state.status())
+}
+
+#[tauri::command]
+pub async fn set_patrol_enabled(
+    app: tauri::AppHandle,
+    state: State<'_, PatrolManager>,
+    enabled: bool,
+) -> Result<(), String> {
+    if enabled {
+        state.set_enabled(true).map_err(|e| e.to_string())?;
+    } else {
+        state.stop();
+    }
+
+    let _ = app.emit("patrol://enabled-changed", enabled);
+    crate::refresh_tray_menu(&app)?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -37,7 +57,7 @@ pub async fn app_quit(
     state: State<'_, PatrolManager>,
     exit_control: State<'_, ExitControl>,
 ) -> Result<(), String> {
-    state.stop().await;
+    state.stop();
     exit_control.allow_next_exit();
     app.exit(0);
     Ok(())

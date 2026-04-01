@@ -49,7 +49,7 @@ export function EmptyState({
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.35, ease: STAGGER_EASE }}
           className={cn(
-            "bg-muted/50 backdrop-blur-sm flex items-center justify-center mb-4",
+            "bg-muted/50 flex items-center justify-center mb-4",
             iconSizeMap[size]
           )}
         >

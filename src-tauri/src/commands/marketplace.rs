@@ -1,7 +1,8 @@
 use crate::core::{
-    marketplace,
+    marketplace, marketplace_snapshot,
     skill::{OfficialPublisher, Skill},
 };
+use std::collections::HashMap;
 
 #[tauri::command]
 pub async fn search_skills_sh(query: String) -> Result<marketplace::MarketplaceResult, String> {
@@ -55,29 +56,6 @@ pub async fn get_official_publishers() -> Result<Vec<OfficialPublisher>, String>
         }
         Err(e) => {
             eprintln!("[get_official_publishers] Error: {}", e);
-            Err(e.to_string())
-        }
-    }
-}
-
-#[tauri::command]
-pub async fn hydrate_marketplace_descriptions(
-    requests: Vec<marketplace::MarketplaceDescriptionRequest>,
-) -> Result<Vec<marketplace::MarketplaceDescriptionPatch>, String> {
-    eprintln!(
-        "[hydrate_marketplace_descriptions] Called with {} requests",
-        requests.len()
-    );
-    match marketplace::hydrate_marketplace_descriptions(requests).await {
-        Ok(result) => {
-            eprintln!(
-                "[hydrate_marketplace_descriptions] Success, got {} patches",
-                result.len()
-            );
-            Ok(result)
-        }
-        Err(e) => {
-            eprintln!("[hydrate_marketplace_descriptions] Error: {}", e);
             Err(e.to_string())
         }
     }
@@ -151,4 +129,152 @@ pub async fn get_marketplace_skill_details(
             Err(e.to_string())
         }
     }
+}
+
+#[tauri::command]
+pub async fn resolve_skill_sources(
+    names: Vec<String>,
+    existing_sources: HashMap<String, String>,
+) -> Result<HashMap<String, String>, String> {
+    eprintln!(
+        "[resolve_skill_sources] Resolving {} skill name(s)",
+        names.len()
+    );
+    let total = names.len();
+    let resolved =
+        marketplace_snapshot::resolve_skill_sources_local_first(&names, &existing_sources)
+            .await
+            .map_err(|e| e.to_string())?;
+    eprintln!(
+        "[resolve_skill_sources] Resolved {}/{} sources",
+        resolved.len(),
+        total
+    );
+    Ok(resolved)
+}
+
+#[tauri::command]
+pub async fn ai_extract_search_keywords(query: String) -> Result<Vec<String>, String> {
+    eprintln!("[ai_extract_search_keywords] Query: {}", query);
+    let config = crate::commands::ai::ensure_ai_config_pub()
+        .await
+        .map_err(|e| {
+            eprintln!("[ai_extract_search_keywords] Config error: {}", e);
+            e
+        })?;
+    let keywords = crate::core::ai_provider::extract_search_keywords(&config, &query)
+        .await
+        .map_err(|e| {
+            let msg = format!("AI keyword extraction failed: {}", e);
+            eprintln!("[ai_extract_search_keywords] {}", msg);
+            msg
+        })?;
+    eprintln!(
+        "[ai_extract_search_keywords] ✓ Extracted {} keywords: {:?}",
+        keywords.len(),
+        keywords
+    );
+    Ok(keywords)
+}
+
+#[tauri::command]
+pub async fn ai_search_with_keywords(
+    keywords: Vec<String>,
+) -> Result<marketplace::AiKeywordSearchResult, String> {
+    eprintln!(
+        "[ai_search_with_keywords] Searching {} keywords: {:?}",
+        keywords.len(),
+        keywords
+    );
+    let result = marketplace::ai_search_by_keywords(&keywords)
+        .await
+        .map_err(|e| {
+            let msg = format!("AI marketplace search failed: {}", e);
+            eprintln!("[ai_search_with_keywords] {}", msg);
+            msg
+        })?;
+    eprintln!(
+        "[ai_search_with_keywords] ✓ Found {} skills, keyword_map keys: {:?}",
+        result.skills.len(),
+        result.keyword_skill_map.keys().collect::<Vec<_>>()
+    );
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn get_leaderboard_local(
+    category: String,
+) -> Result<marketplace_snapshot::LocalFirstResult<Vec<Skill>>, String> {
+    marketplace_snapshot::get_leaderboard_local(&category)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn search_marketplace_local(
+    query: String,
+    limit: Option<u32>,
+) -> Result<marketplace_snapshot::LocalFirstResult<Vec<Skill>>, String> {
+    marketplace_snapshot::search_local(&query, limit)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_publishers_local()
+-> Result<marketplace_snapshot::LocalFirstResult<Vec<OfficialPublisher>>, String> {
+    marketplace_snapshot::get_publishers_local()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_publisher_repos_local(
+    publisher_name: String,
+) -> Result<marketplace_snapshot::LocalFirstResult<Vec<marketplace::PublisherRepo>>, String> {
+    marketplace_snapshot::get_publisher_repos_local(&publisher_name)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_repo_skills_local(
+    source: String,
+) -> Result<marketplace_snapshot::LocalFirstResult<Vec<Skill>>, String> {
+    marketplace_snapshot::get_repo_skills_local(&source)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_skill_detail_local(
+    source: String,
+    name: String,
+) -> Result<marketplace_snapshot::LocalFirstResult<marketplace::MarketplaceSkillDetails>, String> {
+    marketplace_snapshot::get_skill_detail_local(&source, &name)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn ai_search_marketplace_local(
+    keywords: Vec<String>,
+    limit: Option<u32>,
+) -> Result<marketplace_snapshot::LocalFirstResult<marketplace::AiKeywordSearchResult>, String> {
+    marketplace_snapshot::ai_search_local(&keywords, limit)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn sync_marketplace_scope(scope: String) -> Result<(), String> {
+    marketplace_snapshot::sync_marketplace_scope(&scope)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_marketplace_sync_states()
+-> Result<Vec<marketplace_snapshot::SyncStateEntry>, String> {
+    marketplace_snapshot::get_marketplace_sync_states().map_err(|e| e.to_string())
 }

@@ -24,7 +24,6 @@ export function Toaster() {
           warning: "!border-warning/30 !bg-warning/10",
         },
       }}
-      closeButton
     />
   );
 }

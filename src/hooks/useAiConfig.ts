@@ -9,7 +9,6 @@ const DEFAULT_CONFIG: AiConfig = {
   api_key: "",
   model: "gpt-5.4",
   target_language: "zh-CN",
-  use_mymemory_for_short_text: false,
   short_text_priority: "ai_first",
   context_window_k: 128,
   max_concurrent_requests: 4,

@@ -41,6 +41,10 @@ interface ToolbarProps {
   hideStarsSort?: boolean;
   /** Optional callback for AI pick skills button */
   onAiPick?: () => void;
+  /** Optional callback for AI marketplace search */
+  onAiSearch?: () => void;
+  /** Whether AI search is in progress */
+  aiSearching?: boolean;
   /** Optional title node to render at the start of the toolbar */
   titleNode?: React.ReactNode;
   /** Source type filter: "all" | "hub" | "local" */
@@ -70,6 +74,8 @@ export function Toolbar({
   pendingUpdateCount,
   hideStarsSort,
   onAiPick,
+  onAiSearch,
+  aiSearching,
   titleNode,
   sourceFilter,
   onSourceFilterChange,
@@ -98,7 +104,7 @@ export function Toolbar({
   ];
 
   return (
-    <div className="h-14 flex items-center gap-3 px-6 border-b border-border bg-card/30 backdrop-blur-sm overflow-x-auto [&::-webkit-scrollbar]:hidden">
+    <div className="h-14 flex items-center gap-3 px-6 border-b border-border bg-sidebar overflow-x-auto [&::-webkit-scrollbar]:hidden">
       {titleNode && (
         <div className="flex items-center shrink-0 h-8 whitespace-nowrap">
           {titleNode}
@@ -113,6 +119,27 @@ export function Toolbar({
         placeholder={t("toolbar.searchPlaceholder")}
         className="pl-8 h-8 text-xs bg-sidebar/50 focus-visible:bg-background"
         iconClassName="left-2.5"
+        suffix={onAiSearch ? (
+          <button
+            onClick={onAiSearch}
+            disabled={aiSearching || !searchQuery.trim()}
+            className={cn(
+              "flex items-center justify-center w-6 h-6 rounded-md transition-all duration-300 cursor-pointer shrink-0",
+              aiSearching
+                ? "text-ai-text-hover animate-pulse"
+                : searchQuery.trim()
+                  ? "text-ai-text hover:text-ai-text-hover hover:bg-ai-bg-hover"
+                  : "text-muted-foreground/30 cursor-not-allowed"
+            )}
+            title={t("marketplace.aiSearch", { defaultValue: "AI Search" })}
+          >
+            {aiSearching ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="w-3.5 h-3.5" />
+            )}
+          </button>
+        ) : undefined}
       />
 
       {/* AI Pick Skills */}
@@ -128,7 +155,7 @@ export function Toolbar({
 
       {/* Agent filter */}
       {enabledProfiles.length > 0 && onAgentFilterChange && (
-        <div className="flex items-center gap-0 border border-border rounded-lg overflow-hidden backdrop-blur-sm h-8 p-0.5 bg-sidebar/30 shrink-0">
+        <div className="flex items-center gap-0 border border-border rounded-lg overflow-hidden h-8 p-0.5 bg-sidebar/30 shrink-0">
           <button
             onClick={() => onAgentFilterChange(null)}
             aria-pressed={agentFilter === null}
@@ -186,7 +213,7 @@ export function Toolbar({
 
       {/* Source type filter (Hub / Local) */}
       {onSourceFilterChange && (localCount ?? 0) > 0 && (
-        <div className="flex items-center gap-0.5 border border-border rounded-lg overflow-hidden backdrop-blur-sm h-8 p-0.5 bg-sidebar/30 shrink-0">
+        <div className="flex items-center gap-0.5 border border-border rounded-lg overflow-hidden h-8 p-0.5 bg-sidebar/30 shrink-0">
           {(["all", "hub", "local"] as const).map((f) => {
             const isActive = sourceFilter === f;
             return (
@@ -283,7 +310,7 @@ export function Toolbar({
       )}
 
       {/* Sort pills */}
-      <div className="flex items-center gap-0.5 border border-border rounded-lg overflow-hidden backdrop-blur-sm h-8 p-0.5 bg-sidebar/30 shadow-sm ml-auto shrink-0">
+      <div className="flex items-center gap-0.5 border border-border rounded-lg overflow-hidden h-8 p-0.5 bg-sidebar/30 shadow-sm ml-auto shrink-0">
         {sortOptions.map((opt) => {
           const isActive = sortBy === opt.value;
           return (
@@ -309,7 +336,7 @@ export function Toolbar({
       </div>
 
       {/* View toggle */}
-      <div className="flex items-center gap-0.5 border border-border rounded-lg overflow-hidden backdrop-blur-sm h-8 p-0.5 bg-sidebar/30 shadow-sm">
+      <div className="flex items-center gap-0.5 border border-border rounded-lg overflow-hidden h-8 p-0.5 bg-sidebar/30 shadow-sm">
         <button
           onClick={() => onViewModeChange("grid")}
           aria-label="Grid view"

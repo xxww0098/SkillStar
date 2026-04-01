@@ -2,6 +2,7 @@ import { EyeOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 const STORAGE_KEY = "skillstar:background-run";
+const CHANGE_EVENT = "skillstar:background-run-changed";
 
 export function readBackgroundRun(): boolean {
   try {
@@ -17,6 +18,23 @@ export function writeBackgroundRun(enabled: boolean): void {
   } catch {
     // ignore
   }
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent<boolean>(CHANGE_EVENT, { detail: enabled }));
+  }
+}
+
+export function onBackgroundRunChanged(
+  listener: (enabled: boolean) => void,
+): () => void {
+  const handleChange = (event: Event) => {
+    listener((event as CustomEvent<boolean>).detail);
+  };
+
+  window.addEventListener(CHANGE_EVENT, handleChange);
+  return () => {
+    window.removeEventListener(CHANGE_EVENT, handleChange);
+  };
 }
 
 interface BackgroundRunSectionProps {

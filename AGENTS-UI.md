@@ -29,7 +29,7 @@ src/
 │   ├── layout/                   # Sidebar/Toolbar/DetailPanel
 │   ├── skills/                   # cards, editor, dialogs, import/export/deploy
 │   └── marketplace/              # OfficialPublishers
-├── lib/                          # utils, toast, share code, hydration helpers
+├── lib/                          # utils, toast, share code
 └── types/                        # shared TS types
 ```
 
@@ -38,13 +38,18 @@ src/
 - State is hook-driven (`useState` / `useMemo` / `useCallback`) with shared skill state from `SkillsProvider`.
 - No external state-management library unless explicitly justified.
 - Keep cross-page deploy/detail navigation state centralized in `App.tsx`.
-- Marketplace description hydration must reuse `src/lib/marketplaceDescriptionHydration.ts`.
+- Marketplace pages must read local-first snapshot commands from Tauri and treat remote sync as an explicit follow-up refresh, not a direct page data source.
+- Marketplace UI should surface snapshot freshness/seeding state when relevant instead of hydrating missing descriptions in the browser.
+- Marketplace drill-down screens (`PublisherDetail`, `DetailPanel`) should reuse the same local-first snapshot flow as the main marketplace page.
 - Settings storage/location UI must use backend-resolved paths instead of frontend path reconstruction.
 
 ## Streaming UX Rules
 - Skill translation: invoke `ai_translate_skill_stream`, listen to `ai://translate-stream` events.
 - Quick summary: invoke `ai_summarize_skill_stream`, listen to `ai://summarize-stream` events.
 - Event phases are `start` / `delta` / `complete` / `error`; UI should render incrementally and handle interruption safely.
+- Durable translation reuse is backend-owned via SQLite cache; frontend translation state may only cache the active panel/session, not replace backend cache decisions.
+- `Retranslate via AI` UI must request an AI-only refresh, not the generic priority/fallback path.
+- AI skill pick UI should render backend-provided relevance order as-is and surface lightweight explanation metadata (for example score or reason) rather than re-sorting or hiding why a skill was recommended.
 - Security scan progress must distinguish file-prep progress from AI chunk progress; concurrent worker state should be visible in the scanning UI rather than collapsed to a single active skill.
 
 ## Visual System (Dark Glassmorphism)
@@ -78,6 +83,8 @@ src/
 - Shared project-path conflicts must be single-owner at selection time.
 - Destructive skill actions use explicit confirmation components, not browser `confirm()`.
 - New skills default to not linked to any agent until user toggles.
+- Background-run preference must flow through shared helpers/events so tray actions and Settings switches render the same patrol state.
+- Tray background actions should use stateful labels (`Start` / `Stop`) instead of a static one-way action label.
 
 ## Maintenance Rules
 - Frontend structure/convention changes must update this file first.

@@ -73,11 +73,31 @@ export function ExportShareCodeModal({
     const analyze = async () => {
       setAnalyzing(true);
       const statuses: SkillExportStatus[] = [];
+      const resolvedSources: Record<string, string> = {};
 
       for (const skillName of activeSkills) {
-        const localSkill = hubSkills.find((s) => s.name === skillName);
-        const gitUrl =
-          group?.skill_sources?.[skillName] || localSkill?.git_url || "";
+        const localSkill = hubSkills.find((skill) => skill.name === skillName);
+        const gitUrl = group?.skill_sources?.[skillName] || localSkill?.git_url || "";
+        if (gitUrl.trim()) {
+          resolvedSources[skillName] = gitUrl;
+        }
+      }
+
+      const namesNeedingSource = activeSkills.filter((skillName) => !resolvedSources[skillName]);
+      if (namesNeedingSource.length > 0) {
+        try {
+          const remoteResolved = await invoke<Record<string, string>>("resolve_skill_sources", {
+            names: namesNeedingSource,
+            existingSources: resolvedSources,
+          });
+          Object.assign(resolvedSources, remoteResolved);
+        } catch {
+          // Keep best-effort export behavior and fall back to embed/bundle modes below.
+        }
+      }
+
+      for (const skillName of activeSkills) {
+        const gitUrl = resolvedSources[skillName] || "";
 
         if (gitUrl) {
           statuses.push({ name: skillName, gitUrl, status: "ok" });

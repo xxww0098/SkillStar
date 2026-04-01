@@ -1,5 +1,6 @@
 use crate::core::{
     agent_profile, gh_manager, local_skill, lockfile, paths, repo_history, repo_scanner, sync,
+    translation_cache,
 };
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -246,6 +247,8 @@ pub struct CacheCleanResult {
     pub repos_removed: usize,
     /// Number of repo history entries cleared
     pub history_cleared: usize,
+    /// Number of cached translation entries cleared
+    pub translation_cleared: usize,
 }
 
 #[tauri::command]
@@ -253,6 +256,7 @@ pub async fn clear_all_caches() -> Result<CacheCleanResult, String> {
     tokio::task::spawn_blocking(|| {
         let repos_removed = repo_scanner::clean_unused_cache().unwrap_or(0);
         let history_cleared = repo_history::clear_history().unwrap_or(0);
+        let translation_cleared = translation_cache::clear_cache().unwrap_or(0);
 
         // Clean up legacy "agenthub" data directory (old app name before rename to "skillstar")
         if let Some(data_dir) = dirs::data_dir() {
@@ -265,6 +269,7 @@ pub async fn clear_all_caches() -> Result<CacheCleanResult, String> {
         CacheCleanResult {
             repos_removed,
             history_cleared,
+            translation_cleared,
         }
     })
     .await
@@ -293,7 +298,9 @@ pub async fn force_delete_installed_skills() -> Result<usize, String> {
             .map_err(|e| format!("Failed to recreate hub dir: {}", e))?;
 
         // Clear lockfile entries so UI state and filesystem stay aligned.
-        let _lock = lockfile::get_mutex().blocking_lock();
+        let _lock = lockfile::get_mutex()
+            .lock()
+            .map_err(|_| "Lockfile mutex poisoned".to_string())?;
         let lock_path = lockfile::lockfile_path();
         let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
         lf.skills.clear();
@@ -342,7 +349,9 @@ pub async fn force_delete_repo_caches() -> Result<usize, String> {
 
         // Prune lockfile entries for removed cache-backed skills.
         if !removed_skill_names.is_empty() {
-            let _lock = lockfile::get_mutex().blocking_lock();
+            let _lock = lockfile::get_mutex()
+                .lock()
+                .map_err(|_| "Lockfile mutex poisoned".to_string())?;
             let lock_path = lockfile::lockfile_path();
             let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
             lf.skills
@@ -533,7 +542,9 @@ pub async fn clean_broken_skills() -> Result<usize, String> {
         }
 
         // Phase 3: Prune orphaned lockfile entries
-        let _lock = lockfile::get_mutex().blocking_lock();
+        let _lock = lockfile::get_mutex()
+            .lock()
+            .map_err(|_| "Lockfile mutex poisoned".to_string())?;
         let lock_path = lockfile::lockfile_path();
         let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
         let before = lf.skills.len();

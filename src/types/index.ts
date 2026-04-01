@@ -44,18 +44,26 @@ export interface MarketplaceResult {
   has_more: boolean;
 }
 
-export interface MarketplaceDescriptionRequest {
-  name: string;
-  source?: string | null;
-  git_url?: string | null;
+export type SnapshotStatus =
+  | "fresh"
+  | "stale"
+  | "seeding"
+  | "miss"
+  | "error_fallback"
+  | "remote_error";
+
+export interface LocalFirstResult<T> {
+  data: T;
+  snapshot_status: SnapshotStatus;
+  snapshot_updated_at: string | null;
+  error?: string | null;
 }
 
-export interface MarketplaceDescriptionPatch {
-  key: string;
-  name: string;
-  source?: string | null;
-  description: string;
-  from_cache: boolean;
+export interface AiKeywordSearchResult {
+  skills: Skill[];
+  total_count: number;
+  /** Maps each keyword to the skill names it found */
+  keyword_skill_map: Record<string, string[]>;
 }
 
 export interface SecurityAudit {
@@ -94,6 +102,15 @@ export interface PublisherRepo {
   url: string;
   skills: PublisherRepoSkill[];
 }
+
+export interface SyncStateEntry {
+  scope: string;
+  last_success_at: string | null;
+  last_attempt_at: string | null;
+  last_error: string | null;
+  next_refresh_at: string | null;
+  schema_version: number;
+}
 export interface AgentProfile {
   id: string;
   display_name: string;
@@ -118,12 +135,19 @@ export interface SkillCardDeck {
 
 export type SortOption = "stars-desc" | "updated" | "name";
 export type ViewMode = "grid" | "list";
-export type NavPage = "my-skills" | "marketplace" | "skill-cards" | "projects" | "security-scan" | "settings";
+export type NavPage =
+  | "my-skills"
+  | "marketplace"
+  | "skill-cards"
+  | "projects"
+  | "security-scan"
+  | "settings";
 
 /** Sub-page navigation for drill-down views */
-export type SubPage =
-  | { type: "publisher-detail"; publisher: OfficialPublisher }
-  | null;
+export type SubPage = {
+  type: "publisher-detail";
+  publisher: OfficialPublisher;
+} | null;
 
 export interface SkillContent {
   name: string;
@@ -139,11 +163,37 @@ export interface AiConfigStatus {
   api_key: string;
 }
 
+export interface AiPickRecommendation {
+  name: string;
+  score: number;
+  reason: string;
+}
+
+export interface AiPickResponse {
+  recommendations: AiPickRecommendation[];
+  fallbackUsed: boolean;
+  roundsSucceeded: number;
+}
+
 export interface AiStreamPayload {
   requestId: string;
   event: AiStreamEvent;
   delta?: string | null;
   message?: string | null;
+}
+
+export type ShortTextTranslationSource = "ai" | "mymemory";
+
+export interface ShortTextTranslationResult {
+  text: string;
+  source: ShortTextTranslationSource;
+}
+
+export interface MymemoryUsageStats {
+  total_chars_sent: number;
+  daily_chars_sent: number;
+  daily_reset_date: string;
+  updated_at: string;
 }
 
 export interface FrontmatterEntry {
@@ -232,7 +282,6 @@ export interface AiConfig {
   api_key: string;
   model: string;
   target_language: string;
-  use_mymemory_for_short_text: boolean;
   short_text_priority: "ai_first" | "mymemory_first";
   /** Model context window in K tokens (e.g. 128 = 128K tokens) */
   context_window_k: number;
@@ -294,6 +343,7 @@ export interface StorageOverview {
 export interface CacheCleanResult {
   repos_removed: number;
   history_cleared: number;
+  translation_cleared: number;
 }
 
 // ── GitHub Publish ──────────────────────────────────────────────────
@@ -379,7 +429,14 @@ export interface SecurityScanResult {
 
 export interface SecurityScanEvent {
   requestId: string;
-  event: "skill-start" | "file-start" | "skill-complete" | "chunk-error" | "error" | "done" | "progress";
+  event:
+    | "skill-start"
+    | "file-start"
+    | "skill-complete"
+    | "chunk-error"
+    | "error"
+    | "done"
+    | "progress";
   skillName?: string;
   fileName?: string;
   result?: SecurityScanResult;
@@ -392,7 +449,15 @@ export interface SecurityScanEvent {
   activeChunkWorkers?: number;
   maxChunkWorkers?: number;
   message?: string;
-  phase?: "collect" | "static" | "triage" | "ai-analyze" | "aggregate" | "done" | "error" | string;
+  phase?:
+    | "collect"
+    | "static"
+    | "triage"
+    | "ai-analyze"
+    | "aggregate"
+    | "done"
+    | "error"
+    | string;
 }
 
 export interface SecurityScanEstimate {

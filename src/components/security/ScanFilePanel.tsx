@@ -12,6 +12,8 @@ interface ScanFilePanelProps {
   activeChunkFiles: {
     skillName: string;
     fileName: string;
+    chunkCompleted?: number;
+    chunkTotal?: number;
   }[];
   stage: string | null;
   syncPulseKey: number;
@@ -59,6 +61,27 @@ function getStagePrefix(stage: string | null): string {
   }
 }
 
+function getChunkLabel(
+  focusChunkCompleted: number | null,
+  focusChunkTotal: number | null,
+  activeChunkCount: number
+): string {
+  if (focusChunkTotal && focusChunkTotal > 0 && focusChunkCompleted !== null) {
+    if (focusChunkTotal === 1) {
+      return "single chunk";
+    }
+
+    const activeChunkIndex = Math.min(focusChunkCompleted + 1, focusChunkTotal);
+    return `chunk ${activeChunkIndex}/${focusChunkTotal}`;
+  }
+
+  if (activeChunkCount <= 0) {
+    return "waiting for chunks";
+  }
+
+  return `${activeChunkCount} active chunk${activeChunkCount === 1 ? "" : "s"}`;
+}
+
 export function ScanFilePanel({
   activeSkills,
   currentSkill,
@@ -72,6 +95,13 @@ export function ScanFilePanel({
 }: ScanFilePanelProps) {
   const focusChunk = activeChunkFiles[0] ?? null;
   const focusFileName = focusChunk?.fileName ?? fileName;
+  const focusChunkCompleted = typeof focusChunk?.chunkCompleted === "number" ? focusChunk.chunkCompleted : null;
+  const focusChunkTotal = typeof focusChunk?.chunkTotal === "number" ? focusChunk.chunkTotal : null;
+  const chunkLabel = getChunkLabel(
+    focusChunkCompleted,
+    focusChunkTotal,
+    activeChunkFiles.length
+  );
   const progress = progressPercent;
   const theme = useMemo(() => getFileTheme(focusFileName), [focusFileName]);
   const Icon = theme.icon;
@@ -223,11 +253,14 @@ export function ScanFilePanel({
             <span className="tabular-nums">
               {activeChunkWorkers}/{Math.max(maxChunkWorkers, 1)} workers
             </span>
+            <span className="tabular-nums">
+              {chunkLabel}
+            </span>
           </div>
 
           <div className="relative h-1.5 rounded-full border border-border/50 bg-muted overflow-hidden">
             <motion.div
-              className="absolute inset-y-0 left-0 rounded-full bg-success shadow-[0_0_8px_rgba(var(--color-success-rgb),0.5)]"
+              className="absolute inset-0 rounded-full bg-success shadow-[0_0_8px_rgba(var(--color-success-rgb),0.5)]"
               initial={{ scaleX: 0 }}
               animate={{ scaleX: progress / 100 }}
               transition={{ duration: 0.4, ease: "easeOut" }}

@@ -344,7 +344,7 @@ export function Sidebar({
                 collapsed ? "justify-center px-0 py-2.5" : "gap-2.5 px-3 py-2",
                 isActive
                   ? "bg-sidebar-active text-primary font-medium shadow-[0_0_12px_rgba(var(--color-primary-rgb),0.15)]"
-                  : "text-muted-foreground hover:bg-sidebar-hover hover:text-foreground hover:backdrop-blur-sm"
+                  : "text-muted-foreground hover:bg-sidebar-hover hover:text-foreground"
               )}
             >
               <div className="relative flex items-center justify-center">

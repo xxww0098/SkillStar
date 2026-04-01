@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use super::{agent_profile, sync};
+use super::{agent_profile, local_skill, sync};
 
 // ── Data structures ─────────────────────────────────────────────────
 
@@ -645,13 +645,16 @@ pub fn scan_project_skills(project_path: &str) -> ProjectScanResult {
     }
 }
 
-/// Import discovered skills into the hub and update the project's skills-list.
+/// Import discovered skills into local storage and update the project's
+/// skills-list.
 ///
-/// Strategy A: Copy + Replace with Symlink.
-/// - If a skill doesn't exist in the hub, copy it there.
-/// - Replace the original real directory in the project with a symlink.
-/// - If the skill already exists in the hub, skip copying but still write
-///   the mapping into skills-list.json.
+/// Strategy A: Adopt + Replace with Symlink.
+/// - If a skill doesn't exist in the hub, move it into `skills-local/` and
+///   expose it through the hub symlink in `skills/`.
+/// - Replace the original real directory in the project with a symlink to the
+///   hub entry.
+/// - If the skill already exists in the hub, skip adoption but still write
+///   the mapping into `skills-list.json`.
 /// - Finally, merge all imported skills into the project's skills-list.json.
 pub fn import_scanned_skills(
     project_path: &str,
@@ -662,6 +665,7 @@ pub fn import_scanned_skills(
     let canonical_project_name = entry.name;
 
     let hub_dir = sync::get_hub_skills_dir();
+    local_skill::reconcile_hub_symlinks();
     let profiles = agent_profile::list_profiles();
     let project = Path::new(project_path);
 
@@ -734,18 +738,24 @@ pub fn import_scanned_skills(
 
         let hub_skill_dir = hub_dir.join(&target.name);
 
-        // Step 1: Copy to hub if not already there
+        // Step 1: Adopt into local storage if not already present in the hub.
         if !hub_skill_dir.exists() {
-            copy_dir_recursive(&source_dir, &hub_skill_dir)
-                .with_context(|| format!("failed to copy skill '{}' to hub", target.name))?;
+            local_skill::adopt_existing_dir(&target.name, &source_dir).with_context(|| {
+                format!(
+                    "failed to adopt discovered project skill '{}' into skills-local",
+                    target.name
+                )
+            })?;
             imported_to_hub.push(target.name.clone());
+        } else {
+            // Step 2a: Skill already exists in the hub, so replace the
+            // unmanaged project copy with a symlink to the canonical hub entry.
+            std::fs::remove_dir_all(&source_dir)
+                .with_context(|| format!("failed to remove real dir: {}", source_dir.display()))?;
         }
 
-        // Step 2: Replace real directory with symlink
-        // Remove the real directory first, then create symlink
-        std::fs::remove_dir_all(&source_dir)
-            .with_context(|| format!("failed to remove real dir: {}", source_dir.display()))?;
-
+        // Step 2b: Point the project entry at the hub entry, which may itself
+        // be a symlink into `skills-local/`.
         create_symlink(&hub_skill_dir, &source_dir)
             .with_context(|| format!("failed to create symlink for skill '{}'", target.name))?;
 
@@ -765,30 +775,6 @@ pub fn import_scanned_skills(
         skills_list_updated: true,
         symlink_count,
     })
-}
-
-/// Recursively copy a directory, skipping OS/VCS junk files.
-fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
-    std::fs::create_dir_all(dst)?;
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let file_name = entry.file_name();
-        let src_path = entry.path();
-        let dst_path = dst.join(&file_name);
-
-        // Skip git metadata and macOS system files
-        if file_name == ".git" || file_name == ".DS_Store" {
-            continue;
-        }
-
-        if src_path.is_dir() {
-            copy_dir_recursive(&src_path, &dst_path)?;
-        } else {
-            std::fs::copy(&src_path, &dst_path)
-                .with_context(|| format!("failed to copy {:?}", src_path))?;
-        }
-    }
-    Ok(())
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -1009,7 +995,7 @@ mod tests {
                     .imported_to_hub
                     .iter()
                     .any(|name| name == "legacy-skill"),
-                "expected legacy skill to be copied to hub during import"
+                "expected legacy skill to be exposed through the hub during import"
             );
 
             let registered = list_projects()
@@ -1026,9 +1012,29 @@ mod tests {
                 claude_skills.iter().any(|skill| skill == "legacy-skill"),
                 "expected imported skill to be present in project's skills list"
             );
+            let local_skill_dir = crate::core::paths::local_skills_dir().join("legacy-skill");
+            let hub_skill_dir = sync::get_hub_skills_dir().join("legacy-skill");
+            assert!(
+                local_skill_dir.is_dir(),
+                "expected imported skill to be moved into skills-local"
+            );
+            assert!(
+                hub_skill_dir.is_symlink(),
+                "expected hub entry for imported skill to be a symlink"
+            );
+            assert_eq!(
+                std::fs::read_link(&hub_skill_dir)?,
+                local_skill_dir,
+                "expected hub entry to point at skills-local storage"
+            );
             assert!(
                 source_skill_dir.is_symlink(),
                 "expected original project skill directory to be replaced with symlink"
+            );
+            assert_eq!(
+                std::fs::read_link(&source_skill_dir)?,
+                hub_skill_dir,
+                "expected project skill directory to point at the canonical hub entry"
             );
 
             Ok(())

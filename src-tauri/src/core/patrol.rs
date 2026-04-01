@@ -6,9 +6,9 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
-use tokio::sync::{Mutex, watch};
+use tokio::sync::watch;
 
 use super::{installed_skill, local_skill, sync};
 
@@ -60,6 +60,7 @@ pub fn save_config(config: &PatrolConfig) -> Result<()> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PatrolStatus {
+    pub enabled: bool,
     pub running: bool,
     pub interval_secs: u64,
     pub skills_checked: u64,
@@ -80,6 +81,7 @@ pub struct PatrolCheckEvent {
 // ── Patrol Manager ──────────────────────────────────────────────────
 
 struct PatrolInner {
+    enabled: bool,
     running: bool,
     cancel_tx: Option<watch::Sender<bool>>,
     skills_checked: u64,
@@ -97,6 +99,7 @@ impl PatrolManager {
         let config = load_config();
         Self {
             inner: Arc::new(Mutex::new(PatrolInner {
+                enabled: config.enabled,
                 running: false,
                 cancel_tx: None,
                 skills_checked: 0,
@@ -107,15 +110,19 @@ impl PatrolManager {
         }
     }
 
-    /// Start the patrol loop. If already running, update the interval.
-    pub async fn start(&self, app: AppHandle, interval_secs: u64) -> Result<()> {
-        let mut inner = self.inner.lock().await;
+    /// Start the patrol loop. If already running, stop the existing task first.
+    ///
+    /// This is synchronous — it spawns the patrol loop on the tokio runtime
+    /// but does not block on it.
+    pub fn start(&self, app: AppHandle, interval_secs: u64) -> Result<()> {
+        let mut inner = self.inner.lock().unwrap();
 
         // If already running, stop the existing task first.
         if let Some(tx) = inner.cancel_tx.take() {
             let _ = tx.send(true);
         }
 
+        inner.enabled = true;
         inner.interval_secs = interval_secs;
         inner.running = true;
         inner.skills_checked = 0;
@@ -138,11 +145,12 @@ impl PatrolManager {
     }
 
     /// Stop the patrol loop.
-    pub async fn stop(&self) {
-        let mut inner = self.inner.lock().await;
+    pub fn stop(&self) {
+        let mut inner = self.inner.lock().unwrap();
         if let Some(tx) = inner.cancel_tx.take() {
             let _ = tx.send(true);
         }
+        inner.enabled = false;
         inner.running = false;
         inner.current_skill.clear();
 
@@ -153,10 +161,21 @@ impl PatrolManager {
         });
     }
 
+    pub fn set_enabled(&self, enabled: bool) -> Result<()> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.enabled = enabled;
+        let interval_secs = inner.interval_secs;
+        save_config(&PatrolConfig {
+            enabled,
+            interval_secs,
+        })
+    }
+
     /// Get current patrol status.
-    pub async fn status(&self) -> PatrolStatus {
-        let inner = self.inner.lock().await;
+    pub fn status(&self) -> PatrolStatus {
+        let inner = self.inner.lock().unwrap();
         PatrolStatus {
+            enabled: inner.enabled,
             running: inner.running,
             interval_secs: inner.interval_secs,
             skills_checked: inner.skills_checked,
@@ -206,7 +225,7 @@ async fn patrol_loop(
 
             // Update current_skill
             {
-                let mut inner = state.lock().await;
+                let mut inner = state.lock().unwrap();
                 inner.current_skill = name.clone();
             }
 
@@ -222,7 +241,7 @@ async fn patrol_loop(
 
             // Update counters
             let event = {
-                let mut inner = state.lock().await;
+                let mut inner = state.lock().unwrap();
                 inner.skills_checked += 1;
                 if update_available {
                     inner.updates_found += 1;
@@ -252,7 +271,7 @@ async fn patrol_loop(
     }
 
     // Clean up: mark as stopped
-    let mut inner = state.lock().await;
+    let mut inner = state.lock().unwrap();
     inner.running = false;
     inner.current_skill.clear();
     inner.cancel_tx = None;

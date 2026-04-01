@@ -79,7 +79,7 @@ function SkillCardInner({
     <Wrapper {...wrapperProps} className="h-full">
         <Card
         className={cn(
-          "h-full flex flex-col cursor-pointer group relative rounded-2xl bg-card/50 backdrop-blur-sm border-white/10 shadow-[0_4px_20px_-8px_rgba(0,0,0,0.3)] hover:bg-card-hover/60 hover:shadow-[0_8px_30px_-10px_rgba(0,0,0,0.4)] transition",
+          "h-full flex flex-col cursor-pointer group relative rounded-2xl bg-card border-border shadow-[0_4px_20px_-8px_var(--color-shadow)] hover:bg-card-hover hover:shadow-[0_8px_30px_-10px_var(--color-shadow)] transition",
           compact && "p-2",
           selected && "ring-2 ring-primary/40 border-primary/30"
         )}
@@ -87,11 +87,14 @@ function SkillCardInner({
       >
         {/* Rank badge (top-left) */}
         {skill.rank && skill.rank <= 100 && (
-          <div className={cn(
-            "absolute top-3 left-3 z-10 w-7 h-7 rounded-lg border flex items-center justify-center text-micro tabular-nums",
-            rankStyle(skill.rank)
-          )}>
-            #{skill.rank}
+          <div
+            className={cn(
+              "absolute top-3 left-3 z-10 w-7 h-7 rounded-lg border flex items-center justify-center leading-none tabular-nums",
+              skill.rank >= 100 ? "text-[10px] tracking-tight" : "text-micro",
+              rankStyle(skill.rank)
+            )}
+          >
+            {skill.rank}
           </div>
         )}
 
@@ -125,7 +128,7 @@ function SkillCardInner({
               <Button
                 size="sm"
                 variant="outline"
-                className="h-7 px-2.5 text-xs bg-card/50 backdrop-blur-sm hover:bg-muted/60 font-medium border-warning text-warning-foreground shadow-[0_0_10px_rgba(234,179,8,0.1)] transition-colors"
+                className="h-7 px-2.5 text-xs bg-card hover:bg-muted font-medium border-warning text-warning-foreground shadow-[0_0_10px_rgba(234,179,8,0.1)] transition-colors"
                 disabled={updating}
                 onClick={(e) => {
                   e.stopPropagation();

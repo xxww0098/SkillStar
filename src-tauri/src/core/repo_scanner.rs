@@ -554,7 +554,9 @@ pub fn install_from_repo(
         ));
     }
 
-    let _lock = lockfile::get_mutex().blocking_lock();
+    let _lock = lockfile::get_mutex()
+        .lock()
+        .map_err(|_| anyhow!("Lockfile mutex poisoned"))?;
     let lock_path = lockfile::lockfile_path();
     let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
 

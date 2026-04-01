@@ -6,7 +6,12 @@ import { X, Save, FileText, Eye, PanelLeftClose, PanelLeftOpen, Globe, Sparkles,
 import { Button } from "../ui/button";
 import { Markdown } from "../ui/Markdown";
 import { ResizablePanel } from "../ui/ResizablePanel";
-import { unwrapOuterMarkdownFence, navigateToAiSettings } from "../../lib/utils";
+import {
+  formatAiErrorMessage,
+  normalizeSkillMarkdownForPreview,
+  unwrapOuterMarkdownFence,
+  navigateToAiSettings,
+} from "../../lib/utils";
 import type { AiConfigStatus, AiStreamPayload, FrontmatterEntry, SkillContent } from "../../types";
 
 interface SkillEditorProps {
@@ -224,7 +229,9 @@ function normalizeTranslatedDocument(
       mergedFrontmatter = writeFrontmatterValue(mergedFrontmatter, "name", originalName);
     }
     const translatedBody = stripLeadingDuplicatedMetadata(translated.body, frontmatterKeys);
-    return `---\n${mergedFrontmatter}\n---${translatedBody ? `\n${translatedBody}` : ""}`;
+    return normalizeSkillMarkdownForPreview(
+      `---\n${mergedFrontmatter}\n---${translatedBody ? `\n${translatedBody}` : ""}`
+    );
   }
 
   // Fallback path: keep original frontmatter structure, patch translated description if present.
@@ -237,7 +244,9 @@ function normalizeTranslatedDocument(
     : original.frontmatter;
 
   const translatedBody = stripLeadingDuplicatedMetadata(translatedRaw, frontmatterKeys);
-  return `---\n${mergedFrontmatter}\n---${translatedBody ? `\n${translatedBody}` : ""}`;
+  return normalizeSkillMarkdownForPreview(
+    `---\n${mergedFrontmatter}\n---${translatedBody ? `\n${translatedBody}` : ""}`
+  );
 }
 
 export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorProps) {
@@ -255,6 +264,7 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
   const [translatedSource, setTranslatedSource] = useState<string | null>(null);
   const [translationVisible, setTranslationVisible] = useState(false);
   const [translating, setTranslating] = useState(false);
+  const [retranslating, setRetranslating] = useState(false);
   const [translationHasDelta, setTranslationHasDelta] = useState(false);
   const [translationWasNonStreaming, setTranslationWasNonStreaming] = useState(false);
   const [summaryContent, setSummaryContent] = useState<string | null>(null);
@@ -269,9 +279,12 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
   const translateUnlistenRef = useRef<(() => void) | null>(null);
   const summarizeUnlistenRef = useRef<(() => void) | null>(null);
 
-  const previewSource = translationVisible && translatedContent != null ? translatedContent : editedContent;
+  const previewSource = normalizeSkillMarkdownForPreview(
+    translationVisible && translatedContent != null ? translatedContent : editedContent
+  );
   const previewFrontmatterEntries = parseFrontmatterEntries(splitFrontmatter(previewSource).frontmatter);
   const previewContent = splitFrontmatter(previewSource).body;
+  const localizedAiError = formatAiErrorMessage(aiError, t);
 
   const handleTranslate = async () => {
     if (!aiConfigured) return;
@@ -284,6 +297,7 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
         translateUnlistenRef.current = null;
       }
       setTranslating(false);
+      setRetranslating(false);
       if (!translatedContent) {
         setTranslationVisible(false);
       }
@@ -310,12 +324,23 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
     let deltaCount = 0;
 
     setTranslating(true);
+    setRetranslating(false);
     setAiError(null);
     setTranslationHasDelta(false);
     setTranslationWasNonStreaming(false);
     // Don't set translationVisible or translatedContent yet —
     // keep showing original content until first delta or final result arrives.
     setTranslatedSource(null);
+
+    let rafId: number | null = null;
+    const flushDelta = () => {
+      rafId = null;
+      if (activeTranslateIdRef.current !== requestId) return;
+      setTranslatedContent(streamedRaw);
+      setTranslationVisible(true);
+      if (deltaCount >= 2) setTranslationHasDelta(true);
+    };
+
     try {
       const unlisten = await listen<AiStreamPayload>("ai://translate-stream", (event) => {
         if (activeTranslateIdRef.current !== requestId) return;
@@ -324,11 +349,10 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
 
         if (payload.event === "delta" && payload.delta) {
           deltaCount += 1;
-          if (deltaCount >= 2) setTranslationHasDelta(true);
           streamedRaw += payload.delta;
-          setTranslatedContent(streamedRaw);
-          // Show translated content now that we have actual data
-          setTranslationVisible(true);
+          if (rafId == null) {
+            rafId = requestAnimationFrame(flushDelta);
+          }
           return;
         }
 
@@ -362,12 +386,103 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
       }
       setAiError(String(e));
     } finally {
+      if (rafId != null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
       if (translateUnlistenRef.current) {
         translateUnlistenRef.current();
         translateUnlistenRef.current = null;
       }
       if (activeTranslateIdRef.current === requestId) {
         setTranslating(false);
+        setRetranslating(false);
+        activeTranslateIdRef.current = null;
+      }
+    }
+  };
+
+  const handleAiRetranslate = async () => {
+    if (!aiConfigured || translating || loadError) return;
+
+    const sourceContent = editedContent;
+    const requestId =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `retranslate-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    activeTranslateIdRef.current = requestId;
+    let streamedRaw = "";
+    let deltaCount = 0;
+
+    setTranslating(true);
+    setRetranslating(true);
+    setAiError(null);
+    setTranslationHasDelta(false);
+    setTranslationWasNonStreaming(false);
+
+    let rafId: number | null = null;
+    const flushDelta = () => {
+      rafId = null;
+      if (activeTranslateIdRef.current !== requestId) return;
+      setTranslatedContent(streamedRaw);
+      setTranslationVisible(true);
+      if (deltaCount >= 2) setTranslationHasDelta(true);
+    };
+
+    try {
+      const unlisten = await listen<AiStreamPayload>("ai://translate-stream", (event) => {
+        if (activeTranslateIdRef.current !== requestId) return;
+        const payload = event.payload;
+        if (payload.requestId !== requestId) return;
+
+        if (payload.event === "delta" && payload.delta) {
+          deltaCount += 1;
+          streamedRaw += payload.delta;
+          if (rafId == null) {
+            rafId = requestAnimationFrame(flushDelta);
+          }
+          return;
+        }
+
+        if (payload.event === "error" && payload.message) {
+          setAiError(payload.message);
+        }
+      });
+      translateUnlistenRef.current = unlisten;
+
+      const result = await invoke<string>("ai_translate_skill_stream", {
+        requestId,
+        content: sourceContent,
+        forceRefresh: true,
+      });
+
+      if (activeTranslateIdRef.current !== requestId) return;
+      const normalized = normalizeTranslatedDocument(sourceContent, result);
+      setTranslatedContent(normalized);
+      setTranslatedSource(sourceContent);
+      setTranslationVisible(true);
+      setTranslationWasNonStreaming(deltaCount < 2);
+    } catch (e) {
+      if (activeTranslateIdRef.current !== requestId) return;
+      setTranslationHasDelta(deltaCount >= 2);
+      setTranslationWasNonStreaming(false);
+      if (streamedRaw.trim()) {
+        setTranslatedContent(streamedRaw);
+        setTranslationVisible(true);
+      }
+      setAiError(String(e));
+    } finally {
+      if (rafId != null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      if (translateUnlistenRef.current) {
+        translateUnlistenRef.current();
+        translateUnlistenRef.current = null;
+      }
+      if (activeTranslateIdRef.current === requestId) {
+        setTranslating(false);
+        setRetranslating(false);
         activeTranslateIdRef.current = null;
       }
     }
@@ -408,6 +523,15 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
     setAiError(null);
     setSummaryHasDelta(false);
     setSummaryContent(null);
+
+    let rafId: number | null = null;
+    const flushDelta = () => {
+      rafId = null;
+      if (activeSummarizeIdRef.current !== requestId) return;
+      setSummaryContent(streamedRaw);
+      if (deltaCount >= 2) setSummaryHasDelta(true);
+    };
+
     try {
       const unlisten = await listen<AiStreamPayload>("ai://summarize-stream", (event) => {
         if (activeSummarizeIdRef.current !== requestId) return;
@@ -416,9 +540,10 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
 
         if (payload.event === "delta" && payload.delta) {
           deltaCount += 1;
-          if (deltaCount >= 2) setSummaryHasDelta(true);
           streamedRaw += payload.delta;
-          setSummaryContent(streamedRaw);
+          if (rafId == null) {
+            rafId = requestAnimationFrame(flushDelta);
+          }
           return;
         }
 
@@ -444,6 +569,10 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
       }
       setAiError(String(e));
     } finally {
+      if (rafId != null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
       if (summarizeUnlistenRef.current) {
         summarizeUnlistenRef.current();
         summarizeUnlistenRef.current = null;
@@ -480,6 +609,9 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
         summarizeUnlistenRef.current();
         summarizeUnlistenRef.current = null;
       }
+
+      activeTranslateIdRef.current = null;
+      activeSummarizeIdRef.current = null;
     };
   }, []);
 
@@ -643,6 +775,38 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
                   ? t("skillEditor.showTranslation")
                   : t("skillEditor.translate")}
               </button>
+              {translatedContent && translatedSource === editedContent && (
+                <button
+                  onClick={() => {
+                    if (loadError) return;
+                    if (!aiConfigured) {
+                      navigateToAiSettings();
+                      return;
+                    }
+                    void handleAiRetranslate();
+                  }}
+                  disabled={!!loadError || translating}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-md text-micro font-medium transition-colors cursor-pointer ${
+                    translating && retranslating
+                      ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
+                      : aiConfigured && !loadError
+                      ? "text-muted-foreground hover:text-foreground hover:bg-card-hover"
+                      : loadError
+                      ? "text-muted-foreground/50 cursor-not-allowed"
+                      : "text-primary/80 bg-primary/5 border border-primary/20 hover:bg-primary/10"
+                  }`}
+                  title={t("skillEditor.retranslateWithAi")}
+                >
+                  {translating && retranslating ? (
+                    <Square className="w-3 h-3 fill-current" />
+                  ) : (
+                    <Sparkles className="w-3 h-3" />
+                  )}
+                  {translating && retranslating
+                    ? t("skillEditor.retranslatingWithAi")
+                    : t("skillEditor.retranslateWithAi")}
+                </button>
+              )}
               <button
                 onClick={() => {
                   if (loadError) return;
@@ -701,9 +865,9 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
           )}
 
           {/* AI Error Banner */}
-          {aiError && (
+          {localizedAiError && (
             <div className="px-4 py-2 bg-destructive/10 border-b border-destructive/20 flex items-center gap-2">
-              <span className="text-xs text-destructive flex-1">{aiError}</span>
+              <span className="text-xs text-destructive flex-1">{localizedAiError}</span>
               <button
                 onClick={() => setAiError(null)}
                 className="text-destructive/60 hover:text-destructive cursor-pointer p-1.5 rounded focus-ring"
@@ -745,7 +909,7 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
                   )}
                 </div>
                 {summaryContent ? (
-                  <Markdown className="text-sm">
+                  <Markdown streaming={summarizing} className="text-sm">
                     {summaryContent}
                   </Markdown>
                 ) : summarizing ? (
@@ -784,7 +948,7 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
             ) : previewContent.trim().length === 0 && previewFrontmatterEntries.length === 0 ? (
               <div className="text-sm text-muted-foreground">{t("skillEditor.noContent")}</div>
             ) : (
-              <Markdown fallback={<div className="text-sm text-muted-foreground">Loading preview...</div>}>
+              <Markdown streaming={translating && translationVisible} fallback={<div className="text-sm text-muted-foreground">Loading preview...</div>}>
                 {previewContent}
               </Markdown>
             )}

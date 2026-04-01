@@ -1,22 +1,32 @@
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{LazyLock, OnceLock};
 
-use anyhow::{Context, Result};
-use chrono::{Duration, Utc};
+use anyhow::{Context, Result, anyhow};
 use regex::Regex;
-use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use super::skill::{OfficialPublisher, Skill, SkillCategory, extract_github_source_from_url};
-
-const DESCRIPTION_CACHE_TTL_DAYS: i64 = 14;
-const DESCRIPTION_CACHE_MAX_ENTRIES: usize = 5000;
-const DESCRIPTION_FETCH_CONCURRENCY: usize = 4;
-const DESCRIPTION_MAX_CHARS: usize = 240;
+use super::skill::{OfficialPublisher, Skill, SkillCategory};
 
 /// Build-time User-Agent string derived from Cargo.toml version.
 const USER_AGENT: &str = concat!("SkillStar/", env!("CARGO_PKG_VERSION"));
+
+/// Shared HTTP client for all marketplace requests.
+///
+/// Reuses TLS sessions and connection pools across calls, avoiding
+/// the ~50-100ms overhead of a fresh TLS handshake per request.
+static MARKETPLACE_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::limited(3))
+        .user_agent(USER_AGENT)
+        .build()
+        .expect("Failed to build marketplace HTTP client")
+});
+
+fn marketplace_client() -> &'static reqwest::Client {
+    &MARKETPLACE_CLIENT
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MarketplaceResult {
@@ -24,35 +34,6 @@ pub struct MarketplaceResult {
     pub total_count: u32,
     pub page: u32,
     pub has_more: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MarketplaceDescriptionRequest {
-    pub name: String,
-    pub source: Option<String>,
-    pub git_url: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MarketplaceDescriptionPatch {
-    pub key: String,
-    pub name: String,
-    pub source: Option<String>,
-    pub description: String,
-    pub from_cache: bool,
-}
-
-#[derive(Debug, Clone)]
-struct NormalizedDescriptionTarget {
-    key: String,
-    name: String,
-    source: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct DescriptionCacheEntry {
-    description: String,
-    updated_at: String,
 }
 
 // ── skills.sh Integration ──────────────────────────────────────────────
@@ -107,7 +88,7 @@ impl From<SkillsShSkill> for Skill {
 /// Note: max limit is ~100 (API returns 400 for higher values)
 /// Note: empty query returns 400 — a query is always required
 pub async fn search_skills_sh(query: &str, limit: u32) -> Result<MarketplaceResult> {
-    let client = reqwest::Client::new();
+    let client = marketplace_client();
     // Clamp limit to API maximum
     let clamped_limit = limit.min(100);
     let url = format!(
@@ -143,206 +124,7 @@ pub async fn search_skills_sh(query: &str, limit: u32) -> Result<MarketplaceResu
     })
 }
 
-/// Hydrate missing marketplace descriptions by fetching skills.sh skill pages.
-///
-/// Resolution order:
-/// 1) cache hit in `marketplace_description_cache.json`
-/// 2) fetch `https://skills.sh/{source}/{skill}` and parse Summary
-///
-/// Cache read/write failures are treated as non-fatal.
-pub async fn hydrate_marketplace_descriptions(
-    requests: Vec<MarketplaceDescriptionRequest>,
-) -> Result<Vec<MarketplaceDescriptionPatch>> {
-    if requests.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let mut cache = load_description_cache();
-    prune_description_cache(&mut cache);
-
-    let mut patches = Vec::new();
-    let mut misses = Vec::new();
-    let mut seen = HashSet::new();
-    let now = Utc::now();
-
-    for request in requests {
-        let Some(target) = normalize_description_target(&request) else {
-            continue;
-        };
-
-        if !seen.insert(target.key.clone()) {
-            continue;
-        }
-
-        if let Some(entry) = cache.get(&target.key) {
-            if is_cache_entry_fresh(entry, &now) && is_valid_description(&entry.description) {
-                patches.push(MarketplaceDescriptionPatch {
-                    key: target.key.clone(),
-                    name: target.name.clone(),
-                    source: Some(target.source.clone()),
-                    description: entry.description.clone(),
-                    from_cache: true,
-                });
-                continue;
-            }
-        }
-
-        misses.push(target);
-    }
-
-    if !misses.is_empty() {
-        let client = reqwest::Client::new();
-        let fetched = fetch_descriptions_with_limited_concurrency(&client, &misses).await;
-
-        if !fetched.is_empty() {
-            for patch in fetched {
-                cache.insert(
-                    patch.key.clone(),
-                    DescriptionCacheEntry {
-                        description: patch.description.clone(),
-                        updated_at: Utc::now().to_rfc3339(),
-                    },
-                );
-                patches.push(patch);
-            }
-            persist_description_cache(&cache);
-        }
-    }
-
-    Ok(patches)
-}
-
-async fn fetch_descriptions_with_limited_concurrency(
-    client: &reqwest::Client,
-    targets: &[NormalizedDescriptionTarget],
-) -> Vec<MarketplaceDescriptionPatch> {
-    let mut patches = Vec::new();
-
-    for chunk in targets.chunks(DESCRIPTION_FETCH_CONCURRENCY) {
-        let mut join_set = tokio::task::JoinSet::new();
-
-        for target in chunk {
-            let client = client.clone();
-            let target = target.clone();
-            join_set.spawn(async move { fetch_description_for_target(client, target).await });
-        }
-
-        while let Some(result) = join_set.join_next().await {
-            match result {
-                Ok(Some(patch)) => patches.push(patch),
-                Ok(None) => {}
-                Err(e) => {
-                    eprintln!(
-                        "[hydrate_marketplace_descriptions] fetch task join error: {}",
-                        e
-                    );
-                }
-            }
-        }
-    }
-
-    patches
-}
-
-async fn fetch_description_for_target(
-    client: reqwest::Client,
-    target: NormalizedDescriptionTarget,
-) -> Option<MarketplaceDescriptionPatch> {
-    let url = format!("https://skills.sh/{}/{}", target.source, target.name);
-    let response = client
-        .get(&url)
-        .header("User-Agent", USER_AGENT)
-        .header("Accept", "text/html,application/xhtml+xml")
-        .send()
-        .await
-        .ok()?;
-
-    let html = response.error_for_status().ok()?.text().await.ok()?;
-    let description = extract_summary_description_from_html(&html)?;
-
-    if !is_valid_description(&description) {
-        return None;
-    }
-
-    Some(MarketplaceDescriptionPatch {
-        key: target.key,
-        name: target.name,
-        source: Some(target.source),
-        description,
-        from_cache: false,
-    })
-}
-
-fn normalize_description_target(
-    request: &MarketplaceDescriptionRequest,
-) -> Option<NormalizedDescriptionTarget> {
-    let source = request
-        .source
-        .as_deref()
-        .and_then(normalize_source)
-        .or_else(|| {
-            request
-                .git_url
-                .as_deref()
-                .and_then(extract_github_source_from_url)
-                .and_then(|s| normalize_source(&s))
-        })?;
-
-    let name = normalize_skill_name(&request.name)?;
-    let key = format!("{}/{}", source, name);
-
-    Some(NormalizedDescriptionTarget { key, name, source })
-}
-
-fn normalize_source(raw: &str) -> Option<String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    let source = trimmed
-        .trim_start_matches("https://github.com/")
-        .trim_start_matches("http://github.com/")
-        .trim_end_matches('/')
-        .trim_end_matches(".git")
-        .to_lowercase();
-
-    let mut parts = source.split('/').filter(|s| !s.is_empty());
-    let owner = parts.next()?;
-    let repo = parts.next()?;
-    Some(format!("{}/{}", owner, repo))
-}
-
-fn normalize_skill_name(raw: &str) -> Option<String> {
-    let trimmed = raw.trim().to_lowercase();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed)
-    }
-}
-
 // ── Cached Regexes (compiled once, reused forever) ─────────────────
-
-fn re_summary_block() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(
-            r#">Summary</div><div[^>]*>\s*<div class="prose[^"]*">([\s\S]*?)</div>\s*</div>"#,
-        )
-        .expect("summary block regex")
-    })
-}
-
-fn re_strong() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r#"<strong>([\s\S]*?)</strong>"#).expect("strong regex"))
-}
-
-fn re_paragraph() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r#"<p>([\s\S]*?)</p>"#).expect("paragraph regex"))
-}
 
 fn re_strip_html() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
@@ -372,213 +154,9 @@ fn re_nextjs_skill_data() -> &'static Regex {
     })
 }
 
-fn extract_summary_description_from_html(html: &str) -> Option<String> {
-    let block = re_summary_block()
-        .captures(html)
-        .and_then(|caps| caps.get(1).map(|m| m.as_str()))?;
-
-    if let Some(caps) = re_strong().captures(block) {
-        let text = caps.get(1).map(|m| m.as_str()).unwrap_or_default();
-        let normalized = normalize_description_text(text);
-        if is_valid_description(&normalized) {
-            return Some(normalized);
-        }
-    }
-
-    if let Some(caps) = re_paragraph().captures(block) {
-        let text = caps.get(1).map(|m| m.as_str()).unwrap_or_default();
-        let normalized = normalize_description_text(text);
-        if is_valid_description(&normalized) {
-            return Some(normalized);
-        }
-    }
-
-    let fallback = normalize_description_text(block);
-    if fallback.is_empty() {
-        None
-    } else {
-        Some(fallback)
-    }
-}
-
-fn normalize_description_text(raw: &str) -> String {
-    let stripped = re_strip_html().replace_all(raw, " ");
-    let decoded = decode_html_entities(&stripped);
-    let collapsed = decoded.split_whitespace().collect::<Vec<_>>().join(" ");
-    truncate_chars(&collapsed, DESCRIPTION_MAX_CHARS)
-}
-
-fn decode_html_entities(text: &str) -> String {
-    text.replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&nbsp;", " ")
-}
-
-fn truncate_chars(text: &str, max_chars: usize) -> String {
-    let trimmed = text.trim();
-    if trimmed.chars().count() <= max_chars {
-        return trimmed.to_string();
-    }
-
-    trimmed
-        .chars()
-        .take(max_chars)
-        .collect::<String>()
-        .trim()
-        .to_string()
-}
-
-fn is_valid_description(description: &str) -> bool {
-    let trimmed = description.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-
-    let lower = trimmed.to_lowercase();
-    if lower.starts_with("install the ") && lower.contains(" skill for ") {
-        return false;
-    }
-
-    if lower.starts_with("skill: ") {
-        return false;
-    }
-
-    true
-}
-
-fn description_db_path() -> PathBuf {
-    super::paths::data_root().join("marketplace.db")
-}
-
-fn init_marketplace_db() -> Result<Connection, rusqlite::Error> {
-    let path = description_db_path();
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let conn = Connection::open(&path)?;
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS marketplace_cache (
-            key TEXT PRIMARY KEY,
-            description TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        )",
-        (),
-    )?;
-    Ok(conn)
-}
-
-fn load_description_cache() -> HashMap<String, DescriptionCacheEntry> {
-    let mut map = HashMap::new();
-    let conn = match init_marketplace_db() {
-        Ok(c) => c,
-        Err(_) => return map,
-    };
-    let mut stmt = match conn.prepare("SELECT key, description, updated_at FROM marketplace_cache")
-    {
-        Ok(s) => s,
-        Err(_) => return map,
-    };
-
-    let rows = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-        ))
-    });
-
-    if let Ok(mapped) = rows {
-        for row_result in mapped.flatten() {
-            let (key, description, updated_at) = row_result;
-            map.insert(
-                key,
-                DescriptionCacheEntry {
-                    description,
-                    updated_at,
-                },
-            );
-        }
-    }
-    map
-}
-
-fn persist_description_cache(entries: &HashMap<String, DescriptionCacheEntry>) {
-    // Delete legacy json file if exists
-    let legacy_path = super::paths::data_root().join("marketplace_description_cache.json");
-    if legacy_path.exists() {
-        let _ = std::fs::remove_file(legacy_path);
-    }
-
-    let mut conn = match init_marketplace_db() {
-        Ok(c) => c,
-        Err(_) => return,
-    };
-
-    let mut pruned = entries.clone();
-    prune_description_cache(&mut pruned);
-
-    if let Ok(tx) = conn.transaction() {
-        {
-            let mut stmt = tx.prepare_cached(
-                "INSERT OR REPLACE INTO marketplace_cache (key, description, updated_at) VALUES (?1, ?2, ?3)"
-            ).expect("SQL prepare failed");
-            for (key, entry) in &pruned {
-                let _ = stmt.execute((key, &entry.description, &entry.updated_at));
-            }
-        }
-
-        let _ = tx.execute(
-            "DELETE FROM marketplace_cache 
-             WHERE key NOT IN (
-                 SELECT key FROM marketplace_cache 
-                 ORDER BY updated_at DESC LIMIT ?1
-             )",
-            [DESCRIPTION_CACHE_MAX_ENTRIES as i64],
-        );
-        let _ = tx.commit();
-    }
-}
-
-fn prune_description_cache(entries: &mut HashMap<String, DescriptionCacheEntry>) {
-    let now = Utc::now();
-
-    entries.retain(|_, entry| {
-        is_cache_entry_fresh(entry, &now) && is_valid_description(&entry.description)
-    });
-
-    if entries.len() <= DESCRIPTION_CACHE_MAX_ENTRIES {
-        return;
-    }
-
-    let mut pairs: Vec<(String, DescriptionCacheEntry)> = entries.drain().collect();
-    pairs.sort_by(|a, b| {
-        cache_entry_timestamp(&b.1.updated_at).cmp(&cache_entry_timestamp(&a.1.updated_at))
-    });
-    pairs.truncate(DESCRIPTION_CACHE_MAX_ENTRIES);
-    entries.extend(pairs);
-}
-
-fn is_cache_entry_fresh(entry: &DescriptionCacheEntry, now: &chrono::DateTime<Utc>) -> bool {
-    let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(&entry.updated_at) else {
-        return false;
-    };
-
-    let updated = parsed.with_timezone(&Utc);
-    *now - updated <= Duration::days(DESCRIPTION_CACHE_TTL_DAYS)
-}
-
-fn cache_entry_timestamp(updated_at: &str) -> i64 {
-    chrono::DateTime::parse_from_rfc3339(updated_at)
-        .map(|dt| dt.timestamp())
-        .unwrap_or(0)
-}
-
 /// Get skills.sh leaderboard via HTML scraping
 pub async fn get_skills_sh_leaderboard(category: &str) -> Result<Vec<Skill>> {
-    let client = reqwest::Client::new();
+    let client = marketplace_client();
 
     // Map category to URL path
     let url_path = match category {
@@ -624,10 +202,76 @@ pub async fn get_skills_sh_leaderboard(category: &str) -> Result<Vec<Skill>> {
     Ok(skills)
 }
 
-fn parse_skills_sh_html(html: &str) -> Vec<Skill> {
+/// Extract skills from the escaped Next.js SSR payload.
+///
+/// The skills.sh homepage embeds skill data as backslash-escaped JSON inside
+/// `<script>` tags. Each object looks like:
+///   `{\"source\":\"vercel-labs/skills\",\"skillId\":\"find-skills\",\"name\":\"find-skills\",\"installs\":787461}`
+///
+/// Standard regex with `[^{}]` and unescaped `"` delimiters fails to match
+/// these objects. This function uses a regex targeting escaped quotes and then
+/// unescapes each match before serde parsing.
+fn extract_skills_from_escaped_payload(html: &str) -> Vec<Skill> {
+    fn re_escaped_skill_object() -> &'static Regex {
+        static RE: OnceLock<Regex> = OnceLock::new();
+        RE.get_or_init(|| {
+            // Match flat JSON objects containing \"skillId\" (escaped quotes).
+            // [^}]* is safe because these skill objects never have nested braces.
+            Regex::new(r#"\{[^}]*\\"skillId\\"[^}]*\}"#).expect("escaped skill object regex")
+        })
+    }
+
+    let re = re_escaped_skill_object();
     let mut skills = Vec::new();
 
-    // Try multiple patterns to find skill data (using cached regexes)
+    for cap in re.find_iter(html) {
+        let raw = cap.as_str();
+        // The SSR payload uses double-backslash escaping: \\"field\\"
+        // Two passes of \" → " fully unescape to valid JSON.
+        let unescaped = raw
+            .replace("\\\"", "\"")
+            .replace("\\\"", "\"")
+            .replace("\\/", "/")
+            .replace("\\\\", "\\");
+
+        if let Ok(entry) = serde_json::from_str::<SkillsShSkill>(&unescaped) {
+            let source = entry.source.clone();
+            let repo_url = entry
+                .repo_url
+                .unwrap_or_else(|| format!("https://github.com/{}", source));
+            let description = entry.description.unwrap_or_default();
+            skills.push(Skill::from_skills_sh(
+                entry.name,
+                description,
+                entry.installs,
+                source,
+                repo_url,
+            ));
+        }
+    }
+
+    skills
+}
+
+fn parse_skills_sh_html(html: &str) -> Vec<Skill> {
+    // ── Strategy 0: Escaped SSR payload (current skills.sh format) ──────
+    // Primary path. The Next.js SSR payload embeds skill data as
+    // backslash-escaped JSON objects. Extract, unescape, parse.
+    let mut skills = extract_skills_from_escaped_payload(html);
+    if !skills.is_empty() {
+        eprintln!(
+            "[skills.sh] Strategy 0 (escaped SSR) matched {} skills",
+            skills.len()
+        );
+        let mut seen = std::collections::HashSet::new();
+        skills.retain(|s| seen.insert(s.name.clone()));
+        for (i, skill) in skills.iter_mut().enumerate() {
+            skill.rank = Some((i + 1) as u32);
+        }
+        return skills;
+    }
+
+    // ── Strategy 1 (legacy fallback): unescaped JSON / HTML patterns ────
 
     // Pattern 1: Find JSON objects containing skillId and installs
     let cached_regexes: [&Regex; 2] = [re_leaderboard_json_object(), re_leaderboard_escaped()];
@@ -732,7 +376,7 @@ fn extract_description_from_html(_html: &str, skill_name: &str) -> String {
 
 /// Get official publishers from skills.sh/official via HTML scraping
 pub async fn get_official_publishers() -> Result<Vec<OfficialPublisher>> {
-    let client = reqwest::Client::new();
+    let client = marketplace_client();
 
     let html = client
         .get("https://skills.sh/official")
@@ -964,15 +608,7 @@ fn known_official_publishers() -> Vec<OfficialPublisher> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
-    use chrono::{Duration, Utc};
-
-    use super::{
-        DESCRIPTION_CACHE_MAX_ENTRIES, DescriptionCacheEntry, MarketplaceDescriptionRequest,
-        extract_summary_description_from_html, is_valid_description, normalize_description_target,
-        parse_official_publishers_html, prune_description_cache,
-    };
+    use super::parse_official_publishers_html;
 
     #[test]
     fn parses_current_official_row_repo_and_skill_counts() {
@@ -983,89 +619,6 @@ mod tests {
         assert_eq!(publishers[0].repo, "skills");
         assert_eq!(publishers[0].repo_count, 11);
         assert_eq!(publishers[0].skill_count, 256);
-    }
-
-    #[test]
-    fn extracts_summary_description_prefers_strong() {
-        let html = r#"
-        <div>Summary</div><div><div class="prose prose-invert"><p><strong>Fast screenshot capture for desktop and windows.</strong></p><p>extra text</p></div></div>
-        "#;
-
-        let summary = extract_summary_description_from_html(html).unwrap();
-        assert_eq!(summary, "Fast screenshot capture for desktop and windows.");
-    }
-
-    #[test]
-    fn extracts_summary_description_falls_back_to_paragraph() {
-        let html = r#"
-        <div>Summary</div><div><div class="prose prose-invert"><p>Render AI chat interfaces with optimistic updates.</p></div></div>
-        "#;
-
-        let summary = extract_summary_description_from_html(html).unwrap();
-        assert_eq!(
-            summary,
-            "Render AI chat interfaces with optimistic updates."
-        );
-    }
-
-    #[test]
-    fn rejects_template_install_description() {
-        assert!(!is_valid_description(
-            "Install the screenshot skill for openai/skills"
-        ));
-        assert!(!is_valid_description("   "));
-        assert!(is_valid_description(
-            "Capture desktop screenshots with region support."
-        ));
-    }
-
-    #[test]
-    fn normalizes_description_target_from_source_and_git_url() {
-        let from_source = MarketplaceDescriptionRequest {
-            name: "Screenshot".to_string(),
-            source: Some("OpenAI/Skills".to_string()),
-            git_url: None,
-        };
-        let target1 = normalize_description_target(&from_source).unwrap();
-        assert_eq!(target1.key, "openai/skills/screenshot");
-
-        let from_git = MarketplaceDescriptionRequest {
-            name: "screenshot".to_string(),
-            source: None,
-            git_url: Some("https://github.com/openai/skills.git".to_string()),
-        };
-        let target2 = normalize_description_target(&from_git).unwrap();
-        assert_eq!(target2.key, "openai/skills/screenshot");
-    }
-
-    #[test]
-    fn prunes_cache_by_ttl_and_max_entries() {
-        let mut entries = HashMap::new();
-        let now = Utc::now();
-
-        entries.insert(
-            "old/entry".to_string(),
-            DescriptionCacheEntry {
-                description: "stale".to_string(),
-                updated_at: (now - Duration::days(30)).to_rfc3339(),
-            },
-        );
-
-        for i in 0..(DESCRIPTION_CACHE_MAX_ENTRIES + 10) {
-            entries.insert(
-                format!("source/skill-{}", i),
-                DescriptionCacheEntry {
-                    description: format!("description {}", i),
-                    updated_at: (now - Duration::seconds(i as i64)).to_rfc3339(),
-                },
-            );
-        }
-
-        prune_description_cache(&mut entries);
-
-        assert!(!entries.contains_key("old/entry"));
-        assert!(entries.len() <= DESCRIPTION_CACHE_MAX_ENTRIES);
-        assert!(entries.contains_key("source/skill-0"));
     }
 
     #[test]
@@ -1136,7 +689,7 @@ pub async fn get_publisher_repo_skills(
     let repo_lower = repo_name.to_lowercase();
     let url = format!("https://skills.sh/{}/{}", publisher_lower, repo_lower);
 
-    let client = reqwest::Client::new();
+    let client = marketplace_client();
     let html = client
         .get(&url)
         .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -1282,7 +835,7 @@ fn parse_repo_skills_html(html: &str, publisher: &str, repo: &str) -> Vec<Publis
 ///    (the per-publisher page may omit low-traffic repos).
 /// 2. Fall back to `skills.sh/<publisher>` HTML scraping if the official payload fails.
 pub async fn get_publisher_repos(publisher_name: &str) -> Result<Vec<PublisherRepo>> {
-    let client = reqwest::Client::new();
+    let client = marketplace_client();
     let publisher_lower = publisher_name.to_lowercase();
 
     // Strategy 1: official page SSR payload (complete data)
@@ -1603,10 +1156,7 @@ pub async fn fetch_marketplace_skill_details(
     let url = format!("https://skills.sh/{}/{}", source, name);
     eprintln!("[fetch_skill_details] Fetching: {}", url);
 
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::limited(3))
-        .build()
-        .context("Failed to build HTTP client")?;
+    let client = marketplace_client();
 
     let response = client
         .get(&url)
@@ -1799,4 +1349,190 @@ fn extract_security_audits(html: &str) -> Vec<SecurityAudit> {
     }
 
     audits
+}
+
+// ── AI Marketplace Search ───────────────────────────────────────────
+
+/// Result of AI-powered keyword search, including per-keyword attribution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiKeywordSearchResult {
+    /// Merged, deduplicated skills sorted by installs.
+    pub skills: Vec<Skill>,
+    pub total_count: u32,
+    /// Maps each keyword → list of skill names it found.
+    pub keyword_skill_map: HashMap<String, Vec<String>>,
+}
+
+/// Search skills.sh concurrently with multiple keywords and merge results.
+///
+/// Each keyword is searched in parallel (bounded to 4 concurrent requests).
+/// Results are deduplicated by skill name, keeping the entry with the highest
+/// install count. Returns per-keyword attribution for frontend filtering.
+pub async fn ai_search_by_keywords(keywords: &[String]) -> Result<AiKeywordSearchResult> {
+    if keywords.is_empty() {
+        return Ok(AiKeywordSearchResult {
+            skills: Vec::new(),
+            total_count: 0,
+            keyword_skill_map: HashMap::new(),
+        });
+    }
+
+    let mut join_set: tokio::task::JoinSet<Result<(String, MarketplaceResult)>> =
+        tokio::task::JoinSet::new();
+    let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(4));
+
+    for keyword in keywords.iter().cloned() {
+        let permit = semaphore.clone();
+        join_set.spawn(async move {
+            let _permit = permit
+                .acquire_owned()
+                .await
+                .map_err(|_| anyhow!("search semaphore closed"))?;
+            eprintln!("[ai_search] Searching keyword: {}", keyword);
+            let result = search_skills_sh(&keyword, 50).await?;
+            Ok((keyword, result))
+        });
+    }
+
+    // Merge all results, dedup by name keeping highest install count.
+    // Also track which keyword found which skill names.
+    let mut seen: HashMap<String, Skill> = HashMap::new();
+    let mut keyword_skill_map: HashMap<String, Vec<String>> = HashMap::new();
+
+    while let Some(result) = join_set.join_next().await {
+        match result {
+            Ok(Ok((keyword, market_result))) => {
+                let mut names_for_keyword = Vec::new();
+                for skill in market_result.skills {
+                    let key = skill.name.to_lowercase();
+                    names_for_keyword.push(skill.name.clone());
+                    let entry = seen.entry(key).or_insert_with(|| skill.clone());
+                    if skill.stars > entry.stars {
+                        *entry = skill;
+                    }
+                }
+                keyword_skill_map.insert(keyword, names_for_keyword);
+            }
+            Ok(Err(e)) => {
+                eprintln!("[ai_search] Keyword search error: {}", e);
+            }
+            Err(e) => {
+                eprintln!("[ai_search] Task join error: {}", e);
+            }
+        }
+    }
+
+    let mut skills: Vec<Skill> = seen.into_values().collect();
+    skills.sort_by(|a, b| b.stars.cmp(&a.stars));
+    for (i, skill) in skills.iter_mut().enumerate() {
+        skill.rank = Some((i + 1) as u32);
+    }
+    let total_count = skills.len() as u32;
+
+    eprintln!(
+        "[ai_search] Merged {} unique skills from {} keywords",
+        total_count,
+        keywords.len()
+    );
+
+    Ok(AiKeywordSearchResult {
+        skills,
+        total_count,
+        keyword_skill_map,
+    })
+}
+
+#[cfg(test)]
+mod ai_search_tests {
+    use super::ai_search_by_keywords;
+
+    /// Integration test: verifies keyword_skill_map is correctly populated.
+    /// Uses real network calls, so marked #[ignore] for CI.
+    /// Run with: cargo test ai_search_returns_keyword_map -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn ai_search_returns_keyword_map() {
+        let keywords = vec!["react".to_string(), "typescript".to_string()];
+        let result = ai_search_by_keywords(&keywords).await.unwrap();
+
+        eprintln!("Total skills returned: {}", result.skills.len());
+        eprintln!(
+            "keyword_skill_map keys: {:?}",
+            result.keyword_skill_map.keys().collect::<Vec<_>>()
+        );
+
+        // 1) Should return some skills
+        assert!(
+            !result.skills.is_empty(),
+            "Expected at least 1 skill from search"
+        );
+
+        // 2) keyword_skill_map should have entries for each keyword
+        for kw in &keywords {
+            let names = result.keyword_skill_map.get(kw);
+            assert!(
+                names.is_some(),
+                "keyword_skill_map missing entry for '{}'",
+                kw
+            );
+            let names = names.unwrap();
+            eprintln!(
+                "Keyword '{}' found {} skills: {:?}",
+                kw,
+                names.len(),
+                &names[..names.len().min(5)]
+            );
+            assert!(
+                !names.is_empty(),
+                "Expected at least 1 skill for keyword '{}'",
+                kw
+            );
+        }
+
+        // 3) total_count matches skills vec length
+        assert_eq!(
+            result.total_count as usize,
+            result.skills.len(),
+            "total_count should match skills.len()"
+        );
+
+        // 4) Every returned skill should be attributed to at least one keyword
+        let all_attributed: std::collections::HashSet<String> = result
+            .keyword_skill_map
+            .values()
+            .flat_map(|v| v.iter().cloned())
+            .collect();
+        for skill in &result.skills {
+            assert!(
+                all_attributed.contains(&skill.name),
+                "Skill '{}' not found in any keyword_skill_map entry",
+                skill.name
+            );
+        }
+
+        // 5) Serializes to JSON correctly (simulates what Tauri sends to frontend)
+        let json = serde_json::to_value(&result).unwrap();
+        assert!(
+            json["keyword_skill_map"].is_object(),
+            "keyword_skill_map should serialize as JSON object"
+        );
+        assert!(
+            json["skills"].is_array(),
+            "skills should serialize as JSON array"
+        );
+        let map = json["keyword_skill_map"].as_object().unwrap();
+        eprintln!("JSON keyword_skill_map: {} keys", map.len());
+        for (k, v) in map {
+            eprintln!("  '{}': {} skills", k, v.as_array().unwrap().len());
+        }
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn ai_search_empty_keywords_returns_empty() {
+        let result = ai_search_by_keywords(&[]).await.unwrap();
+        assert!(result.skills.is_empty());
+        assert_eq!(result.total_count, 0);
+        assert!(result.keyword_skill_map.is_empty());
+    }
 }

@@ -38,13 +38,18 @@ SkillStar 是一个 Tauri 桌面应用（也支持 CLI），用于统一管理 A
 <br/>
 
 ## 核心能力
-- 多 Agent 生态：Gemini CLI、Claude Code、Codex CLI、OpenCode CLI、OpenClaw、Antigravity
-- 纯 symlink 分发：项目目录不落地副本，避免 `git status` 污染
-- Hub + Repo Cache 双层结构：支持多技能仓库统一更新
-- AI 辅助阅读：SKILL.md 翻译与摘要（支持流式展示）
-- 本地技能生命周期：创建、编辑、发布、毕业（local → hub）
-- 共享机制：Share Code + `.ags` / `.agd` Bundle
-- 后台巡检：低频、单技能节奏更新检查
+| 能力 | 说明 |
+|------|------|
+| 多 Agent 生态 | Gemini CLI、Claude Code、Codex CLI、OpenCode CLI、OpenClaw、Antigravity |
+| 纯 symlink 分发 | 项目目录不落地副本，避免 `git status` 污染 |
+| Hub + Repo Cache 双层 | 支持多技能仓库统一更新 |
+| 安全扫描 | 三模式（Static / Smart / Deep）扫描，含 AI 深度分析与风险评级 |
+| AI 辅助阅读 | SKILL.md 翻译与摘要（流式展示），短文本双通道翻译 |
+| AI 技能推荐 | 本地预排 + AI 多轮打分，精准推荐技能 |
+| 本地技能生命周期 | 创建、编辑、删除、发布、毕业（local → hub） |
+| 共享机制 | Share Code + `.ags` / `.agd` Bundle 导入导出 |
+| 后台巡检 | 低频单技能节奏更新检查，可在设置/系统托盘控制 |
+| 多语言 | 中 / 英 全界面国际化（i18next） |
 
 ## 安装
 ### Homebrew (macOS)
@@ -93,25 +98,35 @@ bun run tauri build
 ## 典型工作流
 1. `Marketplace` 浏览并安装技能
 2. `My Skills` 管理技能、编辑 SKILL.md、配置 Agent 链接
-3. `Decks` 组合技能并一键部署到项目
-4. `Projects` 注册项目并执行按 Agent 同步
-5. 需要命令行时使用内置 CLI（`skillstar list/install/update/...`）
+3. `Security Scan` 扫描已安装技能的安全风险（支持 AI 深度分析）
+4. `Decks` 组合技能并一键部署到项目
+5. `Projects` 注册项目并执行按 Agent 同步
+6. 需要命令行时使用内置 CLI（`skillstar list/install/update/...`）
 
 ## 技术架构
 | Layer | Technology | Purpose |
 |-------|------------|---------|
 | Desktop Shell | Tauri v2 | 桌面容器与 IPC |
-| Backend | Rust + tokio + reqwest | 业务逻辑与异步任务 |
-| Git Engine | gix (gitoxide) | 克隆/拉取/哈希对比 |
-| Frontend | React 18 + TypeScript + Vite | SPA UI |
-| UI | TailwindCSS v4 + Framer Motion + Radix | 设计系统与交互 |
-| Storage | JSON files | 无数据库持久化 |
+| Backend | Rust 2024 + tokio + reqwest 0.13 | 业务逻辑与异步任务 |
+| Git Engine | gix 0.80 (gitoxide) | 克隆/拉取/哈希对比 |
+| Frontend | React 18 + TypeScript + Vite 5 | SPA UI |
+| UI | TailwindCSS v4 + Framer Motion 12 + Radix | 设计系统与交互 |
+| Storage | JSON files + SQLite | 配置持久化 + 翻译/安全扫描缓存 |
+| Crypto | AES-256-GCM | API Key 加密存储 |
 
 ## 目录概览
 ```text
 SkillStar/
 ├── src/                # React 前端
+│   ├── hooks/          #   数据 hooks（skills, projects, marketplace, AI, updater, security）
+│   ├── pages/          #   MySkills, Marketplace, SecurityScan, SkillCards, Projects, Settings
+│   ├── components/     #   ui/, layout/, skills/, marketplace/, security/
+│   ├── lib/            #   共享工具
+│   └── types/          #   共享 TS 类型
 ├── src-tauri/          # Rust 后端（Tauri + CLI）
+│   ├── src/commands/   #   marketplace, agents, projects, github, ai, patrol
+│   ├── src/core/       #   domain modules（skills, sync, repo, security_scan, ai_provider ...）
+│   └── prompts/        #   AI/Security 系统提示词
 ├── docs/Error.md       # 关键问题与修复记录
 ├── AGENTS.md           # 后端/全局工程规范
 ├── AGENTS-UI.md        # 前端规范

@@ -14,13 +14,20 @@ import {
 import type {
   AiConfig,
   CacheCleanResult,
+  MymemoryUsageStats,
   ProxyConfig,
   StorageOverview,
 } from "../../types";
 import { AgentConnectionsSection } from "./AgentConnectionsSection";
 import { ProxySection } from "./ProxySection";
 import { AiProviderSection } from "./AiProviderSection";
-import { BackgroundRunSection, readBackgroundRun, writeBackgroundRun } from "./BackgroundRunSection";
+import { ShortTextServiceSection } from "./ShortTextServiceSection";
+import {
+  BackgroundRunSection,
+  onBackgroundRunChanged,
+  readBackgroundRun,
+  writeBackgroundRun,
+} from "./BackgroundRunSection";
 import { AppearanceSection } from "./AppearanceSection";
 import { LanguageSection } from "./LanguageSection";
 import { StorageSection } from "./StorageSection";
@@ -50,7 +57,6 @@ function isSameAiConfig(a: AiConfig, b: AiConfig): boolean {
     a.api_key === b.api_key &&
     a.model === b.model &&
     a.target_language === b.target_language &&
-    a.use_mymemory_for_short_text === b.use_mymemory_for_short_text &&
     a.short_text_priority === b.short_text_priority &&
     a.context_window_k === b.context_window_k &&
     a.max_concurrent_requests === b.max_concurrent_requests &&
@@ -97,7 +103,7 @@ function proxyReducer(state: ProxyState, action: ProxyAction): ProxyState {
     case "SET_FIELD":
       return { ...state, config: { ...state.config, [action.field]: action.value } };
     case "LOAD":
-      return { ...state, config: action.config, savedConfig: action.config };
+      return { ...state, config: action.config, savedConfig: action.config, loaded: true };
     case "MARK_SAVED_CONFIG":
       return { ...state, savedConfig: action.config };
     case "START_SAVE":
@@ -227,6 +233,8 @@ export function Settings() {
   const [backgroundRun, setBackgroundRun] = useState(() => readBackgroundRun());
   const { profiles, loading: profilesLoading, toggleProfile, unlinkAllFromAgent } = useAgentProfiles();
 
+  useEffect(() => onBackgroundRunChanged(setBackgroundRun), []);
+
   // Proxy reducer
   const [proxyState, dispatchProxy] = useReducer(proxyReducer, {
     config: initialProxyConfig,
@@ -260,11 +268,16 @@ export function Settings() {
   });
 
   const [storageOverview, setStorageOverview] = useState<StorageOverview | null>(null);
+  const [mymemoryUsage, setMymemoryUsage] = useState<MymemoryUsageStats | null>(null);
   const [fetchingStorage, setFetchingStorage] = useState(false);
   const [cleaningCaches, setCleaningCaches] = useState(false);
   const [cleaningBroken, setCleaningBroken] = useState(false);
   const [forceDeletingTarget, setForceDeletingTarget] = useState<ForceDeleteTarget | null>(null);
   const [ghInstalled, setGhInstalled] = useState<boolean | null>(null);
+
+  const notifySkillsRefresh = useCallback(() => {
+    window.dispatchEvent(new Event("skillstar:refresh-skills"));
+  }, []);
 
   // ── Proxy effects ─────────────────────────────────────────────────────────
 
@@ -272,7 +285,7 @@ export function Settings() {
     dispatchProxy({ type: "START_LOAD" });
     invoke<ProxyConfig>("get_proxy_config")
       .then((config) => dispatchProxy({ type: "LOAD", config }))
-      .catch(() => dispatchProxy({ type: "START_LOAD" }))
+      .catch(() => dispatchProxy({ type: "LOAD", config: initialProxyConfig }))
       .finally(() => dispatchProxy({ type: "FINISH_SAVE" }));
   }, []);
 
@@ -352,9 +365,27 @@ export function Settings() {
     }
   }, []);
 
+  const fetchMymemoryUsage = useCallback(async () => {
+    try {
+      const usage = await invoke<MymemoryUsageStats>("get_mymemory_usage_stats");
+      setMymemoryUsage(usage);
+    } catch {
+      // ignore
+    }
+  }, []);
+
   useEffect(() => {
     fetchStorageOverview();
   }, [fetchStorageOverview]);
+
+  useEffect(() => {
+    void fetchMymemoryUsage();
+  }, [fetchMymemoryUsage]);
+
+  useEffect(() => {
+    if (!aiState.expanded) return;
+    void fetchMymemoryUsage();
+  }, [aiState.expanded, fetchMymemoryUsage]);
 
   useEffect(() => {
     invoke<boolean>("check_gh_installed").then(setGhInstalled).catch(() => setGhInstalled(false));
@@ -457,13 +488,15 @@ export function Settings() {
 
   const handleBackgroundRunToggle = useCallback(async (enabled: boolean) => {
     writeBackgroundRun(enabled);
-    setBackgroundRun(enabled);
-    if (!enabled) {
-      try {
+    try {
+      if (enabled) {
+        await invoke("set_patrol_enabled", { enabled: true });
+      } else {
         await invoke("stop_patrol");
-      } catch (e) {
-        console.error("Stop patrol failed:", e);
       }
+    } catch (e) {
+      writeBackgroundRun(!enabled);
+      console.error("Update patrol background run failed:", e);
     }
   }, []);
 
@@ -507,7 +540,7 @@ export function Settings() {
         localStorage.removeItem("skillstar_last_check");
       } catch { /* ignore */ }
 
-      const total = result.repos_removed + result.history_cleared;
+      const total = result.repos_removed + result.history_cleared + result.translation_cleared;
       if (total > 0) {
         toast.success(t("settings.cacheCleanDone", { count: total }));
       } else {
@@ -551,6 +584,9 @@ export function Settings() {
           toast.info(t("settings.forceDeleteConfigEmpty"));
         }
 
+        if (target === "hub") {
+          notifySkillsRefresh();
+        }
         await fetchStorageOverview();
       } catch (e) {
         console.error("Force delete failed:", e);
@@ -559,7 +595,7 @@ export function Settings() {
         setForceDeletingTarget(null);
       }
     },
-    [fetchStorageOverview, t]
+    [fetchStorageOverview, notifySkillsRefresh, t]
   );
 
   const handleCleanBroken = useCallback(async () => {
@@ -574,6 +610,7 @@ export function Settings() {
       } else {
         toast.info(t("settings.repairNone"));
       }
+      notifySkillsRefresh();
       await fetchStorageOverview();
     } catch (e) {
       console.error("Clean broken skills failed:", e);
@@ -581,7 +618,7 @@ export function Settings() {
     } finally {
       setCleaningBroken(false);
     }
-  }, [fetchStorageOverview, t]);
+  }, [fetchStorageOverview, notifySkillsRefresh, t]);
 
   const formatBytes = useCallback((bytes: number) => {
     if (bytes === 0) return "0 B";
@@ -617,7 +654,7 @@ export function Settings() {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: "easeOut" }}
-        className="flex-1 overflow-y-auto px-8 py-8"
+        className="flex-1 overflow-y-auto p-6"
       >
         <div className="max-w-[720px] mx-auto space-y-8 pb-12">
           <AgentConnectionsSection
@@ -658,6 +695,12 @@ export function Settings() {
             onConfigChange={handleAiConfigChange}
             onToggleShowApiKey={() => dispatchAi({ type: "TOGGLE_SHOW_API_KEY" })}
             onTestConnection={handleAiTestConnection}
+          />
+
+          <ShortTextServiceSection
+            localAiConfig={aiState.config}
+            mymemoryUsage={mymemoryUsage}
+            onConfigChange={handleAiConfigChange}
           />
 
           <BackgroundRunSection

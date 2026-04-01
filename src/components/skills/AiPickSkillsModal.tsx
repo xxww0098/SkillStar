@@ -6,7 +6,12 @@ import { useTranslation } from "react-i18next";
 import { Button } from "../ui/button";
 import { cn, navigateToAiSettings } from "../../lib/utils";
 import { toast } from "../../lib/toast";
-import type { AiConfigStatus, Skill } from "../../types";
+import type {
+  AiConfigStatus,
+  AiPickRecommendation,
+  AiPickResponse,
+  Skill,
+} from "../../types";
 
 interface AiPickSkillsModalProps {
   open: boolean;
@@ -27,10 +32,12 @@ export function AiPickSkillsModal({
   const prefersReducedMotion = useReducedMotion();
   const [phase, setPhase] = useState<Phase>("input");
   const [prompt, setPrompt] = useState("");
-  const [recommended, setRecommended] = useState<string[]>([]);
+  const [recommended, setRecommended] = useState<AiPickRecommendation[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [aiConfigured, setAiConfigured] = useState<boolean | null>(null);
+  const [fallbackUsed, setFallbackUsed] = useState(false);
+  const [roundsSucceeded, setRoundsSucceeded] = useState(0);
 
   useEffect(() => {
     if (open) {
@@ -40,6 +47,8 @@ export function AiPickSkillsModal({
       setSelected(new Set());
       setError(null);
       setAiConfigured(null);
+      setFallbackUsed(false);
+      setRoundsSucceeded(0);
 
       const loadAiConfig = async () => {
         try {
@@ -64,18 +73,19 @@ export function AiPickSkillsModal({
         description: s.description,
       }));
 
-      const result = await invoke<string[]>("ai_pick_skills", {
+      const result = await invoke<AiPickResponse>("ai_pick_skills", {
         prompt: prompt.trim(),
         skills: skillMetas,
       });
 
-      // Filter to only names that actually exist locally
-      const validNames = result.filter((name) =>
-        skills.some((s) => s.name === name)
+      const validRecommendations = result.recommendations.filter((item) =>
+        skills.some((s) => s.name === item.name)
       );
 
-      setRecommended(validNames);
-      setSelected(new Set(validNames));
+      setRecommended(validRecommendations);
+      setSelected(new Set(validRecommendations.map((item) => item.name)));
+      setFallbackUsed(result.fallbackUsed);
+      setRoundsSucceeded(result.roundsSucceeded);
       setPhase("result");
     } catch (e) {
       setError(String(e));
@@ -216,13 +226,21 @@ export function AiPickSkillsModal({
                       animate={{ opacity: 1 }}
                       className="space-y-3"
                     >
-                      <div className="flex items-center justify-between">
-                        <p className="text-xs text-muted-foreground">
-                          {t("aiPickModal.resultTitle")}
-                        </p>
-                        <span className="text-micro text-muted-foreground tabular-nums">
-                          {selected.size} / {recommended.length}
-                        </span>
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs text-muted-foreground">
+                            {t("aiPickModal.resultTitle")}
+                          </p>
+                          <span className="text-micro text-muted-foreground tabular-nums">
+                            {selected.size} / {recommended.length}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 text-micro text-muted-foreground/80">
+                          <span>{t("aiPickModal.consensusMeta", { count: roundsSucceeded })}</span>
+                          {fallbackUsed && (
+                            <span>{t("aiPickModal.fallbackMeta")}</span>
+                          )}
+                        </div>
                       </div>
 
                       {recommended.length === 0 ? (
@@ -232,17 +250,20 @@ export function AiPickSkillsModal({
                       ) : (
                         <div className="max-h-52 overflow-y-auto rounded-xl border border-border/50 bg-sidebar/30">
                           <div className="space-y-0.5 p-1">
-                            {recommended.map((name) => {
+                            {recommended.map((item) => {
                               const skill = skills.find(
-                                (s) => s.name === name
+                                (s) => s.name === item.name
                               );
-                              const isSelected = selected.has(name);
+                              const isSelected = selected.has(item.name);
+                              const reason = item.reason.trim();
+                              const showDescription =
+                                !!skill?.description && skill.description !== reason;
                               return (
                                 <button
-                                  key={name}
-                                  onClick={() => toggleSkill(name)}
+                                  key={item.name}
+                                  onClick={() => toggleSkill(item.name)}
                                   className={cn(
-                                    "w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition cursor-pointer",
+                                    "w-full flex items-start gap-2.5 px-2.5 py-2 rounded-lg text-left transition cursor-pointer",
                                     isSelected
                                       ? "bg-violet-500/8 hover:bg-violet-500/12"
                                       : "hover:bg-muted/50"
@@ -264,18 +285,28 @@ export function AiPickSkillsModal({
                                     )}
                                   </div>
                                   <div className="flex-1 min-w-0">
-                                    <div
-                                      className={cn(
-                                        "text-caption truncate",
-                                        isSelected
-                                          ? "text-violet-300 font-medium"
-                                          : "text-foreground"
-                                      )}
-                                    >
-                                      {name}
+                                    <div className="flex items-center gap-2">
+                                      <div
+                                        className={cn(
+                                          "text-caption truncate",
+                                          isSelected
+                                            ? "text-violet-300 font-medium"
+                                            : "text-foreground"
+                                        )}
+                                      >
+                                        {item.name}
+                                      </div>
+                                      <span className="shrink-0 rounded-full border border-violet-500/40 bg-violet-500/18 px-2 py-0.5 text-[11px] font-semibold leading-none text-violet-800 dark:border-violet-400/45 dark:bg-violet-400/20 dark:text-violet-100">
+                                        {item.score}
+                                      </span>
                                     </div>
-                                    {skill?.description && (
-                                      <div className="text-micro text-muted-foreground truncate mt-0.5">
+                                    {reason && (
+                                      <div className="text-[11px] leading-4 text-violet-100/85 mt-0.5">
+                                        {reason}
+                                      </div>
+                                    )}
+                                    {showDescription && (
+                                      <div className="text-micro text-muted-foreground mt-0.5">
                                         {skill.description}
                                       </div>
                                     )}

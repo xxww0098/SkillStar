@@ -71,11 +71,9 @@ export function SkillSelectionBar({
 
   /* ── Shared icon-text button style ──────────────────────────── */
   const ghostBtn =
-    "inline-flex items-center gap-1.5 px-2.5 h-7 rounded-lg text-[12px] font-medium text-muted-foreground hover:text-foreground hover:bg-white/[0.07] active:bg-white/10 transition-all duration-150 cursor-pointer select-none disabled:opacity-40 disabled:pointer-events-none whitespace-nowrap";
+    "inline-flex items-center gap-1.5 px-2.5 h-7 rounded-lg text-[12px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted active:bg-muted/80 transition-all duration-150 cursor-pointer select-none disabled:opacity-40 disabled:pointer-events-none whitespace-nowrap";
 
-  /* Paper-mode overrides — detected via CSS variable */
-  const ghostBtnPaper =
-    "[html[data-bg-style=paper]_&]:hover:bg-black/[0.05] [html[data-bg-style=paper]_&]:active:bg-black/[0.08]";
+  const ghostBtnPaper = "";
 
   return (
     <motion.div
@@ -87,8 +85,8 @@ export function SkillSelectionBar({
     >
       {/* Glass bar */}
       <div
-        className="flex items-center gap-1 px-4 py-1.5 border-b border-white/[0.06] bg-white/[0.03] backdrop-blur-xl
-          [html[data-bg-style=paper]_&]:bg-black/[0.025] [html[data-bg-style=paper]_&]:border-black/[0.06]"
+        className="flex items-center gap-1 px-4 py-1.5 border-b border-border-subtle bg-sidebar
+          backdrop-blur-xl"
       >
         {/* ─── Zone 1: Selection state ─────────────────────────── */}
         <div className="flex items-center gap-1 shrink-0">
@@ -116,7 +114,7 @@ export function SkillSelectionBar({
         </div>
 
         {/* Divider */}
-        <div className="w-px h-3.5 bg-white/[0.08] mx-1 shrink-0 [html[data-bg-style=paper]_&]:bg-black/[0.08]" />
+        <div className="w-px h-3.5 bg-border-subtle mx-1 shrink-0" />
 
         {/* ─── Zone 2: Actions ─────────────────────────────────── */}
         <div className="flex items-center gap-1 flex-1 min-w-0">
@@ -258,8 +256,7 @@ export function SkillSelectionBar({
           {/* Dismiss selection */}
           <button
             onClick={onClear}
-            className="inline-flex items-center justify-center w-6 h-6 rounded-md text-muted-foreground/60 hover:text-foreground hover:bg-white/[0.07] active:bg-white/10 transition-all duration-150 cursor-pointer
-              [html[data-bg-style=paper]_&]:hover:bg-black/[0.05]"
+            className="inline-flex items-center justify-center w-6 h-6 rounded-md text-muted-foreground/60 hover:text-foreground hover:bg-muted active:bg-muted/80 transition-all duration-150 cursor-pointer"
             aria-label={t("selectionBar.clear")}
           >
             <X className="w-3.5 h-3.5" />

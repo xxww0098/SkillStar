@@ -14,6 +14,8 @@ interface MarkdownProps {
   className?: string;
   /** Fallback shown while react-markdown chunk loads (default: plain text) */
   fallback?: ReactNode;
+  /** When true, render as plain text to avoid expensive re-parsing during streaming */
+  streaming?: boolean;
 }
 
 /**
@@ -26,23 +28,27 @@ interface MarkdownProps {
  * - `.markdown-content` + Tailwind `prose` styling
  * - `<Suspense>` with a plain-text fallback
  */
-export function Markdown({ children, className, fallback }: MarkdownProps) {
+export function Markdown({ children, className, fallback, streaming }: MarkdownProps) {
   return (
     <div className={cn("markdown-content prose prose-sm dark:prose-invert max-w-none", className)}>
-      <Suspense
-        fallback={
-          fallback ?? (
-            <p className="text-body whitespace-pre-wrap">{children}</p>
-          )
-        }
-      >
-        <ReactMarkdown
-          remarkPlugins={REMARK_PLUGINS}
-          components={markdownComponents}
+      {streaming ? (
+        <p className="text-body whitespace-pre-wrap">{children}</p>
+      ) : (
+        <Suspense
+          fallback={
+            fallback ?? (
+              <p className="text-body whitespace-pre-wrap">{children}</p>
+            )
+          }
         >
-          {children}
-        </ReactMarkdown>
-      </Suspense>
+          <ReactMarkdown
+            remarkPlugins={REMARK_PLUGINS}
+            components={markdownComponents}
+          >
+            {children}
+          </ReactMarkdown>
+        </Suspense>
+      )}
     </div>
   );
 }

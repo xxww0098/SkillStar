@@ -2,11 +2,39 @@ mod cli;
 mod commands;
 mod core;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{
+    Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 use tauri::{Emitter, Manager};
 
 pub struct ExitControl {
     allow_exit: AtomicBool,
+}
+
+pub struct TrayState {
+    lang: Mutex<String>,
+}
+
+impl TrayState {
+    pub fn new(lang: impl Into<String>) -> Self {
+        Self {
+            lang: Mutex::new(lang.into()),
+        }
+    }
+
+    pub fn lang(&self) -> String {
+        self.lang
+            .lock()
+            .map(|lang| lang.clone())
+            .unwrap_or_else(|_| detect_system_lang().to_string())
+    }
+
+    pub fn set_lang(&self, lang: String) {
+        if let Ok(mut current_lang) = self.lang.lock() {
+            *current_lang = lang;
+        }
+    }
 }
 
 impl ExitControl {
@@ -44,25 +72,47 @@ pub fn run() {
 
     builder
         .manage(core::patrol::PatrolManager::new())
+        .manage(TrayState::new(detect_system_lang()))
         .manage(ExitControl::new())
         .setup(|app| {
+            if let Err(err) = core::marketplace_snapshot::initialize() {
+                eprintln!("[marketplace_snapshot] init failed: {err}");
+            }
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(err) =
+                    core::marketplace_snapshot::refresh_startup_scopes_if_needed().await
+                {
+                    eprintln!("[marketplace_snapshot] startup refresh failed: {err}");
+                }
+                let _ = app_handle.emit("marketplace://ready", ());
+            });
             setup_tray(app)?;
             Ok(())
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                // Prevent native close and hide the window to background.
-                api.prevent_close();
-                let _ = window.hide();
-                // Hide the Dock icon — keep only the tray icon visible.
-                #[cfg(target_os = "macos")]
-                {
-                    let _ = window
-                        .app_handle()
-                        .set_activation_policy(tauri::ActivationPolicy::Accessory);
+                let app = window.app_handle();
+                let patrol_manager = app.state::<core::patrol::PatrolManager>();
+                let should_background = patrol_manager.status().enabled;
+
+                if should_background {
+                    // Prevent native close and hide the window to background.
+                    api.prevent_close();
+                    let _ = window.hide();
+                    // Hide the Dock icon — keep only the tray icon visible.
+                    #[cfg(target_os = "macos")]
+                    {
+                        let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                    }
+                    // Notify frontend so it can optionally start patrol.
+                    let _ = window.emit("skillstar://window-hidden", ());
+                } else {
+                    api.prevent_close();
+                    let exit_control = app.state::<ExitControl>();
+                    exit_control.allow_next_exit();
+                    app.exit(0);
                 }
-                // Notify frontend so it can optionally start patrol.
-                let _ = window.emit("skillstar://window-hidden", ());
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -75,10 +125,21 @@ pub fn run() {
             commands::marketplace::search_skills_sh,
             commands::marketplace::get_skills_sh_leaderboard,
             commands::marketplace::get_official_publishers,
-            commands::marketplace::hydrate_marketplace_descriptions,
             commands::marketplace::get_publisher_repos,
             commands::marketplace::get_publisher_repo_skills,
             commands::marketplace::get_marketplace_skill_details,
+            commands::marketplace::resolve_skill_sources,
+            commands::marketplace::ai_extract_search_keywords,
+            commands::marketplace::ai_search_with_keywords,
+            commands::marketplace::get_leaderboard_local,
+            commands::marketplace::search_marketplace_local,
+            commands::marketplace::get_publishers_local,
+            commands::marketplace::get_publisher_repos_local,
+            commands::marketplace::get_repo_skills_local,
+            commands::marketplace::get_skill_detail_local,
+            commands::marketplace::ai_search_marketplace_local,
+            commands::marketplace::sync_marketplace_scope,
+            commands::marketplace::get_marketplace_sync_states,
             commands::github::check_gh_installed,
             commands::github::check_gh_status,
             commands::github::publish_skill_to_github,
@@ -123,7 +184,12 @@ pub fn run() {
             commands::ai::ai_translate_skill,
             commands::ai::ai_translate_skill_stream,
             commands::ai::ai_translate_short_text,
+            commands::ai::ai_translate_short_text_with_source,
+            commands::ai::get_mymemory_usage_stats,
             commands::ai::ai_translate_short_text_stream,
+            commands::ai::ai_translate_short_text_stream_with_source,
+            commands::ai::ai_retranslate_short_text_with_source,
+            commands::ai::ai_retranslate_short_text_stream_with_source,
             commands::ai::ai_summarize_skill,
             commands::ai::ai_summarize_skill_stream,
             commands::ai::ai_test_connection,
@@ -156,6 +222,7 @@ pub fn run() {
             commands::patrol::start_patrol,
             commands::patrol::stop_patrol,
             commands::patrol::get_patrol_status,
+            commands::patrol::set_patrol_enabled,
             commands::patrol::app_quit,
             commands::patrol::set_dock_visible,
             update_tray_language,
@@ -176,31 +243,48 @@ pub fn run() {
 
 // ── System Tray ─────────────────────────────────────────────────────
 
-/// Returns (show_label, stop_patrol_label, quit_label) for the given language.
-fn tray_labels(lang: &str) -> (&'static str, &'static str, &'static str) {
+/// Returns (show_label, toggle_patrol_label, quit_label) for the given language.
+fn tray_labels(lang: &str, patrol_enabled: bool) -> (&'static str, &'static str, &'static str) {
     if lang.starts_with("zh") {
-        ("显示窗口", "停止后台检查", "退出")
+        (
+            "显示窗口",
+            if patrol_enabled {
+                "停止后台检查"
+            } else {
+                "启动后台检查"
+            },
+            "退出",
+        )
     } else {
-        ("Show Window", "Stop Background Check", "Quit")
+        (
+            "Show Window",
+            if patrol_enabled {
+                "Stop Background Check"
+            } else {
+                "Start Background Check"
+            },
+            "Quit",
+        )
     }
 }
 
 fn build_tray_menu(
     app: &impl Manager<tauri::Wry>,
     lang: &str,
+    patrol_enabled: bool,
 ) -> Result<tauri::menu::Menu<tauri::Wry>, Box<dyn std::error::Error>> {
     use tauri::menu::{MenuBuilder, MenuItem};
 
-    let (show_label, stop_label, quit_label) = tray_labels(lang);
+    let (show_label, toggle_label, quit_label) = tray_labels(lang, patrol_enabled);
 
     let show_i = MenuItem::with_id(app, "show", show_label, true, None::<&str>)?;
-    let stop_i = MenuItem::with_id(app, "stop_patrol", stop_label, true, None::<&str>)?;
+    let toggle_i = MenuItem::with_id(app, "toggle_patrol", toggle_label, true, None::<&str>)?;
     let quit_i = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
 
     let menu = MenuBuilder::new(app)
         .item(&show_i)
         .separator()
-        .item(&stop_i)
+        .item(&toggle_i)
         .separator()
         .item(&quit_i)
         .build()?;
@@ -221,12 +305,17 @@ fn detect_system_lang() -> &'static str {
 fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
-    let lang = detect_system_lang();
-    let menu = build_tray_menu(app, lang)?;
+    let lang = app.state::<TrayState>().lang();
+    let patrol_enabled = app.state::<core::patrol::PatrolManager>().status().enabled;
+    let menu = build_tray_menu(app, &lang, patrol_enabled)?;
 
     TrayIconBuilder::with_id("main-tray")
         .tooltip("SkillStar")
-        .icon(app.default_window_icon().unwrap().clone())
+        .icon(
+            app.default_window_icon()
+                .expect("SkillStar must have a default window icon")
+                .clone(),
+        )
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
@@ -242,23 +331,22 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                     let _ = window.set_focus();
                 }
             }
-            "stop_patrol" => {
+            "toggle_patrol" => {
                 let manager = app.state::<core::patrol::PatrolManager>();
-                tauri::async_runtime::block_on(manager.stop());
-                // Restore Dock icon before showing.
-                #[cfg(target_os = "macos")]
-                {
-                    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+                let status = manager.status();
+
+                if status.enabled {
+                    manager.stop();
+                } else {
+                    let _ = manager.start(app.clone(), status.interval_secs);
                 }
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.unminimize();
-                    let _ = window.set_focus();
-                }
+
+                let _ = app.emit("patrol://enabled-changed", !status.enabled);
+                let _ = refresh_tray_menu(app);
             }
             "quit" => {
                 let manager = app.state::<core::patrol::PatrolManager>();
-                tauri::async_runtime::block_on(manager.stop());
+                manager.stop();
                 let exit_control = app.state::<ExitControl>();
                 exit_control.allow_next_exit();
                 app.exit(0);
@@ -290,14 +378,22 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-// ── Tray language update command ────────────────────────────────────
+pub(crate) fn refresh_tray_menu(app: &tauri::AppHandle) -> Result<(), String> {
+    let lang = app.state::<TrayState>().lang();
+    let patrol_enabled = app.state::<core::patrol::PatrolManager>().status().enabled;
 
-#[tauri::command]
-async fn update_tray_language(app: tauri::AppHandle, lang: String) -> Result<(), String> {
-    let menu = build_tray_menu(&app, &lang).map_err(|e| e.to_string())?;
+    let menu = build_tray_menu(app, &lang, patrol_enabled).map_err(|e| e.to_string())?;
     let tray = app
         .tray_by_id("main-tray")
         .ok_or_else(|| "tray not found".to_string())?;
     tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+// ── Tray language update command ────────────────────────────────────
+
+#[tauri::command]
+async fn update_tray_language(app: tauri::AppHandle, lang: String) -> Result<(), String> {
+    app.state::<TrayState>().set_lang(lang);
+    refresh_tray_menu(&app)
 }

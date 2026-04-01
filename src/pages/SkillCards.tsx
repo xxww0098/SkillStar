@@ -1,7 +1,9 @@
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useTranslation } from "react-i18next";
 import { Share2, Plus, Rocket, Copy, Trash2, MoreHorizontal, Edit2, Download, FolderKanban, Package, AlertTriangle, Loader2 } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import { toast } from "sonner";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Card } from "../components/ui/card";
@@ -16,12 +18,60 @@ import { useSkills } from "../hooks/useSkills";
 import { useAgentProfiles } from "../hooks/useAgentProfiles";
 import { AgentIcon } from "../components/ui/AgentIcon";
 import { cn, agentIconCls } from "../lib/utils";
-import type { SkillCardDeck } from "../types";
+import type { SkillCardDeck, Skill } from "../types";
 
 interface SkillCardsProps {
   onNavigateToProjects?: (skills?: string[]) => void;
   preSelectedSkills?: string[] | null;
   onClearPreSelected?: () => void;
+}
+
+const normalizeSkillName = (name: string) => name.trim();
+
+const uniqueNormalizedSkillNames = (names: string[]): string[] => {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const rawName of names) {
+    const name = normalizeSkillName(rawName);
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    normalized.push(name);
+  }
+  return normalized;
+};
+
+const normalizeSkillSources = (sources?: Record<string, string>): Record<string, string> => {
+  const normalized: Record<string, string> = {};
+  if (!sources) return normalized;
+  for (const [rawName, rawUrl] of Object.entries(sources)) {
+    const name = normalizeSkillName(rawName);
+    const url = rawUrl?.trim();
+    if (!name || !url) continue;
+    normalized[name] = url;
+  }
+  return normalized;
+};
+
+// ── Module-level install progress store ─────────────────────────────
+// Survives component unmount/remount so switching pages doesn't lose
+// the active install state. Each entry maps groupId → progress.
+interface InstallProgressEntry {
+  done: number;
+  total: number;
+  abortController?: AbortController;
+}
+const activeInstalls = new Map<string, InstallProgressEntry>();
+const installListeners = new Set<() => void>();
+function notifyInstallListeners() {
+  for (const fn of installListeners) fn();
+}
+
+// Clean up module-level state during HMR to prevent stale data pollution
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    activeInstalls.clear();
+    installListeners.clear();
+  });
 }
 
 export function SkillCards({
@@ -41,13 +91,76 @@ export function SkillCards({
   const [quickPackSkills, setQuickPackSkills] = useState<string[]>([]);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [publishTarget, setPublishTarget] = useState<string | null>(null);
-  const [installingMissing, setInstallingMissing] = useState<string | null>(null);
+  const [installingMissing, setInstallingMissing] = useState<string | null>(
+    // Restore from module-level store on mount
+    () => {
+      for (const id of activeInstalls.keys()) return id;
+      return null;
+    }
+  );
+  const [installProgress, setInstallProgress] = useState<{ done: number; total: number } | null>(
+    () => {
+      for (const [, entry] of activeInstalls) return { done: entry.done, total: entry.total };
+      return null;
+    }
+  );
+  const [backendInstalledNames, setBackendInstalledNames] = useState<Set<string>>(new Set());
+  // Track whether install handler is owned by this mount
+  const installOwnerRef = useRef(false);
   const enabledProfiles = profiles.filter((p) => p.enabled);
   // Batch-toggle state: { groupId::agentId → "linking" }
   const [linkState, setLinkState] = useState<Record<string, "linking">>({});
   const skillByName = useMemo(
-    () => new Map(skills.map((skill) => [skill.name, skill])),
+    () =>
+      new Map(
+        skills.map((skill) => [normalizeSkillName(skill.name), skill] as const)
+      ),
     [skills]
+  );
+  const installedNameSet = useMemo(() => {
+    const next = new Set<string>(backendInstalledNames);
+    for (const name of skillByName.keys()) {
+      next.add(name);
+    }
+    return next;
+  }, [backendInstalledNames, skillByName]);
+
+  const refreshBackendInstalledNames = useCallback(async () => {
+    try {
+      const latest = await invoke<Skill[]>("list_skills");
+      const next = new Set(
+        latest.map((skill) => normalizeSkillName(skill.name)).filter(Boolean)
+      );
+      setBackendInstalledNames(next);
+      return next;
+    } catch (e) {
+      console.error("Failed to refresh installed skills snapshot:", e);
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshBackendInstalledNames();
+  }, [refreshBackendInstalledNames]);
+
+  const buildSkillSources = useCallback(
+    (selectedSkills: string[], existingSources?: Record<string, string>) => {
+      const nextSources = normalizeSkillSources(existingSources);
+      for (const rawName of selectedSkills) {
+        const skillName = normalizeSkillName(rawName);
+        if (!skillName) continue;
+        const existing = nextSources[skillName];
+        if (existing) {
+          continue;
+        }
+        const gitUrl = skillByName.get(skillName)?.git_url?.trim();
+        if (gitUrl) {
+          nextSources[skillName] = gitUrl;
+        }
+      }
+      return nextSources;
+    },
+    [skillByName]
   );
 
   const handleToggleGroupAgentLinks = useCallback(
@@ -82,7 +195,6 @@ export function SkillCards({
     [linkState, toggleSkillForAgent]
   );
 
-
   const handleDelete = async (id: string) => {
     try {
       await deleteGroup(id);
@@ -101,27 +213,151 @@ export function SkillCards({
     }
   };
 
+  // Subscribe to module-level install progress changes so remounts pick up live state
+  useEffect(() => {
+    const listener = () => {
+      const entry = Array.from(activeInstalls.entries())[0];
+      if (entry) {
+        setInstallingMissing(entry[0]);
+        setInstallProgress({ done: entry[1].done, total: entry[1].total });
+      } else {
+        setInstallingMissing(null);
+        setInstallProgress(null);
+      }
+    };
+    installListeners.add(listener);
+    return () => { installListeners.delete(listener); };
+  }, []);
+
   const handleInstallMissing = async (group: SkillCardDeck) => {
-    if (installingMissing) return;
-    const missing = group.skills.filter(
-      (name) => !skillByName.has(name) && group.skill_sources?.[name]
-    );
+    if (installingMissing || activeInstalls.has(group.id)) return;
+    const groupSkillNames = uniqueNormalizedSkillNames(group.skills);
+    if (groupSkillNames.length === 0) return;
+
+    const refreshedInstalled = await refreshBackendInstalledNames();
+    const installedSnapshot = refreshedInstalled ?? installedNameSet;
+    const missing = groupSkillNames.filter((name) => !installedSnapshot.has(name));
     if (missing.length === 0) return;
-    setInstallingMissing(group.id);
-    setMenuOpenId(null);
-    try {
-      for (const name of missing) {
-        const url = group.skill_sources[name];
-        if (url) {
-          try {
-            await installSkill(url, name);
-          } catch (e) {
-            console.error(`Failed to install ${name}:`, e);
-          }
+
+    const nextSources = normalizeSkillSources(group.skill_sources);
+
+    // Identify names that have no known source
+    const namesNeedingSource = missing.filter((name) => !nextSources[name]);
+
+    // Batch-resolve missing sources via backend marketplace search
+    if (namesNeedingSource.length > 0) {
+      try {
+        const resolved = await invoke<Record<string, string>>("resolve_skill_sources", {
+          names: namesNeedingSource,
+          existingSources: nextSources,
+        });
+        for (const [name, url] of Object.entries(resolved)) {
+          if (url) nextSources[name] = url;
         }
+      } catch (e) {
+        console.error("[SkillCards] resolve_skill_sources failed:", e);
+      }
+    }
+
+    const installQueue: Array<{ name: string; url: string }> = [];
+    const noSourceNames: string[] = [];
+    for (const name of missing) {
+      const url = nextSources[name];
+      if (url) {
+        installQueue.push({ name, url });
+      } else {
+        noSourceNames.push(name);
+      }
+    }
+
+    if (installQueue.length === 0) {
+      toast.error(
+        t("skillCards.installNoSource", {
+          defaultValue: "No install source found for missing skills",
+        })
+      );
+      return;
+    }
+
+    // Persist resolved sources back to the group
+    const sourcesChanged = namesNeedingSource.some((name) => !!nextSources[name]);
+
+    // Register in module-level store
+    const progressEntry: InstallProgressEntry = { done: 0, total: installQueue.length };
+    activeInstalls.set(group.id, progressEntry);
+    setInstallingMissing(group.id);
+    setInstallProgress({ done: 0, total: installQueue.length });
+    setMenuOpenId(null);
+    installOwnerRef.current = true;
+    notifyInstallListeners();
+
+    let successCount = 0;
+    const failedNames: string[] = [];
+
+    // Concurrent install with bounded parallelism (3 at a time)
+    const CONCURRENCY = 3;
+    let cursor = 0;
+    const runNext = async (): Promise<void> => {
+      while (cursor < installQueue.length) {
+        const idx = cursor++;
+        const item = installQueue[idx];
+        try {
+          await installSkill(item.url, item.name);
+          successCount++;
+        } catch (e) {
+          console.error(`Failed to install ${item.name}:`, e);
+          failedNames.push(item.name);
+        }
+        // Update progress
+        progressEntry.done++;
+        activeInstalls.set(group.id, { ...progressEntry });
+        // Only update local state if this mount owns the install
+        if (installOwnerRef.current) {
+          setInstallProgress({ done: progressEntry.done, total: progressEntry.total });
+        }
+        notifyInstallListeners();
+      }
+    };
+
+    try {
+      await Promise.all(
+        Array.from({ length: Math.min(CONCURRENCY, installQueue.length) }, () => runNext())
+      );
+
+      if (sourcesChanged) {
+        await updateGroup(group.id, { skillSources: nextSources });
+      }
+      // Summary toast
+      if (successCount > 0 && failedNames.length === 0 && noSourceNames.length === 0) {
+        toast.success(
+          t("skillCards.installAllSuccess", {
+            count: successCount,
+            defaultValue: `Successfully installed ${successCount} skill(s)`,
+          })
+        );
+      } else if (successCount > 0) {
+        toast.warning(
+          t("skillCards.installPartial", {
+            success: successCount,
+            failed: failedNames.length + noSourceNames.length,
+            defaultValue: `Installed ${successCount}, failed ${failedNames.length + noSourceNames.length}`,
+          })
+        );
+      } else {
+        toast.error(
+          t("skillCards.installAllFailed", {
+            defaultValue: "Failed to install skills",
+          })
+        );
       }
     } finally {
+      activeInstalls.delete(group.id);
+      installOwnerRef.current = false;
       setInstallingMissing(null);
+      setInstallProgress(null);
+      notifyInstallListeners();
+      void refreshBackendInstalledNames();
+      window.dispatchEvent(new Event("skillstar:refresh-skills"));
     }
   };
 
@@ -143,7 +379,7 @@ export function SkillCards({
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="h-14 flex items-center justify-between px-6 border-b border-border bg-card/30 backdrop-blur-sm">
+      <div className="h-14 flex items-center justify-between px-6 border-b border-border bg-sidebar">
         <div className="flex items-center gap-3">
           <h1>{t("sidebar.groups")}</h1>
           {!loading && (
@@ -177,7 +413,7 @@ export function SkillCards({
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.2 }}
-        className="flex-1 overflow-y-auto px-8 py-8 bg-gradient-to-br from-transparent via-card/10 to-transparent"
+        className="flex-1 overflow-y-auto p-6"
       >
         <div className="space-y-6">
 
@@ -201,12 +437,13 @@ export function SkillCards({
             <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-5 max-w-6xl mx-auto">
               <AnimatePresence>
                 {groups.map((group) => {
-                  const installedCount = group.skills.filter((n) => skillByName.has(n)).length;
-                  const totalCount = group.skills.length;
+                  const groupSkillNames = uniqueNormalizedSkillNames(group.skills);
+                  const groupInstalledSkillNames = groupSkillNames.filter((name) =>
+                    installedNameSet.has(name)
+                  );
+                  const installedCount = groupInstalledSkillNames.length;
+                  const totalCount = groupSkillNames.length;
                   const missingCount = totalCount - installedCount;
-                  const installableMissingCount = group.skills.filter(
-                    (n) => !skillByName.has(n) && group.skill_sources?.[n]
-                  ).length;
                   const isInstallingThis = installingMissing === group.id;
                   return (
                     <motion.div
@@ -215,11 +452,11 @@ export function SkillCards({
                       animate={{ opacity: 1, scale: 1 }}
                       exit={{ opacity: 0, scale: 0.95 }}
                       className={cn(
-                        "relative transition-shadow h-[200px]",
+                        "relative transition-shadow min-h-[200px]",
                         menuOpenId === group.id ? "z-50" : "z-0 hover:z-10"
                       )}
                     >
-                      <Card className="hover:bg-card/60 flex flex-col h-full relative group shadow-sm hover:shadow-xl transition p-0 border border-white/10 bg-card/40 backdrop-blur-sm overflow-hidden">
+                      <Card className="hover:bg-card-hover flex flex-col h-full relative group shadow-sm hover:shadow-xl transition p-0 border border-border bg-card overflow-hidden">
                         <div className="p-4 flex flex-col flex-1 relative min-h-0">
                           {/* Top Action Row (Context Menu) */}
                           <div className="absolute top-4 right-4 z-20 flex items-center gap-1">
@@ -252,7 +489,7 @@ export function SkillCards({
                                 <motion.div
                                   initial={{ opacity: 0, scale: 0.95 }}
                                   animate={{ opacity: 1, scale: 1 }}
-                                  className="absolute right-0 top-full mt-1 w-36 p-1 rounded-xl border border-white/10 bg-card/80 backdrop-blur-xl shadow-xl z-30"
+                                  className="absolute right-0 top-full mt-1 w-36 p-1 rounded-xl border border-border bg-card backdrop-blur-xl shadow-xl z-30"
                                 >
                                   <button
                                     onClick={() => {
@@ -278,7 +515,7 @@ export function SkillCards({
                                     <Trash2 className="w-3 h-3" />
                                     {t("common.delete")}
                                   </button>
-                                  {installableMissingCount > 0 && (
+                                  {missingCount > 0 && (
                                     <button
                                       onClick={() => handleInstallMissing(group)}
                                       disabled={isInstallingThis}
@@ -289,7 +526,9 @@ export function SkillCards({
                                       ) : (
                                         <Download className="w-3 h-3" />
                                       )}
-                                      {t("skillCards.installMissing", { count: installableMissingCount, defaultValue: `Install missing (${installableMissingCount})` })}
+                                      {isInstallingThis && installProgress
+                                        ? `${installProgress.done}/${installProgress.total}`
+                                        : t("skillCards.installMissing", { count: missingCount, defaultValue: `Install missing (${missingCount})` })}
                                     </button>
                                   )}
                                 </motion.div>
@@ -322,8 +561,8 @@ export function SkillCards({
 
                           {/* Skills Preview Tags */}
                           <div className="flex flex-wrap items-center gap-1.5 mt-auto overflow-hidden max-h-[46px]">
-                            {group.skills.slice(0, 5).map((skillName) => {
-                              const skill = skills.find((s) => s.name === skillName);
+                            {groupSkillNames.slice(0, 5).map((skillName) => {
+                              const skill = skillByName.get(skillName);
                               return (
                                 <Badge
                                   key={skillName}
@@ -337,12 +576,12 @@ export function SkillCards({
                                 </Badge>
                               );
                             })}
-                            {group.skills.length > 5 && (
+                            {groupSkillNames.length > 5 && (
                               <Badge
                                 variant="outline"
                                 className="text-micro font-medium px-2 py-0.5 h-5 bg-muted text-muted-foreground border-transparent"
                               >
-                                +{group.skills.length - 5}
+                                +{groupSkillNames.length - 5}
                               </Badge>
                             )}
                             {missingCount > 0 && (
@@ -362,14 +601,14 @@ export function SkillCards({
                             /* All skills missing — show warning */
                             <div className="flex items-center gap-2 flex-1 min-w-0">
                               <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0" />
-                              <span className="text-xs text-warning-foreground truncate">
+                              <span className="text-xs text-muted-foreground truncate">
                                 {t("skillCards.noSkillsInstalled", { defaultValue: "No skills installed" })}
                               </span>
-                              {installableMissingCount > 0 && (
+                              {missingCount > 0 && (
                                 <Button
                                   size="sm"
-                                  variant="outline"
-                                  className="h-6 px-2.5 text-xs ml-auto border-warning/30 text-warning-foreground hover:bg-warning/10 shrink-0"
+                                  variant="ghost"
+                                  className="h-7 px-3 text-xs ml-auto text-muted-foreground hover:text-foreground shrink-0"
                                   disabled={isInstallingThis}
                                   onClick={(e) => {
                                     e.stopPropagation();
@@ -377,11 +616,13 @@ export function SkillCards({
                                   }}
                                 >
                                   {isInstallingThis ? (
-                                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                    <Loader2 className="w-3 h-3 animate-spin" />
                                   ) : (
-                                    <Download className="w-3 h-3 mr-1" />
+                                    <Download className="w-3 h-3" />
                                   )}
-                                  {t("skillCards.installAll", { defaultValue: "Install all" })}
+                                  {isInstallingThis && installProgress
+                                    ? `${installProgress.done}/${installProgress.total}`
+                                    : t("skillCards.installAll", { defaultValue: "Install all" })}
                                 </Button>
                               )}
                             </div>
@@ -393,19 +634,16 @@ export function SkillCards({
                               {enabledProfiles.map((profile) => {
                                 const key = `${group.id}::${profile.id}`;
                                 const state = linkState[key];
-                                const installedSkillNames = group.skills.filter((name) =>
-                                  skillByName.has(name)
-                                );
-                                const linkedCount = installedSkillNames.filter((name) =>
+                                const linkedCount = groupInstalledSkillNames.filter((name) =>
                                   skillByName
                                     .get(name)
                                     ?.agent_links?.includes(profile.display_name)
                                 ).length;
                                 const allLinked =
-                                  installedSkillNames.length > 0 &&
-                                  linkedCount === installedSkillNames.length;
+                                  groupInstalledSkillNames.length > 0 &&
+                                  linkedCount === groupInstalledSkillNames.length;
                                 const partialLinked =
-                                  linkedCount > 0 && linkedCount < installedSkillNames.length;
+                                  linkedCount > 0 && linkedCount < groupInstalledSkillNames.length;
                                 const linking = state === "linking";
                                 return (
                                   <button
@@ -416,11 +654,11 @@ export function SkillCards({
                                         group,
                                         profile.id,
                                         profile.display_name,
-                                        installedSkillNames,
+                                        groupInstalledSkillNames,
                                         allLinked
                                       );
                                     }}
-                                    disabled={linking || installedSkillNames.length === 0}
+                                    disabled={linking || groupInstalledSkillNames.length === 0}
                                     title={
                                       allLinked
                                         ? t("skillCards.unlinkAllFrom", {
@@ -467,7 +705,7 @@ export function SkillCards({
                                 className="h-7 px-3 text-xs group/btn bg-primary hover:bg-primary/90"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  onNavigateToProjects?.(group.skills);
+                                  onNavigateToProjects?.(groupSkillNames);
                                 }}
                               >
                                 <Rocket className="w-3 h-3 mr-1.5 transition-transform group-hover/btn:-translate-y-[1px] group-hover/btn:translate-x-[1px]" />
@@ -507,9 +745,10 @@ export function SkillCards({
               description: desc,
               icon,
               skills: selectedSkills,
+              skillSources: buildSkillSources(selectedSkills, editGroup.skill_sources),
             });
           } else {
-            await createGroup(name, desc, icon, selectedSkills);
+            await createGroup(name, desc, icon, selectedSkills, buildSkillSources(selectedSkills));
             setQuickPackSkills([]);
           }
         }}

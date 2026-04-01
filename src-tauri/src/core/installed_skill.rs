@@ -15,6 +15,8 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
 static SKILL_CACHE: LazyLock<RwLock<Option<Vec<Skill>>>> = LazyLock::new(|| RwLock::new(None));
+static UPDATE_STATE_CACHE: LazyLock<RwLock<HashMap<String, bool>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
 
 pub fn invalidate_cache() {
     if let Ok(mut cache) = SKILL_CACHE.write() {
@@ -28,10 +30,38 @@ pub struct SkillUpdateState {
     pub update_available: bool,
 }
 
+fn apply_cached_update_states(mut skills: Vec<Skill>) -> Vec<Skill> {
+    let update_states = UPDATE_STATE_CACHE
+        .read()
+        .ok()
+        .map(|states| states.clone())
+        .unwrap_or_default();
+
+    for skill in &mut skills {
+        if let Some(update_available) = update_states.get(&skill.name) {
+            skill.update_available = *update_available;
+        }
+    }
+
+    skills
+}
+
+pub async fn list_installed_skills_fast() -> Result<Vec<Skill>> {
+    if let Ok(cache) = SKILL_CACHE.read() {
+        if let Some(skills) = &*cache {
+            return Ok(apply_cached_update_states(skills.clone()));
+        }
+    }
+
+    list_installed_skills()
+        .await
+        .map(apply_cached_update_states)
+}
+
 pub async fn list_installed_skills() -> Result<Vec<Skill>> {
     if let Ok(cache) = SKILL_CACHE.read() {
         if let Some(skills) = &*cache {
-            return Ok(skills.clone());
+            return Ok(apply_cached_update_states(skills.clone()));
         }
     }
 
@@ -74,6 +104,8 @@ pub async fn list_installed_skills() -> Result<Vec<Skill>> {
     }
 
     skills.sort_by(|left, right| left.name.cmp(&right.name));
+
+    let skills = apply_cached_update_states(skills);
 
     if let Ok(mut cache) = SKILL_CACHE.write() {
         *cache = Some(skills.clone());
@@ -136,6 +168,12 @@ pub async fn refresh_skill_updates(names: Option<Vec<String>>) -> Result<Vec<Ski
     }
 
     states.sort_by(|left, right| left.name.cmp(&right.name));
+    if let Ok(mut cache) = UPDATE_STATE_CACHE.write() {
+        cache.clear();
+        for state in &states {
+            cache.insert(state.name.clone(), state.update_available);
+        }
+    }
     Ok(states)
 }
 

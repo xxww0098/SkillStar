@@ -14,6 +14,66 @@ Significant bugs and fixes, kept in short form for faster lookup.
 
 ---
 
+### Project Import Stored Discovered Skills In Hub Instead Of Local Storage — 2026-04-01
+- Symptom: Importing unmanaged skills discovered in project agent folders created real directories under `~/.skillstar/.agents/skills/` instead of treating them as local skills.
+- Root cause: `import_scanned_skills` copied project-discovered skills straight into the hub and only replaced the project folder with a symlink afterwards, bypassing `skills-local/`.
+- Fix: Add local-skill adoption flow that moves discovered project skills into `skills-local/`, recreates the hub entry as a symlink, and then points the project folder at that canonical hub link.
+- Files: `src-tauri/src/core/local_skill.rs`, `src-tauri/src/core/project_manifest.rs`, `AGENTS.md`
+
+### Marketplace Could Feel Slow And Re-fetch The Same Data On Every View — 2026-04-01
+- Symptom: Marketplace tabs, publisher drill-down, and detail panels depended on direct remote fetches or client-side hydration, so first paint was slow and repeated navigation re-downloaded the same marketplace data.
+- Root cause: Marketplace had no durable local snapshot model; descriptions were hydrated in the browser, search skipped any local index, and publisher/detail flows bypassed a shared cache.
+- Fix: Add `marketplace_snapshot.rs` with SQLite snapshot tables + FTS, expose local-first Tauri commands with freshness status, move Marketplace/PublisherDetail/DetailPanel to snapshot reads plus explicit stale refresh, and seed remote search results back into the local corpus.
+- Files: `src-tauri/src/core/marketplace_snapshot.rs`, `src-tauri/src/commands/marketplace.rs`, `src-tauri/src/lib.rs`, `src/hooks/useMarketplace.ts`, `src/pages/Marketplace.tsx`, `src/pages/PublisherDetail.tsx`, `src/components/layout/DetailPanel.tsx`, `src/types/index.ts`, `AGENTS.md`, `AGENTS-UI.md`
+
+### Marketplace Stayed In Loading State Forever In React StrictMode — 2026-04-01
+- Symptom: Marketplace page stayed on `正在从 skills.sh 加载技能...` and never rendered data.
+- Root cause: `mountedRef` cleanup set `current = false`, but mount lifecycle never reset it to `true`; in `React.StrictMode` remount checks, async callbacks exited early and skipped `setLoading(false)`.
+- Fix: Reset `mountedRef.current = true` on mount lifecycle, keep `false` on cleanup, and apply the same fix to shared async components using the same guard pattern.
+- Files: `src/hooks/useMarketplace.ts`, `src/hooks/useAiStream.ts`, `src/components/layout/DetailPanel.tsx`
+
+### Deck Card Could Hide Install Action For Missing Skills — 2026-04-01
+- Symptom: Deck cards showed `No skills installed` without an install button, and existing decks could not recover missing skills.
+- Root cause: Deck create/edit flow did not persist `skill_sources` from selected installed skills, and install actions were gated by pre-existing source metadata only.
+- Fix: Persist `skill_sources` on deck create/edit, keep install entry visible when skills are missing, and add marketplace name-based source resolution fallback during install.
+- Files: `src/pages/SkillCards.tsx`, `src/i18n/locales/en.json`, `src/i18n/locales/zh-CN.json`
+
+### Export Analyzer Could Misclassify Uninstalled Simple Skills As Bundle — 2026-04-01
+- Symptom: `分享技能` showed `压缩包` for simple skills that were only missing locally, instead of generating a normal share code.
+- Root cause: Export analysis only trusted local `git_url` and fell back to reading local files; uninstalled skills failed local file reads and were marked as bundle.
+- Fix: Add marketplace name-based `git_url` resolution fallback before local-file fallback so missing-but-remote skills stay in normal share-code export.
+- Files: `src/components/skills/ExportShareCodeModal.tsx`
+
+### AI Smart Pick Could Feel Random And Return Fragile Results — 2026-04-01
+- Symptom: `AI 智能选卡` recommendations could swing between runs, fail on loosely formatted model output, or surface alphabetically sorted results that looked unrelated to the user prompt.
+- Root cause: The picker sent an unbounded YAML-like catalog directly to the model, accepted overly fragile array-only parsing, allowed one successful round to dominate, and discarded relevance information before returning results.
+- Fix: Add deterministic local pre-ranking and bounded candidate catalogs, require structured AI recommendations with score/reason metadata, aggregate multi-round consensus into stable relevance ordering, and fall back to deterministic local ranking when AI output is partial or invalid.
+- Files: `src-tauri/src/core/ai_provider.rs`, `src-tauri/src/commands/ai.rs`, `src-tauri/prompts/ai/pick_skills.md`, `src/components/skills/AiPickSkillsModal.tsx`, `src/types/index.ts`, `src/i18n/locales/en.json`, `src/i18n/locales/zh-CN.json`, `AGENTS.md`, `AGENTS-UI.md`
+
+### Translation Cache Was Split Across Frontend State And Backend DB — 2026-04-01
+- Symptom: Translation reuse behaved inconsistently across panels, `SKILL.md` streaming could run concurrently, and `AI 重译` for short text could still come back from MyMemory.
+- Root cause: Frontend kept extra translation caches outside SQLite, `ai_translate_skill_stream` had no global session gate, and short-text retranslate only bypassed cache without forcing the AI provider path.
+- Fix: Make SQLite the durable translation cache authority, serialize `SKILL.md` streaming translation sessions globally, and add an AI-only retranslate path for short text.
+- Files: `src-tauri/src/commands/ai.rs`, `src/components/skills/SkillReader.tsx`, `src/components/layout/DetailPanel.tsx`, `AGENTS.md`, `AGENTS-UI.md`
+
+### Tray Stop Patrol Could Be Silently Undone By Auto-Restart — 2026-04-01
+- Symptom: Clicking `停止后台检查` in the tray appeared ineffective because background checks restarted after the window hid again.
+- Root cause: Tray stop only halted the current Rust patrol loop; the frontend still auto-started patrol on `window-hidden` from its local background-run toggle.
+- Fix: Persist patrol auto-start intent in backend status, gate hidden-window auto-start on that backend flag, and sync tray stop back into the shared frontend background-run state.
+- Files: `src-tauri/src/core/patrol.rs`, `src-tauri/src/commands/patrol.rs`, `src-tauri/src/lib.rs`, `src/App.tsx`, `src/pages/settings-page/BackgroundRunSection.tsx`, `src/pages/settings-page/index.tsx`, `AGENTS.md`, `AGENTS-UI.md`
+
+### Window Close Could Still Leave Tray Icon After Background Run Was Stopped — 2026-04-01
+- Symptom: After disabling `后台运行`, clicking the window close button still left the app alive in the macOS menu bar/tray.
+- Root cause: Native close handling always forced `prevent_close + hide`, regardless of whether background run was still enabled.
+- Fix: Make close behavior conditional on patrol enablement: hide to tray only when background run is enabled, otherwise allow the close action to terminate the app; also sync frontend background-run preference into backend state at startup.
+- Files: `src-tauri/src/lib.rs`, `src/App.tsx`, `AGENTS.md`
+
+### Tray Background Action Stayed Stuck On `Stop` Instead Of Toggling — 2026-04-01
+- Symptom: The tray menu always showed `停止后台检查`, even after background mode was already stopped.
+- Root cause: Tray menu labels were static, and the tray action only implemented a one-way stop path instead of rebuilding itself from the current patrol enabled state.
+- Fix: Add tray state-aware menu rebuilding, change the tray action into a real start/stop toggle, and broadcast shared patrol enabled state so Settings and tray labels stay aligned.
+- Files: `src-tauri/src/lib.rs`, `src-tauri/src/commands/patrol.rs`, `src/App.tsx`, `AGENTS.md`, `AGENTS-UI.md`
+
 ### Security Scan Clear Cache Left Log Files Behind — 2026-03-31
 - Symptom: Clicking `清理缓存` in Security Scan cleared cached results but old scan logs remained on disk.
 - Root cause: `clear_security_scan_cache` only deleted DB cache rows and legacy JSON cache, not `security_scan.log` or `security_scan_logs/`.

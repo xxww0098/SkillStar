@@ -174,7 +174,9 @@ export function MySkills({
     try {
       await installSkill(url);
     } catch (e) {
+      console.error("[MySkills] installSkill failed:", e);
       toast.error(t("mySkills.installFailed"));
+      throw e;
     }
   };
 
@@ -402,7 +404,7 @@ export function MySkills({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.2 }}
-          className="flex-1 overflow-y-auto p-6 bg-gradient-to-br from-transparent via-card/10 to-transparent"
+          className="flex-1 overflow-y-auto p-6"
         >
           {loading ? (
             <div className="flex items-center justify-center py-20">
@@ -432,7 +434,7 @@ export function MySkills({
       {selectedSkill && (
         <Suspense
           fallback={
-            <div className="absolute right-0 top-0 bottom-0 w-[400px] h-full border-l border-white/10 bg-card/60 backdrop-blur-xl shadow-2xl overflow-y-auto z-50 rounded-tl-xl rounded-bl-xl flex items-center justify-center">
+            <div className="absolute right-0 top-0 bottom-0 w-full max-w-sm h-full border-l border-border bg-card backdrop-blur-xl shadow-2xl overflow-y-auto z-50 rounded-tl-xl rounded-bl-xl flex items-center justify-center">
               <LoadingLogo size="sm" />
             </div>
           }

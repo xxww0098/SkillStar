@@ -394,7 +394,7 @@ export function SecurityScan() {
   const selectedModeMeta = modeOptions.find((item) => item.mode === selectedMode) ?? modeOptions[1];
   const SelectedModeIcon = selectedModeMeta.icon;
   const canStartScan = phase !== "scanning";
-  const showLivePanel = phase !== "done" || results.length === 0;
+  const showLivePanel = phase === "scanning" || (phase !== "done" && results.length === 0);
 
   // Dropdown state for mode picker
   const [modeDropdownOpen, setModeDropdownOpen] = useState(false);
@@ -571,7 +571,7 @@ export function SecurityScan() {
       )}
 
       {phase === "scanning" && (
-        <div className="px-6 py-2 border-b border-border/60 bg-card/30 backdrop-blur-sm shrink-0">
+        <div className="px-6 py-2 border-b border-border/60 bg-card/30 shrink-0">
           <div className="flex flex-wrap items-center gap-2.5 text-[10px]">
             <div className="inline-flex items-center gap-1.5 rounded-full border border-success/20 bg-success/8 px-2.5 py-1 text-success">
               <Radar className="w-3.5 h-3.5" />
@@ -798,8 +798,8 @@ export function SecurityScan() {
                   <AlertTriangle size={12} />
                   {t("securityScan.errors", "Scan Errors")}
                 </div>
-                {errors.map((e) => (
-                  <div key={e.skillName} className="text-[11px] text-destructive/60 pl-4">
+                {errors.map((e, i) => (
+                  <div key={`${e.skillName}-${i}`} className="text-[11px] text-destructive/60 pl-4">
                     {e.skillName}: {e.message}
                   </div>
                 ))}

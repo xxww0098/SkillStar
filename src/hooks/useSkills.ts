@@ -185,6 +185,17 @@ function useSkillsState() {
     };
   }, [refresh]);
 
+  useEffect(() => {
+    const handleExternalRefresh = () => {
+      void refresh(true, true);
+    };
+
+    window.addEventListener("skillstar:refresh-skills", handleExternalRefresh);
+    return () => {
+      window.removeEventListener("skillstar:refresh-skills", handleExternalRefresh);
+    };
+  }, [refresh]);
+
 
 
   // ── Patrol backend event listener ────────────────────────────────

@@ -20,6 +20,18 @@ import type {
 export type ScanPhase = "idle" | "scanning" | "done";
 export type ScanMode = "static" | "smart" | "deep";
 
+/** Strip potential sensitive info (API keys, paths) and truncate for UI display */
+function sanitizeErrorMessage(e: unknown): string {
+  let msg = e instanceof Error ? e.message : String(e);
+  // Remove anything resembling an API key (long base64/hex strings)
+  msg = msg.replace(/\b[A-Za-z0-9/+]{32,}\b/g, "[REDACTED]");
+  // Remove absolute file paths
+  msg = msg.replace(/(?:\/[\w.-]+){3,}/g, "[path]");
+  // Truncate
+  if (msg.length > 200) msg = msg.slice(0, 197) + "...";
+  return msg || "Unknown error";
+}
+
 export interface SecurityScanActiveChunkFile {
   skillName: string;
   fileName: string;
@@ -600,7 +612,7 @@ export function SecurityScanProvider({ children }: { children: ReactNode }) {
                 errors: [
                   ...prev.errors,
                   { skillName: payload.skillName || "unknown", message: payload.message || "Chunk analysis failed" },
-                ],
+                ].slice(-50),
                 activeChunkWorkers: payload.activeChunkWorkers ?? prev.activeChunkWorkers,
                 maxChunkWorkers: payload.maxChunkWorkers ?? prev.maxChunkWorkers,
               }));
@@ -623,7 +635,7 @@ export function SecurityScanProvider({ children }: { children: ReactNode }) {
                   errors: [
                     ...prev.errors,
                     { skillName: payload.skillName || "unknown", message: payload.message || "Unknown error" },
-                  ],
+                  ].slice(-50),
                   scanned: payload.scanned ?? prev.scanned,
                   total: payload.total ?? prev.total,
                   skillFileProgress: removeSkillFileProgress(prev.skillFileProgress, payload.skillName),
@@ -660,7 +672,9 @@ export function SecurityScanProvider({ children }: { children: ReactNode }) {
         }
       );
 
-      // Fire the command (non-blocking — results come via events)
+      // Fire the command — primary state updates come via events above.
+      // The invoke return is only used as a safety net if the "done" event
+      // was somehow missed (e.g. listener registered after event fired).
       try {
         const exactResults = await invoke<SecurityScanResult[]>("ai_security_scan", {
           requestId,
@@ -668,60 +682,67 @@ export function SecurityScanProvider({ children }: { children: ReactNode }) {
           force,
           mode,
         });
-        const exactRiskMap: Record<string, RiskLevel> = {};
-        for (const result of exactResults) {
-          exactRiskMap[result.skill_name] = result.risk_level;
-        }
-        setState((prev) => ({
-          ...prev,
-          phase: "done",
-          activeSkills: [],
-          currentSkill: null,
-          currentStage: null,
-          currentFile: null,
-          syncPulseKey: prev.syncPulseKey + 1,
-          scanAngle: 0,
-          scanStartedAt: null,
-          recentFiles: pushRecentFile(prev.recentFiles, prev.currentFile, prev.currentSkill, prev.currentStage),
-          skillFileProgress: {},
-          skillChunkProgress: {},
-          activeChunkFiles: [],
-          activeChunkWorkers: 0,
-          maxChunkWorkers: prev.maxChunkWorkers,
-          results: targetSet
-            ? [
-                ...prev.results.filter((result) => !targetSet.has(result.skill_name)),
-                ...exactResults,
-              ]
-            : exactResults,
-          riskMap: targetSet
-            ? {
-                ...Object.fromEntries(
-                  Object.entries(prev.riskMap).filter(([name]) => !targetSet.has(name))
-                ),
-                ...exactRiskMap,
-              }
-            : exactRiskMap,
-        }));
+        setState((prev) => {
+          // If the "done" event already transitioned state, skip the duplicate update
+          if (prev.phase === "done") return prev;
+          const exactRiskMap: Record<string, RiskLevel> = {};
+          for (const result of exactResults) {
+            exactRiskMap[result.skill_name] = result.risk_level;
+          }
+          return {
+            ...prev,
+            phase: "done",
+            activeSkills: [],
+            currentSkill: null,
+            currentStage: null,
+            currentFile: null,
+            syncPulseKey: prev.syncPulseKey + 1,
+            scanAngle: 0,
+            scanStartedAt: null,
+            recentFiles: pushRecentFile(prev.recentFiles, prev.currentFile, prev.currentSkill, prev.currentStage),
+            skillFileProgress: {},
+            skillChunkProgress: {},
+            activeChunkFiles: [],
+            activeChunkWorkers: 0,
+            maxChunkWorkers: prev.maxChunkWorkers,
+            results: targetSet
+              ? [
+                  ...prev.results.filter((result) => !targetSet.has(result.skill_name)),
+                  ...exactResults,
+                ]
+              : exactResults,
+            riskMap: targetSet
+              ? {
+                  ...Object.fromEntries(
+                    Object.entries(prev.riskMap).filter(([name]) => !targetSet.has(name))
+                  ),
+                  ...exactRiskMap,
+                }
+              : exactRiskMap,
+          };
+        });
       } catch (e) {
-        setState((prev) => ({
-          ...prev,
-          phase: "done",
-          activeSkills: [],
-          currentSkill: null,
-          currentStage: null,
-          currentFile: null,
-          syncPulseKey: prev.syncPulseKey + 1,
-          scanAngle: 0,
-          scanStartedAt: null,
-          recentFiles: pushRecentFile(prev.recentFiles, prev.currentFile, prev.currentSkill, prev.currentStage),
-          skillFileProgress: {},
-          skillChunkProgress: {},
-          activeChunkFiles: [],
-          activeChunkWorkers: 0,
-          maxChunkWorkers: prev.maxChunkWorkers,
-          errors: [...prev.errors, { skillName: "", message: String(e) }],
-        }));
+        setState((prev) => {
+          if (prev.phase === "done") return prev;
+          return {
+            ...prev,
+            phase: "done",
+            activeSkills: [],
+            currentSkill: null,
+            currentStage: null,
+            currentFile: null,
+            syncPulseKey: prev.syncPulseKey + 1,
+            scanAngle: 0,
+            scanStartedAt: null,
+            recentFiles: pushRecentFile(prev.recentFiles, prev.currentFile, prev.currentSkill, prev.currentStage),
+            skillFileProgress: {},
+            skillChunkProgress: {},
+            activeChunkFiles: [],
+            activeChunkWorkers: 0,
+            maxChunkWorkers: prev.maxChunkWorkers,
+            errors: [...prev.errors, { skillName: "", message: sanitizeErrorMessage(e) }],
+          };
+        });
       }
     },
     []
@@ -781,29 +802,31 @@ export function SecurityScanProvider({ children }: { children: ReactNode }) {
 
   const cancelScan = useCallback(async () => {
     try {
-      if (state.phase !== "scanning") return;
       await invoke("cancel_security_scan");
-      setState((prev) => ({
-        ...prev,
-        phase: "done",
-        activeSkills: [],
-        currentSkill: null,
-        currentStage: null,
-        currentFile: null,
-        syncPulseKey: prev.syncPulseKey + 1,
-        scanAngle: 0,
-        scanStartedAt: null,
-        recentFiles: pushRecentFile(prev.recentFiles, prev.currentFile, prev.currentSkill, prev.currentStage),
-        skillFileProgress: {},
-        skillChunkProgress: {},
-        activeChunkFiles: [],
-        activeChunkWorkers: 0,
-        maxChunkWorkers: 0,
-      }));
+      setState((prev) => {
+        if (prev.phase !== "scanning") return prev;
+        return {
+          ...prev,
+          phase: "done",
+          activeSkills: [],
+          currentSkill: null,
+          currentStage: null,
+          currentFile: null,
+          syncPulseKey: prev.syncPulseKey + 1,
+          scanAngle: 0,
+          scanStartedAt: null,
+          recentFiles: pushRecentFile(prev.recentFiles, prev.currentFile, prev.currentSkill, prev.currentStage),
+          skillFileProgress: {},
+          skillChunkProgress: {},
+          activeChunkFiles: [],
+          activeChunkWorkers: 0,
+          maxChunkWorkers: 0,
+        };
+      });
     } catch {
       // ignore
     }
-  }, [state.phase]);
+  }, []);
 
   // Cleanup listener on unmount (provider level — only on app close)
   useEffect(() => {

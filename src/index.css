@@ -217,6 +217,19 @@
 /* ========== Markdown ========== */
 
 @layer components {
+  :root[data-bg-style="paper"] .ss-switch[data-state="unchecked"] {
+    background-color: rgba(255, 255, 255, 0.98);
+    border-color: rgba(15, 23, 42, 0.16);
+  }
+
+  :root[data-bg-style="paper"] .ss-switch[data-state="checked"] {
+    border-color: rgba(var(--color-primary-rgb), 0.45);
+  }
+
+  :root[data-bg-style="paper"] .ss-switch .ss-switch-thumb {
+    border-color: rgba(15, 23, 42, 0.12);
+  }
+
   .markdown-content {
     max-width: 75ch; /* Comfortable reading length for long passages */
   }
@@ -256,7 +269,7 @@
 @layer components {
   /* Reusable modal dialog surface — used by 8+ modal components */
   .modal-surface {
-    @apply relative overflow-hidden rounded-[24px] border border-white/10 bg-card/95 backdrop-blur-3xl ring-1 ring-white/5;
+    @apply relative overflow-hidden rounded-[24px] border border-glass-border bg-card/95 backdrop-blur-3xl ring-1 ring-glass-ring;
     box-shadow: 0 0 80px -20px rgba(0, 0, 0, 0.5);
   }
 

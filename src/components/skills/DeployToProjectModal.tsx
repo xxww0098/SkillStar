@@ -25,7 +25,7 @@ export function DeployToProjectModal({
   const { t } = useTranslation();
   const prefersReducedMotion = useReducedMotion();
   const [projectPath, setProjectPath] = useState<string | null>(null);
-  const [selectedAgents, setSelectedAgents] = useState<string[]>(["claude"]);
+  const [selectedAgents, setSelectedAgents] = useState<string[]>([]);
   const [deploying, setDeploying] = useState(false);
   const [result, setResult] = useState<number | null>(null);
 
@@ -53,6 +53,7 @@ export function DeployToProjectModal({
 
   const handleClose = () => {
     setProjectPath(null);
+    setSelectedAgents([]);
     setResult(null);
     setDeploying(false);
     onClose();
@@ -190,7 +191,7 @@ export function DeployToProjectModal({
                   <Button
                     size="sm"
                     onClick={handleDeploy}
-                    disabled={!projectPath || deploying}
+                    disabled={!projectPath || deploying || selectedAgents.length === 0}
                   >
                     {deploying ? (
                       <span className="flex items-center gap-1.5">

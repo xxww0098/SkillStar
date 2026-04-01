@@ -41,24 +41,42 @@ pub fn is_local_skill(name: &str) -> bool {
     resolved.starts_with(&local_dir)
 }
 
+fn prepare_new_local_skill_paths(name: &str) -> Result<(PathBuf, PathBuf)> {
+    let hub_dir = sync::get_hub_skills_dir();
+    let local_dir = local_skills_dir();
+    let skill_local_path = local_dir.join(name);
+    let skill_hub_path = hub_dir.join(name);
+
+    if skill_hub_path.symlink_metadata().is_ok() {
+        anyhow::bail!("Skill '{}' already exists", name);
+    }
+    if skill_local_path.symlink_metadata().is_ok() {
+        anyhow::bail!("Skill '{}' already exists in skills-local", name);
+    }
+
+    std::fs::create_dir_all(&local_dir).with_context(|| {
+        format!(
+            "Failed to create local skills directory: {}",
+            local_dir.display()
+        )
+    })?;
+    std::fs::create_dir_all(&hub_dir).with_context(|| {
+        format!(
+            "Failed to create hub skills directory: {}",
+            hub_dir.display()
+        )
+    })?;
+
+    Ok((skill_local_path, skill_hub_path))
+}
+
 /// Create a new local skill.
 ///
 /// 1. Creates `skills-local/<name>/SKILL.md`
 /// 2. Creates symlink `skills/<name>` → `skills-local/<name>`
 /// 3. Returns the `Skill` struct with `skill_type = "local"`
 pub fn create(name: &str, content: Option<&str>) -> Result<Skill> {
-    let hub_dir = sync::get_hub_skills_dir();
-    let local_dir = local_skills_dir();
-    let skill_local_path = local_dir.join(name);
-    let skill_hub_path = hub_dir.join(name);
-
-    // Reject if name already exists in hub or local
-    if skill_hub_path.symlink_metadata().is_ok() {
-        anyhow::bail!("Skill '{}' already exists", name);
-    }
-    if skill_local_path.exists() {
-        anyhow::bail!("Skill '{}' already exists in skills-local", name);
-    }
+    let (skill_local_path, skill_hub_path) = prepare_new_local_skill_paths(name)?;
 
     // Create the local skill directory + SKILL.md
     std::fs::create_dir_all(&skill_local_path).with_context(|| {
@@ -78,7 +96,6 @@ pub fn create(name: &str, content: Option<&str>) -> Result<Skill> {
         .with_context(|| format!("Failed to write SKILL.md for '{}'", name))?;
 
     // Create symlink in hub: skills/<name> → skills-local/<name>
-    std::fs::create_dir_all(&hub_dir)?;
     create_symlink(&skill_local_path, &skill_hub_path)
         .with_context(|| format!("Failed to create hub symlink for '{}'", name))?;
 
@@ -101,6 +118,50 @@ pub fn create(name: &str, content: Option<&str>) -> Result<Skill> {
         rank: None,
         source: None,
     })
+}
+
+/// Adopt an existing skill directory into `skills-local/` and expose it via
+/// the hub symlink in `skills/`.
+///
+/// This is used when SkillStar discovers a new unmanaged skill inside a
+/// project-level agent folder and needs to normalize it into local-skill
+/// storage without leaving a real directory behind in the hub.
+pub fn adopt_existing_dir(name: &str, source_dir: &Path) -> Result<PathBuf> {
+    if !source_dir.is_dir() {
+        anyhow::bail!(
+            "Source skill directory '{}' does not exist or is not a directory",
+            source_dir.display()
+        );
+    }
+
+    let (skill_local_path, skill_hub_path) = prepare_new_local_skill_paths(name)?;
+
+    move_dir(source_dir, &skill_local_path).with_context(|| {
+        format!(
+            "Failed to move discovered skill '{}' into skills-local",
+            name
+        )
+    })?;
+
+    if let Err(err) = create_symlink(&skill_local_path, &skill_hub_path)
+        .with_context(|| format!("Failed to create hub symlink for '{}'", name))
+    {
+        if let Err(rollback_err) = move_dir(&skill_local_path, source_dir).with_context(|| {
+            format!(
+                "Failed to restore discovered skill '{}' after hub symlink error",
+                name
+            )
+        }) {
+            return Err(anyhow::anyhow!(
+                "{}; rollback also failed: {}",
+                err,
+                rollback_err
+            ));
+        }
+        return Err(err);
+    }
+
+    Ok(skill_local_path)
 }
 
 /// Reconcile hub symlinks for local skills.
@@ -309,6 +370,16 @@ pub fn migrate_existing() -> Result<u32> {
 
 /// Migrate a single skill directory from hub to skills-local.
 fn migrate_single_skill(src: &Path, dest: &Path) -> Result<()> {
+    move_dir(src, dest)?;
+
+    // Create symlink: src (hub) → dest (skills-local)
+    create_symlink(dest, src)
+        .with_context(|| format!("Failed to create migration symlink {:?} → {:?}", src, dest))?;
+
+    Ok(())
+}
+
+fn move_dir(src: &Path, dest: &Path) -> Result<()> {
     // Move the directory (rename if same filesystem, otherwise copy+delete)
     if std::fs::rename(src, dest).is_err() {
         // Cross-filesystem: copy recursively then delete
@@ -316,10 +387,6 @@ fn migrate_single_skill(src: &Path, dest: &Path) -> Result<()> {
         std::fs::remove_dir_all(src)
             .context("Failed to remove original skill directory after copy")?;
     }
-
-    // Create symlink: src (hub) → dest (skills-local)
-    create_symlink(dest, src)
-        .with_context(|| format!("Failed to create migration symlink {:?} → {:?}", src, dest))?;
 
     Ok(())
 }
