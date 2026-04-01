@@ -38,18 +38,29 @@ SkillStar 是一个 Tauri 桌面应用（也支持 CLI），用于统一管理 A
 <br/>
 
 ## 核心能力
-| 能力 | 说明 |
-|------|------|
-| 多 Agent 生态 | Gemini CLI、Claude Code、Codex CLI、OpenCode CLI、OpenClaw、Antigravity |
-| 纯 symlink 分发 | 项目目录不落地副本，避免 `git status` 污染 |
-| Hub + Repo Cache 双层 | 支持多技能仓库统一更新 |
-| 安全扫描 | 三模式（Static / Smart / Deep）扫描，含 AI 深度分析与风险评级 |
-| AI 辅助阅读 | SKILL.md 翻译与摘要（流式展示），短文本双通道翻译 |
-| AI 技能推荐 | 本地预排 + AI 多轮打分，精准推荐技能 |
-| 本地技能生命周期 | 创建、编辑、删除、发布、毕业（local → hub） |
-| 共享机制 | Share Code + `.ags` / `.agd` Bundle 导入导出 |
-| 后台巡检 | 低频单技能节奏更新检查，可在设置/系统托盘控制 |
-| 多语言 | 中 / 英 全界面国际化（i18next） |
+
+### ⚡️ 核心分发与管理
+- **多 Agent 生态**: 原生支持 Gemini CLI、Claude Code、Codex CLI、OpenCode CLI、OpenClaw、Antigravity。
+- **纯 Symlink 注入**: 项目目录不落地副本，完全无侵入，避免触发 `git status` 污染或影响构建产物。
+- **项目级精准调度**: 在 `Projects` 中注册工程，按需为不同 Agent 配置独立技能池，自动处理共享路径和冲突。
+
+### 🧠 AI 深度赋能
+- **AI 辅助阅读与翻译**: 基于 SQLite 持久化缓存的流式 SKILL.md 翻译与摘要，短文本采用双引擎并行加速。
+- **智能技能推荐 (Smart Pick)**: 本地先验排序大模型结合多轮共识打分，在海量技能中精准推荐最匹配当前任务的工具。
+
+### 🛡️ 安全与可信
+- **三模安全雷达扫描**: 提供 Static（静态）、Smart（智能辅助）、Deep（大模型源码级深度推断） 三种安全扫描模式。
+- **源与沙箱隔离**: Hub（全量远端拉取）与 Local（本地开发）存储分离，基于文件 Hash 校验缓存，一旦篡改自动拦截。
+
+### 🛍️ 生态大市场
+- **Local-first Marketplace**: 基于 SQLite + FTS 全文检索的本地聚合快照，无需等待网络加载，支持离线浏览和秒级响应。
+- **Deck 组合与分发**: 一键将多个技能打包为 `.agd` 套牌，或提取单包 `.ags`。通过 Share Code 在网络/内网无缝流转。
+- **本地创作周期 (Authoring)**: 图形化界面直接创建并编辑技能（`skills-local`），一键发布（Graduate）至 GitHub 开源源。
+
+### 🖥️ 极客体验
+- **Dark Glassmorphism UI**: 基于 Framer Motion 和 TailwindCSS 4 的沉浸式暗黑玻璃质感设计语言，动画无缝串联每个操作。
+- **托盘后台自动巡检**: 通过系统 Tray 控制节点，低频静默更新云端知识与工具包，随时保持最新的能力集。
+- **全界面双语适配**: 原生支持中文/英文（基于设备区域自动探测 + 个人强制配置）。
 
 ## 安装
 ### Homebrew (macOS)
