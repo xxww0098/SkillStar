@@ -117,7 +117,7 @@ pub async fn uninstall_skill(name: String) -> Result<(), AppError> {
         if meta.is_symlink() {
             crate::core::paths::remove_symlink(&path)?;
         } else {
-            std::fs::remove_dir_all(&path)?;
+            crate::core::paths::remove_dir_all_retry(&path)?;
         }
     }
 

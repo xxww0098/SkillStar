@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, params};
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 #[cfg(test)]
 use std::path::PathBuf;
@@ -133,14 +132,7 @@ fn normalize_target_language(target_language: &str) -> String {
 }
 
 fn source_hash(source_text: &str) -> String {
-    let digest = Sha256::digest(source_text.as_bytes());
-    let mut hex = String::with_capacity(64);
-    const HEX_TABLE: &[u8; 16] = b"0123456789abcdef";
-    for &byte in &digest {
-        hex.push(HEX_TABLE[(byte >> 4) as usize] as char);
-        hex.push(HEX_TABLE[(byte & 0xf) as usize] as char);
-    }
-    hex
+    super::util::sha256_hex(source_text.as_bytes())
 }
 
 fn build_cache_key(kind: TranslationKind, target_language: &str, source_text_hash: &str) -> String {

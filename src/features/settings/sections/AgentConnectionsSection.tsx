@@ -5,7 +5,7 @@ import { AlertTriangle, Plus, Unlink, X } from "lucide-react";
 import { Badge } from "../../../components/ui/badge";
 import { Switch } from "../../../components/ui/switch";
 import { AgentIcon } from "../../../components/ui/AgentIcon";
-import { cn, agentIconCls } from "../../../lib/utils";
+import { cn, agentIconCls, isWindows, formatPlatformPath } from "../../../lib/utils";
 import type { AgentProfile, CustomProfileDef } from "../../../types";
 import { AddCustomAgentDialog } from "../components/AddCustomAgentDialog";
 
@@ -30,20 +30,24 @@ function formatGlobalPath(path: string): string {
 
   // macOS / Linux: /Users/<user>/… or /home/<user>/…
   const macOrLinux = normalized.match(/^\/(?:Users|home)\/[^/]+\/(.+)$/);
-  if (macOrLinux?.[1]) return `~/${macOrLinux[1]}`;
+  if (macOrLinux?.[1]) return formatPlatformPath(`~/${macOrLinux[1]}`);
 
   // Windows: any drive letter, e.g. C:/Users/<user>/… or D:/Users/<user>/…
   const windows = normalized.match(/^[A-Za-z]:\/Users\/[^/]+\/(.+)$/);
-  if (windows?.[1]) return `~/${windows[1]}`;
+  if (windows?.[1]) {
+    if (isWindows()) return `~\\${windows[1].replace(/\//g, "\\")}`;
+    return `~/${windows[1]}`;
+  }
 
-  return normalized;
+  // Unknown layout – still apply platform separator
+  return formatPlatformPath(normalized);
 }
 
 function displayPaths(profile: AgentProfile): string[] {
   const primary = formatGlobalPath(profile.global_skills_dir);
   if (profile.id !== "codex") return [primary];
 
-  const codexLegacyPath = "~/.agents/skills";
+  const codexLegacyPath = formatPlatformPath("~/.agents/skills");
   if (primary === codexLegacyPath) return [primary];
 
   return [primary, codexLegacyPath];

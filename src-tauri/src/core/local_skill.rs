@@ -402,8 +402,10 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
         let src_path = entry.path();
         let dest_path = dest.join(&file_name);
 
-        // Skip git metadata and macOS system files
-        if file_name == ".git" || file_name == ".DS_Store" {
+        // Skip git metadata and OS system files
+        if file_name == ".git" || file_name == ".DS_Store"
+            || file_name == "Thumbs.db" || file_name == "desktop.ini"
+        {
             continue;
         }
 

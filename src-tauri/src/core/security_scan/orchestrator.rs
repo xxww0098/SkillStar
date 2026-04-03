@@ -1383,11 +1383,27 @@ impl DynamicSandboxAnalyzer {
         let mut cmd = command_with_path(&launch.program);
         cmd.args(&launch.args)
             .current_dir(&sandbox_dir)
-            .env_clear()
-            .env("PATH", "/usr/bin:/bin:/usr/local/bin")
-            .env("HOME", &sandbox_dir)
-            .env("TMPDIR", &sandbox_dir)
-            .env("HTTP_PROXY", "")
+            .env_clear();
+
+        // Platform-specific minimal environment for sandboxed execution.
+        #[cfg(unix)]
+        {
+            cmd.env("PATH", "/usr/bin:/bin:/usr/local/bin")
+                .env("HOME", &sandbox_dir)
+                .env("TMPDIR", &sandbox_dir);
+        }
+        #[cfg(windows)]
+        {
+            let sys_root =
+                std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
+            cmd.env("PATH", format!(r"{}\system32;{}", sys_root, sys_root))
+                .env("USERPROFILE", &sandbox_dir)
+                .env("TEMP", &sandbox_dir)
+                .env("TMP", &sandbox_dir)
+                .env("SystemRoot", &sys_root);
+        }
+
+        cmd.env("HTTP_PROXY", "")
             .env("HTTPS_PROXY", "")
             .env("ALL_PROXY", "")
             .env("NO_PROXY", "*")

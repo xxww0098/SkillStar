@@ -51,9 +51,9 @@ pub fn builtin_presets() -> Vec<MirrorPreset> {
             supports_clone: true,
         },
         MirrorPreset {
-            id: "ghp_ci".into(),
-            name: "GHP.ci".into(),
-            url: "https://ghp.ci/".into(),
+            id: "ghfast_top".into(),
+            name: "GHFast.top".into(),
+            url: "https://ghfast.top/".into(),
             supports_clone: true,
         },
     ]

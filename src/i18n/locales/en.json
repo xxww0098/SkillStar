@@ -130,6 +130,7 @@
     "myMemoryCharsSent": "MyMemory total characters sent: {{count}}",
     "myMemoryUsageDailyWithTotal": "Today: {{daily}} chars (total: {{total}})",
     "myMemoryCharsSentUnknown": "MyMemory total characters sent: --",
+    "shortTextServiceTitle": "Default Short Text Translation Service",
     "shortTextPriority": "Short Description Priority",
     "shortTextPriorityAiFirst": "AI First (fallback to MyMemory)",
     "shortTextPriorityMyMemoryFirst": "MyMemory First (fallback to AI)",
@@ -164,11 +165,15 @@
     "ghInstallPlatform_unknown": "this system",
     "ghCopyCommand": "Copy command",
     "ghInstallCommandUnavailable": "Could not detect this platform. Open the official install guide with the button above.",
+    "gitInstall": "Install",
+    "gitInstalled": "Installed",
+    "gitInstallCommandLabel": "Install Git ({{os}})",
     "about": "About",
     "version": "SkillStar Version",
     "checkUpdate": "Check for Updates",
     "checkingUpdate": "Checking...",
     "upToDate": "SkillStar is up to date",
+    "updateFoundDesc": "v{{version}} is available — check the sidebar to update",
     "framework": "Framework",
     "gitBackend": "Git Backend",
     "license": "License",
@@ -856,7 +861,10 @@
       "bash_reverse": "Bash reverse shell via /dev/tcp",
       "modify_shell_rc": "Modifying shell startup config for persistence",
       "cron_persistence": "Cron job manipulation for persistence",
-      "long_base64": "Long base64-encoded string (may conceal payload)"
+      "long_base64": "Long base64-encoded string (may conceal payload)",
+      "powershell_encoded": "PowerShell encoded command execution (may conceal payload)",
+      "schtasks_persistence": "Windows scheduled task creation for persistence",
+      "registry_persistence": "Windows registry modification for auto-start persistence"
     },
     "logHint": "Each scan is saved as a timestamped log. You can open the log folder for details.",
     "latestLog": "Latest: {{time}}",
@@ -899,5 +907,19 @@
     "deleteFailed": "Failed to delete hook",
     "lastRun": "Last run: {{time}}",
     "clickToToggle": "Click to toggle script/output"
+  },
+  "commandPalette": {
+    "placeholder": "Type a command or search...",
+    "navigation": "Navigation",
+    "actions": "Actions",
+    "refresh": "Refresh",
+    "navigate": "navigate",
+    "select": "select"
+  },
+  "emptyState": {
+    "mySkillsCta": "Browse Marketplace",
+    "mySkillsDesc": "No cards installed yet. Discover and install cards from the Marketplace to get started.",
+    "projectsCta": "Register a project",
+    "projectsDesc": "Register your project directory to start managing agent skills."
   }
 }

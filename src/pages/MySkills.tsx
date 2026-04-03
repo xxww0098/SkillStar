@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, lazy, Suspense } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Layers, AlertTriangle } from "lucide-react";
+import { Layers, AlertTriangle, Globe } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 
 import { useTranslation } from "react-i18next";
@@ -22,6 +22,7 @@ import { useSecurityScan } from "../features/security/hooks/useSecurityScan";
 import { useViewMode } from "../hooks/useViewMode";
 import { toast } from "../lib/toast";
 import { LoadingLogo } from "../components/ui/LoadingLogo";
+import { Button } from "../components/ui/button";
 import { BatchTranslationProgress } from "../components/ui/BatchTranslationProgress";
 import type { Skill, SortOption } from "../types";
 
@@ -356,9 +357,28 @@ export function MySkills({
   }, [selectedSkillNames, batchRemoveSkillsFromAllAgents, clearSelection, t]);
 
   const getEmptyMessage = () => {
-    if (skills.length === 0) return t("mySkills.empty");
+    if (skills.length === 0) return t("emptyState.mySkillsDesc");
     if (showUpdateOnly) return t("mySkills.noUpdates");
     return t("mySkills.noMatching");
+  };
+
+  const getEmptyAction = () => {
+    if (skills.length === 0) {
+      return (
+        <Button
+          onClick={() => {
+            window.dispatchEvent(
+              new CustomEvent("skillstar:navigate", { detail: { page: "marketplace" } })
+            );
+          }}
+          className="gap-2"
+        >
+          <Globe className="w-4 h-4" />
+          {t("emptyState.mySkillsCta")}
+        </Button>
+      );
+    }
+    return undefined;
   };
 
   return (
@@ -491,6 +511,7 @@ export function MySkills({
               onInstall={handleInstall}
               onUpdate={handleUpdate}
               emptyMessage={getEmptyMessage()}
+              emptyAction={getEmptyAction()}
               selectable
               selectedSkills={selectedSkillNames}
               onSelectSkill={handleSelectSkill}
@@ -507,7 +528,7 @@ export function MySkills({
       {selectedSkill && (
         <Suspense
           fallback={
-            <div className="absolute right-0 top-0 bottom-0 w-full max-w-sm h-full border-l border-border bg-card backdrop-blur-xl shadow-2xl overflow-y-auto z-50 rounded-tl-xl rounded-bl-xl flex items-center justify-center">
+            <div className="absolute right-0 top-0 bottom-0 w-full max-w-md h-full border-l border-border bg-card backdrop-blur-xl shadow-2xl overflow-y-auto z-50 rounded-tl-xl rounded-bl-xl flex items-center justify-center">
               <LoadingLogo size="sm" />
             </div>
           }

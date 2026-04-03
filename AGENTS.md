@@ -23,7 +23,7 @@ SkillStar is a Tauri v2 desktop app with a React SPA frontend and Rust backend.
 | Hub skills | `~/.skillstar/hub/skills/` |
 | Local authored skills | `~/.skillstar/hub/local/` |
 | Repo cache | `~/.skillstar/hub/repos/` |
-| Setup hooks | `~/.skillstar/hub/setup-hooks/` |
+
 
 ## Project Structure (Condensed)
 ```text
@@ -43,13 +43,14 @@ SkillStar/
 ├── src-tauri/
 │   ├── src/
 │   │   ├── commands.rs            # Tauri command root
-│   │   ├── commands/              # marketplace, agents, projects, github, ai, patrol, acp
+│   │   ├── commands/              # marketplace, agents, projects, github, patrol, acp
+│   │   │   └── ai/               # AI commands split: translate, summarize, scan
 │   │   └── core/                  # domain modules
 │   │       ├── acp_client/        # ACP client for external agent integration
 │   │       ├── ai_provider/       # AI config, translation, summarization, skill pick
 │   │       ├── security_scan/     # static/AI scanning, cache, logging
 │   │       ├── marketplace_snapshot/ # local-first marketplace DB
-│   │       └── ...                # skills, sync, repo, local, bundles, paths, setup_hook
+│   │       └── ...                # skills, sync, repo, local, bundles, paths
 │   ├── Cargo.toml
 │   └── tauri.conf.json
 ├── docs/Error.md
@@ -176,20 +177,15 @@ SkillStar/
 - `core/github_mirror.rs` owns preset definitions, config load/save, URL rewriting, and connectivity testing.
 - All git subprocess invocations (clone, fetch, pull, sparse checkout) inject mirror URL rewriting via `git -c url.*.insteadOf=...` per-command; the user's global `.gitconfig` is never modified.
 - Mirror rewriting only affects `https://github.com/` URLs; non-GitHub remotes pass through unchanged.
-- Built-in presets include commonly used community mirrors (ghproxy.vip, gh-proxy.com, github.akams.cn, gh.llkk.cc, ghp.ci); all use the URL-prefix proxy pattern.
+- Built-in presets include commonly used community mirrors (ghproxy.vip, gh-proxy.com, github.akams.cn, gh.llkk.cc, ghfast.top); all use the URL-prefix proxy pattern.
 - Users can specify a custom mirror URL; it must start with `https://` or `http://` and is normalized to end with `/`.
 - Tauri commands: `get_github_mirror_config`, `save_github_mirror_config`, `get_github_mirror_presets`, `test_github_mirror`.
 - `test_github_mirror` sends an HTTP HEAD request to verify reachability and returns latency in milliseconds.
 
-### ACP Integration (Setup Hooks)
-- Non-standard repos that require post-clone build steps (e.g. `./setup`, `npm install`) are normalized via an external Agent through ACP (Agent Client Protocol).
-- SkillStar acts as an ACP **client**: it spawns an Agent subprocess (Claude Code / OpenCode / Codex) via stdio, opens a session in the repo directory, and sends a setup task prompt.
-- The Agent does all the work: reads README, generates a setup script, runs it, and returns the verified script.
-- SkillStar only stores the successful script (`~/.skillstar/hub/setup-hooks/<skill>.sh` + `.json` metadata) for explicit user-managed setup hooks; ACP is no longer part of repo migration/install orchestration.
+### ACP Integration
 - ACP Client implementation is in `core/acp_client.rs`; it implements the `acp::Client` trait with auto-approved permissions and text collection via `session_notification`.
-- Script storage and execution is in `core/setup_hook.rs` (lightweight CRUD + shell execution with 300s timeout).
-- Tauri commands are in `commands/acp.rs`: `acp_generate_setup_hook`, `get_setup_hook`, `save_setup_hook`, `delete_setup_hook`, `run_setup_hook`.
-- Hooks execute in the resolved repo cache root (`hub/repos/<cache>/`) so build tools have full repo context.
+- ACP config commands are in `commands/acp.rs`: `get_acp_config`, `save_acp_config`.
+- The ACP client is retained for potential future agent integrations but has no active consumer in the current codebase.
 
 ## Page Responsibilities
 | Page | Scope | Responsibility |

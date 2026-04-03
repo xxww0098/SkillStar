@@ -16,7 +16,6 @@
 //!     ├── local/              # User-authored local skills
 //!     ├── repos/              # Cached git repositories
 //!     ├── publish/            # Publish staging area
-//!     ├── setup-hooks/        # ACP-generated build scripts
 //!     └── lock.json           # Installation lockfile
 //! ```
 //!
@@ -246,10 +245,7 @@ pub fn lockfile_path() -> PathBuf {
     hub_root().join("lock.json")
 }
 
-/// `hub/setup-hooks/` — ACP-generated build scripts.
-pub fn setup_hooks_dir() -> PathBuf {
-    hub_root().join("setup-hooks")
-}
+
 
 // ═══════════════════════════════════════════════════════════════════
 //  Legacy migration
@@ -351,8 +347,7 @@ pub fn migrate_legacy_paths() {
         let _ = remove_dir_if_empty(&legacy_hub);
     }
 
-    // ── Setup hooks (from data_root/setup-hooks → hub/setup-hooks) ──
-    migrate_dir(&root.join("setup-hooks"), &setup_hooks_dir());
+
 
     // ── Clean up legacy files ──
     let _ = std::fs::remove_file(root.join("security_scan_cache.json"));
@@ -521,6 +516,35 @@ fn same_drive(a: &Path, b: &Path) -> bool {
     a.components().next().map_or(false, |ac| {
         b.components().next().map_or(false, |bc| ac == bc)
     })
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Resilient filesystem operations
+// ═══════════════════════════════════════════════════════════════════
+
+/// Attempt `remove_dir_all` with retry logic for Windows file-locking.
+///
+/// On Windows, antivirus software, search indexers, and lingering process
+/// handles can hold files open, causing `remove_dir_all` to fail with
+/// `ERROR_SHARING_VIOLATION`.  This wrapper retries up to 3 times with a
+/// 200 ms delay between attempts, which is enough for most transient locks.
+///
+/// On Unix this is functionally identical to a single `remove_dir_all` call
+/// since file locks do not prevent deletion.
+pub fn remove_dir_all_retry(path: &Path) -> std::io::Result<()> {
+    let mut last_err = None;
+    for attempt in 0..3u32 {
+        match std::fs::remove_dir_all(path) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                last_err = Some(e);
+                if attempt < 2 {
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                }
+            }
+        }
+    }
+    Err(last_err.unwrap())
 }
 
 // ═══════════════════════════════════════════════════════════════════

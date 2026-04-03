@@ -393,6 +393,21 @@ export interface PublishResult {
   source_folder: string;
 }
 
+export interface GitInstallInstruction {
+  label: string;
+  command: string;
+}
+
+export type GitStatus =
+  | { status: "Installed"; version: string }
+  | {
+      status: "NotInstalled";
+      os: string;
+      install_instructions: GitInstallInstruction[];
+      download_url: string;
+    };
+
+
 export interface UserRepo {
   full_name: string;
   url: string;

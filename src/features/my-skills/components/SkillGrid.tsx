@@ -52,6 +52,7 @@ interface SkillGridProps {
   onUpdate: (name: string) => void;
   onVisibleCountChange?: (visible: number, total: number) => void;
   emptyMessage?: string;
+  emptyAction?: React.ReactNode;
   selectable?: boolean;
   selectedSkills?: Set<string>;
   onSelectSkill?: (name: string) => void;
@@ -78,6 +79,7 @@ export function SkillGrid({
   onUpdate,
   onVisibleCountChange,
   emptyMessage,
+  emptyAction,
   selectable,
   selectedSkills,
   onSelectSkill,
@@ -186,7 +188,7 @@ export function SkillGrid({
   }, [onVisibleCountChange, displayedSkills.length, skills.length]);
 
   if (skills.length === 0) {
-    return <EmptyState title={emptyMessage ?? t("skillGrid.noSkills")} size="lg" />;
+    return <EmptyState title={emptyMessage ?? t("skillGrid.noSkills")} action={emptyAction} size="lg" />;
   }
 
   const gridStyle: CSSProperties | undefined =

@@ -1,18 +1,21 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { copyToClipboard } from "../../../lib/utils";
+import { copyToClipboard, detectPlatform, type Platform } from "../../../lib/utils";
+import { invoke } from "@tauri-apps/api/core";
+import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { useTranslation } from "react-i18next";
-import { Check, CheckCircle, Copy, ExternalLink, Terminal, XCircle, RefreshCw } from "lucide-react";
+import { Check, CheckCircle, Copy, ExternalLink, Terminal, XCircle, RefreshCw, GitBranch } from "lucide-react";
 import { Button } from "../../../components/ui/button";
 import { Badge } from "../../../components/ui/badge";
+import type { GitStatus } from "../../../types";
 
 interface AboutSectionProps {
   ghInstalled: boolean | null;
-  onCheckUpdate?: () => void;
+  onCheckUpdate?: () => Promise<{ found: boolean; version?: string }>;
   isCheckingUpdate?: boolean;
 }
 
-type GhInstallPlatform = "macos" | "windows" | "linux" | "unknown";
+type GhInstallPlatform = Platform;
 
 const GH_INSTALL_COMMANDS: Record<Exclude<GhInstallPlatform, "unknown">, string> = {
   macos: "brew install gh",
@@ -20,24 +23,31 @@ const GH_INSTALL_COMMANDS: Record<Exclude<GhInstallPlatform, "unknown">, string>
   linux: "sudo apt install gh",
 };
 
-function detectPlatform(): GhInstallPlatform {
-  if (typeof navigator === "undefined") return "unknown";
-  const source = `${navigator.userAgent} ${navigator.platform}`.toLowerCase();
-  if (source.includes("mac")) return "macos";
-  if (source.includes("win")) return "windows";
-  if (source.includes("linux")) return "linux";
-  return "unknown";
-}
-
 export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = false }: AboutSectionProps) {
   const { t } = useTranslation();
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
   const [appVersion, setAppVersion] = useState<string>("...");
+
+  // Git status
+  const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
 
   useEffect(() => {
     getVersion()
       .then((v) => setAppVersion(v))
       .catch(() => setAppVersion("unknown"));
+  }, []);
+
+  useEffect(() => {
+    invoke<GitStatus>("check_git_status")
+      .then(setGitStatus)
+      .catch(() =>
+        setGitStatus({
+          status: "NotInstalled",
+          os: "Unknown",
+          install_instructions: [],
+          download_url: "https://git-scm.com/downloads",
+        })
+      );
   }, []);
 
   const ghInstallPlatform = useMemo(() => detectPlatform(), []);
@@ -49,18 +59,29 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
     { platform: "macOS", path: "~/.skillstar/" },
   ] as const;
 
-  const handleCopy = async () => {
-    if (!ghInstallCommand) return;
-    const copySuccess = await copyToClipboard(ghInstallCommand);
+  const handleCopy = useCallback(async (text: string, id: string) => {
+    const copySuccess = await copyToClipboard(text);
     if (copySuccess) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1600);
+      setCopied(id);
+      setTimeout(() => setCopied(null), 1600);
     }
-  };
+  }, []);
 
-  const handleCheckUpdate = () => {
-    if (onCheckUpdate) {
-      onCheckUpdate();
+  const handleCheckUpdate = async () => {
+    if (!onCheckUpdate) return;
+    try {
+      const result = await onCheckUpdate();
+      if (result.found) {
+        const { toast: sonnerToast } = await import("sonner");
+        sonnerToast.success(t("sidebar.newUpdate"), {
+          description: t("settings.updateFoundDesc", { version: result.version }),
+        });
+      } else {
+        const { toast: sonnerToast } = await import("sonner");
+        sonnerToast.info(t("settings.upToDate"));
+      }
+    } catch {
+      // Error state is already handled by the updater hook
     }
   };
 
@@ -73,6 +94,63 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
         <h2 className="text-sm font-semibold text-foreground tracking-tight">{t("settings.about")}</h2>
       </div>
       <div className="rounded-xl border border-border bg-card divide-y divide-border overflow-hidden">
+        {/* ── Git CLI ──────────────────────────────────────────── */}
+        <div className="px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            {gitStatus === null ? (
+              <div className="w-4 h-4 rounded-full bg-muted animate-pulse" />
+            ) : gitStatus.status === "Installed" ? (
+              <CheckCircle className="w-4 h-4 text-emerald-500" />
+            ) : (
+              <XCircle className="w-4 h-4 text-destructive" />
+            )}
+            <span className="text-sm font-medium">
+              <GitBranch className="w-3.5 h-3.5 inline mr-1 opacity-60" />
+              Git
+            </span>
+          </div>
+          {gitStatus?.status === "Installed" && (
+            <Badge variant="success">v{gitStatus.version}</Badge>
+          )}
+          {gitStatus?.status === "NotInstalled" && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => shellOpen(gitStatus.download_url)}
+            >
+              <ExternalLink className="w-3 h-3" />
+              {t("settings.gitInstall")}
+            </Button>
+          )}
+        </div>
+
+        {gitStatus?.status === "NotInstalled" && gitStatus.install_instructions.length > 0 && (
+          <div className="px-4 py-3 bg-muted/20 space-y-2">
+            <div className="text-xs text-muted-foreground flex items-center gap-1.5">
+              <Terminal className="w-3.5 h-3.5 shrink-0" />
+              <span>
+                {t("settings.gitInstallCommandLabel", { os: gitStatus.os })}
+              </span>
+            </div>
+            {gitStatus.install_instructions.map((inst) => (
+              <div key={inst.label} className="rounded-md border border-border bg-card px-2.5 py-2 flex items-center gap-2">
+                <div className="flex-1 min-w-0">
+                  <div className="text-micro text-muted-foreground mb-0.5">{inst.label}</div>
+                  <code className="font-mono text-xs text-foreground/85 select-all break-all">{inst.command}</code>
+                </div>
+                <button
+                  onClick={() => handleCopy(inst.command, `git-${inst.label}`)}
+                  className="p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground cursor-pointer focus-ring shrink-0"
+                  title={t("settings.ghCopyCommand")}
+                >
+                  {copied === `git-${inst.label}` ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ── GitHub CLI ──────────────────────────────────────── */}
         <div className="px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             {ghInstalled === null ? (
@@ -88,7 +166,7 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
             <Button
               size="sm"
               variant="outline"
-              onClick={() => window.open("https://cli.github.com/", "_blank")}
+              onClick={() => shellOpen("https://cli.github.com/")}
             >
               <ExternalLink className="w-3 h-3" />
               {t("settings.ghInstall")}
@@ -111,11 +189,11 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
               <div className="rounded-md border border-border bg-card px-2.5 py-2 flex items-center gap-2">
                 <code className="font-mono text-xs text-foreground/85 select-all flex-1">{ghInstallCommand}</code>
                 <button
-                  onClick={handleCopy}
+                  onClick={() => handleCopy(ghInstallCommand, "gh")}
                   className="p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground cursor-pointer focus-ring"
                   title={t("settings.ghCopyCommand")}
                 >
-                  {copied ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copied === "gh" ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
                 </button>
               </div>
             ) : (

@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { AgentIcon } from "../../../components/ui/AgentIcon";
 import { MOTION_TRANSITION, motionDuration } from "../../../comm/motion";
-import { cn, agentIconCls } from "../../../lib/utils";
+import { cn, agentIconCls, formatPlatformPath } from "../../../lib/utils";
 import type { AmbiguousGroup, DetectedAgent } from "../../../types";
 
 interface AgentDisambiguationDialogProps {
@@ -243,7 +243,7 @@ export function AgentDisambiguationDialog({
                           <p className="text-micro text-muted-foreground/70 font-mono tracking-tight flex items-center gap-1 mt-0.5">
                             <ChevronRight className="w-2.5 h-2.5 opacity-50 shrink-0" />
                             <span className="truncate">
-                              {candidate.project_skills_rel}
+                              {formatPlatformPath(candidate.project_skills_rel)}
                             </span>
                           </p>
                         </div>

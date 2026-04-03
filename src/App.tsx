@@ -1,17 +1,14 @@
-import React, { lazy, Suspense } from "react";
+import React, { lazy, Suspense, useState, useCallback, useEffect, useRef } from "react";
 import { LoadingLogo } from "./components/ui/LoadingLogo";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Sidebar } from "./components/layout/Sidebar";
+import { CommandPalette } from "./components/layout/CommandPalette";
 import { useUpdater } from "./hooks/useUpdater";
 import { useNavigation } from "./hooks/useNavigation";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useTauriSetup } from "./hooks/useTauriSetup";
 import { looksLikeShareCode } from "./lib/shareCode";
 import { Toaster } from "./components/ui/sonner";
-import {
-  readBackgroundRun,
-  writeBackgroundRun,
-} from "./features/settings/sections/BackgroundRunSection";
-import { getLanguage } from "./i18n";
-import { useEffect, useRef } from "react";
 
 const MySkillsPage = lazy(() => import("./pages/MySkills").then((mod) => ({ default: mod.MySkills })));
 const MarketplacePage = lazy(() => import("./pages/Marketplace").then((mod) => ({ default: mod.Marketplace })));
@@ -34,84 +31,25 @@ function AppContent() {
   const prefersReducedMotion = useReducedMotion();
   const updater = useUpdater();
   const lastClipboardValue = useRef("");
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+
+  const toggleCommandPalette = useCallback(() => {
+    setCommandPaletteOpen((prev) => !prev);
+  }, []);
+
+  // ── Keyboard shortcuts ────────────────────────────────────────────
+  useKeyboardShortcuts({
+    onNavigate: nav.navigate,
+    onToggleCommandPalette: toggleCommandPalette,
+  });
 
   // ── Sidebar collapsed ──────────────────────────────────────────
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(() => {
     try { return localStorage.getItem("sidebar-collapsed") === "true"; } catch { return false; }
   });
 
-  // ── Window hidden handler ──────────────────────────────────────
-  useEffect(() => {
-    (async () => {
-      try {
-        const { invoke } = await import("@tauri-apps/api/core");
-        await invoke("set_patrol_enabled", { enabled: readBackgroundRun() });
-      } catch {
-        // Not in Tauri environment
-      }
-    })();
-  }, []);
-
-  useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    let cancelled = false;
-    type PatrolStatus = {
-      enabled: boolean;
-      interval_secs: number;
-    };
-
-    (async () => {
-      try {
-        const { listen } = await import("@tauri-apps/api/event");
-        const { invoke } = await import("@tauri-apps/api/core");
-        const fn = await listen("skillstar://window-hidden", async () => {
-          if (!readBackgroundRun()) {
-            return;
-          }
-
-          const status = await invoke<PatrolStatus>("get_patrol_status").catch(() => null);
-          if (status && !status.enabled) {
-            await invoke("set_patrol_enabled", { enabled: true }).catch(() => {});
-          }
-
-          await invoke("start_patrol", {
-            intervalSecs: status?.interval_secs ?? 30,
-          }).catch(() => {});
-        });
-        if (cancelled) { fn(); } else { unlisten = fn; }
-      } catch { /* Not in Tauri environment */ }
-    })();
-    return () => { cancelled = true; unlisten?.(); };
-  }, []);
-
-  useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const { listen } = await import("@tauri-apps/api/event");
-        const fn = await listen<boolean>("patrol://enabled-changed", (event) => {
-          writeBackgroundRun(Boolean(event.payload));
-        });
-        if (cancelled) { fn(); } else { unlisten = fn; }
-      } catch {
-        // Not in Tauri environment
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, []);
-
-  // ── Sync language to tray on mount ─────────────────────────────
-  useEffect(() => {
-    import("@tauri-apps/api/core")
-      .then(({ invoke }) => invoke("update_tray_language", { lang: getLanguage() }))
-      .catch(() => {});
-  }, []);
+  // ── Tauri lifecycle (patrol, tray, window-hidden) ──────────────
+  useTauriSetup();
 
   // ── Clipboard share-code detection ─────────────────────────────
   useEffect(() => {
@@ -240,6 +178,14 @@ function AppContent() {
           <Suspense fallback={<PageFallback />}>{renderPage()}</Suspense>
         </motion.div>
       </AnimatePresence>
+      <CommandPalette
+        open={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+        onNavigate={(page) => {
+          nav.navigate(page);
+          setCommandPaletteOpen(false);
+        }}
+      />
       <Toaster />
     </div>
   );

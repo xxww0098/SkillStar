@@ -5,11 +5,44 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-## [0.1.4] - 2026-04-03
+## [0.1.5] - 2026-04-04
 
-## [0.1.3] - 2026-04-02
+### Added
+- **Command Palette** (`⌘K` / `Ctrl+K`) — fuzzy-searchable action launcher for quick page navigation and app-wide commands.
+- **Keyboard Shortcuts** — `⌘1–6` page navigation, `⌘,` Settings, `⌘I` Import; extracted into `useKeyboardShortcuts` hook.
+- **Git installation detection** (`check_git_status`) — cross-platform Git availability check with platform-specific install instructions (Xcode CLT / Homebrew / winget / apt / pacman) shown in Settings → About.
+- **Settings sidebar navigation** — floating icon-only dock with IntersectionObserver-driven scroll highlighting and framer-motion entrance/selection animations.
+- **Windows security scan patterns** — PowerShell encoded commands (Critical), `schtasks` scheduled task persistence (High), and registry Run/RunOnce auto-start persistence (High).
+- **External link interception** — `<a href="https://…">` clicks now open in the system browser instead of navigating the WebView (fixes Windows WebView2 navigation).
+- **Platform path display** — `isWindows()` / `formatPlatformPath()` utilities ensure backslash separators in Settings agent paths on Windows.
+- **`useTauriSetup` hook** — extracted patrol sync, tray language init, and window-hidden handler from App.tsx into a dedicated lifecycle hook.
 
-## [0.1.2] - 2026-04-01
+### Changed
+- **AI command module refactored** — monolithic `commands/ai.rs` (2 400+ LOC) split into `commands/ai/{mod,translate,summarize,scan}.rs` submodules; public API unchanged.
+- **Fonts bundled locally** — DM Sans and JetBrains Mono variable TTFs shipped in `public/fonts/`; removed Google Fonts CDN dependency and tightened CSP (`style-src` / `font-src` no longer allow external origins).
+- **Font stack extended** — added `PingFang SC` and `Microsoft YaHei` fallbacks for CJK rendering.
+- **Detail panel widened** — max width increased from `max-w-sm` to `max-w-md`; action buttons moved to a sticky bottom bar.
+- **Detail panel Escape close** — pressing `Escape` dismisses the panel when not in edit/read mode.
+- **Detail panel translation auto-trigger** — no longer requires AI config for short-text translation (MyMemory-only path works); skips auto-translate when `localized_description` is already hydrated.
+- **ResizablePanel** — max width now computed from parent container width (not viewport), preventing panels from extending behind the sidebar; width re-clamped on window resize.
+- **SHA-256 helper deduplicated** — moved inline hex-encoding into `core::util::sha256_hex()`; consumed by `installed_skill.rs` and `translation_cache.rs`.
+- **GitHub mirror preset** — replaced defunct `GHP.ci` with `GHFast.top`.
+- **Patrol mutex handling** — all `.lock().unwrap()` calls replaced with `.unwrap_or_else(|p| p.into_inner())` to recover from poisoned mutexes instead of panicking.
+- **Directory copy** — `copy_dir_recursive` in `gh_manager` and `local_skill` now skips Windows system files (`Thumbs.db`, `desktop.ini`) alongside `.DS_Store`.
+- **File deletion** — `remove_dir_all` replaced with `remove_dir_all_retry` (3 attempts, 200 ms delay) to handle Windows file-locking (antivirus / search indexer).
+- **Dynamic sandbox** — security scan sandbox environment split into Unix and Windows branches for correct PATH / HOME / TEMP handling.
+- **Updater hook** — `check()` now returns `{ found, version? }` for callers that need to act on the result.
+- **Viewport units** — `100vh` supplemented with `100dvh` for the root element, fixing mobile/dynamic viewport height.
+
+### Fixed
+- Detail panel opening no longer triggers an unintended AI retranslation when MyMemory is the only configured provider.
+- ResizablePanel width restored from localStorage could exceed the available parent area on smaller screens.
+- Patrol crash-loops on mutex poisoning after a previous panic.
+- Windows WebView2 bounds desync (content rendered in top half only) — forced resize on startup.
+
+### Removed
+- **Setup Hook system** — `setup_hook.rs`, `SetupHookPanel.tsx`, and all ACP build/rebuild commands (`acp_generate_setup_hook`, `acp_rebuild_skills`, `scan_rebuild_skills`, `apply_rebuild_skills`, `get_setup_hook`, `save_setup_hook`, `delete_setup_hook`, `run_setup_hook`).
+- `setup-hooks/` path from hub directory tree and legacy migration.
 
 ### Added
 - **Security Scan** — full-featured page with three scan modes (Static / Smart / Deep):

@@ -5,6 +5,7 @@ import { Button } from "../../../components/ui/button";
 import { Badge } from "../../../components/ui/badge";
 import { MOTION_TRANSITION } from "../../../comm/motion";
 import type { AgentProfile, ImportDone, ScannedSkill } from "../../../types";
+import { formatPlatformPath } from "../../../lib/utils";
 
 interface ScanImportBannerProps {
   unmanagedSkills: ScannedSkill[];
@@ -96,11 +97,13 @@ export function ScanImportBanner({
                             {enabledProfilesById.get(skill.agent_id) && (
                               <span
                                 className="text-micro font-mono text-muted-foreground/60 px-1.5 py-0.5 bg-muted/40 rounded border border-border/40"
-                                title={`Found in ${enabledProfilesById.get(skill.agent_id)?.project_skills_rel}`}
+                                title={`Found in ${formatPlatformPath(enabledProfilesById.get(skill.agent_id)?.project_skills_rel ?? "")}`}
                               >
-                                {enabledProfilesById
-                                  .get(skill.agent_id)
-                                  ?.project_skills_rel.split("/")[0]}
+                                {formatPlatformPath(
+                                  enabledProfilesById
+                                    .get(skill.agent_id)
+                                    ?.project_skills_rel.split("/")[0] ?? ""
+                                )}
                               </span>
                             )}
                             {skill.has_skill_md && (

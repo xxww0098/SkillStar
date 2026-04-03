@@ -165,11 +165,15 @@
     "ghInstallPlatform_unknown": "当前系统",
     "ghCopyCommand": "复制命令",
     "ghInstallCommandUnavailable": "未识别当前系统，请使用上方按钮打开官方安装页。",
+    "gitInstall": "安装",
+    "gitInstalled": "已安装",
+    "gitInstallCommandLabel": "安装 Git（{{os}}）",
     "about": "关于",
     "version": "SkillStar 版本",
     "checkUpdate": "检查更新",
     "checkingUpdate": "正在检查更新...",
     "upToDate": "已经是最新版本",
+    "updateFoundDesc": "v{{version}} 可用，请在左侧边栏操作更新",
     "framework": "框架",
     "gitBackend": "Git 后端",
     "license": "许可证",
@@ -857,7 +861,10 @@
       "bash_reverse": "疑似通过 /dev/tcp 发起 Bash 反弹 shell",
       "modify_shell_rc": "修改 shell 启动配置（可能用于持久化）",
       "cron_persistence": "定时任务（cron）修改（可能用于持久化）",
-      "long_base64": "超长 base64 字符串（可能用于隐藏载荷）"
+      "long_base64": "超长 base64 字符串（可能用于隐藏载荷）",
+      "powershell_encoded": "PowerShell 编码命令执行（可能用于隐藏载荷）",
+      "schtasks_persistence": "Windows 计划任务创建（可能用于持久化）",
+      "registry_persistence": "Windows 注册表修改（可能用于开机自启持久化）"
     },
     "logHint": "每次扫描都会按时间戳保存一份日志，可打开日志目录查看详情。",
     "latestLog": "最新日志：{{time}}",
@@ -957,5 +964,19 @@
     "deleteFailed": "删除失败",
     "lastRun": "上次执行：{{time}}",
     "clickToToggle": "点击切换脚本/输出"
+  },
+  "commandPalette": {
+    "placeholder": "输入命令或搜索...",
+    "navigation": "导航",
+    "actions": "操作",
+    "refresh": "刷新",
+    "navigate": "导航",
+    "select": "选择"
+  },
+  "emptyState": {
+    "mySkillsCta": "浏览市场",
+    "mySkillsDesc": "还没有安装任何技能，前往市场发现并安装技能。",
+    "projectsCta": "注册项目",
+    "projectsDesc": "注册项目目录，开始管理智能体技能。"
   }
 }

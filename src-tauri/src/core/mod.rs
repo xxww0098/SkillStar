@@ -19,7 +19,6 @@ pub mod proxy;
 pub mod repo_history;
 pub mod repo_scanner;
 pub mod security_scan;
-pub mod setup_hook;
 pub mod skill;
 pub mod skill_bundle;
 pub mod skill_group;
@@ -27,6 +26,7 @@ pub mod skill_install;
 pub mod skill_pack;
 pub mod sync;
 pub mod translation_cache;
+pub mod util;
 
 #[cfg(test)]
 pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {

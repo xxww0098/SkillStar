@@ -26,6 +26,132 @@ pub fn is_gh_installed() -> bool {
         .unwrap_or(false)
 }
 
+// ── Git Status ──────────────────────────────────────────────────────
+
+/// Platform-specific install instruction for Git.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitInstallInstruction {
+    /// Short label, e.g. "Homebrew", "winget", "apt"
+    pub label: String,
+    /// Shell command to run, e.g. "brew install git"
+    pub command: String,
+}
+
+/// Result of checking whether `git` is available.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "status")]
+pub enum GitStatus {
+    /// Git is installed. `version` contains the raw version string.
+    Installed { version: String },
+    /// Git is not found. `os` is the detected platform name.
+    /// `install_instructions` lists OS-appropriate install options.
+    NotInstalled {
+        os: String,
+        install_instructions: Vec<GitInstallInstruction>,
+        download_url: String,
+    },
+}
+
+/// Check whether `git` is available on the system.
+///
+/// Uses the enriched PATH from `command_with_path` so Homebrew / scoop
+/// installs are found even in GUI-launched apps.
+pub fn check_git_status() -> GitStatus {
+    let output = command_with_path("git")
+        .arg("--version")
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => {
+            let raw = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            // `git --version` → "git version 2.44.0"
+            let version = raw
+                .strip_prefix("git version ")
+                .unwrap_or(&raw)
+                .to_string();
+            GitStatus::Installed { version }
+        }
+        _ => {
+            let (os, instructions, url) = git_install_info();
+            GitStatus::NotInstalled {
+                os,
+                install_instructions: instructions,
+                download_url: url,
+            }
+        }
+    }
+}
+
+/// Return OS-specific install instructions for Git.
+fn git_install_info() -> (String, Vec<GitInstallInstruction>, String) {
+    #[cfg(target_os = "macos")]
+    {
+        (
+            "macOS".to_string(),
+            vec![
+                GitInstallInstruction {
+                    label: "Xcode Command Line Tools".to_string(),
+                    command: "xcode-select --install".to_string(),
+                },
+                GitInstallInstruction {
+                    label: "Homebrew".to_string(),
+                    command: "brew install git".to_string(),
+                },
+            ],
+            "https://git-scm.com/downloads/mac".to_string(),
+        )
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        (
+            "Windows".to_string(),
+            vec![
+                GitInstallInstruction {
+                    label: "winget".to_string(),
+                    command: "winget install --id Git.Git -e --source winget".to_string(),
+                },
+                GitInstallInstruction {
+                    label: "Scoop".to_string(),
+                    command: "scoop install git".to_string(),
+                },
+            ],
+            "https://git-scm.com/downloads/win".to_string(),
+        )
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        (
+            "Linux".to_string(),
+            vec![
+                GitInstallInstruction {
+                    label: "apt (Debian/Ubuntu)".to_string(),
+                    command: "sudo apt install git".to_string(),
+                },
+                GitInstallInstruction {
+                    label: "dnf (Fedora)".to_string(),
+                    command: "sudo dnf install git".to_string(),
+                },
+                GitInstallInstruction {
+                    label: "pacman (Arch)".to_string(),
+                    command: "sudo pacman -S git".to_string(),
+                },
+            ],
+            "https://git-scm.com/downloads/linux".to_string(),
+        )
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        (
+            "Unknown".to_string(),
+            vec![],
+            "https://git-scm.com/downloads".to_string(),
+        )
+    }
+}
+
 /// Check if gh is authenticated
 pub fn is_gh_authenticated() -> Result<bool> {
     let output = command_with_path("gh")
@@ -450,8 +576,10 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
         let file_name = entry.file_name();
         let dest_path = dest.join(&file_name);
 
-        // Explicitly avoid copying git metadata and macOS system files
-        if file_name == ".git" || file_name == ".DS_Store" {
+        // Explicitly avoid copying git metadata and OS system files
+        if file_name == ".git" || file_name == ".DS_Store"
+            || file_name == "Thumbs.db" || file_name == "desktop.ini"
+        {
             continue;
         }
 

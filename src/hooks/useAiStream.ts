@@ -46,6 +46,12 @@ interface UseAiStreamOptions {
    * If not provided, the invoke result is used as-is (assumed string).
    */
   parseInvokeResult?: (raw: unknown) => { text: string; provider?: string };
+  /**
+   * When false, execute() will proceed even when AI is not configured.
+   * This allows backends that have non-AI fallbacks (e.g. MyMemory) to work.
+   * Default: true.
+   */
+  requiresAiConfig?: boolean;
 }
 
 interface ExecuteAiStreamOptions {
@@ -65,6 +71,7 @@ export function useAiStream({
   eventChannel,
   normalizeResult,
   parseInvokeResult,
+  requiresAiConfig = true,
 }: UseAiStreamOptions) {
   const [state, setState] = useState<AiStreamState>(INITIAL_STATE);
   const [aiConfigured, setAiConfigured] = useState(false);
@@ -111,7 +118,7 @@ export function useAiStream({
       sourceContent: string,
       options: ExecuteAiStreamOptions = {}
     ): Promise<string | null> => {
-      if (!aiConfigured) return null;
+      if (requiresAiConfig && !aiConfigured) return null;
       const forceRefresh = options.forceRefresh ?? false;
       const keepVisibleWhileLoading = options.keepVisibleWhileLoading ?? false;
       const extraInvokeParams = options.extraInvokeParams ?? {};
@@ -262,7 +269,7 @@ export function useAiStream({
         }
       }
     },
-    [aiConfigured, cancel, dismiss, command, eventChannel, normalizeResult, parseInvokeResult]
+    [aiConfigured, requiresAiConfig, cancel, dismiss, command, eventChannel, normalizeResult, parseInvokeResult]
   );
 
   // Cleanup on unmount

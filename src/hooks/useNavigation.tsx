@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect, useRef } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo } from "react";
 import type { NavPage, SubPage } from "../types";
 import type { TabId as MarketplaceTabId } from "../pages/Marketplace";
 
@@ -187,7 +187,7 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
     return () => window.removeEventListener("hashchange", handleHashChange);
   }, []);
 
-  const value: NavigationContext = {
+  const value: NavigationContext = useMemo(() => ({
     activePage, subPage,
     projectsPreSelectedSkills, skillCardsPreSelectedSkills,
     mySkillsFocusSkill, marketplaceTab, clipboardShareCode,
@@ -195,7 +195,15 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
     setProjectsPreSelectedSkills, setSkillCardsPreSelectedSkills,
     setMySkillsFocusSkill, setMarketplaceTab, setClipboardShareCode,
     goToProjectsWithSkills, goToSkillCardsWithSkills, goToMySkillsFocus,
-  };
+  }), [
+    activePage, subPage,
+    projectsPreSelectedSkills, skillCardsPreSelectedSkills,
+    mySkillsFocusSkill, marketplaceTab, clipboardShareCode,
+    navigate, setSubPage,
+    setProjectsPreSelectedSkills, setSkillCardsPreSelectedSkills,
+    setMySkillsFocusSkill, setMarketplaceTab, setClipboardShareCode,
+    goToProjectsWithSkills, goToSkillCardsWithSkills, goToMySkillsFocus,
+  ]);
 
   return <NavContext.Provider value={value}>{children}</NavContext.Provider>;
 }

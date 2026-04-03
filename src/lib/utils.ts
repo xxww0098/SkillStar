@@ -1,6 +1,37 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
+// ── Platform detection (cached) ─────────────────────────────────────
+export type Platform = "macos" | "windows" | "linux" | "unknown";
+
+let _cachedPlatform: Platform | null = null;
+
+/** Detect the current OS platform from navigator. Result is cached. */
+export function detectPlatform(): Platform {
+  if (_cachedPlatform) return _cachedPlatform;
+  if (typeof navigator === "undefined") return "unknown";
+  const source = `${navigator.userAgent} ${navigator.platform}`.toLowerCase();
+  if (source.includes("mac")) _cachedPlatform = "macos";
+  else if (source.includes("win")) _cachedPlatform = "windows";
+  else if (source.includes("linux")) _cachedPlatform = "linux";
+  else _cachedPlatform = "unknown";
+  return _cachedPlatform;
+}
+
+/** Return `true` when running on Windows. */
+export function isWindows(): boolean {
+  return detectPlatform() === "windows";
+}
+
+/**
+ * Format a relative path for display using the current platform's separator.
+ * On Windows, forward slashes are replaced with backslashes.
+ */
+export function formatPlatformPath(path: string): string {
+  if (isWindows()) return path.replace(/\//g, "\\");
+  return path;
+}
+
 // Re-export frontmatter utilities so existing importers don't break.
 export {
   unwrapOuterMarkdownFence,

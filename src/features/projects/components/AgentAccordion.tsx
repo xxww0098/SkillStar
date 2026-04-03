@@ -7,7 +7,7 @@ import { Input } from "../../../components/ui/input";
 import { Switch } from "../../../components/ui/switch";
 import { AgentIcon } from "../../../components/ui/AgentIcon";
 import { MOTION_TRANSITION } from "../../../comm/motion";
-import { cn, agentIconCls } from "../../../lib/utils";
+import { cn, agentIconCls, formatPlatformPath } from "../../../lib/utils";
 import type { AgentProfile, Skill } from "../../../types";
 
 interface AgentAccordionProps {
@@ -89,7 +89,7 @@ export function AgentAccordion({
                     {profile.display_name}
                   </span>
                   <span className="text-micro text-muted-foreground/60 font-mono bg-muted/40 px-1.5 py-0.5 rounded-md truncate">
-                    {profile.project_skills_rel}
+                    {formatPlatformPath(profile.project_skills_rel)}
                   </span>
                 </div>
                 {isEnabled && skills.length > 0 && (

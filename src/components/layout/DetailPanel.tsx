@@ -91,10 +91,24 @@ export function DetailPanel({
   const [editing, setEditing] = useState(false);
   const [reading, setReading] = useState(false);
 
+  // Close on Escape key
+  useEffect(() => {
+    if (!skill || editing || reading) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [skill, editing, reading, onClose]);
+
   // ── Description Translation (via reusable hook) ─────────────
   const descriptionStream = useAiStream({
     command: "ai_translate_short_text_stream_with_source",
     eventChannel: "ai://translate-stream",
+    requiresAiConfig: false,
     parseInvokeResult: (raw) => {
       const result = raw as ShortTextTranslationResult;
       return {
@@ -324,10 +338,14 @@ export function DetailPanel({
     if (
       !skill ||
       !autoTranslateDescription ||
-      !shortDescriptionTranslationEnabled ||
-      !aiConfigured
+      !shortDescriptionTranslationEnabled
     )
       return;
+    // If the skill already ships with a pre-cached localized_description
+    // (hydrated in the reset effect), skip auto-translate entirely.
+    // We check the prop directly because effects from the same render cycle
+    // can't see each other's queued state updates.
+    if (skill.localized_description) return;
     const renderedDescription =
       skillDetails?.summary?.trim() || skill.description?.trim() || "";
     if (!renderedDescription) return;
@@ -342,7 +360,6 @@ export function DetailPanel({
     skill,
     skillDetails?.summary,
     targetLanguage,
-    aiConfigured,
   ]);
 
   const toggleAutoTranslateDescription = (enabled: boolean) => {
@@ -506,9 +523,9 @@ export function DetailPanel({
   const localizedQuickReadError = formatAiErrorMessage(quickReadError, t);
   const shouldDeferDescriptionRender =
     autoTranslateDescription &&
-    aiConfigured &&
     shortDescriptionTranslationEnabled &&
     hasDescription &&
+    !skill?.localized_description &&
     !hasTranslationForCurrentDescription &&
     !descriptionTranslateError &&
     !descriptionDeferTimedOut;
@@ -577,7 +594,7 @@ export function DetailPanel({
           animate={{ x: 0, opacity: 1 }}
           exit={{ x: "100%", opacity: 0 }}
           transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-          className="absolute right-0 top-0 bottom-0 w-full max-w-sm h-full border-l border-border bg-card backdrop-blur-xl shadow-2xl overflow-hidden z-50 rounded-tl-xl rounded-bl-xl will-change-transform flex flex-col"
+          className="absolute right-0 top-0 bottom-0 w-full max-w-md h-full border-l border-border bg-card backdrop-blur-xl shadow-2xl overflow-hidden z-50 rounded-tl-xl rounded-bl-xl will-change-transform flex flex-col"
         >
           {/* Header — pinned */}
           <div className="flex items-center justify-between p-4 border-b border-border shrink-0">
@@ -974,56 +991,57 @@ export function DetailPanel({
                 </Button>
               )}
 
-              {/* Actions */}
-              <div className="space-y-2 pt-2">
-                {skill.installed ? (
-                  <>
-                    {skill.update_available &&
-                      skill.skill_type !== "local" && (
-                      <Button
-                        className="w-full"
-                        onClick={() => onUpdate(skill.name)}
-                      >
-                        <RefreshCw className="w-4 h-4 mr-2" />
-                        {t("detailPanel.updateAvailable")}
-                      </Button>
-                    )}
+            </div>
+          </div>
 
-                    <div className="flex gap-2">
-                      {onReinstall && skill.skill_type !== "local" && (
-                        <Button
-                          variant="secondary"
-                          className="flex-1"
-                          onClick={() => onReinstall(skill.git_url, skill.name)}
-                        >
-                          <RefreshCw className="w-4 h-4 mr-2" />
-                          {t("detailPanel.reinstall")}
-                        </Button>
-                      )}
-                      <Button
-                        variant="destructive"
-                        className="flex-1"
-                        disabled={uninstalling}
-                        onClick={() => onUninstall(skill.name)}
-                      >
-                        <Trash2 className="w-4 h-4 mr-2" />
-                        {uninstalling
-                          ? t("common.uninstalling")
-                          : t("common.uninstall")}
-                      </Button>
-                    </div>
-                  </>
-                ) : (
+          {/* Sticky action bar */}
+          <div className="shrink-0 border-t border-border bg-card/80 backdrop-blur-sm p-4 space-y-2">
+            {skill.installed ? (
+              <>
+                {skill.update_available &&
+                  skill.skill_type !== "local" && (
                   <Button
                     className="w-full"
-                    onClick={() => onInstall(skill.git_url, skill.name)}
+                    onClick={() => onUpdate(skill.name)}
                   >
-                    <Download className="w-4 h-4" />
-                    {t("common.install")}
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    {t("detailPanel.updateAvailable")}
                   </Button>
                 )}
-              </div>
-            </div>
+
+                <div className="flex gap-2">
+                  {onReinstall && skill.skill_type !== "local" && (
+                    <Button
+                      variant="secondary"
+                      className="flex-1"
+                      onClick={() => onReinstall(skill.git_url, skill.name)}
+                    >
+                      <RefreshCw className="w-4 h-4 mr-2" />
+                      {t("detailPanel.reinstall")}
+                    </Button>
+                  )}
+                  <Button
+                    variant="destructive"
+                    className="flex-1"
+                    disabled={uninstalling}
+                    onClick={() => onUninstall(skill.name)}
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    {uninstalling
+                      ? t("common.uninstalling")
+                      : t("common.uninstall")}
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <Button
+                className="w-full"
+                onClick={() => onInstall(skill.git_url, skill.name)}
+              >
+                <Download className="w-4 h-4" />
+                {t("common.install")}
+              </Button>
+            )}
           </div>
         </motion.aside>
       )}

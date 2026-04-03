@@ -775,8 +775,9 @@ fn static_theme(pattern_id: &str) -> &'static str {
         | "sensitive_env"
         | "sensitive_etc_passwd"
         | "sensitive_gnupg" => "secret_access",
-        "reverse_shell" | "bash_reverse" | "modify_shell_rc" | "cron_persistence" => "persistence",
-        "unicode_bidi" | "long_base64" => "obfuscation",
+        "reverse_shell" | "bash_reverse" | "modify_shell_rc" | "cron_persistence"
+        | "schtasks_persistence" | "registry_persistence" => "persistence",
+        "unicode_bidi" | "long_base64" | "powershell_encoded" => "obfuscation",
         "npm_global_install" | "pip_install" => "dependency",
         _ => "general",
     }
@@ -3082,6 +3083,25 @@ const STATIC_PATTERNS: &[PatternDef] = &[
         regex: r"crontab\s+(-e|-l|-r)|/etc/cron",
         severity: RiskLevel::High,
         description: "Cron job manipulation for persistence",
+    },
+    // Windows-specific patterns
+    PatternDef {
+        id: "powershell_encoded",
+        regex: r"(?i)powershell\s+.*-enc(odedcommand)?\s+[A-Za-z0-9+/=]{20,}",
+        severity: RiskLevel::Critical,
+        description: "PowerShell encoded command execution (may conceal payload)",
+    },
+    PatternDef {
+        id: "schtasks_persistence",
+        regex: r"(?i)schtasks\s+/create\s",
+        severity: RiskLevel::High,
+        description: "Windows scheduled task creation for persistence",
+    },
+    PatternDef {
+        id: "registry_persistence",
+        regex: r"(?i)reg\s+add\s+.*(Run|RunOnce|Startup)",
+        severity: RiskLevel::High,
+        description: "Windows registry modification for auto-start persistence",
     },
 ];
 

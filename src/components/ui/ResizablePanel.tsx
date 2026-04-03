@@ -6,7 +6,7 @@ interface ResizablePanelProps {
   defaultWidth: number;
   /** Minimum width in pixels (default: 360) */
   minWidth?: number;
-  /** Maximum width as percentage of viewport (default: 90) */
+  /** Maximum width as percentage of parent container (default: 90) */
   maxWidthPercent?: number;
   /** localStorage key for width persistence (omit to skip persistence) */
   storageKey?: string;
@@ -49,14 +49,28 @@ export function ResizablePanel({
   const startWidth = useRef(0);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // Clamp width to viewport bounds
+  // Clamp width to parent container bounds (not viewport) so the panel never
+  // extends behind the sidebar or other siblings.
   const clamp = useCallback(
     (w: number) => {
-      const maxPx = Math.floor((window.innerWidth * maxWidthPercent) / 100);
+      const parentWidth = panelRef.current?.parentElement?.clientWidth ?? window.innerWidth;
+      const maxPx = Math.floor((parentWidth * maxWidthPercent) / 100);
       return Math.max(minWidth, Math.min(w, maxPx));
     },
     [minWidth, maxWidthPercent]
   );
+  // Re-clamp width after mount (parent ref available) and on window resize,
+  // so restored widths that exceeded the current parent area get corrected.
+  useEffect(() => {
+    const reclamp = () => setWidth((w) => clamp(w));
+    // Defer initial reclamp to next frame so the parent is measured
+    const raf = requestAnimationFrame(reclamp);
+    window.addEventListener("resize", reclamp);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", reclamp);
+    };
+  }, [clamp]);
 
   // Persist width to localStorage
   useEffect(() => {

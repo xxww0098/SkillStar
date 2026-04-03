@@ -7,7 +7,7 @@ import { Button } from "../../../components/ui/button";
 import { SelectAllButton } from "../../../components/ui/SelectAllButton";
 import { AgentIcon } from "../../../components/ui/AgentIcon";
 import { MOTION_TRANSITION, motionDuration } from "../../../comm/motion";
-import { cn, agentIconCls } from "../../../lib/utils";
+import { cn, agentIconCls, formatPlatformPath } from "../../../lib/utils";
 import type { AgentProfile, ProjectEntry, Skill } from "../../../types";
 
 interface ProjectDeployAgentDialogProps {
@@ -392,7 +392,7 @@ export function ProjectDeployAgentDialog({
                               </div>
                               <p className="text-micro text-muted-foreground/70 font-mono tracking-tight flex items-center gap-1 truncate">
                                 <ChevronRight className="w-2.5 h-2.5 opacity-50 shrink-0" />
-                                <span className="truncate">{profile.project_skills_rel}</span>
+                                <span className="truncate">{formatPlatformPath(profile.project_skills_rel)}</span>
                               </p>
                             </div>
 

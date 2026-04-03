@@ -321,7 +321,7 @@ function SkillCardInner({
                           className={cn(
                             agentIconCls(profile.icon, "w-4 h-4"),
                             "transition-[filter,opacity] drop-shadow-sm",
-                            !isUsed && "grayscale opacity-40 hover:opacity-70"
+                            !isUsed && "grayscale opacity-40 hover:opacity-70 hover:grayscale-0"
                           )}
                         />
                       </button>

@@ -123,7 +123,7 @@ impl PatrolManager {
     /// This is synchronous — it spawns the patrol loop on the tokio runtime
     /// but does not block on it.
     pub fn start(&self, app: AppHandle, interval_secs: u64) -> Result<()> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
 
         // If already running, stop the existing task first.
         if let Some(tx) = inner.cancel_tx.take() {
@@ -154,7 +154,7 @@ impl PatrolManager {
 
     /// Stop the patrol loop.
     pub fn stop(&self) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(tx) = inner.cancel_tx.take() {
             let _ = tx.send(true);
         }
@@ -170,7 +170,7 @@ impl PatrolManager {
     }
 
     pub fn set_enabled(&self, enabled: bool) -> Result<()> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
         inner.enabled = enabled;
         let interval_secs = inner.interval_secs;
         save_config(&PatrolConfig {
@@ -181,7 +181,7 @@ impl PatrolManager {
 
     /// Get current patrol status.
     pub fn status(&self) -> PatrolStatus {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
         PatrolStatus {
             enabled: inner.enabled,
             running: inner.running,
@@ -244,7 +244,7 @@ async fn patrol_loop(
 
             // Update current_skill
             {
-                let mut inner = state.lock().unwrap();
+                let mut inner = state.lock().unwrap_or_else(|p| p.into_inner());
                 inner.current_skill = entry.name.clone();
             }
 
@@ -267,7 +267,7 @@ async fn patrol_loop(
 
             // Update counters
             let event = {
-                let mut inner = state.lock().unwrap();
+                let mut inner = state.lock().unwrap_or_else(|p| p.into_inner());
                 inner.skills_checked += 1;
                 if update_available {
                     inner.updates_found += 1;
@@ -303,7 +303,7 @@ async fn patrol_loop(
     }
 
     // Clean up: mark as stopped
-    let mut inner = state.lock().unwrap();
+    let mut inner = state.lock().unwrap_or_else(|p| p.into_inner());
     inner.running = false;
     inner.current_skill.clear();
     inner.cancel_tx = None;

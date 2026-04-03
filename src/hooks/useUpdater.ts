@@ -64,8 +64,8 @@ export function useUpdater() {
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Check ─────────────────────────────────────────────────────────
-  const check = useCallback(async () => {
-    if (checkingRef.current) return;
+  const check = useCallback(async (): Promise<{ found: boolean; version?: string }> => {
+    if (checkingRef.current) return { found: false };
     checkingRef.current = true;
 
     try {
@@ -77,13 +77,13 @@ export function useUpdater() {
       if (!update) {
         setState((s) => ({ ...s, status: "idle", version: "", progress: 0, error: "" }));
         localStorage.setItem(LAST_CHECK_KEY, String(Date.now()));
-        return;
+        return { found: false };
       }
 
       if (update.version === getSkipped()) {
         setState((s) => ({ ...s, status: "idle", version: "", progress: 0, error: "" }));
         localStorage.setItem(LAST_CHECK_KEY, String(Date.now()));
-        return;
+        return { found: false };
       }
 
       candidateRef.current = update;
@@ -95,6 +95,7 @@ export function useUpdater() {
         retriesLeft: MAX_DOWNLOAD_RETRIES,
       });
       localStorage.setItem(LAST_CHECK_KEY, String(Date.now()));
+      return { found: true, version: update.version };
     } catch (e) {
       setState((s) => ({
         ...s,
@@ -103,6 +104,7 @@ export function useUpdater() {
         progress: 0,
         error: mapUpdaterError(e),
       }));
+      return { found: false };
     } finally {
       checkingRef.current = false;
     }

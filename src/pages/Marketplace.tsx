@@ -661,7 +661,7 @@ export function Marketplace({
       {selectedSkill && (
         <Suspense
           fallback={
-            <div className="absolute right-0 top-0 bottom-0 w-full max-w-sm h-full border-l border-border bg-card backdrop-blur-xl shadow-2xl overflow-y-auto z-50 rounded-tl-xl rounded-bl-xl flex items-center justify-center">
+            <div className="absolute right-0 top-0 bottom-0 w-full max-w-md h-full border-l border-border bg-card backdrop-blur-xl shadow-2xl overflow-y-auto z-50 rounded-tl-xl rounded-bl-xl flex items-center justify-center">
               <LoadingLogo size="sm" />
             </div>
           }

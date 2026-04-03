@@ -186,6 +186,9 @@ function getStaticDescription(
     modify_shell_rc: "securityScan.staticDescription.modify_shell_rc",
     cron_persistence: "securityScan.staticDescription.cron_persistence",
     long_base64: "securityScan.staticDescription.long_base64",
+    powershell_encoded: "securityScan.staticDescription.powershell_encoded",
+    schtasks_persistence: "securityScan.staticDescription.schtasks_persistence",
+    registry_persistence: "securityScan.staticDescription.registry_persistence",
   };
 
   const key = keyByPattern[patternId];
@@ -301,7 +304,8 @@ const OWASP_AGENTIC_RULES: Array<{ tag: string; keywords: string[] }> = [
   },
   {
     tag: "AS-06 Privilege Escalation & Persistence",
-    keywords: ["sudo", "setuid", "chmod", "chown", "authorized_keys", "persistence", ".bashrc", ".zshrc"],
+    keywords: ["sudo", "setuid", "chmod", "chown", "authorized_keys", "persistence", ".bashrc", ".zshrc",
+      "reg add", "schtasks", "net user", "runas", "Set-ExecutionPolicy", "powershell -enc", "HKLM\\\\", "HKCU\\\\"],
   },
   {
     tag: "AS-07 Sandbox Escape / Isolation Failure",

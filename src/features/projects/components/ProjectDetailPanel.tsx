@@ -5,6 +5,7 @@ import { AlertTriangle, FolderKanban, FolderSync } from "lucide-react";
 import { Button } from "../../../components/ui/button";
 import { MOTION_TRANSITION } from "../../../comm/motion";
 import type { AgentProfile, ImportDone, ProjectEntry, ScannedSkill, Skill } from "../../../types";
+import { formatPlatformPath } from "../../../lib/utils";
 import { ScanImportBanner } from "./ScanImportBanner";
 import { AgentAccordion } from "./AgentAccordion";
 import { ApplyFooter } from "./ApplyFooter";
@@ -155,7 +156,7 @@ export function ProjectDetailPanel({
                 <div className="space-y-1">
                   {sharedProjectPaths.map((group) => (
                     <div key={group.path} className="text-micro text-muted-foreground">
-                      <span className="font-mono text-foreground/80">{group.path}</span>
+                      <span className="font-mono text-foreground/80">{formatPlatformPath(group.path)}</span>
                       <span>{" · "}</span>
                       <span>{group.agents.join(" / ")}</span>
                     </div>

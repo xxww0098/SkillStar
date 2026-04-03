@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "SkillStar",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "identifier": "com.skillstar.desktop",
   "build": {
     "beforeDevCommand": "bun run dev",
@@ -24,7 +24,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' https://api.github.com https://github.com; img-src 'self' https://avatars.githubusercontent.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com"
+      "csp": "default-src 'self'; connect-src 'self' https://api.github.com https://github.com; img-src 'self' https://avatars.githubusercontent.com; style-src 'self' 'unsafe-inline'; font-src 'self'"
     }
   },
   "bundle": {

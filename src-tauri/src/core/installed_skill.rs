@@ -349,14 +349,7 @@ fn build_installed_skill(
 
     // Fast HashMap lookup — zero DB cost (preloaded in bulk).
     if target_language.is_some() && !description.trim().is_empty() {
-        use sha2::{Digest, Sha256};
-        let digest = Sha256::digest(description.as_bytes());
-        let mut hex = String::with_capacity(64);
-        const HEX_TABLE: &[u8; 16] = b"0123456789abcdef";
-        for &byte in &digest {
-            hex.push(HEX_TABLE[(byte >> 4) as usize] as char);
-            hex.push(HEX_TABLE[(byte & 0xf) as usize] as char);
-        }
+        let hex = super::util::sha256_hex(description.as_bytes());
         if let Some(cached) = preloaded_translations.get(&hex) {
             if !cached.translated_text.trim().is_empty() {
                 localized_description = Some(cached.translated_text.clone());

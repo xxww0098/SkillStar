@@ -18,6 +18,11 @@ pub async fn check_gh_status() -> Result<gh_manager::GhStatus, AppError> {
 }
 
 #[tauri::command]
+pub async fn check_git_status() -> Result<gh_manager::GitStatus, AppError> {
+    Ok(tokio::task::spawn_blocking(gh_manager::check_git_status).await?)
+}
+
+#[tauri::command]
 pub async fn publish_skill_to_github(
     skill_name: String,
     description: String,
@@ -353,7 +358,7 @@ pub async fn force_delete_installed_skills() -> Result<usize, AppError> {
         }
 
         if hub_dir.exists() {
-            std::fs::remove_dir_all(&hub_dir)?;
+            paths::remove_dir_all_retry(&hub_dir)?;
         }
         std::fs::create_dir_all(&hub_dir)?;
 
@@ -420,7 +425,7 @@ pub async fn force_delete_repo_caches() -> Result<usize, AppError> {
         }
 
         if cache_dir.exists() {
-            std::fs::remove_dir_all(&cache_dir)?;
+            paths::remove_dir_all_retry(&cache_dir)?;
         }
         std::fs::create_dir_all(&cache_dir)?;
 

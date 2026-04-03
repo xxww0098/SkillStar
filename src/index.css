@@ -1,4 +1,28 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=JetBrains+Mono:wght@400;500;600&display=swap');
+/* DM Sans — variable font, bundled locally to avoid Google Fonts CDN dependency.
+   Source: https://github.com/google/fonts/tree/main/ofl/dmsans (OFL-1.1) */
+@font-face {
+  font-family: "DM Sans";
+  font-style: normal;
+  font-weight: 100 1000;
+  font-display: swap;
+  src: url("/fonts/DMSans-Variable.ttf") format("truetype");
+}
+@font-face {
+  font-family: "DM Sans";
+  font-style: italic;
+  font-weight: 100 1000;
+  font-display: swap;
+  src: url("/fonts/DMSans-Variable-Italic.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("/fonts/JetBrainsMono-Variable.ttf") format("truetype");
+}
+
 @plugin "@tailwindcss/typography";
 @import "tailwindcss";
 
@@ -47,7 +71,7 @@
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-xl: 16px;
-  --font-sans: "DM Sans", system-ui, -apple-system, sans-serif;
+  --font-sans: "DM Sans", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
@@ -107,6 +131,7 @@
       radial-gradient(ellipse at 80% 100%, rgba(139, 92, 246, 0.06) 0%, transparent 50%);
     color: var(--color-foreground);
     min-height: 100vh;
+    min-height: 100dvh;
     overflow: hidden;
     font-kerning: normal;
   }
@@ -119,6 +144,7 @@
 
   #root {
     height: 100vh;
+    height: 100dvh;
     display: flex;
   }
 
