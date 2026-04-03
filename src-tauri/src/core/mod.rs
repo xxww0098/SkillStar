@@ -1,8 +1,11 @@
+pub mod acp_client;
 pub mod agent_profile;
 pub mod ai_provider;
 pub mod db_pool;
+pub mod error;
 pub mod gh_manager;
 pub mod git_ops;
+pub mod github_mirror;
 pub mod installed_skill;
 pub mod local_skill;
 pub mod lockfile;
@@ -16,10 +19,12 @@ pub mod proxy;
 pub mod repo_history;
 pub mod repo_scanner;
 pub mod security_scan;
+pub mod setup_hook;
 pub mod skill;
 pub mod skill_bundle;
 pub mod skill_group;
 pub mod skill_install;
+pub mod skill_pack;
 pub mod sync;
 pub mod translation_cache;
 

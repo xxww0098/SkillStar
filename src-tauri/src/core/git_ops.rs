@@ -2,6 +2,7 @@ use anyhow::{Context, Result, anyhow};
 use std::fs;
 use std::path::Path;
 
+use super::github_mirror;
 use super::path_env::command_with_path;
 use tracing::warn;
 
@@ -18,7 +19,9 @@ pub fn compute_tree_hash(repo_path: &Path) -> Result<String> {
 /// Always uses `--depth 1 --single-branch` to minimise network transfer
 /// and disk usage. Skills only need the latest snapshot, not full history.
 pub fn clone_repo(url: &str, dest: &Path) -> Result<()> {
-    let output = command_with_path("git")
+    let mut cmd = command_with_path("git");
+    github_mirror::apply_mirror_args(&mut cmd);
+    let output = cmd
         .args(["clone", "--depth", "1", "--single-branch"])
         .arg(url)
         .arg(dest)
@@ -38,7 +41,9 @@ pub fn clone_repo(url: &str, dest: &Path) -> Result<()> {
 /// Only fetches the latest commit – ideal for repo scanning where full
 /// history is unnecessary.
 pub fn clone_repo_shallow(url: &str, dest: &Path) -> Result<()> {
-    let output = command_with_path("git")
+    let mut cmd = command_with_path("git");
+    github_mirror::apply_mirror_args(&mut cmd);
+    let output = cmd
         .args(["clone", "--depth", "1"])
         .arg(url)
         .arg(dest)
@@ -60,7 +65,9 @@ pub fn clone_repo_shallow(url: &str, dest: &Path) -> Result<()> {
 /// must follow up with `git sparse-checkout set <dirs>` + `git checkout` to
 /// materialize only the directories they need.
 pub fn clone_repo_sparse(url: &str, dest: &Path) -> Result<()> {
-    let output = command_with_path("git")
+    let mut cmd = command_with_path("git");
+    github_mirror::apply_mirror_args(&mut cmd);
+    let output = cmd
         .args([
             "clone",
             "--filter=blob:none",
@@ -139,7 +146,9 @@ pub fn apply_sparse_checkout(repo_path: &Path, dirs: &[&str]) -> Result<()> {
     // fetch file content from the remote.  A failure here (e.g. HTTP/2 framing
     // error, promisor remote offline) means nothing was materialised; treating
     // it as non-fatal would leave a broken cache that blocks future retries.
-    let output = command_with_path("git")
+    let mut checkout_cmd = command_with_path("git");
+    github_mirror::apply_mirror_args(&mut checkout_cmd);
+    let output = checkout_cmd
         .current_dir(repo_path)
         .arg("checkout")
         .output()
@@ -237,7 +246,11 @@ pub fn pull_repo(repo_path: &Path) -> Result<()> {
 }
 
 fn run_git(repo_path: &Path, args: &[&str]) -> Result<String> {
-    let output = command_with_path("git")
+    let mut cmd = command_with_path("git");
+    // Mirror args (-c url.*.insteadOf) must precede the subcommand.
+    // For local-only operations (rev-parse, reset) this is harmless.
+    github_mirror::apply_mirror_args(&mut cmd);
+    let output = cmd
         .current_dir(repo_path)
         .args(args)
         .output()

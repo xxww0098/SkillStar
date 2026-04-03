@@ -297,15 +297,16 @@ function SkillCardInner({
                     const isUsed = skill.agent_links?.includes(profile.display_name) ?? false;
                     const toggleKey = `${skill.name}::${profile.id}`;
                     const isToggling = pendingAgentToggleKeys?.has(toggleKey) ?? false;
+                    const isDisabled = isToggling;
                     return (
                       <button
                         key={profile.id}
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (isToggling) return;
+                          if (isDisabled) return;
                           onToggleAgent(skill.name, profile.id, !isUsed, profile.display_name);
                         }}
-                        disabled={isToggling}
+                        disabled={isDisabled}
                         className={cn(
                           "w-7 h-7 shrink-0 rounded-lg flex items-center justify-center border transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-wait",
                           isUsed

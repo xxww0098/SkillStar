@@ -24,6 +24,59 @@ pub fn invalidate_cache() {
     }
 }
 
+fn normalize_snapshot_component(raw: &str) -> Option<String> {
+    let trimmed = raw.trim().to_ascii_lowercase();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+fn build_snapshot_skill_key(source: &str, name: &str) -> Option<String> {
+    Some(format!(
+        "{}/{}",
+        normalize_snapshot_component(source)?,
+        normalize_snapshot_component(name)?
+    ))
+}
+
+pub fn installed_snapshot_markers() -> HashSet<String> {
+    let mut markers = HashSet::new();
+
+    let hub_skills_dir = super::paths::hub_skills_dir();
+    if let Ok(entries) = std::fs::read_dir(&hub_skills_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir()
+                && path
+                    .symlink_metadata()
+                    .map(|meta| !meta.is_symlink())
+                    .unwrap_or(true)
+            {
+                continue;
+            }
+            if let Some(name) = entry.file_name().to_str() {
+                markers.insert(name.to_ascii_lowercase());
+            }
+        }
+    }
+
+    let lock_path = lockfile::lockfile_path();
+    if let Ok(lockfile) = lockfile::Lockfile::load(&lock_path) {
+        for entry in lockfile.skills {
+            markers.insert(entry.name.to_ascii_lowercase());
+            if let Some(source) = extract_github_source_from_url(&entry.git_url) {
+                if let Some(skill_key) = build_snapshot_skill_key(&source, &entry.name) {
+                    markers.insert(skill_key);
+                }
+            }
+        }
+    }
+
+    markers
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SkillUpdateState {
     pub name: String,
@@ -117,7 +170,13 @@ pub async fn list_installed_skills() -> Result<Vec<Skill>> {
 
         tasks.spawn_blocking(move || {
             let _permit = permit;
-            build_installed_skill(path, lock_entry, &profiles, target_lang.as_deref(), &translations)
+            build_installed_skill(
+                path,
+                lock_entry,
+                &profiles,
+                target_lang.as_deref(),
+                &translations,
+            )
         });
     }
 

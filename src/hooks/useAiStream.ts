@@ -1,5 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import type { AiConfig, AiStreamPayload } from "../types";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { getAiConfigCached } from "./useAiConfig";
+import type { AiStreamPayload } from "../types";
 
 /**
  * Shared hook for AI streaming operations (translate / summarize).
@@ -76,14 +79,13 @@ export function useAiStream({
   // Guard async setState after component unmount
   const mountedRef = useRef(true);
 
-  // Load AI config on mount
+  // Load AI config on mount (uses module-level singleton cache)
   useEffect(() => {
     (async () => {
       try {
-        const { invoke } = await import("@tauri-apps/api/core");
-        const config = await invoke<AiConfig>("get_ai_config");
+        const config = await getAiConfigCached();
         if (!mountedRef.current) return;
-        setAiConfigured(config.enabled && config.api_key.trim().length > 0);
+        setAiConfigured(config.enabled && (config.api_format === "local" || config.api_key.trim().length > 0));
         if (config.target_language) setTargetLanguage(config.target_language);
       } catch {
         if (mountedRef.current) setAiConfigured(false);
@@ -117,28 +119,34 @@ export function useAiStream({
       const snap = stateRef.current;
 
       if (!forceRefresh) {
-        // If already loading, cancel
         if (snap.loading) {
-          cancel();
-          if (!snap.content) {
-            setState((prev) => ({ ...prev, visible: false }));
+          if (snap.source === sourceContent) {
+            // Already loading the same thing, treat as toggle cancel
+            cancel();
+            if (!snap.content) {
+              setState((prev) => ({ ...prev, visible: false }));
+            }
+            return null;
+          } else {
+            // Loading something else, cancel it and proceed to load the new one
+            cancel();
           }
-          return null;
-        }
+        } else {
+          // If visible, toggle off only if the source content matches
+          if (snap.visible && snap.source === sourceContent) {
+            dismiss();
+            return null;
+          }
 
-        // If visible, toggle off
-        if (snap.visible) {
-          dismiss();
-          return null;
-        }
-
-        // If cached result matches source, show it
-        if (snap.content && snap.source === sourceContent) {
-          setState((prev) => ({ ...prev, visible: true }));
-          return snap.content;
+          // If cached result matches source, show it
+          if (snap.content && snap.source === sourceContent) {
+            setState((prev) => ({ ...prev, visible: true }));
+            return snap.content;
+          }
         }
       } else if (snap.loading) {
-        return null;
+        // Force refresh while loading, cancel old and proceed
+        cancel();
       }
 
       // Start new request
@@ -158,14 +166,11 @@ export function useAiStream({
         hasDelta: false,
         wasNonStreaming: false,
         error: null,
-        source: keepVisibleWhileLoading ? prev.source : null,
+        source: keepVisibleWhileLoading ? prev.source : sourceContent,
         provider: keepVisibleWhileLoading ? prev.provider : null,
       }));
 
       try {
-        const { listen } = await import("@tauri-apps/api/event");
-        const { invoke } = await import("@tauri-apps/api/core");
-
         const flushDelta = () => {
           rafId = null;
           if (activeIdRef.current !== requestId) return;

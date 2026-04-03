@@ -98,6 +98,7 @@ export function ImportModal({
   // ── State ──────────────────────────────────────────────────────
   const [phase, setPhase] = useState<Phase>("inputURL");
   const [urlInput, setUrlInput] = useState("");
+  const [fullDepthScan, setFullDepthScan] = useState(false);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [selectedSkills, setSelectedSkills] = useState<Set<string>>(new Set());
   const [history, setHistory] = useState<RepoHistoryEntry[]>([]);
@@ -126,6 +127,7 @@ export function ImportModal({
       setInstalledCount(0);
       setShareCodeExistingNames([]);
       setShareCodeSummary(null);
+      setFullDepthScan(false);
 
       // If opening with a share code (clipboard detect or prop), go directly to share code flow
       if (initialShareCode && looksLikeShareCode(initialShareCode)) {
@@ -277,8 +279,18 @@ export function ImportModal({
         if (skill.u) {
           // Git-backed skill: use repo scanner flow
           try {
-            const result = await invoke<ScanResult>("scan_github_repo", { url: skill.u });
-            const target = result.skills.find((s) => normalizeSkillName(s.id) === skillKey);
+            let result = await invoke<ScanResult>("scan_github_repo", {
+              url: skill.u,
+              fullDepth: false,
+            });
+            let target = result.skills.find((s) => normalizeSkillName(s.id) === skillKey);
+            if (!target) {
+              result = await invoke<ScanResult>("scan_github_repo", {
+                url: skill.u,
+                fullDepth: true,
+              });
+              target = result.skills.find((s) => normalizeSkillName(s.id) === skillKey);
+            }
             if (target) {
               const installed = await invoke<string[]>("install_from_scan", {
                 repoUrl: result.source_url,
@@ -372,9 +384,10 @@ export function ImportModal({
 
   // ── Scan ───────────────────────────────────────────────────────
   const handleScan = useCallback(
-    async (url?: string) => {
+    async (url?: string, scanDepthOverride?: boolean) => {
       const input = (url || urlInput).trim();
       if (!input) return;
+      const useFullDepth = scanDepthOverride ?? fullDepthScan;
 
       setPhase("scanning");
       setProgressMsg(t("githubImportModal.cloning"));
@@ -382,6 +395,7 @@ export function ImportModal({
       try {
         const result = await invoke<ScanResult>("scan_github_repo", {
           url: input,
+          fullDepth: useFullDepth,
         });
 
         if (result.skills.length === 0) {
@@ -413,7 +427,7 @@ export function ImportModal({
         setPhase("error");
       }
     },
-    [urlInput]
+    [fullDepthScan, t, urlInput]
   );
 
   // ── Install ────────────────────────────────────────────────────
@@ -464,6 +478,7 @@ export function ImportModal({
   const reset = () => {
     setPhase("inputURL");
     setUrlInput("");
+    setFullDepthScan(false);
     setScanResult(null);
     setSelectedSkills(new Set());
     setProgressMsg("");
@@ -559,6 +574,8 @@ export function ImportModal({
                     urlInput={urlInput}
                     setUrlInput={handleUrlInputChange}
                     onScan={() => handleScan()}
+                    fullDepthEnabled={fullDepthScan}
+                    onToggleFullDepth={setFullDepthScan}
                     history={history}
                     onSelectHistory={(entry) => {
                       setUrlInput(entry.source);

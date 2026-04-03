@@ -13,7 +13,7 @@ import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
 import { Switch } from "../../../components/ui/switch";
 import { cn } from "../../../lib/utils";
-import type { AiConfig } from "../../../types";
+import type { AiConfig, FormatPreset } from "../../../types";
 
 interface AiProviderSectionProps {
   localAiConfig: AiConfig;
@@ -24,12 +24,27 @@ interface AiProviderSectionProps {
   aiSaved: boolean;
   aiTesting: boolean;
   aiTestResult: "success" | "error" | null;
+  aiTestLatency: number | null;
   showApiKey: boolean;
   onToggleExpanded: () => void;
   onEnabledChange: (enabled: boolean) => void;
   onConfigChange: (next: AiConfig) => void;
   onToggleShowApiKey: () => void;
   onTestConnection: () => void;
+}
+
+/** Get the preset key for a given api_format */
+function presetKeyFor(format: AiConfig["api_format"]): "openai_preset" | "anthropic_preset" | "local_preset" {
+  switch (format) {
+    case "anthropic": return "anthropic_preset";
+    case "local":     return "local_preset";
+    default:          return "openai_preset";
+  }
+}
+
+/** Build a FormatPreset from the active fields of config */
+function activeToPreset(config: AiConfig): FormatPreset {
+  return { base_url: config.base_url, api_key: config.api_key, model: config.model };
 }
 
 export function AiProviderSection({
@@ -47,12 +62,20 @@ export function AiProviderSection({
   onConfigChange,
   onToggleShowApiKey,
   onTestConnection,
+  aiTestLatency,
 }: AiProviderSectionProps) {
   const { t } = useTranslation();
   const isAnthropicFormat = localAiConfig.api_format === "anthropic";
-  const aiApiKeyPlaceholder = isAnthropicFormat ? "sk-ant-..." : "sk-...";
-  const aiBaseUrlPlaceholder = isAnthropicFormat ? "https://api.anthropic.com" : "https://api.openai.com/v1";
-  const aiModelPlaceholder = isAnthropicFormat ? "claude-sonnet-4-20250514" : "gpt-5.4";
+  const isLocalFormat = localAiConfig.api_format === "local";
+  const aiApiKeyPlaceholder = isLocalFormat
+    ? t("settings.localApiKeyOptional", { defaultValue: "Optional — most local models don't need this" })
+    : isAnthropicFormat ? "sk-ant-..." : "sk-...";
+  const aiBaseUrlPlaceholder = isLocalFormat
+    ? "http://127.0.0.1:11434/v1"
+    : isAnthropicFormat ? "https://api.anthropic.com" : "https://api.openai.com/v1";
+  const aiModelPlaceholder = isLocalFormat
+    ? "llama3.1:8b"
+    : isAnthropicFormat ? "claude-sonnet-4-20250514" : "gpt-5.4";
   const clampConcurrency = (value: number) => Math.min(20, Math.max(1, value || 1));
   const formControlClass =
     "flex h-9 w-full rounded-xl border border-input-border bg-input backdrop-blur-sm px-3 text-sm text-foreground shadow-sm transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:border-primary/60";
@@ -66,9 +89,9 @@ export function AiProviderSection({
             <Sparkles className="w-4 h-4 text-emerald-500" />
           </div>
           <h2 className="text-sm font-semibold text-foreground tracking-tight">{t("settings.aiProvider")}</h2>
-          {localAiConfig.enabled && localAiConfig.api_key && (
+          {localAiConfig.enabled && (localAiConfig.api_key || isLocalFormat) && (
             <span className="text-xs text-muted-foreground ml-2 px-2 py-0.5 rounded-md bg-muted/50 border border-border">
-              {localAiConfig.api_format === "anthropic" ? "Anthropic" : "OpenAI"} · {localAiConfig.model}
+              {isLocalFormat ? t("settings.localModel", { defaultValue: "Local" }) : localAiConfig.api_format === "anthropic" ? "Anthropic" : "OpenAI"} · {localAiConfig.model}
             </span>
           )}
         </div>
@@ -105,27 +128,42 @@ export function AiProviderSection({
                 <select
                   value={localAiConfig.api_format}
                   onChange={(e) => {
-                    const nextFormat = e.target.value as "openai" | "anthropic";
-                    const currentUrl = localAiConfig.base_url.trim();
-                    const urlToSet = (currentUrl === "https://api.openai.com/v1" || currentUrl === "https://api.anthropic.com")
-                      ? ""
-                      : currentUrl;
-                    
-                    onConfigChange({
+                    const nextFormat = e.target.value as "openai" | "anthropic" | "local";
+                    const currentFormat = localAiConfig.api_format;
+
+                    if (nextFormat === currentFormat) return;
+
+                    // Save current active values to the current format's preset
+                    const currentPresetKey = presetKeyFor(currentFormat);
+                    const savedPresets = {
                       ...localAiConfig,
+                      [currentPresetKey]: activeToPreset(localAiConfig),
+                    };
+
+                    // Load the target format's preset values
+                    const nextPresetKey = presetKeyFor(nextFormat);
+                    const nextPreset = savedPresets[nextPresetKey] as FormatPreset;
+
+                    // Default model fallbacks for empty presets
+                    const defaultModel = nextFormat === "anthropic"
+                      ? "claude-sonnet-4-20250514"
+                      : nextFormat === "local"
+                      ? "llama3.1:8b"
+                      : "gpt-5.4";
+
+                    onConfigChange({
+                      ...savedPresets,
                       api_format: nextFormat,
-                      base_url: urlToSet,
-                      model: localAiConfig.model.trim()
-                        ? localAiConfig.model
-                        : nextFormat === "anthropic"
-                        ? "claude-sonnet-4-20250514"
-                        : "gpt-5.4",
+                      base_url: nextPreset.base_url,
+                      api_key: nextPreset.api_key,
+                      model: nextPreset.model || defaultModel,
                     });
                   }}
                   className={`${formControlClass} pr-8`}
                 >
                   <option value="openai">{t("settings.openaiCompatible")}</option>
                   <option value="anthropic">{t("settings.anthropicMessages")}</option>
+                  <option value="local">{t("settings.localModel", { defaultValue: "Local Model (Ollama)" })}</option>
                 </select>
               </div>
               <div>
@@ -167,7 +205,12 @@ export function AiProviderSection({
             </div>
 
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">{t("settings.apiKey")}</label>
+              <label className="text-xs text-muted-foreground block mb-1">
+                {t("settings.apiKey")}
+                {isLocalFormat && (
+                  <span className="ml-1.5 text-[10px] text-muted-foreground/60">({t("common.optional")})</span>
+                )}
+              </label>
               <div className="relative">
                 <Input
                   type={showApiKey ? "text" : "password"}
@@ -206,6 +249,18 @@ export function AiProviderSection({
                     <option value="claude-opus-4-20250514" />
                     <option value="claude-3-7-sonnet-20250219" />
                     <option value="claude-3-5-sonnet-20241022" />
+                  </>
+                ) : isLocalFormat ? (
+                  <>
+                    <option value="llama3.1:8b" />
+                    <option value="llama3.1:70b" />
+                    <option value="qwen2.5:7b" />
+                    <option value="qwen2.5:32b" />
+                    <option value="deepseek-r1:7b" />
+                    <option value="deepseek-r1:32b" />
+                    <option value="gemma2:9b" />
+                    <option value="mistral:7b" />
+                    <option value="phi3:mini" />
                   </>
                 ) : (
                   <>
@@ -291,29 +346,27 @@ export function AiProviderSection({
                 size="sm"
                 variant="outline"
                 onClick={onTestConnection}
-                disabled={aiSaving || aiTesting || !localAiConfig.enabled || !localAiConfig.api_key.trim()}
+                disabled={aiSaving || aiTesting || !localAiConfig.enabled || (!localAiConfig.api_key.trim() && !isLocalFormat)}
+                className="min-w-[112px] px-3 relative"
               >
-                {aiTesting ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                    {t("common.testing")}
-                  </>
-                ) : aiTestResult === "success" ? (
-                  <>
-                    <CheckCircle className="w-3.5 h-3.5 mr-1.5 text-success" />
-                    {t("common.connected")}
-                  </>
-                ) : aiTestResult === "error" ? (
-                  <>
-                    <XCircle className="w-3.5 h-3.5 mr-1.5 text-destructive" />
-                    {t("common.failed")}
-                  </>
-                ) : (
-                  <>
-                    <Zap className="w-3.5 h-3.5 mr-1.5" />
-                    {t("settings.testConnection")}
-                  </>
-                )}
+                <div className="flex items-center justify-center gap-1.5 min-w-max">
+                  {aiTesting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  {!aiTesting && aiTestResult === "success" && <CheckCircle className="w-3.5 h-3.5 text-success" />}
+                  {!aiTesting && aiTestResult === "error" && <XCircle className="w-3.5 h-3.5 text-destructive" />}
+                  {!aiTesting && !aiTestResult && <Zap className="w-3.5 h-3.5" />}
+                  
+                  <span>
+                    {aiTesting 
+                      ? t("common.testing") 
+                      : (aiTestResult === "success" && typeof aiTestLatency === "number")
+                      ? `${t("common.connected")} (${aiTestLatency}ms)`
+                      : aiTestResult === "success"
+                      ? t("common.connected")
+                      : aiTestResult === "error"
+                      ? t("common.failed")
+                      : t("settings.testConnection")}
+                  </span>
+                </div>
               </Button>
             </div>
           </div>

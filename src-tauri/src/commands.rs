@@ -1,3 +1,4 @@
+pub mod acp;
 pub mod agents;
 pub mod ai;
 pub mod github;
@@ -6,7 +7,8 @@ pub mod patrol;
 pub mod projects;
 
 use crate::core::{
-    git_ops, installed_skill, local_skill, lockfile, marketplace_snapshot, project_manifest, proxy,
+    error::AppError,
+    git_ops, github_mirror, installed_skill, local_skill, lockfile, project_manifest, proxy,
     repo_scanner, security_scan,
     skill::{
         Skill, SkillContent, extract_github_source_from_url, extract_skill_description,
@@ -30,43 +32,74 @@ pub struct UpdateResult {
 }
 
 #[tauri::command]
-pub async fn get_proxy_config() -> Result<proxy::ProxyConfig, String> {
-    proxy::load_config().map_err(|e| format!("Failed to read proxy config: {}", e))
+pub async fn get_proxy_config() -> Result<proxy::ProxyConfig, AppError> {
+    proxy::load_config().map_err(|e| AppError::Other(format!("Failed to read proxy config: {}", e)))
 }
 
 #[tauri::command]
-pub async fn save_proxy_config(config: proxy::ProxyConfig) -> Result<(), String> {
-    proxy::save_config(&config).map_err(|e| format!("Failed to write proxy config: {}", e))
+pub async fn save_proxy_config(config: proxy::ProxyConfig) -> Result<(), AppError> {
+    proxy::save_config(&config)
+        .map_err(|e| AppError::Other(format!("Failed to write proxy config: {}", e)))
+}
+
+// ── GitHub Mirror ───────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn get_github_mirror_config() -> Result<github_mirror::GitHubMirrorConfig, AppError> {
+    github_mirror::load_config()
+        .map_err(|e| AppError::Other(format!("Failed to read mirror config: {}", e)))
+}
+
+#[tauri::command]
+pub async fn save_github_mirror_config(
+    config: github_mirror::GitHubMirrorConfig,
+) -> Result<(), AppError> {
+    github_mirror::save_config(&config)
+        .map_err(|e| AppError::Other(format!("Failed to write mirror config: {}", e)))
+}
+
+#[tauri::command]
+pub async fn get_github_mirror_presets() -> Result<Vec<github_mirror::MirrorPreset>, AppError> {
+    Ok(github_mirror::builtin_presets())
+}
+
+#[tauri::command]
+pub async fn test_github_mirror(url: String) -> Result<u64, AppError> {
+    github_mirror::test_mirror(&url)
+        .await
+        .map_err(|e| AppError::Other(format!("Mirror test failed: {}", e)))
 }
 
 // ── Skills ──────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn list_skills() -> Result<Vec<Skill>, String> {
+pub async fn list_skills() -> Result<Vec<Skill>, AppError> {
     installed_skill::list_installed_skills()
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| AppError::Anyhow(e))
 }
 
 #[tauri::command]
 pub async fn refresh_skill_updates(
     names: Option<Vec<String>>,
-) -> Result<Vec<installed_skill::SkillUpdateState>, String> {
+) -> Result<Vec<installed_skill::SkillUpdateState>, AppError> {
     installed_skill::refresh_skill_updates(names)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| AppError::Anyhow(e))
 }
 
 #[tauri::command]
-pub async fn install_skill(url: String, name: Option<String>) -> Result<Skill, String> {
-    skill_install::install_skill(url, name).await
+pub async fn install_skill(url: String, name: Option<String>) -> Result<Skill, AppError> {
+    skill_install::install_skill(url, name)
+        .await
+        .map_err(|e| AppError::Other(e))
 }
 
 #[tauri::command]
-pub async fn uninstall_skill(name: String) -> Result<(), String> {
+pub async fn uninstall_skill(name: String) -> Result<(), AppError> {
     // If it's a local skill, delegate to local_skill::delete
     if local_skill::is_local_skill(&name) {
-        local_skill::delete(&name).map_err(|e| e.to_string())?;
+        local_skill::delete(&name).map_err(|e| AppError::Anyhow(e))?;
         crate::core::installed_skill::invalidate_cache();
         security_scan::invalidate_skill_cache(&name);
         return Ok(());
@@ -82,22 +115,31 @@ pub async fn uninstall_skill(name: String) -> Result<(), String> {
     // so a broken symlink (target deleted) returns false and is never cleaned up.
     if let Ok(meta) = path.symlink_metadata() {
         if meta.is_symlink() {
-            std::fs::remove_file(&path).map_err(|e| format!("Failed to remove symlink: {}", e))?;
+            crate::core::paths::remove_symlink(&path)?;
         } else {
-            std::fs::remove_dir_all(&path)
-                .map_err(|e| format!("Failed to delete folder: {}", e))?;
+            std::fs::remove_dir_all(&path)?;
         }
     }
 
     let _lock = lockfile::get_mutex()
         .lock()
-        .map_err(|_| "Lockfile mutex poisoned".to_string())?;
+        .map_err(|_| AppError::Lockfile("Lockfile mutex poisoned".to_string()))?;
     let lock_path = lockfile::lockfile_path();
-    let mut lf = lockfile::Lockfile::load(&lock_path)
-        .map_err(|e| format!("Failed to load lockfile '{}': {}", lock_path.display(), e))?;
+    let mut lf = lockfile::Lockfile::load(&lock_path).map_err(|e| {
+        AppError::Lockfile(format!(
+            "Failed to load lockfile '{}': {}",
+            lock_path.display(),
+            e
+        ))
+    })?;
     lf.remove(&name);
-    lf.save(&lock_path)
-        .map_err(|e| format!("Failed to save lockfile '{}': {}", lock_path.display(), e))?;
+    lf.save(&lock_path).map_err(|e| {
+        AppError::Lockfile(format!(
+            "Failed to save lockfile '{}': {}",
+            lock_path.display(),
+            e
+        ))
+    })?;
 
     let _ = project_manifest::remove_skill_from_all_projects(&name);
     crate::core::installed_skill::invalidate_cache();
@@ -111,14 +153,14 @@ pub async fn toggle_skill_for_agent(
     skill_name: String,
     agent_id: String,
     enable: bool,
-) -> Result<(), String> {
-    sync::toggle_skill_for_agent(&skill_name, &agent_id, enable).map_err(|e| e.to_string())?;
+) -> Result<(), AppError> {
+    sync::toggle_skill_for_agent(&skill_name, &agent_id, enable)?;
     crate::core::installed_skill::invalidate_cache();
     Ok(())
 }
 
 #[tauri::command]
-pub async fn update_skill(name: String) -> Result<UpdateResult, String> {
+pub async fn update_skill(name: String) -> Result<UpdateResult, AppError> {
     let skills_dir = crate::core::paths::hub_skills_dir();
     let path = skills_dir.join(&name);
 
@@ -127,19 +169,25 @@ pub async fn update_skill(name: String) -> Result<UpdateResult, String> {
 
     let _lock = lockfile::get_mutex()
         .lock()
-        .map_err(|_| "Lockfile mutex poisoned".to_string())?;
+        .map_err(|_| AppError::Lockfile("Lockfile mutex poisoned".to_string()))?;
     let lock_path = lockfile::lockfile_path();
-    let mut lf = lockfile::Lockfile::load(&lock_path)
-        .map_err(|e| format!("Failed to load lockfile '{}': {}", lock_path.display(), e))?;
+    let mut lf = lockfile::Lockfile::load(&lock_path).map_err(|e| {
+        AppError::Lockfile(format!(
+            "Failed to load lockfile '{}': {}",
+            lock_path.display(),
+            e
+        ))
+    })?;
     let lock_entry = lf.skills.iter().find(|s| s.name == name).cloned();
 
     let tree_hash = if is_repo_skill {
         // Pull via the repo cache
         let source_folder = lock_entry.as_ref().and_then(|e| e.source_folder.as_deref());
-        repo_scanner::pull_repo_skill_update(&path, source_folder).map_err(|e| e.to_string())?
+        repo_scanner::pull_repo_skill_update(&path, source_folder)
+            .map_err(|e| AppError::Git(e.to_string()))?
     } else {
-        git_ops::pull_repo(&path).map_err(|e| e.to_string())?;
-        git_ops::compute_tree_hash(&path).map_err(|e| e.to_string())?
+        git_ops::pull_repo(&path).map_err(|e| AppError::Git(e.to_string()))?;
+        git_ops::compute_tree_hash(&path).map_err(|e| AppError::Git(e.to_string()))?
     };
 
     // For repo-cached skills, updating one skill pulls the entire repo.
@@ -175,8 +223,13 @@ pub async fn update_skill(name: String) -> Result<UpdateResult, String> {
         entry.tree_hash = tree_hash.clone();
     }
 
-    lf.save(&lock_path)
-        .map_err(|e| format!("Failed to save lockfile '{}': {}", lock_path.display(), e))?;
+    lf.save(&lock_path).map_err(|e| {
+        AppError::Lockfile(format!(
+            "Failed to save lockfile '{}': {}",
+            lock_path.display(),
+            e
+        ))
+    })?;
     crate::core::installed_skill::invalidate_cache();
 
     // Invalidate security scan cache — content changed, old results are stale
@@ -260,7 +313,7 @@ fn resolve_repo_root_from_symlink(
 use crate::core::skill_group::{self, SkillGroup};
 
 #[tauri::command]
-pub async fn list_skill_groups() -> Result<Vec<SkillGroup>, String> {
+pub async fn list_skill_groups() -> Result<Vec<SkillGroup>, AppError> {
     Ok(skill_group::list_groups())
 }
 
@@ -271,7 +324,7 @@ pub async fn create_skill_group(
     icon: String,
     skills: Vec<String>,
     skill_sources: Option<HashMap<String, String>>,
-) -> Result<SkillGroup, String> {
+) -> Result<SkillGroup, AppError> {
     skill_group::create_group(
         name,
         description,
@@ -279,7 +332,7 @@ pub async fn create_skill_group(
         skills,
         skill_sources.unwrap_or_default(),
     )
-    .map_err(|e| e.to_string())
+    .map_err(|e| AppError::Anyhow(e))
 }
 
 #[tauri::command]
@@ -290,19 +343,19 @@ pub async fn update_skill_group(
     icon: Option<String>,
     skills: Option<Vec<String>>,
     skill_sources: Option<HashMap<String, String>>,
-) -> Result<SkillGroup, String> {
+) -> Result<SkillGroup, AppError> {
     skill_group::update_group(id, name, description, icon, skills, skill_sources)
-        .map_err(|e| e.to_string())
+        .map_err(|e| AppError::Anyhow(e))
 }
 
 #[tauri::command]
-pub async fn delete_skill_group(id: String) -> Result<(), String> {
-    skill_group::delete_group(&id).map_err(|e| e.to_string())
+pub async fn delete_skill_group(id: String) -> Result<(), AppError> {
+    skill_group::delete_group(&id).map_err(|e| AppError::Anyhow(e))
 }
 
 #[tauri::command]
-pub async fn duplicate_skill_group(id: String) -> Result<SkillGroup, String> {
-    skill_group::duplicate_group(&id).map_err(|e| e.to_string())
+pub async fn duplicate_skill_group(id: String) -> Result<SkillGroup, AppError> {
+    skill_group::duplicate_group(&id).map_err(|e| AppError::Anyhow(e))
 }
 
 #[tauri::command]
@@ -310,12 +363,12 @@ pub async fn deploy_skill_group(
     group_id: String,
     project_path: String,
     agent_types: Vec<String>,
-) -> Result<u32, String> {
+) -> Result<u32, AppError> {
     let groups = skill_group::list_groups();
     let group = groups
         .iter()
         .find(|g| g.id == group_id)
-        .ok_or_else(|| format!("Group '{}' not found", group_id))?;
+        .ok_or_else(|| AppError::Other(format!("Group '{}' not found", group_id)))?;
 
     // Download any missing skills before syncing
     let skills_dir = crate::core::paths::hub_skills_dir();
@@ -336,7 +389,7 @@ pub async fn deploy_skill_group(
             "resolving {} missing skill source(s) via marketplace snapshot",
             names_needing_source.len()
         );
-        match marketplace_snapshot::resolve_skill_sources_local_first(
+        match crate::core::marketplace::resolve_skill_sources_local_first(
             &names_needing_source,
             &sources,
         )
@@ -381,8 +434,8 @@ pub async fn deploy_skill_group(
         .map(|id| (id, group.skills.clone()))
         .collect();
 
-    let (_name, count) =
-        project_manifest::save_and_sync(&project_path, agents).map_err(|e| e.to_string())?;
+    let (_name, count) = project_manifest::save_and_sync(&project_path, agents)
+        .map_err(|e| AppError::Project(e.to_string()))?;
 
     Ok(count)
 }
@@ -474,7 +527,7 @@ fn resolve_skill_content_dir(name: &str) -> Option<std::path::PathBuf> {
 }
 
 #[tauri::command]
-pub async fn read_skill_file_raw(name: String) -> Result<String, String> {
+pub async fn read_skill_file_raw(name: String) -> Result<String, AppError> {
     let skills_dir = crate::core::paths::hub_skills_dir();
     let skill_dir = skills_dir.join(&name);
     let effective_dir =
@@ -482,14 +535,17 @@ pub async fn read_skill_file_raw(name: String) -> Result<String, String> {
 
     let skill_md = effective_dir.join("SKILL.md");
     if !skill_md.exists() {
-        return Err(format!("SKILL.md not found for '{}'", name));
+        return Err(AppError::SkillNotFound { name });
     }
 
-    std::fs::read_to_string(&skill_md).map_err(|e| format!("Failed to read SKILL.md: {}", e))
+    Ok(std::fs::read_to_string(&skill_md)?)
 }
 
 #[tauri::command]
-pub async fn create_local_skill_from_content(name: String, content: String) -> Result<(), String> {
+pub async fn create_local_skill_from_content(
+    name: String,
+    content: String,
+) -> Result<(), AppError> {
     let hub_dir = crate::core::paths::hub_skills_dir();
     let hub_path = hub_dir.join(&name);
 
@@ -499,7 +555,7 @@ pub async fn create_local_skill_from_content(name: String, content: String) -> R
     }
 
     // Create in skills-local/ and symlink back to skills/
-    let _ = local_skill::create(&name, Some(&content)).map_err(|e| e.to_string())?;
+    let _ = local_skill::create(&name, Some(&content)).map_err(|e| AppError::Anyhow(e))?;
     crate::core::installed_skill::invalidate_cache();
 
     Ok(())
@@ -508,34 +564,33 @@ pub async fn create_local_skill_from_content(name: String, content: String) -> R
 // ── Local Skills ────────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn create_local_skill(name: String, content: Option<String>) -> Result<Skill, String> {
-    let skill = local_skill::create(&name, content.as_deref()).map_err(|e| e.to_string())?;
+pub async fn create_local_skill(name: String, content: Option<String>) -> Result<Skill, AppError> {
+    let skill = local_skill::create(&name, content.as_deref()).map_err(|e| AppError::Anyhow(e))?;
     crate::core::installed_skill::invalidate_cache();
     Ok(skill)
 }
 
 #[tauri::command]
-pub async fn delete_local_skill(name: String) -> Result<(), String> {
-    local_skill::delete(&name).map_err(|e| e.to_string())?;
+pub async fn delete_local_skill(name: String) -> Result<(), AppError> {
+    local_skill::delete(&name).map_err(|e| AppError::Anyhow(e))?;
     crate::core::installed_skill::invalidate_cache();
     Ok(())
 }
 
 #[tauri::command]
-pub async fn migrate_local_skills() -> Result<u32, String> {
+pub async fn migrate_local_skills() -> Result<u32, AppError> {
     tokio::task::spawn_blocking(|| local_skill::migrate_existing())
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
-        .map_err(|e| e.to_string())
+        .await?
+        .map_err(|e| AppError::Anyhow(e))
 }
 
 #[tauri::command]
-pub async fn list_skill_files(name: String) -> Result<Vec<String>, String> {
+pub async fn list_skill_files(name: String) -> Result<Vec<String>, AppError> {
     let skills_dir = crate::core::paths::hub_skills_dir();
     let skill_dir = skills_dir.join(&name);
 
     if !skill_dir.exists() {
-        return Err(format!("Skill '{}' not found", name));
+        return Err(AppError::SkillNotFound { name });
     }
 
     let effective_dir =
@@ -565,7 +620,9 @@ fn collect_files_recursive(root: &std::path::Path, dir: &std::path::Path, files:
         if path.is_dir() {
             collect_files_recursive(root, &path, files);
         } else if let Ok(rel) = path.strip_prefix(root) {
-            files.push(rel.to_string_lossy().to_string());
+            // Normalize to forward slashes for consistent cross-platform display
+            let rel_str = rel.to_string_lossy().replace('\\', "/");
+            files.push(rel_str);
         }
     }
 }
@@ -573,46 +630,42 @@ fn collect_files_recursive(root: &std::path::Path, dir: &std::path::Path, files:
 // ── SKILL.md Content ─────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn read_skill_content(name: String) -> Result<SkillContent, String> {
+pub async fn read_skill_content(name: String) -> Result<SkillContent, AppError> {
     let skills_dir = crate::core::paths::hub_skills_dir();
     let skill_dir = skills_dir.join(&name);
     if !skill_dir.exists() {
-        return Err(format!("Skill '{}' not found", name));
+        return Err(AppError::SkillNotFound { name });
     }
     let _ = git_ops::ensure_worktree_checked_out(&skill_dir);
     let effective_dir = resolve_skill_content_dir(&name).unwrap_or(skill_dir);
     let skill_path = effective_dir.join("SKILL.md");
 
     if !skill_path.exists() {
-        return Err(format!("Skill '{}' not found", name));
+        return Err(AppError::SkillNotFound { name });
     }
 
-    let full_content =
-        std::fs::read_to_string(&skill_path).map_err(|e| format!("Failed to read file: {}", e))?;
-
+    let full_content = std::fs::read_to_string(&skill_path)?;
     Ok(parse_skill_content(name, full_content))
 }
 
 #[tauri::command]
-pub async fn update_skill_content(name: String, content: String) -> Result<(), String> {
+pub async fn update_skill_content(name: String, content: String) -> Result<(), AppError> {
     let skills_dir = crate::core::paths::hub_skills_dir();
     let skill_dir = skills_dir.join(&name);
     if !skill_dir.exists() {
-        return Err(format!("Skill '{}' not found", name));
+        return Err(AppError::SkillNotFound { name });
     }
     let effective_dir = resolve_skill_content_dir(&name).unwrap_or(skill_dir);
     let skill_path = effective_dir.join("SKILL.md");
 
     if !skill_path.exists() {
-        return Err(format!("Skill '{}' not found", name));
+        return Err(AppError::SkillNotFound { name });
     }
 
     // Atomic write: write to temp file then rename
     let temp_path = skill_path.with_extension("tmp");
-    std::fs::write(&temp_path, &content)
-        .map_err(|e| format!("Failed to write temp file: {}", e))?;
-
-    std::fs::rename(&temp_path, &skill_path).map_err(|e| format!("Failed to save file: {}", e))?;
+    std::fs::write(&temp_path, &content)?;
+    std::fs::rename(&temp_path, &skill_path)?;
 
     security_scan::invalidate_skill_cache(&name);
 
@@ -625,103 +678,90 @@ pub async fn update_skill_content(name: String, content: String) -> Result<(), S
 pub async fn export_skill_bundle(
     name: String,
     output_path: Option<String>,
-) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || {
+) -> Result<String, AppError> {
+    let path = tokio::task::spawn_blocking(move || {
         skill_bundle::export_bundle(&name, output_path.as_deref())
             .map(|path| path.to_string_lossy().to_string())
     })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
-    .map_err(|e| e.to_string())
+    .await?
+    .map_err(|e| AppError::Bundle(e.to_string()))?;
+    Ok(path)
 }
 
 #[tauri::command]
 pub async fn preview_skill_bundle(
     file_path: String,
-) -> Result<skill_bundle::BundleManifest, String> {
+) -> Result<skill_bundle::BundleManifest, AppError> {
     tokio::task::spawn_blocking(move || skill_bundle::preview_bundle(&file_path))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
-        .map_err(|e| e.to_string())
+        .await?
+        .map_err(|e| AppError::Bundle(e.to_string()))
 }
 
 #[tauri::command]
 pub async fn import_skill_bundle(
     file_path: String,
     force: bool,
-) -> Result<skill_bundle::ImportBundleResult, String> {
+) -> Result<skill_bundle::ImportBundleResult, AppError> {
     tokio::task::spawn_blocking(move || skill_bundle::import_bundle(&file_path, force))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
-        .map_err(|e| e.to_string())
+        .await?
+        .map_err(|e| AppError::Bundle(e.to_string()))
 }
 
 #[tauri::command]
 pub async fn export_multi_skill_bundle(
     names: Vec<String>,
     output_path: String,
-) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || {
+) -> Result<String, AppError> {
+    let path = tokio::task::spawn_blocking(move || {
         skill_bundle::export_multi_bundle(&names, &output_path)
             .map(|path| path.to_string_lossy().to_string())
     })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
-    .map_err(|e| e.to_string())
+    .await?
+    .map_err(|e| AppError::Bundle(e.to_string()))?;
+    Ok(path)
 }
 
 #[tauri::command]
 pub async fn preview_multi_skill_bundle(
     file_path: String,
-) -> Result<skill_bundle::MultiManifest, String> {
+) -> Result<skill_bundle::MultiManifest, AppError> {
     tokio::task::spawn_blocking(move || skill_bundle::preview_multi_bundle(&file_path))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
-        .map_err(|e| e.to_string())
+        .await?
+        .map_err(|e| AppError::Bundle(e.to_string()))
 }
 
 #[tauri::command]
 pub async fn import_multi_skill_bundle(
     file_path: String,
     force: bool,
-) -> Result<skill_bundle::ImportMultiBundleResult, String> {
+) -> Result<skill_bundle::ImportMultiBundleResult, AppError> {
     tokio::task::spawn_blocking(move || skill_bundle::import_multi_bundle(&file_path, force))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
-        .map_err(|e| e.to_string())
+        .await?
+        .map_err(|e| AppError::Bundle(e.to_string()))
 }
 
 // ── Text File I/O (share code files) ────────────────────────────────
 
 #[tauri::command]
-pub async fn write_text_file(path: String, content: String) -> Result<(), String> {
-    std::fs::write(&path, &content).map_err(|e| format!("Failed to write file: {}", e))
+pub async fn write_text_file(path: String, content: String) -> Result<(), AppError> {
+    Ok(std::fs::write(&path, &content)?)
 }
 
 #[tauri::command]
-pub async fn read_text_file(path: String) -> Result<String, String> {
-    std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e))
+pub async fn read_text_file(path: String) -> Result<String, AppError> {
+    Ok(std::fs::read_to_string(&path)?)
 }
 
 #[tauri::command]
-pub async fn open_folder(path: String) -> Result<(), String> {
+pub async fn open_folder(path: String) -> Result<(), AppError> {
     #[cfg(target_os = "macos")]
-    std::process::Command::new("open")
-        .arg(&path)
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    std::process::Command::new("open").arg(&path).spawn()?;
 
     #[cfg(target_os = "windows")]
-    std::process::Command::new("explorer")
-        .arg(&path)
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    std::process::Command::new("explorer").arg(&path).spawn()?;
 
     #[cfg(target_os = "linux")]
-    std::process::Command::new("xdg-open")
-        .arg(&path)
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    std::process::Command::new("xdg-open").arg(&path).spawn()?;
 
     Ok(())
 }

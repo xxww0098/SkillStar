@@ -6,8 +6,8 @@ import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { cn, navigateToAiSettings } from "../../../lib/utils";
 import { toast } from "../../../lib/toast";
+import { getAiConfigCached } from "../../../hooks/useAiConfig";
 import type {
-  AiConfigStatus,
   AiPickRecommendation,
   AiPickResponse,
   Skill,
@@ -52,8 +52,8 @@ export function AiPickSkillsModal({
 
       const loadAiConfig = async () => {
         try {
-          const config = await invoke<AiConfigStatus>("get_ai_config");
-          setAiConfigured(config.enabled && config.api_key.trim().length > 0);
+          const config = await getAiConfigCached();
+          setAiConfigured(config.enabled && (config.api_format === "local" || config.api_key.trim().length > 0));
         } catch {
           setAiConfigured(false);
         }

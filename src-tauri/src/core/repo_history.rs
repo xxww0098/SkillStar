@@ -23,7 +23,7 @@ struct RepoHistoryFile {
 }
 
 fn history_path() -> PathBuf {
-    super::paths::data_root().join("repo_history.json")
+    super::paths::repo_history_path()
 }
 
 /// Load all repo history entries, sorted by most-recently-used first.

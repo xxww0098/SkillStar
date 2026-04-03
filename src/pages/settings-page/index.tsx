@@ -14,14 +14,17 @@ import {
 import type {
   AiConfig,
   CacheCleanResult,
+  GitHubMirrorConfig,
   MymemoryUsageStats,
   ProxyConfig,
   StorageOverview,
 } from "../../types";
 import { AgentConnectionsSection } from "../../features/settings/sections/AgentConnectionsSection";
 import { ProxySection } from "../../features/settings/sections/ProxySection";
+import { GitHubMirrorSection } from "../../features/settings/sections/GitHubMirrorSection";
 import { AiProviderSection } from "../../features/settings/sections/AiProviderSection";
 import { ShortTextServiceSection } from "../../features/settings/sections/ShortTextServiceSection";
+import { AcpSection } from "../../features/settings/sections/AcpSection";
 import {
   BackgroundRunSection,
   onBackgroundRunChanged,
@@ -49,6 +52,14 @@ function isSameProxyConfig(a: ProxyConfig, b: ProxyConfig): boolean {
   );
 }
 
+function isSameMirrorConfig(a: GitHubMirrorConfig, b: GitHubMirrorConfig): boolean {
+  return (
+    a.enabled === b.enabled &&
+    a.preset_id === b.preset_id &&
+    a.custom_url === b.custom_url
+  );
+}
+
 function isSameAiConfig(a: AiConfig, b: AiConfig): boolean {
   return (
     a.enabled === b.enabled &&
@@ -61,7 +72,11 @@ function isSameAiConfig(a: AiConfig, b: AiConfig): boolean {
     a.context_window_k === b.context_window_k &&
     a.max_concurrent_requests === b.max_concurrent_requests &&
     a.chunk_char_limit === b.chunk_char_limit &&
-    a.scan_max_response_tokens === b.scan_max_response_tokens
+    a.scan_max_response_tokens === b.scan_max_response_tokens &&
+    a.security_scan_telemetry_enabled === b.security_scan_telemetry_enabled &&
+    JSON.stringify(a.openai_preset) === JSON.stringify(b.openai_preset) &&
+    JSON.stringify(a.anthropic_preset) === JSON.stringify(b.anthropic_preset) &&
+    JSON.stringify(a.local_preset) === JSON.stringify(b.local_preset)
   );
 }
 
@@ -125,6 +140,62 @@ function proxyReducer(state: ProxyState, action: ProxyAction): ProxyState {
   }
 }
 
+// ── Mirror reducer ────────────────────────────────────────────────────────────
+
+type MirrorAction =
+  | { type: "SET_FIELD"; field: keyof GitHubMirrorConfig; value: GitHubMirrorConfig[keyof GitHubMirrorConfig] }
+  | { type: "LOAD"; config: GitHubMirrorConfig }
+  | { type: "MARK_SAVED_CONFIG"; config: GitHubMirrorConfig }
+  | { type: "START_SAVE" }
+  | { type: "FINISH_SAVE" }
+  | { type: "MARK_SAVED_INDICATOR" }
+  | { type: "CLEAR_SAVED_INDICATOR" }
+  | { type: "TOGGLE_EXPANDED" }
+  | { type: "START_LOAD" }
+  | { type: "REVERT"; config: GitHubMirrorConfig };
+
+interface MirrorState {
+  config: GitHubMirrorConfig;
+  savedConfig: GitHubMirrorConfig;
+  saving: boolean;
+  savedIndicator: boolean;
+  expanded: boolean;
+  loaded: boolean;
+}
+
+const initialMirrorConfig: GitHubMirrorConfig = {
+  enabled: false,
+  preset_id: "ghproxy_vip",
+  custom_url: null,
+};
+
+function mirrorReducer(state: MirrorState, action: MirrorAction): MirrorState {
+  switch (action.type) {
+    case "SET_FIELD":
+      return { ...state, config: { ...state.config, [action.field]: action.value } };
+    case "LOAD":
+      return { ...state, config: action.config, savedConfig: action.config, loaded: true };
+    case "MARK_SAVED_CONFIG":
+      return { ...state, savedConfig: action.config };
+    case "START_SAVE":
+      return { ...state, saving: true };
+    case "FINISH_SAVE":
+      return { ...state, saving: false };
+    case "MARK_SAVED_INDICATOR":
+      return { ...state, savedIndicator: true };
+    case "CLEAR_SAVED_INDICATOR":
+      return { ...state, savedIndicator: false };
+    case "TOGGLE_EXPANDED":
+      return { ...state, expanded: !state.expanded };
+    case "START_LOAD":
+      return { ...state, loaded: false };
+    case "REVERT":
+      return { ...state, config: action.config, saving: false };
+    default:
+      return state;
+  }
+}
+
 type AiAction =
   | { type: "SET_FIELD"; field: keyof AiConfig; value: AiConfig[keyof AiConfig] }
   | { type: "LOAD"; config: AiConfig }
@@ -135,7 +206,7 @@ type AiAction =
   | { type: "CLEAR_SAVED_INDICATOR" }
   | { type: "TOGGLE_EXPANDED" }
   | { type: "START_TEST" }
-  | { type: "FINISH_TEST"; result: "success" | "error" }
+  | { type: "FINISH_TEST"; result: "success" | "error"; latency?: number }
   | { type: "CLEAR_TEST_RESULT" }
   | { type: "TOGGLE_SHOW_API_KEY" }
   | { type: "REVERT"; config: AiConfig };
@@ -148,6 +219,7 @@ interface AiState {
   expanded: boolean;
   testing: boolean;
   testResult: "success" | "error" | null;
+  testLatency: number | null;
   showApiKey: boolean;
   loaded: boolean;
 }
@@ -171,11 +243,11 @@ function aiReducer(state: AiState, action: AiAction): AiState {
     case "TOGGLE_EXPANDED":
       return { ...state, expanded: !state.expanded };
     case "START_TEST":
-      return { ...state, testing: true, testResult: null };
+      return { ...state, testing: true, testResult: null, testLatency: null };
     case "FINISH_TEST":
-      return { ...state, testing: false, testResult: action.result };
+      return { ...state, testing: false, testResult: action.result, testLatency: action.latency ?? null };
     case "CLEAR_TEST_RESULT":
-      return { ...state, testResult: null };
+      return { ...state, testResult: null, testLatency: null };
     case "TOGGLE_SHOW_API_KEY":
       return { ...state, showApiKey: !state.showApiKey };
     case "REVERT":
@@ -224,7 +296,7 @@ function agentReducer(state: AgentState, action: AgentAction): AgentState {
 
 // ── Component ───────────────────────────────────────────────────────────────
 
-export function Settings() {
+export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: () => void; isCheckingUpdate?: boolean }) {
   const { t, i18n } = useTranslation();
   const [currentLang, setCurrentLang] = useState(i18n.language);
   const [backgroundStyle, setBackgroundStyle] = useState<BackgroundStyle>(
@@ -245,6 +317,16 @@ export function Settings() {
     loaded: false,
   });
 
+  // Mirror reducer
+  const [mirrorState, dispatchMirror] = useReducer(mirrorReducer, {
+    config: initialMirrorConfig,
+    savedConfig: initialMirrorConfig,
+    saving: false,
+    savedIndicator: false,
+    expanded: false,
+    loaded: false,
+  });
+
   // AI reducer
   const { config: aiConfig, loading: aiLoading, saveConfig: saveAiConfig, testConnection } = useAiConfig();
   const [aiState, dispatchAi] = useReducer(aiReducer, {
@@ -255,6 +337,7 @@ export function Settings() {
     expanded: false,
     testing: false,
     testResult: null,
+    testLatency: null,
     showApiKey: false,
     loaded: false,
   });
@@ -313,6 +396,41 @@ export function Settings() {
 
     return () => clearTimeout(timer);
   }, [proxyState.config, proxyState.loaded, proxyState.saving, proxyState.savedConfig, t]);
+
+  // ── Mirror effects ────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    dispatchMirror({ type: "START_LOAD" });
+    invoke<GitHubMirrorConfig>("get_github_mirror_config")
+      .then((config) => dispatchMirror({ type: "LOAD", config }))
+      .catch(() => dispatchMirror({ type: "LOAD", config: initialMirrorConfig }))
+      .finally(() => dispatchMirror({ type: "FINISH_SAVE" }));
+  }, []);
+
+  useEffect(() => {
+    if (!mirrorState.loaded || mirrorState.saving || isSameMirrorConfig(mirrorState.config, mirrorState.savedConfig)) {
+      return;
+    }
+
+    const previousConfig = mirrorState.savedConfig;
+    const timer = setTimeout(() => {
+      dispatchMirror({ type: "START_SAVE" });
+      invoke("save_github_mirror_config", { config: mirrorState.config })
+        .then(() => {
+          dispatchMirror({ type: "MARK_SAVED_CONFIG", config: mirrorState.config });
+          dispatchMirror({ type: "MARK_SAVED_INDICATOR" });
+          setTimeout(() => dispatchMirror({ type: "CLEAR_SAVED_INDICATOR" }), 2000);
+        })
+        .catch((e) => {
+          console.error("Failed to save mirror config:", e);
+          dispatchMirror({ type: "REVERT", config: previousConfig });
+          toast.error(t("settings.saveMirrorFailed"));
+        })
+        .finally(() => dispatchMirror({ type: "FINISH_SAVE" }));
+    }, AUTO_SAVE_DELAY_MS);
+
+    return () => clearTimeout(timer);
+  }, [mirrorState.config, mirrorState.loaded, mirrorState.saving, mirrorState.savedConfig, t]);
 
   // ── AI effects ────────────────────────────────────────────────────────────
 
@@ -507,8 +625,8 @@ export function Settings() {
     try {
       await saveAiConfig(aiState.config);
       dispatchAi({ type: "MARK_SAVED_CONFIG", config: aiState.config });
-      await testConnection();
-      dispatchAi({ type: "FINISH_TEST", result: "success" });
+      const latency = await testConnection();
+      dispatchAi({ type: "FINISH_TEST", result: "success", latency });
       setTimeout(() => dispatchAi({ type: "CLEAR_TEST_RESULT" }), 3000);
     } catch (e) {
       dispatchAi({ type: "FINISH_TEST", result: "error" });
@@ -636,6 +754,14 @@ export function Settings() {
     });
   }, []);
 
+  // ── Mirror config change handler ───────────────────────────────────────────
+
+  const handleMirrorConfigChange = useCallback((next: GitHubMirrorConfig) => {
+    Object.entries(next).forEach(([key, value]) => {
+      dispatchMirror({ type: "SET_FIELD", field: key as keyof GitHubMirrorConfig, value });
+    });
+  }, []);
+
   // ── AI config change handler ───────────────────────────────────────────────
 
   const handleAiConfigChange = useCallback((next: AiConfig) => {
@@ -683,6 +809,16 @@ export function Settings() {
             onConfigChange={handleProxyConfigChange}
           />
 
+          <GitHubMirrorSection
+            mirrorConfig={mirrorState.config}
+            ready={mirrorState.loaded}
+            mirrorExpanded={mirrorState.expanded}
+            mirrorSaving={mirrorState.saving}
+            mirrorSaved={mirrorState.savedIndicator}
+            onToggleExpanded={() => dispatchMirror({ type: "TOGGLE_EXPANDED" })}
+            onConfigChange={handleMirrorConfigChange}
+          />
+
           <AiProviderSection
             localAiConfig={aiState.config}
             ready={aiState.loaded}
@@ -691,6 +827,7 @@ export function Settings() {
             aiSaved={aiState.savedIndicator}
             aiTesting={aiState.testing}
             aiTestResult={aiState.testResult}
+            aiTestLatency={aiState.testLatency}
             showApiKey={aiState.showApiKey}
             onToggleExpanded={() => dispatchAi({ type: "TOGGLE_EXPANDED" })}
             onEnabledChange={handleAiEnabledChange}
@@ -704,6 +841,8 @@ export function Settings() {
             mymemoryUsage={mymemoryUsage}
             onConfigChange={handleAiConfigChange}
           />
+
+          <AcpSection />
 
           <BackgroundRunSection
             enabled={backgroundRun}
@@ -730,7 +869,7 @@ export function Settings() {
             onCleanBroken={handleCleanBroken}
           />
 
-          <AboutSection ghInstalled={ghInstalled} />
+          <AboutSection ghInstalled={ghInstalled} onCheckUpdate={onCheckUpdate} isCheckingUpdate={isCheckingUpdate} />
         </div>
       </motion.main>
     </div>

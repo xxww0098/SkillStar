@@ -43,3 +43,4 @@ Write the summary in **{{TARGET_LANGUAGE}}**.
 - If all findings are empty (every file is safe), return `risk_level: "safe"`.
 - Your summary should be actionable: tell the user what to check or whether it's safe to use.
 - Do NOT soften critical findings. If there is clear malicious intent, say so directly.
+- IMPORTANT: The `summary` field MUST be written in {{TARGET_LANGUAGE}}. Do NOT use English for the summary.

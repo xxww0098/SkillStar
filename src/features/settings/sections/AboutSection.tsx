@@ -5,10 +5,11 @@ import { useTranslation } from "react-i18next";
 import { Check, CheckCircle, Copy, ExternalLink, Terminal, XCircle, RefreshCw } from "lucide-react";
 import { Button } from "../../../components/ui/button";
 import { Badge } from "../../../components/ui/badge";
-import { toast } from "sonner";
 
 interface AboutSectionProps {
   ghInstalled: boolean | null;
+  onCheckUpdate?: () => void;
+  isCheckingUpdate?: boolean;
 }
 
 type GhInstallPlatform = "macos" | "windows" | "linux" | "unknown";
@@ -28,11 +29,10 @@ function detectPlatform(): GhInstallPlatform {
   return "unknown";
 }
 
-export function AboutSection({ ghInstalled }: AboutSectionProps) {
+export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = false }: AboutSectionProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const [appVersion, setAppVersion] = useState<string>("...");
-  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
 
   useEffect(() => {
     getVersion()
@@ -58,23 +58,9 @@ export function AboutSection({ ghInstalled }: AboutSectionProps) {
     }
   };
 
-  const handleCheckUpdate = async () => {
-    if (isCheckingUpdate) return;
-    setIsCheckingUpdate(true);
-    try {
-      const { check } = await import("@tauri-apps/plugin-updater");
-      const update = await check();
-      if (update) {
-        toast.success(t("sidebar.newUpdate"), {
-          description: t("sidebar.updateAvailable", { version: update.version }),
-        });
-      } else {
-        toast.info(t("settings.upToDate"));
-      }
-    } catch (e) {
-      toast.error(t("sidebar.updateError"));
-    } finally {
-      setIsCheckingUpdate(false);
+  const handleCheckUpdate = () => {
+    if (onCheckUpdate) {
+      onCheckUpdate();
     }
   };
 

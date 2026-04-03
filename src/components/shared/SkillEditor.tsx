@@ -52,6 +52,7 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
   const translationHasDelta = translationStream.hasDelta;
   const translationWasNonStreaming = translationStream.wasNonStreaming;
   const summaryContent = summaryStream.content;
+  const summaryVisible = summaryStream.visible;
   const summarizing = summaryStream.loading;
   const summaryHasDelta = summaryStream.hasDelta;
   const aiConfigured = translationStream.aiConfigured;
@@ -152,6 +153,7 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
     setEditedContent(value);
     setHasChanges(value !== content?.content);
     if (translationVisible) translationStream.setVisible(false);
+    if (summaryVisible) summaryStream.setVisible(false);
   };
 
   if (loading) {
@@ -326,7 +328,7 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
                     : aiConfigured
                     ? summarizing
                       ? "Click to cancel"
-                      : summaryContent
+                      : summaryContent && summaryVisible
                       ? "Hide summary"
                       : "AI quick summary"
                     : "AI not configured (optional). Editing is still available."
@@ -337,7 +339,7 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
                 ) : (
                   <Sparkles className="w-3 h-3" />
                 )}
-                {summarizing ? t("common.cancel") : summaryContent ? t("skillEditor.hideSummary") : t("skillEditor.summary")}
+                {summarizing ? t("common.cancel") : summaryContent ? (summaryVisible ? t("skillEditor.hideSummary") : t("skillEditor.summary")) : t("skillEditor.summary")}
               </button>
             </div>
           </div>
@@ -367,7 +369,7 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
 
           <div className="markdown-content flex-1 p-4 overflow-y-auto overscroll-y-contain prose prose-sm dark:prose-invert max-w-none">
             {/* AI Summary Card */}
-            {summaryContent !== null && (
+            {summaryVisible && summaryContent !== null && (
               <div className="not-prose mb-4 rounded-lg border border-primary/20 bg-primary/5 p-4">
                 <div className="flex items-center gap-2 mb-2">
                   <Sparkles className="w-4 h-4 text-primary" />

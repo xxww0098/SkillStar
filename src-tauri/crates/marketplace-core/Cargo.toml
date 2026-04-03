@@ -1,0 +1,22 @@
+[package]
+name = "skillstar-marketplace-core"
+version = "0.1.3"
+edition = "2024"
+rust-version = "1.94.1"
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+html2md = "0.2"
+regex = "1"
+reqwest = { version = "0.13", features = ["json", "rustls"], default-features = false }
+r2d2 = "0.8.10"
+r2d2_sqlite = "0.33.0"
+rusqlite = { version = "0.39.0", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1.44"
+
+[dev-dependencies]
+tempfile = "3"

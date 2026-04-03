@@ -11,11 +11,16 @@ export interface UpdateState {
   version: string;
   progress: number;
   error: string;
+  /** How many automatic retries remain before giving up. */
+  retriesLeft: number;
 }
 
 const SKIPPED_KEY = "skillstar_skipped_version";
 const LAST_CHECK_KEY = "skillstar_last_check";
 const CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1h
+const CHECK_TIMEOUT_MS = 12_000;           // 12s for release JSON fetch
+const DOWNLOAD_TIMEOUT_MS = 5 * 60_000;    // 5min for binary download
+const MAX_DOWNLOAD_RETRIES = 2;
 
 function getSkipped(): string {
   return localStorage.getItem(SKIPPED_KEY) ?? "";
@@ -25,6 +30,17 @@ function getLastCheck(): number {
   return Number(localStorage.getItem(LAST_CHECK_KEY)) || 0;
 }
 
+/** Race a promise against a timeout. */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms);
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
+
 export function useUpdater() {
   const { t } = useTranslation();
   const [state, setState] = useState<UpdateState>({
@@ -32,6 +48,7 @@ export function useUpdater() {
     version: "",
     progress: 0,
     error: "",
+    retriesLeft: MAX_DOWNLOAD_RETRIES,
   });
 
   const mapUpdaterError = useCallback((e: unknown): string => {
@@ -44,7 +61,9 @@ export function useUpdater() {
 
   const candidateRef = useRef<Update | null>(null);
   const checkingRef = useRef(false);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── Check ─────────────────────────────────────────────────────────
   const check = useCallback(async () => {
     if (checkingRef.current) return;
     checkingRef.current = true;
@@ -53,16 +72,16 @@ export function useUpdater() {
       setState((s) => ({ ...s, status: "checking", error: "" }));
 
       const { check: checkUpdate } = await import("@tauri-apps/plugin-updater");
-      const update = await checkUpdate();
+      const update = await withTimeout(checkUpdate(), CHECK_TIMEOUT_MS, "Update check");
 
       if (!update) {
-        setState({ status: "idle", version: "", progress: 0, error: "" });
+        setState((s) => ({ ...s, status: "idle", version: "", progress: 0, error: "" }));
         localStorage.setItem(LAST_CHECK_KEY, String(Date.now()));
         return;
       }
 
       if (update.version === getSkipped()) {
-        setState({ status: "idle", version: "", progress: 0, error: "" });
+        setState((s) => ({ ...s, status: "idle", version: "", progress: 0, error: "" }));
         localStorage.setItem(LAST_CHECK_KEY, String(Date.now()));
         return;
       }
@@ -73,20 +92,23 @@ export function useUpdater() {
         version: update.version,
         progress: 0,
         error: "",
+        retriesLeft: MAX_DOWNLOAD_RETRIES,
       });
       localStorage.setItem(LAST_CHECK_KEY, String(Date.now()));
     } catch (e) {
-      setState({
+      setState((s) => ({
+        ...s,
         status: "error",
         version: "",
         progress: 0,
         error: mapUpdaterError(e),
-      });
+      }));
     } finally {
       checkingRef.current = false;
     }
   }, [mapUpdaterError]);
 
+  // ── Download ──────────────────────────────────────────────────────
   const download = useCallback(async () => {
     const candidate = candidateRef.current;
     if (!candidate) return;
@@ -97,7 +119,7 @@ export function useUpdater() {
       let downloaded = 0;
       let contentLength = 0;
 
-      await candidate.download((event) => {
+      const downloadPromise = candidate.download((event) => {
         if (event.event === "Started") {
           contentLength = event.data.contentLength ?? 0;
           setState((s) => ({ ...s, progress: 0 }));
@@ -106,22 +128,42 @@ export function useUpdater() {
           const pct =
             contentLength > 0
               ? Math.min(100, Math.round((downloaded / contentLength) * 100))
-              : Math.min(95, (typeof state.progress === "number" ? state.progress : 0) + 1);
+              : Math.min(95, downloaded > 0 ? Math.round(Math.log2(downloaded / 1024)) : 1);
           setState((s) => ({ ...s, progress: pct }));
         }
       });
 
+      await withTimeout(downloadPromise, DOWNLOAD_TIMEOUT_MS, "Download");
+
       setState((s) => ({ ...s, status: "ready", progress: 100 }));
     } catch (e) {
-      setState({
-        status: "error",
-        version: state.version,
-        progress: 0,
-        error: mapUpdaterError(e),
+      setState((prev) => {
+        const retriesLeft = prev.retriesLeft - 1;
+        if (retriesLeft > 0) {
+          // Schedule automatic retry
+          retryTimerRef.current = setTimeout(() => {
+            download();
+          }, 3000); // retry after 3s
+          return {
+            ...prev,
+            status: "downloading",
+            progress: 0,
+            error: "",
+            retriesLeft,
+          };
+        }
+        return {
+          ...prev,
+          status: "error",
+          progress: 0,
+          error: mapUpdaterError(e),
+          retriesLeft: 0,
+        };
       });
     }
-  }, [state.progress, mapUpdaterError]);
+  }, [mapUpdaterError]);
 
+  // ── Apply (install + relaunch) ────────────────────────────────────
   const apply = useCallback(async () => {
     const candidate = candidateRef.current;
     if (!candidate) return;
@@ -138,36 +180,68 @@ export function useUpdater() {
     }
   }, [mapUpdaterError]);
 
+  // ── Skip this version ─────────────────────────────────────────────
   const skip = useCallback(() => {
     if (state.version) {
       localStorage.setItem(SKIPPED_KEY, state.version);
     }
-    setState({ status: "idle", version: "", progress: 0, error: "" });
+    setState({ status: "idle", version: "", progress: 0, error: "", retriesLeft: MAX_DOWNLOAD_RETRIES });
     candidateRef.current = null;
+    if (retryTimerRef.current) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
   }, [state.version]);
 
+  // ── Dismiss error ─────────────────────────────────────────────────
   const dismiss = useCallback(() => {
-    setState({ status: "idle", version: "", progress: 0, error: "" });
+    setState({ status: "idle", version: "", progress: 0, error: "", retriesLeft: MAX_DOWNLOAD_RETRIES });
+    if (retryTimerRef.current) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
   }, []);
 
-  // Auto-check on mount + hourly
+  // ── Retry (re-check + re-download if candidate lost) ─────────────
+  const retry = useCallback(async () => {
+    if (retryTimerRef.current) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+    setState((s) => ({ ...s, retriesLeft: MAX_DOWNLOAD_RETRIES }));
+    if (candidateRef.current) {
+      await download();
+    } else {
+      await check();
+    }
+  }, [check, download]);
+
+  // ── Auto-check on mount + periodic ────────────────────────────────
   useEffect(() => {
     const lastCheck = getLastCheck();
     const elapsed = Date.now() - lastCheck;
+    const firstDelay = elapsed >= CHECK_INTERVAL_MS ? 500 : (CHECK_INTERVAL_MS - elapsed);
 
-    // Check on mount if enough time has passed
-    if (elapsed >= CHECK_INTERVAL_MS) {
+    const firstTimer = setTimeout(() => {
       check();
-    } else {
-      // Schedule the first check at the remaining interval
-      const timer = setTimeout(check, CHECK_INTERVAL_MS - elapsed);
-      return () => clearTimeout(timer);
-    }
+    }, firstDelay);
 
-    // Periodic check
     const interval = setInterval(check, CHECK_INTERVAL_MS);
-    return () => clearInterval(interval);
+
+    return () => {
+      clearTimeout(firstTimer);
+      clearInterval(interval);
+    };
   }, [check]);
 
-  return { state, check, download, apply, skip, dismiss };
+  // Cleanup retry timer on unmount
+  useEffect(() => {
+    return () => {
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+      }
+    };
+  }, []);
+
+  return { state, check, download, apply, skip, dismiss, retry };
 }

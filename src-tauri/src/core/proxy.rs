@@ -69,7 +69,7 @@ impl Default for ProxyConfig {
 }
 
 fn config_path() -> std::path::PathBuf {
-    super::paths::data_root().join("proxy.json")
+    super::paths::proxy_config_path()
 }
 
 pub fn load_config() -> Result<ProxyConfig> {

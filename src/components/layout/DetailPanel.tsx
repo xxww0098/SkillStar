@@ -250,12 +250,16 @@ export function DetailPanel({
       if (!renderedDescription || !shortDescriptionTranslationEnabled) return;
 
       if (mode === "auto") {
-        // Auto mode: skip if already translating, visible, or has reusable content
-        if (translatingDescription) return;
+        // Auto mode: skip if already translating the same text, or if visible/cached for the same text
+        if (translatingDescription && descriptionTranslationSource === renderedDescription) return;
         if (descriptionTranslationVisible && descriptionTranslationSource === renderedDescription) return;
         if (translatedDescription != null && descriptionTranslationSource === renderedDescription) {
           descriptionStream.setVisible(true);
           return;
+        }
+        // If we are currently translating a DIFFERENT text, we should ideally cancel it and start the new one.
+        if (translatingDescription) {
+          descriptionStream.cancel();
         }
       }
       // Manual mode: use the hook's built-in toggle/cancel behavior
@@ -298,7 +302,6 @@ export function DetailPanel({
     const renderedDescription =
       skillDetails?.summary?.trim() || skill?.description?.trim() || "";
     if (!renderedDescription) return;
-    if (descriptionTranslationSource !== renderedDescription) return;
     if (translatedDescription != null || descriptionTranslateError) return;
 
     const timer = window.setTimeout(() => {
@@ -321,7 +324,8 @@ export function DetailPanel({
     if (
       !skill ||
       !autoTranslateDescription ||
-      !shortDescriptionTranslationEnabled
+      !shortDescriptionTranslationEnabled ||
+      !aiConfigured
     )
       return;
     const renderedDescription =
@@ -338,6 +342,7 @@ export function DetailPanel({
     skill,
     skillDetails?.summary,
     targetLanguage,
+    aiConfigured,
   ]);
 
   const toggleAutoTranslateDescription = (enabled: boolean) => {
@@ -501,6 +506,7 @@ export function DetailPanel({
   const localizedQuickReadError = formatAiErrorMessage(quickReadError, t);
   const shouldDeferDescriptionRender =
     autoTranslateDescription &&
+    aiConfigured &&
     shortDescriptionTranslationEnabled &&
     hasDescription &&
     !hasTranslationForCurrentDescription &&
@@ -972,7 +978,8 @@ export function DetailPanel({
               <div className="space-y-2 pt-2">
                 {skill.installed ? (
                   <>
-                    {skill.update_available && skill.skill_type !== "local" && (
+                    {skill.update_available &&
+                      skill.skill_type !== "local" && (
                       <Button
                         className="w-full"
                         onClick={() => onUpdate(skill.name)}

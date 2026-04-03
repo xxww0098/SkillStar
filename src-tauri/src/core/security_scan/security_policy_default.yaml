@@ -1,0 +1,6 @@
+preset: balanced
+severity_threshold: low
+enabled_analyzers: []
+ignore_rules:
+  - pip_install
+rule_overrides: {}

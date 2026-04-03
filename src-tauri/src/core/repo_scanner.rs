@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 use tracing::warn;
 
 use super::{
-    git_ops, local_skill, lockfile, path_env::command_with_path, repo_history, security_scan,
+    git_ops, github_mirror, local_skill, lockfile, path_env::command_with_path, repo_history,
+    security_scan,
 };
 
 // ── Data Types ──────────────────────────────────────────────────────
@@ -110,11 +111,10 @@ pub fn normalize_repo_url(input: &str) -> Result<(String, String)> {
 
 // ── Repo Cache ──────────────────────────────────────────────────────
 
-
 /// Derive a cache directory name from a source identifier.
 ///
 /// `"vercel-labs/skills"` → `"vercel-labs--skills"`
-fn cache_dir_name(source: &str) -> String {
+pub fn cache_dir_name(source: &str) -> String {
     source.replace('/', "--")
 }
 
@@ -143,7 +143,9 @@ pub fn clone_or_fetch_repo(repo_url: &str, source: &str) -> Result<PathBuf> {
 
     if repo_dir.join(".git").exists() {
         // Already cached — shallow fetch latest
-        let output = command_with_path("git")
+        let mut fetch_cmd = command_with_path("git");
+        github_mirror::apply_mirror_args(&mut fetch_cmd);
+        let output = fetch_cmd
             .current_dir(&repo_dir)
             .args(["fetch", "--depth", "1", "--quiet"])
             .output()
@@ -164,8 +166,18 @@ pub fn clone_or_fetch_repo(repo_url: &str, source: &str) -> Result<PathBuf> {
         // Re-discover SKILL.md dirs and update sparse-checkout (handles new skills added upstream)
         if is_sparse_checkout(&repo_dir) {
             if let Ok(dirs) = discover_skill_dirs_from_tree(&repo_dir) {
-                let dir_refs: Vec<&str> = dirs.iter().map(|s| s.as_str()).collect();
-                let _ = git_ops::apply_sparse_checkout(&repo_dir, &dir_refs);
+                if dirs.is_empty() {
+                    let _ = command_with_path("git")
+                        .current_dir(&repo_dir)
+                        .args(["sparse-checkout", "disable"])
+                        .output();
+                    let mut co_cmd = command_with_path("git");
+                    github_mirror::apply_mirror_args(&mut co_cmd);
+                    let _ = co_cmd.current_dir(&repo_dir).arg("checkout").output();
+                } else {
+                    let dir_refs: Vec<&str> = dirs.iter().map(|s| s.as_str()).collect();
+                    let _ = git_ops::apply_sparse_checkout(&repo_dir, &dir_refs);
+                }
             }
         }
 
@@ -196,10 +208,9 @@ fn clone_sparse_with_skills(repo_url: &str, dest: &Path) -> Result<()> {
 
     if skill_dirs.is_empty() {
         // No skills found — fall back to full checkout
-        let _ = command_with_path("git")
-            .current_dir(dest)
-            .arg("checkout")
-            .output();
+        let mut co_cmd = command_with_path("git");
+        github_mirror::apply_mirror_args(&mut co_cmd);
+        let _ = co_cmd.current_dir(dest).arg("checkout").output();
         return Ok(());
     }
 
@@ -217,6 +228,17 @@ fn clone_sparse_with_skills(repo_url: &str, dest: &Path) -> Result<()> {
 /// agent-specific copies.
 fn discover_skill_dirs_from_tree(repo_dir: &Path) -> Result<Vec<String>> {
     let all_paths = git_ops::list_tree_paths(repo_dir)?;
+    Ok(derive_sparse_skill_dirs_from_tree_paths(&all_paths))
+}
+
+/// Derive sparse-checkout directories from repo tree paths.
+///
+/// If a root-level `SKILL.md` exists, return an empty list to force full checkout.
+fn derive_sparse_skill_dirs_from_tree_paths(all_paths: &[String]) -> Vec<String> {
+    // Root-level skill must be materialized, so sparse mode should be skipped.
+    if all_paths.iter().any(|p| p == "SKILL.md") {
+        return Vec::new();
+    }
 
     // Collect parent dirs of all SKILL.md files
     let skill_dirs: Vec<String> = all_paths
@@ -234,14 +256,6 @@ fn discover_skill_dirs_from_tree(repo_dir: &Path) -> Result<Vec<String>> {
             }
         })
         .collect();
-
-    if skill_dirs.is_empty() {
-        // Might be a root-level SKILL.md repo
-        if all_paths.iter().any(|p| p == "SKILL.md") {
-            // Need the entire repo — return empty to trigger full checkout
-            return Ok(Vec::new());
-        }
-    }
 
     // Deduplicate: for skills that appear in multiple agent dirs (e.g.
     // `.claude/skills/foo`, `.agents/skills/foo`, `source/skills/foo`),
@@ -281,7 +295,7 @@ fn discover_skill_dirs_from_tree(repo_dir: &Path) -> Result<Vec<String>> {
     // e.g. if we have `source/skills/foo`, `source/skills/bar`, just use `source/skills`
     let compacted = compact_to_common_parents(&result);
 
-    Ok(compacted)
+    compacted
 }
 
 /// Compact a list of directories to their common parent prefixes.
@@ -359,12 +373,19 @@ fn is_sparse_checkout(repo_dir: &Path) -> bool {
 // ── SKILL.md Scanning ───────────────────────────────────────────────
 
 /// Scan a cloned repo directory for all SKILL.md files and extract metadata.
-pub fn scan_skills_in_repo(repo_dir: &Path) -> Vec<DiscoveredSkill> {
+pub fn scan_skills_in_repo(
+    repo_dir: &Path,
+    repo_url: &str,
+    full_depth: bool,
+) -> Vec<DiscoveredSkill> {
     let hub_skills_dir = super::paths::hub_skills_dir();
+    let lock_entries = lockfile::Lockfile::load(&lockfile::lockfile_path())
+        .map(|lf| lf.skills)
+        .unwrap_or_default();
 
     // Collect all SKILL.md paths
     let skill_md_paths = find_skill_md_files(repo_dir);
-    let mut discovered = Vec::with_capacity(skill_md_paths.len());
+    let mut discovered: Vec<DiscoveredSkill> = Vec::with_capacity(skill_md_paths.len());
 
     for skill_md_path in skill_md_paths {
         let skill_dir = match skill_md_path.parent() {
@@ -383,15 +404,17 @@ pub fn scan_skills_in_repo(repo_dir: &Path) -> Vec<DiscoveredSkill> {
         let folder_path = match skill_dir.strip_prefix(repo_dir) {
             Ok(rel) => {
                 let rel_str = rel.to_string_lossy().to_string();
-                // Normalize: remove trailing separators
-                let clean = rel_str.trim_matches('/').to_string();
+                // Normalize: remove trailing separators (both / and \)
+                let clean = rel_str
+                    .trim_matches(|c: char| c == '/' || c == '\\')
+                    .to_string();
                 clean
             }
             Err(_) => continue,
         };
 
-        // For root-level SKILL.md, use repo directory name as skill ID
-        let (effective_name, effective_folder) = if folder_path.is_empty() {
+        // For root-level SKILL.md, fallback to repo name as skill ID.
+        let (default_name, effective_folder) = if folder_path.is_empty() {
             let repo_name = repo_dir
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
@@ -411,30 +434,88 @@ pub fn scan_skills_in_repo(repo_dir: &Path) -> Vec<DiscoveredSkill> {
             (skill_name, folder_path)
         };
 
-        let description = extract_frontmatter_description(&skill_md_path);
-        let already_installed = hub_skills_dir.join(&effective_name).exists();
+        let frontmatter = extract_frontmatter(&skill_md_path);
+        let effective_name = frontmatter
+            .name
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or(default_name);
 
         discovered.push(DiscoveredSkill {
             id: effective_name,
             folder_path: effective_folder,
-            description,
-            already_installed,
+            description: frontmatter.description,
+            already_installed: false,
         });
     }
 
-    // Deduplicate by skill id.
+    // Root-first: if a root skill exists and full-depth is disabled, return root only.
+    if !full_depth {
+        if let Some(root_skill) = discovered
+            .iter()
+            .find(|skill| skill.folder_path.is_empty())
+            .cloned()
+        {
+            discovered = vec![root_skill];
+        }
+    }
+
+    let mut deduped = dedupe_discovered_skills(discovered);
+
+    // Compatibility with legacy installs:
+    // if lockfile identifies the same repo_url + source_folder under an older
+    // skill name, expose the installed name to avoid duplicate installs.
+    for skill in &mut deduped {
+        let source_folder = if skill.folder_path.is_empty() {
+            None
+        } else {
+            Some(skill.folder_path.as_str())
+        };
+
+        let legacy_name = lock_entries.iter().find_map(|entry| {
+            if same_remote_url(&entry.git_url, repo_url)
+                && option_str_eq(entry.source_folder.as_deref(), source_folder)
+            {
+                Some(entry.name.clone())
+            } else {
+                None
+            }
+        });
+
+        if let Some(name) = legacy_name {
+            skill.id = name;
+            skill.already_installed = hub_skills_dir.join(&skill.id).exists()
+                || lock_entries.iter().any(|entry| {
+                    entry.name == skill.id
+                        && same_remote_url(&entry.git_url, repo_url)
+                        && option_str_eq(entry.source_folder.as_deref(), source_folder)
+                });
+        } else {
+            skill.already_installed = hub_skills_dir.join(&skill.id).exists();
+        }
+    }
+
+    deduped = dedupe_discovered_skills(deduped);
+
+    // Sort by name
+    deduped.sort_by(|a, b| a.id.to_lowercase().cmp(&b.id.to_lowercase()));
+    deduped
+}
+
+fn option_str_eq(left: Option<&str>, right: Option<&str>) -> bool {
+    left == right
+}
+
+fn dedupe_discovered_skills(skills: Vec<DiscoveredSkill>) -> Vec<DiscoveredSkill> {
     // Repos like "impeccable" distribute the same skill into multiple agent directories
     // (.claude/skills/, .cursor/skills/, .gemini/skills/, .agents/skills/, source/skills/ etc).
-    // We keep only one entry per id, preferring the canonical source path.
+    // We keep one entry per ID, preferring root, then canonical source path.
     let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    let mut deduped: Vec<DiscoveredSkill> = Vec::with_capacity(discovered.len());
+    let mut deduped: Vec<DiscoveredSkill> = Vec::with_capacity(skills.len());
 
-    for skill in discovered {
+    for skill in skills {
         let key = skill.id.to_lowercase();
         if let Some(&existing_idx) = seen.get(&key) {
-            // Replace if the new one has a higher-priority source path
-            if source_priority(&skill.folder_path)
-                > source_priority(&deduped[existing_idx].folder_path)
+            if discovered_skill_priority(&skill) > discovered_skill_priority(&deduped[existing_idx])
             {
                 deduped[existing_idx] = skill;
             }
@@ -444,9 +525,15 @@ pub fn scan_skills_in_repo(repo_dir: &Path) -> Vec<DiscoveredSkill> {
         }
     }
 
-    // Sort by name
-    deduped.sort_by(|a, b| a.id.to_lowercase().cmp(&b.id.to_lowercase()));
     deduped
+}
+
+fn discovered_skill_priority(skill: &DiscoveredSkill) -> u8 {
+    if skill.folder_path.is_empty() {
+        4
+    } else {
+        source_priority(&skill.folder_path)
+    }
 }
 
 /// Assign a priority to a folder path for deduplication.
@@ -494,20 +581,37 @@ fn find_skill_md_recursive(dir: &Path, results: &mut Vec<PathBuf>) {
     }
 }
 
-/// Extract the `description` field from SKILL.md YAML frontmatter.
-fn extract_frontmatter_description(skill_md_path: &Path) -> String {
+#[derive(Debug)]
+struct SkillFrontmatter {
+    name: Option<String>,
+    description: String,
+}
+
+/// Extract the `name` and `description` from SKILL.md YAML frontmatter.
+fn extract_frontmatter(skill_md_path: &Path) -> SkillFrontmatter {
     let content = match std::fs::read_to_string(skill_md_path) {
         Ok(c) => c,
-        Err(_) => return String::new(),
+        Err(_) => {
+            return SkillFrontmatter {
+                name: None,
+                description: String::new(),
+            };
+        }
     };
 
     if !content.starts_with("---") {
-        return String::new();
+        return SkillFrontmatter {
+            name: None,
+            description: String::new(),
+        };
     }
 
     let parts: Vec<&str> = content.splitn(3, "---").collect();
     if parts.len() < 3 {
-        return String::new();
+        return SkillFrontmatter {
+            name: None,
+            description: String::new(),
+        };
     }
 
     let yaml_str = parts[1];
@@ -515,12 +619,19 @@ fn extract_frontmatter_description(skill_md_path: &Path) -> String {
     // Use serde_yaml to parse the frontmatter
     #[derive(Deserialize)]
     struct Frontmatter {
+        name: Option<String>,
         description: Option<String>,
     }
 
     match serde_yaml::from_str::<Frontmatter>(yaml_str) {
-        Ok(fm) => fm.description.unwrap_or_default().trim().to_string(),
-        Err(_) => String::new(),
+        Ok(fm) => SkillFrontmatter {
+            name: fm.name.map(|name| name.trim().to_string()),
+            description: fm.description.unwrap_or_default().trim().to_string(),
+        },
+        Err(_) => SkillFrontmatter {
+            name: None,
+            description: String::new(),
+        },
     }
 }
 
@@ -574,26 +685,7 @@ pub fn install_from_repo(
         // If it already exists, remove it to allow reinstall
         if let Ok(meta) = dest.symlink_metadata() {
             if meta.is_symlink() {
-                #[cfg(unix)]
-                let _ = std::fs::remove_file(&dest);
-                #[cfg(windows)]
-                {
-                    // Directory symlinks (created via symlink_dir) must use
-                    // remove_dir; file symlinks must use remove_file.
-                    if meta.is_dir() {
-                        std::fs::remove_dir(&dest)
-                    } else {
-                        std::fs::remove_file(&dest)
-                    }
-                    .unwrap_or_else(|e| {
-                        warn!(
-                            target: "repo_scanner",
-                            path = %dest.display(),
-                            error = %e,
-                            "failed to remove symlink"
-                        );
-                    });
-                }
+                let _ = super::paths::remove_symlink(&dest);
             } else {
                 let _ = std::fs::remove_dir_all(&dest);
             }
@@ -616,12 +708,7 @@ pub fn install_from_repo(
         }
 
         // Create symlink: hub/skills/<name> → .repos/<cache>/<folder>/
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&source_path, &dest)
-            .with_context(|| format!("Failed to symlink {:?} → {:?}", source_path, dest))?;
-
-        #[cfg(windows)]
-        std::os::windows::fs::symlink_dir(&source_path, &dest)
+        super::paths::create_symlink(&source_path, &dest)
             .with_context(|| format!("Failed to symlink {:?} → {:?}", source_path, dest))?;
 
         // Compute tree hash from the cached repo for this skill's subfolder
@@ -921,8 +1008,19 @@ pub fn pull_repo_skill_update(skill_path: &Path, folder_path: Option<&str>) -> R
     // Re-apply sparse checkout if enabled (handles newly added skills)
     if is_sparse_checkout(&repo_root) {
         if let Ok(dirs) = discover_skill_dirs_from_tree(&repo_root) {
-            let dir_refs: Vec<&str> = dirs.iter().map(|s| s.as_str()).collect();
-            let _ = git_ops::apply_sparse_checkout(&repo_root, &dir_refs);
+            if dirs.is_empty() {
+                let _ = command_with_path("git")
+                    .current_dir(&repo_root)
+                    .args(["sparse-checkout", "disable"])
+                    .output();
+                let _ = command_with_path("git")
+                    .current_dir(&repo_root)
+                    .arg("checkout")
+                    .output();
+            } else {
+                let dir_refs: Vec<&str> = dirs.iter().map(|s| s.as_str()).collect();
+                let _ = git_ops::apply_sparse_checkout(&repo_root, &dir_refs);
+            }
         }
     }
 
@@ -942,11 +1040,16 @@ fn is_shallow_repo(repo_dir: &Path) -> bool {
 
 /// Full scan flow: normalize URL → clone/fetch → scan → save history → return results.
 pub fn scan_repo(input: &str) -> Result<ScanResult> {
+    scan_repo_with_mode(input, false)
+}
+
+/// Full scan flow with optional full-depth discovery.
+pub fn scan_repo_with_mode(input: &str, full_depth: bool) -> Result<ScanResult> {
     let (repo_url, source) = normalize_repo_url(input)?;
 
     let repo_dir = clone_or_fetch_repo(&repo_url, &source)?;
 
-    let skills = scan_skills_in_repo(&repo_dir);
+    let skills = scan_skills_in_repo(&repo_dir, &repo_url, full_depth);
 
     // Save to history
     let _ = repo_history::upsert_entry(&source, &repo_url);
@@ -1122,9 +1225,10 @@ fn dir_size(path: &Path) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{local_skill, lockfile, sync};
+    use crate::core::{local_skill, lockfile, paths};
     use anyhow::Result;
     use std::ffi::OsStr;
+    use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn env_lock() -> &'static std::sync::Mutex<()> {
@@ -1137,6 +1241,53 @@ mod tests {
 
     fn remove_env<K: AsRef<OsStr>>(key: K) {
         unsafe { std::env::remove_var(key) }
+    }
+
+    fn with_temp_home<F>(suffix: &str, f: F) -> Result<()>
+    where
+        F: FnOnce() -> Result<()>,
+    {
+        let _guard = env_lock()
+            .lock()
+            .expect("environment lock should not be poisoned");
+
+        let stamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let temp_root =
+            std::env::temp_dir().join(format!("skillstar-repo-scanner-{}-{}", suffix, stamp));
+        let previous_home = std::env::var_os("HOME");
+        set_env("HOME", temp_root.join("home"));
+        #[cfg(windows)]
+        let previous_userprofile = std::env::var_os("USERPROFILE");
+        #[cfg(windows)]
+        set_env("USERPROFILE", temp_root.join("home"));
+
+        let result = f();
+
+        match previous_home {
+            Some(value) => set_env("HOME", value),
+            None => remove_env("HOME"),
+        }
+        #[cfg(windows)]
+        match previous_userprofile {
+            Some(value) => set_env("USERPROFILE", value),
+            None => remove_env("USERPROFILE"),
+        }
+        let _ = std::fs::remove_dir_all(&temp_root);
+
+        result
+    }
+
+    fn write_skill_md(path: &Path, name: &str, description: &str) -> Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let content = format!(
+            "---\nname: {name}\ndescription: {description}\n---\n\n# {name}\n",
+            name = name,
+            description = description
+        );
+        std::fs::write(path, content)?;
+        Ok(())
     }
 
     #[test]
@@ -1216,6 +1367,113 @@ mod tests {
     }
 
     #[test]
+    fn sparse_tree_dirs_force_full_checkout_when_root_skill_exists() {
+        let tree_paths = vec![
+            "SKILL.md".to_string(),
+            "skills/nested/SKILL.md".to_string(),
+            "README.md".to_string(),
+        ];
+        let dirs = derive_sparse_skill_dirs_from_tree_paths(&tree_paths);
+        assert!(
+            dirs.is_empty(),
+            "expected root-level SKILL.md to force full checkout"
+        );
+    }
+
+    #[test]
+    fn scan_root_first_returns_only_root_skill_by_default() -> Result<()> {
+        with_temp_home("root-first-default", || {
+            let repo_dir = paths::repos_cache_dir().join("owner--repo");
+            write_skill_md(&repo_dir.join("SKILL.md"), "root-skill", "root")?;
+            write_skill_md(
+                &repo_dir.join("skills/nested-skill/SKILL.md"),
+                "nested-skill",
+                "nested",
+            )?;
+
+            let skills = scan_skills_in_repo(&repo_dir, "https://github.com/owner/repo.git", false);
+            assert_eq!(skills.len(), 1);
+            assert_eq!(skills[0].id, "root-skill");
+            assert_eq!(skills[0].folder_path, "");
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn scan_full_depth_includes_root_and_nested_skills() -> Result<()> {
+        with_temp_home("root-first-full-depth", || {
+            let repo_dir = paths::repos_cache_dir().join("owner--repo");
+            write_skill_md(&repo_dir.join("SKILL.md"), "root-skill", "root")?;
+            write_skill_md(
+                &repo_dir.join("skills/nested-skill/SKILL.md"),
+                "nested-skill",
+                "nested",
+            )?;
+
+            let skills = scan_skills_in_repo(&repo_dir, "https://github.com/owner/repo.git", true);
+            assert_eq!(skills.len(), 2);
+            assert!(
+                skills
+                    .iter()
+                    .any(|s| s.id == "root-skill" && s.folder_path.is_empty())
+            );
+            assert!(
+                skills
+                    .iter()
+                    .any(|s| s.id == "nested-skill" && s.folder_path == "skills/nested-skill")
+            );
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn scan_uses_frontmatter_name_for_root_skill_id() -> Result<()> {
+        with_temp_home("root-frontmatter-name", || {
+            let repo_dir = paths::repos_cache_dir().join("owner--repo");
+            write_skill_md(
+                &repo_dir.join("SKILL.md"),
+                "gstack-root-name",
+                "root description",
+            )?;
+
+            let skills = scan_skills_in_repo(&repo_dir, "https://github.com/owner/repo.git", false);
+            assert_eq!(skills.len(), 1);
+            assert_eq!(skills[0].id, "gstack-root-name");
+            assert_eq!(skills[0].folder_path, "");
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn scan_uses_lockfile_name_for_legacy_repo_folder_mapping() -> Result<()> {
+        with_temp_home("legacy-name-mapping", || {
+            let repo_dir = paths::repos_cache_dir().join("owner--repo");
+            write_skill_md(
+                &repo_dir.join("skills/new-folder-name/SKILL.md"),
+                "new-frontmatter-name",
+                "desc",
+            )?;
+
+            let lock_path = lockfile::lockfile_path();
+            let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
+            lf.upsert(lockfile::LockEntry {
+                name: "legacy-installed-name".to_string(),
+                git_url: "https://github.com/owner/repo.git".to_string(),
+                tree_hash: "legacy-hash".to_string(),
+                installed_at: chrono::Utc::now().to_rfc3339(),
+                source_folder: Some("skills/new-folder-name".to_string()),
+            });
+            lf.save(&lock_path)?;
+
+            let skills = scan_skills_in_repo(&repo_dir, "https://github.com/owner/repo.git", true);
+            assert_eq!(skills.len(), 1);
+            assert_eq!(skills[0].id, "legacy-installed-name");
+            assert!(skills[0].already_installed);
+            Ok(())
+        })
+    }
+
+    #[test]
     fn install_from_repo_does_not_replace_local_skill() -> Result<()> {
         let _guard = env_lock()
             .lock()
@@ -1234,7 +1492,7 @@ mod tests {
         let result = (|| -> Result<()> {
             let _ = local_skill::create("demo-skill", Some("# local"))?;
 
-            let cache_dir = super::paths::repos_cache_dir().join(super::cache_dir_name("owner/repo"));
+            let cache_dir = paths::repos_cache_dir().join(cache_dir_name("owner/repo"));
             let source_dir = cache_dir.join("skills/demo-skill");
             std::fs::create_dir_all(&source_dir)?;
             std::fs::write(source_dir.join("SKILL.md"), "# remote")?;
@@ -1291,7 +1549,7 @@ mod tests {
         set_env("USERPROFILE", temp_root.join("home"));
 
         let result = (|| -> Result<()> {
-            let hub_path = super::paths::hub_skills_dir().join("demo-skill");
+            let hub_path = paths::hub_skills_dir().join("demo-skill");
             std::fs::create_dir_all(&hub_path)?;
             std::fs::write(hub_path.join("SKILL.md"), "# existing")?;
 
@@ -1306,7 +1564,7 @@ mod tests {
             });
             lf.save(&lock_path)?;
 
-            let cache_dir = super::paths::repos_cache_dir().join(super::cache_dir_name("owner/repo"));
+            let cache_dir = paths::repos_cache_dir().join(cache_dir_name("owner/repo"));
             let source_dir = cache_dir.join("skills/demo-skill");
             std::fs::create_dir_all(&source_dir)?;
             std::fs::write(source_dir.join("SKILL.md"), "# incoming")?;

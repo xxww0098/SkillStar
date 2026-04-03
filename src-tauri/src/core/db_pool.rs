@@ -53,20 +53,11 @@ where
     .context("spawn_blocking join error")?
 }
 
-// ── Marketplace Pool ────────────────────────────────────────────────
-
-static MARKETPLACE_POOL: LazyLock<DbPool> = LazyLock::new(|| {
-    create_pool(&super::paths::marketplace_db_path(), 4).expect("marketplace DB pool init failed")
-});
-
-pub fn marketplace_pool() -> &'static DbPool {
-    &MARKETPLACE_POOL
-}
-
 // ── Translation Cache Pool ──────────────────────────────────────────
 
 static TRANSLATION_POOL: LazyLock<DbPool> = LazyLock::new(|| {
-    create_pool(&super::paths::translation_db_path(), 4).expect("translation cache DB pool init failed")
+    create_pool(&super::paths::translation_db_path(), 4)
+        .expect("translation cache DB pool init failed")
 });
 
 pub fn translation_pool() -> &'static DbPool {
@@ -76,7 +67,8 @@ pub fn translation_pool() -> &'static DbPool {
 // ── Security Scan Pool ──────────────────────────────────────────────
 
 static SECURITY_SCAN_POOL: LazyLock<DbPool> = LazyLock::new(|| {
-    create_pool(&super::paths::security_scan_db_path(), 3).expect("security scan DB pool init failed")
+    create_pool(&super::paths::security_scan_db_path(), 3)
+        .expect("security scan DB pool init failed")
 });
 
 pub fn security_scan_pool() -> &'static DbPool {

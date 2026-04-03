@@ -14,7 +14,6 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use tracing::{info, warn};
 
-
 /// Check if a skill in the hub is a local skill (symlink pointing into `skills-local/`).
 pub fn is_local_skill(name: &str) -> bool {
     let hub_dir = super::paths::hub_skills_dir();
@@ -225,7 +224,7 @@ pub fn delete(name: &str) -> Result<()> {
     let hub_path = hub_dir.join(name);
     if hub_path.symlink_metadata().is_ok() {
         if hub_path.is_symlink() {
-            std::fs::remove_file(&hub_path)
+            super::paths::remove_symlink(&hub_path)
                 .with_context(|| format!("Failed to remove hub symlink for '{}'", name))?;
         } else {
             // Not a symlink — should not happen for local skills, but handle gracefully
@@ -259,7 +258,7 @@ pub fn graduate(name: &str) -> Result<()> {
     let hub_dir = super::paths::hub_skills_dir();
     let hub_path = hub_dir.join(name);
     if hub_path.is_symlink() {
-        std::fs::remove_file(&hub_path)
+        super::paths::remove_symlink(&hub_path)
             .with_context(|| format!("Failed to remove hub symlink for '{}'", name))?;
     }
 
@@ -416,4 +415,3 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
     }
     Ok(())
 }
-

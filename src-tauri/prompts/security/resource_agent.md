@@ -54,6 +54,7 @@ Keep `category`, `severity`, and `file_risk` as English schema tokens.
     {
       "category": "suspicious_url | hidden_credential | malicious_dep | anomalous_config | encoded_payload",
       "severity": "low | medium | high | critical",
+      "confidence": 0.0,
       "description": "Concise description of the issue",
       "evidence": "The exact suspicious value or line (max 200 chars)",
       "recommendation": "What the user should do"
@@ -75,3 +76,4 @@ If no issues are found, return:
 - Example placeholder values like `YOUR_API_KEY_HERE` are SAFE.
 - Actual API keys or tokens (even labeled as examples) should be flagged as LOW risk.
 - Config that only affects local build/formatting behavior is SAFE.
+- `confidence` must be a numeric score in [0.0, 1.0] for each finding.

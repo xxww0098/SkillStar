@@ -55,6 +55,7 @@ Keep `category`, `severity`, and `file_risk` as English schema tokens.
     {
       "category": "remote_code_exec | data_exfil | backdoor | cryptomining | obfuscation",
       "severity": "low | medium | high | critical",
+      "confidence": 0.0,
       "description": "Concise description of the issue",
       "evidence": "The exact suspicious code snippet (max 200 chars)",
       "recommendation": "What the user should do"
@@ -77,3 +78,4 @@ If no issues are found, return:
 - Scripts that reach outside the project (network, home dir, system config) are SUSPICIOUS.
 - A helper that runs `prettier` on local files is SAFE.
 - A helper that sends file contents to a webhook is NOT safe.
+- `confidence` must be a numeric score in [0.0, 1.0] for each finding.

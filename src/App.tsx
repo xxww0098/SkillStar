@@ -190,7 +190,7 @@ function AppContent() {
           />
         );
       case "settings":
-        return <SettingsPage />;
+        return <SettingsPage onCheckUpdate={updater.check} isCheckingUpdate={updater.state.status === "checking"} />;
       case "security-scan":
         return <SecurityScanPage />;
       default:
@@ -225,6 +225,7 @@ function AppContent() {
         onRestart={updater.apply}
         onSkip={updater.skip}
         onDismiss={updater.dismiss}
+        onRetry={updater.retry}
       />
       <AnimatePresence mode="wait">
         <motion.div

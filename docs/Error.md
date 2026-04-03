@@ -14,6 +14,12 @@ Significant bugs and fixes, kept in short form for faster lookup.
 
 ---
 
+### CLI Install Mode Missing `--global` / `--agent` / Interactive Selection — 2026-04-02
+- Symptom: `skillstar install --global <url>` was unsupported, and default CLI install did not provide one-step project-level linking or explicit per-agent targeting.
+- Root cause: `cli.rs` install subcommand only accepted `url` and always executed a hub clone path; no mode switch existed for project-level vs global install, and no terminal selection flow existed when agent targets were omitted.
+- Fix: Extended CLI install with `--global`, `--project`, `--agent`, and `--name`; install now reuses `core::skill_install`, defaults to project-level linking in current directory, supports interactive terminal agent selection when `--agent` is omitted, and falls back to `.agents/skills` when no agent is chosen.
+- Files: `src-tauri/src/cli.rs`, `src-tauri/src/main.rs`, `AGENTS.md`, `README.md`
+
 ### SkillSelectionBar Overlaps Info Sidebar (DetailPanel) — 2026-04-01
 - Symptom: When the side Info Panel (`DetailPanel`) slided out to show skill details, the `SkillSelectionBar` (batch actions bar) rendered on top of it, overlapping the header text and close buttons.
 - Root cause: `SkillSelectionBar` was hardcoded to `z-[60]`, which is higher than the `DetailPanel`'s `z-50` overlay relative to the main container.

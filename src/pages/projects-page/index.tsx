@@ -840,6 +840,7 @@ export function Projects({
         project={deployTargetProject}
         skillNames={pendingGroupSkills ?? []}
         profiles={enabledProfiles}
+        skillCatalog={hubSkills}
         initialSelectedAgentIds={deployDialogInitialAgents}
         onClose={handleCloseDeployDialog}
         onConfirm={handleConfirmDeployAgents}

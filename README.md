@@ -60,15 +60,37 @@ SkillStar 是一个 Tauri 桌面应用（也支持 CLI），用于统一管理 A
 - **托盘后台自动巡检**: 通过系统 Tray 控制节点，低频静默更新云端知识与工具包，随时保持最新的能力集。
 - **全界面双语适配**: 原生支持中文/英文（基于设备区域自动探测 + 个人强制配置）。
 
-## 安装
-### Homebrew (macOS)
+## 安装与 CLI 配置
+
+### 1. macOS (苹果系统)
+**通过 Homebrew 安装（推荐）**：
 ```bash
 brew tap xxww0098/skillstar
 brew install --cask skillstar
 ```
+*注：Homebrew 会自动将 CLI 映射到全局路径，安装后即可在终端直接使用 `skillstar` 命令行入口。*
 
-### 手动下载
-从 [GitHub Releases](https://github.com/xxww0098/SkillStar/releases/latest) 下载：
+**下载 `.dmg` 手动安装**：
+将应用拖入“应用程序”后，系统不会自动注册环境变量。需手动创建软链接以启用全局 CLI 调用：
+```bash
+sudo ln -sf /Applications/SkillStar.app/Contents/MacOS/SkillStar /usr/local/bin/skillstar
+```
+
+### 2. Windows 系统
+**通过 `.exe` 安装程序**：
+运行 Setup 安装程序时，SkillStar 默认会自动将安装目录加入到系统的**环境变量 (Path)**。
+安装完成后，**重启终端 (PowerShell 或 CMD)** 即可在全局使用 `skillstar` 命令。
+
+### 3. Linux 系统
+- **`.deb` / `.rpm` 安装包**：使用包管理器（如 `apt`/`yum`）安装，会自动配置环境（位于 `/usr/bin/skillstar`），直接可用。
+- **`.AppImage` 便携版**：赋予执行权限并放入系统 `PATH` 中：
+  ```bash
+  chmod +x SkillStar_x.x.x_amd64.AppImage
+  sudo mv SkillStar_x.x.x_amd64.AppImage /usr/local/bin/skillstar
+  ```
+
+### 手动下载地址
+从 [GitHub Releases](https://github.com/xxww0098/SkillStar/releases/latest) 下载获取所有平台的独立发行版包：
 
 | 平台 | 安装包 |
 |------|--------|
@@ -78,7 +100,7 @@ brew install --cask skillstar
 | Linux | `SkillStar_x.x.x_amd64.AppImage` / `.deb` / `.rpm` |
 
 > [!NOTE]
-> macOS 首次启动若提示损坏，可执行：
+> macOS 首次启动若出现损坏提示，请在终端执行：
 > ```bash
 > xattr -cr /Applications/SkillStar.app
 > ```
@@ -111,6 +133,69 @@ bun run tauri build
 4. `Decks` 组合技能并一键部署到项目
 5. `Projects` 注册项目并执行按 Agent 同步
 6. 需要命令行时使用内置 CLI（`skillstar list/install/update/...`）
+
+## CLI 快速用法
+
+SkillStar 提供了丰富的命令行工具用于无缝工作流集成。
+
+### 1. 安装技能 (`install`)
+```bash
+# 默认：安装到 Hub 并链接到当前项目（自动识别项目内已有 agent 目录）
+skillstar install https://github.com/user/my-agent-skill
+
+# 全局：仅安装到 Hub，不写入当前项目目录
+skillstar install --global https://github.com/user/my-agent-skill
+
+# 指定项目目录执行项目级安装
+skillstar install --project /path/to/project https://github.com/user/my-agent-skill
+
+# 指定目标 agent（可重复或逗号分隔）
+skillstar install --agent opencode https://github.com/user/my-agent-skill
+skillstar install --agent codex,claude https://github.com/user/my-agent-skill
+
+# 当一个仓库中包含多个技能时，可指定具体的技能名称
+skillstar install --name cool-skill https://github.com/user/multi-skill-repo
+```
+
+### 2. 技能管理 (`list`, `update`, `scan`)
+```bash
+# 列表：查看已安装的所有技能
+skillstar list
+
+# 更新：更新特定的技能（如果省略名称，则更新所有技能）
+skillstar update [name]
+
+# 扫描：对指定技能目录执行安全威胁扫描（支持 AI 分析）
+skillstar scan /path/to/skill
+skillstar scan /path/to/skill --static-only  # 仅执行静态模式扫描，跳过 AI 分析
+```
+
+### 3. 创建与发布 (`create`, `publish`)
+```bash
+# 创建：在当前目录生成新的技能模板 (包含基础的 SKILL.md)
+skillstar create
+
+# 发布：将当前目录下的技能代码推送为 GitHub 开源技能（依赖 GitHub CLI）
+skillstar publish
+```
+
+### 4. 工具包与健康维护 (`pack`, `doctor`)
+```bash
+# 列表：列出所有已安装的技能组合包 (Pack/Deck)
+skillstar pack list
+
+# 移除：卸载指定的组合包
+skillstar pack remove <name>
+
+# 健康检查：检查指定的包（或所有包）是否完整且正常存在于本地
+skillstar doctor [name]
+```
+
+### 5. 启动图形界面 (`gui`)
+```bash
+# 从终端中强制唤起桌面图形界面 (GUI) 模式
+skillstar gui
+```
 
 ## 技术架构
 | Layer | Technology | Purpose |

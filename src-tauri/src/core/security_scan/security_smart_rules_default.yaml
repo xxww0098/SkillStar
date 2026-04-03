@@ -1,0 +1,133 @@
+min_confidence: 0.45
+rules:
+  - id: always_skill_role
+    kind: always_role
+    enabled: true
+    confidence: 0.99
+    roles: ["skill"]
+
+  - id: always_script_role
+    kind: always_role
+    enabled: true
+    confidence: 0.97
+    roles: ["script"]
+
+  - id: scripts_path_prefix
+    kind: path_prefix
+    enabled: true
+    confidence: 0.93
+    path_prefixes: ["scripts/", "script/", "bin/"]
+
+  - id: workflow_path_prefix
+    kind: path_prefix
+    enabled: true
+    confidence: 0.82
+    path_prefixes: [".github/workflows/", ".gitlab/", ".circleci/"]
+
+  - id: shell_extension
+    kind: extension_in
+    enabled: true
+    confidence: 0.88
+    extensions: ["sh", "bash", "zsh", "fish", "ps1", "bat"]
+
+  - id: executable_language_extension
+    kind: extension_in
+    enabled: true
+    confidence: 0.80
+    extensions: ["py", "js", "ts", "rb", "lua", "pl", "r"]
+
+  - id: network_url_signals
+    kind: content_contains_any
+    enabled: true
+    confidence: 0.75
+    any_signals: ["http://", "https://", "webhook", "socket", "tcp://"]
+
+  - id: network_cli_signals
+    kind: content_contains_any
+    enabled: true
+    confidence: 0.83
+    any_signals: ["curl ", "wget ", "nc ", "ncat ", "netcat "]
+
+  - id: http_client_library_signals
+    kind: content_contains_any
+    enabled: true
+    confidence: 0.72
+    any_signals: ["requests.", "aiohttp", "httpx", "axios", "reqwest", "net/http", "fetch("]
+
+  - id: command_execution_signals
+    kind: content_contains_any
+    enabled: true
+    confidence: 0.9
+    any_signals: ["exec(", "eval(", "spawn(", "system(", "subprocess", "child_process", "os.popen", "processbuilder"]
+
+  - id: shell_exec_signals
+    kind: content_contains_any
+    enabled: true
+    confidence: 0.91
+    any_signals: ["bash -c", "sh -c", "powershell -command", "encodedcommand", "cmd /c"]
+
+  - id: file_write_signals
+    kind: content_contains_any
+    enabled: true
+    confidence: 0.76
+    any_signals: ["fs.write", "writefile", "file.write", "std::fs::write", "with open(", ">> "]
+
+  - id: persistence_signals
+    kind: content_contains_any
+    enabled: true
+    confidence: 0.89
+    any_signals: ["crontab", "authorized_keys", ".bashrc", ".zshrc", "systemd", "/etc/cron"]
+
+  - id: env_access_signals
+    kind: content_contains_any
+    enabled: true
+    confidence: 0.74
+    any_signals: ["process.env", "os.environ", "env::var", ".env"]
+
+  - id: secret_keyword_signals
+    kind: content_contains_any
+    enabled: true
+    confidence: 0.71
+    any_signals: ["api_key", "secret", "token", "password", "private_key", "credential"]
+
+  - id: obfuscation_base64_signals
+    kind: content_contains_any
+    enabled: true
+    confidence: 0.73
+    any_signals: ["base64", "atob(", "btoa(", "buffer.from("]
+
+  - id: obfuscation_escape_signals
+    kind: content_contains_any
+    enabled: true
+    confidence: 0.7
+    any_signals: ["\\x", "\\u00", "charcodeat", "fromcharcode"]
+
+  - id: prompt_injection_signals
+    kind: content_contains_any
+    enabled: true
+    confidence: 0.78
+    any_signals: ["ignore previous instructions", "system prompt", "developer message", "jailbreak", "override policy"]
+
+  - id: privilege_escalation_signals
+    kind: content_contains_any
+    enabled: true
+    confidence: 0.86
+    any_signals: ["sudo ", "chmod +x", "setfacl", "chown ", "setuid"]
+
+  - id: dynamic_loading_signals
+    kind: content_contains_any
+    enabled: true
+    confidence: 0.79
+    any_signals: ["importlib", "require(", "dlopen", "loadlibrary", "runtime.getruntime"]
+
+  - id: suspicious_file_name
+    kind: file_name_contains
+    enabled: true
+    confidence: 0.66
+    file_name_contains: ["install", "deploy", "bootstrap", "setup", "autorun", "hook"]
+
+  - id: large_file_triage
+    kind: min_file_size
+    enabled: true
+    confidence: 0.55
+    min_size_bytes: 12000

@@ -86,6 +86,8 @@
     "agentDisplayName": "Display Name",
     "globalSkillsDir": "Global Skills Path",
     "projectSkillsRel": "Project Skills Relative Path",
+    "invalidProjectPathPattern": "Project skill path must strictly follow the format '.agent/skills'",
+    "invalidProjectPath": "Project skill path must be a relative path and cannot contain '..'",
     "agentConnectionsDesc": "",
     "loadingAgents": "Loading agents...",
     "linked": "linked",
@@ -104,10 +106,19 @@
     "proxyPassword": "Password",
     "proxyBypass": "Bypass List",
     "proxyBypassPlaceholder": "localhost,127.0.0.1,.local",
+    "githubMirror": "GitHub Acceleration",
+    "githubMirrorConfig": "Mirror Configuration",
+    "githubMirrorNotice": "Acceleration mirrors act as intermediaries. Only use for public repositories. If you have a VPN/proxy, you may not need this.",
+    "mirrorCustom": "Custom Mirror",
+    "mirrorTest": "Test",
+    "mirrorTestFail": "Failed",
+    "saveMirrorFailed": "Failed to save mirror config",
     "aiProvider": "AI Provider",
     "apiFormat": "API Format",
     "openaiCompatible": "OpenAI Compatible",
     "anthropicMessages": "Anthropic Messages API",
+    "localModel": "Local Model (Ollama)",
+    "localApiKeyOptional": "Optional — most local models don't need this",
     "baseUrl": "Base URL",
     "baseUrlHintOpenai": "OpenAI compatible: request will be sent to {base_url}/chat/completions",
     "baseUrlHintAnthropic": "Anthropic format: request will be sent to {base_url}/v1/messages",
@@ -229,7 +240,13 @@
     "backgroundRunHint": "Keep SkillStar running in the background to check for updates. New updates are only flagged, never automatically installed.",
     "backgroundStyle": "Background Style",
     "backgroundCurrent": "Dark",
-    "backgroundPaper": "Paper White"
+    "backgroundPaper": "Paper White",
+    "acpTitle": "ACP Agent",
+    "acpAgent": "Agent for Setup Hooks",
+    "acpDesc": "Configure which ACP-compatible agent to use for generating setup hooks. The agent will analyze repositories and create build scripts automatically.",
+    "acpPresets": "Quick Select",
+    "acpCommand": "Agent Command",
+    "acpCommandHint": "The command to launch the ACP agent subprocess. Must support --acp or equivalent stdio mode."
   },
   "mySkills": {
     "title": "Cards",
@@ -261,7 +278,9 @@
     "createFailed": "Failed to create skill",
     "batchAiProgress": "Translating {{completed}}/{{total}}: {{current}}",
     "batchAiDone": "Translation complete ({{total}} skills)",
-    "batchAiError": "Failed to start AI translation."
+    "batchAiError": "Failed to start AI translation.",
+    "batchUpdateSuccess": "{{count}} skill(s) updated successfully",
+    "batchUpdatePartial": "{{success}} updated, {{failed}} failed"
   },
   "toolbar": {
     "searchPlaceholder": "Search cards...",
@@ -308,7 +327,16 @@
     "exportSuccess": "Exported successfully!",
     "updateAvailable": "Update Available",
     "reinstall": "Reinstall",
-    "readSkillMd": "Read SKILL.md"
+    "readSkillMd": "Read SKILL.md",
+    "specialHandlerTitle": "Built-in Handler",
+    "specialHandlerManaged": "Managed by {{handler}}",
+    "specialHandlerHint": "This skill comes from a built-in special repo workflow. SkillStar reruns the handler instead of using ACP migration.",
+    "specialCompatibleAgents": "Compatible agents",
+    "specialLastSuccess": "Last run succeeded",
+    "specialLastFailed": "Last run failed",
+    "specialLastRun": "Last run: {{time}}",
+    "specialRecentOutput": "Recent output",
+    "specialRerun": "Rerun Built-in Handler"
   },
   "marketplace": {
     "title": "Cards Directory",
@@ -455,7 +483,8 @@
     "installed": "Installed",
     "noDescription": "No description",
     "add": "Add",
-    "remove": "Remove"
+    "remove": "Remove",
+    "incompatibleAgent": "{{agent}} is not compatible with this skill"
   },
   "selectionBar": {
     "selected": "{{count}} selected",
@@ -512,6 +541,8 @@
     "description": "Enter a GitHub repository URL to scan for cards",
     "placeholder": "owner/repo or https://github.com/...",
     "scan": "Scan",
+    "fullDepthLabel": "Deep scan nested skills",
+    "fullDepthHint": "Include subdirectory SKILL.md files (default scan prioritizes root skill when present).",
     "recentRepos": "Recent Repositories",
     "cloning": "Cloning repository...",
     "noSkillsFound": "No cards found in this repository.",
@@ -528,7 +559,13 @@
     "reinstallAll": "Reinstall All",
     "done": "Done",
     "somethingWrong": "Something went wrong",
-    "tryAgain": "Try Again"
+    "tryAgain": "Try Again",
+    "specialTitle": "Built-in Handler",
+    "specialMatched": "This repository is handled by {{handler}} inside SkillStar.",
+    "specialCompatibleAgents": "Compatible agents",
+    "specialFlowHint": "SkillStar will run the repo's fixed setup command, collect the generated Codex-family skills, and install them as a managed group.",
+    "specialInstall": "Install via Built-in Handler",
+    "specialInstalling": "Running built-in special repo setup..."
   },
   "publishModal": {
     "title": "Publish to GitHub",
@@ -823,6 +860,44 @@
     },
     "logHint": "Each scan is saved as a timestamped log. You can open the log folder for details.",
     "latestLog": "Latest: {{time}}",
-    "openLogs": "Open Logs"
+    "openLogs": "Open Logs",
+    "policyLabel": "Policy",
+    "thresholdLabel": "Min Severity",
+    "policyPreset": {
+      "strict": "Strict",
+      "balanced": "Balanced",
+      "permissive": "Permissive"
+    },
+    "policySaving": "Saving policy...",
+    "policySaved": "Policy saved",
+    "incrementalOn": "Incremental: ON",
+    "incrementalOff": "Incremental: OFF",
+    "analyzersPlaceholder": "pattern, doc_consistency, secrets, semantic, pip_install...",
+    "applyAnalyzers": "Apply Analyzers",
+    "ignoreRulesPlaceholder": "Rules to ignore (e.g. test_rule_a, fake_key)",
+    "applyIgnoreRules": "Apply Ignore Rules",
+    "exportingFormat": "Exporting {{format}}...",
+    "exportFormat": "Export {{format}}",
+    "latestReport": "Last Report: {{path}}",
+    "estimateFallback": "AI unavailable, using STATIC mode",
+    "estimateFiles": "files",
+    "estimateCalls": "API calls",
+    "riskScore": "Risk {{score}}/10"
+  },
+  "setupHook": {
+    "title": "Setup Hook",
+    "generateViaAcp": "ACP Setup",
+    "generating": "Agent working...",
+    "generateSuccess": "Setup hook generated successfully!",
+    "generateFailed": "ACP setup failed",
+    "run": "Run",
+    "running": "Running...",
+    "runSuccess": "Setup hook ran successfully!",
+    "runFailed": "Setup hook failed",
+    "saveFailed": "Failed to save hook",
+    "deleted": "Setup hook deleted",
+    "deleteFailed": "Failed to delete hook",
+    "lastRun": "Last run: {{time}}",
+    "clickToToggle": "Click to toggle script/output"
   }
 }

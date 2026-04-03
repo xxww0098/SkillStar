@@ -3,12 +3,12 @@ use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::sync::RwLock;
-use tracing::{debug, info};
 #[cfg(test)]
 use std::path::PathBuf;
 #[cfg(not(test))]
 use std::sync::LazyLock;
+use std::sync::RwLock;
+use tracing::{debug, info};
 
 const CACHE_SCHEMA_VERSION: &str = "v1";
 
@@ -18,8 +18,9 @@ const CACHE_SCHEMA_VERSION: &str = "v1";
 // Eliminates DB roundtrips during list_skills (which builds 100+ skills
 // concurrently on blocking threads, each needing its description translation).
 
-static SHORT_TRANSLATION_MEM: std::sync::LazyLock<RwLock<HashMap<(String, String), CachedTranslation>>> =
-    std::sync::LazyLock::new(|| RwLock::new(HashMap::new()));
+static SHORT_TRANSLATION_MEM: std::sync::LazyLock<
+    RwLock<HashMap<(String, String), CachedTranslation>>,
+> = std::sync::LazyLock::new(|| RwLock::new(HashMap::new()));
 
 const CORRUPTED_MARKERS: &[&str] = &[
     "PLEASE SELECT TWO DISTINCT LANGUAGES",
@@ -306,6 +307,77 @@ pub fn clear_cache() -> Result<usize> {
     })
 }
 
+// ── LRU Cache Cleanup ───────────────────────────────────────────────
+
+/// Maximum number of cache entries before LRU eviction kicks in.
+const MAX_CACHE_ENTRIES: i64 = 10_000;
+
+/// Entries older than this many days are considered stale.
+const STALE_ENTRY_DAYS: i64 = 90;
+
+/// Clean up stale and excess translation cache entries.
+///
+/// 1. Deletes entries older than `STALE_ENTRY_DAYS`.
+/// 2. If still over `MAX_CACHE_ENTRIES`, keeps only the most recent entries.
+///
+/// Returns the total number of entries removed.
+pub fn cleanup_stale_entries() -> Result<usize> {
+    // Clear in-memory cache — it will be re-warmed lazily.
+    if let Ok(mut mem) = SHORT_TRANSLATION_MEM.write() {
+        mem.clear();
+    }
+
+    with_conn(|conn| {
+        let cutoff = (chrono::Utc::now() - chrono::Duration::days(STALE_ENTRY_DAYS)).to_rfc3339();
+
+        // Phase 1: delete entries older than STALE_ENTRY_DAYS
+        let deleted_stale: usize = conn
+            .execute(
+                "DELETE FROM translation_cache WHERE updated_at < ?1",
+                params![cutoff],
+            )
+            .context("Failed to delete stale translations")?;
+
+        // Phase 2: if still over limit, keep the most recent MAX_CACHE_ENTRIES
+        let total: i64 = conn
+            .query_row("SELECT COUNT(1) FROM translation_cache", [], |row| {
+                row.get(0)
+            })
+            .context("Failed to count translation cache entries")?;
+
+        let deleted_lru: usize = if total > MAX_CACHE_ENTRIES {
+            conn.execute(
+                "DELETE FROM translation_cache WHERE cache_key NOT IN (
+                    SELECT cache_key FROM translation_cache
+                    ORDER BY updated_at DESC LIMIT ?1
+                )",
+                params![MAX_CACHE_ENTRIES],
+            )
+            .context("Failed to LRU-evict excess translations")?
+        } else {
+            0
+        };
+
+        let total_removed = deleted_stale + deleted_lru;
+        if total_removed > 0 {
+            info!(target: "translate", stale = deleted_stale, lru = deleted_lru, "cleanup removed {total_removed} cache entries");
+        }
+
+        Ok(total_removed)
+    })
+}
+
+/// Run once at startup: clean stale entries. Safe to call multiple times
+/// (only does real work on the first call per process).
+pub fn startup_cleanup() {
+    static DONE: std::sync::Once = std::sync::Once::new();
+    DONE.call_once(|| {
+        if let Err(e) = cleanup_stale_entries() {
+            tracing::warn!(target: "translate", "startup cache cleanup failed: {e}");
+        }
+    });
+}
+
 /// Bulk-load all Short translations for a given target language into a
 /// HashMap keyed by `source_hash`.  Used by `list_installed_skills` to
 /// avoid N+1 DB queries (one per skill) during listing.
@@ -357,10 +429,7 @@ pub fn preload_short_translations(
     // Warm in-memory cache with the bulk-loaded data.
     if let Ok(mut mem) = SHORT_TRANSLATION_MEM.write() {
         for (hash, cached) in &map {
-            mem.insert(
-                (hash.clone(), normalized_lang.clone()),
-                cached.clone(),
-            );
+            mem.insert((hash.clone(), normalized_lang.clone()), cached.clone());
         }
     }
     info!(target: "translate", entries = map.len(), "preload_short_translations done");

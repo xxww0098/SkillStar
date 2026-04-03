@@ -8,13 +8,14 @@ import { SelectAllButton } from "../../../components/ui/SelectAllButton";
 import { AgentIcon } from "../../../components/ui/AgentIcon";
 import { MOTION_TRANSITION, motionDuration } from "../../../comm/motion";
 import { cn, agentIconCls } from "../../../lib/utils";
-import type { AgentProfile, ProjectEntry } from "../../../types";
+import type { AgentProfile, ProjectEntry, Skill } from "../../../types";
 
 interface ProjectDeployAgentDialogProps {
   open: boolean;
   project: ProjectEntry | null;
   skillNames: string[];
   profiles: AgentProfile[];
+  skillCatalog: Skill[];
   initialSelectedAgentIds?: string[];
   onClose: () => void;
   onConfirm: (agentIds: string[]) => void;
@@ -25,6 +26,7 @@ export function ProjectDeployAgentDialog({
   project,
   skillNames,
   profiles,
+  skillCatalog: _skillCatalog,
   initialSelectedAgentIds,
   onClose,
   onConfirm,
@@ -32,7 +34,8 @@ export function ProjectDeployAgentDialog({
   const { t } = useTranslation();
   const prefersReducedMotion = useReducedMotion();
   const enabledProfiles = useMemo(
-    () => profiles.filter((profile) => profile.enabled && profile.id !== "openclaw"),
+    () =>
+      profiles.filter((profile) => profile.enabled && profile.id !== "openclaw"),
     [profiles]
   );
 

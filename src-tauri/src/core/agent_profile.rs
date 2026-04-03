@@ -7,15 +7,69 @@ use std::path::{Path, PathBuf};
 //
 // Adding a new agent requires only one line here.
 const BUILTIN_AGENT_DEFS: &[(&str, &str, &str, &[&str], &str)] = &[
-    ("opencode",    "OpenCode",    "agents/opencode.svg",     &[".config", "opencode", "skills"], ".opencode/skills"),
-    ("claude",      "Claude Code", "agents/claude.svg",       &[".claude", "skills"],              ".claude/skills"),
-    ("codex",       "Codex CLI",   "agents/codex.svg",        &[".codex", "skills"],               ".codex/skills"),
-    ("antigravity", "Antigravity", "agents/antigravity.svg",  &[".gemini", "antigravity", "skills"], ".agents/skills"),
-    ("gemini",      "Gemini CLI",  "agents/gemini.svg",       &[".gemini", "skills"],              ".gemini/skills"),
-    ("cursor",      "Cursor",      "agents/cursor.svg",       &[".cursor", "skills"],              ".cursor/skills"),
-    ("qoder",       "Qoder",       "agents/qoder-color.svg",  &[".qoder", "skills"],               ".qoder/skills"),
-    ("trae",        "Trae",        "agents/trae-color.svg",   &[".trae", "skills"],                ".trae/skills"),
-    ("openclaw",    "OpenClaw",    "agents/openclaw.svg",     &[".openclaw", "skills"],            ""),
+    (
+        "opencode",
+        "OpenCode",
+        "agents/opencode.svg",
+        &[".config", "opencode", "skills"],
+        ".opencode/skills",
+    ),
+    (
+        "claude",
+        "Claude Code",
+        "agents/claude.svg",
+        &[".claude", "skills"],
+        ".claude/skills",
+    ),
+    (
+        "codex",
+        "Codex CLI",
+        "agents/codex.svg",
+        &[".codex", "skills"],
+        ".codex/skills",
+    ),
+    (
+        "antigravity",
+        "Antigravity",
+        "agents/antigravity.svg",
+        &[".gemini", "antigravity", "skills"],
+        ".agents/skills",
+    ),
+    (
+        "gemini",
+        "Gemini CLI",
+        "agents/gemini.svg",
+        &[".gemini", "skills"],
+        ".gemini/skills",
+    ),
+    (
+        "cursor",
+        "Cursor",
+        "agents/cursor.svg",
+        &[".cursor", "skills"],
+        ".cursor/skills",
+    ),
+    (
+        "qoder",
+        "Qoder",
+        "agents/qoder-color.svg",
+        &[".qoder", "skills"],
+        ".qoder/skills",
+    ),
+    (
+        "trae",
+        "Trae",
+        "agents/trae-color.svg",
+        &[".trae", "skills"],
+        ".trae/skills",
+    ),
+    (
+        "openclaw",
+        "OpenClaw",
+        "agents/openclaw.svg",
+        &[".openclaw", "skills"],
+        "",
+    ),
 ];
 
 /// A single Agent profile describing where its skills directory lives.
@@ -87,7 +141,7 @@ fn home_dir() -> PathBuf {
 
 /// Path to the TOML configuration file storing user preferences.
 fn prefs_path() -> PathBuf {
-    super::paths::data_root().join("profiles.toml")
+    super::paths::profiles_config_path()
 }
 
 /// Load persisted user preferences from disk.
@@ -166,18 +220,28 @@ pub fn list_profiles() -> Vec<AgentProfile> {
 
     for cp in &prefs.custom_profiles {
         let path_str = &cp.global_skills_dir;
-        let pbuf = if let Some(stripped) = path_str.strip_prefix("~/") {
+        // Handle both ~/ (Unix) and ~\ (Windows) prefixes
+        let pbuf = if let Some(stripped) = path_str
+            .strip_prefix("~/")
+            .or_else(|| path_str.strip_prefix("~\\"))
+        {
             home.join(stripped)
         } else {
             PathBuf::from(path_str)
         };
 
+        // Normalize project_skills_rel to forward slashes for cross-platform consistency
+        let normalized_rel = cp.project_skills_rel.replace('\\', "/");
+
         profiles.push(AgentProfile {
             id: cp.id.clone(),
             display_name: cp.display_name.clone(),
-            icon: cp.icon_data_uri.clone().unwrap_or_else(|| "agents/openclaw.svg".into()),
+            icon: cp
+                .icon_data_uri
+                .clone()
+                .unwrap_or_else(|| "agents/openclaw.svg".into()),
             global_skills_dir: pbuf,
-            project_skills_rel: cp.project_skills_rel.clone(),
+            project_skills_rel: normalized_rel,
             installed: false,
             enabled: false,
             synced_count: 0,
@@ -194,13 +258,30 @@ pub fn list_profiles() -> Vec<AgentProfile> {
 }
 
 pub fn add_custom_profile(def: CustomProfileDef) -> Result<()> {
+    let project_rel = def.project_skills_rel.trim();
+    if !project_rel.is_empty() {
+        if !project_rel.starts_with('.') || !project_rel.ends_with("/skills") {
+            return Err(anyhow::anyhow!("Project skills path must strictly follow the format '.agentname/skills'"));
+        }
+        let middle = &project_rel[1..project_rel.len() - "/skills".len()];
+        if middle.is_empty() || !middle.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+            return Err(anyhow::anyhow!("Project skills path must strictly follow the format '.agentname/skills'"));
+        }
+    }
+
     let mut prefs = load_prefs();
-    
+
     let mut new_def = def.clone();
     if new_def.id.is_empty() {
-        new_def.id = format!("custom_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+        new_def.id = format!(
+            "custom_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+        );
     }
-    
+
     prefs.custom_profiles.retain(|p| p.id != new_def.id);
     prefs.custom_profiles.push(new_def.clone());
     prefs.enabled.insert(new_def.id.clone(), true);

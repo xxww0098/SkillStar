@@ -34,7 +34,7 @@ impl Default for PatrolConfig {
 }
 
 fn config_path() -> std::path::PathBuf {
-    super::paths::data_root().join("patrol.json")
+    super::paths::patrol_state_path()
 }
 
 pub fn load_config() -> PatrolConfig {

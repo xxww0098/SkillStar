@@ -175,6 +175,12 @@ export function MySkills({
     return visibleSkills;
   }, [skills, searchQuery, sortBy, agentFilter, profiles, showUpdateOnly, sourceFilter]);
 
+  const compatibleSelectionProfiles = useMemo(
+    () =>
+      profiles.filter((profile) => profile.enabled && profile.id !== "openclaw"),
+    [profiles]
+  );
+
   const handleInstall = async (url: string) => {
     try {
       await installSkill(url);
@@ -278,16 +284,45 @@ export function MySkills({
   }, [closeUninstallDialog, pendingUninstallNames, removeSkillFromUi, uninstallSkill, t]);
 
   const handleBatchUpdate = async () => {
+    // Only update skills that actually have updates available (skip local skills)
+    const updatableNames = Array.from(selectedSkillNames).filter((name) => {
+      const skill = skills.find((s) => s.name === name);
+      return skill?.update_available && skill.skill_type !== "local";
+    });
+
+    if (updatableNames.length === 0) {
+      toast.info(t("mySkills.noUpdates"));
+      return;
+    }
+
     setBatchLoading(true);
-    for (const name of selectedSkillNames) {
+    let successCount = 0;
+    const failedNames: string[] = [];
+
+    for (const name of updatableNames) {
       try {
         await updateSkill(name);
-      } catch (e) {
-        toast.error(t("mySkills.updateFailed"));
+        successCount++;
+      } catch {
+        failedNames.push(name);
       }
     }
+
     clearSelection();
     setBatchLoading(false);
+
+    // Summary toast
+    if (failedNames.length === 0) {
+      toast.success(t("mySkills.batchUpdateSuccess", { count: successCount, defaultValue: `${successCount} skill(s) updated` }));
+    } else if (successCount > 0) {
+      toast.warning(t("mySkills.batchUpdatePartial", {
+        success: successCount,
+        failed: failedNames.length,
+        defaultValue: `${successCount} updated, ${failedNames.length} failed`,
+      }));
+    } else {
+      toast.error(t("mySkills.updateFailed"));
+    }
   };
 
   const handleBatchLink = useCallback(async (agentId: string) => {
@@ -301,7 +336,7 @@ export function MySkills({
       clearSelection();
       await refresh(true, true);
     } catch (e) {
-      toast.error(t("mySkills.batchLinkFailed"));
+      toast.error(String(e) || t("mySkills.batchLinkFailed"));
     } finally {
       setBatchLoading(false);
     }
@@ -379,7 +414,7 @@ export function MySkills({
                 setSelectedSkillNames(new Set(filteredSkills.map((skill) => skill.name)))
               }
               onClear={clearSelection}
-              agentProfiles={profiles}
+              agentProfiles={compatibleSelectionProfiles}
               onBatchLink={handleBatchLink}
               onBatchUnlinkAll={handleBatchUnlinkAll}
               onBatchAiProcess={async () => {
@@ -497,7 +532,7 @@ export function MySkills({
         open={deployModalOpen}
         onClose={() => setDeployModalOpen(false)}
         selectedSkills={Array.from(selectedSkillNames)}
-        profiles={profiles.filter((p) => p.enabled)}
+        profiles={compatibleSelectionProfiles}
         onDeploy={deploySkillsToProject}
       />
 

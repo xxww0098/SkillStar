@@ -98,7 +98,7 @@ fn try_install_from_repo_cache(
         return None;
     };
 
-    let skills_found = repo_scanner::scan_skills_in_repo(&repo_dir);
+    let skills_found = repo_scanner::scan_skills_in_repo(&repo_dir, &repo_url, false);
     let target = find_target_skill(&skills_found, requested_name, name_hint);
 
     let Some(skill) = target else {
@@ -190,6 +190,25 @@ pub async fn install_skill(url: String, name: Option<String>) -> Result<Skill, S
         url,
         Some(tree_hash),
     ))
+}
+
+/// Install all skills from a repo that contains a skillpack.toml manifest.
+/// Returns the list of installed skill names.
+pub async fn install_skill_pack(url: String) -> Result<Vec<String>, String> {
+    let (repo_url, source) =
+        super::repo_scanner::normalize_repo_url(&url).map_err(|e| format!("Invalid URL: {}", e))?;
+
+    let repo_dir = super::repo_scanner::clone_or_fetch_repo(&repo_url, &source)
+        .map_err(|e| format!("Failed to clone repo: {}", e))?;
+
+    // Detect pack manifest
+    super::skill_pack::detect_pack(&repo_dir)
+        .map_err(|e| format!("Failed to detect skill pack: {}", e))?
+        .ok_or_else(|| "No skillpack.toml found in repository".to_string())?;
+
+    // Install via skill_pack module
+    super::skill_pack::install_pack(&repo_dir, &source, &url)
+        .map_err(|e| format!("Pack install failed: {}", e))
 }
 
 #[cfg(test)]

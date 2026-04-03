@@ -34,7 +34,7 @@ struct GroupStore {
 
 /// Path to the JSON file storing groups.
 fn store_path() -> PathBuf {
-    super::paths::data_root().join("groups.json")
+    super::paths::groups_path()
 }
 
 fn load_store() -> GroupStore {

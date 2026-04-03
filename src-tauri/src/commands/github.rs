@@ -1,20 +1,20 @@
 use crate::core::{
-    agent_profile, gh_manager, local_skill, lockfile, paths, repo_history, repo_scanner, sync,
+    agent_profile, ai_provider, error::AppError, gh_manager, local_skill, lockfile, paths,
+    repo_history, repo_scanner, security_scan, skill_pack, sync,
 };
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tracing::error;
 
 #[tauri::command]
-pub async fn check_gh_installed() -> Result<bool, String> {
+pub async fn check_gh_installed() -> Result<bool, AppError> {
     Ok(gh_manager::is_gh_installed())
 }
 
 #[tauri::command]
-pub async fn check_gh_status() -> Result<gh_manager::GhStatus, String> {
-    Ok(tokio::task::spawn_blocking(gh_manager::check_status)
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?)
+pub async fn check_gh_status() -> Result<gh_manager::GhStatus, AppError> {
+    Ok(tokio::task::spawn_blocking(gh_manager::check_status).await?)
 }
 
 #[tauri::command]
@@ -25,8 +25,50 @@ pub async fn publish_skill_to_github(
     existing_repo_url: Option<String>,
     folder_name: String,
     repo_name: String,
-) -> Result<gh_manager::PublishResult, String> {
+) -> Result<gh_manager::PublishResult, AppError> {
     let was_local = local_skill::is_local_skill(&skill_name);
+    let skill_scan_dir = resolve_skill_dir_for_publish(&skill_name, was_local)?;
+
+    // Mandatory pre-publish security gate.
+    let scan_config = ai_provider::AiConfig {
+        // Keep the gate deterministic and cost-free: static mode only.
+        enabled: false,
+        ..ai_provider::AiConfig::default()
+    };
+    let scan_result = security_scan::scan_single_skill::<fn(&str, Option<&str>)>(
+        &scan_config,
+        &skill_name,
+        &skill_scan_dir,
+        security_scan::ScanMode::Static,
+        Arc::new(tokio::sync::Semaphore::new(1)),
+        None,
+    )
+    .await
+    .map_err(|e| AppError::Other(format!("Pre-publish security scan failed: {}", e)))?;
+    if scan_result.incomplete {
+        return Err(AppError::Other(
+            "Pre-publish security scan was incomplete. Resolve scan errors and retry publish."
+                .to_string(),
+        ));
+    }
+    if matches!(
+        scan_result.risk_level,
+        security_scan::RiskLevel::High | security_scan::RiskLevel::Critical
+    ) {
+        return Err(AppError::Other(format!(
+            "Publish blocked by security gate: risk={} score={:.1}/10. {}",
+            match scan_result.risk_level {
+                security_scan::RiskLevel::Critical => "Critical",
+                security_scan::RiskLevel::High => "High",
+                security_scan::RiskLevel::Medium => "Medium",
+                security_scan::RiskLevel::Low => "Low",
+                security_scan::RiskLevel::Safe => "Safe",
+            },
+            scan_result.risk_score,
+            scan_result.summary
+        )));
+    }
+
     let skill_name_clone = skill_name.clone();
     let folder_name_clone = folder_name.clone();
 
@@ -40,9 +82,8 @@ pub async fn publish_skill_to_github(
             &folder_name,
         )
     })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
-    .map_err(|e| e.to_string())?;
+    .await?
+    .map_err(|e| AppError::Git(e.to_string()))?;
 
     // Post-publish graduation: local → hub
     if was_local {
@@ -57,7 +98,7 @@ pub async fn publish_skill_to_github(
             }
 
             // 2. Re-clone from GitHub into .repos/ and symlink to skills/
-            let scan = match repo_scanner::scan_repo(&git_url) {
+            let scan = match repo_scanner::scan_repo_with_mode(&git_url, true) {
                 Ok(s) => s,
                 Err(e) => {
                     error!(target: "publish", "failed to scan repo after publish: {e}");
@@ -82,36 +123,62 @@ pub async fn publish_skill_to_github(
                 }
             }
         })
-        .await
-        .map_err(|e| format!("Task join error during graduation: {}", e))?;
+        .await?;
     }
 
     Ok(result)
 }
 
+fn resolve_skill_dir_for_publish(skill_name: &str, was_local: bool) -> Result<PathBuf, AppError> {
+    let path = if was_local {
+        paths::local_skills_dir().join(skill_name)
+    } else {
+        paths::hub_skills_dir().join(skill_name)
+    };
+
+    if !path.exists() && !path.is_symlink() {
+        return Err(AppError::Other(format!(
+            "Skill '{}' directory not found for pre-publish scan",
+            skill_name
+        )));
+    }
+
+    if path.is_symlink() {
+        std::fs::canonicalize(&path).map_err(|e| {
+            AppError::Other(format!(
+                "Failed to resolve symlink for skill '{}': {}",
+                skill_name, e
+            ))
+        })
+    } else {
+        Ok(path)
+    }
+}
+
 #[tauri::command]
-pub async fn list_user_repos(limit: Option<u32>) -> Result<Vec<gh_manager::UserRepo>, String> {
+pub async fn list_user_repos(limit: Option<u32>) -> Result<Vec<gh_manager::UserRepo>, AppError> {
     let repo_limit = limit.unwrap_or(30);
     tokio::task::spawn_blocking(move || gh_manager::list_user_repos(repo_limit))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
-        .map_err(|e| e.to_string())
+        .await?
+        .map_err(|e| AppError::Git(e.to_string()))
 }
 
 #[tauri::command]
-pub async fn inspect_repo_folders(repo_full_name: String) -> Result<Vec<String>, String> {
+pub async fn inspect_repo_folders(repo_full_name: String) -> Result<Vec<String>, AppError> {
     tokio::task::spawn_blocking(move || gh_manager::inspect_repo_folders(&repo_full_name))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
-        .map_err(|e| e.to_string())
+        .await?
+        .map_err(|e| AppError::Git(e.to_string()))
 }
 
 #[tauri::command]
-pub async fn scan_github_repo(url: String) -> Result<repo_scanner::ScanResult, String> {
-    tokio::task::spawn_blocking(move || repo_scanner::scan_repo(&url))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
-        .map_err(|e| e.to_string())
+pub async fn scan_github_repo(
+    url: String,
+    full_depth: Option<bool>,
+) -> Result<repo_scanner::ScanResult, AppError> {
+    let use_full_depth = full_depth.unwrap_or(false);
+    tokio::task::spawn_blocking(move || repo_scanner::scan_repo_with_mode(&url, use_full_depth))
+        .await?
+        .map_err(|e| AppError::Git(e.to_string()))
 }
 
 #[tauri::command]
@@ -119,35 +186,31 @@ pub async fn install_from_scan(
     repo_url: String,
     source: String,
     skills: Vec<repo_scanner::SkillInstallTarget>,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<String>, AppError> {
     tokio::task::spawn_blocking(move || {
         let install_result = repo_scanner::install_from_repo(&source, &repo_url, &skills);
         crate::core::installed_skill::invalidate_cache();
         install_result
     })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
-    .map_err(|e| e.to_string())
+    .await?
+    .map_err(|e| AppError::Git(e.to_string()))
 }
 
 #[tauri::command]
-pub async fn list_repo_history() -> Result<Vec<repo_history::RepoHistoryEntry>, String> {
+pub async fn list_repo_history() -> Result<Vec<repo_history::RepoHistoryEntry>, AppError> {
     Ok(repo_history::list_entries())
 }
 
 #[tauri::command]
-pub async fn get_repo_cache_info() -> Result<repo_scanner::RepoCacheInfo, String> {
-    Ok(tokio::task::spawn_blocking(repo_scanner::get_cache_info)
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?)
+pub async fn get_repo_cache_info() -> Result<repo_scanner::RepoCacheInfo, AppError> {
+    Ok(tokio::task::spawn_blocking(repo_scanner::get_cache_info).await?)
 }
 
 #[tauri::command]
-pub async fn clean_repo_cache() -> Result<usize, String> {
+pub async fn clean_repo_cache() -> Result<usize, AppError> {
     tokio::task::spawn_blocking(repo_scanner::clean_unused_cache)
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
-        .map_err(|e| e.to_string())
+        .await?
+        .map_err(|e| AppError::Anyhow(e))
 }
 
 // ── Storage management ──────────────────────────────────────────────
@@ -194,14 +257,14 @@ pub struct StorageOverview {
 }
 
 #[tauri::command]
-pub async fn get_storage_overview() -> Result<StorageOverview, String> {
-    tokio::task::spawn_blocking(|| {
+pub async fn get_storage_overview() -> Result<StorageOverview, AppError> {
+    Ok(tokio::task::spawn_blocking(|| {
         let data_root = paths::data_root();
         let hub_root = paths::hub_root();
         let is_hub_under_data = hub_root.starts_with(&data_root) && hub_root != data_root;
 
-        let config_dir = data_root.clone();
-        let config_bytes = dir_size_shallow(&config_dir, Some("repo_history.json"));
+        let config_dir = paths::config_dir();
+        let config_bytes = dir_size_recursive(&config_dir);
 
         let hub_dir = paths::hub_skills_dir();
         let hub_bytes = dir_size_recursive(&hub_dir);
@@ -236,8 +299,7 @@ pub async fn get_storage_overview() -> Result<StorageOverview, String> {
             history_count,
         }
     })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))
+    .await?)
 }
 
 /// Result of a unified cache cleanup.
@@ -252,8 +314,8 @@ pub struct CacheCleanResult {
 }
 
 #[tauri::command]
-pub async fn clear_all_caches() -> Result<CacheCleanResult, String> {
-    tokio::task::spawn_blocking(|| {
+pub async fn clear_all_caches() -> Result<CacheCleanResult, AppError> {
+    Ok(tokio::task::spawn_blocking(|| {
         let repos_removed = repo_scanner::clean_unused_cache().unwrap_or(0);
         let history_cleared = repo_history::clear_history().unwrap_or(0);
 
@@ -273,16 +335,15 @@ pub async fn clear_all_caches() -> Result<CacheCleanResult, String> {
             translation_cleared: 0,
         }
     })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))
+    .await?)
 }
 
 /// Force-delete all installed skills from the hub.
 ///
 /// Returns the number of skill entries removed.
 #[tauri::command]
-pub async fn force_delete_installed_skills() -> Result<usize, String> {
-    tokio::task::spawn_blocking(|| {
+pub async fn force_delete_installed_skills() -> Result<usize, AppError> {
+    tokio::task::spawn_blocking(|| -> Result<usize, AppError> {
         let hub_dir = crate::core::paths::hub_skills_dir();
         let removed_count = count_children(&hub_dir);
 
@@ -292,16 +353,14 @@ pub async fn force_delete_installed_skills() -> Result<usize, String> {
         }
 
         if hub_dir.exists() {
-            std::fs::remove_dir_all(&hub_dir)
-                .map_err(|e| format!("Failed to remove hub dir: {}", e))?;
+            std::fs::remove_dir_all(&hub_dir)?;
         }
-        std::fs::create_dir_all(&hub_dir)
-            .map_err(|e| format!("Failed to recreate hub dir: {}", e))?;
+        std::fs::create_dir_all(&hub_dir)?;
 
         // Clear lockfile entries so UI state and filesystem stay aligned.
         let _lock = lockfile::get_mutex()
             .lock()
-            .map_err(|_| "Lockfile mutex poisoned".to_string())?;
+            .map_err(|_| AppError::Lockfile("Lockfile mutex poisoned".to_string()))?;
         let lock_path = lockfile::lockfile_path();
         let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
         lf.skills.clear();
@@ -309,16 +368,15 @@ pub async fn force_delete_installed_skills() -> Result<usize, String> {
         crate::core::installed_skill::invalidate_cache();
         Ok(removed_count)
     })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
+    .await?
 }
 
 /// Force-delete all repo caches (including currently referenced ones).
 ///
 /// Returns the number of cached repositories removed.
 #[tauri::command]
-pub async fn force_delete_repo_caches() -> Result<usize, String> {
-    tokio::task::spawn_blocking(|| {
+pub async fn force_delete_repo_caches() -> Result<usize, AppError> {
+    tokio::task::spawn_blocking(|| -> Result<usize, AppError> {
         let cache_dir = repos_cache_dir();
         let repos_removed = count_directories(&cache_dir);
         let hub_dir = crate::core::paths::hub_skills_dir();
@@ -338,7 +396,7 @@ pub async fn force_delete_repo_caches() -> Result<usize, String> {
                     if let Some(name) = entry.file_name().to_str() {
                         removed_skill_names.insert(name.to_string());
                     }
-                    let _ = std::fs::remove_file(&skill_path);
+                    let _ = paths::remove_symlink(&skill_path);
                 }
             }
         }
@@ -352,7 +410,7 @@ pub async fn force_delete_repo_caches() -> Result<usize, String> {
         if !removed_skill_names.is_empty() {
             let _lock = lockfile::get_mutex()
                 .lock()
-                .map_err(|_| "Lockfile mutex poisoned".to_string())?;
+                .map_err(|_| AppError::Lockfile("Lockfile mutex poisoned".to_string()))?;
             let lock_path = lockfile::lockfile_path();
             let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
             lf.skills
@@ -362,52 +420,56 @@ pub async fn force_delete_repo_caches() -> Result<usize, String> {
         }
 
         if cache_dir.exists() {
-            std::fs::remove_dir_all(&cache_dir)
-                .map_err(|e| format!("Failed to remove cache dir: {}", e))?;
+            std::fs::remove_dir_all(&cache_dir)?;
         }
-        std::fs::create_dir_all(&cache_dir)
-            .map_err(|e| format!("Failed to recreate cache dir: {}", e))?;
+        std::fs::create_dir_all(&cache_dir)?;
 
         Ok(repos_removed)
     })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
+    .await?
 }
 
 /// Force-delete app config files.
 ///
 /// Returns the number of config files removed.
 #[tauri::command]
-pub async fn force_delete_app_config() -> Result<usize, String> {
-    tokio::task::spawn_blocking(|| {
-        let config_dir = paths::data_root();
-        if !config_dir.exists() {
-            return Ok(0usize);
-        }
-
+pub async fn force_delete_app_config() -> Result<usize, AppError> {
+    Ok(tokio::task::spawn_blocking(|| {
         let mut removed = 0usize;
-        if let Ok(entries) = std::fs::read_dir(&config_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if !path.is_file() {
-                    continue;
-                }
-                let file_name = entry.file_name();
-                let file_name = file_name.to_string_lossy();
-                // Keep scan history isolated from config deletion.
-                if file_name == "repo_history.json" {
-                    continue;
-                }
-                if std::fs::remove_file(&path).is_ok() {
-                    removed += 1;
+
+        // Delete config dir contents
+        let config_dir = paths::config_dir();
+        if config_dir.exists() {
+            if let Ok(entries) = std::fs::read_dir(&config_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file() {
+                        if std::fs::remove_file(&path).is_ok() {
+                            removed += 1;
+                        }
+                    }
                 }
             }
         }
 
-        Ok(removed)
+        // Also delete state dir contents (rebuildable)
+        let state_dir = paths::state_dir();
+        if state_dir.exists() {
+            if let Ok(entries) = std::fs::read_dir(&state_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file() {
+                        if std::fs::remove_file(&path).is_ok() {
+                            removed += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        removed
     })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
+    .await?)
 }
 
 /// Calculate total size of top-level files in a directory (non-recursive).
@@ -512,8 +574,8 @@ fn count_hub_skills(hub_dir: &Path) -> (usize, usize) {
 ///
 /// Returns the number of issues fixed.
 #[tauri::command]
-pub async fn clean_broken_skills() -> Result<usize, String> {
-    tokio::task::spawn_blocking(|| {
+pub async fn clean_broken_skills() -> Result<usize, AppError> {
+    tokio::task::spawn_blocking(|| -> Result<usize, AppError> {
         let hub_dir = crate::core::paths::hub_skills_dir();
         let mut fixed: usize = 0;
         let mut removed_names: HashSet<String> = HashSet::new();
@@ -527,7 +589,7 @@ pub async fn clean_broken_skills() -> Result<usize, String> {
                 };
                 if meta.is_symlink() && !path.exists() {
                     // Broken symlink — target is gone
-                    if std::fs::remove_file(&path).is_ok() {
+                    if paths::remove_symlink(&path).is_ok() {
                         if let Some(name) = entry.file_name().to_str() {
                             removed_names.insert(name.to_string());
                         }
@@ -545,7 +607,7 @@ pub async fn clean_broken_skills() -> Result<usize, String> {
         // Phase 3: Prune orphaned lockfile entries
         let _lock = lockfile::get_mutex()
             .lock()
-            .map_err(|_| "Lockfile mutex poisoned".to_string())?;
+            .map_err(|_| AppError::Lockfile("Lockfile mutex poisoned".to_string()))?;
         let lock_path = lockfile::lockfile_path();
         let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
         let before = lf.skills.len();
@@ -564,8 +626,7 @@ pub async fn clean_broken_skills() -> Result<usize, String> {
 
         Ok(fixed)
     })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
+    .await?
 }
 
 fn count_directories(path: &Path) -> usize {
@@ -576,7 +637,6 @@ fn count_directories(path: &Path) -> usize {
         .map(|entries| entries.flatten().filter(|e| e.path().is_dir()).count())
         .unwrap_or(0)
 }
-
 
 fn resolve_symlink_target(symlink_path: &Path) -> Option<PathBuf> {
     std::fs::read_link(symlink_path).ok().map(|target| {
@@ -590,4 +650,36 @@ fn resolve_symlink_target(symlink_path: &Path) -> Option<PathBuf> {
 
 fn repos_cache_dir() -> PathBuf {
     paths::repos_cache_dir()
+}
+
+// ── Skill Pack Commands ──────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn install_pack_from_url(url: String) -> Result<Vec<String>, AppError> {
+    tokio::task::spawn_blocking(move || {
+        let rt = tokio::runtime::Runtime::new().map_err(|e| AppError::Other(e.to_string()))?;
+        rt.block_on(crate::core::skill_install::install_skill_pack(url))
+            .map_err(|e| AppError::Other(e))
+    })
+    .await?
+    .map_err(|e| e)
+}
+
+#[tauri::command]
+pub async fn list_installed_packs() -> Result<Vec<skill_pack::PackEntry>, AppError> {
+    Ok(tokio::task::spawn_blocking(skill_pack::list_packs).await?)
+}
+
+#[tauri::command]
+pub async fn remove_installed_pack(name: String) -> Result<Vec<String>, AppError> {
+    tokio::task::spawn_blocking(move || skill_pack::remove_pack(&name))
+        .await?
+        .map_err(|e| AppError::Other(e.to_string()))
+}
+
+#[tauri::command]
+pub async fn get_pack_doctor(name: String) -> Result<skill_pack::DoctorReport, AppError> {
+    tokio::task::spawn_blocking(move || skill_pack::doctor_pack(&name))
+        .await?
+        .map_err(|e| AppError::Other(e.to_string()))
 }

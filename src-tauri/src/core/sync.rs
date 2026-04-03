@@ -61,7 +61,7 @@ pub fn toggle_skill_for_agent(skill_name: &str, agent_id: &str, enable: bool) ->
         // Remove existing symlink if present
         if target.symlink_metadata().is_ok() {
             if target.is_symlink() {
-                std::fs::remove_file(&target)?;
+                super::paths::remove_symlink(&target)?;
             } else {
                 anyhow::bail!("Target cannot be overwritten because it is a real directory");
             }
@@ -70,7 +70,7 @@ pub fn toggle_skill_for_agent(skill_name: &str, agent_id: &str, enable: bool) ->
     } else {
         // Remove symlink
         if target.symlink_metadata().is_ok() && target.is_symlink() {
-            std::fs::remove_file(&target)?;
+            super::paths::remove_symlink(&target)?;
         }
     }
 
@@ -85,7 +85,7 @@ pub fn remove_skill_from_all_agents(skill_name: &str) -> Result<Vec<String>> {
     for profile in &profiles {
         let target = profile.global_skills_dir.join(skill_name);
         if target.is_symlink() {
-            std::fs::remove_file(&target)?;
+            super::paths::remove_symlink(&target)?;
             removed_from.push(profile.display_name.clone());
         }
     }
@@ -108,8 +108,7 @@ pub fn unlink_all_skills_from_agent(agent_id: &str) -> Result<u32> {
         let entry = entry?;
         let path = entry.path();
         if path.is_symlink() {
-            std::fs::remove_file(&path)
-                .with_context(|| format!("Failed to remove symlink {:?}", path))?;
+            super::paths::remove_symlink(&path)?;
             removed += 1;
         }
     }
@@ -148,8 +147,7 @@ pub fn unlink_skill_from_agent(skill_name: &str, agent_id: &str) -> Result<()> {
 
     let target = profile.global_skills_dir.join(skill_name);
     if target.is_symlink() {
-        std::fs::remove_file(&target)
-            .with_context(|| format!("Failed to remove symlink {:?}", target))?;
+        super::paths::remove_symlink(&target)?;
     }
     Ok(())
 }
@@ -224,7 +222,7 @@ pub fn create_project_skills(
             let target = skills_folder.join(name);
             if target.symlink_metadata().is_ok() {
                 if target.is_symlink() {
-                    let _ = std::fs::remove_file(&target);
+                    let _ = super::paths::remove_symlink(&target);
                 } else {
                     continue;
                 }
@@ -237,8 +235,6 @@ pub fn create_project_skills(
 
     Ok(total_linked)
 }
-
-
 
 /// Re-sync a skill only to agents that already have it linked.
 ///
@@ -260,7 +256,7 @@ pub fn resync_existing_links(skill_name: &str) -> Result<Vec<String>> {
         let target = profile.global_skills_dir.join(skill_name);
         // Only re-link if a symlink already exists (preserves user's assignment)
         if target.is_symlink() {
-            std::fs::remove_file(&target)?;
+            super::paths::remove_symlink(&target)?;
             super::paths::create_symlink(&skill_path, &target)?;
             linked_to.push(profile.display_name.clone());
         }

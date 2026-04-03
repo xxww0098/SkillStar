@@ -18,6 +18,10 @@ import {
   Radar,
   Orbit,
   FileText,
+  ChevronDown,
+  ChevronUp,
+  Download,
+  RotateCcw,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { getFileTheme, getRiskTone } from "../../lib/securityScanTheme";
@@ -39,151 +43,236 @@ interface SidebarProps {
   onRestart?: () => void;
   onSkip?: () => void;
   onDismiss?: () => void;
+  onRetry?: () => void;
 }
 
-/* ---------- tiny status indicator with hover popover ---------- */
+/* ---------- Inline Update Banner (sidebar bottom) ---------- */
 
-function UpdateIndicator({
+function UpdateBanner({
   status,
   version,
   progress,
   error,
+  collapsed,
   onUpdate,
   onRestart,
   onSkip,
   onDismiss,
+  onRetry,
   t,
 }: {
   status: UpdateStatus;
   version: string;
   progress: number;
   error: string;
+  collapsed?: boolean;
   onUpdate?: () => void;
   onRestart?: () => void;
   onSkip?: () => void;
   onDismiss?: () => void;
+  onRetry?: () => void;
   t: (key: string, opts?: Record<string, unknown>) => string;
 }) {
-  const [hovered, setHovered] = useState(false);
+  const [errorExpanded, setErrorExpanded] = useState(false);
 
   if (status === "idle" || status === "checking") return null;
 
-  const iconMap: Record<string, { Icon: React.ElementType; color: string; bg: string; pulse?: boolean; spin?: boolean }> = {
-    available:   { Icon: ArrowUpCircle, color: "text-blue-500",    bg: "bg-blue-500/10 hover:bg-blue-500/20" },
-    downloading: { Icon: RefreshCw,     color: "text-amber-500",   bg: "bg-amber-500/10 hover:bg-amber-500/20", spin: true },
-    ready:       { Icon: CheckCircle2,  color: "text-emerald-500", bg: "bg-emerald-500/10 hover:bg-emerald-500/20", pulse: true },
-    error:       { Icon: AlertCircle,   color: "text-red-500",     bg: "bg-red-500/10 hover:bg-red-500/20" },
-  };
-  const cfg = iconMap[status];
-  if (!cfg) return null;
-  const { Icon, color, bg, pulse, spin } = cfg;
+  // Collapsed mode: show a compact badge that hints at the update
+  if (collapsed) {
+    const colorMap: Record<string, string> = {
+      available: "bg-primary",
+      downloading: "bg-amber-500",
+      ready: "bg-emerald-500",
+      error: "bg-destructive",
+    };
+    const iconMap: Record<string, React.ElementType> = {
+      available: ArrowUpCircle,
+      downloading: Download,
+      ready: CheckCircle2,
+      error: AlertCircle,
+    };
+    const Icon = iconMap[status] ?? ArrowUpCircle;
+    const badgeBg = colorMap[status] ?? "bg-primary";
 
-  const renderPopover = () => {
-    switch (status) {
-      case "available":
-        return (
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-foreground">{t("sidebar.newUpdate")}</span>
-              <span className="text-micro font-medium px-1.5 py-0.5 rounded border border-primary/20 bg-primary/5 text-primary">v{version}</span>
+    return (
+      <div className="px-1.5 pb-1">
+        <motion.button
+          initial={{ scale: 0, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ type: "spring", stiffness: 400, damping: 25 }}
+          onClick={status === "ready" ? onRestart : status === "error" ? onRetry : onUpdate}
+          title={status === "available" ? `${t("sidebar.newUpdate")} v${version}` : status === "downloading" ? `${t("sidebar.downloading")} ${progress}%` : status === "ready" ? t("sidebar.readyToInstall") : t("sidebar.updateError")}
+          className={cn(
+            "w-full flex items-center justify-center py-2.5 rounded-lg cursor-pointer transition-all duration-200",
+            "hover:scale-105 active:scale-95",
+            status === "downloading" && "relative overflow-hidden",
+          )}
+        >
+          <div className={cn("w-7 h-7 rounded-full flex items-center justify-center", `${badgeBg}/15`)}>
+            <Icon className={cn("w-4 h-4", badgeBg.replace("bg-", "text-"), status === "downloading" && "animate-pulse")} />
+          </div>
+          {/* Downloading ring progress */}
+          {status === "downloading" && (
+            <svg className="absolute inset-0 w-full h-full" viewBox="0 0 40 40" style={{ transform: "rotate(-90deg)" }}>
+              <circle cx="20" cy="20" r="16" fill="none" stroke="currentColor" strokeWidth="2" className="text-border" />
+              <motion.circle
+                cx="20" cy="20" r="16" fill="none" stroke="currentColor" strokeWidth="2.5"
+                className="text-amber-500"
+                strokeLinecap="round"
+                strokeDasharray={100.5}
+                initial={{ strokeDashoffset: 100.5 }}
+                animate={{ strokeDashoffset: 100.5 - (progress / 100) * 100.5 }}
+                transition={{ duration: 0.3 }}
+              />
+            </svg>
+          )}
+        </motion.button>
+      </div>
+    );
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 10 }}
+      transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+      className="mx-3 mb-2"
+    >
+      <div className="rounded-xl border border-border bg-card/80 backdrop-blur-sm overflow-hidden">
+        {/* ── Available ───────────────────────────────────── */}
+        {status === "available" && (
+          <div className="p-3">
+            <div className="flex items-center gap-2 mb-2.5">
+              <div className="w-6 h-6 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                <ArrowUpCircle className="w-3.5 h-3.5 text-primary" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-semibold text-foreground leading-none">{t("sidebar.newUpdate")}</div>
+              </div>
+              <span className="text-[10px] font-mono font-medium px-1.5 py-0.5 rounded-md border border-primary/20 bg-primary/5 text-primary shrink-0">
+                v{version}
+              </span>
             </div>
-            <div className="flex gap-1.5 mt-1">
-              <button onClick={onUpdate} className="flex-1 inline-flex justify-center items-center text-micro font-medium bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg py-1.5 transition-colors cursor-pointer shadow-sm">
+            <div className="flex gap-1.5">
+              <button
+                onClick={onUpdate}
+                className="flex-1 inline-flex justify-center items-center gap-1.5 text-[11px] font-medium bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg py-1.5 transition-all duration-200 cursor-pointer shadow-sm active:scale-[0.97]"
+              >
+                <Download className="w-3 h-3" />
                 {t("sidebar.updateNow")}
               </button>
-              <button onClick={onSkip} className="inline-flex justify-center items-center text-micro font-medium bg-secondary text-secondary-foreground hover:bg-secondary/80 rounded-lg px-2.5 py-1.5 transition-colors cursor-pointer">
+              <button
+                onClick={onSkip}
+                className="inline-flex justify-center items-center text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-lg px-2.5 py-1.5 transition-colors cursor-pointer"
+              >
                 {t("sidebar.skip")}
               </button>
             </div>
           </div>
-        );
-      case "downloading":
-        return (
-          <div className="flex flex-col gap-2.5">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-medium text-foreground flex items-center gap-1.5">
-                <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground" />
-                {t("sidebar.downloading")}
-              </span>
-              <span className="text-micro font-semibold text-muted-foreground">{progress}%</span>
+        )}
+
+        {/* ── Downloading ────────────────────────────────── */}
+        {status === "downloading" && (
+          <div className="p-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-primary" />
+                <span className="text-xs font-medium text-foreground">{t("sidebar.downloading")}</span>
+              </div>
+              <span className="text-[11px] font-mono font-semibold text-primary tabular-nums">{progress}%</span>
             </div>
-            <div className="h-1.5 bg-secondary/60 rounded-full overflow-hidden">
-              <motion.div className="h-full bg-primary rounded-full relative" initial={{ width: 0 }} animate={{ width: `${progress}%` }} transition={{ duration: 0.3 }}>
-                <div className="absolute inset-0 bg-white/20 animate-pulse" />
+            {/* Progress bar */}
+            <div className="h-1.5 bg-muted/60 rounded-full overflow-hidden">
+              <motion.div
+                className="h-full rounded-full relative"
+                style={{ background: "linear-gradient(90deg, var(--color-primary) 0%, color-mix(in oklch, var(--color-primary), white 20%) 100%)" }}
+                initial={{ width: 0 }}
+                animate={{ width: `${progress}%` }}
+                transition={{ duration: 0.4, ease: "easeOut" }}
+              >
+                <motion.div
+                  className="absolute inset-0 bg-white/25 rounded-full"
+                  animate={{ opacity: [0.3, 0.6, 0.3] }}
+                  transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+                />
               </motion.div>
             </div>
+            {version && (
+              <div className="text-[10px] text-muted-foreground mt-1.5">v{version}</div>
+            )}
           </div>
-        );
-      case "ready":
-        return (
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-1.5 text-emerald-500 mb-0.5">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span className="text-xs font-semibold">{t("sidebar.readyToInstall")}</span>
+        )}
+
+        {/* ── Ready ──────────────────────────────────────── */}
+        {status === "ready" && (
+          <div className="p-3">
+            <div className="flex items-center gap-2 mb-2.5">
+              <div className="w-6 h-6 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+              </div>
+              <span className="text-xs font-semibold text-emerald-500">{t("sidebar.readyToInstall")}</span>
             </div>
-            <button onClick={onRestart} className="w-full inline-flex justify-center items-center text-micro font-medium bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg py-1.5 transition-colors cursor-pointer shadow-sm">
+            <button
+              onClick={onRestart}
+              className="w-full inline-flex justify-center items-center gap-1.5 text-[11px] font-medium bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg py-1.5 transition-all duration-200 cursor-pointer shadow-sm active:scale-[0.97]"
+            >
+              <RotateCcw className="w-3 h-3" />
               {t("sidebar.restart")}
             </button>
           </div>
-        );
-      case "error":
-        return (
-          <div className="flex flex-col gap-2 relative">
-            <div className="flex items-center gap-1.5 text-red-500 pr-5">
-              <AlertCircle className="w-3.5 h-3.5" />
-              <span className="text-xs font-semibold">{t("sidebar.updateError")}</span>
+        )}
+
+        {/* ── Error ──────────────────────────────────────── */}
+        {status === "error" && (
+          <div className="p-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-3.5 h-3.5 text-destructive" />
+                <span className="text-xs font-semibold text-destructive">{t("sidebar.updateError")}</span>
+              </div>
+              {onDismiss && (
+                <button
+                  onClick={onDismiss}
+                  aria-label="Dismiss"
+                  className="text-muted-foreground hover:text-foreground p-1 rounded transition-colors cursor-pointer"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
             </div>
-            {onDismiss && (
-              <button onClick={onDismiss} aria-label={t("common.dismiss")} className="absolute top-0 right-0 text-muted-foreground hover:text-foreground p-1.5 rounded transition-colors cursor-pointer focus-ring">
-                <X className="w-3.5 h-3.5" />
-              </button>
+            {error && (
+              <div className="mb-2">
+                <div
+                  className={cn(
+                    "text-[10px] text-muted-foreground leading-relaxed break-words",
+                    !errorExpanded && "line-clamp-2",
+                  )}
+                >
+                  {error}
+                </div>
+                {error.length > 80 && (
+                  <button
+                    onClick={() => setErrorExpanded((v) => !v)}
+                    className="text-[10px] text-muted-foreground/70 hover:text-muted-foreground mt-0.5 flex items-center gap-0.5 cursor-pointer"
+                  >
+                    {errorExpanded ? <ChevronUp className="w-2.5 h-2.5" /> : <ChevronDown className="w-2.5 h-2.5" />}
+                    {errorExpanded ? t("common.hide") : t("common.more")}
+                  </button>
+                )}
+              </div>
             )}
-            <div className="text-micro text-muted-foreground leading-relaxed line-clamp-3" title={error}>
-              {error}
-            </div>
-            <button onClick={onUpdate} className="mt-1 w-full inline-flex justify-center items-center text-micro font-medium bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 border border-red-500/20 rounded-lg py-1.5 transition-colors cursor-pointer">
+            <button
+              onClick={onRetry}
+              className="w-full inline-flex justify-center items-center gap-1.5 text-[11px] font-medium bg-destructive/10 text-destructive hover:bg-destructive/20 border border-destructive/20 rounded-lg py-1.5 transition-colors cursor-pointer"
+            >
+              <RefreshCw className="w-3 h-3" />
               {t("common.retry")}
             </button>
           </div>
-        );
-      default:
-        return null;
-    }
-  };
-
-  return (
-    <div
-      className="relative flex items-center"
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
-      {/* Indicator Dot */}
-      <motion.div
-        initial={{ scale: 0 }}
-        animate={{ scale: 1 }}
-        className={cn(
-          "w-5 h-5 rounded-full flex items-center justify-center cursor-default transition-colors",
-          bg
         )}
-      >
-        <Icon className={cn("w-3 h-3", color, spin && "animate-spin", pulse && "animate-pulse")} />
-      </motion.div>
-
-      {/* Floating Card Popover */}
-      <AnimatePresence>
-        {hovered && (
-          <motion.div
-            initial={{ opacity: 0, y: 6, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 6, scale: 0.96 }}
-            transition={{ duration: 0.15, ease: "easeOut" }}
-             className="absolute top-[calc(100%+8px)] left-1/2 -translate-x-1/2 z-[100] w-[190px] p-3.5 rounded-[14px] bg-sidebar backdrop-blur-xl border border-border overflow-hidden shadow-[0_8px_30px_rgba(0,0,0,0.4)] origin-top"
-          >
-            {renderPopover()}
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+      </div>
+    </motion.div>
   );
 }
 
@@ -201,6 +290,7 @@ export function Sidebar({
   onRestart,
   onSkip,
   onDismiss,
+  onRetry,
 }: SidebarProps) {
   const { t } = useTranslation();
   const { phase, activeSkills, currentFile, currentStage, scanAngle, recentFiles } = useSecurityScan();
@@ -292,24 +382,23 @@ export function Sidebar({
                 alt="SkillStar icon"
                 className="w-full h-full origin-center will-change-transform"
               />
+              {/* Badge overlay for update status on logo when collapsed */}
+              {collapsed && updateStatus && updateStatus !== "idle" && updateStatus !== "checking" && (
+                <motion.span
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  className={cn(
+                    "absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-sidebar",
+                    updateStatus === "available" && "bg-primary",
+                    updateStatus === "downloading" && "bg-amber-500 animate-pulse",
+                    updateStatus === "ready" && "bg-emerald-500",
+                    updateStatus === "error" && "bg-destructive",
+                  )}
+                />
+              )}
             </motion.div>
             {!collapsed && (
-              <>
-                <span className="text-lg font-bold tracking-tight text-foreground whitespace-nowrap">SkillStar</span>
-                {updateStatus && updateStatus !== "idle" && updateStatus !== "checking" && (
-                  <UpdateIndicator
-                    status={updateStatus}
-                    version={updateVersion ?? ""}
-                    progress={updateProgress ?? 0}
-                    error={updateError ?? ""}
-                    onUpdate={onUpdate}
-                    onRestart={onRestart}
-                    onSkip={onSkip}
-                    onDismiss={onDismiss}
-                    t={t}
-                  />
-                )}
-              </>
+              <span className="text-lg font-bold tracking-tight text-foreground whitespace-nowrap">SkillStar</span>
             )}
           </div>
           {!collapsed && (
@@ -469,6 +558,25 @@ export function Sidebar({
           );
         })}
       </nav>
+
+      {/* Update banner (above collapse toggle) */}
+      <AnimatePresence>
+        {updateStatus && updateStatus !== "idle" && updateStatus !== "checking" && (
+          <UpdateBanner
+            status={updateStatus}
+            version={updateVersion ?? ""}
+            progress={updateProgress ?? 0}
+            error={updateError ?? ""}
+            collapsed={collapsed}
+            onUpdate={onUpdate}
+            onRestart={onRestart}
+            onSkip={onSkip}
+            onDismiss={onDismiss}
+            onRetry={onRetry}
+            t={t}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Collapse toggle */}
       {onToggleCollapse && (

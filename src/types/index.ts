@@ -220,6 +220,19 @@ export interface ProxyConfig {
   bypass: string | null;
 }
 
+export interface GitHubMirrorPreset {
+  id: string;
+  name: string;
+  url: string;
+  supports_clone: boolean;
+}
+
+export interface GitHubMirrorConfig {
+  enabled: boolean;
+  preset_id: string | null;
+  custom_url: string | null;
+}
+
 export interface ProjectEntry {
   path: string;
   name: string;
@@ -284,9 +297,15 @@ export interface ProjectAgentDetection {
   auto_enable: string[];
 }
 
+export interface FormatPreset {
+  base_url: string;
+  api_key: string;
+  model: string;
+}
+
 export interface AiConfig {
   enabled: boolean;
-  api_format: "openai" | "anthropic";
+  api_format: "openai" | "anthropic" | "local";
   base_url: string;
   api_key: string;
   model: string;
@@ -300,6 +319,12 @@ export interface AiConfig {
   chunk_char_limit: number;
   /** Override: 0 = auto-derive from context_window_k */
   scan_max_response_tokens: number;
+  /** Optional anonymous security scan telemetry (aggregate only, no skill names/content). */
+  security_scan_telemetry_enabled: boolean;
+  /** Per-format saved presets */
+  openai_preset: FormatPreset;
+  anthropic_preset: FormatPreset;
+  local_preset: FormatPreset;
 }
 
 // ── GitHub Repo Scanner ─────────────────────────────────────────────
@@ -425,16 +450,27 @@ export interface StaticFinding {
   pattern_id: string;
   snippet: string;
   severity: RiskLevel;
+  confidence?: number;
   description: string;
+  owasp_agentic_tags?: string[];
 }
 
 export interface AiFinding {
   category: string;
   severity: RiskLevel;
+  confidence?: number;
   file_path: string;
   description: string;
   evidence: string;
   recommendation: string;
+  owasp_agentic_tags?: string[];
+}
+
+export interface SecurityScanAnalyzerExecution {
+  id: string;
+  status: string;
+  findings: number;
+  error?: string | null;
 }
 
 export interface SecurityScanResult {
@@ -445,6 +481,11 @@ export interface SecurityScanResult {
   scanner_version: string;
   target_language?: string;
   risk_level: RiskLevel;
+  risk_score?: number;
+  confidence_score?: number;
+  meta_deduped_count?: number;
+  meta_consensus_count?: number;
+  analyzer_executions?: SecurityScanAnalyzerExecution[];
   static_findings: StaticFinding[];
   ai_findings: AiFinding[];
   summary: string;
@@ -514,4 +555,17 @@ export interface SecurityScanLogEntry {
   path: string;
   created_at: string;
   size_bytes: number;
+}
+
+export interface SecurityScanRuleOverride {
+  enabled?: boolean;
+  severity?: string;
+}
+
+export interface SecurityScanPolicy {
+  preset: string;
+  severity_threshold: string;
+  enabled_analyzers: string[];
+  ignore_rules: string[];
+  rule_overrides: Record<string, SecurityScanRuleOverride>;
 }

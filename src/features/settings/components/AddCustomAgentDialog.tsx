@@ -47,8 +47,11 @@ export function AddCustomAgentDialog({ open, onClose, onConfirm, initialData, on
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.type !== "image/svg+xml" && !file.name.toLowerCase().endsWith(".svg")) {
-      toast.error(t("settings.invalidSvgFormat", { defaultValue: "Please upload a valid SVG file." }));
+    const name = file.name.toLowerCase();
+    const validExt = name.endsWith(".svg") || name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".webp");
+    const validMime = file.type.startsWith("image/");
+    if (!validExt && !validMime) {
+      toast.error(t("settings.invalidIconFormat", { defaultValue: "Please upload a valid image file (SVG, PNG, JPG, WEBP)." }));
       return;
     }
 
@@ -58,7 +61,7 @@ export function AddCustomAgentDialog({ open, onClose, onConfirm, initialData, on
       setIconData(data);
 
       if (!displayName.trim()) {
-        const rawName = file.name.replace(/\.svg$/i, "");
+        const rawName = file.name.replace(/\.(svg|png|jpe?g|webp)$/i, "");
         const formatted = rawName
           .split(/[-_]+/)
           .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
@@ -67,7 +70,7 @@ export function AddCustomAgentDialog({ open, onClose, onConfirm, initialData, on
       }
     };
     reader.onerror = () => {
-      toast.error(t("settings.failedToReadSvg", { defaultValue: "Failed to read SVG file." }));
+      toast.error(t("settings.failedToReadIcon", { defaultValue: "Failed to read icon file." }));
     };
     reader.readAsDataURL(file);
   };
@@ -75,11 +78,19 @@ export function AddCustomAgentDialog({ open, onClose, onConfirm, initialData, on
   const handleConfirm = () => {
     if (!displayName.trim() || !globalPath.trim()) return;
 
+    const parsedProject = projectPath.trim();
+    if (parsedProject) {
+      if (!/^\.[a-zA-Z0-9_-]+\/skills$/.test(parsedProject)) {
+        toast.error(t("settings.invalidProjectPathPattern", { defaultValue: "Project skill path must strictly follow the format '.agent/skills'" }));
+        return;
+      }
+    }
+
     onConfirm({
       id: initialData?.id || "",
       display_name: displayName.trim(),
       global_skills_dir: globalPath.trim(),
-      project_skills_rel: projectPath.trim(),
+      project_skills_rel: parsedProject,
       icon_data_uri: iconData,
     });
   };
@@ -142,13 +153,13 @@ export function AddCustomAgentDialog({ open, onClose, onConfirm, initialData, on
                       <ImageIcon className="w-6 h-6 text-muted-foreground/60" />
                     )}
                     <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
-                      <span className="text-[10px] font-medium text-white shadow-sm">+ SVG</span>
+                      <span className="text-[10px] font-medium text-white shadow-sm">+ Icon</span>
                     </div>
                   </div>
-                  <input ref={fileInputRef} type="file" accept=".svg" className="hidden" onChange={handleFileChange} />
+                  <input ref={fileInputRef} type="file" accept=".svg,.png,.jpg,.jpeg,.webp,image/*" className="hidden" onChange={handleFileChange} />
                   <div className="flex flex-col items-center gap-0.5 mt-1">
                     <p className="text-xs text-muted-foreground text-center">
-                      {t("settings.uploadSvgIcon", { defaultValue: "Upload SVG Icon" })}
+                      {t("settings.uploadIcon", { defaultValue: "Upload Icon" })}
                     </p>
                     <a
                       href={`https://lobehub.com/${i18n.language === "zh-CN" ? "zh/" : ""}icons`}

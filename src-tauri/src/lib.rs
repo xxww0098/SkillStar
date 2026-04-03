@@ -87,14 +87,18 @@ pub fn run() {
         .manage(TrayState::new(detect_system_lang()))
         .manage(ExitControl::new())
         .setup(|app| {
-            if let Err(err) = core::marketplace_snapshot::initialize() {
+            // Migrate v1 flat layout → v2 categorised layout (idempotent)
+            core::paths::migrate_legacy_paths();
+
+            if let Err(err) = core::marketplace::initialize_local_snapshot() {
                 error!(target: "marketplace_snapshot", "init failed: {err}");
             }
+            // Run translation cache LRU cleanup (once per process, non-blocking)
+            core::translation_cache::startup_cleanup();
+
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(err) =
-                    core::marketplace_snapshot::refresh_startup_scopes_if_needed().await
-                {
+                if let Err(err) = core::marketplace::refresh_local_snapshot_startup_scopes().await {
                     error!(target: "marketplace_snapshot", "startup refresh failed: {err}");
                 }
                 let _ = app_handle.emit("marketplace://ready", ());
@@ -152,6 +156,8 @@ pub fn run() {
             commands::marketplace::ai_search_marketplace_local,
             commands::marketplace::sync_marketplace_scope,
             commands::marketplace::get_marketplace_sync_states,
+            commands::marketplace::search_marketplace_packs,
+            commands::marketplace::list_marketplace_packs,
             commands::github::check_gh_installed,
             commands::github::check_gh_status,
             commands::github::publish_skill_to_github,
@@ -183,6 +189,10 @@ pub fn run() {
             commands::update_skill_content,
             commands::get_proxy_config,
             commands::save_proxy_config,
+            commands::get_github_mirror_config,
+            commands::save_github_mirror_config,
+            commands::get_github_mirror_presets,
+            commands::test_github_mirror,
             commands::projects::register_project,
             commands::projects::list_projects,
             commands::projects::get_project_skills,
@@ -214,6 +224,10 @@ pub fn run() {
             commands::ai::clear_security_scan_cache,
             commands::ai::list_security_scan_logs,
             commands::ai::get_security_scan_log_dir,
+            commands::ai::get_security_scan_policy,
+            commands::ai::save_security_scan_policy,
+            commands::ai::export_security_scan_sarif,
+            commands::ai::export_security_scan_report,
             commands::github::scan_github_repo,
             commands::github::install_from_scan,
             commands::github::list_repo_history,
@@ -225,6 +239,10 @@ pub fn run() {
             commands::github::force_delete_repo_caches,
             commands::github::force_delete_app_config,
             commands::github::clean_broken_skills,
+            commands::github::install_pack_from_url,
+            commands::github::list_installed_packs,
+            commands::github::remove_installed_pack,
+            commands::github::get_pack_doctor,
             commands::export_skill_bundle,
             commands::preview_skill_bundle,
             commands::import_skill_bundle,
@@ -240,6 +258,16 @@ pub fn run() {
             commands::patrol::set_patrol_enabled,
             commands::patrol::app_quit,
             commands::patrol::set_dock_visible,
+            commands::acp::acp_generate_setup_hook,
+            commands::acp::acp_rebuild_skills,
+            commands::acp::scan_rebuild_skills,
+            commands::acp::apply_rebuild_skills,
+            commands::acp::get_setup_hook,
+            commands::acp::save_setup_hook,
+            commands::acp::delete_setup_hook,
+            commands::acp::run_setup_hook,
+            commands::acp::get_acp_config,
+            commands::acp::save_acp_config,
             update_tray_language,
         ])
         .build(tauri::generate_context!())

@@ -51,3 +51,7 @@ homebrew-tap/
 # Dev scripts / test binaries (keep out of release)
 run-*.sh
 test_parse
+
+# Tauri updater keys
+*.key
+*.key.pub

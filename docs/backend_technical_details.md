@@ -86,11 +86,50 @@ flowchart TD
 ---
 
 ## 3. 基于软链接（Symlink）的项目同步及生命周期内存锁定防爆
-> 文件模块: `src-tauri/src/core/sync.rs`
+> 文件模块: `src-tauri/src/core/sync.rs`、`src-tauri/src/core/skill_install.rs`、`src-tauri/src/core/local_skill.rs`
 
 技能作为各个系统间的插件应用挂接器，当业务项目（Project）试图从 Hub 获取多枚 Agent 技能分配时，这涉及跨工作环境调度同步。为了防止各处引用技能库副本膨胀、也防止各工作组升级时出现离群滞后的老版本拷贝堆积，系统放弃了直接的文件级 `copy` 而选用了操作系统的软链接挂载能力来同步。
 
-### 3.1 对操作系统的抹平设计
+### 3.1 三层软链接架构
+
+系统采用三层软链接架构来管理技能的分发与访问：
+
+#### 存储层（数据实际存放位置）
+
+- **Git 技能**: `~/.skillstar/.agents/.repos/<owner>--repo>/<skill-folder>/`（git sparse checkout 缓存）
+- **本地技能**: `~/.skillstar/.agents/skills-local/<name>/`（用户创建的真实目录）
+
+#### Hub 层（中央索引）
+
+```
+~/.skillstar/.agents/skills/<skill-name>  →  实际存储位置
+```
+
+所有技能在 Hub 中都有一个软链接，指向存储层的实际数据。这是技能的"总目录"。
+
+#### Agent 层（各 Agent 的访问入口）
+
+```
+~/.claude/skills/<skill-name>        →  ~/.skillstar/.agents/skills/<skill-name>
+~/.codex/skills/<skill-name>         →  ~/.skillstar/.agents/skills/<skill-name>
+<project>/.claude/skills/<skill-name> →  ~/.skillstar/.agents/skills/<skill-name>
+```
+
+每个 Agent 或项目通过自己的软链接指向 Hub 层，形成链式软链接。
+
+#### Skills Hub 链接 vs Agent 链接
+
+|              | Skills Hub 链接                                    | Agent 链接                                       |
+| ------------ | -------------------------------------------------- | ------------------------------------------------ |
+| **位置**     | `~/.skillstar/.agents/skills/`                     | 各 Agent 的目录（如 `~/.claude/skills/`）        |
+| **指向**     | 存储层（`.repos/` 或 `skills-local/`）             | Hub 层的 `skills/<name>`                         |
+| **作用**     | 技能注册索引，记录技能实际位置                     | 让特定 Agent/项目能"看到"这个技能                |
+| **创建时机** | 安装/导入技能时                                    | 同步(sync)/开关(toggle)时                        |
+| **管理模块** | `skill_install.rs` / `local_skill.rs`              | `sync.rs`                                        |
+
+核心设计理念：**Skills 文件夹是"仓库"，Agent 文件夹是"窗口"**——仓库决定存什么，窗口决定谁能看到。
+
+### 3.2 对操作系统的抹平设计
 将所有 Agent 对于挂载点的引用强依赖到一个单一的核心数据真相 (Single Source Of Truth) 目录，当有任何升级请求仅涉及挂接 `target` 本身的升级处理。
 为抹平系统层调用隔离，采用了条件编译的方式实现不同平台的挂接指令: `unix::fs::symlink` 处理 Mac/Linux，并动用了 `windows::fs::symlink_dir` 处理对文件夹引用的 Windows 端跨越。
 

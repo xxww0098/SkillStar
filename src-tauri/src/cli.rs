@@ -1,6 +1,11 @@
 use clap::{Parser, Subcommand};
 
-use crate::core::{ai_provider, gh_manager, git_ops, lockfile, security_scan};
+use crate::core::{
+    agent_profile, ai_provider, gh_manager, git_ops, lockfile, project_manifest, security_scan,
+    skill_install, skill_pack, sync,
+};
+use std::io::{self, IsTerminal, Write};
+use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
 #[command(
@@ -18,6 +23,18 @@ pub enum Commands {
     List,
     /// Install a skill from a Git URL
     Install {
+        /// Install to hub only (do not link into current project)
+        #[arg(long)]
+        global: bool,
+        /// Target project path for project-level install (defaults to current dir)
+        #[arg(long, conflicts_with = "global")]
+        project: Option<String>,
+        /// Target agent id(s), repeatable or comma-separated, e.g. --agent codex,opencode
+        #[arg(long = "agent", value_delimiter = ',')]
+        agent: Vec<String>,
+        /// Explicit skill name (useful when one repo contains multiple skills)
+        #[arg(long)]
+        name: Option<String>,
         /// Git URL of the skill repository
         url: String,
     },
@@ -38,20 +55,55 @@ pub enum Commands {
         #[arg(long)]
         static_only: bool,
     },
+    /// Run health checks on installed packs or all packs
+    Doctor {
+        /// Pack name to check (checks all packs if omitted)
+        name: Option<String>,
+    },
+    /// Manage installed skill packs
+    Pack {
+        #[command(subcommand)]
+        action: PackAction,
+    },
     /// Force launch GUI mode
     Gui,
 }
 
+#[derive(Subcommand)]
+pub enum PackAction {
+    /// List installed skill packs
+    List,
+    /// Remove an installed skill pack by name
+    Remove {
+        /// Pack name to remove
+        name: String,
+    },
+}
+
 pub fn run(args: Vec<String>) {
+    // Migrate v1 flat layout → v2 categorised layout (idempotent)
+    crate::core::paths::migrate_legacy_paths();
+
     let cli = Cli::parse_from(args);
 
     match cli.command {
         Commands::List => cmd_list(),
-        Commands::Install { url } => cmd_install(&url),
+        Commands::Install {
+            url,
+            global,
+            project,
+            agent,
+            name,
+        } => cmd_install(&url, name.as_deref(), global, project.as_deref(), &agent),
         Commands::Update { name } => cmd_update(name.as_deref()),
         Commands::Create => cmd_create(),
         Commands::Publish => cmd_publish(),
         Commands::Scan { path, static_only } => cmd_scan(&path, static_only),
+        Commands::Doctor { name } => cmd_doctor(name.as_deref()),
+        Commands::Pack { action } => match action {
+            PackAction::List => cmd_pack_list(),
+            PackAction::Remove { name } => cmd_pack_remove(&name),
+        },
         Commands::Gui => {
             // Will be handled by main.rs — restart in GUI mode
             println!("Launching SkillStar GUI...");
@@ -83,40 +135,327 @@ fn cmd_list() {
     }
 }
 
-fn cmd_install(url: &str) {
+fn derive_name_hint(url: &str, explicit_name: Option<&str>) -> String {
+    explicit_name.map(str::to_string).unwrap_or_else(|| {
+        url.rsplit('/')
+            .next()
+            .unwrap_or("skill")
+            .trim_end_matches(".git")
+            .to_string()
+    })
+}
+
+fn normalize_remote_url(url: &str) -> String {
+    url.trim()
+        .trim_end_matches('/')
+        .trim_end_matches(".git")
+        .trim_end_matches('/')
+        .to_lowercase()
+}
+
+fn same_remote_url(left: &str, right: &str) -> bool {
+    normalize_remote_url(left) == normalize_remote_url(right)
+}
+
+fn resolve_installed_name(
+    url: &str,
+    explicit_name: Option<&str>,
+    name_hint: &str,
+) -> Result<Option<String>, String> {
     let skills_dir = crate::core::paths::hub_skills_dir();
-    let name = url
-        .rsplit('/')
-        .next()
-        .unwrap_or("skill")
-        .trim_end_matches(".git");
-    let dest = skills_dir.join(name);
+    let lock_path = lockfile::lockfile_path();
+    let lockfile = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
+    let has_matching_lock = |name: &str| {
+        lockfile
+            .skills
+            .iter()
+            .any(|entry| entry.name == name && same_remote_url(&entry.git_url, url))
+    };
 
-    println!("Installing skill '{}' from {}...", name, url);
+    if let Some(name) = explicit_name {
+        if skills_dir.join(name).exists() {
+            if has_matching_lock(name) {
+                return Ok(Some(name.to_string()));
+            }
+            return Err(format!(
+                "Skill '{}' already exists but is linked to a different repository. Re-run with a different --name or uninstall the existing skill first.",
+                name
+            ));
+        }
+    } else if skills_dir.join(name_hint).exists() && has_matching_lock(name_hint) {
+        return Ok(Some(name_hint.to_string()));
+    }
 
-    if dest.exists() {
-        eprintln!("Skill '{}' already installed at {:?}", name, dest);
+    let mut matches: Vec<String> = lockfile
+        .skills
+        .iter()
+        .filter(|entry| same_remote_url(&entry.git_url, url) && skills_dir.join(&entry.name).exists())
+        .map(|entry| entry.name.clone())
+        .collect();
+    matches.sort();
+    matches.dedup();
+
+    if let Some(name) = explicit_name {
+        if matches.iter().any(|candidate| candidate == name) {
+            return Ok(Some(name.to_string()));
+        }
+        return Ok(None);
+    }
+
+    match matches.len() {
+        0 => Ok(None),
+        1 => Ok(matches.into_iter().next()),
+        _ => Err(format!(
+            "Repository '{}' maps to multiple installed skills ({}). Please re-run with --name <skill-name>.",
+            url,
+            matches.join(", ")
+        )),
+    }
+}
+
+fn install_or_reuse_skill(
+    url: &str,
+    explicit_name: Option<&str>,
+) -> Result<(String, bool), String> {
+    let name_hint = derive_name_hint(url, explicit_name);
+    if let Some(name) = resolve_installed_name(url, explicit_name, &name_hint)? {
+        return Ok((name, false));
+    }
+
+    let rt = tokio::runtime::Runtime::new().map_err(|e| format!("Failed to start runtime: {e}"))?;
+    match rt.block_on(skill_install::install_skill(
+        url.to_string(),
+        explicit_name.map(str::to_string),
+    )) {
+        Ok(skill) => Ok((skill.name, true)),
+        Err(err) => {
+            if err.contains("already installed") {
+                if let Some(name) = resolve_installed_name(url, explicit_name, &name_hint)? {
+                    return Ok((name, false));
+                }
+            }
+            Err(err)
+        }
+    }
+}
+
+fn resolve_auto_project_agents(project_path: &Path) -> Vec<String> {
+    let detection = project_manifest::detect_project_agents(&project_path.to_string_lossy());
+    let mut agent_ids: Vec<String> = detection
+        .detected
+        .iter()
+        .filter(|agent| agent.exists)
+        .map(|agent| agent.agent_id.clone())
+        .collect();
+    agent_ids.sort();
+    agent_ids.dedup();
+    agent_ids
+}
+
+fn normalize_agent_ids(agent_ids: &[String]) -> Vec<String> {
+    let mut normalized: Vec<String> = agent_ids
+        .iter()
+        .map(|id| id.trim().to_lowercase())
+        .filter(|id| !id.is_empty())
+        .collect();
+    normalized.sort();
+    normalized.dedup();
+    normalized
+}
+
+fn supported_project_agents() -> Vec<(String, String)> {
+    let mut supported: Vec<(String, String)> = agent_profile::list_profiles()
+        .into_iter()
+        .filter(|profile| profile.has_project_skills())
+        .map(|profile| (profile.id, profile.project_skills_rel))
+        .collect();
+    supported.sort_by(|a, b| a.0.cmp(&b.0));
+    supported.dedup_by(|a, b| a.0 == b.0);
+    supported
+}
+
+fn prompt_for_agent_selection(auto_agent_ids: &[String]) -> Vec<String> {
+    if !io::stdin().is_terminal() {
+        return auto_agent_ids.to_vec();
+    }
+
+    let supported = supported_project_agents();
+    if supported.is_empty() {
+        return auto_agent_ids.to_vec();
+    }
+
+    let supported_ids: Vec<String> = supported.into_iter().map(|(id, _)| id).collect();
+    let default_text = if auto_agent_ids.is_empty() {
+        "auto fallback (.agents/skills)".to_string()
+    } else {
+        format!("auto detected ({})", auto_agent_ids.join(", "))
+    };
+
+    println!("Select target agent(s) for project link:");
+    println!("  Available: {}", supported_ids.join(", "));
+    println!(
+        "  Press Enter for {} or input comma-separated agent ids.",
+        default_text
+    );
+    print!("  Agent(s): ");
+    let _ = io::stdout().flush();
+
+    let mut input = String::new();
+    if io::stdin().read_line(&mut input).is_err() {
+        return auto_agent_ids.to_vec();
+    }
+
+    let input = input.trim();
+    if input.is_empty() {
+        return auto_agent_ids.to_vec();
+    }
+
+    let parsed: Vec<String> = input
+        .split(',')
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty())
+        .collect();
+    normalize_agent_ids(&parsed)
+}
+
+fn validate_agent_ids(agent_ids: &[String]) -> Result<Vec<String>, String> {
+    let normalized = normalize_agent_ids(agent_ids);
+    if normalized.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let supported = supported_project_agents();
+    let supported_ids: Vec<String> = supported.iter().map(|(id, _)| id.clone()).collect();
+    let mut invalid = Vec::new();
+    for agent_id in &normalized {
+        if !supported_ids.iter().any(|id| id == agent_id) {
+            invalid.push(agent_id.clone());
+        }
+    }
+
+    if invalid.is_empty() {
+        Ok(normalized)
+    } else {
+        Err(format!(
+            "Unknown agent id(s): {}. Supported agents: {}.",
+            invalid.join(", "),
+            supported_ids.join(", ")
+        ))
+    }
+}
+
+fn resolve_rel_dirs_for_agents(agent_ids: &[String]) -> Vec<String> {
+    if agent_ids.is_empty() {
+        return vec![".agents/skills".to_string()];
+    }
+
+    let supported = supported_project_agents();
+    let mut rel_dirs = Vec::new();
+    for agent_id in agent_ids {
+        if let Some((_, rel_dir)) = supported.iter().find(|(id, _)| id == agent_id) {
+            rel_dirs.push(rel_dir.clone());
+        }
+    }
+
+    rel_dirs.sort();
+    rel_dirs.dedup();
+    if rel_dirs.is_empty() {
+        rel_dirs.push(".agents/skills".to_string());
+    }
+    rel_dirs
+}
+
+fn print_project_targets(project_path: &Path, rel_dirs: &[String], skill_name: &str) {
+    for rel_dir in rel_dirs {
+        let linked_path = project_path.join(rel_dir).join(skill_name);
+        println!("  ↳ {}", linked_path.display());
+    }
+}
+
+fn cmd_install(
+    url: &str,
+    name: Option<&str>,
+    global: bool,
+    project: Option<&str>,
+    requested_agents: &[String],
+) {
+    println!("Installing from {}...", url);
+
+    let (skill_name, newly_installed) = match install_or_reuse_skill(url, name) {
+        Ok(result) => result,
+        Err(err) => {
+            eprintln!("✗ Failed to install into hub: {}", err);
+            std::process::exit(1);
+        }
+    };
+
+    if newly_installed {
+        println!("✓ Installed '{}' into hub.", skill_name);
+    } else {
+        println!("✓ Reusing existing hub install '{}'.", skill_name);
+    }
+
+    if global {
+        println!("Done (global install mode).");
         return;
     }
 
-    match git_ops::clone_repo(url, &dest) {
-        Ok(_) => {
-            let tree_hash = git_ops::compute_tree_hash(&dest).unwrap_or_default();
-            let lock_path = lockfile::lockfile_path();
-            let mut lockfile = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
-            lockfile.upsert(lockfile::LockEntry {
-                name: name.to_string(),
-                git_url: url.to_string(),
-                tree_hash,
-                installed_at: chrono::Utc::now().to_rfc3339(),
-                source_folder: None,
-            });
-            if let Err(e) = lockfile.save(&lock_path) {
-                eprintln!("Warning: Failed to save lockfile: {}", e);
+    let project_path = match project {
+        Some(path) => PathBuf::from(path),
+        None => match std::env::current_dir() {
+            Ok(path) => path,
+            Err(err) => {
+                eprintln!("✗ Failed to read current directory: {}", err);
+                std::process::exit(1);
             }
-            println!("✓ Skill '{}' installed successfully.", name);
+        },
+    };
+
+    if !project_path.is_dir() {
+        eprintln!(
+            "✗ Project path is not a directory: {}",
+            project_path.display()
+        );
+        std::process::exit(1);
+    }
+
+    let auto_agent_ids = resolve_auto_project_agents(&project_path);
+    let mut chosen_agents = normalize_agent_ids(requested_agents);
+    if chosen_agents.is_empty() {
+        chosen_agents = prompt_for_agent_selection(&auto_agent_ids);
+    }
+    let agent_ids = match validate_agent_ids(&chosen_agents) {
+        Ok(agent_ids) => agent_ids,
+        Err(err) => {
+            eprintln!("✗ {}", err);
+            std::process::exit(1);
         }
-        Err(e) => eprintln!("✗ Failed to install: {}", e),
+    };
+    let rel_dirs = resolve_rel_dirs_for_agents(&agent_ids);
+    let selected_skills = vec![skill_name.clone()];
+
+    match sync::create_project_skills(&project_path, &selected_skills, &agent_ids) {
+        Ok(linked_count) => {
+            println!(
+                "✓ Linked '{}' into project {} ({} link(s)).",
+                skill_name,
+                project_path.display(),
+                linked_count
+            );
+            if agent_ids.is_empty() {
+                println!("  Target mode: fallback path (.agents/skills)");
+            } else {
+                println!("  Target agents: {}", agent_ids.join(", "));
+            }
+            print_project_targets(&project_path, &rel_dirs, &skill_name);
+        }
+        Err(err) => {
+            eprintln!(
+                "✗ Installed to hub but failed to link into project: {}",
+                err
+            );
+            std::process::exit(1);
+        }
     }
 }
 
@@ -329,6 +668,98 @@ fn cmd_scan(path: &str, static_only: bool) {
         }
         Err(e) => {
             eprintln!("✗ Scan failed: {}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
+fn cmd_doctor(name: Option<&str>) {
+    if let Some(name) = name {
+        match skill_pack::doctor_pack(name) {
+            Ok(report) => {
+                println!("Pack: {} v{}", report.pack_name, report.version);
+                println!(
+                    "Overall healthy: {}",
+                    if report.overall_healthy { "YES" } else { "NO" }
+                );
+                println!();
+                println!("{:<25} {:<8} {}", "CHECK", "PASSED", "DETAIL");
+                println!("{}", "-".repeat(60));
+                for check in &report.checks {
+                    println!(
+                        "{:<25} {:<8} {}",
+                        check.name,
+                        if check.passed { "YES" } else { "NO" },
+                        check.message.as_deref().unwrap_or("-")
+                    );
+                }
+            }
+            Err(e) => {
+                eprintln!("✗ Doctor failed: {}", e);
+                std::process::exit(1);
+            }
+        }
+    } else {
+        let reports = skill_pack::doctor_all();
+        if reports.is_empty() {
+            println!("No packs installed.");
+            return;
+        }
+        for report in reports {
+            println!(
+                "{:<20} v{:<10} {}",
+                report.pack_name,
+                report.version,
+                if report.overall_healthy {
+                    "✓ healthy"
+                } else {
+                    "✗ issues"
+                }
+            );
+        }
+    }
+}
+
+fn cmd_pack_list() {
+    let packs = skill_pack::list_packs();
+    if packs.is_empty() {
+        println!("No packs installed.");
+        return;
+    }
+    println!(
+        "{:<25} {:<10} {:<15} {}",
+        "NAME", "VERSION", "STATUS", "SKILLS"
+    );
+    println!("{}", "-".repeat(70));
+    for pack in &packs {
+        let skill_names: Vec<&str> = pack.skills.iter().map(|s| s.name.as_str()).collect();
+        println!(
+            "{:<25} {:<10} {:<15} {}",
+            pack.name,
+            pack.version,
+            format!("{:?}", pack.status),
+            skill_names.join(", ")
+        );
+    }
+    println!("\n{} pack(s) installed.", packs.len());
+}
+
+fn cmd_pack_remove(name: &str) {
+    match skill_pack::remove_pack(name) {
+        Ok(removed) => {
+            if removed.is_empty() {
+                println!("Pack '{}' had no skills to remove.", name);
+            } else {
+                println!(
+                    "✓ Removed pack '{}' ({} skill(s): {})",
+                    name,
+                    removed.len(),
+                    removed.join(", ")
+                );
+            }
+        }
+        Err(e) => {
+            eprintln!("✗ Failed to remove pack '{}': {}", name, e);
             std::process::exit(1);
         }
     }

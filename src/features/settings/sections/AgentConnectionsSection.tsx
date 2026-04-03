@@ -27,9 +27,12 @@ interface AgentConnectionsSectionProps {
 
 function formatGlobalPath(path: string): string {
   const normalized = path.replace(/\\/g, "/");
+
+  // macOS / Linux: /Users/<user>/… or /home/<user>/…
   const macOrLinux = normalized.match(/^\/(?:Users|home)\/[^/]+\/(.+)$/);
   if (macOrLinux?.[1]) return `~/${macOrLinux[1]}`;
 
+  // Windows: any drive letter, e.g. C:/Users/<user>/… or D:/Users/<user>/…
   const windows = normalized.match(/^[A-Za-z]:\/Users\/[^/]+\/(.+)$/);
   if (windows?.[1]) return `~/${windows[1]}`;
 

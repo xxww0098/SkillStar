@@ -491,7 +491,7 @@ async fn ensure_ai_config() -> Result<ai_provider::AiConfig, String> {
     if !config.enabled {
         return Err("AI provider is disabled. Please enable it in Settings.".to_string());
     }
-    if config.api_key.trim().is_empty() {
+    if config.api_key.trim().is_empty() && config.api_format != ai_provider::ApiFormat::Local {
         return Err(
             "AI provider is not configured. Please set up your API key in Settings.".to_string(),
         );
@@ -746,7 +746,7 @@ pub async fn ai_retranslate_short_text_stream_with_source(
 #[tauri::command]
 pub async fn ai_summarize_skill(content: String) -> Result<String, String> {
     let config = ensure_ai_config().await?;
-    
+
     // Check cache
     if let Ok(Some(cached)) = translation_cache::get_cached_translation(
         TranslationKind::Summary,
@@ -755,11 +755,11 @@ pub async fn ai_summarize_skill(content: String) -> Result<String, String> {
     ) {
         return Ok(cached.translated_text);
     }
-    
+
     let result = ai_provider::summarize_text(&config, &content)
         .await
         .map_err(|e| e.to_string())?;
-        
+
     let _ = translation_cache::upsert_translation(
         TranslationKind::Summary,
         &config.target_language,
@@ -767,7 +767,7 @@ pub async fn ai_summarize_skill(content: String) -> Result<String, String> {
         &result,
         Some("ai"),
     );
-    
+
     Ok(result)
 }
 
@@ -780,7 +780,7 @@ pub async fn ai_summarize_skill_stream(
     let config = ensure_ai_config().await?;
 
     let _ = emit_summarize_stream_event(&window, &request_id, "start", None, None);
-    
+
     if let Ok(Some(cached)) = translation_cache::get_cached_translation(
         TranslationKind::Summary,
         &config.target_language,
@@ -836,7 +836,7 @@ const BATCH_DESC_CHUNK_SIZE: usize = 10;
 
 /// Path to the pending batch translation task file.
 fn batch_translate_pending_path() -> std::path::PathBuf {
-    crate::core::paths::data_root().join("batch_translate_pending.json")
+    crate::core::paths::batch_translate_pending_path()
 }
 
 fn save_pending_batch(names: &[String]) {
@@ -863,14 +863,17 @@ pub async fn check_pending_batch_translate() -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-pub async fn ai_batch_process_skills(app: AppHandle, skill_names: Vec<String>) -> Result<(), String> {
+pub async fn ai_batch_process_skills(
+    app: AppHandle,
+    skill_names: Vec<String>,
+) -> Result<(), String> {
     let config = ensure_ai_config().await?;
     let total = skill_names.len();
     info!(target: "translate", total, skills = ?&skill_names[..skill_names.len().min(5)], "ai_batch_process_skills ENTER");
 
     // Persist task so it can be resumed after restart.
     save_pending_batch(&skill_names);
-    
+
     tauri::async_runtime::spawn(async move {
         use tauri::Emitter;
         let completed = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -899,7 +902,8 @@ pub async fn ai_batch_process_skills(app: AppHandle, skill_names: Vec<String>) -
                     TranslationKind::Short,
                     &config.target_language,
                     desc,
-                ).unwrap_or(None);
+                )
+                .unwrap_or(None);
                 let is_usable = cached.as_ref().map_or(false, |c| {
                     matches!(c.source_provider.as_deref(), Some("ai"))
                 });
@@ -954,11 +958,14 @@ pub async fn ai_batch_process_skills(app: AppHandle, skill_names: Vec<String>) -
 
                 // Emit progress
                 let done = completed_ref.load(std::sync::atomic::Ordering::Relaxed);
-                let _ = app_ref.emit("ai://batch-progress", BatchProgressPayload {
-                    completed: done,
-                    total,
-                    current_name: name.clone(),
-                });
+                let _ = app_ref.emit(
+                    "ai://batch-progress",
+                    BatchProgressPayload {
+                        completed: done,
+                        total,
+                        current_name: name.clone(),
+                    },
+                );
 
                 // 2a. Summary
                 if !content.content.trim().is_empty() {
@@ -966,10 +973,13 @@ pub async fn ai_batch_process_skills(app: AppHandle, skill_names: Vec<String>) -
                         TranslationKind::Summary,
                         &cfg.target_language,
                         &content.content,
-                    ).unwrap_or(None);
+                    )
+                    .unwrap_or(None);
 
                     if cached.is_none() {
-                        if let Ok(summary) = ai_provider::summarize_text(&cfg, &content.content).await {
+                        if let Ok(summary) =
+                            ai_provider::summarize_text(&cfg, &content.content).await
+                        {
                             let _ = translation_cache::upsert_translation(
                                 TranslationKind::Summary,
                                 &cfg.target_language,
@@ -987,10 +997,13 @@ pub async fn ai_batch_process_skills(app: AppHandle, skill_names: Vec<String>) -
                         TranslationKind::Skill,
                         &cfg.target_language,
                         &content.content,
-                    ).unwrap_or(None);
+                    )
+                    .unwrap_or(None);
 
                     if cached.is_none() {
-                        if let Ok(translated) = translate_skill_with_section_cache(&cfg, &content.content, false).await {
+                        if let Ok(translated) =
+                            translate_skill_with_section_cache(&cfg, &content.content, false).await
+                        {
                             let _ = translation_cache::upsert_translation(
                                 TranslationKind::Skill,
                                 &cfg.target_language,
@@ -1019,18 +1032,21 @@ pub async fn ai_batch_process_skills(app: AppHandle, skill_names: Vec<String>) -
         clear_pending_batch();
 
         // Final progress event
-        let _ = app.emit("ai://batch-progress", BatchProgressPayload {
-            completed: total,
-            total,
-            current_name: String::new(),
-        });
+        let _ = app.emit(
+            "ai://batch-progress",
+            BatchProgressPayload {
+                completed: total,
+                total,
+                current_name: String::new(),
+            },
+        );
     });
 
     Ok(())
 }
 
 #[tauri::command]
-pub async fn ai_test_connection() -> Result<String, String> {
+pub async fn ai_test_connection() -> Result<u64, String> {
     let config = ensure_ai_config().await?;
     ai_provider::test_connection(&config)
         .await
@@ -1065,7 +1081,8 @@ pub async fn ai_pick_skills(
 // ── Security Scan Commands ──────────────────────────────────────────
 
 use crate::core::security_scan::{
-    self, FileRole, FileScanResult, PreparedChunk, PreparedSkillScan, SecurityScanResult,
+    self, FileRole, FileScanResult, PreparedChunk, PreparedSkillScan, SecurityScanPolicy,
+    SecurityScanReportFormat, SecurityScanResult,
 };
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use tokio::sync::{Semaphore as TokioSemaphore, mpsc};
@@ -1369,6 +1386,7 @@ struct AggregateScanArgs<'a> {
     run_started_at: chrono::DateTime<chrono::Utc>,
     total: usize,
     ai_concurrency: usize,
+    telemetry_enabled: bool,
     cached_skill_names: &'a [String],
     cached_results: Vec<SecurityScanResult>,
     scan_results: Vec<SecurityScanResult>,
@@ -1393,6 +1411,26 @@ fn aggregate_results(args: AggregateScanArgs<'_>) -> Vec<SecurityScanResult> {
     )
     .ok()
     .map(|p| p.to_string_lossy().to_string());
+
+    if args.telemetry_enabled {
+        if let Err(err) = security_scan::persist_scan_telemetry(
+            args.request_id_value,
+            args.requested_mode,
+            args.resolved_mode.label(),
+            args.force,
+            args.run_started_at,
+            run_finished_at,
+            args.total,
+            &all_results,
+            args.scan_errors,
+        ) {
+            warn!(
+                target: "security_scan",
+                error = %err,
+                "failed to persist scan telemetry"
+            );
+        }
+    }
 
     emit_scan_event(
         args.window,
@@ -1431,6 +1469,7 @@ async fn run_ai_scan_pipeline(
     let requested_mode = mode.clone();
     let request_id_value = request_id.clone();
     let config = Arc::new(ai_provider::load_config_async().await);
+    let telemetry_enabled = config.security_scan_telemetry_enabled;
 
     // Resolve skill directories
     let hub_dir = crate::core::paths::hub_skills_dir();
@@ -2155,6 +2194,7 @@ async fn run_ai_scan_pipeline(
         run_started_at,
         total,
         ai_concurrency,
+        telemetry_enabled,
         cached_skill_names: &cached_skill_names,
         cached_results,
         scan_results,
@@ -2204,6 +2244,70 @@ pub async fn list_security_scan_logs(
 #[tauri::command]
 pub async fn get_security_scan_log_dir() -> Result<String, String> {
     Ok(security_scan::scan_logs_dir().to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn get_security_scan_policy() -> Result<SecurityScanPolicy, String> {
+    Ok(security_scan::get_policy())
+}
+
+#[tauri::command]
+pub async fn save_security_scan_policy(policy: SecurityScanPolicy) -> Result<(), String> {
+    security_scan::save_policy(&policy).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn export_security_scan_sarif(
+    skill_names: Option<Vec<String>>,
+    request_label: Option<String>,
+) -> Result<String, String> {
+    let hub_dir = crate::core::paths::hub_skills_dir();
+    let mut results = security_scan::load_all_cached()
+        .into_iter()
+        .filter(|result| {
+            let skill_path = hub_dir.join(&result.skill_name);
+            skill_path.is_dir() || skill_path.is_symlink()
+        })
+        .collect::<Vec<_>>();
+
+    if let Some(names) = skill_names {
+        if !names.is_empty() {
+            let requested: std::collections::HashSet<String> = names.into_iter().collect();
+            results.retain(|result| requested.contains(&result.skill_name));
+        }
+    }
+
+    let path = security_scan::export_sarif_report(&results, request_label.as_deref())
+        .map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn export_security_scan_report(
+    format: String,
+    skill_names: Option<Vec<String>>,
+    request_label: Option<String>,
+) -> Result<String, String> {
+    let hub_dir = crate::core::paths::hub_skills_dir();
+    let mut results = security_scan::load_all_cached()
+        .into_iter()
+        .filter(|result| {
+            let skill_path = hub_dir.join(&result.skill_name);
+            skill_path.is_dir() || skill_path.is_symlink()
+        })
+        .collect::<Vec<_>>();
+
+    if let Some(names) = skill_names {
+        if !names.is_empty() {
+            let requested: std::collections::HashSet<String> = names.into_iter().collect();
+            results.retain(|result| requested.contains(&result.skill_name));
+        }
+    }
+
+    let parsed_format = SecurityScanReportFormat::parse_loose(&format);
+    let path = security_scan::export_scan_report(&results, parsed_format, request_label.as_deref())
+        .map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().to_string())
 }
 
 #[cfg(test)]

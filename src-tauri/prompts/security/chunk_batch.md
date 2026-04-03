@@ -3,8 +3,8 @@ You are a security analyst reviewing files from an AI coding skill called "{{SKI
 This is chunk {{CHUNK_NUM}} of {{TOTAL_CHUNKS}}.
 
 Language requirement:
-- Write `description` and `recommendation` in **{{TARGET_LANGUAGE}}**.
-- Keep `category`, `severity`, and `file_risk` as English schema tokens.
+- Write `category`, `description`, and `recommendation` in **{{TARGET_LANGUAGE}}**.
+- Keep `severity` and `file_risk` as English schema tokens (Safe|Low|Medium|High|Critical).
 - Keep `evidence` as the original snippet from the source file.
 
 Analyze each file for security risks. Focus on:
@@ -25,8 +25,9 @@ RESPONSE FORMAT:
       "file_risk": "Safe|Low|Medium|High|Critical",
       "findings": [
         {
-          "category": "<short category>",
+          "category": "<short category in {{TARGET_LANGUAGE}}>",
           "severity": "Low|Medium|High|Critical",
+          "confidence": 0.0,
           "description": "<one-line description>",
           "evidence": "<relevant code snippet, max 200 chars>",
           "recommendation": "<brief fix suggestion>"
@@ -42,3 +43,5 @@ Rules:
 - Use the EXACT file path from the input (the "--- FILE: <path> ---" marker).
 - Be concise but thorough. Prioritize real threats over style issues.
 - Err on the side of caution: flag suspicious patterns even if they might be benign.
+- `confidence` must be a number in [0.0, 1.0] and represent your confidence for that finding.
+- IMPORTANT: `category`, `description`, and `recommendation` MUST be written in {{TARGET_LANGUAGE}}. Do NOT use English for these fields.

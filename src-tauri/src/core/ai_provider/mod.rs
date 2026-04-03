@@ -28,6 +28,7 @@ fn estimate_translation_max_tokens(input: &str) -> u32 {
 pub enum ApiFormat {
     Openai,
     Anthropic,
+    Local,
 }
 
 impl ApiFormat {
@@ -35,6 +36,7 @@ impl ApiFormat {
         match raw.trim().to_ascii_lowercase().as_str() {
             "openai" => Self::Openai,
             "anthropic" => Self::Anthropic,
+            "local" => Self::Local,
             _ => Self::Openai,
         }
     }
@@ -100,6 +102,25 @@ static MYMEMORY_USAGE_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()
 static AI_REQUEST_SEMAPHORE: LazyLock<Mutex<Option<(u32, Arc<tokio::sync::Semaphore>)>>> =
     LazyLock::new(|| Mutex::new(None));
 
+// ── AiConfig In-Memory Cache ────────────────────────────────────────
+//
+// Avoids repeated disk reads + AES-256-GCM decryption on every AI command.
+// TTL = 5 seconds; invalidated immediately on save_config.
+
+const AI_CONFIG_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5);
+
+static AI_CONFIG_CACHE: LazyLock<Mutex<Option<(std::time::Instant, AiConfig)>>> =
+    LazyLock::new(|| Mutex::new(None));
+
+/// Invalidate the in-memory AiConfig cache.
+/// Called by `save_config` / `save_config_async` so that the next load
+/// picks up fresh values from disk.
+pub fn invalidate_config_cache() {
+    if let Ok(mut guard) = AI_CONFIG_CACHE.lock() {
+        *guard = None;
+    }
+}
+
 fn ai_request_concurrency_budget(config: &AiConfig) -> u32 {
     resolve_scan_params(config).max_concurrent_requests.max(1)
 }
@@ -145,6 +166,19 @@ where
     Ok(ShortTextPriority::parse_loose(&raw))
 }
 
+/// Per-format saved preset (base_url, api_key, model).
+/// When the user switches api_format, the active fields are swapped from/to
+/// the corresponding preset so each format remembers its own values.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FormatPreset {
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub api_key: String,
+    #[serde(default)]
+    pub model: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiConfig {
     pub enabled: bool,
@@ -169,10 +203,27 @@ pub struct AiConfig {
     /// Override: 0 = auto-derive from context_window_k
     #[serde(default)]
     pub scan_max_response_tokens: u32,
+    /// Optional anonymous telemetry for security scan quality metrics.
+    /// When enabled, SkillStar only records aggregate run stats (no skill names/content).
+    #[serde(default = "default_security_scan_telemetry_enabled")]
+    pub security_scan_telemetry_enabled: bool,
+    /// Saved preset for OpenAI-compatible format.
+    #[serde(default)]
+    pub openai_preset: FormatPreset,
+    /// Saved preset for Anthropic Messages format.
+    #[serde(default)]
+    pub anthropic_preset: FormatPreset,
+    /// Saved preset for Local (Ollama) format.
+    #[serde(default)]
+    pub local_preset: FormatPreset,
 }
 
 fn default_context_window_k() -> u32 {
     128
+}
+
+fn default_security_scan_telemetry_enabled() -> bool {
+    false
 }
 
 impl Default for AiConfig {
@@ -189,6 +240,14 @@ impl Default for AiConfig {
             max_concurrent_requests: 4,
             chunk_char_limit: 0,
             scan_max_response_tokens: 0,
+            security_scan_telemetry_enabled: default_security_scan_telemetry_enabled(),
+            openai_preset: FormatPreset::default(),
+            anthropic_preset: FormatPreset::default(),
+            local_preset: FormatPreset {
+                base_url: "http://127.0.0.1:11434/v1".to_string(),
+                model: "llama3.1:8b".to_string(),
+                ..Default::default()
+            },
         }
     }
 }
@@ -241,8 +300,10 @@ pub fn resolve_scan_params(config: &AiConfig) -> ResolvedScanParams {
     }
 }
 
+
+
 fn config_path() -> PathBuf {
-    super::paths::data_root().join("ai_config.json")
+    super::paths::ai_config_path()
 }
 
 fn get_encryption_key() -> aes_gcm::Key<aes_gcm::Aes256Gcm> {
@@ -303,6 +364,28 @@ fn decrypt_api_key(encoded: &str) -> String {
 
 #[must_use]
 pub fn load_config() -> AiConfig {
+    // Try in-memory cache first (avoids disk read + AES decrypt).
+    if let Ok(guard) = AI_CONFIG_CACHE.lock() {
+        if let Some((ts, cached)) = guard.as_ref() {
+            if ts.elapsed() < AI_CONFIG_CACHE_TTL {
+                return cached.clone();
+            }
+        }
+    }
+
+    let fresh = load_config_from_disk();
+
+    // Warm cache.
+    if let Ok(mut guard) = AI_CONFIG_CACHE.lock() {
+        *guard = Some((std::time::Instant::now(), fresh.clone()));
+    }
+
+    fresh
+}
+
+/// Read config directly from disk (no cache). Used by `load_config` after
+/// a cache miss and by any code that explicitly needs the on-disk state.
+fn load_config_from_disk() -> AiConfig {
     let path = config_path();
     if !path.exists() {
         return AiConfig::default();
@@ -346,6 +429,10 @@ pub fn save_config(config: &AiConfig) -> Result<()> {
     let content =
         serde_json::to_string_pretty(&config_to_save).context("Failed to serialize AI config")?;
     std::fs::write(&path, content).context("Failed to write AI config")?;
+
+    // Invalidate in-memory cache so the next load picks up fresh values.
+    invalidate_config_cache();
+
     Ok(())
 }
 
@@ -392,7 +479,11 @@ const TRANSLATION_CHUNK_RETRY_MIN_CHARS: usize = 4_000;
 // ── Prompts ─────────────────────────────────────────────────────────
 
 const TRANSLATE_DOCUMENT_PROMPT: &str = include_str!("../../../prompts/ai/translate_document.md");
+const TRANSLATE_DOCUMENT_PROMPT_HY_MT: &str =
+    include_str!("../../../prompts/ai/translate_document_hy_mt.md");
 const TRANSLATE_SHORT_PROMPT: &str = include_str!("../../../prompts/ai/translate_short.md");
+const TRANSLATE_SHORT_PROMPT_HY_MT: &str =
+    include_str!("../../../prompts/ai/translate_short_hy_mt.md");
 const SUMMARY_PROMPT: &str = include_str!("../../../prompts/ai/summary.md");
 const TRANSLATE_CHUNK_PROMPT: &str = include_str!("../../../prompts/ai/translate_chunk.md");
 const PICK_SKILLS_PROMPT: &str = include_str!("../../../prompts/ai/pick_skills.md");
@@ -404,14 +495,39 @@ fn is_empty_ai_response_error(err: &anyhow::Error) -> bool {
     err.to_string().contains("AI returned empty response")
 }
 
-fn build_translation_system_prompt(lang: &str, source_lang_hint: &str) -> String {
-    TRANSLATE_DOCUMENT_PROMPT
+fn is_hy_mt_model(config: &AiConfig) -> bool {
+    is_local_format(config)
+        && config
+            .model
+            .trim()
+            .to_ascii_lowercase()
+            .contains("hy-mt")
+}
+
+fn build_translation_system_prompt(config: &AiConfig, lang: &str, source_lang_hint: &str) -> String {
+    let template = if is_hy_mt_model(config) {
+        TRANSLATE_DOCUMENT_PROMPT_HY_MT
+    } else {
+        TRANSLATE_DOCUMENT_PROMPT
+    };
+
+    template
         .replace("{lang}", lang)
         .replace("{source_lang_hint}", source_lang_hint)
 }
 
-fn build_short_translation_system_prompt(lang: &str, source_lang_hint: &str) -> String {
-    TRANSLATE_SHORT_PROMPT
+fn build_short_translation_system_prompt(
+    config: &AiConfig,
+    lang: &str,
+    source_lang_hint: &str,
+) -> String {
+    let template = if is_hy_mt_model(config) {
+        TRANSLATE_SHORT_PROMPT_HY_MT
+    } else {
+        TRANSLATE_SHORT_PROMPT
+    };
+
+    template
         .replace("{lang}", lang)
         .replace("{source_lang_hint}", source_lang_hint)
 }
@@ -605,7 +721,16 @@ fn current_proxy_fingerprint() -> ProxyFingerprint {
 
 /// Build a reqwest client, optionally honouring the user's proxy config.
 fn build_http_client_inner(fingerprint: &ProxyFingerprint) -> Result<reqwest::Client> {
-    let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(120));
+    let mut builder = reqwest::Client::builder()
+        // Total request timeout (covers entire request lifecycle).
+        .timeout(std::time::Duration::from_secs(120))
+        // Fast-fail on network-unreachable / DNS-timeout scenarios
+        // instead of waiting the full 120s.
+        .connect_timeout(std::time::Duration::from_secs(10))
+        // Keep idle connections alive to reuse TLS sessions.
+        .pool_idle_timeout(std::time::Duration::from_secs(90))
+        // Match the AI concurrency budget default.
+        .pool_max_idle_per_host(4);
 
     if fingerprint.enabled {
         let proxy_url = format!(
@@ -726,16 +851,35 @@ fn is_anthropic_format(config: &AiConfig) -> bool {
     matches!(config.api_format, ApiFormat::Anthropic)
 }
 
+fn is_local_format(config: &AiConfig) -> bool {
+    matches!(config.api_format, ApiFormat::Local)
+}
+
+/// For local API format, use a dummy token if api_key is empty.
+fn effective_api_key(config: &AiConfig) -> String {
+    if config.api_key.trim().is_empty() && is_local_format(config) {
+        "ollama".to_string()
+    } else {
+        config.api_key.clone()
+    }
+}
+
 fn build_openai_chat_url(base_url: &str) -> String {
     let mut base = base_url.trim_end_matches('/');
     if base.is_empty() {
         base = "https://api.openai.com/v1";
     }
     if base.ends_with("/chat/completions") {
-        base.to_string()
-    } else {
-        format!("{}/chat/completions", base)
+        return base.to_string();
     }
+    // Auto-insert /v1 for bare host:port URLs (e.g. http://host:1234)
+    // that have no path segment — common with Ollama endpoints.
+    if let Some(after_scheme) = base.split_once("://").map(|(_, rest)| rest) {
+        if !after_scheme.contains('/') {
+            return format!("{}/v1/chat/completions", base);
+        }
+    }
+    format!("{}/chat/completions", base)
 }
 
 fn build_anthropic_messages_url(base_url: &str) -> String {
@@ -792,7 +936,7 @@ async fn openai_chat_completion_with_opts(
     let resp = client
         .post(&url)
         .header("Content-Type", "application/json")
-        .header("Authorization", format!("Bearer {}", config.api_key))
+        .header("Authorization", format!("Bearer {}", effective_api_key(config)))
         .json(&body)
         .send()
         .await
@@ -924,7 +1068,7 @@ where
         .post(&url)
         .header("Content-Type", "application/json")
         .header("Accept", "text/event-stream")
-        .header("Authorization", format!("Bearer {}", config.api_key))
+        .header("Authorization", format!("Bearer {}", effective_api_key(config)))
         .json(&body)
         .send()
         .await
@@ -1063,7 +1207,7 @@ async fn anthropic_messages_completion(
     let resp = client
         .post(&url)
         .header("Content-Type", "application/json")
-        .header("x-api-key", &config.api_key)
+        .header("x-api-key", effective_api_key(config))
         .header("anthropic-version", "2023-06-01")
         .json(&body)
         .send()
@@ -1127,7 +1271,7 @@ where
         .post(&url)
         .header("Content-Type", "application/json")
         .header("Accept", "text/event-stream")
-        .header("x-api-key", &config.api_key)
+        .header("x-api-key", effective_api_key(config))
         .header("anthropic-version", "2023-06-01")
         .json(&body)
         .send()
@@ -1340,7 +1484,7 @@ where
 }
 
 fn ai_short_text_available(config: &AiConfig) -> bool {
-    config.enabled && !config.api_key.trim().is_empty()
+    config.enabled && (!config.api_key.trim().is_empty() || is_local_format(config))
 }
 
 fn normalize_mymemory_lang(code: &str) -> String {
@@ -1436,12 +1580,15 @@ fn source_lang_hint_from_code(code: &str) -> String {
 /// stored at `~/.skillstar/.mymemory_de`.
 fn get_mymemory_de() -> String {
     use std::fs;
-    let path = crate::core::paths::data_root().join(".mymemory_de");
+    let path = crate::core::paths::mymemory_disabled_path();
     if let Ok(email) = fs::read_to_string(&path) {
         let trimmed = email.trim().to_string();
         if !trimmed.is_empty() {
             return trimmed;
         }
+    }
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
     }
     let id = uuid::Uuid::new_v4();
     let email = format!("{id}@skillstar.local");
@@ -1450,7 +1597,7 @@ fn get_mymemory_de() -> String {
 }
 
 fn mymemory_usage_path() -> PathBuf {
-    crate::core::paths::data_root().join("mymemory_usage.json")
+    crate::core::paths::mymemory_usage_path()
 }
 
 fn load_mymemory_usage_stats_inner() -> MymemoryUsageStats {
@@ -1462,11 +1609,12 @@ fn load_mymemory_usage_stats_inner() -> MymemoryUsageStats {
 }
 
 fn save_mymemory_usage_stats_inner(stats: &MymemoryUsageStats) {
-    let data_root = crate::core::paths::data_root();
-    if std::fs::create_dir_all(&data_root).is_err() {
-        return;
-    }
     let path = mymemory_usage_path();
+    if let Some(parent) = path.parent() {
+        if std::fs::create_dir_all(parent).is_err() {
+            return;
+        }
+    }
     if let Ok(raw) = serde_json::to_string_pretty(stats) {
         let _ = std::fs::write(path, raw);
     }
@@ -1638,25 +1786,37 @@ async fn mymemory_translate_short_text(config: &AiConfig, text: &str) -> Result<
     let de = get_mymemory_de_async().await;
     let de_param = (!de.trim().is_empty()).then_some(de);
 
-    // 1) Parse Markdown to HTML so MyMemory properly preserves the structural tags
-    let parser = pulldown_cmark::Parser::new(text);
-    let mut html_input = String::new();
-    pulldown_cmark::html::push_html(&mut html_input, parser);
+    // Fast path: skip Markdown↔HTML round-trip for plain text (no formatting)
+    let is_plain = !text.contains(['#', '*', '`', '[', '|', '>', '~']);
 
-    // 2) Try with de (per-email quota)
-    let translated_html =
-        match mymemory_call(&client, &html_input, &langpair, de_param.as_deref()).await {
+    let api_input = if is_plain {
+        text.to_string()
+    } else {
+        // Parse Markdown to HTML so MyMemory properly preserves the structural tags
+        let parser = pulldown_cmark::Parser::new(text);
+        let mut html_input = String::new();
+        pulldown_cmark::html::push_html(&mut html_input, parser);
+        html_input
+    };
+
+    // Try with de (per-email quota)
+    let raw_result =
+        match mymemory_call(&client, &api_input, &langpair, de_param.as_deref()).await {
             Ok(result) => result,
             Err(e) => {
                 warn!(target: "mymemory", error = %e, "de request failed, retrying anonymous");
-                // 3) Fallback: anonymous (no de, per-IP quota)
-                mymemory_call(&client, &html_input, &langpair, None).await?
+                // Fallback: anonymous (no de, per-IP quota)
+                mymemory_call(&client, &api_input, &langpair, None).await?
             }
         };
 
-    // 4) Convert back safely to Markdown
-    let md_output = html2md::parse_html(&translated_html).trim().to_string();
-    Ok(md_output)
+    // Convert back to Markdown only if we sent HTML
+    let output = if is_plain {
+        raw_result.trim().to_string()
+    } else {
+        html2md::parse_html(&raw_result).trim().to_string()
+    };
+    Ok(output)
 }
 
 // ── Public API ───────────────────────────────────────────────────────
@@ -1667,7 +1827,7 @@ pub async fn translate_text(config: &AiConfig, text: &str) -> Result<String> {
     let lang = language_display_name(&config.target_language);
     let source_lang_hint =
         "English (en); technical markdown with possible mixed-language snippets.";
-    let system_prompt = build_translation_system_prompt(lang, source_lang_hint);
+    let system_prompt = build_translation_system_prompt(config, lang, source_lang_hint);
     debug!(
         target: "translate",
         lang = %lang,
@@ -1725,7 +1885,7 @@ where
     let lang = language_display_name(&config.target_language);
     let source_lang_hint =
         "English (en); technical markdown with possible mixed-language snippets.";
-    let system_prompt = build_translation_system_prompt(lang, source_lang_hint);
+    let system_prompt = build_translation_system_prompt(config, lang, source_lang_hint);
     debug!(
         target: "translate",
         lang = %lang,
@@ -1784,7 +1944,7 @@ pub async fn translate_short_text(config: &AiConfig, text: &str) -> Result<Strin
     let lang = language_display_name(&config.target_language);
     let source_lang = detect_short_text_source_lang(text);
     let source_lang_hint = source_lang_hint_from_code(source_lang);
-    let system_prompt = build_short_translation_system_prompt(lang, &source_lang_hint);
+    let system_prompt = build_short_translation_system_prompt(config, lang, &source_lang_hint);
     chat_completion_capped(config, &system_prompt, text, SHORT_TEXT_MAX_TOKENS).await
 }
 
@@ -1795,10 +1955,7 @@ pub async fn translate_short_text(config: &AiConfig, text: &str) -> Result<Strin
 /// per-item `translate_short_text` when parsing fails.
 ///
 /// Returns a Vec with the same length and order as `texts`.
-pub async fn translate_short_texts_batch(
-    config: &AiConfig,
-    texts: &[&str],
-) -> Result<Vec<String>> {
+pub async fn translate_short_texts_batch(config: &AiConfig, texts: &[&str]) -> Result<Vec<String>> {
     if texts.is_empty() {
         return Ok(vec![]);
     }
@@ -2036,7 +2193,7 @@ where
     let lang = language_display_name(&config.target_language);
     let source_lang = detect_short_text_source_lang(text);
     let source_lang_hint = source_lang_hint_from_code(source_lang);
-    let system_prompt = build_short_translation_system_prompt(lang, &source_lang_hint);
+    let system_prompt = build_short_translation_system_prompt(config, lang, &source_lang_hint);
 
     match chat_completion_stream(
         config,
@@ -2648,16 +2805,17 @@ pub async fn pick_skills(
 }
 
 /// Test API connectivity with a minimal request.
-pub async fn test_connection(config: &AiConfig) -> Result<String> {
+pub async fn test_connection(config: &AiConfig) -> Result<u64> {
     let system_prompt = "Reply with exactly: connection_ok";
-    let result = chat_completion(config, system_prompt, "ping").await?;
-    Ok(result)
+    let start = std::time::Instant::now();
+    let _ = chat_completion(config, system_prompt, "ping").await?;
+    Ok(start.elapsed().as_millis() as u64)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        RankedSkillPickCandidate, SkillPickCandidate, fallback_skill_pick,
+        AiConfig, ApiFormat, RankedSkillPickCandidate, SkillPickCandidate, fallback_skill_pick,
         parse_skill_pick_response, shortlist_skill_pick_candidates, split_translation_chunks,
     };
 
@@ -2783,6 +2941,48 @@ mod tests {
         );
     }
 
+    #[test]
+    fn hy_mt_prompt_selection_only_for_local_hy_mt_models() {
+        let mut cfg = AiConfig::default();
+        cfg.api_format = ApiFormat::Local;
+        cfg.model = "huihui_ai/hy-mt1.5-abliterated:1.8b".to_string();
+
+        let hy_mt_prompt = super::build_translation_system_prompt(
+            &cfg,
+            "Simplified Chinese",
+            "English (en)",
+        );
+        assert!(
+            hy_mt_prompt.contains("Treat the USER message as source text"),
+            "HY-MT local models should use the dedicated HY-MT translation prompt"
+        );
+
+        cfg.model = "llama3.1:8b".to_string();
+        let generic_prompt = super::build_translation_system_prompt(
+            &cfg,
+            "Simplified Chinese",
+            "English (en)",
+        );
+        assert!(
+            !generic_prompt.contains("Treat the USER message as source text"),
+            "non HY-MT models should keep the generic translation prompt"
+        );
+    }
+
+    #[test]
+    fn hy_mt_prompt_selection_not_enabled_for_non_local_formats() {
+        let mut cfg = AiConfig::default();
+        cfg.api_format = ApiFormat::Openai;
+        cfg.model = "tencent/HY-MT1.5-1.8B".to_string();
+
+        let prompt =
+            super::build_short_translation_system_prompt(&cfg, "Simplified Chinese", "English (en)");
+        assert!(
+            !prompt.contains("Treat the USER message as source text"),
+            "HY-MT prompt adaptation is scoped to local format only"
+        );
+    }
+
     // ── get_mymemory_de tests ───────────────────────────────────────
 
     /// Helper: generate a unique temp dir, set env, run, restore.
@@ -2903,6 +3103,8 @@ mod tests {
         });
     }
 
+
+
     #[test]
     fn save_and_load_config_async_roundtrip_keeps_plain_api_key() {
         with_temp_data_root(|_dir| {
@@ -2930,7 +3132,7 @@ mod tests {
     }
 
     // ── MyMemory Formatting Stability Tests ─────────────────────────────
-    // These tests verify that the `Markdown -> HTML -> TranslatedHTML -> Markdown` 
+    // These tests verify that the `Markdown -> HTML -> TranslatedHTML -> Markdown`
     // pipeline correctly preserves structural elements regardless of MyMemory's translation.
 
     fn simulate_mymemory_format_pipeline(original_md: &str, translated_html: &str) -> String {
@@ -2938,9 +3140,9 @@ mod tests {
         let parser = pulldown_cmark::Parser::new(original_md);
         let mut html_input = String::new();
         pulldown_cmark::html::push_html(&mut html_input, parser);
-        
+
         // (Mock: MyMemory translates internal text, preserves HTML. `translated_html` is returned.)
-        
+
         // Step 2: parse HTML back to Markdown
         html2md::parse_html(translated_html).trim().to_string()
     }

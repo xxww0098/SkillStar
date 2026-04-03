@@ -108,8 +108,19 @@ fn enriched_path_windows() -> String {
 ///
 /// Use this instead of `Command::new()` for any external tool (git, gh, etc.)
 /// that may be installed in a non-standard location.
+///
+/// On Windows, sets `CREATE_NO_WINDOW` to prevent CMD windows from flashing.
 pub fn command_with_path(program: &str) -> Command {
     let mut cmd = Command::new(program);
     cmd.env("PATH", enriched_path());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // CREATE_NO_WINDOW (0x08000000): prevents the console window from
+        // flashing on screen when spawning git.exe / gh.exe.
+        cmd.creation_flags(0x08000000);
+    }
+
     cmd
 }

@@ -1,129 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum SkillCategory {
-    Hot,
-    Popular,
-    Rising,
-    New,
-    None,
-}
-
-impl std::fmt::Display for SkillCategory {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SkillCategory::Hot => write!(f, "Hot"),
-            SkillCategory::Popular => write!(f, "Popular"),
-            SkillCategory::Rising => write!(f, "Rising"),
-            SkillCategory::New => write!(f, "New"),
-            SkillCategory::None => write!(f, ""),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum SkillType {
-    Hub,
-    Local,
-}
-
-impl Default for SkillType {
-    fn default() -> Self {
-        Self::Hub
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Skill {
-    pub name: String,
-    pub description: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub localized_description: Option<String>,
-    /// Indicates if a skill is git-backed (`Hub`) or user-authored (`Local`).
-    #[serde(default)]
-    pub skill_type: SkillType,
-    pub stars: u32,
-    pub installed: bool,
-    pub update_available: bool,
-    pub last_updated: String,
-    pub git_url: String,
-    pub tree_hash: Option<String>,
-    pub category: SkillCategory,
-    pub author: Option<String>,
-    pub topics: Vec<String>,
-    pub agent_links: Option<Vec<String>>,
-    /// Leaderboard rank position (1-indexed)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rank: Option<u32>,
-    /// skills.sh source repo (e.g. "vercel-labs/skills")
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
-}
-
-impl Skill {
-    /// Create a Skill from skills.sh data.
-    ///
-    /// Accepts owned `String` parameters — the caller should move data in
-    /// rather than cloning it.
-    pub fn from_skills_sh(
-        name: String,
-        description: String,
-        stars: u32,
-        author: String,
-        git_url: String,
-    ) -> Self {
-        let mut skill = Self {
-            name,
-            description,
-            localized_description: None,
-            skill_type: SkillType::Hub,
-            stars,
-            installed: false,
-            update_available: false,
-            last_updated: chrono::Utc::now().to_rfc3339(),
-            git_url,
-            tree_hash: None,
-            category: SkillCategory::None,
-            source: Some(author.clone()),
-            author: Some(author),
-            topics: Vec::new(),
-            agent_links: Some(Vec::new()),
-            rank: None,
-        };
-        skill.classify();
-        skill
-    }
-
-    /// Classify a skill based on install count
-    pub fn classify(&mut self) {
-        if self.stars > 500 {
-            self.category = SkillCategory::Hot;
-        } else if self.stars > 100 {
-            self.category = SkillCategory::Popular;
-        } else if self.stars > 10 {
-            self.category = SkillCategory::Rising;
-        } else if self.stars > 0 {
-            self.category = SkillCategory::New;
-        }
-    }
-}
-
-/// Official publisher from skills.sh/official
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OfficialPublisher {
-    /// Organization/user name (e.g. "anthropics")
-    pub name: String,
-    /// Repository name (e.g. "skills")
-    pub repo: String,
-    /// Number of repositories for this publisher
-    pub repo_count: u32,
-    /// Number of skills for this publisher
-    pub skill_count: u32,
-    /// URL to the publisher page on skills.sh
-    pub url: String,
-}
+pub use skillstar_marketplace_core::{
+    OfficialPublisher, Skill, SkillCategory, SkillType, extract_github_source_from_url,
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SkillContent {
@@ -180,23 +60,6 @@ pub fn parse_skill_content(name: String, full_content: String) -> SkillContent {
         scopes: frontmatter.scopes.unwrap_or_default(),
         allowed_tools: frontmatter.allowed_tools.unwrap_or_default(),
         content: full_content,
-    }
-}
-
-/// Extract "owner/repo" from a GitHub URL.
-pub fn extract_github_source_from_url(url: &str) -> Option<String> {
-    let lower = url.to_lowercase();
-    let prefix = "https://github.com/";
-    if !lower.starts_with(prefix) {
-        return None;
-    }
-
-    let rest = &url[prefix.len()..];
-    let clean = rest.trim_end_matches(".git").trim_end_matches('/');
-    if clean.contains('/') {
-        Some(clean.to_string())
-    } else {
-        None
     }
 }
 
