@@ -5,6 +5,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-04-04
+
+### Added
+- **Windows Developer Mode banner** — platform-aware guidance component that detects NTFS junction/symlink capability and guides users to enable Developer Mode for full functionality.
+- **`check_developer_mode` command** — backend check for Windows Developer Mode status via registry query.
+- **`is_link()` utility** — centralized cross-platform helper that detects both true symlinks and NTFS junction points, replacing scattered `is_symlink()` checks.
+- **`create_symlink_or_copy()` fallback** — project-level deployment now falls back to directory copy when both symlinks and junctions fail (e.g. cross-drive on Windows without Developer Mode).
+- **Mirror-aware updater** — `commands/updater.rs` with `check_app_update` / `download_app_update` / `install_app_update` Rust commands that dynamically inject GitHub mirror endpoints into the Tauri updater, bypassing network restrictions.
+- **`gix` → Git CLI fallback** — `compute_tree_hash` now falls back to `git rev-parse` via CLI when `gix` fails on Windows (NTFS locking / shallow clone quirks).
+
+### Changed
+- **Symlink detection unified** — all filesystem-sensitive operations (`installed_skill`, `local_skill`, `sync`, `agent_profile`, `gh_manager`, `repo_scanner`, `skill_bundle`, `skill_pack`, `project_manifest`) now use `paths::is_link()` instead of raw `is_symlink()`.
+- **Junction target resolution** — `read_link` calls in `local_skill` and `gh_manager` now fall back to `junction::get_target()` on Windows.
+- **Updater hook refactored** — `useUpdater.ts` now calls Rust-side commands (`check_app_update` / `download_app_update` / `install_app_update`) instead of using the JS `@tauri-apps/plugin-updater` directly; supports mirror-aware endpoints and download progress events.
+- **Update check timeout** increased from 12s to 20s to accommodate mirror latency.
+- **SVG icon fix** — `AgentIcon` and `AntigravityIcon` interaction improvements.
+
+### Fixed
+- Windows symlink operations silently failing when Developer Mode is disabled — now detected and handled with junction fallback + user guidance.
+- Updater unable to check for updates when GitHub mirror acceleration is enabled.
+- `gix` panicking on Windows shallow clones due to NTFS file-locking.
+
 ## [0.1.5] - 2026-04-04
 
 ### Added

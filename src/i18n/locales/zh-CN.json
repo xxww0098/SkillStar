@@ -251,7 +251,13 @@
     "acpDesc": "设置用于生成构建钩子的 ACP 兼容代理。代理会自动分析仓库并创建构建脚本。",
     "acpPresets": "快速选择",
     "acpCommand": "代理命令",
-    "acpCommandHint": "启动 ACP 代理子进程的命令。必须支持 --acp 或等效的 stdio 模式。"
+    "acpCommandHint": "启动 ACP 代理子进程的命令。必须支持 --acp 或等效的 stdio 模式。",
+    "devModeBannerTitle": "建议开启「开发人员模式」",
+    "devModeBannerDesc": "当前正使用 Junction Point 作为兼容方案。开启 Windows 开发人员模式后可使用完整的 Symlink 支持，跨盘项目部署体验更佳。",
+    "devModeBannerStepsWin10": "设置 → 更新和安全 → 开发者选项 → 开启「开发人员模式」",
+    "devModeBannerStepsWin11": "设置 → 系统 → 开发者选项 → 开启「开发人员模式」",
+    "devModeBannerDismiss": "知道了",
+    "devModeBannerLearnMore": "打开系统设置"
   },
   "mySkills": {
     "title": "技能",

@@ -49,10 +49,7 @@ pub fn installed_snapshot_markers() -> HashSet<String> {
         for entry in entries.flatten() {
             let path = entry.path();
             if !path.is_dir()
-                && path
-                    .symlink_metadata()
-                    .map(|meta| !meta.is_symlink())
-                    .unwrap_or(true)
+                && !super::paths::is_link(&path)
             {
                 continue;
             }
@@ -414,9 +411,9 @@ fn detect_agent_links(skill_name: &str, profiles: &[AgentProfile]) -> Vec<String
     let mut links = Vec::with_capacity(2); // most skills link to 1-2 agents
     for profile in profiles {
         let link_path = profile.global_skills_dir.join(skill_name);
-        // Check both is_symlink() AND exists(): exists() follows the symlink,
+        // Check both is_link() AND exists(): exists() follows the link target,
         // so a broken symlink (target deleted) returns false — don't report it as linked.
-        if link_path.is_symlink() && link_path.exists() {
+        if super::paths::is_link(&link_path) && link_path.exists() {
             links.push(profile.display_name.clone());
         }
     }

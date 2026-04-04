@@ -11,7 +11,7 @@ import type { GitStatus } from "../../../types";
 
 interface AboutSectionProps {
   ghInstalled: boolean | null;
-  onCheckUpdate?: () => Promise<{ found: boolean; version?: string }>;
+  onCheckUpdate?: () => Promise<{ found: boolean; version?: string; error?: boolean }>;
   isCheckingUpdate?: boolean;
 }
 
@@ -71,6 +71,10 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
     if (!onCheckUpdate) return;
     try {
       const result = await onCheckUpdate();
+      if (result.error) {
+        // Error state is already handled by the updater hook (sidebar banner)
+        return;
+      }
       if (result.found) {
         const { toast: sonnerToast } = await import("sonner");
         sonnerToast.success(t("sidebar.newUpdate"), {

@@ -19,11 +19,15 @@ pub fn is_local_skill(name: &str) -> bool {
     let hub_dir = super::paths::hub_skills_dir();
     let skill_path = hub_dir.join(name);
 
-    if !skill_path.is_symlink() {
+    if !super::paths::is_link(&skill_path) {
         return false;
     }
 
-    let Ok(target) = std::fs::read_link(&skill_path) else {
+    // read_link works for symlinks; on Windows also try junction::get_target
+    let link_target = std::fs::read_link(&skill_path);
+    #[cfg(windows)]
+    let link_target = link_target.or_else(|_| junction::get_target(&skill_path));
+    let Ok(target) = link_target else {
         return false;
     };
 
@@ -223,7 +227,7 @@ pub fn delete(name: &str) -> Result<()> {
     let hub_dir = super::paths::hub_skills_dir();
     let hub_path = hub_dir.join(name);
     if hub_path.symlink_metadata().is_ok() {
-        if hub_path.is_symlink() {
+        if super::paths::is_link(&hub_path) {
             super::paths::remove_symlink(&hub_path)
                 .with_context(|| format!("Failed to remove hub symlink for '{}'", name))?;
         } else {
@@ -257,7 +261,7 @@ pub fn graduate(name: &str) -> Result<()> {
     // Remove hub symlink
     let hub_dir = super::paths::hub_skills_dir();
     let hub_path = hub_dir.join(name);
-    if hub_path.is_symlink() {
+    if super::paths::is_link(&hub_path) {
         super::paths::remove_symlink(&hub_path)
             .with_context(|| format!("Failed to remove hub symlink for '{}'", name))?;
     }
@@ -316,7 +320,7 @@ pub fn migrate_existing() -> Result<u32> {
         let Ok(meta) = path.symlink_metadata() else {
             continue;
         };
-        if meta.is_symlink() || !meta.is_dir() {
+        if super::paths::is_link(&path) || !meta.is_dir() {
             continue;
         }
 

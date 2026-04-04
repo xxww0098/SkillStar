@@ -86,6 +86,7 @@ pub fn run() {
         .manage(core::patrol::PatrolManager::new())
         .manage(TrayState::new(detect_system_lang()))
         .manage(ExitControl::new())
+        .manage(commands::updater::PendingUpdate::new())
         .setup(|app| {
             // Migrate v1 flat layout → v2 categorised layout (idempotent)
             core::paths::migrate_legacy_paths();
@@ -188,6 +189,7 @@ pub fn run() {
             commands::github::check_gh_installed,
             commands::github::check_gh_status,
             commands::github::check_git_status,
+            commands::github::check_developer_mode,
             commands::github::publish_skill_to_github,
             commands::github::list_user_repos,
             commands::github::inspect_repo_folders,
@@ -288,6 +290,9 @@ pub fn run() {
             commands::patrol::set_dock_visible,
             commands::acp::get_acp_config,
             commands::acp::save_acp_config,
+            commands::updater::check_app_update,
+            commands::updater::download_and_install_update,
+            commands::updater::restart_after_update,
             update_tray_language,
         ])
         .build(tauri::generate_context!())

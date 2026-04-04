@@ -195,12 +195,12 @@ fn builtin_profiles() -> Vec<AgentProfile> {
         .collect()
 }
 
-/// Count how many skill symlinks exist in a directory.
+/// Count how many skill symlinks/junctions exist in a directory.
 fn count_symlinks(dir: &Path) -> u32 {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return 0;
     };
-    entries.flatten().filter(|e| e.path().is_symlink()).count() as u32
+    entries.flatten().filter(|e| super::paths::is_link(&e.path())).count() as u32
 }
 
 /// Detect installation by creating the config/skills dir if it doesn't exist.

@@ -446,36 +446,121 @@ pub fn create_symlink(src: &Path, dst: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Cross-platform symlink removal.
+/// Create a symlink, junction, or **copy** as a last resort.
+///
+/// Intended for project-level skill deployment where the project directory
+/// may be on a different drive than the hub.  Falls back gracefully:
+///
+/// 1. Try true symlink (`symlink_dir`)
+/// 2. Try junction point (same-drive only)
+/// 3. Copy the entire directory tree
+///
+/// Returns `Ok(true)` if a copy fallback was used (not a live link),
+/// `Ok(false)` if a symlink/junction was created.
+pub fn create_symlink_or_copy(src: &Path, dst: &Path) -> anyhow::Result<bool> {
+    match create_symlink(src, dst) {
+        Ok(()) => Ok(false),
+        Err(_) => {
+            // Both symlink and junction failed — copy the directory
+            copy_dir_all(src, dst)
+                .with_context(|| format!("Failed to copy {:?} -> {:?}", src, dst))?;
+            Ok(true)
+        }
+    }
+}
+
+/// Recursively copy a directory tree, skipping `.git`.
+fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        // Skip .git to keep the copy lightweight
+        if entry.file_name() == ".git" {
+            continue;
+        }
+
+        if src_path.is_dir() {
+            copy_dir_all(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path)?;
+        }
+    }
+    Ok(())
+}
+
+
+/// Check whether a path is a symlink **or** a junction point.
+///
+/// On Unix this is equivalent to `path.is_symlink()`.
+///
+/// On Windows, `create_symlink` falls back to junction points when
+/// Developer Mode is disabled. Junction points are NTFS reparse points
+/// that `Path::is_symlink()` does **not** detect — it only recognises
+/// true symbolic links. This helper checks both, ensuring that unlink
+/// operations work regardless of which link type was created.
+pub fn is_link(path: &Path) -> bool {
+    if path.is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        if junction::exists(path).unwrap_or(false) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Cross-platform removal of symlinks **and** junction points.
 ///
 /// On Windows, directory symlinks (created via `symlink_dir`) must be removed
 /// with `remove_dir()`, not `remove_file()` — the latter returns
-/// `ERROR_ACCESS_DENIED`.  This utility inspects the metadata and dispatches
-/// correctly on every platform.
+/// `ERROR_ACCESS_DENIED`.  Junction points are removed via `junction::delete`.
+///
+/// Retries with exponential backoff to handle transient file locks from
+/// antivirus scanners, search indexers, etc.
 pub fn remove_symlink(path: &Path) -> anyhow::Result<()> {
-    let meta = path
-        .symlink_metadata()
-        .with_context(|| format!("Failed to read symlink metadata: {:?}", path))?;
+    // Try standard symlink detection first
+    if path.is_symlink() {
+        #[cfg(unix)]
+        std::fs::remove_file(path)
+            .with_context(|| format!("Failed to remove symlink: {:?}", path))?;
 
-    if !meta.is_symlink() {
-        anyhow::bail!("Not a symlink: {:?}", path);
+        #[cfg(windows)]
+        {
+            let meta = path
+                .symlink_metadata()
+                .with_context(|| format!("Failed to read symlink metadata: {:?}", path))?;
+            let remove_op = || -> std::io::Result<()> {
+                if meta.is_dir() {
+                    std::fs::remove_dir(path)
+                } else {
+                    std::fs::remove_file(path)
+                }
+            };
+            retry_io(remove_op)
+                .with_context(|| format!("Failed to remove symlink: {:?}", path))?;
+        }
+        return Ok(());
     }
 
-    #[cfg(unix)]
-    std::fs::remove_file(path).with_context(|| format!("Failed to remove symlink: {:?}", path))?;
-
+    // On Windows, also check for junction points (created when Developer Mode
+    // is disabled and symlink_dir fails with ERROR_PRIVILEGE_NOT_HELD).
     #[cfg(windows)]
     {
-        // Directory symlinks must use remove_dir; file symlinks use remove_file.
-        if meta.is_dir() {
-            std::fs::remove_dir(path)
-        } else {
-            std::fs::remove_file(path)
+        if junction::exists(path).unwrap_or(false) {
+            retry_io(|| {
+                junction::delete(path).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+            })
+            .with_context(|| format!("Failed to remove junction point: {:?}", path))?;
+            return Ok(());
         }
-        .with_context(|| format!("Failed to remove symlink: {:?}", path))?;
     }
 
-    Ok(())
+    anyhow::bail!("Not a symlink or junction: {:?}", path);
 }
 
 /// Check if the current platform supports symlink creation.
@@ -508,6 +593,42 @@ pub fn check_symlink_support() -> bool {
     }
 }
 
+/// Check if Windows Developer Mode is enabled (true symlinks work).
+///
+/// Returns `true` on Unix (always supported) or on Windows when
+/// `symlink_dir` succeeds without ERROR_PRIVILEGE_NOT_HELD (1314).
+///
+/// When this returns `false` on Windows, the app falls back to junction
+/// points, which have limitations (same-drive only, not detected by
+/// `is_symlink()`). The frontend can use this to recommend enabling
+/// Developer Mode for a better experience.
+pub fn check_developer_mode() -> bool {
+    #[cfg(unix)]
+    {
+        true
+    }
+
+    #[cfg(windows)]
+    {
+        let tmp = std::env::temp_dir();
+        let test_src = tmp.join(".skillstar_devmode_test_src");
+        let test_dst = tmp.join(".skillstar_devmode_test_dst");
+
+        // Clean up any leftovers from previous runs
+        let _ = std::fs::remove_dir(&test_dst);
+        let _ = std::fs::remove_dir(&test_src);
+
+        let _ = std::fs::create_dir_all(&test_src);
+        let result = std::os::windows::fs::symlink_dir(&test_src, &test_dst).is_ok();
+
+        // Clean up
+        let _ = std::fs::remove_dir(&test_dst);
+        let _ = std::fs::remove_dir(&test_src);
+
+        result
+    }
+}
+
 /// Check if two paths are on the same Windows drive letter.
 /// Junction points only work within the same drive.
 #[cfg(windows)]
@@ -526,21 +647,41 @@ fn same_drive(a: &Path, b: &Path) -> bool {
 ///
 /// On Windows, antivirus software, search indexers, and lingering process
 /// handles can hold files open, causing `remove_dir_all` to fail with
-/// `ERROR_SHARING_VIOLATION`.  This wrapper retries up to 3 times with a
-/// 200 ms delay between attempts, which is enough for most transient locks.
+/// `ERROR_SHARING_VIOLATION`.  This wrapper retries with exponential
+/// backoff (200 → 400 → 800 → 1600 ms, ~3 s total) which handles
+/// most transient locks from Windows Defender real-time scanning.
 ///
 /// On Unix this is functionally identical to a single `remove_dir_all` call
 /// since file locks do not prevent deletion.
 pub fn remove_dir_all_retry(path: &Path) -> std::io::Result<()> {
+    retry_io(|| std::fs::remove_dir_all(path))
+}
+
+/// Retry an IO operation with exponential backoff.
+///
+/// 5 attempts total: immediate, then 200ms, 400ms, 800ms, 1600ms delays
+/// (~3 seconds maximum wait). Covers transient Windows file locks from
+/// antivirus, search indexer, and shell thumbnail generators.
+fn retry_io<F>(op: F) -> std::io::Result<()>
+where
+    F: Fn() -> std::io::Result<()>,
+{
+    let delays_ms: &[u64] = &[0, 200, 400, 800, 1600];
     let mut last_err = None;
-    for attempt in 0..3u32 {
-        match std::fs::remove_dir_all(path) {
+    for (attempt, &delay) in delays_ms.iter().enumerate() {
+        if delay > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(delay));
+        }
+        match op() {
             Ok(()) => return Ok(()),
             Err(e) => {
+                tracing::debug!(
+                    target: "paths",
+                    attempt = attempt + 1,
+                    error = %e,
+                    "IO operation failed, will retry"
+                );
                 last_err = Some(e);
-                if attempt < 2 {
-                    std::thread::sleep(std::time::Duration::from_millis(200));
-                }
             }
         }
     }

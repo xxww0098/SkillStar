@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import type { Update } from "@tauri-apps/plugin-updater";
-
-const UPDATER_ERROR_PATTERN = /could not fetch a valid release json/i;
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 export type UpdateStatus = "idle" | "checking" | "available" | "downloading" | "ready" | "error";
 
@@ -15,11 +14,22 @@ export interface UpdateState {
   retriesLeft: number;
 }
 
+interface UpdateCheckResult {
+  available: boolean;
+  version: string | null;
+  date: string | null;
+  body: string | null;
+}
+
+interface DownloadProgressPayload {
+  chunk_length: number;
+  content_length: number | null;
+}
+
 const SKIPPED_KEY = "skillstar_skipped_version";
 const LAST_CHECK_KEY = "skillstar_last_check";
 const CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1h
-const CHECK_TIMEOUT_MS = 12_000;           // 12s for release JSON fetch
-const DOWNLOAD_TIMEOUT_MS = 5 * 60_000;    // 5min for binary download
+const CHECK_TIMEOUT_MS = 20_000;           // 20s (mirror may add latency)
 const MAX_DOWNLOAD_RETRIES = 2;
 
 function getSkipped(): string {
@@ -51,51 +61,53 @@ export function useUpdater() {
     retriesLeft: MAX_DOWNLOAD_RETRIES,
   });
 
+  const checkingRef = useRef(false);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const mapUpdaterError = useCallback((e: unknown): string => {
     const msg = e instanceof Error ? e.message : String(e);
-    if (UPDATER_ERROR_PATTERN.test(msg)) {
+    // Friendly message for common fetch failures
+    if (/could not fetch|update check failed|timed out/i.test(msg)) {
       return t("sidebar.updateErrorFetchRelease");
     }
     return msg;
   }, [t]);
 
-  const candidateRef = useRef<Update | null>(null);
-  const checkingRef = useRef(false);
-  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // ── Check ─────────────────────────────────────────────────────────
-  const check = useCallback(async (): Promise<{ found: boolean; version?: string }> => {
+  // ── Check (via Rust command with mirror support) ──────────────────
+  const check = useCallback(async (): Promise<{ found: boolean; version?: string; error?: boolean }> => {
     if (checkingRef.current) return { found: false };
     checkingRef.current = true;
 
     try {
       setState((s) => ({ ...s, status: "checking", error: "" }));
 
-      const { check: checkUpdate } = await import("@tauri-apps/plugin-updater");
-      const update = await withTimeout(checkUpdate(), CHECK_TIMEOUT_MS, "Update check");
+      const result = await withTimeout(
+        invoke<UpdateCheckResult>("check_app_update"),
+        CHECK_TIMEOUT_MS,
+        "Update check",
+      );
 
-      if (!update) {
+      if (!result.available || !result.version) {
         setState((s) => ({ ...s, status: "idle", version: "", progress: 0, error: "" }));
         localStorage.setItem(LAST_CHECK_KEY, String(Date.now()));
         return { found: false };
       }
 
-      if (update.version === getSkipped()) {
+      if (result.version === getSkipped()) {
         setState((s) => ({ ...s, status: "idle", version: "", progress: 0, error: "" }));
         localStorage.setItem(LAST_CHECK_KEY, String(Date.now()));
         return { found: false };
       }
 
-      candidateRef.current = update;
       setState({
         status: "available",
-        version: update.version,
+        version: result.version,
         progress: 0,
         error: "",
         retriesLeft: MAX_DOWNLOAD_RETRIES,
       });
       localStorage.setItem(LAST_CHECK_KEY, String(Date.now()));
-      return { found: true, version: update.version };
+      return { found: true, version: result.version };
     } catch (e) {
       setState((s) => ({
         ...s,
@@ -104,48 +116,60 @@ export function useUpdater() {
         progress: 0,
         error: mapUpdaterError(e),
       }));
-      return { found: false };
+      return { found: false, error: true };
     } finally {
       checkingRef.current = false;
     }
   }, [mapUpdaterError]);
 
-  // ── Download ──────────────────────────────────────────────────────
+  // ── Download + Install (via Rust command) ─────────────────────────
   const download = useCallback(async () => {
-    const candidate = candidateRef.current;
-    if (!candidate) return;
-
     try {
       setState((s) => ({ ...s, status: "downloading", progress: 0, error: "" }));
 
       let downloaded = 0;
       let contentLength = 0;
 
-      const downloadPromise = candidate.download((event) => {
-        if (event.event === "Started") {
-          contentLength = event.data.contentLength ?? 0;
-          setState((s) => ({ ...s, progress: 0 }));
-        } else if (event.event === "Progress") {
-          downloaded += event.data.chunkLength;
+      // Listen for download progress events from the Rust side
+      const unlisten = await listen<DownloadProgressPayload>(
+        "updater://download-progress",
+        (event) => {
+          if (event.payload.content_length) {
+            contentLength = event.payload.content_length;
+          }
+          downloaded += event.payload.chunk_length;
           const pct =
             contentLength > 0
               ? Math.min(100, Math.round((downloaded / contentLength) * 100))
               : Math.min(95, downloaded > 0 ? Math.round(Math.log2(downloaded / 1024)) : 1);
           setState((s) => ({ ...s, progress: pct }));
-        }
-      });
+        },
+      );
 
-      await withTimeout(downloadPromise, DOWNLOAD_TIMEOUT_MS, "Download");
-
-      setState((s) => ({ ...s, status: "ready", progress: 100 }));
+      try {
+        await invoke("download_and_install_update");
+        setState((s) => ({ ...s, status: "ready", progress: 100 }));
+      } finally {
+        unlisten();
+      }
     } catch (e) {
       setState((prev) => {
         const retriesLeft = prev.retriesLeft - 1;
         if (retriesLeft > 0) {
-          // Schedule automatic retry
-          retryTimerRef.current = setTimeout(() => {
-            download();
-          }, 3000); // retry after 3s
+          // The failed download consumed the PendingUpdate. We need to
+          // re-check (which re-stores the Update) before re-downloading.
+          retryTimerRef.current = setTimeout(async () => {
+            try {
+              const res = await invoke<UpdateCheckResult>("check_app_update");
+              if (res.available) {
+                download();
+              } else {
+                setState((s) => ({ ...s, status: "idle", version: "", progress: 0, error: "" }));
+              }
+            } catch {
+              setState((s) => ({ ...s, status: "error", progress: 0, error: mapUpdaterError(e) }));
+            }
+          }, 3000);
           return {
             ...prev,
             status: "downloading",
@@ -165,14 +189,10 @@ export function useUpdater() {
     }
   }, [mapUpdaterError]);
 
-  // ── Apply (install + relaunch) ────────────────────────────────────
+  // ── Apply (restart) ───────────────────────────────────────────────
   const apply = useCallback(async () => {
-    const candidate = candidateRef.current;
-    if (!candidate) return;
     try {
-      await candidate.install();
-      const { relaunch } = await import("@tauri-apps/plugin-process");
-      await relaunch();
+      await invoke("restart_after_update");
     } catch (e) {
       setState((s) => ({
         ...s,
@@ -188,7 +208,6 @@ export function useUpdater() {
       localStorage.setItem(SKIPPED_KEY, state.version);
     }
     setState({ status: "idle", version: "", progress: 0, error: "", retriesLeft: MAX_DOWNLOAD_RETRIES });
-    candidateRef.current = null;
     if (retryTimerRef.current) {
       clearTimeout(retryTimerRef.current);
       retryTimerRef.current = null;
@@ -211,12 +230,8 @@ export function useUpdater() {
       retryTimerRef.current = null;
     }
     setState((s) => ({ ...s, retriesLeft: MAX_DOWNLOAD_RETRIES }));
-    if (candidateRef.current) {
-      await download();
-    } else {
-      await check();
-    }
-  }, [check, download]);
+    await check();
+  }, [check]);
 
   // ── Auto-check on mount + periodic ────────────────────────────────
   useEffect(() => {

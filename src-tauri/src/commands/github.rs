@@ -23,6 +23,11 @@ pub async fn check_git_status() -> Result<gh_manager::GitStatus, AppError> {
 }
 
 #[tauri::command]
+pub async fn check_developer_mode() -> Result<bool, AppError> {
+    Ok(tokio::task::spawn_blocking(paths::check_developer_mode).await?)
+}
+
+#[tauri::command]
 pub async fn publish_skill_to_github(
     skill_name: String,
     description: String,
@@ -141,14 +146,14 @@ fn resolve_skill_dir_for_publish(skill_name: &str, was_local: bool) -> Result<Pa
         paths::hub_skills_dir().join(skill_name)
     };
 
-    if !path.exists() && !path.is_symlink() {
+    if !path.exists() && !paths::is_link(&path) {
         return Err(AppError::Other(format!(
             "Skill '{}' directory not found for pre-publish scan",
             skill_name
         )));
     }
 
-    if path.is_symlink() {
+    if paths::is_link(&path) {
         std::fs::canonicalize(&path).map_err(|e| {
             AppError::Other(format!(
                 "Failed to resolve symlink for skill '{}': {}",
@@ -391,7 +396,7 @@ pub async fn force_delete_repo_caches() -> Result<usize, AppError> {
         if let Ok(entries) = std::fs::read_dir(&hub_dir) {
             for entry in entries.flatten() {
                 let skill_path = entry.path();
-                if !skill_path.is_symlink() {
+                if !paths::is_link(&skill_path) {
                     continue;
                 }
                 let Some(target) = resolve_symlink_target(&skill_path) else {
@@ -546,7 +551,7 @@ fn count_hub_skills(hub_dir: &Path) -> (usize, usize) {
             let Ok(meta) = path.symlink_metadata() else {
                 continue;
             };
-            if meta.is_symlink() {
+            if paths::is_link(&path) {
                 // Symlink: check if the target still exists
                 if path.exists() {
                     valid += 1;
@@ -592,7 +597,7 @@ pub async fn clean_broken_skills() -> Result<usize, AppError> {
                 let Ok(meta) = path.symlink_metadata() else {
                     continue;
                 };
-                if meta.is_symlink() && !path.exists() {
+                if paths::is_link(&path) && !path.exists() {
                     // Broken symlink — target is gone
                     if paths::remove_symlink(&path).is_ok() {
                         if let Some(name) = entry.file_name().to_str() {
@@ -620,7 +625,7 @@ pub async fn clean_broken_skills() -> Result<usize, AppError> {
             let skill_path = hub_dir.join(&entry.name);
             // Keep entries that have a valid directory or valid symlink
             skill_path.symlink_metadata().is_ok()
-                && (!skill_path.is_symlink() || skill_path.exists())
+                && (!paths::is_link(&skill_path) || skill_path.exists())
         });
         let orphans_removed = before - lf.skills.len();
         if orphans_removed > 0 {

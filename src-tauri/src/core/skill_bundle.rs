@@ -51,9 +51,12 @@ pub fn export_bundle(skill_name: &str, output_path: Option<&str>) -> Result<Path
         anyhow::bail!("Skill '{}' not found in hub", skill_name);
     }
 
-    // Resolve symlinks so we read actual content
-    let effective_dir = if skill_dir.is_symlink() {
-        std::fs::read_link(&skill_dir)
+    // Resolve symlinks / junction points so we read actual content
+    let effective_dir = if super::paths::is_link(&skill_dir) {
+        let link_target = std::fs::read_link(&skill_dir);
+        #[cfg(windows)]
+        let link_target = link_target.or_else(|_| junction::get_target(&skill_dir));
+        link_target
             .map(|target| {
                 if target.is_absolute() {
                     target
@@ -297,8 +300,11 @@ pub fn export_multi_bundle(skill_names: &[String], output_path: &str) -> Result<
             continue;
         }
 
-        let effective_dir = if skill_dir.is_symlink() {
-            std::fs::read_link(&skill_dir)
+        let effective_dir = if super::paths::is_link(&skill_dir) {
+            let link_target = std::fs::read_link(&skill_dir);
+            #[cfg(windows)]
+            let link_target = link_target.or_else(|_| junction::get_target(&skill_dir));
+            link_target
                 .map(|target| {
                     if target.is_absolute() {
                         target

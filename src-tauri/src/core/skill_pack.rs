@@ -247,7 +247,7 @@ pub fn install_pack(repo_dir: &Path, source: &str, repo_url: &str) -> Result<Vec
 
     // Validate: check for conflicts with existing skills
     for (name, temp_dir, target_dir) in &staged {
-        if target_dir.exists() && !target_dir.is_symlink() {
+        if target_dir.exists() && !super::paths::is_link(target_dir) {
             // Existing non-symlink skill conflicts — abort
             // Clean up all staged temp dirs
             for (_, td, _) in &staged {
@@ -265,8 +265,8 @@ pub fn install_pack(repo_dir: &Path, source: &str, repo_url: &str) -> Result<Vec
     let mut renamed = Vec::new();
     for (name, temp_dir, target_dir) in &staged {
         // Remove existing symlink if present
-        if target_dir.is_symlink() || target_dir.exists() {
-            if target_dir.is_symlink() {
+        if super::paths::is_link(target_dir) || target_dir.exists() {
+            if super::paths::is_link(target_dir) {
                 let _ = super::paths::remove_symlink(target_dir);
             } else {
                 let _ = std::fs::remove_dir_all(target_dir);
@@ -418,8 +418,8 @@ pub fn remove_pack(name: &str) -> Result<Vec<String>> {
 
     for skill in &pack.skills {
         let skill_path = hub.join(&skill.name);
-        if skill_path.is_symlink() || skill_path.exists() {
-            if skill_path.is_symlink() {
+        if super::paths::is_link(&skill_path) || skill_path.exists() {
+            if super::paths::is_link(&skill_path) {
                 match super::paths::remove_symlink(&skill_path) {
                     Ok(()) => removed.push(skill.name.clone()),
                     Err(e) => {
@@ -525,9 +525,9 @@ pub fn doctor_pack(name: &str) -> Result<DoctorReport> {
     let mut broken_links = Vec::new();
     for skill in &pack.skills {
         let skill_path = hub.join(&skill.name);
-        if !skill_path.exists() && !skill_path.is_symlink() {
+        if !skill_path.exists() && !super::paths::is_link(&skill_path) {
             missing_skills.push(skill.name.clone());
-        } else if skill_path.is_symlink() {
+        } else if super::paths::is_link(&skill_path) {
             // Check if symlink target resolves
             if std::fs::read_link(&skill_path)
                 .map(|t| !t.exists())

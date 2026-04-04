@@ -1034,7 +1034,7 @@ pub async fn get_cached_scan_results() -> Result<Vec<SecurityScanResult>, String
         .into_iter()
         .filter(|result| {
             let skill_path = hub_dir.join(&result.skill_name);
-            skill_path.is_dir() || skill_path.is_symlink()
+            skill_path.is_dir() || crate::core::paths::is_link(&skill_path)
         })
         .collect())
 }
@@ -1079,7 +1079,7 @@ pub async fn export_security_scan_sarif(
         .into_iter()
         .filter(|result| {
             let skill_path = hub_dir.join(&result.skill_name);
-            skill_path.is_dir() || skill_path.is_symlink()
+            skill_path.is_dir() || crate::core::paths::is_link(&skill_path)
         })
         .collect::<Vec<_>>();
 
@@ -1106,7 +1106,7 @@ pub async fn export_security_scan_report(
         .into_iter()
         .filter(|result| {
             let skill_path = hub_dir.join(&result.skill_name);
-            skill_path.is_dir() || skill_path.is_symlink()
+            skill_path.is_dir() || crate::core::paths::is_link(&skill_path)
         })
         .collect::<Vec<_>>();
 

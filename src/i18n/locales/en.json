@@ -251,7 +251,13 @@
     "acpDesc": "Configure which ACP-compatible agent to use for generating setup hooks. The agent will analyze repositories and create build scripts automatically.",
     "acpPresets": "Quick Select",
     "acpCommand": "Agent Command",
-    "acpCommandHint": "The command to launch the ACP agent subprocess. Must support --acp or equivalent stdio mode."
+    "acpCommandHint": "The command to launch the ACP agent subprocess. Must support --acp or equivalent stdio mode.",
+    "devModeBannerTitle": "Enable Developer Mode for Better Experience",
+    "devModeBannerDesc": "SkillStar is using junction points as a fallback. For full symlink support (including cross-drive project deployment), enable Windows Developer Mode.",
+    "devModeBannerStepsWin10": "Settings → Update & Security → For developers → Developer Mode → On",
+    "devModeBannerStepsWin11": "Settings → System → For developers → Developer Mode → On",
+    "devModeBannerDismiss": "Got it",
+    "devModeBannerLearnMore": "Learn More"
   },
   "mySkills": {
     "title": "Cards",

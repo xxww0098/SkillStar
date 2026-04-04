@@ -228,7 +228,7 @@ pub fn remove_skill_from_all_projects(skill_name: &str) -> Result<Vec<String>> {
             let skill_path = project_root
                 .join(&profile.project_skills_rel)
                 .join(skill_name);
-            if !skill_path.is_symlink() {
+            if !paths::is_link(&skill_path) {
                 continue;
             }
 
@@ -294,7 +294,7 @@ pub fn full_sync(project_path: &str, skills_list: &SkillsList) -> Result<u32> {
                 continue;
             }
             let target = target_dir.join(skill_name);
-            if paths::create_symlink(&source, &target).is_ok() {
+            if paths::create_symlink_or_copy(&source, &target).is_ok() {
                 total += 1;
             }
         }
@@ -392,7 +392,7 @@ pub fn rebuild_skills_list_from_disk(project_path: &str) -> Result<SkillsList> {
         let mut names = Vec::new();
         for entry in entries.flatten() {
             let path = entry.path();
-            if !path.is_dir() && !path.is_symlink() {
+            if !path.is_dir() && !paths::is_link(&path) {
                 continue;
             }
 
@@ -404,7 +404,7 @@ pub fn rebuild_skills_list_from_disk(project_path: &str) -> Result<SkillsList> {
             // Keep explicit skill folders and symlinked skills.
             // Skip arbitrary non-skill directories without SKILL.md.
             let has_skill_md = path.join("SKILL.md").exists();
-            if !path.is_symlink() && !has_skill_md {
+            if !paths::is_link(&path) && !has_skill_md {
                 continue;
             }
 
@@ -602,12 +602,12 @@ pub fn scan_project_skills(project_path: &str) -> ProjectScanResult {
         let mut found_any = false;
         for entry in entries.flatten() {
             let path = entry.path();
-            if !path.is_dir() && !path.is_symlink() {
+            if !path.is_dir() && !paths::is_link(&path) {
                 continue;
             }
             // For symlinks that point to directories, is_dir() returns true
             // but we also need is_symlink() check
-            let is_symlink = path.is_symlink();
+            let is_symlink = paths::is_link(&path);
             let name = entry.file_name().to_string_lossy().to_string();
             if name.is_empty() || name.starts_with('.') {
                 continue;
@@ -714,7 +714,7 @@ pub fn import_scanned_skills(
         }
 
         // Skip if already a symlink (already managed)
-        if source_dir.is_symlink() {
+        if paths::is_link(&source_dir) {
             continue;
         }
 
@@ -751,7 +751,7 @@ pub fn import_scanned_skills(
 
         // Step 2b: Point the project entry at the hub entry, which may itself
         // be a symlink into `skills-local/`.
-        paths::create_symlink(&hub_skill_dir, &source_dir)
+        paths::create_symlink_or_copy(&hub_skill_dir, &source_dir)
             .with_context(|| format!("failed to create symlink for skill '{}'", target.name))?;
 
         symlink_count += 1;
@@ -797,7 +797,7 @@ fn clear_project_symlinks(project: &Path, profile: &agent_profile::AgentProfile)
                 )
             })?;
             let entry_path = entry.path();
-            if entry_path.is_symlink() {
+            if paths::is_link(&entry_path) {
                 paths::remove_symlink(&entry_path).with_context(|| {
                     format!("failed to remove stale symlink: {}", entry_path.display())
                 })?;

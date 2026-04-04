@@ -102,7 +102,7 @@ function InlineSvgIcon({
   return (
     <span
       dangerouslySetInnerHTML={{ __html: markup }}
-      className={`inline-flex items-center justify-center shrink-0 [&>svg]:w-[inherit] [&>svg]:h-[inherit] [&>svg]:block ${className ?? ""}`}
+      className={`inline-flex items-center justify-center shrink-0 pointer-events-none [&>svg]:w-[inherit] [&>svg]:h-[inherit] [&>svg]:block ${className ?? ""}`}
     />
   );
 }

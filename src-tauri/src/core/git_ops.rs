@@ -6,12 +6,42 @@ use super::github_mirror;
 use super::path_env::command_with_path;
 use tracing::warn;
 
-/// Compute the tree-hash of a local Git repository using gix
+/// Compute the tree-hash of a local Git repository.
+///
+/// Tries the in-process `gix` library first (fastest, no process spawn).
+/// Falls back to `git rev-parse HEAD^{tree}` via CLI when `gix` fails —
+/// this is needed on Windows where `gix` can choke on shallow clones
+/// due to NTFS file-locking or path-normalization quirks.
 pub fn compute_tree_hash(repo_path: &Path) -> Result<String> {
+    match compute_tree_hash_gix(repo_path) {
+        Ok(hash) => Ok(hash),
+        Err(gix_err) => {
+            warn!(
+                target: "git_ops",
+                path = %repo_path.display(),
+                error = %gix_err,
+                "gix failed to read HEAD tree hash, falling back to git CLI"
+            );
+            compute_tree_hash_cli(repo_path)
+                .with_context(|| format!(
+                    "Both gix and git CLI failed to compute tree hash for {:?}. gix error: {}",
+                    repo_path, gix_err
+                ))
+        }
+    }
+}
+
+/// In-process tree hash via `gix` (no subprocess).
+fn compute_tree_hash_gix(repo_path: &Path) -> Result<String> {
     let repo = gix::open(repo_path).context("Failed to open git repository")?;
     let head = repo.head_commit().context("Failed to get HEAD commit")?;
     let tree_id = head.tree_id().context("Failed to get tree ID")?;
     Ok(tree_id.to_string())
+}
+
+/// CLI fallback: `git rev-parse HEAD^{tree}`.
+fn compute_tree_hash_cli(repo_path: &Path) -> Result<String> {
+    run_git(repo_path, &["rev-parse", "HEAD^{tree}"])
 }
 
 /// Clone a repository from a URL to a destination path.

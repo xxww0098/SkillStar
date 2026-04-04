@@ -58,9 +58,9 @@ pub fn toggle_skill_for_agent(skill_name: &str, agent_id: &str, enable: bool) ->
         // Ensure parent dir exists
         std::fs::create_dir_all(&profile.global_skills_dir)?;
 
-        // Remove existing symlink if present
-        if target.symlink_metadata().is_ok() {
-            if target.is_symlink() {
+        // Remove existing symlink/junction if present
+        if target.symlink_metadata().is_ok() || super::paths::is_link(&target) {
+            if super::paths::is_link(&target) {
                 super::paths::remove_symlink(&target)?;
             } else {
                 anyhow::bail!("Target cannot be overwritten because it is a real directory");
@@ -68,8 +68,8 @@ pub fn toggle_skill_for_agent(skill_name: &str, agent_id: &str, enable: bool) ->
         }
         super::paths::create_symlink(&skill_path, &target)?;
     } else {
-        // Remove symlink
-        if target.symlink_metadata().is_ok() && target.is_symlink() {
+        // Remove symlink or junction
+        if super::paths::is_link(&target) {
             super::paths::remove_symlink(&target)?;
         }
     }
@@ -84,7 +84,7 @@ pub fn remove_skill_from_all_agents(skill_name: &str) -> Result<Vec<String>> {
 
     for profile in &profiles {
         let target = profile.global_skills_dir.join(skill_name);
-        if target.is_symlink() {
+        if super::paths::is_link(&target) {
             super::paths::remove_symlink(&target)?;
             removed_from.push(profile.display_name.clone());
         }
@@ -107,7 +107,7 @@ pub fn unlink_all_skills_from_agent(agent_id: &str) -> Result<u32> {
     for entry in std::fs::read_dir(skills_dir).context("Failed to read agent skills directory")? {
         let entry = entry?;
         let path = entry.path();
-        if path.is_symlink() {
+        if super::paths::is_link(&path) {
             super::paths::remove_symlink(&path)?;
             removed += 1;
         }
@@ -130,7 +130,7 @@ pub fn list_linked_skills(agent_id: &str) -> Result<Vec<String>> {
     for entry in std::fs::read_dir(skills_dir)? {
         let entry = entry?;
         let path = entry.path();
-        if path.is_symlink() {
+        if super::paths::is_link(&path) {
             if let Some(name) = entry.file_name().to_str() {
                 names.push(name.to_string());
             }
@@ -146,7 +146,7 @@ pub fn unlink_skill_from_agent(skill_name: &str, agent_id: &str) -> Result<()> {
     let profile = agent_profile::find_profile(&profiles, agent_id)?;
 
     let target = profile.global_skills_dir.join(skill_name);
-    if target.is_symlink() {
+    if super::paths::is_link(&target) {
         super::paths::remove_symlink(&target)?;
     }
     Ok(())
@@ -169,7 +169,7 @@ pub fn batch_link_skills_to_agent(skill_names: &[String], agent_id: &str) -> Res
             continue; // Skip missing skills silently
         }
         let target = profile.global_skills_dir.join(name);
-        if target.is_symlink() {
+        if super::paths::is_link(&target) {
             continue; // Already linked
         }
         // Remove non-symlink entry if it exists (shouldn't happen, but be safe)
@@ -220,14 +220,12 @@ pub fn create_project_skills(
                 continue;
             }
             let target = skills_folder.join(name);
-            if target.symlink_metadata().is_ok() {
-                if target.is_symlink() {
-                    let _ = super::paths::remove_symlink(&target);
-                } else {
-                    continue;
-                }
+            if super::paths::is_link(&target) {
+                let _ = super::paths::remove_symlink(&target);
+            } else if target.exists() {
+                continue;
             }
-            if super::paths::create_symlink(&source, &target).is_ok() {
+            if super::paths::create_symlink_or_copy(&source, &target).is_ok() {
                 total_linked += 1;
             }
         }
@@ -254,8 +252,8 @@ pub fn resync_existing_links(skill_name: &str) -> Result<Vec<String>> {
 
     for profile in profiles.iter() {
         let target = profile.global_skills_dir.join(skill_name);
-        // Only re-link if a symlink already exists (preserves user's assignment)
-        if target.is_symlink() {
+        // Only re-link if a symlink/junction already exists (preserves user's assignment)
+        if super::paths::is_link(&target) {
             super::paths::remove_symlink(&target)?;
             super::paths::create_symlink(&skill_path, &target)?;
             linked_to.push(profile.display_name.clone());

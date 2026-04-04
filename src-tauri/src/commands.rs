@@ -5,6 +5,7 @@ pub mod github;
 pub mod marketplace;
 pub mod patrol;
 pub mod projects;
+pub mod updater;
 
 use crate::core::{
     error::AppError,
@@ -113,12 +114,11 @@ pub async fn uninstall_skill(name: String) -> Result<(), AppError> {
 
     // Use symlink_metadata() instead of exists() — exists() follows symlinks,
     // so a broken symlink (target deleted) returns false and is never cleaned up.
-    if let Ok(meta) = path.symlink_metadata() {
-        if meta.is_symlink() {
-            crate::core::paths::remove_symlink(&path)?;
-        } else {
-            crate::core::paths::remove_dir_all_retry(&path)?;
-        }
+    // Also check is_link() which detects Windows junction points.
+    if crate::core::paths::is_link(&path) {
+        crate::core::paths::remove_symlink(&path)?;
+    } else if path.exists() {
+        crate::core::paths::remove_dir_all_retry(&path)?;
     }
 
     let _lock = lockfile::get_mutex()
@@ -441,11 +441,19 @@ pub async fn deploy_skill_group(
 }
 
 fn resolve_skill_dir(skill_dir: &std::path::Path) -> std::path::PathBuf {
-    if !skill_dir.is_symlink() {
+    if !crate::core::paths::is_link(skill_dir) {
         return skill_dir.to_path_buf();
     }
 
-    std::fs::read_link(skill_dir)
+    // Try std::fs::read_link first (works for true symlinks)
+    let link_target = std::fs::read_link(skill_dir);
+
+    // On Windows, junction points may not be readable via read_link;
+    // fall back to junction::get_target.
+    #[cfg(windows)]
+    let link_target = link_target.or_else(|_| junction::get_target(skill_dir));
+
+    link_target
         .map(|target| {
             if target.is_absolute() {
                 target

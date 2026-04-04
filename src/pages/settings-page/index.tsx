@@ -35,6 +35,7 @@ import { AppearanceSection } from "../../features/settings/sections/AppearanceSe
 import { LanguageSection } from "../../features/settings/sections/LanguageSection";
 import { StorageSection } from "../../features/settings/sections/StorageSection";
 import { AboutSection } from "../../features/settings/sections/AboutSection";
+import { DevModeBanner } from "../../features/settings/components/DevModeBanner";
 
 type ForceDeleteTarget = "hub" | "cache" | "config";
 
@@ -413,7 +414,7 @@ function SettingsSidebarNav() {
 
 // ── Component ───────────────────────────────────────────────────────────────
 
-export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: () => Promise<{ found: boolean; version?: string }>; isCheckingUpdate?: boolean }) {
+export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: () => Promise<{ found: boolean; version?: string; error?: boolean }>; isCheckingUpdate?: boolean }) {
   const { t, i18n } = useTranslation();
   const [currentLang, setCurrentLang] = useState(i18n.language);
   const [backgroundStyle, setBackgroundStyle] = useState<BackgroundStyle>(
@@ -905,6 +906,9 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
         {/* Content */}
         <div id="settings-scroll-container" className="flex-1 h-full overflow-y-auto p-6">
         <div className="max-w-[720px] mx-auto space-y-8 pb-12 lg:pl-16">
+          {/* Windows Developer Mode guidance banner */}
+          <DevModeBanner />
+
           <section id="settings-agents">
           <AgentConnectionsSection
             profiles={profiles}

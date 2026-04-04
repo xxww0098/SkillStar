@@ -684,7 +684,7 @@ pub fn install_from_repo(
 
         // If it already exists, remove it to allow reinstall
         if let Ok(meta) = dest.symlink_metadata() {
-            if meta.is_symlink() {
+            if super::paths::is_link(&dest) {
                 let _ = super::paths::remove_symlink(&dest);
             } else {
                 let _ = std::fs::remove_dir_all(&dest);
@@ -944,10 +944,13 @@ fn find_repo_root(path: &Path) -> Option<PathBuf> {
 
 /// Check whether a skill directory is a symlink into the repo cache.
 pub fn is_repo_cached_skill(skill_path: &Path) -> bool {
-    if !skill_path.is_symlink() {
+    if !super::paths::is_link(skill_path) {
         return false;
     }
-    let target = match std::fs::read_link(skill_path) {
+    let link_target = std::fs::read_link(skill_path);
+    #[cfg(windows)]
+    let link_target = link_target.or_else(|_| junction::get_target(skill_path));
+    let target = match link_target {
         Ok(t) => t,
         Err(_) => return false,
     };
@@ -1169,7 +1172,7 @@ fn collect_referenced_cache_dirs(
 
     for entry in entries.flatten() {
         let skill_path = entry.path();
-        if !skill_path.is_symlink() {
+        if !super::paths::is_link(&skill_path) {
             continue;
         }
 
