@@ -44,15 +44,33 @@ fn cached_profiles() -> Vec<agent_profile::AgentProfile> {
 
 /// Sync or unsync a single skill to a specific agent profile.
 pub fn toggle_skill_for_agent(skill_name: &str, agent_id: &str, enable: bool) -> Result<()> {
+    tracing::info!(
+        target: "sync",
+        skill_name,
+        agent_id,
+        enable,
+        "toggle_skill_for_agent called"
+    );
+
     let hub_dir = super::paths::hub_skills_dir();
     let skill_path = hub_dir.join(skill_name);
     if enable && !skill_path.exists() {
+        tracing::error!(target: "sync", skill_name, "Skill not found in hub");
         anyhow::bail!("Skill '{}' not found in hub", skill_name);
     }
 
     let profiles = cached_profiles();
     let profile = agent_profile::find_profile(&profiles, agent_id)?;
     let target = profile.global_skills_dir.join(skill_name);
+
+    tracing::info!(
+        target: "sync",
+        target = %target.display(),
+        is_link = super::paths::is_link(&target),
+        exists = target.exists(),
+        is_dir = target.is_dir(),
+        "Target path state before toggle"
+    );
 
     if enable {
         // Ensure parent dir exists
@@ -61,23 +79,34 @@ pub fn toggle_skill_for_agent(skill_name: &str, agent_id: &str, enable: bool) ->
         // Remove existing symlink/junction/copy if present
         if target.symlink_metadata().is_ok() || super::paths::is_link(&target) {
             if super::paths::is_link(&target) {
+                tracing::info!(target: "sync", "Removing existing link before re-link");
                 super::paths::remove_symlink(&target)?;
             } else if target.is_dir() && target.join("SKILL.md").exists() {
-                // Previous copy-based deployment — safe to remove and re-link
+                tracing::info!(target: "sync", "Removing existing copy-based deployment before re-link");
                 super::paths::remove_dir_all_retry(&target)?;
             } else {
+                tracing::error!(target: "sync", target = %target.display(), "Cannot overwrite real directory");
                 anyhow::bail!("Target cannot be overwritten because it is a real directory");
             }
         }
         super::paths::create_symlink(&skill_path, &target)?;
+        tracing::info!(target: "sync", skill_name, agent_id, "Skill linked successfully");
     } else {
         // Remove symlink, junction, or directory copy
         if super::paths::is_link(&target) {
+            tracing::info!(target: "sync", "Unlinking (symlink/junction)");
             super::paths::remove_symlink(&target)?;
         } else if target.is_dir() {
-            // Handle copy-based deployment (create_symlink_or_copy fallback on Windows)
+            tracing::info!(target: "sync", "Unlinking (copy-based deployment)");
             super::paths::remove_link_or_copy(&target)?;
+        } else {
+            tracing::warn!(
+                target: "sync",
+                target = %target.display(),
+                "Toggle off requested but target is not a link or directory — nothing to remove"
+            );
         }
+        tracing::info!(target: "sync", skill_name, agent_id, "Skill unlinked successfully");
     }
 
     Ok(())
@@ -106,11 +135,14 @@ pub fn remove_skill_from_all_agents(skill_name: &str) -> Result<Vec<String>> {
 
 /// Remove all skill symlinks from a specific agent profile.
 pub fn unlink_all_skills_from_agent(agent_id: &str) -> Result<u32> {
+    tracing::info!(target: "sync", agent_id, "unlink_all_skills_from_agent called");
+
     let profiles = cached_profiles();
     let profile = agent_profile::find_profile(&profiles, agent_id)?;
 
     let skills_dir = &profile.global_skills_dir;
     if !skills_dir.exists() {
+        tracing::info!(target: "sync", agent_id, "Skills directory does not exist, nothing to unlink");
         return Ok(0);
     }
 
@@ -118,17 +150,22 @@ pub fn unlink_all_skills_from_agent(agent_id: &str) -> Result<u32> {
     for entry in std::fs::read_dir(skills_dir).context("Failed to read agent skills directory")? {
         let entry = entry?;
         let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
         if super::paths::is_link(&path) {
+            tracing::info!(target: "sync", name, path = %path.display(), "Removing symlink/junction");
             super::paths::remove_symlink(&path)?;
             removed += 1;
         } else if path.is_dir() {
-            // Handle copy-based deployment
+            tracing::info!(target: "sync", name, path = %path.display(), "Removing copy-based deployment");
             if super::paths::remove_link_or_copy(&path).is_ok() {
                 removed += 1;
+            } else {
+                tracing::warn!(target: "sync", name, path = %path.display(), "Failed to remove directory entry during unlink_all");
             }
         }
     }
 
+    tracing::info!(target: "sync", agent_id, removed, "unlink_all_skills_from_agent completed");
     Ok(removed)
 }
 
@@ -161,16 +198,41 @@ pub fn list_linked_skills(agent_id: &str) -> Result<Vec<String>> {
 
 /// Unlink a single skill from a specific agent.
 pub fn unlink_skill_from_agent(skill_name: &str, agent_id: &str) -> Result<()> {
+    tracing::info!(
+        target: "sync",
+        skill_name,
+        agent_id,
+        "unlink_skill_from_agent called"
+    );
+
     let profiles = cached_profiles();
     let profile = agent_profile::find_profile(&profiles, agent_id)?;
 
     let target = profile.global_skills_dir.join(skill_name);
+    tracing::info!(
+        target: "sync",
+        path = %target.display(),
+        is_link = super::paths::is_link(&target),
+        exists = target.exists(),
+        is_dir = target.is_dir(),
+        "Target path state"
+    );
+
     if super::paths::is_link(&target) {
+        tracing::info!(target: "sync", "Removing symlink/junction");
         super::paths::remove_symlink(&target)?;
     } else if target.is_dir() {
-        // Handle copy-based deployment
+        tracing::info!(target: "sync", "Removing copy-based deployment");
         super::paths::remove_link_or_copy(&target)?;
+    } else {
+        tracing::warn!(
+            target: "sync",
+            path = %target.display(),
+            "Target is not a link or directory — cannot unlink"
+        );
     }
+
+    tracing::info!(target: "sync", skill_name, agent_id, "unlink_skill_from_agent completed");
     Ok(())
 }
 

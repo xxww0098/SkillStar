@@ -154,8 +154,19 @@ pub async fn toggle_skill_for_agent(
     agent_id: String,
     enable: bool,
 ) -> Result<(), AppError> {
-    sync::toggle_skill_for_agent(&skill_name, &agent_id, enable)?;
+    tracing::info!(
+        target: "cmd",
+        skill_name,
+        agent_id,
+        enable,
+        "toggle_skill_for_agent called"
+    );
+    sync::toggle_skill_for_agent(&skill_name, &agent_id, enable).map_err(|e| {
+        tracing::error!(target: "cmd", skill_name, agent_id, enable, error = %e, "toggle_skill_for_agent failed");
+        AppError::Anyhow(e)
+    })?;
     crate::core::installed_skill::invalidate_cache();
+    tracing::info!(target: "cmd", skill_name, agent_id, enable, "toggle_skill_for_agent completed");
     Ok(())
 }
 

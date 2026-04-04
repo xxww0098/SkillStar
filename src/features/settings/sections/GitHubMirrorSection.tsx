@@ -110,16 +110,30 @@ export function GitHubMirrorSection({
               {t("settings.githubMirrorNotice")}
             </p>
 
-            {/* Preset selection */}
-            <div className="space-y-1.5">
+            {/* Preset selection — use role="radiogroup"/"radio" instead of native
+                <input type="radio"> to avoid browser scroll-to-visible behavior
+                that causes the settings page to jump when switching presets. */}
+            <div role="radiogroup" aria-label={t("settings.githubMirrorConfig")} className="space-y-1.5">
               {presets.map((preset) => {
                 const isSelected = mirrorConfig.preset_id === preset.id;
                 const testResult = testResults[preset.id];
                 const isTesting = testingId === preset.id;
 
                 return (
-                  <label
+                  <div
                     key={preset.id}
+                    role="radio"
+                    aria-checked={isSelected}
+                    tabIndex={0}
+                    onClick={() =>
+                      onConfigChange({ ...mirrorConfig, preset_id: preset.id, custom_url: null })
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onConfigChange({ ...mirrorConfig, preset_id: preset.id, custom_url: null });
+                      }
+                    }}
                     className={cn(
                       "flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition-all duration-150",
                       isSelected
@@ -127,15 +141,6 @@ export function GitHubMirrorSection({
                         : "border-border hover:border-border/80 hover:bg-muted/20"
                     )}
                   >
-                    <input
-                      type="radio"
-                      name="mirror-preset"
-                      checked={isSelected}
-                      onChange={() =>
-                        onConfigChange({ ...mirrorConfig, preset_id: preset.id, custom_url: null })
-                      }
-                      className="sr-only"
-                    />
                     <div
                       className={cn(
                         "w-3.5 h-3.5 rounded-full border-2 shrink-0 transition-colors",
@@ -162,6 +167,7 @@ export function GitHubMirrorSection({
                         e.stopPropagation();
                         handleTestMirror(preset.url, preset.id);
                       }}
+                      onKeyDown={(e) => e.stopPropagation()}
                       disabled={isTesting}
                       className={cn(
                         "shrink-0 text-xs px-2.5 py-1 rounded-md border transition-colors cursor-pointer",
@@ -190,12 +196,22 @@ export function GitHubMirrorSection({
                         t("settings.mirrorTest")
                       )}
                     </button>
-                  </label>
+                  </div>
                 );
               })}
 
               {/* Custom option */}
-              <label
+              <div
+                role="radio"
+                aria-checked={isCustom}
+                tabIndex={0}
+                onClick={() => onConfigChange({ ...mirrorConfig, preset_id: null })}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onConfigChange({ ...mirrorConfig, preset_id: null });
+                  }
+                }}
                 className={cn(
                   "flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition-all duration-150",
                   isCustom
@@ -203,13 +219,6 @@ export function GitHubMirrorSection({
                     : "border-border hover:border-border/80 hover:bg-muted/20"
                 )}
               >
-                <input
-                  type="radio"
-                  name="mirror-preset"
-                  checked={isCustom}
-                  onChange={() => onConfigChange({ ...mirrorConfig, preset_id: null })}
-                  className="sr-only"
-                />
                 <div
                   className={cn(
                     "w-3.5 h-3.5 rounded-full border-2 shrink-0 transition-colors",
@@ -240,6 +249,7 @@ export function GitHubMirrorSection({
                         }
                         placeholder="https://your-mirror.example/"
                         onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
                       />
                     </div>
                   )}
@@ -254,6 +264,7 @@ export function GitHubMirrorSection({
                       e.stopPropagation();
                       handleTestMirror(mirrorConfig.custom_url!, "custom");
                     }}
+                    onKeyDown={(e) => e.stopPropagation()}
                     disabled={testingId === "custom"}
                     className={cn(
                       "shrink-0 text-xs px-2.5 py-1 rounded-md border transition-colors cursor-pointer",
@@ -283,7 +294,7 @@ export function GitHubMirrorSection({
                     )}
                   </button>
                 )}
-              </label>
+              </div>
             </div>
 
             <div className="flex items-center justify-end min-h-5">

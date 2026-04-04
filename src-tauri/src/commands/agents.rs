@@ -7,13 +7,26 @@ pub async fn list_agent_profiles() -> Result<Vec<agent_profile::AgentProfile>, A
 
 #[tauri::command]
 pub async fn toggle_agent_profile(id: String) -> Result<bool, AppError> {
-    agent_profile::toggle_profile(&id).map_err(|e| AppError::AgentProfile(e.to_string()))
+    tracing::info!(target: "cmd::agents", id, "toggle_agent_profile called");
+    let result = agent_profile::toggle_profile(&id).map_err(|e| {
+        tracing::error!(target: "cmd::agents", id, error = %e, "toggle_agent_profile failed");
+        AppError::AgentProfile(e.to_string())
+    });
+    if let Ok(new_state) = &result {
+        tracing::info!(target: "cmd::agents", id, enabled = *new_state, "toggle_agent_profile completed");
+    }
+    result
 }
 
 #[tauri::command]
 pub async fn unlink_all_skills_from_agent(agent_id: String) -> Result<u32, AppError> {
-    let removed = sync::unlink_all_skills_from_agent(&agent_id)?;
+    tracing::info!(target: "cmd::agents", agent_id, "unlink_all_skills_from_agent called");
+    let removed = sync::unlink_all_skills_from_agent(&agent_id).map_err(|e| {
+        tracing::error!(target: "cmd::agents", agent_id, error = %e, "unlink_all_skills_from_agent failed");
+        AppError::Anyhow(e)
+    })?;
     installed_skill::invalidate_cache();
+    tracing::info!(target: "cmd::agents", agent_id, removed, "unlink_all_skills_from_agent completed");
     Ok(removed)
 }
 
@@ -34,8 +47,18 @@ pub async fn list_linked_skills(agent_id: String) -> Result<Vec<String>, AppErro
 
 #[tauri::command]
 pub async fn unlink_skill_from_agent(skill_name: String, agent_id: String) -> Result<(), AppError> {
-    sync::unlink_skill_from_agent(&skill_name, &agent_id)?;
+    tracing::info!(
+        target: "cmd::agents",
+        skill_name,
+        agent_id,
+        "unlink_skill_from_agent called"
+    );
+    sync::unlink_skill_from_agent(&skill_name, &agent_id).map_err(|e| {
+        tracing::error!(target: "cmd::agents", skill_name, agent_id, error = %e, "unlink_skill_from_agent failed");
+        AppError::Anyhow(e)
+    })?;
     installed_skill::invalidate_cache();
+    tracing::info!(target: "cmd::agents", skill_name, agent_id, "unlink_skill_from_agent completed");
     Ok(())
 }
 

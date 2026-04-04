@@ -85,6 +85,7 @@ function isSameAiConfig(a: AiConfig, b: AiConfig): boolean {
 
 type ProxyAction =
   | { type: "SET_FIELD"; field: keyof ProxyConfig; value: ProxyConfig[keyof ProxyConfig] }
+  | { type: "SET_CONFIG"; config: ProxyConfig }
   | { type: "LOAD"; config: ProxyConfig }
   | { type: "MARK_SAVED_CONFIG"; config: ProxyConfig }
   | { type: "START_SAVE" }
@@ -118,6 +119,8 @@ function proxyReducer(state: ProxyState, action: ProxyAction): ProxyState {
   switch (action.type) {
     case "SET_FIELD":
       return { ...state, config: { ...state.config, [action.field]: action.value } };
+    case "SET_CONFIG":
+      return { ...state, config: action.config };
     case "LOAD":
       return { ...state, config: action.config, savedConfig: action.config, loaded: true };
     case "MARK_SAVED_CONFIG":
@@ -145,6 +148,7 @@ function proxyReducer(state: ProxyState, action: ProxyAction): ProxyState {
 
 type MirrorAction =
   | { type: "SET_FIELD"; field: keyof GitHubMirrorConfig; value: GitHubMirrorConfig[keyof GitHubMirrorConfig] }
+  | { type: "SET_CONFIG"; config: GitHubMirrorConfig }
   | { type: "LOAD"; config: GitHubMirrorConfig }
   | { type: "MARK_SAVED_CONFIG"; config: GitHubMirrorConfig }
   | { type: "START_SAVE" }
@@ -174,6 +178,8 @@ function mirrorReducer(state: MirrorState, action: MirrorAction): MirrorState {
   switch (action.type) {
     case "SET_FIELD":
       return { ...state, config: { ...state.config, [action.field]: action.value } };
+    case "SET_CONFIG":
+      return { ...state, config: action.config };
     case "LOAD":
       return { ...state, config: action.config, savedConfig: action.config, loaded: true };
     case "MARK_SAVED_CONFIG":
@@ -199,6 +205,7 @@ function mirrorReducer(state: MirrorState, action: MirrorAction): MirrorState {
 
 type AiAction =
   | { type: "SET_FIELD"; field: keyof AiConfig; value: AiConfig[keyof AiConfig] }
+  | { type: "SET_CONFIG"; config: AiConfig }
   | { type: "LOAD"; config: AiConfig }
   | { type: "MARK_SAVED_CONFIG"; config: AiConfig }
   | { type: "START_SAVE" }
@@ -229,6 +236,8 @@ function aiReducer(state: AiState, action: AiAction): AiState {
   switch (action.type) {
     case "SET_FIELD":
       return { ...state, config: { ...state.config, [action.field]: action.value } };
+    case "SET_CONFIG":
+      return { ...state, config: action.config };
     case "LOAD":
       return { ...state, config: action.config, savedConfig: action.config, loaded: true };
     case "MARK_SAVED_CONFIG":
@@ -869,25 +878,19 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
   // ── Proxy config change handler ────────────────────────────────────────────
 
   const handleProxyConfigChange = useCallback((next: ProxyConfig) => {
-    Object.entries(next).forEach(([key, value]) => {
-      dispatchProxy({ type: "SET_FIELD", field: key as keyof ProxyConfig, value });
-    });
+    dispatchProxy({ type: "SET_CONFIG", config: next });
   }, []);
 
   // ── Mirror config change handler ───────────────────────────────────────────
 
   const handleMirrorConfigChange = useCallback((next: GitHubMirrorConfig) => {
-    Object.entries(next).forEach(([key, value]) => {
-      dispatchMirror({ type: "SET_FIELD", field: key as keyof GitHubMirrorConfig, value });
-    });
+    dispatchMirror({ type: "SET_CONFIG", config: next });
   }, []);
 
   // ── AI config change handler ───────────────────────────────────────────────
 
   const handleAiConfigChange = useCallback((next: AiConfig) => {
-    Object.entries(next).forEach(([key, value]) => {
-      dispatchAi({ type: "SET_FIELD", field: key as keyof AiConfig, value });
-    });
+    dispatchAi({ type: "SET_CONFIG", config: next });
   }, []);
 
   return (
@@ -900,7 +903,7 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: "easeOut" }}
-        className="flex-1 overflow-hidden relative"
+        className="flex flex-col flex-1 min-h-0 overflow-hidden relative"
       >
         {/* Floating settings sidebar nav */}
         <SettingsSidebarNav />

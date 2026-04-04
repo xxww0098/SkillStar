@@ -523,6 +523,8 @@ pub fn is_link(path: &Path) -> bool {
 /// Retries with exponential backoff to handle transient file locks from
 /// antivirus scanners, search indexers, etc.
 pub fn remove_symlink(path: &Path) -> anyhow::Result<()> {
+    tracing::info!(target: "paths", path = %path.display(), "remove_symlink called");
+
     // Try standard symlink detection first
     if path.is_symlink() {
         #[cfg(unix)]
@@ -534,11 +536,34 @@ pub fn remove_symlink(path: &Path) -> anyhow::Result<()> {
             let meta = path
                 .symlink_metadata()
                 .with_context(|| format!("Failed to read symlink metadata: {:?}", path))?;
+            let is_dir = meta.is_dir();
+            tracing::info!(
+                target: "paths",
+                path = %path.display(),
+                is_dir,
+                file_type = ?meta.file_type(),
+                "Detected symlink via is_symlink(), attempting removal"
+            );
+            // On Windows, symlink_metadata().is_dir() can return false for directory
+            // symlinks when the target is missing (dangling link). Using the wrong
+            // removal function gives ERROR_ACCESS_DENIED. Always try remove_dir first,
+            // then fall back to remove_file.
             let remove_op = || -> std::io::Result<()> {
-                if meta.is_dir() {
+                if is_dir {
                     std::fs::remove_dir(path)
                 } else {
-                    std::fs::remove_file(path)
+                    std::fs::remove_dir(path).or_else(|dir_err| {
+                        std::fs::remove_file(path).map_err(|file_err| {
+                            // Prefer the dir error if it wasn't just "not a directory"
+                            tracing::debug!(
+                                target: "paths",
+                                dir_error = %dir_err,
+                                file_error = %file_err,
+                                "remove_dir failed, remove_file also failed"
+                            );
+                            dir_err
+                        })
+                    })
                 }
             };
             retry_io(remove_op)
@@ -551,7 +576,16 @@ pub fn remove_symlink(path: &Path) -> anyhow::Result<()> {
     // is disabled and symlink_dir fails with ERROR_PRIVILEGE_NOT_HELD).
     #[cfg(windows)]
     {
-        if junction::exists(path).unwrap_or(false) {
+        let junction_exists = junction::exists(path).unwrap_or(false);
+        tracing::info!(
+            target: "paths",
+            path = %path.display(),
+            is_symlink = false,
+            junction_exists,
+            "path.is_symlink()=false, checking junction"
+        );
+        if junction_exists {
+            tracing::info!(target: "paths", path = %path.display(), "Detected junction point, removing");
             retry_io(|| {
                 junction::delete(path).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
             })
@@ -560,6 +594,7 @@ pub fn remove_symlink(path: &Path) -> anyhow::Result<()> {
         }
     }
 
+    tracing::error!(target: "paths", path = %path.display(), "Not a symlink or junction");
     anyhow::bail!("Not a symlink or junction: {:?}", path);
 }
 
@@ -724,18 +759,34 @@ where
             std::thread::sleep(std::time::Duration::from_millis(delay));
         }
         match op() {
-            Ok(()) => return Ok(()),
+            Ok(()) => {
+                if attempt > 0 {
+                    tracing::info!(
+                        target: "paths",
+                        attempt = attempt + 1,
+                        "IO operation succeeded after retry"
+                    );
+                }
+                return Ok(());
+            }
             Err(e) => {
-                tracing::debug!(
+                tracing::warn!(
                     target: "paths",
                     attempt = attempt + 1,
                     error = %e,
+                    os_code = e.raw_os_error().unwrap_or(-1),
+                    kind = ?e.kind(),
                     "IO operation failed, will retry"
                 );
                 last_err = Some(e);
             }
         }
     }
+    tracing::error!(
+        target: "paths",
+        error = %last_err.as_ref().unwrap(),
+        "IO operation failed after all retries"
+    );
     Err(last_err.unwrap())
 }
 
