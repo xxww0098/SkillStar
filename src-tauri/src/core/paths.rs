@@ -579,6 +579,21 @@ pub fn remove_link_or_copy(path: &Path) -> anyhow::Result<()> {
         return remove_symlink(path);
     }
 
+    // On Windows, junction points that is_link() failed to detect (e.g. due to
+    // reparse-point read errors from antivirus or indexer locks) can still be
+    // removed via plain remove_dir().  This is safe because:
+    //  - For junction points: remove_dir removes only the junction, not the target.
+    //  - For real non-empty directories: remove_dir fails with "directory not empty",
+    //    so we fall through to the copy-based removal below.
+    #[cfg(windows)]
+    {
+        if path.symlink_metadata().is_ok() {
+            if retry_io(|| std::fs::remove_dir(path)).is_ok() {
+                return Ok(());
+            }
+        }
+    }
+
     // Real directory — likely a copy-based deployment.
     // Safety check: only remove if it looks like a skill directory.
     if path.is_dir() {

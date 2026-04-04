@@ -666,6 +666,7 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
     try {
       await unlinkAllFromAgent(id);
       await toggleProfile(id);
+      notifySkillsRefresh();
     } catch (e) {
       console.error("Disable failed:", e);
       toast.error(t("settings.disableFailed"));
@@ -673,7 +674,7 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
       dispatchAgent({ type: "SET_UNLINKING_ID", id: null });
       dispatchAgent({ type: "SET_CONFIRM_DISABLE_ID", id: null });
     }
-  }, [agentState.confirmDisableId, unlinkAllFromAgent, toggleProfile, t]);
+  }, [agentState.confirmDisableId, unlinkAllFromAgent, toggleProfile, t, notifySkillsRefresh]);
 
   const toggleExpand = useCallback(
     async (agentId: string) => {
@@ -698,12 +699,13 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
       try {
         await invoke("unlink_skill_from_agent", { skillName, agentId });
         dispatchAgent({ type: "REMOVE_LINKED_SKILL", agentId, skillName });
+        notifySkillsRefresh();
       } catch (e) {
         console.error("Unlink failed:", e);
         toast.error(t("settings.unlinkFailed"));
       }
     },
-    [t]
+    [t, notifySkillsRefresh]
   );
 
   // ── Language & appearance handlers ───────────────────────────────────────

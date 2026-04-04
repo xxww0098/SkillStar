@@ -254,6 +254,12 @@ function useSkillsState() {
       setPendingAgentToggleKeys(new Set(pendingAgentToggleRef.current));
       setIsTogglingAgent(true);
 
+      // Cancel any in-flight skills refetch to prevent stale server data from
+      // overwriting the optimistic update while the backend processes the toggle.
+      // On Windows, junction removal can take 1-3s due to retry_io backoff;
+      // a concurrent refetch completing in that window would revert the UI.
+      await queryClient.cancelQueries({ queryKey: SKILLS_QUERY_KEY });
+
       const previousSnapshot = queryClient.getQueryData<Skill[]>(SKILLS_QUERY_KEY) ?? [];
 
       try {
