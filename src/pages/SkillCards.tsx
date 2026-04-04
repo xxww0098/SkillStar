@@ -194,13 +194,27 @@ export function SkillCards({
 
       setLinkState((prev) => ({ ...prev, [key]: "linking" }));
       try {
-        await Promise.all(
-          installedSkillNames.map((skillName) =>
-            toggleSkillForAgent(skillName, agentId, !allLinked, agentName)
-          )
-        );
-      } catch (e) {
-        console.error("Batch toggle failed:", e);
+        let failed = 0;
+        for (const skillName of installedSkillNames) {
+          try {
+            await toggleSkillForAgent(skillName, agentId, !allLinked, agentName);
+          } catch (e) {
+            failed += 1;
+            console.error("Batch toggle failed for skill:", skillName, e);
+          }
+        }
+
+        if (failed > 0) {
+          toast.error(
+            t("skillCards.batchTogglePartialFailed", {
+              failed,
+              total: installedSkillNames.length,
+              defaultValue: "Failed to update {{failed}}/{{total}} links",
+            })
+          );
+        }
+
+        window.dispatchEvent(new Event("skillstar:refresh-skills"));
       } finally {
         setLinkState((prev) => {
           const next = { ...prev };

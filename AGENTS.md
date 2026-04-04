@@ -99,6 +99,7 @@ SkillStar/
 - Installed-skill list should render fast from local snapshot first.
 - Remote update checks run in bounded background work.
 - Project sync is reconciliation: add selected symlinks, remove stale ones, prune empty agent folders.
+- Windows/global agent unlink must attempt `remove_link_or_copy` for any existing entry (link/junction/copy), and only treat missing targets as no-op.
 - Repo scan/import defaults to **root-first**: when repo root has a valid `SKILL.md`, treat the root as the primary single skill by default.
 - Repo scan/import may optionally use **full-depth** discovery to include nested `SKILL.md` skills in the same repository.
 - Imported skill identity should prefer frontmatter `name`; fall back to directory name (and for root-level fallback use repo name when needed).
@@ -170,6 +171,7 @@ SkillStar/
 
 ### Storage APIs
 - Storage overview APIs must return resolved real filesystem paths.
+- Storage size scans for hub/cache/config must not follow symlink/junction targets; treat links as metadata-only entries to avoid recursive loops and Windows UI hangs.
 - Respect `SKILLSTAR_DATA_DIR` and `SKILLSTAR_HUB_DIR` overrides.
 
 ### GitHub Mirror Acceleration

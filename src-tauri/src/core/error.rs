@@ -36,6 +36,7 @@ pub enum AppError {
     #[error("AI provider error: {0}")]
     AiProvider(String),
 
+    #[allow(dead_code)]
     #[error("Security scan error: {0}")]
     SecurityScan(String),
 

@@ -40,6 +40,8 @@ import { DevModeBanner } from "../../features/settings/components/DevModeBanner"
 type ForceDeleteTarget = "hub" | "cache" | "config";
 
 const AUTO_SAVE_DELAY_MS = 600;
+const FORCE_DELETE_SLOW_HINT_MS = 2500;
+const FORCE_DELETE_UI_TIMEOUT_MS = 15000;
 
 function isSameProxyConfig(a: ProxyConfig, b: ProxyConfig): boolean {
   return (
@@ -388,9 +390,14 @@ function SettingsSidebarNav() {
   }, []);
 
   const handleClick = (id: string) => {
+    const scrollRoot = document.getElementById("settings-scroll-container");
     const el = document.getElementById(id);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (el && scrollRoot) {
+      const rootRect = scrollRoot.getBoundingClientRect();
+      const sectionRect = el.getBoundingClientRect();
+      const offset = 12;
+      const targetTop = scrollRoot.scrollTop + (sectionRect.top - rootRect.top) - offset;
+      scrollRoot.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
       clearTimeout(timerRef.current);
       pendingIdRef.current = id;
       setActiveId(id);
@@ -398,10 +405,15 @@ function SettingsSidebarNav() {
   };
 
   return (
-    <nav className="hidden lg:flex absolute left-5 top-1/2 -translate-y-1/2 z-20 flex-col items-center gap-1.5 py-3 px-1.5 rounded-2xl border border-border/50 bg-card/80 backdrop-blur-2xl shadow-[0_8px_40px_-12px_rgba(0,0,0,0.3),0_0_0_1px_rgba(255,255,255,0.04)]">
+    <nav className="hidden lg:flex z-20 flex-col items-center gap-1.5 py-3 px-1.5 rounded-2xl border border-border/50 bg-card/80 backdrop-blur-2xl shadow-[0_8px_40px_-12px_rgba(0,0,0,0.3),0_0_0_1px_rgba(255,255,255,0.04)]">
       {SETTINGS_SECTIONS.map((section) => {
         const isActive = activeId === section.id;
         const Icon = section.icon;
+        
+        let nudgeClass = "";
+        if (section.id === "settings-storage") nudgeClass = "translate-y-[1px]";
+        if (section.id === "settings-about") nudgeClass = "translate-y-[1px] translate-x-[1px]";
+
         return (
           <button
             key={section.id}
@@ -413,7 +425,7 @@ function SettingsSidebarNav() {
                 : "text-muted-foreground/45 hover:text-foreground hover:bg-muted/50"
             }`}
           >
-            <Icon className="w-[18px] h-[18px]" strokeWidth={isActive ? 2.2 : 1.7} />
+            <Icon className={`w-[18px] h-[18px] ${nudgeClass}`} strokeWidth={isActive ? 2.2 : 1.7} />
           </button>
         );
       })}
@@ -483,6 +495,7 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
   const [cleaningCaches, setCleaningCaches] = useState(false);
   const [cleaningBroken, setCleaningBroken] = useState(false);
   const [forceDeletingTarget, setForceDeletingTarget] = useState<ForceDeleteTarget | null>(null);
+  const [slowForceDeletingTarget, setSlowForceDeletingTarget] = useState<ForceDeleteTarget | null>(null);
   const [ghInstalled, setGhInstalled] = useState<boolean | null>(null);
 
   const notifySkillsRefresh = useCallback(() => {
@@ -805,16 +818,27 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
   const handleForceDelete = useCallback(
     async (target: ForceDeleteTarget) => {
       setForceDeletingTarget(target);
-      try {
-        let removed = 0;
-        if (target === "hub") {
-          removed = await invoke<number>("force_delete_installed_skills");
-        } else if (target === "cache") {
-          removed = await invoke<number>("force_delete_repo_caches");
-        } else {
-          removed = await invoke<number>("force_delete_app_config");
-        }
+      setSlowForceDeletingTarget(null);
 
+      const slowHintTimer = window.setTimeout(() => {
+        setSlowForceDeletingTarget((current) => current ?? target);
+      }, FORCE_DELETE_SLOW_HINT_MS);
+
+      const deletePromise =
+        target === "hub"
+          ? invoke<number>("force_delete_installed_skills")
+          : target === "cache"
+            ? invoke<number>("force_delete_repo_caches")
+            : invoke<number>("force_delete_app_config");
+
+      const targetLabel =
+        target === "hub"
+          ? t("settings.storageHub")
+          : target === "cache"
+            ? t("settings.repoCache")
+            : t("settings.storageConfig");
+
+      const reportDeleteResult = (removed: number) => {
         if (removed > 0) {
           if (target === "hub") {
             toast.success(t("settings.forceDeleteHubDone", { count: removed }));
@@ -834,12 +858,66 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
         if (target === "hub") {
           notifySkillsRefresh();
         }
-        await fetchStorageOverview();
+      };
+
+      const timeoutSymbol = Symbol("force-delete-timeout");
+      let timeoutTimer = 0;
+      try {
+        const raced = await Promise.race<number | typeof timeoutSymbol>([
+          deletePromise,
+          new Promise<typeof timeoutSymbol>((resolve) => {
+            timeoutTimer = window.setTimeout(
+              () => resolve(timeoutSymbol),
+              FORCE_DELETE_UI_TIMEOUT_MS
+            );
+          }),
+        ]);
+
+        if (raced === timeoutSymbol) {
+          toast.warning(
+            t("settings.forceDeleteTimeoutHint", {
+              target: targetLabel,
+            })
+          );
+          setForceDeletingTarget(null);
+          setSlowForceDeletingTarget(null);
+
+          void deletePromise
+            .then((removed) => {
+              reportDeleteResult(removed);
+              toast.info(
+                t("settings.forceDeleteBackgroundDone", {
+                  target: targetLabel,
+                })
+              );
+            })
+            .catch((e) => {
+              console.error("Background force delete failed:", e);
+              toast.error(
+                t("settings.forceDeleteBackgroundFailed", {
+                  target: targetLabel,
+                })
+              );
+            })
+            .finally(() => {
+              void fetchStorageOverview();
+            });
+
+          return;
+        }
+
+        reportDeleteResult(raced);
+        void fetchStorageOverview();
       } catch (e) {
         console.error("Force delete failed:", e);
         toast.error(t("settings.forceDeleteFailed"));
       } finally {
-        setForceDeletingTarget(null);
+        if (timeoutTimer) {
+          window.clearTimeout(timeoutTimer);
+        }
+        window.clearTimeout(slowHintTimer);
+        setForceDeletingTarget((current) => (current === target ? null : current));
+        setSlowForceDeletingTarget((current) => (current === target ? null : current));
       }
     },
     [fetchStorageOverview, notifySkillsRefresh, t]
@@ -894,7 +972,7 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
   }, []);
 
   return (
-    <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-background">
+    <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden bg-background">
       <div className="h-[60px] flex flex-col justify-center px-8 border-b border-border/40 bg-card/40 backdrop-blur-xl z-10 shrink-0">
         <h1>{t("settings.title")}</h1>
       </div>
@@ -905,16 +983,22 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
         transition={{ duration: 0.3, ease: "easeOut" }}
         className="flex flex-col flex-1 min-h-0 overflow-hidden relative"
       >
-        {/* Floating settings sidebar nav */}
-        <SettingsSidebarNav />
-
         {/* Content */}
-        <div id="settings-scroll-container" className="flex-1 h-full overflow-y-auto p-6">
-        <div className="max-w-[720px] mx-auto space-y-8 pb-12 lg:pl-16">
-          {/* Windows Developer Mode guidance banner */}
-          <DevModeBanner />
+        <div id="settings-scroll-container" className="flex-1 min-h-0 overflow-y-auto p-6 relative">
+          <div className="flex justify-center w-full min-h-full max-w-[1400px] mx-auto">
+            {/* Left elastic gutter (Centers sidebar between edge and content) */}
+            <div className="hidden lg:flex flex-1 justify-center items-start relative px-4">
+              <div className="sticky top-1/2 -translate-y-1/2 h-max w-full flex justify-center pt-8">
+                <SettingsSidebarNav />
+              </div>
+            </div>
 
-          <section id="settings-agents">
+            {/* Main content block */}
+            <div className="w-full max-w-[720px] shrink-0 space-y-8 pb-12 relative">
+              {/* Windows Developer Mode guidance banner */}
+              <DevModeBanner />
+
+          <section id="settings-agents" className="scroll-mt-3">
           <AgentConnectionsSection
             profiles={profiles}
             profilesLoading={profilesLoading}
@@ -932,7 +1016,7 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
           />
           </section>
 
-          <section id="settings-proxy">
+          <section id="settings-proxy" className="scroll-mt-3">
           <ProxySection
             proxyConfig={proxyState.config}
             ready={proxyState.loaded}
@@ -944,7 +1028,7 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
           />
           </section>
 
-          <section id="settings-mirror">
+          <section id="settings-mirror" className="scroll-mt-3">
           <GitHubMirrorSection
             mirrorConfig={mirrorState.config}
             ready={mirrorState.loaded}
@@ -956,7 +1040,7 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
           />
           </section>
 
-          <section id="settings-ai">
+          <section id="settings-ai" className="scroll-mt-3">
           <AiProviderSection
             localAiConfig={aiState.config}
             ready={aiState.loaded}
@@ -975,7 +1059,7 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
           />
           </section>
 
-          <section id="settings-shorttext">
+          <section id="settings-shorttext" className="scroll-mt-3">
           <ShortTextServiceSection
             localAiConfig={aiState.config}
             mymemoryUsage={mymemoryUsage}
@@ -983,35 +1067,36 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
           />
           </section>
 
-          <section id="settings-acp">
+          <section id="settings-acp" className="scroll-mt-3">
           <AcpSection />
           </section>
 
-          <section id="settings-background">
+          <section id="settings-background" className="scroll-mt-3">
           <BackgroundRunSection
             enabled={backgroundRun}
             onToggle={handleBackgroundRunToggle}
           />
           </section>
 
-          <section id="settings-appearance">
+          <section id="settings-appearance" className="scroll-mt-3">
           <AppearanceSection
             backgroundStyle={backgroundStyle}
             onBackgroundStyleChange={handleBackgroundStyleChange}
           />
           </section>
 
-          <section id="settings-language">
+          <section id="settings-language" className="scroll-mt-3">
           <LanguageSection currentLang={currentLang} onLanguageChange={handleLanguageChange} />
           </section>
 
-          <section id="settings-storage">
+          <section id="settings-storage" className="scroll-mt-3">
           <StorageSection
             overview={storageOverview}
             loading={fetchingStorage}
             cleaning={cleaningCaches}
             cleaningBroken={cleaningBroken}
             forceDeletingTarget={forceDeletingTarget}
+            slowForceDeletingTarget={slowForceDeletingTarget}
             formatBytes={formatBytes}
             onCleanAll={handleCleanAllCaches}
             onForceDeleteHub={() => handleForceDelete("hub")}
@@ -1020,10 +1105,14 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
           />
           </section>
 
-          <section id="settings-about">
+          <section id="settings-about" className="scroll-mt-3">
           <AboutSection ghInstalled={ghInstalled} onCheckUpdate={onCheckUpdate} isCheckingUpdate={isCheckingUpdate} />
           </section>
-        </div>
+            </div>
+
+            {/* Right elastic gutter to balance flex layout symmetrically */}
+            <div className="hidden lg:block flex-1 border-transparent"></div>
+          </div>
         </div>
       </motion.main>
     </div>

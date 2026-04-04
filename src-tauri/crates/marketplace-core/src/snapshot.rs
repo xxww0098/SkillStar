@@ -183,10 +183,6 @@ fn snapshot_runtime() -> SnapshotRuntimeConfig {
         .unwrap_or_else(|_| default_runtime())
 }
 
-fn db_path() -> PathBuf {
-    snapshot_runtime().db_path
-}
-
 fn legacy_cache_path() -> PathBuf {
     snapshot_runtime()
         .data_root
@@ -247,7 +243,7 @@ fn snapshot_pool(db_path: &PathBuf) -> Result<db::DbPool> {
 /// `SKILLSTAR_DATA_DIR`, but the pool path resolves only once at init.
 #[cfg(test)]
 fn create_connection() -> Result<Connection> {
-    let path = db_path();
+    let path = snapshot_runtime().db_path;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).context("Failed to create marketplace db directory")?;
     }

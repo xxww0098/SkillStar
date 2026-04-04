@@ -446,6 +446,7 @@ pub async fn load_config_async() -> AiConfig {
         })
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub async fn save_config_async(config: &AiConfig) -> Result<()> {
     let config = config.clone();
     tokio::task::spawn_blocking(move || save_config(&config))

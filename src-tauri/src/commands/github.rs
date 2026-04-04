@@ -482,42 +482,35 @@ pub async fn force_delete_app_config() -> Result<usize, AppError> {
     .await?)
 }
 
-/// Calculate total size of top-level files in a directory (non-recursive).
-fn dir_size_shallow(path: &Path, exclude_file_name: Option<&str>) -> u64 {
-    if !path.exists() {
-        return 0;
-    }
-    let mut total: u64 = 0;
-    if let Ok(entries) = std::fs::read_dir(path) {
-        for entry in entries.flatten() {
-            if let Some(skip_name) = exclude_file_name {
-                if entry.file_name().to_string_lossy() == skip_name {
-                    continue;
-                }
-            }
-            let entry_path = entry.path();
-            if entry_path.is_file() {
-                if let Ok(meta) = entry_path.metadata() {
-                    total += meta.len();
-                }
-            }
-        }
-    }
-    total
-}
-
 /// Calculate total size of a directory recursively.
 fn dir_size_recursive(path: &std::path::Path) -> u64 {
     if !path.exists() {
         return 0;
     }
     let mut total: u64 = 0;
-    if let Ok(entries) = std::fs::read_dir(path) {
+    let mut stack = vec![path.to_path_buf()];
+
+    while let Some(dir) = stack.pop() {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+
         for entry in entries.flatten() {
             let entry_path = entry.path();
-            if entry_path.is_dir() {
-                total += dir_size_recursive(&entry_path);
-            } else if let Ok(meta) = entry_path.metadata() {
+            // Do not follow symlink/junction targets when sizing storage.
+            // Following links can double-count repo cache content and can hang
+            // on cyclic link graphs (especially on Windows junction-heavy setups).
+            if paths::is_link(&entry_path) {
+                continue;
+            }
+
+            let Ok(meta) = std::fs::symlink_metadata(&entry_path) else {
+                continue;
+            };
+            if meta.is_dir() {
+                stack.push(entry_path);
+            } else if meta.is_file() {
                 total += meta.len();
             }
         }
@@ -594,9 +587,9 @@ pub async fn clean_broken_skills() -> Result<usize, AppError> {
         if let Ok(entries) = std::fs::read_dir(&hub_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                let Ok(meta) = path.symlink_metadata() else {
+                if path.symlink_metadata().is_err() {
                     continue;
-                };
+                }
                 if paths::is_link(&path) && !path.exists() {
                     // Broken symlink — target is gone
                     if paths::remove_symlink(&path).is_ok() {
@@ -644,17 +637,32 @@ fn count_directories(path: &Path) -> usize {
         return 0;
     }
     std::fs::read_dir(path)
-        .map(|entries| entries.flatten().filter(|e| e.path().is_dir()).count())
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter(|entry| {
+                    let p = entry.path();
+                    if paths::is_link(&p) {
+                        return false;
+                    }
+                    p.symlink_metadata().map(|m| m.is_dir()).unwrap_or(false)
+                })
+                .count()
+        })
         .unwrap_or(0)
 }
 
 fn resolve_symlink_target(symlink_path: &Path) -> Option<PathBuf> {
-    std::fs::read_link(symlink_path).ok().map(|target| {
-        if target.is_absolute() {
-            target
-        } else {
-            symlink_path.parent().unwrap_or(Path::new(".")).join(target)
-        }
+    // `read_link` handles symlinks; Windows junctions may require `junction::get_target`.
+    let link_target = std::fs::read_link(symlink_path);
+    #[cfg(windows)]
+    let link_target = link_target.or_else(|_| junction::get_target(symlink_path));
+    let target = link_target.ok()?;
+
+    Some(if target.is_absolute() {
+        target
+    } else {
+        symlink_path.parent().unwrap_or(Path::new(".")).join(target)
     })
 }
 

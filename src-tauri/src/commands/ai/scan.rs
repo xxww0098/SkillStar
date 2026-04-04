@@ -65,11 +65,6 @@ impl SecurityScanPayload {
         self
     }
 
-    fn file(mut self, name: impl Into<String>) -> Self {
-        self.file_name = Some(name.into());
-        self
-    }
-
     fn with_result(mut self, r: SecurityScanResult) -> Self {
         self.result = Some(r);
         self

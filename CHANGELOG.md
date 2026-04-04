@@ -5,6 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-04-04
+
+### Added
+- **Settings config reducer** — `SET_CONFIG` action added to simplify config state management on the UI.
+- **Backend tracing** — comprehensive logging added to skill toggle, unlink, and sync operations (`commands.rs`, `sync.rs`) for better observability.
+
+### Changed
+- **Settings radio navigation** — replaced native radio inputs with ARIA role-based components to prevent browser default scroll-to-visible from jumping the page on click.
+- **Optimistic toggle resilience** — `useSkills.ts` now cancels in-flight data refetches before applying optimistic UI updates, preventing race conditions.
+
+### Fixed
+- **Windows symlink removal fallback** — `remove_link_or_copy()` now tries `remove_dir()` before `remove_file()` to safely delete dangling directory symlinks (bypassing `ACCESS_DENIED` errors from stale metadata).
+- **Windows junction persistence** — added a fallback to remove lingering directory junctions that evades standard `is_link()` detection due to antivirus or indexer file locks.
+- **Settings update sync** — project/agent unlink operations in Settings now properly notify the My Skills page to refresh local state.
+
 ## [0.1.7] - 2026-04-04
 
 ### Added

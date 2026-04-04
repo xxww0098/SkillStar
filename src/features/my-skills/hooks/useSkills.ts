@@ -261,6 +261,8 @@ function useSkillsState() {
       await queryClient.cancelQueries({ queryKey: SKILLS_QUERY_KEY });
 
       const previousSnapshot = queryClient.getQueryData<Skill[]>(SKILLS_QUERY_KEY) ?? [];
+      const previousSkillSnapshot =
+        previousSnapshot.find((item) => item.name === skillName) ?? null;
 
       try {
         if (agentName) {
@@ -280,7 +282,20 @@ function useSkillsState() {
 
         await invoke("toggle_skill_for_agent", { skillName, agentId, enable });
       } catch (e) {
-        queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, previousSnapshot);
+        if (previousSkillSnapshot) {
+          queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) =>
+            prev.map((item) =>
+              item.name === skillName
+                ? { ...item, agent_links: previousSkillSnapshot.agent_links }
+                : item,
+            ),
+          );
+        } else {
+          await queryClient.invalidateQueries({
+            queryKey: SKILLS_QUERY_KEY,
+            exact: true,
+          });
+        }
         await refresh(true, true);
         throw new Error(String(e));
       } finally {

@@ -3,6 +3,7 @@
 //! Launches an external Agent (Claude Code / OpenCode / Codex) as a subprocess
 //! and sends it a task to analyse a skill repo and generate a working setup
 //! script.  The agent does ALL the heavy lifting.
+#![allow(dead_code)]
 
 use agent_client_protocol::{self as acp, Agent as _};
 use anyhow::{Context, Result, anyhow};
@@ -298,7 +299,6 @@ impl acp::Client for SkillStarClient {
 
         #[cfg(windows)]
         {
-            use std::os::windows::process::CommandExt;
             cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
         }
 
@@ -675,7 +675,6 @@ async fn run_acp_with_prompt(
 
             #[cfg(windows)]
             {
-                use std::os::windows::process::CommandExt;
                 cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
             }
 

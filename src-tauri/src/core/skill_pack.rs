@@ -246,7 +246,7 @@ pub fn install_pack(repo_dir: &Path, source: &str, repo_url: &str) -> Result<Vec
     }
 
     // Validate: check for conflicts with existing skills
-    for (name, temp_dir, target_dir) in &staged {
+    for (name, _temp_dir, target_dir) in &staged {
         if target_dir.exists() && !super::paths::is_link(target_dir) {
             // Existing non-symlink skill conflicts — abort
             // Clean up all staged temp dirs

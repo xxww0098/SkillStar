@@ -12,6 +12,7 @@ interface StorageSectionProps {
   loading: boolean;
   cleaning: boolean;
   forceDeletingTarget: "hub" | "cache" | "config" | null;
+  slowForceDeletingTarget: "hub" | "cache" | "config" | null;
   cleaningBroken: boolean;
   formatBytes: (bytes: number) => string;
   onCleanAll: () => void;
@@ -26,6 +27,7 @@ export function StorageSection({
   cleaning,
   cleaningBroken,
   forceDeletingTarget,
+  slowForceDeletingTarget,
   formatBytes,
   onCleanAll,
   onForceDeleteHub,
@@ -214,6 +216,7 @@ export function StorageSection({
                     onClick={onForceDeleteHub}
                     disabled={forceDeletingTarget !== null}
                     isDeleting={forceDeletingTarget === "hub"}
+                    isSlow={slowForceDeletingTarget === "hub"}
                     label={t("settings.forceDelete")}
                     confirmMsg={t("settings.confirmForceDelete")}
                   />
@@ -245,6 +248,7 @@ export function StorageSection({
                     onClick={onForceDeleteCache}
                     disabled={forceDeletingTarget !== null}
                     isDeleting={forceDeletingTarget === "cache"}
+                    isSlow={slowForceDeletingTarget === "cache"}
                     label={t("settings.forceDelete")}
                     confirmMsg={t("settings.confirmForceDelete")}
                   />
@@ -439,12 +443,14 @@ function ForceDeleteButton({
   onClick,
   disabled,
   isDeleting,
+  isSlow,
   label,
   confirmMsg,
 }: {
   onClick: () => void;
   disabled: boolean;
   isDeleting: boolean;
+  isSlow: boolean;
   label: string;
   confirmMsg: string;
 }) {
@@ -454,20 +460,27 @@ function ForceDeleteButton({
 
   return (
     <>
-      <Button
-        size="icon"
-        variant="ghost"
-        onClick={() => setShowConfirm(true)}
-        disabled={disabled || isDeleting}
-        className={`h-7 w-7 text-muted-foreground hover:text-destructive ${isDeleting ? "animate-pulse text-destructive" : "hover:bg-destructive/10"}`}
-        title={label}
-      >
-        {isDeleting ? (
-          <Loader2 className="w-4 h-4 animate-spin" />
-        ) : (
-          <Trash2 className="w-4 h-4" />
-        )}
-      </Button>
+      <div className="flex items-center gap-2">
+        <Button
+          size="icon"
+          variant="ghost"
+          onClick={() => setShowConfirm(true)}
+          disabled={disabled || isDeleting}
+          className={`h-7 w-7 text-muted-foreground hover:text-destructive ${isDeleting ? "animate-pulse text-destructive" : "hover:bg-destructive/10"}`}
+          title={label}
+        >
+          {isDeleting ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Trash2 className="w-4 h-4" />
+          )}
+        </Button>
+        {isDeleting && isSlow ? (
+          <span className="text-micro text-amber-400/90 whitespace-nowrap">
+            {t("settings.forceDeleteSlowHint")}
+          </span>
+        ) : null}
+      </div>
 
       <AnimatePresence>
         {showConfirm && (

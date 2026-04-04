@@ -4,10 +4,11 @@ import { copyToClipboard, detectPlatform, type Platform } from "../../../lib/uti
 import { invoke } from "@tauri-apps/api/core";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { useTranslation } from "react-i18next";
-import { Check, CheckCircle, Copy, ExternalLink, Terminal, XCircle, RefreshCw, GitBranch } from "lucide-react";
+import { Check, CheckCircle, Copy, ExternalLink, Terminal, XCircle, RefreshCw, GitBranch, Sparkles } from "lucide-react";
 import { Button } from "../../../components/ui/button";
 import { Badge } from "../../../components/ui/badge";
 import type { GitStatus } from "../../../types";
+import { motion } from "framer-motion";
 
 interface AboutSectionProps {
   ghInstalled: boolean | null;
@@ -114,7 +115,7 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
             </span>
           </div>
           {gitStatus?.status === "Installed" && (
-            <Badge variant="success">v{gitStatus.version}</Badge>
+            <Badge variant="success">{t("settings.gitInstalled")}</Badge>
           )}
           {gitStatus?.status === "NotInstalled" && (
             <Button
@@ -214,12 +215,26 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
           
           <div className="relative flex justify-between items-center text-sm">
             <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-2.5">
-                <span className="text-foreground font-medium">{t("settings.version")}</span>
-                <div className="px-2 py-0.5 rounded-md bg-zinc-500/10 border border-zinc-500/20 text-zinc-600 dark:text-zinc-400 font-mono text-xs shadow-sm flex items-center gap-1.5">
-                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-                  {appVersion}
-                </div>
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-medium">{t("settings.version")}</span>
+                
+                <motion.div 
+                  className="relative flex items-center justify-center rounded-full p-[2px] overflow-hidden select-none pointer-events-none shadow-sm"
+                >
+                  <motion.div 
+                    className="absolute inset-0 bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 opacity-70 dark:opacity-80"
+                    animate={{ backgroundPosition: ["0% 50%", "100% 50%", "0% 50%"] }}
+                    transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
+                    style={{ backgroundSize: "200% 200%" }}
+                  />
+                  <div className="relative bg-card dark:bg-card/90 rounded-full flex items-center px-3 py-1 z-10 overflow-hidden backdrop-blur-sm">
+                    <span className="relative z-20 font-mono text-xs font-bold leading-none bg-gradient-to-br from-indigo-500 to-purple-500 dark:from-indigo-400 dark:to-purple-400 bg-clip-text text-transparent flex items-center tracking-wider">
+                      <Sparkles className="w-3.5 h-3.5 text-indigo-500/80 dark:text-indigo-400/80 animate-pulse mr-1" />
+                      v{appVersion}
+                    </span>
+                  </div>
+                </motion.div>
+                
               </div>
             </div>
             <Button 

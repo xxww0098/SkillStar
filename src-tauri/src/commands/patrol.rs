@@ -69,11 +69,11 @@ pub async fn app_quit(
 }
 
 #[tauri::command]
-pub async fn set_dock_visible(app: tauri::AppHandle, visible: bool) -> Result<(), AppError> {
+pub async fn set_dock_visible(app: tauri::AppHandle, _visible: bool) -> Result<(), AppError> {
     #[cfg(target_os = "macos")]
     {
         use tauri::ActivationPolicy;
-        let policy = if visible {
+        let policy = if _visible {
             ActivationPolicy::Regular
         } else {
             ActivationPolicy::Accessory

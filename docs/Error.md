@@ -14,6 +14,30 @@ Significant bugs and fixes, kept in short form for faster lookup.
 
 ---
 
+### Windows Force Delete Spinner Could Stall During Storage Refresh — 2026-04-04
+- Symptom: On Windows, force-deleting installed skills or repo cache could keep showing a loading spinner for a long time (sometimes appearing stuck).
+- Root cause: Settings force-delete flow awaited `get_storage_overview` before clearing the button loading state, and storage size walkers followed symlink/junction targets, which can trigger expensive or cyclic scans through repo-linked directories.
+- Fix: Added slow-operation hints and UI timeout escape for force-delete (release spinner while backend continues, then report completion/failure), stopped blocking force-delete completion on storage refresh (`fetchStorageOverview` now runs in background), and made storage/cache size calculations skip symlink/junction targets. Also added Windows junction target fallback when resolving hub links to cache paths.
+- Files: `AGENTS.md`, `src/pages/settings-page/index.tsx`, `src-tauri/src/commands/github.rs`, `src-tauri/src/core/repo_scanner.rs`
+
+### Windows Agent Unlink Fully No-Op (All Unlink Paths) — 2026-04-04
+- Symptom: On Windows, all unlink operations (`单个按钮取消链接`, `设置页取消链接`, `取消全部链接`) could no-op, making SVG agent buttons appear permanently lit.
+- Root cause: Sync unlink flow first gated deletion behind a strict managed-entry precheck (`is_link || has SKILL.md`). On some Windows junction/directory states this precheck returned false, so removal was skipped before `remove_link_or_copy` had a chance to run.
+- Fix: Split sync deletion into two paths: strict overwrite guard for link-time replacement, and unlink-time removal that attempts `remove_link_or_copy` whenever a target entry exists (only missing targets are treated as no-op).
+- Files: `src-tauri/src/core/sync.rs`, `AGENTS.md`
+
+### Settings / GitHub Mirror Panel Appeared Clipped (Blank Lower Area) — 2026-04-04
+- Symptom: In Settings, clicking `GitHub 加速` could show a partially rendered mirror panel with a large blank area below.
+- Root cause: Nested flex containers in settings page missed `min-h-0`, and the scroll root used `h-full`; in WebView this can break overflow sizing and clip tall sections.
+- Fix: Added `min-h-0` to the settings root and main flex containers, and switched the scroll root from `h-full` to `min-h-0` to restore correct vertical scrolling/layout.
+- Files: `src/pages/settings-page/index.tsx`
+
+### Windows Agent Unlink Reverted After Delay / Batch Unlink Aborted Early — 2026-04-04
+- Symptom: On Windows, agent SVG link state could turn off then flip back on after ~2 seconds; Settings "取消链接" felt ineffective.
+- Root cause: (1) Skill card batch link/unlink used concurrent toggles; one delayed filesystem failure could roll back the whole optimistic snapshot. (2) Backend `unlink_all_skills_from_agent` aborted on the first removal error, so one bad entry could cancel the entire batch.
+- Fix: Changed skill-card batch toggles to sequential execution with partial-failure reporting and scoped rollback per-skill (not full snapshot). Unified backend unlink removal through robust link/copy removal, continued batch unlink on per-entry failures, and invalidated sync profile cache after agent profile mutations.
+- Files: `src/pages/SkillCards.tsx`, `src/features/my-skills/hooks/useSkills.ts`, `src-tauri/src/core/sync.rs`, `src-tauri/src/commands/agents.rs`
+
 ### CLI Install Mode Missing `--global` / `--agent` / Interactive Selection — 2026-04-02
 - Symptom: `skillstar install --global <url>` was unsupported, and default CLI install did not provide one-step project-level linking or explicit per-agent targeting.
 - Root cause: `cli.rs` install subcommand only accepted `url` and always executed a hub clone path; no mode switch existed for project-level vs global install, and no terminal selection flow existed when agent targets were omitted.

@@ -653,6 +653,7 @@ pub fn remove_link_or_copy(path: &Path) -> anyhow::Result<()> {
 ///
 /// On Windows, returns true if EITHER symlinks or junction points work.
 /// On Unix, always returns true.
+#[allow(dead_code)]
 pub fn check_symlink_support() -> bool {
     #[cfg(unix)]
     {
@@ -719,7 +720,6 @@ pub fn check_developer_mode() -> bool {
 /// Junction points only work within the same drive.
 #[cfg(windows)]
 fn same_drive(a: &Path, b: &Path) -> bool {
-    use std::path::Component;
     a.components().next().map_or(false, |ac| {
         b.components().next().map_or(false, |bc| ac == bc)
     })

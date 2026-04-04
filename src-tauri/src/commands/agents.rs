@@ -14,6 +14,7 @@ pub async fn toggle_agent_profile(id: String) -> Result<bool, AppError> {
     });
     if let Ok(new_state) = &result {
         tracing::info!(target: "cmd::agents", id, enabled = *new_state, "toggle_agent_profile completed");
+        sync::invalidate_profile_cache();
     }
     result
 }
@@ -75,10 +76,14 @@ pub async fn batch_remove_skills_from_all_agents(skill_names: Vec<String>) -> Re
 pub async fn add_custom_agent_profile(
     def: agent_profile::CustomProfileDef,
 ) -> Result<(), AppError> {
-    agent_profile::add_custom_profile(def).map_err(|e| AppError::AgentProfile(e.to_string()))
+    agent_profile::add_custom_profile(def).map_err(|e| AppError::AgentProfile(e.to_string()))?;
+    sync::invalidate_profile_cache();
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn remove_custom_agent_profile(id: String) -> Result<(), AppError> {
-    agent_profile::remove_custom_profile(&id).map_err(|e| AppError::AgentProfile(e.to_string()))
+    agent_profile::remove_custom_profile(&id).map_err(|e| AppError::AgentProfile(e.to_string()))?;
+    sync::invalidate_profile_cache();
+    Ok(())
 }

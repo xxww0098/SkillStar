@@ -683,7 +683,7 @@ pub fn install_from_repo(
         }
 
         // If it already exists, remove it to allow reinstall
-        if let Ok(meta) = dest.symlink_metadata() {
+        if let Ok(_meta) = dest.symlink_metadata() {
             if super::paths::is_link(&dest) {
                 let _ = super::paths::remove_symlink(&dest);
             } else {
@@ -1042,6 +1042,7 @@ fn is_shallow_repo(repo_dir: &Path) -> bool {
 // ── Top-level Scan Command ──────────────────────────────────────────
 
 /// Full scan flow: normalize URL → clone/fetch → scan → save history → return results.
+#[allow(dead_code)]
 pub fn scan_repo(input: &str) -> Result<ScanResult> {
     scan_repo_with_mode(input, false)
 }
@@ -1102,7 +1103,13 @@ pub fn get_cache_info() -> RepoCacheInfo {
     if let Ok(entries) = std::fs::read_dir(&cache_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if !path.is_dir() {
+            if super::paths::is_link(&path) {
+                continue;
+            }
+            let Ok(meta) = std::fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if !meta.is_dir() {
                 continue;
             }
             let size = dir_size(&path);
@@ -1141,7 +1148,13 @@ pub fn clean_unused_cache() -> Result<usize> {
     if let Ok(entries) = std::fs::read_dir(&cache_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if !path.is_dir() {
+            if super::paths::is_link(&path) {
+                continue;
+            }
+            let Ok(meta) = std::fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if !meta.is_dir() {
                 continue;
             }
             if !referenced.contains(&path) {
@@ -1176,8 +1189,11 @@ fn collect_referenced_cache_dirs(
             continue;
         }
 
-        // Resolve symlink target
-        let target = match std::fs::read_link(&skill_path) {
+        // Resolve symlink/junction target.
+        let link_target = std::fs::read_link(&skill_path);
+        #[cfg(windows)]
+        let link_target = link_target.or_else(|_| junction::get_target(&skill_path));
+        let target = match link_target {
             Ok(t) => {
                 if t.is_absolute() {
                     t
@@ -1215,9 +1231,15 @@ fn dir_size(path: &Path) -> u64 {
         };
         for entry in entries.flatten() {
             let entry_path = entry.path();
-            if entry_path.is_dir() {
+            if super::paths::is_link(&entry_path) {
+                continue;
+            }
+            let Ok(meta) = std::fs::symlink_metadata(&entry_path) else {
+                continue;
+            };
+            if meta.is_dir() {
                 stack.push(entry_path);
-            } else if let Ok(meta) = entry_path.metadata() {
+            } else if meta.is_file() {
                 total += meta.len();
             }
         }
@@ -1611,6 +1633,31 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&temp_root);
 
+        result
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dir_size_ignores_symlinked_directories() -> Result<()> {
+        use std::os::unix::fs::symlink;
+
+        let stamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let temp_root = std::env::temp_dir().join(format!("skillstar-dir-size-link-{}", stamp));
+        let result = (|| -> Result<()> {
+            let root = temp_root.join("root");
+            let real_dir = root.join("repo");
+            std::fs::create_dir_all(&real_dir)?;
+            std::fs::write(real_dir.join("payload.bin"), vec![0u8; 32])?;
+
+            // If dir_size follows this symlink, the file would be double-counted.
+            symlink(&real_dir, root.join("repo-link"))?;
+
+            let size = dir_size(&root);
+            assert_eq!(size, 32);
+            Ok(())
+        })();
+
+        let _ = std::fs::remove_dir_all(&temp_root);
         result
     }
 }

@@ -1165,13 +1165,13 @@ impl DynamicSandboxAnalyzer {
 
     fn build_sandbox_launch(
         runner: &DynamicRunner,
-        sandbox_dir: &Path,
+        _sandbox_dir: &Path,
         _staged_name: &str,
     ) -> Result<SandboxLaunch> {
         #[cfg(target_os = "macos")]
         {
             if binary_available("sandbox-exec") {
-                let profile = Self::create_macos_sandbox_profile(sandbox_dir)?;
+                let profile = Self::create_macos_sandbox_profile(_sandbox_dir)?;
                 let mut args = vec![
                     "-f".to_string(),
                     profile.to_string_lossy().to_string(),
@@ -1206,7 +1206,7 @@ impl DynamicSandboxAnalyzer {
                 }
                 args.extend([
                     "--bind".to_string(),
-                    sandbox_dir.to_string_lossy().to_string(),
+                    _sandbox_dir.to_string_lossy().to_string(),
                     "/workspace".to_string(),
                     "--proc".to_string(),
                     "/proc".to_string(),

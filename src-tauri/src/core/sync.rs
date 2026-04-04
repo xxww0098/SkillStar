@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use std::sync::{OnceLock, RwLock};
 use std::time::{Duration, Instant};
+use tracing::warn;
 
 use super::agent_profile;
 
@@ -16,6 +17,13 @@ struct ProfileSnapshotCache {
 fn profile_cache() -> &'static RwLock<ProfileSnapshotCache> {
     static CACHE: OnceLock<RwLock<ProfileSnapshotCache>> = OnceLock::new();
     CACHE.get_or_init(|| RwLock::new(ProfileSnapshotCache::default()))
+}
+
+pub fn invalidate_profile_cache() {
+    if let Ok(mut cache) = profile_cache().write() {
+        cache.loaded_at = None;
+        cache.profiles.clear();
+    }
 }
 
 /// Return a short-lived snapshot of agent profiles.
@@ -40,6 +48,31 @@ fn cached_profiles() -> Vec<agent_profile::AgentProfile> {
     }
 
     profiles
+}
+
+fn remove_managed_entry_for_overwrite(path: &Path) -> Result<bool> {
+    let is_link = super::paths::is_link(path);
+    let is_copy = path.is_dir() && path.join("SKILL.md").exists();
+
+    if !is_link && !is_copy {
+        return Ok(false);
+    }
+
+    super::paths::remove_link_or_copy(path)?;
+    Ok(true)
+}
+
+fn remove_entry_for_unlink(path: &Path) -> Result<bool> {
+    // Keep unlink idempotent: if nothing exists at the target, treat as no-op.
+    if path.symlink_metadata().is_err() && !super::paths::is_link(path) {
+        return Ok(false);
+    }
+
+    // For unlink paths, attempt removal whenever an entry exists.
+    // `remove_link_or_copy` already handles link/junction/copy differences,
+    // including Windows-specific junction fallback behavior.
+    super::paths::remove_link_or_copy(path)?;
+    Ok(true)
 }
 
 /// Sync or unsync a single skill to a specific agent profile.
@@ -77,14 +110,8 @@ pub fn toggle_skill_for_agent(skill_name: &str, agent_id: &str, enable: bool) ->
         std::fs::create_dir_all(&profile.global_skills_dir)?;
 
         // Remove existing symlink/junction/copy if present
-        if target.symlink_metadata().is_ok() || super::paths::is_link(&target) {
-            if super::paths::is_link(&target) {
-                tracing::info!(target: "sync", "Removing existing link before re-link");
-                super::paths::remove_symlink(&target)?;
-            } else if target.is_dir() && target.join("SKILL.md").exists() {
-                tracing::info!(target: "sync", "Removing existing copy-based deployment before re-link");
-                super::paths::remove_dir_all_retry(&target)?;
-            } else {
+        if target.symlink_metadata().is_ok() || super::paths::is_link(&target) || target.exists() {
+            if !remove_managed_entry_for_overwrite(&target)? {
                 tracing::error!(target: "sync", target = %target.display(), "Cannot overwrite real directory");
                 anyhow::bail!("Target cannot be overwritten because it is a real directory");
             }
@@ -93,13 +120,7 @@ pub fn toggle_skill_for_agent(skill_name: &str, agent_id: &str, enable: bool) ->
         tracing::info!(target: "sync", skill_name, agent_id, "Skill linked successfully");
     } else {
         // Remove symlink, junction, or directory copy
-        if super::paths::is_link(&target) {
-            tracing::info!(target: "sync", "Unlinking (symlink/junction)");
-            super::paths::remove_symlink(&target)?;
-        } else if target.is_dir() {
-            tracing::info!(target: "sync", "Unlinking (copy-based deployment)");
-            super::paths::remove_link_or_copy(&target)?;
-        } else {
+        if !remove_entry_for_unlink(&target)? {
             tracing::warn!(
                 target: "sync",
                 target = %target.display(),
@@ -119,13 +140,20 @@ pub fn remove_skill_from_all_agents(skill_name: &str) -> Result<Vec<String>> {
 
     for profile in &profiles {
         let target = profile.global_skills_dir.join(skill_name);
-        if super::paths::is_link(&target) {
-            super::paths::remove_symlink(&target)?;
-            removed_from.push(profile.display_name.clone());
-        } else if target.is_dir() {
-            // Handle copy-based deployment
-            if super::paths::remove_link_or_copy(&target).is_ok() {
+        match remove_entry_for_unlink(&target) {
+            Ok(true) => {
                 removed_from.push(profile.display_name.clone());
+            }
+            Ok(false) => {}
+            Err(err) => {
+                warn!(
+                    target: "sync",
+                    path = ?target,
+                    skill = %skill_name,
+                    agent = %profile.id,
+                    error = %err,
+                    "Failed to remove skill link from agent"
+                );
             }
         }
     }
@@ -151,16 +179,20 @@ pub fn unlink_all_skills_from_agent(agent_id: &str) -> Result<u32> {
         let entry = entry?;
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().to_string();
-        if super::paths::is_link(&path) {
-            tracing::info!(target: "sync", name, path = %path.display(), "Removing symlink/junction");
-            super::paths::remove_symlink(&path)?;
-            removed += 1;
-        } else if path.is_dir() {
-            tracing::info!(target: "sync", name, path = %path.display(), "Removing copy-based deployment");
-            if super::paths::remove_link_or_copy(&path).is_ok() {
+        match remove_entry_for_unlink(&path) {
+            Ok(true) => {
+                tracing::info!(target: "sync", name, path = %path.display(), "Removed managed skill deployment");
                 removed += 1;
-            } else {
-                tracing::warn!(target: "sync", name, path = %path.display(), "Failed to remove directory entry during unlink_all");
+            }
+            Ok(false) => {}
+            Err(err) => {
+                tracing::warn!(
+                    target: "sync",
+                    path = ?path,
+                    agent = %agent_id,
+                    error = %err,
+                    "Failed to unlink skill from agent directory entry"
+                );
             }
         }
     }
@@ -218,17 +250,11 @@ pub fn unlink_skill_from_agent(skill_name: &str, agent_id: &str) -> Result<()> {
         "Target path state"
     );
 
-    if super::paths::is_link(&target) {
-        tracing::info!(target: "sync", "Removing symlink/junction");
-        super::paths::remove_symlink(&target)?;
-    } else if target.is_dir() {
-        tracing::info!(target: "sync", "Removing copy-based deployment");
-        super::paths::remove_link_or_copy(&target)?;
-    } else {
+    if !remove_entry_for_unlink(&target)? {
         tracing::warn!(
             target: "sync",
             path = %target.display(),
-            "Target is not a link or directory — cannot unlink"
+            "Target is not a managed entry — cannot unlink"
         );
     }
 
