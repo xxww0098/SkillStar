@@ -411,9 +411,11 @@ fn detect_agent_links(skill_name: &str, profiles: &[AgentProfile]) -> Vec<String
     let mut links = Vec::with_capacity(2); // most skills link to 1-2 agents
     for profile in profiles {
         let link_path = profile.global_skills_dir.join(skill_name);
-        // Check both is_link() AND exists(): exists() follows the link target,
-        // so a broken symlink (target deleted) returns false — don't report it as linked.
+        // Check symlinks/junctions: is_link() AND exists() (follows target — broken = false)
         if super::paths::is_link(&link_path) && link_path.exists() {
+            links.push(profile.display_name.clone());
+        } else if link_path.is_dir() && link_path.join("SKILL.md").exists() {
+            // Also detect copy-based deployment (Windows fallback)
             links.push(profile.display_name.clone());
         }
     }

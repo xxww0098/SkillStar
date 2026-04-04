@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-04-04
+
+### Added
+- **`remove_link_or_copy()` utility** — inverse of `create_symlink_or_copy()` that safely removes symlinks, NTFS junction points, or directory copies (Windows fallback), with SKILL.md presence check to prevent accidental deletion of unrelated directories.
+
+### Fixed
+- **Windows unlink silently failing** — skills deployed as directory copies (when both symlinks and junctions failed) could not be unlinked, uninstalled, or toggled off; all sync/unlink paths (`toggle_skill_for_agent`, `remove_skill_from_all_agents`, `unlink_all_skills_from_agent`, `unlink_skill_from_agent`) now handle copy-based deployments.
+- **Copy-based skills invisible in UI** — `list_linked_skills`, `detect_agent_links`, and `count_symlinks` now detect directory copies with SKILL.md, so Settings and My Skills pages correctly display agent link badges and synced counts on Windows.
+- **Re-enabling a skill after copy deployment** — the enable path in `toggle_skill_for_agent` now removes a previous copy-based deployment before creating a proper symlink, instead of bailing with "Target cannot be overwritten".
+- **Project-level unlink** — `remove_skill_from_all_projects` and `clear_project_symlinks` now also clean up copy-based skill deployments in project directories.
+
 ## [0.1.6] - 2026-04-04
 
 ### Added

@@ -563,6 +563,42 @@ pub fn remove_symlink(path: &Path) -> anyhow::Result<()> {
     anyhow::bail!("Not a symlink or junction: {:?}", path);
 }
 
+/// Remove a symlink, junction, or **directory copy** at `path`.
+///
+/// This is the inverse of `create_symlink_or_copy`: it handles all three
+/// link types created on Windows (true symlink, junction, or directory copy).
+///
+/// For symlinks and junctions, delegates to `remove_symlink`. For real
+/// directories (copy fallback), uses `remove_dir_all_retry`.
+///
+/// The `hub_source_name` is optionally used to verify that the directory
+/// looks like a managed skill copy (contains a SKILL.md) before deletion,
+/// to avoid accidentally removing unrelated real directories.
+pub fn remove_link_or_copy(path: &Path) -> anyhow::Result<()> {
+    if is_link(path) {
+        return remove_symlink(path);
+    }
+
+    // Real directory — likely a copy-based deployment.
+    // Safety check: only remove if it looks like a skill directory.
+    if path.is_dir() {
+        // Verify it contains SKILL.md or is an installed skill directory
+        // to avoid removing arbitrary user directories.
+        let looks_managed = path.join("SKILL.md").exists();
+        if looks_managed {
+            remove_dir_all_retry(path)?;
+            return Ok(());
+        }
+
+        anyhow::bail!(
+            "Directory exists but does not appear to be a managed skill copy: {:?}",
+            path
+        );
+    }
+
+    anyhow::bail!("Not a symlink, junction, or directory: {:?}", path);
+}
+
 /// Check if the current platform supports symlink creation.
 ///
 /// On Windows, returns true if EITHER symlinks or junction points work.

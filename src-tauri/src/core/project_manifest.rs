@@ -228,13 +228,14 @@ pub fn remove_skill_from_all_projects(skill_name: &str) -> Result<Vec<String>> {
             let skill_path = project_root
                 .join(&profile.project_skills_rel)
                 .join(skill_name);
-            if !paths::is_link(&skill_path) {
+            if !paths::is_link(&skill_path) && !skill_path.is_dir() {
                 continue;
             }
 
-            paths::remove_symlink(&skill_path).with_context(|| {
+            // Remove symlink, junction, or copy
+            paths::remove_link_or_copy(&skill_path).with_context(|| {
                 format!(
-                    "failed to remove project skill symlink '{}' from {}",
+                    "failed to remove project skill '{}' from {}",
                     skill_name, entry.path
                 )
             })?;
@@ -801,6 +802,9 @@ fn clear_project_symlinks(project: &Path, profile: &agent_profile::AgentProfile)
                 paths::remove_symlink(&entry_path).with_context(|| {
                     format!("failed to remove stale symlink: {}", entry_path.display())
                 })?;
+            } else if entry_path.is_dir() {
+                // Also remove copy-based deployments
+                let _ = paths::remove_link_or_copy(&entry_path);
             }
         }
     }

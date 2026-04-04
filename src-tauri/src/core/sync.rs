@@ -58,19 +58,25 @@ pub fn toggle_skill_for_agent(skill_name: &str, agent_id: &str, enable: bool) ->
         // Ensure parent dir exists
         std::fs::create_dir_all(&profile.global_skills_dir)?;
 
-        // Remove existing symlink/junction if present
+        // Remove existing symlink/junction/copy if present
         if target.symlink_metadata().is_ok() || super::paths::is_link(&target) {
             if super::paths::is_link(&target) {
                 super::paths::remove_symlink(&target)?;
+            } else if target.is_dir() && target.join("SKILL.md").exists() {
+                // Previous copy-based deployment — safe to remove and re-link
+                super::paths::remove_dir_all_retry(&target)?;
             } else {
                 anyhow::bail!("Target cannot be overwritten because it is a real directory");
             }
         }
         super::paths::create_symlink(&skill_path, &target)?;
     } else {
-        // Remove symlink or junction
+        // Remove symlink, junction, or directory copy
         if super::paths::is_link(&target) {
             super::paths::remove_symlink(&target)?;
+        } else if target.is_dir() {
+            // Handle copy-based deployment (create_symlink_or_copy fallback on Windows)
+            super::paths::remove_link_or_copy(&target)?;
         }
     }
 
@@ -87,6 +93,11 @@ pub fn remove_skill_from_all_agents(skill_name: &str) -> Result<Vec<String>> {
         if super::paths::is_link(&target) {
             super::paths::remove_symlink(&target)?;
             removed_from.push(profile.display_name.clone());
+        } else if target.is_dir() {
+            // Handle copy-based deployment
+            if super::paths::remove_link_or_copy(&target).is_ok() {
+                removed_from.push(profile.display_name.clone());
+            }
         }
     }
 
@@ -110,6 +121,11 @@ pub fn unlink_all_skills_from_agent(agent_id: &str) -> Result<u32> {
         if super::paths::is_link(&path) {
             super::paths::remove_symlink(&path)?;
             removed += 1;
+        } else if path.is_dir() {
+            // Handle copy-based deployment
+            if super::paths::remove_link_or_copy(&path).is_ok() {
+                removed += 1;
+            }
         }
     }
 
@@ -130,7 +146,10 @@ pub fn list_linked_skills(agent_id: &str) -> Result<Vec<String>> {
     for entry in std::fs::read_dir(skills_dir)? {
         let entry = entry?;
         let path = entry.path();
-        if super::paths::is_link(&path) {
+        // Include symlinks/junctions AND copy-based deployments
+        let is_managed = super::paths::is_link(&path)
+            || (path.is_dir() && path.join("SKILL.md").exists());
+        if is_managed {
             if let Some(name) = entry.file_name().to_str() {
                 names.push(name.to_string());
             }
@@ -148,6 +167,9 @@ pub fn unlink_skill_from_agent(skill_name: &str, agent_id: &str) -> Result<()> {
     let target = profile.global_skills_dir.join(skill_name);
     if super::paths::is_link(&target) {
         super::paths::remove_symlink(&target)?;
+    } else if target.is_dir() {
+        // Handle copy-based deployment
+        super::paths::remove_link_or_copy(&target)?;
     }
     Ok(())
 }
