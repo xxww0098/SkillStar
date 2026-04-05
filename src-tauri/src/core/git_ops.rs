@@ -32,8 +32,13 @@ pub fn compute_tree_hash(repo_path: &Path) -> Result<String> {
 }
 
 /// In-process tree hash via `gix` (no subprocess).
+///
+/// Uses `gix::discover` instead of `gix::open` so that subdirectory paths
+/// (common for symlinked skills pointing into repo subdirs) correctly walk
+/// up to find the `.git` root.
 fn compute_tree_hash_gix(repo_path: &Path) -> Result<String> {
-    let repo = gix::open(repo_path).context("Failed to open git repository")?;
+    let repo = gix::discover(repo_path)
+        .context("Failed to discover git repository")?;
     let head = repo.head_commit().context("Failed to get HEAD commit")?;
     let tree_id = head.tree_id().context("Failed to get tree ID")?;
     Ok(tree_id.to_string())

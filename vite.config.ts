@@ -4,7 +4,6 @@ import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import { fileURLToPath } from "url";
 
-// @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -19,28 +18,13 @@ export default defineConfig(async () => ({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          "react-vendor": ["react", "react-dom", "scheduler"],
-          "motion-vendor": ["framer-motion"],
-          "i18n-vendor": ["i18next", "react-i18next"],
-          "tauri-vendor": [
-            "@tauri-apps/api",
-            "@tauri-apps/plugin-dialog",
-            "@tauri-apps/plugin-process",
-            "@tauri-apps/plugin-shell",
-            "@tauri-apps/plugin-updater",
-          ],
-          "radix-vendor": [
-            "@radix-ui/react-slot",
-            "@radix-ui/react-switch",
-          ],
-          "ui-vendor": [
-            "class-variance-authority",
-            "clsx",
-            "lucide-react",
-            "sonner",
-            "tailwind-merge",
-          ],
+        manualChunks: (id) => {
+          if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/') || id.includes('node_modules/scheduler/')) return 'react-vendor';
+          if (id.includes('node_modules/framer-motion/')) return 'motion-vendor';
+          if (id.includes('node_modules/i18next/') || id.includes('node_modules/react-i18next/')) return 'i18n-vendor';
+          if (id.includes('node_modules/@tauri-apps/')) return 'tauri-vendor';
+          if (id.includes('node_modules/@radix-ui/')) return 'radix-vendor';
+          if (id.includes('node_modules/class-variance-authority/') || id.includes('node_modules/clsx/') || id.includes('node_modules/lucide-react/') || id.includes('node_modules/sonner/') || id.includes('node_modules/tailwind-merge/')) return 'ui-vendor';
         },
       },
     },

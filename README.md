@@ -221,10 +221,16 @@ SkillStar/
 │   ├── src/commands/   #   marketplace, agents, projects, github, ai, patrol
 │   ├── src/core/       #   domain modules（skills, sync, repo, security_scan, ai_provider ...）
 │   └── prompts/        #   AI/Security 系统提示词
-├── docs/Error.md       # 关键问题与修复记录
-├── AGENTS.md           # 后端/全局工程规范
-├── AGENTS-UI.md        # 前端规范
-└── .impeccable.md      # 设计语义与视觉基线
+├── docs/
+│   ├── Error.md           # 关键问题与修复记录
+│   ├── CHANGELOG.md       # 版本变更日志
+│   └── impeccable.md      # 设计语义与视觉基线
+├── scripts/
+│   ├── release/           # 发布脚本
+│   ├── security_scan/     # 安全扫描脚本
+│   └── internal/          # 内部维护脚本
+├── AGENTS.md              # 后端/全局工程规范
+└── AGENTS-UI.md           # 前端规范
 ```
 
 ## 支持的 Agent CLI

@@ -1,4 +1,6 @@
-import { lazy, Suspense, type ReactNode } from "react";
+import { lazy, type ReactNode, Suspense } from "react";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import { markdownComponents } from "../../lib/markdown";
 import { cn } from "../../lib/utils";
@@ -7,6 +9,7 @@ const ReactMarkdown = lazy(() => import("react-markdown"));
 
 /** Stable reference — avoids re-creating the array on every render */
 const REMARK_PLUGINS = [remarkGfm];
+const REHYPE_PLUGINS = [rehypeRaw, rehypeSanitize];
 
 interface MarkdownProps {
   children: string;
@@ -34,17 +37,8 @@ export function Markdown({ children, className, fallback, streaming }: MarkdownP
       {streaming ? (
         <p className="text-body whitespace-pre-wrap">{children}</p>
       ) : (
-        <Suspense
-          fallback={
-            fallback ?? (
-              <p className="text-body whitespace-pre-wrap">{children}</p>
-            )
-          }
-        >
-          <ReactMarkdown
-            remarkPlugins={REMARK_PLUGINS}
-            components={markdownComponents}
-          >
+        <Suspense fallback={fallback ?? <p className="text-body whitespace-pre-wrap">{children}</p>}>
+          <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={markdownComponents}>
             {children}
           </ReactMarkdown>
         </Suspense>

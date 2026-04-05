@@ -6,7 +6,8 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { Button } from "../../../components/ui/button";
 import { createShareCode, formatShareMessage, ShareCodeData, ShareCodeType } from "../../../lib/shareCode";
 import { toast } from "../../../lib/toast";
-import { Sparkles, Package, FileText, Link2, Download, Check, Copy, KeyRound, Loader2, X, Github } from "lucide-react";
+import { Sparkles, Package, FileText, Link2, Download, Check, Copy, KeyRound, Loader2, X } from "lucide-react";
+import { Github } from "../../../components/ui/icons/Github";
 import type { SkillCardDeck, Skill } from "../../../types";
 import { copyToClipboard } from "../../../lib/utils";
 

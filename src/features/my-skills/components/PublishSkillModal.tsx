@@ -7,7 +7,6 @@ import { SearchInput } from "../../../components/ui/SearchInput";
 import { toast } from "../../../lib/toast";
 import {
   X,
-  Github,
   Globe,
   Lock,
   Loader2,
@@ -23,6 +22,7 @@ import {
   Plus,
   GitBranch,
 } from "lucide-react";
+import { Github } from "../../../components/ui/icons/Github";
 import type { GhStatus, PublishResult, UserRepo } from "../../../types";
 import { copyToClipboard } from "../../../lib/utils";
 

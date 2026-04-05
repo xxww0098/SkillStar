@@ -1,6 +1,6 @@
 [package]
 name = "skillstar"
-version = "0.1.8"
+version = "0.1.9"
 description = "SkillStar — Skill management for AI agents"
 authors = ["SkillStar"]
 edition = "2024"
@@ -48,7 +48,7 @@ r2d2_sqlite = "0.33.0"
 r2d2 = "0.8.10"
 pulldown-cmark = "0.13.3"
 tracing = "0.1.44"
-tracing-subscriber = { version = "0.3.23", features = ["fmt", "env-filter"] }
+tracing-subscriber = { version = "0.3.23", features = ["fmt", "env-filter", "json"] }
 thiserror = "2.0.18"
 petgraph = "0.8.3"
 agent-client-protocol = "0.10"

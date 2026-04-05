@@ -5,6 +5,48 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-04-05
+
+### Added
+- **CI pipeline** (`ci.yml`) — full GitHub Actions workflow with frontend lint + test (Biome + Vitest), Rust fmt/clippy/test on Ubuntu/macOS/Windows, and `cargo-deny` supply chain audit (advisories, licenses, sources).
+- **Biome** — integrated `@biomejs/biome` 2.x for unified lint + format; `bun run lint` / `lint:fix` / `format` scripts added.
+- **Vitest** — testing foundation with jsdom environment, auto-mocked Tauri IPC (`src/test/setup.ts`), and initial test suite (`smoke`, `utils`, `frontmatter`, `useViewMode`, `useAiConfig`, `useAgentProfiles`).
+- **`cargo-deny`** — `src-tauri/deny.toml` policy for advisories, license allowlist, and source validation.
+- **Custom `Github` icon component** — SVG-based replacement for the removed `Github` export from `lucide-react` v1.7.
+- **Markdown security sanitization** — `rehype-raw` + `rehype-sanitize` pipeline added to the `<Markdown>` component to safely render raw HTML while blocking XSS vectors.
+- **Translation safety timeout** — `useAiStream` hook now enforces a 60s frontend safety timer that force-recovers the UI when the backend stream hangs.
+- **Lockfile unit tests** — comprehensive test coverage for `core::lockfile` (round-trip save/load, upsert, remove, source folders, parent directory creation).
+- **Structured JSON logging** — `SKILLSTAR_LOG_JSON=1` enables JSON-formatted tracing output with span events for production debugging.
+- **Settings AI auto-scroll** — navigating to Settings via the "configure AI" shortcut now smoothly scrolls to the AI provider section.
+
+### Changed
+- **TypeScript** upgraded from 5.5 to **6.0**; removed deprecated `baseUrl` from `tsconfig.json`.
+- **Vite** upgraded from 5.x to **8.0**; `@vitejs/plugin-react` upgraded to 6.x.
+- **lucide-react** upgraded from 0.436 to **1.7** — removed `Github` icon replaced with custom SVG component across `DetailPanel`, `ExportShareCodeModal`, `PublishSkillModal`.
+- **`tracing-subscriber`** — added `json` feature flag for structured log output.
+- **`manualChunks`** — replaced static object mapping with a function-based chunking strategy in `vite.config.ts` for more robust Vite 8 compatibility.
+- **`gix::open` → `gix::discover`** — `compute_tree_hash_gix` now uses `discover()` so symlinked skill paths correctly walk up to find the `.git` root, eliminating spurious "failed to read HEAD tree hash" warnings.
+- **MyMemory API timeout** — added 15s per-request timeout to prevent indefinite hangs on unresponsive external API.
+- **AI short-text fallback timeout** — non-streaming retry path now enforces a 20s timeout per attempt.
+- **Short-text priority translation timeout** — overall translation command capped at 45s with structured error reporting.
+- **CI release lockfile** — `bun install` in release workflow switched to `--frozen-lockfile` for reproducible builds.
+- **Security scan CI** — renamed job to "Skill scan gate"; removed redundant `cargo fmt` and `cargo check` steps (now in main CI).
+- **Project structure documented** — `AGENTS.md` updated with `docs/`, `scripts/` directory tree, corrected dependency versions (React 19, reqwest 0.13, gix 0.80), and added Quality & CI section.
+- **README** — updated directory tree to reflect `docs/` and `scripts/` reorganization.
+
+### Fixed
+- Translation UI getting permanently stuck when backend stream hangs — frontend safety timeout now recovers after 60s.
+- `gix` "failed to open git repository" warnings for symlinked skills pointing to subdirectories of a repo.
+- MyMemory API calls could hang indefinitely if the external service was unreachable.
+
+### Removed
+- **`next-themes`** dependency — unused theme management package removed.
+- **`scripts/download_avatars.cjs`** — relocated to `scripts/internal/`.
+- **`.impeccable.md`** — moved to `docs/impeccable.md`.
+- **`CHANGELOG.md`** (root) — moved to `docs/CHANGELOG.md`.
+- **`docs/backend_technical_details.md`** — obsolete documentation removed.
+- **`@ts-expect-error` for `process`** — no longer needed with Vite 8 type definitions.
+
 ## [0.1.8] - 2026-04-04
 
 ### Added

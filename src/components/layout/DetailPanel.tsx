@@ -20,7 +20,6 @@ import {
   ExternalLink,
 
   Sparkles,
-  Github,
   Languages,
   Square,
   Star,
@@ -29,6 +28,7 @@ import {
   BookOpen,
   Check,
 } from "lucide-react";
+import { Github as GitHub } from "../ui/icons/Github";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { Markdown } from "../ui/Markdown";
@@ -986,7 +986,7 @@ export function DetailPanel({
                   className="w-full border-primary/30 text-primary hover:bg-primary/15 hover:text-primary"
                   onClick={() => onPublish(skill.name)}
                 >
-                  <Github className="w-4 h-4 mr-2" />
+                  <GitHub className="w-4 h-4 mr-2" />
                   {t("detailPanel.publishToGithub")}
                 </Button>
               )}

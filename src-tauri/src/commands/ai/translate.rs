@@ -579,17 +579,33 @@ pub async fn ai_translate_short_text_stream_with_source(
             .map_err(anyhow::Error::msg)
     };
 
+    const SHORT_TEXT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+
     let translate_result = if requires_ai {
-        ai_provider::translate_short_text_streaming(&config, &content, &mut on_delta)
-            .await
-            .map(|result| (result, ai_provider::ShortTextSource::Ai))
-    } else {
-        ai_provider::translate_short_text_streaming_with_priority_source(
-            &config,
-            &content,
-            &mut on_delta,
+        tokio::time::timeout(
+            SHORT_TEXT_TIMEOUT,
+            ai_provider::translate_short_text_streaming(&config, &content, &mut on_delta),
         )
         .await
+        .unwrap_or_else(|_| {
+            warn!(target: "translate", "short text AI-only translation timed out after 45s");
+            Err(anyhow::anyhow!("Translation timed out"))
+        })
+        .map(|result| (result, ai_provider::ShortTextSource::Ai))
+    } else {
+        tokio::time::timeout(
+            SHORT_TEXT_TIMEOUT,
+            ai_provider::translate_short_text_streaming_with_priority_source(
+                &config,
+                &content,
+                &mut on_delta,
+            ),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            warn!(target: "translate", "short text priority translation timed out after 45s");
+            Err(anyhow::anyhow!("Translation timed out"))
+        })
     };
 
     match translate_result {

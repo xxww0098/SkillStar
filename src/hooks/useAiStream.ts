@@ -165,6 +165,7 @@ export function useAiStream({
       let streamedRaw = "";
       let deltaCount = 0;
       let rafId: number | null = null;
+      let safetyTimer: ReturnType<typeof setTimeout> | undefined;
 
       setState((prev) => ({
         content: keepVisibleWhileLoading ? prev.content : null,
@@ -208,6 +209,27 @@ export function useAiStream({
           }
         });
         unlistenRef.current = unlisten;
+
+        // Safety timeout — if the backend hangs beyond this, force-recover the UI.
+        const SAFETY_TIMEOUT_MS = 60_000;
+        safetyTimer = setTimeout(() => {
+          if (activeIdRef.current !== requestId) return;
+          activeIdRef.current = null;
+          if (unlistenRef.current) {
+            unlistenRef.current();
+            unlistenRef.current = null;
+          }
+          setState({
+            content: streamedRaw.trim() ? streamedRaw : null,
+            visible: !!streamedRaw.trim(),
+            loading: false,
+            hasDelta: deltaCount >= 2,
+            wasNonStreaming: false,
+            error: "Translation timed out",
+            source: sourceContent,
+            provider: null,
+          });
+        }, SAFETY_TIMEOUT_MS);
 
         const invokePayload = {
           requestId,
@@ -256,6 +278,7 @@ export function useAiStream({
         });
         return null;
       } finally {
+        if (safetyTimer !== undefined) clearTimeout(safetyTimer);
         if (rafId != null) {
           cancelAnimationFrame(rafId);
           rafId = null;

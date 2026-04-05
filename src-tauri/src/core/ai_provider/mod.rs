@@ -1712,11 +1712,13 @@ async fn mymemory_call(
     let url = reqwest::Url::parse_with_params("https://api.mymemory.translated.net/get", &params)
         .context("Failed to build MyMemory URL")?;
 
-    let resp = client
-        .get(url)
-        .send()
-        .await
-        .context("Failed to send request to MyMemory API")?;
+    let resp = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        client.get(url).send(),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("MyMemory API request timed out after 15s"))?
+    .context("Failed to send request to MyMemory API")?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -2208,11 +2210,21 @@ where
         Ok(result) if !result.trim().is_empty() => Ok(result),
         Ok(_) => {
             warn!(target: "short_text", "AI streaming returned empty, retrying non-streaming");
-            translate_short_text(config, text).await
+            tokio::time::timeout(
+                std::time::Duration::from_secs(20),
+                translate_short_text(config, text),
+            )
+            .await
+            .map_err(|_| anyhow::anyhow!("Short text non-streaming fallback timed out after 20s"))?
         }
         Err(stream_err) => {
             warn!(target: "short_text", error = %stream_err, "AI streaming failed, retrying non-streaming");
-            translate_short_text(config, text).await
+            tokio::time::timeout(
+                std::time::Duration::from_secs(20),
+                translate_short_text(config, text),
+            )
+            .await
+            .map_err(|_| anyhow::anyhow!("Short text non-streaming fallback timed out after 20s"))?
         }
     }
 }

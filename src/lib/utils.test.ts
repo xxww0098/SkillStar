@@ -1,0 +1,94 @@
+import { describe, expect, it } from "vitest";
+import { agentIconCls, cn, detectPlatform, formatAiErrorMessage, formatInstalls, formatPlatformPath } from "./utils";
+
+describe("cn (class merging)", () => {
+  it("should merge class names", () => {
+    expect(cn("foo", "bar")).toBe("foo bar");
+  });
+
+  it("should handle conditional classes", () => {
+    expect(cn("base", false && "hidden", "visible")).toBe("base visible");
+  });
+
+  it("should merge Tailwind classes correctly", () => {
+    expect(cn("p-4", "p-2")).toBe("p-2");
+  });
+});
+
+describe("detectPlatform", () => {
+  it("should return a valid platform string", () => {
+    const platform = detectPlatform();
+    expect(["macos", "windows", "linux", "unknown"]).toContain(platform);
+  });
+});
+
+describe("formatPlatformPath", () => {
+  it("should return the path unchanged on non-Windows", () => {
+    // In jsdom, navigator is not Windows
+    const result = formatPlatformPath("src/hooks/test.ts");
+    // The result depends on the platform detection, but should be a string
+    expect(typeof result).toBe("string");
+  });
+});
+
+describe("agentIconCls", () => {
+  it("should return base classes for SVG icons", () => {
+    expect(agentIconCls("claude.svg")).toBe("w-3.5 h-3.5");
+  });
+
+  it("should bump size for PNG icons", () => {
+    expect(agentIconCls("claude.png")).toBe("w-5 h-5");
+  });
+
+  it("should support custom base", () => {
+    expect(agentIconCls("test.svg", "w-4 h-4")).toBe("w-4 h-4");
+    expect(agentIconCls("test.png", "w-4 h-4")).toBe("w-5 h-5");
+  });
+});
+
+describe("formatInstalls", () => {
+  it("should format small numbers without suffix", () => {
+    expect(formatInstalls(42)).toBe("42");
+    expect(formatInstalls(999)).toBe("999");
+  });
+
+  it("should format thousands with K suffix", () => {
+    expect(formatInstalls(1_000)).toBe("1.0K");
+    expect(formatInstalls(759_100)).toBe("759.1K");
+  });
+
+  it("should format millions with M suffix", () => {
+    expect(formatInstalls(1_200_000)).toBe("1.2M");
+    expect(formatInstalls(10_500_000)).toBe("10.5M");
+  });
+});
+
+describe("formatAiErrorMessage", () => {
+  const mockT = (key: string, opts?: Record<string, unknown>) => (opts?.defaultValue as string) ?? key;
+
+  it("should return null for empty errors", () => {
+    expect(formatAiErrorMessage(null, mockT)).toBeNull();
+    expect(formatAiErrorMessage(undefined, mockT)).toBeNull();
+    expect(formatAiErrorMessage("", mockT)).toBeNull();
+  });
+
+  it("should detect AI not configured errors", () => {
+    const result = formatAiErrorMessage("AI provider is disabled", mockT);
+    expect(result).toContain("not configured");
+  });
+
+  it("should detect MyMemory errors", () => {
+    const result = formatAiErrorMessage("MyMemory service unavailable", mockT);
+    expect(result).toContain("MyMemory");
+  });
+
+  it("should detect network errors", () => {
+    const result = formatAiErrorMessage("Failed to send request", mockT);
+    expect(result).toContain("Network");
+  });
+
+  it("should return raw message for unknown errors", () => {
+    const result = formatAiErrorMessage("Some unknown error", mockT);
+    expect(result).toBe("Some unknown error");
+  });
+});

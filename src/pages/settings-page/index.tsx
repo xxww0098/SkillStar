@@ -657,6 +657,21 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
       if (focus === "ai-provider") {
         dispatchAi({ type: "TOGGLE_EXPANDED" });
         localStorage.removeItem("skillstar:settings-focus");
+
+        // Scroll to the AI section after a short delay so the DOM has rendered
+        requestAnimationFrame(() => {
+          setTimeout(() => {
+            const scrollRoot = document.getElementById("settings-scroll-container");
+            const aiSection = document.getElementById("settings-ai");
+            if (scrollRoot && aiSection) {
+              const rootRect = scrollRoot.getBoundingClientRect();
+              const sectionRect = aiSection.getBoundingClientRect();
+              const offset = 12;
+              const targetTop = scrollRoot.scrollTop + (sectionRect.top - rootRect.top) - offset;
+              scrollRoot.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
+            }
+          }, 100);
+        });
       }
     } catch {
       // ignore localStorage access errors
