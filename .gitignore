@@ -26,8 +26,10 @@ src-tauri/target/
 *.sln
 *.sw?
 
-# SkillStar / Local Skills Sync
-.agents/
+# SkillStar / Local Skills Sync — ignore .agents/ except workflows/
+.agents/*
+!.agents/workflows/
+!.agents/workflows/**
 
 # Gemini agent config
 .gemini/
