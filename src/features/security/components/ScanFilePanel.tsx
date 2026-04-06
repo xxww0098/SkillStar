@@ -1,9 +1,8 @@
+import { AnimatePresence, motion } from "framer-motion";
+import { Orbit, Radar, Scan } from "lucide-react";
 import { useMemo } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Scan, Radar, Orbit } from "lucide-react";
-
-import type { SecurityScanTrailItem } from "../../../types";
 import { getFileTheme, getRiskTone } from "../../../lib/securityScanTheme";
+import type { SecurityScanTrailItem } from "../../../types";
 
 interface ScanFilePanelProps {
   activeSkills: string[];
@@ -64,7 +63,7 @@ function getStagePrefix(stage: string | null): string {
 function getChunkLabel(
   focusChunkCompleted: number | null,
   focusChunkTotal: number | null,
-  activeChunkCount: number
+  activeChunkCount: number,
 ): string {
   if (focusChunkTotal && focusChunkTotal > 0 && focusChunkCompleted !== null) {
     if (focusChunkTotal === 1) {
@@ -97,11 +96,7 @@ export function ScanFilePanel({
   const focusFileName = focusChunk?.fileName ?? fileName;
   const focusChunkCompleted = typeof focusChunk?.chunkCompleted === "number" ? focusChunk.chunkCompleted : null;
   const focusChunkTotal = typeof focusChunk?.chunkTotal === "number" ? focusChunk.chunkTotal : null;
-  const chunkLabel = getChunkLabel(
-    focusChunkCompleted,
-    focusChunkTotal,
-    activeChunkFiles.length
-  );
+  const chunkLabel = getChunkLabel(focusChunkCompleted, focusChunkTotal, activeChunkFiles.length);
   const progress = progressPercent;
   const theme = useMemo(() => getFileTheme(focusFileName), [focusFileName]);
   const Icon = theme.icon;
@@ -122,9 +117,7 @@ export function ScanFilePanel({
           <div className="flex items-center justify-center w-6 h-6 rounded border border-success/30 bg-success/10 text-success">
             <Scan className="w-3.5 h-3.5" />
           </div>
-          <span className="text-[10px] font-medium tracking-widest uppercase text-muted-foreground">
-            Security Scan
-          </span>
+          <span className="text-[10px] font-medium tracking-widest uppercase text-muted-foreground">Security Scan</span>
         </div>
         <motion.div
           key={stage}
@@ -137,7 +130,6 @@ export function ScanFilePanel({
       </div>
 
       <div className="relative z-10 p-5 flex flex-col gap-5 flex-1">
-
         {/* Skills being scanned + Current file */}
         <AnimatePresence mode="wait">
           {focusFileName ? (
@@ -150,7 +142,9 @@ export function ScanFilePanel({
             >
               {/* Skill chips */}
               <div className="flex items-center gap-3">
-                <div className={`flex items-center justify-center w-8 h-8 rounded-lg border bg-background shadow-sm ${theme.chip}`}>
+                <div
+                  className={`flex items-center justify-center w-8 h-8 rounded-lg border bg-background shadow-sm ${theme.chip}`}
+                >
                   <Icon className={`w-4 h-4 ${theme.tintText}`} />
                 </div>
                 <div className="flex flex-col">
@@ -204,9 +198,7 @@ export function ScanFilePanel({
               {/* Files being analyzed — simple list without worker/chunk detail */}
               {activeChunkFiles.length > 0 && (
                 <div className="space-y-1.5">
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    Analyzing
-                  </div>
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Analyzing</div>
                   <div className="max-h-[7rem] space-y-1 overflow-y-auto pr-1">
                     {activeChunkFiles.map((chunk) => (
                       <div
@@ -253,9 +245,7 @@ export function ScanFilePanel({
             <span className="tabular-nums">
               {activeChunkWorkers}/{Math.max(maxChunkWorkers, 1)} workers
             </span>
-            <span className="tabular-nums">
-              {chunkLabel}
-            </span>
+            <span className="tabular-nums">{chunkLabel}</span>
           </div>
 
           <div className="relative h-1.5 rounded-full border border-border/50 bg-muted overflow-hidden">
@@ -297,10 +287,12 @@ export function ScanFilePanel({
                               {item.fileName.split("/").pop()}
                             </span>
                             <span className="truncate text-[10px] text-muted-foreground">
-                              {(item.fileName.split("/").slice(0, -1).pop())}
+                              {item.fileName.split("/").slice(0, -1).pop()}
                             </span>
                           </div>
-                          <span className={`shrink-0 rounded bg-background px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider border ${riskTone.text} ${riskTone.pill}`}>
+                          <span
+                            className={`shrink-0 rounded bg-background px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider border ${riskTone.text} ${riskTone.pill}`}
+                          >
                             {item.riskLevel ?? "Safe"}
                           </span>
                         </div>
@@ -324,7 +316,6 @@ export function ScanFilePanel({
             </div>
           </div>
         ) : null}
-
       </div>
     </motion.div>
   );

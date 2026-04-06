@@ -1,6 +1,6 @@
-import { useState, useCallback, useRef, useEffect } from "react";
-import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { X, FolderPlus, Loader2 } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { FolderPlus, Loader2, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
@@ -45,7 +45,7 @@ export function CreateLocalSkillModal({
       if (existingSkillNames.has(trimmed)) return t("mySkills.skillNameExists");
       return null;
     },
-    [existingSkillNames, t]
+    [existingSkillNames, t],
   );
 
   const handleSubmit = async () => {
@@ -133,11 +133,12 @@ export function CreateLocalSkillModal({
                 className="font-mono"
                 disabled={creating}
               />
-              {error && (
-                <p className="text-xs text-destructive">{error}</p>
-              )}
+              {error && <p className="text-xs text-destructive">{error}</p>}
               <p className="text-xs text-muted-foreground/70">
-                Stored in <code className="text-micro bg-muted/50 px-1 py-0.5 rounded">~/.skillstar/.agents/skills-local/{name || "..."}/</code>
+                Stored in{" "}
+                <code className="text-micro bg-muted/50 px-1 py-0.5 rounded">
+                  ~/.skillstar/.agents/skills-local/{name || "..."}/
+                </code>
               </p>
             </div>
 
@@ -146,11 +147,7 @@ export function CreateLocalSkillModal({
               <Button variant="ghost" onClick={onClose} disabled={creating}>
                 {t("common.cancel")}
               </Button>
-              <Button
-                onClick={handleSubmit}
-                disabled={creating || !name.trim()}
-                className="min-w-[80px]"
-              >
+              <Button onClick={handleSubmit} disabled={creating || !name.trim()} className="min-w-[80px]">
                 {creating ? (
                   <>
                     <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />

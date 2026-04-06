@@ -7,9 +7,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use tauri::AppHandle;
 use tracing::{debug, error, info, warn};
 
-use super::{
-    emit_translate_stream_event, ensure_ai_config, ShortTextTranslationPayload,
-};
+use super::{ShortTextTranslationPayload, emit_translate_stream_event, ensure_ai_config};
 
 /// Global concurrency limiter — at most 3 different skills translate at once.
 static SKILL_TRANSLATION_GLOBAL: LazyLock<tokio::sync::Semaphore> =
@@ -406,10 +404,7 @@ async fn translate_skill_stream_with_section_cache(
 // ── Tauri Commands ──────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn ai_translate_skill(
-    content: String,
-    force: Option<bool>,
-) -> Result<String, String> {
+pub async fn ai_translate_skill(content: String, force: Option<bool>) -> Result<String, String> {
     let config = ensure_ai_config().await?;
 
     let force_refresh = force.unwrap_or(false);
@@ -519,13 +514,8 @@ pub async fn ai_translate_skill_stream(
             Ok(result)
         }
         Err(err) => {
-            let _ = emit_translate_stream_event(
-                &window,
-                &request_id,
-                "error",
-                None,
-                Some(err.clone()),
-            );
+            let _ =
+                emit_translate_stream_event(&window, &request_id, "error", None, Some(err.clone()));
             Err(err)
         }
     }

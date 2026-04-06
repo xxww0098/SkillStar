@@ -5,14 +5,7 @@ interface SkeletonProps {
 }
 
 export function Skeleton({ className }: SkeletonProps) {
-  return (
-    <div
-      className={cn(
-        "rounded-md animate-shimmer",
-        className
-      )}
-    />
-  );
+  return <div className={cn("rounded-md animate-shimmer", className)} />;
 }
 
 export function SkillCardSkeleton() {

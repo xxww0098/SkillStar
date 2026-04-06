@@ -38,6 +38,15 @@ export interface UpdateResult {
   siblings_cleared: string[];
 }
 
+/** A new skill found in a cached repo that the user hasn't installed yet. */
+export interface RepoNewSkill {
+  repo_source: string;
+  repo_url: string;
+  skill_id: string;
+  folder_path: string;
+  description: string;
+}
+
 export interface MarketplaceResult {
   skills: Skill[];
   total_count: number;
@@ -45,13 +54,7 @@ export interface MarketplaceResult {
   has_more: boolean;
 }
 
-export type SnapshotStatus =
-  | "fresh"
-  | "stale"
-  | "seeding"
-  | "miss"
-  | "error_fallback"
-  | "remote_error";
+export type SnapshotStatus = "fresh" | "stale" | "seeding" | "miss" | "error_fallback" | "remote_error";
 
 export interface LocalFirstResult<T> {
   data: T;
@@ -149,6 +152,7 @@ export type NavPage =
   | "marketplace"
   | "skill-cards"
   | "projects"
+  | "models"
   | "security-scan"
   | "settings";
 
@@ -407,7 +411,6 @@ export type GitStatus =
       download_url: string;
     };
 
-
 export interface UserRepo {
   full_name: string;
   url: string;
@@ -513,14 +516,7 @@ export interface SecurityScanResult {
 
 export interface SecurityScanEvent {
   requestId: string;
-  event:
-    | "skill-start"
-    | "file-start"
-    | "skill-complete"
-    | "chunk-error"
-    | "error"
-    | "done"
-    | "progress";
+  event: "skill-start" | "file-start" | "skill-complete" | "chunk-error" | "error" | "done" | "progress";
   skillName?: string;
   fileName?: string;
   result?: SecurityScanResult;
@@ -533,15 +529,7 @@ export interface SecurityScanEvent {
   activeChunkWorkers?: number;
   maxChunkWorkers?: number;
   message?: string;
-  phase?:
-    | "collect"
-    | "static"
-    | "triage"
-    | "ai-analyze"
-    | "aggregate"
-    | "done"
-    | "error"
-    | string;
+  phase?: "collect" | "static" | "triage" | "ai-analyze" | "aggregate" | "done" | "error" | string;
 }
 
 export interface SecurityScanEstimate {

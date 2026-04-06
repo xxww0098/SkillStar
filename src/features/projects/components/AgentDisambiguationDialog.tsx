@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { Check, FolderSearch, X, ChevronRight } from "lucide-react";
+import { Check, ChevronRight, FolderSearch, X } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "../../../components/ui/button";
-import { AgentIcon } from "../../../components/ui/AgentIcon";
 import { MOTION_TRANSITION, motionDuration } from "../../../comm/motion";
-import { cn, agentIconCls, formatPlatformPath } from "../../../lib/utils";
+import { AgentIcon } from "../../../components/ui/AgentIcon";
+import { Button } from "../../../components/ui/button";
+import { agentIconCls, cn, formatPlatformPath } from "../../../lib/utils";
 import type { AmbiguousGroup, DetectedAgent } from "../../../types";
 
 interface AgentDisambiguationDialogProps {
@@ -66,10 +66,7 @@ export function AgentDisambiguationDialog({
             exit={{ opacity: 0 }}
             transition={{
               ...MOTION_TRANSITION.modalBackdrop,
-              duration: motionDuration(
-                prefersReducedMotion,
-                MOTION_TRANSITION.modalBackdrop.duration,
-              ),
+              duration: motionDuration(prefersReducedMotion, MOTION_TRANSITION.modalBackdrop.duration),
             }}
             className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm"
             onClick={onClose}
@@ -77,27 +74,12 @@ export function AgentDisambiguationDialog({
 
           {/* Dialog */}
           <motion.div
-            initial={
-              prefersReducedMotion
-                ? { opacity: 0 }
-                : { opacity: 0, scale: 0.94, y: 20 }
-            }
-            animate={
-              prefersReducedMotion
-                ? { opacity: 1 }
-                : { opacity: 1, scale: 1, y: 0 }
-            }
-            exit={
-              prefersReducedMotion
-                ? { opacity: 0 }
-                : { opacity: 0, scale: 0.94, y: 15 }
-            }
+            initial={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.94, y: 20 }}
+            animate={prefersReducedMotion ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0 }}
+            exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.94, y: 15 }}
             transition={{
               ...MOTION_TRANSITION.modal,
-              duration: motionDuration(
-                prefersReducedMotion,
-                MOTION_TRANSITION.modal.duration,
-              ),
+              duration: motionDuration(prefersReducedMotion, MOTION_TRANSITION.modal.duration),
             }}
             className="fixed left-1/2 top-1/2 z-50 w-full max-w-[440px] -translate-x-1/2 -translate-y-1/2 p-4"
           >
@@ -141,9 +123,7 @@ export function AgentDisambiguationDialog({
                 <div className="px-6 pt-4 pb-2">
                   <div className="flex items-center gap-2 rounded-xl bg-muted/40 border border-border px-3 py-2">
                     <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/60 shrink-0" />
-                    <code className="text-xs font-mono text-foreground/80 truncate">
-                      {group.path}
-                    </code>
+                    <code className="text-xs font-mono text-foreground/80 truncate">{group.path}</code>
                   </div>
                 </div>
 
@@ -155,25 +135,17 @@ export function AgentDisambiguationDialog({
                 >
                   {candidates.map((candidate, index) => {
                     const isSelected = selectedId === candidate.agent_id;
-                    const isOpenCodeIcon = candidate.icon
-                      .toLowerCase()
-                      .includes("opencode");
+                    const isOpenCodeIcon = candidate.icon.toLowerCase().includes("opencode");
 
                     return (
                       <motion.button
                         key={candidate.agent_id}
                         type="button"
-                        initial={
-                          prefersReducedMotion
-                            ? false
-                            : { opacity: 0, y: 8 }
-                        }
+                        initial={prefersReducedMotion ? false : { opacity: 0, y: 8 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{
                           ...MOTION_TRANSITION.enter,
-                          delay: prefersReducedMotion
-                            ? 0
-                            : index * 0.04,
+                          delay: prefersReducedMotion ? 0 : index * 0.04,
                         }}
                         role="radio"
                         aria-checked={isSelected}
@@ -182,7 +154,7 @@ export function AgentDisambiguationDialog({
                           "group w-full relative outline-none flex items-center gap-3 overflow-hidden rounded-[16px] border p-3.5 text-left transition duration-300 cursor-pointer",
                           isSelected
                             ? "border-primary/50 bg-primary/10 shadow-[0_4px_20px_-8px_rgba(var(--color-primary-rgb),0.3)]"
-                            : "border-border bg-background/70 hover:border-primary/25 hover:bg-card hover:-translate-y-px"
+                            : "border-border bg-background/70 hover:border-primary/25 hover:bg-card hover:-translate-y-px",
                         )}
                       >
                         {/* Selection glow */}
@@ -208,7 +180,7 @@ export function AgentDisambiguationDialog({
                             isOpenCodeIcon &&
                               (isSelected
                                 ? "border-zinc-500/90 bg-zinc-900"
-                                : "border-zinc-500/70 bg-zinc-900 group-hover:bg-zinc-800 group-hover:border-zinc-300/70")
+                                : "border-zinc-500/70 bg-zinc-900 group-hover:bg-zinc-800 group-hover:border-zinc-300/70"),
                           )}
                         >
                           <AgentIcon
@@ -219,11 +191,8 @@ export function AgentDisambiguationDialog({
                               isSelected
                                 ? "opacity-100 scale-110"
                                 : "grayscale opacity-50 group-hover:grayscale-0 group-hover:opacity-80",
-                              isOpenCodeIcon &&
-                                "grayscale-0 invert brightness-200 contrast-125",
-                              isOpenCodeIcon &&
-                                !isSelected &&
-                                "opacity-85 group-hover:opacity-100"
+                              isOpenCodeIcon && "grayscale-0 invert brightness-200 contrast-125",
+                              isOpenCodeIcon && !isSelected && "opacity-85 group-hover:opacity-100",
                             )}
                           />
                         </div>
@@ -233,18 +202,14 @@ export function AgentDisambiguationDialog({
                           <span
                             className={cn(
                               "text-sm font-bold transition-colors",
-                              isSelected
-                                ? "text-primary"
-                                : "text-foreground"
+                              isSelected ? "text-primary" : "text-foreground",
                             )}
                           >
                             {candidate.display_name}
                           </span>
                           <p className="text-micro text-muted-foreground/70 font-mono tracking-tight flex items-center gap-1 mt-0.5">
                             <ChevronRight className="w-2.5 h-2.5 opacity-50 shrink-0" />
-                            <span className="truncate">
-                              {formatPlatformPath(candidate.project_skills_rel)}
-                            </span>
+                            <span className="truncate">{formatPlatformPath(candidate.project_skills_rel)}</span>
                           </p>
                         </div>
 
@@ -254,7 +219,7 @@ export function AgentDisambiguationDialog({
                             "relative z-10 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition duration-300",
                             isSelected
                               ? "border-primary bg-primary text-primary-foreground shadow-[0_0_10px_rgba(var(--color-primary-rgb),0.3)] scale-[1.05]"
-                              : "border-border bg-transparent text-transparent group-hover:border-primary/25"
+                              : "border-border bg-transparent text-transparent group-hover:border-primary/25",
                           )}
                         >
                           <Check className="h-3 w-3" strokeWidth={3} />
@@ -280,7 +245,7 @@ export function AgentDisambiguationDialog({
                       className={cn(
                         "rounded-lg px-5 relative overflow-hidden transition",
                         selectedId &&
-                          "shadow-[0_0_15px_rgba(var(--color-primary-rgb),0.3)] hover:shadow-[0_0_20px_rgba(var(--color-primary-rgb),0.4)]"
+                          "shadow-[0_0_15px_rgba(var(--color-primary-rgb),0.3)] hover:shadow-[0_0_20px_rgba(var(--color-primary-rgb),0.4)]",
                       )}
                       onClick={handleConfirm}
                       disabled={!selectedId}

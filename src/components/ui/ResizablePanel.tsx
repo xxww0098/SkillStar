@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "../../lib/utils";
 
 interface ResizablePanelProps {
@@ -57,7 +57,7 @@ export function ResizablePanel({
       const maxPx = Math.floor((parentWidth * maxWidthPercent) / 100);
       return Math.max(minWidth, Math.min(w, maxPx));
     },
-    [minWidth, maxWidthPercent]
+    [minWidth, maxWidthPercent],
   );
   // Re-clamp width after mount (parent ref available) and on window resize,
   // so restored widths that exceeded the current parent area get corrected.
@@ -90,7 +90,7 @@ export function ResizablePanel({
       document.body.style.cursor = "col-resize";
       document.body.style.userSelect = "none";
     },
-    [width]
+    [width],
   );
 
   useEffect(() => {
@@ -121,15 +121,12 @@ export function ResizablePanel({
       ref={panelRef}
       className={cn(
         "absolute right-0 top-0 bottom-0 h-full border-l border-border bg-background shadow-[0_4px_20px_-8px_rgba(0,0,0,0.3)] overflow-hidden z-50 rounded-tl-xl rounded-bl-xl flex flex-col",
-        className
+        className,
       )}
       style={{ width }}
     >
       {/* Drag handle — left edge */}
-      <div
-        onMouseDown={onMouseDown}
-        className="absolute left-0 top-0 bottom-0 w-1 z-[60] cursor-col-resize group"
-      >
+      <div onMouseDown={onMouseDown} className="absolute left-0 top-0 bottom-0 w-1 z-[60] cursor-col-resize group">
         {/* Visual indicator — subtle line that glows on hover */}
         <div className="absolute inset-y-0 left-0 w-px bg-border group-hover:bg-primary/60 transition-colors duration-150" />
         {/* Wider hit area */}

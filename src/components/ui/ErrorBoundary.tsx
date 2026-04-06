@@ -1,5 +1,5 @@
-import { Component } from "react";
 import type { ErrorInfo, ReactNode } from "react";
+import { Component } from "react";
 
 interface Props {
   children: ReactNode;
@@ -23,12 +23,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     this.setState({ errorInfo: info });
-    console.error(
-      "[ErrorBoundary] Uncaught error:",
-      error,
-      "\nComponent stack:",
-      info.componentStack,
-    );
+    console.error("[ErrorBoundary] Uncaught error:", error, "\nComponent stack:", info.componentStack);
   }
 
   private handleReload = () => {
@@ -68,9 +63,7 @@ export class ErrorBoundary extends Component<Props, State> {
             !
           </div>
           <h2 className="text-heading-md">Something went wrong</h2>
-          <p className="text-caption max-w-md">
-            An unexpected error occurred. You can try reloading the page.
-          </p>
+          <p className="text-caption max-w-md">An unexpected error occurred. You can try reloading the page.</p>
           <pre className="text-xs text-muted-foreground bg-muted rounded-lg p-3 max-w-lg overflow-auto max-h-40 text-left whitespace-pre-wrap break-words">
             {this.formatErrorDetails()}
           </pre>
@@ -95,4 +88,3 @@ export class ErrorBoundary extends Component<Props, State> {
     return this.props.children;
   }
 }
-

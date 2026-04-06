@@ -1,22 +1,17 @@
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   createContext,
   createElement,
-  useState,
+  type ReactNode,
   useCallback,
+  useContext,
   useEffect,
   useRef,
-  useContext,
-  type ReactNode,
+  useState,
 } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type {
-  SecurityScanEvent,
-  SecurityScanResult,
-  SecurityScanTrailItem,
-  RiskLevel,
-} from "../../../types";
+import type { RiskLevel, SecurityScanEvent, SecurityScanResult, SecurityScanTrailItem } from "../../../types";
 
 export type ScanPhase = "idle" | "scanning" | "done";
 export type ScanMode = "static" | "smart" | "deep";
@@ -99,7 +94,7 @@ function pushRecentFile(
   skillName: string | null,
   stage: string | null,
   riskLevel?: RiskLevel,
-  reasonLabels?: string[]
+  reasonLabels?: string[],
 ): SecurityScanTrailItem[] {
   if (!fileName) return items;
 
@@ -159,7 +154,11 @@ function getFileReasonLabels(result: SecurityScanResult | undefined, fileName: s
     }
   }
 
-  if (labels.size === 0 && (result.static_findings.some((f) => f.file_path === fileName) || result.ai_findings.some((f) => f.file_path === fileName))) {
+  if (
+    labels.size === 0 &&
+    (result.static_findings.some((f) => f.file_path === fileName) ||
+      result.ai_findings.some((f) => f.file_path === fileName))
+  ) {
     labels.add("review");
   }
 
@@ -170,13 +169,12 @@ function upsertSkillFileProgress(
   progressMap: Record<string, { scanned: number; total: number }>,
   skillName: string | null | undefined,
   scanned?: number,
-  total?: number
+  total?: number,
 ): Record<string, { scanned: number; total: number }> {
   if (!skillName) return progressMap;
 
   const current = progressMap[skillName] ?? { scanned: 0, total: 0 };
-  const nextScanned =
-    typeof scanned === "number" ? Math.max(current.scanned, scanned) : current.scanned;
+  const nextScanned = typeof scanned === "number" ? Math.max(current.scanned, scanned) : current.scanned;
   const nextTotal = typeof total === "number" ? Math.max(current.total, total) : current.total;
 
   if (current.scanned === nextScanned && current.total === nextTotal) {
@@ -191,7 +189,7 @@ function upsertSkillFileProgress(
 
 function removeSkillFileProgress(
   progressMap: Record<string, { scanned: number; total: number }>,
-  skillName: string | null | undefined
+  skillName: string | null | undefined,
 ): Record<string, { scanned: number; total: number }> {
   if (!skillName || !(skillName in progressMap)) return progressMap;
   const { [skillName]: _removed, ...rest } = progressMap;
@@ -202,13 +200,12 @@ function upsertSkillChunkProgress(
   progressMap: Record<string, { completed: number; total: number }>,
   skillName: string | null | undefined,
   completed?: number,
-  total?: number
+  total?: number,
 ): Record<string, { completed: number; total: number }> {
   if (!skillName) return progressMap;
 
   const current = progressMap[skillName] ?? { completed: 0, total: 0 };
-  const nextCompleted =
-    typeof completed === "number" ? Math.max(current.completed, completed) : current.completed;
+  const nextCompleted = typeof completed === "number" ? Math.max(current.completed, completed) : current.completed;
   const nextTotal = typeof total === "number" ? Math.max(current.total, total) : current.total;
 
   if (current.completed === nextCompleted && current.total === nextTotal) {
@@ -223,7 +220,7 @@ function upsertSkillChunkProgress(
 
 function removeSkillChunkProgress(
   progressMap: Record<string, { completed: number; total: number }>,
-  skillName: string | null | undefined
+  skillName: string | null | undefined,
 ): Record<string, { completed: number; total: number }> {
   if (!skillName || !(skillName in progressMap)) return progressMap;
   const { [skillName]: _removed, ...rest } = progressMap;
@@ -237,7 +234,7 @@ function upsertActiveChunkFile(
   skillName: string | null | undefined,
   fileName: string | null | undefined,
   chunkCompleted: number,
-  chunkTotal: number
+  chunkTotal: number,
 ): SecurityScanActiveChunkFile[] {
   if (!skillName || !fileName) return items;
   const next: SecurityScanActiveChunkFile = {
@@ -248,26 +245,22 @@ function upsertActiveChunkFile(
     updatedAt: Date.now(),
   };
 
-  const filtered = items.filter(
-    (item) => !(item.skillName === skillName && item.fileName === fileName)
-  );
+  const filtered = items.filter((item) => !(item.skillName === skillName && item.fileName === fileName));
   return [next, ...filtered].slice(0, MAX_ACTIVE_CHUNK_FILES);
 }
 
 function removeActiveChunkFile(
   items: SecurityScanActiveChunkFile[],
   skillName: string | null | undefined,
-  fileName: string | null | undefined
+  fileName: string | null | undefined,
 ): SecurityScanActiveChunkFile[] {
   if (!skillName || !fileName) return items;
-  return items.filter(
-    (item) => !(item.skillName === skillName && item.fileName === fileName)
-  );
+  return items.filter((item) => !(item.skillName === skillName && item.fileName === fileName));
 }
 
 function removeActiveChunkFilesForSkill(
   items: SecurityScanActiveChunkFile[],
-  skillName: string | null | undefined
+  skillName: string | null | undefined,
 ): SecurityScanActiveChunkFile[] {
   if (!skillName) return items;
   return items.filter((item) => item.skillName !== skillName);
@@ -277,16 +270,13 @@ function calculateProgressPercent(
   scanned: number,
   total: number,
   fileProgressMap: Record<string, { scanned: number; total: number }>,
-  chunkProgressMap: Record<string, { completed: number; total: number }>
+  chunkProgressMap: Record<string, { completed: number; total: number }>,
 ): number {
   if (total <= 0) return 0;
 
   const completedSkills = Math.min(scanned, total);
   let partialSkills = 0;
-  const skillNames = new Set([
-    ...Object.keys(fileProgressMap),
-    ...Object.keys(chunkProgressMap),
-  ]);
+  const skillNames = new Set([...Object.keys(fileProgressMap), ...Object.keys(chunkProgressMap)]);
   for (const skillName of skillNames) {
     const chunk = chunkProgressMap[skillName];
     if (chunk && chunk.total > 0) {
@@ -402,12 +392,8 @@ export function SecurityScanProvider({ children }: { children: ReactNode }) {
       const requestId = `scan-${Date.now()}`;
       const targetSet = skillNames.length > 0 ? new Set(skillNames) : null;
       const nextCachedResults =
-        queryClient.setQueryData<SecurityScanResult[]>(
-          SECURITY_SCAN_RESULTS_QUERY_KEY,
-          (prev = []) =>
-            targetSet
-              ? prev.filter((result) => !targetSet.has(result.skill_name))
-              : []
+        queryClient.setQueryData<SecurityScanResult[]>(SECURITY_SCAN_RESULTS_QUERY_KEY, (prev = []) =>
+          targetSet ? prev.filter((result) => !targetSet.has(result.skill_name)) : [],
         ) ?? [];
 
       setState((prev) => ({
@@ -439,298 +425,268 @@ export function SecurityScanProvider({ children }: { children: ReactNode }) {
         unlistenRef.current();
       }
 
-      unlistenRef.current = await listen<SecurityScanEvent>(
-        "ai://security-scan",
-        (event) => {
-          const payload = event.payload;
-          if (payload.requestId !== requestId) return;
+      unlistenRef.current = await listen<SecurityScanEvent>("ai://security-scan", (event) => {
+        const payload = event.payload;
+        if (payload.requestId !== requestId) return;
 
-          switch (payload.event) {
-            case "skill-start": {
-              const skillName = payload.skillName || null;
-              const stage = payload.phase || payload.message || "collect";
-              setState((prev) => {
-                const newActive = skillName && !prev.activeSkills.includes(skillName)
+        switch (payload.event) {
+          case "skill-start": {
+            const skillName = payload.skillName || null;
+            const stage = payload.phase || payload.message || "collect";
+            setState((prev) => {
+              const newActive =
+                skillName && !prev.activeSkills.includes(skillName)
                   ? [...prev.activeSkills, skillName]
                   : prev.activeSkills;
-                const nextSkillFileProgress = upsertSkillFileProgress(
-                  prev.skillFileProgress,
-                  skillName,
-                  payload.skillFileScanned,
-                  payload.skillFileTotal
-                );
-                const nextSkillChunkProgress = upsertSkillChunkProgress(
-                  prev.skillChunkProgress,
-                  skillName,
-                  payload.skillChunkCompleted,
-                  payload.skillChunkTotal
-                );
-                const nextActiveChunkFiles = removeActiveChunkFilesForSkill(
-                  prev.activeChunkFiles,
-                  skillName
-                );
-                return {
-                  ...prev,
-                  activeSkills: newActive,
-                  currentSkill: skillName ?? newActive[0] ?? null,
-                  currentStage: stage,
-                  currentFile: null,
-                  syncPulseKey: prev.syncPulseKey + 1,
-                  scanAngle: prev.scanAngle,
-                  scanStartedAt: prev.scanStartedAt ?? Date.now(),
-                  scanned: payload.scanned ?? prev.scanned,
-                  total: payload.total ?? prev.total,
-                  skillFileProgress: nextSkillFileProgress,
-                  skillChunkProgress: nextSkillChunkProgress,
-                  activeChunkFiles: nextActiveChunkFiles,
-                  activeChunkWorkers: payload.activeChunkWorkers ?? prev.activeChunkWorkers,
-                  maxChunkWorkers: payload.maxChunkWorkers ?? prev.maxChunkWorkers,
-                };
-              });
-              break;
-            }
-
-            case "file-start":
-              setState((prev) => {
-                const nextFile = payload.fileName || null;
-                const stage = payload.phase || payload.message || prev.currentStage;
-                // Smooth rotation: advance by a fixed step per file event (wraps at 360)
-                const nextAngle = (prev.scanAngle + 17) % 360;
-                return {
-                  ...prev,
-                  currentSkill: payload.skillName ?? prev.currentSkill,
-                  currentStage: stage,
-                  currentFile: nextFile,
-                  scanAngle: nextAngle,
-                  skillFileProgress: upsertSkillFileProgress(
-                    prev.skillFileProgress,
-                    payload.skillName,
-                    payload.skillFileScanned,
-                    payload.skillFileTotal
-                  ),
-                  skillChunkProgress: upsertSkillChunkProgress(
-                    prev.skillChunkProgress,
-                    payload.skillName,
-                    payload.skillChunkCompleted,
-                    payload.skillChunkTotal
-                  ),
-                  activeChunkWorkers: payload.activeChunkWorkers ?? prev.activeChunkWorkers,
-                  maxChunkWorkers: payload.maxChunkWorkers ?? prev.maxChunkWorkers,
-                  recentFiles:
-                    nextFile !== prev.currentFile
-                      ? pushRecentFile(prev.recentFiles, prev.currentFile, prev.currentSkill, prev.currentStage)
-                      : prev.recentFiles,
-                };
-              });
-              break;
-
-            case "progress": {
-              const stage = payload.phase || payload.message || null;
-              const progressSkill = payload.skillName ?? null;
-              setState((prev) => {
-                const previousSkillChunkCompleted = progressSkill
-                  ? prev.skillChunkProgress[progressSkill]?.completed ?? 0
-                  : 0;
-                const reportedChunkCompleted =
-                  typeof payload.skillChunkCompleted === "number"
-                    ? payload.skillChunkCompleted
-                    : previousSkillChunkCompleted;
-                const reportedChunkTotal =
-                  typeof payload.skillChunkTotal === "number"
-                    ? payload.skillChunkTotal
-                    : progressSkill
-                    ? prev.skillChunkProgress[progressSkill]?.total ?? 0
-                    : 0;
-                const nextSkillFileProgress = upsertSkillFileProgress(
-                  prev.skillFileProgress,
-                  payload.skillName,
-                  payload.skillFileScanned,
-                  payload.skillFileTotal
-                );
-                const nextSkillChunkProgress = upsertSkillChunkProgress(
-                  prev.skillChunkProgress,
-                  payload.skillName,
-                  payload.skillChunkCompleted,
-                  payload.skillChunkTotal
-                );
-
-                let nextActiveChunkFiles = prev.activeChunkFiles;
-                const isAiAnalyze = stage === "ai-analyze" || stage === "ai";
-                const hasFileName = Boolean(payload.fileName);
-
-                if (isAiAnalyze && hasFileName && progressSkill) {
-                  const isCompletionTick =
-                    reportedChunkCompleted > previousSkillChunkCompleted;
-                  nextActiveChunkFiles = isCompletionTick
-                    ? removeActiveChunkFile(nextActiveChunkFiles, progressSkill, payload.fileName)
-                    : upsertActiveChunkFile(
-                        nextActiveChunkFiles,
-                        progressSkill,
-                        payload.fileName,
-                        reportedChunkCompleted,
-                        reportedChunkTotal
-                      );
-                }
-
-                if (
-                  progressSkill &&
-                  !hasFileName &&
-                  (stage === "aggregate" || stage === "done" || stage === "error")
-                ) {
-                  nextActiveChunkFiles = removeActiveChunkFilesForSkill(
-                    nextActiveChunkFiles,
-                    progressSkill
-                  );
-                }
-
-                const focusedFile = nextActiveChunkFiles[0]?.fileName ?? payload.fileName ?? prev.currentFile;
-                return {
-                  ...prev,
-                  currentSkill: payload.skillName ?? prev.currentSkill,
-                  currentStage: stage,
-                  currentFile: focusedFile,
-                  scanAngle: prev.scanAngle,
-                  skillFileProgress: nextSkillFileProgress,
-                  skillChunkProgress: nextSkillChunkProgress,
-                  activeChunkFiles: nextActiveChunkFiles,
-                  activeChunkWorkers: payload.activeChunkWorkers ?? prev.activeChunkWorkers,
-                  maxChunkWorkers: payload.maxChunkWorkers ?? prev.maxChunkWorkers,
-                };
-              });
-              break;
-            }
-
-            case "skill-complete":
-              if (payload.result) {
-                queryClient.setQueryData<SecurityScanResult[]>(
-                  SECURITY_SCAN_RESULTS_QUERY_KEY,
-                  (prev = []) => [
-                    ...prev.filter(
-                      (result) => result.skill_name !== payload.result!.skill_name
-                    ),
-                    payload.result!,
-                  ]
-                );
-              }
-              setState((prev) => {
-                const newResults = payload.result
-                  ? [...prev.results.filter((r) => r.skill_name !== payload.result!.skill_name), payload.result]
-                  : prev.results;
-                const newRiskMap = { ...prev.riskMap };
-                if (payload.result) {
-                  newRiskMap[payload.result.skill_name] = payload.result.risk_level;
-                }
-                const completedName = payload.skillName || payload.result?.skill_name;
-                const newActive = completedName
-                  ? prev.activeSkills.filter((s) => s !== completedName)
-                  : prev.activeSkills;
-                const nextSkillFileProgress = removeSkillFileProgress(
-                  prev.skillFileProgress,
-                  completedName
-                );
-                const nextSkillChunkProgress = removeSkillChunkProgress(
-                  prev.skillChunkProgress,
-                  completedName
-                );
-                const nextActiveChunkFiles = removeActiveChunkFilesForSkill(
-                  prev.activeChunkFiles,
-                  completedName
-                );
-                return {
-                  ...prev,
-                  results: newResults,
-                  riskMap: newRiskMap,
-                  activeSkills: newActive,
-                  currentSkill: newActive[0] || null,
-                  currentStage: newActive.length > 0 ? prev.currentStage : null,
-                  currentFile: nextActiveChunkFiles[0]?.fileName ?? null,
-                  syncPulseKey: prev.syncPulseKey + 1,
-                  scanAngle: newActive.length > 0 ? prev.scanAngle : 0,
-                  scanStartedAt: prev.scanStartedAt,
-                  recentFiles: pushRecentFile(
-                    prev.recentFiles,
-                    prev.currentFile,
-                    prev.currentSkill,
-                    prev.currentStage,
-                    getFileRiskFromResult(payload.result, prev.currentFile),
-                    getFileReasonLabels(payload.result, prev.currentFile)
-                  ),
-                  scanned: payload.scanned ?? prev.scanned,
-                  total: payload.total ?? prev.total,
-                  skillFileProgress: nextSkillFileProgress,
-                  skillChunkProgress: nextSkillChunkProgress,
-                  activeChunkFiles: nextActiveChunkFiles,
-                  activeChunkWorkers: payload.activeChunkWorkers ?? prev.activeChunkWorkers,
-                  maxChunkWorkers: payload.maxChunkWorkers ?? prev.maxChunkWorkers,
-                };
-              });
-              break;
-
-            case "chunk-error":
-              setState((prev) => ({
+              const nextSkillFileProgress = upsertSkillFileProgress(
+                prev.skillFileProgress,
+                skillName,
+                payload.skillFileScanned,
+                payload.skillFileTotal,
+              );
+              const nextSkillChunkProgress = upsertSkillChunkProgress(
+                prev.skillChunkProgress,
+                skillName,
+                payload.skillChunkCompleted,
+                payload.skillChunkTotal,
+              );
+              const nextActiveChunkFiles = removeActiveChunkFilesForSkill(prev.activeChunkFiles, skillName);
+              return {
                 ...prev,
-                errors: [
-                  ...prev.errors,
-                  { skillName: payload.skillName || "unknown", message: payload.message || "Chunk analysis failed" },
-                ].slice(-50),
-                activeChunkWorkers: payload.activeChunkWorkers ?? prev.activeChunkWorkers,
-                maxChunkWorkers: payload.maxChunkWorkers ?? prev.maxChunkWorkers,
-              }));
-              break;
-
-            case "error":
-              setState((prev) => {
-                const newActive = payload.skillName
-                  ? prev.activeSkills.filter((skill) => skill !== payload.skillName)
-                  : prev.activeSkills;
-                const nextActiveChunkFiles = removeActiveChunkFilesForSkill(
-                  prev.activeChunkFiles,
-                  payload.skillName
-                );
-                return {
-                  ...prev,
-                  activeSkills: newActive,
-                  currentSkill: newActive[0] ?? null,
-                  currentFile: nextActiveChunkFiles[0]?.fileName ?? prev.currentFile,
-                  errors: [
-                    ...prev.errors,
-                    { skillName: payload.skillName || "unknown", message: payload.message || "Unknown error" },
-                  ].slice(-50),
-                  scanned: payload.scanned ?? prev.scanned,
-                  total: payload.total ?? prev.total,
-                  skillFileProgress: removeSkillFileProgress(prev.skillFileProgress, payload.skillName),
-                  skillChunkProgress: removeSkillChunkProgress(prev.skillChunkProgress, payload.skillName),
-                  activeChunkFiles: nextActiveChunkFiles,
-                  activeChunkWorkers: payload.activeChunkWorkers ?? prev.activeChunkWorkers,
-                  maxChunkWorkers: payload.maxChunkWorkers ?? prev.maxChunkWorkers,
-                };
-              });
-              break;
-
-            case "done":
-              setState((prev) => ({
-                ...prev,
-                phase: "done",
-                activeSkills: [],
-                currentSkill: null,
-                currentStage: null,
+                activeSkills: newActive,
+                currentSkill: skillName ?? newActive[0] ?? null,
+                currentStage: stage,
                 currentFile: null,
                 syncPulseKey: prev.syncPulseKey + 1,
-                scanAngle: 0,
-                scanStartedAt: null,
-                recentFiles: pushRecentFile(prev.recentFiles, prev.currentFile, prev.currentSkill, prev.currentStage),
+                scanAngle: prev.scanAngle,
+                scanStartedAt: prev.scanStartedAt ?? Date.now(),
                 scanned: payload.scanned ?? prev.scanned,
                 total: payload.total ?? prev.total,
-                skillFileProgress: {},
-                skillChunkProgress: {},
-                activeChunkFiles: [],
-                activeChunkWorkers: 0,
-                maxChunkWorkers: prev.maxChunkWorkers,
-              }));
-              break;
+                skillFileProgress: nextSkillFileProgress,
+                skillChunkProgress: nextSkillChunkProgress,
+                activeChunkFiles: nextActiveChunkFiles,
+                activeChunkWorkers: payload.activeChunkWorkers ?? prev.activeChunkWorkers,
+                maxChunkWorkers: payload.maxChunkWorkers ?? prev.maxChunkWorkers,
+              };
+            });
+            break;
           }
+
+          case "file-start":
+            setState((prev) => {
+              const nextFile = payload.fileName || null;
+              const stage = payload.phase || payload.message || prev.currentStage;
+              // Smooth rotation: advance by a fixed step per file event (wraps at 360)
+              const nextAngle = (prev.scanAngle + 17) % 360;
+              return {
+                ...prev,
+                currentSkill: payload.skillName ?? prev.currentSkill,
+                currentStage: stage,
+                currentFile: nextFile,
+                scanAngle: nextAngle,
+                skillFileProgress: upsertSkillFileProgress(
+                  prev.skillFileProgress,
+                  payload.skillName,
+                  payload.skillFileScanned,
+                  payload.skillFileTotal,
+                ),
+                skillChunkProgress: upsertSkillChunkProgress(
+                  prev.skillChunkProgress,
+                  payload.skillName,
+                  payload.skillChunkCompleted,
+                  payload.skillChunkTotal,
+                ),
+                activeChunkWorkers: payload.activeChunkWorkers ?? prev.activeChunkWorkers,
+                maxChunkWorkers: payload.maxChunkWorkers ?? prev.maxChunkWorkers,
+                recentFiles:
+                  nextFile !== prev.currentFile
+                    ? pushRecentFile(prev.recentFiles, prev.currentFile, prev.currentSkill, prev.currentStage)
+                    : prev.recentFiles,
+              };
+            });
+            break;
+
+          case "progress": {
+            const stage = payload.phase || payload.message || null;
+            const progressSkill = payload.skillName ?? null;
+            setState((prev) => {
+              const previousSkillChunkCompleted = progressSkill
+                ? (prev.skillChunkProgress[progressSkill]?.completed ?? 0)
+                : 0;
+              const reportedChunkCompleted =
+                typeof payload.skillChunkCompleted === "number"
+                  ? payload.skillChunkCompleted
+                  : previousSkillChunkCompleted;
+              const reportedChunkTotal =
+                typeof payload.skillChunkTotal === "number"
+                  ? payload.skillChunkTotal
+                  : progressSkill
+                    ? (prev.skillChunkProgress[progressSkill]?.total ?? 0)
+                    : 0;
+              const nextSkillFileProgress = upsertSkillFileProgress(
+                prev.skillFileProgress,
+                payload.skillName,
+                payload.skillFileScanned,
+                payload.skillFileTotal,
+              );
+              const nextSkillChunkProgress = upsertSkillChunkProgress(
+                prev.skillChunkProgress,
+                payload.skillName,
+                payload.skillChunkCompleted,
+                payload.skillChunkTotal,
+              );
+
+              let nextActiveChunkFiles = prev.activeChunkFiles;
+              const isAiAnalyze = stage === "ai-analyze" || stage === "ai";
+              const hasFileName = Boolean(payload.fileName);
+
+              if (isAiAnalyze && hasFileName && progressSkill) {
+                const isCompletionTick = reportedChunkCompleted > previousSkillChunkCompleted;
+                nextActiveChunkFiles = isCompletionTick
+                  ? removeActiveChunkFile(nextActiveChunkFiles, progressSkill, payload.fileName)
+                  : upsertActiveChunkFile(
+                      nextActiveChunkFiles,
+                      progressSkill,
+                      payload.fileName,
+                      reportedChunkCompleted,
+                      reportedChunkTotal,
+                    );
+              }
+
+              if (progressSkill && !hasFileName && (stage === "aggregate" || stage === "done" || stage === "error")) {
+                nextActiveChunkFiles = removeActiveChunkFilesForSkill(nextActiveChunkFiles, progressSkill);
+              }
+
+              const focusedFile = nextActiveChunkFiles[0]?.fileName ?? payload.fileName ?? prev.currentFile;
+              return {
+                ...prev,
+                currentSkill: payload.skillName ?? prev.currentSkill,
+                currentStage: stage,
+                currentFile: focusedFile,
+                scanAngle: prev.scanAngle,
+                skillFileProgress: nextSkillFileProgress,
+                skillChunkProgress: nextSkillChunkProgress,
+                activeChunkFiles: nextActiveChunkFiles,
+                activeChunkWorkers: payload.activeChunkWorkers ?? prev.activeChunkWorkers,
+                maxChunkWorkers: payload.maxChunkWorkers ?? prev.maxChunkWorkers,
+              };
+            });
+            break;
+          }
+
+          case "skill-complete":
+            if (payload.result) {
+              queryClient.setQueryData<SecurityScanResult[]>(SECURITY_SCAN_RESULTS_QUERY_KEY, (prev = []) => [
+                ...prev.filter((result) => result.skill_name !== payload.result!.skill_name),
+                payload.result!,
+              ]);
+            }
+            setState((prev) => {
+              const newResults = payload.result
+                ? [...prev.results.filter((r) => r.skill_name !== payload.result!.skill_name), payload.result]
+                : prev.results;
+              const newRiskMap = { ...prev.riskMap };
+              if (payload.result) {
+                newRiskMap[payload.result.skill_name] = payload.result.risk_level;
+              }
+              const completedName = payload.skillName || payload.result?.skill_name;
+              const newActive = completedName
+                ? prev.activeSkills.filter((s) => s !== completedName)
+                : prev.activeSkills;
+              const nextSkillFileProgress = removeSkillFileProgress(prev.skillFileProgress, completedName);
+              const nextSkillChunkProgress = removeSkillChunkProgress(prev.skillChunkProgress, completedName);
+              const nextActiveChunkFiles = removeActiveChunkFilesForSkill(prev.activeChunkFiles, completedName);
+              return {
+                ...prev,
+                results: newResults,
+                riskMap: newRiskMap,
+                activeSkills: newActive,
+                currentSkill: newActive[0] || null,
+                currentStage: newActive.length > 0 ? prev.currentStage : null,
+                currentFile: nextActiveChunkFiles[0]?.fileName ?? null,
+                syncPulseKey: prev.syncPulseKey + 1,
+                scanAngle: newActive.length > 0 ? prev.scanAngle : 0,
+                scanStartedAt: prev.scanStartedAt,
+                recentFiles: pushRecentFile(
+                  prev.recentFiles,
+                  prev.currentFile,
+                  prev.currentSkill,
+                  prev.currentStage,
+                  getFileRiskFromResult(payload.result, prev.currentFile),
+                  getFileReasonLabels(payload.result, prev.currentFile),
+                ),
+                scanned: payload.scanned ?? prev.scanned,
+                total: payload.total ?? prev.total,
+                skillFileProgress: nextSkillFileProgress,
+                skillChunkProgress: nextSkillChunkProgress,
+                activeChunkFiles: nextActiveChunkFiles,
+                activeChunkWorkers: payload.activeChunkWorkers ?? prev.activeChunkWorkers,
+                maxChunkWorkers: payload.maxChunkWorkers ?? prev.maxChunkWorkers,
+              };
+            });
+            break;
+
+          case "chunk-error":
+            setState((prev) => ({
+              ...prev,
+              errors: [
+                ...prev.errors,
+                { skillName: payload.skillName || "unknown", message: payload.message || "Chunk analysis failed" },
+              ].slice(-50),
+              activeChunkWorkers: payload.activeChunkWorkers ?? prev.activeChunkWorkers,
+              maxChunkWorkers: payload.maxChunkWorkers ?? prev.maxChunkWorkers,
+            }));
+            break;
+
+          case "error":
+            setState((prev) => {
+              const newActive = payload.skillName
+                ? prev.activeSkills.filter((skill) => skill !== payload.skillName)
+                : prev.activeSkills;
+              const nextActiveChunkFiles = removeActiveChunkFilesForSkill(prev.activeChunkFiles, payload.skillName);
+              return {
+                ...prev,
+                activeSkills: newActive,
+                currentSkill: newActive[0] ?? null,
+                currentFile: nextActiveChunkFiles[0]?.fileName ?? prev.currentFile,
+                errors: [
+                  ...prev.errors,
+                  { skillName: payload.skillName || "unknown", message: payload.message || "Unknown error" },
+                ].slice(-50),
+                scanned: payload.scanned ?? prev.scanned,
+                total: payload.total ?? prev.total,
+                skillFileProgress: removeSkillFileProgress(prev.skillFileProgress, payload.skillName),
+                skillChunkProgress: removeSkillChunkProgress(prev.skillChunkProgress, payload.skillName),
+                activeChunkFiles: nextActiveChunkFiles,
+                activeChunkWorkers: payload.activeChunkWorkers ?? prev.activeChunkWorkers,
+                maxChunkWorkers: payload.maxChunkWorkers ?? prev.maxChunkWorkers,
+              };
+            });
+            break;
+
+          case "done":
+            setState((prev) => ({
+              ...prev,
+              phase: "done",
+              activeSkills: [],
+              currentSkill: null,
+              currentStage: null,
+              currentFile: null,
+              syncPulseKey: prev.syncPulseKey + 1,
+              scanAngle: 0,
+              scanStartedAt: null,
+              recentFiles: pushRecentFile(prev.recentFiles, prev.currentFile, prev.currentSkill, prev.currentStage),
+              scanned: payload.scanned ?? prev.scanned,
+              total: payload.total ?? prev.total,
+              skillFileProgress: {},
+              skillChunkProgress: {},
+              activeChunkFiles: [],
+              activeChunkWorkers: 0,
+              maxChunkWorkers: prev.maxChunkWorkers,
+            }));
+            break;
         }
-      );
+      });
 
       // Fire the command — primary state updates come via events above.
       // The invoke return is only used as a safety net if the "done" event
@@ -742,14 +698,9 @@ export function SecurityScanProvider({ children }: { children: ReactNode }) {
           force,
           mode,
         });
-        const existingCached = queryClient.getQueryData<SecurityScanResult[]>(
-          SECURITY_SCAN_RESULTS_QUERY_KEY
-        ) ?? [];
+        const existingCached = queryClient.getQueryData<SecurityScanResult[]>(SECURITY_SCAN_RESULTS_QUERY_KEY) ?? [];
         const mergedResults = targetSet
-          ? [
-              ...existingCached.filter((result) => !targetSet.has(result.skill_name)),
-              ...exactResults,
-            ]
+          ? [...existingCached.filter((result) => !targetSet.has(result.skill_name)), ...exactResults]
           : exactResults;
         queryClient.setQueryData(SECURITY_SCAN_RESULTS_QUERY_KEY, mergedResults);
 
@@ -800,7 +751,7 @@ export function SecurityScanProvider({ children }: { children: ReactNode }) {
         });
       }
     },
-    [queryClient]
+    [queryClient],
   );
 
   const resetScan = useCallback(() => {
@@ -895,10 +846,7 @@ export function SecurityScanProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (state.phase !== "done") return;
-    queryClient.setQueryData<SecurityScanResult[]>(
-      SECURITY_SCAN_RESULTS_QUERY_KEY,
-      state.results
-    );
+    queryClient.setQueryData<SecurityScanResult[]>(SECURITY_SCAN_RESULTS_QUERY_KEY, state.results);
   }, [queryClient, state.phase, state.results]);
 
   const value: SecurityScanContextValue = {
@@ -907,7 +855,7 @@ export function SecurityScanProvider({ children }: { children: ReactNode }) {
       state.scanned,
       state.total,
       state.skillFileProgress,
-      state.skillChunkProgress
+      state.skillChunkProgress,
     ),
     startScan,
     resetScan,

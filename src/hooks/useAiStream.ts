@@ -1,8 +1,8 @@
-import { useState, useRef, useCallback, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getAiConfigCached } from "./useAiConfig";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { AiStreamPayload } from "../types";
+import { getAiConfigCached } from "./useAiConfig";
 
 /**
  * Shared hook for AI streaming operations (translate / summarize).
@@ -114,10 +114,7 @@ export function useAiStream({
   }, []);
 
   const execute = useCallback(
-    async (
-      sourceContent: string,
-      options: ExecuteAiStreamOptions = {}
-    ): Promise<string | null> => {
+    async (sourceContent: string, options: ExecuteAiStreamOptions = {}): Promise<string | null> => {
       if (requiresAiConfig && !aiConfigured) return null;
       const forceRefresh = options.forceRefresh ?? false;
       const keepVisibleWhileLoading = options.keepVisibleWhileLoading ?? false;
@@ -184,7 +181,7 @@ export function useAiStream({
           if (activeIdRef.current !== requestId) return;
           setState((prev) => ({
             ...prev,
-            content: streamedRaw,
+            content: streamedRaw || null,
             visible: true,
             hasDelta: deltaCount >= 2,
           }));
@@ -196,6 +193,14 @@ export function useAiStream({
           if (payload.requestId !== requestId) return;
 
           if (payload.event === "delta" && payload.delta) {
+            if (payload.delta === "\0CLEAR\0") {
+              streamedRaw = "";
+              deltaCount = 0;
+              if (rafId == null) {
+                rafId = requestAnimationFrame(flushDelta);
+              }
+              return;
+            }
             deltaCount += 1;
             streamedRaw += payload.delta;
             if (rafId == null) {
@@ -292,7 +297,7 @@ export function useAiStream({
         }
       }
     },
-    [aiConfigured, requiresAiConfig, cancel, dismiss, command, eventChannel, normalizeResult, parseInvokeResult]
+    [aiConfigured, requiresAiConfig, cancel, dismiss, command, eventChannel, normalizeResult, parseInvokeResult],
   );
 
   // Cleanup on unmount
@@ -315,8 +320,7 @@ export function useAiStream({
     execute,
     cancel,
     dismiss,
-    hydrate: (c: string | null, source: string | null) =>
-      setState((prev) => ({ ...prev, content: c, source })),
+    hydrate: (c: string | null, source: string | null) => setState((prev) => ({ ...prev, content: c, source })),
     setVisible: (v: boolean) => setState((prev) => ({ ...prev, visible: v })),
     setContent: (c: string | null) => setState((prev) => ({ ...prev, content: c })),
     setError: (e: string | null) => setState((prev) => ({ ...prev, error: e })),

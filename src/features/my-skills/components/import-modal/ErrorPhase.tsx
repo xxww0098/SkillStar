@@ -1,5 +1,5 @@
-import { useTranslation } from "react-i18next";
 import { AlertTriangle, RotateCcw } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../../components/ui/button";
 
 export interface ErrorPhaseProps {
@@ -7,10 +7,7 @@ export interface ErrorPhaseProps {
   onRetry: () => void;
 }
 
-export function ErrorPhase({
-  message,
-  onRetry,
-}: ErrorPhaseProps) {
+export function ErrorPhase({ message, onRetry }: ErrorPhaseProps) {
   const { t } = useTranslation();
 
   return (

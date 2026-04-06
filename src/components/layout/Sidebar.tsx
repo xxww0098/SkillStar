@@ -1,33 +1,35 @@
-import { useMemo, useState } from "react";
-import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
-  Globe,
-  Settings,
-  Package,
-  Layers,
-  FolderKanban,
-  ArrowUpCircle,
-  RefreshCw,
-  CheckCircle2,
   AlertCircle,
-  X,
-  ShieldCheck,
-  Radar,
-  Orbit,
-  FileText,
+  ArrowUpCircle,
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Cpu,
   Download,
+  FileText,
+  FolderKanban,
+  Globe,
+  Layers,
+  Orbit,
+  Package,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Radar,
+  RefreshCw,
   RotateCcw,
+  Settings,
+  ShieldCheck,
+  X,
 } from "lucide-react";
-import { cn } from "../../lib/utils";
-import { getFileTheme, getRiskTone } from "../../lib/securityScanTheme";
-import type { NavPage } from "../../types";
-import type { UpdateStatus } from "../../hooks/useUpdater";
+import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useSecurityScan } from "../../features/security/hooks/useSecurityScan";
+import type { UpdateStatus } from "../../hooks/useUpdater";
+import { getFileTheme, getRiskTone } from "../../lib/securityScanTheme";
+import { cn } from "../../lib/utils";
+import type { NavPage } from "../../types";
 
 interface SidebarProps {
   activePage: NavPage;
@@ -44,6 +46,10 @@ interface SidebarProps {
   onSkip?: () => void;
   onDismiss?: () => void;
   onRetry?: () => void;
+  /** Count of new uninstalled skills detected in cached repos */
+  ghostSkillCount?: number;
+  /** Count of installed skills that have available updates */
+  pendingUpdatesCount?: number;
 }
 
 /* ---------- Inline Update Banner (sidebar bottom) ---------- */
@@ -101,7 +107,15 @@ function UpdateBanner({
           animate={{ scale: 1, opacity: 1 }}
           transition={{ type: "spring", stiffness: 400, damping: 25 }}
           onClick={status === "ready" ? onRestart : status === "error" ? onRetry : onUpdate}
-          title={status === "available" ? `${t("sidebar.newUpdate")} v${version}` : status === "downloading" ? `${t("sidebar.downloading")} ${progress}%` : status === "ready" ? t("sidebar.readyToInstall") : t("sidebar.updateError")}
+          title={
+            status === "available"
+              ? `${t("sidebar.newUpdate")} v${version}`
+              : status === "downloading"
+                ? `${t("sidebar.downloading")} ${progress}%`
+                : status === "ready"
+                  ? t("sidebar.readyToInstall")
+                  : t("sidebar.updateError")
+          }
           className={cn(
             "w-full flex items-center justify-center py-2.5 rounded-lg cursor-pointer transition-all duration-200",
             "hover:scale-105 active:scale-95",
@@ -109,14 +123,29 @@ function UpdateBanner({
           )}
         >
           <div className={cn("w-7 h-7 rounded-full flex items-center justify-center", `${badgeBg}/15`)}>
-            <Icon className={cn("w-4 h-4", badgeBg.replace("bg-", "text-"), status === "downloading" && "animate-pulse")} />
+            <Icon
+              className={cn("w-4 h-4", badgeBg.replace("bg-", "text-"), status === "downloading" && "animate-pulse")}
+            />
           </div>
           {/* Downloading ring progress */}
           {status === "downloading" && (
             <svg className="absolute inset-0 w-full h-full" viewBox="0 0 40 40" style={{ transform: "rotate(-90deg)" }}>
-              <circle cx="20" cy="20" r="16" fill="none" stroke="currentColor" strokeWidth="2" className="text-border" />
+              <circle
+                cx="20"
+                cy="20"
+                r="16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                className="text-border"
+              />
               <motion.circle
-                cx="20" cy="20" r="16" fill="none" stroke="currentColor" strokeWidth="2.5"
+                cx="20"
+                cy="20"
+                r="16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
                 className="text-amber-500"
                 strokeLinecap="round"
                 strokeDasharray={100.5}
@@ -186,7 +215,10 @@ function UpdateBanner({
             <div className="h-1.5 bg-muted/60 rounded-full overflow-hidden">
               <motion.div
                 className="h-full rounded-full relative"
-                style={{ background: "linear-gradient(90deg, var(--color-primary) 0%, color-mix(in oklch, var(--color-primary), white 20%) 100%)" }}
+                style={{
+                  background:
+                    "linear-gradient(90deg, var(--color-primary) 0%, color-mix(in oklch, var(--color-primary), white 20%) 100%)",
+                }}
                 initial={{ width: 0 }}
                 animate={{ width: `${progress}%` }}
                 transition={{ duration: 0.4, ease: "easeOut" }}
@@ -198,9 +230,7 @@ function UpdateBanner({
                 />
               </motion.div>
             </div>
-            {version && (
-              <div className="text-[10px] text-muted-foreground mt-1.5">v{version}</div>
-            )}
+            {version && <div className="text-[10px] text-muted-foreground mt-1.5">v{version}</div>}
           </div>
         )}
 
@@ -291,6 +321,8 @@ export function Sidebar({
   onSkip,
   onDismiss,
   onRetry,
+  ghostSkillCount,
+  pendingUpdatesCount,
 }: SidebarProps) {
   const { t } = useTranslation();
   const { phase, activeSkills, currentFile, currentStage, scanAngle, recentFiles } = useSecurityScan();
@@ -320,25 +352,32 @@ export function Sidebar({
     }
   };
 
-  const navItems: { id: NavPage; label: string; icon: React.ElementType }[] = [
+  type NavItemNode =
+    | { type?: "item"; id: NavPage; label: string; icon: React.ElementType }
+    | { type: "divider"; id: string };
+
+  const navItems: NavItemNode[] = [
     { id: "my-skills", label: t("sidebar.skills"), icon: Package },
     { id: "marketplace", label: t("sidebar.market"), icon: Globe },
     { id: "skill-cards", label: t("sidebar.groups"), icon: Layers },
     { id: "projects", label: t("sidebar.projects"), icon: FolderKanban },
+    { type: "divider", id: "div-1" },
+    { id: "models", label: t("sidebar.models", "模型"), icon: Cpu },
     { id: "security-scan", label: t("sidebar.security", "Security"), icon: ShieldCheck },
+    { type: "divider", id: "div-2" },
     { id: "settings", label: t("sidebar.settings"), icon: Settings },
   ];
 
-    return (
+  return (
     <motion.aside
       initial={{ opacity: 0, x: -10 }}
-      animate={{ opacity: 1, x: 0, width: collapsed ? 56 : 220 }}
+      animate={{ opacity: 1, x: 0, width: collapsed ? 56 : 180 }}
       transition={{ duration: prefersReducedMotion ? 0.01 : 0.2 }}
       onAnimationStart={() => setIsAnimating(true)}
       onAnimationComplete={() => setIsAnimating(false)}
       className={cn(
         "h-full bg-sidebar backdrop-blur-md border-r border-border flex flex-col relative z-50 will-change-transform shrink-0",
-        (isAnimating || collapsed) ? "overflow-hidden" : ""
+        isAnimating || collapsed ? "overflow-hidden" : "",
       )}
     >
       {/* Logo */}
@@ -373,9 +412,9 @@ export function Sidebar({
               <motion.img
                 variants={{
                   idle: { rotate: 0 },
-                  hover: { 
-                    rotate: 360, 
-                    transition: { duration: 0.8, ease: [0.16, 1, 0.3, 1] } 
+                  hover: {
+                    rotate: 360,
+                    transition: { duration: 0.8, ease: [0.16, 1, 0.3, 1] },
                   },
                 }}
                 src="/skillstar-icon.svg"
@@ -402,7 +441,9 @@ export function Sidebar({
             )}
           </div>
           {!collapsed && (
-            <span className="text-micro font-medium text-muted-foreground/60 tracking-widest uppercase">{t("sidebar.tagline")}</span>
+            <span className="text-micro font-medium text-muted-foreground/60 tracking-widest uppercase">
+              {t("sidebar.tagline")}
+            </span>
           )}
         </div>
       </div>
@@ -410,11 +451,17 @@ export function Sidebar({
       {/* Navigation */}
       <nav className={cn("flex-1 py-3", collapsed ? "px-1.5" : "px-3")}>
         {!collapsed && (
-          <div className="text-caption uppercase tracking-wider px-2 mb-2 font-medium">
-            {t("sidebar.navigation")}
-          </div>
+          <div className="text-caption uppercase tracking-wider px-2 mb-2 font-medium">{t("sidebar.navigation")}</div>
         )}
         {navItems.map((item) => {
+          if (item.type === "divider") {
+            return (
+              <div key={item.id} className={cn("py-1.5 transition-all duration-200", collapsed ? "px-2" : "px-4")}>
+                <div className="h-px bg-border/60" />
+              </div>
+            );
+          }
+
           const Icon = item.icon;
           const isActive = activePage === item.id;
           return (
@@ -433,7 +480,7 @@ export function Sidebar({
                 collapsed ? "justify-center px-0 py-2.5" : "gap-2.5 px-3 py-2",
                 isActive
                   ? "bg-sidebar-active text-primary font-medium shadow-[0_0_12px_rgba(var(--color-primary-rgb),0.15)]"
-                  : "text-muted-foreground hover:bg-sidebar-hover hover:text-foreground"
+                  : "text-muted-foreground hover:bg-sidebar-hover hover:text-foreground",
               )}
             >
               <div className="relative flex items-center justify-center">
@@ -461,6 +508,47 @@ export function Sidebar({
                 )}
               </div>
               {!collapsed && item.label}
+              {/* Badges on My Skills */}
+              {item.id === "my-skills" && !collapsed && (!!ghostSkillCount || !!pendingUpdatesCount) && (
+                <div className="ml-auto flex items-center gap-1.5">
+                  {!!pendingUpdatesCount && pendingUpdatesCount > 0 && (
+                    <motion.span
+                      initial={{ scale: 0 }}
+                      animate={{ scale: 1 }}
+                      className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-warning/15 text-warning text-[10px] font-bold tabular-nums"
+                    >
+                      {pendingUpdatesCount}
+                    </motion.span>
+                  )}
+                  {!!ghostSkillCount && ghostSkillCount > 0 && (
+                    <motion.span
+                      initial={{ scale: 0 }}
+                      animate={{ scale: 1 }}
+                      className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-primary/15 text-primary text-[10px] font-bold tabular-nums"
+                    >
+                      +{ghostSkillCount}
+                    </motion.span>
+                  )}
+                </div>
+              )}
+              {item.id === "my-skills" && collapsed && !!ghostSkillCount && ghostSkillCount > 0 && (
+                <motion.span
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-primary border-2 border-sidebar"
+                />
+              )}
+              {item.id === "my-skills" &&
+                collapsed &&
+                (!ghostSkillCount || ghostSkillCount === 0) &&
+                !!pendingUpdatesCount &&
+                pendingUpdatesCount > 0 && (
+                  <motion.span
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-warning border-2 border-sidebar"
+                  />
+                )}
               {item.id === "security-scan" && phase === "scanning" && !collapsed && (
                 <div className="ml-auto flex min-w-0 items-center gap-1.5">
                   <span className="max-w-[74px] truncate text-[9px] uppercase tracking-[0.18em] text-success/70">
@@ -479,7 +567,9 @@ export function Sidebar({
                     transition={{ duration: 0.16, ease: "easeOut" }}
                     className={cn(
                       "absolute z-[120] min-w-[220px] rounded-[14px] border border-success/15 bg-background/95 backdrop-blur-xl p-3 shadow-[0_10px_28px_rgba(0,0,0,0.35)]",
-                      collapsed ? "left-[calc(100%+8px)] top-1/2 -translate-y-1/2" : "left-[calc(100%-4px)] top-1/2 -translate-y-1/2"
+                      collapsed
+                        ? "left-[calc(100%+8px)] top-1/2 -translate-y-1/2"
+                        : "left-[calc(100%-4px)] top-1/2 -translate-y-1/2",
                     )}
                   >
                     <div className="flex items-center justify-between gap-3 mb-2">
@@ -518,12 +608,19 @@ export function Sidebar({
                           const riskTone = getRiskTone(item_.riskLevel);
 
                           return (
-                            <div key={`${item_.fileName}-${item_.timestamp}`} className={`flex items-start gap-2 rounded-lg border border-border/50 bg-muted/50 px-2 py-1.5 text-[10px] ${riskTone.glow}`}>
+                            <div
+                              key={`${item_.fileName}-${item_.timestamp}`}
+                              className={`flex items-start gap-2 rounded-lg border border-border/50 bg-muted/50 px-2 py-1.5 text-[10px] ${riskTone.glow}`}
+                            >
                               <span className={`mt-1.5 h-1.5 w-1.5 rounded-full shrink-0 ${riskTone.dot}`} />
                               <div className="min-w-0 flex-1">
                                 <div className="flex min-w-0 items-center gap-2">
-                                  <div className={`truncate ${fileTheme.tintText}`}>{item_.fileName.split("/").pop()}</div>
-                                  <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[8px] uppercase tracking-[0.16em] ${riskTone.text} ${riskTone.pill}`}>
+                                  <div className={`truncate ${fileTheme.tintText}`}>
+                                    {item_.fileName.split("/").pop()}
+                                  </div>
+                                  <span
+                                    className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[8px] uppercase tracking-[0.16em] ${riskTone.text} ${riskTone.pill}`}
+                                  >
                                     {item_.riskLevel ?? "Safe"}
                                   </span>
                                 </div>
@@ -586,10 +683,14 @@ export function Sidebar({
             title={collapsed ? t("sidebar.expand") : t("sidebar.collapse")}
             className={cn(
               "w-full flex items-center rounded-lg text-sm text-muted-foreground hover:bg-sidebar-hover hover:text-foreground transition duration-200 cursor-pointer focus-ring",
-              collapsed ? "justify-center px-0 py-2.5" : "gap-2.5 px-3 py-2"
+              collapsed ? "justify-center px-0 py-2.5" : "gap-2.5 px-3 py-2",
             )}
           >
-            {collapsed ? <PanelLeftOpen className="w-4 h-4 shrink-0" /> : <PanelLeftClose className="w-4 h-4 shrink-0" />}
+            {collapsed ? (
+              <PanelLeftOpen className="w-4 h-4 shrink-0" />
+            ) : (
+              <PanelLeftClose className="w-4 h-4 shrink-0" />
+            )}
             {!collapsed && t("sidebar.collapse")}
           </button>
         </div>

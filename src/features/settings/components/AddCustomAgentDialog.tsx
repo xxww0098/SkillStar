@@ -1,12 +1,12 @@
-import { useState, useRef, useEffect } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { X, Image as ImageIcon, Sparkles, FolderKanban, Trash2 } from "lucide-react";
+import { FolderKanban, Image as ImageIcon, Sparkles, Trash2, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { MOTION_TRANSITION, motionDuration } from "../../../comm/motion";
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
-import { MOTION_TRANSITION, motionDuration } from "../../../comm/motion";
-import type { CustomProfileDef } from "../../../types";
 import { toast } from "../../../lib/toast";
+import type { CustomProfileDef } from "../../../types";
 
 interface AddCustomAgentDialogProps {
   open: boolean;
@@ -48,10 +48,17 @@ export function AddCustomAgentDialog({ open, onClose, onConfirm, initialData, on
     if (!file) return;
 
     const name = file.name.toLowerCase();
-    const validExt = name.endsWith(".svg") || name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".webp");
+    const validExt =
+      name.endsWith(".svg") ||
+      name.endsWith(".png") ||
+      name.endsWith(".jpg") ||
+      name.endsWith(".jpeg") ||
+      name.endsWith(".webp");
     const validMime = file.type.startsWith("image/");
     if (!validExt && !validMime) {
-      toast.error(t("settings.invalidIconFormat", { defaultValue: "Please upload a valid image file (SVG, PNG, JPG, WEBP)." }));
+      toast.error(
+        t("settings.invalidIconFormat", { defaultValue: "Please upload a valid image file (SVG, PNG, JPG, WEBP)." }),
+      );
       return;
     }
 
@@ -81,7 +88,11 @@ export function AddCustomAgentDialog({ open, onClose, onConfirm, initialData, on
     const parsedProject = projectPath.trim();
     if (parsedProject) {
       if (!/^\.[a-zA-Z0-9_-]+\/skills$/.test(parsedProject)) {
-        toast.error(t("settings.invalidProjectPathPattern", { defaultValue: "Project skill path must strictly follow the format '.agent/skills'" }));
+        toast.error(
+          t("settings.invalidProjectPathPattern", {
+            defaultValue: "Project skill path must strictly follow the format '.agent/skills'",
+          }),
+        );
         return;
       }
     }
@@ -128,8 +139,8 @@ export function AddCustomAgentDialog({ open, onClose, onConfirm, initialData, on
                     <Sparkles className="h-4 w-4" />
                   </div>
                   <h2 className="text-base font-semibold tracking-tight">
-                    {initialData 
-                      ? t("common.edit", { defaultValue: "Edit" }) 
+                    {initialData
+                      ? t("common.edit", { defaultValue: "Edit" })
                       : t("settings.addCustomAgent", { defaultValue: "Add Custom Agent" })}
                   </h2>
                 </div>
@@ -143,7 +154,7 @@ export function AddCustomAgentDialog({ open, onClose, onConfirm, initialData, on
 
               <div className="p-6 space-y-4">
                 <div className="space-y-1.5 flex flex-col items-center">
-                  <div 
+                  <div
                     className="h-16 w-16 mb-2 rounded-[14px] border border-border bg-card shadow-sm flex items-center justify-center overflow-hidden cursor-pointer hover:border-primary/50 transition relative group"
                     onClick={() => fileInputRef.current?.click()}
                   >
@@ -156,7 +167,13 @@ export function AddCustomAgentDialog({ open, onClose, onConfirm, initialData, on
                       <span className="text-[10px] font-medium text-white shadow-sm">+ Icon</span>
                     </div>
                   </div>
-                  <input ref={fileInputRef} type="file" accept=".svg,.png,.jpg,.jpeg,.webp,image/*" className="hidden" onChange={handleFileChange} />
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".svg,.png,.jpg,.jpeg,.webp,image/*"
+                    className="hidden"
+                    onChange={handleFileChange}
+                  />
                   <div className="flex flex-col items-center gap-0.5 mt-1">
                     <p className="text-xs text-muted-foreground text-center">
                       {t("settings.uploadIcon", { defaultValue: "Upload Icon" })}
@@ -174,7 +191,8 @@ export function AddCustomAgentDialog({ open, onClose, onConfirm, initialData, on
 
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-foreground ml-1">
-                    {t("settings.agentDisplayName", { defaultValue: "Display Name" })} <span className="text-destructive">*</span>
+                    {t("settings.agentDisplayName", { defaultValue: "Display Name" })}{" "}
+                    <span className="text-destructive">*</span>
                   </label>
                   <Input
                     placeholder="e.g. My AI Assistant"
@@ -187,7 +205,8 @@ export function AddCustomAgentDialog({ open, onClose, onConfirm, initialData, on
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-foreground ml-1 flex items-center gap-1.5">
                     <FolderKanban className="w-3.5 h-3.5 text-muted-foreground" />
-                    {t("settings.globalSkillsDir", { defaultValue: "Global Skills Path" })} <span className="text-destructive">*</span>
+                    {t("settings.globalSkillsDir", { defaultValue: "Global Skills Path" })}{" "}
+                    <span className="text-destructive">*</span>
                   </label>
                   <Input
                     placeholder="e.g. ~/.myagent/skills"
@@ -199,7 +218,7 @@ export function AddCustomAgentDialog({ open, onClose, onConfirm, initialData, on
 
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-foreground ml-1 flex items-center gap-1.5">
-                    {t("settings.projectSkillsRel", { defaultValue: "Project Skills Relative Path" })} 
+                    {t("settings.projectSkillsRel", { defaultValue: "Project Skills Relative Path" })}
                   </label>
                   <Input
                     placeholder="e.g. .myagent/skills"
@@ -213,13 +232,13 @@ export function AddCustomAgentDialog({ open, onClose, onConfirm, initialData, on
               <div className="flex items-center justify-between border-t border-border/40 bg-muted/20 px-6 py-4">
                 <div className="flex items-center">
                   {initialData && onRemove && (
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       onClick={() => {
                         onRemove();
                         onClose();
-                      }} 
+                      }}
                       className="rounded-lg text-destructive hover:bg-destructive/10 hover:text-destructive px-2"
                       title={t("settings.removeCustomAgent", { defaultValue: "Remove custom agent" })}
                     >
@@ -232,9 +251,9 @@ export function AddCustomAgentDialog({ open, onClose, onConfirm, initialData, on
                   <Button variant="ghost" size="sm" onClick={onClose} className="rounded-lg">
                     {t("common.cancel")}
                   </Button>
-                  <Button 
-                    size="sm" 
-                    onClick={handleConfirm} 
+                  <Button
+                    size="sm"
+                    onClick={handleConfirm}
                     disabled={!displayName.trim() || !globalPath.trim()}
                     className="rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground"
                   >

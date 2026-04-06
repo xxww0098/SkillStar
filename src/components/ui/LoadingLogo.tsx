@@ -34,18 +34,12 @@ export function LoadingLogo({ size = "md", label, className }: LoadingLogoProps)
         initial={{ opacity: 0, scale: 0.8 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-        className={cn(
-          "rounded-xl overflow-hidden bg-white shadow-sm shrink-0",
-          sizeMap[size]
-        )}
+        className={cn("rounded-xl overflow-hidden bg-white shadow-sm shrink-0", sizeMap[size])}
       >
         <img
           src="/skillstar-icon.svg"
           alt=""
-          className={cn(
-            "w-full h-full origin-center",
-            !prefersReducedMotion && "animate-logo-spin"
-          )}
+          className={cn("w-full h-full origin-center", !prefersReducedMotion && "animate-logo-spin")}
         />
       </motion.div>
       {label && (

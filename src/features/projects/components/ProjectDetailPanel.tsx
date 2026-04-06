@@ -1,14 +1,14 @@
-import { useMemo } from "react";
 import { motion } from "framer-motion";
-import { useTranslation } from "react-i18next";
 import { AlertTriangle, FolderKanban, FolderSync } from "lucide-react";
-import { Button } from "../../../components/ui/button";
+import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { MOTION_TRANSITION } from "../../../comm/motion";
-import type { AgentProfile, ImportDone, ProjectEntry, ScannedSkill, Skill } from "../../../types";
+import { Button } from "../../../components/ui/button";
 import { formatPlatformPath } from "../../../lib/utils";
-import { ScanImportBanner } from "./ScanImportBanner";
+import type { AgentProfile, ImportDone, ProjectEntry, ScannedSkill, Skill } from "../../../types";
 import { AgentAccordion } from "./AgentAccordion";
 import { ApplyFooter } from "./ApplyFooter";
+import { ScanImportBanner } from "./ScanImportBanner";
 
 interface ProjectDetailPanelProps {
   selectedProject: ProjectEntry | null;
@@ -150,9 +150,7 @@ export function ProjectDetailPanel({
               </div>
               <div className="min-w-0 space-y-2">
                 <div className="text-sm font-medium text-foreground">{t("projects.projectNoticeTitle")}</div>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  {t("projects.projectNoticeShared")}
-                </p>
+                <p className="text-xs leading-relaxed text-muted-foreground">{t("projects.projectNoticeShared")}</p>
                 <div className="space-y-1">
                   {sharedProjectPaths.map((group) => (
                     <div key={group.path} className="text-micro text-muted-foreground">

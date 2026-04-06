@@ -129,10 +129,8 @@ pub fn run() {
                         tokio::time::sleep(std::time::Duration::from_millis(150)).await;
                         if let Ok(size) = win.inner_size() {
                             // Force a 1px resize then restore — triggers WM_SIZE
-                            let adjusted = tauri::PhysicalSize::new(
-                                size.width.saturating_sub(1),
-                                size.height,
-                            );
+                            let adjusted =
+                                tauri::PhysicalSize::new(size.width.saturating_sub(1), size.height);
                             let _ = win.set_size(tauri::Size::Physical(adjusted));
                             tokio::time::sleep(std::time::Duration::from_millis(16)).await;
                             let _ = win.set_size(tauri::Size::Physical(size));
@@ -283,6 +281,10 @@ pub fn run() {
             commands::github::list_installed_packs,
             commands::github::remove_installed_pack,
             commands::github::get_pack_doctor,
+            commands::github::check_new_repo_skills,
+            commands::github::dismiss_new_skill,
+            commands::github::get_dismissed_new_skills,
+            commands::github::dismiss_new_skills_batch,
             commands::export_skill_bundle,
             commands::preview_skill_bundle,
             commands::import_skill_bundle,
@@ -303,6 +305,45 @@ pub fn run() {
             commands::updater::check_app_update,
             commands::updater::download_and_install_update,
             commands::updater::restart_after_update,
+            commands::models::get_model_config_status,
+            commands::models::get_claude_model_config,
+            commands::models::save_claude_model_config,
+            commands::models::get_codex_model_config,
+            commands::models::save_codex_model_config,
+            commands::models::get_codex_auth,
+            commands::models::save_codex_auth,
+            commands::models::get_codex_auth_status,
+            commands::models::codex_oauth_start,
+            commands::models::codex_oauth_complete,
+            commands::models::codex_oauth_cancel,
+            commands::models::codex_oauth_submit_callback,
+            commands::models::list_codex_accounts,
+            commands::models::get_current_codex_account_id,
+            commands::models::switch_codex_account,
+            commands::models::delete_codex_account,
+            commands::models::refresh_codex_quota,
+            commands::models::refresh_all_codex_quotas,
+            commands::models::add_codex_api_key_account,
+            commands::models::get_opencode_model_config,
+            commands::models::save_opencode_model_config,
+            commands::models::set_claude_setting,
+            commands::models::set_codex_setting,
+            commands::models::set_opencode_setting,
+            commands::models::test_model_endpoints,
+            commands::models::get_opencode_cli_models,
+            commands::models::get_opencode_auth_providers,
+            commands::models::add_opencode_auth_provider,
+            commands::models::remove_opencode_auth_provider,
+            commands::models::get_model_providers,
+            commands::models::switch_model_provider,
+            commands::models::add_model_provider,
+            commands::models::update_model_provider,
+            commands::models::delete_model_provider,
+            commands::models::reorder_model_providers,
+            commands::models::fetch_endpoint_models,
+            commands::models::read_model_config_text,
+            commands::models::write_model_config_text,
+            commands::models::format_model_config_text,
             update_tray_language,
         ])
         .build(tauri::generate_context!())
@@ -351,15 +392,109 @@ fn build_tray_menu(
     lang: &str,
     patrol_enabled: bool,
 ) -> Result<tauri::menu::Menu<tauri::Wry>, Box<dyn std::error::Error>> {
-    use tauri::menu::{MenuBuilder, MenuItem};
+    use tauri::menu::{CheckMenuItem, MenuBuilder, MenuItem, SubmenuBuilder};
 
     let (show_label, toggle_label, quit_label) = tray_labels(lang, patrol_enabled);
+    let empty_label = if lang.starts_with("zh") {
+        "空"
+    } else {
+        "Empty"
+    };
 
     let show_i = MenuItem::with_id(app, "show", show_label, true, None::<&str>)?;
     let toggle_i = MenuItem::with_id(app, "toggle_patrol", toggle_label, true, None::<&str>)?;
     let quit_i = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
 
-    let menu = MenuBuilder::new(app)
+    let store = core::model_config::providers::read_store().unwrap_or_default();
+
+    let mut menu_builder = MenuBuilder::new(app);
+
+    for (app_id, display_name, app_providers) in [
+        ("codex", "Codex", &store.codex),
+        ("claude", "Claude", &store.claude),
+    ] {
+        let mut sub_builder = SubmenuBuilder::new(app, display_name);
+
+        let mut sorted_providers: Vec<_> = app_providers.providers.values().collect();
+        sorted_providers.sort_by_key(|p| p.sort_index.unwrap_or(u32::MAX));
+
+        let mut has_items = false;
+
+        if !sorted_providers.is_empty() {
+            has_items = true;
+            for provider in sorted_providers {
+                let is_checked = app_providers.current.as_deref() == Some(provider.id.as_str());
+                let id = format!("provider_{}_{}", app_id, provider.id);
+                let check_item = CheckMenuItem::with_id(
+                    app,
+                    &id,
+                    &provider.name,
+                    true,
+                    is_checked,
+                    None::<&str>,
+                )?;
+                let _ = check_item.set_checked(is_checked);
+                sub_builder = sub_builder.item(&check_item);
+            }
+        }
+
+        if app_id == "codex" {
+            let accounts = core::model_config::codex_accounts::list_accounts()
+                .into_iter()
+                .filter(|a| a.auth_mode == "oauth" || a.auth_mode == "apikey")
+                .collect::<Vec<_>>();
+
+            if !accounts.is_empty() {
+                if has_items {
+                    sub_builder = sub_builder.separator();
+                }
+                has_items = true;
+                let current_account_id =
+                    core::model_config::codex_accounts::get_current_account_id();
+                for account in accounts {
+                    let is_checked = current_account_id.as_deref() == Some(account.id.as_str());
+                    let display_text = if account.email.contains('@') {
+                        account
+                            .email
+                            .split('@')
+                            .next()
+                            .unwrap_or(&account.email)
+                            .to_string()
+                    } else {
+                        account.email.clone()
+                    };
+
+                    let id = format!("account_{}_{}", app_id, account.id);
+                    let check_item = CheckMenuItem::with_id(
+                        app,
+                        &id,
+                        &display_text,
+                        true,
+                        is_checked,
+                        None::<&str>,
+                    )?;
+                    let _ = check_item.set_checked(is_checked);
+                    sub_builder = sub_builder.item(&check_item);
+                }
+            }
+        }
+
+        if !has_items {
+            let empty_item = MenuItem::with_id(
+                app,
+                format!("empty_{}", app_id),
+                empty_label,
+                false,
+                None::<&str>,
+            )?;
+            sub_builder = sub_builder.item(&empty_item);
+        }
+        let submenu = sub_builder.build()?;
+        menu_builder = menu_builder.item(&submenu);
+    }
+
+    let menu = menu_builder
+        .separator()
         .item(&show_i)
         .separator()
         .item(&toggle_i)
@@ -428,6 +563,56 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 let exit_control = app.state::<ExitControl>();
                 exit_control.allow_next_exit();
                 app.exit(0);
+            }
+            id if id.starts_with("provider_") => {
+                let parts: Vec<&str> = id.splitn(3, '_').collect();
+                if parts.len() == 3 {
+                    let app_id = parts[1];
+                    let provider_id = parts[2];
+                    if let Err(e) =
+                        core::model_config::providers::switch_provider(app_id, provider_id)
+                    {
+                        tracing::error!("Failed to switch provider from tray: {}", e);
+                    } else {
+                        let _ = app.emit(
+                            "model-config://switched",
+                            serde_json::json!({
+                                "appId": app_id,
+                                "providerId": provider_id
+                            }),
+                        );
+                        if let Err(e) = refresh_tray_menu(app) {
+                            tracing::error!("Failed to refresh tray menu: {}", e);
+                        }
+                    }
+                }
+            }
+            id if id.starts_with("account_") => {
+                let parts: Vec<&str> = id.splitn(3, '_').collect();
+                if parts.len() == 3 {
+                    let account_id = parts[2].to_string();
+                    let app_handle = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        match crate::commands::models::switch_codex_account(
+                            app_handle.clone(),
+                            account_id.clone(),
+                        )
+                        .await
+                        {
+                            Ok(_) => {
+                                let _ = app_handle.emit(
+                                    "codex-account://switched",
+                                    serde_json::json!({
+                                        "accountId": account_id
+                                    }),
+                                );
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to switch codex account from tray: {}", e);
+                            }
+                        }
+                    });
+                }
             }
             _ => {}
         })

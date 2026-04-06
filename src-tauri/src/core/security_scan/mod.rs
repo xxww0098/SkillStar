@@ -775,8 +775,12 @@ fn static_theme(pattern_id: &str) -> &'static str {
         | "sensitive_env"
         | "sensitive_etc_passwd"
         | "sensitive_gnupg" => "secret_access",
-        "reverse_shell" | "bash_reverse" | "modify_shell_rc" | "cron_persistence"
-        | "schtasks_persistence" | "registry_persistence" => "persistence",
+        "reverse_shell"
+        | "bash_reverse"
+        | "modify_shell_rc"
+        | "cron_persistence"
+        | "schtasks_persistence"
+        | "registry_persistence" => "persistence",
         "unicode_bidi" | "long_base64" | "powershell_encoded" => "obfuscation",
         "npm_global_install" | "pip_install" => "dependency",
         _ => "general",

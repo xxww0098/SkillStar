@@ -5,6 +5,48 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-06
+
+### Added
+- **Models page** — dedicated top-level page for unified model provider management across Claude Code, Codex, and OpenCode; capsule switcher selects the active app context.
+- **Provider management system** (`core/model_config/providers.rs`) — named provider entries with per-app `current` selection, persistent storage in `~/.skillstar/config/model_providers.json`, and live config file writes on switch.
+- **Preset catalog** — curated provider presets for Claude (Anthropic, OpenRouter, SiliconCloud, Bailian, etc.), Codex (OpenAI, Azure), and OpenCode (DeepSeek, Doubao, Kimi, MiniMax, Zhipu, Moonshot, etc.) with one-click add.
+- **Provider cards** — rich expandable cards showing provider name, category, endpoint, active indicator, and inline settings editing; collapsible model/key/endpoint fields per provider.
+- **Drag-to-reorder providers** (`useDragReorder` hook) — classList-driven drag indicator CSS (zero React re-renders during drag), with persistent `sort_index` saved to backend on drop.
+- **Config file editor** — raw JSON/TOML editor modal for `settings.json`, `config.toml`, and `opencode.json` with syntax validation and format-on-save.
+- **Endpoint speed test** (`core/model_config/speedtest.rs`) — concurrent HTTP HEAD latency measurement for provider endpoints with fallback to GET on 405; UI shows latency badges per provider.
+- **Codex OAuth PKCE flow** (`core/model_config/codex_oauth.rs`) — browser-based OpenAI login using the same public OAuth client as Codex CLI (`app_EMoamEEZ73f0CkXaXp7hrann`); local HTTP callback server on port 1455 with PKCE challenge, token exchange, and 5-minute timeout.
+- **Codex multi-account management** (`core/model_config/codex_accounts.rs`) — add/switch/delete accounts (OAuth or API key), per-account token storage in `~/.skillstar/config/codex_accounts/`, quota fetch from `chatgpt.com/backend-api/wham/usage`, and quota bar UI component.
+- **Codex behavior strip** — advanced Codex settings UI for `approval_policy`, `sandbox_permissions`, network access, `notify_on_completion`, `shell_environment_policy`, history, and telemetry toggles with InfoTip hover documentation.
+- **OpenCode native provider discovery** — reads `auth.json` + env-var detection (via `opencode providers list` CLI) + custom providers from `opencode.json`; supports add/remove/ignore operations.
+- **Ghost skill cards** — new-skill discovery for cached repos; `detect_new_skills_in_cached_repos()` surfaces uninstalled skills as dismissible ghost cards with install action in My Skills; persistent dismissal state in `~/.skillstar/state/dismissed_new_skills.json`.
+- **Sidebar notification badges** — My Skills sidebar item shows pending update count (amber) and new ghost skill count (green) badges; badge visibility adapts to collapsed/expanded sidebar state.
+- **Tray menu provider switching** — system tray now shows per-app provider submenus (Codex / Claude / OpenCode) with checkmark on active provider; clicking switches provider and emits `model-config://switched` event to sync UI.
+- **Provider icon system** — SVG icons for 9 providers (Bailian, DeepSeek, Doubao, Kimi, MiniMax, OpenRouter, SiliconCloud, XiaomiMiMo, Zhipu) in `public/providers/`.
+- **Shared UI primitives for Models** — `ApiKeyInput`, `EndpointInput`, `ModelInput`, `ProviderIcon` reusable components under `features/models/components/shared/`.
+- **Configuration InfoTips convention** — `AGENTS-UI.md` rule requiring `[?]` hover tips on model config fields with newline-separated option descriptions and auto-highlighted option names.
+- **Translation quality validation** (`translation_looks_translated`) — post-translation check verifying that CJK-targeted translations actually contain target-script characters; untranslated results are rejected and retried via alternate provider. Unit tests for script detection edge cases.
+- **Translation cache cleanup** — `cleanup_untranslated_entries()` purges cached short translations for CJK languages that contain no CJK/kana/hangul characters.
+- **Custom agent path validation** — `add_custom_agent` now enforces strict `.agentname/skills` format with alphanumeric/hyphen/underscore agent name.
+
+### Changed
+- **`reqwest`** — added `form` feature flag for OAuth token exchange `application/x-www-form-urlencoded` requests.
+- **New Rust dependencies** — `toml_edit` 0.25 (TOML config mutation), `rand` 0.10 (PKCE verifier generation), `urlencoding` 2.1 (OAuth URL encoding), `tiny_http` 0.12 (OAuth callback server), `lazy_static` 1.5 (global OAuth state).
+- **AI provider translation** — system prompt now built dynamically via `build_translation_system_prompt()` with explicit target language enforcement.
+- **Skill update state resilience** — `prefetch_unique_repos` now returns a set of failed repo roots; `refresh_single_skill_update` returns `Option<bool>` (`None` for failed-fetch repos); `refresh_skill_updates` and patrol preserve previous cached state for `None` results instead of writing false.
+- **Update state cleared on success** — `update_skill` now calls `clear_update_state` for the updated skill and all siblings to prevent stale "update available" badges after successful update.
+- **Agent profile skill counting** — `count_symlinks` now also counts non-symlink directories containing `SKILL.md` (copy-based deployments).
+- **Updater commands consolidated** — `download_app_update` + `install_app_update` merged into single `download_and_install_update` command.
+- **Codebase formatting** — Biome 2.x auto-format applied across 141 files; multi-line transition/object literals reformatted for consistency.
+
+### Fixed
+- Skill update failing but card showing "Updated" — fetch errors in `prefetch_unique_repos` silently discarded; stale local/remote ref comparison wrote `update_available: false` to cache, overriding the correct state. Backend now preserves previous cache on fetch failure; frontend restores `update_available: true` on update error as defense-in-depth.
+- Translation returning untranslated English text for CJK targets — added script-aware validation that rejects results without target-language characters and retries via alternate provider.
+- Stale untranslated entries accumulating in translation cache for CJK languages.
+
+### Removed
+- **`docs/ARCHITECTURE.md`** — obsolete architecture document removed (content covered by `AGENTS.md`).
+
 ## [0.1.9] - 2026-04-05
 
 ### Added

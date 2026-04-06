@@ -24,9 +24,7 @@ export function writeBackgroundRun(enabled: boolean): void {
   }
 }
 
-export function onBackgroundRunChanged(
-  listener: (enabled: boolean) => void,
-): () => void {
+export function onBackgroundRunChanged(listener: (enabled: boolean) => void): () => void {
   const handleChange = (event: Event) => {
     listener((event as CustomEvent<boolean>).detail);
   };
@@ -42,10 +40,7 @@ interface BackgroundRunSectionProps {
   onToggle: (enabled: boolean) => void;
 }
 
-export function BackgroundRunSection({
-  enabled,
-  onToggle,
-}: BackgroundRunSectionProps) {
+export function BackgroundRunSection({ enabled, onToggle }: BackgroundRunSectionProps) {
   const { t } = useTranslation();
 
   return (
@@ -63,8 +58,7 @@ export function BackgroundRunSection({
         <div className="flex items-center justify-between gap-4">
           <p className="text-xs text-muted-foreground leading-relaxed max-w-[520px]">
             {t("settings.backgroundRunHint", {
-              defaultValue:
-                "开启后，关闭窗口时隐藏至后台继续检查技能更新。",
+              defaultValue: "开启后，关闭窗口时隐藏至后台继续检查技能更新。",
             })}
           </p>
 

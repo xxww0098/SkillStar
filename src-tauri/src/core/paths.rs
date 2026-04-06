@@ -245,8 +245,6 @@ pub fn lockfile_path() -> PathBuf {
     hub_root().join("lock.json")
 }
 
-
-
 // ═══════════════════════════════════════════════════════════════════
 //  Legacy migration
 // ═══════════════════════════════════════════════════════════════════
@@ -346,8 +344,6 @@ pub fn migrate_legacy_paths() {
         // Clean up empty legacy hub
         let _ = remove_dir_if_empty(&legacy_hub);
     }
-
-
 
     // ── Clean up legacy files ──
     let _ = std::fs::remove_file(root.join("security_scan_cache.json"));
@@ -491,7 +487,6 @@ fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-
 /// Check whether a path is a symlink **or** a junction point.
 ///
 /// On Unix this is equivalent to `path.is_symlink()`.
@@ -566,8 +561,7 @@ pub fn remove_symlink(path: &Path) -> anyhow::Result<()> {
                     })
                 }
             };
-            retry_io(remove_op)
-                .with_context(|| format!("Failed to remove symlink: {:?}", path))?;
+            retry_io(remove_op).with_context(|| format!("Failed to remove symlink: {:?}", path))?;
         }
         return Ok(());
     }
@@ -587,7 +581,8 @@ pub fn remove_symlink(path: &Path) -> anyhow::Result<()> {
         if junction_exists {
             tracing::info!(target: "paths", path = %path.display(), "Detected junction point, removing");
             retry_io(|| {
-                junction::delete(path).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+                junction::delete(path)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
             })
             .with_context(|| format!("Failed to remove junction point: {:?}", path))?;
             return Ok(());

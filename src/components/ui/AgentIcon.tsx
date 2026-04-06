@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { AgentProfile } from "../../types";
 import { AntigravityIcon } from "./icons/AntigravityIcon";
 
@@ -28,22 +28,11 @@ export function AgentIcon({ profile, className, alt }: AgentIconProps) {
     return <AntigravityIcon className={className} />;
   }
 
-  const isSvg =
-    profile.icon.endsWith(".svg") && !profile.icon.startsWith("data:image");
+  const isSvg = profile.icon.endsWith(".svg") && !profile.icon.startsWith("data:image");
 
   if (!isSvg) {
-    const imgSrc = profile.icon.startsWith("data:image")
-      ? profile.icon
-      : `/${profile.icon}`;
-    return (
-      <img
-        src={imgSrc}
-        alt={alt ?? profile.display_name}
-        className={className}
-        loading="lazy"
-        decoding="async"
-      />
-    );
+    const imgSrc = profile.icon.startsWith("data:image") ? profile.icon : `/${profile.icon}`;
+    return <img src={imgSrc} alt={alt ?? profile.display_name} className={className} loading="lazy" decoding="async" />;
   }
 
   // Inline SVG path for reliable CSS filter support
@@ -52,16 +41,8 @@ export function AgentIcon({ profile, className, alt }: AgentIconProps) {
 
 // ── Private inline-SVG loader ────────────────────────────────────────
 
-function InlineSvgIcon({
-  path,
-  className,
-}: {
-  path: string;
-  className?: string;
-}) {
-  const [markup, setMarkup] = useState<string | null>(
-    () => svgCache.get(path) ?? null,
-  );
+function InlineSvgIcon({ path, className }: { path: string; className?: string }) {
+  const [markup, setMarkup] = useState<string | null>(() => svgCache.get(path) ?? null);
 
   useEffect(() => {
     if (svgCache.has(path)) {

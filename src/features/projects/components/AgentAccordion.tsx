@@ -1,13 +1,13 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { useTranslation } from "react-i18next";
 import { ChevronRight, Plus, Search, X } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { MOTION_TRANSITION } from "../../../comm/motion";
+import { AgentIcon } from "../../../components/ui/AgentIcon";
 import { Badge } from "../../../components/ui/badge";
 import { CardTemplate } from "../../../components/ui/card-template";
 import { Input } from "../../../components/ui/input";
 import { Switch } from "../../../components/ui/switch";
-import { AgentIcon } from "../../../components/ui/AgentIcon";
-import { MOTION_TRANSITION } from "../../../comm/motion";
-import { cn, agentIconCls, formatPlatformPath } from "../../../lib/utils";
+import { agentIconCls, cn, formatPlatformPath } from "../../../lib/utils";
 import type { AgentProfile, Skill } from "../../../types";
 
 interface AgentAccordionProps {
@@ -52,9 +52,7 @@ export function AgentAccordion({
       </div>
       <CardTemplate className="rounded-xl overflow-hidden divide-y divide-border hover:-translate-y-0">
         {enabledProfiles.length === 0 && (
-          <div className="px-3.5 py-6 text-xs text-muted-foreground text-center">
-            {t("projects.noAgents")}
-          </div>
+          <div className="px-3.5 py-6 text-xs text-muted-foreground text-center">{t("projects.noAgents")}</div>
         )}
         {enabledProfiles.map((profile) => {
           const isEnabled = enabledAgents.includes(profile.id);
@@ -68,24 +66,26 @@ export function AgentAccordion({
                 onClick={() => onToggleExpand(profile.id)}
                 className={cn(
                   "w-full flex items-center gap-2.5 px-3.5 h-11 text-left transition-colors cursor-pointer",
-                  isExpanded ? "bg-primary/[0.03]" : isEnabled ? "hover:bg-muted/50" : "hover:bg-muted/30"
+                  isExpanded ? "bg-primary/[0.03]" : isEnabled ? "hover:bg-muted/50" : "hover:bg-muted/30",
                 )}
               >
                 <ChevronRight
                   className={cn(
                     "w-3.5 h-3.5 shrink-0 transition-transform duration-200",
                     isExpanded && "rotate-90",
-                    !isEnabled && "text-muted-foreground/40"
+                    !isEnabled && "text-muted-foreground/40",
                   )}
                 />
                 <AgentIcon
                   profile={profile}
-                  className={cn(agentIconCls(profile.icon, "w-4 h-4"), "shrink-0 transition", !isEnabled && "grayscale opacity-40")}
+                  className={cn(
+                    agentIconCls(profile.icon, "w-4 h-4"),
+                    "shrink-0 transition",
+                    !isEnabled && "grayscale opacity-40",
+                  )}
                 />
                 <div className="flex-1 flex items-center gap-2.5 min-w-0">
-                  <span
-                    className={cn("text-sm font-medium truncate shrink-0", !isEnabled && "text-muted-foreground")}
-                  >
+                  <span className={cn("text-sm font-medium truncate shrink-0", !isEnabled && "text-muted-foreground")}>
                     {profile.display_name}
                   </span>
                   <span className="text-micro text-muted-foreground/60 font-mono bg-muted/40 px-1.5 py-0.5 rounded-md truncate">
@@ -97,7 +97,10 @@ export function AgentAccordion({
                     {skills.length}
                   </Badge>
                 )}
-                <label onClick={(event) => event.stopPropagation()} className="shrink-0 cursor-pointer p-2 -mr-2 flex items-center justify-center rounded-lg hover:bg-muted/50 transition-colors">
+                <label
+                  onClick={(event) => event.stopPropagation()}
+                  className="shrink-0 cursor-pointer p-2 -mr-2 flex items-center justify-center rounded-lg hover:bg-muted/50 transition-colors"
+                >
                   <Switch checked={isEnabled} onCheckedChange={() => onToggleAgent(profile.id)} />
                 </label>
               </button>
@@ -180,7 +183,12 @@ export function AgentAccordion({
                               {available.length > 1 && (
                                 <button
                                   type="button"
-                                  onClick={() => onAddAllSkills?.(profile.id, available.map(s => s.name))}
+                                  onClick={() =>
+                                    onAddAllSkills?.(
+                                      profile.id,
+                                      available.map((s) => s.name),
+                                    )
+                                  }
                                   className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-border text-micro text-muted-foreground hover:border-primary/40 hover:text-primary hover:bg-primary/5 transition-colors cursor-pointer"
                                   title={t("common.selectAll", "全选")}
                                 >

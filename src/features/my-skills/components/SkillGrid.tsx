@@ -1,11 +1,13 @@
-import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, type CSSProperties } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { X } from "lucide-react";
+import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { SkillCard } from "./SkillCard";
-import { EmptyState } from "../../../components/ui/EmptyState";
-import type { AgentProfile, RiskLevel, Skill, ViewMode } from "../../../types";
-import { cn } from "../../../lib/utils";
 import { MOTION_DURATION, MOTION_TRANSITION } from "../../../comm/motion";
+import { EmptyState } from "../../../components/ui/EmptyState";
+import { cn } from "../../../lib/utils";
+import type { AgentProfile, RepoNewSkill, RiskLevel, Skill, ViewMode } from "../../../types";
+import { GhostSkillCard } from "./GhostSkillCard";
+import { SkillCard } from "./SkillCard";
 
 /**
  * Above this count we use progressive loading (infinite scroll)
@@ -57,16 +59,19 @@ interface SkillGridProps {
   selectedSkills?: Set<string>;
   onSelectSkill?: (name: string) => void;
   profiles?: AgentProfile[];
-  onToggleAgent?: (
-    skillName: string,
-    agentId: string,
-    enable: boolean,
-    agentName?: string,
-  ) => void;
+  onToggleAgent?: (skillName: string, agentId: string, enable: boolean, agentName?: string) => void;
   installingNames?: Set<string>;
   pendingUpdateNames?: Set<string>;
   pendingAgentToggleKeys?: Set<string>;
   riskMap?: Record<string, RiskLevel>;
+  /** Ghost skills (new repo skills not yet installed) */
+  ghostSkills?: RepoNewSkill[];
+  onInstallGhost?: (skill: RepoNewSkill) => void;
+  onDismissGhost?: (repoSource: string, skillId: string) => void;
+  /** Dismiss all ghost skills from a repo at once */
+  onDismissGhostRepo?: (repoSource: string) => void;
+  /** Click a ghost card to show detail */
+  onGhostClick?: (skill: RepoNewSkill) => void;
 }
 
 export function SkillGrid({
@@ -89,6 +94,11 @@ export function SkillGrid({
   pendingUpdateNames,
   pendingAgentToggleKeys,
   riskMap,
+  ghostSkills,
+  onInstallGhost,
+  onDismissGhost,
+  onDismissGhostRepo,
+  onGhostClick,
 }: SkillGridProps) {
   const { t } = useTranslation();
   const prefersReducedMotion = useReducedMotion();
@@ -147,13 +157,9 @@ export function SkillGrid({
     let cols: number;
     if (columnStrategy === "auto-fit" || columnStrategy === "auto-fill") {
       const safeMinWidth = Math.max(220, minColumnWidth);
-      cols = Math.max(
-        1,
-        Math.floor((containerWidth + GRID_GAP_PX) / (safeMinWidth + GRID_GAP_PX))
-      );
+      cols = Math.max(1, Math.floor((containerWidth + GRID_GAP_PX) / (safeMinWidth + GRID_GAP_PX)));
       if (prevColCountRef.current > 0 && cols < prevColCountRef.current) {
-        const thresholdForPrev =
-          prevColCountRef.current * (safeMinWidth + GRID_GAP_PX) - GRID_GAP_PX;
+        const thresholdForPrev = prevColCountRef.current * (safeMinWidth + GRID_GAP_PX) - GRID_GAP_PX;
         if (containerWidth >= thresholdForPrev - HYSTERESIS_PX) {
           cols = prevColCountRef.current;
         }
@@ -187,7 +193,19 @@ export function SkillGrid({
     onVisibleCountChange?.(displayedSkills.length, skills.length);
   }, [onVisibleCountChange, displayedSkills.length, skills.length]);
 
-  if (skills.length === 0) {
+  // Group ghost skills by repo source
+  const ghostGroups = useMemo(() => {
+    if (!ghostSkills || ghostSkills.length === 0) return [];
+    const groups: Map<string, RepoNewSkill[]> = new Map();
+    for (const s of ghostSkills) {
+      const list = groups.get(s.repo_source) ?? [];
+      list.push(s);
+      groups.set(s.repo_source, list);
+    }
+    return Array.from(groups.entries());
+  }, [ghostSkills]);
+
+  if (skills.length === 0 && ghostGroups.length === 0) {
     return <EmptyState title={emptyMessage ?? t("skillGrid.noSkills")} action={emptyAction} size="lg" />;
   }
 
@@ -217,51 +235,103 @@ export function SkillGrid({
   );
 
   // Sentinel element for infinite scroll trigger
-  const sentinel = hasMore ? (
-    <div ref={sentinelRef} className="h-px w-full" aria-hidden />
-  ) : null;
+  const sentinel = hasMore ? <div ref={sentinelRef} className="h-px w-full" aria-hidden /> : null;
+
+  // Ghost skills section rendered above the grid
+  const ghostSection =
+    ghostGroups.length > 0 && onInstallGhost && onDismissGhost ? (
+      <div className="mb-4">
+        <AnimatePresence>
+          {ghostGroups.map(([repoSource, groupSkills]) => (
+            <motion.div
+              key={repoSource}
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.25 }}
+              className="mb-3"
+            >
+              {/* Group header */}
+              <div className="flex items-center gap-2 px-1 mb-2">
+                <div className="h-px flex-1 bg-primary/15" />
+                <span className="text-[11px] font-medium text-primary/60 whitespace-nowrap">
+                  {repoSource}{" "}
+                  {t("ghostCard.foundCount", {
+                    count: groupSkills.length,
+                    defaultValue: `发现 ${groupSkills.length} 个新技能`,
+                  })}
+                </span>
+                {/* Repo-level dismiss all button */}
+                {onDismissGhostRepo && (
+                  <button
+                    onClick={() => onDismissGhostRepo(repoSource)}
+                    className="p-0.5 rounded text-muted-foreground/40 hover:text-foreground hover:bg-muted/60 transition-all duration-150 cursor-pointer"
+                    title={t("ghostCard.dismissAll", "全部忽略")}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                <div className="h-px flex-1 bg-primary/15" />
+              </div>
+              {/* Ghost cards grid */}
+              <div className={cn(viewMode === "grid" ? "ss-cards-grid" : "ss-cards-list")} style={gridStyle}>
+                <AnimatePresence>
+                  {groupSkills.map((gs) => (
+                    <GhostSkillCard
+                      key={`${gs.repo_source}/${gs.skill_id}`}
+                      skill={gs}
+                      onInstall={onInstallGhost}
+                      onDismiss={onDismissGhost}
+                      onClick={onGhostClick}
+                    />
+                  ))}
+                </AnimatePresence>
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+    ) : null;
 
   // ── Large dataset: plain CSS grid, no layout animations ──
   if (!useLayoutAnimations) {
     return (
-      <div
-        ref={containerRef}
-        className={cn(viewMode === "grid" ? "ss-cards-grid" : "ss-cards-list")}
-        style={gridStyle}
-      >
-        {displayedSkills.map((skill) => (
-          <div key={skill.name + skill.git_url} className="h-full">
-            {renderCard(skill)}
-          </div>
-        ))}
-        {sentinel}
+      <div ref={containerRef}>
+        {ghostSection}
+        <div className={cn(viewMode === "grid" ? "ss-cards-grid" : "ss-cards-list")} style={gridStyle}>
+          {displayedSkills.map((skill) => (
+            <div key={skill.name + skill.git_url} className="h-full">
+              {renderCard(skill)}
+            </div>
+          ))}
+          {sentinel}
+        </div>
       </div>
     );
   }
 
   // ── Small dataset: full framer-motion layout animations ──
   return (
-    <div
-      ref={containerRef}
-      className={cn(viewMode === "grid" ? "ss-cards-grid" : "ss-cards-list")}
-      style={gridStyle}
-    >
-      <AnimatePresence mode="popLayout">
-        {displayedSkills.map((skill) => (
-          <motion.div
-            key={skill.name + skill.git_url}
-            layout="position"
-            initial="hidden"
-            animate="show"
-            variants={itemVariants}
-            exit="exit"
-            className="h-full"
-          >
-            {renderCard(skill)}
-          </motion.div>
-        ))}
-      </AnimatePresence>
-      {sentinel}
+    <div ref={containerRef}>
+      {ghostSection}
+      <div className={cn(viewMode === "grid" ? "ss-cards-grid" : "ss-cards-list")} style={gridStyle}>
+        <AnimatePresence mode="popLayout">
+          {displayedSkills.map((skill) => (
+            <motion.div
+              key={skill.name + skill.git_url}
+              layout="position"
+              initial="hidden"
+              animate="show"
+              variants={itemVariants}
+              exit="exit"
+              className="h-full"
+            >
+              {renderCard(skill)}
+            </motion.div>
+          ))}
+        </AnimatePresence>
+        {sentinel}
+      </div>
     </div>
   );
 }

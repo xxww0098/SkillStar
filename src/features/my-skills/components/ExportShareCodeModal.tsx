@@ -1,15 +1,15 @@
-import { useState, useEffect, useMemo } from "react";
-import { useTranslation } from "react-i18next";
-import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { Check, Copy, Download, FileText, KeyRound, Link2, Loader2, Package, Sparkles, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
-import { createShareCode, formatShareMessage, ShareCodeData, ShareCodeType } from "../../../lib/shareCode";
-import { toast } from "../../../lib/toast";
-import { Sparkles, Package, FileText, Link2, Download, Check, Copy, KeyRound, Loader2, X } from "lucide-react";
 import { Github } from "../../../components/ui/icons/Github";
-import type { SkillCardDeck, Skill } from "../../../types";
+import { createShareCode, formatShareMessage, type ShareCodeData, type ShareCodeType } from "../../../lib/shareCode";
+import { toast } from "../../../lib/toast";
 import { copyToClipboard } from "../../../lib/utils";
+import type { Skill, SkillCardDeck } from "../../../types";
 
 interface ExportShareCodeModalProps {
   open: boolean;
@@ -54,7 +54,7 @@ export function ExportShareCodeModal({
 
   // Analyze skills when modal opens
   useEffect(() => {
-    const activeSkills = group ? group.skills : (skillNames || []);
+    const activeSkills = group ? group.skills : skillNames || [];
     if (!open || activeSkills.length === 0) {
       setSkillStatuses([]);
       return;
@@ -142,12 +142,9 @@ export function ExportShareCodeModal({
   // Categorize
   const shareCodeSkills = useMemo(
     () => skillStatuses.filter((s) => s.status === "ok" || s.status === "embedded"),
-    [skillStatuses]
+    [skillStatuses],
   );
-  const bundleSkills = useMemo(
-    () => skillStatuses.filter((s) => s.status === "bundle"),
-    [skillStatuses]
-  );
+  const bundleSkills = useMemo(() => skillStatuses.filter((s) => s.status === "bundle"), [skillStatuses]);
   const hasEmbedded = skillStatuses.some((s) => s.status === "embedded");
 
   // Determine export mode: if ANY skill requires a bundle, the whole payload is exported as a bundle
@@ -202,7 +199,7 @@ export function ExportShareCodeModal({
 
       // Automatically copy to clipboard when generated
       const textToCopy = formatShareMessage(sharePayload, generated, codeType);
-      
+
       const copySuccess = await copyToClipboard(textToCopy);
       if (copySuccess) {
         setCopied(true);
@@ -230,9 +227,7 @@ export function ExportShareCodeModal({
   const handleCopy = async () => {
     if (!code) return;
     // Copy formatted message with deck name, description and share code
-    const textToCopy = shareData
-      ? formatShareMessage(shareData.data, code, shareData.type)
-      : code;
+    const textToCopy = shareData ? formatShareMessage(shareData.data, code, shareData.type) : code;
     const copySuccess = await copyToClipboard(textToCopy);
     if (copySuccess) {
       setCopied(true);
@@ -241,20 +236,14 @@ export function ExportShareCodeModal({
     }
   };
 
-
-
   const handleSaveBundleFile = async () => {
     try {
       const ext = group ? "agd" : "ags";
       const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-      const defaultName = group
-        ? `${group.name}-bundle-${ts}.${ext}`
-        : `skills-bundle-${ts}.${ext}`;
+      const defaultName = group ? `${group.name}-bundle-${ts}.${ext}` : `skills-bundle-${ts}.${ext}`;
       const path = await save({
         defaultPath: defaultName,
-        filters: [
-          { name: "SkillStar Bundle", extensions: ["ags", "agd", "agentskills"] },
-        ],
+        filters: [{ name: "SkillStar Bundle", extensions: ["ags", "agd", "agentskills"] }],
       });
       if (!path) return;
       setLoading(true);
@@ -310,14 +299,21 @@ export function ExportShareCodeModal({
             transition={{ duration: prefersReducedMotion ? 0.01 : 0.3, ease: [0.16, 1, 0.3, 1] }}
             className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-[420px] max-h-[calc(100vh-2rem)] z-50"
           >
-            <div role="dialog" aria-modal="true" aria-label={group ? t("exportShareCodeModal.titleDeck") : t("exportShareCodeModal.title")} className="modal-surface max-h-[calc(100vh-2rem)] flex flex-col">
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label={group ? t("exportShareCodeModal.titleDeck") : t("exportShareCodeModal.title")}
+              className="modal-surface max-h-[calc(100vh-2rem)] flex flex-col"
+            >
               {/* Top ambient glow */}
               <div className="pointer-events-none absolute -left-20 -top-20 h-48 w-48 rounded-full bg-primary/20 blur-[60px] opacity-70" />
               <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-accent/10 blur-[60px] opacity-70" />
               <div className="relative z-10 flex flex-col min-h-0 flex-1 h-full">
                 {/* Header */}
                 <div className="flex items-center justify-between px-6 pt-5 pb-1">
-                  <h2 className="text-heading-sm">{group ? t("exportShareCodeModal.titleDeck") : t("exportShareCodeModal.title")}</h2>
+                  <h2 className="text-heading-sm">
+                    {group ? t("exportShareCodeModal.titleDeck") : t("exportShareCodeModal.title")}
+                  </h2>
                   <button
                     onClick={handleClose}
                     aria-label={t("common.close")}
@@ -469,9 +465,7 @@ export function ExportShareCodeModal({
                         disabled={loading || skillStatuses.length === 0}
                         className="w-full mt-1"
                       >
-                        {loading && (
-                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        )}
+                        {loading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                         <Sparkles className="w-3.5 h-3.5 mr-1.5" />
                         {t("exportShareCodeModal.generateExport")}
                       </Button>
@@ -495,7 +489,11 @@ export function ExportShareCodeModal({
                           <div className="relative group">
                             <textarea
                               readOnly
-                              value={shareData && code ? formatShareMessage(shareData.data, code, shareData.type) : (code || "")}
+                              value={
+                                shareData && code
+                                  ? formatShareMessage(shareData.data, code, shareData.type)
+                                  : code || ""
+                              }
                               className="flex w-full rounded-xl border border-input bg-muted/50 px-3 py-2.5 text-micro font-mono shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-h-[140px] resize-none pr-20"
                             />
                             <div className="absolute right-2 top-2 flex items-center gap-1.5">
@@ -512,9 +510,7 @@ export function ExportShareCodeModal({
                             </div>
                           </div>
                           {hasEmbedded && (
-                            <p className="text-micro text-primary/70">
-                              {t("exportShareCodeModal.embeddedInfo")}
-                            </p>
+                            <p className="text-micro text-primary/70">{t("exportShareCodeModal.embeddedInfo")}</p>
                           )}
                         </div>
                       )}
@@ -564,8 +560,8 @@ export function ExportShareCodeModal({
                               {bundleExporting
                                 ? t("exportShareCodeModal.exporting")
                                 : bundleSaved
-                                ? t("exportShareCodeModal.bundleSavedBtn")
-                                : t("exportShareCodeModal.saveBundleFile")}
+                                  ? t("exportShareCodeModal.bundleSavedBtn")
+                                  : t("exportShareCodeModal.saveBundleFile")}
                             </Button>
                           </div>
                         </div>

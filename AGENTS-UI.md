@@ -84,6 +84,11 @@ src/
 - Motion should be purposeful: entry, exit, and hover transitions only.
 - Respect `prefers-reduced-motion` and keep AA contrast.
 
+### Configuration InfoTips
+- UI fields for model and core behaviors must include an `InfoTip` (`[?]` hover) to explain the configuration.
+- For options-based inputs like `SegmentPill`, descriptions must use a newline-separated dictionary format. Example: `"Description summary:\n\nOption1: explanation\nOption2: explanation"`.
+- The `InfoTip` renderer automatically parses this `Label: ` syntax to apply highlighted typography (`font-bold text-foreground`) to the option names, creating a consistent structural visual hierarchy without requiring inline JSX.
+
 ## Conventions
 - Styling: TailwindCSS utilities only.
 - Components: prefer `components/ui/*` primitives; use Radix for accessibility-heavy patterns.

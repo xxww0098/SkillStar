@@ -43,9 +43,7 @@ export function AiNotConfiguredBanner({ show }: AiNotConfiguredBannerProps) {
 
   return (
     <div className="px-4 py-2 border-b border-border bg-muted/30 flex items-center gap-2">
-      <span className="text-micro text-muted-foreground flex-1">
-        {t("skillEditor.aiNotConfigured")}
-      </span>
+      <span className="text-micro text-muted-foreground flex-1">{t("skillEditor.aiNotConfigured")}</span>
       <button
         onClick={navigateToAiSettings}
         className="px-2 py-1 rounded-md text-micro font-medium border border-border hover:bg-card-hover transition-colors cursor-pointer"

@@ -1,5 +1,5 @@
-import { toast as sonner } from "sonner";
 import { createElement } from "react";
+import { toast as sonner } from "sonner";
 import { SuccessCheckmark } from "../components/ui/SuccessCheckmark";
 
 export const toast = {
@@ -11,8 +11,7 @@ export const toast = {
   info: (message: string) => sonner(message),
   warning: (message: string) => sonner.warning(message),
   /** Show or update a progress toast by ID (stays until dismissed). */
-  loading: (message: string, id: string) =>
-    sonner.loading(message, { id, duration: Infinity }),
+  loading: (message: string, id: string) => sonner.loading(message, { id, duration: Infinity }),
   /** Dismiss a toast by ID. */
   dismiss: (id: string) => sonner.dismiss(id),
 };

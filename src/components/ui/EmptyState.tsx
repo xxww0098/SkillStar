@@ -24,34 +24,20 @@ const iconSizeMap = {
 
 const STAGGER_EASE = [0.22, 1, 0.36, 1] as const;
 
-export function EmptyState({
-  icon,
-  title,
-  description,
-  action,
-  size = "md",
-  className,
-}: EmptyStateProps) {
+export function EmptyState({ icon, title, description, action, size = "md", className }: EmptyStateProps) {
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.25 }}
-      className={cn(
-        "flex flex-col items-center justify-center text-center",
-        sizeMap[size],
-        className
-      )}
+      className={cn("flex flex-col items-center justify-center text-center", sizeMap[size], className)}
     >
       {icon && (
         <motion.div
           initial={{ opacity: 0, scale: 0.85 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.35, ease: STAGGER_EASE }}
-          className={cn(
-            "bg-muted/50 flex items-center justify-center mb-4",
-            iconSizeMap[size]
-          )}
+          className={cn("bg-muted/50 flex items-center justify-center mb-4", iconSizeMap[size])}
         >
           {icon}
         </motion.div>
@@ -87,4 +73,3 @@ export function EmptyState({
     </motion.div>
   );
 }
-

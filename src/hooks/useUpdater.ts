@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 export type UpdateStatus = "idle" | "checking" | "available" | "downloading" | "ready" | "error";
 
@@ -29,7 +29,7 @@ interface DownloadProgressPayload {
 const SKIPPED_KEY = "skillstar_skipped_version";
 const LAST_CHECK_KEY = "skillstar_last_check";
 const CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1h
-const CHECK_TIMEOUT_MS = 20_000;           // 20s (mirror may add latency)
+const CHECK_TIMEOUT_MS = 20_000; // 20s (mirror may add latency)
 const MAX_DOWNLOAD_RETRIES = 2;
 
 function getSkipped(): string {
@@ -45,8 +45,14 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms);
     promise.then(
-      (v) => { clearTimeout(timer); resolve(v); },
-      (e) => { clearTimeout(timer); reject(e); },
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
     );
   });
 }
@@ -64,14 +70,17 @@ export function useUpdater() {
   const checkingRef = useRef(false);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const mapUpdaterError = useCallback((e: unknown): string => {
-    const msg = e instanceof Error ? e.message : String(e);
-    // Friendly message for common fetch failures
-    if (/could not fetch|update check failed|timed out/i.test(msg)) {
-      return t("sidebar.updateErrorFetchRelease");
-    }
-    return msg;
-  }, [t]);
+  const mapUpdaterError = useCallback(
+    (e: unknown): string => {
+      const msg = e instanceof Error ? e.message : String(e);
+      // Friendly message for common fetch failures
+      if (/could not fetch|update check failed|timed out/i.test(msg)) {
+        return t("sidebar.updateErrorFetchRelease");
+      }
+      return msg;
+    },
+    [t],
+  );
 
   // ── Check (via Rust command with mirror support) ──────────────────
   const check = useCallback(async (): Promise<{ found: boolean; version?: string; error?: boolean }> => {
@@ -81,11 +90,7 @@ export function useUpdater() {
     try {
       setState((s) => ({ ...s, status: "checking", error: "" }));
 
-      const result = await withTimeout(
-        invoke<UpdateCheckResult>("check_app_update"),
-        CHECK_TIMEOUT_MS,
-        "Update check",
-      );
+      const result = await withTimeout(invoke<UpdateCheckResult>("check_app_update"), CHECK_TIMEOUT_MS, "Update check");
 
       if (!result.available || !result.version) {
         setState((s) => ({ ...s, status: "idle", version: "", progress: 0, error: "" }));
@@ -131,20 +136,17 @@ export function useUpdater() {
       let contentLength = 0;
 
       // Listen for download progress events from the Rust side
-      const unlisten = await listen<DownloadProgressPayload>(
-        "updater://download-progress",
-        (event) => {
-          if (event.payload.content_length) {
-            contentLength = event.payload.content_length;
-          }
-          downloaded += event.payload.chunk_length;
-          const pct =
-            contentLength > 0
-              ? Math.min(100, Math.round((downloaded / contentLength) * 100))
-              : Math.min(95, downloaded > 0 ? Math.round(Math.log2(downloaded / 1024)) : 1);
-          setState((s) => ({ ...s, progress: pct }));
-        },
-      );
+      const unlisten = await listen<DownloadProgressPayload>("updater://download-progress", (event) => {
+        if (event.payload.content_length) {
+          contentLength = event.payload.content_length;
+        }
+        downloaded += event.payload.chunk_length;
+        const pct =
+          contentLength > 0
+            ? Math.min(100, Math.round((downloaded / contentLength) * 100))
+            : Math.min(95, downloaded > 0 ? Math.round(Math.log2(downloaded / 1024)) : 1);
+        setState((s) => ({ ...s, progress: pct }));
+      });
 
       try {
         await invoke("download_and_install_update");
@@ -237,7 +239,7 @@ export function useUpdater() {
   useEffect(() => {
     const lastCheck = getLastCheck();
     const elapsed = Date.now() - lastCheck;
-    const firstDelay = elapsed >= CHECK_INTERVAL_MS ? 500 : (CHECK_INTERVAL_MS - elapsed);
+    const firstDelay = elapsed >= CHECK_INTERVAL_MS ? 500 : CHECK_INTERVAL_MS - elapsed;
 
     const firstTimer = setTimeout(() => {
       check();

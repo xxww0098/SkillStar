@@ -1,6 +1,6 @@
 use crate::core::{
-    agent_profile, ai_provider, error::AppError, gh_manager, local_skill, lockfile, paths,
-    repo_history, repo_scanner, security_scan, skill_pack, sync,
+    agent_profile, ai_provider, dismissed_skills, error::AppError, gh_manager, local_skill,
+    lockfile, paths, repo_history, repo_scanner, security_scan, skill_pack, sync,
 };
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -698,6 +698,54 @@ pub async fn remove_installed_pack(name: String) -> Result<Vec<String>, AppError
 #[tauri::command]
 pub async fn get_pack_doctor(name: String) -> Result<skill_pack::DoctorReport, AppError> {
     tokio::task::spawn_blocking(move || skill_pack::doctor_pack(&name))
+        .await?
+        .map_err(|e| AppError::Other(e.to_string()))
+}
+
+// ── New-skill detection commands ────────────────────────────────────
+
+/// Manually check all cached repos for new uninstalled skills.
+/// Returns the list after filtering out dismissed entries.
+#[tauri::command]
+pub async fn check_new_repo_skills() -> Result<Vec<repo_scanner::RepoNewSkill>, AppError> {
+    let new_skills =
+        tokio::task::spawn_blocking(repo_scanner::detect_new_skills_in_cached_repos).await?;
+
+    let dismissed = dismissed_skills::load_dismissed();
+    let dismissed_set: std::collections::HashSet<&str> =
+        dismissed.iter().map(|s| s.as_str()).collect();
+
+    let filtered: Vec<repo_scanner::RepoNewSkill> = new_skills
+        .into_iter()
+        .filter(|s| {
+            let key = format!("{}/{}", s.repo_source, s.skill_id);
+            !dismissed_set.contains(key.as_str())
+        })
+        .collect();
+
+    Ok(filtered)
+}
+
+/// Dismiss a new-skill notification so it won't appear again.
+/// Key format: "repo_source/skill_id"
+#[tauri::command]
+pub async fn dismiss_new_skill(key: String) -> Result<(), AppError> {
+    tokio::task::spawn_blocking(move || dismissed_skills::dismiss(&key))
+        .await?
+        .map_err(|e| AppError::Other(e.to_string()))
+}
+
+/// Load all dismissed new-skill keys.
+#[tauri::command]
+pub async fn get_dismissed_new_skills() -> Result<Vec<String>, AppError> {
+    Ok(dismissed_skills::load_dismissed())
+}
+
+/// Batch dismiss multiple new-skill notifications.
+/// Used for repo-level "dismiss all" in the ghost card group header.
+#[tauri::command]
+pub async fn dismiss_new_skills_batch(keys: Vec<String>) -> Result<(), AppError> {
+    tokio::task::spawn_blocking(move || dismissed_skills::dismiss_batch(&keys))
         .await?
         .map_err(|e| AppError::Other(e.to_string()))
 }

@@ -1,14 +1,5 @@
+import { CheckCircle, ChevronDown, Eye, EyeOff, Loader2, Sparkles, XCircle, Zap } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import {
-  CheckCircle,
-  ChevronDown,
-  Eye,
-  EyeOff,
-  Loader2,
-  Sparkles,
-  XCircle,
-  Zap,
-} from "lucide-react";
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
 import { Switch } from "../../../components/ui/switch";
@@ -36,9 +27,12 @@ interface AiProviderSectionProps {
 /** Get the preset key for a given api_format */
 function presetKeyFor(format: AiConfig["api_format"]): "openai_preset" | "anthropic_preset" | "local_preset" {
   switch (format) {
-    case "anthropic": return "anthropic_preset";
-    case "local":     return "local_preset";
-    default:          return "openai_preset";
+    case "anthropic":
+      return "anthropic_preset";
+    case "local":
+      return "local_preset";
+    default:
+      return "openai_preset";
   }
 }
 
@@ -69,17 +63,18 @@ export function AiProviderSection({
   const isLocalFormat = localAiConfig.api_format === "local";
   const aiApiKeyPlaceholder = isLocalFormat
     ? t("settings.localApiKeyOptional", { defaultValue: "Optional — most local models don't need this" })
-    : isAnthropicFormat ? "sk-ant-..." : "sk-...";
+    : isAnthropicFormat
+      ? "sk-ant-..."
+      : "sk-...";
   const aiBaseUrlPlaceholder = isLocalFormat
     ? "http://127.0.0.1:11434/v1"
-    : isAnthropicFormat ? "https://api.anthropic.com" : "https://api.openai.com/v1";
-  const aiModelPlaceholder = isLocalFormat
-    ? "llama3.1:8b"
-    : isAnthropicFormat ? "claude-sonnet-4-20250514" : "gpt-5.4";
+    : isAnthropicFormat
+      ? "https://api.anthropic.com"
+      : "https://api.openai.com/v1";
+  const aiModelPlaceholder = isLocalFormat ? "llama3.1:8b" : isAnthropicFormat ? "claude-sonnet-4-20250514" : "gpt-5.4";
   const clampConcurrency = (value: number) => Math.min(20, Math.max(1, value || 1));
   const formControlClass =
     "flex h-9 w-full rounded-xl border border-input-border bg-input backdrop-blur-sm px-3 text-sm text-foreground shadow-sm transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:border-primary/60";
-
 
   return (
     <section>
@@ -91,31 +86,40 @@ export function AiProviderSection({
           <h2 className="text-sm font-semibold text-foreground tracking-tight">{t("settings.aiProvider")}</h2>
           {localAiConfig.enabled && (localAiConfig.api_key || isLocalFormat) && (
             <span className="text-xs text-muted-foreground ml-2 px-2 py-0.5 rounded-md bg-muted/50 border border-border">
-              {isLocalFormat ? t("settings.localModel", { defaultValue: "Local" }) : localAiConfig.api_format === "anthropic" ? "Anthropic" : "OpenAI"} · {localAiConfig.model}
+              {isLocalFormat
+                ? t("settings.localModel", { defaultValue: "Local" })
+                : localAiConfig.api_format === "anthropic"
+                  ? "Anthropic"
+                  : "OpenAI"}{" "}
+              · {localAiConfig.model}
             </span>
           )}
         </div>
-        
+
         {ready ? (
-          <Switch
-            checked={localAiConfig.enabled}
-            onCheckedChange={onEnabledChange}
-            disabled={aiSaving}
-          />
+          <Switch checked={localAiConfig.enabled} onCheckedChange={onEnabledChange} disabled={aiSaving} />
         ) : (
           <div className="h-5 w-9 rounded-full border border-border bg-muted/60" />
         )}
       </div>
 
-      <div className={cn("rounded-xl border border-border overflow-hidden transition-colors", localAiConfig.enabled ? "bg-card" : "bg-card/50")}>
-        <button onClick={onToggleExpanded} className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer">
+      <div
+        className={cn(
+          "rounded-xl border border-border overflow-hidden transition-colors",
+          localAiConfig.enabled ? "bg-card" : "bg-card/50",
+        )}
+      >
+        <button
+          onClick={onToggleExpanded}
+          className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer"
+        >
           <span className="text-sm font-medium text-foreground">
             {t("settings.aiConfigTitle", { defaultValue: "AI Configuration" })}
           </span>
           <ChevronDown
             className={cn(
               "w-4 h-4 text-muted-foreground transition-transform duration-200",
-              !aiExpanded && "-rotate-90"
+              !aiExpanded && "-rotate-90",
             )}
           />
         </button>
@@ -145,11 +149,12 @@ export function AiProviderSection({
                     const nextPreset = savedPresets[nextPresetKey] as FormatPreset;
 
                     // Default model fallbacks for empty presets
-                    const defaultModel = nextFormat === "anthropic"
-                      ? "claude-sonnet-4-20250514"
-                      : nextFormat === "local"
-                      ? "llama3.1:8b"
-                      : "gpt-5.4";
+                    const defaultModel =
+                      nextFormat === "anthropic"
+                        ? "claude-sonnet-4-20250514"
+                        : nextFormat === "local"
+                          ? "llama3.1:8b"
+                          : "gpt-5.4";
 
                     onConfigChange({
                       ...savedPresets,
@@ -167,9 +172,7 @@ export function AiProviderSection({
                 </select>
               </div>
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">
-                  {t("settings.translationLanguage")}
-                </label>
+                <label className="text-xs text-muted-foreground block mb-1">{t("settings.translationLanguage")}</label>
                 <select
                   value={localAiConfig.target_language}
                   onChange={(e) => onConfigChange({ ...localAiConfig, target_language: e.target.value })}
@@ -190,8 +193,6 @@ export function AiProviderSection({
                 </select>
               </div>
             </div>
-
-
 
             <div>
               <label className="text-xs text-muted-foreground block mb-1">{t("settings.baseUrl")}</label>
@@ -224,11 +225,7 @@ export function AiProviderSection({
                   onClick={onToggleShowApiKey}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer p-1.5 rounded-md focus-ring"
                 >
-                  {showApiKey ? (
-                    <EyeOff className="w-3.5 h-3.5" />
-                  ) : (
-                    <Eye className="w-3.5 h-3.5" />
-                  )}
+                  {showApiKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                 </button>
               </div>
             </div>
@@ -279,7 +276,9 @@ export function AiProviderSection({
             {/* ── Context & Concurrency ─── */}
             <div className="pt-2 border-t border-border/40">
               <div className="flex items-center gap-1.5 mb-2.5">
-                <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">{t("settings.scanOptimization", { defaultValue: "Security Scan" })}</span>
+                <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                  {t("settings.scanOptimization", { defaultValue: "Security Scan" })}
+                </span>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -299,12 +298,12 @@ export function AiProviderSection({
                       }}
                       className="w-24 font-mono tabular-nums"
                     />
-                    <span className="text-xs font-mono text-foreground tabular-nums shrink-0">
-                      K
-                    </span>
+                    <span className="text-xs font-mono text-foreground tabular-nums shrink-0">K</span>
                     <span className="text-[10px] text-muted-foreground">tokens</span>
                   </div>
-                  <p className="text-[10px] text-muted-foreground/60 mt-1">{t("settings.contextWindowHint", { defaultValue: "Your model's max context window." })}</p>
+                  <p className="text-[10px] text-muted-foreground/60 mt-1">
+                    {t("settings.contextWindowHint", { defaultValue: "Your model's max context window." })}
+                  </p>
                 </div>
 
                 <div>
@@ -328,7 +327,9 @@ export function AiProviderSection({
                     />
                   </div>
                   <p className="text-[10px] text-muted-foreground/60 mt-1">
-                    {t("settings.aiConcurrencyOverride", { defaultValue: "Adjust down if you encounter API rate limits." })}
+                    {t("settings.aiConcurrencyOverride", {
+                      defaultValue: "Adjust down if you encounter API rate limits.",
+                    })}
                   </p>
                 </div>
               </div>
@@ -346,7 +347,9 @@ export function AiProviderSection({
                 size="sm"
                 variant="outline"
                 onClick={onTestConnection}
-                disabled={aiSaving || aiTesting || !localAiConfig.enabled || (!localAiConfig.api_key.trim() && !isLocalFormat)}
+                disabled={
+                  aiSaving || aiTesting || !localAiConfig.enabled || (!localAiConfig.api_key.trim() && !isLocalFormat)
+                }
                 className="min-w-[112px] px-3 relative"
               >
                 <div className="flex items-center justify-center gap-1.5 min-w-max">
@@ -354,17 +357,17 @@ export function AiProviderSection({
                   {!aiTesting && aiTestResult === "success" && <CheckCircle className="w-3.5 h-3.5 text-success" />}
                   {!aiTesting && aiTestResult === "error" && <XCircle className="w-3.5 h-3.5 text-destructive" />}
                   {!aiTesting && !aiTestResult && <Zap className="w-3.5 h-3.5" />}
-                  
+
                   <span>
-                    {aiTesting 
-                      ? t("common.testing") 
-                      : (aiTestResult === "success" && typeof aiTestLatency === "number")
-                      ? `${t("common.connected")} (${aiTestLatency}ms)`
-                      : aiTestResult === "success"
-                      ? t("common.connected")
-                      : aiTestResult === "error"
-                      ? t("common.failed")
-                      : t("settings.testConnection")}
+                    {aiTesting
+                      ? t("common.testing")
+                      : aiTestResult === "success" && typeof aiTestLatency === "number"
+                        ? `${t("common.connected")} (${aiTestLatency}ms)`
+                        : aiTestResult === "success"
+                          ? t("common.connected")
+                          : aiTestResult === "error"
+                            ? t("common.failed")
+                            : t("settings.testConnection")}
                   </span>
                 </div>
               </Button>

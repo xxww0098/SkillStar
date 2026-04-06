@@ -1,7 +1,7 @@
-import { useTranslation } from "react-i18next";
 import { Languages } from "lucide-react";
-import { cn } from "../../../lib/utils";
+import { useTranslation } from "react-i18next";
 import { supportedLanguages } from "../../../i18n";
+import { cn } from "../../../lib/utils";
 
 interface LanguageSectionProps {
   currentLang: string;
@@ -32,7 +32,7 @@ export function LanguageSection({ currentLang, onLanguageChange }: LanguageSecti
                   "px-4 py-1.5 rounded-md text-xs font-medium transition cursor-pointer",
                   currentLang === lang.code || currentLang.startsWith(lang.code)
                     ? "bg-background text-foreground shadow-sm ring-1 ring-border/50"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted",
                 )}
               >
                 {lang.label}

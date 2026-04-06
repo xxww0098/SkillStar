@@ -1,5 +1,5 @@
-import { useTranslation } from "react-i18next";
 import { ChevronDown, Globe } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Input } from "../../../components/ui/input";
 import { Switch } from "../../../components/ui/switch";
 import { cn } from "../../../lib/utils";
@@ -42,7 +42,7 @@ export function ProxySection({
             </span>
           )}
         </div>
-        
+
         {ready ? (
           <Switch
             checked={proxyConfig.enabled}
@@ -54,13 +54,23 @@ export function ProxySection({
         )}
       </div>
 
-      <div className={cn("rounded-xl border border-border overflow-hidden transition-colors", proxyConfig.enabled ? "bg-card" : "bg-card/50")}>
-        <button onClick={onToggleExpanded} className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer">
-          <span className="text-sm font-medium text-foreground">{t("settings.proxyConfigTitle", { defaultValue: "Proxy Configuration" })}</span>
+      <div
+        className={cn(
+          "rounded-xl border border-border overflow-hidden transition-colors",
+          proxyConfig.enabled ? "bg-card" : "bg-card/50",
+        )}
+      >
+        <button
+          onClick={onToggleExpanded}
+          className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer"
+        >
+          <span className="text-sm font-medium text-foreground">
+            {t("settings.proxyConfigTitle", { defaultValue: "Proxy Configuration" })}
+          </span>
           <ChevronDown
             className={cn(
               "w-4 h-4 text-muted-foreground transition-transform duration-200",
-              !proxyExpanded && "-rotate-90"
+              !proxyExpanded && "-rotate-90",
             )}
           />
         </button>
@@ -69,9 +79,7 @@ export function ProxySection({
           <div className="px-4 pb-4 pt-1 border-t border-border space-y-3">
             <div className="grid grid-cols-[120px_1fr_80px] gap-3">
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">
-                  {t("settings.proxyType")}
-                </label>
+                <label className="text-xs text-muted-foreground block mb-1">{t("settings.proxyType")}</label>
                 <select
                   value={proxyConfig.proxy_type}
                   onChange={(e) =>
@@ -88,9 +96,7 @@ export function ProxySection({
                 </select>
               </div>
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">
-                  {t("settings.proxyHost")}
-                </label>
+                <label className="text-xs text-muted-foreground block mb-1">{t("settings.proxyHost")}</label>
                 <Input
                   type="text"
                   value={proxyConfig.host}
@@ -99,15 +105,11 @@ export function ProxySection({
                 />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">
-                  {t("settings.proxyPort")}
-                </label>
+                <label className="text-xs text-muted-foreground block mb-1">{t("settings.proxyPort")}</label>
                 <Input
                   type="number"
                   value={proxyConfig.port}
-                  onChange={(e) =>
-                    onConfigChange({ ...proxyConfig, port: parseInt(e.target.value, 10) || 7897 })
-                  }
+                  onChange={(e) => onConfigChange({ ...proxyConfig, port: parseInt(e.target.value, 10) || 7897 })}
                   placeholder="7897"
                 />
               </div>
@@ -115,35 +117,25 @@ export function ProxySection({
 
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">
-                  {t("settings.proxyUsername")}
-                </label>
+                <label className="text-xs text-muted-foreground block mb-1">{t("settings.proxyUsername")}</label>
                 <Input
                   type="text"
                   value={proxyConfig.username || ""}
-                  onChange={(e) =>
-                    onConfigChange({ ...proxyConfig, username: e.target.value || null })
-                  }
+                  onChange={(e) => onConfigChange({ ...proxyConfig, username: e.target.value || null })}
                   placeholder={t("common.optional")}
                 />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">
-                  {t("settings.proxyPassword")}
-                </label>
+                <label className="text-xs text-muted-foreground block mb-1">{t("settings.proxyPassword")}</label>
                 <Input
                   type="password"
                   value={proxyConfig.password || ""}
-                  onChange={(e) =>
-                    onConfigChange({ ...proxyConfig, password: e.target.value || null })
-                  }
+                  onChange={(e) => onConfigChange({ ...proxyConfig, password: e.target.value || null })}
                   placeholder={t("common.optional")}
                 />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">
-                  {t("settings.proxyBypass")}
-                </label>
+                <label className="text-xs text-muted-foreground block mb-1">{t("settings.proxyBypass")}</label>
                 <Input
                   type="text"
                   value={proxyConfig.bypass || ""}

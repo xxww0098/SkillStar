@@ -24,6 +24,14 @@ pub fn invalidate_cache() {
     }
 }
 
+pub fn clear_update_state(name: &str) {
+    if let Ok(mut cache) = UPDATE_STATE_CACHE.write() {
+        // Assume false since we just updated it, rather than deleting entirely
+        // which could cause a flash if the UI forces a refresh before the next update check
+        cache.insert(name.to_string(), false);
+    }
+}
+
 fn normalize_snapshot_component(raw: &str) -> Option<String> {
     let trimmed = raw.trim().to_ascii_lowercase();
     if trimmed.is_empty() {
@@ -48,9 +56,7 @@ pub fn installed_snapshot_markers() -> HashSet<String> {
     if let Ok(entries) = std::fs::read_dir(&hub_skills_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if !path.is_dir()
-                && !super::paths::is_link(&path)
-            {
+            if !path.is_dir() && !super::paths::is_link(&path) {
                 continue;
             }
             if let Some(name) = entry.file_name().to_str() {
@@ -205,13 +211,16 @@ pub async fn refresh_skill_updates(names: Option<Vec<String>>) -> Result<Vec<Ski
     // Pre-fetch: deduplicate repo-cached skills by repo root and fetch each
     // repo once. This avoids N redundant `git fetch` calls when N skills
     // share the same repository.
-    {
+    // Returns the set of repo roots where fetch failed (e.g. shallow file
+    // race). Skills in failed repos will preserve their existing update state.
+    let failed_fetch_roots: Arc<std::collections::HashSet<std::path::PathBuf>> = {
         let dirs = skill_dirs.clone();
-        let _ = tokio::task::spawn_blocking(move || {
-            repo_scanner::prefetch_unique_repos(&dirs);
-        })
-        .await;
-    }
+        let result =
+            tokio::task::spawn_blocking(move || repo_scanner::prefetch_unique_repos(&dirs))
+                .await
+                .unwrap_or_default();
+        Arc::new(result)
+    };
 
     let semaphore = Arc::new(Semaphore::new(update_check_concurrency_limit()));
     let mut tasks = JoinSet::new();
@@ -232,24 +241,33 @@ pub async fn refresh_skill_updates(names: Option<Vec<String>>) -> Result<Vec<Ski
             .await
             .context("Failed to acquire update-check permit")?;
 
+        let failed_roots = Arc::clone(&failed_fetch_roots);
         tasks.spawn_blocking(move || {
             let _permit = permit;
-            SkillUpdateState {
-                name,
-                update_available: refresh_single_skill_update(&path),
-            }
+            let update_available = refresh_single_skill_update(&path, &failed_roots);
+            (name, update_available)
         });
     }
 
     let mut states = Vec::new();
     while let Some(result) = tasks.join_next().await {
-        let state = result.map_err(|err| anyhow!("skill-update task failed: {}", err))?;
-        states.push(state);
+        let (name, update_available) =
+            result.map_err(|err| anyhow!("skill-update task failed: {}", err))?;
+        // None means "fetch failed, status unknown" — skip so the previous
+        // cached value is preserved and the UI doesn't falsely clear the
+        // update badge.
+        if let Some(available) = update_available {
+            states.push(SkillUpdateState {
+                name,
+                update_available: available,
+            });
+        }
     }
 
     states.sort_by(|left, right| left.name.cmp(&right.name));
     if let Ok(mut cache) = UPDATE_STATE_CACHE.write() {
-        cache.clear();
+        // Only update entries we got definitive results for; leave the rest
+        // as-is so failed-fetch skills keep their previous state.
         for state in &states {
             cache.insert(state.name.clone(), state.update_available);
         }
@@ -397,14 +415,18 @@ fn build_installed_skill(
     })
 }
 
-fn refresh_single_skill_update(path: &Path) -> bool {
+fn refresh_single_skill_update(
+    path: &Path,
+    failed_fetch_roots: &std::collections::HashSet<std::path::PathBuf>,
+) -> Option<bool> {
     // For repo-cached skills, the repo has already been fetched by
     // prefetch_unique_repos; only compare local HEAD vs origin/HEAD.
+    // Returns None when the prefetch failed for this skill's repo.
     if repo_scanner::is_repo_cached_skill(path) {
-        return repo_scanner::check_repo_skill_update_local(path);
+        return repo_scanner::check_repo_skill_update_local(path, failed_fetch_roots);
     }
     let _ = git_ops::ensure_worktree_checked_out(path);
-    git_ops::check_update(path).unwrap_or(false)
+    Some(git_ops::check_update(path).unwrap_or(false))
 }
 
 fn detect_agent_links(skill_name: &str, profiles: &[AgentProfile]) -> Vec<String> {

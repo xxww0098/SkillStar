@@ -189,7 +189,9 @@ fn resolve_installed_name(
     let mut matches: Vec<String> = lockfile
         .skills
         .iter()
-        .filter(|entry| same_remote_url(&entry.git_url, url) && skills_dir.join(&entry.name).exists())
+        .filter(|entry| {
+            same_remote_url(&entry.git_url, url) && skills_dir.join(&entry.name).exists()
+        })
         .map(|entry| entry.name.clone())
         .collect();
     matches.sort();

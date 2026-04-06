@@ -1,7 +1,7 @@
 import { Paintbrush } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { cn } from "../../../lib/utils";
 import type { BackgroundStyle } from "../../../lib/backgroundStyle";
+import { cn } from "../../../lib/utils";
 
 interface AppearanceSectionProps {
   backgroundStyle: BackgroundStyle;
@@ -13,10 +13,7 @@ const BACKGROUND_OPTIONS: { id: BackgroundStyle; labelKey: string }[] = [
   { id: "current", labelKey: "settings.backgroundCurrent" },
 ];
 
-export function AppearanceSection({
-  backgroundStyle,
-  onBackgroundStyleChange,
-}: AppearanceSectionProps) {
+export function AppearanceSection({ backgroundStyle, onBackgroundStyleChange }: AppearanceSectionProps) {
   const { t } = useTranslation();
 
   return (
@@ -40,7 +37,7 @@ export function AppearanceSection({
                   "px-4 py-1.5 rounded-md text-xs font-medium transition cursor-pointer",
                   backgroundStyle === option.id
                     ? "bg-background text-foreground shadow-sm ring-1 ring-border/50"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted",
                 )}
               >
                 {t(option.labelKey)}

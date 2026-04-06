@@ -10,51 +10,51 @@
  * so typos and arg mismatches are caught at compile time.
  */
 
+import { type UseQueryOptions, useMutation, useQuery } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
-import { useQuery, useMutation, type UseQueryOptions } from "@tanstack/react-query";
 import type {
-  Skill,
-  SkillContent,
-  SkillUpdateState,
-  UpdateResult,
-  SkillCardDeck,
-  AiConfig,
-  ProxyConfig,
   AgentProfile,
+  AiConfig,
+  AiKeywordSearchResult,
+  AiPickResponse,
+  BundleManifest,
+  CacheCleanResult,
   CustomProfileDef,
-  ProjectEntry,
-  SkillsList,
-  ProjectScanResult,
-  ImportTarget,
+  GhStatus,
+  ImportBundleResult,
+  ImportMultiBundleResult,
   ImportResult,
-  ProjectAgentDetection,
+  ImportTarget,
+  LocalFirstResult,
   MarketplaceResult,
   MarketplaceSkillDetails,
+  MultiManifest,
+  MymemoryUsageStats,
   OfficialPublisher,
+  ProjectAgentDetection,
+  ProjectEntry,
+  ProjectScanResult,
+  ProxyConfig,
   PublisherRepo,
   PublisherRepoSkill,
-  AiKeywordSearchResult,
-  LocalFirstResult,
-  SyncStateEntry,
-  GhStatus,
   PublishResult,
-  UserRepo,
-  ScanResult,
-  SkillInstallTarget,
   RepoHistoryEntry,
-  StorageOverview,
-  CacheCleanResult,
-  BundleManifest,
-  ImportBundleResult,
-  MultiManifest,
-  ImportMultiBundleResult,
-  SecurityScanResult,
+  ScanResult,
   SecurityScanEstimate,
   SecurityScanLogEntry,
   SecurityScanPolicy,
-  MymemoryUsageStats,
+  SecurityScanResult,
   ShortTextTranslationResult,
-  AiPickResponse,
+  Skill,
+  SkillCardDeck,
+  SkillContent,
+  SkillInstallTarget,
+  SkillsList,
+  SkillUpdateState,
+  StorageOverview,
+  SyncStateEntry,
+  UpdateResult,
+  UserRepo,
 } from "../types";
 
 // ── PatrolStatus (not exported from types yet) ──────────────────────
@@ -354,9 +354,7 @@ interface TauriCommands {
  */
 export function tauriInvoke<K extends keyof TauriCommands>(
   command: K,
-  ...args: TauriCommands[K]["args"] extends Record<string, never>
-    ? []
-    : [TauriCommands[K]["args"]]
+  ...args: TauriCommands[K]["args"] extends Record<string, never> ? [] : [TauriCommands[K]["args"]]
 ): Promise<TauriCommands[K]["result"]> {
   return invoke<TauriCommands[K]["result"]>(command, args[0] as Record<string, unknown>);
 }
@@ -364,9 +362,7 @@ export function tauriInvoke<K extends keyof TauriCommands>(
 // ── React Query Wrappers ────────────────────────────────────────────
 
 type QueryCommands = {
-  [K in keyof TauriCommands]: TauriCommands[K]["args"] extends Record<string, never>
-    ? K
-    : never;
+  [K in keyof TauriCommands]: TauriCommands[K]["args"] extends Record<string, never> ? K : never;
 }[keyof TauriCommands];
 
 /**
@@ -378,10 +374,7 @@ type QueryCommands = {
  */
 export function useTauriQuery<K extends QueryCommands>(
   command: K,
-  options?: Omit<
-    UseQueryOptions<TauriCommands[K]["result"], Error>,
-    "queryKey" | "queryFn"
-  >,
+  options?: Omit<UseQueryOptions<TauriCommands[K]["result"], Error>, "queryKey" | "queryFn">,
 ) {
   return useQuery<TauriCommands[K]["result"], Error>({
     queryKey: [command],
@@ -400,10 +393,7 @@ export function useTauriQuery<K extends QueryCommands>(
 export function useTauriQueryWithArgs<K extends keyof TauriCommands>(
   command: K,
   args: TauriCommands[K]["args"],
-  options?: Omit<
-    UseQueryOptions<TauriCommands[K]["result"], Error>,
-    "queryKey" | "queryFn"
-  >,
+  options?: Omit<UseQueryOptions<TauriCommands[K]["result"], Error>, "queryKey" | "queryFn">,
 ) {
   return useQuery<TauriCommands[K]["result"], Error>({
     queryKey: [command, args],
@@ -421,14 +411,9 @@ export function useTauriQueryWithArgs<K extends keyof TauriCommands>(
  * ```
  */
 export function useTauriMutation<K extends keyof TauriCommands>(command: K) {
-  return useMutation<
-    TauriCommands[K]["result"],
-    Error,
-    TauriCommands[K]["args"]
-  >({
-    mutationFn: (args) =>
-      invoke<TauriCommands[K]["result"]>(command, args as Record<string, unknown>),
+  return useMutation<TauriCommands[K]["result"], Error, TauriCommands[K]["args"]>({
+    mutationFn: (args) => invoke<TauriCommands[K]["result"]>(command, args as Record<string, unknown>),
   });
 }
 
-export type { TauriCommands, PatrolStatus, RepoCacheInfo };
+export type { PatrolStatus, RepoCacheInfo, TauriCommands };

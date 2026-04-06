@@ -216,8 +216,8 @@ pub fn list_linked_skills(agent_id: &str) -> Result<Vec<String>> {
         let entry = entry?;
         let path = entry.path();
         // Include symlinks/junctions AND copy-based deployments
-        let is_managed = super::paths::is_link(&path)
-            || (path.is_dir() && path.join("SKILL.md").exists());
+        let is_managed =
+            super::paths::is_link(&path) || (path.is_dir() && path.join("SKILL.md").exists());
         if is_managed {
             if let Some(name) = entry.file_name().to_str() {
                 names.push(name.to_string());

@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useTranslation } from "react-i18next";
 import { Bot, Check, ChevronDown, ChevronRight } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 interface AcpConfig {
@@ -12,16 +12,12 @@ interface AcpConfig {
 
 /** Built-in agent presets for quick selection. */
 const AGENT_PRESETS = [
-  { label: "Claude Code", command: "npx -y @agentclientprotocol/claude-agent-acp" },
+  { label: "Claude", command: "npx -y @agentclientprotocol/claude-agent-acp" },
   { label: "OpenCode", command: "opencode acp" },
 ] as const;
 
 function isSameAcpConfig(a: AcpConfig, b: AcpConfig): boolean {
-  return (
-    a.enabled === b.enabled &&
-    a.agent_command === b.agent_command &&
-    a.agent_label === b.agent_label
-  );
+  return a.enabled === b.enabled && a.agent_command === b.agent_command && a.agent_label === b.agent_label;
 }
 
 export function AcpSection() {
@@ -29,7 +25,7 @@ export function AcpSection() {
   const [config, setConfig] = useState<AcpConfig>({
     enabled: false,
     agent_command: "npx -y @agentclientprotocol/claude-agent-acp",
-    agent_label: "Claude Code",
+    agent_label: "Claude",
   });
   const savedConfigRef = useRef<AcpConfig>(config);
   const [loaded, setLoaded] = useState(false);
@@ -67,16 +63,13 @@ export function AcpSection() {
     return () => clearTimeout(timer);
   }, [config, loaded, saving, t]);
 
-  const selectPreset = useCallback(
-    (preset: (typeof AGENT_PRESETS)[number]) => {
-      setConfig((prev) => ({
-        ...prev,
-        agent_command: preset.command,
-        agent_label: preset.label,
-      }));
-    },
-    []
-  );
+  const selectPreset = useCallback((preset: (typeof AGENT_PRESETS)[number]) => {
+    setConfig((prev) => ({
+      ...prev,
+      agent_command: preset.command,
+      agent_label: preset.label,
+    }));
+  }, []);
 
   const toggleEnabled = useCallback(() => {
     setConfig((prev) => ({ ...prev, enabled: !prev.enabled }));
@@ -88,9 +81,7 @@ export function AcpSection() {
         <div className="w-7 h-7 rounded-lg bg-violet-500/10 flex items-center justify-center shrink-0 border border-violet-500/20">
           <Bot className="w-4 h-4 text-violet-400" />
         </div>
-        <h2 className="text-sm font-semibold text-foreground tracking-tight">
-          {t("settings.acpTitle")}
-        </h2>
+        <h2 className="text-sm font-semibold text-foreground tracking-tight">{t("settings.acpTitle")}</h2>
         {saved && (
           <span className="ml-auto mr-3 text-[11px] text-emerald-400 flex items-center gap-1">
             <Check className="w-3 h-3" />
@@ -126,12 +117,8 @@ export function AcpSection() {
           onClick={() => setExpanded(!expanded)}
         >
           <div>
-            <p className="text-xs font-medium text-foreground">
-              {t("settings.acpAgent")}
-            </p>
-            <p className="text-[11px] text-muted-foreground">
-              {config.agent_label}
-            </p>
+            <p className="text-xs font-medium text-foreground">{t("settings.acpAgent")}</p>
+            <p className="text-[11px] text-muted-foreground">{config.agent_label}</p>
           </div>
           {expanded ? (
             <ChevronDown className="w-4 h-4 text-muted-foreground" />
@@ -143,9 +130,7 @@ export function AcpSection() {
         {/* Expanded config */}
         {expanded && (
           <div className="px-4 pb-4 space-y-3 border-t border-border/50">
-            <p className="text-[11px] text-muted-foreground pt-3 leading-relaxed">
-              {t("settings.acpDesc")}
-            </p>
+            <p className="text-[11px] text-muted-foreground pt-3 leading-relaxed">{t("settings.acpDesc")}</p>
 
             {/* Agent presets */}
             <div className="space-y-1.5">
@@ -188,18 +173,14 @@ export function AcpSection() {
                   setConfig((prev) => ({
                     ...prev,
                     agent_command: e.target.value,
-                    agent_label:
-                      AGENT_PRESETS.find((p) => p.command === e.target.value)
-                        ?.label ?? "Custom",
+                    agent_label: AGENT_PRESETS.find((p) => p.command === e.target.value)?.label ?? "Custom",
                   }))
                 }
                 className="w-full rounded-lg bg-background/60 border border-border/50 px-3 py-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary/50"
                 placeholder="npx -y @agentclientprotocol/claude-agent-acp"
                 spellCheck={false}
               />
-              <p className="text-[10px] text-muted-foreground/70">
-                {t("settings.acpCommandHint")}
-              </p>
+              <p className="text-[10px] text-muted-foreground/70">{t("settings.acpCommandHint")}</p>
             </div>
           </div>
         )}

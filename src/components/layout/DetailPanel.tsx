@@ -1,47 +1,28 @@
-import {
-  lazy,
-  Suspense,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { motion, AnimatePresence } from "framer-motion";
-import { useTranslation } from "react-i18next";
+import { AnimatePresence, motion } from "framer-motion";
 import {
-  X,
+  BookOpen,
+  Calendar,
+  Check,
   Download,
-  GitBranch,
-  RefreshCw,
-  Trash2,
   Edit3,
   ExternalLink,
-
-  Sparkles,
+  GitBranch,
   Languages,
+  RefreshCw,
+  ShieldCheck,
+  Sparkles,
   Square,
   Star,
-  Calendar,
-  ShieldCheck,
-  BookOpen,
-  Check,
+  Trash2,
+  X,
 } from "lucide-react";
-import { Github as GitHub } from "../ui/icons/Github";
-import { Button } from "../ui/button";
-import { Badge } from "../ui/badge";
-import { Markdown } from "../ui/Markdown";
-import { Skeleton } from "../ui/Skeleton";
-import { LoadingLogo } from "../ui/LoadingLogo";
-
-import {
-  formatAiErrorMessage,
-  formatInstalls,
-  navigateToAiSettings,
-} from "../../lib/utils";
-import { unwrapOuterMarkdownFence } from "../../lib/frontmatter";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useAiStream } from "../../hooks/useAiStream";
+import { unwrapOuterMarkdownFence } from "../../lib/frontmatter";
+import { formatAiErrorMessage, formatInstalls, navigateToAiSettings } from "../../lib/utils";
 import type {
   AiStreamPayload,
   LocalFirstResult,
@@ -50,17 +31,19 @@ import type {
   Skill,
   SkillContent,
 } from "../../types";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { Github as GitHub } from "../ui/icons/Github";
+import { LoadingLogo } from "../ui/LoadingLogo";
+import { Markdown } from "../ui/Markdown";
+import { Skeleton } from "../ui/Skeleton";
 
 const AUTO_TRANSLATE_DESCRIPTION_KEY = "skillstar:auto-translate-description";
 const AUTO_TRANSLATE_DESCRIPTION_TIMEOUT_MS = 6000;
 
-const SkillEditor = lazy(() =>
-  import("../shared/SkillEditor").then((mod) => ({ default: mod.SkillEditor })),
-);
+const SkillEditor = lazy(() => import("../shared/SkillEditor").then((mod) => ({ default: mod.SkillEditor })));
 
-const SkillReader = lazy(() =>
-  import("../shared/SkillReader").then((mod) => ({ default: mod.SkillReader })),
-);
+const SkillReader = lazy(() => import("../shared/SkillReader").then((mod) => ({ default: mod.SkillReader })));
 
 interface DetailPanelProps {
   skill: Skill | null;
@@ -134,25 +117,21 @@ export function DetailPanel({
   const [quickReadVisible, setQuickReadVisible] = useState(false);
   const [quickReading, setQuickReading] = useState(false);
   const [quickReadHasDelta, setQuickReadHasDelta] = useState(false);
-  const [quickReadWasNonStreaming, setQuickReadWasNonStreaming] =
-    useState(false);
+  const [quickReadWasNonStreaming, setQuickReadWasNonStreaming] = useState(false);
   const [quickReadError, setQuickReadError] = useState<string | null>(null);
   const targetLanguage = descriptionStream.targetLanguage;
 
-  const [descriptionDeferTimedOut, setDescriptionDeferTimedOut] =
-    useState(false);
-  const [autoTranslateDescription, setAutoTranslateDescription] =
-    useState<boolean>(() => {
-      try {
-        return localStorage.getItem(AUTO_TRANSLATE_DESCRIPTION_KEY) === "true";
-      } catch {
-        return false;
-      }
-    });
+  const [descriptionDeferTimedOut, setDescriptionDeferTimedOut] = useState(false);
+  const [autoTranslateDescription, setAutoTranslateDescription] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(AUTO_TRANSLATE_DESCRIPTION_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
 
   // Marketplace detail fetching
-  const [skillDetails, setSkillDetails] =
-    useState<MarketplaceSkillDetails | null>(null);
+  const [skillDetails, setSkillDetails] = useState<MarketplaceSkillDetails | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const quickReadCacheRef = useRef<Map<string, string>>(new Map());
 
@@ -162,7 +141,6 @@ export function DetailPanel({
   const autoTranslateAttemptedKeyRef = useRef<string | null>(null);
   // Guard async setState after component unmount
   const mountedRef = useRef(true);
-
 
   // Cleanup event listeners on unmount
   useEffect(() => {
@@ -182,13 +160,10 @@ export function DetailPanel({
     setDetailsLoading(true);
     try {
       const readLocal = () =>
-        invoke<LocalFirstResult<MarketplaceSkillDetails>>(
-          "get_skill_detail_local",
-          {
-            source,
-            name,
-          },
-        );
+        invoke<LocalFirstResult<MarketplaceSkillDetails>>("get_skill_detail_local", {
+          source,
+          name,
+        });
       const result = await readLocal();
       if (!mountedRef.current) return;
       setSkillDetails(result.data);
@@ -202,10 +177,7 @@ export function DetailPanel({
             if (!mountedRef.current) return;
             setSkillDetails(fresh.data);
           } catch (e) {
-            console.warn(
-              "[DetailPanel] Failed to refresh local skill detail:",
-              e,
-            );
+            console.warn("[DetailPanel] Failed to refresh local skill detail:", e);
           }
         })();
       }
@@ -259,8 +231,7 @@ export function DetailPanel({
 
   const handleTranslateDescription = useCallback(
     async (mode: "manual" | "auto" = "manual") => {
-      const renderedDescription =
-        skillDetails?.summary?.trim() || skill?.description?.trim() || "";
+      const renderedDescription = skillDetails?.summary?.trim() || skill?.description?.trim() || "";
       if (!renderedDescription || !shortDescriptionTranslationEnabled) return;
 
       if (mode === "auto") {
@@ -293,8 +264,7 @@ export function DetailPanel({
 
   const handleAiRetranslateDescription = useCallback(async () => {
     if (!aiConfigured || translatingDescription) return;
-    const renderedDescription =
-      skillDetails?.summary?.trim() || skill?.description?.trim() || "";
+    const renderedDescription = skillDetails?.summary?.trim() || skill?.description?.trim() || "";
     if (!renderedDescription) return;
 
     await descriptionStream.execute(renderedDescription, {
@@ -302,19 +272,12 @@ export function DetailPanel({
       keepVisibleWhileLoading: true,
       extraInvokeParams: { forceAi: true },
     });
-  }, [
-    aiConfigured,
-    translatingDescription,
-    skill,
-    skillDetails?.summary,
-    descriptionStream,
-  ]);
+  }, [aiConfigured, translatingDescription, skill, skillDetails?.summary, descriptionStream]);
 
   // Deferred timeout for auto-translate
   useEffect(() => {
     if (!autoTranslateDescription || !translatingDescription) return;
-    const renderedDescription =
-      skillDetails?.summary?.trim() || skill?.description?.trim() || "";
+    const renderedDescription = skillDetails?.summary?.trim() || skill?.description?.trim() || "";
     if (!renderedDescription) return;
     if (translatedDescription != null || descriptionTranslateError) return;
 
@@ -335,19 +298,13 @@ export function DetailPanel({
 
   // Auto-translate trigger
   useEffect(() => {
-    if (
-      !skill ||
-      !autoTranslateDescription ||
-      !shortDescriptionTranslationEnabled
-    )
-      return;
+    if (!skill || !autoTranslateDescription || !shortDescriptionTranslationEnabled) return;
     // If the skill already ships with a pre-cached localized_description
     // (hydrated in the reset effect), skip auto-translate entirely.
     // We check the prop directly because effects from the same render cycle
     // can't see each other's queued state updates.
     if (skill.localized_description) return;
-    const renderedDescription =
-      skillDetails?.summary?.trim() || skill.description?.trim() || "";
+    const renderedDescription = skillDetails?.summary?.trim() || skill.description?.trim() || "";
     if (!renderedDescription) return;
     const autoKey = `${targetLanguage}::${skill.name}::${renderedDescription}`;
     if (autoTranslateAttemptedKeyRef.current === autoKey) return;
@@ -423,27 +380,24 @@ export function DetailPanel({
     };
 
     try {
-      const unlisten = await listen<AiStreamPayload>(
-        "ai://summarize-stream",
-        (event) => {
-          if (activeQuickReadIdRef.current !== requestId) return;
-          const payload = event.payload;
-          if (payload.requestId !== requestId) return;
+      const unlisten = await listen<AiStreamPayload>("ai://summarize-stream", (event) => {
+        if (activeQuickReadIdRef.current !== requestId) return;
+        const payload = event.payload;
+        if (payload.requestId !== requestId) return;
 
-          if (payload.event === "delta" && payload.delta) {
-            deltaCount += 1;
-            streamedRaw += payload.delta;
-            if (rafId == null) {
-              rafId = requestAnimationFrame(flushDelta);
-            }
-            return;
+        if (payload.event === "delta" && payload.delta) {
+          deltaCount += 1;
+          streamedRaw += payload.delta;
+          if (rafId == null) {
+            rafId = requestAnimationFrame(flushDelta);
           }
+          return;
+        }
 
-          if (payload.event === "error" && payload.message) {
-            setQuickReadError(payload.message);
-          }
-        },
-      );
+        if (payload.event === "error" && payload.message) {
+          setQuickReadError(payload.message);
+        }
+      });
       quickReadUnlistenRef.current = unlisten;
 
       const skillContent = await onReadContent(skill.name);
@@ -491,35 +445,22 @@ export function DetailPanel({
 
   const canEdit = skill?.installed && onReadContent && onSaveContent;
 
-
-
   // skills.sh URL
-  const skillsShUrl = skill?.source
-    ? `https://skills.sh/${skill.source}/${skill.name}`
-    : null;
+  const skillsShUrl = skill?.source ? `https://skills.sh/${skill.source}/${skill.name}` : null;
   const rawDescription = skill?.description?.trim() || "";
   // Use enriched summary from detail fetch when available
   const enrichedDescription = skillDetails?.summary?.trim() || rawDescription;
   const hasDescription = enrichedDescription.length > 0;
   const hasTranslationForCurrentDescription =
     translatedDescription != null &&
-    (descriptionTranslationSource === enrichedDescription ||
-      descriptionTranslationSource === rawDescription);
+    (descriptionTranslationSource === enrichedDescription || descriptionTranslationSource === rawDescription);
   const descriptionTranslationMatches =
     descriptionTranslationSource != null &&
-    (descriptionTranslationSource === enrichedDescription ||
-      descriptionTranslationSource === rawDescription);
+    (descriptionTranslationSource === enrichedDescription || descriptionTranslationSource === rawDescription);
   const descriptionTranslationActive =
-    descriptionTranslationVisible &&
-    translatedDescription != null &&
-    descriptionTranslationMatches;
-  const displayDescriptionProvider =
-    descriptionTranslationProvider ??
-    (descriptionTranslationActive ? "ai" : null);
-  const localizedDescriptionError = formatAiErrorMessage(
-    descriptionTranslateError,
-    t,
-  );
+    descriptionTranslationVisible && translatedDescription != null && descriptionTranslationMatches;
+  const displayDescriptionProvider = descriptionTranslationProvider ?? (descriptionTranslationActive ? "ai" : null);
+  const localizedDescriptionError = formatAiErrorMessage(descriptionTranslateError, t);
   const localizedQuickReadError = formatAiErrorMessage(quickReadError, t);
   const shouldDeferDescriptionRender =
     autoTranslateDescription &&
@@ -529,10 +470,7 @@ export function DetailPanel({
     !hasTranslationForCurrentDescription &&
     !descriptionTranslateError &&
     !descriptionDeferTimedOut;
-  const displayDescription = descriptionTranslationActive
-    ? translatedDescription
-    : enrichedDescription;
-
+  const displayDescription = descriptionTranslationActive ? translatedDescription : enrichedDescription;
 
   return (
     <AnimatePresence mode="sync">
@@ -578,11 +516,7 @@ export function DetailPanel({
               </div>
             }
           >
-            <SkillReader
-              skillName={skill.name}
-              content={skillDetails.readme}
-              onClose={() => setReading(false)}
-            />
+            <SkillReader skillName={skill.name} content={skillDetails.readme} onClose={() => setReading(false)} />
           </Suspense>
         </motion.div>
       )}
@@ -613,10 +547,7 @@ export function DetailPanel({
               {/* Meta */}
               <div className="flex items-center gap-3 flex-wrap">
                 {skill.rank && (
-                  <Badge
-                    variant="outline"
-                    className="tabular-nums font-semibold"
-                  >
+                  <Badge variant="outline" className="tabular-nums font-semibold">
                     {skill.rank}
                   </Badge>
                 )}
@@ -643,22 +574,15 @@ export function DetailPanel({
                       : `${formatInstalls(skill.stars)} installs`}
                   </div>
                 )}
-                {skill.skill_type === "local" && (
-                  <span className="text-caption">local</span>
+                {skill.skill_type === "local" && <span className="text-caption">local</span>}
+                {skill.source && <span className="text-caption break-all">by {skill.source}</span>}
+                {!skill.source && skill.author && <span className="text-caption break-all">by {skill.author}</span>}
+                {skillDetails?.github_stars != null && skillDetails.github_stars > 0 && (
+                  <div className="flex items-center gap-1 text-caption">
+                    <Star className="w-3.5 h-3.5 text-amber-400/70" />
+                    {skillDetails.github_stars}
+                  </div>
                 )}
-                {skill.source && (
-                  <span className="text-caption break-all">by {skill.source}</span>
-                )}
-                {!skill.source && skill.author && (
-                  <span className="text-caption break-all">by {skill.author}</span>
-                )}
-                {skillDetails?.github_stars != null &&
-                  skillDetails.github_stars > 0 && (
-                    <div className="flex items-center gap-1 text-caption">
-                      <Star className="w-3.5 h-3.5 text-amber-400/70" />
-                      {skillDetails.github_stars}
-                    </div>
-                  )}
                 {skillDetails?.first_seen && (
                   <div className="flex items-center gap-1 text-caption">
                     <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
@@ -708,17 +632,13 @@ export function DetailPanel({
                     </p>
                   ) : hasDescription ? (
                     <Markdown
-                      streaming={
-                        translatingDescription && descriptionTranslationActive
-                      }
+                      streaming={translatingDescription && descriptionTranslationActive}
                       className="text-body leading-relaxed [&_p]:my-0 [&_p]:whitespace-pre-wrap [&_p+ul]:mt-3 [&_p+ol]:mt-3 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1.5 [&_strong]:text-foreground"
                     >
                       {displayDescription}
                     </Markdown>
                   ) : (
-                    <p className="text-body leading-relaxed">
-                      {t("detailPanel.noDescription")}
-                    </p>
+                    <p className="text-body leading-relaxed">{t("detailPanel.noDescription")}</p>
                   )}
                 </div>
                 {/* AI Actions Row */}
@@ -731,11 +651,9 @@ export function DetailPanel({
                           : navigateToAiSettings
                       }
                       className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition duration-300 cursor-pointer shadow-sm relative overflow-hidden group focus-ring ${
-                        shortDescriptionTranslationEnabled &&
-                        translatingDescription
+                        shortDescriptionTranslationEnabled && translatingDescription
                           ? "bg-destructive/10 text-destructive border border-destructive/20"
-                          : shortDescriptionTranslationEnabled &&
-                              descriptionTranslationActive
+                          : shortDescriptionTranslationEnabled && descriptionTranslationActive
                             ? "bg-primary/10 text-primary border border-primary/20"
                             : "bg-gradient-to-br from-background to-muted/50 border border-border hover:border-primary/40 text-muted-foreground hover:text-foreground"
                       }`}
@@ -748,9 +666,7 @@ export function DetailPanel({
                         title={t("detailPanel.autoTranslateDescription")}
                         onClick={(event) => {
                           event.stopPropagation();
-                          toggleAutoTranslateDescription(
-                            !autoTranslateDescription,
-                          );
+                          toggleAutoTranslateDescription(!autoTranslateDescription);
                         }}
                         className={`relative z-10 h-4 w-4 rounded-[4px] border flex items-center justify-center transition-colors ${
                           autoTranslateDescription
@@ -760,8 +676,7 @@ export function DetailPanel({
                       >
                         <Check className="h-3 w-3" />
                       </span>
-                      {shortDescriptionTranslationEnabled &&
-                      translatingDescription ? (
+                      {shortDescriptionTranslationEnabled && translatingDescription ? (
                         <Square className="w-3.5 h-3.5 fill-current animate-pulse relative z-10" />
                       ) : (
                         <Languages
@@ -814,39 +729,36 @@ export function DetailPanel({
                     {localizedDescriptionError}
                   </div>
                 )}
-                {translatingDescription &&
-                  descriptionTranslationActive &&
-                  descriptionHasDelta && (
-                    <div className="text-xs text-primary bg-primary/10 rounded-md px-3 py-2 border border-primary/20">
-                      {t("detailPanel.streamingDescriptionPreview")}
-                    </div>
-                  )}
-                {descriptionTranslationActive &&
-                  (displayDescriptionProvider || aiConfigured) && (
-                    <div className="text-xs text-muted-foreground bg-muted/40 rounded-md px-3 py-2 border border-border flex items-center justify-between gap-3">
-                      <span>
-                        {displayDescriptionProvider
-                          ? t("detailPanel.translationSourceNotice", {
-                              source:
-                                displayDescriptionProvider === "mymemory"
-                                  ? t("detailPanel.translationSourceMyMemory")
-                                  : t("detailPanel.translationSourceAi"),
-                            })
-                          : null}
-                      </span>
-                      {aiConfigured && (
-                        <button
-                          onClick={() => void handleAiRetranslateDescription()}
-                          disabled={translatingDescription}
-                          className="text-primary hover:text-primary/80 disabled:opacity-60 disabled:cursor-not-allowed transition-colors cursor-pointer whitespace-nowrap"
-                        >
-                          {translatingDescription
-                            ? t("detailPanel.retranslatingWithAi")
-                            : t("detailPanel.retranslateWithAi")}
-                        </button>
-                      )}
-                    </div>
-                  )}
+                {translatingDescription && descriptionTranslationActive && descriptionHasDelta && (
+                  <div className="text-xs text-primary bg-primary/10 rounded-md px-3 py-2 border border-primary/20">
+                    {t("detailPanel.streamingDescriptionPreview")}
+                  </div>
+                )}
+                {descriptionTranslationActive && (displayDescriptionProvider || aiConfigured) && (
+                  <div className="text-xs text-muted-foreground bg-muted/40 rounded-md px-3 py-2 border border-border flex items-center justify-between gap-3">
+                    <span>
+                      {displayDescriptionProvider
+                        ? t("detailPanel.translationSourceNotice", {
+                            source:
+                              displayDescriptionProvider === "mymemory"
+                                ? t("detailPanel.translationSourceMyMemory")
+                                : t("detailPanel.translationSourceAi"),
+                          })
+                        : null}
+                    </span>
+                    {aiConfigured && (
+                      <button
+                        onClick={() => void handleAiRetranslateDescription()}
+                        disabled={translatingDescription}
+                        className="text-primary hover:text-primary/80 disabled:opacity-60 disabled:cursor-not-allowed transition-colors cursor-pointer whitespace-nowrap"
+                      >
+                        {translatingDescription
+                          ? t("detailPanel.retranslatingWithAi")
+                          : t("detailPanel.retranslateWithAi")}
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* AI Quick Read Content */}
@@ -867,21 +779,15 @@ export function DetailPanel({
                       </div>
                     )}
 
-                    {!quickReading &&
-                      quickReadVisible &&
-                      quickReadContent &&
-                      quickReadWasNonStreaming && (
-                        <div className="text-xs text-muted-foreground bg-muted/40 rounded-md px-3 py-2 border border-border">
-                          {t("detailPanel.nonStreamingQuickReadNotice")}
-                        </div>
-                      )}
+                    {!quickReading && quickReadVisible && quickReadContent && quickReadWasNonStreaming && (
+                      <div className="text-xs text-muted-foreground bg-muted/40 rounded-md px-3 py-2 border border-border">
+                        {t("detailPanel.nonStreamingQuickReadNotice")}
+                      </div>
+                    )}
 
                     {quickReadVisible && quickReadContent && (
                       <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
-                        <Markdown
-                          streaming={quickReading}
-                          className="text-xs [&_p]:my-1 [&_strong]:text-primary/90"
-                        >
+                        <Markdown streaming={quickReading} className="text-xs [&_p]:my-1 [&_strong]:text-primary/90">
                           {quickReadContent}
                         </Markdown>
                       </div>
@@ -891,9 +797,7 @@ export function DetailPanel({
 
               {skill.installed && onReadContent && !aiConfigured && (
                 <div className="rounded-lg border border-border bg-card px-3 py-2 flex items-center gap-2">
-                  <p className="text-xs text-muted-foreground flex-1">
-                    {t("detailPanel.aiPromptHint")}
-                  </p>
+                  <p className="text-xs text-muted-foreground flex-1">{t("detailPanel.aiPromptHint")}</p>
                   <button
                     onClick={navigateToAiSettings}
                     className="px-2 py-1 rounded-md text-micro font-medium border border-border hover:bg-muted transition-colors cursor-pointer focus-ring"
@@ -902,8 +806,6 @@ export function DetailPanel({
                   </button>
                 </div>
               )}
-
-
 
               {/* skills.sh link */}
               {skillsShUrl && (
@@ -922,24 +824,17 @@ export function DetailPanel({
               {skill.skill_type !== "local" && skill.git_url && (
                 <div className="space-y-2">
                   <a
-                    href={
-                      skill.git_url.startsWith("http")
-                        ? skill.git_url
-                        : `https://${skill.git_url}`
-                    }
+                    href={skill.git_url.startsWith("http") ? skill.git_url : `https://${skill.git_url}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center gap-2 text-xs text-primary/70 hover:text-primary transition-colors"
                   >
                     <GitBranch className="w-3.5 h-3.5 shrink-0" />
-                    <span className="truncate font-mono">
-                      {skill.git_url}
-                    </span>
+                    <span className="truncate font-mono">{skill.git_url}</span>
                   </a>
 
                   <div className="text-caption">
-                    {t("detailPanel.updated")}{" "}
-                    {new Date(skill.last_updated).toLocaleDateString()}
+                    {t("detailPanel.updated")} {new Date(skill.last_updated).toLocaleDateString()}
                   </div>
                 </div>
               )}
@@ -957,11 +852,7 @@ export function DetailPanel({
 
               {/* SKILL.md — open in reader */}
               {skillDetails?.readme && (
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => setReading(true)}
-                >
+                <Button variant="outline" className="w-full" onClick={() => setReading(true)}>
                   <BookOpen className="w-4 h-4 mr-2" />
                   {t("detailPanel.readSkillMd")}
                 </Button>
@@ -969,11 +860,7 @@ export function DetailPanel({
 
               {/* Edit Button (only for installed skills) */}
               {canEdit && (
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => setEditing(true)}
-                >
+                <Button variant="outline" className="w-full" onClick={() => setEditing(true)}>
                   <Edit3 className="w-4 h-4 mr-2" />
                   {t("detailPanel.editSkillMd")}
                 </Button>
@@ -990,7 +877,6 @@ export function DetailPanel({
                   {t("detailPanel.publishToGithub")}
                 </Button>
               )}
-
             </div>
           </div>
 
@@ -998,12 +884,8 @@ export function DetailPanel({
           <div className="shrink-0 border-t border-border bg-card/80 backdrop-blur-sm p-4 space-y-2">
             {skill.installed ? (
               <>
-                {skill.update_available &&
-                  skill.skill_type !== "local" && (
-                  <Button
-                    className="w-full"
-                    onClick={() => onUpdate(skill.name)}
-                  >
+                {skill.update_available && skill.skill_type !== "local" && (
+                  <Button className="w-full" onClick={() => onUpdate(skill.name)}>
                     <RefreshCw className="w-4 h-4 mr-2" />
                     {t("detailPanel.updateAvailable")}
                   </Button>
@@ -1027,17 +909,12 @@ export function DetailPanel({
                     onClick={() => onUninstall(skill.name)}
                   >
                     <Trash2 className="w-4 h-4 mr-2" />
-                    {uninstalling
-                      ? t("common.uninstalling")
-                      : t("common.uninstall")}
+                    {uninstalling ? t("common.uninstalling") : t("common.uninstall")}
                   </Button>
                 </div>
               </>
             ) : (
-              <Button
-                className="w-full"
-                onClick={() => onInstall(skill.git_url, skill.name)}
-              >
+              <Button className="w-full" onClick={() => onInstall(skill.git_url, skill.name)}>
                 <Download className="w-4 h-4" />
                 {t("common.install")}
               </Button>

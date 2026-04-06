@@ -1,19 +1,11 @@
-import { useState } from "react";
-import { useTranslation } from "react-i18next";
-import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { AlertTriangle, Check, FileText, FolderOpen, Loader2, Package, X } from "lucide-react";
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
-import {
-  Package,
-  FileText,
-  Loader2,
-  X,
-  Check,
-  AlertTriangle,
-  FolderOpen,
-} from "lucide-react";
-import type { MultiManifest, ImportMultiBundleResult } from "../../../types";
+import type { ImportMultiBundleResult, MultiManifest } from "../../../types";
 
 interface ImportDeckBundleModalProps {
   open: boolean;
@@ -24,11 +16,7 @@ interface ImportDeckBundleModalProps {
 
 type Phase = "pick" | "preview" | "conflict" | "done" | "error";
 
-export function ImportDeckBundleModal({
-  open: isOpen,
-  onClose,
-  onDeckImported,
-}: ImportDeckBundleModalProps) {
+export function ImportDeckBundleModal({ open: isOpen, onClose, onDeckImported }: ImportDeckBundleModalProps) {
   const { t } = useTranslation();
   const prefersReducedMotion = useReducedMotion();
   const [phase, setPhase] = useState<Phase>("pick");
@@ -59,9 +47,7 @@ export function ImportDeckBundleModal({
     try {
       const selected = await open({
         multiple: false,
-        filters: [
-          { name: "SkillStar Deck Bundle", extensions: ["agd"] },
-        ],
+        filters: [{ name: "SkillStar Deck Bundle", extensions: ["agd"] }],
       });
       if (!selected) return;
 
@@ -140,7 +126,12 @@ export function ImportDeckBundleModal({
             transition={{ duration: prefersReducedMotion ? 0.01 : 0.3, ease: [0.16, 1, 0.3, 1] }}
             className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm z-50"
           >
-            <div role="dialog" aria-modal="true" aria-label={t("importDeckBundleModal.title")} className="bg-card border border-border/80 rounded-2xl shadow-xl flex flex-col overflow-hidden">
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label={t("importDeckBundleModal.title")}
+              className="bg-card border border-border/80 rounded-2xl shadow-xl flex flex-col overflow-hidden"
+            >
               <div className="flex items-center justify-between px-6 pt-4 shrink-0">
                 <h2 className="text-heading-sm flex items-center gap-2">
                   <Package className="w-4 h-4 text-primary" />
@@ -174,13 +165,9 @@ export function ImportDeckBundleModal({
                         <FolderOpen className="w-8 h-8 text-muted-foreground group-hover:text-primary transition-colors" />
                       )}
                       <span className="text-sm font-medium text-muted-foreground group-hover:text-foreground transition-colors">
-                        {loading
-                          ? t("importDeckBundleModal.reading")
-                          : t("importDeckBundleModal.pickFile")}
+                        {loading ? t("importDeckBundleModal.reading") : t("importDeckBundleModal.pickFile")}
                       </span>
-                      <span className="text-micro text-muted-foreground/70">
-                        .agd
-                      </span>
+                      <span className="text-micro text-muted-foreground/70">.agd</span>
                     </button>
                   </div>
                 )}
@@ -229,19 +216,13 @@ export function ImportDeckBundleModal({
                       )}
                     </div>
 
-                    <Button
-                      onClick={() => handleImport(false)}
-                      disabled={loading}
-                      className="w-full"
-                    >
+                    <Button onClick={() => handleImport(false)} disabled={loading} className="w-full">
                       {loading ? (
                         <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                       ) : (
                         <Package className="w-4 h-4 mr-2" />
                       )}
-                      {loading
-                        ? t("importDeckBundleModal.importing")
-                        : t("importDeckBundleModal.import")}
+                      {loading ? t("importDeckBundleModal.importing") : t("importDeckBundleModal.import")}
                     </Button>
                   </div>
                 )}
@@ -254,29 +235,15 @@ export function ImportDeckBundleModal({
                         <AlertTriangle className="w-3.5 h-3.5" />
                         {t("importDeckBundleModal.conflictTitle")}
                       </p>
-                      <p className="text-micro text-muted-foreground">
-                        {t("importDeckBundleModal.conflictDesc")}
-                      </p>
+                      <p className="text-micro text-muted-foreground">{t("importDeckBundleModal.conflictDesc")}</p>
                     </div>
 
                     <div className="flex gap-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="flex-1"
-                        onClick={handleClose}
-                      >
+                      <Button variant="ghost" size="sm" className="flex-1" onClick={handleClose}>
                         {t("common.cancel")}
                       </Button>
-                      <Button
-                        size="sm"
-                        className="flex-1"
-                        onClick={() => handleImport(true)}
-                        disabled={loading}
-                      >
-                        {loading ? (
-                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        ) : null}
+                      <Button size="sm" className="flex-1" onClick={() => handleImport(true)} disabled={loading}>
+                        {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
                         {t("importBundleModal.replace")}
                       </Button>
                     </div>
@@ -290,9 +257,7 @@ export function ImportDeckBundleModal({
                       <Check className="w-6 h-6 text-success" />
                     </div>
                     <div>
-                      <p className="text-sm font-semibold">
-                        {t("importDeckBundleModal.success")}
-                      </p>
+                      <p className="text-sm font-semibold">{t("importDeckBundleModal.success")}</p>
                       <p className="text-xs text-muted-foreground mt-1">
                         {t("importDeckBundleModal.successDesc", {
                           count: result.skill_names.length,
@@ -313,12 +278,7 @@ export function ImportDeckBundleModal({
                       {error}
                     </div>
                     <div className="flex gap-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="flex-1"
-                        onClick={handleClose}
-                      >
+                      <Button variant="ghost" size="sm" className="flex-1" onClick={handleClose}>
                         {t("common.close")}
                       </Button>
                       <Button

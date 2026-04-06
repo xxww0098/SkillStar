@@ -1,41 +1,19 @@
-import {
-  useState,
-  useEffect,
-  useMemo,
-  useCallback,
-  useRef,
-  lazy,
-  Suspense,
-} from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { useTranslation } from "react-i18next";
-import {
-  ArrowLeft,
-  ChevronRight,
-  ExternalLink,
-  Folder,
-  Package,
-  Search,
-  ArrowUp,
-  GitBranch,
-} from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
-import { Button } from "../components/ui/button";
+import { AnimatePresence, motion } from "framer-motion";
+import { ArrowLeft, ArrowUp, ChevronRight, ExternalLink, Folder, GitBranch, Package, Search } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Badge } from "../components/ui/badge";
-import { Input } from "../components/ui/input";
+import { Button } from "../components/ui/button";
 import { EmptyState } from "../components/ui/EmptyState";
-import { SkillGridSkeleton } from "../components/ui/Skeleton";
+import { Input } from "../components/ui/input";
 import { LoadingLogo } from "../components/ui/LoadingLogo";
-import { SkillGrid } from "../features/my-skills/components/SkillGrid";
+import { SkillGridSkeleton } from "../components/ui/Skeleton";
 import { PublisherAvatar } from "../features/marketplace/components/OfficialPublishers";
+import { SkillGrid } from "../features/my-skills/components/SkillGrid";
 import { useSkills } from "../features/my-skills/hooks/useSkills";
 import { cn, formatInstalls } from "../lib/utils";
-import type {
-  LocalFirstResult,
-  OfficialPublisher,
-  PublisherRepo,
-  Skill,
-} from "../types";
+import type { LocalFirstResult, OfficialPublisher, PublisherRepo, Skill } from "../types";
 
 const DetailPanel = lazy(() =>
   import("../components/layout/DetailPanel").then((mod) => ({
@@ -50,8 +28,7 @@ interface PublisherDetailProps {
 
 export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
   const { t } = useTranslation();
-  const { installSkill, updateSkill, uninstallSkill, pendingUpdateNames } =
-    useSkills();
+  const { installSkill, updateSkill, uninstallSkill, pendingUpdateNames } = useSkills();
   const [skills, setSkills] = useState<Skill[]>([]);
   const [activeRepo, setActiveRepo] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -59,9 +36,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [showBackToTop, setShowBackToTop] = useState(false);
-  const [installingNames, setInstallingNames] = useState<Set<string>>(
-    new Set(),
-  );
+  const [installingNames, setInstallingNames] = useState<Set<string>>(new Set());
   const [installStatus, setInstallStatus] = useState<string | null>(null);
   const [publisherRepos, setPublisherRepos] = useState<PublisherRepo[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -80,12 +55,9 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
     (async () => {
       try {
         const readLocal = () =>
-          invoke<LocalFirstResult<PublisherRepo[]>>(
-            "get_publisher_repos_local",
-            {
-              publisherName: publisher.name,
-            },
-          );
+          invoke<LocalFirstResult<PublisherRepo[]>>("get_publisher_repos_local", {
+            publisherName: publisher.name,
+          });
         const result = await readLocal();
         if (cancelled) return;
         setPublisherRepos(result.data);
@@ -166,9 +138,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
     if (activeRepo) return [];
     if (!searchQuery.trim()) return publisherRepos;
     const normalizedQuery = searchQuery.toLowerCase();
-    return publisherRepos.filter((repo) =>
-      repo.repo.toLowerCase().includes(normalizedQuery),
-    );
+    return publisherRepos.filter((repo) => repo.repo.toLowerCase().includes(normalizedQuery));
   }, [activeRepo, publisherRepos, searchQuery]);
 
   const visibleSkills = useMemo(() => {
@@ -184,14 +154,9 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
     );
   }, [activeRepo, skills, searchQuery]);
 
-  const shownSkillCount = activeRepo
-    ? skills.length
-    : publisherRepos.reduce((sum, repo) => sum + repo.skill_count, 0);
+  const shownSkillCount = activeRepo ? skills.length : publisherRepos.reduce((sum, repo) => sum + repo.skill_count, 0);
 
-  const totalInstalls = useMemo(
-    () => publisherRepos.reduce((sum, repo) => sum + repo.installs, 0),
-    [publisherRepos],
-  );
+  const totalInstalls = useMemo(() => publisherRepos.reduce((sum, repo) => sum + repo.installs, 0), [publisherRepos]);
 
   const handleInstall = useCallback(
     async (url: string, name: string) => {
@@ -222,22 +187,14 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
         );
         const agentCount = skill.agent_links?.length ?? 0;
         setInstallStatus(
-          agentCount > 0
-            ? t("publisherDetail.installedSynced", { count: agentCount })
-            : t("publisherDetail.installed"),
+          agentCount > 0 ? t("publisherDetail.installedSynced", { count: agentCount }) : t("publisherDetail.installed"),
         );
         setTimeout(() => setInstallStatus(null), 4000);
       } catch (e) {
         const message = String(e).toLowerCase();
         if (message.includes("already installed")) {
-          setSkills((prev) =>
-            prev.map((entry) =>
-              entry.name === name ? { ...entry, installed: true } : entry,
-            ),
-          );
-          setSelectedSkill((prev) =>
-            prev?.name === name ? { ...prev, installed: true } : prev,
-          );
+          setSkills((prev) => prev.map((entry) => (entry.name === name ? { ...entry, installed: true } : entry)));
+          setSelectedSkill((prev) => (prev?.name === name ? { ...prev, installed: true } : prev));
           setInstallStatus(t("publisherDetail.installed"));
           setTimeout(() => setInstallStatus(null), 4000);
           return;
@@ -260,14 +217,8 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
     async (name: string) => {
       try {
         await updateSkill(name);
-        setSkills((prev) =>
-          prev.map((entry) =>
-            entry.name === name ? { ...entry, update_available: false } : entry,
-          ),
-        );
-        setSelectedSkill((prev) =>
-          prev?.name === name ? { ...prev, update_available: false } : prev,
-        );
+        setSkills((prev) => prev.map((entry) => (entry.name === name ? { ...entry, update_available: false } : entry)));
+        setSelectedSkill((prev) => (prev?.name === name ? { ...prev, update_available: false } : prev));
       } catch (e) {
         console.error("Update failed:", e);
       }
@@ -349,15 +300,11 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
 
           <div className="w-px h-5 bg-border mx-1" />
 
-          <h1 className="text-heading-md whitespace-nowrap truncate">
-            {publisher.name}
-          </h1>
+          <h1 className="text-heading-md whitespace-nowrap truncate">{publisher.name}</h1>
           {activeRepo && (
             <>
               <span className="text-muted-foreground">/</span>
-              <span className="text-sm text-foreground/80 font-mono truncate max-w-[320px]">
-                {activeRepo}
-              </span>
+              <span className="text-sm text-foreground/80 font-mono truncate max-w-[320px]">{activeRepo}</span>
             </>
           )}
 
@@ -385,9 +332,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
                 exit={{ opacity: 0 }}
                 className={cn(
                   "text-xs font-medium whitespace-nowrap",
-                  installStatus.startsWith("✓")
-                    ? "text-success"
-                    : "text-destructive",
+                  installStatus.startsWith("✓") ? "text-success" : "text-destructive",
                 )}
               >
                 {installStatus}
@@ -436,9 +381,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
                   </span>
                   <span className="text-sm text-muted-foreground flex items-center gap-1.5">
                     <Package className="w-3.5 h-3.5" />
-                    {loading
-                      ? "..."
-                      : t("publisherDetail.skills", { count: shownSkillCount })}
+                    {loading ? "..." : t("publisherDetail.skills", { count: shownSkillCount })}
                   </span>
                   {!loading && totalInstalls > 0 && (
                     <span className="text-sm text-muted-foreground">
@@ -467,11 +410,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
             ) : !activeRepo && publisherRepos.length === 0 ? (
               <EmptyState
                 icon={<Package className="w-6 h-6 text-muted-foreground" />}
-                title={
-                  searchQuery.trim()
-                    ? t("publisherDetail.noMatch")
-                    : t("publisherDetail.noSkills")
-                }
+                title={searchQuery.trim() ? t("publisherDetail.noMatch") : t("publisherDetail.noSkills")}
                 description={
                   searchQuery.trim()
                     ? t("publisherDetail.tryDifferent")
@@ -549,9 +488,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
                   </Button>
                   <div className="w-px h-4 bg-border" />
                   <GitBranch className="w-3.5 h-3.5 text-muted-foreground" />
-                  <span className="text-xs font-semibold text-foreground/80 font-mono truncate">
-                    {activeRepo}
-                  </span>
+                  <span className="text-xs font-semibold text-foreground/80 font-mono truncate">{activeRepo}</span>
                   <Badge
                     variant="outline"
                     className="text-micro px-1.5 py-0 h-4 font-normal text-muted-foreground bg-muted border-transparent"
@@ -594,9 +531,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.8 }}
               transition={{ duration: 0.15 }}
-              onClick={() =>
-                scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" })
-              }
+              onClick={() => scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" })}
               className="absolute bottom-8 right-8 z-40 w-10 h-10 rounded-full bg-background/80 hover:bg-background border border-border/50 text-foreground/80 hover:text-foreground shadow-sm hover:shadow-md backdrop-blur-md flex items-center justify-center transition duration-200 cursor-pointer group"
               title={t("publisherDetail.backToTop")}
             >

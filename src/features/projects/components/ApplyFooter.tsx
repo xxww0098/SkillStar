@@ -1,8 +1,8 @@
 import { motion } from "framer-motion";
-import { useTranslation } from "react-i18next";
 import { Check, RefreshCw } from "lucide-react";
-import { Button } from "../../../components/ui/button";
+import { useTranslation } from "react-i18next";
 import { MOTION_TRANSITION } from "../../../comm/motion";
+import { Button } from "../../../components/ui/button";
 
 interface ApplyFooterProps {
   totalSkills: number;
@@ -13,14 +13,7 @@ interface ApplyFooterProps {
   onApply: () => void;
 }
 
-export function ApplyFooter({
-  totalSkills,
-  enabledAgentsCount,
-  syncResult,
-  saving,
-  dirty,
-  onApply,
-}: ApplyFooterProps) {
+export function ApplyFooter({ totalSkills, enabledAgentsCount, syncResult, saving, dirty, onApply }: ApplyFooterProps) {
   const { t } = useTranslation();
 
   return (

@@ -300,8 +300,6 @@ pub fn resolve_scan_params(config: &AiConfig) -> ResolvedScanParams {
     }
 }
 
-
-
 fn config_path() -> PathBuf {
     super::paths::ai_config_path()
 }
@@ -497,15 +495,14 @@ fn is_empty_ai_response_error(err: &anyhow::Error) -> bool {
 }
 
 fn is_hy_mt_model(config: &AiConfig) -> bool {
-    is_local_format(config)
-        && config
-            .model
-            .trim()
-            .to_ascii_lowercase()
-            .contains("hy-mt")
+    is_local_format(config) && config.model.trim().to_ascii_lowercase().contains("hy-mt")
 }
 
-fn build_translation_system_prompt(config: &AiConfig, lang: &str, source_lang_hint: &str) -> String {
+fn build_translation_system_prompt(
+    config: &AiConfig,
+    lang: &str,
+    source_lang_hint: &str,
+) -> String {
     let template = if is_hy_mt_model(config) {
         TRANSLATE_DOCUMENT_PROMPT_HY_MT
     } else {
@@ -937,7 +934,10 @@ async fn openai_chat_completion_with_opts(
     let resp = client
         .post(&url)
         .header("Content-Type", "application/json")
-        .header("Authorization", format!("Bearer {}", effective_api_key(config)))
+        .header(
+            "Authorization",
+            format!("Bearer {}", effective_api_key(config)),
+        )
         .json(&body)
         .send()
         .await
@@ -1069,7 +1069,10 @@ where
         .post(&url)
         .header("Content-Type", "application/json")
         .header("Accept", "text/event-stream")
-        .header("Authorization", format!("Bearer {}", effective_api_key(config)))
+        .header(
+            "Authorization",
+            format!("Bearer {}", effective_api_key(config)),
+        )
         .json(&body)
         .send()
         .await
@@ -1488,6 +1491,45 @@ fn ai_short_text_available(config: &AiConfig) -> bool {
     config.enabled && (!config.api_key.trim().is_empty() || is_local_format(config))
 }
 
+/// Check if a translation result actually contains characters from the target
+/// language's script.  Returns `true` when the result looks genuinely
+/// translated (or the target is Latin-script and thus indistinguishable).
+///
+/// This prevents caching English text as a "translation" when the AI model
+/// returns the input verbatim.
+fn translation_looks_translated(target_language: &str, source: &str, result: &str) -> bool {
+    let target_needs_cjk = matches!(
+        target_language,
+        "zh-CN" | "zh-TW" | "zh-cn" | "zh-tw" | "ja" | "ko"
+    );
+    if !target_needs_cjk {
+        // For Latin-script targets we can't easily validate; assume OK.
+        return true;
+    }
+
+    // If source is already in the target script, any result is fine.
+    let source_lang = detect_short_text_source_lang(source);
+    let target_normalized = normalize_mymemory_lang(target_language);
+    let source_normalized = normalize_mymemory_lang(source_lang);
+    if source_normalized == target_normalized {
+        return true;
+    }
+
+    // Count CJK / kana / hangul characters in the result.
+    let target_script_chars: usize = result
+        .chars()
+        .filter(|c| is_cjk_ideograph(*c) || is_japanese_kana(*c) || is_hangul(*c))
+        .count();
+
+    // Require at least 2 target-script characters, or 10% of the result.
+    let alpha_chars: usize = result.chars().filter(|c| c.is_alphabetic()).count();
+    if alpha_chars == 0 {
+        return target_script_chars > 0;
+    }
+    let ratio = target_script_chars as f32 / alpha_chars as f32;
+    target_script_chars >= 2 && ratio >= 0.08
+}
+
 fn normalize_mymemory_lang(code: &str) -> String {
     let trimmed = code.trim();
     if trimmed.is_empty() {
@@ -1712,13 +1754,10 @@ async fn mymemory_call(
     let url = reqwest::Url::parse_with_params("https://api.mymemory.translated.net/get", &params)
         .context("Failed to build MyMemory URL")?;
 
-    let resp = tokio::time::timeout(
-        std::time::Duration::from_secs(15),
-        client.get(url).send(),
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("MyMemory API request timed out after 15s"))?
-    .context("Failed to send request to MyMemory API")?;
+    let resp = tokio::time::timeout(std::time::Duration::from_secs(15), client.get(url).send())
+        .await
+        .map_err(|_| anyhow::anyhow!("MyMemory API request timed out after 15s"))?
+        .context("Failed to send request to MyMemory API")?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -1803,15 +1842,15 @@ async fn mymemory_translate_short_text(config: &AiConfig, text: &str) -> Result<
     };
 
     // Try with de (per-email quota)
-    let raw_result =
-        match mymemory_call(&client, &api_input, &langpair, de_param.as_deref()).await {
-            Ok(result) => result,
-            Err(e) => {
-                warn!(target: "mymemory", error = %e, "de request failed, retrying anonymous");
-                // Fallback: anonymous (no de, per-IP quota)
-                mymemory_call(&client, &api_input, &langpair, None).await?
-            }
-        };
+    let raw_result = match mymemory_call(&client, &api_input, &langpair, de_param.as_deref()).await
+    {
+        Ok(result) => result,
+        Err(e) => {
+            warn!(target: "mymemory", error = %e, "de request failed, retrying anonymous");
+            // Fallback: anonymous (no de, per-IP quota)
+            mymemory_call(&client, &api_input, &langpair, None).await?
+        }
+    };
 
     // Convert back to Markdown only if we sent HTML
     let output = if is_plain {
@@ -2097,13 +2136,22 @@ where
             if ai_available {
                 match translate_short_text_streaming(config, text, on_delta).await {
                     Ok(result) if !result.trim().is_empty() => {
-                        return Ok((result, ShortTextSource::Ai));
+                        if translation_looks_translated(&config.target_language, text, &result) {
+                            return Ok((result, ShortTextSource::Ai));
+                        }
+                        warn!(
+                            target: "short_text",
+                            "AI returned untranslated result, falling back to MyMemory"
+                        );
+                        let _ = on_delta("\0CLEAR\0");
+                        ai_err = Some(anyhow::anyhow!("AI returned untranslated result"));
                     }
                     Ok(_) => {
                         warn!(
                             target: "short_text",
                             "AI returned empty response, falling back to MyMemory"
                         );
+                        let _ = on_delta("\0CLEAR\0");
                         ai_err = Some(anyhow::anyhow!("AI returned empty response"));
                     }
                     Err(err) => {
@@ -2112,6 +2160,7 @@ where
                             error = %err,
                             "AI translation failed, falling back to MyMemory"
                         );
+                        let _ = on_delta("\0CLEAR\0");
                         ai_err = Some(err);
                     }
                 }
@@ -2128,6 +2177,9 @@ where
                 let result = mymemory_translate_short_text(config, text)
                     .await
                     .with_context(|| context)?;
+                if !translation_looks_translated(&config.target_language, text, &result) {
+                    anyhow::bail!("Both AI and MyMemory returned untranslated results");
+                }
                 return Ok((result, ShortTextSource::Mymemory));
             }
 
@@ -2141,7 +2193,15 @@ where
             if mymemory_available {
                 match mymemory_translate_short_text(config, text).await {
                     Ok(result) if !result.trim().is_empty() => {
-                        return Ok((result, ShortTextSource::Mymemory));
+                        if translation_looks_translated(&config.target_language, text, &result) {
+                            return Ok((result, ShortTextSource::Mymemory));
+                        }
+                        warn!(
+                            target: "short_text",
+                            "MyMemory returned untranslated result, falling back to AI"
+                        );
+                        mymemory_err =
+                            Some(anyhow::anyhow!("MyMemory returned untranslated result"));
                     }
                     Ok(_) => {
                         warn!(
@@ -2172,6 +2232,9 @@ where
                 let result = translate_short_text_streaming(config, text, on_delta)
                     .await
                     .with_context(|| context)?;
+                if !translation_looks_translated(&config.target_language, text, &result) {
+                    anyhow::bail!("Both MyMemory and AI returned untranslated results");
+                }
                 return Ok((result, ShortTextSource::Ai));
             }
 
@@ -2960,22 +3023,16 @@ mod tests {
         cfg.api_format = ApiFormat::Local;
         cfg.model = "huihui_ai/hy-mt1.5-abliterated:1.8b".to_string();
 
-        let hy_mt_prompt = super::build_translation_system_prompt(
-            &cfg,
-            "Simplified Chinese",
-            "English (en)",
-        );
+        let hy_mt_prompt =
+            super::build_translation_system_prompt(&cfg, "Simplified Chinese", "English (en)");
         assert!(
             hy_mt_prompt.contains("Treat the USER message as source text"),
             "HY-MT local models should use the dedicated HY-MT translation prompt"
         );
 
         cfg.model = "llama3.1:8b".to_string();
-        let generic_prompt = super::build_translation_system_prompt(
-            &cfg,
-            "Simplified Chinese",
-            "English (en)",
-        );
+        let generic_prompt =
+            super::build_translation_system_prompt(&cfg, "Simplified Chinese", "English (en)");
         assert!(
             !generic_prompt.contains("Treat the USER message as source text"),
             "non HY-MT models should keep the generic translation prompt"
@@ -2988,8 +3045,11 @@ mod tests {
         cfg.api_format = ApiFormat::Openai;
         cfg.model = "tencent/HY-MT1.5-1.8B".to_string();
 
-        let prompt =
-            super::build_short_translation_system_prompt(&cfg, "Simplified Chinese", "English (en)");
+        let prompt = super::build_short_translation_system_prompt(
+            &cfg,
+            "Simplified Chinese",
+            "English (en)",
+        );
         assert!(
             !prompt.contains("Treat the USER message as source text"),
             "HY-MT prompt adaptation is scoped to local format only"
@@ -3116,8 +3176,6 @@ mod tests {
         });
     }
 
-
-
     #[test]
     fn save_and_load_config_async_roundtrip_keeps_plain_api_key() {
         with_temp_data_root(|_dir| {
@@ -3240,5 +3298,55 @@ mod tests {
         let translated_html = "<p>段落 1</p>\n<p>段落 2</p>\n";
         let result = simulate_mymemory_format_pipeline(md, translated_html);
         assert_eq!(result, "段落 1\n\n段落 2");
+    }
+
+    #[test]
+    fn translation_looks_translated_rejects_english_for_zh_cn() {
+        let source = "Diagnose and fix broken adapters when websites change.";
+        let result = "Diagnose and fix broken adapters when websites change.";
+        assert!(
+            !super::translation_looks_translated("zh-CN", source, result),
+            "Should reject English result for zh-CN target"
+        );
+    }
+
+    #[test]
+    fn translation_looks_translated_accepts_chinese() {
+        let source = "Diagnose and fix broken adapters when websites change.";
+        let result = "当网站发生变化时，诊断并修复损坏的适配器。";
+        assert!(
+            super::translation_looks_translated("zh-CN", source, result),
+            "Should accept Chinese result for zh-CN target"
+        );
+    }
+
+    #[test]
+    fn translation_looks_translated_accepts_mixed() {
+        let source = "Use OpenCLI to automate tasks.";
+        let result = "使用 OpenCLI 自动化任务。";
+        assert!(
+            super::translation_looks_translated("zh-CN", source, result),
+            "Should accept mixed CJK+Latin result"
+        );
+    }
+
+    #[test]
+    fn translation_looks_translated_accepts_latin_target() {
+        let source = "诊断并修复适配器。";
+        let result = "Diagnose and fix adapters.";
+        assert!(
+            super::translation_looks_translated("en", source, result),
+            "Latin-script targets always pass"
+        );
+    }
+
+    #[test]
+    fn translation_looks_translated_accepts_same_script() {
+        let source = "这是中文描述。";
+        let result = "这是中文描述。";
+        assert!(
+            super::translation_looks_translated("zh-CN", source, result),
+            "Same-script source and target should pass"
+        );
     }
 }

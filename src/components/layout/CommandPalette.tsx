@@ -1,19 +1,19 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { useTranslation } from "react-i18next";
+import { AnimatePresence, motion } from "framer-motion";
 import {
-  Search,
-  Package,
+  Command,
+  Download,
+  FolderKanban,
   Globe,
   Layers,
-  FolderKanban,
-  ShieldCheck,
-  Settings,
-  Download,
+  Package,
   RefreshCw,
-  Command,
+  Search,
+  Settings,
+  ShieldCheck,
   Sparkles,
 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { NavPage } from "../../types";
 
 interface CommandPaletteAction {
@@ -34,13 +34,7 @@ interface CommandPaletteProps {
   onRefresh?: () => void;
 }
 
-export function CommandPalette({
-  open,
-  onClose,
-  onNavigate,
-  onImport,
-  onRefresh,
-}: CommandPaletteProps) {
+export function CommandPalette({ open, onClose, onNavigate, onImport, onRefresh }: CommandPaletteProps) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
@@ -140,9 +134,7 @@ export function CommandPalette({
     if (!query.trim()) return actions;
     const q = query.toLowerCase();
     return actions.filter(
-      (a) =>
-        a.label.toLowerCase().includes(q) ||
-        a.keywords?.some((kw) => kw.toLowerCase().includes(q))
+      (a) => a.label.toLowerCase().includes(q) || a.keywords?.some((kw) => kw.toLowerCase().includes(q)),
     );
   }, [actions, query]);
 
@@ -182,7 +174,7 @@ export function CommandPalette({
       // Small delay so close animation starts before navigation
       requestAnimationFrame(() => action.onSelect());
     },
-    [onClose]
+    [onClose],
   );
 
   const handleKeyDown = useCallback(
@@ -190,15 +182,11 @@ export function CommandPalette({
       switch (e.key) {
         case "ArrowDown":
           e.preventDefault();
-          setActiveIndex((prev) =>
-            prev < filteredActions.length - 1 ? prev + 1 : 0
-          );
+          setActiveIndex((prev) => (prev < filteredActions.length - 1 ? prev + 1 : 0));
           break;
         case "ArrowUp":
           e.preventDefault();
-          setActiveIndex((prev) =>
-            prev > 0 ? prev - 1 : filteredActions.length - 1
-          );
+          setActiveIndex((prev) => (prev > 0 ? prev - 1 : filteredActions.length - 1));
           break;
         case "Enter":
           e.preventDefault();
@@ -212,7 +200,7 @@ export function CommandPalette({
           break;
       }
     },
-    [filteredActions, activeIndex, handleSelect, onClose]
+    [filteredActions, activeIndex, handleSelect, onClose],
   );
 
   if (!open) return null;
@@ -262,17 +250,11 @@ export function CommandPalette({
               </div>
 
               {/* Results */}
-              <div
-                ref={listRef}
-                className="max-h-[320px] overflow-y-auto overscroll-contain py-2"
-                role="listbox"
-              >
+              <div ref={listRef} className="max-h-[320px] overflow-y-auto overscroll-contain py-2" role="listbox">
                 {filteredActions.length === 0 ? (
                   <div className="flex flex-col items-center py-8 text-center">
                     <Sparkles className="w-5 h-5 text-muted-foreground/50 mb-2" />
-                    <p className="text-sm text-muted-foreground">
-                      {t("common.noResults")}
-                    </p>
+                    <p className="text-sm text-muted-foreground">{t("common.noResults")}</p>
                   </div>
                 ) : (
                   Object.entries(groupedActions).map(([section, items]) => (
@@ -292,23 +274,13 @@ export function CommandPalette({
                             onClick={() => handleSelect(action)}
                             onMouseEnter={() => setActiveIndex(idx)}
                             className={`w-full flex items-center gap-3 px-4 py-2 text-sm cursor-pointer transition-colors ${
-                              isActive
-                                ? "bg-primary/10 text-primary"
-                                : "text-foreground/80 hover:bg-muted/40"
+                              isActive ? "bg-primary/10 text-primary" : "text-foreground/80 hover:bg-muted/40"
                             }`}
                           >
-                            <span
-                              className={`shrink-0 ${
-                                isActive
-                                  ? "text-primary"
-                                  : "text-muted-foreground"
-                              }`}
-                            >
+                            <span className={`shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`}>
                               {action.icon}
                             </span>
-                            <span className="flex-1 text-left truncate">
-                              {action.label}
-                            </span>
+                            <span className="flex-1 text-left truncate">{action.label}</span>
                             {action.shortcut && (
                               <kbd className="shrink-0 rounded border border-border/50 bg-muted/30 px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground/70">
                                 {action.shortcut}

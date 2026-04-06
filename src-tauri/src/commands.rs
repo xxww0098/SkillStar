@@ -3,6 +3,7 @@ pub mod agents;
 pub mod ai;
 pub mod github;
 pub mod marketplace;
+pub mod models;
 pub mod patrol;
 pub mod projects;
 pub mod updater;
@@ -242,10 +243,12 @@ pub async fn update_skill(name: String) -> Result<UpdateResult, AppError> {
         ))
     })?;
     crate::core::installed_skill::invalidate_cache();
+    crate::core::installed_skill::clear_update_state(&name);
 
     // Invalidate security scan cache — content changed, old results are stale
     security_scan::invalidate_skill_cache(&name);
     for sib in &sibling_names {
+        crate::core::installed_skill::clear_update_state(sib);
         security_scan::invalidate_skill_cache(sib);
     }
 

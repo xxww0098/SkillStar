@@ -57,18 +57,13 @@ pub enum GitStatus {
 /// Uses the enriched PATH from `command_with_path` so Homebrew / scoop
 /// installs are found even in GUI-launched apps.
 pub fn check_git_status() -> GitStatus {
-    let output = command_with_path("git")
-        .arg("--version")
-        .output();
+    let output = command_with_path("git").arg("--version").output();
 
     match output {
         Ok(o) if o.status.success() => {
             let raw = String::from_utf8_lossy(&o.stdout).trim().to_string();
             // `git --version` → "git version 2.44.0"
-            let version = raw
-                .strip_prefix("git version ")
-                .unwrap_or(&raw)
-                .to_string();
+            let version = raw.strip_prefix("git version ").unwrap_or(&raw).to_string();
             GitStatus::Installed { version }
         }
         _ => {
@@ -389,8 +384,8 @@ pub fn publish_skill(
         let link_target = std::fs::read_link(&skill_source);
         #[cfg(windows)]
         let link_target = link_target.or_else(|_| junction::get_target(&skill_source));
-        let target = link_target
-            .with_context(|| format!("Failed to read symlink for '{}'", skill_name))?;
+        let target =
+            link_target.with_context(|| format!("Failed to read symlink for '{}'", skill_name))?;
         let resolved = if target.is_absolute() {
             target
         } else {
@@ -580,8 +575,10 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
         let dest_path = dest.join(&file_name);
 
         // Explicitly avoid copying git metadata and OS system files
-        if file_name == ".git" || file_name == ".DS_Store"
-            || file_name == "Thumbs.db" || file_name == "desktop.ini"
+        if file_name == ".git"
+            || file_name == ".DS_Store"
+            || file_name == "Thumbs.db"
+            || file_name == "desktop.ini"
         {
             continue;
         }

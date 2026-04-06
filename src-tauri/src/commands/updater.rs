@@ -76,9 +76,7 @@ fn effective_endpoints() -> Vec<url::Url> {
 /// Returns update metadata.  The `Update` object is stored in app state so
 /// `download_app_update` / `install_app_update` can use it later.
 #[tauri::command]
-pub async fn check_app_update(
-    app: tauri::AppHandle,
-) -> Result<UpdateCheckResult, String> {
+pub async fn check_app_update(app: tauri::AppHandle) -> Result<UpdateCheckResult, String> {
     use tauri_plugin_updater::UpdaterExt;
 
     let endpoints = effective_endpoints();
@@ -138,7 +136,10 @@ pub async fn download_and_install_update(app: tauri::AppHandle) -> Result<(), St
     // Take the update out of the mutex — we own it for the remainder of this call.
     let update = {
         let pending = app.state::<PendingUpdate>();
-        let mut slot = pending.inner.lock().map_err(|e| format!("lock error: {e}"))?;
+        let mut slot = pending
+            .inner
+            .lock()
+            .map_err(|e| format!("lock error: {e}"))?;
         slot.take().ok_or("no pending update to download")?
     };
 

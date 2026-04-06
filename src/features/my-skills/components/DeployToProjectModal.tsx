@@ -1,8 +1,8 @@
-import { useState } from "react";
-import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { X, FolderOpen, Rocket, Check } from "lucide-react";
-import { useTranslation } from "react-i18next";
 import { open } from "@tauri-apps/plugin-dialog";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { Check, FolderOpen, Rocket, X } from "lucide-react";
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { cn } from "../../../lib/utils";
 import type { AgentProfile } from "../../../types";
@@ -32,7 +32,7 @@ export function DeployToProjectModal({
   const handleChooseFolder = async () => {
     const path = await open({
       directory: true,
-        title: t("deployModal.chooseDir"),
+      title: t("deployModal.chooseDir"),
     });
     if (path) setProjectPath(path as string);
   };
@@ -60,9 +60,7 @@ export function DeployToProjectModal({
   };
 
   const toggleAgent = (id: string) => {
-    setSelectedAgents((prev) =>
-      prev.includes(id) ? prev.filter((a) => a !== id) : [...prev, id]
-    );
+    setSelectedAgents((prev) => (prev.includes(id) ? prev.filter((a) => a !== id) : [...prev, id]));
   };
 
   return (
@@ -90,124 +88,119 @@ export function DeployToProjectModal({
               <div className="pointer-events-none absolute -left-20 -top-20 h-48 w-48 rounded-full bg-primary/20 blur-[60px] opacity-70" />
               <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-accent/10 blur-[60px] opacity-70" />
               <div className="relative z-10">
-              {/* Header */}
-              <div className="flex items-center justify-between px-6 pt-4 pb-0">
-                <h2 className="text-heading-sm">{t("deployModal.title")}</h2>
-                <button
-                  onClick={handleClose}
-                  aria-label={t("common.close")}
-                  className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              <div className="px-6 py-4 space-y-4">
-                {/* Agent selector */}
-                <div className="grid grid-cols-5 gap-1.5">
-                  {profiles.filter(p => p.id !== "openclaw").map((profile) => {
-                    const isSelected = selectedAgents.includes(profile.id);
-                    return (
-                      <button
-                        key={profile.id}
-                        onClick={() => toggleAgent(profile.id)}
-                        className={cn(
-                          "relative flex flex-col items-center gap-1 p-2.5 rounded-xl border transition-colors cursor-pointer",
-                          isSelected
-                            ? "border-primary/40 bg-primary/5"
-                            : "border-border hover:bg-muted"
-                        )}
-                      >
-                        {isSelected && (
-                          <div className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-primary" />
-                        )}
-                        <img
-                          src={`/${profile.icon}`}
-                          alt={profile.display_name}
-                          className={cn(
-                            "w-5 h-5 transition-[filter,opacity]",
-                            !isSelected && "grayscale opacity-40"
-                          )}
-                          loading="lazy"
-                          decoding="async"
-                        />
-                        <span className="text-micro font-medium truncate w-full text-center leading-tight">
-                          {profile.display_name.split(" ")[0]}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Project folder */}
-                <div className="flex gap-2">
+                {/* Header */}
+                <div className="flex items-center justify-between px-6 pt-4 pb-0">
+                  <h2 className="text-heading-sm">{t("deployModal.title")}</h2>
                   <button
-                    onClick={handleChooseFolder}
-                    className={cn(
-                      "flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border text-sm text-left transition-colors cursor-pointer",
-                      projectPath
-                        ? "border-border bg-card font-mono text-foreground"
-                        : "border-dashed border-border hover:border-border hover:bg-muted text-muted-foreground"
-                    )}
+                    onClick={handleClose}
+                    aria-label={t("common.close")}
+                    className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors cursor-pointer"
                   >
-                    <FolderOpen className="w-3.5 h-3.5 shrink-0 opacity-60" />
-                    <span className="truncate">
-                      {projectPath || t("deployModal.chooseFolder")}
-                    </span>
+                    <X className="w-4 h-4" />
                   </button>
                 </div>
 
-                {/* Skills pills */}
-                <div className="flex flex-wrap gap-1 max-h-[120px] overflow-y-auto pr-1">
-                  {selectedSkills.map((name) => (
-                    <span
-                      key={name}
-                      className="px-1.5 py-0.5 rounded text-micro bg-muted text-muted-foreground"
+                <div className="px-6 py-4 space-y-4">
+                  {/* Agent selector */}
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {profiles
+                      .filter((p) => p.id !== "openclaw")
+                      .map((profile) => {
+                        const isSelected = selectedAgents.includes(profile.id);
+                        return (
+                          <button
+                            key={profile.id}
+                            onClick={() => toggleAgent(profile.id)}
+                            className={cn(
+                              "relative flex flex-col items-center gap-1 p-2.5 rounded-xl border transition-colors cursor-pointer",
+                              isSelected ? "border-primary/40 bg-primary/5" : "border-border hover:bg-muted",
+                            )}
+                          >
+                            {isSelected && (
+                              <div className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-primary" />
+                            )}
+                            <img
+                              src={`/${profile.icon}`}
+                              alt={profile.display_name}
+                              className={cn(
+                                "w-5 h-5 transition-[filter,opacity]",
+                                !isSelected && "grayscale opacity-40",
+                              )}
+                              loading="lazy"
+                              decoding="async"
+                            />
+                            <span className="text-micro font-medium truncate w-full text-center leading-tight">
+                              {profile.display_name.split(" ")[0]}
+                            </span>
+                          </button>
+                        );
+                      })}
+                  </div>
+
+                  {/* Project folder */}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleChooseFolder}
+                      className={cn(
+                        "flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border text-sm text-left transition-colors cursor-pointer",
+                        projectPath
+                          ? "border-border bg-card font-mono text-foreground"
+                          : "border-dashed border-border hover:border-border hover:bg-muted text-muted-foreground",
+                      )}
                     >
-                      {name}
-                    </span>
-                  ))}
+                      <FolderOpen className="w-3.5 h-3.5 shrink-0 opacity-60" />
+                      <span className="truncate">{projectPath || t("deployModal.chooseFolder")}</span>
+                    </button>
+                  </div>
+
+                  {/* Skills pills */}
+                  <div className="flex flex-wrap gap-1 max-h-[120px] overflow-y-auto pr-1">
+                    {selectedSkills.map((name) => (
+                      <span key={name} className="px-1.5 py-0.5 rounded text-micro bg-muted text-muted-foreground">
+                        {name}
+                      </span>
+                    ))}
+                  </div>
+
+                  {/* Result */}
+                  {result !== null && (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="flex items-center gap-2 text-sm text-success"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      {t("deployModal.deployed", { count: result })}
+                    </motion.div>
+                  )}
                 </div>
 
-                {/* Result */}
-                {result !== null && (
-                  <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="flex items-center gap-2 text-sm text-success"
-                  >
-                    <Check className="w-3.5 h-3.5" />
-                    {t("deployModal.deployed", { count: result })}
-                  </motion.div>
-                )}
-              </div>
-
-              {/* Footer */}
-              <div className="flex items-center justify-end gap-2 px-6 py-3.5 border-t border-border/60">
-                <Button variant="ghost" size="sm" onClick={handleClose}>
-                  {result !== null ? t("common.done") : t("deployModal.cancel")}
-                </Button>
-                {result === null && (
-                  <Button
-                    size="sm"
-                    onClick={handleDeploy}
-                    disabled={!projectPath || deploying || selectedAgents.length === 0}
-                  >
-                    {deploying ? (
-                      <span className="flex items-center gap-1.5">
-                        <span className="w-3.5 h-3.5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
-                        {t("deployModal.deploying")}
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1.5">
-                        <Rocket className="w-3.5 h-3.5" />
-                        {t("deployModal.deploy")}
-                      </span>
-                    )}
+                {/* Footer */}
+                <div className="flex items-center justify-end gap-2 px-6 py-3.5 border-t border-border/60">
+                  <Button variant="ghost" size="sm" onClick={handleClose}>
+                    {result !== null ? t("common.done") : t("deployModal.cancel")}
                   </Button>
-                )}
+                  {result === null && (
+                    <Button
+                      size="sm"
+                      onClick={handleDeploy}
+                      disabled={!projectPath || deploying || selectedAgents.length === 0}
+                    >
+                      {deploying ? (
+                        <span className="flex items-center gap-1.5">
+                          <span className="w-3.5 h-3.5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
+                          {t("deployModal.deploying")}
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1.5">
+                          <Rocket className="w-3.5 h-3.5" />
+                          {t("deployModal.deploy")}
+                        </span>
+                      )}
+                    </Button>
+                  )}
+                </div>
               </div>
-            </div>
             </div>
           </motion.div>
         </>

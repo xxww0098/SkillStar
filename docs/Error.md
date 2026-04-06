@@ -14,6 +14,12 @@ Significant bugs and fixes, kept in short form for faster lookup.
 
 ---
 
+### Skill Update Fails But Card Shows "Updated" — 2026-04-05
+- Symptom: `git fetch --depth 1 --quiet` fails with `fatal: shallow file has changed since we read it`, toast shows "更新失败", but the skill card's update button changes to "已安装" (no update badge).
+- Root cause: `prefetch_unique_repos` silently discarded fetch errors (`let _ = ...`). The subsequent `check_repo_skill_update_local` compared stale local/remote refs and returned `false` (no update), which wrote `update_available: false` to `UPDATE_STATE_CACHE`. The periodic `updatesQuery` refetch merged this into the frontend cache before or after the explicit update attempt, overriding the correct "update available" state.
+- Fix: (1) Backend: `prefetch_unique_repos` now returns a set of repo roots where fetch failed. `check_repo_skill_update_local` accepts this set and returns `None` for failed-fetch repos (not `false`). `refresh_skill_updates` preserves the previous cached state for `None` results instead of clearing the cache. Patrol follows the same pattern. (2) Frontend: `useSkills.updateSkill` restores `update_available: true` in the query cache on error as defense-in-depth.
+- Files: `repo_scanner.rs`, `installed_skill.rs`, `patrol.rs`, `useSkills.ts`
+
 ### Windows Force Delete Spinner Could Stall During Storage Refresh — 2026-04-04
 - Symptom: On Windows, force-deleting installed skills or repo cache could keep showing a loading spinner for a long time (sometimes appearing stuck).
 - Root cause: Settings force-delete flow awaited `get_storage_overview` before clearing the button loading state, and storage size walkers followed symlink/junction targets, which can trigger expensive or cyclic scans through repo-linked directories.

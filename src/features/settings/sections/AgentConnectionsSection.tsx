@@ -1,11 +1,11 @@
-import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { useTranslation } from "react-i18next";
 import { AlertTriangle, Plus, Unlink, X } from "lucide-react";
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import { AgentIcon } from "../../../components/ui/AgentIcon";
 import { Badge } from "../../../components/ui/badge";
 import { Switch } from "../../../components/ui/switch";
-import { AgentIcon } from "../../../components/ui/AgentIcon";
-import { cn, agentIconCls, isWindows, formatPlatformPath } from "../../../lib/utils";
+import { agentIconCls, cn, formatPlatformPath, isWindows } from "../../../lib/utils";
 import type { AgentProfile, CustomProfileDef } from "../../../types";
 import { AddCustomAgentDialog } from "../components/AddCustomAgentDialog";
 
@@ -102,29 +102,37 @@ export function AgentConnectionsSection({
                 <div className="flex items-center gap-3 px-4 py-3">
                   {profile.id.startsWith("custom_") && onAddCustomProfile ? (
                     <button
-                      onClick={() => setEditingProfile({
-                        id: profile.id,
-                        display_name: profile.display_name,
-                        global_skills_dir: profile.global_skills_dir,
-                        project_skills_rel: profile.project_skills_rel,
-                        icon_data_uri: profile.icon,
-                      })}
+                      onClick={() =>
+                        setEditingProfile({
+                          id: profile.id,
+                          display_name: profile.display_name,
+                          global_skills_dir: profile.global_skills_dir,
+                          project_skills_rel: profile.project_skills_rel,
+                          icon_data_uri: profile.icon,
+                        })
+                      }
                       title={t("common.edit", { defaultValue: "Edit" })}
                       className={cn(
                         "w-8 h-8 flex items-center justify-center rounded-[10px] transition bg-card border border-border shrink-0 shadow-sm cursor-pointer hover:border-primary/50 hover:bg-muted/50",
-                        profile.enabled ? "" : "grayscale opacity-50 border-transparent bg-muted/50 hover:bg-muted/80"
+                        profile.enabled ? "" : "grayscale opacity-50 border-transparent bg-muted/50 hover:bg-muted/80",
                       )}
                     >
-                      <AgentIcon profile={profile} className={cn(agentIconCls(profile.icon, "w-5 h-5"), "object-contain")} />
+                      <AgentIcon
+                        profile={profile}
+                        className={cn(agentIconCls(profile.icon, "w-5 h-5"), "object-contain")}
+                      />
                     </button>
                   ) : (
                     <div
                       className={cn(
                         "w-8 h-8 flex items-center justify-center rounded-[10px] transition bg-card border border-border shrink-0 shadow-sm",
-                        profile.enabled ? "" : "grayscale opacity-50 border-transparent bg-muted/50"
+                        profile.enabled ? "" : "grayscale opacity-50 border-transparent bg-muted/50",
                       )}
                     >
-                      <AgentIcon profile={profile} className={cn(agentIconCls(profile.icon, "w-5 h-5"), "object-contain")} />
+                      <AgentIcon
+                        profile={profile}
+                        className={cn(agentIconCls(profile.icon, "w-5 h-5"), "object-contain")}
+                      />
                     </div>
                   )}
 
@@ -149,7 +157,7 @@ export function AgentConnectionsSection({
                         "flex items-center gap-1 tabular-nums rounded-md px-1.5 py-0.5 transition-colors cursor-pointer text-[10px] font-medium leading-none",
                         expandedAgentId === profile.id
                           ? "text-primary bg-primary/10"
-                          : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                          : "text-muted-foreground hover:text-foreground hover:bg-muted",
                       )}
                     >
                       {linkedSkills[profile.id]?.length ?? profile.synced_count} {t("settings.linked")}
@@ -198,13 +206,11 @@ export function AgentConnectionsSection({
                             className={cn(
                               "px-2.5 py-1 rounded-md text-micro font-medium transition-colors cursor-pointer",
                               "bg-destructive/10 text-destructive hover:bg-destructive/20",
-                              unlinkingId === profile.id && "opacity-50 pointer-events-none"
+                              unlinkingId === profile.id && "opacity-50 pointer-events-none",
                             )}
                           >
                             <Unlink className="w-3 h-3 inline mr-1" />
-                            {unlinkingId === profile.id
-                              ? t("common.uninstalling")
-                              : t("settings.disableAndUnlink")}
+                            {unlinkingId === profile.id ? t("common.uninstalling") : t("settings.disableAndUnlink")}
                           </button>
                         </div>
                       </div>
@@ -269,9 +275,7 @@ export function AgentConnectionsSection({
             setEditingProfile(null);
           }}
           onRemove={
-            editingProfile && onRemoveCustomProfile
-              ? () => onRemoveCustomProfile(editingProfile.id)
-              : undefined
+            editingProfile && onRemoveCustomProfile ? () => onRemoveCustomProfile(editingProfile.id) : undefined
           }
         />
       )}

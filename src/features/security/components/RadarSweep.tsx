@@ -1,5 +1,5 @@
+import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 
 interface RadarSweepProps {
   active: boolean;
@@ -33,8 +33,7 @@ const sweepArmStyle = {
   width: "50%",
   height: "2px",
   transformOrigin: "left center",
-  background:
-    "linear-gradient(90deg, rgba(var(--color-success-rgb), 0.8) 0%, rgba(var(--color-success-rgb), 0) 100%)",
+  background: "linear-gradient(90deg, rgba(var(--color-success-rgb), 0.8) 0%, rgba(var(--color-success-rgb), 0) 100%)",
 };
 const sweepTrailStyle = {
   position: "absolute" as const,
@@ -112,12 +111,7 @@ export function RadarSweep({
   return (
     <div className="relative flex items-center justify-center" style={containerStyle}>
       {/* Radar background */}
-      <canvas
-        ref={canvasRef}
-        width={280}
-        height={280}
-        className="absolute inset-0"
-      />
+      <canvas ref={canvasRef} width={280} height={280} className="absolute inset-0" />
 
       {/* Outer glow ring */}
       <div
@@ -161,9 +155,7 @@ export function RadarSweep({
       <div className="relative z-10 flex flex-col items-center text-center">
         {active ? (
           <>
-            <div className="text-3xl font-bold text-success tabular-nums">
-              {progress}%
-            </div>
+            <div className="text-3xl font-bold text-success tabular-nums">{progress}%</div>
             <div className="text-xs text-muted-foreground mt-1 tabular-nums">
               {scanned}/{total}
             </div>
@@ -171,13 +163,8 @@ export function RadarSweep({
             {activeSkills.length > 0 && (
               <div className="mt-2.5 max-w-[170px] flex flex-col items-center gap-1">
                 {activeSkills.map((skill) => (
-                  <div
-                    key={skill}
-                    className="flex items-center gap-1.5 w-full"
-                  >
-                    <span
-                      className="w-1.5 h-1.5 rounded-full bg-success shrink-0 animate-pulse"
-                    />
+                  <div key={skill} className="flex items-center gap-1.5 w-full">
+                    <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0 animate-pulse" />
                     <span className="text-[11px] text-success truncate">{skill}</span>
                   </div>
                 ))}
@@ -186,14 +173,14 @@ export function RadarSweep({
                     {currentStage === "collect"
                       ? "Preparing..."
                       : currentStage === "static"
-                      ? "Static Match..."
-                      : currentStage === "triage"
-                        ? "Triage..."
-                        : currentStage === "ai" || currentStage === "ai-analyze"
-                        ? "AI Analysis..."
-                        : currentStage === "aggregator" || currentStage === "aggregate"
-                          ? "AI Consensus..."
-                          : "Scanning..."}
+                        ? "Static Match..."
+                        : currentStage === "triage"
+                          ? "Triage..."
+                          : currentStage === "ai" || currentStage === "ai-analyze"
+                            ? "AI Analysis..."
+                            : currentStage === "aggregator" || currentStage === "aggregate"
+                              ? "AI Consensus..."
+                              : "Scanning..."}
                   </span>
                 )}
               </div>

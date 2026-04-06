@@ -1,6 +1,5 @@
+import { AlertTriangle, Check, Download, GitBranch, KeyRound, Package } from "lucide-react";
 import { useTranslation } from "react-i18next";
-
-import { GitBranch, Check, Package, KeyRound, AlertTriangle, Download } from "lucide-react";
 import { Button } from "../../../../components/ui/button";
 import type { ShareCodeData } from "../../../../lib/shareCode";
 
@@ -69,9 +68,7 @@ export function ShareCodePreviewPhase({
 
   // Success: show skill preview
   const existingSet = new Set(existingNames.map((name) => name.trim().toLowerCase()));
-  const installableCount = data.s.filter(
-    (skill) => !existingSet.has(skill.n.trim().toLowerCase()),
-  ).length;
+  const installableCount = data.s.filter((skill) => !existingSet.has(skill.n.trim().toLowerCase())).length;
   const hasEmbedded = data.s.some((s) => s.c);
   const hasPrivate = data.s.some((s) => s.p);
 
@@ -126,9 +123,7 @@ export function ShareCodePreviewPhase({
               >
                 <div
                   className={`w-4 h-4 rounded border-[1.5px] flex items-center justify-center ${
-                    isExisting
-                      ? "bg-emerald-500/20 border-emerald-500/40"
-                      : "bg-primary border-primary"
+                    isExisting ? "bg-emerald-500/20 border-emerald-500/40" : "bg-primary border-primary"
                   }`}
                 >
                   <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />
@@ -151,9 +146,7 @@ export function ShareCodePreviewPhase({
                     </span>
                   )}
                 </div>
-                {skill.u && (
-                  <GitBranch className="w-3 h-3 text-muted-foreground" />
-                )}
+                {skill.u && <GitBranch className="w-3 h-3 text-muted-foreground" />}
               </div>
             );
           })}

@@ -1,20 +1,18 @@
+import { Eye, FileText, Globe, Loader2, RotateCcw, Sparkles, Square, X } from "lucide-react";
 import { useEffect, useState } from "react";
-
 import { useTranslation } from "react-i18next";
-import { X, FileText, Eye, Globe, Sparkles, Loader2, RotateCcw, Square } from "lucide-react";
+import { useAiStream } from "../../hooks/useAiStream";
+import {
+  normalizeSkillMarkdownForPreview,
+  parseFrontmatterEntries,
+  splitFrontmatter,
+  unwrapOuterMarkdownFence,
+} from "../../lib/frontmatter";
+import { formatAiErrorMessage, navigateToAiSettings } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Markdown } from "../ui/Markdown";
 import { ResizablePanel } from "../ui/ResizablePanel";
 import { AiErrorBanner, AiNotConfiguredBanner } from "./AiBanners";
-import { formatAiErrorMessage, navigateToAiSettings } from "../../lib/utils";
-import {
-  splitFrontmatter,
-  parseFrontmatterEntries,
-  normalizeSkillMarkdownForPreview,
-  unwrapOuterMarkdownFence,
-} from "../../lib/frontmatter";
-import { useAiStream } from "../../hooks/useAiStream";
-
 
 interface SkillReaderProps {
   skillName: string;
@@ -48,8 +46,7 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
   const translationStream = useAiStream({
     command: "ai_translate_skill_stream",
     eventChannel: "ai://translate-stream",
-    normalizeResult: (_source, result) =>
-      normalizeSkillMarkdownForPreview(unwrapOuterMarkdownFence(result).trim()),
+    normalizeResult: (_source, result) => normalizeSkillMarkdownForPreview(unwrapOuterMarkdownFence(result).trim()),
   });
   const summaryStream = useAiStream({
     command: "ai_summarize_skill_stream",
@@ -71,11 +68,10 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
   const localizedAiError = formatAiErrorMessage(aiError, t);
 
   const previewSource = normalizeSkillMarkdownForPreview(
-    translationVisible && translatedContent != null ? translatedContent : content
+    translationVisible && translatedContent != null ? translatedContent : content,
   );
   const previewFrontmatterEntries = parseFrontmatterEntries(splitFrontmatter(previewSource).frontmatter);
   const previewContent = splitFrontmatter(previewSource).body;
-
 
   useEffect(() => {
     translationStream.hydrate(null, null);
@@ -149,16 +145,10 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
         <div className="flex items-center gap-2">
           <FileText className="w-4 h-4 text-primary" />
           <h2 className="text-heading-sm truncate">{skillName}</h2>
-          <span className="text-micro text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded font-mono">
-            SKILL.md
-          </span>
+          <span className="text-micro text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded font-mono">SKILL.md</span>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onClose}
-          >
+          <Button size="sm" variant="outline" onClick={onClose}>
             <X className="w-4 h-4" />
           </Button>
         </div>
@@ -185,18 +175,18 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
               translating
                 ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
                 : translationVisible
-                ? "bg-primary/15 text-primary"
-                : aiConfigured
-                ? "text-muted-foreground hover:text-foreground hover:bg-card-hover"
-                : "text-primary/80 bg-primary/5 border border-primary/20 hover:bg-primary/10"
+                  ? "bg-primary/15 text-primary"
+                  : aiConfigured
+                    ? "text-muted-foreground hover:text-foreground hover:bg-card-hover"
+                    : "text-primary/80 bg-primary/5 border border-primary/20 hover:bg-primary/10"
             }`}
             title={
               aiConfigured
                 ? translationVisible
                   ? "Show original"
                   : translatedContent
-                  ? "Show cached translation"
-                  : "Translate to target language"
+                    ? "Show cached translation"
+                    : "Translate to target language"
                 : "AI not configured"
             }
           >
@@ -210,10 +200,10 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
             {translating
               ? t("common.cancel")
               : translationVisible
-              ? t("skillEditor.original")
-              : translatedContent
-              ? t("skillEditor.showTranslation")
-              : t("skillEditor.translate")}
+                ? t("skillEditor.original")
+                : translatedContent
+                  ? t("skillEditor.showTranslation")
+                  : t("skillEditor.translate")}
           </button>
           {translatedContent && (
             <button
@@ -229,8 +219,8 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
                 translating && retranslating
                   ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
                   : aiConfigured
-                  ? "text-muted-foreground hover:text-foreground hover:bg-card-hover"
-                  : "text-primary/80 bg-primary/5 border border-primary/20 hover:bg-primary/10"
+                    ? "text-muted-foreground hover:text-foreground hover:bg-card-hover"
+                    : "text-primary/80 bg-primary/5 border border-primary/20 hover:bg-primary/10"
               } disabled:cursor-not-allowed disabled:opacity-60`}
               title={t("skillEditor.retranslateWithAi")}
             >
@@ -239,9 +229,7 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
               ) : (
                 <Sparkles className="w-3 h-3" />
               )}
-              {translating && retranslating
-                ? t("skillEditor.retranslatingWithAi")
-                : t("skillEditor.retranslateWithAi")}
+              {translating && retranslating ? t("skillEditor.retranslatingWithAi") : t("skillEditor.retranslateWithAi")}
             </button>
           )}
           <button
@@ -256,27 +244,29 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
               summarizing
                 ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
                 : summaryContent
-                ? "bg-primary/15 text-primary"
-                : aiConfigured
-                ? "text-muted-foreground hover:text-foreground hover:bg-card-hover"
-                : "text-primary/80 bg-primary/5 border border-primary/20 hover:bg-primary/10"
+                  ? "bg-primary/15 text-primary"
+                  : aiConfigured
+                    ? "text-muted-foreground hover:text-foreground hover:bg-card-hover"
+                    : "text-primary/80 bg-primary/5 border border-primary/20 hover:bg-primary/10"
             }`}
             title={
               aiConfigured
                 ? summarizing
                   ? "Click to cancel"
                   : summaryContent
-                  ? "Hide summary"
-                  : "AI quick summary"
+                    ? "Hide summary"
+                    : "AI quick summary"
                 : "AI not configured"
             }
           >
-            {summarizing ? (
-              <Square className="w-3 h-3 fill-current" />
-            ) : (
-              <Sparkles className="w-3 h-3" />
-            )}
-            {summarizing ? t("common.cancel") : summaryContent ? (summaryVisible ? t("skillEditor.hideSummary") : t("skillEditor.summary")) : t("skillEditor.summary")}
+            {summarizing ? <Square className="w-3 h-3 fill-current" /> : <Sparkles className="w-3 h-3" />}
+            {summarizing
+              ? t("common.cancel")
+              : summaryContent
+                ? summaryVisible
+                  ? t("skillEditor.hideSummary")
+                  : t("skillEditor.summary")
+                : t("skillEditor.summary")}
           </button>
         </div>
       </div>
@@ -334,9 +324,7 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
                       {entry.key}
                     </th>
                     <td className="px-3 py-2 text-foreground break-words">
-                      <Markdown className="[&_p]:my-1 [&_pre]:my-2 [&_ul]:my-1 [&_ol]:my-1">
-                        {entry.value}
-                      </Markdown>
+                      <Markdown className="[&_p]:my-1 [&_pre]:my-2 [&_ul]:my-1 [&_ol]:my-1">{entry.value}</Markdown>
                     </td>
                   </tr>
                 ))}
@@ -349,7 +337,10 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
         {previewContent.trim().length === 0 && previewFrontmatterEntries.length === 0 ? (
           <div className="text-sm text-muted-foreground">{t("skillEditor.noContent")}</div>
         ) : (
-          <Markdown streaming={translating && translationVisible} fallback={<div className="text-sm text-muted-foreground">Loading preview...</div>}>
+          <Markdown
+            streaming={translating && translationVisible}
+            fallback={<div className="text-sm text-muted-foreground">Loading preview...</div>}
+          >
             {previewContent}
           </Markdown>
         )}

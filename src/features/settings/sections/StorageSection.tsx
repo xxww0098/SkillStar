@@ -1,8 +1,23 @@
+import { invoke } from "@tauri-apps/api/core";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import {
+  AlertTriangle,
+  ChevronDown,
+  Database,
+  FolderGit2,
+  FolderOpen,
+  FolderPlus,
+  Globe,
+  HardDrive,
+  History,
+  Loader2,
+  Stethoscope,
+  Trash2,
+  Wrench,
+  X,
+} from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { HardDrive, Database, FolderGit2, FolderPlus, FolderOpen, History, Loader2, Trash2, Globe, Stethoscope, Wrench, AlertTriangle, X, ChevronDown } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
 import { Button } from "../../../components/ui/button";
 import { toast } from "../../../lib/toast";
 import type { StorageOverview } from "../../../types";
@@ -51,9 +66,7 @@ export function StorageSection({
     : 0;
 
   const hasBroken = overview ? overview.broken_count > 0 : false;
-  const hubRelativePath = overview
-    ? getRelativePathFromParent(overview.data_root_path, overview.hub_root_path)
-    : null;
+  const hubRelativePath = overview ? getRelativePathFromParent(overview.data_root_path, overview.hub_root_path) : null;
 
   return (
     <section>
@@ -64,9 +77,7 @@ export function StorageSection({
         <h2 className="text-sm font-semibold text-foreground tracking-tight">{t("settings.storage")}</h2>
       </div>
       <div className="mb-2 px-1 flex items-start justify-between gap-3">
-        <p className="text-micro leading-relaxed text-muted-foreground/75">
-          {t("settings.storagePathModelHint")}
-        </p>
+        <p className="text-micro leading-relaxed text-muted-foreground/75">{t("settings.storagePathModelHint")}</p>
         <button
           type="button"
           onClick={() => setPathStructureOpen((prev) => !prev)}
@@ -121,9 +132,7 @@ export function StorageSection({
             <div>
               <div className="text-sm font-medium text-foreground">{t("settings.storageTotal")}</div>
               {overview && !loading && (
-                <div className="text-xs text-muted-foreground mt-0.5 font-mono">
-                  {formatBytes(totalBytes)}
-                </div>
+                <div className="text-xs text-muted-foreground mt-0.5 font-mono">{formatBytes(totalBytes)}</div>
               )}
             </div>
           </div>
@@ -326,13 +335,7 @@ export function StorageSection({
   );
 }
 
-function OpenFolderButton({
-  onClick,
-  label,
-}: {
-  onClick: () => void;
-  label: string;
-}) {
+function OpenFolderButton({ onClick, label }: { onClick: () => void; label: string }) {
   return (
     <Button
       size="icon"
@@ -367,9 +370,7 @@ function StorageRow({
 
   return (
     <div className="px-4 py-2.5 flex items-center gap-3">
-      <div className="w-6 h-6 rounded-md bg-muted/50 flex shrink-0 items-center justify-center">
-        {icon}
-      </div>
+      <div className="w-6 h-6 rounded-md bg-muted/50 flex shrink-0 items-center justify-center">{icon}</div>
       <div className="min-w-0 flex-1">
         <div className="text-xs font-medium text-foreground/80 flex items-center gap-1.5">
           <span>{label}</span>
@@ -379,7 +380,7 @@ function StorageRow({
             </span>
           )}
         </div>
-        <div 
+        <div
           className={`text-micro mt-0.5 transition-opacity ${highlight ? "text-amber-400/80" : "text-muted-foreground"} ${highlight && cleaning ? "animate-pulse" : ""}`}
         >
           {detail}
@@ -469,16 +470,10 @@ function ForceDeleteButton({
           className={`h-7 w-7 text-muted-foreground hover:text-destructive ${isDeleting ? "animate-pulse text-destructive" : "hover:bg-destructive/10"}`}
           title={label}
         >
-          {isDeleting ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <Trash2 className="w-4 h-4" />
-          )}
+          {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
         </Button>
         {isDeleting && isSlow ? (
-          <span className="text-micro text-amber-400/90 whitespace-nowrap">
-            {t("settings.forceDeleteSlowHint")}
-          </span>
+          <span className="text-micro text-amber-400/90 whitespace-nowrap">{t("settings.forceDeleteSlowHint")}</span>
         ) : null}
       </div>
 
@@ -511,11 +506,7 @@ function ForceDeleteButton({
                   <div className="flex items-start justify-between gap-4 px-6 pt-5">
                     <div className="flex items-start gap-3">
                       <motion.div
-                        animate={
-                          prefersReducedMotion
-                            ? undefined
-                            : { scale: [1, 1.04, 1], rotate: [0, -3, 0] }
-                        }
+                        animate={prefersReducedMotion ? undefined : { scale: [1, 1.04, 1], rotate: [0, -3, 0] }}
                         transition={{ duration: 0.42, ease: [0.22, 1, 0.36, 1] }}
                         className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-destructive/10 text-destructive"
                       >
@@ -523,9 +514,7 @@ function ForceDeleteButton({
                       </motion.div>
                       <div className="space-y-1">
                         <h2 className="text-heading-sm">{label}</h2>
-                        <p className="text-caption leading-5 pr-4 mt-2 mb-4 text-muted-foreground">
-                          {confirmMsg}
-                        </p>
+                        <p className="text-caption leading-5 pr-4 mt-2 mb-4 text-muted-foreground">{confirmMsg}</p>
                       </div>
                     </div>
 

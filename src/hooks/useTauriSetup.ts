@@ -1,10 +1,7 @@
-import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import {
-  readBackgroundRun,
-  writeBackgroundRun,
-} from "../features/settings/sections/BackgroundRunSection";
+import { useEffect } from "react";
+import { readBackgroundRun, writeBackgroundRun } from "../features/settings/sections/BackgroundRunSection";
 import { getLanguage } from "../i18n";
 
 type PatrolStatus = {
@@ -50,13 +47,21 @@ export function useTauriSetup() {
             intervalSecs: status?.interval_secs ?? 30,
           }).catch(() => {});
         });
-        if (cancelled) { unlistenHidden(); } else { cleanups.push(unlistenHidden); }
+        if (cancelled) {
+          unlistenHidden();
+        } else {
+          cleanups.push(unlistenHidden);
+        }
 
         // 3. Listen for patrol enabled-changed → sync to localStorage
         const unlistenEnabled = await listen<boolean>("patrol://enabled-changed", (event) => {
           writeBackgroundRun(Boolean(event.payload));
         });
-        if (cancelled) { unlistenEnabled(); } else { cleanups.push(unlistenEnabled); }
+        if (cancelled) {
+          unlistenEnabled();
+        } else {
+          cleanups.push(unlistenEnabled);
+        }
       } catch {
         // Not in Tauri environment
       }

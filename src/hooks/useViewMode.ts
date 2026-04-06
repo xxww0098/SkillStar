@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { ViewMode } from "../types";
 
 const VIEW_MODE_KEY = "skillstar:view-mode";

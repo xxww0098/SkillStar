@@ -1,17 +1,13 @@
-import { useState, useEffect } from "react";
-import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { X, Sparkles, Check, Loader2 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { Check, Loader2, Sparkles, X } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
-import { cn, navigateToAiSettings } from "../../../lib/utils";
-import { toast } from "../../../lib/toast";
 import { getAiConfigCached } from "../../../hooks/useAiConfig";
-import type {
-  AiPickRecommendation,
-  AiPickResponse,
-  Skill,
-} from "../../../types";
+import { toast } from "../../../lib/toast";
+import { cn, navigateToAiSettings } from "../../../lib/utils";
+import type { AiPickRecommendation, AiPickResponse, Skill } from "../../../types";
 
 interface AiPickSkillsModalProps {
   open: boolean;
@@ -22,12 +18,7 @@ interface AiPickSkillsModalProps {
 
 type Phase = "input" | "loading" | "result";
 
-export function AiPickSkillsModal({
-  open,
-  onClose,
-  skills,
-  onResult,
-}: AiPickSkillsModalProps) {
+export function AiPickSkillsModal({ open, onClose, skills, onResult }: AiPickSkillsModalProps) {
   const { t } = useTranslation();
   const prefersReducedMotion = useReducedMotion();
   const [phase, setPhase] = useState<Phase>("input");
@@ -78,9 +69,7 @@ export function AiPickSkillsModal({
         skills: skillMetas,
       });
 
-      const validRecommendations = result.recommendations.filter((item) =>
-        skills.some((s) => s.name === item.name)
-      );
+      const validRecommendations = result.recommendations.filter((item) => skills.some((s) => s.name === item.name));
 
       setRecommended(validRecommendations);
       setSelected(new Set(validRecommendations.map((item) => item.name)));
@@ -157,9 +146,7 @@ export function AiPickSkillsModal({
                       animate={{ opacity: 1, scale: 1 }}
                       className="mb-4 rounded-xl border border-warning/20 bg-warning/10 px-4 py-3 flex items-start gap-3"
                     >
-                      <div className="flex-1 text-sm text-warning/90">
-                        {t("aiPickModal.aiNotConfigured")}
-                      </div>
+                      <div className="flex-1 text-sm text-warning/90">{t("aiPickModal.aiNotConfigured")}</div>
                       <button
                         onClick={() => {
                           onClose();
@@ -173,14 +160,8 @@ export function AiPickSkillsModal({
                   )}
 
                   {phase === "input" && (
-                    <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="space-y-3"
-                    >
-                      <p className="text-xs text-muted-foreground">
-                        {t("aiPickModal.description")}
-                      </p>
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-3">
+                      <p className="text-xs text-muted-foreground">{t("aiPickModal.description")}</p>
                       <textarea
                         value={prompt}
                         onChange={(e) => setPrompt(e.target.value)}
@@ -193,9 +174,7 @@ export function AiPickSkillsModal({
                           }
                         }}
                       />
-                      {error && (
-                        <p className="text-xs text-destructive">{error}</p>
-                      )}
+                      {error && <p className="text-xs text-destructive">{error}</p>}
                     </motion.div>
                   )}
 
@@ -211,35 +190,23 @@ export function AiPickSkillsModal({
                         </div>
                         <div className="absolute inset-0 rounded-full bg-violet-500/20 animate-ping" />
                       </div>
-                      <p className="text-sm text-muted-foreground">
-                        {t("aiPickModal.picking")}
-                      </p>
-                      <p className="text-micro text-muted-foreground/60">
-                        {t("aiPickModal.pickingDetail")}
-                      </p>
+                      <p className="text-sm text-muted-foreground">{t("aiPickModal.picking")}</p>
+                      <p className="text-micro text-muted-foreground/60">{t("aiPickModal.pickingDetail")}</p>
                     </motion.div>
                   )}
 
                   {phase === "result" && (
-                    <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="space-y-3"
-                    >
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-3">
                       <div className="space-y-1">
                         <div className="flex items-center justify-between">
-                          <p className="text-xs text-muted-foreground">
-                            {t("aiPickModal.resultTitle")}
-                          </p>
+                          <p className="text-xs text-muted-foreground">{t("aiPickModal.resultTitle")}</p>
                           <span className="text-micro text-muted-foreground tabular-nums">
                             {selected.size} / {recommended.length}
                           </span>
                         </div>
                         <div className="flex flex-wrap items-center gap-2 text-micro text-muted-foreground/80">
                           <span>{t("aiPickModal.consensusMeta", { count: roundsSucceeded })}</span>
-                          {fallbackUsed && (
-                            <span>{t("aiPickModal.fallbackMeta")}</span>
-                          )}
+                          {fallbackUsed && <span>{t("aiPickModal.fallbackMeta")}</span>}
                         </div>
                       </div>
 
@@ -251,48 +218,34 @@ export function AiPickSkillsModal({
                         <div className="max-h-52 overflow-y-auto rounded-xl border border-border/50 bg-sidebar/30">
                           <div className="space-y-0.5 p-1">
                             {recommended.map((item) => {
-                              const skill = skills.find(
-                                (s) => s.name === item.name
-                              );
+                              const skill = skills.find((s) => s.name === item.name);
                               const isSelected = selected.has(item.name);
                               const reason = item.reason.trim();
                               const displayDesc = skill?.localized_description || skill?.description;
-                              const showDescription =
-                                !!displayDesc && displayDesc !== reason;
+                              const showDescription = !!displayDesc && displayDesc !== reason;
                               return (
                                 <button
                                   key={item.name}
                                   onClick={() => toggleSkill(item.name)}
                                   className={cn(
                                     "w-full flex items-start gap-2.5 px-2.5 py-2 rounded-lg text-left transition cursor-pointer",
-                                    isSelected
-                                      ? "bg-violet-500/8 hover:bg-violet-500/12"
-                                      : "hover:bg-muted/50"
+                                    isSelected ? "bg-violet-500/8 hover:bg-violet-500/12" : "hover:bg-muted/50",
                                   )}
                                 >
                                   <div
                                     className={cn(
                                       "w-4 h-4 rounded border-[1.5px] flex items-center justify-center shrink-0 transition",
-                                      isSelected
-                                        ? "bg-violet-500 border-violet-500"
-                                        : "border-muted-foreground/30"
+                                      isSelected ? "bg-violet-500 border-violet-500" : "border-muted-foreground/30",
                                     )}
                                   >
-                                    {isSelected && (
-                                      <Check
-                                        className="w-2.5 h-2.5 text-white"
-                                        strokeWidth={3}
-                                      />
-                                    )}
+                                    {isSelected && <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />}
                                   </div>
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2">
                                       <div
                                         className={cn(
                                           "text-caption truncate",
-                                          isSelected
-                                            ? "text-violet-300 font-medium"
-                                            : "text-foreground"
+                                          isSelected ? "text-violet-300 font-medium" : "text-foreground",
                                         )}
                                       >
                                         {item.name}
@@ -302,14 +255,10 @@ export function AiPickSkillsModal({
                                       </span>
                                     </div>
                                     {reason && (
-                                      <div className="text-[11px] leading-4 text-violet-100/85 mt-0.5">
-                                        {reason}
-                                      </div>
+                                      <div className="text-[11px] leading-4 text-violet-100/85 mt-0.5">{reason}</div>
                                     )}
                                     {showDescription && (
-                                      <div className="text-micro text-muted-foreground mt-0.5">
-                                        {displayDesc}
-                                      </div>
+                                      <div className="text-micro text-muted-foreground mt-0.5">{displayDesc}</div>
                                     )}
                                   </div>
                                 </button>
@@ -326,11 +275,7 @@ export function AiPickSkillsModal({
                 <div className="flex items-center justify-between gap-2 px-6 py-3.5 border-t border-border/60 shrink-0">
                   {phase === "result" ? (
                     <>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setPhase("input")}
-                      >
+                      <Button variant="ghost" size="sm" onClick={() => setPhase("input")}>
                         {t("common.back")}
                       </Button>
                       <Button
@@ -353,19 +298,12 @@ export function AiPickSkillsModal({
                       <Button
                         size="sm"
                         onClick={handlePick}
-                        disabled={
-                          !prompt.trim() ||
-                          phase === "loading" ||
-                          skills.length === 0 ||
-                          aiConfigured !== true
-                        }
+                        disabled={!prompt.trim() || phase === "loading" || skills.length === 0 || aiConfigured !== true}
                         className="bg-violet-600 hover:bg-violet-500 text-white"
                       >
                         <span className="flex items-center gap-1.5">
                           <Sparkles className="w-3.5 h-3.5" />
-                          {phase === "loading"
-                            ? t("aiPickModal.picking")
-                            : t("aiPickModal.pick")}
+                          {phase === "loading" ? t("aiPickModal.picking") : t("aiPickModal.pick")}
                         </span>
                       </Button>
                     </>

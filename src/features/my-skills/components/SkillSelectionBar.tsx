@@ -1,21 +1,22 @@
-import { useState } from "react";
 import { motion } from "framer-motion";
-import { useTranslation } from "react-i18next";
 import {
+  Bot,
+  Check,
+  CheckSquare,
   Layers,
+  Link2,
+  Loader2,
+  MinusSquare,
   RefreshCw,
   Rocket,
+  Share2,
   Trash2,
   X,
-  Link2,
-  Share2,
-  CheckSquare,
-  MinusSquare,
-  Bot,
 } from "lucide-react";
-import { Loader2, Check } from "lucide-react";
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { AgentIcon } from "../../../components/ui/AgentIcon";
-import { cn, agentIconCls } from "../../../lib/utils";
+import { agentIconCls, cn } from "../../../lib/utils";
 import type { AgentProfile } from "../../../types";
 
 interface SkillSelectionBarProps {
@@ -62,8 +63,7 @@ export function SkillSelectionBar({
   const [isUpdating, setIsUpdating] = useState(false);
   const [updateSuccess, setUpdateSuccess] = useState(false);
   const enabledProfiles = agentProfiles?.filter((p) => p.enabled) ?? [];
-  const allSelected =
-    totalCount !== undefined && selectedCount >= totalCount;
+  const allSelected = totalCount !== undefined && selectedCount >= totalCount;
 
   const handleUpdate = async () => {
     if (disabled || isUpdating) return;
@@ -111,12 +111,14 @@ export function SkillSelectionBar({
               className="group flex items-center gap-1.5 h-7 px-3 ml-[1px] rounded-[9px] text-[12px] font-medium text-muted-foreground hover:text-foreground hover:bg-background/80 hover:shadow-sm transition-all duration-200 cursor-pointer select-none whitespace-nowrap"
             >
               <div className="relative w-3.5 h-3.5 shrink-0 flex items-center justify-center">
-                <CheckSquare className={`absolute w-3.5 h-3.5 transition-all duration-300 ease-out ${allSelected ? 'opacity-0 scale-50 rotate-90' : 'opacity-100 scale-100 rotate-0 group-hover:text-primary/80'}`} />
-                <MinusSquare className={`absolute w-3.5 h-3.5 transition-all duration-300 ease-out ${allSelected ? 'opacity-100 scale-100 rotate-0 text-foreground' : 'opacity-0 scale-50 -rotate-90'}`} />
+                <CheckSquare
+                  className={`absolute w-3.5 h-3.5 transition-all duration-300 ease-out ${allSelected ? "opacity-0 scale-50 rotate-90" : "opacity-100 scale-100 rotate-0 group-hover:text-primary/80"}`}
+                />
+                <MinusSquare
+                  className={`absolute w-3.5 h-3.5 transition-all duration-300 ease-out ${allSelected ? "opacity-100 scale-100 rotate-0 text-foreground" : "opacity-0 scale-50 -rotate-90"}`}
+                />
               </div>
-              <span className="relative">
-                {allSelected ? t("common.deselectAll") : t("common.selectAll")}
-              </span>
+              <span className="relative">{allSelected ? t("common.deselectAll") : t("common.selectAll")}</span>
             </button>
           )}
         </div>
@@ -128,11 +130,7 @@ export function SkillSelectionBar({
         <div className="flex items-center gap-1 flex-1 min-w-0">
           {/* Pack as deck */}
           {onPackSkills && (
-            <button
-              onClick={onPackSkills}
-              disabled={disabled}
-              className={`${ghostBtn} ${ghostBtnPaper}`}
-            >
+            <button onClick={onPackSkills} disabled={disabled} className={`${ghostBtn} ${ghostBtnPaper}`}>
               <Layers className="w-3.5 h-3.5 shrink-0 group-hover:scale-110 transition-transform duration-200" />
               {t("selectionBar.packSkills")}
             </button>
@@ -150,10 +148,7 @@ export function SkillSelectionBar({
               </button>
               {linkMenuOpen && (
                 <>
-                  <div
-                    className="fixed inset-0 z-40"
-                    onClick={() => setLinkMenuOpen(false)}
-                  />
+                  <div className="fixed inset-0 z-40" onClick={() => setLinkMenuOpen(false)} />
                   <motion.div
                     initial={{ opacity: 0, scale: 0.95, y: -4 }}
                     animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -162,7 +157,7 @@ export function SkillSelectionBar({
                     <div className="px-3 py-2 text-xs font-medium text-muted-foreground border-b border-border/40 bg-muted/20">
                       {t("selectionBar.linkToAgent", { defaultValue: "Link to Agent" })}
                     </div>
-                    
+
                     <div className="p-2 grid grid-cols-4 gap-1">
                       {enabledProfiles.map((profile) => (
                         <button
@@ -179,7 +174,7 @@ export function SkillSelectionBar({
                             className={cn(
                               agentIconCls(profile.icon, "w-6 h-6"),
                               "transition-[filter,transform] duration-300 drop-shadow-sm",
-                              "grayscale opacity-70 group-hover:grayscale-0 group-hover:opacity-100 group-hover:scale-110"
+                              "grayscale opacity-70 group-hover:grayscale-0 group-hover:opacity-100 group-hover:scale-110",
                             )}
                           />
                           <span className="text-[10px] whitespace-nowrap overflow-hidden text-ellipsis w-full text-center text-muted-foreground group-hover:text-foreground">
@@ -200,7 +195,14 @@ export function SkillSelectionBar({
                         >
                           <Link2 className="w-3.5 h-3.5 relative">
                             {/* Simple slash overlay for unlink icon */}
-                            <svg className="absolute inset-0 text-current" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                            <svg
+                              className="absolute inset-0 text-current"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2.5"
+                              strokeLinecap="round"
+                            >
                               <line x1="4" y1="20" x2="20" y2="4" />
                             </svg>
                           </Link2>
@@ -230,11 +232,7 @@ export function SkillSelectionBar({
 
           {/* Save as group */}
           {onSaveGroup && (
-            <button
-              onClick={onSaveGroup}
-              disabled={disabled}
-              className={`${ghostBtn} ${ghostBtnPaper}`}
-            >
+            <button onClick={onSaveGroup} disabled={disabled} className={`${ghostBtn} ${ghostBtnPaper}`}>
               <Layers className="w-3.5 h-3.5 shrink-0 group-hover:scale-110 transition-transform duration-200" />
               {t("selectionBar.saveAsGroup")}
             </button>
@@ -269,9 +267,7 @@ export function SkillSelectionBar({
             onClick={handleUpdate}
             disabled={disabled || isUpdating || updateSuccess}
             className={`${ghostBtn} ${ghostBtnPaper} ${
-              updateSuccess
-                ? "!text-success !border-success/20 !bg-success/10"
-                : ""
+              updateSuccess ? "!text-success !border-success/20 !bg-success/10" : ""
             }`}
           >
             {isUpdating ? (

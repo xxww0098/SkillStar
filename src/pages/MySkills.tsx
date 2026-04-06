@@ -1,35 +1,35 @@
-import { useState, useMemo, useCallback, useEffect, lazy, Suspense } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Layers, AlertTriangle, Globe } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { AnimatePresence, motion } from "framer-motion";
+import { AlertTriangle, Globe, Layers } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
 import { useTranslation } from "react-i18next";
 import { Toolbar } from "../components/layout/Toolbar";
-import { SkillGrid } from "../features/my-skills/components/SkillGrid";
-import { DeployToProjectModal } from "../features/my-skills/components/DeployToProjectModal";
+import { BatchTranslationProgress } from "../components/ui/BatchTranslationProgress";
+import { Button } from "../components/ui/button";
+import { LoadingLogo } from "../components/ui/LoadingLogo";
+import { AiPickSkillsModal } from "../features/my-skills/components/AiPickSkillsModal";
 import { CreateGroupModal } from "../features/my-skills/components/CreateGroupModal";
-import { SkillSelectionBar } from "../features/my-skills/components/SkillSelectionBar";
-import { UninstallConfirmDialog } from "../features/my-skills/components/UninstallConfirmDialog";
+import { DeployToProjectModal } from "../features/my-skills/components/DeployToProjectModal";
+import { ExportShareCodeModal } from "../features/my-skills/components/ExportShareCodeModal";
+import { ImportBundleModal } from "../features/my-skills/components/ImportBundleModal";
 import { ImportModal } from "../features/my-skills/components/ImportModal";
 import { PublishSkillModal } from "../features/my-skills/components/PublishSkillModal";
-import { ImportBundleModal } from "../features/my-skills/components/ImportBundleModal";
-import { AiPickSkillsModal } from "../features/my-skills/components/AiPickSkillsModal";
-import { ExportShareCodeModal } from "../features/my-skills/components/ExportShareCodeModal";
-import { useSkills } from "../features/my-skills/hooks/useSkills";
+import { SkillGrid } from "../features/my-skills/components/SkillGrid";
+import { SkillSelectionBar } from "../features/my-skills/components/SkillSelectionBar";
+import { UninstallConfirmDialog } from "../features/my-skills/components/UninstallConfirmDialog";
 import { useSkillCards } from "../features/my-skills/hooks/useSkillCards";
-import { useAgentProfiles } from "../hooks/useAgentProfiles";
+import { useSkills } from "../features/my-skills/hooks/useSkills";
 import { useSecurityScan } from "../features/security/hooks/useSecurityScan";
+import { useAgentProfiles } from "../hooks/useAgentProfiles";
 import { useViewMode } from "../hooks/useViewMode";
 import { toast } from "../lib/toast";
-import { LoadingLogo } from "../components/ui/LoadingLogo";
-import { Button } from "../components/ui/button";
-import { BatchTranslationProgress } from "../components/ui/BatchTranslationProgress";
-import type { Skill, SortOption } from "../types";
+import type { RepoNewSkill, Skill, SortOption } from "../types";
 
 const DetailPanel = lazy(() =>
   import("../components/layout/DetailPanel").then((mod) => ({
     default: mod.DetailPanel,
-  }))
+  })),
 );
 
 interface MySkillsProps {
@@ -64,6 +64,10 @@ export function MySkills({
     updateSkillContent,
     batchRemoveSkillsFromAllAgents,
     batchAiProcessSkills,
+    ghostSkills,
+    dismissGhostSkill,
+    dismissGhostRepo,
+    installGhostSkill,
   } = useSkills();
   const { profiles, deploySkillsToProject } = useAgentProfiles();
   const { createGroup, groups } = useSkillCards();
@@ -88,12 +92,40 @@ export function MySkills({
   const [aiPickModalOpen, setAiPickModalOpen] = useState(false);
   const [brokenCount, setBrokenCount] = useState(0);
   const [sourceFilter, setSourceFilter] = useState<"all" | "hub" | "local">("all");
+  const [repoFilter, setRepoFilter] = useState<string | null>(null);
   const [shareCardSkills, setShareCardSkills] = useState<string[] | null>(null);
   const localCount = useMemo(() => skills.filter((s) => s.skill_type === "local").length, [skills]);
-  const pendingUpdateCount = useMemo(
-    () => skills.filter((skill) => skill.update_available).length,
-    [skills]
-  );
+  const pendingUpdateCount = useMemo(() => skills.filter((skill) => skill.update_available).length, [skills]);
+
+  /** Sorted unique repo source strings for the repo filter popover */
+  const repoSources = useMemo(() => {
+    const set = new Set<string>();
+    for (const skill of skills) {
+      if (skill.source) set.add(skill.source);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [skills]);
+  const [isUpdatingAll, setIsUpdatingAll] = useState(false);
+
+  // Convert a ghost skill into a synthetic Skill for DetailPanel
+  const handleGhostClick = useCallback((ghost: RepoNewSkill) => {
+    const syntheticSkill: Skill = {
+      name: ghost.skill_id,
+      description: ghost.description,
+      skill_type: "hub",
+      stars: 0,
+      installed: false,
+      update_available: false,
+      last_updated: new Date().toISOString(),
+      git_url: ghost.repo_url,
+      tree_hash: null,
+      category: "None",
+      author: null,
+      topics: [],
+      source: ghost.repo_source,
+    };
+    setSelectedSkill((prev) => (prev?.name === syntheticSkill.name ? null : syntheticSkill));
+  }, []);
 
   // Fetch broken skill count after skills load (lightweight, one extra field from StorageOverview)
   useEffect(() => {
@@ -104,7 +136,9 @@ export function MySkills({
           if (!cancelled) setBrokenCount(overview.broken_count);
         })
         .catch((e) => console.warn("[MySkills] Failed to get storage overview:", e));
-      return () => { cancelled = true; };
+      return () => {
+        cancelled = true;
+      };
     }
   }, [loading]);
 
@@ -133,7 +167,7 @@ export function MySkills({
         (skill) =>
           skill.name.toLowerCase().includes(normalizedQuery) ||
           skill.description.toLowerCase().includes(normalizedQuery) ||
-          (skill.localized_description && skill.localized_description.toLowerCase().includes(normalizedQuery))
+          (skill.localized_description && skill.localized_description.toLowerCase().includes(normalizedQuery)),
       );
     }
 
@@ -141,9 +175,7 @@ export function MySkills({
     if (agentFilter) {
       const agentProfile = profiles.find((p) => p.id === agentFilter);
       if (agentProfile) {
-        visibleSkills = visibleSkills.filter(
-          (skill) => skill.agent_links?.includes(agentProfile.display_name)
-        );
+        visibleSkills = visibleSkills.filter((skill) => skill.agent_links?.includes(agentProfile.display_name));
       }
     }
 
@@ -158,14 +190,18 @@ export function MySkills({
       visibleSkills = visibleSkills.filter((skill) => skill.update_available);
     }
 
+    // Repo source filter
+    if (repoFilter) {
+      visibleSkills = visibleSkills.filter((skill) => skill.source === repoFilter);
+    }
+
     visibleSkills.sort((a, b) => {
       switch (sortBy) {
         case "stars-desc":
           return b.stars - a.stars || a.name.localeCompare(b.name);
         case "updated":
           return (
-            new Date(b.last_updated).getTime() - new Date(a.last_updated).getTime() ||
-            a.name.localeCompare(b.name)
+            new Date(b.last_updated).getTime() - new Date(a.last_updated).getTime() || a.name.localeCompare(b.name)
           );
         case "name":
         default:
@@ -174,12 +210,11 @@ export function MySkills({
     });
 
     return visibleSkills;
-  }, [skills, searchQuery, sortBy, agentFilter, profiles, showUpdateOnly, sourceFilter]);
+  }, [skills, searchQuery, sortBy, agentFilter, profiles, showUpdateOnly, sourceFilter, repoFilter]);
 
   const compatibleSelectionProfiles = useMemo(
-    () =>
-      profiles.filter((profile) => profile.enabled && profile.id !== "openclaw"),
-    [profiles]
+    () => profiles.filter((profile) => profile.enabled && profile.id !== "openclaw"),
+    [profiles],
   );
 
   const handleInstall = async (url: string) => {
@@ -245,9 +280,12 @@ export function MySkills({
     setUninstallDialogOpen(false);
   }, [uninstalling]);
 
-  const handleUninstall = useCallback((name: string) => {
-    openUninstallDialog([name]);
-  }, [openUninstallDialog]);
+  const handleUninstall = useCallback(
+    (name: string) => {
+      openUninstallDialog([name]);
+    },
+    [openUninstallDialog],
+  );
 
   const handleBatchUninstall = useCallback(() => {
     openUninstallDialog(selectedSkillNames);
@@ -280,7 +318,7 @@ export function MySkills({
     setUninstallError(
       failedNames.length === 1
         ? t("mySkills.batchUninstallFailed", { name: failedNames[0], count: 1 })
-        : t("mySkills.batchUninstallFailed", { name: failedNames[0], count: failedNames.length })
+        : t("mySkills.batchUninstallFailed", { name: failedNames[0], count: failedNames.length }),
     );
   }, [closeUninstallDialog, pendingUninstallNames, removeSkillFromUi, uninstallSkill, t]);
 
@@ -314,34 +352,106 @@ export function MySkills({
 
     // Summary toast
     if (failedNames.length === 0) {
-      toast.success(t("mySkills.batchUpdateSuccess", { count: successCount, defaultValue: `${successCount} skill(s) updated` }));
+      toast.success(
+        t("mySkills.batchUpdateSuccess", { count: successCount, defaultValue: `${successCount} skill(s) updated` }),
+      );
     } else if (successCount > 0) {
-      toast.warning(t("mySkills.batchUpdatePartial", {
-        success: successCount,
-        failed: failedNames.length,
-        defaultValue: `${successCount} updated, ${failedNames.length} failed`,
-      }));
+      toast.warning(
+        t("mySkills.batchUpdatePartial", {
+          success: successCount,
+          failed: failedNames.length,
+          defaultValue: `${successCount} updated, ${failedNames.length} failed`,
+        }),
+      );
     } else {
       toast.error(t("mySkills.updateFailed"));
     }
   };
 
-  const handleBatchLink = useCallback(async (agentId: string) => {
-    setBatchLoading(true);
-    try {
-      await invoke<number>("batch_link_skills_to_agent", {
-        skillNames: Array.from(selectedSkillNames),
-        agentId,
-      });
-      // Refresh skills list to update agent_links
-      clearSelection();
-      await refresh(true, true);
-    } catch (e) {
-      toast.error(String(e) || t("mySkills.batchLinkFailed"));
-    } finally {
-      setBatchLoading(false);
+  const handleUpdateAll = async () => {
+    const allUpdatable = skills.filter((s) => s.update_available && s.skill_type !== "local");
+    if (allUpdatable.length === 0) {
+      toast.info(t("mySkills.noUpdates"));
+      return;
     }
-  }, [selectedSkillNames, clearSelection, refresh, t]);
+
+    setIsUpdatingAll(true);
+
+    // Group by git_url — same repo only needs one update (backend clears siblings)
+    const repoGroups = new Map<string, typeof allUpdatable>();
+    for (const skill of allUpdatable) {
+      const key = skill.git_url || skill.name; // fallback for non-repo skills
+      const group = repoGroups.get(key) ?? [];
+      group.push(skill);
+      repoGroups.set(key, group);
+    }
+
+    // Update one representative per repo concurrently
+    const tasks = Array.from(repoGroups.values()).map(async (group) => {
+      const representative = group[0];
+      try {
+        const updated = await updateSkill(
+          representative.name,
+          group.map((s) => s.name),
+        );
+        if (selectedSkill?.name === representative.name) {
+          setSelectedSkill(updated);
+        }
+        return { success: group.length, failed: [] as string[] };
+      } catch {
+        return { success: 0, failed: group.map((s) => s.name) };
+      }
+    });
+
+    const results = await Promise.allSettled(tasks);
+
+    let successCount = 0;
+    const failedNames: string[] = [];
+    for (const r of results) {
+      if (r.status === "fulfilled") {
+        successCount += r.value.success;
+        failedNames.push(...r.value.failed);
+      }
+    }
+
+    setIsUpdatingAll(false);
+
+    if (failedNames.length === 0) {
+      toast.success(
+        t("mySkills.batchUpdateSuccess", { count: successCount, defaultValue: `${successCount} skill(s) updated` }),
+      );
+    } else if (successCount > 0) {
+      toast.warning(
+        t("mySkills.batchUpdatePartial", {
+          success: successCount,
+          failed: failedNames.length,
+          defaultValue: `${successCount} updated, ${failedNames.length} failed`,
+        }),
+      );
+    } else {
+      toast.error(t("mySkills.updateFailed"));
+    }
+  };
+
+  const handleBatchLink = useCallback(
+    async (agentId: string) => {
+      setBatchLoading(true);
+      try {
+        await invoke<number>("batch_link_skills_to_agent", {
+          skillNames: Array.from(selectedSkillNames),
+          agentId,
+        });
+        // Refresh skills list to update agent_links
+        clearSelection();
+        await refresh(true, true);
+      } catch (e) {
+        toast.error(String(e) || t("mySkills.batchLinkFailed"));
+      } finally {
+        setBatchLoading(false);
+      }
+    },
+    [selectedSkillNames, clearSelection, refresh, t],
+  );
 
   const handleBatchUnlinkAll = useCallback(async () => {
     setBatchLoading(true);
@@ -367,9 +477,7 @@ export function MySkills({
       return (
         <Button
           onClick={() => {
-            window.dispatchEvent(
-              new CustomEvent("skillstar:navigate", { detail: { page: "marketplace" } })
-            );
+            window.dispatchEvent(new CustomEvent("skillstar:navigate", { detail: { page: "marketplace" } }));
           }}
           className="gap-2"
         >
@@ -409,8 +517,16 @@ export function MySkills({
           isRefreshing={loading}
           onAiPick={() => setAiPickModalOpen(true)}
           sourceFilter={sourceFilter}
-          onSourceFilterChange={setSourceFilter}
+          onSourceFilterChange={(f) => {
+            setSourceFilter(f);
+            if (f === "local") setRepoFilter(null);
+          }}
           localCount={localCount}
+          onUpdateAll={handleUpdateAll}
+          isUpdatingAll={isUpdatingAll}
+          repoSources={repoSources}
+          repoFilter={repoFilter}
+          onRepoFilterChange={setRepoFilter}
         />
 
         {/* Selection bar */}
@@ -422,17 +538,11 @@ export function MySkills({
               disabled={batchLoading || uninstalling}
               onDeploy={() => setDeployModalOpen(true)}
               onSaveGroup={onPackSkills ? undefined : () => setGroupModalOpen(true)}
-              onPackSkills={
-                onPackSkills
-                  ? () => onPackSkills(Array.from(selectedSkillNames))
-                  : undefined
-              }
+              onPackSkills={onPackSkills ? () => onPackSkills(Array.from(selectedSkillNames)) : undefined}
               onShare={() => setShareCardSkills(Array.from(selectedSkillNames))}
               onUpdate={handleBatchUpdate}
               onUninstall={handleBatchUninstall}
-              onSelectAll={() =>
-                setSelectedSkillNames(new Set(filteredSkills.map((skill) => skill.name)))
-              }
+              onSelectAll={() => setSelectedSkillNames(new Set(filteredSkills.map((skill) => skill.name)))}
               onClear={clearSelection}
               agentProfiles={compatibleSelectionProfiles}
               onBatchLink={handleBatchLink}
@@ -477,9 +587,7 @@ export function MySkills({
                 </span>
                 <button
                   onClick={() => {
-                    window.dispatchEvent(
-                      new CustomEvent("skillstar:navigate", { detail: { page: "settings" } })
-                    );
+                    window.dispatchEvent(new CustomEvent("skillstar:navigate", { detail: { page: "settings" } }));
                   }}
                   className="text-caption text-amber-400 hover:text-amber-300 font-medium ml-auto cursor-pointer transition-colors"
                 >
@@ -489,7 +597,6 @@ export function MySkills({
             </motion.div>
           )}
         </AnimatePresence>
-
 
         <motion.main
           initial={{ opacity: 0 }}
@@ -507,7 +614,7 @@ export function MySkills({
               viewMode={viewMode}
               columnStrategy="auto-fill"
               minColumnWidth={320}
-              onSkillClick={(skill) => setSelectedSkill(prev => prev?.name === skill.name ? null : skill)}
+              onSkillClick={(skill) => setSelectedSkill((prev) => (prev?.name === skill.name ? null : skill))}
               onInstall={handleInstall}
               onUpdate={handleUpdate}
               emptyMessage={getEmptyMessage()}
@@ -520,6 +627,15 @@ export function MySkills({
               pendingUpdateNames={pendingUpdateNames}
               pendingAgentToggleKeys={pendingAgentToggleKeys}
               riskMap={riskMap}
+              ghostSkills={
+                !showUpdateOnly && !searchQuery && !agentFilter && sourceFilter === "all" && !repoFilter
+                  ? ghostSkills
+                  : undefined
+              }
+              onInstallGhost={installGhostSkill}
+              onDismissGhost={dismissGhostSkill}
+              onDismissGhostRepo={dismissGhostRepo}
+              onGhostClick={handleGhostClick}
             />
           )}
         </motion.main>
@@ -539,9 +655,7 @@ export function MySkills({
             onInstall={handleInstall}
             onUpdate={handleUpdate}
             onUninstall={handleUninstall}
-            uninstalling={
-              uninstalling && pendingUninstallNames.includes(selectedSkill.name)
-            }
+            uninstalling={uninstalling && pendingUninstallNames.includes(selectedSkill.name)}
             onReadContent={readSkillContent}
             onSaveContent={updateSkillContent}
             onPublish={(name) => setPublishTarget(name)}
@@ -613,9 +727,7 @@ export function MySkills({
         open={!!publishTarget}
         onClose={() => setPublishTarget(null)}
         skillName={publishTarget || ""}
-        skillDescription={
-          skills.find((s) => s.name === publishTarget)?.description || ""
-        }
+        skillDescription={skills.find((s) => s.name === publishTarget)?.description || ""}
         onPublished={() => {
           setPublishTarget(null);
           refresh(false, true);

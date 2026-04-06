@@ -43,6 +43,24 @@ pub struct SkillInstallTarget {
     pub folder_path: String,
 }
 
+/// A new skill found in a cached repo that the user hasn't installed yet.
+///
+/// Discovered by comparing `scan_skills_in_repo` results against the lockfile
+/// after patrol has already fetched the repo.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoNewSkill {
+    /// Short source identifier, e.g. "jackwener/opencli"
+    pub repo_source: String,
+    /// Full git URL
+    pub repo_url: String,
+    /// Skill name (from SKILL.md frontmatter or directory name)
+    pub skill_id: String,
+    /// Relative path within the repo
+    pub folder_path: String,
+    /// Description from SKILL.md
+    pub description: String,
+}
+
 // ── URL Normalization ───────────────────────────────────────────────
 
 /// Normalize user input into a full clone URL and a short source identifier.
@@ -568,8 +586,18 @@ fn find_skill_md_recursive(dir: &Path, results: &mut Vec<PathBuf>) {
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
 
-        // Skip .git directory
-        if name_str == ".git" {
+        // Skip directories that never contain SKILL.md
+        if name_str == ".git"
+            || name_str == "node_modules"
+            || name_str == ".venv"
+            || name_str == "venv"
+            || name_str == "__pycache__"
+            || name_str == "target"
+            || name_str == "dist"
+            || name_str == "build"
+            || name_str == ".next"
+            || name_str == ".nuxt"
+        {
             continue;
         }
 
@@ -874,25 +902,47 @@ pub fn resolve_skill_repo_root(skill_path: &Path) -> Option<PathBuf> {
 /// Walks the paths, identifies repo-cached skills, resolves their repo roots,
 /// and issues a single `git fetch --depth 1` per unique repository. This
 /// avoids redundant fetches when multiple skills share the same repo.
-pub fn prefetch_unique_repos(skill_paths: &[PathBuf]) {
+///
+/// Returns the set of repo roots where the fetch **failed** (e.g. "shallow
+/// file has changed since we read it"). Callers should treat skills in
+/// failed-fetch repos as "update status unknown" rather than "up-to-date".
+pub fn prefetch_unique_repos(skill_paths: &[PathBuf]) -> std::collections::HashSet<PathBuf> {
     let mut fetched = std::collections::HashSet::new();
+    let mut failed = std::collections::HashSet::new();
     for path in skill_paths {
         if let Some(root) = resolve_skill_repo_root(path) {
             if fetched.insert(root.clone()) {
-                let _ = command_with_path("git")
-                    .current_dir(&root)
-                    .args(["fetch", "--depth", "1", "--quiet"])
-                    .output();
+                // Use retry-aware fetch to handle shallow-file race condition
+                match git_ops::run_git_shallow_fetch(&root, &["fetch", "--depth", "1", "--quiet"]) {
+                    Ok(_) => {} // success
+                    Err(e) => {
+                        warn!(
+                            target: "repo_scanner",
+                            path = %root.display(),
+                            error = %e,
+                            "prefetch git fetch failed — will preserve existing update state"
+                        );
+                        failed.insert(root);
+                    }
+                }
             }
         }
     }
+    failed
 }
 
 /// Check if a repo-cached skill has updates **without fetching**.
 ///
 /// Compares local HEAD vs `origin/HEAD`. Call [`prefetch_unique_repos`] first
 /// to ensure `origin/HEAD` is up-to-date.
-pub fn check_repo_skill_update_local(skill_path: &Path) -> bool {
+///
+/// `failed_fetch_roots` contains repo roots where prefetch failed; for those
+/// repos we return `None` to signal "unknown" so callers can preserve the
+/// existing cached update state instead of falsely clearing it.
+pub fn check_repo_skill_update_local(
+    skill_path: &Path,
+    failed_fetch_roots: &std::collections::HashSet<PathBuf>,
+) -> Option<bool> {
     let real_path = match std::fs::read_link(skill_path) {
         Ok(target) => {
             if target.is_absolute() {
@@ -901,13 +951,19 @@ pub fn check_repo_skill_update_local(skill_path: &Path) -> bool {
                 skill_path.parent().unwrap_or(Path::new(".")).join(target)
             }
         }
-        Err(_) => return false,
+        Err(_) => return Some(false),
     };
 
     let repo_root = match find_repo_root(&real_path) {
         Some(root) => root,
-        None => return false,
+        None => return Some(false),
     };
+
+    // If the fetch failed for this repo, we can't trust the comparison —
+    // return None so the caller preserves the previous update state.
+    if failed_fetch_roots.contains(&repo_root) {
+        return None;
+    }
 
     let local_head = command_with_path("git")
         .current_dir(&repo_root)
@@ -924,8 +980,10 @@ pub fn check_repo_skill_update_local(skill_path: &Path) -> bool {
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
 
     match (local_head, remote_head) {
-        (Some(local), Some(remote)) => !local.is_empty() && !remote.is_empty() && local != remote,
-        _ => false,
+        (Some(local), Some(remote)) => {
+            Some(!local.is_empty() && !remote.is_empty() && local != remote)
+        }
+        _ => Some(false),
     }
 }
 
@@ -958,6 +1016,75 @@ pub fn is_repo_cached_skill(skill_path: &Path) -> bool {
     target_str.contains(".repos/") || target_str.contains(".repos\\")
 }
 
+/// Detect new uninstalled skills in all cached repos referenced by the lockfile.
+///
+/// After `prefetch_unique_repos()` has already fetched, the cached repos' tree
+/// objects are up-to-date. This function scans each cached repo and compares
+/// the discovered skills against the lockfile to identify new additions.
+///
+/// Returns an empty vec if no new skills are found.
+///
+/// Reuses `scan_skills_in_repo(..., false)` so ghost-skill detection matches
+/// the default root-first install semantics shown elsewhere in the app.
+pub fn detect_new_skills_in_cached_repos() -> Vec<RepoNewSkill> {
+    let lock_path = lockfile::lockfile_path();
+    let lf = match lockfile::Lockfile::load(&lock_path) {
+        Ok(lf) => lf,
+        Err(_) => return Vec::new(),
+    };
+
+    if lf.skills.is_empty() {
+        return Vec::new();
+    }
+
+    // Group installed skills by normalized repo URL → (source_identifier, repo_url)
+    let mut repo_groups: std::collections::HashMap<String, (String, String)> =
+        std::collections::HashMap::new();
+
+    for entry in &lf.skills {
+        if entry.git_url.is_empty() {
+            continue;
+        }
+        let norm_url = normalize_remote_url(&entry.git_url);
+        repo_groups.entry(norm_url).or_insert_with(|| {
+            let source = entry
+                .git_url
+                .strip_prefix("https://github.com/")
+                .unwrap_or(&entry.git_url)
+                .trim_end_matches(".git")
+                .trim_end_matches('/')
+                .to_string();
+            (source, entry.git_url.clone())
+        });
+    }
+
+    let cache_dir = super::paths::repos_cache_dir();
+    let mut new_skills = Vec::new();
+
+    for (_norm_url, (source, repo_url)) in &repo_groups {
+        let repo_dir = cache_dir.join(cache_dir_name(source));
+        if !repo_dir.join(".git").exists() {
+            continue;
+        }
+
+        for skill in scan_skills_in_repo(&repo_dir, repo_url, false) {
+            if skill.already_installed {
+                continue;
+            }
+
+            new_skills.push(RepoNewSkill {
+                repo_source: source.clone(),
+                repo_url: repo_url.clone(),
+                skill_id: skill.id,
+                folder_path: skill.folder_path,
+                description: skill.description,
+            });
+        }
+    }
+
+    new_skills
+}
+
 /// Pull updates for a repo-cached skill.
 ///
 /// Finds the source repo from the symlink, updates local refs from origin,
@@ -980,21 +1107,22 @@ pub fn pull_repo_skill_update(skill_path: &Path, folder_path: Option<&str>) -> R
     let repo_root = find_repo_root(&absolute_path)
         .ok_or_else(|| anyhow!("Cannot find git repo root for symlinked skill"))?;
 
-    let fetch_args: Vec<&str> = if is_shallow_repo(&repo_root) {
-        vec!["fetch", "--depth", "1", "--quiet"]
+    // Use retry-aware fetch for shallow repos to handle the
+    // "shallow file has changed since we read it" race condition.
+    if is_shallow_repo(&repo_root) {
+        git_ops::run_git_shallow_fetch(&repo_root, &["fetch", "--depth", "1", "--quiet"])
+            .context("Failed to fetch repo-cached update (shallow)")?;
     } else {
-        vec!["fetch", "--quiet"]
-    };
+        let output = command_with_path("git")
+            .current_dir(&repo_root)
+            .args(["fetch", "--quiet"])
+            .output()
+            .context("Failed to execute git fetch for repo-cached update")?;
 
-    let output = command_with_path("git")
-        .current_dir(&repo_root)
-        .args(fetch_args)
-        .output()
-        .context("Failed to execute git fetch for repo-cached update")?;
-
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!("git fetch failed: {}", err.trim()));
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow!("git fetch failed: {}", err.trim()));
+        }
     }
 
     let output = command_with_path("git")
@@ -1494,6 +1622,38 @@ mod tests {
             assert_eq!(skills.len(), 1);
             assert_eq!(skills[0].id, "legacy-installed-name");
             assert!(skills[0].already_installed);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn detect_new_skills_respects_root_first_semantics() -> Result<()> {
+        with_temp_home("ghost-root-first", || {
+            let repo_dir = paths::repos_cache_dir().join("owner--repo");
+            std::fs::create_dir_all(repo_dir.join(".git"))?;
+            write_skill_md(&repo_dir.join("SKILL.md"), "root-skill", "root")?;
+            write_skill_md(
+                &repo_dir.join("skills/nested-skill/SKILL.md"),
+                "nested-skill",
+                "nested",
+            )?;
+
+            let lock_path = lockfile::lockfile_path();
+            let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
+            lf.upsert(lockfile::LockEntry {
+                name: "root-skill".to_string(),
+                git_url: "https://github.com/owner/repo.git".to_string(),
+                tree_hash: "root-hash".to_string(),
+                installed_at: chrono::Utc::now().to_rfc3339(),
+                source_folder: None,
+            });
+            lf.save(&lock_path)?;
+
+            let new_skills = detect_new_skills_in_cached_repos();
+            assert!(
+                new_skills.is_empty(),
+                "nested skills should not surface as ghost cards when the repo defaults to a root skill"
+            );
             Ok(())
         })
     }

@@ -200,10 +200,13 @@ fn count_symlinks(dir: &Path) -> u32 {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return 0;
     };
-    entries.flatten().filter(|e| {
-        let path = e.path();
-        super::paths::is_link(&path) || (path.is_dir() && path.join("SKILL.md").exists())
-    }).count() as u32
+    entries
+        .flatten()
+        .filter(|e| {
+            let path = e.path();
+            super::paths::is_link(&path) || (path.is_dir() && path.join("SKILL.md").exists())
+        })
+        .count() as u32
 }
 
 /// Detect installation by creating the config/skills dir if it doesn't exist.
@@ -264,11 +267,19 @@ pub fn add_custom_profile(def: CustomProfileDef) -> Result<()> {
     let project_rel = def.project_skills_rel.trim();
     if !project_rel.is_empty() {
         if !project_rel.starts_with('.') || !project_rel.ends_with("/skills") {
-            return Err(anyhow::anyhow!("Project skills path must strictly follow the format '.agentname/skills'"));
+            return Err(anyhow::anyhow!(
+                "Project skills path must strictly follow the format '.agentname/skills'"
+            ));
         }
         let middle = &project_rel[1..project_rel.len() - "/skills".len()];
-        if middle.is_empty() || !middle.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
-            return Err(anyhow::anyhow!("Project skills path must strictly follow the format '.agentname/skills'"));
+        if middle.is_empty()
+            || !middle
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return Err(anyhow::anyhow!(
+                "Project skills path must strictly follow the format '.agentname/skills'"
+            ));
         }
     }
 

@@ -1,25 +1,22 @@
-import {
-  createElement,
-  createContext,
-  useState,
-  useEffect,
-  useCallback,
-  useRef,
-  useContext,
-  type ReactNode,
-} from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
-import type { Skill, SkillContent, SkillUpdateState, UpdateResult } from "../../../types";
+  createContext,
+  createElement,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { getSkillUpdateRefreshIntervalMs } from "../../../lib/skillUpdateRefresh";
+import type { RepoNewSkill, Skill, SkillContent, SkillUpdateState, UpdateResult } from "../../../types";
 
 const SKILLS_QUERY_KEY = ["skills"] as const;
 const SKILL_UPDATES_QUERY_KEY = ["skills", "updates"] as const;
+const GHOST_SKILLS_QUERY_KEY = ["skills", "ghost"] as const;
 const SKILL_LIST_REFRESH_INTERVAL_MS = 30_000;
 
 type SkillsState = ReturnType<typeof useSkillsState>;
@@ -45,20 +42,24 @@ function useSkillsState() {
     (updates: SkillUpdateState[]) => {
       if (updates.length === 0) return;
 
-      const updatesByName = new Map(
-        updates.map((update) => [update.name, update.update_available]),
-      );
+      const updatesByName = new Map(updates.map((update) => [update.name, update.update_available]));
 
       queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) => {
         if (prev.length === 0) return prev;
 
+        // Read the current pending-update set so we never overwrite skills
+        // whose update_available was just cleared by an in-flight updateSkill.
+        const pending = pendingUpdateRef.current;
+
         let changed = false;
         const next = prev.map((skill) => {
+          // Skip skills currently being updated — their state is authoritative
+          // from the updateSkill handler, not from a potentially stale refetch.
+          if (pending.has(skill.name)) {
+            return skill;
+          }
           const updateAvailable = updatesByName.get(skill.name);
-          if (
-            updateAvailable === undefined ||
-            updateAvailable === skill.update_available
-          ) {
+          if (updateAvailable === undefined || updateAvailable === skill.update_available) {
             return skill;
           }
           changed = true;
@@ -131,7 +132,7 @@ function useSkillsState() {
     };
 
     window.addEventListener("skillstar:refresh-skills", handleExternalRefresh);
-    
+
     listen("ai://translations-updated", handleExternalRefresh).then((unlistenFn) => {
       unlistenTauri = unlistenFn;
     });
@@ -146,19 +147,14 @@ function useSkillsState() {
   useEffect(() => {
     let unlisten: UnlistenFn | null = null;
 
-    listen<{ name: string; update_available: boolean }>(
-      "patrol://skill-checked",
-      (event) => {
-        const { name, update_available } = event.payload;
-        queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) => {
-          const skill = prev.find((item) => item.name === name);
-          if (!skill || skill.update_available === update_available) return prev;
-          return prev.map((item) =>
-            item.name === name ? { ...item, update_available } : item,
-          );
-        });
-      },
-    ).then((fn_) => {
+    listen<{ name: string; update_available: boolean }>("patrol://skill-checked", (event) => {
+      const { name, update_available } = event.payload;
+      queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) => {
+        const skill = prev.find((item) => item.name === name);
+        if (!skill || skill.update_available === update_available) return prev;
+        return prev.map((item) => (item.name === name ? { ...item, update_available } : item));
+      });
+    }).then((fn_) => {
       unlisten = fn_;
     });
 
@@ -167,9 +163,87 @@ function useSkillsState() {
     };
   }, [queryClient]);
 
+  // ── Ghost Skills (new repo skills) ────────────────────────────────
+
+  const ghostQuery = useQuery({
+    queryKey: GHOST_SKILLS_QUERY_KEY,
+    queryFn: () => invoke<RepoNewSkill[]>("check_new_repo_skills"),
+    enabled: skills.length > 0,
+    refetchOnWindowFocus: false,
+    staleTime: 60_000,
+  });
+
+  const ghostSkills = ghostQuery.data ?? [];
+
+  // Listen for patrol event to update ghost skills
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+
+    listen<RepoNewSkill[]>("patrol://new-skills-detected", (event) => {
+      if (event.payload.length > 0) {
+        // Merge with dismissed filter: fetch dismissed list and filter
+        invoke<string[]>("get_dismissed_new_skills")
+          .then((dismissed) => {
+            const dismissedSet = new Set(dismissed);
+            const filtered = event.payload.filter((s) => !dismissedSet.has(`${s.repo_source}/${s.skill_id}`));
+            queryClient.setQueryData<RepoNewSkill[]>(GHOST_SKILLS_QUERY_KEY, filtered);
+          })
+          .catch(() => {
+            // Fallback: set all (dismissed filter will apply on next full fetch)
+            queryClient.setQueryData<RepoNewSkill[]>(GHOST_SKILLS_QUERY_KEY, event.payload);
+          });
+      }
+    }).then((fn_) => {
+      unlisten = fn_;
+    });
+
+    return () => {
+      unlisten?.();
+    };
+  }, [queryClient]);
+
+  const dismissGhostSkill = useCallback(
+    async (repoSource: string, skillId: string) => {
+      const key = `${repoSource}/${skillId}`;
+      // Optimistic: remove immediately from cache
+      queryClient.setQueryData<RepoNewSkill[]>(GHOST_SKILLS_QUERY_KEY, (prev = []) =>
+        prev.filter((s) => `${s.repo_source}/${s.skill_id}` !== key),
+      );
+      try {
+        await invoke("dismiss_new_skill", { key });
+      } catch (e) {
+        // Revert on failure: re-fetch
+        void ghostQuery.refetch();
+        throw new Error(String(e));
+      }
+    },
+    [queryClient, ghostQuery],
+  );
+
+  const dismissGhostRepo = useCallback(
+    async (repoSource: string) => {
+      // Get all keys for this repo from current ghost list
+      const currentGhosts = queryClient.getQueryData<RepoNewSkill[]>(GHOST_SKILLS_QUERY_KEY) ?? [];
+      const keys = currentGhosts
+        .filter((s) => s.repo_source === repoSource)
+        .map((s) => `${s.repo_source}/${s.skill_id}`);
+      if (keys.length === 0) return;
+      // Optimistic: remove all from cache
+      queryClient.setQueryData<RepoNewSkill[]>(GHOST_SKILLS_QUERY_KEY, (prev = []) =>
+        prev.filter((s) => s.repo_source !== repoSource),
+      );
+      try {
+        await invoke("dismiss_new_skills_batch", { keys });
+      } catch (e) {
+        void ghostQuery.refetch();
+        throw new Error(String(e));
+      }
+    },
+    [queryClient, ghostQuery],
+  );
+
   const installMutation = useMutation({
-    mutationFn: ({ url, name }: { url: string; name?: string }) =>
-      invoke<Skill>("install_skill", { url, name }),
+    mutationFn: ({ url, name }: { url: string; name?: string }) => invoke<Skill>("install_skill", { url, name }),
     onSuccess: (skill) => {
       queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) => {
         if (prev.some((item) => item.name === skill.name)) {
@@ -181,12 +255,26 @@ function useSkillsState() {
     },
   });
 
+  const installGhostSkill = useCallback(
+    async (skill: RepoNewSkill) => {
+      try {
+        const installed = await installMutation.mutateAsync({ url: skill.repo_url, name: skill.skill_id });
+        // Remove from ghost list after successful install
+        queryClient.setQueryData<RepoNewSkill[]>(GHOST_SKILLS_QUERY_KEY, (prev = []) =>
+          prev.filter((s) => s.skill_id !== skill.skill_id || s.repo_source !== skill.repo_source),
+        );
+        return installed;
+      } catch (e) {
+        throw new Error(String(e));
+      }
+    },
+    [installMutation, queryClient],
+  );
+
   const uninstallMutation = useMutation({
     mutationFn: (name: string) => invoke("uninstall_skill", { name }),
     onSuccess: (_result, name) => {
-      queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) =>
-        prev.filter((item) => item.name !== name),
-      );
+      queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) => prev.filter((item) => item.name !== name));
     },
   });
 
@@ -213,16 +301,25 @@ function useSkillsState() {
   );
 
   const updateSkill = useCallback(
-    async (name: string) => {
+    async (name: string, siblingNames: string[] = []) => {
       if (pendingUpdateRef.current.has(name)) {
         throw new Error("Update already in progress");
       }
 
       pendingUpdateRef.current.add(name);
+      for (const sib of siblingNames) {
+        pendingUpdateRef.current.add(sib);
+      }
       setPendingUpdateNames(new Set(pendingUpdateRef.current));
 
       try {
         const result = await invoke<UpdateResult>("update_skill", { name });
+
+        // Cancel any in-flight update-check queries so a stale periodic refetch
+        // that started before the pull doesn't overwrite our freshly-cleared
+        // update_available states for sibling skills.
+        await queryClient.cancelQueries({ queryKey: SKILL_UPDATES_QUERY_KEY });
+
         const siblingSet = new Set(result.siblings_cleared);
         queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) =>
           prev.map((item) => {
@@ -236,9 +333,18 @@ function useSkillsState() {
         void refetchUpdates();
         return result.skill;
       } catch (e) {
+        // Restore update_available in the cache — if a concurrent periodic
+        // refresh happened to clear it while the update was in flight, we
+        // need to put it back so the UI continues showing the update button.
+        queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) =>
+          prev.map((item) => (item.name === name ? { ...item, update_available: true } : item)),
+        );
         throw new Error(String(e));
       } finally {
         pendingUpdateRef.current.delete(name);
+        for (const sib of siblingNames) {
+          pendingUpdateRef.current.delete(sib);
+        }
         setPendingUpdateNames(new Set(pendingUpdateRef.current));
       }
     },
@@ -261,8 +367,7 @@ function useSkillsState() {
       await queryClient.cancelQueries({ queryKey: SKILLS_QUERY_KEY });
 
       const previousSnapshot = queryClient.getQueryData<Skill[]>(SKILLS_QUERY_KEY) ?? [];
-      const previousSkillSnapshot =
-        previousSnapshot.find((item) => item.name === skillName) ?? null;
+      const previousSkillSnapshot = previousSnapshot.find((item) => item.name === skillName) ?? null;
 
       try {
         if (agentName) {
@@ -272,9 +377,7 @@ function useSkillsState() {
               const links = item.agent_links ?? [];
               return {
                 ...item,
-                agent_links: enable
-                  ? [...new Set([...links, agentName])]
-                  : links.filter((link) => link !== agentName),
+                agent_links: enable ? [...new Set([...links, agentName])] : links.filter((link) => link !== agentName),
               };
             }),
           );
@@ -285,9 +388,7 @@ function useSkillsState() {
         if (previousSkillSnapshot) {
           queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) =>
             prev.map((item) =>
-              item.name === skillName
-                ? { ...item, agent_links: previousSkillSnapshot.agent_links }
-                : item,
+              item.name === skillName ? { ...item, agent_links: previousSkillSnapshot.agent_links } : item,
             ),
           );
         } else {
@@ -319,16 +420,13 @@ function useSkillsState() {
     [refresh],
   );
 
-  const batchAiProcessSkills = useCallback(
-    async (skillNames: string[]) => {
-      try {
-        await invoke("ai_batch_process_skills", { skillNames });
-      } catch (e) {
-        throw new Error(String(e));
-      }
-    },
-    [],
-  );
+  const batchAiProcessSkills = useCallback(async (skillNames: string[]) => {
+    try {
+      await invoke("ai_batch_process_skills", { skillNames });
+    } catch (e) {
+      throw new Error(String(e));
+    }
+  }, []);
 
   const readSkillContent = useCallback(async (name: string) => {
     try {
@@ -363,9 +461,7 @@ function useSkillsState() {
     async (name: string) => {
       try {
         await invoke("delete_local_skill", { name });
-        queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) =>
-          prev.filter((item) => item.name !== name),
-        );
+        queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) => prev.filter((item) => item.name !== name));
       } catch (e) {
         throw new Error(String(e));
       }
@@ -393,6 +489,10 @@ function useSkillsState() {
     createLocalSkill,
     deleteLocalSkill,
     batchAiProcessSkills,
+    ghostSkills,
+    dismissGhostSkill,
+    dismissGhostRepo,
+    installGhostSkill,
   };
 }
 

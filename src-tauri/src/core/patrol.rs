@@ -228,13 +228,18 @@ async fn patrol_loop(
 
         // Fetch once per unique repo root to avoid per-skill network fetches.
         let skill_paths: Vec<PathBuf> = skills.iter().map(|entry| entry.path.clone()).collect();
-        if let Err(err) = tokio::task::spawn_blocking(move || {
-            repo_scanner::prefetch_unique_repos(&skill_paths);
-        })
-        .await
-        {
-            warn!(target: "patrol", error = %err, "failed to prefetch repos");
-        }
+        let failed_fetch_roots: Arc<std::collections::HashSet<PathBuf>> =
+            match tokio::task::spawn_blocking(move || {
+                repo_scanner::prefetch_unique_repos(&skill_paths)
+            })
+            .await
+            {
+                Ok(failed) => Arc::new(failed),
+                Err(err) => {
+                    warn!(target: "patrol", error = %err, "failed to prefetch repos");
+                    Arc::new(std::collections::HashSet::new())
+                }
+            };
 
         for entry in &skills {
             // Check for cancellation before each skill
@@ -250,9 +255,10 @@ async fn patrol_loop(
 
             let skill_name = entry.name.clone();
             let skill_path = entry.path.clone();
+            let failed_roots = Arc::clone(&failed_fetch_roots);
             // Check this skill locally after cycle prefetch.
-            let update_available = tokio::task::spawn_blocking(move || {
-                check_skill_update_local(&skill_name, &skill_path)
+            let update_result = tokio::task::spawn_blocking(move || {
+                check_skill_update_local(&skill_name, &skill_path, &failed_roots)
             })
             .await
             .unwrap_or_else(|err| {
@@ -262,8 +268,19 @@ async fn patrol_loop(
                     error = %err,
                     "update check task failed"
                 );
-                false
+                Some(false)
             });
+
+            // None = fetch failed for this skill's repo; skip emitting so the
+            // frontend preserves the existing update badge.
+            let Some(update_available) = update_result else {
+                // Still do the per-skill delay to keep cadence.
+                tokio::select! {
+                    _ = tokio::time::sleep(per_skill_delay) => {},
+                    _ = cancel_rx.changed() => break,
+                }
+                continue;
+            };
 
             // Update counters
             let event = {
@@ -295,6 +312,17 @@ async fn patrol_loop(
             break;
         }
 
+        // After checking all skills, detect new uninstalled skills in fetched repos.
+        // This is cheap because repos were already fetched during prefetch_unique_repos().
+        let new_skills_result =
+            tokio::task::spawn_blocking(repo_scanner::detect_new_skills_in_cached_repos).await;
+
+        if let Ok(new_skills) = new_skills_result {
+            if !new_skills.is_empty() {
+                let _ = app.emit("patrol://new-skills-detected", &new_skills);
+            }
+        }
+
         // Wait between patrol cycles.
         tokio::select! {
             _ = tokio::time::sleep(interval) => {},
@@ -309,18 +337,22 @@ async fn patrol_loop(
     inner.cancel_tx = None;
 }
 
-fn check_skill_update_local(skill_name: &str, skill_path: &Path) -> bool {
+fn check_skill_update_local(
+    skill_name: &str,
+    skill_path: &Path,
+    failed_fetch_roots: &std::collections::HashSet<PathBuf>,
+) -> Option<bool> {
     if repo_scanner::is_repo_cached_skill(skill_path) {
-        return repo_scanner::check_repo_skill_update_local(skill_path);
+        return repo_scanner::check_repo_skill_update_local(skill_path, failed_fetch_roots);
     }
 
     // Fallback for non-repo-cached hub skills.
     let _ = git_ops::ensure_worktree_checked_out(skill_path);
     match git_ops::check_update(skill_path) {
-        Ok(update_available) => update_available,
+        Ok(update_available) => Some(update_available),
         Err(err) => {
             warn!(target: "patrol", skill = %skill_name, error = %err, "check failed");
-            false
+            Some(false)
         }
     }
 }

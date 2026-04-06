@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { AnimatePresence, motion } from "framer-motion";
+import { ExternalLink, Monitor, ShieldAlert, X } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { motion, AnimatePresence } from "framer-motion";
-import { ShieldAlert, X, ExternalLink, Monitor } from "lucide-react";
 
 const DISMISS_KEY = "skillstar:devmode-banner-dismissed";
 
@@ -82,9 +82,7 @@ export function DevModeBanner() {
                 <div className="w-7 h-7 rounded-lg bg-sky-500/12 flex items-center justify-center shrink-0">
                   <ShieldAlert className="w-4 h-4 text-sky-400" />
                 </div>
-                <h3 className="text-sm font-semibold text-foreground/90">
-                  {t("settings.devModeBannerTitle")}
-                </h3>
+                <h3 className="text-sm font-semibold text-foreground/90">{t("settings.devModeBannerTitle")}</h3>
               </div>
 
               {/* Description */}

@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import type { NavPage } from "../types";
 
 interface KeyboardShortcutsOptions {
@@ -10,7 +10,7 @@ interface KeyboardShortcutsOptions {
 
 /**
  * Global keyboard shortcuts for the desktop app.
- * 
+ *
  * ⌘K / Ctrl+K → Command palette
  * ⌘1–6       → Navigate pages
  * ⌘,         → Settings
@@ -26,10 +26,7 @@ export function useKeyboardShortcuts({
     (e: KeyboardEvent) => {
       const meta = e.metaKey || e.ctrlKey;
       const target = e.target as HTMLElement;
-      const isInput =
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.isContentEditable;
+      const isInput = target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
 
       // ── ⌘K / Ctrl+K → Command Palette ──
       if (meta && e.key === "k") {
@@ -80,7 +77,7 @@ export function useKeyboardShortcuts({
         return;
       }
     },
-    [onNavigate, onToggleCommandPalette, onImport, onRefresh]
+    [onNavigate, onToggleCommandPalette, onImport, onRefresh],
   );
 
   useEffect(() => {

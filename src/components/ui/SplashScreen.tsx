@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { useEffect, useState } from "react";
 
 const SPLASH_DURATION_MS = 1200;
 const SPLASH_KEY = "skillstar-has-launched";
@@ -67,11 +67,7 @@ export function SplashScreen({ children }: { children: React.ReactNode }) {
               }}
               className="w-16 h-16 rounded-2xl overflow-hidden bg-white shadow-lg"
             >
-              <img
-                src="/skillstar-icon.svg"
-                alt="SkillStar"
-                className="w-full h-full"
-              />
+              <img src="/skillstar-icon.svg" alt="SkillStar" className="w-full h-full" />
             </motion.div>
 
             {/* App name — only on first launch */}
@@ -82,12 +78,8 @@ export function SplashScreen({ children }: { children: React.ReactNode }) {
                 transition={{ delay: 0.3, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
                 className="mt-5 flex flex-col items-center gap-1"
               >
-                <span className="text-xl font-bold tracking-tight text-foreground">
-                  SkillStar
-                </span>
-                <span className="text-xs text-muted-foreground tracking-widest uppercase">
-                  Agent Skill Manager
-                </span>
+                <span className="text-xl font-bold tracking-tight text-foreground">SkillStar</span>
+                <span className="text-xs text-muted-foreground tracking-widest uppercase">Agent Skill Manager</span>
               </motion.div>
             )}
 

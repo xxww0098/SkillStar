@@ -1,20 +1,31 @@
-import { useState, useEffect } from "react";
-
+import {
+  Eye,
+  FileText,
+  Globe,
+  Loader2,
+  PanelLeftClose,
+  PanelLeftOpen,
+  RotateCcw,
+  Save,
+  Sparkles,
+  Square,
+  X,
+} from "lucide-react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { X, Save, FileText, Eye, PanelLeftClose, PanelLeftOpen, Globe, Sparkles, Loader2, RotateCcw, Square } from "lucide-react";
+import { useAiStream } from "../../hooks/useAiStream";
+import {
+  normalizeSkillMarkdownForPreview,
+  normalizeTranslatedDocument,
+  parseFrontmatterEntries,
+  splitFrontmatter,
+} from "../../lib/frontmatter";
+import { formatAiErrorMessage, navigateToAiSettings } from "../../lib/utils";
+import type { SkillContent } from "../../types";
 import { Button } from "../ui/button";
 import { Markdown } from "../ui/Markdown";
 import { ResizablePanel } from "../ui/ResizablePanel";
 import { AiErrorBanner, AiNotConfiguredBanner } from "./AiBanners";
-import { formatAiErrorMessage, navigateToAiSettings } from "../../lib/utils";
-import {
-  splitFrontmatter,
-  parseFrontmatterEntries,
-  normalizeSkillMarkdownForPreview,
-  normalizeTranslatedDocument,
-} from "../../lib/frontmatter";
-import { useAiStream } from "../../hooks/useAiStream";
-import type { SkillContent } from "../../types";
 
 interface SkillEditorProps {
   skillName: string;
@@ -60,7 +71,7 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
   const localizedAiError = formatAiErrorMessage(aiError, t);
 
   const previewSource = normalizeSkillMarkdownForPreview(
-    translationVisible && translatedContent != null ? translatedContent : editedContent
+    translationVisible && translatedContent != null ? translatedContent : editedContent,
   );
   const previewFrontmatterEntries = parseFrontmatterEntries(splitFrontmatter(previewSource).frontmatter);
   const previewContent = splitFrontmatter(previewSource).body;
@@ -178,11 +189,7 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onClose}
-          >
+          <Button size="sm" variant="outline" onClick={onClose}>
             <X className="w-4 h-4" />
           </Button>
         </div>
@@ -235,23 +242,23 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
                   translating
                     ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
                     : translationVisible
-                    ? "bg-primary/15 text-primary"
-                    : aiConfigured && !loadError
-                    ? "text-muted-foreground hover:text-foreground hover:bg-card-hover"
-                    : loadError
-                    ? "text-muted-foreground/50 cursor-not-allowed"
-                    : "text-primary/80 bg-primary/5 border border-primary/20 hover:bg-primary/10"
+                      ? "bg-primary/15 text-primary"
+                      : aiConfigured && !loadError
+                        ? "text-muted-foreground hover:text-foreground hover:bg-card-hover"
+                        : loadError
+                          ? "text-muted-foreground/50 cursor-not-allowed"
+                          : "text-primary/80 bg-primary/5 border border-primary/20 hover:bg-primary/10"
                 }`}
                 title={
                   loadError
                     ? t("skillEditor.loadFailed")
                     : aiConfigured
-                    ? translationVisible
-                      ? "Show original"
-                      : translatedContent && translatedSource === editedContent
-                      ? "Show cached translation"
-                      : "Translate to target language"
-                    : "AI not configured (optional). Editing is still available."
+                      ? translationVisible
+                        ? "Show original"
+                        : translatedContent && translatedSource === editedContent
+                          ? "Show cached translation"
+                          : "Translate to target language"
+                      : "AI not configured (optional). Editing is still available."
                 }
               >
                 {translating ? (
@@ -264,10 +271,10 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
                 {translating
                   ? t("common.cancel")
                   : translationVisible
-                  ? t("skillEditor.original")
-                  : translatedContent && translatedSource === editedContent
-                  ? t("skillEditor.showTranslation")
-                  : t("skillEditor.translate")}
+                    ? t("skillEditor.original")
+                    : translatedContent && translatedSource === editedContent
+                      ? t("skillEditor.showTranslation")
+                      : t("skillEditor.translate")}
               </button>
               {translatedContent && translatedSource === editedContent && (
                 <button
@@ -284,10 +291,10 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
                     translating && retranslating
                       ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
                       : aiConfigured && !loadError
-                      ? "text-muted-foreground hover:text-foreground hover:bg-card-hover"
-                      : loadError
-                      ? "text-muted-foreground/50 cursor-not-allowed"
-                      : "text-primary/80 bg-primary/5 border border-primary/20 hover:bg-primary/10"
+                        ? "text-muted-foreground hover:text-foreground hover:bg-card-hover"
+                        : loadError
+                          ? "text-muted-foreground/50 cursor-not-allowed"
+                          : "text-primary/80 bg-primary/5 border border-primary/20 hover:bg-primary/10"
                   }`}
                   title={t("skillEditor.retranslateWithAi")}
                 >
@@ -315,31 +322,33 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
                   summarizing
                     ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
                     : summaryContent
-                    ? "bg-primary/15 text-primary"
-                    : aiConfigured && !loadError
-                    ? "text-muted-foreground hover:text-foreground hover:bg-card-hover"
-                    : loadError
-                    ? "text-muted-foreground/50 cursor-not-allowed"
-                    : "text-primary/80 bg-primary/5 border border-primary/20 hover:bg-primary/10"
+                      ? "bg-primary/15 text-primary"
+                      : aiConfigured && !loadError
+                        ? "text-muted-foreground hover:text-foreground hover:bg-card-hover"
+                        : loadError
+                          ? "text-muted-foreground/50 cursor-not-allowed"
+                          : "text-primary/80 bg-primary/5 border border-primary/20 hover:bg-primary/10"
                 }`}
                 title={
                   loadError
                     ? t("skillEditor.loadFailed")
                     : aiConfigured
-                    ? summarizing
-                      ? "Click to cancel"
-                      : summaryContent && summaryVisible
-                      ? "Hide summary"
-                      : "AI quick summary"
-                    : "AI not configured (optional). Editing is still available."
+                      ? summarizing
+                        ? "Click to cancel"
+                        : summaryContent && summaryVisible
+                          ? "Hide summary"
+                          : "AI quick summary"
+                      : "AI not configured (optional). Editing is still available."
                 }
               >
-                {summarizing ? (
-                  <Square className="w-3 h-3 fill-current" />
-                ) : (
-                  <Sparkles className="w-3 h-3" />
-                )}
-                {summarizing ? t("common.cancel") : summaryContent ? (summaryVisible ? t("skillEditor.hideSummary") : t("skillEditor.summary")) : t("skillEditor.summary")}
+                {summarizing ? <Square className="w-3 h-3 fill-current" /> : <Sparkles className="w-3 h-3" />}
+                {summarizing
+                  ? t("common.cancel")
+                  : summaryContent
+                    ? summaryVisible
+                      ? t("skillEditor.hideSummary")
+                      : t("skillEditor.summary")
+                    : t("skillEditor.summary")}
               </button>
             </div>
           </div>
@@ -403,9 +412,7 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
                           {entry.key}
                         </th>
                         <td className="px-3 py-2 text-foreground break-words">
-                          <Markdown className="[&_p]:my-1 [&_pre]:my-2 [&_ul]:my-1 [&_ol]:my-1">
-                            {entry.value}
-                          </Markdown>
+                          <Markdown className="[&_p]:my-1 [&_pre]:my-2 [&_ul]:my-1 [&_ol]:my-1">{entry.value}</Markdown>
                         </td>
                       </tr>
                     ))}
@@ -420,7 +427,10 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
             ) : previewContent.trim().length === 0 && previewFrontmatterEntries.length === 0 ? (
               <div className="text-sm text-muted-foreground">{t("skillEditor.noContent")}</div>
             ) : (
-              <Markdown streaming={translating && translationVisible} fallback={<div className="text-sm text-muted-foreground">Loading preview...</div>}>
+              <Markdown
+                streaming={translating && translationVisible}
+                fallback={<div className="text-sm text-muted-foreground">Loading preview...</div>}
+              >
                 {previewContent}
               </Markdown>
             )}

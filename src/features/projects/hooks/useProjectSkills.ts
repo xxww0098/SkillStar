@@ -1,21 +1,19 @@
-import { useState, useCallback } from "react";
-import type { ScannedSkill, ImportDone } from "../../../types";
+import { useCallback, useState } from "react";
+import type { ImportDone, ScannedSkill } from "../../../types";
 
 interface UseProjectSkillsParams {
   pathByAgentId: Map<string, string>;
   ownerBySharedPath: Map<string, string>;
   canonicalizeAgentsBySharedPath: (
     agents: Record<string, string[]>,
-    forcedOwnerByPath?: Map<string, string>
+    forcedOwnerByPath?: Map<string, string>,
   ) => Record<string, string[]>;
-  filterAgentsByEnabledProfiles: (
-    agents: Record<string, string[]>
-  ) => Record<string, string[]>;
+  filterAgentsByEnabledProfiles: (agents: Record<string, string[]>) => Record<string, string[]>;
   filterUnmanagedByEnabledProfiles: (skills: ScannedSkill[]) => ScannedSkill[];
   importProjectSkills: (
     projectPath: string,
     projectName: string,
-    targets: { name: string; agent_id: string }[]
+    targets: { name: string; agent_id: string }[],
   ) => Promise<import("../../../types").ImportResult>;
   loadProjectSkills: (name: string) => Promise<import("../../../types").SkillsList | null>;
   scanProjectSkills: (projectPath: string) => Promise<import("../../../types").ProjectScanResult>;
@@ -69,11 +67,7 @@ export function useProjectSkills({
           }
         }
         const targets = Array.from(dedupedTargets.values());
-        const result = await importProjectSkills(
-          selectedProject.path,
-          selectedProject.name,
-          targets
-        );
+        const result = await importProjectSkills(selectedProject.path, selectedProject.name, targets);
         setImportDone({
           hub: result.imported_to_hub.length,
           links: result.symlink_count,
@@ -91,9 +85,7 @@ export function useProjectSkills({
               preferredOwnerByPath.set(path, agentId);
             }
           }
-          onAgentSkillsChange(() =>
-            canonicalizeAgentsBySharedPath(filteredAgents, preferredOwnerByPath)
-          );
+          onAgentSkillsChange(() => canonicalizeAgentsBySharedPath(filteredAgents, preferredOwnerByPath));
         }
 
         // Re-scan to confirm everything is clean
@@ -119,7 +111,7 @@ export function useProjectSkills({
       scanProjectSkills,
       canonicalizeAgentsBySharedPath,
       onAgentSkillsChange,
-    ]
+    ],
   );
 
   return {

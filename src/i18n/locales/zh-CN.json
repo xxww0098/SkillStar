@@ -306,6 +306,7 @@
     "updated": "最近更新",
     "name": "名称",
     "updateOnly": "待更新",
+    "updateAll": "全部更新",
     "aiPick": "AI 选卡"
   },
   "detailPanel": {

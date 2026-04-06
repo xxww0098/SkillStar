@@ -1,40 +1,38 @@
-import { useState, useMemo, useEffect, useCallback, useRef } from "react";
-import React from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { motion } from "framer-motion";
 import {
-  ShieldCheck,
-  ShieldAlert,
-  ShieldX,
-  RotateCcw,
+  AlertTriangle,
+  Brain,
   ChevronDown,
   ChevronRight,
-  FileText,
-  Zap,
-  Brain,
-  Trash2,
   Clock,
-  AlertTriangle,
-  ScanLine,
-  Radar,
-  FolderOpen,
   Download,
+  FileText,
+  FolderOpen,
+  Radar,
+  RotateCcw,
+  ScanLine,
+  ShieldAlert,
+  ShieldCheck,
+  ShieldX,
+  Trash2,
+  Zap,
 } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
-import { CardTemplate } from "../components/ui/card-template";
-
 import { MOTION_TRANSITION, motionDelay } from "../comm/motion";
+import { CardTemplate } from "../components/ui/card-template";
 import { RadarSweep } from "../features/security/components/RadarSweep";
 import { ScanFilePanel } from "../features/security/components/ScanFilePanel";
-import { useSecurityScan, type ScanMode } from "../features/security/hooks/useSecurityScan";
+import { type ScanMode, useSecurityScan } from "../features/security/hooks/useSecurityScan";
 import type {
   AiFinding,
+  RiskLevel,
   SecurityScanEstimate,
   SecurityScanLogEntry,
   SecurityScanPolicy,
   SecurityScanResult,
   StaticFinding,
-  RiskLevel,
 } from "../types";
 
 // ── Risk Styling ──────────────────────────────────────────────────
@@ -95,13 +93,15 @@ function resolveSkillRiskScore(result: SecurityScanResult): number {
   return fallbackRiskScoreByLevel[result.risk_level] ?? 0;
 }
 
-function calculateOverallRisk(
-  results: SecurityScanResult[]
-): { score: number; safetyScore: number; level: RiskLevel; riskScore10: number } {
+function calculateOverallRisk(results: SecurityScanResult[]): {
+  score: number;
+  safetyScore: number;
+  level: RiskLevel;
+  riskScore10: number;
+} {
   if (results.length === 0) return { score: 0, safetyScore: 100, level: "Safe", riskScore10: 0 };
 
-  const avgRiskScore10 =
-    results.reduce((sum, result) => sum + resolveSkillRiskScore(result), 0) / results.length;
+  const avgRiskScore10 = results.reduce((sum, result) => sum + resolveSkillRiskScore(result), 0) / results.length;
   const riskScore10 = Math.round(avgRiskScore10 * 10) / 10;
   const score = Math.round(riskScore10 * 10);
   const safetyScore = 100 - score;
@@ -162,11 +162,7 @@ function defaultScanPolicy(): SecurityScanPolicy {
   };
 }
 
-function getStaticDescription(
-  t: any,
-  patternId: string,
-  fallback: string
-): string {
+function getStaticDescription(t: any, patternId: string, fallback: string): string {
   const keyByPattern: Record<string, string> = {
     curl_pipe_sh: "securityScan.staticDescription.curl_pipe_sh",
     wget_pipe_sh: "securityScan.staticDescription.wget_pipe_sh",
@@ -202,7 +198,10 @@ function getStaticDescription(
  *  Handles the case where local models ignore the target-language instruction
  *  and still return English category names. */
 function localizeAiCategory(t: any, category: string): string {
-  const normalized = category.trim().toLowerCase().replace(/[\s_-]+/g, "_");
+  const normalized = category
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "_");
   const key = `securityScan.aiCategory.${normalized}`;
   const localized = t(key, { defaultValue: "" });
   return localized || category;
@@ -223,13 +222,9 @@ function localizeScanSummary(t: any, summary: string): string {
     return t("securityScan.summary.scanComplete", { defaultValue: "Scan complete." });
   }
 
-  if (
-    summary ===
-    "Scan was cancelled before all AI chunks completed. Results are partial and may miss issues."
-  ) {
+  if (summary === "Scan was cancelled before all AI chunks completed. Results are partial and may miss issues.") {
     return t("securityScan.summary.cancelled", {
-      defaultValue:
-        "Scan was cancelled before all AI chunks completed. Results are partial and may miss issues.",
+      defaultValue: "Scan was cancelled before all AI chunks completed. Results are partial and may miss issues.",
     });
   }
 
@@ -244,7 +239,7 @@ function localizeScanSummary(t: any, summary: string): string {
   }
 
   const staticNotConfigured = summary.match(
-    /^Static scan found (\d+) pattern match\(es\)\. AI analysis not configured\.$/
+    /^Static scan found (\d+) pattern match\(es\)\. AI analysis not configured\.$/,
   );
   if (staticNotConfigured) {
     const count = Number(staticNotConfigured[1] || 0);
@@ -255,19 +250,18 @@ function localizeScanSummary(t: any, summary: string): string {
   }
 
   const staticNoAdditional = summary.match(
-    /^Static scan found (\d+) pattern match\(es\)\. AI analysis found no additional issues\.$/
+    /^Static scan found (\d+) pattern match\(es\)\. AI analysis found no additional issues\.$/,
   );
   if (staticNoAdditional) {
     const count = Number(staticNoAdditional[1] || 0);
     return t("securityScan.summary.staticMatchesNoAdditionalIssues", {
       count,
-      defaultValue:
-        "Static scan found {{count}} pattern match(es). AI analysis found no additional issues.",
+      defaultValue: "Static scan found {{count}} pattern match(es). AI analysis found no additional issues.",
     });
   }
 
   const aiIncomplete = summary.match(
-    /^AI analysis was incomplete for (\d+) file\(s\)\. Results may miss issues; manual review is recommended\.$/
+    /^AI analysis was incomplete for (\d+) file\(s\)\. Results may miss issues; manual review is recommended\.$/,
   );
   if (aiIncomplete) {
     const count = Number(aiIncomplete[1] || 0);
@@ -304,8 +298,24 @@ const OWASP_AGENTIC_RULES: Array<{ tag: string; keywords: string[] }> = [
   },
   {
     tag: "AS-06 Privilege Escalation & Persistence",
-    keywords: ["sudo", "setuid", "chmod", "chown", "authorized_keys", "persistence", ".bashrc", ".zshrc",
-      "reg add", "schtasks", "net user", "runas", "Set-ExecutionPolicy", "powershell -enc", "HKLM\\\\", "HKCU\\\\"],
+    keywords: [
+      "sudo",
+      "setuid",
+      "chmod",
+      "chown",
+      "authorized_keys",
+      "persistence",
+      ".bashrc",
+      ".zshrc",
+      "reg add",
+      "schtasks",
+      "net user",
+      "runas",
+      "Set-ExecutionPolicy",
+      "powershell -enc",
+      "HKLM\\\\",
+      "HKCU\\\\",
+    ],
   },
   {
     tag: "AS-07 Sandbox Escape / Isolation Failure",
@@ -327,9 +337,9 @@ const OWASP_AGENTIC_RULES: Array<{ tag: string; keywords: string[] }> = [
 
 function inferOwaspAgenticTags(text: string): string[] {
   const lowered = text.toLowerCase();
-  const tags = OWASP_AGENTIC_RULES.filter((rule) =>
-    rule.keywords.some((keyword) => lowered.includes(keyword))
-  ).map((rule) => rule.tag);
+  const tags = OWASP_AGENTIC_RULES.filter((rule) => rule.keywords.some((keyword) => lowered.includes(keyword))).map(
+    (rule) => rule.tag,
+  );
   return tags.length > 0 ? tags : ["AS-10 Insufficient Validation & Guardrails"];
 }
 
@@ -337,9 +347,7 @@ function staticFindingOwaspTags(finding: StaticFinding): string[] {
   if (finding.owasp_agentic_tags && finding.owasp_agentic_tags.length > 0) {
     return finding.owasp_agentic_tags;
   }
-  return inferOwaspAgenticTags(
-    `${finding.pattern_id} ${finding.description} ${finding.snippet || ""}`
-  );
+  return inferOwaspAgenticTags(`${finding.pattern_id} ${finding.description} ${finding.snippet || ""}`);
 }
 
 function aiFindingOwaspTags(finding: AiFinding): string[] {
@@ -347,7 +355,7 @@ function aiFindingOwaspTags(finding: AiFinding): string[] {
     return finding.owasp_agentic_tags;
   }
   return inferOwaspAgenticTags(
-    `${finding.category} ${finding.description} ${finding.evidence || ""} ${finding.recommendation || ""}`
+    `${finding.category} ${finding.description} ${finding.evidence || ""} ${finding.recommendation || ""}`,
   );
 }
 
@@ -373,7 +381,9 @@ function StatPill({ level, count }: { level: RiskLevel; count: number }) {
   const { t } = useTranslation();
   if (count === 0) return null;
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium tabular-nums ${riskColor[level]} ${riskBgSubtle[level]} border border-current/8`}>
+    <span
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium tabular-nums ${riskColor[level]} ${riskBgSubtle[level]} border border-current/8`}
+    >
       <span className={`w-1.5 h-1.5 rounded-full ${riskDot[level]}`} />
       {count} {getRiskShortLabel(t, level)}
     </span>
@@ -396,10 +406,16 @@ function ScanTimer({ startedAt }: { startedAt: number | null }) {
   if (!startedAt) return null;
 
   const elapsed = Math.max(0, Math.floor((now - startedAt) / 1000));
-  const m = Math.floor(elapsed / 60).toString().padStart(2, "0");
+  const m = Math.floor(elapsed / 60)
+    .toString()
+    .padStart(2, "0");
   const s = (elapsed % 60).toString().padStart(2, "0");
 
-  return <span className="font-mono tabular-nums ml-1 px-1.5 py-0.5 bg-success/10 rounded">{m}:{s}</span>;
+  return (
+    <span className="font-mono tabular-nums ml-1 px-1.5 py-0.5 bg-success/10 rounded">
+      {m}:{s}
+    </span>
+  );
 }
 
 // ── Main Page ─────────────────────────────────────────────────────
@@ -493,7 +509,7 @@ export function SecurityScan() {
 
   const ignoredRuleSet = useMemo(
     () => new Set((scanPolicy.ignore_rules ?? []).map((rule) => rule.trim().toLowerCase())),
-    [scanPolicy.ignore_rules]
+    [scanPolicy.ignore_rules],
   );
 
   const loadScanLogs = useCallback(async () => {
@@ -576,7 +592,7 @@ export function SecurityScan() {
         setPolicySaving(false);
       }
     },
-    [loadScanPolicy]
+    [loadScanPolicy],
   );
 
   const exportScanReport = useCallback(
@@ -597,7 +613,7 @@ export function SecurityScan() {
         setExportingFormat(null);
       }
     },
-    [loadScanLogs, results, selectedMode]
+    [loadScanLogs, results, selectedMode],
   );
 
   const ignoreStaticRule = useCallback(
@@ -616,8 +632,8 @@ export function SecurityScan() {
       try {
         const mergedIgnoreRules = Array.from(
           new Set(
-            [...(scanPolicy.ignore_rules ?? []).map((rule) => rule.trim().toLowerCase()), normalized].filter(Boolean)
-          )
+            [...(scanPolicy.ignore_rules ?? []).map((rule) => rule.trim().toLowerCase()), normalized].filter(Boolean),
+          ),
         );
         await persistScanPolicy({
           ...scanPolicy,
@@ -631,18 +647,28 @@ export function SecurityScan() {
         });
       }
     },
-    [ignoredRuleSet, ignoringRuleIds, persistScanPolicy, scanPolicy]
+    [ignoredRuleSet, ignoringRuleIds, persistScanPolicy, scanPolicy],
   );
 
   const riskCounts = useMemo(() => {
     const counts = { safe: 0, low: 0, medium: 0, high: 0, critical: 0 };
     for (const result of results) {
       switch (result.risk_level) {
-        case "Safe": counts.safe++; break;
-        case "Low": counts.low++; break;
-        case "Medium": counts.medium++; break;
-        case "High": counts.high++; break;
-        case "Critical": counts.critical++; break;
+        case "Safe":
+          counts.safe++;
+          break;
+        case "Low":
+          counts.low++;
+          break;
+        case "Medium":
+          counts.medium++;
+          break;
+        case "High":
+          counts.high++;
+          break;
+        case "Critical":
+          counts.critical++;
+          break;
       }
     }
     return counts;
@@ -677,9 +703,24 @@ export function SecurityScan() {
   const latestLogTime = latestLog ? formatTimestamp(latestLog.created_at) : null;
   const showLogHint = phase === "done" || (phase === "idle" && results.length > 0);
   const modeOptions: Array<{ mode: ScanMode; label: string; icon: typeof ScanLine; desc: string }> = [
-    { mode: "static", label: t("securityScan.staticScan", "Static"), icon: ScanLine, desc: t("securityScan.modeDesc.static", "Pattern matching only") },
-    { mode: "smart", label: t("securityScan.smartScan", "Smart"), icon: Zap, desc: t("securityScan.modeDesc.smart", "Static + AI analysis") },
-    { mode: "deep", label: t("securityScan.deepScan", "Deep"), icon: Brain, desc: t("securityScan.modeDesc.deep", "Full AI deep scan") },
+    {
+      mode: "static",
+      label: t("securityScan.staticScan", "Static"),
+      icon: ScanLine,
+      desc: t("securityScan.modeDesc.static", "Pattern matching only"),
+    },
+    {
+      mode: "smart",
+      label: t("securityScan.smartScan", "Smart"),
+      icon: Zap,
+      desc: t("securityScan.modeDesc.smart", "Static + AI analysis"),
+    },
+    {
+      mode: "deep",
+      label: t("securityScan.deepScan", "Deep"),
+      icon: Brain,
+      desc: t("securityScan.modeDesc.deep", "Full AI deep scan"),
+    },
   ];
   const exportOptions: Array<{
     format: "sarif" | "json" | "markdown" | "html";
@@ -717,9 +758,7 @@ export function SecurityScan() {
       <div className="flex items-center justify-between px-6 py-3 border-b border-border shrink-0">
         <div className="flex items-center gap-2.5">
           <ShieldCheck className="w-4 h-4 text-success" />
-          <h1 className="text-sm font-semibold text-foreground">
-            {t("sidebar.security", "Security Scan")}
-          </h1>
+          <h1 className="text-sm font-semibold text-foreground">{t("sidebar.security", "Security Scan")}</h1>
           {phase === "done" && (
             <span className="text-[11px] text-muted-foreground ml-1">
               {results.length} {t("securityScan.skillsLabel", "skills")}
@@ -739,10 +778,7 @@ export function SecurityScan() {
           {phase === "scanning" ? (
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-success/80">
-                <motion.div
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                >
+                <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }}>
                   <Zap className="w-3 h-3" />
                 </motion.div>
                 {t("securityScan.scanning", "Scanning...")}
@@ -767,11 +803,16 @@ export function SecurityScan() {
                 >
                   <SelectedModeIcon className="w-3.5 h-3.5" />
                   {selectedModeMeta.label}
-                  <ChevronDown className={`w-3 h-3 opacity-60 transition-transform duration-200 ${modeDropdownOpen ? "rotate-180" : ""}`} />
+                  <ChevronDown
+                    className={`w-3 h-3 opacity-60 transition-transform duration-200 ${modeDropdownOpen ? "rotate-180" : ""}`}
+                  />
                 </button>
                 {/* ── Action half ── */}
                 <button
-                  onClick={() => { setModeDropdownOpen(false); startScan([], !incrementalScan, selectedMode); }}
+                  onClick={() => {
+                    setModeDropdownOpen(false);
+                    startScan([], !incrementalScan, selectedMode);
+                  }}
                   disabled={!canStartScan}
                   className="group inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-gradient-to-r from-emerald-600/80 to-emerald-500 hover:brightness-110 disabled:opacity-60 disabled:cursor-not-allowed transition-all cursor-pointer"
                 >
@@ -780,9 +821,7 @@ export function SecurityScan() {
                   ) : (
                     <SelectedModeIcon className="w-3.5 h-3.5" />
                   )}
-                  {phase === "done"
-                    ? t("securityScan.rescan", "Rescan")
-                    : t("securityScan.startScan", "Start Scan")}
+                  {phase === "done" ? t("securityScan.rescan", "Rescan") : t("securityScan.startScan", "Start Scan")}
                 </button>
               </div>
 
@@ -801,21 +840,22 @@ export function SecurityScan() {
                     return (
                       <button
                         key={option.mode}
-                        onClick={() => { setSelectedMode(option.mode); setModeDropdownOpen(false); }}
+                        onClick={() => {
+                          setSelectedMode(option.mode);
+                          setModeDropdownOpen(false);
+                        }}
                         className={`w-full flex items-start gap-2.5 rounded-lg px-3 py-2.5 text-left transition-colors cursor-pointer ${
-                          active
-                            ? "bg-emerald-500/12 text-emerald-300"
-                            : "text-foreground hover:bg-muted/60"
+                          active ? "bg-emerald-500/12 text-emerald-300" : "text-foreground hover:bg-muted/60"
                         }`}
                       >
-                        <Icon className={`w-4 h-4 mt-0.5 shrink-0 ${active ? "text-emerald-400" : "text-muted-foreground"}`} />
+                        <Icon
+                          className={`w-4 h-4 mt-0.5 shrink-0 ${active ? "text-emerald-400" : "text-muted-foreground"}`}
+                        />
                         <div className="flex-1 min-w-0">
                           <div className="text-[12px] font-medium leading-tight">{option.label}</div>
                           <div className="text-[10px] text-muted-foreground mt-0.5 leading-snug">{option.desc}</div>
                         </div>
-                        {active && (
-                          <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1.5 shrink-0" />
-                        )}
+                        {active && <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1.5 shrink-0" />}
                       </button>
                     );
                   })}
@@ -823,9 +863,13 @@ export function SecurityScan() {
                   {scanEstimate && !estimating && (
                     <div className="mt-1 border-t border-border/40 pt-2 pb-1 px-3">
                       <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                        <span className="tabular-nums">{scanEstimate.totalFiles} {t("securityScan.estimateFiles", "files")}</span>
+                        <span className="tabular-nums">
+                          {scanEstimate.totalFiles} {t("securityScan.estimateFiles", "files")}
+                        </span>
                         <span className="text-border">·</span>
-                        <span className="tabular-nums">{scanEstimate.estimatedApiCalls} {t("securityScan.estimateCalls", "API calls")}</span>
+                        <span className="tabular-nums">
+                          {scanEstimate.estimatedApiCalls} {t("securityScan.estimateCalls", "API calls")}
+                        </span>
                       </div>
                     </div>
                   )}
@@ -906,7 +950,7 @@ export function SecurityScan() {
               disabled={policySaving}
               placeholder={t(
                 "securityScan.analyzersPlaceholder",
-                "pattern, doc_consistency, secrets, semantic, dynamic, semgrep, trivy, osv, grype, gitleaks, shellcheck, bandit, sbom, virustotal"
+                "pattern, doc_consistency, secrets, semantic, dynamic, semgrep, trivy, osv, grype, gitleaks, shellcheck, bandit, sbom, virustotal",
               )}
               className="h-7 min-w-[170px] rounded-md border border-border/60 bg-card px-2 text-[11px] text-foreground placeholder:text-muted-foreground/60 disabled:opacity-60"
             />
@@ -950,7 +994,12 @@ export function SecurityScan() {
           <div className="flex flex-wrap items-center gap-2 text-[11px]">
             <div className="inline-flex items-center gap-1.5 text-muted-foreground">
               <FolderOpen className="w-3.5 h-3.5 text-success/80" />
-              <span>{t("securityScan.logHint", "Each scan is saved as a timestamped log. You can open the log folder for details.")}</span>
+              <span>
+                {t(
+                  "securityScan.logHint",
+                  "Each scan is saved as a timestamped log. You can open the log folder for details.",
+                )}
+              </span>
               {latestLogTime && (
                 <span className="text-foreground/70">
                   {t("securityScan.latestLog", "Latest: {{time}}", { time: latestLogTime })}
@@ -1086,7 +1135,7 @@ export function SecurityScan() {
                     <p className="text-muted-foreground text-xs leading-relaxed">
                       {t(
                         "securityScan.idleDescription",
-                        "Scan your installed skills for security threats using static pattern matching and AI-powered analysis."
+                        "Scan your installed skills for security threats using static pattern matching and AI-powered analysis.",
                       )}
                     </p>
                     <div className="flex items-center justify-center gap-3">
@@ -1144,25 +1193,33 @@ export function SecurityScan() {
               <div className="shrink-0 relative w-[72px] h-[72px]">
                 <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
                   <circle
-                    cx="18" cy="18" r="15.5"
+                    cx="18"
+                    cy="18"
+                    r="15.5"
                     fill="none"
                     stroke="currentColor"
                     strokeWidth="2"
                     className="text-border"
                   />
                   <motion.circle
-                    cx="18" cy="18" r="15.5"
+                    cx="18"
+                    cy="18"
+                    r="15.5"
                     fill="none"
                     strokeWidth="2.5"
                     strokeLinecap="round"
                     className={riskColor[overallRisk.level]}
                     stroke="currentColor"
                     initial={{ strokeDasharray: "0 100" }}
-                    animate={{ strokeDasharray: `${Math.max(overallRisk.safetyScore, 2)} ${100 - Math.max(overallRisk.safetyScore, 2)}` }}
+                    animate={{
+                      strokeDasharray: `${Math.max(overallRisk.safetyScore, 2)} ${100 - Math.max(overallRisk.safetyScore, 2)}`,
+                    }}
                     transition={{ ...MOTION_TRANSITION.ring, delay: 0.15 }}
                   />
                 </svg>
-                <div className={`absolute inset-0 flex items-center justify-center text-lg font-bold tabular-nums ${riskColor[overallRisk.level]}`}>
+                <div
+                  className={`absolute inset-0 flex items-center justify-center text-lg font-bold tabular-nums ${riskColor[overallRisk.level]}`}
+                >
                   {overallRisk.safetyScore}
                 </div>
               </div>
@@ -1264,11 +1321,7 @@ export function SecurityScan() {
                     ignoredRules={ignoredRuleSet}
                     ignoringRules={ignoringRuleIds}
                     onIgnoreRule={ignoreStaticRule}
-                    onToggle={() =>
-                      setExpandedSkill((prev) =>
-                        prev === result.skill_name ? null : result.skill_name
-                      )
-                    }
+                    onToggle={() => setExpandedSkill((prev) => (prev === result.skill_name ? null : result.skill_name))}
                   />
                 </motion.div>
               ))}
@@ -1305,35 +1358,29 @@ const SkillResultRow = React.memo(function SkillResultRow({
   const metaConsensus = result.meta_consensus_count ?? 0;
   const analyzerExecutions = result.analyzer_executions ?? [];
   const confidencePct = Math.round(
-    ((typeof result.confidence_score === "number" && Number.isFinite(result.confidence_score)
+    (typeof result.confidence_score === "number" && Number.isFinite(result.confidence_score)
       ? result.confidence_score
-      : 0.5) *
-      100)
+      : 0.5) * 100,
   );
   const localizedSummary = localizeScanSummary(t, result.summary || "");
   const hideSummary =
-    !localizedSummary ||
-    localizedSummary ===
-      t("securityScan.summary.noIssues", { defaultValue: "No issues found." });
+    !localizedSummary || localizedSummary === t("securityScan.summary.noIssues", { defaultValue: "No issues found." });
 
   return (
     <CardTemplate
       className={`rounded-lg transition-colors hover:-translate-y-0 ${expanded ? "bg-card/80 ring-1 ring-border" : `hover:bg-card/40 ${riskBgSubtle[result.risk_level]}`}`}
     >
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center gap-3 px-3 py-2.5 text-left cursor-pointer group"
-      >
+      <button onClick={onToggle} className="w-full flex items-center gap-3 px-3 py-2.5 text-left cursor-pointer group">
         {/* Risk dot */}
         <div className="w-5 flex items-center justify-center shrink-0">
-          <span className={`w-2 h-2 rounded-full ${riskDot[result.risk_level]} ${!isSafe ? "ring-2 ring-current/10" : ""}`} />
+          <span
+            className={`w-2 h-2 rounded-full ${riskDot[result.risk_level]} ${!isSafe ? "ring-2 ring-current/10" : ""}`}
+          />
         </div>
 
         {/* Name + summary */}
         <div className="flex-1 min-w-0">
-          <div className="text-[13px] font-medium text-foreground truncate leading-tight">
-            {result.skill_name}
-          </div>
+          <div className="text-[13px] font-medium text-foreground truncate leading-tight">{result.skill_name}</div>
           {!hideSummary && (
             <div className="text-[10px] text-muted-foreground mt-0.5 whitespace-normal break-words [overflow-wrap:anywhere] leading-relaxed pr-1">
               {localizedSummary}
@@ -1350,7 +1397,9 @@ const SkillResultRow = React.memo(function SkillResultRow({
         {/* Status */}
         <div className="w-24 flex items-center justify-end shrink-0">
           {totalFindings > 0 ? (
-            <span className={`inline-flex items-center gap-1 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md ${riskColor[result.risk_level]} bg-current/8`}>
+            <span
+              className={`inline-flex items-center gap-1 text-[10px] font-medium tabular-nums px-1.5 py-0.5 rounded-md ${riskColor[result.risk_level]} bg-current/8`}
+            >
               {t("securityScan.findingsCount", {
                 count: totalFindings,
                 defaultValue: "{{count}} findings",
@@ -1446,7 +1495,9 @@ const SkillResultRow = React.memo(function SkillResultRow({
                           [{getRiskShortLabel(t, f.severity)}]
                         </span>
                         <div className="min-w-0">
-                          <span className="text-muted-foreground font-mono text-[10px]">{f.file_path}:{f.line_number}</span>
+                          <span className="text-muted-foreground font-mono text-[10px]">
+                            {f.file_path}:{f.line_number}
+                          </span>
                           <span className="text-muted-foreground/60 ml-1 text-[10px] tabular-nums">
                             conf {Math.round((f.confidence ?? 0.78) * 100)}%
                           </span>
@@ -1488,12 +1539,11 @@ const SkillResultRow = React.memo(function SkillResultRow({
                 </div>
                 <div className="space-y-1.5">
                   {result.ai_findings.map((f, i) => (
-                    <div
-                      key={`${f.category}-${i}`}
-                      className="pl-3 py-2 rounded-md bg-muted/30 space-y-1"
-                    >
+                    <div key={`${f.category}-${i}`} className="pl-3 py-2 rounded-md bg-muted/30 space-y-1">
                       <div className="text-[11px]">
-                        <span className={`font-medium ${riskColor[f.severity]}`}>[{getRiskShortLabel(t, f.severity)}]</span>{" "}
+                        <span className={`font-medium ${riskColor[f.severity]}`}>
+                          [{getRiskShortLabel(t, f.severity)}]
+                        </span>{" "}
                         <span className="text-foreground font-medium">{localizeAiCategory(t, f.category)}</span>
                         <span className="text-muted-foreground/60 ml-1 text-[10px] tabular-nums">
                           conf {Math.round((f.confidence ?? 0.72) * 100)}%

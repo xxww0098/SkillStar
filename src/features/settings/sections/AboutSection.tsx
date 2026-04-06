@@ -1,14 +1,24 @@
-import { useMemo, useState, useEffect, useCallback } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { copyToClipboard, detectPlatform, type Platform } from "../../../lib/utils";
 import { invoke } from "@tauri-apps/api/core";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
-import { useTranslation } from "react-i18next";
-import { Check, CheckCircle, Copy, ExternalLink, Terminal, XCircle, RefreshCw, GitBranch, Sparkles } from "lucide-react";
-import { Button } from "../../../components/ui/button";
-import { Badge } from "../../../components/ui/badge";
-import type { GitStatus } from "../../../types";
 import { motion } from "framer-motion";
+import {
+  Check,
+  CheckCircle,
+  Copy,
+  ExternalLink,
+  GitBranch,
+  RefreshCw,
+  Sparkles,
+  Terminal,
+  XCircle,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { Badge } from "../../../components/ui/badge";
+import { Button } from "../../../components/ui/button";
+import { copyToClipboard, detectPlatform, type Platform } from "../../../lib/utils";
+import type { GitStatus } from "../../../types";
 
 interface AboutSectionProps {
   ghInstalled: boolean | null;
@@ -47,13 +57,12 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
           os: "Unknown",
           install_instructions: [],
           download_url: "https://git-scm.com/downloads",
-        })
+        }),
       );
   }, []);
 
   const ghInstallPlatform = useMemo(() => detectPlatform(), []);
-  const ghInstallCommand =
-    ghInstallPlatform === "unknown" ? null : GH_INSTALL_COMMANDS[ghInstallPlatform];
+  const ghInstallCommand = ghInstallPlatform === "unknown" ? null : GH_INSTALL_COMMANDS[ghInstallPlatform];
   const platformPaths = [
     { platform: "Windows", path: "%USERPROFILE%\\.skillstar\\" },
     { platform: "Linux", path: "~/.skillstar/" },
@@ -114,15 +123,9 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
               Git
             </span>
           </div>
-          {gitStatus?.status === "Installed" && (
-            <Badge variant="success">{t("settings.gitInstalled")}</Badge>
-          )}
+          {gitStatus?.status === "Installed" && <Badge variant="success">{t("settings.gitInstalled")}</Badge>}
           {gitStatus?.status === "NotInstalled" && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => shellOpen(gitStatus.download_url)}
-            >
+            <Button size="sm" variant="outline" onClick={() => shellOpen(gitStatus.download_url)}>
               <ExternalLink className="w-3 h-3" />
               {t("settings.gitInstall")}
             </Button>
@@ -133,12 +136,13 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
           <div className="px-4 py-3 bg-muted/20 space-y-2">
             <div className="text-xs text-muted-foreground flex items-center gap-1.5">
               <Terminal className="w-3.5 h-3.5 shrink-0" />
-              <span>
-                {t("settings.gitInstallCommandLabel", { os: gitStatus.os })}
-              </span>
+              <span>{t("settings.gitInstallCommandLabel", { os: gitStatus.os })}</span>
             </div>
             {gitStatus.install_instructions.map((inst) => (
-              <div key={inst.label} className="rounded-md border border-border bg-card px-2.5 py-2 flex items-center gap-2">
+              <div
+                key={inst.label}
+                className="rounded-md border border-border bg-card px-2.5 py-2 flex items-center gap-2"
+              >
                 <div className="flex-1 min-w-0">
                   <div className="text-micro text-muted-foreground mb-0.5">{inst.label}</div>
                   <code className="font-mono text-xs text-foreground/85 select-all break-all">{inst.command}</code>
@@ -148,7 +152,11 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
                   className="p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground cursor-pointer focus-ring shrink-0"
                   title={t("settings.ghCopyCommand")}
                 >
-                  {copied === `git-${inst.label}` ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copied === `git-${inst.label}` ? (
+                    <Check className="w-3.5 h-3.5 text-success" />
+                  ) : (
+                    <Copy className="w-3.5 h-3.5" />
+                  )}
                 </button>
               </div>
             ))}
@@ -168,11 +176,7 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
             <span className="text-sm font-medium">GitHub CLI</span>
           </div>
           {ghInstalled === false && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => shellOpen("https://cli.github.com/")}
-            >
+            <Button size="sm" variant="outline" onClick={() => shellOpen("https://cli.github.com/")}>
               <ExternalLink className="w-3 h-3" />
               {t("settings.ghInstall")}
             </Button>
@@ -202,9 +206,7 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
                 </button>
               </div>
             ) : (
-              <p className="text-xs text-muted-foreground">
-                {t("settings.ghInstallCommandUnavailable")}
-              </p>
+              <p className="text-xs text-muted-foreground">{t("settings.ghInstallCommandUnavailable")}</p>
             )}
           </div>
         )}
@@ -212,16 +214,14 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
         <div className="px-4 py-4 relative overflow-hidden group/version">
           {/* Subtle gradient background effect */}
           <div className="absolute inset-0 bg-gradient-to-r from-primary/5 via-transparent to-transparent opacity-0 group-hover/version:opacity-100 transition-opacity duration-500" />
-          
+
           <div className="relative flex justify-between items-center text-sm">
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-3">
                 <span className="text-sm font-medium">{t("settings.version")}</span>
-                
-                <motion.div 
-                  className="relative flex items-center justify-center rounded-full p-[2px] overflow-hidden select-none pointer-events-none shadow-sm"
-                >
-                  <motion.div 
+
+                <motion.div className="relative flex items-center justify-center rounded-full p-[2px] overflow-hidden select-none pointer-events-none shadow-sm">
+                  <motion.div
                     className="absolute inset-0 bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 opacity-70 dark:opacity-80"
                     animate={{ backgroundPosition: ["0% 50%", "100% 50%", "0% 50%"] }}
                     transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
@@ -234,17 +234,18 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
                     </span>
                   </div>
                 </motion.div>
-                
               </div>
             </div>
-            <Button 
-              size="sm" 
-              variant="secondary" 
-              className="h-8 text-xs px-3.5 rounded-full shadow-sm hover:shadow-md transition-all active:scale-95" 
-              onClick={handleCheckUpdate} 
+            <Button
+              size="sm"
+              variant="secondary"
+              className="h-8 text-xs px-3.5 rounded-full shadow-sm hover:shadow-md transition-all active:scale-95"
+              onClick={handleCheckUpdate}
               disabled={isCheckingUpdate}
             >
-              <RefreshCw className={`w-3.5 h-3.5 mr-2 ${isCheckingUpdate ? "animate-spin text-primary" : "text-muted-foreground"}`} />
+              <RefreshCw
+                className={`w-3.5 h-3.5 mr-2 ${isCheckingUpdate ? "animate-spin text-primary" : "text-muted-foreground"}`}
+              />
               {isCheckingUpdate ? t("settings.checkingUpdate") : t("settings.checkUpdate")}
             </Button>
           </div>

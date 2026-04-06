@@ -1,27 +1,19 @@
-import {
-  useState,
-  useEffect,
-  useMemo,
-  useCallback,
-  useRef,
-  lazy,
-  Suspense,
-} from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
+import { ArrowUp, Loader2, Sparkles, X } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Toolbar } from "../components/layout/Toolbar";
-import { SkillGrid } from "../features/my-skills/components/SkillGrid";
-import { OfficialPublishers } from "../features/marketplace/components/OfficialPublishers";
-import { EmptyState } from "../components/ui/EmptyState";
 import { Button } from "../components/ui/button";
-import { useMarketplace } from "../features/marketplace/hooks/useMarketplace";
-import { useSkills } from "../features/my-skills/hooks/useSkills";
-import { ArrowUp, Sparkles, X, Loader2 } from "lucide-react";
-import { toast } from "../lib/toast";
+import { EmptyState } from "../components/ui/EmptyState";
 import { LoadingLogo } from "../components/ui/LoadingLogo";
-import type { OfficialPublisher, Skill, SortOption } from "../types";
-import { cn } from "../lib/utils";
+import { OfficialPublishers } from "../features/marketplace/components/OfficialPublishers";
+import { useMarketplace } from "../features/marketplace/hooks/useMarketplace";
+import { SkillGrid } from "../features/my-skills/components/SkillGrid";
+import { useSkills } from "../features/my-skills/hooks/useSkills";
 import { useViewMode } from "../hooks/useViewMode";
+import { toast } from "../lib/toast";
+import { cn } from "../lib/utils";
+import type { OfficialPublisher, Skill, SortOption } from "../types";
 
 const DetailPanel = lazy(() =>
   import("../components/layout/DetailPanel").then((mod) => ({
@@ -46,11 +38,7 @@ interface MarketplaceProps {
   onTabChange?: (tab: TabId) => void;
 }
 
-export function Marketplace({
-  onNavigateToPublisher,
-  activeTab: controlledTab,
-  onTabChange,
-}: MarketplaceProps) {
+export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, onTabChange }: MarketplaceProps) {
   const { t } = useTranslation();
   const {
     results,
@@ -75,8 +63,7 @@ export function Marketplace({
     fetchOfficialPublishers,
     patchSkill,
   } = useMarketplace();
-  const { installSkill, updateSkill, uninstallSkill, pendingUpdateNames } =
-    useSkills();
+  const { installSkill, updateSkill, uninstallSkill, pendingUpdateNames } = useSkills();
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("stars-desc");
   const [viewMode, setViewMode] = useViewMode("grid");
@@ -91,9 +78,7 @@ export function Marketplace({
   const [showBackToTop, setShowBackToTop] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   /** Skills currently being installed (for per-card loading state) */
-  const [installingNames, setInstallingNames] = useState<Set<string>>(
-    new Set(),
-  );
+  const [installingNames, setInstallingNames] = useState<Set<string>>(new Set());
 
   // Tab change
   useEffect(() => {
@@ -152,25 +137,11 @@ export function Marketplace({
     }
 
     return skills.map((s, i) => {
-      const rank =
-        sortBy === "stars-desc"
-          ? isSearchMode
-            ? i + 1
-            : (s.rank ?? i + 1)
-          : s.rank;
+      const rank = sortBy === "stars-desc" ? (isSearchMode ? i + 1 : (s.rank ?? i + 1)) : s.rank;
       if (rank === s.rank) return s;
       return { ...s, rank };
     });
-  }, [
-    activeTab,
-    results,
-    leaderboard,
-    sortBy,
-    searchQuery,
-    aiKeywords,
-    aiActiveKeywords,
-    aiKeywordSkillMap,
-  ]);
+  }, [activeTab, results, leaderboard, sortBy, searchQuery, aiKeywords, aiActiveKeywords, aiKeywordSkillMap]);
 
   const handleInstall = useCallback(
     async (url: string, name: string) => {
@@ -217,19 +188,13 @@ export function Marketplace({
         const message = String(e).toLowerCase();
         if (message.includes("already installed")) {
           patchSkill(name, (current) => ({ ...current, installed: true }));
-          setSelectedSkill((prev) =>
-            prev?.name === name ? { ...prev, installed: true } : prev,
-          );
+          setSelectedSkill((prev) => (prev?.name === name ? { ...prev, installed: true } : prev));
           setInstallStatus(t("marketplace.installedViaGithub"));
           setTimeout(() => setInstallStatus(null), 4000);
           return;
         }
         console.error("[Marketplace] Install failed:", e);
-        toast.error(
-          String(e)
-            ? `${t("mySkills.installFailed")}: ${String(e)}`
-            : t("mySkills.installFailed"),
-        );
+        toast.error(String(e) ? `${t("mySkills.installFailed")}: ${String(e)}` : t("mySkills.installFailed"));
       } finally {
         setInstallingNames((prev) => {
           const next = new Set(prev);
@@ -249,17 +214,11 @@ export function Marketplace({
           ...current,
           update_available: false,
         }));
-        setSelectedSkill((prev) =>
-          prev?.name === name ? { ...prev, update_available: false } : prev,
-        );
+        setSelectedSkill((prev) => (prev?.name === name ? { ...prev, update_available: false } : prev));
       } catch (e) {
         console.error("Update failed:", e);
         const reason = String(e);
-        toast.error(
-          reason
-            ? `${t("marketplace.updateFailed")}: ${reason}`
-            : t("marketplace.updateFailed"),
-        );
+        toast.error(reason ? `${t("marketplace.updateFailed")}: ${reason}` : t("marketplace.updateFailed"));
       }
     },
     [patchSkill, t, updateSkill],
@@ -355,10 +314,7 @@ export function Marketplace({
         />
 
         {/* Category tabs */}
-        <div
-          className="flex items-center gap-1 px-6 py-2 border-b border-border bg-sidebar"
-          role="tablist"
-        >
+        <div className="flex items-center gap-1 px-6 py-2 border-b border-border bg-sidebar" role="tablist">
           {tabIds.map((id, index) => (
             <button
               key={id}
@@ -375,8 +331,7 @@ export function Marketplace({
               onKeyDown={(e) => {
                 let next = index;
                 if (e.key === "ArrowRight") next = (index + 1) % tabIds.length;
-                else if (e.key === "ArrowLeft")
-                  next = (index - 1 + tabIds.length) % tabIds.length;
+                else if (e.key === "ArrowLeft") next = (index - 1 + tabIds.length) % tabIds.length;
                 else if (e.key === "Home") next = 0;
                 else if (e.key === "End") next = tabIds.length - 1;
                 else return;
@@ -410,13 +365,8 @@ export function Marketplace({
                 {installStatus}
               </motion.span>
             )}
-            {(refreshing ||
-              snapshotStatus === "stale" ||
-              snapshotStatus === "seeding") && (
-              <span
-                className="text-[11px] text-muted-foreground"
-                title={snapshotUpdatedAt ?? undefined}
-              >
+            {(refreshing || snapshotStatus === "stale" || snapshotStatus === "seeding") && (
+              <span className="text-[11px] text-muted-foreground" title={snapshotUpdatedAt ?? undefined}>
                 {refreshing
                   ? t("marketplace.refreshingSnapshot", {
                       defaultValue: "Refreshing snapshot...",
@@ -431,9 +381,7 @@ export function Marketplace({
               </span>
             )}
             {activeTab !== "official" && (
-              <span className="text-caption">
-                {t("marketplace.skillsCount", { count: totalCount })}
-              </span>
+              <span className="text-caption">{t("marketplace.skillsCount", { count: totalCount })}</span>
             )}
           </div>
         </div>
@@ -472,21 +420,13 @@ export function Marketplace({
                         )}
                       >
                         {kw}
-                        <span
-                          className={cn(
-                            "text-[10px] opacity-60",
-                            !isActive && "no-underline",
-                          )}
-                        >
-                          {count}
-                        </span>
+                        <span className={cn("text-[10px] opacity-60", !isActive && "no-underline")}>{count}</span>
                       </button>
                     );
                   })}
                 </div>
                 <span className="text-xs text-muted-foreground ml-1">
-                  {displaySkills.length}{" "}
-                  {t("marketplace.aiResultsFound", { defaultValue: "results" })}
+                  {displaySkills.length} {t("marketplace.aiResultsFound", { defaultValue: "results" })}
                 </span>
                 <button
                   onClick={handleClearAiSearch}
@@ -515,11 +455,7 @@ export function Marketplace({
           }}
         >
           {activeTab === "official" ? (
-            <OfficialPublishers
-              publishers={publishers}
-              viewMode={viewMode}
-              onPublisherClick={onNavigateToPublisher}
-            />
+            <OfficialPublishers publishers={publishers} viewMode={viewMode} onPublisherClick={onNavigateToPublisher} />
           ) : loading || aiSearching ? (
             <div className="flex flex-col items-center justify-center py-20 gap-4">
               <LoadingLogo
@@ -593,8 +529,7 @@ export function Marketplace({
               icon={<Sparkles className="w-6 h-6 text-muted-foreground" />}
               title={t("marketplace.noResultsSearch")}
               description={t("marketplace.searchRemoteHint", {
-                defaultValue:
-                  "No local matches yet. You can run one remote search and seed the snapshot.",
+                defaultValue: "No local matches yet. You can run one remote search and seed the snapshot.",
               })}
               action={
                 <Button
@@ -620,19 +555,13 @@ export function Marketplace({
               viewMode={viewMode}
               columnStrategy="auto-fill"
               minColumnWidth={320}
-              onSkillClick={(skill) =>
-                setSelectedSkill((prev) =>
-                  prev?.name === skill.name ? null : skill,
-                )
-              }
+              onSkillClick={(skill) => setSelectedSkill((prev) => (prev?.name === skill.name ? null : skill))}
               onInstall={handleInstall}
               installingNames={installingNames}
               onUpdate={handleUpdate}
               pendingUpdateNames={pendingUpdateNames}
               emptyMessage={
-                searchQuery.trim() || aiKeywords
-                  ? t("marketplace.noResultsSearch")
-                  : t("marketplace.noResults")
+                searchQuery.trim() || aiKeywords ? t("marketplace.noResultsSearch") : t("marketplace.noResults")
               }
             />
           )}
@@ -646,9 +575,7 @@ export function Marketplace({
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.8 }}
               transition={{ duration: 0.15 }}
-              onClick={() =>
-                scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" })
-              }
+              onClick={() => scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" })}
               className="absolute bottom-8 right-8 z-40 w-10 h-10 rounded-full bg-background/80 hover:bg-background border border-border/50 text-foreground/80 hover:text-foreground shadow-sm hover:shadow-md backdrop-blur-md flex items-center justify-center transition duration-200 cursor-pointer group"
               title={t("marketplace.backToTop")}
             >

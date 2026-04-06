@@ -1,25 +1,16 @@
-import { memo } from "react";
 import { motion } from "framer-motion";
-import {
-  Download,
-  GitBranch,
-  Check,
-  ExternalLink,
-  Loader2,
-  ShieldCheck,
-  ShieldAlert,
-  ShieldX,
-} from "lucide-react";
+import { Check, Download, ExternalLink, GitBranch, Loader2, ShieldAlert, ShieldCheck, ShieldX } from "lucide-react";
+import { memo } from "react";
 import { useTranslation } from "react-i18next";
-import { CardDescription, CardTitle } from "../../../components/ui/card";
-import { CardTemplate } from "../../../components/ui/card-template";
-import { SuccessCheckmark } from "../../../components/ui/SuccessCheckmark";
+import { AgentIcon } from "../../../components/ui/AgentIcon";
 import { Badge } from "../../../components/ui/badge";
 import { Button } from "../../../components/ui/button";
-import { AgentIcon } from "../../../components/ui/AgentIcon";
+import { CardDescription, CardTitle } from "../../../components/ui/card";
+import { CardTemplate } from "../../../components/ui/card-template";
 import { HScrollRow } from "../../../components/ui/HScrollRow";
-import { cn, formatInstalls, agentIconCls } from "../../../lib/utils";
-import type { Skill, AgentProfile, RiskLevel } from "../../../types";
+import { SuccessCheckmark } from "../../../components/ui/SuccessCheckmark";
+import { agentIconCls, cn, formatInstalls } from "../../../lib/utils";
+import type { AgentProfile, RiskLevel, Skill } from "../../../types";
 
 interface SkillCardProps {
   skill: Skill;
@@ -31,12 +22,7 @@ interface SkillCardProps {
   selected?: boolean;
   onSelect?: (name: string) => void;
   profiles?: AgentProfile[];
-  onToggleAgent?: (
-    skillName: string,
-    agentId: string,
-    enable: boolean,
-    agentName?: string,
-  ) => void;
+  onToggleAgent?: (skillName: string, agentId: string, enable: boolean, agentName?: string) => void;
   pendingAgentToggleKeys?: Set<string>;
   installing?: boolean;
   updating?: boolean;
@@ -109,7 +95,7 @@ function SkillCardInner({
         className={cn(
           "w-7 h-7 rounded-lg border flex items-center justify-center leading-none tabular-nums",
           skill.rank >= 100 ? "text-[10px] tracking-tight" : "text-micro",
-          rankStyle(skill.rank)
+          rankStyle(skill.rank),
         )}
       >
         {skill.rank}
@@ -124,7 +110,7 @@ function SkillCardInner({
         riskLevel === "Low" && "bg-amber-500/15 text-amber-300",
         riskLevel === "Medium" && "bg-orange-500/15 text-orange-400",
         riskLevel === "High" && "bg-red-500/15 text-red-400",
-        riskLevel === "Critical" && "bg-red-500/20 text-red-500"
+        riskLevel === "Critical" && "bg-red-500/20 text-red-500",
       )}
       title={`Security: ${riskLevel}`}
     >
@@ -161,9 +147,7 @@ function SkillCardInner({
               <span className="relative inline-flex rounded-full h-2 w-2 bg-warning"></span>
             </span>
           )}
-          {updating
-            ? t("common.updating", { defaultValue: "Updating..." })
-            : t("common.update")}
+          {updating ? t("common.updating", { defaultValue: "Updating..." }) : t("common.update")}
         </Button>
       );
     } else {
@@ -187,12 +171,7 @@ function SkillCardInner({
     }
   } else if (installing) {
     statusAction = (
-      <Button
-        size="sm"
-        variant="outline"
-        className="h-7 px-2.5 text-xs font-medium pointer-events-none"
-        disabled
-      >
+      <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs font-medium pointer-events-none" disabled>
         <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
         {t("common.installing")}
       </Button>
@@ -233,14 +212,10 @@ function SkillCardInner({
                   "w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-colors cursor-pointer",
                   selected
                     ? "bg-primary text-primary-foreground shadow-md shadow-primary/20"
-                    : "bg-primary/10 text-primary hover:bg-primary/20"
+                    : "bg-primary/10 text-primary hover:bg-primary/20",
                 )}
               >
-                {selected ? (
-                  <Check className="w-4 h-4" />
-                ) : (
-                  <GitBranch className="w-4 h-4" />
-                )}
+                {selected ? <Check className="w-4 h-4" /> : <GitBranch className="w-4 h-4" />}
               </button>
             ) : (
               <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
@@ -250,12 +225,8 @@ function SkillCardInner({
             <div className="min-w-0">
               <CardTitle className="truncate ss-card-title">{skill.name}</CardTitle>
               {isLocalSkill && <span className="ss-card-meta">local</span>}
-              {!isLocalSkill && skill.source && (
-                <span className="ss-card-meta">{skill.source}</span>
-              )}
-              {!isLocalSkill && !skill.source && skill.author && (
-                <span className="ss-card-meta">{skill.author}</span>
-              )}
+              {!isLocalSkill && skill.source && <span className="ss-card-meta">{skill.source}</span>}
+              {!isLocalSkill && !skill.source && skill.author && <span className="ss-card-meta">{skill.author}</span>}
             </div>
           </div>
         }
@@ -287,12 +258,7 @@ function SkillCardInner({
 
             <div className="flex items-center gap-1.5 relative z-10 flex-1 min-w-0 justify-end">
               {profiles && onToggleAgent ? (
-                <HScrollRow
-                  count={profiles.length}
-                  itemWidth={28}
-                  gap={6}
-                  className="gap-1.5 min-w-0"
-                >
+                <HScrollRow count={profiles.length} itemWidth={28} gap={6} className="gap-1.5 min-w-0">
                   {profiles.map((profile) => {
                     const isUsed = skill.agent_links?.includes(profile.display_name) ?? false;
                     const toggleKey = `${skill.name}::${profile.id}`;
@@ -312,7 +278,7 @@ function SkillCardInner({
                           isUsed
                             ? "border-primary/40 bg-primary/10 shadow-[0_0_0_1px_rgba(var(--color-primary-rgb),0.15)] hover:shadow-[0_0_0_1px_rgba(var(--color-primary-rgb),0.3)] hover:bg-primary/20"
                             : "border-transparent bg-transparent hover:bg-muted",
-                          isToggling && "opacity-65"
+                          isToggling && "opacity-65",
                         )}
                         title={`${profile.display_name} ${isUsed ? "(Remove)" : "(Add)"}`}
                       >
@@ -321,7 +287,7 @@ function SkillCardInner({
                           className={cn(
                             agentIconCls(profile.icon, "w-4 h-4"),
                             "transition-[filter,opacity] drop-shadow-sm",
-                            !isUsed && "grayscale opacity-40 hover:opacity-70 hover:grayscale-0"
+                            !isUsed && "grayscale opacity-40 hover:opacity-70 hover:grayscale-0",
                           )}
                         />
                       </button>

@@ -306,6 +306,7 @@
     "updated": "Updated",
     "name": "Name",
     "updateOnly": "Updates",
+    "updateAll": "Update All",
     "aiPick": "AI Pick"
   },
   "detailPanel": {

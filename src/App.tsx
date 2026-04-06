@@ -1,21 +1,25 @@
-import React, { lazy, Suspense, useState, useCallback, useEffect, useRef } from "react";
-import { LoadingLogo } from "./components/ui/LoadingLogo";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { Sidebar } from "./components/layout/Sidebar";
+import React, { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { CommandPalette } from "./components/layout/CommandPalette";
-import { useUpdater } from "./hooks/useUpdater";
-import { useNavigation } from "./hooks/useNavigation";
-import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
-import { useTauriSetup } from "./hooks/useTauriSetup";
-import { looksLikeShareCode } from "./lib/shareCode";
+import { Sidebar } from "./components/layout/Sidebar";
+import { LoadingLogo } from "./components/ui/LoadingLogo";
 import { Toaster } from "./components/ui/sonner";
+import { useSkills } from "./features/my-skills/hooks/useSkills";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useNavigation } from "./hooks/useNavigation";
+import { useTauriSetup } from "./hooks/useTauriSetup";
+import { useUpdater } from "./hooks/useUpdater";
+import { looksLikeShareCode } from "./lib/shareCode";
 
 const MySkillsPage = lazy(() => import("./pages/MySkills").then((mod) => ({ default: mod.MySkills })));
 const MarketplacePage = lazy(() => import("./pages/Marketplace").then((mod) => ({ default: mod.Marketplace })));
-const PublisherDetailPage = lazy(() => import("./pages/PublisherDetail").then((mod) => ({ default: mod.PublisherDetail })));
+const PublisherDetailPage = lazy(() =>
+  import("./pages/PublisherDetail").then((mod) => ({ default: mod.PublisherDetail })),
+);
 const SkillCardsPage = lazy(() => import("./pages/SkillCards").then((mod) => ({ default: mod.SkillCards })));
 const ProjectsPage = lazy(() => import("./pages/Projects").then((mod) => ({ default: mod.Projects })));
 const SecurityScanPage = lazy(() => import("./pages/SecurityScan").then((mod) => ({ default: mod.SecurityScan })));
+const ModelsPage = lazy(() => import("./pages/Models").then((mod) => ({ default: mod.Models })));
 const SettingsPage = lazy(() => import("./pages/Settings").then((mod) => ({ default: mod.Settings })));
 
 function PageFallback() {
@@ -30,6 +34,8 @@ function AppContent() {
   const nav = useNavigation();
   const prefersReducedMotion = useReducedMotion();
   const updater = useUpdater();
+  const { ghostSkills, skills } = useSkills();
+  const pendingUpdatesCount = skills.filter((s) => s.update_available).length;
   const lastClipboardValue = useRef("");
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 
@@ -45,7 +51,11 @@ function AppContent() {
 
   // ── Sidebar collapsed ──────────────────────────────────────────
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(() => {
-    try { return localStorage.getItem("sidebar-collapsed") === "true"; } catch { return false; }
+    try {
+      return localStorage.getItem("sidebar-collapsed") === "true";
+    } catch {
+      return false;
+    }
   });
 
   // ── Tauri lifecycle (patrol, tray, window-hidden) ──────────────
@@ -75,10 +85,14 @@ function AppContent() {
                 dismissed = false;
               },
             },
-            onDismiss: () => { dismissed = false; },
+            onDismiss: () => {
+              dismissed = false;
+            },
           });
         }
-      } catch { /* Clipboard read permission denied */ }
+      } catch {
+        /* Clipboard read permission denied */
+      }
     };
     window.addEventListener("focus", handleFocus);
     return () => window.removeEventListener("focus", handleFocus);
@@ -87,7 +101,14 @@ function AppContent() {
   const renderPage = () => {
     if (nav.activePage === "marketplace" && nav.subPage?.type === "publisher-detail") {
       return (
-        <motion.div key="publisher-detail" initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }} transition={{ duration: 0.2, ease: "easeOut" }} className="flex-1 min-w-0 flex overflow-hidden">
+        <motion.div
+          key="publisher-detail"
+          initial={{ opacity: 0, x: 30 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: -30 }}
+          transition={{ duration: 0.2, ease: "easeOut" }}
+          className="flex-1 min-w-0 flex overflow-hidden"
+        >
           <PublisherDetailPage publisher={nav.subPage.publisher} onBack={() => nav.setSubPage(null)} />
         </motion.div>
       );
@@ -99,7 +120,9 @@ function AppContent() {
           <MySkillsPage
             initialFocusSkill={nav.mySkillsFocusSkill}
             onClearFocus={() => nav.setMySkillsFocusSkill(null)}
-            onPackSkills={(skills) => { if (skills.length > 0) nav.goToSkillCardsWithSkills(skills); }}
+            onPackSkills={(skills) => {
+              if (skills.length > 0) nav.goToSkillCardsWithSkills(skills);
+            }}
             initialShareCode={nav.clipboardShareCode ?? undefined}
             onClearShareCode={() => nav.setClipboardShareCode(null)}
           />
@@ -117,7 +140,9 @@ function AppContent() {
           <SkillCardsPage
             preSelectedSkills={nav.skillCardsPreSelectedSkills}
             onClearPreSelected={() => nav.setSkillCardsPreSelectedSkills(null)}
-            onNavigateToProjects={(skills) => { if (skills) nav.goToProjectsWithSkills(skills); }}
+            onNavigateToProjects={(skills) => {
+              if (skills) nav.goToProjectsWithSkills(skills);
+            }}
           />
         );
       case "projects":
@@ -131,6 +156,8 @@ function AppContent() {
         return <SettingsPage onCheckUpdate={updater.check} isCheckingUpdate={updater.state.status === "checking"} />;
       case "security-scan":
         return <SecurityScanPage />;
+      case "models":
+        return <ModelsPage />;
       default:
         return <MySkillsPage />;
     }
@@ -138,7 +165,10 @@ function AppContent() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background border border-border/50">
-      <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[200] focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded-lg focus:text-sm">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[200] focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded-lg focus:text-sm"
+      >
         Skip to content
       </a>
       <Sidebar
@@ -149,7 +179,9 @@ function AppContent() {
         onToggleCollapse={() => {
           setSidebarCollapsed((prev) => {
             const next = !prev;
-            try { localStorage.setItem("sidebar-collapsed", String(next)); } catch (e) {
+            try {
+              localStorage.setItem("sidebar-collapsed", String(next));
+            } catch (e) {
               console.warn("[App] Failed to persist sidebar collapsed state:", e);
             }
             return next;
@@ -164,6 +196,8 @@ function AppContent() {
         onSkip={updater.skip}
         onDismiss={updater.dismiss}
         onRetry={updater.retry}
+        ghostSkillCount={ghostSkills.length}
+        pendingUpdatesCount={pendingUpdatesCount}
       />
       <AnimatePresence mode="wait">
         <motion.div

@@ -1,16 +1,29 @@
-import { motion } from "framer-motion";
-import { useState, useReducer, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { motion } from "framer-motion";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "../../lib/toast";
+import { DevModeBanner } from "../../features/settings/components/DevModeBanner";
+import { AboutSection } from "../../features/settings/sections/AboutSection";
+import { AcpSection } from "../../features/settings/sections/AcpSection";
+import { AgentConnectionsSection } from "../../features/settings/sections/AgentConnectionsSection";
+import { AiProviderSection } from "../../features/settings/sections/AiProviderSection";
+import { AppearanceSection } from "../../features/settings/sections/AppearanceSection";
+import {
+  BackgroundRunSection,
+  onBackgroundRunChanged,
+  readBackgroundRun,
+  writeBackgroundRun,
+} from "../../features/settings/sections/BackgroundRunSection";
+import { GitHubMirrorSection } from "../../features/settings/sections/GitHubMirrorSection";
+import { LanguageSection } from "../../features/settings/sections/LanguageSection";
+import { ProxySection } from "../../features/settings/sections/ProxySection";
+import { ShortTextServiceSection } from "../../features/settings/sections/ShortTextServiceSection";
+import { StorageSection } from "../../features/settings/sections/StorageSection";
 import { useAgentProfiles } from "../../hooks/useAgentProfiles";
 import { useAiConfig } from "../../hooks/useAiConfig";
 import { setLanguage } from "../../i18n";
-import {
-  applyBackgroundStyle,
-  readBackgroundStyle,
-  type BackgroundStyle,
-} from "../../lib/backgroundStyle";
+import { applyBackgroundStyle, type BackgroundStyle, readBackgroundStyle } from "../../lib/backgroundStyle";
+import { toast } from "../../lib/toast";
 import type {
   AiConfig,
   CacheCleanResult,
@@ -19,23 +32,6 @@ import type {
   ProxyConfig,
   StorageOverview,
 } from "../../types";
-import { AgentConnectionsSection } from "../../features/settings/sections/AgentConnectionsSection";
-import { ProxySection } from "../../features/settings/sections/ProxySection";
-import { GitHubMirrorSection } from "../../features/settings/sections/GitHubMirrorSection";
-import { AiProviderSection } from "../../features/settings/sections/AiProviderSection";
-import { ShortTextServiceSection } from "../../features/settings/sections/ShortTextServiceSection";
-import { AcpSection } from "../../features/settings/sections/AcpSection";
-import {
-  BackgroundRunSection,
-  onBackgroundRunChanged,
-  readBackgroundRun,
-  writeBackgroundRun,
-} from "../../features/settings/sections/BackgroundRunSection";
-import { AppearanceSection } from "../../features/settings/sections/AppearanceSection";
-import { LanguageSection } from "../../features/settings/sections/LanguageSection";
-import { StorageSection } from "../../features/settings/sections/StorageSection";
-import { AboutSection } from "../../features/settings/sections/AboutSection";
-import { DevModeBanner } from "../../features/settings/components/DevModeBanner";
 
 type ForceDeleteTarget = "hub" | "cache" | "config";
 
@@ -56,11 +52,7 @@ function isSameProxyConfig(a: ProxyConfig, b: ProxyConfig): boolean {
 }
 
 function isSameMirrorConfig(a: GitHubMirrorConfig, b: GitHubMirrorConfig): boolean {
-  return (
-    a.enabled === b.enabled &&
-    a.preset_id === b.preset_id &&
-    a.custom_url === b.custom_url
-  );
+  return a.enabled === b.enabled && a.preset_id === b.preset_id && a.custom_url === b.custom_url;
 }
 
 function isSameAiConfig(a: AiConfig, b: AiConfig): boolean {
@@ -309,18 +301,18 @@ function agentReducer(state: AgentState, action: AgentAction): AgentState {
 // ── Settings Sidebar Navigation ─────────────────────────────────────────────
 
 import {
-  Unlink,
-  Globe,
-  Zap,
-  Sparkles,
-  Languages as LanguagesIcon,
   Bot,
   EyeOff,
-  Paintbrush,
+  Globe,
   HardDrive,
-  Terminal,
+  Languages as LanguagesIcon,
   type LucideIcon,
   MessageSquareText,
+  Paintbrush,
+  Sparkles,
+  Terminal,
+  Unlink,
+  Zap,
 } from "lucide-react";
 
 const SETTINGS_SECTIONS: { id: string; labelKey: string; icon: LucideIcon }[] = [
@@ -349,6 +341,34 @@ function SettingsSidebarNav() {
 
     const visibleIds = new Set<string>();
 
+    const updateActiveId = () => {
+      // If we are at the very bottom, forcefully select the last item
+      // Add a 5px threshold to account for fractional pixel rounding errors
+      if (Math.abs(scrollRoot.scrollHeight - scrollRoot.scrollTop - scrollRoot.clientHeight) < 5) {
+        const lastId = SETTINGS_SECTIONS[SETTINGS_SECTIONS.length - 1].id;
+        if (pendingIdRef.current !== lastId) {
+          pendingIdRef.current = lastId;
+          clearTimeout(timerRef.current);
+          timerRef.current = setTimeout(() => setActiveId(lastId), 100);
+        }
+        return;
+      }
+
+      // Otherwise evaluate based on IntersectionObserver visibleIds
+      let newId = pendingIdRef.current;
+      for (const section of SETTINGS_SECTIONS) {
+        if (visibleIds.has(section.id)) {
+          newId = section.id;
+          break;
+        }
+      }
+      if (newId !== pendingIdRef.current) {
+        pendingIdRef.current = newId;
+        clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(() => setActiveId(newId), 100);
+      }
+    };
+
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
@@ -358,25 +378,20 @@ function SettingsSidebarNav() {
             visibleIds.delete(entry.target.id);
           }
         }
-        let newId = pendingIdRef.current;
-        for (const section of SETTINGS_SECTIONS) {
-          if (visibleIds.has(section.id)) {
-            newId = section.id;
-            break;
-          }
-        }
-        if (newId !== pendingIdRef.current) {
-          pendingIdRef.current = newId;
-          clearTimeout(timerRef.current);
-          timerRef.current = setTimeout(() => setActiveId(newId), 100);
-        }
+        updateActiveId();
       },
       {
         root: scrollRoot,
         rootMargin: "-10px 0px -70% 0px",
         threshold: 0,
-      }
+      },
     );
+
+    const handleScroll = () => {
+      updateActiveId();
+    };
+
+    scrollRoot.addEventListener("scroll", handleScroll, { passive: true });
 
     for (const section of SETTINGS_SECTIONS) {
       const el = document.getElementById(section.id);
@@ -384,6 +399,7 @@ function SettingsSidebarNav() {
     }
 
     return () => {
+      scrollRoot.removeEventListener("scroll", handleScroll);
       observer.disconnect();
       clearTimeout(timerRef.current);
     };
@@ -409,7 +425,7 @@ function SettingsSidebarNav() {
       {SETTINGS_SECTIONS.map((section) => {
         const isActive = activeId === section.id;
         const Icon = section.icon;
-        
+
         let nudgeClass = "";
         if (section.id === "settings-storage") nudgeClass = "translate-y-[1px]";
         if (section.id === "settings-about") nudgeClass = "translate-y-[1px] translate-x-[1px]";
@@ -435,14 +451,25 @@ function SettingsSidebarNav() {
 
 // ── Component ───────────────────────────────────────────────────────────────
 
-export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: () => Promise<{ found: boolean; version?: string; error?: boolean }>; isCheckingUpdate?: boolean }) {
+export function Settings({
+  onCheckUpdate,
+  isCheckingUpdate,
+}: {
+  onCheckUpdate?: () => Promise<{ found: boolean; version?: string; error?: boolean }>;
+  isCheckingUpdate?: boolean;
+}) {
   const { t, i18n } = useTranslation();
   const [currentLang, setCurrentLang] = useState(i18n.language);
-  const [backgroundStyle, setBackgroundStyle] = useState<BackgroundStyle>(
-    () => readBackgroundStyle()
-  );
+  const [backgroundStyle, setBackgroundStyle] = useState<BackgroundStyle>(() => readBackgroundStyle());
   const [backgroundRun, setBackgroundRun] = useState(() => readBackgroundRun());
-  const { profiles, loading: profilesLoading, toggleProfile, unlinkAllFromAgent, addCustomProfile, removeCustomProfile } = useAgentProfiles();
+  const {
+    profiles,
+    loading: profilesLoading,
+    toggleProfile,
+    unlinkAllFromAgent,
+    addCustomProfile,
+    removeCustomProfile,
+  } = useAgentProfiles();
 
   useEffect(() => onBackgroundRunChanged(setBackgroundRun), []);
 
@@ -581,12 +608,7 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
   }, [aiConfig, aiLoading]);
 
   useEffect(() => {
-    if (
-      !aiState.loaded ||
-      aiState.saving ||
-      aiState.testing ||
-      isSameAiConfig(aiState.config, aiState.savedConfig)
-    ) {
+    if (!aiState.loaded || aiState.saving || aiState.testing || isSameAiConfig(aiState.config, aiState.savedConfig)) {
       return;
     }
 
@@ -646,7 +668,9 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
   }, [aiState.expanded, fetchMymemoryUsage]);
 
   useEffect(() => {
-    invoke<boolean>("check_gh_installed").then(setGhInstalled).catch(() => setGhInstalled(false));
+    invoke<boolean>("check_gh_installed")
+      .then(setGhInstalled)
+      .catch(() => setGhInstalled(false));
   }, []);
 
   // ── AI focus from localStorage ────────────────────────────────────────────
@@ -693,7 +717,7 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
         toast.error(t("settings.toggleFailed"));
       }
     },
-    [profiles, toggleProfile, t]
+    [profiles, toggleProfile, t],
   );
 
   const confirmDisable = useCallback(async () => {
@@ -728,7 +752,7 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
         toast.error(t("settings.listLinkedFailed"));
       }
     },
-    [agentState.expandedAgentId, t]
+    [agentState.expandedAgentId, t],
   );
 
   const handleUnlinkSingle = useCallback(
@@ -742,19 +766,16 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
         toast.error(t("settings.unlinkFailed"));
       }
     },
-    [t, notifySkillsRefresh]
+    [t, notifySkillsRefresh],
   );
 
   // ── Language & appearance handlers ───────────────────────────────────────
 
-  const handleLanguageChange = useCallback(
-    (lang: string) => {
-      setLanguage(lang);
-      setCurrentLang(lang);
-      invoke("update_tray_language", { lang }).catch(() => {});
-    },
-    []
-  );
+  const handleLanguageChange = useCallback((lang: string) => {
+    setLanguage(lang);
+    setCurrentLang(lang);
+    invoke("update_tray_language", { lang }).catch(() => {});
+  }, []);
 
   const handleBackgroundStyleChange = useCallback((style: BackgroundStyle) => {
     setBackgroundStyle(style);
@@ -792,12 +813,9 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
     }
   }, [aiState.config, saveAiConfig, testConnection, t]);
 
-  const handleAiEnabledChange = useCallback(
-    (enabled: boolean) => {
-      dispatchAi({ type: "SET_FIELD", field: "enabled", value: enabled });
-    },
-    []
-  );
+  const handleAiEnabledChange = useCallback((enabled: boolean) => {
+    dispatchAi({ type: "SET_FIELD", field: "enabled", value: enabled });
+  }, []);
 
   // ── Storage handlers ───────────────────────────────────────────────────────
 
@@ -813,7 +831,9 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
         localStorage.removeItem("publisher-avatar-source-v1");
         localStorage.removeItem("skillstar_skipped_version");
         localStorage.removeItem("skillstar_last_check");
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
 
       const total = result.repos_removed + result.history_cleared + result.translation_cleared;
       if (total > 0) {
@@ -881,10 +901,7 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
         const raced = await Promise.race<number | typeof timeoutSymbol>([
           deletePromise,
           new Promise<typeof timeoutSymbol>((resolve) => {
-            timeoutTimer = window.setTimeout(
-              () => resolve(timeoutSymbol),
-              FORCE_DELETE_UI_TIMEOUT_MS
-            );
+            timeoutTimer = window.setTimeout(() => resolve(timeoutSymbol), FORCE_DELETE_UI_TIMEOUT_MS);
           }),
         ]);
 
@@ -892,7 +909,7 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
           toast.warning(
             t("settings.forceDeleteTimeoutHint", {
               target: targetLabel,
-            })
+            }),
           );
           setForceDeletingTarget(null);
           setSlowForceDeletingTarget(null);
@@ -903,7 +920,7 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
               toast.info(
                 t("settings.forceDeleteBackgroundDone", {
                   target: targetLabel,
-                })
+                }),
               );
             })
             .catch((e) => {
@@ -911,7 +928,7 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
               toast.error(
                 t("settings.forceDeleteBackgroundFailed", {
                   target: targetLabel,
-                })
+                }),
               );
             })
             .finally(() => {
@@ -935,7 +952,7 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
         setSlowForceDeletingTarget((current) => (current === target ? null : current));
       }
     },
-    [fetchStorageOverview, notifySkillsRefresh, t]
+    [fetchStorageOverview, notifySkillsRefresh, t],
   );
 
   const handleCleanBroken = useCallback(async () => {
@@ -965,7 +982,7 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
     const unitBase = 1024;
     const sizes = ["B", "KB", "MB", "GB"];
     const sizeIndex = Math.floor(Math.log(bytes) / Math.log(unitBase));
-    return parseFloat((bytes / Math.pow(unitBase, sizeIndex)).toFixed(2)) + " " + sizes[sizeIndex];
+    return parseFloat((bytes / unitBase ** sizeIndex).toFixed(2)) + " " + sizes[sizeIndex];
   }, []);
 
   // ── Proxy config change handler ────────────────────────────────────────────
@@ -1013,116 +1030,117 @@ export function Settings({ onCheckUpdate, isCheckingUpdate }: { onCheckUpdate?: 
               {/* Windows Developer Mode guidance banner */}
               <DevModeBanner />
 
-          <section id="settings-agents" className="scroll-mt-3">
-          <AgentConnectionsSection
-            profiles={profiles}
-            profilesLoading={profilesLoading}
-            confirmDisableId={agentState.confirmDisableId}
-            unlinkingId={agentState.unlinkingId}
-            expandedAgentId={agentState.expandedAgentId}
-            linkedSkills={agentState.linkedSkills}
-            onToggleProfile={handleToggle}
-            onToggleExpand={toggleExpand}
-            onCancelDisable={() => dispatchAgent({ type: "SET_CONFIRM_DISABLE_ID", id: null })}
-            onConfirmDisable={confirmDisable}
-            onUnlinkSkill={handleUnlinkSingle}
-            onAddCustomProfile={addCustomProfile}
-            onRemoveCustomProfile={removeCustomProfile}
-          />
-          </section>
+              <section id="settings-agents" className="scroll-mt-3">
+                <AgentConnectionsSection
+                  profiles={profiles}
+                  profilesLoading={profilesLoading}
+                  confirmDisableId={agentState.confirmDisableId}
+                  unlinkingId={agentState.unlinkingId}
+                  expandedAgentId={agentState.expandedAgentId}
+                  linkedSkills={agentState.linkedSkills}
+                  onToggleProfile={handleToggle}
+                  onToggleExpand={toggleExpand}
+                  onCancelDisable={() => dispatchAgent({ type: "SET_CONFIRM_DISABLE_ID", id: null })}
+                  onConfirmDisable={confirmDisable}
+                  onUnlinkSkill={handleUnlinkSingle}
+                  onAddCustomProfile={addCustomProfile}
+                  onRemoveCustomProfile={removeCustomProfile}
+                />
+              </section>
 
-          <section id="settings-proxy" className="scroll-mt-3">
-          <ProxySection
-            proxyConfig={proxyState.config}
-            ready={proxyState.loaded}
-            proxyExpanded={proxyState.expanded}
-            proxySaving={proxyState.saving}
-            proxySaved={proxyState.savedIndicator}
-            onToggleExpanded={() => dispatchProxy({ type: "TOGGLE_EXPANDED" })}
-            onConfigChange={handleProxyConfigChange}
-          />
-          </section>
+              <section id="settings-proxy" className="scroll-mt-3">
+                <ProxySection
+                  proxyConfig={proxyState.config}
+                  ready={proxyState.loaded}
+                  proxyExpanded={proxyState.expanded}
+                  proxySaving={proxyState.saving}
+                  proxySaved={proxyState.savedIndicator}
+                  onToggleExpanded={() => dispatchProxy({ type: "TOGGLE_EXPANDED" })}
+                  onConfigChange={handleProxyConfigChange}
+                />
+              </section>
 
-          <section id="settings-mirror" className="scroll-mt-3">
-          <GitHubMirrorSection
-            mirrorConfig={mirrorState.config}
-            ready={mirrorState.loaded}
-            mirrorExpanded={mirrorState.expanded}
-            mirrorSaving={mirrorState.saving}
-            mirrorSaved={mirrorState.savedIndicator}
-            onToggleExpanded={() => dispatchMirror({ type: "TOGGLE_EXPANDED" })}
-            onConfigChange={handleMirrorConfigChange}
-          />
-          </section>
+              <section id="settings-mirror" className="scroll-mt-3">
+                <GitHubMirrorSection
+                  mirrorConfig={mirrorState.config}
+                  ready={mirrorState.loaded}
+                  mirrorExpanded={mirrorState.expanded}
+                  mirrorSaving={mirrorState.saving}
+                  mirrorSaved={mirrorState.savedIndicator}
+                  onToggleExpanded={() => dispatchMirror({ type: "TOGGLE_EXPANDED" })}
+                  onConfigChange={handleMirrorConfigChange}
+                />
+              </section>
 
-          <section id="settings-ai" className="scroll-mt-3">
-          <AiProviderSection
-            localAiConfig={aiState.config}
-            ready={aiState.loaded}
-            aiExpanded={aiState.expanded}
-            aiSaving={aiState.saving}
-            aiSaved={aiState.savedIndicator}
-            aiTesting={aiState.testing}
-            aiTestResult={aiState.testResult}
-            aiTestLatency={aiState.testLatency}
-            showApiKey={aiState.showApiKey}
-            onToggleExpanded={() => dispatchAi({ type: "TOGGLE_EXPANDED" })}
-            onEnabledChange={handleAiEnabledChange}
-            onConfigChange={handleAiConfigChange}
-            onToggleShowApiKey={() => dispatchAi({ type: "TOGGLE_SHOW_API_KEY" })}
-            onTestConnection={handleAiTestConnection}
-          />
-          </section>
+              <section id="settings-ai" className="scroll-mt-3">
+                <AiProviderSection
+                  localAiConfig={aiState.config}
+                  ready={aiState.loaded}
+                  aiExpanded={aiState.expanded}
+                  aiSaving={aiState.saving}
+                  aiSaved={aiState.savedIndicator}
+                  aiTesting={aiState.testing}
+                  aiTestResult={aiState.testResult}
+                  aiTestLatency={aiState.testLatency}
+                  showApiKey={aiState.showApiKey}
+                  onToggleExpanded={() => dispatchAi({ type: "TOGGLE_EXPANDED" })}
+                  onEnabledChange={handleAiEnabledChange}
+                  onConfigChange={handleAiConfigChange}
+                  onToggleShowApiKey={() => dispatchAi({ type: "TOGGLE_SHOW_API_KEY" })}
+                  onTestConnection={handleAiTestConnection}
+                />
+              </section>
 
-          <section id="settings-shorttext" className="scroll-mt-3">
-          <ShortTextServiceSection
-            localAiConfig={aiState.config}
-            mymemoryUsage={mymemoryUsage}
-            onConfigChange={handleAiConfigChange}
-          />
-          </section>
+              <section id="settings-shorttext" className="scroll-mt-3">
+                <ShortTextServiceSection
+                  localAiConfig={aiState.config}
+                  mymemoryUsage={mymemoryUsage}
+                  onConfigChange={handleAiConfigChange}
+                />
+              </section>
 
-          <section id="settings-acp" className="scroll-mt-3">
-          <AcpSection />
-          </section>
+              <section id="settings-acp" className="scroll-mt-3">
+                <AcpSection />
+              </section>
 
-          <section id="settings-background" className="scroll-mt-3">
-          <BackgroundRunSection
-            enabled={backgroundRun}
-            onToggle={handleBackgroundRunToggle}
-          />
-          </section>
+              <section id="settings-background" className="scroll-mt-3">
+                <BackgroundRunSection enabled={backgroundRun} onToggle={handleBackgroundRunToggle} />
+              </section>
 
-          <section id="settings-appearance" className="scroll-mt-3">
-          <AppearanceSection
-            backgroundStyle={backgroundStyle}
-            onBackgroundStyleChange={handleBackgroundStyleChange}
-          />
-          </section>
+              <section id="settings-appearance" className="scroll-mt-3">
+                <AppearanceSection
+                  backgroundStyle={backgroundStyle}
+                  onBackgroundStyleChange={handleBackgroundStyleChange}
+                />
+              </section>
 
-          <section id="settings-language" className="scroll-mt-3">
-          <LanguageSection currentLang={currentLang} onLanguageChange={handleLanguageChange} />
-          </section>
+              <section id="settings-language" className="scroll-mt-3">
+                <LanguageSection currentLang={currentLang} onLanguageChange={handleLanguageChange} />
+              </section>
 
-          <section id="settings-storage" className="scroll-mt-3">
-          <StorageSection
-            overview={storageOverview}
-            loading={fetchingStorage}
-            cleaning={cleaningCaches}
-            cleaningBroken={cleaningBroken}
-            forceDeletingTarget={forceDeletingTarget}
-            slowForceDeletingTarget={slowForceDeletingTarget}
-            formatBytes={formatBytes}
-            onCleanAll={handleCleanAllCaches}
-            onForceDeleteHub={() => handleForceDelete("hub")}
-            onForceDeleteCache={() => handleForceDelete("cache")}
-            onCleanBroken={handleCleanBroken}
-          />
-          </section>
+              <section id="settings-storage" className="scroll-mt-3">
+                <StorageSection
+                  overview={storageOverview}
+                  loading={fetchingStorage}
+                  cleaning={cleaningCaches}
+                  cleaningBroken={cleaningBroken}
+                  forceDeletingTarget={forceDeletingTarget}
+                  slowForceDeletingTarget={slowForceDeletingTarget}
+                  formatBytes={formatBytes}
+                  onCleanAll={handleCleanAllCaches}
+                  onForceDeleteHub={() => handleForceDelete("hub")}
+                  onForceDeleteCache={() => handleForceDelete("cache")}
+                  onCleanBroken={handleCleanBroken}
+                />
+              </section>
 
-          <section id="settings-about" className="scroll-mt-3">
-          <AboutSection ghInstalled={ghInstalled} onCheckUpdate={onCheckUpdate} isCheckingUpdate={isCheckingUpdate} />
-          </section>
+              <section id="settings-about" className="scroll-mt-3">
+                <AboutSection
+                  ghInstalled={ghInstalled}
+                  onCheckUpdate={onCheckUpdate}
+                  isCheckingUpdate={isCheckingUpdate}
+                />
+              </section>
             </div>
 
             {/* Right elastic gutter to balance flex layout symmetrically */}

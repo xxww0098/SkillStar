@@ -1,5 +1,5 @@
-import { useTranslation } from "react-i18next";
 import { CheckCircle2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../../components/ui/button";
 
 export type ShareCodeSkipReason = "repo_missing" | "no_source" | "install_failed";
@@ -22,11 +22,7 @@ export interface CompletedPhaseProps {
   onDone: () => void;
 }
 
-export function CompletedPhase({
-  count,
-  summary,
-  onDone,
-}: CompletedPhaseProps) {
+export function CompletedPhase({ count, summary, onDone }: CompletedPhaseProps) {
   const { t } = useTranslation();
   const existingCount = summary?.existingNames.length ?? 0;
   const installedCount = summary?.installedNames.length ?? count;

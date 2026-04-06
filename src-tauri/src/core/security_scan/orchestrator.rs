@@ -1,3 +1,4 @@
+use crate::core::path_env::command_with_path;
 use anyhow::{Result, anyhow};
 use petgraph::algo::has_path_connecting;
 use petgraph::graph::{Graph, NodeIndex};
@@ -6,7 +7,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use crate::core::path_env::command_with_path;
 use std::sync::LazyLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -1381,9 +1381,7 @@ impl DynamicSandboxAnalyzer {
         })?;
 
         let mut cmd = command_with_path(&launch.program);
-        cmd.args(&launch.args)
-            .current_dir(&sandbox_dir)
-            .env_clear();
+        cmd.args(&launch.args).current_dir(&sandbox_dir).env_clear();
 
         // Platform-specific minimal environment for sandboxed execution.
         #[cfg(unix)]

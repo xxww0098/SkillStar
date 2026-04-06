@@ -1,21 +1,22 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { useTranslation } from "react-i18next";
-import { X, Download } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
-import { looksLikeShareCode, parseShareCode, extractShareCode, type ShareCodeData, type ShareCodeType } from "../../../lib/shareCode";
-import type {
-  ScanResult,
-  SkillInstallTarget,
-  RepoHistoryEntry,
-  Skill,
-} from "../../../types";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { Download, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
+  extractShareCode,
+  looksLikeShareCode,
+  parseShareCode,
+  type ShareCodeData,
+  type ShareCodeType,
+} from "../../../lib/shareCode";
+import type { RepoHistoryEntry, ScanResult, Skill, SkillInstallTarget } from "../../../types";
+import {
+  CompletedPhase,
+  ErrorPhase,
   InputURLPhase,
   LoadingPhase,
   SelectSkillsPhase,
-  CompletedPhase,
-  ErrorPhase,
   ShareCodePreviewPhase,
 } from "./import-modal";
 
@@ -166,55 +167,55 @@ export function ImportModal({
     }
   }, []);
 
-  const collectExistingNames = useCallback(
-    (data: ShareCodeData, installedSet: Set<string>) => {
-      const existingNames: string[] = [];
-      const seen = new Set<string>();
+  const collectExistingNames = useCallback((data: ShareCodeData, installedSet: Set<string>) => {
+    const existingNames: string[] = [];
+    const seen = new Set<string>();
 
-      for (const skill of data.s) {
-        const name = skill.n?.trim();
-        if (!name) continue;
-        const key = normalizeSkillName(name);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        if (installedSet.has(key)) {
-          existingNames.push(name);
-        }
-      }
-
-      return existingNames;
-    },
-    [],
-  );
-
-  // ── Share Code Parse ─────────────────────────────────────────
-  const handleParseShareCode = useCallback(async (code: string) => {
-    setShareCodeError("");
-    setShareCodeSummary(null);
-    setProgressMsg(t("shareCodeImport.parsing"));
-    try {
-      // Extract raw share code from formatted message or use as-is
-      const rawCode = extractShareCode(code);
-      const { data, type } = await parseShareCode(rawCode);
-      setShareCodeData(data);
-      setShareCodeType(type);
-      const installedSet = await loadInstalledNameSet();
-      setShareCodeExistingNames(collectExistingNames(data, installedSet));
-      setPhase("shareCodePreview");
-    } catch (e) {
-      const errMsg = String(e);
-      if (errMsg.includes("expired")) {
-        setShareCodeError(errMsg.replace(/^Error:\s*/, ""));
-        setShareCodeData(null);
-        setShareCodeExistingNames([]);
-      } else {
-        setShareCodeError(errMsg);
-        setPhase("shareCodePreview");
-        setShareCodeData(null);
-        setShareCodeExistingNames([]);
+    for (const skill of data.s) {
+      const name = skill.n?.trim();
+      if (!name) continue;
+      const key = normalizeSkillName(name);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (installedSet.has(key)) {
+        existingNames.push(name);
       }
     }
-  }, [collectExistingNames, loadInstalledNameSet, t]);
+
+    return existingNames;
+  }, []);
+
+  // ── Share Code Parse ─────────────────────────────────────────
+  const handleParseShareCode = useCallback(
+    async (code: string) => {
+      setShareCodeError("");
+      setShareCodeSummary(null);
+      setProgressMsg(t("shareCodeImport.parsing"));
+      try {
+        // Extract raw share code from formatted message or use as-is
+        const rawCode = extractShareCode(code);
+        const { data, type } = await parseShareCode(rawCode);
+        setShareCodeData(data);
+        setShareCodeType(type);
+        const installedSet = await loadInstalledNameSet();
+        setShareCodeExistingNames(collectExistingNames(data, installedSet));
+        setPhase("shareCodePreview");
+      } catch (e) {
+        const errMsg = String(e);
+        if (errMsg.includes("expired")) {
+          setShareCodeError(errMsg.replace(/^Error:\s*/, ""));
+          setShareCodeData(null);
+          setShareCodeExistingNames([]);
+        } else {
+          setShareCodeError(errMsg);
+          setPhase("shareCodePreview");
+          setShareCodeData(null);
+          setShareCodeExistingNames([]);
+        }
+      }
+    },
+    [collectExistingNames, loadInstalledNameSet, t],
+  );
 
   const handleShareCodeInstall = useCallback(async () => {
     if (!shareCodeData) return;
@@ -373,14 +374,17 @@ export function ImportModal({
   }, [loadInstalledNameSet, onClearShareCode, onInstalled, shareCodeData, shareCodeType, t]);
 
   // ── Smart input handler: detect share code in URL input ──────
-  const handleUrlInputChange = useCallback((value: string) => {
-    setUrlInput(value);
-    // Auto-detect share code when pasted (handle formatted messages too)
-    const extracted = extractShareCode(value.trim());
-    if (looksLikeShareCode(extracted)) {
-      setTimeout(() => handleParseShareCode(value.trim()), 50);
-    }
-  }, [handleParseShareCode]);
+  const handleUrlInputChange = useCallback(
+    (value: string) => {
+      setUrlInput(value);
+      // Auto-detect share code when pasted (handle formatted messages too)
+      const extracted = extractShareCode(value.trim());
+      if (looksLikeShareCode(extracted)) {
+        setTimeout(() => handleParseShareCode(value.trim()), 50);
+      }
+    },
+    [handleParseShareCode],
+  );
 
   // ── Scan ───────────────────────────────────────────────────────
   const handleScan = useCallback(
@@ -410,14 +414,10 @@ export function ImportModal({
         // otherwise select all uninstalled skills.
         const targetSkill = preSelectedSkillRef.current;
         if (targetSkill) {
-          const match = result.skills.find(
-            (s) => s.id === targetSkill
-          );
+          const match = result.skills.find((s) => s.id === targetSkill);
           setSelectedSkills(match ? new Set([match.id]) : new Set());
         } else {
-          const uninstalled = result.skills
-            .filter((s) => !s.already_installed)
-            .map((s) => s.id);
+          const uninstalled = result.skills.filter((s) => !s.already_installed).map((s) => s.id);
           setSelectedSkills(new Set(uninstalled));
         }
 
@@ -427,43 +427,46 @@ export function ImportModal({
         setPhase("error");
       }
     },
-    [fullDepthScan, t, urlInput]
+    [fullDepthScan, t, urlInput],
   );
 
   // ── Install ────────────────────────────────────────────────────
-  const handleInstall = useCallback(async (shouldPack: boolean = false) => {
-    // If it's an event (e.g. from onClick), it'll be an object. Check type.
-    const pack = typeof shouldPack === "boolean" ? shouldPack : false;
-    
-    if (!scanResult || selectedSkills.size === 0) return;
+  const handleInstall = useCallback(
+    async (shouldPack: boolean = false) => {
+      // If it's an event (e.g. from onClick), it'll be an object. Check type.
+      const pack = typeof shouldPack === "boolean" ? shouldPack : false;
 
-    setShareCodeSummary(null);
-    setPhase("installing");
-    setProgressMsg(t("githubImportModal.installing", { count: selectedSkills.size }));
+      if (!scanResult || selectedSkills.size === 0) return;
 
-    const targets: SkillInstallTarget[] = scanResult.skills
-      .filter((s) => selectedSkills.has(s.id))
-      .map((s) => ({ id: s.id, folder_path: s.folder_path }));
+      setShareCodeSummary(null);
+      setPhase("installing");
+      setProgressMsg(t("githubImportModal.installing", { count: selectedSkills.size }));
 
-    try {
-      const installed = await invoke<string[]>("install_from_scan", {
-        repoUrl: scanResult.source_url,
-        source: scanResult.source,
-        skills: targets,
-      });
+      const targets: SkillInstallTarget[] = scanResult.skills
+        .filter((s) => selectedSkills.has(s.id))
+        .map((s) => ({ id: s.id, folder_path: s.folder_path }));
 
-      setInstalledCount(installed.length);
-      setPhase("completed");
-      onInstalled(installed);
-      
-      if (pack && onPackGroup) {
-        onPackGroup(installed);
+      try {
+        const installed = await invoke<string[]>("install_from_scan", {
+          repoUrl: scanResult.source_url,
+          source: scanResult.source,
+          skills: targets,
+        });
+
+        setInstalledCount(installed.length);
+        setPhase("completed");
+        onInstalled(installed);
+
+        if (pack && onPackGroup) {
+          onPackGroup(installed);
+        }
+      } catch (e) {
+        setErrorMsg(String(e));
+        setPhase("error");
       }
-    } catch (e) {
-      setErrorMsg(String(e));
-      setPhase("error");
-    }
-  }, [scanResult, selectedSkills, onInstalled, onPackGroup]);
+    },
+    [scanResult, selectedSkills, onInstalled, onPackGroup],
+  );
 
   // ── Helpers ────────────────────────────────────────────────────
   const toggleSkill = (id: string) => {
@@ -502,9 +505,7 @@ export function ImportModal({
         return next;
       });
     } else {
-      const all = scanResult.skills
-        .filter((s) => !s.already_installed)
-        .map((s) => s.id);
+      const all = scanResult.skills.filter((s) => !s.already_installed).map((s) => s.id);
       setSelectedSkills(new Set(all));
     }
   };
@@ -545,98 +546,91 @@ export function ImportModal({
             transition={{ duration: prefersReducedMotion ? 0.01 : 0.3, ease: [0.16, 1, 0.3, 1] }}
             className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg z-50"
           >
-            <div role="dialog" aria-modal="true" aria-label={t("common.import", { defaultValue: "Import" })} className="modal-surface">
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label={t("common.import", { defaultValue: "Import" })}
+              className="modal-surface"
+            >
               {/* Top ambient glow */}
               <div className="pointer-events-none absolute -left-20 -top-20 h-48 w-48 rounded-full bg-primary/20 blur-[60px] opacity-70" />
               <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-accent/10 blur-[60px] opacity-70" />
               <div className="relative z-10">
-              {/* Header */}
-              <div className="flex items-center justify-between px-6 pt-4 pb-3 shrink-0 border-b border-border/60">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center">
-                    <Download className="w-4 h-4 text-primary" />
+                {/* Header */}
+                <div className="flex items-center justify-between px-6 pt-4 pb-3 shrink-0 border-b border-border/60">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center">
+                      <Download className="w-4 h-4 text-primary" />
+                    </div>
+                    <h2 className="text-heading-sm">{t("common.import", { defaultValue: "Import" })}</h2>
                   </div>
-                  <h2 className="text-heading-sm">{t("common.import", { defaultValue: "Import" })}</h2>
+                  <button
+                    onClick={onClose}
+                    aria-label={t("common.close")}
+                    className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
-                <button
-                  onClick={onClose}
-                  aria-label={t("common.close")}
-                  className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+
+                {/* Body — phase content */}
+                <div className="flex-1 overflow-y-auto">
+                  {phase === "inputURL" && (
+                    <InputURLPhase
+                      urlInput={urlInput}
+                      setUrlInput={handleUrlInputChange}
+                      onScan={() => handleScan()}
+                      fullDepthEnabled={fullDepthScan}
+                      onToggleFullDepth={setFullDepthScan}
+                      history={history}
+                      onSelectHistory={(entry) => {
+                        setUrlInput(entry.source);
+                        handleScan(entry.source);
+                      }}
+                      onPickLocalFile={onPickLocalFile}
+                      shareCodeDetected={shareCodeDetected}
+                    />
+                  )}
+
+                  {phase === "scanning" && <LoadingPhase message={progressMsg} />}
+
+                  {phase === "selectSkills" && scanResult && (
+                    <SelectSkillsPhase
+                      skills={scanResult.skills}
+                      source={scanResult.source}
+                      selectedSkills={selectedSkills}
+                      onToggle={toggleSkill}
+                      onSelectAll={selectAll}
+                      onDeselectAll={deselectAll}
+                      onInstall={handleInstall}
+                      hasPackGroup={!!onPackGroup}
+                    />
+                  )}
+
+                  {phase === "installing" && <LoadingPhase message={progressMsg} />}
+
+                  {phase === "completed" && (
+                    <CompletedPhase count={installedCount} summary={shareCodeSummary} onDone={onClose} />
+                  )}
+
+                  {phase === "error" && <ErrorPhase message={errorMsg} onRetry={reset} />}
+
+                  {phase === "shareCodePreview" && (
+                    <ShareCodePreviewPhase
+                      data={shareCodeData}
+                      error={shareCodeError}
+                      password={shareCodePassword}
+                      existingNames={shareCodeExistingNames}
+                      onPasswordChange={setShareCodePassword}
+                      onRetryWithPassword={() => handleParseShareCode(urlInput.trim())}
+                      onInstall={handleShareCodeInstall}
+                      onBack={reset}
+                    />
+                  )}
+
+                  {phase === "shareCodeInstalling" && <LoadingPhase message={progressMsg} />}
+                </div>
               </div>
-
-              {/* Body — phase content */}
-              <div className="flex-1 overflow-y-auto">
-                {phase === "inputURL" && (
-                  <InputURLPhase
-                    urlInput={urlInput}
-                    setUrlInput={handleUrlInputChange}
-                    onScan={() => handleScan()}
-                    fullDepthEnabled={fullDepthScan}
-                    onToggleFullDepth={setFullDepthScan}
-                    history={history}
-                    onSelectHistory={(entry) => {
-                      setUrlInput(entry.source);
-                      handleScan(entry.source);
-                    }}
-                    onPickLocalFile={onPickLocalFile}
-                    shareCodeDetected={shareCodeDetected}
-                  />
-                )}
-
-                {phase === "scanning" && (
-                  <LoadingPhase message={progressMsg} />
-                )}
-
-                {phase === "selectSkills" && scanResult && (
-                  <SelectSkillsPhase
-                    skills={scanResult.skills}
-                    source={scanResult.source}
-                    selectedSkills={selectedSkills}
-                    onToggle={toggleSkill}
-                    onSelectAll={selectAll}
-                    onDeselectAll={deselectAll}
-                    onInstall={handleInstall}
-                    hasPackGroup={!!onPackGroup}
-                  />
-                )}
-
-                {phase === "installing" && (
-                  <LoadingPhase message={progressMsg} />
-                )}
-
-                {phase === "completed" && (
-                  <CompletedPhase
-                    count={installedCount}
-                    summary={shareCodeSummary}
-                    onDone={onClose}
-                  />
-                )}
-
-                {phase === "error" && (
-                  <ErrorPhase message={errorMsg} onRetry={reset} />
-                )}
-
-                {phase === "shareCodePreview" && (
-                  <ShareCodePreviewPhase
-                    data={shareCodeData}
-                    error={shareCodeError}
-                    password={shareCodePassword}
-                    existingNames={shareCodeExistingNames}
-                    onPasswordChange={setShareCodePassword}
-                    onRetryWithPassword={() => handleParseShareCode(urlInput.trim())}
-                    onInstall={handleShareCodeInstall}
-                    onBack={reset}
-                  />
-                )}
-
-                {phase === "shareCodeInstalling" && (
-                  <LoadingPhase message={progressMsg} />
-                )}
-              </div>
-            </div>
             </div>
           </motion.div>
         </>

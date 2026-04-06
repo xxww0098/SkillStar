@@ -1,7 +1,7 @@
+import { Clock, Download, Package, Search, Share2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Download, Search, Share2, Package, Clock } from "lucide-react";
-import { SearchInput } from "../../../../components/ui/SearchInput";
 import { Button } from "../../../../components/ui/button";
+import { SearchInput } from "../../../../components/ui/SearchInput";
 import { Switch } from "../../../../components/ui/switch";
 import type { RepoHistoryEntry } from "../../../../types";
 
@@ -37,9 +37,7 @@ export function InputURLPhase({
         <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary/15 to-accent/15 flex items-center justify-center">
           <Download className="w-7 h-7 text-primary/80" />
         </div>
-        <p className="text-sm text-muted-foreground text-center">
-          {t("shareCodeImport.smartInputHint")}
-        </p>
+        <p className="text-sm text-muted-foreground text-center">{t("shareCodeImport.smartInputHint")}</p>
       </div>
 
       {/* Clipboard detected banner */}
@@ -89,7 +87,9 @@ export function InputURLPhase({
         <div className="space-y-4 pt-1">
           <div className="flex items-center gap-4">
             <div className="flex-1 h-px bg-border/60"></div>
-            <span className="text-micro text-muted-foreground font-medium uppercase tracking-wider">{t("common.or")}</span>
+            <span className="text-micro text-muted-foreground font-medium uppercase tracking-wider">
+              {t("common.or")}
+            </span>
             <div className="flex-1 h-px bg-border/60"></div>
           </div>
           <Button

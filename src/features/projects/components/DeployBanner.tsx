@@ -1,8 +1,8 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { useTranslation } from "react-i18next";
 import { Rocket, X } from "lucide-react";
-import { Badge } from "../../../components/ui/badge";
+import { useTranslation } from "react-i18next";
 import { MOTION_TRANSITION } from "../../../comm/motion";
+import { Badge } from "../../../components/ui/badge";
 
 interface DeployBannerProps {
   pendingGroupSkills: string[] | null;
@@ -24,9 +24,7 @@ export function DeployBanner({ pendingGroupSkills, onDismiss }: DeployBannerProp
         >
           <div className="flex items-center gap-3 px-6 py-2.5 bg-primary/5 border-b border-primary/20">
             <Rocket className="w-4 h-4 text-primary shrink-0" />
-            <span className="text-sm">
-              {t("projects.deployBanner", { count: pendingGroupSkills.length })}
-            </span>
+            <span className="text-sm">{t("projects.deployBanner", { count: pendingGroupSkills.length })}</span>
             <div className="flex-1" />
             <div className="flex flex-wrap gap-1 max-w-xs">
               {pendingGroupSkills.slice(0, 3).map((skillName) => (

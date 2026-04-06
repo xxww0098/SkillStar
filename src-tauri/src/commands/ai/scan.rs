@@ -1,12 +1,12 @@
 use crate::core::ai_provider;
 use crate::core::security_scan::{
-    self, FileRole, FileScanResult, PreparedChunk, PreparedSkillScan, ScanMode,
-    SecurityScanPolicy, SecurityScanReportFormat, SecurityScanResult, ScannedFile,
+    self, FileRole, FileScanResult, PreparedChunk, PreparedSkillScan, ScanMode, ScannedFile,
+    SecurityScanPolicy, SecurityScanReportFormat, SecurityScanResult,
 };
 use serde::Serialize;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use tauri::Emitter;
 use tokio::sync::{Semaphore as TokioSemaphore, mpsc};
 use tracing::warn;
@@ -18,7 +18,6 @@ pub async fn cancel_security_scan() -> Result<(), String> {
     CANCEL_SCAN.store(true, Ordering::Relaxed);
     Ok(())
 }
-
 
 fn parse_scan_mode(mode: &str) -> ScanMode {
     match mode {
@@ -523,11 +522,18 @@ async fn run_ai_scan_pipeline(
             let on_progress = move |stage: &str, file_name: Option<&str>| {
                 emit_scan_event(
                     &progress_window,
-                    SecurityScanPayload::new(&r_id, if file_name.is_some() { "file-start" } else { "progress" })
-                        .skill(sn.clone())
-                        .workers(0, ai_concurrency)
-                        .msg(stage)
-                        .phase(stage),
+                    SecurityScanPayload::new(
+                        &r_id,
+                        if file_name.is_some() {
+                            "file-start"
+                        } else {
+                            "progress"
+                        },
+                    )
+                    .skill(sn.clone())
+                    .workers(0, ai_concurrency)
+                    .msg(stage)
+                    .phase(stage),
                 );
             };
 
@@ -629,7 +635,10 @@ async fn run_ai_scan_pipeline(
                 &window,
                 SecurityScanPayload::new(&request_id, "progress")
                     .skill(owner.clone())
-                    .files(execution.prepared.files.len(), execution.prepared.files.len())
+                    .files(
+                        execution.prepared.files.len(),
+                        execution.prepared.files.len(),
+                    )
                     .chunks(execution.completed_chunks, execution.prepared.chunks.len())
                     .workers(active_chunk_workers, ai_concurrency)
                     .msg(format!("chunk {}/{}", chunk.chunk_num, chunk.total_chunks))

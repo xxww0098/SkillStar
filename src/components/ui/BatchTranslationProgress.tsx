@@ -1,8 +1,8 @@
-import { useEffect, useState, useRef } from "react";
-import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { motion, AnimatePresence } from "framer-motion";
+import { listen } from "@tauri-apps/api/event";
+import { AnimatePresence, motion } from "framer-motion";
 import { Check, Languages } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 interface BatchProgress {
   completed: number;
@@ -55,9 +55,7 @@ export function BatchTranslationProgress() {
       invoke<string[]>("check_pending_batch_translate")
         .then((pendingNames) => {
           if (pendingNames && pendingNames.length > 0) {
-            console.log(
-              `[batch-translate] Resuming ${pendingNames.length} pending skills`
-            );
+            console.log(`[batch-translate] Resuming ${pendingNames.length} pending skills`);
             invoke("ai_batch_process_skills", {
               skillNames: pendingNames,
             }).catch((err) => {
@@ -76,11 +74,7 @@ export function BatchTranslationProgress() {
     };
   }, []);
 
-  const pct = progress
-    ? progress.total > 0
-      ? progress.completed / progress.total
-      : 0
-    : 0;
+  const pct = progress ? (progress.total > 0 ? progress.completed / progress.total : 0) : 0;
 
   // SVG circle params
   const size = 52;
@@ -102,11 +96,7 @@ export function BatchTranslationProgress() {
           {/* Tooltip on hover */}
           <div className="absolute bottom-full right-0 mb-2 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200">
             <div className="bg-card/95 backdrop-blur-xl border border-border rounded-lg px-3 py-1.5 shadow-xl whitespace-nowrap text-xs text-foreground">
-              {done
-                ? `翻译完成 (${progress.total})`
-                : progress.currentName
-                  ? `${progress.currentName}`
-                  : "准备中..."}
+              {done ? `翻译完成 (${progress.total})` : progress.currentName ? `${progress.currentName}` : "准备中..."}
             </div>
           </div>
 
@@ -142,9 +132,7 @@ export function BatchTranslationProgress() {
                 strokeLinecap="round"
                 strokeDasharray={circumference}
                 strokeDashoffset={dashOffset}
-                className={`transition-all duration-700 ease-out ${
-                  done ? "text-success" : "text-primary"
-                }`}
+                className={`transition-all duration-700 ease-out ${done ? "text-success" : "text-primary"}`}
               />
             </svg>
 
@@ -158,10 +146,7 @@ export function BatchTranslationProgress() {
                     animate={{ scale: 1, rotate: 0 }}
                     transition={{ type: "spring", stiffness: 500, damping: 20 }}
                   >
-                    <Check
-                      className="w-5 h-5 text-success"
-                      strokeWidth={3}
-                    />
+                    <Check className="w-5 h-5 text-success" strokeWidth={3} />
                   </motion.div>
                 ) : (
                   <motion.div

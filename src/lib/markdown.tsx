@@ -1,13 +1,5 @@
-import {
-  Children,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-  type WheelEvent,
-} from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Children, type ReactNode, useCallback, useEffect, useRef, useState, type WheelEvent } from "react";
 import type { Components } from "react-markdown";
 
 function stringifyChildren(children: ReactNode): string {
@@ -125,7 +117,10 @@ function ScrollBox({
   return (
     <div
       className={`scroll-box-wrapper ${className ?? ""}`}
-      onMouseEnter={() => { setHovered(true); updateArrows(); }}
+      onMouseEnter={() => {
+        setHovered(true);
+        updateArrows();
+      }}
       onMouseLeave={() => setHovered(false)}
     >
       {/* Left arrow */}

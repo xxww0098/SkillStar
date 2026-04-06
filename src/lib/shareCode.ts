@@ -45,19 +45,14 @@ const TTL_MS = TTL_EXPIRE_DAYS * 24 * 60 * 60 * 1000;
  * Pack data into a share code.
  * Steps: JSON → TextEncode → Deflate (if supported) → prepend header → Base64
  */
-export async function createShareCode(
-  data: ShareCodeData,
-  type: ShareCodeType = "deck",
-): Promise<string> {
+export async function createShareCode(data: ShareCodeData, type: ShareCodeType = "deck"): Promise<string> {
   const jsonStr = JSON.stringify(data);
   let payload = new TextEncoder().encode(jsonStr);
   let isCompressed = 0;
 
   if (typeof CompressionStream !== "undefined") {
     try {
-      const stream = new Blob([payload])
-        .stream()
-        .pipeThrough(new CompressionStream("deflate-raw"));
+      const stream = new Blob([payload]).stream().pipeThrough(new CompressionStream("deflate-raw"));
       payload = new Uint8Array(await new Response(stream).arrayBuffer());
       isCompressed = 1;
     } catch (e) {
@@ -88,9 +83,7 @@ export async function createShareCode(
  * Accepts ags-, agd-, and legacy agh- prefixes.
  * Throws if the code has expired.
  */
-export async function parseShareCode(
-  code: string,
-): Promise<ParseResult> {
+export async function parseShareCode(code: string): Promise<ParseResult> {
   let cleanCode = code.trim();
   let type: ShareCodeType;
 
@@ -132,9 +125,7 @@ export async function parseShareCode(
 
   if (Date.now() > expiresAt) {
     const days = Math.round((Date.now() - expiresAt) / (24 * 60 * 60 * 1000));
-    throw new Error(
-      `Share code expired ${days > 0 ? days + " day(s) ago" : ""} (valid for ${TTL_EXPIRE_DAYS} days)`
-    );
+    throw new Error(`Share code expired ${days > 0 ? days + " day(s) ago" : ""} (valid for ${TTL_EXPIRE_DAYS} days)`);
   }
 
   // Decompress if needed
@@ -143,9 +134,7 @@ export async function parseShareCode(
     if (typeof DecompressionStream === "undefined") {
       throw new Error("Browser does not support decompression for this share code");
     }
-    const stream = new Blob([bytes])
-      .stream()
-      .pipeThrough(new DecompressionStream("deflate-raw"));
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
     bytes = new Uint8Array(await new Response(stream).arrayBuffer());
   }
 
@@ -188,11 +177,7 @@ export function looksLikeShareCode(text: string): ShareCodeType | null {
 /**
  * Format a share code into a human-readable share message.
  */
-export function formatShareMessage(
-  data: ShareCodeData,
-  code: string,
-  type: ShareCodeType,
-): string {
+export function formatShareMessage(data: ShareCodeData, code: string, type: ShareCodeType): string {
   const name = data.n || (type === "deck" ? "Skill Deck" : "Skills");
   const skillNames = data.s?.map((s) => s.n).join(", ") || "";
 

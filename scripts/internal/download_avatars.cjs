@@ -3,14 +3,52 @@ const https = require("https");
 const path = require("path");
 
 const FALLBACK_PUBLISHERS = [
-  "vercel-labs", "microsoft", "anthropics", "google-labs-code", "github",
-  "cloudflare", "expo", "firebase", "openai", "supabase", "langchain-ai",
-  "hashicorp", "stripe", "posthog", "prisma", "figma", "firecrawl", "flutter",
-  "vercel", "shadcn", "google-gemini", "huggingface", "remotion-dev", "tavily-ai",
-  "browser-use", "facebook", "better-auth", "resend", "sentry", "getsentry",
-  "neondatabase", "dagster-io", "datadog-labs", "bitwarden", "upstash",
-  "sanity-io", "pulumi", "mapbox", "semgrep", "clerk", "apify",
-  "apollographql", "auth0", "automattic", "axiomhq", "base"
+  "vercel-labs",
+  "microsoft",
+  "anthropics",
+  "google-labs-code",
+  "github",
+  "cloudflare",
+  "expo",
+  "firebase",
+  "openai",
+  "supabase",
+  "langchain-ai",
+  "hashicorp",
+  "stripe",
+  "posthog",
+  "prisma",
+  "figma",
+  "firecrawl",
+  "flutter",
+  "vercel",
+  "shadcn",
+  "google-gemini",
+  "huggingface",
+  "remotion-dev",
+  "tavily-ai",
+  "browser-use",
+  "facebook",
+  "better-auth",
+  "resend",
+  "sentry",
+  "getsentry",
+  "neondatabase",
+  "dagster-io",
+  "datadog-labs",
+  "bitwarden",
+  "upstash",
+  "sanity-io",
+  "pulumi",
+  "mapbox",
+  "semgrep",
+  "clerk",
+  "apify",
+  "apollographql",
+  "auth0",
+  "automattic",
+  "axiomhq",
+  "base",
 ];
 
 const RESERVED_NAMES = new Set(["official", "audits", "docs"]);
@@ -59,7 +97,7 @@ function fetchText(url) {
           body += chunk;
         });
         res.on("end", () => resolve(body));
-      }
+      },
     );
 
     req.on("error", reject);
@@ -71,8 +109,7 @@ function discoverPublishersFromOfficial(html) {
   const normalized = html.replace(/\n/g, "");
 
   // Current skills.sh official table row format.
-  const rowRe =
-    /href="\/([a-z0-9_-]+)"[^>]*><div class="min-w-0 flex items-center gap-3">/g;
+  const rowRe = /href="\/([a-z0-9_-]+)"[^>]*><div class="min-w-0 flex items-center gap-3">/g;
 
   for (const match of normalized.matchAll(rowRe)) {
     const name = match[1];
@@ -98,9 +135,7 @@ function isFileFresh(filePath) {
 
 function downloadAvatar(name) {
   return new Promise((resolve) => {
-    const url = `https://avatars.githubusercontent.com/${encodeURIComponent(
-      name
-    )}?size=120`;
+    const url = `https://avatars.githubusercontent.com/${encodeURIComponent(name)}?size=120`;
     const filePath = path.join(dest, `${name}.png`);
     const tempPath = `${filePath}.tmp`;
 
@@ -144,7 +179,7 @@ function downloadAvatar(name) {
           }
           resolve(false);
         });
-      }
+      },
     );
 
     req.on("error", (e) => {
@@ -174,9 +209,7 @@ async function main() {
   }
 
   const publishers = await resolvePublishers();
-  console.log(
-    `Publisher count: ${publishers.length} | max-age: ${maxAgeDays} day(s) | refreshAll: ${refreshAll}`
-  );
+  console.log(`Publisher count: ${publishers.length} | max-age: ${maxAgeDays} day(s) | refreshAll: ${refreshAll}`);
 
   let downloaded = 0;
   let skipped = 0;
@@ -195,9 +228,7 @@ async function main() {
     else failed += 1;
   }
 
-  console.log(
-    `Done. Downloaded: ${downloaded}, Skipped (cache): ${skipped}, Failed: ${failed}`
-  );
+  console.log(`Done. Downloaded: ${downloaded}, Skipped (cache): ${skipped}, Failed: ${failed}`);
 }
 
 main().catch((e) => {

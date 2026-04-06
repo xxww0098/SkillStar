@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useCallback, useEffect, useState } from "react";
 import type { AiConfig } from "../types";
 
 const DEFAULT_CONFIG: AiConfig = {
@@ -101,4 +101,3 @@ export function useAiConfig() {
     testConnection,
   };
 }
-

@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useCallback, useEffect, useState } from "react";
 import type { SkillCardDeck } from "../../../types";
 
 export function useSkillCards() {
@@ -28,7 +28,7 @@ export function useSkillCards() {
       description: string,
       icon: string,
       skills: string[],
-      skillSources?: Record<string, string>
+      skillSources?: Record<string, string>,
     ) => {
       const group = await invoke<SkillCardDeck>("create_skill_group", {
         name,
@@ -40,7 +40,7 @@ export function useSkillCards() {
       setGroups((prev) => [...prev, group]);
       return group;
     },
-    []
+    [],
   );
 
   const updateGroup = useCallback(
@@ -52,7 +52,7 @@ export function useSkillCards() {
         icon?: string;
         skills?: string[];
         skillSources?: Record<string, string>;
-      }
+      },
     ) => {
       const group = await invoke<SkillCardDeck>("update_skill_group", {
         id,
@@ -61,7 +61,7 @@ export function useSkillCards() {
       setGroups((prev) => prev.map((g) => (g.id === id ? group : g)));
       return group;
     },
-    []
+    [],
   );
 
   const deleteGroup = useCallback(async (id: string) => {
@@ -75,16 +75,13 @@ export function useSkillCards() {
     return group;
   }, []);
 
-  const deployGroup = useCallback(
-    async (groupId: string, projectPath: string, agentTypes: string[]) => {
-      return await invoke<number>("deploy_skill_group", {
-        groupId,
-        projectPath,
-        agentTypes,
-      });
-    },
-    []
-  );
+  const deployGroup = useCallback(async (groupId: string, projectPath: string, agentTypes: string[]) => {
+    return await invoke<number>("deploy_skill_group", {
+      groupId,
+      projectPath,
+      agentTypes,
+    });
+  }, []);
 
   return {
     groups,

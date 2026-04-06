@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
-import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import { ChevronDown, Zap, Check, Loader2, Wifi, WifiOff } from "lucide-react";
+import { Check, ChevronDown, Loader2, Wifi, WifiOff, Zap } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Input } from "../../../components/ui/input";
 import { Switch } from "../../../components/ui/switch";
 import { cn } from "../../../lib/utils";
@@ -32,7 +32,9 @@ export function GitHubMirrorSection({
   const [testResults, setTestResults] = useState<Record<string, number | "error">>({});
 
   useEffect(() => {
-    invoke<GitHubMirrorPreset[]>("get_github_mirror_presets").then(setPresets).catch(() => {});
+    invoke<GitHubMirrorPreset[]>("get_github_mirror_presets")
+      .then(setPresets)
+      .catch(() => {});
   }, []);
 
   const handleTestMirror = async (url: string, id: string) => {
@@ -61,9 +63,7 @@ export function GitHubMirrorSection({
           <div className="w-7 h-7 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0 border border-emerald-500/20">
             <Zap className="w-4 h-4 text-emerald-500" />
           </div>
-          <h2 className="text-sm font-semibold text-foreground tracking-tight">
-            {t("settings.githubMirror")}
-          </h2>
+          <h2 className="text-sm font-semibold text-foreground tracking-tight">{t("settings.githubMirror")}</h2>
           {mirrorConfig.enabled && effectiveUrl && (
             <span className="text-xs text-muted-foreground ml-2 px-2 py-0.5 rounded-md bg-muted/50 border border-border truncate max-w-[260px]">
               {effectiveUrl}
@@ -85,20 +85,18 @@ export function GitHubMirrorSection({
       <div
         className={cn(
           "rounded-xl border border-border overflow-hidden transition-colors",
-          mirrorConfig.enabled ? "bg-card" : "bg-card/50"
+          mirrorConfig.enabled ? "bg-card" : "bg-card/50",
         )}
       >
         <button
           onClick={onToggleExpanded}
           className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer"
         >
-          <span className="text-sm font-medium text-foreground">
-            {t("settings.githubMirrorConfig")}
-          </span>
+          <span className="text-sm font-medium text-foreground">{t("settings.githubMirrorConfig")}</span>
           <ChevronDown
             className={cn(
               "w-4 h-4 text-muted-foreground transition-transform duration-200",
-              !mirrorExpanded && "-rotate-90"
+              !mirrorExpanded && "-rotate-90",
             )}
           />
         </button>
@@ -106,9 +104,7 @@ export function GitHubMirrorSection({
         {mirrorExpanded && (
           <div className="px-4 pb-4 pt-1 border-t border-border space-y-3">
             {/* Security notice */}
-            <p className="text-xs text-muted-foreground leading-relaxed px-1">
-              {t("settings.githubMirrorNotice")}
-            </p>
+            <p className="text-xs text-muted-foreground leading-relaxed px-1">{t("settings.githubMirrorNotice")}</p>
 
             {/* Preset selection — use role="radiogroup"/"radio" instead of native
                 <input type="radio"> to avoid browser scroll-to-visible behavior
@@ -125,9 +121,7 @@ export function GitHubMirrorSection({
                     role="radio"
                     aria-checked={isSelected}
                     tabIndex={0}
-                    onClick={() =>
-                      onConfigChange({ ...mirrorConfig, preset_id: preset.id, custom_url: null })
-                    }
+                    onClick={() => onConfigChange({ ...mirrorConfig, preset_id: preset.id, custom_url: null })}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === " ") {
                         e.preventDefault();
@@ -138,13 +132,13 @@ export function GitHubMirrorSection({
                       "flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition-all duration-150",
                       isSelected
                         ? "border-primary/50 bg-primary/5 ring-1 ring-primary/20"
-                        : "border-border hover:border-border/80 hover:bg-muted/20"
+                        : "border-border hover:border-border/80 hover:bg-muted/20",
                     )}
                   >
                     <div
                       className={cn(
                         "w-3.5 h-3.5 rounded-full border-2 shrink-0 transition-colors",
-                        isSelected ? "border-primary bg-primary" : "border-muted-foreground/40"
+                        isSelected ? "border-primary bg-primary" : "border-muted-foreground/40",
                       )}
                     >
                       {isSelected && (
@@ -175,7 +169,7 @@ export function GitHubMirrorSection({
                           ? testResult === "error"
                             ? "border-red-500/30 bg-red-500/10 text-red-400"
                             : "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
-                          : "border-border text-muted-foreground hover:text-foreground hover:border-border/80"
+                          : "border-border text-muted-foreground hover:text-foreground hover:border-border/80",
                       )}
                     >
                       {isTesting ? (
@@ -216,13 +210,13 @@ export function GitHubMirrorSection({
                   "flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition-all duration-150",
                   isCustom
                     ? "border-primary/50 bg-primary/5 ring-1 ring-primary/20"
-                    : "border-border hover:border-border/80 hover:bg-muted/20"
+                    : "border-border hover:border-border/80 hover:bg-muted/20",
                 )}
               >
                 <div
                   className={cn(
                     "w-3.5 h-3.5 rounded-full border-2 shrink-0 transition-colors",
-                    isCustom ? "border-primary bg-primary" : "border-muted-foreground/40"
+                    isCustom ? "border-primary bg-primary" : "border-muted-foreground/40",
                   )}
                 >
                   {isCustom && (
@@ -233,9 +227,7 @@ export function GitHubMirrorSection({
                 </div>
 
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium text-foreground">
-                    {t("settings.mirrorCustom")}
-                  </div>
+                  <div className="text-sm font-medium text-foreground">{t("settings.mirrorCustom")}</div>
                   {isCustom && (
                     <div className="mt-2">
                       <Input
@@ -272,7 +264,7 @@ export function GitHubMirrorSection({
                         ? testResults["custom"] === "error"
                           ? "border-red-500/30 bg-red-500/10 text-red-400"
                           : "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
-                        : "border-border text-muted-foreground hover:text-foreground hover:border-border/80"
+                        : "border-border text-muted-foreground hover:text-foreground hover:border-border/80",
                     )}
                   >
                     {testingId === "custom" ? (

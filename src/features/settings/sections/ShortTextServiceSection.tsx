@@ -1,5 +1,5 @@
-import { useTranslation } from "react-i18next";
 import { MessageSquareText } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { AiConfig, MymemoryUsageStats } from "../../../types";
 
 interface ShortTextServiceSectionProps {
@@ -18,13 +18,9 @@ export function ShortTextServiceSection({
     "flex h-9 rounded-xl border border-input-border bg-input backdrop-blur-sm px-3 text-sm text-foreground shadow-sm transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:border-primary/60";
   const formatter = new Intl.NumberFormat();
   const formattedDailyChars =
-    typeof mymemoryUsage?.daily_chars_sent === "number"
-      ? formatter.format(mymemoryUsage.daily_chars_sent)
-      : null;
+    typeof mymemoryUsage?.daily_chars_sent === "number" ? formatter.format(mymemoryUsage.daily_chars_sent) : null;
   const formattedTotalChars =
-    typeof mymemoryUsage?.total_chars_sent === "number"
-      ? formatter.format(mymemoryUsage.total_chars_sent)
-      : null;
+    typeof mymemoryUsage?.total_chars_sent === "number" ? formatter.format(mymemoryUsage.total_chars_sent) : null;
 
   return (
     <section>

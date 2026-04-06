@@ -1,21 +1,21 @@
-import { useState, useEffect, useMemo, useCallback, lazy, Suspense } from "react";
-import { useTranslation } from "react-i18next";
-import { Plus, Layers } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { Layers, Plus } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../components/ui/button";
-import { SearchInput } from "../../components/ui/SearchInput";
 import { LoadingLogo } from "../../components/ui/LoadingLogo";
-import { ProjectDeployAgentDialog } from "../../features/projects/components/ProjectDeployAgentDialog";
-import { AgentDisambiguationDialog } from "../../features/projects/components/AgentDisambiguationDialog";
-import { useProjectManifest } from "../../features/projects/hooks/useProjectManifest";
+import { SearchInput } from "../../components/ui/SearchInput";
 import { useSkills } from "../../features/my-skills/hooks/useSkills";
+import { AgentDisambiguationDialog } from "../../features/projects/components/AgentDisambiguationDialog";
+import { DeployBanner } from "../../features/projects/components/DeployBanner";
+import { ProjectDeployAgentDialog } from "../../features/projects/components/ProjectDeployAgentDialog";
+import { ProjectDetailPanel } from "../../features/projects/components/ProjectDetailPanel";
+import { ProjectListPanel } from "../../features/projects/components/ProjectListPanel";
+import { useProjectAgentDetection } from "../../features/projects/hooks/useProjectAgentDetection";
+import { useProjectManifest } from "../../features/projects/hooks/useProjectManifest";
+import { useProjectSkills } from "../../features/projects/hooks/useProjectSkills";
 import { useAgentProfiles } from "../../hooks/useAgentProfiles";
 import type { ProjectEntry, ScannedSkill, Skill } from "../../types";
-import { DeployBanner } from "../../features/projects/components/DeployBanner";
-import { ProjectListPanel } from "../../features/projects/components/ProjectListPanel";
-import { ProjectDetailPanel } from "../../features/projects/components/ProjectDetailPanel";
-import { useProjectAgentDetection } from "../../features/projects/hooks/useProjectAgentDetection";
-import { useProjectSkills } from "../../features/projects/hooks/useProjectSkills";
 
 interface ProjectsProps {
   preSelectedSkills?: string[] | null;
@@ -25,19 +25,24 @@ interface ProjectsProps {
 const DetailPanel = lazy(() =>
   import("../../components/layout/DetailPanel").then((mod) => ({
     default: mod.DetailPanel,
-  }))
+  })),
 );
 
-export function Projects({
-  preSelectedSkills,
-  onClearPreSelected,
-}: ProjectsProps) {
+export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProps) {
   const { t } = useTranslation();
   const {
-    projects, loadProjects, registerProject, loadProjectSkills, saveAndSync,
+    projects,
+    loadProjects,
+    registerProject,
+    loadProjectSkills,
+    saveAndSync,
     saveProjectSkillsList,
-    updateProjectPath, removeProject, scanProjectSkills, importProjectSkills,
-    detectProjectAgents, rebuildProjectSkillsFromDisk,
+    updateProjectPath,
+    removeProject,
+    scanProjectSkills,
+    importProjectSkills,
+    detectProjectAgents,
+    rebuildProjectSkillsFromDisk,
   } = useProjectManifest();
   const {
     skills: hubSkills,
@@ -50,15 +55,12 @@ export function Projects({
   const { profiles } = useAgentProfiles();
   const enabledProfiles = useMemo(
     () => profiles.filter((profile) => profile.enabled && profile.project_skills_rel && profile.id !== "openclaw"),
-    [profiles]
+    [profiles],
   );
-  const enabledProfileIdSet = useMemo(
-    () => new Set(enabledProfiles.map((profile) => profile.id)),
-    [enabledProfiles]
-  );
+  const enabledProfileIdSet = useMemo(() => new Set(enabledProfiles.map((profile) => profile.id)), [enabledProfiles]);
   const enabledProfilesById = useMemo(
     () => new Map(enabledProfiles.map((profile) => [profile.id, profile])),
-    [enabledProfiles]
+    [enabledProfiles],
   );
   const pathByAgentId = useMemo(() => {
     const map = new Map<string, string>();
@@ -89,10 +91,7 @@ export function Projects({
     return map;
   }, [agentIdsByPath]);
   const canonicalizeAgentsBySharedPath = useCallback(
-    (
-      agents: Record<string, string[]>,
-      forcedOwnerByPath?: Map<string, string>
-    ): Record<string, string[]> => {
+    (agents: Record<string, string[]>, forcedOwnerByPath?: Map<string, string>): Record<string, string[]> => {
       const inputByAgent = new Map<string, string[]>();
       for (const [agentId, skills] of Object.entries(agents)) {
         if (!enabledProfileIdSet.has(agentId)) continue;
@@ -105,16 +104,13 @@ export function Projects({
         if (activeIds.length === 0) continue;
 
         const forcedOwner = forcedOwnerByPath?.get(path);
-        const owner =
-          forcedOwner && activeIds.includes(forcedOwner) ? forcedOwner : activeIds[0];
+        const owner = forcedOwner && activeIds.includes(forcedOwner) ? forcedOwner : activeIds[0];
 
-        next[owner] = [
-          ...new Set(activeIds.flatMap((id) => inputByAgent.get(id) ?? [])),
-        ];
+        next[owner] = [...new Set(activeIds.flatMap((id) => inputByAgent.get(id) ?? []))];
       }
       return next;
     },
-    [agentIdsByPath, enabledProfileIdSet]
+    [agentIdsByPath, enabledProfileIdSet],
   );
 
   const [selectedProject, setSelectedProject] = useState<ProjectEntry | null>(null);
@@ -150,9 +146,7 @@ export function Projects({
     const exact = hubSkills.find((skill) => skill.name === target);
     if (exact) return exact;
 
-    const caseInsensitive = hubSkills.find(
-      (skill) => skill.name.toLowerCase() === target.toLowerCase()
-    );
+    const caseInsensitive = hubSkills.find((skill) => skill.name.toLowerCase() === target.toLowerCase());
     if (caseInsensitive) return caseInsensitive;
 
     // Fallback: keep detail panel open even when the skill list snapshot
@@ -192,7 +186,7 @@ export function Projects({
         console.error("Install from detail panel failed:", e);
       }
     },
-    [installSkill]
+    [installSkill],
   );
 
   const handleDetailUpdate = useCallback(
@@ -203,7 +197,7 @@ export function Projects({
         console.error("Update from detail panel failed:", e);
       }
     },
-    [updateSkill]
+    [updateSkill],
   );
 
   const handleDetailUninstall = useCallback(
@@ -215,7 +209,7 @@ export function Projects({
         console.error("Uninstall from detail panel failed:", e);
       }
     },
-    [uninstallSkill]
+    [uninstallSkill],
   );
 
   useEffect(() => {
@@ -232,21 +226,15 @@ export function Projects({
 
   const filterAgentsByEnabledProfiles = useCallback(
     (agents: Record<string, string[]>) =>
-      Object.fromEntries(
-        Object.entries(agents).filter(([agentId]) => enabledProfileIdSet.has(agentId))
-      ),
-    [enabledProfileIdSet]
+      Object.fromEntries(Object.entries(agents).filter(([agentId]) => enabledProfileIdSet.has(agentId))),
+    [enabledProfileIdSet],
   );
 
   const filterUnmanagedByEnabledProfiles = useCallback(
     (skills: ScannedSkill[]) => {
       const deduped = new Map<string, ScannedSkill>();
       for (const skill of skills) {
-        if (
-          !enabledProfileIdSet.has(skill.agent_id) ||
-          skill.is_symlink ||
-          !skill.has_skill_md
-        ) {
+        if (!enabledProfileIdSet.has(skill.agent_id) || skill.is_symlink || !skill.has_skill_md) {
           continue;
         }
         const path = pathByAgentId.get(skill.agent_id) ?? skill.agent_id;
@@ -257,7 +245,7 @@ export function Projects({
       }
       return Array.from(deduped.values());
     },
-    [enabledProfileIdSet, pathByAgentId]
+    [enabledProfileIdSet, pathByAgentId],
   );
 
   // ── Extracted hooks ──────────────────────────────────────────────
@@ -325,27 +313,21 @@ export function Projects({
       }
       return index;
     },
-    [enabledProfileIdSet]
+    [enabledProfileIdSet],
   );
 
   const suggestDeployAgentIds = useCallback(
     (agents: Record<string, string[]>) => {
-      const currentIds = Object.keys(agents).filter((id) =>
-        enabledProfileIdSet.has(id)
-      );
+      const currentIds = Object.keys(agents).filter((id) => enabledProfileIdSet.has(id));
       if (currentIds.length > 0) return currentIds;
       const first = enabledProfiles[0];
       return first ? [first.id] : [];
     },
-    [enabledProfileIdSet, enabledProfiles]
+    [enabledProfileIdSet, enabledProfiles],
   );
 
   const mergePendingSkillsIntoAgents = useCallback(
-    (
-      agents: Record<string, string[]>,
-      targetAgentIds: string[],
-      skillNames: string[]
-    ): Record<string, string[]> => {
+    (agents: Record<string, string[]>, targetAgentIds: string[], skillNames: string[]): Record<string, string[]> => {
       if (targetAgentIds.length === 0 || skillNames.length === 0) return agents;
 
       const next = { ...agents };
@@ -354,7 +336,7 @@ export function Projects({
       }
       return next;
     },
-    []
+    [],
   );
 
   const presentProjectState = useCallback(
@@ -367,7 +349,7 @@ export function Projects({
       setExpandedAgent(Object.keys(agents)[0] ?? null);
       setDirty(isDirty);
     },
-    []
+    [],
   );
 
   const openDeployAgentDialog = useCallback(
@@ -376,7 +358,7 @@ export function Projects({
       setDeployDialogInitialAgents(suggestDeployAgentIds(agents));
       setDeployDialogOpen(true);
     },
-    [suggestDeployAgentIds]
+    [suggestDeployAgentIds],
   );
 
   // ── Project selection ─────────────────────────────────────────────
@@ -407,13 +389,9 @@ export function Projects({
       setScannedSymlinkSkillsByAgent(symlinkSkillsByAgent);
 
       const hasScannedProjectSkills = scannedSkills.some(
-        (skill) =>
-          enabledProfileIdSet.has(skill.agent_id) &&
-          (skill.is_symlink || skill.has_skill_md)
+        (skill) => enabledProfileIdSet.has(skill.agent_id) && (skill.is_symlink || skill.has_skill_md),
       );
-      const hasConfiguredSkills = Object.values(agentsFromConfig).some(
-        (skillNames) => skillNames.length > 0
-      );
+      const hasConfiguredSkills = Object.values(agentsFromConfig).some((skillNames) => skillNames.length > 0);
 
       // One-time self-heal: if disk has project skills but config is empty,
       // rebuild skills-list.json from project directories first.
@@ -447,7 +425,7 @@ export function Projects({
 
       let agents: Record<string, string[]> = canonicalizeAgentsBySharedPath(
         { ...agentsFromConfig },
-        preferredOwnerByPath
+        preferredOwnerByPath,
       );
       for (const profile of enabledProfiles) {
         const scanned = symlinkSkillsByAgent[profile.id] ?? [];
@@ -471,7 +449,7 @@ export function Projects({
         agents,
         symlinkSkillsByAgent,
         project,
-        Boolean(pendingGroupSkills && pendingGroupSkills.length > 0)
+        Boolean(pendingGroupSkills && pendingGroupSkills.length > 0),
       );
 
       const unmanaged = filterUnmanagedByEnabledProfiles(scannedSkills);
@@ -496,7 +474,7 @@ export function Projects({
       setScannedSymlinkSkillsByAgent,
       setUnmanagedAndMaybeExpand,
       canonicalizeAgentsBySharedPath,
-    ]
+    ],
   );
 
   const handleOpenFolder = useCallback(async () => {
@@ -515,11 +493,7 @@ export function Projects({
     } catch (e) {
       console.error("Register project failed:", e);
     }
-  }, [
-    projects,
-    handleSelectProject,
-    registerProject,
-  ]);
+  }, [projects, handleSelectProject, registerProject]);
 
   const handleCloseDeployDialog = useCallback(() => {
     setDeployDialogOpen(false);
@@ -532,18 +506,14 @@ export function Projects({
         handleCloseDeployDialog();
         return;
       }
-      const allowedAgentIds = selectedAgentIds.filter((id) =>
-        enabledProfileIdSet.has(id)
-      );
+      const allowedAgentIds = selectedAgentIds.filter((id) => enabledProfileIdSet.has(id));
       if (allowedAgentIds.length === 0) {
         handleCloseDeployDialog();
         return;
       }
 
       setAgentSkills((prev) =>
-        canonicalizeAgentsBySharedPath(
-          mergePendingSkillsIntoAgents(prev, allowedAgentIds, pendingGroupSkills)
-        )
+        canonicalizeAgentsBySharedPath(mergePendingSkillsIntoAgents(prev, allowedAgentIds, pendingGroupSkills)),
       );
       setExpandedAgent(allowedAgentIds[0] ?? null);
       setDirty(true);
@@ -559,7 +529,7 @@ export function Projects({
       mergePendingSkillsIntoAgents,
       canonicalizeAgentsBySharedPath,
       pendingGroupSkills,
-    ]
+    ],
   );
 
   const handleToggleAgent = useCallback(
@@ -576,13 +546,7 @@ export function Projects({
         } else {
           const conflictGroup = conflictAgentIdsByAgent.get(agentId);
           const inherited = conflictGroup
-            ? [
-                ...new Set(
-                  Array.from(conflictGroup).flatMap(
-                    (conflictAgentId) => next[conflictAgentId] ?? []
-                  )
-                ),
-              ]
+            ? [...new Set(Array.from(conflictGroup).flatMap((conflictAgentId) => next[conflictAgentId] ?? []))]
             : [];
           if (conflictGroup) {
             for (const conflictAgentId of conflictGroup) {
@@ -599,12 +563,7 @@ export function Projects({
       });
       setDirty(true);
     },
-    [
-      enabledProfileIdSet,
-      expandedAgent,
-      conflictAgentIdsByAgent,
-      canonicalizeAgentsBySharedPath,
-    ]
+    [enabledProfileIdSet, expandedAgent, conflictAgentIdsByAgent, canonicalizeAgentsBySharedPath],
   );
 
   const handleToggleExpand = useCallback(
@@ -618,44 +577,35 @@ export function Projects({
       });
       setSkillFilter("");
     },
-    [agentSkills]
+    [agentSkills],
   );
 
-  const handleAddSkill = useCallback(
-    (agentId: string, skillName: string) => {
-      setAgentSkills((prev) => {
-        const current = prev[agentId] ?? [];
-        if (current.includes(skillName)) return prev;
-        return { ...prev, [agentId]: [...current, skillName] };
-      });
-      setDirty(true);
-    },
-    []
-  );
+  const handleAddSkill = useCallback((agentId: string, skillName: string) => {
+    setAgentSkills((prev) => {
+      const current = prev[agentId] ?? [];
+      if (current.includes(skillName)) return prev;
+      return { ...prev, [agentId]: [...current, skillName] };
+    });
+    setDirty(true);
+  }, []);
 
-  const handleAddAllSkills = useCallback(
-    (agentId: string, skillNames: string[]) => {
-      setAgentSkills((prev) => {
-        const current = prev[agentId] ?? [];
-        const newSkills = skillNames.filter(name => !current.includes(name));
-        if (newSkills.length === 0) return prev;
-        return { ...prev, [agentId]: [...current, ...newSkills] };
-      });
-      setDirty(true);
-    },
-    []
-  );
+  const handleAddAllSkills = useCallback((agentId: string, skillNames: string[]) => {
+    setAgentSkills((prev) => {
+      const current = prev[agentId] ?? [];
+      const newSkills = skillNames.filter((name) => !current.includes(name));
+      if (newSkills.length === 0) return prev;
+      return { ...prev, [agentId]: [...current, ...newSkills] };
+    });
+    setDirty(true);
+  }, []);
 
-  const handleRemoveAllSkills = useCallback(
-    (agentId: string) => {
-      setAgentSkills((prev) => {
-        if (!prev[agentId] || prev[agentId].length === 0) return prev;
-        return { ...prev, [agentId]: [] };
-      });
-      setDirty(true);
-    },
-    []
-  );
+  const handleRemoveAllSkills = useCallback((agentId: string) => {
+    setAgentSkills((prev) => {
+      if (!prev[agentId] || prev[agentId].length === 0) return prev;
+      return { ...prev, [agentId]: [] };
+    });
+    setDirty(true);
+  }, []);
 
   const handleRemoveSkill = useCallback((agentId: string, skillName: string) => {
     setAgentSkills((prev) => ({
@@ -670,10 +620,7 @@ export function Projects({
     setSaving(true);
     setSyncResult(null);
     try {
-      const count = await saveAndSync(
-        selectedProject.path,
-        filterAgentsByEnabledProfiles(agentSkills)
-      );
+      const count = await saveAndSync(selectedProject.path, filterAgentsByEnabledProfiles(agentSkills));
       setSyncResult(count);
       setDirty(false);
       loadProjects();
@@ -683,13 +630,7 @@ export function Projects({
     } finally {
       setSaving(false);
     }
-  }, [
-    selectedProject,
-    agentSkills,
-    filterAgentsByEnabledProfiles,
-    saveAndSync,
-    loadProjects,
-  ]);
+  }, [selectedProject, agentSkills, filterAgentsByEnabledProfiles, saveAndSync, loadProjects]);
 
   const handleRemoveProject = useCallback(
     async (e: React.MouseEvent, name: string) => {
@@ -700,14 +641,14 @@ export function Projects({
           setSelectedProject(null);
           setAgentSkills({});
           setExpandedAgent(null);
-    
+
           setDirty(false);
         }
       } catch (e) {
         console.error("Remove failed:", e);
       }
     },
-    [removeProject, selectedProject]
+    [removeProject, selectedProject],
   );
 
   const handleRelinkPath = useCallback(async () => {
@@ -716,7 +657,7 @@ export function Projects({
     if (!path) return;
     try {
       await updateProjectPath(selectedProject.name, path as string);
-      setSelectedProject((prev) => prev ? { ...prev, path: path as string } : null);
+      setSelectedProject((prev) => (prev ? { ...prev, path: path as string } : null));
     } catch (e) {
       console.error("Relink failed:", e);
     }
@@ -729,23 +670,19 @@ export function Projects({
         (s) =>
           s.installed &&
           !current.includes(s.name) &&
-          (!skillFilter || s.name.toLowerCase().includes(skillFilter.toLowerCase()))
+          (!skillFilter || s.name.toLowerCase().includes(skillFilter.toLowerCase())),
       );
     },
-    [hubSkills, agentSkills, skillFilter]
+    [hubSkills, agentSkills, skillFilter],
   );
 
   const enabledAgents = useMemo(
     () => Object.keys(agentSkills).filter((agentId) => enabledProfileIdSet.has(agentId)),
-    [agentSkills, enabledProfileIdSet]
+    [agentSkills, enabledProfileIdSet],
   );
   const totalSkills = useMemo(
-    () =>
-      enabledAgents.reduce(
-        (sum, agentId) => sum + (agentSkills[agentId]?.length ?? 0),
-        0
-      ),
-    [enabledAgents, agentSkills]
+    () => enabledAgents.reduce((sum, agentId) => sum + (agentSkills[agentId]?.length ?? 0), 0),
+    [enabledAgents, agentSkills],
   );
 
   const filteredProjects = useMemo(() => {
@@ -754,11 +691,9 @@ export function Projects({
     return projects.filter(
       (project) =>
         project.name.toLowerCase().includes(normalizedProjectFilter) ||
-        project.path.toLowerCase().includes(normalizedProjectFilter)
+        project.path.toLowerCase().includes(normalizedProjectFilter),
     );
   }, [projects, projectFilter]);
-
-
 
   return (
     <div className="flex-1 min-w-0 flex flex-col overflow-hidden relative">
@@ -786,10 +721,7 @@ export function Projects({
         </div>
       </div>
 
-      <DeployBanner
-        pendingGroupSkills={pendingGroupSkills}
-        onDismiss={() => setPendingGroupSkills(null)}
-      />
+      <DeployBanner pendingGroupSkills={pendingGroupSkills} onDismiss={() => setPendingGroupSkills(null)} />
 
       <div className="flex-1 min-w-0 flex overflow-hidden">
         <ProjectListPanel

@@ -1,7 +1,7 @@
+import { motion } from "framer-motion";
+import { Check, Download, GitBranch, Package, RotateCcw } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { motion } from "framer-motion";
-import { GitBranch, Check, Download, RotateCcw, Package } from "lucide-react";
 import { Button } from "../../../../components/ui/button";
 import { SearchInput } from "../../../../components/ui/SearchInput";
 import { SelectAllButton } from "../../../../components/ui/SelectAllButton";
@@ -35,7 +35,7 @@ export function SelectSkillsPhase({
   const filteredSkills = skills.filter(
     (s) =>
       s.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (s.description?.toLowerCase() || "").includes(searchQuery.toLowerCase())
+      (s.description?.toLowerCase() || "").includes(searchQuery.toLowerCase()),
   );
 
   const installableFiltered = filteredSkills.filter((s) => !s.already_installed);
@@ -62,9 +62,7 @@ export function SelectSkillsPhase({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <GitBranch className="w-3.5 h-3.5 text-muted-foreground" />
-            <span className="text-xs text-muted-foreground font-medium">
-              {source}
-            </span>
+            <span className="text-xs text-muted-foreground font-medium">{source}</span>
             <span className="text-micro bg-muted px-1.5 py-0.5 rounded-md text-muted-foreground/80">
               {skills.length} skill{skills.length !== 1 ? "s" : ""}
             </span>
@@ -102,9 +100,7 @@ export function SelectSkillsPhase({
       <div className="px-6 pb-2 max-h-[38vh] overflow-y-auto">
         <div className="space-y-0.5">
           {filteredSkills.length === 0 && (
-            <div className="py-8 text-center text-xs text-muted-foreground">
-              {t("common.noResults")}
-            </div>
+            <div className="py-8 text-center text-xs text-muted-foreground">{t("common.noResults")}</div>
           )}
           {filteredSkills.map((skill) => {
             const isInstalled = skill.already_installed;
@@ -119,9 +115,7 @@ export function SelectSkillsPhase({
                 transition={{ duration: 0.15 }}
                 className={cn(
                   "w-full flex items-center justify-between px-3 py-2 rounded-xl text-left transition group",
-                  isSelected
-                    ? "bg-primary/5"
-                    : "hover:bg-muted"
+                  isSelected ? "bg-primary/5" : "hover:bg-muted",
                 )}
               >
                 <div
@@ -129,7 +123,12 @@ export function SelectSkillsPhase({
                   className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer py-0.5"
                   role="button"
                   tabIndex={0}
-                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(skill.id); }}}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onToggle(skill.id);
+                    }
+                  }}
                 >
                   {/* Checkbox */}
                   <div
@@ -139,15 +138,12 @@ export function SelectSkillsPhase({
                         ? "bg-primary border-primary"
                         : isInstalled
                           ? "bg-emerald-500/20 border-emerald-500/40"
-                          : "border-muted-foreground/30"
+                          : "border-muted-foreground/30",
                     )}
                   >
                     {(isSelected || (isInstalled && !isSelected)) && (
                       <Check
-                        className={cn(
-                          "w-2.5 h-2.5",
-                          isSelected ? "text-white" : "text-emerald-500"
-                        )}
+                        className={cn("w-2.5 h-2.5", isSelected ? "text-white" : "text-emerald-500")}
                         strokeWidth={3}
                       />
                     )}
@@ -159,7 +155,7 @@ export function SelectSkillsPhase({
                       <span
                         className={cn(
                           "text-caption font-medium truncate",
-                          isSelected ? "text-primary" : "text-foreground"
+                          isSelected ? "text-primary" : "text-foreground",
                         )}
                       >
                         {skill.id}
@@ -176,9 +172,7 @@ export function SelectSkillsPhase({
                       )}
                     </div>
                     {skill.description && (
-                      <p className="text-xs text-muted-foreground truncate mt-0.5">
-                        {skill.description}
-                      </p>
+                      <p className="text-xs text-muted-foreground truncate mt-0.5">{skill.description}</p>
                     )}
                   </div>
                 </div>
@@ -190,7 +184,7 @@ export function SelectSkillsPhase({
                     size="sm"
                     className={cn(
                       "h-7 text-micro px-2.5 transition-opacity whitespace-nowrap cursor-pointer",
-                      !isSelected && "opacity-0 group-hover:opacity-100"
+                      !isSelected && "opacity-0 group-hover:opacity-100",
                     )}
                     onClick={() => onToggle(skill.id)}
                   >
@@ -223,12 +217,7 @@ export function SelectSkillsPhase({
               {t("githubImportModal.reinstallAll")}
             </Button>
           )}
-          <Button
-            size="sm"
-            onClick={() => onInstall(false)}
-            disabled={selectedSkills.size === 0}
-            className="px-5"
-          >
+          <Button size="sm" onClick={() => onInstall(false)} disabled={selectedSkills.size === 0} className="px-5">
             <Download className="w-3.5 h-3.5 mr-1.5" />
             {t("githubImportModal.install")}
           </Button>

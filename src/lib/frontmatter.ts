@@ -48,9 +48,7 @@ export function readDescriptionFromAnyText(text: string): string | null {
 
   // Handle collapsed single-line metadata like:
   // "name: ... description: ... user-invocable: false"
-  const inlineMatch = text.match(
-    /\bdescription:\s*([\s\S]*?)(?=\s+\b[a-zA-Z][a-zA-Z-]*:\s|$)/i
-  );
+  const inlineMatch = text.match(/\bdescription:\s*([\s\S]*?)(?=\s+\b[a-zA-Z][a-zA-Z-]*:\s|$)/i);
   return inlineMatch ? inlineMatch[1].trim() : null;
 }
 
@@ -99,9 +97,8 @@ export function parseFrontmatterEntries(frontmatter: string | null): Frontmatter
         }
 
         const nonEmpty = blockLines.filter((l) => l.trim().length > 0);
-        const minIndent = nonEmpty.length > 0
-          ? Math.min(...nonEmpty.map((l) => (l.match(/^\s*/) || [""])[0].length))
-          : 0;
+        const minIndent =
+          nonEmpty.length > 0 ? Math.min(...nonEmpty.map((l) => (l.match(/^\s*/) || [""])[0].length)) : 0;
         value = blockLines
           .map((l) => (l.trim().length > 0 ? l.slice(minIndent) : ""))
           .join("\n")
@@ -147,10 +144,7 @@ export function parseFrontmatterKeys(frontmatter: string | null): Set<string> {
  * Strip duplicated metadata from the top of a document body when
  * the same keys already exist in frontmatter.
  */
-export function stripLeadingDuplicatedMetadata(
-  content: string,
-  allowedKeys: ReadonlySet<string>
-): string {
+export function stripLeadingDuplicatedMetadata(content: string, allowedKeys: ReadonlySet<string>): string {
   if (allowedKeys.size === 0) {
     return content;
   }
@@ -173,10 +167,7 @@ export function stripLeadingDuplicatedMetadata(
 
   // Collapsed one-liner metadata:
   // name: ... description: ... argument-hint: ... user-invocable: ...
-  const inlineKeys = Array.from(
-    firstLine.matchAll(/([a-zA-Z0-9_-]+)\s*:/g),
-    (m) => m[1]
-  );
+  const inlineKeys = Array.from(firstLine.matchAll(/([a-zA-Z0-9_-]+)\s*:/g), (m) => m[1]);
   const inlineKnownCount = inlineKeys.filter((k) => allowedKeys.has(k)).length;
   if (inlineKnownCount >= 2) {
     let index = start + 1;
@@ -260,16 +251,11 @@ export function normalizeSkillMarkdownForPreview(content: string): string {
  * 2. AI returned only body with inline metadata → extract description, keep original FM
  * 3. No frontmatter in original → use translated document as-is
  */
-export function normalizeTranslatedDocument(
-  originalContent: string,
-  translatedContent: string
-): string {
+export function normalizeTranslatedDocument(originalContent: string, translatedContent: string): string {
   const translatedRaw = unwrapOuterMarkdownFence(translatedContent);
   const original = splitFrontmatter(originalContent);
   const translated = splitFrontmatter(translatedRaw);
-  const frontmatterKeys = new Set(
-    parseFrontmatterEntries(original.frontmatter).map((entry) => entry.key)
-  );
+  const frontmatterKeys = new Set(parseFrontmatterEntries(original.frontmatter).map((entry) => entry.key));
 
   // No frontmatter: use translated document directly.
   if (!original.frontmatter) {
@@ -285,14 +271,13 @@ export function normalizeTranslatedDocument(
     }
     const translatedBody = stripLeadingDuplicatedMetadata(translated.body, frontmatterKeys);
     return normalizeSkillMarkdownForPreview(
-      `---\n${mergedFrontmatter}\n---${translatedBody ? `\n${translatedBody}` : ""}`
+      `---\n${mergedFrontmatter}\n---${translatedBody ? `\n${translatedBody}` : ""}`,
     );
   }
 
   // Fallback path: keep original frontmatter structure, patch translated description if present.
   const translatedDescription =
-    readDescriptionFromAnyText(translatedRaw) ??
-    readFrontmatterValue(original.frontmatter, "description");
+    readDescriptionFromAnyText(translatedRaw) ?? readFrontmatterValue(original.frontmatter, "description");
 
   const mergedFrontmatter = translatedDescription
     ? writeFrontmatterValue(original.frontmatter, "description", translatedDescription)
@@ -300,6 +285,6 @@ export function normalizeTranslatedDocument(
 
   const translatedBody = stripLeadingDuplicatedMetadata(translatedRaw, frontmatterKeys);
   return normalizeSkillMarkdownForPreview(
-    `---\n${mergedFrontmatter}\n---${translatedBody ? `\n${translatedBody}` : ""}`
+    `---\n${mergedFrontmatter}\n---${translatedBody ? `\n${translatedBody}` : ""}`,
   );
 }

@@ -6,6 +6,12 @@ use super::github_mirror;
 use super::path_env::command_with_path;
 use tracing::warn;
 
+/// Maximum number of retries for shallow fetch operations that hit the
+/// `shallow file has changed since we read it` race condition.
+const SHALLOW_FETCH_MAX_RETRIES: u32 = 3;
+/// Backoff delays (ms) between retries.
+const SHALLOW_FETCH_BACKOFF_MS: [u64; 3] = [200, 500, 1000];
+
 /// Compute the tree-hash of a local Git repository.
 ///
 /// Tries the in-process `gix` library first (fastest, no process spawn).
@@ -22,11 +28,12 @@ pub fn compute_tree_hash(repo_path: &Path) -> Result<String> {
                 error = %gix_err,
                 "gix failed to read HEAD tree hash, falling back to git CLI"
             );
-            compute_tree_hash_cli(repo_path)
-                .with_context(|| format!(
+            compute_tree_hash_cli(repo_path).with_context(|| {
+                format!(
                     "Both gix and git CLI failed to compute tree hash for {:?}. gix error: {}",
                     repo_path, gix_err
-                ))
+                )
+            })
         }
     }
 }
@@ -37,8 +44,7 @@ pub fn compute_tree_hash(repo_path: &Path) -> Result<String> {
 /// (common for symlinked skills pointing into repo subdirs) correctly walk
 /// up to find the `.git` root.
 fn compute_tree_hash_gix(repo_path: &Path) -> Result<String> {
-    let repo = gix::discover(repo_path)
-        .context("Failed to discover git repository")?;
+    let repo = gix::discover(repo_path).context("Failed to discover git repository")?;
     let head = repo.head_commit().context("Failed to get HEAD commit")?;
     let tree_id = head.tree_id().context("Failed to get tree ID")?;
     Ok(tree_id.to_string())
@@ -249,7 +255,8 @@ pub fn ensure_worktree_checked_out(repo_path: &Path) -> Result<bool> {
 /// tip commit hash, not additional history.
 pub fn check_update(repo_path: &Path) -> Result<bool> {
     // Depth-1 fetch: updates remote refs without downloading extra history.
-    run_git(repo_path, &["fetch", "--depth", "1", "--quiet"])?;
+    // Retry on shallow-file race condition.
+    run_git_shallow_fetch(repo_path, &["fetch", "--depth", "1", "--quiet"])?;
 
     // For shallow repos, rev-list --left-right can be unreliable.
     // Compare HEAD vs FETCH_HEAD / @{upstream} via rev-parse instead.
@@ -267,7 +274,7 @@ pub fn check_update(repo_path: &Path) -> Result<bool> {
 /// - The result is always exactly at origin HEAD (no merge conflicts).
 /// - Network transfer is bounded to a single commit.
 pub fn pull_repo(repo_path: &Path) -> Result<()> {
-    run_git(repo_path, &["fetch", "--depth", "1", "--quiet"])?;
+    run_git_shallow_fetch(repo_path, &["fetch", "--depth", "1", "--quiet"])?;
 
     // Determine the correct reset target.
     // Try origin/HEAD first, then the tracking upstream, then FETCH_HEAD.
@@ -278,6 +285,43 @@ pub fn pull_repo(repo_path: &Path) -> Result<()> {
 
     run_git(repo_path, &["reset", "--hard", &target])?;
     Ok(())
+}
+
+/// Run a git fetch with retry logic for the shallow-file race condition.
+///
+/// When multiple processes or threads run `git fetch --depth 1` on the same
+/// shallow repo concurrently, Git can fail with:
+///   `fatal: shallow file has changed since we read it`
+/// This is a transient condition — retrying after a short backoff resolves it.
+pub fn run_git_shallow_fetch(repo_path: &Path, args: &[&str]) -> Result<String> {
+    let mut last_err = None;
+    for attempt in 0..SHALLOW_FETCH_MAX_RETRIES {
+        match run_git(repo_path, args) {
+            Ok(output) => return Ok(output),
+            Err(e) => {
+                let err_msg = e.to_string();
+                if err_msg.contains("shallow file has changed") {
+                    let delay = SHALLOW_FETCH_BACKOFF_MS
+                        .get(attempt as usize)
+                        .copied()
+                        .unwrap_or(1000);
+                    warn!(
+                        target: "git_ops",
+                        path = %repo_path.display(),
+                        attempt = attempt + 1,
+                        max = SHALLOW_FETCH_MAX_RETRIES,
+                        delay_ms = delay,
+                        "shallow file race detected, retrying after backoff"
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(delay));
+                    last_err = Some(e);
+                } else {
+                    return Err(e);
+                }
+            }
+        }
+    }
+    Err(last_err.unwrap_or_else(|| anyhow!("shallow fetch failed after retries")))
 }
 
 fn run_git(repo_path: &Path, args: &[&str]) -> Result<String> {

@@ -1,6 +1,6 @@
-import { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo } from "react";
-import type { NavPage, SubPage } from "../types";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { TabId as MarketplaceTabId } from "../pages/Marketplace";
+import type { NavPage, SubPage } from "../types";
 
 // ── Page imports (for prefetching) ──────────────────────────────────
 const importMySkillsPage = () => import("../pages/MySkills");
@@ -8,27 +8,39 @@ const importMarketplacePage = () => import("../pages/Marketplace");
 const importPublisherDetailPage = () => import("../pages/PublisherDetail");
 const importSkillCardsPage = () => import("../pages/SkillCards");
 const importProjectsPage = () => import("../pages/Projects");
+const importModelsPage = () => import("../pages/Models");
 const importSecurityScanPage = () => import("../pages/SecurityScan");
 const importSettingsPage = () => import("../pages/Settings");
 
 const ALL_PAGES: NavPage[] = [
-  "my-skills", "marketplace", "skill-cards", "projects", "security-scan", "settings",
+  "my-skills",
+  "marketplace",
+  "skill-cards",
+  "projects",
+  "models",
+  "security-scan",
+  "settings",
 ];
 
 const DEFAULT_NEXT_PAGES: Record<NavPage, NavPage[]> = {
   "my-skills": ["marketplace", "projects"],
   marketplace: ["my-skills", "skill-cards"],
   "skill-cards": ["projects", "my-skills"],
-  projects: ["my-skills", "security-scan"],
+  projects: ["models", "my-skills"],
+  models: ["security-scan", "projects"],
   "security-scan": ["settings", "my-skills"],
   settings: ["my-skills", "projects"],
 };
 
 const PAGE_IMPORTERS: Record<NavPage, () => Promise<unknown>> = {
   "my-skills": importMySkillsPage,
-  marketplace: () => { void importPublisherDetailPage(); return importMarketplacePage(); },
+  marketplace: () => {
+    void importPublisherDetailPage();
+    return importMarketplacePage();
+  },
   "skill-cards": importSkillCardsPage,
   projects: importProjectsPage,
+  models: importModelsPage,
   settings: importSettingsPage,
   "security-scan": importSecurityScanPage,
 };
@@ -39,12 +51,13 @@ const PAGE_TO_HASH: Record<NavPage, string> = {
   marketplace: "marketplace",
   "skill-cards": "cards",
   projects: "projects",
+  models: "models",
   "security-scan": "security",
   settings: "settings",
 };
 
 const HASH_TO_PAGE: Record<string, NavPage> = Object.fromEntries(
-  Object.entries(PAGE_TO_HASH).map(([page, hash]) => [hash, page as NavPage])
+  Object.entries(PAGE_TO_HASH).map(([page, hash]) => [hash, page as NavPage]),
 );
 
 function pageFromHash(): NavPage {
@@ -102,7 +115,7 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
   const prefetchedPages = useRef<Set<NavPage>>(new Set([activePage]));
   const previousPage = useRef<NavPage>(activePage);
   const transitionScores = useRef<Record<NavPage, Partial<Record<NavPage, number>>>>(
-    Object.fromEntries(ALL_PAGES.map((p) => [p, {}])) as Record<NavPage, Partial<Record<NavPage, number>>>
+    Object.fromEntries(ALL_PAGES.map((p) => [p, {}])) as Record<NavPage, Partial<Record<NavPage, number>>>,
   );
 
   // ── Navigate ────────────────────────────────────────────────────
@@ -113,20 +126,29 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   // ── Convenience navigators ──────────────────────────────────────
-  const goToProjectsWithSkills = useCallback((skills: string[]) => {
-    setProjectsPreSelectedSkills(skills);
-    navigate("projects");
-  }, [navigate]);
+  const goToProjectsWithSkills = useCallback(
+    (skills: string[]) => {
+      setProjectsPreSelectedSkills(skills);
+      navigate("projects");
+    },
+    [navigate],
+  );
 
-  const goToSkillCardsWithSkills = useCallback((skills: string[]) => {
-    setSkillCardsPreSelectedSkills(skills);
-    navigate("skill-cards");
-  }, [navigate]);
+  const goToSkillCardsWithSkills = useCallback(
+    (skills: string[]) => {
+      setSkillCardsPreSelectedSkills(skills);
+      navigate("skill-cards");
+    },
+    [navigate],
+  );
 
-  const goToMySkillsFocus = useCallback((skill: string) => {
-    setMySkillsFocusSkill(skill);
-    navigate("my-skills");
-  }, [navigate]);
+  const goToMySkillsFocus = useCallback(
+    (skill: string) => {
+      setMySkillsFocusSkill(skill);
+      navigate("my-skills");
+    },
+    [navigate],
+  );
 
   // ── Prefetching ─────────────────────────────────────────────────
   const prefetchPage = useCallback((page: NavPage) => {
@@ -187,23 +209,46 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
     return () => window.removeEventListener("hashchange", handleHashChange);
   }, []);
 
-  const value: NavigationContext = useMemo(() => ({
-    activePage, subPage,
-    projectsPreSelectedSkills, skillCardsPreSelectedSkills,
-    mySkillsFocusSkill, marketplaceTab, clipboardShareCode,
-    navigate, setSubPage,
-    setProjectsPreSelectedSkills, setSkillCardsPreSelectedSkills,
-    setMySkillsFocusSkill, setMarketplaceTab, setClipboardShareCode,
-    goToProjectsWithSkills, goToSkillCardsWithSkills, goToMySkillsFocus,
-  }), [
-    activePage, subPage,
-    projectsPreSelectedSkills, skillCardsPreSelectedSkills,
-    mySkillsFocusSkill, marketplaceTab, clipboardShareCode,
-    navigate, setSubPage,
-    setProjectsPreSelectedSkills, setSkillCardsPreSelectedSkills,
-    setMySkillsFocusSkill, setMarketplaceTab, setClipboardShareCode,
-    goToProjectsWithSkills, goToSkillCardsWithSkills, goToMySkillsFocus,
-  ]);
+  const value: NavigationContext = useMemo(
+    () => ({
+      activePage,
+      subPage,
+      projectsPreSelectedSkills,
+      skillCardsPreSelectedSkills,
+      mySkillsFocusSkill,
+      marketplaceTab,
+      clipboardShareCode,
+      navigate,
+      setSubPage,
+      setProjectsPreSelectedSkills,
+      setSkillCardsPreSelectedSkills,
+      setMySkillsFocusSkill,
+      setMarketplaceTab,
+      setClipboardShareCode,
+      goToProjectsWithSkills,
+      goToSkillCardsWithSkills,
+      goToMySkillsFocus,
+    }),
+    [
+      activePage,
+      subPage,
+      projectsPreSelectedSkills,
+      skillCardsPreSelectedSkills,
+      mySkillsFocusSkill,
+      marketplaceTab,
+      clipboardShareCode,
+      navigate,
+      setSubPage,
+      setProjectsPreSelectedSkills,
+      setSkillCardsPreSelectedSkills,
+      setMySkillsFocusSkill,
+      setMarketplaceTab,
+      setClipboardShareCode,
+      goToProjectsWithSkills,
+      goToSkillCardsWithSkills,
+      goToMySkillsFocus,
+    ],
+  );
 
   return <NavContext.Provider value={value}>{children}</NavContext.Provider>;
 }

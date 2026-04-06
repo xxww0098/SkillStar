@@ -1,8 +1,8 @@
+import { FolderOpen, Plus, Trash2 } from "lucide-react";
 import type { MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { FolderOpen, Plus, Trash2 } from "lucide-react";
-import { CardTemplate } from "../../../components/ui/card-template";
 import { Button } from "../../../components/ui/button";
+import { CardTemplate } from "../../../components/ui/card-template";
 import { cn } from "../../../lib/utils";
 import type { ProjectEntry } from "../../../types";
 
@@ -26,7 +26,9 @@ export function ProjectListPanel({
   const { t } = useTranslation();
 
   return (
-    <div className="w-72 min-w-[288px] border-r border-border flex flex-col bg-sidebar/50 pt-3">      <div className="flex-1 overflow-y-auto px-3 space-y-1">
+    <div className="w-72 min-w-[288px] border-r border-border flex flex-col bg-sidebar/50 pt-3">
+      {" "}
+      <div className="flex-1 overflow-y-auto px-3 space-y-1">
         {filteredProjects.map((project) => (
           <CardTemplate
             key={project.name}
@@ -35,7 +37,7 @@ export function ProjectListPanel({
               "group !h-auto cursor-pointer rounded-xl hover:-translate-y-0",
               selectedProject?.name === project.name
                 ? "bg-primary/5 border-primary/20 shadow-sm"
-                : "hover:bg-muted border-transparent"
+                : "hover:bg-muted border-transparent",
             )}
             role="button"
             tabIndex={0}
@@ -51,13 +53,13 @@ export function ProjectListPanel({
                 <div
                   className={cn(
                     "w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors",
-                    selectedProject?.name === project.name ? "bg-primary/10" : "bg-muted"
+                    selectedProject?.name === project.name ? "bg-primary/10" : "bg-muted",
                   )}
                 >
                   <FolderOpen
                     className={cn(
                       "w-4 h-4",
-                      selectedProject?.name === project.name ? "text-primary" : "text-muted-foreground"
+                      selectedProject?.name === project.name ? "text-primary" : "text-muted-foreground",
                     )}
                   />
                 </div>

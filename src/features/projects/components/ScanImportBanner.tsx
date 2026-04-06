@@ -1,11 +1,11 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { useTranslation } from "react-i18next";
 import { Check, Download, GitBranch, RefreshCw, ScanSearch } from "lucide-react";
-import { Button } from "../../../components/ui/button";
-import { Badge } from "../../../components/ui/badge";
+import { useTranslation } from "react-i18next";
 import { MOTION_TRANSITION } from "../../../comm/motion";
-import type { AgentProfile, ImportDone, ScannedSkill } from "../../../types";
+import { Badge } from "../../../components/ui/badge";
+import { Button } from "../../../components/ui/button";
 import { formatPlatformPath } from "../../../lib/utils";
+import type { AgentProfile, ImportDone, ScannedSkill } from "../../../types";
 
 interface ScanImportBannerProps {
   unmanagedSkills: ScannedSkill[];
@@ -58,17 +58,8 @@ export function ScanImportBanner({
                 >
                   {scanExpanded ? t("common.hide") : t("common.details")}
                 </Button>
-                <Button
-                  size="sm"
-                  onClick={onImportAll}
-                  disabled={importing}
-                  className="shrink-0 text-xs h-7 gap-1"
-                >
-                  {importing ? (
-                    <RefreshCw className="w-3 h-3 animate-spin" />
-                  ) : (
-                    <Download className="w-3 h-3" />
-                  )}
+                <Button size="sm" onClick={onImportAll} disabled={importing} className="shrink-0 text-xs h-7 gap-1">
+                  {importing ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
                   {t("projects.importAll")}
                 </Button>
               </div>
@@ -100,9 +91,7 @@ export function ScanImportBanner({
                                 title={`Found in ${formatPlatformPath(enabledProfilesById.get(skill.agent_id)?.project_skills_rel ?? "")}`}
                               >
                                 {formatPlatformPath(
-                                  enabledProfilesById
-                                    .get(skill.agent_id)
-                                    ?.project_skills_rel.split("/")[0] ?? ""
+                                  enabledProfilesById.get(skill.agent_id)?.project_skills_rel.split("/")[0] ?? "",
                                 )}
                               </span>
                             )}
@@ -112,10 +101,7 @@ export function ScanImportBanner({
                               </Badge>
                             )}
                             {skill.in_hub ? (
-                              <Badge
-                                variant="outline"
-                                className="text-micro h-4 px-1 text-muted-foreground"
-                              >
+                              <Badge variant="outline" className="text-micro h-4 px-1 text-muted-foreground">
                                 {t("projects.inHub")}
                               </Badge>
                             ) : (
@@ -146,8 +132,8 @@ export function ScanImportBanner({
           >
             <Check className="w-4 h-4 text-emerald-500 shrink-0" />
             <span className="text-xs text-emerald-700 dark:text-emerald-400">
-              Imported {importDone.hub} skill{importDone.hub !== 1 ? "s" : ""} to hub, created{" "}
-              {importDone.links} symlink{importDone.links !== 1 ? "s" : ""}
+              Imported {importDone.hub} skill{importDone.hub !== 1 ? "s" : ""} to hub, created {importDone.links}{" "}
+              symlink{importDone.links !== 1 ? "s" : ""}
             </span>
           </motion.div>
         )}

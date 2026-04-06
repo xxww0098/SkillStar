@@ -1,10 +1,10 @@
-import { useState } from "react";
 import { motion } from "framer-motion";
-import { Building2, Folder, Package, ChevronRight } from "lucide-react";
+import { Building2, ChevronRight, Folder, Package } from "lucide-react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CardTemplate } from "../../../components/ui/card-template";
 import { Badge } from "../../../components/ui/badge";
 import { Button } from "../../../components/ui/button";
+import { CardTemplate } from "../../../components/ui/card-template";
 import { cn } from "../../../lib/utils";
 import type { OfficialPublisher, ViewMode } from "../../../types";
 
@@ -51,22 +51,11 @@ export function publisherAvatarUrl(name: string): string {
 
 // ── Publisher Avatar ───────────────────────────────────────────────────
 
-export function PublisherAvatar({
-  name,
-  size = "md",
-}: {
-  name: string;
-  size?: "sm" | "md" | "lg";
-}) {
-  const [avatarSource, setAvatarSource] = useState<AvatarSource>(() =>
-    readAvatarSource(name)
-  );
+export function PublisherAvatar({ name, size = "md" }: { name: string; size?: "sm" | "md" | "lg" }) {
+  const [avatarSource, setAvatarSource] = useState<AvatarSource>(() => readAvatarSource(name));
 
   const showFallbackIcon = avatarSource === "none";
-  const avatarSrc =
-    avatarSource === "remote"
-      ? publisherAvatarUrl(name)
-      : `/publishers/${name}.png`;
+  const avatarSrc = avatarSource === "remote" ? publisherAvatarUrl(name) : `/publishers/${name}.png`;
 
   const sizeClasses = {
     sm: "w-8 h-8 rounded-lg",
@@ -84,7 +73,7 @@ export function PublisherAvatar({
     <div
       className={cn(
         sizeClasses[size],
-        "bg-gradient-to-br from-primary/15 to-primary/5 border border-primary/10 flex items-center justify-center shrink-0 overflow-hidden"
+        "bg-gradient-to-br from-primary/15 to-primary/5 border border-primary/10 flex items-center justify-center shrink-0 overflow-hidden",
       )}
     >
       {!showFallbackIcon ? (
@@ -118,13 +107,7 @@ const itemVariants = {
   show: { opacity: 1, y: 0, transition: { duration: 0.2 } },
 };
 
-function PublisherCard({
-  publisher,
-  onClick,
-}: {
-  publisher: OfficialPublisher;
-  onClick?: () => void;
-}) {
+function PublisherCard({ publisher, onClick }: { publisher: OfficialPublisher; onClick?: () => void }) {
   const { t } = useTranslation();
 
   return (
@@ -133,12 +116,17 @@ function PublisherCard({
         className={cn(
           "group transition cursor-pointer border border-border/80",
           "shadow-sm hover:shadow-md hover:border-primary/20",
-          "hover:-translate-y-[1px]"
+          "hover:-translate-y-[1px]",
         )}
         onClick={onClick}
         role="button"
         tabIndex={0}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick?.(); }}}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onClick?.();
+          }
+        }}
         bodyClassName="p-0"
         body={
           <div className="ss-card-body flex items-center gap-3.5">
@@ -171,8 +159,7 @@ function PublisherCard({
             <ChevronRight className="w-4 h-4 text-muted-foreground/50 group-hover:text-primary/70 transition group-hover:translate-x-0.5 shrink-0" />
           </div>
         }
-      >
-      </CardTemplate>
+      ></CardTemplate>
     </motion.div>
   );
 }
@@ -192,11 +179,7 @@ const containerVariants = {
   },
 };
 
-export function OfficialPublishers({
-  publishers,
-  viewMode = "grid",
-  onPublisherClick,
-}: OfficialPublishersProps) {
+export function OfficialPublishers({ publishers, viewMode = "grid", onPublisherClick }: OfficialPublishersProps) {
   const { t } = useTranslation();
   const [showAll, setShowAll] = useState(false);
   const visiblePublishers = showAll ? publishers : publishers.slice(0, 12);
@@ -215,9 +198,7 @@ export function OfficialPublishers({
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-heading-sm">{t("marketplace.officialPublishersTitle")}</h2>
-          <p className="text-caption mt-0.5">
-            {t("marketplace.officialPublishersSubtitle")}
-          </p>
+          <p className="text-caption mt-0.5">{t("marketplace.officialPublishersSubtitle")}</p>
         </div>
         <Badge variant="outline" className="shrink-0">
           {t("marketplace.publishersCount", { count: publishers.length })}
@@ -233,26 +214,15 @@ export function OfficialPublishers({
         style={viewMode === "grid" ? { gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" } : undefined}
       >
         {visiblePublishers.map((pub_) => (
-          <PublisherCard
-            key={pub_.name}
-            publisher={pub_}
-            onClick={() => onPublisherClick?.(pub_)}
-          />
+          <PublisherCard key={pub_.name} publisher={pub_} onClick={() => onPublisherClick?.(pub_)} />
         ))}
       </motion.div>
 
       {/* Show more / less */}
       {publishers.length > 12 && (
         <div className="flex justify-center">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowAll(!showAll)}
-            className="text-xs"
-          >
-            {showAll
-              ? t("marketplace.showLess")
-              : t("marketplace.showAllPublishers", { count: publishers.length })}
+          <Button variant="outline" size="sm" onClick={() => setShowAll(!showAll)} className="text-xs">
+            {showAll ? t("marketplace.showLess") : t("marketplace.showAllPublishers", { count: publishers.length })}
           </Button>
         </div>
       )}

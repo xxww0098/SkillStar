@@ -359,6 +359,56 @@ pub fn cleanup_stale_entries() -> Result<usize> {
     })
 }
 
+/// Remove cached "short" translations that target a CJK language but contain
+/// no CJK/kana/hangul characters (i.e. the AI or MyMemory returned the text
+/// untranslated).
+fn cleanup_untranslated_entries() -> Result<usize> {
+    with_conn(|conn| {
+        // Fetch candidates: short translations for CJK target languages
+        let mut stmt = conn
+            .prepare(
+                "SELECT cache_key, translated_text FROM translation_cache
+             WHERE kind = 'short'
+               AND (target_language IN ('zh-cn', 'zh-tw', 'ja', 'ko'))",
+            )
+            .context("Failed to prepare untranslated cleanup query")?;
+
+        let rows: Vec<(String, String)> = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .context("Failed to query untranslated candidates")?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let mut removed = 0usize;
+        for (cache_key, text) in &rows {
+            let has_target_chars = text.chars().any(|c| {
+                // CJK Unified Ideographs
+                ('\u{4E00}'..='\u{9FFF}').contains(&c)
+                    || ('\u{3400}'..='\u{4DBF}').contains(&c)
+                    || ('\u{F900}'..='\u{FAFF}').contains(&c)
+                    // Japanese kana
+                    || ('\u{3040}'..='\u{30FF}').contains(&c)
+                    // Hangul syllables
+                    || ('\u{AC00}'..='\u{D7AF}').contains(&c)
+            });
+            if !has_target_chars {
+                let _ = conn.execute(
+                    "DELETE FROM translation_cache WHERE cache_key = ?1",
+                    params![cache_key],
+                );
+                removed += 1;
+            }
+        }
+
+        if removed > 0 {
+            info!(target: "translate", removed, "cleaned up untranslated CJK entries");
+        }
+        Ok(removed)
+    })
+}
+
 /// Run once at startup: clean stale entries. Safe to call multiple times
 /// (only does real work on the first call per process).
 pub fn startup_cleanup() {
@@ -366,6 +416,9 @@ pub fn startup_cleanup() {
     DONE.call_once(|| {
         if let Err(e) = cleanup_stale_entries() {
             tracing::warn!(target: "translate", "startup cache cleanup failed: {e}");
+        }
+        if let Err(e) = cleanup_untranslated_entries() {
+            tracing::warn!(target: "translate", "startup untranslated cleanup failed: {e}");
         }
     });
 }

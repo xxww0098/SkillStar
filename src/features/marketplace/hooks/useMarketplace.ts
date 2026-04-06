@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { invoke } from "@tauri-apps/api/core";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AiKeywordSearchResult,
   LocalFirstResult,
@@ -54,22 +54,19 @@ export function useMarketplace() {
   const [error, setError] = useState<string | null>(null);
   const [snapshotStatus, setSnapshotStatus] = useState<SnapshotStatus>("fresh");
   const [snapshotUpdatedAt, setSnapshotUpdatedAt] = useState<string | null>(null);
-  const [requestedLeaderboardCategory, setRequestedLeaderboardCategory] =
-    useState<LeaderboardCategory>("all");
+  const [requestedLeaderboardCategory, setRequestedLeaderboardCategory] = useState<LeaderboardCategory>("all");
   const [leaderboardEnabled, setLeaderboardEnabled] = useState(false);
   const [publishersEnabled, setPublishersEnabled] = useState(false);
   const [aiKeywords, setAiKeywords] = useState<string[] | null>(null);
   const [aiSearching, setAiSearching] = useState(false);
   const [aiPhase, setAiPhase] = useState<AiSearchPhase>(null);
   const [aiAllSkills, setAiAllSkills] = useState<Skill[]>([]);
-  const [aiKeywordSkillMap, setAiKeywordSkillMap] = useState<
-    Record<string, string[]>
-  >({});
+  const [aiKeywordSkillMap, setAiKeywordSkillMap] = useState<Record<string, string[]>>({});
   const [aiActiveKeywords, setAiActiveKeywords] = useState<Set<string>>(new Set());
   const staleRefreshAttemptedRef = useRef<Set<string>>(new Set());
   const inFlightRefreshesRef = useRef(0);
 
-  const applySnapshotMeta = useCallback(<T,>(result: LocalFirstResult<T>) => {
+  const applySnapshotMeta = useCallback(<T>(result: LocalFirstResult<T>) => {
     setSnapshotStatus(result.snapshot_status);
     setSnapshotUpdatedAt(result.snapshot_updated_at);
     if (result.snapshot_status === "remote_error") {
@@ -236,8 +233,7 @@ export function useMarketplace() {
   ]);
 
   const searchMutation = useMutation({
-    mutationFn: ({ query, limit }: { query: string; limit: number }) =>
-      readLocalSearch(query, limit),
+    mutationFn: ({ query, limit }: { query: string; limit: number }) => readLocalSearch(query, limit),
     onMutate: () => {
       setError(null);
     },
@@ -376,16 +372,13 @@ export function useMarketplace() {
     setAiActiveKeywords(new Set());
   }, []);
 
-  const fetchLeaderboard = useCallback(
-    async (category = "all") => {
-      const normalized = normalizeLeaderboardCategory(category);
-      setError(null);
-      staleRefreshAttemptedRef.current.delete(`leaderboard:${normalized}`);
-      setRequestedLeaderboardCategory(normalized);
-      setLeaderboardEnabled(true);
-    },
-    [],
-  );
+  const fetchLeaderboard = useCallback(async (category = "all") => {
+    const normalized = normalizeLeaderboardCategory(category);
+    setError(null);
+    staleRefreshAttemptedRef.current.delete(`leaderboard:${normalized}`);
+    setRequestedLeaderboardCategory(normalized);
+    setLeaderboardEnabled(true);
+  }, []);
 
   const fetchOfficialPublishers = useCallback(async () => {
     setError(null);
@@ -395,8 +388,7 @@ export function useMarketplace() {
 
   const patchSkill = useCallback(
     (name: string, updater: (skill: Skill) => Skill) => {
-      const apply = (skills: Skill[]) =>
-        skills.map((skill) => (skill.name === name ? updater(skill) : skill));
+      const apply = (skills: Skill[]) => skills.map((skill) => (skill.name === name ? updater(skill) : skill));
 
       setLeaderboard((prev) => apply(prev));
       setResults((prev) =>

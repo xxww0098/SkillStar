@@ -1,4 +1,4 @@
-import { clsx, type ClassValue } from "clsx";
+import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 
 // ── Platform detection (cached) ─────────────────────────────────────
@@ -34,8 +34,8 @@ export function formatPlatformPath(path: string): string {
 
 // Re-export frontmatter utilities so existing importers don't break.
 export {
-  unwrapOuterMarkdownFence,
   normalizeSkillMarkdownForPreview,
+  unwrapOuterMarkdownFence,
 } from "./frontmatter";
 
 export function cn(...inputs: ClassValue[]) {
@@ -54,8 +54,10 @@ export function agentIconCls(icon: string, base = "w-3.5 h-3.5"): string {
   if (icon.endsWith(".png")) {
     // Bump one step: 3.5→5, 4→5, 5→6
     return base
-      .replace(/w-3\.5/, "w-5").replace(/h-3\.5/, "h-5")
-      .replace(/w-4\b/, "w-5").replace(/h-4\b/, "h-5");
+      .replace(/w-3\.5/, "w-5")
+      .replace(/h-3\.5/, "h-5")
+      .replace(/w-4\b/, "w-5")
+      .replace(/h-4\b/, "h-5");
   }
   return base;
 }
@@ -74,9 +76,7 @@ export function navigateToAiSettings() {
   } catch {
     // ignore localStorage access errors
   }
-  window.dispatchEvent(
-    new CustomEvent("skillstar:navigate", { detail: { page: "settings" } })
-  );
+  window.dispatchEvent(new CustomEvent("skillstar:navigate", { detail: { page: "settings" } }));
 }
 
 type Translator = (key: string, options?: Record<string, unknown>) => string;
@@ -113,6 +113,12 @@ export function formatAiErrorMessage(error: string | null | undefined, t: Transl
     });
   }
 
+  if (lower.includes("untranslated result")) {
+    return t("detailPanel.untranslatedResult", {
+      defaultValue: "Translation service returned un-translated text. Please try again or switch provider.",
+    });
+  }
+
   return msg;
 }
 
@@ -123,9 +129,12 @@ export async function copyToClipboard(text: string): Promise<boolean> {
       return true;
     }
   } catch (err) {
-    console.warn("navigator.clipboard.writeText failed (likely due to async context loss), falling back to execCommand:", err);
+    console.warn(
+      "navigator.clipboard.writeText failed (likely due to async context loss), falling back to execCommand:",
+      err,
+    );
   }
-  
+
   try {
     const textArea = document.createElement("textarea");
     textArea.value = text;
@@ -143,4 +152,3 @@ export async function copyToClipboard(text: string): Promise<boolean> {
     return false;
   }
 }
-

@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useCallback, useState } from "react";
 import type { AmbiguousGroup, DetectedAgent } from "../../../types";
 
 interface UseProjectAgentDetectionParams {
@@ -6,16 +6,14 @@ interface UseProjectAgentDetectionParams {
   pathByAgentId: Map<string, string>;
   canonicalizeAgentsBySharedPath: (
     agents: Record<string, string[]>,
-    forcedOwnerByPath?: Map<string, string>
+    forcedOwnerByPath?: Map<string, string>,
   ) => Record<string, string[]>;
   detectProjectAgents: (projectPath: string) => Promise<import("../../../types").ProjectAgentDetection>;
   saveProjectSkillsList: (
     projectPath: string,
-    agents: Record<string, string[]>
+    agents: Record<string, string[]>,
   ) => Promise<import("../../../types").SkillsList>;
-  filterAgentsByEnabledProfiles: (
-    agents: Record<string, string[]>
-  ) => Record<string, string[]>;
+  filterAgentsByEnabledProfiles: (agents: Record<string, string[]>) => Record<string, string[]>;
   loadProjects: () => Promise<void>;
   /** Called to propagate agentSkills changes back to the host component */
   onAgentSkillsChange: (updater: (prev: Record<string, string[]>) => Record<string, string[]>) => void;
@@ -44,9 +42,7 @@ export function useProjectAgentDetection({
   const [disambigGroup, setDisambigGroup] = useState<AmbiguousGroup | null>(null);
   const [disambigCandidates, setDisambigCandidates] = useState<DetectedAgent[]>([]);
   const [disambigQueue, setDisambigQueue] = useState<AmbiguousGroup[]>([]);
-  const [scannedSymlinkSkillsByAgent, setScannedSymlinkSkillsByAgent] = useState<
-    Record<string, string[]>
-  >({});
+  const [scannedSymlinkSkillsByAgent, setScannedSymlinkSkillsByAgent] = useState<Record<string, string[]>>({});
 
   const resetDisambigState = useCallback(() => {
     setDisambigOpen(false);
@@ -61,7 +57,7 @@ export function useProjectAgentDetection({
       currentAgents: Record<string, string[]>,
       symlinkSkillsByAgent: Record<string, string[]>,
       _selectedProject: { path: string } | null,
-      suppressDisambiguationDialog = false
+      suppressDisambiguationDialog = false,
     ) => {
       try {
         const detection = await detectProjectAgents(projectPath);
@@ -70,27 +66,19 @@ export function useProjectAgentDetection({
         const hasExistingConfig = Object.keys(currentAgents).length > 0;
         if (hasExistingConfig) return;
 
-        const autoEnable = new Set(
-          detection.auto_enable.filter((agentId) =>
-            enabledProfileIdSet.has(agentId)
-          )
-        );
+        const autoEnable = new Set(detection.auto_enable.filter((agentId) => enabledProfileIdSet.has(agentId)));
 
         // Queue ambiguous groups for disambiguation.
         // Only include agents that are enabled in Settings.
         const relevantGroups: AmbiguousGroup[] = [];
         for (const group of detection.ambiguous_groups) {
-          const enabledAgentIds = group.agent_ids.filter((id) =>
-            enabledProfileIdSet.has(id)
-          );
+          const enabledAgentIds = group.agent_ids.filter((id) => enabledProfileIdSet.has(id));
 
           if (enabledAgentIds.length > 1) {
             relevantGroups.push({
               path: group.path,
               agent_ids: enabledAgentIds,
-              agent_names: group.agent_names.filter((_, index) =>
-                enabledProfileIdSet.has(group.agent_ids[index])
-              ),
+              agent_names: group.agent_names.filter((_, index) => enabledProfileIdSet.has(group.agent_ids[index])),
             });
             continue;
           }
@@ -116,9 +104,7 @@ export function useProjectAgentDetection({
         }
 
         if (!suppressDisambiguationDialog && relevantGroups.length > 0) {
-          const enabledDetected = detection.detected.filter((agent) =>
-            enabledProfileIdSet.has(agent.agent_id)
-          );
+          const enabledDetected = detection.detected.filter((agent) => enabledProfileIdSet.has(agent.agent_id));
           setDisambigCandidates(enabledDetected);
           // Show the first group immediately, queue the rest
           setDisambigGroup(relevantGroups[0]);
@@ -129,11 +115,15 @@ export function useProjectAgentDetection({
         console.error("Agent detection failed:", e);
       }
     },
-    [detectProjectAgents, enabledProfileIdSet, canonicalizeAgentsBySharedPath, onAgentSkillsChange, onDirtyChange]
+    [detectProjectAgents, enabledProfileIdSet, canonicalizeAgentsBySharedPath, onAgentSkillsChange, onDirtyChange],
   );
 
   const handleDisambigConfirm = useCallback(
-    async (selectedAgentId: string, agentSkills: Record<string, string[]>, selectedProject: { path: string } | null) => {
+    async (
+      selectedAgentId: string,
+      agentSkills: Record<string, string[]>,
+      selectedProject: { path: string } | null,
+    ) => {
       const forcedOwnerByPath = new Map<string, string>();
       const selectedPath = pathByAgentId.get(selectedAgentId);
       if (selectedPath) {
@@ -143,9 +133,7 @@ export function useProjectAgentDetection({
       // Hydrate from the whole conflict group (shared path), not just the
       // selected agent id. This keeps rendering stable even if scan attribution
       // lands on another agent in the same shared directory group.
-      const conflictAgentIds = disambigGroup?.agent_ids?.length
-        ? disambigGroup.agent_ids
-        : [selectedAgentId];
+      const conflictAgentIds = disambigGroup?.agent_ids?.length ? disambigGroup.agent_ids : [selectedAgentId];
       let nextAgents = {
         ...agentSkills,
       };
@@ -160,11 +148,7 @@ export function useProjectAgentDetection({
       nextAgents = canonicalizeAgentsBySharedPath(nextAgents, forcedOwnerByPath);
 
       const preScannedSkills = [
-        ...new Set(
-          conflictAgentIds.flatMap(
-            (agentId) => scannedSymlinkSkillsByAgent[agentId] ?? []
-          )
-        ),
+        ...new Set(conflictAgentIds.flatMap((agentId) => scannedSymlinkSkillsByAgent[agentId] ?? [])),
       ];
       if (preScannedSkills.length > 0) {
         const current = nextAgents[selectedAgentId] ?? [];
@@ -174,10 +158,7 @@ export function useProjectAgentDetection({
             ...nextAgents,
             [selectedAgentId]: merged,
           };
-          nextAgents = canonicalizeAgentsBySharedPath(
-            nextAgents,
-            forcedOwnerByPath
-          );
+          nextAgents = canonicalizeAgentsBySharedPath(nextAgents, forcedOwnerByPath);
         }
       }
       onAgentSkillsChange(() => nextAgents);
@@ -189,10 +170,7 @@ export function useProjectAgentDetection({
       if (selectedProject) {
         onSavingChange(true);
         try {
-          await saveProjectSkillsList(
-            selectedProject.path,
-            filterAgentsByEnabledProfiles(nextAgents)
-          );
+          await saveProjectSkillsList(selectedProject.path, filterAgentsByEnabledProfiles(nextAgents));
           onDirtyChange(false);
           loadProjects();
         } catch (e) {
@@ -226,7 +204,7 @@ export function useProjectAgentDetection({
       onDirtyChange,
       onExpandedAgentChange,
       onSavingChange,
-    ]
+    ],
   );
 
   const handleDisambigClose = useCallback(() => {
