@@ -421,11 +421,9 @@ pub fn scan_skills_in_repo(
         // In this case folder_path will be empty and we use the repo name as skill id
         let folder_path = match skill_dir.strip_prefix(repo_dir) {
             Ok(rel) => {
-                let rel_str = rel.to_string_lossy().to_string();
-                // Normalize: remove trailing separators (both / and \)
-                let clean = rel_str
-                    .trim_matches(|c: char| c == '/' || c == '\\')
-                    .to_string();
+                let rel_str = rel.to_string_lossy().replace('\\', "/");
+                // Normalize to repo-style paths and remove trailing separators.
+                let clean = rel_str.trim_matches('/').to_string();
                 clean
             }
             Err(_) => continue,
@@ -1407,8 +1405,13 @@ mod tests {
         let stamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
         let temp_root =
             std::env::temp_dir().join(format!("skillstar-repo-scanner-{}-{}", suffix, stamp));
+        let temp_data_root = temp_root.join("skillstar");
         let previous_home = std::env::var_os("HOME");
+        let previous_data_dir = std::env::var_os("SKILLSTAR_DATA_DIR");
+        let previous_hub_dir = std::env::var_os("SKILLSTAR_HUB_DIR");
         set_env("HOME", temp_root.join("home"));
+        set_env("SKILLSTAR_DATA_DIR", &temp_data_root);
+        set_env("SKILLSTAR_HUB_DIR", temp_data_root.join("hub"));
         #[cfg(windows)]
         let previous_userprofile = std::env::var_os("USERPROFILE");
         #[cfg(windows)]
@@ -1419,6 +1422,14 @@ mod tests {
         match previous_home {
             Some(value) => set_env("HOME", value),
             None => remove_env("HOME"),
+        }
+        match previous_data_dir {
+            Some(value) => set_env("SKILLSTAR_DATA_DIR", value),
+            None => remove_env("SKILLSTAR_DATA_DIR"),
+        }
+        match previous_hub_dir {
+            Some(value) => set_env("SKILLSTAR_HUB_DIR", value),
+            None => remove_env("SKILLSTAR_HUB_DIR"),
         }
         #[cfg(windows)]
         match previous_userprofile {
@@ -1667,8 +1678,13 @@ mod tests {
         let stamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
         let temp_root =
             std::env::temp_dir().join(format!("skillstar-repo-scanner-local-{}", stamp));
+        let temp_data_root = temp_root.join("skillstar");
         let previous_home = std::env::var_os("HOME");
+        let previous_data_dir = std::env::var_os("SKILLSTAR_DATA_DIR");
+        let previous_hub_dir = std::env::var_os("SKILLSTAR_HUB_DIR");
         set_env("HOME", temp_root.join("home"));
+        set_env("SKILLSTAR_DATA_DIR", &temp_data_root);
+        set_env("SKILLSTAR_HUB_DIR", temp_data_root.join("hub"));
         #[cfg(windows)]
         let previous_userprofile = std::env::var_os("USERPROFILE");
         #[cfg(windows)]
@@ -1707,6 +1723,14 @@ mod tests {
             Some(value) => set_env("HOME", value),
             None => remove_env("HOME"),
         }
+        match previous_data_dir {
+            Some(value) => set_env("SKILLSTAR_DATA_DIR", value),
+            None => remove_env("SKILLSTAR_DATA_DIR"),
+        }
+        match previous_hub_dir {
+            Some(value) => set_env("SKILLSTAR_HUB_DIR", value),
+            None => remove_env("SKILLSTAR_HUB_DIR"),
+        }
         #[cfg(windows)]
         match previous_userprofile {
             Some(value) => set_env("USERPROFILE", value),
@@ -1726,8 +1750,13 @@ mod tests {
         let stamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
         let temp_root =
             std::env::temp_dir().join(format!("skillstar-repo-scanner-remote-{}", stamp));
+        let temp_data_root = temp_root.join("skillstar");
         let previous_home = std::env::var_os("HOME");
+        let previous_data_dir = std::env::var_os("SKILLSTAR_DATA_DIR");
+        let previous_hub_dir = std::env::var_os("SKILLSTAR_HUB_DIR");
         set_env("HOME", temp_root.join("home"));
+        set_env("SKILLSTAR_DATA_DIR", &temp_data_root);
+        set_env("SKILLSTAR_HUB_DIR", temp_data_root.join("hub"));
         #[cfg(windows)]
         let previous_userprofile = std::env::var_os("USERPROFILE");
         #[cfg(windows)]
@@ -1785,6 +1814,14 @@ mod tests {
         match previous_home {
             Some(value) => set_env("HOME", value),
             None => remove_env("HOME"),
+        }
+        match previous_data_dir {
+            Some(value) => set_env("SKILLSTAR_DATA_DIR", value),
+            None => remove_env("SKILLSTAR_DATA_DIR"),
+        }
+        match previous_hub_dir {
+            Some(value) => set_env("SKILLSTAR_HUB_DIR", value),
+            None => remove_env("SKILLSTAR_HUB_DIR"),
         }
         #[cfg(windows)]
         match previous_userprofile {

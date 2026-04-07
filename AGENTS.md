@@ -122,6 +122,7 @@ SkillStar/
 - `detect_project_agents` is data-driven by `builtin_profiles()`.
 - Each agent has a unique `project_skills_rel`; disambiguation is sealed (always returns empty).
 - OpenClaw is global-only: `project_skills_rel` stays empty.
+- Custom agent `project_skills_rel` may be entered with Windows backslashes in UI/commands, but backend storage and detection normalize it to forward slashes.
 
 ### AI Integration
 - AI provider config is backend-owned (`config/ai.json`); frontend never stores API keys.

@@ -3097,9 +3097,10 @@ mod tests {
 
     #[test]
     fn mymemory_de_persists_across_calls() {
-        with_temp_data_root(|dir| {
+        with_temp_data_root(|_dir| {
             let first = super::get_mymemory_de();
-            let written = std::fs::read_to_string(dir.join(".mymemory_de")).unwrap();
+            let written =
+                std::fs::read_to_string(crate::core::paths::mymemory_disabled_path()).unwrap();
             assert_eq!(first, written.trim());
 
             let second = super::get_mymemory_de();
@@ -3112,8 +3113,12 @@ mod tests {
 
     #[test]
     fn mymemory_de_overwrites_corrupt_file() {
-        with_temp_data_root(|dir| {
-            std::fs::write(dir.join(".mymemory_de"), "   \n").unwrap();
+        with_temp_data_root(|_dir| {
+            let path = crate::core::paths::mymemory_disabled_path();
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::write(path, "   \n").unwrap();
             let email = super::get_mymemory_de();
             assert!(
                 !email.trim().is_empty(),

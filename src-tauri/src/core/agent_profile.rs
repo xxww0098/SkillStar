@@ -264,7 +264,8 @@ pub fn list_profiles() -> Vec<AgentProfile> {
 }
 
 pub fn add_custom_profile(def: CustomProfileDef) -> Result<()> {
-    let project_rel = def.project_skills_rel.trim();
+    let normalized_project_rel = def.project_skills_rel.trim().replace('\\', "/");
+    let project_rel = normalized_project_rel.as_str();
     if !project_rel.is_empty() {
         if !project_rel.starts_with('.') || !project_rel.ends_with("/skills") {
             return Err(anyhow::anyhow!(
@@ -286,6 +287,7 @@ pub fn add_custom_profile(def: CustomProfileDef) -> Result<()> {
     let mut prefs = load_prefs();
 
     let mut new_def = def.clone();
+    new_def.project_skills_rel = normalized_project_rel;
     if new_def.id.is_empty() {
         new_def.id = format!(
             "custom_{}",
@@ -355,6 +357,56 @@ mod tests {
             openclaw.project_skills_rel.is_empty(),
             "OpenClaw should be global-only and excluded from project-level detection"
         );
+    }
+
+    #[test]
+    fn add_custom_profile_normalizes_windows_project_path_before_persisting() -> Result<()> {
+        let _guard = env_lock()
+            .lock()
+            .expect("environment lock should not be poisoned");
+
+        let stamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let temp_root =
+            std::env::temp_dir().join(format!("skillstar-agent-profile-custom-{}", stamp));
+        let previous_home = std::env::var_os("HOME");
+        set_env("HOME", temp_root.join("home"));
+        #[cfg(windows)]
+        let previous_userprofile = std::env::var_os("USERPROFILE");
+        #[cfg(windows)]
+        set_env("USERPROFILE", temp_root.join("home"));
+
+        let result = (|| -> Result<()> {
+            add_custom_profile(CustomProfileDef {
+                id: "custom_ollama".into(),
+                display_name: "Ollama".into(),
+                global_skills_dir: "D:\\ollama\\skills".into(),
+                project_skills_rel: ".ollma\\skills".into(),
+                icon_data_uri: None,
+            })?;
+
+            let prefs = load_prefs();
+            let saved = prefs
+                .custom_profiles
+                .into_iter()
+                .find(|profile| profile.id == "custom_ollama")
+                .expect("custom profile should be persisted");
+
+            assert_eq!(saved.project_skills_rel, ".ollma/skills");
+            Ok(())
+        })();
+
+        match previous_home {
+            Some(value) => set_env("HOME", value),
+            None => remove_env("HOME"),
+        }
+        #[cfg(windows)]
+        match previous_userprofile {
+            Some(value) => set_env("USERPROFILE", value),
+            None => remove_env("USERPROFILE"),
+        }
+        let _ = std::fs::remove_dir_all(&temp_root);
+
+        result
     }
 
     #[test]

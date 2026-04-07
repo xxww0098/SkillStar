@@ -6,6 +6,7 @@ import { MOTION_TRANSITION, motionDuration } from "../../../comm/motion";
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
 import { toast } from "../../../lib/toast";
+import { formatPlatformPath } from "../../../lib/utils";
 import type { CustomProfileDef } from "../../../types";
 
 interface AddCustomAgentDialogProps {
@@ -19,6 +20,9 @@ interface AddCustomAgentDialogProps {
 export function AddCustomAgentDialog({ open, onClose, onConfirm, initialData, onRemove }: AddCustomAgentDialogProps) {
   const { t, i18n } = useTranslation();
   const prefersReducedMotion = useReducedMotion();
+  const displayNameInputId = "custom-agent-display-name";
+  const globalPathInputId = "custom-agent-global-path";
+  const projectPathInputId = "custom-agent-project-path";
 
   const [displayName, setDisplayName] = useState("");
   const [globalPath, setGlobalPath] = useState("");
@@ -32,7 +36,7 @@ export function AddCustomAgentDialog({ open, onClose, onConfirm, initialData, on
       if (initialData) {
         setDisplayName(initialData.display_name);
         setGlobalPath(initialData.global_skills_dir);
-        setProjectPath(initialData.project_skills_rel || "");
+        setProjectPath(initialData.project_skills_rel ? formatPlatformPath(initialData.project_skills_rel) : "");
         setIconData(initialData.icon_data_uri || null);
       } else {
         setDisplayName("");
@@ -85,7 +89,7 @@ export function AddCustomAgentDialog({ open, onClose, onConfirm, initialData, on
   const handleConfirm = () => {
     if (!displayName.trim() || !globalPath.trim()) return;
 
-    const parsedProject = projectPath.trim();
+    const parsedProject = projectPath.trim().replace(/\\/g, "/");
     if (parsedProject) {
       if (!/^\.[a-zA-Z0-9_-]+\/skills$/.test(parsedProject)) {
         toast.error(
@@ -145,6 +149,7 @@ export function AddCustomAgentDialog({ open, onClose, onConfirm, initialData, on
                   </h2>
                 </div>
                 <button
+                  type="button"
                   onClick={onClose}
                   className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-muted text-muted-foreground transition cursor-pointer"
                 >
@@ -154,7 +159,8 @@ export function AddCustomAgentDialog({ open, onClose, onConfirm, initialData, on
 
               <div className="p-6 space-y-4">
                 <div className="space-y-1.5 flex flex-col items-center">
-                  <div
+                  <button
+                    type="button"
                     className="h-16 w-16 mb-2 rounded-[14px] border border-border bg-card shadow-sm flex items-center justify-center overflow-hidden cursor-pointer hover:border-primary/50 transition relative group"
                     onClick={() => fileInputRef.current?.click()}
                   >
@@ -166,7 +172,7 @@ export function AddCustomAgentDialog({ open, onClose, onConfirm, initialData, on
                     <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
                       <span className="text-[10px] font-medium text-white shadow-sm">+ Icon</span>
                     </div>
-                  </div>
+                  </button>
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -190,11 +196,12 @@ export function AddCustomAgentDialog({ open, onClose, onConfirm, initialData, on
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-foreground ml-1">
+                  <label htmlFor={displayNameInputId} className="text-xs font-medium text-foreground ml-1">
                     {t("settings.agentDisplayName", { defaultValue: "Display Name" })}{" "}
                     <span className="text-destructive">*</span>
                   </label>
                   <Input
+                    id={displayNameInputId}
                     placeholder="e.g. My AI Assistant"
                     value={displayName}
                     onChange={(e) => setDisplayName(e.target.value)}
@@ -203,12 +210,16 @@ export function AddCustomAgentDialog({ open, onClose, onConfirm, initialData, on
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-foreground ml-1 flex items-center gap-1.5">
+                  <label
+                    htmlFor={globalPathInputId}
+                    className="text-xs font-medium text-foreground ml-1 flex items-center gap-1.5"
+                  >
                     <FolderKanban className="w-3.5 h-3.5 text-muted-foreground" />
                     {t("settings.globalSkillsDir", { defaultValue: "Global Skills Path" })}{" "}
                     <span className="text-destructive">*</span>
                   </label>
                   <Input
+                    id={globalPathInputId}
                     placeholder="e.g. ~/.myagent/skills"
                     value={globalPath}
                     onChange={(e) => setGlobalPath(e.target.value)}
@@ -217,11 +228,15 @@ export function AddCustomAgentDialog({ open, onClose, onConfirm, initialData, on
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-foreground ml-1 flex items-center gap-1.5">
+                  <label
+                    htmlFor={projectPathInputId}
+                    className="text-xs font-medium text-foreground ml-1 flex items-center gap-1.5"
+                  >
                     {t("settings.projectSkillsRel", { defaultValue: "Project Skills Relative Path" })}
                   </label>
                   <Input
-                    placeholder="e.g. .myagent/skills"
+                    id={projectPathInputId}
+                    placeholder={`e.g. ${formatPlatformPath(".myagent/skills")}`}
                     value={projectPath}
                     onChange={(e) => setProjectPath(e.target.value)}
                     className="bg-background font-mono text-xs"

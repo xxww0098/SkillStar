@@ -9,9 +9,7 @@ use super::atomic_write;
 
 /// Returns the Codex config directory: `~/.codex/`
 pub fn config_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".codex")
+    super::home_dir().join(".codex")
 }
 
 /// Returns the path to `~/.codex/config.toml`

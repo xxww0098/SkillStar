@@ -49,6 +49,10 @@ pub fn data_root() -> PathBuf {
         let expanded = shellexpand_home(&dir);
         return PathBuf::from(expanded);
     }
+    #[cfg(test)]
+    if let Some(home) = std::env::var_os("HOME") {
+        return PathBuf::from(home).join(".skillstar");
+    }
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".skillstar")
@@ -68,6 +72,10 @@ pub fn hub_root() -> PathBuf {
 
 /// User home directory (used for agent profile dirs like `~/.claude/skills`).
 pub fn home_dir() -> PathBuf {
+    #[cfg(test)]
+    if let Some(home) = std::env::var_os("HOME") {
+        return PathBuf::from(home);
+    }
     dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
 }
 

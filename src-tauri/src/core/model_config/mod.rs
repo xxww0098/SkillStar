@@ -6,7 +6,30 @@ pub mod opencode;
 pub mod providers;
 pub mod speedtest;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+#[cfg(test)]
+fn env_path(key: &str) -> Option<PathBuf> {
+    std::env::var_os(key).map(PathBuf::from)
+}
+
+pub(super) fn home_dir() -> PathBuf {
+    #[cfg(test)]
+    if let Some(path) = env_path("SKILLSTAR_TEST_HOME") {
+        return path;
+    }
+
+    dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
+}
+
+pub(super) fn config_dir() -> PathBuf {
+    #[cfg(test)]
+    if let Some(path) = env_path("SKILLSTAR_TEST_CONFIG_DIR") {
+        return path;
+    }
+
+    dirs::config_dir().unwrap_or_else(|| home_dir().join(".config"))
+}
 
 /// Atomic write: write to a temporary file then rename to the target path.
 /// This prevents partial/corrupt writes if the process is interrupted.

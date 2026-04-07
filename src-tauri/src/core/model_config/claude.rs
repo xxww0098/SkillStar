@@ -17,9 +17,7 @@ use super::{read_json_file, write_json_file};
 
 /// Returns the Claude config directory: `~/.claude/`
 pub fn config_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".claude")
+    super::home_dir().join(".claude")
 }
 
 /// Returns the path to `~/.claude/settings.json`

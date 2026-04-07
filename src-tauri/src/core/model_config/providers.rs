@@ -79,10 +79,7 @@ pub struct ProvidersStore {
 }
 
 fn store_path() -> PathBuf {
-    let base = dirs::home_dir()
-        .unwrap_or_default()
-        .join(".skillstar")
-        .join("config");
+    let base = super::home_dir().join(".skillstar").join("config");
     base.join("model_providers.json")
 }
 
@@ -423,7 +420,11 @@ mod tests {
         let temp_root =
             std::env::temp_dir().join(format!("skillstar-model-providers-{}-{}", suffix, stamp));
         let previous_home = std::env::var_os("HOME");
+        let previous_test_home = std::env::var_os("SKILLSTAR_TEST_HOME");
+        let previous_test_config = std::env::var_os("SKILLSTAR_TEST_CONFIG_DIR");
         set_env("HOME", temp_root.join("home"));
+        set_env("SKILLSTAR_TEST_HOME", temp_root.join("home"));
+        set_env("SKILLSTAR_TEST_CONFIG_DIR", temp_root.join("config"));
         #[cfg(windows)]
         let previous_userprofile = std::env::var_os("USERPROFILE");
         #[cfg(windows)]
@@ -434,6 +435,14 @@ mod tests {
         match previous_home {
             Some(value) => set_env("HOME", value),
             None => remove_env("HOME"),
+        }
+        match previous_test_home {
+            Some(value) => set_env("SKILLSTAR_TEST_HOME", value),
+            None => remove_env("SKILLSTAR_TEST_HOME"),
+        }
+        match previous_test_config {
+            Some(value) => set_env("SKILLSTAR_TEST_CONFIG_DIR", value),
+            None => remove_env("SKILLSTAR_TEST_CONFIG_DIR"),
         }
         #[cfg(windows)]
         match previous_userprofile {

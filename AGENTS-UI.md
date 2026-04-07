@@ -105,6 +105,7 @@ src/
 - New skills default to not linked to any agent until user toggles.
 - Background-run preference must flow through shared helpers/events so tray actions and Settings switches render the same patrol state.
 - Tray background actions should use stateful labels (`Start` / `Stop`) instead of a static one-way action label.
+- Agent path fields in Settings should display platform-native separators for editing, while `project_skills_rel` remains backend-canonicalized with forward slashes.
 
 ## Maintenance Rules
 - Frontend structure/convention changes must update this file first.

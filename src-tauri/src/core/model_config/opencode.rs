@@ -16,16 +16,11 @@ use super::{read_json_file, write_json_file};
 pub fn config_dir() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
-        dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("opencode")
+        super::config_dir().join("opencode")
     }
     #[cfg(not(target_os = "windows"))]
     {
-        dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".config")
-            .join("opencode")
+        super::home_dir().join(".config").join("opencode")
     }
 }
 
