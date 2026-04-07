@@ -698,6 +698,16 @@ pub async fn ai_batch_process_skills(
         use tauri::Emitter;
         let completed = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
+        // ── Emit initial progress so UI shows up immediately ──────────
+        let _ = app.emit(
+            "ai://batch-progress",
+            BatchProgressPayload {
+                completed: 0,
+                total,
+                current_name: String::new(),
+            },
+        );
+
         // ── Collect all skill content upfront ──────────────────────────
         let mut skill_contents: Vec<(String, crate::core::skill::SkillContent)> = Vec::new();
         for name in &skill_names {

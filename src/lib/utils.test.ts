@@ -1,5 +1,14 @@
-import { describe, expect, it } from "vitest";
-import { agentIconCls, cn, detectPlatform, formatAiErrorMessage, formatInstalls, formatPlatformPath } from "./utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  agentIconCls,
+  cn,
+  detectPlatform,
+  formatAiErrorMessage,
+  formatInstalls,
+  formatPlatformPath,
+  navigateToAiSettings,
+  navigateToSettingsSection,
+} from "./utils";
 
 describe("cn (class merging)", () => {
   it("should merge class names", () => {
@@ -90,5 +99,74 @@ describe("formatAiErrorMessage", () => {
   it("should return raw message for unknown errors", () => {
     const result = formatAiErrorMessage("Some unknown error", mockT);
     expect(result).toBe("Some unknown error");
+  });
+});
+
+describe("settings navigation helpers", () => {
+  const storage = new Map<string, string>();
+  const localStorageMock = {
+    get length() {
+      return storage.size;
+    },
+    clear: () => storage.clear(),
+    getItem: (key: string) => storage.get(key) ?? null,
+    key: (index: number) => Array.from(storage.keys())[index] ?? null,
+    removeItem: (key: string) => {
+      storage.delete(key);
+    },
+    setItem: (key: string, value: string) => {
+      storage.set(key, String(value));
+    },
+  } as Storage;
+
+  beforeEach(() => {
+    storage.clear();
+    Object.defineProperty(globalThis, "localStorage", {
+      value: localStorageMock,
+      configurable: true,
+    });
+    Object.defineProperty(window, "localStorage", {
+      value: localStorageMock,
+      configurable: true,
+    });
+  });
+
+  afterEach(() => {
+    storage.clear();
+  });
+
+  it("should navigate to settings and focus the requested section", () => {
+    const handleNavigate = vi.fn();
+    const handleFocus = vi.fn();
+
+    window.addEventListener("skillstar:navigate", handleNavigate as EventListener);
+    window.addEventListener("skillstar:settings-focus", handleFocus as EventListener);
+
+    navigateToSettingsSection("storage");
+
+    expect(localStorage.getItem("skillstar:settings-focus")).toBe("storage");
+    expect(handleNavigate).toHaveBeenCalledTimes(1);
+    expect((handleNavigate.mock.calls[0][0] as CustomEvent<{ page?: string }>).detail).toEqual({ page: "settings" });
+    expect(handleFocus).toHaveBeenCalledTimes(1);
+    expect((handleFocus.mock.calls[0][0] as CustomEvent<{ target?: string }>).detail).toEqual({ target: "storage" });
+
+    window.removeEventListener("skillstar:navigate", handleNavigate as EventListener);
+    window.removeEventListener("skillstar:settings-focus", handleFocus as EventListener);
+  });
+
+  it("should keep AI navigation focused on the AI section", () => {
+    const handleFocus = vi.fn();
+
+    window.addEventListener("skillstar:settings-focus", handleFocus as EventListener);
+
+    navigateToAiSettings();
+
+    expect(localStorage.getItem("skillstar:settings-focus")).toBe("ai-provider");
+    expect(handleFocus).toHaveBeenCalledTimes(1);
+    expect((handleFocus.mock.calls[0][0] as CustomEvent<{ target?: string }>).detail).toEqual({
+      target: "ai-provider",
+    });
+
+    window.removeEventListener("skillstar:settings-focus", handleFocus as EventListener);
   });
 });

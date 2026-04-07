@@ -24,6 +24,7 @@ import { useSecurityScan } from "../features/security/hooks/useSecurityScan";
 import { useAgentProfiles } from "../hooks/useAgentProfiles";
 import { useViewMode } from "../hooks/useViewMode";
 import { toast } from "../lib/toast";
+import { navigateToSettingsSection } from "../lib/utils";
 import type { RepoNewSkill, Skill, SortOption } from "../types";
 
 const DetailPanel = lazy(() =>
@@ -586,8 +587,9 @@ export function MySkills({
                   {t("mySkills.brokenBanner", { count: brokenCount })}
                 </span>
                 <button
+                  type="button"
                   onClick={() => {
-                    window.dispatchEvent(new CustomEvent("skillstar:navigate", { detail: { page: "settings" } }));
+                    navigateToSettingsSection("storage");
                   }}
                   className="text-caption text-amber-400 hover:text-amber-300 font-medium ml-auto cursor-pointer transition-colors"
                 >

@@ -24,6 +24,7 @@ import { useAiConfig } from "../../hooks/useAiConfig";
 import { setLanguage } from "../../i18n";
 import { applyBackgroundStyle, type BackgroundStyle, readBackgroundStyle } from "../../lib/backgroundStyle";
 import { toast } from "../../lib/toast";
+import type { SettingsFocusTarget } from "../../lib/utils";
 import type {
   AiConfig,
   CacheCleanResult,
@@ -329,6 +330,11 @@ const SETTINGS_SECTIONS: { id: string; labelKey: string; icon: LucideIcon }[] = 
   { id: "settings-about", labelKey: "settings.about", icon: Terminal },
 ];
 
+const SETTINGS_FOCUS_TO_SECTION_ID: Record<SettingsFocusTarget, string> = {
+  "ai-provider": "settings-ai",
+  storage: "settings-storage",
+};
+
 function SettingsSidebarNav() {
   const { t } = useTranslation();
   const [activeId, setActiveId] = useState(SETTINGS_SECTIONS[0].id);
@@ -433,6 +439,7 @@ function SettingsSidebarNav() {
         return (
           <button
             key={section.id}
+            type="button"
             onClick={() => handleClick(section.id)}
             title={t(section.labelKey)}
             className={`w-9 h-9 flex items-center justify-center rounded-xl cursor-pointer ${
@@ -673,34 +680,57 @@ export function Settings({
       .catch(() => setGhInstalled(false));
   }, []);
 
-  // ── AI focus from localStorage ────────────────────────────────────────────
+  const focusSettingsSection = useCallback(
+    (target: SettingsFocusTarget) => {
+      if (target === "ai-provider" && !aiState.expanded) {
+        dispatchAi({ type: "TOGGLE_EXPANDED" });
+      }
+
+      const sectionId = SETTINGS_FOCUS_TO_SECTION_ID[target];
+
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          const scrollRoot = document.getElementById("settings-scroll-container");
+          const section = document.getElementById(sectionId);
+          if (!scrollRoot || !section) return;
+
+          const rootRect = scrollRoot.getBoundingClientRect();
+          const sectionRect = section.getBoundingClientRect();
+          const offset = 12;
+          const targetTop = scrollRoot.scrollTop + (sectionRect.top - rootRect.top) - offset;
+          scrollRoot.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
+        }, 100);
+      });
+    },
+    [aiState.expanded],
+  );
+
+  // ── Settings section focus from navigation intents ───────────────────────
 
   useEffect(() => {
-    try {
-      const focus = localStorage.getItem("skillstar:settings-focus");
-      if (focus === "ai-provider") {
-        dispatchAi({ type: "TOGGLE_EXPANDED" });
-        localStorage.removeItem("skillstar:settings-focus");
-
-        // Scroll to the AI section after a short delay so the DOM has rendered
-        requestAnimationFrame(() => {
-          setTimeout(() => {
-            const scrollRoot = document.getElementById("settings-scroll-container");
-            const aiSection = document.getElementById("settings-ai");
-            if (scrollRoot && aiSection) {
-              const rootRect = scrollRoot.getBoundingClientRect();
-              const sectionRect = aiSection.getBoundingClientRect();
-              const offset = 12;
-              const targetTop = scrollRoot.scrollTop + (sectionRect.top - rootRect.top) - offset;
-              scrollRoot.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
-            }
-          }, 100);
-        });
+    const applyStoredFocus = () => {
+      try {
+        const focus = localStorage.getItem("skillstar:settings-focus");
+        if (focus === "ai-provider" || focus === "storage") {
+          localStorage.removeItem("skillstar:settings-focus");
+          focusSettingsSection(focus);
+        }
+      } catch {
+        // ignore localStorage access errors
       }
-    } catch {
-      // ignore localStorage access errors
-    }
-  }, []);
+    };
+
+    const handleFocusEvent = (event: Event) => {
+      const target = (event as CustomEvent<{ target?: SettingsFocusTarget }>).detail?.target;
+      if (target === "ai-provider" || target === "storage") {
+        focusSettingsSection(target);
+      }
+    };
+
+    applyStoredFocus();
+    window.addEventListener("skillstar:settings-focus", handleFocusEvent as EventListener);
+    return () => window.removeEventListener("skillstar:settings-focus", handleFocusEvent as EventListener);
+  }, [focusSettingsSection]);
 
   // ── Agent handlers ─────────────────────────────────────────────────────────
 

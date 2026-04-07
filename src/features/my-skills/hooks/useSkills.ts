@@ -320,7 +320,13 @@ function useSkillsState() {
         // update_available states for sibling skills.
         await queryClient.cancelQueries({ queryKey: SKILL_UPDATES_QUERY_KEY });
 
-        const siblingSet = new Set(result.siblings_cleared);
+        // `Update All` already knows which installed skills share a repo.
+        // Merge that UI-known sibling list with the backend response so the
+        // grid clears every updated card immediately instead of waiting for a
+        // follow-up refresh to reconcile the rest of the repo.
+        const siblingSet = new Set(
+          [...siblingNames, ...result.siblings_cleared].filter((siblingName) => siblingName !== name),
+        );
         queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) =>
           prev.map((item) => {
             if (item.name === name) return result.skill;

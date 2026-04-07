@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-04-08
+
+### Fixed
+- **Windows path normalization** — custom agent `project_skills_rel` config now normalizes backslashes to forward slashes to reliably match cross-platform profiles.
+
 ## [0.2.0] - 2026-04-06
 
 ### Added

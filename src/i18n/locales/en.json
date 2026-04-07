@@ -279,7 +279,7 @@
     "batchUninstallFailed_one": "Failed to uninstall {{name}}, please try again.",
     "batchUninstallFailed_other": "{{count}} cards failed to uninstall, please try again.",
     "brokenBanner": "{{count}} broken skills detected (missing source files)",
-    "brokenBannerAction": "Go fix",
+    "brokenBannerAction": "Open Storage",
     "newSkill": "New Skill",
     "createLocalSkill": "Create Local Skill",
     "skillNameLabel": "Skill Name",

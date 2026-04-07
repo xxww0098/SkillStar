@@ -69,14 +69,22 @@ export function formatInstalls(count: number): string {
   return count.toLocaleString();
 }
 
-/** Navigate to AI settings page via custom event */
-export function navigateToAiSettings() {
+export type SettingsFocusTarget = "ai-provider" | "storage";
+
+/** Navigate to Settings and request focus on a specific section. */
+export function navigateToSettingsSection(target: SettingsFocusTarget) {
   try {
-    localStorage.setItem("skillstar:settings-focus", "ai-provider");
+    localStorage.setItem("skillstar:settings-focus", target);
   } catch {
     // ignore localStorage access errors
   }
   window.dispatchEvent(new CustomEvent("skillstar:navigate", { detail: { page: "settings" } }));
+  window.dispatchEvent(new CustomEvent("skillstar:settings-focus", { detail: { target } }));
+}
+
+/** Navigate to AI settings page via custom event */
+export function navigateToAiSettings() {
+  navigateToSettingsSection("ai-provider");
 }
 
 type Translator = (key: string, options?: Record<string, unknown>) => string;

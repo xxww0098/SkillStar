@@ -279,7 +279,7 @@
     "batchUninstallFailed_one": "未能卸载 {{name}}，请稍后重试。",
     "batchUninstallFailed_other": "还有 {{count}} 个 Skill 卸载失败，请重试。",
     "brokenBanner": "发现 {{count}} 个失效技能（断裂链接/源文件丢失）",
-    "brokenBannerAction": "前往修复",
+    "brokenBannerAction": "前往存储",
     "newSkill": "新建技能",
     "createLocalSkill": "创建本地技能",
     "skillNameLabel": "技能名称",
