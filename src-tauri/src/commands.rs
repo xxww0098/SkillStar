@@ -92,13 +92,20 @@ pub async fn refresh_skill_updates(
 
 #[tauri::command]
 pub async fn install_skill(url: String, name: Option<String>) -> Result<Skill, AppError> {
-    skill_install::install_skill(url, name)
+    tokio::task::spawn_blocking(move || skill_install::install_skill(url, name))
         .await
-        .map_err(|e| AppError::Other(e))
+        .map_err(|e| AppError::Other(format!("install task panicked: {e}")))?
+        .map_err(AppError::Other)
 }
 
 #[tauri::command]
 pub async fn uninstall_skill(name: String) -> Result<(), AppError> {
+    tokio::task::spawn_blocking(move || uninstall_skill_sync(name))
+        .await
+        .map_err(|e| AppError::Other(format!("uninstall task panicked: {e}")))?
+}
+
+fn uninstall_skill_sync(name: String) -> Result<(), AppError> {
     // If it's a local skill, delegate to local_skill::delete
     if local_skill::is_local_skill(&name) {
         local_skill::delete(&name).map_err(|e| AppError::Anyhow(e))?;
@@ -173,27 +180,30 @@ pub async fn toggle_skill_for_agent(
 
 #[tauri::command]
 pub async fn update_skill(name: String) -> Result<UpdateResult, AppError> {
+    tokio::task::spawn_blocking(move || update_skill_sync(name))
+        .await
+        .map_err(|e| AppError::Other(format!("update task panicked: {e}")))?
+}
+
+fn update_skill_sync(name: String) -> Result<UpdateResult, AppError> {
     let skills_dir = crate::core::paths::hub_skills_dir();
     let path = skills_dir.join(&name);
 
     // Check if this is a repo-cached skill (symlink into .repos/)
     let is_repo_skill = repo_scanner::is_repo_cached_skill(&path);
 
-    let _lock = lockfile::get_mutex()
-        .lock()
-        .map_err(|_| AppError::Lockfile("Lockfile mutex poisoned".to_string()))?;
-    let lock_path = lockfile::lockfile_path();
-    let mut lf = lockfile::Lockfile::load(&lock_path).map_err(|e| {
-        AppError::Lockfile(format!(
-            "Failed to load lockfile '{}': {}",
-            lock_path.display(),
-            e
-        ))
-    })?;
-    let lock_entry = lf.skills.iter().find(|s| s.name == name).cloned();
+    // Read the lock entry WITHOUT holding the mutex — we only need a snapshot
+    // for the git pull parameters. The mutex is acquired later for the
+    // read→modify→write cycle only.
+    let lock_entry = {
+        let lock_path = lockfile::lockfile_path();
+        lockfile::Lockfile::load(&lock_path)
+            .ok()
+            .and_then(|lf| lf.skills.into_iter().find(|s| s.name == name))
+    };
 
+    // ── Git pull (network I/O) — NO lockfile mutex held ─────────────
     let tree_hash = if is_repo_skill {
-        // Pull via the repo cache
         let source_folder = lock_entry.as_ref().and_then(|e| e.source_folder.as_deref());
         repo_scanner::pull_repo_skill_update(&path, source_folder)
             .map_err(|e| AppError::Git(e.to_string()))?
@@ -202,46 +212,61 @@ pub async fn update_skill(name: String) -> Result<UpdateResult, AppError> {
         git_ops::compute_tree_hash(&path).map_err(|e| AppError::Git(e.to_string()))?
     };
 
-    // For repo-cached skills, updating one skill pulls the entire repo.
-    // Find all sibling skills from the same git_url and update their
-    // lockfile tree_hash too, so they don't stay stale.
+    // ── Lockfile update — mutex held only for read→modify→write ─────
     let mut sibling_names: Vec<String> = Vec::new();
 
-    if is_repo_skill {
-        if let Some(ref entry) = lock_entry {
-            let git_url = &entry.git_url;
-            for sibling in lf.skills.iter_mut().filter(|s| s.git_url == *git_url) {
-                if sibling.name == name {
-                    sibling.tree_hash = tree_hash.clone();
-                } else {
-                    // Recompute sibling's subtree hash from the now-updated repo
-                    let sibling_path = skills_dir.join(&sibling.name);
-                    if sibling_path.exists() {
-                        if let Some(ref folder) = sibling.source_folder {
-                            if let Ok(repo_root) = resolve_repo_root_from_symlink(&sibling_path) {
-                                if let Ok(hash) =
-                                    repo_scanner::compute_subtree_hash_pub(&repo_root, folder)
+    {
+        let _lock = lockfile::get_mutex()
+            .lock()
+            .map_err(|_| AppError::Lockfile("Lockfile mutex poisoned".to_string()))?;
+        let lock_path = lockfile::lockfile_path();
+        let mut lf = lockfile::Lockfile::load(&lock_path).map_err(|e| {
+            AppError::Lockfile(format!(
+                "Failed to load lockfile '{}': {}",
+                lock_path.display(),
+                e
+            ))
+        })?;
+
+        if is_repo_skill {
+            if let Some(ref entry) = lock_entry {
+                let git_url = &entry.git_url;
+                for sibling in lf.skills.iter_mut().filter(|s| s.git_url == *git_url) {
+                    if sibling.name == name {
+                        sibling.tree_hash = tree_hash.clone();
+                    } else {
+                        // Recompute sibling's subtree hash from the now-updated repo
+                        let sibling_path = skills_dir.join(&sibling.name);
+                        if sibling_path.exists() {
+                            if let Some(ref folder) = sibling.source_folder {
+                                if let Ok(repo_root) =
+                                    resolve_repo_root_from_symlink(&sibling_path)
                                 {
-                                    sibling.tree_hash = hash;
+                                    if let Ok(hash) =
+                                        repo_scanner::compute_subtree_hash_pub(&repo_root, folder)
+                                    {
+                                        sibling.tree_hash = hash;
+                                    }
                                 }
                             }
+                            sibling_names.push(sibling.name.clone());
                         }
-                        sibling_names.push(sibling.name.clone());
                     }
                 }
             }
+        } else if let Some(entry) = lf.skills.iter_mut().find(|s| s.name == name) {
+            entry.tree_hash = tree_hash.clone();
         }
-    } else if let Some(entry) = lf.skills.iter_mut().find(|s| s.name == name) {
-        entry.tree_hash = tree_hash.clone();
-    }
 
-    lf.save(&lock_path).map_err(|e| {
-        AppError::Lockfile(format!(
-            "Failed to save lockfile '{}': {}",
-            lock_path.display(),
-            e
-        ))
-    })?;
+        lf.save(&lock_path).map_err(|e| {
+            AppError::Lockfile(format!(
+                "Failed to save lockfile '{}': {}",
+                lock_path.display(),
+                e
+            ))
+        })?;
+    } // ← mutex released here
+
     crate::core::installed_skill::invalidate_cache();
     crate::core::installed_skill::clear_update_state(&name);
 
@@ -301,25 +326,8 @@ pub async fn update_skill(name: String) -> Result<UpdateResult, AppError> {
 fn resolve_repo_root_from_symlink(
     skill_path: &std::path::Path,
 ) -> Result<std::path::PathBuf, String> {
-    let real_path = std::fs::read_link(skill_path).map_err(|e| e.to_string())?;
-    let absolute_path = if real_path.is_absolute() {
-        real_path
-    } else {
-        skill_path
-            .parent()
-            .unwrap_or(std::path::Path::new("."))
-            .join(real_path)
-    };
-    // Walk up to find .git
-    let mut current = absolute_path;
-    loop {
-        if current.join(".git").exists() {
-            return Ok(current);
-        }
-        if !current.pop() {
-            return Err("Cannot find git repo root".to_string());
-        }
-    }
+    repo_scanner::resolve_skill_repo_root(skill_path)
+        .ok_or_else(|| "Cannot find git repo root".to_string())
 }
 
 // ── Skill Groups ────────────────────────────────────────────────────
@@ -423,18 +431,25 @@ pub async fn deploy_skill_group(
         }
     }
 
-    let mut install_tasks = tokio::task::JoinSet::new();
+    // Group skills by their Git URL to install efficiently
+    let mut batch_by_url: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
     for skill_name in &group.skills {
         if !skills_dir.join(skill_name).exists() {
             if let Some(git_url) = sources.get(skill_name) {
-                let git_url = git_url.clone();
-                let skill_name = skill_name.clone();
-                install_tasks.spawn(async move {
-                    // Keep best-effort behavior: deployment continues even if a single install fails.
-                    let _ = install_skill(git_url, Some(skill_name)).await;
-                });
+                batch_by_url
+                    .entry(git_url.clone())
+                    .or_default()
+                    .push(skill_name.clone());
             }
         }
+    }
+
+    let mut install_tasks = tokio::task::JoinSet::new();
+    for (url, names) in batch_by_url {
+        install_tasks.spawn_blocking(move || {
+            // Keep best-effort behavior
+            let _ = skill_install::install_skills_batch(&url, &names);
+        });
     }
     while let Some(result) = install_tasks.join_next().await {
         if let Err(e) = result {

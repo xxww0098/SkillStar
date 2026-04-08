@@ -1,8 +1,9 @@
 import { ArrowUpCircle, Check, Download, GitFork, Loader2, RefreshCw, Sparkles, X } from "lucide-react";
 
 import { Popover } from "radix-ui";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "../../lib/toast";
 import { agentIconCls, cn } from "../../lib/utils";
 import type { AgentProfile, SortOption, ViewMode } from "../../types";
 import { AgentIcon } from "../ui/AgentIcon";
@@ -107,14 +108,38 @@ export function Toolbar({
   const shouldAnimateUpdateOnly = hasPendingUpdates && !isUpdateOnlyActive;
 
   const [cooldown, setCooldown] = useState(false);
+  const [refreshState, setRefreshState] = useState<"idle" | "requested" | "refreshing">("idle");
+
   const handleRefresh = useCallback(() => {
     if (cooldown || isRefreshing) return;
     setCooldown(true);
+    setRefreshState("requested");
     onRefresh?.();
     setTimeout(() => {
       setCooldown(false);
     }, 5000);
   }, [cooldown, isRefreshing, onRefresh]);
+
+  useEffect(() => {
+    if (refreshState === "requested") {
+      if (isRefreshing) {
+        setRefreshState("refreshing");
+      } else {
+        const timer = setTimeout(() => {
+          if (refreshState === "requested") {
+            toast.success(t("common.refreshed", { defaultValue: "Refreshed successfully" }));
+            setRefreshState("idle");
+          }
+        }, 500);
+        return () => clearTimeout(timer);
+      }
+    } else if (refreshState === "refreshing") {
+      if (!isRefreshing) {
+        toast.success(t("common.refreshed", { defaultValue: "Refreshed successfully" }));
+        setRefreshState("idle");
+      }
+    }
+  }, [isRefreshing, refreshState, t]);
 
   const sortOptions: { value: SortOption; label: string }[] = [
     ...(hideStarsSort ? [] : [{ value: "stars-desc" as SortOption, label: t("toolbar.stars") }]),
@@ -364,7 +389,7 @@ export function Toolbar({
           onClick={handleRefresh}
           disabled={isRefreshing || cooldown}
           className={cn(
-            "flex items-center justify-center w-8 h-8 rounded-lg border border-border/80 bg-background/50 shadow-sm backdrop-blur-md text-foreground/80 hover:text-foreground hover:bg-accent/10 hover:border-accent/50 transition duration-200 cursor-pointer group shrink-0 focus-ring",
+            "flex items-center h-8 px-3 gap-1.5 rounded-lg border border-border/80 bg-background/50 shadow-sm backdrop-blur-md text-xs font-medium text-foreground/80 hover:text-foreground hover:bg-accent/10 hover:border-accent/50 transition duration-200 cursor-pointer group whitespace-nowrap shrink-0 focus-ring",
             (isRefreshing || cooldown) && "opacity-50 cursor-not-allowed",
           )}
           title={t("common.refresh", { defaultValue: "Refresh" })}
@@ -379,6 +404,7 @@ export function Toolbar({
               )}
             />
           )}
+          {t("common.refresh", { defaultValue: "Refresh" })}
         </button>
       )}
 

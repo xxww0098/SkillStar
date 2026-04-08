@@ -39,32 +39,32 @@ fn find_target_skill<'a>(
     })
 }
 
-fn load_tree_hash_for(installed_name: &str) -> Option<String> {
-    let lock_path = lockfile::lockfile_path();
-    match lockfile::Lockfile::load(&lock_path) {
-        Ok(lockfile) => lockfile
-            .skills
-            .iter()
-            .find(|entry| entry.name == installed_name)
-            .map(|entry| entry.tree_hash.clone()),
-        Err(err) => {
-            warn!(
-                target: "install_skill",
-                path = %lock_path.display(),
-                error = %err,
-                "failed to read lockfile for tree hash lookup"
-            );
-            None
-        }
-    }
+/// Compute tree hash directly from an installed skill's path.
+///
+/// For symlinked (repo-cached) skills this resolves the symlink target
+/// and computes the hash from the real directory, avoiding a redundant
+/// lockfile re-read that `install_from_repo` has just written to.
+fn compute_tree_hash_for(skills_dir: &Path, installed_name: &str) -> Option<String> {
+    let skill_path = skills_dir.join(installed_name);
+    let effective_path = std::fs::read_link(&skill_path)
+        .map(|target| {
+            if target.is_absolute() {
+                target
+            } else {
+                skill_path.parent().unwrap_or(Path::new(".")).join(target)
+            }
+        })
+        .unwrap_or(skill_path);
+    git_ops::compute_tree_hash(&effective_path).ok()
 }
 
-fn build_installed_skill(
+fn new_skill_from_install(
     name: String,
     description: String,
     git_url: String,
     tree_hash: Option<String>,
 ) -> Skill {
+    let source = extract_github_source_from_url(&git_url);
     Skill {
         name,
         description,
@@ -74,14 +74,14 @@ fn build_installed_skill(
         installed: true,
         update_available: false,
         last_updated: chrono::Utc::now().to_rfc3339(),
-        git_url: git_url.clone(),
+        git_url,
         tree_hash,
         category: SkillCategory::None,
         author: None,
         topics: Vec::new(),
         agent_links: Some(Vec::new()),
         rank: None,
-        source: extract_github_source_from_url(&git_url),
+        source,
     }
 }
 
@@ -100,6 +100,18 @@ fn try_install_from_repo_cache(
 
     let skills_found = repo_scanner::scan_skills_in_repo(&repo_dir, &repo_url, false);
     let target = find_target_skill(&skills_found, requested_name, name_hint);
+
+    // Guard against overwriting a local skill whose name matches the repo skill
+    if let Some(skill) = &target {
+        if super::paths::local_skills_dir().join(&skill.id).exists() {
+            warn!(
+                target: "install_skill",
+                skill_id = %skill.id,
+                "repo-cache skill would collide with existing local skill, skipping"
+            );
+            return None;
+        }
+    }
 
     let Some(skill) = target else {
         warn!(
@@ -122,8 +134,8 @@ fn try_install_from_repo_cache(
             let dest = skills_dir.join(&installed_name);
             let description = extract_skill_description(&dest);
             installed_skill::invalidate_cache();
-            let tree_hash = load_tree_hash_for(&installed_name);
-            Some(build_installed_skill(
+            let tree_hash = compute_tree_hash_for(skills_dir, &installed_name);
+            Some(new_skill_from_install(
                 installed_name,
                 description,
                 repo_url,
@@ -138,7 +150,7 @@ fn try_install_from_repo_cache(
     }
 }
 
-pub async fn install_skill(url: String, name: Option<String>) -> Result<Skill, String> {
+pub fn install_skill(url: String, name: Option<String>) -> Result<Skill, String> {
     let skills_dir = super::paths::hub_skills_dir();
     let name_hint = derive_name_hint(&url, name.as_deref());
 
@@ -184,7 +196,7 @@ pub async fn install_skill(url: String, name: Option<String>) -> Result<Skill, S
     installed_skill::invalidate_cache();
 
     let description = extract_skill_description(&dest);
-    Ok(build_installed_skill(
+    Ok(new_skill_from_install(
         name_hint,
         description,
         url,
@@ -192,9 +204,96 @@ pub async fn install_skill(url: String, name: Option<String>) -> Result<Skill, S
     ))
 }
 
+/// Install multiple skills from the same repository URL in a single batch.
+/// This prevents git clone/fetch overlap and lockfile serialization issues when
+/// multiple skills share the same repository.
+pub fn install_skills_batch(url: &str, names: &[String]) -> Result<Vec<Skill>, String> {
+    if names.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let skills_dir = super::paths::hub_skills_dir();
+    let Ok((repo_url, source)) = repo_scanner::normalize_repo_url(url) else {
+        return Err(format!("Invalid URL: {}", url));
+    };
+
+    let Ok(repo_dir) = repo_scanner::clone_or_fetch_repo(&repo_url, &source) else {
+        return Err(format!("Failed to fetch repo: {}", url));
+    };
+
+    let skills_found = repo_scanner::scan_skills_in_repo(&repo_dir, &repo_url, false);
+    
+    let mut targets = Vec::new();
+    let mut fallback_names = Vec::new();
+
+    for name in names {
+        // First try to find a match in the scanned repo
+        let target = find_target_skill(&skills_found, Some(name), name);
+        if let Some(skill) = target {
+            if super::paths::local_skills_dir().join(&skill.id).exists() {
+                warn!(
+                    target: "install_skills_batch",
+                    skill_id = %skill.id,
+                    "repo-cache skill would collide with existing local skill, skipping"
+                );
+                continue;
+            }
+            if skills_dir.join(&skill.id).exists() {
+                // Already installed, skip
+                continue;
+            }
+            targets.push(repo_scanner::SkillInstallTarget {
+                id: skill.id.clone(),
+                folder_path: skill.folder_path.clone(),
+            });
+        } else {
+            // Not found in repo -> fallback to direct clone path later
+            fallback_names.push(name.clone());
+        }
+    }
+
+    let mut installed_skills = Vec::new();
+
+    if !targets.is_empty() {
+        match repo_scanner::install_from_repo(&source, &repo_url, &targets) {
+            Ok(installed) => {
+                installed_skill::invalidate_cache();
+                for installed_name in installed {
+                    let dest = skills_dir.join(&installed_name);
+                    let description = extract_skill_description(&dest);
+                    let tree_hash = compute_tree_hash_for(&skills_dir, &installed_name);
+                    installed_skills.push(new_skill_from_install(
+                        installed_name,
+                        description,
+                        repo_url.clone(),
+                        tree_hash,
+                    ));
+                }
+            }
+            Err(e) => {
+                warn!(target: "install_skills_batch", error = %e, "batch repo install failed");
+                // Fallback: all targets must be installed via direct fallback
+                for t in targets {
+                    fallback_names.push(t.id);
+                }
+            }
+        }
+    }
+
+    // Process fallbacks one by one 
+    for name in fallback_names {
+        match install_skill(url.to_string(), Some(name)) {
+            Ok(skill) => installed_skills.push(skill),
+            Err(e) => warn!(target: "install_skills_batch", error = %e, "fallback install failed"),
+        }
+    }
+
+    Ok(installed_skills)
+}
+
 /// Install all skills from a repo that contains a skillpack.toml manifest.
 /// Returns the list of installed skill names.
-pub async fn install_skill_pack(url: String) -> Result<Vec<String>, String> {
+pub fn install_skill_pack(url: String) -> Result<Vec<String>, String> {
     let (repo_url, source) =
         super::repo_scanner::normalize_repo_url(&url).map_err(|e| format!("Invalid URL: {}", e))?;
 

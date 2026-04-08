@@ -67,26 +67,15 @@ git add -A
 git commit -m "chore: bump version to X.Y.Z"
 ```
 
-## 4. Push to remote
-
-```bash
-git push origin main
-```
-
-> [!NOTE]
-> **Network Issues:** If the push fails with an error like `RPC failed; curl 56 Recv failure: Connection reset by peer` or `fatal: the remote end hung up unexpectedly`, it is typically due to a proxy or firewall issue (e.g. GFW). Ensure your VPN or proxy is active before retrying. 
-> If you have a local proxy running but Git isn't using it, set the proxy explicitly:
-> `git config --global http.proxy http://127.0.0.1:<port>`
-> *(Don't forget to unset it later with `git config --global --unset http.proxy` if needed)*
-
-## 5. Tag and push the tag
+## 4. Tag and push
 
 ```bash
 git tag vX.Y.Z
-git push origin vX.Y.Z
+git push --atomic origin main vX.Y.Z
 ```
 
-This triggers the CI pipeline (`.github/workflows/release.yml`) which will:
+This single atomic push safely syncs the branch and the tag simultaneously, which efficiently triggers the CI pipeline (`.github/workflows/release.yml`) once.
+The pipeline will:
 1. Matrix-build for macOS arm64/x64, Linux x64, Windows x64
 2. Generate `latest.json` with per-platform signatures
 3. Publish the draft release
@@ -109,4 +98,4 @@ If a file was missed after the commit + tag have already been pushed:
 2. `git add <file> && git commit --amend --no-edit`
 3. Delete the remote tag: `git push origin :refs/tags/vX.Y.Z`
 4. Recreate the tag: `git tag -f vX.Y.Z`
-5. Force-push both: `git push --force origin main && git push origin vX.Y.Z`
+5. Force-push both: `git push --atomic --force origin main vX.Y.Z`

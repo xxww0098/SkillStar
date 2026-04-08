@@ -87,18 +87,13 @@ pub struct SkillUpdateState {
 }
 
 fn apply_cached_update_states(mut skills: Vec<Skill>) -> Vec<Skill> {
-    let update_states = UPDATE_STATE_CACHE
-        .read()
-        .ok()
-        .map(|states| states.clone())
-        .unwrap_or_default();
-
-    for skill in &mut skills {
-        if let Some(update_available) = update_states.get(&skill.name) {
-            skill.update_available = *update_available;
+    if let Ok(update_states) = UPDATE_STATE_CACHE.read() {
+        for skill in &mut skills {
+            if let Some(&update_available) = update_states.get(&skill.name) {
+                skill.update_available = update_available;
+            }
         }
     }
-
     skills
 }
 
@@ -390,7 +385,7 @@ fn build_installed_skill(
     };
 
     Ok(Skill {
-        name: name.clone(),
+        name,
         description,
         localized_description,
         skill_type,

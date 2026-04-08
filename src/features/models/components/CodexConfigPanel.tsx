@@ -1,252 +1,16 @@
 import { AnimatePresence, motion } from "framer-motion";
-import {
-  AlertCircle,
-  Check,
-  ChevronDown,
-  ChevronUp,
-  Key,
-  Loader2,
-  LogIn,
-  RefreshCw,
-  Save,
-  ShieldCheck,
-  Trash2,
-  User,
-  X,
-} from "lucide-react";
+import { ChevronDown, ChevronUp, Key, Loader2, LogIn, RefreshCw, Save, ShieldCheck, X } from "lucide-react";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
 
 import { cn } from "../../../lib/utils";
-import { useCodexAccounts, type CodexAccount } from "../hooks/useCodexAccounts";
+import { useCodexAccounts } from "../hooks/useCodexAccounts";
 import { useCodexConfig } from "../hooks/useCodexConfig";
 import { codexPresets } from "../presets/codexPresets";
-import { CodexQuotaBar } from "./CodexQuotaBar";
+import { AccountRow } from "./shared/AccountRow";
 import { ApiKeyInput } from "./shared/ApiKeyInput";
 import { EndpointInput } from "./shared/EndpointInput";
 import { ModelInput } from "./shared/ModelInput";
-
-// ── Plan badge helpers ──────────────────────────────────────────────
-
-function getPlanColor(planType?: string): string {
-  if (!planType) return "#666";
-  const p = planType.toLowerCase();
-  if (p.includes("team")) return "#7C3AED";
-  if (p.includes("pro") || p.includes("plus")) return "#F59E0B";
-  if (p.includes("enterprise")) return "#3B82F6";
-  return "#6B7280";
-}
-
-function getPlanLabel(planType?: string): string {
-  if (!planType) return "FREE";
-  const p = planType.toLowerCase();
-  if (p.includes("team")) return "TEAM";
-  if (p.includes("pro")) return "PRO";
-  if (p.includes("plus")) return "PLUS";
-  if (p.includes("enterprise")) return "ENT";
-  if (p === "api_key") return "KEY";
-  return planType.toUpperCase().slice(0, 6);
-}
-
-// ── Account Row Component ───────────────────────────────────────────
-
-function AccountRow({
-  account,
-  isCurrent,
-  expanded,
-  quotaRefreshing,
-  onSwitch,
-  onToggle,
-  onDelete,
-  onRefreshQuota,
-}: {
-  account: CodexAccount;
-  isCurrent: boolean;
-  expanded: boolean;
-  quotaRefreshing: boolean;
-  onSwitch: () => void;
-  onToggle: () => void;
-  onDelete: () => void;
-  onRefreshQuota: () => void;
-}) {
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const planColor = getPlanColor(account.planType);
-  const planLabel = getPlanLabel(account.planType);
-  const isOAuth = account.authMode === "oauth";
-
-  return (
-    <div
-      className={cn(
-        "rounded-xl border transition-all duration-200",
-        isCurrent ? "border-emerald-500/40 bg-emerald-500/5" : "border-border/60 bg-card/40 hover:bg-card/60",
-      )}
-    >
-      {/* Header row */}
-      {/* biome-ignore lint/a11y/useSemanticElements: Interactive row with complex inner elements */}
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={onToggle}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            onToggle();
-          }
-        }}
-        className="flex items-center gap-3 px-3.5 py-2.5 cursor-pointer select-none"
-      >
-        {/* Icon */}
-        <div
-          className={cn(
-            "w-7 h-7 rounded-lg flex items-center justify-center shrink-0",
-            isOAuth ? "bg-emerald-500/15" : "bg-amber-500/15",
-          )}
-        >
-          {isOAuth ? <User className="w-3.5 h-3.5 text-emerald-400" /> : <Key className="w-3.5 h-3.5 text-amber-400" />}
-        </div>
-
-        {/* Info */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs font-semibold text-foreground truncate">
-              {isOAuth ? account.email : `API Key: ${(account.openaiApiKey || "").slice(0, 12)}...`}
-            </span>
-            <span
-              className="px-1.5 py-0 rounded text-[9px] font-bold text-white leading-relaxed"
-              style={{ backgroundColor: planColor }}
-            >
-              {planLabel}
-            </span>
-            {isCurrent && (
-              <span className="flex items-center gap-0.5 text-emerald-400">
-                <Check className="w-3 h-3" />
-                <span className="text-[10px] font-medium">当前</span>
-              </span>
-            )}
-          </div>
-
-          {/* Compact quota bars */}
-          {isOAuth && account.quota && !expanded && (
-            <div className="mt-1.5 space-y-0.5 max-w-[280px]">
-              <CodexQuotaBar label="5h" percentage={account.quota.hourlyPercentage} compact />
-              <CodexQuotaBar label="7d" percentage={account.quota.weeklyPercentage} compact />
-            </div>
-          )}
-        </div>
-
-        {/* Actions */}
-        {/* biome-ignore lint/a11y/useKeyWithClickEvents: Wrapping action buttons */}
-        <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-          {!isCurrent && (
-            <button
-              type="button"
-              onClick={onSwitch}
-              className="px-2 py-1 rounded-md text-[10px] font-medium text-emerald-600 border border-emerald-500/30 hover:bg-emerald-500/10 transition-colors"
-            >
-              使用
-            </button>
-          )}
-          <ChevronDown
-            className={cn(
-              "w-3.5 h-3.5 text-muted-foreground/50 transition-transform duration-200",
-              expanded && "rotate-180",
-            )}
-          />
-        </div>
-      </div>
-
-      {/* Expanded details */}
-      <AnimatePresence>
-        {expanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="overflow-hidden"
-          >
-            <div className="px-3.5 pb-3.5 pt-1 border-t border-border/30 space-y-3">
-              {/* Full quota display */}
-              {isOAuth && account.quota && (
-                <div className="space-y-2 p-3 rounded-lg bg-muted/20">
-                  <CodexQuotaBar
-                    label="5小时配额"
-                    percentage={account.quota.hourlyPercentage}
-                    resetTime={account.quota.hourlyResetTime}
-                  />
-                  <CodexQuotaBar
-                    label="7天配额"
-                    percentage={account.quota.weeklyPercentage}
-                    resetTime={account.quota.weeklyResetTime}
-                  />
-                </div>
-              )}
-
-              {/* Quota error */}
-              {account.quotaError && (
-                <div className="flex items-start gap-2 p-2.5 rounded-lg bg-destructive/10 border border-destructive/20">
-                  <AlertCircle className="w-3.5 h-3.5 text-destructive shrink-0 mt-0.5" />
-                  <p className="text-[10px] text-destructive leading-relaxed">{account.quotaError.message}</p>
-                </div>
-              )}
-
-              {/* No quota yet */}
-              {isOAuth && !account.quota && !account.quotaError && (
-                <p className="text-[10px] text-muted-foreground/60 px-1">尚未获取配额数据，点击下方刷新按钮获取</p>
-              )}
-
-              {/* Account meta */}
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-muted-foreground/60 px-1">
-                {account.accountId && (
-                  <span>
-                    Account: <span className="font-mono">{account.accountId.slice(0, 12)}...</span>
-                  </span>
-                )}
-                <span>创建于 {new Date(account.createdAt * 1000).toLocaleDateString("zh-CN")}</span>
-              </div>
-
-              {/* Action buttons */}
-              <div className="flex items-center gap-2 pt-1">
-                {isOAuth && (
-                  <button
-                    type="button"
-                    onClick={onRefreshQuota}
-                    disabled={quotaRefreshing}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-medium bg-muted/30 hover:bg-muted/50 text-muted-foreground transition-colors disabled:opacity-50"
-                  >
-                    <RefreshCw className={cn("w-3 h-3", quotaRefreshing && "animate-spin")} />
-                    刷新配额
-                  </button>
-                )}
-
-                <div className="flex-1" />
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!confirmDelete) {
-                      setConfirmDelete(true);
-                      setTimeout(() => setConfirmDelete(false), 3000);
-                      return;
-                    }
-                    onDelete();
-                  }}
-                  className={cn(
-                    "flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-medium transition-colors",
-                    confirmDelete ? "bg-destructive text-white" : "text-destructive hover:bg-destructive/10",
-                  )}
-                >
-                  <Trash2 className="w-3 h-3" />
-                  {confirmDelete ? "确认删除" : "删除"}
-                </button>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
 
 // ── Add API Key Form ────────────────────────────────────────────────
 
@@ -309,6 +73,10 @@ export function CodexConfigPanel() {
   const [expandedAccountId, setExpandedAccountId] = useState<string | null>(null);
   const [showAddApiKey, setShowAddApiKey] = useState(false);
 
+  const handleToggleAccount = useCallback((accountId: string) => {
+    setExpandedAccountId((prev) => (prev === accountId ? null : accountId));
+  }, []);
+
   if (config.loading || acctState.loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -351,10 +119,6 @@ export function CodexConfigPanel() {
       config.configText.includes(p.config.split("\n")[0]),
   );
 
-  const handleToggleAccount = useCallback((accountId: string) => {
-    setExpandedAccountId((prev) => (prev === accountId ? null : accountId));
-  }, []);
-
   return (
     <div className="space-y-5">
       {/* ── Account Management Section ──────────────────────── */}
@@ -374,7 +138,7 @@ export function CodexConfigPanel() {
           )}
         </div>
 
-        {/* Account list */}
+        {/* Account list — now uses shared AccountRow */}
         {acctState.accounts.length > 0 && (
           <div className="space-y-2">
             {acctState.accounts.map((account) => (

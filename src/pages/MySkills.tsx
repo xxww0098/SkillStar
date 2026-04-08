@@ -438,13 +438,27 @@ export function MySkills({
     async (agentId: string) => {
       setBatchLoading(true);
       try {
-        await invoke<number>("batch_link_skills_to_agent", {
+        const linked = await invoke<number>("batch_link_skills_to_agent", {
           skillNames: Array.from(selectedSkillNames),
           agentId,
         });
-        // Refresh skills list to update agent_links
         clearSelection();
         await refresh(true, true);
+        if (linked === 0) {
+          toast.warning(
+            t("mySkills.batchLinkNone", {
+              count: selectedSkillNames.size,
+              defaultValue: `No skills were linked (${selectedSkillNames.size} skill(s) not found in hub)`,
+            }),
+          );
+        } else {
+          toast.success(
+            t("mySkills.batchLinkSuccess", {
+              count: linked,
+              defaultValue: `${linked} skill(s) linked`,
+            }),
+          );
+        }
       } catch (e) {
         toast.error(String(e) || t("mySkills.batchLinkFailed"));
       } finally {

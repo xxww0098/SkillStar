@@ -566,45 +566,49 @@ fn source_priority(folder_path: &str) -> u8 {
     }
 }
 
-/// Recursively find all SKILL.md files in a directory, skipping .git.
+/// Find all SKILL.md files in a directory, skipping well-known non-skill dirs.
+///
+/// Uses an explicit stack instead of recursion to avoid stack overflow on
+/// deeply nested repositories.
 fn find_skill_md_files(dir: &Path) -> Vec<PathBuf> {
+    const SKIP_DIRS: &[&str] = &[
+        ".git",
+        "node_modules",
+        ".venv",
+        "venv",
+        "__pycache__",
+        "target",
+        "dist",
+        "build",
+        ".next",
+        ".nuxt",
+    ];
+
     let mut results = Vec::new();
-    find_skill_md_recursive(dir, &mut results);
-    results
-}
+    let mut stack = vec![dir.to_path_buf()];
 
-fn find_skill_md_recursive(dir: &Path, results: &mut Vec<PathBuf>) {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
+    while let Some(current) = stack.pop() {
+        let entries = match std::fs::read_dir(&current) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
 
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
 
-        // Skip directories that never contain SKILL.md
-        if name_str == ".git"
-            || name_str == "node_modules"
-            || name_str == ".venv"
-            || name_str == "venv"
-            || name_str == "__pycache__"
-            || name_str == "target"
-            || name_str == "dist"
-            || name_str == "build"
-            || name_str == ".next"
-            || name_str == ".nuxt"
-        {
-            continue;
-        }
-
-        if path.is_dir() {
-            find_skill_md_recursive(&path, results);
-        } else if name_str == "SKILL.md" {
-            results.push(path);
+            if path.is_dir() {
+                if !SKIP_DIRS.iter().any(|skip| *skip == &*name_str) {
+                    stack.push(path);
+                }
+            } else if name_str == "SKILL.md" {
+                results.push(path);
+            }
         }
     }
+
+    results
 }
 
 #[derive(Debug)]
@@ -762,7 +766,7 @@ pub fn install_from_repo(
         installed_names.push(target.id.clone());
     }
 
-    let _ = lf.save(&lock_path);
+    lf.save(&lock_path).context("Failed to save lockfile after batch install")?;
 
     // Save to repo history
     let _ = repo_history::upsert_entry(source, repo_url);

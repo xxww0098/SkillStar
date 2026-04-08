@@ -675,12 +675,9 @@ fn repos_cache_dir() -> PathBuf {
 #[tauri::command]
 pub async fn install_pack_from_url(url: String) -> Result<Vec<String>, AppError> {
     tokio::task::spawn_blocking(move || {
-        let rt = tokio::runtime::Runtime::new().map_err(|e| AppError::Other(e.to_string()))?;
-        rt.block_on(crate::core::skill_install::install_skill_pack(url))
-            .map_err(|e| AppError::Other(e))
+        crate::core::skill_install::install_skill_pack(url).map_err(AppError::Other)
     })
     .await?
-    .map_err(|e| e)
 }
 
 #[tauri::command]

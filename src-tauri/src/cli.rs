@@ -224,11 +224,10 @@ fn install_or_reuse_skill(
         return Ok((name, false));
     }
 
-    let rt = tokio::runtime::Runtime::new().map_err(|e| format!("Failed to start runtime: {e}"))?;
-    match rt.block_on(skill_install::install_skill(
+    match skill_install::install_skill(
         url.to_string(),
         explicit_name.map(str::to_string),
-    )) {
+    ) {
         Ok(skill) => Ok((skill.name, true)),
         Err(err) => {
             if err.contains("already installed") {

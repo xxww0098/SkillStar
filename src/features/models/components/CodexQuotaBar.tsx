@@ -1,3 +1,4 @@
+import { motion } from "framer-motion";
 import { cn } from "../../../lib/utils";
 
 interface QuotaBarProps {
@@ -64,22 +65,34 @@ function getQuotaColor(percentage: number): {
   };
 }
 
+/** Semantic label for quota level */
+function getQuotaSemanticLabel(percentage: number): { label: string; className: string } {
+  if (percentage >= 70) return { label: "充裕", className: "text-emerald-400/70" };
+  if (percentage >= 40) return { label: "适中", className: "text-amber-400/70" };
+  if (percentage >= 15) return { label: "注意", className: "text-orange-400/70" };
+  return { label: "低", className: "text-red-400/70" };
+}
+
 export function CodexQuotaBar({ label, percentage, resetTime, compact = false }: QuotaBarProps) {
   const color = getQuotaColor(percentage);
   const reset = formatResetTime(resetTime);
   const clampedPct = Math.max(0, Math.min(100, percentage));
+  const semantic = getQuotaSemanticLabel(percentage);
 
   if (compact) {
     return (
       <div className="flex items-center gap-2">
         <span className="text-[10px] text-muted-foreground/70 w-7 shrink-0">{label}</span>
         <div className="flex-1 h-1.5 rounded-full bg-muted/40 overflow-hidden">
-          <div
-            className={cn("h-full rounded-full bg-gradient-to-r transition-all duration-700", color.bar)}
-            style={{ width: `${clampedPct}%` }}
+          <motion.div
+            className={cn("h-full rounded-full bg-gradient-to-r", color.bar)}
+            initial={{ width: 0 }}
+            animate={{ width: `${clampedPct}%` }}
+            transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
           />
         </div>
         <span className={cn("text-[10px] font-mono tabular-nums w-8 text-right", color.text)}>{clampedPct}%</span>
+        <span className={cn("text-[9px] w-6 shrink-0", semantic.className)}>{semantic.label}</span>
       </div>
     );
   }
@@ -91,21 +104,23 @@ export function CodexQuotaBar({ label, percentage, resetTime, compact = false }:
         <div className="flex items-center gap-2">
           {reset && <span className="text-[10px] text-muted-foreground/60 font-mono">重置 {reset}</span>}
           <span className={cn("text-[11px] font-bold font-mono tabular-nums", color.text)}>{clampedPct}%</span>
+          <span className={cn("text-[10px] font-medium", semantic.className)}>{semantic.label}</span>
         </div>
       </div>
       <div className="relative h-2 rounded-full bg-muted/40 overflow-hidden">
-        <div
-          className={cn(
-            "absolute inset-y-0 left-0 rounded-full bg-gradient-to-r transition-all duration-700 ease-out",
-            color.bar,
-          )}
-          style={{ width: `${clampedPct}%` }}
+        <motion.div
+          className={cn("absolute inset-y-0 left-0 rounded-full bg-gradient-to-r", color.bar)}
+          initial={{ width: 0 }}
+          animate={{ width: `${clampedPct}%` }}
+          transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
         />
         {/* Shine effect */}
-        <div
+        <motion.div
           className="absolute inset-y-0 left-0 rounded-full opacity-30"
+          initial={{ width: 0 }}
+          animate={{ width: `${clampedPct}%` }}
+          transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
           style={{
-            width: `${clampedPct}%`,
             background: "linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.3) 50%, transparent 100%)",
           }}
         />

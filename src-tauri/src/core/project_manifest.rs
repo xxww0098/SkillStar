@@ -5,10 +5,23 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use super::{agent_profile, local_skill, paths};
+
+fn ensure_project_root_exists(project_path: &str) -> Result<PathBuf> {
+    let project = Path::new(project_path);
+    if project.is_dir() {
+        return Ok(project.to_path_buf());
+    }
+
+    anyhow::bail!(
+        "Project path not found or not a directory: {}\n\
+请在「Projects」页面点击「更改路径」重新关联该项目目录。",
+        project.display()
+    );
+}
 
 // ── Data structures ─────────────────────────────────────────────────
 
@@ -83,6 +96,9 @@ fn save_index(index: &ProjectIndex) -> Result<()> {
 /// Register a project in the index. Creates the per-project config folder.
 /// If a project with the same path already exists, returns the existing entry.
 pub fn register_project(project_path: &str) -> Result<ProjectEntry> {
+    // Avoid silently creating new directories when the user passes a stale path.
+    let _ = ensure_project_root_exists(project_path)?;
+
     let mut index = load_index();
 
     // Check for existing entry by path
@@ -150,6 +166,9 @@ pub fn remove_project(name: &str) -> Result<()> {
 
 /// Update a project's local path and rebuild its symlinks.
 pub fn update_project_path(name: &str, new_path: &str) -> Result<u32> {
+    // Validate before mutating the index so we don't persist a broken path.
+    let _ = ensure_project_root_exists(new_path)?;
+
     let mut index = load_index();
     let Some(entry) = index.projects.iter_mut().find(|p| p.name == name) else {
         anyhow::bail!("project '{}' not found", name);
@@ -164,7 +183,7 @@ pub fn update_project_path(name: &str, new_path: &str) -> Result<u32> {
         updated_at: chrono::Utc::now().to_rfc3339(),
     });
 
-    let count = full_sync(new_path, &skills_list)?;
+    let count = full_sync(new_path, &skills_list, None)?;
     Ok(count)
 }
 
@@ -257,21 +276,43 @@ pub fn remove_skill_from_all_projects(skill_name: &str) -> Result<Vec<String>> {
 
 // ── Full Sync ───────────────────────────────────────────────────────
 
-/// Perform a full sync: clear all existing symlinks in each agent's project
-/// skill directory, then recreate them from the provided skills list.
+/// Perform a full sync: clear existing symlinks in managed agent directories,
+/// then recreate them from the provided skills list.
+///
+/// Only touches agent directories that appear in `skills_list.agents` or in
+/// `cleanup_agents` (agents removed from a previous config).  Agent directories
+/// not mentioned in either are left untouched, preventing cross-agent data loss
+/// from CLI-deployed or externally-managed symlinks.
 ///
 /// Returns the total number of symlinks created.
-pub fn full_sync(project_path: &str, skills_list: &SkillsList) -> Result<u32> {
+pub fn full_sync(
+    project_path: &str,
+    skills_list: &SkillsList,
+    cleanup_agents: Option<&[String]>,
+) -> Result<u32> {
     let hub_dir = paths::hub_skills_dir();
     let profiles = agent_profile::list_profiles();
-    let project = Path::new(project_path);
+    let project = ensure_project_root_exists(project_path)?;
     let mut total = 0u32;
+    let mut failures: Vec<String> = Vec::new();
+
+    // Only clear directories for agents we are actively managing:
+    // - agents in the new skills_list (will be rebuilt)
+    // - agents in cleanup_agents (were in old config, now removed)
+    let agents_in_list: HashSet<&str> =
+        skills_list.agents.keys().map(|s| s.as_str()).collect();
 
     for profile in &profiles {
         if !profile.has_project_skills() {
             continue;
         }
-        clear_project_symlinks(project, profile)?;
+        let should_clear = agents_in_list.contains(profile.id.as_str())
+            || cleanup_agents
+                .map_or(false, |ids| ids.iter().any(|id| id == &profile.id));
+        if !should_clear {
+            continue;
+        }
+        clear_project_symlinks(project.as_path(), profile)?;
     }
 
     for (agent_id, skill_names) in &skills_list.agents {
@@ -295,10 +336,23 @@ pub fn full_sync(project_path: &str, skills_list: &SkillsList) -> Result<u32> {
                 continue;
             }
             let target = target_dir.join(skill_name);
-            if paths::create_symlink_or_copy(&source, &target).is_ok() {
-                total += 1;
+            match paths::create_symlink_or_copy(&source, &target) {
+                Ok(_) => total += 1,
+                Err(err) => failures.push(format!(
+                    "Failed to link '{skill_name}' for agent '{agent_id}' at {target}: {err}",
+                    target = target.display()
+                )),
             }
         }
+    }
+
+    if !failures.is_empty() {
+        let failed = failures.len();
+        let preview = failures.into_iter().take(6).collect::<Vec<_>>().join("\n");
+        anyhow::bail!(
+            "Project sync incomplete: created {total} link(s), {failed} failure(s).\n{preview}",
+            failed = failed
+        );
     }
 
     Ok(total)
@@ -308,11 +362,19 @@ pub fn full_sync(project_path: &str, skills_list: &SkillsList) -> Result<u32> {
 ///
 /// This is the main entry point for both initial deployment and subsequent
 /// modifications. Returns `(project_name, symlink_count)`.
+///
+/// Compares the old skills-list against the new one to determine which agent
+/// directories need cleanup (agents that were configured before but removed
+/// now). Only those directories plus the new active ones are cleared and
+/// rebuilt; unrelated agent directories are left untouched.
 pub fn save_and_sync(
     project_path: &str,
     agents: HashMap<String, Vec<String>>,
 ) -> Result<(String, u32)> {
     let entry = register_project(project_path)?;
+
+    // Snapshot the old config so we can compute which agents were removed.
+    let old_list = load_skills_list(&entry.name);
 
     let skills_list = SkillsList {
         agents,
@@ -320,7 +382,20 @@ pub fn save_and_sync(
     };
 
     save_skills_list(&entry.name, &skills_list)?;
-    let count = full_sync(project_path, &skills_list)?;
+
+    // Agents that existed in old config but are absent from new config need
+    // their project directories cleaned up.
+    let cleanup: Vec<String> = old_list
+        .map(|old| {
+            old.agents
+                .keys()
+                .filter(|id| !skills_list.agents.contains_key(*id))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let count = full_sync(project_path, &skills_list, Some(&cleanup))?;
 
     Ok((entry.name, count))
 }
@@ -344,6 +419,123 @@ pub fn save_skills_list_only(
     save_skills_list(&entry.name, &skills_list)?;
 
     Ok(skills_list)
+}
+
+/// Incrementally add skills to a project for the given agents.
+///
+/// Unlike `save_and_sync` (which replaces the entire skills-list and rebuilds
+/// all symlinks), this function **merges** the requested skills into the
+/// existing skills-list and only creates symlinks for the new entries —
+/// leaving other agents' project directories untouched.
+///
+/// This is the canonical path for CLI `skillstar install` and quick-deploy
+/// operations that should be additive, not destructive.
+///
+/// If `agent_ids` is empty, falls back to the first profile whose
+/// `project_skills_rel` is `".agents/skills"` (i.e. Antigravity), or the
+/// first available profile with project-level support.
+pub fn add_skills_to_project(
+    project_path: &str,
+    skill_names: &[String],
+    agent_ids: &[String],
+) -> Result<u32> {
+    let entry = register_project(project_path)?;
+    let hub_dir = paths::hub_skills_dir();
+    let profiles = agent_profile::list_profiles();
+    let project = ensure_project_root_exists(project_path)?;
+
+    // Resolve which agents to target
+    let mut target_agent_ids: Vec<String> = agent_ids
+        .iter()
+        .filter(|id| {
+            profiles
+                .iter()
+                .any(|p| p.id == **id && p.has_project_skills())
+        })
+        .cloned()
+        .collect();
+
+    if target_agent_ids.is_empty() {
+        // Fallback: prefer the profile using .agents/skills, then first available
+        if let Some(fallback) = profiles
+            .iter()
+            .find(|p| p.project_skills_rel == ".agents/skills" && p.has_project_skills())
+            .or_else(|| profiles.iter().find(|p| p.has_project_skills()))
+        {
+            target_agent_ids.push(fallback.id.clone());
+        }
+    }
+
+    // Merge into existing skills-list.json
+    let mut skills_list = load_skills_list(&entry.name).unwrap_or(SkillsList {
+        agents: HashMap::new(),
+        updated_at: chrono::Utc::now().to_rfc3339(),
+    });
+
+    for agent_id in &target_agent_ids {
+        let agent_skills = skills_list.agents.entry(agent_id.clone()).or_default();
+        for name in skill_names {
+            if !agent_skills.contains(name) {
+                agent_skills.push(name.clone());
+            }
+        }
+    }
+    skills_list.updated_at = chrono::Utc::now().to_rfc3339();
+    save_skills_list(&entry.name, &skills_list)?;
+
+    // Create only the new symlinks (incremental — no clearing)
+    let mut total = 0u32;
+    let mut failures: Vec<String> = Vec::new();
+
+    for agent_id in &target_agent_ids {
+        let Some(profile) = profiles.iter().find(|p| &p.id == agent_id) else {
+            continue;
+        };
+        if !profile.has_project_skills() {
+            continue;
+        }
+
+        let target_dir = project.join(&profile.project_skills_rel);
+        std::fs::create_dir_all(&target_dir)
+            .with_context(|| format!("failed to create skill dir: {}", target_dir.display()))?;
+
+        for name in skill_names {
+            let source = hub_dir.join(name);
+            if !source.exists() {
+                continue;
+            }
+            let target = target_dir.join(name);
+
+            // If already a symlink, remove and recreate (refresh)
+            if paths::is_link(&target) {
+                let _ = paths::remove_symlink(&target);
+            } else if target.exists() {
+                // Real directory exists — skip to avoid data loss
+                continue;
+            }
+
+            match paths::create_symlink_or_copy(&source, &target) {
+                Ok(_) => total += 1,
+                Err(err) => failures.push(format!(
+                    "Failed to link '{}' for agent '{}' at {}: {}",
+                    name,
+                    agent_id,
+                    target.display(),
+                    err
+                )),
+            }
+        }
+    }
+
+    if !failures.is_empty() {
+        let failed = failures.len();
+        let preview = failures.into_iter().take(6).collect::<Vec<_>>().join("\n");
+        anyhow::bail!(
+            "Project deploy incomplete: created {total} link(s), {failed} failure(s).\n{preview}"
+        );
+    }
+
+    Ok(total)
 }
 
 /// Rebuild a project's skills-list.json from on-disk project skill directories.
@@ -582,10 +774,10 @@ pub struct ImportResult {
 /// every child directory. Classify each as symlink vs real directory, check
 /// whether the hub already has a skill with the same name, and whether the
 /// directory contains a SKILL.md file.
-pub fn scan_project_skills(project_path: &str) -> ProjectScanResult {
+pub fn scan_project_skills(project_path: &str) -> Result<ProjectScanResult> {
     let hub_dir = paths::hub_skills_dir();
     let profiles = agent_profile::list_profiles();
-    let project = Path::new(project_path);
+    let project = ensure_project_root_exists(project_path)?;
 
     let mut skills = Vec::with_capacity(profiles.len() * 8); // reasonable pre-alloc
     let mut agents_found = Vec::with_capacity(profiles.len());
@@ -635,10 +827,10 @@ pub fn scan_project_skills(project_path: &str) -> ProjectScanResult {
         }
     }
 
-    ProjectScanResult {
+    Ok(ProjectScanResult {
         skills,
         agents_found,
-    }
+    })
 }
 
 /// Import discovered skills into local storage and update the project's
@@ -885,7 +1077,7 @@ mod tests {
                 agents: first_agents,
                 updated_at: chrono::Utc::now().to_rfc3339(),
             };
-            full_sync(&project_path.to_string_lossy(), &first)?;
+            full_sync(&project_path.to_string_lossy(), &first, None)?;
 
             let claude_link = project_path.join(".claude/skills/demo-skill");
             let codex_link = project_path.join(".codex/skills/demo-skill");
@@ -898,11 +1090,14 @@ mod tests {
                 "expected initial codex symlink to exist"
             );
 
+            // Second sync: deselect all agents. Pass previous agents as cleanup
+            // to mirror the diff that save_and_sync computes in production.
+            let cleanup = vec!["claude".to_string(), "codex".to_string()];
             let second = SkillsList {
                 agents: HashMap::new(),
                 updated_at: chrono::Utc::now().to_rfc3339(),
             };
-            full_sync(&project_path.to_string_lossy(), &second)?;
+            full_sync(&project_path.to_string_lossy(), &second, Some(&cleanup))?;
 
             assert!(
                 !claude_link.symlink_metadata().is_ok(),

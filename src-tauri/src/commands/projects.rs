@@ -68,7 +68,8 @@ pub async fn remove_project(name: String) -> Result<(), AppError> {
 pub async fn scan_project_skills(
     project_path: String,
 ) -> Result<project_manifest::ProjectScanResult, AppError> {
-    Ok(project_manifest::scan_project_skills(&project_path))
+    project_manifest::scan_project_skills(&project_path)
+        .map_err(|e| AppError::Project(e.to_string()))
 }
 
 #[tauri::command]

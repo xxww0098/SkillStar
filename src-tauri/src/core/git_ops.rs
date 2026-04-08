@@ -60,10 +60,27 @@ fn compute_tree_hash_cli(repo_path: &Path) -> Result<String> {
 /// Always uses `--depth 1 --single-branch` to minimise network transfer
 /// and disk usage. Skills only need the latest snapshot, not full history.
 pub fn clone_repo(url: &str, dest: &Path) -> Result<()> {
+    clone_repo_shallow_inner(url, dest, true)
+}
+
+/// Shallow-clone a repository (depth=1) for fast scanning.
+///
+/// Only fetches the latest commit – ideal for repo scanning where full
+/// history is unnecessary.  Unlike `clone_repo`, does *not* pass
+/// `--single-branch` so remote tracking refs are created for update checks.
+pub fn clone_repo_shallow(url: &str, dest: &Path) -> Result<()> {
+    clone_repo_shallow_inner(url, dest, false)
+}
+
+/// Shared implementation for shallow clones.
+fn clone_repo_shallow_inner(url: &str, dest: &Path, single_branch: bool) -> Result<()> {
     let mut cmd = command_with_path("git");
     github_mirror::apply_mirror_args(&mut cmd);
+    cmd.args(["clone", "--depth", "1"]);
+    if single_branch {
+        cmd.arg("--single-branch");
+    }
     let output = cmd
-        .args(["clone", "--depth", "1", "--single-branch"])
         .arg(url)
         .arg(dest)
         .output()
@@ -72,28 +89,6 @@ pub fn clone_repo(url: &str, dest: &Path) -> Result<()> {
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);
         return Err(anyhow!("git clone failed: {}", err.trim()));
-    }
-
-    Ok(())
-}
-
-/// Shallow-clone a repository (depth=1) for fast scanning.
-///
-/// Only fetches the latest commit – ideal for repo scanning where full
-/// history is unnecessary.
-pub fn clone_repo_shallow(url: &str, dest: &Path) -> Result<()> {
-    let mut cmd = command_with_path("git");
-    github_mirror::apply_mirror_args(&mut cmd);
-    let output = cmd
-        .args(["clone", "--depth", "1"])
-        .arg(url)
-        .arg(dest)
-        .output()
-        .context("Failed to execute git clone --depth 1")?;
-
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!("git shallow clone failed: {}", err.trim()));
     }
 
     Ok(())

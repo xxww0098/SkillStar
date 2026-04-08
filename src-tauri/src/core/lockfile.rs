@@ -43,13 +43,15 @@ impl Lockfile {
         Ok(lockfile)
     }
 
-    /// Save lockfile to disk
+    /// Save lockfile to disk atomically (write to temp + rename).
     pub fn save(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         let content = serde_json::to_string_pretty(self)?;
-        std::fs::write(path, content).context("Failed to write lockfile")?;
+        let tmp_path = path.with_extension("tmp");
+        std::fs::write(&tmp_path, content).context("Failed to write lockfile (temp)")?;
+        std::fs::rename(&tmp_path, path).context("Failed to rename lockfile into place")?;
         Ok(())
     }
 

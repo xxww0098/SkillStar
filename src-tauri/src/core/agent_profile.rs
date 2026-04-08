@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 // ── Built-in agent definitions (data table) ────────────────────────
 // (id, display_name, icon, home_subdirs, project_skills_rel)
@@ -104,9 +105,8 @@ impl AgentProfile {
 
 /// Find an agent profile by its ID from a slice of profiles.
 ///
-/// Returns `Err` if no profile matches — this is the canonical
-/// replacement for the `.find(...).ok_or_else(...)` pattern that was
-/// previously duplicated across `sync.rs` and `project_manifest.rs`.
+/// Returns `Err` if no profile matches. This is the canonical
+/// replacement for the `.find(...).ok_or_else(...)` pattern.
 pub fn find_profile<'a>(
     profiles: &'a [AgentProfile],
     agent_id: &str,
@@ -168,31 +168,55 @@ fn save_prefs(prefs: &ProfilePrefs) -> Result<()> {
     Ok(())
 }
 
+struct BuiltinAgentData {
+    id: String,
+    display_name: String,
+    icon: String,
+    subdirs: &'static [&'static str],
+    project_skills_rel: String,
+}
+
+fn builtin_agent_data() -> &'static [BuiltinAgentData] {
+    static CACHED: OnceLock<Vec<BuiltinAgentData>> = OnceLock::new();
+    CACHED.get_or_init(|| {
+        BUILTIN_AGENT_DEFS
+            .iter()
+            .map(|(id, name, icon, subdirs, rel)| BuiltinAgentData {
+                id: (*id).to_string(),
+                display_name: (*name).to_string(),
+                icon: (*icon).to_string(),
+                subdirs: *subdirs,
+                project_skills_rel: (*rel).to_string(),
+            })
+            .collect()
+    })
+}
+
 /// Built-in agent definitions with correct directory paths.
 ///
 /// Profile data is driven by `BUILTIN_AGENT_DEFS`; adding a new agent
 /// only requires appending one tuple to the const table.
 fn builtin_profiles() -> Vec<AgentProfile> {
     let home = home_dir();
-    BUILTIN_AGENT_DEFS
-        .iter()
-        .map(|(id, name, icon, subdirs, rel)| {
-            let mut dir = home.clone();
-            for seg in *subdirs {
-                dir = dir.join(seg);
-            }
-            AgentProfile {
-                id: (*id).into(),
-                display_name: (*name).into(),
-                icon: (*icon).into(),
-                global_skills_dir: dir,
-                project_skills_rel: (*rel).into(),
-                installed: false,
-                enabled: false,
-                synced_count: 0,
-            }
-        })
-        .collect()
+    let data = builtin_agent_data();
+    let mut profiles = Vec::with_capacity(data.len());
+
+    for d in data {
+        let mut dir = home.clone();
+        dir.extend(d.subdirs);
+        profiles.push(AgentProfile {
+            id: d.id.clone(),
+            display_name: d.display_name.clone(),
+            icon: d.icon.clone(),
+            global_skills_dir: dir,
+            project_skills_rel: d.project_skills_rel.clone(),
+            installed: false,
+            enabled: false,
+            synced_count: 0,
+        });
+    }
+    
+    profiles
 }
 
 /// Count how many managed skill entries (symlinks, junctions, or copies) exist in a directory.
@@ -203,26 +227,54 @@ fn count_symlinks(dir: &Path) -> u32 {
     entries
         .flatten()
         .filter(|e| {
-            let path = e.path();
-            super::paths::is_link(&path) || (path.is_dir() && path.join("SKILL.md").exists())
+            let Ok(ft) = e.file_type() else {
+                return false;
+            };
+            
+            // Fast paths using dirent file_type (no stat calls on Unix, fast on Windows)
+            if ft.is_symlink() {
+                return true;
+            }
+
+            // Fallback for Windows junction points which might not be marked as symlinks
+            #[cfg(windows)]
+            if super::paths::is_link(&e.path()) {
+                return true;
+            }
+
+            // Fallback for copied directories
+            if ft.is_dir() {
+                let mut p = e.path();
+                p.push("SKILL.md");
+                return p.exists();
+            }
+
+            false
         })
         .count() as u32
 }
 
 /// Detect installation by creating the config/skills dir if it doesn't exist.
 fn detect_installed(profile: &AgentProfile) -> bool {
-    // The user requested to unconditionally create the directory and treat it as installed.
     if !profile.global_skills_dir.exists() {
-        let _ = std::fs::create_dir_all(&profile.global_skills_dir);
+        if let Err(e) = std::fs::create_dir_all(&profile.global_skills_dir) {
+            tracing::warn!(
+                "Failed to provision global skills directory for agent profile '{}' at {:?}: {}",
+                profile.id,
+                profile.global_skills_dir,
+                e
+            );
+            return false;
+        }
     }
     true
 }
 
-/// List all agent profiles with detected install status and user prefs.
-pub fn list_profiles() -> Vec<AgentProfile> {
-    let prefs = load_prefs();
+fn get_base_profiles(prefs: &ProfilePrefs) -> Vec<AgentProfile> {
     let mut profiles = builtin_profiles();
     let home = home_dir();
+
+    profiles.reserve(prefs.custom_profiles.len());
 
     for cp in &prefs.custom_profiles {
         let path_str = &cp.global_skills_dir;
@@ -236,9 +288,6 @@ pub fn list_profiles() -> Vec<AgentProfile> {
             PathBuf::from(path_str)
         };
 
-        // Normalize project_skills_rel to forward slashes for cross-platform consistency
-        let normalized_rel = cp.project_skills_rel.replace('\\', "/");
-
         profiles.push(AgentProfile {
             id: cp.id.clone(),
             display_name: cp.display_name.clone(),
@@ -247,12 +296,20 @@ pub fn list_profiles() -> Vec<AgentProfile> {
                 .clone()
                 .unwrap_or_else(|| "agents/openclaw.svg".into()),
             global_skills_dir: pbuf,
-            project_skills_rel: normalized_rel,
+            project_skills_rel: cp.project_skills_rel.clone(),
             installed: false,
             enabled: false,
             synced_count: 0,
         });
     }
+    
+    profiles
+}
+
+/// List all agent profiles with detected install status and user prefs.
+pub fn list_profiles() -> Vec<AgentProfile> {
+    let prefs = load_prefs();
+    let mut profiles = get_base_profiles(&prefs);
 
     for p in &mut profiles {
         p.installed = detect_installed(p);
@@ -286,7 +343,7 @@ pub fn add_custom_profile(def: CustomProfileDef) -> Result<()> {
 
     let mut prefs = load_prefs();
 
-    let mut new_def = def.clone();
+    let mut new_def = def;
     new_def.project_skills_rel = normalized_project_rel;
     if new_def.id.is_empty() {
         new_def.id = format!(
@@ -299,8 +356,8 @@ pub fn add_custom_profile(def: CustomProfileDef) -> Result<()> {
     }
 
     prefs.custom_profiles.retain(|p| p.id != new_def.id);
-    prefs.custom_profiles.push(new_def.clone());
     prefs.enabled.insert(new_def.id.clone(), true);
+    prefs.custom_profiles.push(new_def);
     save_prefs(&prefs)
 }
 
@@ -311,15 +368,12 @@ pub fn remove_custom_profile(id: &str) -> Result<()> {
     save_prefs(&prefs)
 }
 
-/// Toggle the enabled state of a single agent profile.
 pub fn toggle_profile(id: &str) -> Result<bool> {
     let mut prefs = load_prefs();
     let current = prefs.enabled.get(id).copied().unwrap_or_else(|| {
-        list_profiles()
-            .into_iter()
-            .find(|profile| profile.id == id)
-            .map(|profile| profile.enabled)
-            .unwrap_or(false)
+        // If not explicitly set, known profiles default to enabled
+        builtin_agent_data().iter().any(|def| def.id == id)
+            || prefs.custom_profiles.iter().any(|cp| cp.id == id)
     });
     let new_state = !current;
     prefs.enabled.insert(id.to_string(), new_state);
@@ -380,7 +434,7 @@ mod tests {
                 id: "custom_ollama".into(),
                 display_name: "Ollama".into(),
                 global_skills_dir: "D:\\ollama\\skills".into(),
-                project_skills_rel: ".ollma\\skills".into(),
+                project_skills_rel: ".ollama\\skills".into(),
                 icon_data_uri: None,
             })?;
 
@@ -391,7 +445,7 @@ mod tests {
                 .find(|profile| profile.id == "custom_ollama")
                 .expect("custom profile should be persisted");
 
-            assert_eq!(saved.project_skills_rel, ".ollma/skills");
+            assert_eq!(saved.project_skills_rel, ".ollama/skills");
             Ok(())
         })();
 

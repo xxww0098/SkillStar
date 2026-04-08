@@ -491,6 +491,7 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
                   const totalCount = groupSkillNames.length;
                   const missingCount = totalCount - installedCount;
                   const isInstallingThis = installingMissing === group.id;
+                  const maxSkillsToShow = viewMode === "grid" ? 5 : 999;
                   return (
                     <motion.div
                       key={group.id}
@@ -519,8 +520,8 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
                           {/* Header section */}
                           <div
                             className={cn(
-                              "flex items-start gap-4 pr-8 shrink-0",
-                              viewMode === "grid" ? "mb-5" : "w-[300px]",
+                              "flex items-start gap-4 pr-4 shrink-0",
+                              viewMode === "grid" ? "mb-5" : "w-[220px]",
                             )}
                           >
                             <div className="w-12 h-12 rounded-xl bg-primary/5 border border-primary/10 flex items-center justify-center text-2xl shrink-0">
@@ -547,11 +548,11 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
                           {/* Skills Preview Tags */}
                           <div
                             className={cn(
-                              "flex flex-wrap items-center gap-1.5 overflow-hidden max-h-[46px]",
-                              viewMode === "grid" ? "mt-auto" : "ml-4 flex-1",
+                              "flex flex-wrap items-center gap-1.5",
+                              viewMode === "grid" ? "mt-auto overflow-hidden max-h-[46px]" : "ml-2 flex-1 py-1",
                             )}
                           >
-                            {groupSkillNames.slice(0, 5).map((skillName) => {
+                            {groupSkillNames.slice(0, maxSkillsToShow).map((skillName) => {
                               const skill = skillByName.get(skillName);
                               return (
                                 <Badge
@@ -568,12 +569,12 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
                                 </Badge>
                               );
                             })}
-                            {groupSkillNames.length > 5 && (
+                            {groupSkillNames.length > maxSkillsToShow && (
                               <Badge
                                 variant="outline"
                                 className="text-micro font-medium px-2 py-0.5 h-5 bg-muted text-muted-foreground border-transparent"
                               >
-                                +{groupSkillNames.length - 5}
+                                +{groupSkillNames.length - maxSkillsToShow}
                               </Badge>
                             )}
                           </div>
@@ -649,7 +650,7 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
                         <div
                           className={cn(
                             "border-border/50 flex items-center shrink-0",
-                            viewMode === "grid" ? "ss-card-footer mt-auto rounded-b-xl" : "pl-6 pr-16 py-4 border-l",
+                            viewMode === "grid" ? "ss-card-footer mt-auto rounded-b-xl" : "pl-6 pr-16 py-4 border-l w-[320px]",
                           )}
                         >
                           {installedCount === 0 ? (

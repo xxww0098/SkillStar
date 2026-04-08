@@ -4,7 +4,7 @@ export function Toaster() {
   return (
     <Sonner
       position="bottom-right"
-      duration={5000}
+      duration={2500}
       closeButton
       toastOptions={{
         style: {

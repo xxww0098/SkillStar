@@ -101,8 +101,8 @@ export function ProjectDetailPanel({
           <div className="w-16 h-16 rounded-2xl bg-primary/5 border border-primary/10 flex items-center justify-center mx-auto mb-4">
             <FolderKanban className="w-8 h-8 text-primary/30" />
           </div>
-          <h3 className="text-heading-sm mb-1">{t("projects.selectProjectTitle")}</h3>
-          <p className="text-caption max-w-xs">{t("projects.selectProjectDesc")}</p>
+          <h3 className="text-heading-sm mb-2 text-foreground">{t("projects.selectProjectTitle")}</h3>
+          <p className="text-sm font-medium text-muted-foreground max-w-xs">{t("projects.selectProjectDesc")}</p>
         </motion.div>
       </div>
     );
@@ -119,7 +119,7 @@ export function ProjectDetailPanel({
             <h2 className="text-heading-sm truncate">{selectedProject.name}</h2>
             <p className="text-caption font-mono truncate">{selectedProject.path}</p>
           </div>
-          <Button variant="outline" size="sm" onClick={onRelinkPath}>
+          <Button variant="outline" size="sm" onClick={onRelinkPath} className="transition-all hover:bg-muted duration-200">
             <FolderSync className="w-3.5 h-3.5 mr-1.5" />
             {t("projects.changePath")}
           </Button>
@@ -143,7 +143,12 @@ export function ProjectDetailPanel({
         />
 
         {sharedProjectPaths.length > 0 && (
-          <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
+          <motion.div 
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={MOTION_TRANSITION.fadeFast}
+            className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3"
+          >
             <div className="flex items-start gap-3">
               <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-amber-500/20 bg-amber-500/10">
                 <AlertTriangle className="w-4 h-4 text-amber-400" />
@@ -162,7 +167,7 @@ export function ProjectDetailPanel({
                 </div>
               </div>
             </div>
-          </div>
+          </motion.div>
         )}
 
         <AgentAccordion

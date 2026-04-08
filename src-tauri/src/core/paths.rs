@@ -462,6 +462,15 @@ pub fn create_symlink(src: &Path, dst: &Path) -> anyhow::Result<()> {
 /// Returns `Ok(true)` if a copy fallback was used (not a live link),
 /// `Ok(false)` if a symlink/junction was created.
 pub fn create_symlink_or_copy(src: &Path, dst: &Path) -> anyhow::Result<bool> {
+    // Safety: never fall back to copying **into** an existing destination.
+    // Callers must clear/prepare the target path first.
+    if dst.symlink_metadata().is_ok() || is_link(dst) || dst.exists() {
+        anyhow::bail!(
+            "Destination already exists, refusing to overwrite: {}",
+            dst.display()
+        );
+    }
+
     match create_symlink(src, dst) {
         Ok(()) => Ok(false),
         Err(_) => {

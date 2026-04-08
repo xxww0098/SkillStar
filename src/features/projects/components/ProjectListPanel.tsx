@@ -34,10 +34,10 @@ export function ProjectListPanel({
             key={project.name}
             onClick={() => onSelectProject(project)}
             className={cn(
-              "group !h-auto cursor-pointer rounded-xl hover:-translate-y-0",
+              "group !h-auto cursor-pointer rounded-xl transition-all duration-300",
               selectedProject?.name === project.name
-                ? "bg-primary/5 border-primary/20 shadow-sm"
-                : "hover:bg-muted border-transparent",
+                ? "bg-primary/5 border-primary/20 shadow-sm ring-1 ring-primary/10"
+                : "hover:bg-muted/80 border-transparent hover:-translate-y-[1px] hover:shadow-sm",
             )}
             role="button"
             tabIndex={0}
@@ -70,7 +70,8 @@ export function ProjectListPanel({
                 <div className="shrink-0">
                   <button
                     onClick={(event) => onRemoveProject(event, project.name)}
-                    className="p-1.5 rounded-md opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition cursor-pointer"
+                    className="p-1.5 rounded-md opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all duration-200 cursor-pointer focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-destructive/40"
+                    aria-label={t("projects.removeProject")}
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>

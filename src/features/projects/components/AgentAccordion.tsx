@@ -50,7 +50,7 @@ export function AgentAccordion({
       <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
         {t("projects.agentsSection")}
       </div>
-      <CardTemplate className="rounded-xl overflow-hidden divide-y divide-border hover:-translate-y-0">
+      <CardTemplate className="rounded-[1rem] overflow-hidden divide-y divide-border/40 shadow-sm hover:shadow-md transition-shadow duration-300">
         {enabledProfiles.length === 0 && (
           <div className="px-3.5 py-6 text-xs text-muted-foreground text-center">{t("projects.noAgents")}</div>
         )}
@@ -65,7 +65,7 @@ export function AgentAccordion({
               <button
                 onClick={() => onToggleExpand(profile.id)}
                 className={cn(
-                  "w-full flex items-center gap-2.5 px-3.5 h-11 text-left transition-colors cursor-pointer",
+                  "w-full flex items-center gap-2.5 px-3.5 h-12 text-left transition-colors cursor-pointer group/accordion focus-visible:outline-none focus-visible:bg-muted/50",
                   isExpanded ? "bg-primary/[0.03]" : isEnabled ? "hover:bg-muted/50" : "hover:bg-muted/30",
                 )}
               >
@@ -99,7 +99,7 @@ export function AgentAccordion({
                 )}
                 <label
                   onClick={(event) => event.stopPropagation()}
-                  className="shrink-0 cursor-pointer p-2 -mr-2 flex items-center justify-center rounded-lg hover:bg-muted/50 transition-colors"
+                  className="shrink-0 cursor-pointer p-2 -mr-2 flex items-center justify-center rounded-lg hover:bg-muted/50 transition-colors focus-within:ring-2 focus-within:ring-primary/40"
                 >
                   <Switch checked={isEnabled} onCheckedChange={() => onToggleAgent(profile.id)} />
                 </label>

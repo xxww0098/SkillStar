@@ -15,6 +15,7 @@ import { useProjectAgentDetection } from "../../features/projects/hooks/useProje
 import { useProjectManifest } from "../../features/projects/hooks/useProjectManifest";
 import { useProjectSkills } from "../../features/projects/hooks/useProjectSkills";
 import { useAgentProfiles } from "../../hooks/useAgentProfiles";
+import { toast } from "../../lib/toast";
 import type { ProjectEntry, ScannedSkill, Skill } from "../../types";
 
 interface ProjectsProps {
@@ -383,6 +384,7 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
         scannedSkills = firstScan.skills;
       } catch (e) {
         console.error("Initial scan failed:", e);
+        toast.error(String(e) || t("projects.scanFailed", { defaultValue: "Project scan failed" }));
       }
 
       const symlinkSkillsByAgent = buildSymlinkSkillIndex(scannedSkills);
@@ -474,6 +476,7 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
       setScannedSymlinkSkillsByAgent,
       setUnmanagedAndMaybeExpand,
       canonicalizeAgentsBySharedPath,
+      t,
     ],
   );
 
@@ -492,8 +495,9 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
       await handleSelectProject(entry);
     } catch (e) {
       console.error("Register project failed:", e);
+      toast.error(String(e) || t("projects.registerFailed", { defaultValue: "Register project failed" }));
     }
-  }, [projects, handleSelectProject, registerProject]);
+  }, [projects, handleSelectProject, registerProject, t]);
 
   const handleCloseDeployDialog = useCallback(() => {
     setDeployDialogOpen(false);
@@ -627,10 +631,11 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
       setTimeout(() => setSyncResult(null), 4000);
     } catch (e) {
       console.error("Save and sync failed:", e);
+      toast.error(String(e) || t("projects.syncFailed", { defaultValue: "Sync failed" }));
     } finally {
       setSaving(false);
     }
-  }, [selectedProject, agentSkills, filterAgentsByEnabledProfiles, saveAndSync, loadProjects]);
+  }, [selectedProject, agentSkills, filterAgentsByEnabledProfiles, saveAndSync, loadProjects, t]);
 
   const handleRemoveProject = useCallback(
     async (e: React.MouseEvent, name: string) => {
@@ -660,8 +665,9 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
       setSelectedProject((prev) => (prev ? { ...prev, path: path as string } : null));
     } catch (e) {
       console.error("Relink failed:", e);
+      toast.error(String(e) || t("projects.relinkFailed", { defaultValue: "Change path failed" }));
     }
-  }, [selectedProject, updateProjectPath]);
+  }, [selectedProject, updateProjectPath, t]);
 
   const getAvailableSkills = useCallback(
     (agentId: string) => {

@@ -266,82 +266,120 @@ pub fn unlink_skill_from_agent(skill_name: &str, agent_id: &str) -> Result<()> {
 ///
 /// Skips skills that are already linked. Returns the number of new links created.
 pub fn batch_link_skills_to_agent(skill_names: &[String], agent_id: &str) -> Result<u32> {
+    tracing::info!(
+        target: "sync",
+        agent_id,
+        count = skill_names.len(),
+        "batch_link_skills_to_agent called"
+    );
+
     let hub_dir = super::paths::hub_skills_dir();
     let profiles = cached_profiles();
     let profile = agent_profile::find_profile(&profiles, agent_id)?;
+    let target_dir = &profile.global_skills_dir;
 
-    std::fs::create_dir_all(&profile.global_skills_dir)?;
+    std::fs::create_dir_all(target_dir)?;
 
     let mut linked = 0u32;
+    let mut skipped = 0u32;
     for name in skill_names {
         let skill_path = hub_dir.join(name);
-        if !skill_path.exists() {
-            continue; // Skip missing skills silently
-        }
-        let target = profile.global_skills_dir.join(name);
-        if super::paths::is_link(&target) {
-            continue; // Already linked
-        }
-        // Remove non-symlink entry if it exists (shouldn't happen, but be safe)
-        if target.exists() {
+        let target = target_dir.join(name);
+
+        let skill_exists = skill_path.exists();
+        let skill_is_link = super::paths::is_link(&skill_path);
+
+        if !skill_exists {
+            if skill_is_link {
+                tracing::warn!(
+                    target: "sync",
+                    skill = %name,
+                    skill_path = %skill_path.display(),
+                    "Skill hub entry is a broken symlink — removing and skipping"
+                );
+                let _ = super::paths::remove_link_or_copy(&skill_path);
+            } else {
+                tracing::warn!(
+                    target: "sync",
+                    skill = %name,
+                    skill_path = %skill_path.display(),
+                    "Skill not found in hub directory — skipping"
+                );
+            }
+            skipped += 1;
             continue;
         }
-        super::paths::create_symlink(&skill_path, &target)?;
-        linked += 1;
+
+        if super::paths::is_link(&target) {
+            tracing::debug!(target: "sync", skill = %name, target = %target.display(), "Already linked — skipping");
+            continue;
+        }
+        if target.exists() {
+            tracing::warn!(
+                target: "sync",
+                skill = %name,
+                target = %target.display(),
+                "Real directory exists at target — skipping"
+            );
+            skipped += 1;
+            continue;
+        }
+
+        match super::paths::create_symlink(&skill_path, &target) {
+            Ok(()) => {
+                tracing::info!(
+                    target: "sync",
+                    skill = %name,
+                    source = %skill_path.display(),
+                    target = %target.display(),
+                    "Skill linked successfully"
+                );
+                linked += 1;
+            }
+            Err(e) => {
+                tracing::error!(
+                    target: "sync",
+                    skill = %name,
+                    source = %skill_path.display(),
+                    target = %target.display(),
+                    error = %e,
+                    "Failed to create symlink for skill"
+                );
+                return Err(e);
+            }
+        }
     }
+
+    tracing::info!(
+        target: "sync",
+        agent_id,
+        linked,
+        skipped,
+        total = skill_names.len(),
+        "batch_link_skills_to_agent completed"
+    );
 
     Ok(linked)
 }
 
 /// Create project-level skill symlinks in a project directory.
+///
+/// This is a thin facade over `project_manifest::add_skills_to_project()` — all
+/// project-level skill management is canonically owned by `project_manifest`.
+///
+/// The function registers the project (if not already registered), merges the
+/// requested skills into `skills-list.json`, and creates symlinks incrementally
+/// without clearing other agents' directories.
 pub fn create_project_skills(
     project_path: &Path,
     selected_skills: &[String],
     agent_types: &[String],
 ) -> Result<u32> {
-    let hub_dir = super::paths::hub_skills_dir();
-    let profiles = cached_profiles();
-
-    let mut rel_dirs: Vec<String> = agent_types
-        .iter()
-        .filter_map(|id| {
-            profiles
-                .iter()
-                .find(|p| &p.id == id)
-                .filter(|p| p.has_project_skills())
-                .map(|p| p.project_skills_rel.clone())
-        })
-        .collect();
-
-    if rel_dirs.is_empty() {
-        rel_dirs.push(".agents/skills".to_string());
-    }
-
-    let mut total_linked = 0u32;
-
-    for rel_dir in rel_dirs {
-        let skills_folder = project_path.join(&rel_dir);
-        std::fs::create_dir_all(&skills_folder)
-            .with_context(|| format!("Failed to create {}", skills_folder.display()))?;
-
-        for name in selected_skills {
-            let source = hub_dir.join(name);
-            if !source.exists() {
-                continue;
-            }
-            let target = skills_folder.join(name);
-            if super::paths::is_link(&target) {
-                let _ = super::paths::remove_symlink(&target);
-            } else if target.exists() {
-                continue;
-            }
-            if super::paths::create_symlink_or_copy(&source, &target).is_ok() {
-                total_linked += 1;
-            }
-        }
-    }
-
-    Ok(total_linked)
+    super::project_manifest::add_skills_to_project(
+        &project_path.to_string_lossy(),
+        selected_skills,
+        agent_types,
+    )
 }
 
 /// Re-sync a skill only to agents that already have it linked.

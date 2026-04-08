@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-04-09
+
+### Added
+- **Refresh UX** — clear success feedback and cooldown mechanism when using the global refresh button.
+
+### Changed
+- **Skill installation optimization** — offloaded sync I/O and git operations to background threads, preventing main thread stalls. Atomic lockfile updates and minimized mutex contention.
+- **Account management UI** — modernized Codex and Model provider configuration interfaces.
+- **Agent profile architecture** — static config access refactored to use architectural caches (`OnceLock`); simpler, non-blocking profile toggling.
+
+### Fixed
+- **Skill card layout** — dynamic adjustment of visible tags in horizontal mode to avoid clipped text.
+- **Codex OAuth actions** — repaired silent failure on interactive elements.
+- **Project skill migration** — unified internal symlinking logic to prevent destructive syncs and ensure consistent state writing to `skills-list.json`.
+- **System resilience** — replaced silent error ingest with explicit handling around OS file creation and capability checks in `agent_profile.rs`.
+
 ## [0.2.1] - 2026-04-08
 
 ### Fixed
