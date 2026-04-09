@@ -76,6 +76,8 @@ pub struct ProvidersStore {
     pub codex: AppProviders,
     #[serde(default)]
     pub opencode: AppProviders,
+    #[serde(default)]
+    pub gemini: AppProviders,
 }
 
 fn store_path() -> PathBuf {
@@ -139,6 +141,7 @@ fn get_app_mut<'a>(store: &'a mut ProvidersStore, app_id: &str) -> &'a mut AppPr
         "claude" => &mut store.claude,
         "codex" => &mut store.codex,
         "opencode" => &mut store.opencode,
+        "gemini" => &mut store.gemini,
         _ => &mut store.claude,
     }
 }
@@ -148,6 +151,7 @@ fn get_app<'a>(store: &'a ProvidersStore, app_id: &str) -> &'a AppProviders {
         "claude" => &store.claude,
         "codex" => &store.codex,
         "opencode" => &store.opencode,
+        "gemini" => &store.gemini,
         _ => &store.claude,
     }
 }
@@ -331,6 +335,10 @@ fn apply_config_to_app(app_id: &str, config: &Value) -> Result<()> {
                 }
             }
             opencode::write_config(&existing)?;
+        }
+        "gemini" => {
+            // Gemini currently has no separate configuration file.
+            // Environment variables are injected dynamically.
         }
         _ => {}
     }
