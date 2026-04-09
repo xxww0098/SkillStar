@@ -67,18 +67,22 @@ git add -A
 git commit -m "chore: bump version to X.Y.Z"
 ```
 
-## 4. Tag and push
+## 4. Create Draft Release & Tag and Push
+
+To prevent `tauri-action` matrix jobs from racing to create the release (which causes a \`403 Resource not accessible by integration\` error in CI), we must explicitly create a Draft Release locally before pushing the tag.
 
 ```bash
+gh release create vX.Y.Z --draft --title "SkillStar vX.Y.Z" --notes "Release vX.Y.Z"
 git tag vX.Y.Z
 git push --atomic origin main vX.Y.Z
 ```
 
 This single atomic push safely syncs the branch and the tag simultaneously, which efficiently triggers the CI pipeline (`.github/workflows/release.yml`) once.
+Because the draft release already exists, the concurrent pipeline matrix jobs will just upload assets to it rather than crashing during creation.
 The pipeline will:
 1. Matrix-build for macOS arm64/x64, Linux x64, Windows x64
 2. Generate `latest.json` with per-platform signatures
-3. Publish the draft release
+3. Upload assets to the prepopulated draft release
 
 ## 6. Verify
 

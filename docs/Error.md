@@ -14,6 +14,12 @@ Significant bugs and fixes, kept in short form for faster lookup.
 
 ---
 
+### Release Matrix Action Failing with `Resource not accessible by integration` — 2026-04-09
+- Symptom: `tauri-action` fails in the release workflow across multiple matrix jobs with `Couldn't find release with tag vX.Y.Z. Creating one. ##[error]Resource not accessible by integration`, resulting in no release being published.
+- Root cause: Race condition. Multiple concurrent matrix jobs attempt to create the missing Draft Release via `POST /releases` at the exact same moment. Due to concurrency/rate-limit restrictions on `GITHUB_TOKEN`, this throws an HTTP 403.
+- Fix: Bypass the job racing by manually creating the empty Draft Release (via `gh release create vX.Y.Z --draft`) using the local `gh` token *before* triggering the GitHub Action matrix.
+- Files: `.github/workflows/release.yml`, `.agents/workflows/release.md`
+
 ### Skill Update Fails But Card Shows "Updated" — 2026-04-05
 - Symptom: `git fetch --depth 1 --quiet` fails with `fatal: shallow file has changed since we read it`, toast shows "更新失败", but the skill card's update button changes to "已安装" (no update badge).
 - Root cause: `prefetch_unique_repos` silently discarded fetch errors (`let _ = ...`). The subsequent `check_repo_skill_update_local` compared stale local/remote refs and returned `false` (no update), which wrote `update_available: false` to `UPDATE_STATE_CACHE`. The periodic `updatesQuery` refetch merged this into the frontend cache before or after the explicit update attempt, overriding the correct "update available" state.
