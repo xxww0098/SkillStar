@@ -27,6 +27,7 @@ fn main() {
             "scan",
             "doctor",
             "pack",
+            "launch",
             "gui",
             "-h",
             "--help",

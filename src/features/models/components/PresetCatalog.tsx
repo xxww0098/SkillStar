@@ -3,11 +3,13 @@ import { Check, ChevronDown, Loader2, Plus, Search } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { cn } from "../../../lib/utils";
+import { useCodexAccounts } from "../hooks/useCodexAccounts";
+import { useGeminiOAuth } from "../hooks/useGeminiOAuth";
 import type { ProviderEntry } from "../hooks/useModelProviders";
 import { claudePresets } from "../presets/claudePresets";
 import { codexPresets } from "../presets/codexPresets";
+import { geminiPresets } from "../presets/geminiPresets";
 import { opencodePresets } from "../presets/opencodePresets";
-import { useCodexAccounts } from "../hooks/useCodexAccounts";
 import type { ModelAppId } from "./AppCapsuleSwitcher";
 import { ProviderIcon } from "./shared/ProviderIcon";
 
@@ -25,6 +27,7 @@ export function PresetCatalog({ appId, appColor, onAddPreset, existingProviders 
   const [customName, setCustomName] = useState("");
   const [showCustom, setShowCustom] = useState(false);
   const codexState = useCodexAccounts();
+  const geminiState = useGeminiOAuth({ onAccountAdded: onAddPreset });
 
   // Build a Set of existing provider names (lowercase) for O(1) dedup lookups
   const existingNames = useMemo(() => new Set(existingProviders.map((p) => p.name.toLowerCase())), [existingProviders]);
@@ -61,6 +64,16 @@ export function PresetCatalog({ appId, appColor, onAddPreset, existingProviders 
           apiKeyUrl: p.apiKeyUrl,
           iconColor: p.iconColor,
           settingsConfig: { provider: { [p.name.toLowerCase().replace(/[^a-z0-9]/g, "_")]: p.settingsConfig } },
+        }));
+      case "gemini":
+        return geminiPresets.map((p) => ({
+          id: p.name.toLowerCase().replace(/[^a-z0-9]/g, "_"),
+          name: p.name,
+          category: p.category,
+          websiteUrl: p.websiteUrl,
+          apiKeyUrl: p.apiKeyUrl,
+          iconColor: p.iconColor,
+          settingsConfig: { env: p.env },
         }));
       default:
         return [];
@@ -133,7 +146,8 @@ export function PresetCatalog({ appId, appColor, onAddPreset, existingProviders 
       id: `custom_${Date.now()}`,
       name: nameStr,
       category: "custom",
-      settingsConfig: appId === "claude" ? { env: {} } : appId === "codex" ? { config: codexConfig } : {},
+      settingsConfig:
+        appId === "claude" || appId === "gemini" ? { env: {} } : appId === "codex" ? { config: codexConfig } : {},
       createdAt: Date.now(),
       sortIndex: 999,
     };
@@ -241,6 +255,32 @@ export function PresetCatalog({ appId, appColor, onAddPreset, existingProviders 
                           <Loader2 className="w-3 h-3 animate-spin text-[#00A67E]" />
                         ) : (
                           <Plus className="w-3 h-3 text-[#00A67E]/50 group-hover/chip:text-[#00A67E] transition-colors" />
+                        )}
+                      </button>
+                    )}
+
+                    {/* Gemini OAuth Injection */}
+                    {appId === "gemini" && group.key === "official" && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          geminiState.startOAuth();
+                        }}
+                        disabled={geminiState.oauthLoading}
+                        className={cn(
+                          "group/chip flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all",
+                          geminiState.oauthLoading
+                            ? "text-[#4285F4] border-[#4285F4]/30 bg-[#4285F4]/10 animate-pulse"
+                            : "text-[#4285F4] border-[#4285F4]/20 bg-[#4285F4]/10 hover:bg-[#4285F4]/20 hover:border-[#4285F4]/40",
+                        )}
+                      >
+                        <ProviderIcon name="Google OAuth" fallbackColor="#4285F4" size="w-4 h-4" />
+                        Google OAuth
+                        {geminiState.oauthLoading ? (
+                          <Loader2 className="w-3 h-3 animate-spin text-[#4285F4]" />
+                        ) : (
+                          <Plus className="w-3 h-3 text-[#4285F4]/50 group-hover/chip:text-[#4285F4] transition-colors" />
                         )}
                       </button>
                     )}

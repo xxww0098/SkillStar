@@ -383,6 +383,7 @@ const APP_BEHAVIORS: Record<ModelAppId, BehaviorField[]> = {
         "控制会话分析报告与云端共享资源的生成机制：\n\nManual: 极其克制，仅在人工主动点击分享时生成打包\nAuto: 每次结束时自动生成摘要日志并回传处理\nOff: 最高隐私保护，彻底关闭云端映射外放行为",
     },
   ],
+  gemini: [],
 };
 
 // ── Official doc links ──────────────────────────────────────────────
@@ -399,6 +400,10 @@ const APP_DOC_LINKS: Record<ModelAppId, { url: string; label: string }> = {
   opencode: {
     url: "https://opencode.ai/docs/config/",
     label: "OpenCode 配置文档",
+  },
+  gemini: {
+    url: "https://aistudio.google.com/app/apikey",
+    label: "Gemini 配置文档",
   },
 };
 

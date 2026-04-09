@@ -96,6 +96,10 @@ export function ProviderCard({
       const env = cfg?.env as Record<string, unknown> | undefined;
       return !!(env?.ANTHROPIC_AUTH_TOKEN || env?.ANTHROPIC_API_KEY);
     }
+    if (appId === "gemini") {
+      const env = cfg?.env as Record<string, unknown> | undefined;
+      return !!env?.GEMINI_API_KEY;
+    }
     if (appId === "codex") {
       const auth = cfg?.auth as Record<string, unknown> | undefined;
       // Official codex uses browser auth, no API key needed
@@ -134,6 +138,14 @@ export function ProviderCard({
   // ── Draft updaters ──────────────────────────────────────────
 
   const updateClaudeEnv = useCallback((key: string, value: string) => {
+    setDraft((prev) => {
+      const env = { ...((prev.settingsConfig.env as Record<string, unknown>) || {}) };
+      env[key] = value;
+      return { ...prev, settingsConfig: { ...prev.settingsConfig, env } };
+    });
+  }, []);
+
+  const updateGeminiEnv = useCallback((key: string, value: string) => {
     setDraft((prev) => {
       const env = { ...((prev.settingsConfig.env as Record<string, unknown>) || {}) };
       env[key] = value;
@@ -380,7 +392,7 @@ export function ProviderCard({
           label="当前模型"
           value={modelMatch?.[1] || ""}
           onChange={(v) => {
-            let newText = getEnsuredConfig(configText);
+            const newText = getEnsuredConfig(configText);
             if (/^model\s*=\s*"[^"]*"/m.test(newText)) {
               updateCodexConfig(newText.replace(/^model\s*=\s*"[^"]*"/m, `model = "${v}"`));
             } else {
@@ -389,6 +401,30 @@ export function ProviderCard({
             }
           }}
           placeholder="gpt-5.4"
+          fetchedModels={modelFetch.models}
+          fetchingModels={modelFetch.loading}
+        />
+      </div>
+    );
+  };
+
+  const renderGeminiFields = () => {
+    const env = (draft.settingsConfig.env as Record<string, unknown>) || {};
+    return (
+      <div className="space-y-3.5">
+        <ApiKeyInput
+          value={(env.GEMINI_API_KEY as string) || ""}
+          onChange={(v) => updateGeminiEnv("GEMINI_API_KEY", v)}
+          apiKeyUrl={provider.apiKeyUrl}
+        />
+        <EndpointInput
+          value={(env.GOOGLE_GEMINI_BASE_URL as string) || ""}
+          onChange={(v) => updateGeminiEnv("GOOGLE_GEMINI_BASE_URL", v)}
+        />
+        <ModelInput
+          label="主模型"
+          value={(env.GEMINI_MODEL as string) || ""}
+          onChange={(v) => updateGeminiEnv("GEMINI_MODEL", v)}
           fetchedModels={modelFetch.models}
           fetchingModels={modelFetch.loading}
         />
@@ -606,7 +642,9 @@ export function ProviderCard({
         {/* Name + URL */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <h3 className="text-sm font-semibold text-foreground leading-tight truncate">{provider.name}</h3>
+            <h3 className="text-sm font-semibold text-foreground leading-tight truncate">
+              {provider.name.replace(/^Google \((.+)\)$/, "$1")}
+            </h3>
             {isCurrent && (
               <span
                 className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-semibold text-white"
@@ -752,6 +790,7 @@ export function ProviderCard({
                   {appId === "claude" && renderClaudeFields()}
                   {appId === "codex" && renderCodexFields()}
                   {appId === "opencode" && renderOpenCodeFields()}
+                  {appId === "gemini" && renderGeminiFields()}
                 </div>
 
                 {/* Notes / URL */}

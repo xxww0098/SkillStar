@@ -7,6 +7,7 @@ import { type ProviderEntry, useModelProviders, useOpenCodeNativeProviders } fro
 import { AppCapsuleSwitcher, type ModelAppId } from "./AppCapsuleSwitcher";
 import { BehaviorStrip } from "./BehaviorStrip";
 import { CodexAccountSection } from "./CodexAccountSection";
+import { GeminiAccountSection } from "./GeminiAccountSection";
 import { ConfigFileEditor, type ConfigFileKey } from "./ConfigFileEditor";
 import { PresetCatalog } from "./PresetCatalog";
 import { ProviderCard } from "./ProviderCard";
@@ -16,6 +17,7 @@ const APP_COLORS: Record<ModelAppId, string> = {
   claude: "#D97757",
   codex: "#00A67E",
   opencode: "#6366F1",
+  gemini: "#3B82F6",
 };
 
 /** Config files available for each app */
@@ -23,6 +25,7 @@ const APP_CONFIG_FILES: Record<ModelAppId, { key: ConfigFileKey; label: string; 
   claude: [{ key: "claude", label: "settings.json", path: "~/.claude/settings.json" }],
   codex: [{ key: "codex_config", label: "config.toml", path: "~/.codex/config.toml" }],
   opencode: [{ key: "opencode", label: "opencode.json", path: "~/.config/opencode/opencode.json" }],
+  gemini: [],
 };
 
 /* ── Drag state is now fully managed in useDragReorder hook ── */
@@ -120,52 +123,54 @@ export function ModelsPanel() {
 
         <div className="flex items-center gap-1.5">
           {/* Config file editor button */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => {
-                const files = APP_CONFIG_FILES[activeApp];
-                if (files.length === 1) {
-                  setConfigEditorOpen(files[0].key);
-                } else {
-                  setConfigDropdownOpen((v) => !v);
-                }
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 border border-border transition-all"
-            >
-              <FileCode2 className="w-3.5 h-3.5" />
-              配置文件
-            </button>
-            {/* Dropdown for multi-file apps (Codex) */}
-            {configDropdownOpen && APP_CONFIG_FILES[activeApp].length > 1 && (
-              <>
-                <button
-                  type="button"
-                  className="fixed inset-0 z-40 cursor-default"
-                  onClick={() => setConfigDropdownOpen(false)}
-                  tabIndex={-1}
-                  aria-label="Close dropdown"
-                />
-                <div className="absolute right-0 top-full mt-1 z-50 min-w-[160px] rounded-lg border border-border bg-card shadow-lg py-1">
-                  {APP_CONFIG_FILES[activeApp].map((f) => (
-                    <button
-                      key={f.key}
-                      type="button"
-                      onClick={() => {
-                        setConfigEditorOpen(f.key);
-                        setConfigDropdownOpen(false);
-                      }}
-                      className="w-full text-left px-3 py-2 text-xs text-foreground hover:bg-muted/50 transition-colors flex items-center gap-2"
-                    >
-                      <FileCode2 className="w-3 h-3 text-muted-foreground" />
-                      {f.label}
-                      <span className="text-[10px] text-muted-foreground/50 ml-auto font-mono">{f.path}</span>
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
+          {APP_CONFIG_FILES[activeApp]?.length > 0 && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  const files = APP_CONFIG_FILES[activeApp];
+                  if (files.length === 1) {
+                    setConfigEditorOpen(files[0].key);
+                  } else {
+                    setConfigDropdownOpen((v) => !v);
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 border border-border transition-all"
+              >
+                <FileCode2 className="w-3.5 h-3.5" />
+                配置文件
+              </button>
+              {/* Dropdown for multi-file apps (Codex) */}
+              {configDropdownOpen && APP_CONFIG_FILES[activeApp].length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    className="fixed inset-0 z-40 cursor-default"
+                    onClick={() => setConfigDropdownOpen(false)}
+                    tabIndex={-1}
+                    aria-label="Close dropdown"
+                  />
+                  <div className="absolute right-0 top-full mt-1 z-50 min-w-[160px] rounded-lg border border-border bg-card shadow-lg py-1">
+                    {APP_CONFIG_FILES[activeApp].map((f) => (
+                      <button
+                        key={f.key}
+                        type="button"
+                        onClick={() => {
+                          setConfigEditorOpen(f.key);
+                          setConfigDropdownOpen(false);
+                        }}
+                        className="w-full text-left px-3 py-2 text-xs text-foreground hover:bg-muted/50 transition-colors flex items-center gap-2"
+                      >
+                        <FileCode2 className="w-3 h-3 text-muted-foreground" />
+                        {f.label}
+                        <span className="text-[10px] text-muted-foreground/50 ml-auto font-mono">{f.path}</span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -194,9 +199,12 @@ export function ModelsPanel() {
               ) : providers.sortedProviders.length === 0 ? (
                 /* Empty state */
                 <div className="space-y-5">
-                  {/* Codex OAuth account section (even when no providers) */}
+                  {/* Open AI / Google OAuth account section (even when no providers) */}
                   {activeApp === "codex" && (
                     <CodexAccountSection isOAuthActive={isOAuthActive} onAccountSwitched={handleAccountSwitched} />
+                  )}
+                  {activeApp === "gemini" && (
+                    <GeminiAccountSection onAccountSwitched={handleAccountSwitched} />
                   )}
 
                   <div className="flex flex-col items-center justify-center py-12 text-center">
@@ -227,14 +235,25 @@ export function ModelsPanel() {
               ) : (
                 /* Provider card list */
                 <div className="space-y-3">
-                  {/* Codex OAuth account section */}
+                  {/* Codex/Gemini account section */}
                   {activeApp === "codex" && (
                     <CodexAccountSection isOAuthActive={isOAuthActive} onAccountSwitched={handleAccountSwitched} />
+                  )}
+                  {activeApp === "gemini" && (
+                    <GeminiAccountSection onAccountSwitched={handleAccountSwitched} />
                   )}
 
                   <div className="space-y-3" ref={listContainerRef}>
                     <AnimatePresence>
-                      {localProviders.map((provider) => (
+                      {localProviders
+                        .filter(
+                          (provider) =>
+                            !(
+                              provider.id.startsWith("gemini_oauth_") ||
+                              provider.id.startsWith("gemini_apikey_")
+                            )
+                        )
+                        .map((provider) => (
                         <ProviderCard
                           key={provider.id}
                           provider={provider}

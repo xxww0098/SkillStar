@@ -96,14 +96,10 @@ function EmptyAccountState({
             "flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium transition-all shadow-sm",
             oauthLoading
               ? "bg-[#00A67E]/20 text-[#00A67E] animate-pulse"
-              : "bg-[#00A67E] hover:bg-[#00A67E]/90 text-white"
+              : "bg-[#00A67E] hover:bg-[#00A67E]/90 text-white",
           )}
         >
-          {oauthLoading ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <LogIn className="w-3.5 h-3.5" />
-          )}
+          {oauthLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogIn className="w-3.5 h-3.5" />}
           {oauthLoading ? "等待授权..." : "OAuth 登录"}
         </button>
         <button
@@ -153,7 +149,7 @@ export function CodexAccountSection({
     <div className="space-y-3">
       {/* Section header */}
       <div className="flex items-center justify-between px-1">
-        <h3 className="text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-widest">OpenAI 账号</h3>
+        <h3 className="text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-widest">OPENAI CODEX 账号</h3>
         {oauthCount > 0 && (
           <button
             type="button"
@@ -199,7 +195,7 @@ export function CodexAccountSection({
                 "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-medium transition-all group",
                 state.oauthLoading
                   ? "bg-primary/10 text-primary animate-pulse border border-transparent"
-                  : "bg-transparent text-muted-foreground hover:text-[#00A67E] hover:bg-[#00A67E]/10 border border-border hover:border-[#00A67E]/30"
+                  : "bg-transparent text-muted-foreground hover:text-[#00A67E] hover:bg-[#00A67E]/10 border border-border hover:border-[#00A67E]/30",
               )}
             >
               {state.oauthLoading ? (
@@ -236,7 +232,7 @@ export function CodexAccountSection({
           </div>
         </div>
       ) : (
-        <EmptyAccountState 
+        <EmptyAccountState
           onOAuth={state.startOAuth}
           onApiKey={() => setShowAddApiKey(!showAddApiKey)}
           oauthLoading={state.oauthLoading}

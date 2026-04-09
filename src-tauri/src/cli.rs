@@ -1,8 +1,8 @@
 use clap::{Parser, Subcommand};
 
 use crate::core::{
-    agent_profile, ai_provider, gh_manager, git_ops, lockfile, project_manifest, security_scan,
-    skill_install, skill_pack, sync,
+    agent_profile, ai_provider, gh_manager, git_ops, launch_deck, lockfile, project_manifest,
+    security_scan, skill_install, skill_pack, sync, terminal_backend,
 };
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -67,6 +67,11 @@ pub enum Commands {
     },
     /// Force launch GUI mode
     Gui,
+    /// Launch agent CLIs for a project
+    Launch {
+        #[command(subcommand)]
+        action: LaunchAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -77,6 +82,29 @@ pub enum PackAction {
     Remove {
         /// Pack name to remove
         name: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum LaunchAction {
+    /// Deploy a project's saved launch configuration
+    Deploy {
+        /// Project name (as registered in SkillStar)
+        project_name: String,
+    },
+    /// Directly launch a single agent CLI in the current directory
+    Run {
+        /// Agent CLI to launch: claude | codex | opencode | gemini
+        agent: String,
+        /// Provider profile to use (optional)
+        #[arg(long)]
+        provider: Option<String>,
+        /// Enable safe/dangerously-skip-permissions mode
+        #[arg(long)]
+        safe: bool,
+        /// Extra arguments passed through to the CLI
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
 }
 
@@ -108,6 +136,15 @@ pub fn run(args: Vec<String>) {
             // Will be handled by main.rs — restart in GUI mode
             println!("Launching SkillStar GUI...");
         }
+        Commands::Launch { action } => match action {
+            LaunchAction::Deploy { project_name } => cmd_launch_deploy(&project_name),
+            LaunchAction::Run {
+                agent,
+                provider,
+                safe,
+                args,
+            } => cmd_launch_run(&agent, provider.as_deref(), safe, &args),
+        },
     }
 }
 
@@ -761,6 +798,111 @@ fn cmd_pack_remove(name: &str) {
         }
         Err(e) => {
             eprintln!("✗ Failed to remove pack '{}': {}", name, e);
+            std::process::exit(1);
+        }
+    }
+}
+
+fn cmd_launch_deploy(project_name: &str) {
+    let config = match launch_deck::load_config(project_name) {
+        Some(c) => c,
+        None => {
+            eprintln!("✗ No launch config found for project '{}'", project_name);
+            eprintln!("  Configure a launch layout in SkillStar UI first.");
+            std::process::exit(1);
+        }
+    };
+
+    // Find project path from registered projects
+    let projects_path = crate::core::paths::projects_manifest_path();
+    let project_path = if projects_path.exists() {
+        let data = std::fs::read_to_string(&projects_path).unwrap_or_default();
+        let projects: Vec<serde_json::Value> =
+            serde_json::from_str(&data).unwrap_or_default();
+        projects
+            .iter()
+            .find(|p| p.get("name").and_then(|n| n.as_str()) == Some(project_name))
+            .and_then(|p| p.get("path").and_then(|v| v.as_str()))
+            .map(|s| s.to_string())
+    } else {
+        None
+    };
+
+    let project_path = match project_path {
+        Some(p) => p,
+        None => {
+            // Fallback to current directory
+            match std::env::current_dir() {
+                Ok(p) => p.to_string_lossy().to_string(),
+                Err(e) => {
+                    eprintln!("✗ Project '{}' not found and cannot read current dir: {}", project_name, e);
+                    std::process::exit(1);
+                }
+            }
+        }
+    };
+
+    println!("Deploying launch config for '{}' ({:?} mode)...", project_name, config.mode);
+
+    match terminal_backend::deploy(&config, &project_path) {
+        Ok(result) => {
+            if result.success {
+                println!("✓ {}", result.message);
+            } else {
+                eprintln!("✗ {}", result.message);
+                std::process::exit(1);
+            }
+        }
+        Err(e) => {
+            eprintln!("✗ Deploy failed: {}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
+fn cmd_launch_run(agent: &str, provider: Option<&str>, safe: bool, args: &[String]) {
+    // Verify the agent is a known CLI
+    if terminal_backend::find_cli_binary(agent).is_none() {
+        eprintln!("✗ Agent CLI '{}' not found.", agent);
+        eprintln!("  Available: claude, codex, opencode, gemini");
+        std::process::exit(1);
+    }
+
+    let cwd = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| ".".to_string());
+
+    let pane = launch_deck::LayoutNode::Pane {
+        id: "cli-run".to_string(),
+        agent_id: agent.to_string(),
+        provider_id: provider.map(|s| s.to_string()),
+        provider_name: None,
+        model_id: None,
+        safe_mode: safe,
+        extra_args: args.to_vec(),
+    };
+
+    let script = terminal_backend::generate_single_script(&pane, &cwd);
+
+    // Write and execute directly
+    let script_path = std::env::temp_dir().join(format!("ss-run-{}.sh", agent));
+    if let Err(e) = std::fs::write(&script_path, &script) {
+        eprintln!("✗ Failed to write script: {}", e);
+        std::process::exit(1);
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755));
+    }
+
+    println!("Launching {} in {}...", agent, cwd);
+
+    match terminal_backend::open_script_in_terminal(&script_path) {
+        Ok(_) => println!("✓ Launched in terminal"),
+        Err(e) => {
+            eprintln!("✗ Failed to open terminal: {}", e);
             std::process::exit(1);
         }
     }

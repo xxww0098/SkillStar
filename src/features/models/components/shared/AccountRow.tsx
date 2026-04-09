@@ -5,19 +5,20 @@
  * Displays account info, plan badge, quota bars, and contextual actions.
  */
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertCircle, Check, ChevronDown, Key, RefreshCw, Trash2, User } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, Key, RefreshCw, Trash2, User, Zap } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { cn } from "../../../../lib/utils";
 import type { CodexAccount } from "../../hooks/useCodexAccounts";
 import { CodexQuotaBar } from "../CodexQuotaBar";
+import { AgentIcon } from "./ProviderIcon";
 
 // ── Plan badge helpers ──────────────────────────────────────────────
 
 export function getPlanColor(planType?: string): string {
   if (!planType) return "#6B7280";
   const p = planType.toLowerCase();
-  if (p.includes("team")) return "#7C3AED";
+  if (p.includes("team") || p.includes("ultra") || p.includes("advanced") || p.includes("premium")) return "#7C3AED";
   if (p.includes("pro") || p.includes("plus")) return "#F59E0B";
   if (p.includes("enterprise")) return "#3B82F6";
   return "#6B7280";
@@ -26,12 +27,15 @@ export function getPlanColor(planType?: string): string {
 export function getPlanLabel(planType?: string): string {
   if (!planType) return "FREE";
   const p = planType.toLowerCase();
+  if (p.includes("ultra")) return "ULTRA";
+  if (p.includes("advanced")) return "ADVANCED";
+  if (p.includes("premium")) return "PREMIUM";
   if (p.includes("team")) return "TEAM";
   if (p.includes("pro")) return "PRO";
   if (p.includes("plus")) return "PLUS";
   if (p.includes("enterprise")) return "ENT";
   if (p === "api_key") return "KEY";
-  return planType.toUpperCase().slice(0, 6);
+  return planType.toUpperCase().slice(0, 8);
 }
 
 // ── AccountRow ──────────────────────────────────────────────────────
@@ -129,7 +133,7 @@ export function AccountRow({
             backgroundColor: isOAuth ? (isCurrent ? "#00A67E20" : "#00A67E10") : isCurrent ? "#F59E0B20" : "#F59E0B10",
           }}
         >
-          {isOAuth ? <User className="w-3.5 h-3.5 text-emerald-400" /> : <Key className="w-3.5 h-3.5 text-amber-400" />}
+          {isOAuth ? <AgentIcon appId="codex" color="#34d399" className="w-4 h-4" /> : <Key className="w-3.5 h-3.5 text-amber-400" />}
         </div>
 
         {/* Info */}
@@ -180,8 +184,11 @@ export function AccountRow({
           {!isCurrent && (
             <button
               type="button"
-              onClick={onSwitch}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium border transition-all hover:shadow-sm"
+              onClick={() => {
+                onSwitch();
+                onRefreshQuota();
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all hover:shadow-sm"
               style={{
                 borderColor: "#00A67E40",
                 color: "#00A67E",
@@ -199,6 +206,7 @@ export function AccountRow({
                 e.currentTarget.style.backgroundColor = "transparent";
               }}
             >
+              <Zap className="w-3.5 h-3.5" />
               使用
             </button>
           )}

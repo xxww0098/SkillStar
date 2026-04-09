@@ -14,7 +14,7 @@ import type { AgentProfile, RiskLevel, Skill } from "../../../types";
 
 interface SkillCardProps {
   skill: Skill;
-  onClick: () => void;
+  onClick: (skill: Skill) => void;
   onInstall: (url: string, name: string) => void;
   onUpdate: (name: string) => void;
   compact?: boolean;
@@ -198,7 +198,7 @@ function SkillCardInner({
       <CardTemplate
         className={cn("cursor-pointer group", compact && "p-2")}
         selected={selected}
-        onClick={onClick}
+        onClick={() => onClick(skill)}
         topLeftSlot={rankBadge}
         bottomLeftSlot={riskBadge}
         topRightSlot={statusAction}

@@ -1,4 +1,4 @@
-import { lazy, type ReactNode, Suspense } from "react";
+import { lazy, memo, type ReactNode, Suspense } from "react";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
@@ -31,18 +31,26 @@ interface MarkdownProps {
  * - `.markdown-content` + Tailwind `prose` styling
  * - `<Suspense>` with a plain-text fallback
  */
-export function Markdown({ children, className, fallback, streaming }: MarkdownProps) {
-  return (
-    <div className={cn("markdown-content prose prose-sm dark:prose-invert max-w-none", className)}>
-      {streaming ? (
-        <p className="text-body whitespace-pre-wrap">{children}</p>
-      ) : (
-        <Suspense fallback={fallback ?? <p className="text-body whitespace-pre-wrap">{children}</p>}>
-          <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={markdownComponents}>
-            {children}
-          </ReactMarkdown>
-        </Suspense>
-      )}
-    </div>
-  );
-}
+export const Markdown = memo(
+  function Markdown({ children, className, fallback, streaming }: MarkdownProps) {
+    return (
+      <div className={cn("markdown-content prose prose-sm dark:prose-invert max-w-none", className)}>
+        {streaming ? (
+          <p className="text-body whitespace-pre-wrap">{children}</p>
+        ) : (
+          <Suspense fallback={fallback ?? <p className="text-body whitespace-pre-wrap">{children}</p>}>
+            <ReactMarkdown
+              remarkPlugins={REMARK_PLUGINS}
+              rehypePlugins={REHYPE_PLUGINS}
+              components={markdownComponents}
+            >
+              {children}
+            </ReactMarkdown>
+          </Suspense>
+        )}
+      </div>
+    );
+  },
+  (prev, next) =>
+    prev.children === next.children && prev.streaming === next.streaming && prev.className === next.className,
+);

@@ -43,6 +43,7 @@ const CURRENT_COLOR_SVGS = new Set([
   "/providers/xiaomimimo.svg",
   "/agents/claude.svg",
   "/agents/opencode.svg",
+  "/agents/gemini.svg",
 ]);
 
 /**
@@ -52,6 +53,7 @@ export const AGENT_ICON_MAP: Record<string, string> = {
   claude: "/agents/claude.svg",
   codex: "/agents/codex.svg",
   opencode: "/agents/opencode.svg",
+  gemini: "/agents/gemini.svg",
 };
 
 /**

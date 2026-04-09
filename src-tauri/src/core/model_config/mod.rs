@@ -2,6 +2,8 @@ pub mod claude;
 pub mod codex;
 pub mod codex_accounts;
 pub mod codex_oauth;
+pub mod gemini_oauth;
+pub mod gemini_quota;
 pub mod opencode;
 pub mod providers;
 pub mod speedtest;

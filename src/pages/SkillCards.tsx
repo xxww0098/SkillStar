@@ -650,7 +650,9 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
                         <div
                           className={cn(
                             "border-border/50 flex items-center shrink-0",
-                            viewMode === "grid" ? "ss-card-footer mt-auto rounded-b-xl" : "pl-6 pr-16 py-4 border-l w-[320px]",
+                            viewMode === "grid"
+                              ? "ss-card-footer mt-auto rounded-b-xl"
+                              : "pl-6 pr-16 py-4 border-l w-[320px]",
                           )}
                         >
                           {installedCount === 0 ? (

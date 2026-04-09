@@ -2,6 +2,7 @@ pub mod acp;
 pub mod agents;
 pub mod ai;
 pub mod github;
+pub mod launch;
 pub mod marketplace;
 pub mod models;
 pub mod patrol;

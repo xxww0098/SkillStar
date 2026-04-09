@@ -416,7 +416,7 @@ export function useOpenCodeNativeProviders() {
           const providerConfig = entry.settingsConfig?.provider as Record<string, unknown> | undefined;
           const baseURL = "https://api.minimaxi.com/v1";
 
-          let models: Record<string, { name: string }> = {};
+          const models: Record<string, { name: string }> = {};
           try {
             const fetched = await invoke<{ id: string; owned_by?: string }[]>("fetch_endpoint_models", {
               baseUrl: baseURL,

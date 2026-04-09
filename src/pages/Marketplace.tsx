@@ -217,7 +217,7 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
         setSelectedSkill((prev) => (prev?.name === name ? { ...prev, update_available: false } : prev));
       } catch (e) {
         console.error("Update failed:", e);
-        const reason = String(e);
+        const reason = e instanceof Error ? e.message : String(e);
         toast.error(reason ? `${t("marketplace.updateFailed")}: ${reason}` : t("marketplace.updateFailed"));
       }
     },

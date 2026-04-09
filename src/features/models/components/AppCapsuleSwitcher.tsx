@@ -2,7 +2,7 @@ import { motion } from "framer-motion";
 import { cn } from "../../../lib/utils";
 import { AgentIcon } from "./shared/ProviderIcon";
 
-export type ModelAppId = "claude" | "codex" | "opencode";
+export type ModelAppId = "claude" | "codex" | "opencode" | "gemini";
 
 interface AppCapsuleItem {
   id: ModelAppId;
@@ -14,6 +14,7 @@ const APPS: AppCapsuleItem[] = [
   { id: "claude", label: "Claude", color: "#D97757" },
   { id: "codex", label: "Codex", color: "#00A67E" },
   { id: "opencode", label: "OpenCode", color: "#6366F1" },
+  { id: "gemini", label: "Gemini", color: "#3B82F6" },
 ];
 
 interface AppCapsuleSwitcherProps {

@@ -339,7 +339,12 @@ fn build_installed_skill(
 
     // For symlinked skills, read SKILL.md from the symlink target
     let effective_path = if is_repo_skill {
-        std::fs::read_link(&path)
+        let link_target = std::fs::read_link(&path);
+        
+        #[cfg(windows)]
+        let link_target = link_target.or_else(|_| junction::get_target(&path));
+        
+        link_target
             .map(|target| {
                 if target.is_absolute() {
                     target

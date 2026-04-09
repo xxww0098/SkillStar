@@ -217,7 +217,7 @@ export function SkillGrid({
   const renderCard = (skill: Skill) => (
     <SkillCard
       skill={skill}
-      onClick={() => onSkillClick(skill)}
+      onClick={onSkillClick}
       onInstall={onInstall}
       onUpdate={onUpdate}
       compact={viewMode === "list"}

@@ -6,6 +6,7 @@ import { MOTION_TRANSITION } from "../../../comm/motion";
 import { Button } from "../../../components/ui/button";
 import { formatPlatformPath } from "../../../lib/utils";
 import type { AgentProfile, ImportDone, ProjectEntry, ScannedSkill, Skill } from "../../../types";
+import { LaunchDeckSection } from "../../launch/components/LaunchDeckSection";
 import { AgentAccordion } from "./AgentAccordion";
 import { ApplyFooter } from "./ApplyFooter";
 import { ScanImportBanner } from "./ScanImportBanner";
@@ -119,7 +120,12 @@ export function ProjectDetailPanel({
             <h2 className="text-heading-sm truncate">{selectedProject.name}</h2>
             <p className="text-caption font-mono truncate">{selectedProject.path}</p>
           </div>
-          <Button variant="outline" size="sm" onClick={onRelinkPath} className="transition-all hover:bg-muted duration-200">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onRelinkPath}
+            className="transition-all hover:bg-muted duration-200"
+          >
             <FolderSync className="w-3.5 h-3.5 mr-1.5" />
             {t("projects.changePath")}
           </Button>
@@ -143,7 +149,7 @@ export function ProjectDetailPanel({
         />
 
         {sharedProjectPaths.length > 0 && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
             transition={MOTION_TRANSITION.fadeFast}
@@ -169,6 +175,8 @@ export function ProjectDetailPanel({
             </div>
           </motion.div>
         )}
+
+        <LaunchDeckSection projectName={selectedProject.name} projectPath={selectedProject.path} />
 
         <AgentAccordion
           enabledProfiles={enabledProfiles}

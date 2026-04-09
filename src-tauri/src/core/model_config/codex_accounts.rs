@@ -566,6 +566,40 @@ pub fn create_api_key_account(
 
 const USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 
+fn extract_detail_code_from_body(body: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(body).ok()?;
+
+    if let Some(code) = value
+        .get("detail")
+        .and_then(|d| d.get("code"))
+        .and_then(|c| c.as_str())
+    {
+        return Some(code.to_string());
+    }
+
+    if let Some(code) = value
+        .get("error")
+        .and_then(|e| e.get("code"))
+        .and_then(|c| c.as_str())
+    {
+        return Some(code.to_string());
+    }
+
+    if let Some(code) = value.get("code").and_then(|c| c.as_str()) {
+        return Some(code.to_string());
+    }
+
+    None
+}
+
+fn extract_error_code_from_message(message: &str) -> Option<String> {
+    let marker = "[error_code:";
+    let start = message.find(marker)?;
+    let code_start = start + marker.len();
+    let end = message[code_start..].find(']')?;
+    Some(message[code_start..code_start + end].to_string())
+}
+
 #[derive(Debug, Deserialize)]
 struct WindowInfo {
     used_percent: Option<i32>,
@@ -652,8 +686,15 @@ async fn fetch_quota_internal(
         .map_err(|e| format!("读取响应失败: {}", e))?;
 
     if !status.is_success() {
-        let body_preview = &body[..body.len().min(200)];
-        return Err(format!("API 返回错误 {} - {}", status, body_preview));
+        let detail_code = extract_detail_code_from_body(&body);
+        let body_preview = if body.len() > 200 { &body[..200] } else { &body };
+
+        let mut error_message = format!("API 返回错误 {}", status);
+        if let Some(code) = detail_code {
+            error_message.push_str(&format!(" [error_code:{}]", code));
+        }
+        error_message.push_str(&format!(" - {}", body_preview));
+        return Err(error_message);
     }
 
     let usage: UsageResponse =
@@ -771,7 +812,7 @@ pub async fn refresh_account_quota(account_id: &str) -> Result<CodexQuota, Strin
                             }
                             Err(retry_err) => {
                                 account.quota_error = Some(CodexQuotaError {
-                                    code: None,
+                                    code: extract_error_code_from_message(&retry_err),
                                     message: retry_err.clone(),
                                     timestamp: chrono::Utc::now().timestamp(),
                                 });
@@ -784,7 +825,7 @@ pub async fn refresh_account_quota(account_id: &str) -> Result<CodexQuota, Strin
             }
 
             account.quota_error = Some(CodexQuotaError {
-                code: None,
+                code: extract_error_code_from_message(&e),
                 message: e.clone(),
                 timestamp: chrono::Utc::now().timestamp(),
             });
@@ -796,26 +837,39 @@ pub async fn refresh_account_quota(account_id: &str) -> Result<CodexQuota, Strin
 
 /// Refresh all account quotas concurrently.
 pub async fn refresh_all_quotas() -> Vec<(String, Result<CodexQuota, String>)> {
+    use futures::future::join_all;
+    use std::sync::Arc;
+    use tokio::sync::Semaphore;
+
+    const MAX_CONCURRENT: usize = 5;
     let accounts: Vec<_> = list_accounts()
         .into_iter()
         .filter(|a| a.auth_mode != "apikey")
         .collect();
 
-    let mut tasks = Vec::new();
-    for account in accounts {
-        let account_id = account.id.clone();
-        tasks.push(tokio::spawn(async move {
-            let result = refresh_account_quota(&account_id).await;
-            (account_id, result)
-        }));
+    let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT));
+    let tasks: Vec<_> = accounts
+        .into_iter()
+        .map(|account| {
+            let account_id = account.id.clone();
+            let semaphore = semaphore.clone();
+            async move {
+                let _permit = match semaphore.acquire_owned().await {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return (account_id, Err(format!("获取并发许可失败: {}", e)));
+                    }
+                };
+                let result = refresh_account_quota(&account_id).await;
+                (account_id, result)
+            }
+        })
+        .collect();
+
+    let mut results = Vec::with_capacity(tasks.len());
+    for task in join_all(tasks).await {
+        results.push(task);
     }
 
-    let mut results = Vec::new();
-    for task in tasks {
-        match task.await {
-            Ok(item) => results.push(item),
-            Err(e) => tracing::error!("Quota refresh task panic: {}", e),
-        }
-    }
     results
 }

@@ -127,6 +127,39 @@ pub async fn codex_oauth_submit_callback(
         .map_err(|e| AppError::Other(format!("OAuth callback error: {e}")))
 }
 
+// ── Gemini OAuth ───────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn gemini_oauth_start() -> Result<crate::core::model_config::gemini_oauth::GeminiOAuthStartResponse, AppError> {
+    crate::core::model_config::gemini_oauth::start_login()
+        .await
+        .map_err(|e| AppError::Other(format!("Gemini OAuth start error: {e}")))
+}
+
+#[tauri::command]
+pub async fn gemini_oauth_complete(
+    login_id: String,
+) -> Result<crate::core::model_config::gemini_oauth::GeminiOAuthCompletePayload, AppError> {
+    crate::core::model_config::gemini_oauth::complete_login(&login_id)
+        .await
+        .map_err(|e| AppError::Other(format!("Gemini OAuth complete error: {e}")))
+}
+
+#[tauri::command]
+pub fn gemini_oauth_cancel(login_id: Option<String>) -> Result<(), AppError> {
+    crate::core::model_config::gemini_oauth::cancel_login(login_id.as_deref())
+        .map_err(|e| AppError::Other(format!("Gemini OAuth cancel error: {e}")))
+}
+
+#[tauri::command]
+pub fn gemini_oauth_submit_callback(
+    login_id: String,
+    callback_url: String,
+) -> Result<(), AppError> {
+    crate::core::model_config::gemini_oauth::submit_callback_url(&login_id, &callback_url)
+        .map_err(|e| AppError::Other(format!("Gemini OAuth callback error: {e}")))
+}
+
 #[tauri::command]
 pub async fn list_codex_accounts() -> Result<Vec<codex_accounts::CodexAccount>, AppError> {
     Ok(codex_accounts::list_accounts())
@@ -206,6 +239,16 @@ pub async fn refresh_codex_quota(
 pub async fn refresh_all_codex_quotas()
 -> Result<Vec<(String, Result<codex_accounts::CodexQuota, String>)>, AppError> {
     Ok(codex_accounts::refresh_all_quotas().await)
+}
+
+#[tauri::command]
+pub async fn refresh_gemini_quota(
+    app_id: String,
+    provider_id: String,
+) -> Result<crate::core::model_config::gemini_quota::GeminiQuota, AppError> {
+    crate::core::model_config::gemini_quota::refresh_gemini_quota(&app_id, &provider_id)
+        .await
+        .map_err(|e| AppError::Other(format!("Gemini quota refresh error: {e}")))
 }
 
 #[tauri::command]

@@ -8,6 +8,7 @@ pub mod gh_manager;
 pub mod git_ops;
 pub mod github_mirror;
 pub mod installed_skill;
+pub mod launch_deck;
 pub mod local_skill;
 pub mod lockfile;
 pub mod marketplace;
@@ -27,6 +28,7 @@ pub mod skill_group;
 pub mod skill_install;
 pub mod skill_pack;
 pub mod sync;
+pub mod terminal_backend;
 pub mod translation_cache;
 pub mod util;
 

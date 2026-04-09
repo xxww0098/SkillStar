@@ -216,7 +216,7 @@ export function DetailPanel({
     setReading(false);
 
     // Fetch details for remote marketplace skills
-    if (skill && !skill.installed && skill.source) {
+    if (skill && skill.source) {
       fetchDetails(skill.source, skill.name);
     }
   }, [

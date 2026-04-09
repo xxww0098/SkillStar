@@ -235,7 +235,7 @@ export function MySkills({
         setSelectedSkill(updated);
       }
     } catch (e) {
-      const reason = String(e);
+      const reason = e instanceof Error ? e.message : String(e);
       toast.error(reason ? `${t("mySkills.updateFailed")}: ${reason}` : t("mySkills.updateFailed"));
     }
   };
@@ -338,13 +338,15 @@ export function MySkills({
     setBatchLoading(true);
     let successCount = 0;
     const failedNames: string[] = [];
+    const errors: string[] = [];
 
     for (const name of updatableNames) {
       try {
         await updateSkill(name);
         successCount++;
-      } catch {
+      } catch (e) {
         failedNames.push(name);
+        errors.push(e instanceof Error ? e.message : String(e));
       }
     }
 
@@ -365,7 +367,8 @@ export function MySkills({
         }),
       );
     } else {
-      toast.error(t("mySkills.updateFailed"));
+      const reason = errors[0];
+      toast.error(reason ? `${t("mySkills.updateFailed")}: ${reason}` : t("mySkills.updateFailed"));
     }
   };
 
@@ -398,9 +401,9 @@ export function MySkills({
         if (selectedSkill?.name === representative.name) {
           setSelectedSkill(updated);
         }
-        return { success: group.length, failed: [] as string[] };
-      } catch {
-        return { success: 0, failed: group.map((s) => s.name) };
+        return { success: group.length, failed: [] as string[], error: null as string | null };
+      } catch (e) {
+        return { success: 0, failed: group.map((s) => s.name), error: e instanceof Error ? e.message : String(e) };
       }
     });
 
@@ -408,10 +411,12 @@ export function MySkills({
 
     let successCount = 0;
     const failedNames: string[] = [];
+    const errors: string[] = [];
     for (const r of results) {
       if (r.status === "fulfilled") {
         successCount += r.value.success;
         failedNames.push(...r.value.failed);
+        if (r.value.error) errors.push(r.value.error);
       }
     }
 
@@ -430,7 +435,8 @@ export function MySkills({
         }),
       );
     } else {
-      toast.error(t("mySkills.updateFailed"));
+      const reason = errors[0];
+      toast.error(reason ? `${t("mySkills.updateFailed")}: ${reason}` : t("mySkills.updateFailed"));
     }
   };
 

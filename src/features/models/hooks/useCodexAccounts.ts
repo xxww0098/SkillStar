@@ -197,9 +197,11 @@ export function useCodexAccounts() {
   // ── Refresh Single Quota ─────────────────────────────────
   const refreshQuota = useCallback(async (accountId: string) => {
     setQuotaRefreshing((prev) => new Set(prev).add(accountId));
+    toast("正在获取配额信息...");
     try {
       const quota = await invoke<CodexQuota>("refresh_codex_quota", { accountId });
       setAccounts((prev) => prev.map((a) => (a.id === accountId ? { ...a, quota, quotaError: undefined } : a)));
+      toast.success("配额刷新成功");
     } catch (e) {
       toast.error(`刷新配额失败: ${e}`);
     } finally {
@@ -218,16 +220,19 @@ export function useCodexAccounts() {
 
     const allIds = new Set(oauthAccounts.map((a) => a.id));
     setQuotaRefreshing(allIds);
+    toast("正在同步刷新配额...");
 
     try {
       await invoke("refresh_all_codex_quotas");
+      toast.success("所有账号配额已刷新");
       dispatchRefresh();
     } catch (e) {
+      toast.error(`批量刷新配额失败: ${e}`);
       console.error("Refresh all quotas error:", e);
     } finally {
       setQuotaRefreshing(new Set());
     }
-  }, [accounts, load]);
+  }, [accounts, dispatchRefresh]);
 
   // ── Add API Key Account ─────────────────────────────────
   const addApiKeyAccount = useCallback(
