@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MOTION_TRANSITION, motionDuration } from "../../../comm/motion";
 import { Button } from "../../../components/ui/button";
+import { ExternalAnchor } from "../../../components/ui/ExternalAnchor";
 import { Input } from "../../../components/ui/input";
 import { toast } from "../../../lib/toast";
 import { formatPlatformPath } from "../../../lib/utils";
@@ -184,14 +185,12 @@ export function AddCustomAgentDialog({ open, onClose, onConfirm, initialData, on
                     <p className="text-xs text-muted-foreground text-center">
                       {t("settings.uploadIcon", { defaultValue: "Upload Icon" })}
                     </p>
-                    <a
+                    <ExternalAnchor
                       href={`https://lobehub.com/${i18n.language === "zh-CN" ? "zh/" : ""}icons`}
-                      target="_blank"
-                      rel="noopener noreferrer"
                       className="text-[10px] text-primary/70 hover:text-primary hover:underline transition-colors"
                     >
                       {t("settings.findIconsOnLobeHub", { defaultValue: "Find icons on LobeHub" })}
-                    </a>
+                    </ExternalAnchor>
                   </div>
                 </div>
 

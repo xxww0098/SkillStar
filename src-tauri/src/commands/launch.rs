@@ -13,9 +13,7 @@ pub async fn get_launch_config(
 }
 
 #[tauri::command]
-pub async fn save_launch_config(
-    config: launch_deck::LaunchConfig,
-) -> Result<(), AppError> {
+pub async fn save_launch_config(config: launch_deck::LaunchConfig) -> Result<(), AppError> {
     tokio::task::spawn_blocking(move || {
         launch_deck::save_config(&config)
             .map_err(|e| AppError::Other(format!("Failed to save launch config: {}", e)))

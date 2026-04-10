@@ -40,31 +40,32 @@ const ProviderSelect = memo(function ProviderSelect({
   pane: PaneNode;
   onAssign: (paneId: string, agentId: string, providerId?: string, providerName?: string, modelId?: string) => void;
 }) {
+  const DEFAULT_PROVIDER_VALUE = "__default__";
   const isOpencode = pane.agentId === "opencode";
   const genericProviders = useModelProviders(pane.agentId as ModelAppId);
   const opencodeProviders = useOpenCodeNativeProviders();
   const providers = isOpencode ? opencodeProviders : genericProviders;
 
-  if (providers.sortedProviders.length === 0 && !providers.loading) {
-    return (
-      <span className="mt-1 text-[10px] bg-background/50 border border-destructive/30 text-destructive/80 rounded px-1.5 py-0.5">
-        无可用供应商
-      </span>
-    );
-  }
+  const hasAssignedProvider =
+    !!pane.providerId && providers.sortedProviders.some((provider) => provider.id === pane.providerId);
+  const selectedProviderId = hasAssignedProvider ? pane.providerId : DEFAULT_PROVIDER_VALUE;
 
   return (
     <select
       className="mt-1 text-[10px] bg-background/80 border border-border/50 rounded-md px-1.5 py-0.5 text-muted-foreground outline-none cursor-pointer hover:border-primary/40 focus:border-primary/60 transition-colors shadow-sm backdrop-blur-md appearance-none text-center min-w-[90px]"
-      value={pane.providerId || ""}
+      value={selectedProviderId}
       onChange={(e) => {
         const pId = e.target.value;
+        if (pId === DEFAULT_PROVIDER_VALUE) {
+          onAssign(pane.id, pane.agentId, undefined, undefined, pane.modelId);
+          return;
+        }
         const pName = providers.sortedProviders.find((p) => p.id === pId)?.name;
         onAssign(pane.id, pane.agentId, pId, pName, pane.modelId);
       }}
     >
-      <option value="" disabled>
-        设供应商...
+      <option value={DEFAULT_PROVIDER_VALUE}>
+        Default
       </option>
       {providers.sortedProviders.map((p) => {
         const displayName = p.name.replace(/^Google \((.+)\)$/, "$1");

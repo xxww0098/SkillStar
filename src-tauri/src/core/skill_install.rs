@@ -222,7 +222,7 @@ pub fn install_skills_batch(url: &str, names: &[String]) -> Result<Vec<Skill>, S
     };
 
     let skills_found = repo_scanner::scan_skills_in_repo(&repo_dir, &repo_url, false);
-    
+
     let mut targets = Vec::new();
     let mut fallback_names = Vec::new();
 
@@ -280,7 +280,7 @@ pub fn install_skills_batch(url: &str, names: &[String]) -> Result<Vec<Skill>, S
         }
     }
 
-    // Process fallbacks one by one 
+    // Process fallbacks one by one
     for name in fallback_names {
         match install_skill(url.to_string(), Some(name)) {
             Ok(skill) => installed_skills.push(skill),

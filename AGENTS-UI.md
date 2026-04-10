@@ -95,6 +95,7 @@ src/
 - Types: shared types in `src/types/index.ts`.
 - Icons: Lucide React.
 - Avoid inline style unless dynamic value cannot be expressed with utility classes.
+- External navigation must use `components/ui/ExternalAnchor` for link elements and `openExternalUrl` for buttons/programmatic flows; avoid raw `<a target="_blank">` in app views.
 
 ## Desktop UX Conventions
 - Pages include `MySkills`, `Marketplace`, `PublisherDetail`, `SkillCards`, `Projects`, `Settings`.

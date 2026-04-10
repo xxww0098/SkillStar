@@ -430,6 +430,12 @@ export function ImportModal({
     [fullDepthScan, t, urlInput],
   );
 
+  const handleDeepScan = useCallback(() => {
+    if (!scanResult) return;
+    setFullDepthScan(true);
+    void handleScan(scanResult.source_url, true);
+  }, [handleScan, scanResult]);
+
   // ── Install ────────────────────────────────────────────────────
   const handleInstall = useCallback(
     async (shouldPack: boolean = false) => {
@@ -580,8 +586,6 @@ export function ImportModal({
                       urlInput={urlInput}
                       setUrlInput={handleUrlInputChange}
                       onScan={() => handleScan()}
-                      fullDepthEnabled={fullDepthScan}
-                      onToggleFullDepth={setFullDepthScan}
                       history={history}
                       onSelectHistory={(entry) => {
                         setUrlInput(entry.source);
@@ -603,6 +607,8 @@ export function ImportModal({
                       onSelectAll={selectAll}
                       onDeselectAll={deselectAll}
                       onInstall={handleInstall}
+                      fullDepthEnabled={fullDepthScan}
+                      onDeepScan={handleDeepScan}
                       hasPackGroup={!!onPackGroup}
                     />
                   )}

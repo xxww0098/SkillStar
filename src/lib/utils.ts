@@ -32,6 +32,65 @@ export function formatPlatformPath(path: string): string {
   return path;
 }
 
+function normalizeSlashes(path: string): string {
+  return path.replace(/\\/g, "/");
+}
+
+/**
+ * Infer home root from an absolute path.
+ * - Windows: `C:/Users/<name>`
+ * - macOS/Linux: `/Users/<name>` or `/home/<name>`
+ */
+export function inferUserHomeRoot(path: string): string | null {
+  const normalized = normalizeSlashes(path);
+
+  const windows = normalized.match(/^([A-Za-z]:\/Users\/[^/]+)(?:\/|$)/);
+  if (windows?.[1]) return windows[1];
+
+  const unix = normalized.match(/^(\/(?:Users|home)\/[^/]+)(?:\/|$)/);
+  if (unix?.[1]) return unix[1];
+
+  return null;
+}
+
+/**
+ * Format an absolute path for current platform display.
+ * - Windows: keeps absolute path and uses backslashes.
+ * - macOS/Linux: collapses `/Users/<u>/...` and `/home/<u>/...` to `~/...`.
+ */
+export function formatGlobalPathForDisplay(path: string, platform: Platform = detectPlatform()): string {
+  const normalized = normalizeSlashes(path);
+  if (platform === "windows") return normalized.replace(/\//g, "\\");
+
+  const homeRoot = inferUserHomeRoot(normalized);
+  if (!homeRoot) return normalized;
+  if (normalized === homeRoot) return "~";
+
+  const prefix = `${homeRoot}/`;
+  if (normalized.startsWith(prefix)) return `~/${normalized.slice(prefix.length)}`;
+
+  return normalized;
+}
+
+/**
+ * Resolve SkillStar data root display path from resolved home dir.
+ * Example (Windows): `C:\\Users\\name\\.skillstar\\`
+ */
+export function resolveSkillstarDataPath(home: string, platform: Platform = detectPlatform()): string | null {
+  const trimmed = home.replace(/[\\/]+$/, "");
+  if (!trimmed) return null;
+
+  if (platform === "windows") {
+    const winHome = trimmed.replace(/\//g, "\\");
+    return `${winHome}\\.skillstar\\`;
+  }
+  if (platform === "linux" || platform === "macos") {
+    const unixHome = trimmed.replace(/\\/g, "/");
+    return `${unixHome}/.skillstar/`;
+  }
+  return null;
+}
+
 // Re-export frontmatter utilities so existing importers don't break.
 export {
   normalizeSkillMarkdownForPreview,
@@ -132,7 +191,7 @@ export function formatAiErrorMessage(error: string | null | undefined, t: Transl
 
 export async function copyToClipboard(text: string): Promise<boolean> {
   try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
+    if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text);
       return true;
     }

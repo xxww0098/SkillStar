@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronUp, ExternalLink, Loader2, Save } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { ExternalAnchor } from "../../../components/ui/ExternalAnchor";
 import { cn } from "../../../lib/utils";
 import { useClaudeConfig } from "../hooks/useClaudeConfig";
 
@@ -128,15 +129,13 @@ export function ClaudeConfigPanel() {
         <p className="text-xs text-muted-foreground/60 font-mono truncate">~/.claude/settings.json</p>
         <div className="flex items-center gap-2">
           {activePreset?.websiteUrl && (
-            <a
+            <ExternalAnchor
               href={activePreset.websiteUrl}
-              target="_blank"
-              rel="noopener noreferrer"
               className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
               title="官网"
             >
               <ExternalLink className="w-4 h-4" />
-            </a>
+            </ExternalAnchor>
           )}
           <button
             type="button"

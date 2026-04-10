@@ -4,6 +4,7 @@ use crate::core::error::AppError;
 use crate::core::model_config::{
     claude, codex, codex_accounts, codex_oauth, opencode, providers, speedtest,
 };
+use crate::core::path_env::command_with_path;
 
 /// Status of all three model config files.
 #[derive(serde::Serialize)]
@@ -104,10 +105,6 @@ pub async fn codex_oauth_complete(
     let account = codex_accounts::create_account_from_tokens(tokens)
         .map_err(|e| AppError::Other(format!("Create account error: {e}")))?;
 
-    // Auto-switch to the new account
-    codex_accounts::switch_account(&account.id)
-        .map_err(|e| AppError::Other(format!("Switch account error: {e}")))?;
-
     let _ = crate::refresh_tray_menu(&app);
     Ok(account)
 }
@@ -130,7 +127,8 @@ pub async fn codex_oauth_submit_callback(
 // ── Gemini OAuth ───────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn gemini_oauth_start() -> Result<crate::core::model_config::gemini_oauth::GeminiOAuthStartResponse, AppError> {
+pub async fn gemini_oauth_start()
+-> Result<crate::core::model_config::gemini_oauth::GeminiOAuthStartResponse, AppError> {
     crate::core::model_config::gemini_oauth::start_login()
         .await
         .map_err(|e| AppError::Other(format!("Gemini OAuth start error: {e}")))
@@ -474,9 +472,7 @@ pub async fn fetch_endpoint_models(
 #[tauri::command]
 pub async fn get_opencode_cli_models() -> Result<Vec<String>, AppError> {
     let output = tauri::async_runtime::spawn_blocking(|| {
-        std::process::Command::new("opencode")
-            .arg("models")
-            .output()
+        command_with_path("opencode").arg("models").output()
     })
     .await
     .map_err(|e| AppError::Other(format!("Task panic: {e}")))??;
@@ -539,7 +535,7 @@ pub async fn get_opencode_auth_providers() -> Result<serde_json::Value, AppError
     };
 
     // Augment with environment variables detected by opencode CLI
-    if let Ok(output) = std::process::Command::new("opencode")
+    if let Ok(output) = command_with_path("opencode")
         .arg("providers")
         .arg("list")
         .output()

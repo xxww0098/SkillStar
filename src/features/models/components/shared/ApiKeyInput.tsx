@@ -1,5 +1,6 @@
 import { Check, Copy, ExternalLink, Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
+import { openExternalUrl } from "../../../../lib/externalOpen";
 import { cn } from "../../../../lib/utils";
 
 interface ApiKeyInputProps {
@@ -35,16 +36,15 @@ export function ApiKeyInput({
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{label}</span>
         {apiKeyUrl && (
-          <a
-            href={apiKeyUrl}
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            type="button"
+            onClick={() => void openExternalUrl(apiKeyUrl)}
             className="flex items-center gap-1 text-[10px] text-muted-foreground/70 hover:text-primary transition-colors"
             title="获取 API Key"
           >
             <ExternalLink className="w-3 h-3" />
             <span>获取</span>
-          </a>
+          </button>
         )}
       </div>
       <div className="relative flex items-center">

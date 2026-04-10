@@ -1,6 +1,7 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Children, type ReactNode, useCallback, useEffect, useRef, useState, type WheelEvent } from "react";
 import type { Components } from "react-markdown";
+import { ExternalAnchor } from "../components/ui/ExternalAnchor";
 
 function stringifyChildren(children: ReactNode): string {
   return Children.toArray(children)
@@ -171,6 +172,22 @@ function ScrollBox({
 /* ─── Markdown component overrides ─── */
 
 export const markdownComponents: Components = {
+  a({ node: _node, href, children, ...props }) {
+    if (typeof href !== "string" || href.trim().length === 0) {
+      return (
+        <a {...props} href={href}>
+          {children}
+        </a>
+      );
+    }
+
+    return (
+      <ExternalAnchor href={href} {...props}>
+        {children}
+      </ExternalAnchor>
+    );
+  },
+
   code({ node: _node, children, className, ...props }) {
     const raw = stringifyChildren(children).replace(/\n$/, "");
     const normalized = stripWrappedBackticks(raw);

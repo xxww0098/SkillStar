@@ -149,7 +149,9 @@ export function CodexAccountSection({
     <div className="space-y-3">
       {/* Section header */}
       <div className="flex items-center justify-between px-1">
-        <h3 className="text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-widest">OPENAI CODEX 账号</h3>
+        <h3 className="text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-widest">
+          OPENAI CODEX 账号
+        </h3>
         {oauthCount > 0 && (
           <button
             type="button"
@@ -187,40 +189,32 @@ export function CodexAccountSection({
 
           {/* Add account buttons (when accounts already exist) */}
           <div className="flex items-center gap-2 pt-1">
-            <button
-              type="button"
-              onClick={state.startOAuth}
-              disabled={state.oauthLoading}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-medium transition-all group",
-                state.oauthLoading
-                  ? "bg-primary/10 text-primary animate-pulse border border-transparent"
-                  : "bg-transparent text-muted-foreground hover:text-[#00A67E] hover:bg-[#00A67E]/10 border border-border hover:border-[#00A67E]/30",
-              )}
-            >
-              {state.oauthLoading ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  等待授权...
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      state.cancelOAuth();
-                    }}
-                    className="ml-1 p-0.5 rounded hover:bg-black/10 transition-colors"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </>
-              ) : (
-                <>
-                  <LogIn className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100" />
-                  添加 OAuth
-                </>
-              )}
-            </button>
-
+            {state.oauthLoading ? (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-medium transition-all bg-primary/10 text-primary animate-pulse border border-transparent">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                等待授权...
+                <button
+                  type="button"
+                  onClick={state.cancelOAuth}
+                  aria-label="取消 OAuth 授权"
+                  className="ml-1 p-0.5 rounded hover:bg-black/10 transition-colors"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={state.startOAuth}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-medium transition-all group",
+                  "bg-transparent text-muted-foreground hover:text-[#00A67E] hover:bg-[#00A67E]/10 border border-border hover:border-[#00A67E]/30",
+                )}
+              >
+                <LogIn className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100" />
+                添加 OAuth
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setShowAddApiKey(!showAddApiKey)}

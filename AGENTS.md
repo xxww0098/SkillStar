@@ -124,6 +124,13 @@ SkillStar/
 - OpenClaw is global-only: `project_skills_rel` stays empty.
 - Custom agent `project_skills_rel` may be entered with Windows backslashes in UI/commands, but backend storage and detection normalize it to forward slashes.
 
+### Model Accounts
+- Completing Codex OAuth login only adds or refreshes the account record; it must not auto-switch the current active Codex account.
+
+### Launch Deck / Terminal
+- On Windows, **single mode** launch must run through a generated PowerShell script (`.ps1`) and must not require `bash`.
+- On Windows, **multi mode (tmux)** is disabled; Launch Deck must force/keep single mode and reject multi deploy attempts with a clear message.
+
 ### AI Integration
 - AI provider config is backend-owned (`config/ai.json`); frontend never stores API keys.
 - Long translation should fallback to chunked translation when full pass returns empty content.

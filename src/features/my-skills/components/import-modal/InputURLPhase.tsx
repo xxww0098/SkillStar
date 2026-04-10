@@ -2,15 +2,12 @@ import { Clock, Download, Package, Search, Share2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../../components/ui/button";
 import { SearchInput } from "../../../../components/ui/SearchInput";
-import { Switch } from "../../../../components/ui/switch";
 import type { RepoHistoryEntry } from "../../../../types";
 
 export interface InputURLPhaseProps {
   urlInput: string;
   setUrlInput: (v: string) => void;
   onScan: () => void;
-  fullDepthEnabled: boolean;
-  onToggleFullDepth: (enabled: boolean) => void;
   history: RepoHistoryEntry[];
   onSelectHistory: (entry: RepoHistoryEntry) => void;
   onPickLocalFile?: () => void;
@@ -21,8 +18,6 @@ export function InputURLPhase({
   urlInput,
   setUrlInput,
   onScan,
-  fullDepthEnabled,
-  onToggleFullDepth,
   history,
   onSelectHistory,
   onPickLocalFile,
@@ -69,18 +64,6 @@ export function InputURLPhase({
           <Search className="w-3.5 h-3.5 mr-1.5" />
           {t("githubImportModal.scan")}
         </Button>
-      </div>
-
-      <div className="flex items-start justify-between gap-3 rounded-xl border border-border/60 bg-muted/25 px-3 py-2.5">
-        <div className="space-y-0.5">
-          <p className="text-xs font-medium">{t("githubImportModal.fullDepthLabel")}</p>
-          <p className="text-micro text-muted-foreground">{t("githubImportModal.fullDepthHint")}</p>
-        </div>
-        <Switch
-          checked={fullDepthEnabled}
-          onCheckedChange={(checked) => onToggleFullDepth(Boolean(checked))}
-          aria-label={t("githubImportModal.fullDepthLabel")}
-        />
       </div>
 
       {onPickLocalFile && (

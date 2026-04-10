@@ -92,7 +92,9 @@ pub fn read_store() -> Result<ProvidersStore> {
     }
     let text = std::fs::read_to_string(&path)
         .with_context(|| format!("Failed to read {}", path.display()))?;
-    let mut store: ProvidersStore = serde_json::from_str(&text)
+    // Be tolerant of UTF-8 BOM (for example when files are rewritten by PowerShell).
+    let text = text.trim_start_matches('\u{FEFF}');
+    let mut store: ProvidersStore = serde_json::from_str(text)
         .with_context(|| format!("Failed to parse {}", path.display()))?;
 
     // Data Migration: Clean up legacy / stale settings from user's persisted state
@@ -153,6 +155,63 @@ fn get_app<'a>(store: &'a ProvidersStore, app_id: &str) -> &'a AppProviders {
         "opencode" => &store.opencode,
         "gemini" => &store.gemini,
         _ => &store.claude,
+    }
+}
+
+fn normalize_claude_auth_keys_in_json_env(env_obj: &mut Map<String, Value>) {
+    let auth_token = env_obj
+        .get("ANTHROPIC_AUTH_TOKEN")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToString::to_string);
+    let api_key = env_obj
+        .get("ANTHROPIC_API_KEY")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToString::to_string);
+    let has_custom_base_url = env_obj
+        .get("ANTHROPIC_BASE_URL")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .map_or(false, |v| !v.is_empty());
+
+    if has_custom_base_url {
+        match (auth_token, api_key) {
+            (Some(token), _) => {
+                env_obj.insert("ANTHROPIC_AUTH_TOKEN".to_string(), Value::String(token));
+                env_obj.remove("ANTHROPIC_API_KEY");
+            }
+            (None, Some(key)) => {
+                env_obj.insert("ANTHROPIC_AUTH_TOKEN".to_string(), Value::String(key));
+                env_obj.remove("ANTHROPIC_API_KEY");
+            }
+            (None, None) => {
+                env_obj.remove("ANTHROPIC_AUTH_TOKEN");
+                env_obj.remove("ANTHROPIC_API_KEY");
+            }
+        }
+        return;
+    }
+
+    match (auth_token, api_key) {
+        (Some(_token), Some(key)) => {
+            env_obj.insert("ANTHROPIC_API_KEY".to_string(), Value::String(key));
+            env_obj.remove("ANTHROPIC_AUTH_TOKEN");
+        }
+        (Some(token), None) => {
+            env_obj.insert("ANTHROPIC_AUTH_TOKEN".to_string(), Value::String(token));
+            env_obj.remove("ANTHROPIC_API_KEY");
+        }
+        (None, Some(key)) => {
+            env_obj.insert("ANTHROPIC_API_KEY".to_string(), Value::String(key));
+            env_obj.remove("ANTHROPIC_AUTH_TOKEN");
+        }
+        (None, None) => {
+            env_obj.remove("ANTHROPIC_AUTH_TOKEN");
+            env_obj.remove("ANTHROPIC_API_KEY");
+        }
     }
 }
 
@@ -224,6 +283,8 @@ fn apply_config_to_app(app_id: &str, config: &Value) -> Result<()> {
                 for (key, value) in new_env {
                     env_obj.insert(key.clone(), value.clone());
                 }
+
+                normalize_claude_auth_keys_in_json_env(env_obj);
             }
             claude::write_settings(&existing)?;
         }
@@ -481,6 +542,26 @@ mod tests {
     }
 
     #[test]
+    fn read_store_tolerates_utf8_bom() -> Result<()> {
+        with_temp_home("bom-tolerant", || {
+            let path = store_path();
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let mut bytes = vec![0xEF, 0xBB, 0xBF];
+            bytes.extend_from_slice(
+                br#"{"claude":{"providers":{"p1":{"id":"p1","name":"P1","category":"custom","settingsConfig":{"env":{"ANTHROPIC_API_KEY":"k"}}}},"current":"p1"}}"#,
+            );
+            std::fs::write(&path, bytes)?;
+
+            let store = read_store()?;
+            assert!(store.claude.providers.contains_key("p1"));
+            assert_eq!(store.claude.current.as_deref(), Some("p1"));
+            Ok(())
+        })
+    }
+
+    #[test]
     fn add_and_update_provider_do_not_activate_until_explicit_switch() -> Result<()> {
         with_temp_home("no-auto-activate", || {
             let entry = sample_codex_provider();
@@ -561,6 +642,129 @@ mod tests {
                 !env.contains_key("ANTHROPIC_DEFAULT_OPUS_MODEL"),
                 "stale provider model mappings should be cleared"
             );
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn apply_claude_provider_env_keeps_auth_token_only() -> Result<()> {
+        with_temp_home("claude-auth-token-only", || {
+            apply_config_to_app(
+                "claude",
+                &json!({
+                    "env": {
+                        "ANTHROPIC_AUTH_TOKEN": "token-only"
+                    }
+                }),
+            )?;
+
+            let settings = claude::read_settings()?;
+            let env = settings
+                .get("env")
+                .and_then(|value| value.as_object())
+                .expect("env object should exist");
+
+            assert_eq!(env.get("ANTHROPIC_AUTH_TOKEN"), Some(&json!("token-only")));
+            assert!(!env.contains_key("ANTHROPIC_API_KEY"));
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn apply_claude_provider_env_token_with_custom_base_url_keeps_auth_token() -> Result<()> {
+        with_temp_home("claude-auth-token-custom-base", || {
+            apply_config_to_app(
+                "claude",
+                &json!({
+                    "env": {
+                        "ANTHROPIC_AUTH_TOKEN": "token-only",
+                        "ANTHROPIC_BASE_URL": "https://api.minimaxi.com/anthropic"
+                    }
+                }),
+            )?;
+
+            let settings = claude::read_settings()?;
+            let env = settings
+                .get("env")
+                .and_then(|value| value.as_object())
+                .expect("env object should exist");
+
+            assert_eq!(env.get("ANTHROPIC_AUTH_TOKEN"), Some(&json!("token-only")));
+            assert!(!env.contains_key("ANTHROPIC_API_KEY"));
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn apply_claude_provider_env_api_key_with_custom_base_url_maps_to_auth_token() -> Result<()> {
+        with_temp_home("claude-api-key-custom-base", || {
+            apply_config_to_app(
+                "claude",
+                &json!({
+                    "env": {
+                        "ANTHROPIC_API_KEY": "key-only",
+                        "ANTHROPIC_BASE_URL": "https://api.minimaxi.com/anthropic"
+                    }
+                }),
+            )?;
+
+            let settings = claude::read_settings()?;
+            let env = settings
+                .get("env")
+                .and_then(|value| value.as_object())
+                .expect("env object should exist");
+
+            assert_eq!(env.get("ANTHROPIC_AUTH_TOKEN"), Some(&json!("key-only")));
+            assert!(!env.contains_key("ANTHROPIC_API_KEY"));
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn apply_claude_provider_env_keeps_api_key_only() -> Result<()> {
+        with_temp_home("claude-api-key-only", || {
+            apply_config_to_app(
+                "claude",
+                &json!({
+                    "env": {
+                        "ANTHROPIC_API_KEY": "key-only"
+                    }
+                }),
+            )?;
+
+            let settings = claude::read_settings()?;
+            let env = settings
+                .get("env")
+                .and_then(|value| value.as_object())
+                .expect("env object should exist");
+
+            assert_eq!(env.get("ANTHROPIC_API_KEY"), Some(&json!("key-only")));
+            assert!(!env.contains_key("ANTHROPIC_AUTH_TOKEN"));
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn apply_claude_provider_env_prefers_api_key_when_both_present() -> Result<()> {
+        with_temp_home("claude-auth-key-conflict", || {
+            apply_config_to_app(
+                "claude",
+                &json!({
+                    "env": {
+                        "ANTHROPIC_AUTH_TOKEN": "token-value",
+                        "ANTHROPIC_API_KEY": "key-value"
+                    }
+                }),
+            )?;
+
+            let settings = claude::read_settings()?;
+            let env = settings
+                .get("env")
+                .and_then(|value| value.as_object())
+                .expect("env object should exist");
+
+            assert_eq!(env.get("ANTHROPIC_API_KEY"), Some(&json!("key-value")));
+            assert!(!env.contains_key("ANTHROPIC_AUTH_TOKEN"));
             Ok(())
         })
     }

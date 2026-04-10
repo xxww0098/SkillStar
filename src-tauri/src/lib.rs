@@ -293,6 +293,7 @@ pub fn run() {
             commands::import_multi_skill_bundle,
             commands::write_text_file,
             commands::read_text_file,
+            commands::open_external_url,
             commands::open_folder,
             commands::patrol::start_patrol,
             commands::patrol::stop_patrol,

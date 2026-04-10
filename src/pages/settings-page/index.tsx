@@ -265,15 +265,11 @@ function aiReducer(state: AiState, action: AiAction): AiState {
 type AgentAction =
   | { type: "SET_EXPANDED_AGENT"; agentId: string | null }
   | { type: "SET_LINKED_SKILLS"; agentId: string; skills: string[] }
-  | { type: "REMOVE_LINKED_SKILL"; agentId: string; skillName: string }
-  | { type: "SET_UNLINKING_ID"; id: string | null }
-  | { type: "SET_CONFIRM_DISABLE_ID"; id: string | null };
+  | { type: "REMOVE_LINKED_SKILL"; agentId: string; skillName: string };
 
 interface AgentState {
   expandedAgentId: string | null;
   linkedSkills: Record<string, string[]>;
-  unlinkingId: string | null;
-  confirmDisableId: string | null;
 }
 
 function agentReducer(state: AgentState, action: AgentAction): AgentState {
@@ -290,10 +286,6 @@ function agentReducer(state: AgentState, action: AgentAction): AgentState {
           [action.agentId]: (state.linkedSkills[action.agentId] ?? []).filter((s) => s !== action.skillName),
         },
       };
-    case "SET_UNLINKING_ID":
-      return { ...state, unlinkingId: action.id };
-    case "SET_CONFIRM_DISABLE_ID":
-      return { ...state, confirmDisableId: action.id };
     default:
       return state;
   }
@@ -473,7 +465,6 @@ export function Settings({
     profiles,
     loading: profilesLoading,
     toggleProfile,
-    unlinkAllFromAgent,
     addCustomProfile,
     removeCustomProfile,
   } = useAgentProfiles();
@@ -519,8 +510,6 @@ export function Settings({
   const [agentState, dispatchAgent] = useReducer(agentReducer, {
     expandedAgentId: null,
     linkedSkills: {},
-    unlinkingId: null,
-    confirmDisableId: null,
   });
 
   const [storageOverview, setStorageOverview] = useState<StorageOverview | null>(null);
@@ -736,10 +725,6 @@ export function Settings({
 
   const handleToggle = useCallback(
     async (profile: (typeof profiles)[0]) => {
-      if (profile.enabled && profile.synced_count > 0) {
-        dispatchAgent({ type: "SET_CONFIRM_DISABLE_ID", id: profile.id });
-        return;
-      }
       try {
         await toggleProfile(profile.id);
       } catch (e) {
@@ -747,25 +732,8 @@ export function Settings({
         toast.error(t("settings.toggleFailed"));
       }
     },
-    [profiles, toggleProfile, t],
+    [toggleProfile, t],
   );
-
-  const confirmDisable = useCallback(async () => {
-    const id = agentState.confirmDisableId;
-    if (!id) return;
-    dispatchAgent({ type: "SET_UNLINKING_ID", id });
-    try {
-      await unlinkAllFromAgent(id);
-      await toggleProfile(id);
-      notifySkillsRefresh();
-    } catch (e) {
-      console.error("Disable failed:", e);
-      toast.error(t("settings.disableFailed"));
-    } finally {
-      dispatchAgent({ type: "SET_UNLINKING_ID", id: null });
-      dispatchAgent({ type: "SET_CONFIRM_DISABLE_ID", id: null });
-    }
-  }, [agentState.confirmDisableId, unlinkAllFromAgent, toggleProfile, t, notifySkillsRefresh]);
 
   const toggleExpand = useCallback(
     async (agentId: string) => {
@@ -1012,7 +980,7 @@ export function Settings({
     const unitBase = 1024;
     const sizes = ["B", "KB", "MB", "GB"];
     const sizeIndex = Math.floor(Math.log(bytes) / Math.log(unitBase));
-    return parseFloat((bytes / unitBase ** sizeIndex).toFixed(2)) + " " + sizes[sizeIndex];
+    return `${parseFloat((bytes / unitBase ** sizeIndex).toFixed(2))} ${sizes[sizeIndex]}`;
   }, []);
 
   // ── Proxy config change handler ────────────────────────────────────────────
@@ -1064,14 +1032,10 @@ export function Settings({
                 <AgentConnectionsSection
                   profiles={profiles}
                   profilesLoading={profilesLoading}
-                  confirmDisableId={agentState.confirmDisableId}
-                  unlinkingId={agentState.unlinkingId}
                   expandedAgentId={agentState.expandedAgentId}
                   linkedSkills={agentState.linkedSkills}
                   onToggleProfile={handleToggle}
                   onToggleExpand={toggleExpand}
-                  onCancelDisable={() => dispatchAgent({ type: "SET_CONFIRM_DISABLE_ID", id: null })}
-                  onConfirmDisable={confirmDisable}
                   onUnlinkSkill={handleUnlinkSingle}
                   onAddCustomProfile={addCustomProfile}
                   onRemoveCustomProfile={removeCustomProfile}

@@ -737,7 +737,7 @@ pub fn install_from_repo(
             continue;
         }
 
-        // Create symlink: hub/skills/<name> → .repos/<cache>/<folder>/
+        // Create symlink: hub/skills/<name> -> repos/<cache>/<folder>/
         super::paths::create_symlink(&source_path, &dest)
             .with_context(|| format!("Failed to symlink {:?} → {:?}", source_path, dest))?;
 
@@ -766,7 +766,8 @@ pub fn install_from_repo(
         installed_names.push(target.id.clone());
     }
 
-    lf.save(&lock_path).context("Failed to save lockfile after batch install")?;
+    lf.save(&lock_path)
+        .context("Failed to save lockfile after batch install")?;
 
     // Save to repo history
     let _ = repo_history::upsert_entry(source, repo_url);
@@ -1014,8 +1015,35 @@ pub fn is_repo_cached_skill(skill_path: &Path) -> bool {
         Ok(t) => t,
         Err(_) => return false,
     };
-    let target_str = target.to_string_lossy();
-    target_str.contains(".repos/") || target_str.contains(".repos\\")
+    let target = if target.is_absolute() {
+        target
+    } else {
+        skill_path.parent().unwrap_or(Path::new(".")).join(target)
+    };
+
+    is_repo_cache_target_path(&target)
+}
+
+fn normalize_path_for_compare(path: &Path) -> String {
+    let normalized = path
+        .to_string_lossy()
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_string();
+    #[cfg(windows)]
+    {
+        normalized.to_ascii_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        normalized
+    }
+}
+
+fn is_repo_cache_target_path(target: &Path) -> bool {
+    let target_norm = normalize_path_for_compare(target);
+    let repo_root_norm = normalize_path_for_compare(&super::paths::repos_cache_dir());
+    target_norm == repo_root_norm || target_norm.starts_with(&(repo_root_norm + "/"))
 }
 
 /// Detect new uninstalled skills in all cached repos referenced by the lockfile.
@@ -1210,7 +1238,7 @@ pub struct RepoCacheInfo {
     pub unused_bytes: u64,
 }
 
-/// Collect information about the repo cache (`.repos/` directory).
+/// Collect information about the repo cache (`repos/` directory).
 pub fn get_cache_info() -> RepoCacheInfo {
     let cache_dir = super::paths::repos_cache_dir();
     if !cache_dir.exists() {
@@ -1383,7 +1411,7 @@ mod tests {
     use crate::core::{local_skill, lockfile, paths};
     use anyhow::Result;
     use std::ffi::OsStr;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn env_lock() -> &'static std::sync::Mutex<()> {
@@ -1546,6 +1574,23 @@ mod tests {
             dirs.is_empty(),
             "expected root-level SKILL.md to force full checkout"
         );
+    }
+
+    #[test]
+    fn repo_cache_target_detection_only_uses_current_repos_dir() -> Result<()> {
+        with_temp_home("repo-cache-target-detection", || {
+            let current = paths::repos_cache_dir().join("owner--repo/skills/demo");
+            assert!(is_repo_cache_target_path(&current));
+
+            let local = paths::local_skills_dir().join("demo");
+            assert!(!is_repo_cache_target_path(&local));
+
+            let legacy =
+                PathBuf::from("C:/Users/demo/.skillstar/.agents/.repos/owner--repo/skills/demo");
+            assert!(!is_repo_cache_target_path(&legacy));
+
+            Ok(())
+        })
     }
 
     #[test]

@@ -1,22 +1,16 @@
-import { AnimatePresence, motion } from "framer-motion";
-import { Key, Loader2, LogIn, Save, ShieldPlus, X, RefreshCw } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { AnimatePresence, motion } from "framer-motion";
+import { Key, Loader2, LogIn, RefreshCw, Save, ShieldPlus, X } from "lucide-react";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
 
 import { cn } from "../../../lib/utils";
-import { useModelProviders, ProviderEntry } from "../hooks/useModelProviders";
 import { useGeminiOAuth } from "../hooks/useGeminiOAuth";
+import { type ProviderEntry, useModelProviders } from "../hooks/useModelProviders";
 import { ApiKeyInput } from "./shared/ApiKeyInput";
 import { GeminiAccountRow } from "./shared/GeminiAccountRow";
 
-function AddApiKeyForm({
-  onSubmit,
-  onCancel,
-}: {
-  onSubmit: (key: string) => void;
-  onCancel: () => void;
-}) {
+function AddApiKeyForm({ onSubmit, onCancel }: { onSubmit: (key: string) => void; onCancel: () => void }) {
   const [apiKey, setApiKey] = useState("");
 
   return (
@@ -104,35 +98,36 @@ function EmptyAccountState({
   );
 }
 
-export function GeminiAccountSection({
-  onAccountSwitched,
-}: {
-  onAccountSwitched?: () => void;
-}) {
+export function GeminiAccountSection({ onAccountSwitched }: { onAccountSwitched?: () => void }) {
   const { providers, addProvider, updateProvider, deleteProvider, switchTo, currentId } = useModelProviders("gemini");
-  
+
   // We consider "Accounts" to be entries explicitly added via OAuth or the inline API Key form.
   const accounts = Object.values(providers).filter(
-    (p) => p.id.startsWith("gemini_oauth_") || p.id.startsWith("gemini_apikey_")
+    (p) => p.id.startsWith("gemini_oauth_") || p.id.startsWith("gemini_apikey_"),
   );
-  
+
   const [showAddApiKey, setShowAddApiKey] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const handleToggle = useCallback((id: string) => {
     setExpandedId((prev) => (prev === id ? null : id));
   }, []);
-  
+
   // Quota states
-  const [quotas, setQuotas] = useState<Record<string, { 
-    percentage: number; 
-    resetTime: string; 
-    planName?: string;
-    models?: { name: string; displayName?: string; percentage: number; resetTime: string }[];
-    availableCredits?: string;
-    isForbidden?: boolean;
-    errorMessage?: string;
-  }>>({});
+  const [quotas, setQuotas] = useState<
+    Record<
+      string,
+      {
+        percentage: number;
+        resetTime: string;
+        planName?: string;
+        models?: { name: string; displayName?: string; percentage: number; resetTime: string }[];
+        availableCredits?: string;
+        isForbidden?: boolean;
+        errorMessage?: string;
+      }
+    >
+  >({});
   const [refreshing, setRefreshing] = useState<Set<string>>(new Set());
 
   const refreshQuota = useCallback(async (providerId: string) => {
@@ -158,27 +153,29 @@ export function GeminiAccountSection({
 
   const refreshAllQuotas = useCallback(async () => {
     if (accounts.length === 0) return;
-    
+
     const allIds = new Set(accounts.map((a) => a.id));
     setRefreshing(allIds);
     toast("正在同步刷新配额...");
 
     try {
-      const promises = accounts.map(account => 
+      const promises = accounts.map((account) =>
         invoke<any>("refresh_gemini_quota", {
           appId: "gemini",
           providerId: account.id,
-        }).then(quota => ({ id: account.id, quota })).catch(e => ({ id: account.id, error: e }))
+        })
+          .then((quota) => ({ id: account.id, quota }))
+          .catch((e) => ({ id: account.id, error: e })),
       );
 
       const results = await Promise.all(promises);
       const newQuotas = { ...quotas };
       let successCount = 0;
-      results.forEach(res => {
-         if ("quota" in res && res.quota) {
-           newQuotas[res.id] = res.quota;
-           successCount++;
-         }
+      results.forEach((res) => {
+        if ("quota" in res && res.quota) {
+          newQuotas[res.id] = res.quota;
+          successCount++;
+        }
       });
       setQuotas(newQuotas);
       if (successCount > 0 && successCount === results.length) {
@@ -198,7 +195,7 @@ export function GeminiAccountSection({
   const geminiState = useGeminiOAuth({
     onAccountAdded: (provider) => {
       const existing = Object.values(providers).find(
-        p => p.id.startsWith("gemini_oauth_") && p.name === provider.name
+        (p) => p.id.startsWith("gemini_oauth_") && p.name === provider.name,
       );
       if (existing) {
         const merged = { ...provider, id: existing.id };
@@ -209,7 +206,7 @@ export function GeminiAccountSection({
         switchTo(provider.id);
       }
       if (onAccountSwitched) onAccountSwitched();
-    }
+    },
   });
 
   const hasAccounts = accounts.length > 0;
@@ -218,7 +215,9 @@ export function GeminiAccountSection({
     <div className="space-y-3 mb-6">
       {/* Section header */}
       <div className="flex items-center justify-between px-1">
-        <h3 className="text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-widest">Google Gemini 账号</h3>
+        <h3 className="text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-widest">
+          Google Gemini 账号
+        </h3>
         {hasAccounts && (
           <button
             type="button"
@@ -255,40 +254,32 @@ export function GeminiAccountSection({
           </div>
 
           <div className="flex items-center gap-2 pt-1">
-            <button
-              type="button"
-              onClick={geminiState.startOAuth}
-              disabled={geminiState.oauthLoading}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-medium transition-all group",
-                geminiState.oauthLoading
-                  ? "bg-primary/10 text-primary animate-pulse border border-transparent"
-                  : "bg-transparent text-muted-foreground hover:text-[#4285F4] hover:bg-[#4285F4]/10 border border-border hover:border-[#4285F4]/30",
-              )}
-            >
-              {geminiState.oauthLoading ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  等待授权...
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      geminiState.cancelOAuth();
-                    }}
-                    className="ml-1 p-0.5 rounded hover:bg-black/10 transition-colors"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </>
-              ) : (
-                <>
-                  <LogIn className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100" />
-                  添加 OAuth
-                </>
-              )}
-            </button>
-
+            {geminiState.oauthLoading ? (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-medium transition-all bg-primary/10 text-primary animate-pulse border border-transparent">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                等待授权...
+                <button
+                  type="button"
+                  onClick={geminiState.cancelOAuth}
+                  aria-label="取消 Gemini OAuth 授权"
+                  className="ml-1 p-0.5 rounded hover:bg-black/10 transition-colors"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={geminiState.startOAuth}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-medium transition-all group",
+                  "bg-transparent text-muted-foreground hover:text-[#4285F4] hover:bg-[#4285F4]/10 border border-border hover:border-[#4285F4]/30",
+                )}
+              >
+                <LogIn className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100" />
+                添加 OAuth
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setShowAddApiKey(!showAddApiKey)}

@@ -687,7 +687,11 @@ async fn fetch_quota_internal(
 
     if !status.is_success() {
         let detail_code = extract_detail_code_from_body(&body);
-        let body_preview = if body.len() > 200 { &body[..200] } else { &body };
+        let body_preview = if body.len() > 200 {
+            &body[..200]
+        } else {
+            &body
+        };
 
         let mut error_message = format!("API 返回错误 {}", status);
         if let Some(code) = detail_code {

@@ -215,7 +215,7 @@ fn builtin_profiles() -> Vec<AgentProfile> {
             synced_count: 0,
         });
     }
-    
+
     profiles
 }
 
@@ -230,7 +230,7 @@ fn count_symlinks(dir: &Path) -> u32 {
             let Ok(ft) = e.file_type() else {
                 return false;
             };
-            
+
             // Fast paths using dirent file_type (no stat calls on Unix, fast on Windows)
             if ft.is_symlink() {
                 return true;
@@ -302,7 +302,7 @@ fn get_base_profiles(prefs: &ProfilePrefs) -> Vec<AgentProfile> {
             synced_count: 0,
         });
     }
-    
+
     profiles
 }
 

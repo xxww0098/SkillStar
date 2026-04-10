@@ -1,12 +1,23 @@
 import { AlertTriangle, Copy } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { detectPlatform } from "../../../lib/utils";
 
 export function TmuxPrompt() {
   const { t } = useTranslation();
+  const platform = detectPlatform();
+  const installCommand =
+    platform === "windows" ? "pacman -S tmux" : platform === "linux" ? "sudo apt install tmux" : "brew install tmux";
+  const desc =
+    platform === "windows"
+      ? t(
+          "launch.tmuxDescWindows",
+          "多面板模式需要 bash + tmux。Windows 推荐使用 MSYS2/Git Bash/WSL，并确保在该运行时里 `tmux -V` 可执行。",
+        )
+      : t("launch.tmuxDesc", "多面板模式需要 tmux。安装后即可使用多终端布局。");
 
   const handleCopy = () => {
-    navigator.clipboard.writeText("brew install tmux");
+    navigator.clipboard.writeText(installCommand);
     toast.success(t("launch.tmuxCopied", "已复制到剪贴板"));
   };
 
@@ -18,13 +29,9 @@ export function TmuxPrompt() {
         </div>
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium text-foreground">{t("launch.tmuxRequired", "需要安装 tmux")}</div>
-          <p className="text-xs text-muted-foreground mt-1">
-            {t("launch.tmuxDesc", "多面板模式需要 tmux。安装后即可使用多终端布局。")}
-          </p>
+          <p className="text-xs text-muted-foreground mt-1">{desc}</p>
           <div className="mt-2 flex items-center gap-2">
-            <code className="text-xs bg-muted/50 rounded px-2 py-1 font-mono text-foreground/80">
-              brew install tmux
-            </code>
+            <code className="text-xs bg-muted/50 rounded px-2 py-1 font-mono text-foreground/80">{installCommand}</code>
             <button
               type="button"
               onClick={handleCopy}

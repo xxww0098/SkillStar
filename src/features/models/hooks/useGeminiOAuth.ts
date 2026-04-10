@@ -1,8 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-shell";
 import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ProviderEntry } from "./useModelProviders";
+import { openExternalUrl } from "../../../lib/externalOpen";
+import type { ProviderEntry } from "./useModelProviders";
+
+interface GeminiOAuthCompletePayload {
+  email: string;
+  accessToken: string;
+  refreshToken?: string | null;
+}
 
 export function useGeminiOAuth({ onAccountAdded }: { onAccountAdded?: (provider: ProviderEntry) => void }) {
   const [oauthLoading, setOauthLoading] = useState(false);
@@ -15,11 +21,14 @@ export function useGeminiOAuth({ onAccountAdded }: { onAccountAdded?: (provider:
     try {
       const result = await invoke<{ loginId: string; verificationUri: string }>("gemini_oauth_start");
       activeLoginId.current = result.loginId;
-      await open(result.verificationUri);
+      const opened = await openExternalUrl(result.verificationUri);
+      if (!opened) {
+        throw new Error("Failed to open browser for Gemini OAuth");
+      }
       toast.info("请在浏览器中完成 Google 登录授权");
 
-      const payload = await invoke<any>("gemini_oauth_complete", { loginId: result.loginId });
-      
+      const payload = await invoke<GeminiOAuthCompletePayload>("gemini_oauth_complete", { loginId: result.loginId });
+
       if (onAccountAdded) {
         const provider: ProviderEntry = {
           id: `gemini_oauth_${Date.now()}`,
@@ -35,11 +44,11 @@ export function useGeminiOAuth({ onAccountAdded }: { onAccountAdded?: (provider:
         };
         onAccountAdded(provider);
       }
-      
+
       toast.success(`Google 账号授权成功: ${payload.email}`);
-    } catch (e: any) {
+    } catch (e) {
       if (activeLoginId.current !== null) {
-        toast.error(`授权失败: ${e}`);
+        toast.error(`授权失败: ${String(e)}`);
       }
     } finally {
       setOauthLoading(false);

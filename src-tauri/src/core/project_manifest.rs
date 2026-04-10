@@ -299,16 +299,14 @@ pub fn full_sync(
     // Only clear directories for agents we are actively managing:
     // - agents in the new skills_list (will be rebuilt)
     // - agents in cleanup_agents (were in old config, now removed)
-    let agents_in_list: HashSet<&str> =
-        skills_list.agents.keys().map(|s| s.as_str()).collect();
+    let agents_in_list: HashSet<&str> = skills_list.agents.keys().map(|s| s.as_str()).collect();
 
     for profile in &profiles {
         if !profile.has_project_skills() {
             continue;
         }
         let should_clear = agents_in_list.contains(profile.id.as_str())
-            || cleanup_agents
-                .map_or(false, |ids| ids.iter().any(|id| id == &profile.id));
+            || cleanup_agents.map_or(false, |ids| ids.iter().any(|id| id == &profile.id));
         if !should_clear {
             continue;
         }

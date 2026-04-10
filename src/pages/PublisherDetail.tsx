@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { EmptyState } from "../components/ui/EmptyState";
+import { ExternalAnchor } from "../components/ui/ExternalAnchor";
 import { Input } from "../components/ui/input";
 import { LoadingLogo } from "../components/ui/LoadingLogo";
 import { SkillGridSkeleton } from "../components/ui/Skeleton";
@@ -390,15 +391,13 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
                       })}
                     </span>
                   )}
-                  <a
+                  <ExternalAnchor
                     href={publisher.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
                     className="text-sm text-primary/70 hover:text-primary flex items-center gap-1.5 transition-colors ml-auto"
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
                     {t("publisherDetail.viewOnSkillsSh")}
-                  </a>
+                  </ExternalAnchor>
                 </div>
               </div>
             </div>

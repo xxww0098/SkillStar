@@ -1,10 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-shell";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-
-// ── Types ────────────────────────────────────────────────────────────
+import { openExternalUrl } from "../../../lib/externalOpen";
 
 export interface CodexTokens {
   idToken: string;
@@ -51,8 +49,6 @@ interface OAuthLoginStartResponse {
   authUrl: string;
 }
 
-// ── Hook ─────────────────────────────────────────────────────────────
-
 export function useCodexAccounts() {
   const [accounts, setAccounts] = useState<CodexAccount[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
@@ -60,8 +56,8 @@ export function useCodexAccounts() {
   const [oauthLoading, setOauthLoading] = useState(false);
   const [quotaRefreshing, setQuotaRefreshing] = useState<Set<string>>(new Set());
   const activeLoginId = useRef<string | null>(null);
+  const completingLoginId = useRef<string | null>(null);
 
-  // ── Load ─────────────────────────────────
   const load = useCallback(async () => {
     try {
       const [accts, currId] = await Promise.all([
@@ -78,12 +74,13 @@ export function useCodexAccounts() {
   }, []);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
-  // ── Listen to Global Refresh Event ─────────────────────────
   useEffect(() => {
-    const handleRefresh = () => load();
+    const handleRefresh = () => {
+      void load();
+    };
     window.addEventListener("codex-accounts-refresh", handleRefresh);
     return () => window.removeEventListener("codex-accounts-refresh", handleRefresh);
   }, [load]);
@@ -92,13 +89,16 @@ export function useCodexAccounts() {
     window.dispatchEvent(new CustomEvent("codex-accounts-refresh"));
   }, []);
 
-  // ── Listen to OAuth events ─────────────────────────────────
   useEffect(() => {
-    const unlisteners: (() => void)[] = [];
+    let disposed = false;
+    let unlistenCompleted: UnlistenFn | null = null;
+    let unlistenTimeout: UnlistenFn | null = null;
 
-    listen<{ loginId: string }>("codex-oauth-login-completed", async (event) => {
+    const handleCompleted = async (event: { payload: { loginId: string } }) => {
       const { loginId } = event.payload;
       if (activeLoginId.current !== loginId) return;
+      if (completingLoginId.current === loginId) return;
+      completingLoginId.current = loginId;
 
       try {
         const account = await invoke<CodexAccount>("codex_oauth_complete", { loginId });
@@ -108,45 +108,78 @@ export function useCodexAccounts() {
           description: "如 Codex 正在运行，请手动重启以使新凭证生效",
           duration: 5000,
         });
-        dispatchRefresh(); // Tell all instances to reload
+        dispatchRefresh();
         window.dispatchEvent(new CustomEvent("model-providers-refresh"));
       } catch (e) {
         setOauthLoading(false);
         activeLoginId.current = null;
         toast.error(`OAuth 登录完成失败: ${e}`);
+      } finally {
+        if (completingLoginId.current === loginId) {
+          completingLoginId.current = null;
+        }
       }
-    }).then((f) => unlisteners.push(f));
+    };
 
-    listen<{ loginId: string }>("codex-oauth-login-timeout", () => {
+    const handleTimeout = (event: { payload: { loginId: string } }) => {
+      const { loginId } = event.payload;
+      if (activeLoginId.current !== loginId) return;
       setOauthLoading(false);
       activeLoginId.current = null;
+      if (completingLoginId.current === loginId) {
+        completingLoginId.current = null;
+      }
       toast.error("OAuth 登录超时，请重试");
-    }).then((f) => unlisteners.push(f));
+    };
+
+    const registerListeners = async () => {
+      const completed = await listen<{ loginId: string }>("codex-oauth-login-completed", handleCompleted);
+      if (disposed) {
+        completed();
+      } else {
+        unlistenCompleted = completed;
+      }
+
+      const timeout = await listen<{ loginId: string }>("codex-oauth-login-timeout", handleTimeout);
+      if (disposed) {
+        timeout();
+      } else {
+        unlistenTimeout = timeout;
+      }
+    };
+
+    void registerListeners();
 
     return () => {
-      for (const fn of unlisteners) fn();
+      disposed = true;
+      unlistenCompleted?.();
+      unlistenTimeout?.();
     };
   }, [dispatchRefresh]);
 
-  // ── Start OAuth ─────────────────────────────────
   const startOAuth = useCallback(async () => {
     if (oauthLoading) return;
     setOauthLoading(true);
+    completingLoginId.current = null;
 
     try {
       const result = await invoke<OAuthLoginStartResponse>("codex_oauth_start");
       activeLoginId.current = result.loginId;
 
-      // Open browser using Tauri shell API
-      await open(result.authUrl);
+      const opened = await openExternalUrl(result.authUrl);
+      if (!opened) {
+        throw new Error("Failed to open browser for OAuth");
+      }
+
       toast.info("请在浏览器中完成 OpenAI 登录授权");
     } catch (e) {
       setOauthLoading(false);
+      activeLoginId.current = null;
+      completingLoginId.current = null;
       toast.error(`启动 OAuth 失败: ${e}`);
     }
   }, [oauthLoading]);
 
-  // ── Cancel OAuth ─────────────────────────────────
   const cancelOAuth = useCallback(async () => {
     try {
       await invoke("codex_oauth_cancel", {
@@ -157,20 +190,19 @@ export function useCodexAccounts() {
     }
     setOauthLoading(false);
     activeLoginId.current = null;
+    completingLoginId.current = null;
   }, []);
 
-  // ── Switch Account ─────────────────────────────────
   const switchAccount = useCallback(
     async (accountId: string) => {
       try {
         const updated = await invoke<CodexAccount>("switch_codex_account", { accountId });
-        setCurrentId(accountId); // Optimistic: update local state immediately
+        setCurrentId(accountId);
         toast.success(`已切换到 ${updated.email}`, {
           description: "如 Codex 正在运行，请手动重启以使新凭证生效",
           duration: 5000,
         });
         dispatchRefresh();
-        // Refresh provider list — backend cleared provider current
         window.dispatchEvent(new CustomEvent("model-providers-refresh"));
         window.dispatchEvent(new CustomEvent("skillstar_config_changed"));
       } catch (e) {
@@ -180,7 +212,6 @@ export function useCodexAccounts() {
     [dispatchRefresh],
   );
 
-  // ── Delete Account ─────────────────────────────────
   const deleteAccount = useCallback(
     async (accountId: string) => {
       try {
@@ -194,7 +225,6 @@ export function useCodexAccounts() {
     [dispatchRefresh],
   );
 
-  // ── Refresh Single Quota ─────────────────────────────────
   const refreshQuota = useCallback(async (accountId: string) => {
     setQuotaRefreshing((prev) => new Set(prev).add(accountId));
     toast("正在获取配额信息...");
@@ -213,7 +243,6 @@ export function useCodexAccounts() {
     }
   }, []);
 
-  // ── Refresh All Quotas ─────────────────────────────────
   const refreshAllQuotas = useCallback(async () => {
     const oauthAccounts = accounts.filter((a) => a.authMode === "oauth");
     if (oauthAccounts.length === 0) return;
@@ -234,7 +263,6 @@ export function useCodexAccounts() {
     }
   }, [accounts, dispatchRefresh]);
 
-  // ── Add API Key Account ─────────────────────────────────
   const addApiKeyAccount = useCallback(
     async (apiKey: string, apiBaseUrl?: string) => {
       try {

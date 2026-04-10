@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Check, Download, GitBranch, Package, RotateCcw } from "lucide-react";
+import { Check, Download, GitBranch, Package, RotateCcw, ScanSearch } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../../components/ui/button";
@@ -16,6 +16,8 @@ export interface SelectSkillsPhaseProps {
   onSelectAll: (ids?: string[]) => void;
   onDeselectAll: (ids?: string[]) => void;
   onInstall: (pack?: boolean) => void;
+  fullDepthEnabled: boolean;
+  onDeepScan: () => void;
   hasPackGroup?: boolean;
 }
 
@@ -27,6 +29,8 @@ export function SelectSkillsPhase({
   onSelectAll,
   onDeselectAll,
   onInstall,
+  fullDepthEnabled,
+  onDeepScan,
   hasPackGroup,
 }: SelectSkillsPhaseProps) {
   const { t } = useTranslation();
@@ -70,8 +74,9 @@ export function SelectSkillsPhase({
           <div className="flex items-center gap-3">
             {hasPackGroup && selectedSkills.size > 0 && (
               <button
+                type="button"
                 onClick={() => onInstall(true)}
-                className="text-xs text-amber-500 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-1 rounded-md transition-colors flex items-center gap-1 cursor-pointer font-medium"
+                className="text-xs text-amber-500 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-1 rounded-md transition-colors flex items-center gap-1 cursor-pointer font-medium whitespace-nowrap"
               >
                 <Package className="w-3.5 h-3.5" />
                 {t("githubImportModal.quickPack")}
@@ -203,6 +208,16 @@ export function SelectSkillsPhase({
           {t("githubImportModal.selected", { count: selectedSkills.size })}
         </span>
         <div className="flex items-center gap-2">
+          <Button
+            variant={fullDepthEnabled ? "secondary" : "outline"}
+            size="sm"
+            onClick={onDeepScan}
+            className="px-3 whitespace-nowrap"
+          >
+            <ScanSearch className="w-3.5 h-3.5 mr-1.5" />
+            {fullDepthEnabled ? t("githubImportModal.rescanFullDepth") : t("githubImportModal.fullDepthLabel")}
+          </Button>
+
           {/* Reinstall All button when every skill is already installed */}
           {skills.every((s) => s.already_installed) && (
             <Button

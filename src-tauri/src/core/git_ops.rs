@@ -1,16 +1,21 @@
 use anyhow::{Context, Result, anyhow};
+use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use super::github_mirror;
 use super::path_env::command_with_path;
-use tracing::warn;
+use tracing::{debug, warn};
 
 /// Maximum number of retries for shallow fetch operations that hit the
 /// `shallow file has changed since we read it` race condition.
 const SHALLOW_FETCH_MAX_RETRIES: u32 = 3;
 /// Backoff delays (ms) between retries.
 const SHALLOW_FETCH_BACKOFF_MS: [u64; 3] = [200, 500, 1000];
+/// Per-repository shallow-fetch mutexes to avoid concurrent `.git/shallow` races.
+static SHALLOW_FETCH_LOCKS: LazyLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Compute the tree-hash of a local Git repository.
 ///
@@ -22,12 +27,36 @@ pub fn compute_tree_hash(repo_path: &Path) -> Result<String> {
     match compute_tree_hash_gix(repo_path) {
         Ok(hash) => Ok(hash),
         Err(gix_err) => {
-            warn!(
-                target: "git_ops",
-                path = %repo_path.display(),
-                error = %gix_err,
-                "gix failed to read HEAD tree hash, falling back to git CLI"
-            );
+            let is_repo_discovery_miss = gix_err
+                .to_string()
+                .contains("Failed to discover git repository");
+
+            // Non-git paths are common for local/copy-based skills; avoid
+            // noisy warnings and skip CLI fallback when no `.git` ancestor exists.
+            if is_repo_discovery_miss && !has_git_ancestor(repo_path) {
+                debug!(
+                    target: "git_ops",
+                    path = %repo_path.display(),
+                    "tree hash skipped: path is not inside a git repository"
+                );
+                return Err(gix_err);
+            }
+
+            if is_repo_discovery_miss {
+                debug!(
+                    target: "git_ops",
+                    path = %repo_path.display(),
+                    error = %gix_err,
+                    "gix could not discover git repository, falling back to git CLI"
+                );
+            } else {
+                warn!(
+                    target: "git_ops",
+                    path = %repo_path.display(),
+                    error = %gix_err,
+                    "gix failed to read HEAD tree hash, falling back to git CLI"
+                );
+            }
             compute_tree_hash_cli(repo_path).with_context(|| {
                 format!(
                     "Both gix and git CLI failed to compute tree hash for {:?}. gix error: {}",
@@ -53,6 +82,17 @@ fn compute_tree_hash_gix(repo_path: &Path) -> Result<String> {
 /// CLI fallback: `git rev-parse HEAD^{tree}`.
 fn compute_tree_hash_cli(repo_path: &Path) -> Result<String> {
     run_git(repo_path, &["rev-parse", "HEAD^{tree}"])
+}
+
+fn has_git_ancestor(path: &Path) -> bool {
+    let mut current = Some(path);
+    while let Some(dir) = current {
+        if dir.join(".git").exists() {
+            return true;
+        }
+        current = dir.parent();
+    }
+    false
 }
 
 /// Clone a repository from a URL to a destination path.
@@ -289,6 +329,11 @@ pub fn pull_repo(repo_path: &Path) -> Result<()> {
 ///   `fatal: shallow file has changed since we read it`
 /// This is a transient condition — retrying after a short backoff resolves it.
 pub fn run_git_shallow_fetch(repo_path: &Path, args: &[&str]) -> Result<String> {
+    let repo_lock = shallow_fetch_lock(repo_path);
+    let _fetch_guard = repo_lock
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
     let mut last_err = None;
     for attempt in 0..SHALLOW_FETCH_MAX_RETRIES {
         match run_git(repo_path, args) {
@@ -317,6 +362,16 @@ pub fn run_git_shallow_fetch(repo_path: &Path, args: &[&str]) -> Result<String> 
         }
     }
     Err(last_err.unwrap_or_else(|| anyhow!("shallow fetch failed after retries")))
+}
+
+fn shallow_fetch_lock(repo_path: &Path) -> Arc<Mutex<()>> {
+    let mut locks = SHALLOW_FETCH_LOCKS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    locks
+        .entry(repo_path.to_path_buf())
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone()
 }
 
 fn run_git(repo_path: &Path, args: &[&str]) -> Result<String> {

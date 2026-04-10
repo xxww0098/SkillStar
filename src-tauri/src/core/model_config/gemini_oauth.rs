@@ -104,7 +104,6 @@ pub struct GoogleTokenRefreshResponse {
     pub error_description: Option<String>,
 }
 
-
 lazy_static::lazy_static! {
     static ref PENDING_OAUTH_STATE: Arc<Mutex<Option<PendingOAuthState>>> = Arc::new(Mutex::new(None));
 }
@@ -429,7 +428,9 @@ async fn exchange_code_for_tokens(
     Ok(payload)
 }
 
-pub async fn refresh_access_token(refresh_token: &str) -> Result<GoogleTokenRefreshResponse, String> {
+pub async fn refresh_access_token(
+    refresh_token: &str,
+) -> Result<GoogleTokenRefreshResponse, String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
@@ -532,7 +533,8 @@ pub async fn start_login() -> Result<GeminiOAuthStartResponse, String> {
 
     tracing::info!(
         "[Gemini OAuth] 登录会话已创建: login_id={}, callback_url={}",
-        login_id, callback_url
+        login_id,
+        callback_url
     );
 
     Ok(GeminiOAuthStartResponse {
@@ -724,10 +726,7 @@ pub fn submit_callback_url(login_id: &str, callback_url: &str) -> Result<(), Str
     drop(guard);
     set_pending_login(Some(snapshot));
 
-    tracing::info!(
-        "[Gemini OAuth] 已接收手动回调链接: login_id={}",
-        login_id
-    );
+    tracing::info!("[Gemini OAuth] 已接收手动回调链接: login_id={}", login_id);
     Ok(())
 }
 

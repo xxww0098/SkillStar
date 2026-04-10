@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -185,10 +185,7 @@ fn build_cloud_code_metadata(project_id: Option<&str>) -> Value {
         "pluginVersion".into(),
         Value::String(env!("CARGO_PKG_VERSION").into()),
     );
-    metadata.insert(
-        "platform".into(),
-        Value::String(platform_name().into()),
-    );
+    metadata.insert("platform".into(), Value::String(platform_name().into()));
     metadata.insert("updateChannel".into(), Value::String("stable".into()));
     metadata.insert("pluginType".into(), Value::String("GEMINI".into()));
     if let Some(pid) = project_id.filter(|v| !v.trim().is_empty()) {
@@ -204,10 +201,7 @@ fn build_load_code_assist_payload(project_id: Option<&str>) -> Value {
     });
     if let Some(pid) = project_id.filter(|v| !v.trim().is_empty()) {
         if let Some(obj) = payload.as_object_mut() {
-            obj.insert(
-                "cloudaicompanionProject".into(),
-                Value::String(pid.into()),
-            );
+            obj.insert("cloudaicompanionProject".into(), Value::String(pid.into()));
         }
     }
     payload
@@ -221,7 +215,11 @@ fn extract_project_id(value: &Value) -> Option<String> {
     }
     if let Some(obj) = value.as_object() {
         for key in &["projectId", "projectNumber", "id"] {
-            if let Some(id) = obj.get(*key).and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            if let Some(id) = obj
+                .get(*key)
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+            {
                 return Some(id.to_string());
             }
         }
@@ -292,9 +290,7 @@ fn persist_gcp_tos_detection(
         .unwrap_or(false);
 
     if detected_gcp_tos != current_flag {
-        let meta = provider
-            .meta
-            .get_or_insert_with(|| serde_json::json!({}));
+        let meta = provider.meta.get_or_insert_with(|| serde_json::json!({}));
         if let Some(obj) = meta.as_object_mut() {
             obj.insert("is_gcp_tos".into(), serde_json::json!(detected_gcp_tos));
         }
@@ -323,10 +319,7 @@ async fn try_onboard_user(
     let ua = load_code_assist_user_agent();
     if let Some(pid) = project_id.filter(|v| !v.trim().is_empty()) {
         if let Some(obj) = payload.as_object_mut() {
-            obj.insert(
-                "cloudaicompanionProject".into(),
-                Value::String(pid.into()),
-            );
+            obj.insert("cloudaicompanionProject".into(), Value::String(pid.into()));
         }
     }
 
@@ -534,10 +527,7 @@ pub async fn refresh_gemini_quota(
                                         err,
                                         &text[..text.len().min(500)]
                                     ));
-                                    tracing::warn!(
-                                        "[Gemini] loadCodeAssist parse failed: {}",
-                                        err
-                                    );
+                                    tracing::warn!("[Gemini] loadCodeAssist parse failed: {}", err);
                                 }
                             }
                         }
@@ -616,8 +606,7 @@ pub async fn refresh_gemini_quota(
     // ── Step 1b: onboardUser if no project yet ──────────────────────
 
     if project_id.is_none() {
-        let onboard_tier = pick_onboard_tier(&allowed_tiers)
-            .or_else(|| subscription_tier.clone());
+        let onboard_tier = pick_onboard_tier(&allowed_tiers).or_else(|| subscription_tier.clone());
         if let Some(tier_id) = onboard_tier {
             tracing::info!(
                 "[Gemini] No project ID, attempting onboardUser with tier={}",
@@ -669,9 +658,7 @@ pub async fn refresh_gemini_quota(
                             "[Gemini][fetchAvailableModels] Raw response (first 1000 chars): {}",
                             &payload_text[..payload_text.len().min(1000)]
                         );
-                        if let Ok(payload) =
-                            serde_json::from_str::<QuotaResponse>(&payload_text)
-                        {
+                        if let Ok(payload) = serde_json::from_str::<QuotaResponse>(&payload_text) {
                             tracing::info!(
                                 "[Gemini][fetchAvailableModels] Parsed {} models, keys: {:?}",
                                 payload.models.len(),
@@ -680,8 +667,11 @@ pub async fn refresh_gemini_quota(
                             for (name, info) in payload.models {
                                 // Skip internal/experimental models identical to reference proxy.
                                 match name.as_str() {
-                                    "chat_20706" | "chat_23310" | "tab_flash_lite_preview" 
-                                    | "tab_jump_flash_lite_preview" | "gemini-2.5-flash-thinking" 
+                                    "chat_20706"
+                                    | "chat_23310"
+                                    | "tab_flash_lite_preview"
+                                    | "tab_jump_flash_lite_preview"
+                                    | "gemini-2.5-flash-thinking"
                                     | "gemini-2.5-pro" => continue,
                                     _ => {}
                                 }
@@ -695,16 +685,18 @@ pub async fn refresh_gemini_quota(
                                                 best_reset_time =
                                                     quota.reset_time.clone().unwrap_or_default();
                                             }
-                                            
-                                            let display_name = info.display_name.clone().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| name.clone());
-                                            
+
+                                            let display_name = info
+                                                .display_name
+                                                .clone()
+                                                .filter(|s| !s.trim().is_empty())
+                                                .unwrap_or_else(|| name.clone());
+
                                             models_list.push(ModelQuota {
                                                 name: name.clone(),
                                                 display_name: Some(display_name),
                                                 percentage: pct,
-                                                reset_time: quota
-                                                    .reset_time
-                                                    .unwrap_or_default(),
+                                                reset_time: quota.reset_time.unwrap_or_default(),
                                             });
                                         }
                                     }
@@ -732,8 +724,8 @@ pub async fn refresh_gemini_quota(
                     break;
                 } else {
                     let status = response.status();
-                    let retryable = status == reqwest::StatusCode::TOO_MANY_REQUESTS
-                        || status.as_u16() >= 500;
+                    let retryable =
+                        status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.as_u16() >= 500;
                     tracing::warn!(
                         "[Gemini] fetchAvailableModels failed: status={} attempt={}/3",
                         status,

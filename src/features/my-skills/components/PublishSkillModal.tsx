@@ -20,6 +20,7 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
+import { ExternalAnchor } from "../../../components/ui/ExternalAnchor";
 import { Github } from "../../../components/ui/icons/Github";
 import { SearchInput } from "../../../components/ui/SearchInput";
 import { toast } from "../../../lib/toast";
@@ -279,15 +280,13 @@ export function PublishSkillModal({ open, onClose, skillName, skillDescription, 
                               {copied ? <Check className="w-3 h-3 text-success" /> : <Copy className="w-3 h-3" />}
                             </button>
                           </div>
-                          <a
+                          <ExternalAnchor
                             href="https://cli.github.com/"
-                            target="_blank"
-                            rel="noopener noreferrer"
                             className="flex items-center gap-1.5 text-xs text-primary hover:underline"
                           >
                             <ExternalLink className="w-3 h-3" />
                             cli.github.com
-                          </a>
+                          </ExternalAnchor>
                         </div>
                       )}
                       {ghStatus.status === "NotAuthenticated" && (
@@ -604,15 +603,13 @@ export function PublishSkillModal({ open, onClose, skillName, skillDescription, 
                         </button>
                       </div>
 
-                      <a
+                      <ExternalAnchor
                         href={result.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
                         className="flex items-center gap-2 text-xs text-primary hover:underline justify-center py-1"
                       >
                         <ExternalLink className="w-3.5 h-3.5" />
                         {t("publishModal.openOnGithub")}
-                      </a>
+                      </ExternalAnchor>
                     </div>
                   )}
                 </div>

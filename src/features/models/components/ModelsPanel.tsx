@@ -1,14 +1,14 @@
-import { open } from "@tauri-apps/plugin-shell";
 import { AnimatePresence, motion } from "framer-motion";
 import { FileCode2, Loader2, Package } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { openExternalUrl } from "../../../lib/externalOpen";
 import { DRAG_CSS, useDragReorder } from "../hooks/useDragReorder";
 import { type ProviderEntry, useModelProviders, useOpenCodeNativeProviders } from "../hooks/useModelProviders";
 import { AppCapsuleSwitcher, type ModelAppId } from "./AppCapsuleSwitcher";
 import { BehaviorStrip } from "./BehaviorStrip";
 import { CodexAccountSection } from "./CodexAccountSection";
-import { GeminiAccountSection } from "./GeminiAccountSection";
 import { ConfigFileEditor, type ConfigFileKey } from "./ConfigFileEditor";
+import { GeminiAccountSection } from "./GeminiAccountSection";
 import { PresetCatalog } from "./PresetCatalog";
 import { ProviderCard } from "./ProviderCard";
 import { AgentIcon } from "./shared/ProviderIcon";
@@ -266,7 +266,9 @@ export function ModelsPanel() {
                           onToggleExpand={() => handleToggleExpand(provider.id)}
                           onUpdate={(entry) => providers.updateProvider(entry)}
                           onDelete={() => providers.deleteProvider(provider.id)}
-                          onOpenWebsite={provider.websiteUrl ? () => open(provider.websiteUrl!) : undefined}
+                          onOpenWebsite={
+                            provider.websiteUrl ? () => void openExternalUrl(provider.websiteUrl!) : undefined
+                          }
                           onDragHandlePointerDown={(e) => handleDragStart(provider.id, e)}
                           readOnly={activeApp === "opencode"}
                         />

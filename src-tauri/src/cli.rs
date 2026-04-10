@@ -261,10 +261,7 @@ fn install_or_reuse_skill(
         return Ok((name, false));
     }
 
-    match skill_install::install_skill(
-        url.to_string(),
-        explicit_name.map(str::to_string),
-    ) {
+    match skill_install::install_skill(url.to_string(), explicit_name.map(str::to_string)) {
         Ok(skill) => Ok((skill.name, true)),
         Err(err) => {
             if err.contains("already installed") {
@@ -817,8 +814,7 @@ fn cmd_launch_deploy(project_name: &str) {
     let projects_path = crate::core::paths::projects_manifest_path();
     let project_path = if projects_path.exists() {
         let data = std::fs::read_to_string(&projects_path).unwrap_or_default();
-        let projects: Vec<serde_json::Value> =
-            serde_json::from_str(&data).unwrap_or_default();
+        let projects: Vec<serde_json::Value> = serde_json::from_str(&data).unwrap_or_default();
         projects
             .iter()
             .find(|p| p.get("name").and_then(|n| n.as_str()) == Some(project_name))
@@ -835,14 +831,20 @@ fn cmd_launch_deploy(project_name: &str) {
             match std::env::current_dir() {
                 Ok(p) => p.to_string_lossy().to_string(),
                 Err(e) => {
-                    eprintln!("✗ Project '{}' not found and cannot read current dir: {}", project_name, e);
+                    eprintln!(
+                        "✗ Project '{}' not found and cannot read current dir: {}",
+                        project_name, e
+                    );
                     std::process::exit(1);
                 }
             }
         }
     };
 
-    println!("Deploying launch config for '{}' ({:?} mode)...", project_name, config.mode);
+    println!(
+        "Deploying launch config for '{}' ({:?} mode)...",
+        project_name, config.mode
+    );
 
     match terminal_backend::deploy(&config, &project_path) {
         Ok(result) => {
@@ -882,10 +884,11 @@ fn cmd_launch_run(agent: &str, provider: Option<&str>, safe: bool, args: &[Strin
         extra_args: args.to_vec(),
     };
 
-    let script = terminal_backend::generate_single_script(&pane, &cwd);
+    let (script, extension, script_kind) =
+        terminal_backend::generate_single_script_for_current_os(&pane, &cwd);
 
     // Write and execute directly
-    let script_path = std::env::temp_dir().join(format!("ss-run-{}.sh", agent));
+    let script_path = std::env::temp_dir().join(format!("ss-run-{}.{}", agent, extension));
     if let Err(e) = std::fs::write(&script_path, &script) {
         eprintln!("✗ Failed to write script: {}", e);
         std::process::exit(1);
@@ -899,7 +902,7 @@ fn cmd_launch_run(agent: &str, provider: Option<&str>, safe: bool, args: &[Strin
 
     println!("Launching {} in {}...", agent, cwd);
 
-    match terminal_backend::open_script_in_terminal(&script_path) {
+    match terminal_backend::open_script_in_terminal_with_kind(&script_path, script_kind) {
         Ok(_) => println!("✓ Launched in terminal"),
         Err(e) => {
             eprintln!("✗ Failed to open terminal: {}", e);

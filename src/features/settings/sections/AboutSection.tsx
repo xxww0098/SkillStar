@@ -1,12 +1,13 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
-import { open as shellOpen } from "@tauri-apps/plugin-shell";
+import { homeDir } from "@tauri-apps/api/path";
 import { motion } from "framer-motion";
 import {
   Check,
   CheckCircle,
   Copy,
   ExternalLink,
+  FolderOpen,
   GitBranch,
   RefreshCw,
   Sparkles,
@@ -17,7 +18,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "../../../components/ui/badge";
 import { Button } from "../../../components/ui/button";
-import { copyToClipboard, detectPlatform, type Platform } from "../../../lib/utils";
+import { openExternalUrl } from "../../../lib/externalOpen";
+import { toast } from "../../../lib/toast";
+import { copyToClipboard, detectPlatform, type Platform, resolveSkillstarDataPath } from "../../../lib/utils";
 import type { GitStatus } from "../../../types";
 
 interface AboutSectionProps {
@@ -38,6 +41,7 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
   const { t } = useTranslation();
   const [copied, setCopied] = useState<string | null>(null);
   const [appVersion, setAppVersion] = useState<string>("...");
+  const [resolvedDataPath, setResolvedDataPath] = useState<string | null>(null);
 
   // Git status
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
@@ -63,11 +67,55 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
 
   const ghInstallPlatform = useMemo(() => detectPlatform(), []);
   const ghInstallCommand = ghInstallPlatform === "unknown" ? null : GH_INSTALL_COMMANDS[ghInstallPlatform];
-  const platformPaths = [
-    { platform: "Windows", path: "%USERPROFILE%\\.skillstar\\" },
-    { platform: "Linux", path: "~/.skillstar/" },
-    { platform: "macOS", path: "~/.skillstar/" },
-  ] as const;
+
+  useEffect(() => {
+    let active = true;
+
+    homeDir()
+      .then((home) => {
+        if (!active) return;
+        setResolvedDataPath(resolveSkillstarDataPath(home, ghInstallPlatform));
+      })
+      .catch(() => {
+        if (!active) return;
+        setResolvedDataPath(null);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [ghInstallPlatform]);
+
+  const platformPaths = useMemo(() => {
+    switch (ghInstallPlatform) {
+      case "windows":
+        return [
+          {
+            platform: "Windows",
+            path: resolvedDataPath ?? "%USERPROFILE%\\.skillstar\\",
+            openPath: resolvedDataPath,
+          },
+        ];
+      case "linux":
+        return [{ platform: "Linux", path: resolvedDataPath ?? "~/.skillstar/", openPath: resolvedDataPath }];
+      case "macos":
+        return [{ platform: "macOS", path: resolvedDataPath ?? "~/.skillstar/", openPath: resolvedDataPath }];
+      default:
+        return [];
+    }
+  }, [ghInstallPlatform, resolvedDataPath]);
+
+  const handleOpenFolder = useCallback(
+    async (path: string) => {
+      try {
+        await invoke("open_folder", { path });
+      } catch (error) {
+        console.error("Failed to open folder:", error);
+        toast.error(t("settings.openFolderFailed"));
+      }
+    },
+    [t],
+  );
 
   const handleCopy = useCallback(async (text: string, id: string) => {
     const copySuccess = await copyToClipboard(text);
@@ -125,7 +173,7 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
           </div>
           {gitStatus?.status === "Installed" && <Badge variant="success">{t("settings.gitInstalled")}</Badge>}
           {gitStatus?.status === "NotInstalled" && (
-            <Button size="sm" variant="outline" onClick={() => shellOpen(gitStatus.download_url)}>
+            <Button size="sm" variant="outline" onClick={() => void openExternalUrl(gitStatus.download_url)}>
               <ExternalLink className="w-3 h-3" />
               {t("settings.gitInstall")}
             </Button>
@@ -148,6 +196,7 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
                   <code className="font-mono text-xs text-foreground/85 select-all break-all">{inst.command}</code>
                 </div>
                 <button
+                  type="button"
                   onClick={() => handleCopy(inst.command, `git-${inst.label}`)}
                   className="p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground cursor-pointer focus-ring shrink-0"
                   title={t("settings.ghCopyCommand")}
@@ -176,7 +225,7 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
             <span className="text-sm font-medium">GitHub CLI</span>
           </div>
           {ghInstalled === false && (
-            <Button size="sm" variant="outline" onClick={() => shellOpen("https://cli.github.com/")}>
+            <Button size="sm" variant="outline" onClick={() => void openExternalUrl("https://cli.github.com/")}>
               <ExternalLink className="w-3 h-3" />
               {t("settings.ghInstall")}
             </Button>
@@ -198,6 +247,7 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
               <div className="rounded-md border border-border bg-card px-2.5 py-2 flex items-center gap-2">
                 <code className="font-mono text-xs text-foreground/85 select-all flex-1">{ghInstallCommand}</code>
                 <button
+                  type="button"
                   onClick={() => handleCopy(ghInstallCommand, "gh")}
                   className="p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground cursor-pointer focus-ring"
                   title={t("settings.ghCopyCommand")}
@@ -251,14 +301,27 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
           </div>
         </div>
 
-        <div className="px-4 py-3 space-y-1.5">
-          {platformPaths.map((item) => (
-            <div key={item.platform} className="flex items-center gap-2 text-xs">
-              <span className="text-muted-foreground min-w-[56px]">{item.platform}</span>
-              <code className="font-mono text-caption">{item.path}</code>
-            </div>
-          ))}
-        </div>
+        {platformPaths.length > 0 && (
+          <div className="px-4 py-3 space-y-1.5">
+            {platformPaths.map((item) => (
+              <div key={item.platform} className="flex items-center gap-2 text-xs">
+                <span className="text-muted-foreground min-w-[56px]">{item.platform}</span>
+                <code className="font-mono text-caption flex-1 break-all">{item.path}</code>
+                {item.openPath ? (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                    title={t("settings.openFolder")}
+                    onClick={() => void handleOpenFolder(item.openPath)}
+                  >
+                    <FolderOpen className="w-4 h-4" />
+                  </Button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );

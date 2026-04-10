@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ChevronDown, Loader2, Rocket, Save } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { detectPlatform } from "../../../lib/utils";
 import { useAgentClis } from "../hooks/useAgentClis";
 import type { LaunchMode, LayoutNode } from "../hooks/useLaunchConfig";
 import { useLaunchConfig } from "../hooks/useLaunchConfig";
@@ -24,50 +25,66 @@ interface TmuxStatus {
 
 export function LaunchDeckSection({ projectName, projectPath }: LaunchDeckSectionProps) {
   const { t } = useTranslation();
+  const isWindows = detectPlatform() === "windows";
   const [expanded, setExpanded] = useState(true);
   const [tmuxStatus, setTmuxStatus] = useState<TmuxStatus | null>(null);
   const agents = useAgentClis();
   const { config, setConfig, saving, loading } = useLaunchConfig(projectName);
 
+  // Windows policy: force single mode and disable tmux multi mode.
+  useEffect(() => {
+    if (isWindows && config?.mode === "multi") {
+      setConfig((prev) => ({ ...prev, mode: "single" }));
+    }
+  }, [isWindows, config?.mode, setConfig]);
+
   // Check tmux on expand
   useEffect(() => {
+    if (isWindows) {
+      return;
+    }
     if (expanded && tmuxStatus === null) {
       invoke<TmuxStatus>("check_tmux")
         .then(setTmuxStatus)
         .catch(() => setTmuxStatus({ installed: false, version: null }));
     }
-  }, [expanded, tmuxStatus]);
+  }, [expanded, isWindows, tmuxStatus]);
 
   const handleModeChange = useCallback(
     (mode: LaunchMode) => {
       if (!config) return;
+      if (isWindows && mode === "multi") return;
 
       setConfig((prev) => ({ ...prev, mode }));
     },
-    [config, setConfig],
+    [config, isWindows, setConfig],
   );
 
   const handleLayoutUpdate = useCallback(
     (newLayout: LayoutNode) => {
       setConfig((prev) => {
-        if (prev.mode === "single") {
+        const targetMode: LaunchMode = isWindows ? "single" : prev.mode;
+        if (targetMode === "single") {
           return { ...prev, singleLayout: newLayout };
         }
         return { ...prev, multiLayout: newLayout };
       });
     },
-    [setConfig],
+    [isWindows, setConfig],
   );
 
-  const currentLayout = config ? (config.mode === "single" ? config.singleLayout : config.multiLayout) : null;
+  const effectiveMode: LaunchMode = isWindows ? "single" : (config?.mode ?? "single");
+  const currentLayout = config ? (effectiveMode === "single" ? config.singleLayout : config.multiLayout) : null;
   const { split, remove, resize, assign } = useLayoutTree(currentLayout, handleLayoutUpdate);
 
   if (loading || !config) {
     return null;
   }
 
-  const isMulti = config.mode === "multi";
-  const needsTmux = isMulti && tmuxStatus !== null && !tmuxStatus.installed;
+  const isMulti = effectiveMode === "multi";
+  const editorHeight = 320;
+  const needsTmux = !isWindows && isMulti && tmuxStatus !== null && !tmuxStatus.installed;
+  const deployConfig = isWindows && config.mode === "multi" ? { ...config, mode: "single" as LaunchMode } : config;
   const paneCount = countPanes(currentLayout!);
   const hasEmptyPanes = (() => {
     const checkEmpty = (node: LayoutNode): boolean => {
@@ -105,7 +122,7 @@ export function LaunchDeckSection({ projectName, projectPath }: LaunchDeckSectio
           {expanded && (
             // biome-ignore lint/a11y/noStaticElementInteractions: event isolation wrapper
             <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-              <ModeSwitch mode={config.mode} onModeChange={handleModeChange} />
+              <ModeSwitch mode={effectiveMode} onModeChange={handleModeChange} disableMulti={isWindows} />
             </span>
           )}
           <ChevronDown
@@ -133,7 +150,7 @@ export function LaunchDeckSection({ projectName, projectPath }: LaunchDeckSectio
               {/* Layout editor */}
               <div
                 className="relative rounded-xl border border-border/50 bg-background overflow-hidden p-2 shadow-sm transition-all duration-300"
-                style={{ height: isMulti ? "320px" : "120px" }}
+                style={{ height: `${editorHeight}px` }}
               >
                 {/* Subtle grid background for the entire editor */}
                 <div className="absolute inset-0 pointer-events-none bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZD0iTTAgMGg0MHY0MEgweiIgZmlsbD0ibm9uZSIvPjxwYXRoIGQ9Ik0wIDAuNWg0ME0wIDM5LjVoNDBNMC41IDB2NDBNMzkuNSAwdjQwIiBzdHJva2U9InJnYmEoMCwgMCwgMCwgMC4wNCkiIHN0cm9rZS13aWR0aD0iMSIvPjwvc3ZnPg==')] [mask-image:radial-gradient(ellipse_at_center,black,transparent_70%)] opacity-50" />
@@ -167,9 +184,9 @@ export function LaunchDeckSection({ projectName, projectPath }: LaunchDeckSectio
                   )}
                 </div>
                 <DeployButton
-                  config={config}
+                  config={deployConfig}
                   projectPath={projectPath}
-                  disabled={hasEmptyPanes || needsTmux}
+                  disabled={hasEmptyPanes || needsTmux || (isWindows && config.mode === "multi")}
                 />
               </div>
             </div>

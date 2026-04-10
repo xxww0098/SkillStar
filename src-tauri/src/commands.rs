@@ -240,8 +240,7 @@ fn update_skill_sync(name: String) -> Result<UpdateResult, AppError> {
                         let sibling_path = skills_dir.join(&sibling.name);
                         if sibling_path.exists() {
                             if let Some(ref folder) = sibling.source_folder {
-                                if let Ok(repo_root) =
-                                    resolve_repo_root_from_symlink(&sibling_path)
+                                if let Ok(repo_root) = resolve_repo_root_from_symlink(&sibling_path)
                                 {
                                     if let Ok(hash) =
                                         repo_scanner::compute_subtree_hash_pub(&repo_root, folder)
@@ -433,7 +432,8 @@ pub async fn deploy_skill_group(
     }
 
     // Group skills by their Git URL to install efficiently
-    let mut batch_by_url: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    let mut batch_by_url: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
     for skill_name in &group.skills {
         if !skills_dir.join(skill_name).exists() {
             if let Some(git_url) = sources.get(skill_name) {
@@ -788,6 +788,63 @@ pub async fn write_text_file(path: String, content: String) -> Result<(), AppErr
 #[tauri::command]
 pub async fn read_text_file(path: String) -> Result<String, AppError> {
     Ok(std::fs::read_to_string(&path)?)
+}
+
+#[tauri::command]
+pub async fn open_external_url(url: String) -> Result<(), AppError> {
+    let trimmed = url.trim();
+    let lower = trimmed.to_ascii_lowercase();
+
+    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+        return Err(AppError::Other(
+            "Only http(s) URLs are supported".to_string(),
+        ));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // `explorer <url>` can mis-handle some OAuth URLs and open File Explorer.
+        // Prefer the URL protocol handler directly.
+        if std::process::Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", trimmed])
+            .spawn()
+            .is_err()
+        {
+            // Fallback for environments where `rundll32` is unavailable.
+            std::process::Command::new("explorer")
+                .arg(trimmed)
+                .spawn()
+                .map_err(|e| AppError::Other(format!("Failed to open URL on Windows: {e}")))?;
+        }
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(trimmed)
+            .spawn()
+            .map_err(|e| AppError::Other(format!("Failed to open URL on macOS: {e}")))?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        if std::process::Command::new("xdg-open")
+            .arg(trimmed)
+            .spawn()
+            .is_err()
+        {
+            std::process::Command::new("gio")
+                .args(["open", trimmed])
+                .spawn()
+                .map_err(|e| AppError::Other(format!("Failed to open URL on Linux: {e}")))?;
+        }
+        return Ok(());
+    }
+
+    #[allow(unreachable_code)]
+    Ok(())
 }
 
 #[tauri::command]

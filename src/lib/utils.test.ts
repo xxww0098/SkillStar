@@ -4,10 +4,13 @@ import {
   cn,
   detectPlatform,
   formatAiErrorMessage,
+  formatGlobalPathForDisplay,
   formatInstalls,
   formatPlatformPath,
+  inferUserHomeRoot,
   navigateToAiSettings,
   navigateToSettingsSection,
+  resolveSkillstarDataPath,
 } from "./utils";
 
 describe("cn (class merging)", () => {
@@ -37,6 +40,41 @@ describe("formatPlatformPath", () => {
     const result = formatPlatformPath("src/hooks/test.ts");
     // The result depends on the platform detection, but should be a string
     expect(typeof result).toBe("string");
+  });
+});
+
+describe("inferUserHomeRoot", () => {
+  it("should infer Windows home root", () => {
+    expect(inferUserHomeRoot("C:\\Users\\xiewe\\.skillstar\\")).toBe("C:/Users/xiewe");
+  });
+
+  it("should infer Unix home root", () => {
+    expect(inferUserHomeRoot("/home/user/.skillstar/")).toBe("/home/user");
+    expect(inferUserHomeRoot("/Users/alice/.skillstar/")).toBe("/Users/alice");
+  });
+});
+
+describe("formatGlobalPathForDisplay", () => {
+  it("should keep absolute Windows paths on Windows platform", () => {
+    expect(formatGlobalPathForDisplay("C:/Users/xiewe/.codex/skills", "windows")).toBe(
+      "C:\\Users\\xiewe\\.codex\\skills",
+    );
+  });
+
+  it("should collapse Unix home paths to tilde on macOS/Linux", () => {
+    expect(formatGlobalPathForDisplay("/Users/alice/.codex/skills", "macos")).toBe("~/.codex/skills");
+    expect(formatGlobalPathForDisplay("/home/alice/.codex/skills", "linux")).toBe("~/.codex/skills");
+  });
+});
+
+describe("resolveSkillstarDataPath", () => {
+  it("should resolve Windows SkillStar data path", () => {
+    expect(resolveSkillstarDataPath("C:/Users/xiewe/", "windows")).toBe("C:\\Users\\xiewe\\.skillstar\\");
+  });
+
+  it("should resolve Linux/macOS SkillStar data path", () => {
+    expect(resolveSkillstarDataPath("/home/xiewe/", "linux")).toBe("/home/xiewe/.skillstar/");
+    expect(resolveSkillstarDataPath("/Users/xiewe/", "macos")).toBe("/Users/xiewe/.skillstar/");
   });
 });
 

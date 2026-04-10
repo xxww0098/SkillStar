@@ -33,6 +33,7 @@ import type {
 } from "../../types";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { ExternalAnchor } from "../ui/ExternalAnchor";
 import { Github as GitHub } from "../ui/icons/Github";
 import { LoadingLogo } from "../ui/LoadingLogo";
 import { Markdown } from "../ui/Markdown";
@@ -809,29 +810,25 @@ export function DetailPanel({
 
               {/* skills.sh link */}
               {skillsShUrl && (
-                <a
+                <ExternalAnchor
                   href={skillsShUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
                   className="flex items-center gap-2 text-xs text-primary/70 hover:text-primary transition-colors"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
                   {t("detailPanel.viewOnSkillsSh")}
-                </a>
+                </ExternalAnchor>
               )}
 
               {/* Git info — only for hub (git-backed) skills */}
               {skill.skill_type !== "local" && skill.git_url && (
                 <div className="space-y-2">
-                  <a
+                  <ExternalAnchor
                     href={skill.git_url.startsWith("http") ? skill.git_url : `https://${skill.git_url}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
                     className="flex items-center gap-2 text-xs text-primary/70 hover:text-primary transition-colors"
                   >
                     <GitBranch className="w-3.5 h-3.5 shrink-0" />
                     <span className="truncate font-mono">{skill.git_url}</span>
-                  </a>
+                  </ExternalAnchor>
 
                   <div className="text-caption">
                     {t("detailPanel.updated")} {new Date(skill.last_updated).toLocaleDateString()}

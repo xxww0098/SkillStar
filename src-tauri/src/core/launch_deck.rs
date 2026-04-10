@@ -92,10 +92,12 @@ fn load_all() -> HashMap<String, LaunchConfig> {
     if !path.exists() {
         return HashMap::new();
     }
-    let Ok(data) = std::fs::read_to_string(&path) else { return HashMap::new(); };
+    let Ok(data) = std::fs::read_to_string(&path) else {
+        return HashMap::new();
+    };
     let map: HashMap<String, serde_json::Value> = serde_json::from_str(&data).unwrap_or_default();
     let mut resolved = HashMap::new();
-    
+
     for (k, mut val) in map {
         if let Some(obj) = val.as_object_mut() {
             if obj.contains_key("layout") && !obj.contains_key("singleLayout") {
@@ -103,7 +105,10 @@ fn load_all() -> HashMap<String, LaunchConfig> {
                 let mode = obj.get("mode").and_then(|m| m.as_str()).unwrap_or("single");
                 if mode == "multi" {
                     obj.insert("multiLayout".to_string(), layout);
-                    obj.insert("singleLayout".to_string(), serde_json::to_value(default_layout_node()).unwrap());
+                    obj.insert(
+                        "singleLayout".to_string(),
+                        serde_json::to_value(default_layout_node()).unwrap(),
+                    );
                 } else {
                     obj.insert("singleLayout".to_string(), layout.clone());
                     obj.insert("multiLayout".to_string(), layout);
@@ -123,12 +128,11 @@ fn save_all(configs: &HashMap<String, LaunchConfig>) -> Result<()> {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("Failed to create dir for {}", path.display()))?;
     }
-    let data = serde_json::to_string_pretty(configs)
-        .context("Failed to serialize launch configs")?;
+    let data =
+        serde_json::to_string_pretty(configs).context("Failed to serialize launch configs")?;
     // Atomic write
     let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, &data)
-        .with_context(|| format!("Failed to write {}", tmp.display()))?;
+    std::fs::write(&tmp, &data).with_context(|| format!("Failed to write {}", tmp.display()))?;
     std::fs::rename(&tmp, &path)
         .with_context(|| format!("Failed to rename {} → {}", tmp.display(), path.display()))?;
     Ok(())
@@ -192,9 +196,7 @@ pub fn validate(config: &LaunchConfig) -> Result<(), Vec<String>> {
 pub fn count_panes(node: &LayoutNode) -> usize {
     match node {
         LayoutNode::Pane { .. } => 1,
-        LayoutNode::Split { children, .. } => {
-            count_panes(&children[0]) + count_panes(&children[1])
-        }
+        LayoutNode::Split { children, .. } => count_panes(&children[0]) + count_panes(&children[1]),
     }
 }
 
@@ -274,7 +276,12 @@ mod tests {
         let tree = sample_split(
             SplitDirection::H,
             0.5,
-            sample_split(SplitDirection::V, 0.5, sample_pane("a", "claude"), sample_pane("b", "codex")),
+            sample_split(
+                SplitDirection::V,
+                0.5,
+                sample_pane("a", "claude"),
+                sample_pane("b", "codex"),
+            ),
             sample_pane("c", "gemini"),
         );
         assert_eq!(count_panes(&tree), 3);

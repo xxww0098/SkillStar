@@ -159,40 +159,32 @@ export function CodexConfigPanel() {
 
         {/* Add account buttons */}
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={acctState.startOAuth}
-            disabled={acctState.oauthLoading}
-            className={cn(
-              "flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all",
-              acctState.oauthLoading
-                ? "bg-primary/20 text-primary animate-pulse"
-                : "bg-[#00A67E]/10 text-[#00A67E] border border-[#00A67E]/20 hover:bg-[#00A67E]/20",
-            )}
-          >
-            {acctState.oauthLoading ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                等待授权...
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    acctState.cancelOAuth();
-                  }}
-                  className="ml-1 p-0.5 rounded hover:bg-white/10 transition-colors"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </>
-            ) : (
-              <>
-                <LogIn className="w-3.5 h-3.5" />
-                OAuth 登录
-              </>
-            )}
-          </button>
-
+          {acctState.oauthLoading ? (
+            <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all bg-primary/20 text-primary animate-pulse">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              等待授权...
+              <button
+                type="button"
+                onClick={acctState.cancelOAuth}
+                aria-label="取消 OAuth 授权"
+                className="ml-1 p-0.5 rounded hover:bg-white/10 transition-colors"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={acctState.startOAuth}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all",
+                "bg-[#00A67E]/10 text-[#00A67E] border border-[#00A67E]/20 hover:bg-[#00A67E]/20",
+              )}
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              OAuth 登录
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setShowAddApiKey(!showAddApiKey)}
