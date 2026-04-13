@@ -1,0 +1,1510 @@
+//! Project-level skill configuration management.
+//!
+//! All config data lives in SkillStar's data directory (`skillstar/projects/`).
+//! Project directories receive symlinks or explicit directory copies.
+
+mod types;
+mod manifest_paths;
+mod helpers;
+
+pub use types::{
+    AmbiguousGroup, CascadeUpdateSummary, DetectedAgent, ImportResult, ImportTarget,
+    ProjectAgentDetection, ProjectDeployMode, ProjectEntry, ProjectScanResult, ScannedSkill,
+    SkillsList,
+};
+
+pub(crate) use types::{
+    deploy_skill_auto, ensure_project_root_exists, prune_deploy_modes_for_agents,
+};
+
+use helpers::{clear_project_symlinks, prune_empty_dirs_upward};
+use manifest_paths::{index_path, project_dir, skills_list_path};
+use types::ProjectIndex;
+
+use anyhow::{Context, Result};
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
+
+use crate::core::{
+    infra::{fs_ops, paths as fs_paths},
+    local_skill,
+    projects::agents as agent_profile,
+};
+
+// ── Project Index CRUD ──────────────────────────────────────────────
+
+fn load_index() -> ProjectIndex {
+    let path = index_path();
+    if !path.exists() {
+        return ProjectIndex::default();
+    }
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return ProjectIndex::default();
+    };
+    serde_json::from_str(&content).unwrap_or_default()
+}
+
+fn save_index(index: &ProjectIndex) -> Result<()> {
+    let path = index_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content =
+        serde_json::to_string_pretty(index).context("failed to serialize project index")?;
+    std::fs::write(&path, content).context("failed to write project index")?;
+    Ok(())
+}
+
+/// Register a project in the index. Creates the per-project config folder.
+/// If a project with the same path already exists, returns the existing entry.
+pub fn register_project(project_path: &str) -> Result<ProjectEntry> {
+    // Avoid silently creating new directories when the user passes a stale path.
+    let _ = ensure_project_root_exists(project_path)?;
+
+    let mut index = load_index();
+
+    // Check for existing entry by path
+    if let Some(existing) = index.projects.iter().find(|p| p.path == project_path) {
+        return Ok(existing.clone());
+    }
+
+    let name = Path::new(project_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    // Handle duplicate names by appending a suffix
+    let unique_name = {
+        let mut candidate = name.clone();
+        let mut counter = 1u32;
+        while index.projects.iter().any(|p| p.name == candidate) {
+            counter += 1;
+            candidate = format!("{name}-{counter}");
+        }
+        candidate
+    };
+
+    let entry = ProjectEntry {
+        path: project_path.to_string(),
+        name: unique_name.clone(),
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+
+    // Create per-project config directory
+    let dir = project_dir(&unique_name);
+    std::fs::create_dir_all(&dir)
+        .with_context(|| format!("failed to create project dir: {}", dir.display()))?;
+
+    index.projects.push(entry.clone());
+    save_index(&index)?;
+
+    Ok(entry)
+}
+
+/// List all registered projects.
+pub fn list_projects() -> Vec<ProjectEntry> {
+    load_index().projects
+}
+
+/// Remove a project from the index and delete its config folder.
+pub fn remove_project(name: &str) -> Result<()> {
+    let mut index = load_index();
+    let before = index.projects.len();
+    index.projects.retain(|p| p.name != name);
+    if index.projects.len() == before {
+        anyhow::bail!("project '{}' not found", name);
+    }
+    save_index(&index)?;
+
+    // Remove config folder
+    let dir = project_dir(name);
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir)
+            .with_context(|| format!("failed to remove project dir: {}", dir.display()))?;
+    }
+
+    Ok(())
+}
+
+/// Update a project's local path and rebuild its symlinks.
+pub fn update_project_path(name: &str, new_path: &str) -> Result<u32> {
+    // Validate before mutating the index so we don't persist a broken path.
+    let _ = ensure_project_root_exists(new_path)?;
+
+    let mut index = load_index();
+    let Some(entry) = index.projects.iter_mut().find(|p| p.name == name) else {
+        anyhow::bail!("project '{}' not found", name);
+    };
+
+    entry.path = new_path.to_string();
+    save_index(&index)?;
+
+    // Rebuild mapped paths
+    let skills_list = load_skills_list(name).unwrap_or_default();
+
+    let count = full_sync(new_path, &skills_list, None)?;
+    Ok(count)
+}
+
+// ── Skills List CRUD ────────────────────────────────────────────────
+
+/// Load a project's skill list by project name.
+pub fn load_skills_list(name: &str) -> Option<SkillsList> {
+    let path = skills_list_path(name);
+    let content = std::fs::read_to_string(&path).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+/// Save a project's skill list.
+fn save_skills_list(name: &str, list: &SkillsList) -> Result<()> {
+    let path = skills_list_path(name);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = serde_json::to_string_pretty(list).context("failed to serialize skills list")?;
+    std::fs::write(&path, content).context("failed to write skills list")?;
+    Ok(())
+}
+
+/// Remove a skill from every registered project's persisted metadata and
+/// project-level symlinks.
+///
+/// This is a targeted cleanup pass used when a skill is uninstalled from the
+/// hub. It intentionally removes only the named symlink from project folders
+/// instead of running a full project sync, so unmanaged on-disk directories are
+/// left alone.
+pub fn remove_skill_from_all_projects(skill_name: &str) -> Result<Vec<String>> {
+    let profiles = agent_profile::list_profiles();
+    let mut touched_projects = Vec::new();
+
+    for entry in list_projects() {
+        let mut touched = false;
+
+        if let Some(mut skills_list) = load_skills_list(&entry.name) {
+            let mut list_changed = false;
+            for skill_names in skills_list.agents.values_mut() {
+                let before = skill_names.len();
+                skill_names.retain(|name| name != skill_name);
+                if skill_names.len() != before {
+                    list_changed = true;
+                }
+            }
+            if list_changed {
+                skills_list.agents.retain(|_, skills| !skills.is_empty());
+                skills_list.updated_at = chrono::Utc::now().to_rfc3339();
+                save_skills_list(&entry.name, &skills_list)?;
+                touched = true;
+            }
+        }
+
+        let project_root = Path::new(&entry.path);
+        for profile in &profiles {
+            if !profile.has_project_skills() {
+                continue;
+            }
+
+            let skill_path = project_root
+                .join(&profile.project_skills_rel)
+                .join(skill_name);
+            if !fs_ops::is_link(&skill_path) && !skill_path.is_dir() {
+                continue;
+            }
+
+            // Remove symlink, junction, or copy
+            fs_ops::remove_link_or_copy(&skill_path).with_context(|| {
+                format!(
+                    "failed to remove project skill '{}' from {}",
+                    skill_name, entry.path
+                )
+            })?;
+
+            if let Some(parent) = skill_path.parent() {
+                prune_empty_dirs_upward(parent, project_root)?;
+            }
+
+            touched = true;
+        }
+
+        if touched {
+            touched_projects.push(entry.name);
+        }
+    }
+
+    Ok(touched_projects)
+}
+
+// ── Full Sync ───────────────────────────────────────────────────────
+
+/// Perform a full sync: clear existing symlinks in managed agent directories,
+/// then recreate them from the provided skills list.
+///
+/// Only touches agent directories that appear in `skills_list.agents` or in
+/// `cleanup_agents` (agents removed from a previous config).  Agent directories
+/// not mentioned in either are left untouched, preventing cross-agent data loss
+/// from CLI-deployed or externally-managed symlinks.
+///
+/// Returns the total number of symlinks created.
+pub fn full_sync(
+    project_path: &str,
+    skills_list: &SkillsList,
+    cleanup_agents: Option<&[String]>,
+) -> Result<u32> {
+    let hub_dir = fs_paths::hub_skills_dir();
+    let profiles = agent_profile::list_profiles();
+    let project = ensure_project_root_exists(project_path)?;
+    let mut total = 0u32;
+    let mut failures: Vec<String> = Vec::new();
+
+    // Only clear directories for agents we are actively managing:
+    // - agents in the new skills_list (will be rebuilt)
+    // - agents in cleanup_agents (were in old config, now removed)
+    let agents_in_list: HashSet<&str> = skills_list.agents.keys().map(|s| s.as_str()).collect();
+
+    for profile in &profiles {
+        if !profile.has_project_skills() {
+            continue;
+        }
+        let should_clear = agents_in_list.contains(profile.id.as_str())
+            || cleanup_agents.map_or(false, |ids| ids.iter().any(|id| id == &profile.id));
+        if !should_clear {
+            continue;
+        }
+        clear_project_symlinks(project.as_path(), profile)?;
+    }
+
+    for (agent_id, skill_names) in &skills_list.agents {
+        // Find the agent profile to get its project_skills_rel
+        let Some(profile) = profiles.iter().find(|p| &p.id == agent_id) else {
+            continue;
+        };
+        // Skip agents that have no project-level skills support
+        if !profile.has_project_skills() {
+            continue;
+        }
+
+        let target_dir = project.join(&profile.project_skills_rel);
+        std::fs::create_dir_all(&target_dir)
+            .with_context(|| format!("failed to create skill dir: {}", target_dir.display()))?;
+
+        // Create new symlinks (auto-fallback to copy if symlink fails)
+        for skill_name in skill_names {
+            let source = hub_dir.join(skill_name);
+            if !source.exists() {
+                continue;
+            }
+            let target = target_dir.join(skill_name);
+            match deploy_skill_auto(&source, &target) {
+                Ok(()) => total += 1,
+                Err(err) => failures.push(format!(
+                    "Failed to link '{skill_name}' for agent '{agent_id}' at {target}: {err}",
+                    target = target.display()
+                )),
+            }
+        }
+    }
+
+    if !failures.is_empty() {
+        let failed = failures.len();
+        let preview = failures.into_iter().take(6).collect::<Vec<_>>().join("\n");
+        anyhow::bail!(
+            "Project sync incomplete: created {total} link(s), {failed} failure(s).\n{preview}",
+            failed = failed
+        );
+    }
+
+    Ok(total)
+}
+
+/// Register a project, save its skills list, and perform a full sync.
+///
+/// This is the main entry point for both initial deployment and subsequent
+/// modifications. Returns `(project_name, symlink_count)`.
+///
+/// Compares the old skills-list against the new one to determine which agent
+/// directories need cleanup (agents that were configured before but removed
+/// now). Only those directories plus the new active ones are cleared and
+/// rebuilt; unrelated agent directories are left untouched.
+pub fn save_and_sync(
+    project_path: &str,
+    agents: HashMap<String, Vec<String>>,
+    deploy_modes: HashMap<String, ProjectDeployMode>,
+) -> Result<(String, u32)> {
+    let entry = register_project(project_path)?;
+
+    // Snapshot the old config so we can compute which agents were removed.
+    let old_list = load_skills_list(&entry.name);
+
+    let _profiles = agent_profile::list_profiles();
+    // deploy_modes accepted for backward-compat but ignored;
+    // deploy always tries symlink first, auto-falling back to copy.
+    let _ = &deploy_modes;
+    let skills_list = SkillsList {
+        agents,
+        deploy_modes: HashMap::new(),
+        updated_at: chrono::Utc::now().to_rfc3339(),
+    };
+
+    save_skills_list(&entry.name, &skills_list)?;
+
+    // Agents that existed in old config but are absent from new config need
+    // their project directories cleaned up.
+    let cleanup: Vec<String> = old_list
+        .map(|old| {
+            old.agents
+                .keys()
+                .filter(|id| !skills_list.agents.contains_key(*id))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let count = full_sync(project_path, &skills_list, Some(&cleanup))?;
+
+    Ok((entry.name, count))
+}
+
+/// Register a project and persist its skills-list.json without mutating any
+/// project filesystem symlinks.
+///
+/// This is used for non-destructive metadata updates (for example, resolving
+/// shared-path ownership) where we must not clear or recreate links.
+pub fn save_skills_list_only(
+    project_path: &str,
+    agents: HashMap<String, Vec<String>>,
+) -> Result<SkillsList> {
+    let entry = register_project(project_path)?;
+
+    let profiles = agent_profile::list_profiles();
+    let mut skills_list = load_skills_list(&entry.name).unwrap_or_default();
+    skills_list.agents = agents;
+    skills_list.updated_at = chrono::Utc::now().to_rfc3339();
+    prune_deploy_modes_for_agents(&mut skills_list.deploy_modes, &skills_list.agents, &profiles);
+
+    save_skills_list(&entry.name, &skills_list)?;
+
+    Ok(skills_list)
+}
+
+/// Incrementally add skills to a project for the given agents.
+///
+/// Unlike `save_and_sync` (which replaces the entire skills-list and rebuilds
+/// all symlinks), this function **merges** the requested skills into the
+/// existing skills-list and only creates symlinks for the new entries —
+/// leaving other agents' project directories untouched.
+///
+/// This is the canonical path for CLI `skillstar install` and quick-deploy
+/// operations that should be additive, not destructive.
+///
+/// If `agent_ids` is empty, falls back to the first profile whose
+/// `project_skills_rel` is `".agents/skills"` (i.e. Antigravity), or the
+/// first available profile with project-level support.
+pub fn add_skills_to_project(
+    project_path: &str,
+    skill_names: &[String],
+    agent_ids: &[String],
+) -> Result<u32> {
+    let entry = register_project(project_path)?;
+    let hub_dir = fs_paths::hub_skills_dir();
+    let profiles = agent_profile::list_profiles();
+    let project = ensure_project_root_exists(project_path)?;
+
+    // Resolve which agents to target
+    let mut target_agent_ids: Vec<String> = agent_ids
+        .iter()
+        .filter(|id| {
+            profiles
+                .iter()
+                .any(|p| p.id == **id && p.has_project_skills())
+        })
+        .cloned()
+        .collect();
+
+    if target_agent_ids.is_empty() {
+        // Fallback: prefer the profile using .agents/skills, then first available
+        if let Some(fallback) = profiles
+            .iter()
+            .find(|p| p.project_skills_rel == ".agents/skills" && p.has_project_skills())
+            .or_else(|| profiles.iter().find(|p| p.has_project_skills()))
+        {
+            target_agent_ids.push(fallback.id.clone());
+        }
+    }
+
+    // Merge into existing skills-list.json
+    let mut skills_list = load_skills_list(&entry.name).unwrap_or_default();
+
+    for agent_id in &target_agent_ids {
+        let agent_skills = skills_list.agents.entry(agent_id.clone()).or_default();
+        for name in skill_names {
+            if !agent_skills.contains(name) {
+                agent_skills.push(name.clone());
+            }
+        }
+    }
+    skills_list.updated_at = chrono::Utc::now().to_rfc3339();
+    save_skills_list(&entry.name, &skills_list)?;
+
+    // Create only the new symlinks (incremental — no clearing)
+    let mut total = 0u32;
+    let mut failures: Vec<String> = Vec::new();
+
+    for agent_id in &target_agent_ids {
+        let Some(profile) = profiles.iter().find(|p| &p.id == agent_id) else {
+            continue;
+        };
+        if !profile.has_project_skills() {
+            continue;
+        }
+
+        let target_dir = project.join(&profile.project_skills_rel);
+        std::fs::create_dir_all(&target_dir)
+            .with_context(|| format!("failed to create skill dir: {}", target_dir.display()))?;
+
+        for name in skill_names {
+            let source = hub_dir.join(name);
+            if !source.exists() {
+                continue;
+            }
+            let target = target_dir.join(name);
+
+            // If already a symlink, remove and recreate (refresh)
+            if fs_ops::is_link(&target) {
+                let _ = fs_ops::remove_symlink(&target);
+            } else if target.exists() {
+                // Real directory exists — skip to avoid data loss
+                continue;
+            }
+
+            match deploy_skill_auto(&source, &target) {
+                Ok(()) => total += 1,
+                Err(err) => failures.push(format!(
+                    "Failed to link '{}' for agent '{}' at {}: {}",
+                    name,
+                    agent_id,
+                    target.display(),
+                    err
+                )),
+            }
+        }
+    }
+
+    if !failures.is_empty() {
+        let failed = failures.len();
+        let preview = failures.into_iter().take(6).collect::<Vec<_>>().join("\n");
+        anyhow::bail!(
+            "Project deploy incomplete: created {total} link(s), {failed} failure(s).\n{preview}"
+        );
+    }
+
+    Ok(total)
+}
+
+/// Rebuild a project's skills-list.json from on-disk project skill directories.
+///
+/// For shared paths (multiple agents with the same `project_skills_rel`), this
+/// function picks a single owner agent:
+/// 1) prefer an agent that already exists in current skills-list.json
+/// 2) otherwise use the first agent in builtin profile order.
+///
+/// It persists and returns the rebuilt list, without performing full sync.
+pub fn rebuild_skills_list_from_disk(project_path: &str) -> Result<SkillsList> {
+    let entry = register_project(project_path)?;
+    let project = Path::new(project_path);
+    let profiles = agent_profile::list_profiles();
+    let existing_agents = load_skills_list(&entry.name)
+        .map(|list| list.agents)
+        .unwrap_or_default();
+
+    // Group profiles by project_skills_rel while preserving profile order.
+    let mut path_order = Vec::new();
+    let mut groups: HashMap<String, Vec<agent_profile::AgentProfile>> = HashMap::new();
+    for profile in profiles {
+        if !profile.has_project_skills() {
+            continue;
+        }
+        if !groups.contains_key(&profile.project_skills_rel) {
+            path_order.push(profile.project_skills_rel.clone());
+        }
+        groups
+            .entry(profile.project_skills_rel.clone())
+            .or_default()
+            .push(profile);
+    }
+
+    let mut rebuilt_agents: HashMap<String, Vec<String>> = HashMap::new();
+
+    for rel_path in path_order {
+        let Some(group_profiles) = groups.get(&rel_path) else {
+            continue;
+        };
+        let skills_dir = project.join(&rel_path);
+        let entries = match std::fs::read_dir(&skills_dir) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+
+        let mut names = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() && !fs_ops::is_link(&path) {
+                continue;
+            }
+
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.is_empty() || name.starts_with('.') {
+                continue;
+            }
+
+            // Keep explicit skill folders and symlinked skills.
+            // Skip arbitrary non-skill directories without SKILL.md.
+            let has_skill_md = path.join("SKILL.md").exists();
+            if !fs_ops::is_link(&path) && !has_skill_md {
+                continue;
+            }
+
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+
+        if names.is_empty() {
+            continue;
+        }
+
+        // Prefer previously configured owner for shared paths.
+        let owner = group_profiles
+            .iter()
+            .find(|profile| existing_agents.contains_key(&profile.id))
+            .or_else(|| group_profiles.first())
+            .map(|profile| profile.id.clone());
+
+        let Some(owner_id) = owner else {
+            continue;
+        };
+
+        let bucket = rebuilt_agents.entry(owner_id).or_default();
+        bucket.extend(names);
+    }
+
+    for names in rebuilt_agents.values_mut() {
+        names.sort();
+        names.dedup();
+    }
+
+    let prior_deploy = load_skills_list(&entry.name)
+        .map(|list| list.deploy_modes)
+        .unwrap_or_default();
+
+    let mut rebuilt = SkillsList {
+        agents: rebuilt_agents,
+        deploy_modes: prior_deploy,
+        updated_at: chrono::Utc::now().to_rfc3339(),
+    };
+    prune_deploy_modes_for_agents(
+        &mut rebuilt.deploy_modes,
+        &rebuilt.agents,
+        &agent_profile::list_profiles(),
+    );
+
+    save_skills_list(&entry.name, &rebuilt)?;
+
+    Ok(rebuilt)
+}
+
+// ── Agent Detection ─────────────────────────────────────────────────
+
+/// Scan a project directory for existing agent skill directories.
+///
+/// For each agent profile, check if `<project_root>/<project_skills_rel>` exists.
+/// Unique paths that exist → auto-enable. Shared paths that exist → ambiguous group.
+pub fn detect_project_agents(project_path: &str) -> ProjectAgentDetection {
+    let profiles = agent_profile::list_profiles();
+    let project = Path::new(project_path);
+
+    // Build detection list
+    let detected: Vec<DetectedAgent> = profiles
+        .iter()
+        .filter(|p| p.has_project_skills())
+        .map(|p| {
+            let skills_dir = project.join(&p.project_skills_rel);
+            DetectedAgent {
+                agent_id: p.id.clone(),
+                display_name: p.display_name.clone(),
+                icon: p.icon.clone(),
+                project_skills_rel: p.project_skills_rel.clone(),
+                exists: skills_dir.exists(),
+            }
+        })
+        .collect();
+
+    // Group agents by project_skills_rel
+    let mut path_groups: std::collections::HashMap<String, Vec<(String, String)>> =
+        std::collections::HashMap::new();
+    for d in &detected {
+        if d.exists {
+            path_groups
+                .entry(d.project_skills_rel.clone())
+                .or_default()
+                .push((d.agent_id.clone(), d.display_name.clone()));
+        }
+    }
+
+    let mut ambiguous_groups = Vec::new();
+    let mut auto_enable = Vec::new();
+
+    for (path, agents) in &path_groups {
+        if agents.len() > 1 {
+            ambiguous_groups.push(AmbiguousGroup {
+                path: path.clone(),
+                agent_ids: agents.iter().map(|(id, _)| id.clone()).collect(),
+                agent_names: agents.iter().map(|(_, name)| name.clone()).collect(),
+            });
+        } else if let Some((id, _)) = agents.first() {
+            auto_enable.push(id.clone());
+        }
+    }
+
+    // Disambiguation sealed — each agent now has a unique project_skills_rel,
+    // so ambiguous groups can no longer occur. The detection logic above is
+    // preserved but its output is discarded.
+    ProjectAgentDetection {
+        detected,
+        ambiguous_groups: Vec::new(),
+        auto_enable,
+    }
+}
+
+// ── Scan & Import ───────────────────────────────────────────────────
+
+/// Scan a project directory for existing skill entries across all agent profiles.
+///
+/// For each agent profile, look at `<project>/<project_skills_rel>/` and inspect
+/// every child directory. Classify each as symlink vs real directory, check
+/// whether the hub already has a skill with the same name, and whether the
+/// directory contains a SKILL.md file.
+pub fn scan_project_skills(project_path: &str) -> Result<ProjectScanResult> {
+    let hub_dir = fs_paths::hub_skills_dir();
+    let profiles = agent_profile::list_profiles();
+    let project = ensure_project_root_exists(project_path)?;
+
+    let mut skills = Vec::with_capacity(profiles.len() * 8); // reasonable pre-alloc
+    let mut agents_found = Vec::with_capacity(profiles.len());
+
+    for profile in &profiles {
+        if !profile.has_project_skills() {
+            continue;
+        }
+        let skills_dir = project.join(&profile.project_skills_rel);
+        let entries = match std::fs::read_dir(&skills_dir) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+
+        let mut found_any = false;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() && !fs_ops::is_link(&path) {
+                continue;
+            }
+            // For symlinks that point to directories, is_dir() returns true
+            // but we also need is_symlink() check
+            let is_symlink = fs_ops::is_link(&path);
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.is_empty() || name.starts_with('.') {
+                continue;
+            }
+
+            let in_hub = hub_dir.join(&name).exists();
+            let has_skill_md = path.join("SKILL.md").exists();
+            if !is_symlink && !has_skill_md {
+                continue;
+            }
+
+            skills.push(ScannedSkill {
+                name,
+                agent_id: profile.id.clone(),
+                is_symlink,
+                in_hub,
+                has_skill_md,
+            });
+            found_any = true;
+        }
+
+        if found_any {
+            agents_found.push(profile.id.clone());
+        }
+    }
+
+    Ok(ProjectScanResult {
+        skills,
+        agents_found,
+    })
+}
+
+/// Compute a lightweight content hash of a directory tree.
+///
+/// Walks all files recursively (sorted by relative path for determinism),
+/// hashing each file's relative path and contents. Skips `.git` directories.
+/// Returns a hex-encoded SHA-256 digest.
+fn dir_content_hash(dir: &std::path::Path) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    use std::collections::BTreeSet;
+    use std::io::Read;
+
+    let mut file_paths = BTreeSet::new();
+    collect_files(dir, dir, &mut file_paths)?;
+
+    let mut hasher = Sha256::new();
+    for rel in &file_paths {
+        hasher.update(rel.as_bytes());
+        let abs = dir.join(rel);
+        if let Ok(mut f) = std::fs::File::open(&abs) {
+            let mut buf = [0u8; 8192];
+            loop {
+                let n = f.read(&mut buf).unwrap_or(0);
+                if n == 0 {
+                    break;
+                }
+                hasher.update(&buf[..n]);
+            }
+        }
+    }
+    let digest = hasher.finalize();
+    let mut hex = String::with_capacity(64);
+    const HEX_TABLE: &[u8; 16] = b"0123456789abcdef";
+    for &byte in &digest {
+        hex.push(HEX_TABLE[(byte >> 4) as usize] as char);
+        hex.push(HEX_TABLE[(byte & 0xf) as usize] as char);
+    }
+    Ok(hex)
+}
+
+/// Recursively collect relative file paths under `root`, skipping `.git`.
+fn collect_files(
+    base: &std::path::Path,
+    dir: &std::path::Path,
+    out: &mut std::collections::BTreeSet<String>,
+) -> Result<()> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(_) => return Ok(()),
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name();
+        if name == ".git" {
+            continue;
+        }
+        if path.is_dir() && !fs_ops::is_link(&path) {
+            collect_files(base, &path, out)?;
+        } else if path.is_file() {
+            if let Ok(rel) = path.strip_prefix(base) {
+                out.insert(rel.to_string_lossy().to_string());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Refresh copy-deployed skills whose content has drifted from the hub.
+///
+/// For each skill in the project's `skills-list.json`:
+/// 1. Skip symlinks — they always point to the live hub entry.
+/// 2. Skip skills that no longer exist in the project directory (the user
+///    removed them on purpose; we must not re-copy).
+/// 3. For remaining copy-deployed skills, hash both the project copy and the
+///    hub source. If they differ, delete the project copy and re-deploy.
+///
+/// Returns the number of skills that were refreshed.
+pub fn refresh_stale_copies(project_path: &str) -> Result<u32> {
+    let hub_dir = fs_paths::hub_skills_dir();
+    let profiles = agent_profile::list_profiles();
+    let project = ensure_project_root_exists(project_path)?;
+
+    // Find project name for loading skills-list.json
+    let index = load_index();
+    let entry = index.projects.iter().find(|p| p.path == project_path);
+    let Some(entry) = entry else {
+        // Not a registered project — nothing to refresh
+        return Ok(0);
+    };
+    let skills_list = match load_skills_list(&entry.name) {
+        Some(list) => list,
+        None => return Ok(0),
+    };
+
+    let mut refreshed = 0u32;
+
+    for (agent_id, skill_names) in &skills_list.agents {
+        let Some(profile) = profiles.iter().find(|p| &p.id == agent_id) else {
+            continue;
+        };
+        if !profile.has_project_skills() {
+            continue;
+        }
+
+        let target_dir = project.join(&profile.project_skills_rel);
+        for skill_name in skill_names {
+            let target = target_dir.join(skill_name);
+
+            // 1. Skip symlinks — they are always up-to-date
+            if fs_ops::is_link(&target) {
+                continue;
+            }
+
+            // 2. Skip if not present in project (user deleted it)
+            if !target.is_dir() {
+                continue;
+            }
+
+            // 3. Check the hub source exists
+            let source = hub_dir.join(skill_name);
+            if !source.exists() {
+                continue;
+            }
+
+            // 4. Compare hashes
+            let hub_hash = match dir_content_hash(&source) {
+                Ok(h) => h,
+                Err(e) => {
+                    tracing::warn!(
+                        target: "sync",
+                        skill = %skill_name,
+                        error = %e,
+                        "Failed to hash hub skill, skipping refresh"
+                    );
+                    continue;
+                }
+            };
+            let project_hash = match dir_content_hash(&target) {
+                Ok(h) => h,
+                Err(e) => {
+                    tracing::warn!(
+                        target: "sync",
+                        skill = %skill_name,
+                        error = %e,
+                        "Failed to hash project skill copy, skipping refresh"
+                    );
+                    continue;
+                }
+            };
+
+            if hub_hash == project_hash {
+                continue;
+            }
+
+            // 5. Hashes differ → refresh: remove old copy, re-deploy
+            tracing::info!(
+                target: "sync",
+                skill = %skill_name,
+                agent = %agent_id,
+                "Copy-deployed skill is stale, refreshing from hub"
+            );
+            if let Err(e) = fs_ops::remove_link_or_copy(&target) {
+                tracing::warn!(
+                    target: "sync",
+                    skill = %skill_name,
+                    error = %e,
+                    "Failed to remove stale copy, skipping"
+                );
+                continue;
+            }
+            match deploy_skill_auto(&source, &target) {
+                Ok(()) => refreshed += 1,
+                Err(e) => {
+                    tracing::warn!(
+                        target: "sync",
+                        skill = %skill_name,
+                        error = %e,
+                        "Failed to re-deploy skill after stale copy removal"
+                    );
+                }
+            }
+        }
+    }
+
+    if refreshed > 0 {
+        tracing::info!(
+            target: "sync",
+            refreshed,
+            project = %project_path,
+            "Refreshed stale copy-deployed skills"
+        );
+    }
+
+    Ok(refreshed)
+}
+
+/// Import discovered skills into local storage and update the project's
+/// skills-list.
+///
+/// Strategy A: Adopt + Replace with Symlink.
+/// - If a skill doesn't exist in the hub, move it into `skills-local/` and
+///   expose it through the hub symlink in `skills/`.
+/// - Replace the original real directory in the project with a symlink to the
+///   hub entry.
+/// - If the skill already exists in the hub, skip adoption but still write
+///   the mapping into `skills-list.json`.
+/// - Finally, merge all imported skills into the project's skills-list.json.
+pub fn import_scanned_skills(
+    project_path: &str,
+    project_name: &str,
+    targets: &[ImportTarget],
+) -> Result<ImportResult> {
+    let entry = register_project(project_path)?;
+    let canonical_project_name = entry.name;
+
+    let hub_dir = fs_paths::hub_skills_dir();
+    local_skill::reconcile_hub_symlinks();
+    let profiles = agent_profile::list_profiles();
+    let project = Path::new(project_path);
+
+    std::fs::create_dir_all(&hub_dir)
+        .with_context(|| format!("failed to create hub dir: {}", hub_dir.display()))?;
+
+    // Preserve any previously chosen owner for shared project paths.
+    let mut existing = load_skills_list(&canonical_project_name)
+        .or_else(|| {
+            if project_name != canonical_project_name.as_str() {
+                load_skills_list(project_name)
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default();
+
+    let mut owner_by_path: HashMap<String, String> = HashMap::new();
+    for agent_id in existing.agents.keys() {
+        let Some(profile) = profiles.iter().find(|p| &p.id == agent_id) else {
+            continue;
+        };
+        if !profile.has_project_skills() {
+            continue;
+        }
+        owner_by_path
+            .entry(profile.project_skills_rel.clone())
+            .or_insert_with(|| agent_id.clone());
+    }
+
+    let mut imported_to_hub = Vec::new();
+    let mut symlink_count = 0u32;
+
+    for target in targets {
+        // Find the agent profile used to locate the on-disk project folder.
+        let Some(source_profile) = profiles.iter().find(|p| p.id == target.agent_id) else {
+            continue;
+        };
+        if !source_profile.has_project_skills() {
+            continue;
+        }
+
+        let source_dir = project
+            .join(&source_profile.project_skills_rel)
+            .join(&target.name);
+        if !source_dir.exists() {
+            continue;
+        }
+
+        // Skip if already a symlink (already managed)
+        if fs_ops::is_link(&source_dir) {
+            continue;
+        }
+
+        // Only valid skill folders are safe to import and replace.
+        if !source_dir.join("SKILL.md").exists() {
+            continue;
+        }
+
+        let effective_agent_id = owner_by_path
+            .get(&source_profile.project_skills_rel)
+            .cloned()
+            .unwrap_or_else(|| target.agent_id.clone());
+        owner_by_path
+            .entry(source_profile.project_skills_rel.clone())
+            .or_insert_with(|| effective_agent_id.clone());
+
+        let hub_skill_dir = hub_dir.join(&target.name);
+
+        // Step 1: Adopt into local storage if not already present in the hub.
+        if !hub_skill_dir.exists() {
+            local_skill::adopt_existing_dir(&target.name, &source_dir).with_context(|| {
+                format!(
+                    "failed to adopt discovered project skill '{}' into skills-local",
+                    target.name
+                )
+            })?;
+            imported_to_hub.push(target.name.clone());
+        } else {
+            // Step 2a: Skill already exists in the hub, so replace the
+            // unmanaged project copy with a symlink to the canonical hub entry.
+            std::fs::remove_dir_all(&source_dir)
+                .with_context(|| format!("failed to remove real dir: {}", source_dir.display()))?;
+        }
+
+        // Step 2b: Point the project entry at the hub entry, which may itself
+        // be a symlink into `skills-local/`.
+        fs_ops::create_symlink_or_copy(&hub_skill_dir, &source_dir)
+            .with_context(|| format!("failed to create symlink for skill '{}'", target.name))?;
+
+        symlink_count += 1;
+
+        let agent_skills = existing.agents.entry(effective_agent_id).or_default();
+        if !agent_skills.contains(&target.name) {
+            agent_skills.push(target.name.clone());
+        }
+    }
+
+    existing.updated_at = chrono::Utc::now().to_rfc3339();
+    save_skills_list(&canonical_project_name, &existing)?;
+
+    Ok(ImportResult {
+        imported_to_hub,
+        skills_list_updated: true,
+        symlink_count,
+    })
+}
+
+// ── Cascade update stubs (not yet implemented) ────────────────────────
+
+#[allow(dead_code)]
+pub fn cascade_skill_update_to_projects(_skills: &[String]) -> CascadeUpdateSummary {
+    CascadeUpdateSummary::default()
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::Result;
+    use std::ffi::OsStr;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::core::lock_test_env()
+    }
+
+    fn set_env<K: AsRef<OsStr>, V: AsRef<OsStr>>(key: K, value: V) {
+        unsafe { std::env::set_var(key, value) }
+    }
+
+    fn remove_env<K: AsRef<OsStr>>(key: K) {
+        unsafe { std::env::remove_var(key) }
+    }
+
+    #[test]
+    fn full_sync_removes_symlinks_for_deselected_agents() -> Result<()> {
+        let _guard = env_lock();
+
+        let temp_root = make_temp_root("project-sync-remove")?;
+        let previous_home = std::env::var_os("HOME");
+        set_env("HOME", temp_root.join("home"));
+        #[cfg(windows)]
+        let previous_userprofile = std::env::var_os("USERPROFILE");
+        #[cfg(windows)]
+        set_env("USERPROFILE", temp_root.join("home"));
+
+        let result = (|| -> Result<()> {
+            let hub_skill = fs_paths::hub_skills_dir().join("demo-skill");
+            std::fs::create_dir_all(&hub_skill)?;
+            std::fs::write(hub_skill.join("SKILL.md"), "description: test")?;
+
+            let project_path = temp_root.join("workspace").join("demo-project");
+            std::fs::create_dir_all(&project_path)?;
+
+            let mut first_agents = HashMap::new();
+            first_agents.insert("claude".to_string(), vec!["demo-skill".to_string()]);
+            first_agents.insert("codex".to_string(), vec!["demo-skill".to_string()]);
+            let first = SkillsList {
+                agents: first_agents,
+                deploy_modes: HashMap::new(),
+                updated_at: chrono::Utc::now().to_rfc3339(),
+            };
+            full_sync(&project_path.to_string_lossy(), &first, None)?;
+
+            let claude_link = project_path.join(".claude/skills/demo-skill");
+            let codex_link = project_path.join(".codex/skills/demo-skill");
+            assert!(
+                claude_link.is_symlink(),
+                "expected initial symlink to exist"
+            );
+            assert!(
+                codex_link.is_symlink(),
+                "expected initial codex symlink to exist"
+            );
+
+            // Second sync: deselect all agents. Pass previous agents as cleanup
+            // to mirror the diff that save_and_sync computes in production.
+            let cleanup = vec!["claude".to_string(), "codex".to_string()];
+            let second = SkillsList {
+                agents: HashMap::new(),
+                deploy_modes: HashMap::new(),
+                updated_at: chrono::Utc::now().to_rfc3339(),
+            };
+            full_sync(&project_path.to_string_lossy(), &second, Some(&cleanup))?;
+
+            assert!(
+                !claude_link.symlink_metadata().is_ok(),
+                "expected stale symlink to be removed after deselecting agent"
+            );
+            assert!(
+                !codex_link.symlink_metadata().is_ok(),
+                "expected stale .codex symlink to be removed after deselecting agent"
+            );
+            assert!(
+                !project_path.join(".claude/skills").exists(),
+                "expected empty .claude/skills directory to be pruned"
+            );
+            assert!(
+                !project_path.join(".claude").exists(),
+                "expected empty .claude directory to be pruned"
+            );
+            assert!(
+                !project_path.join(".codex/skills").exists(),
+                "expected empty .codex/skills directory to be pruned"
+            );
+            assert!(
+                !project_path.join(".codex").exists(),
+                "expected empty .codex directory to be pruned"
+            );
+
+            Ok(())
+        })();
+
+        match previous_home {
+            Some(value) => set_env("HOME", value),
+            None => remove_env("HOME"),
+        }
+        #[cfg(windows)]
+        match previous_userprofile {
+            Some(value) => set_env("USERPROFILE", value),
+            None => remove_env("USERPROFILE"),
+        }
+        let _ = std::fs::remove_dir_all(&temp_root);
+
+        result
+    }
+
+    #[test]
+    fn import_scanned_skills_registers_project_when_missing() -> Result<()> {
+        let _guard = env_lock();
+
+        let temp_root = make_temp_root("project-import-register")?;
+        let previous_home = std::env::var_os("HOME");
+        set_env("HOME", temp_root.join("home"));
+        #[cfg(windows)]
+        let previous_userprofile = std::env::var_os("USERPROFILE");
+        #[cfg(windows)]
+        set_env("USERPROFILE", temp_root.join("home"));
+
+        let result = (|| -> Result<()> {
+            let project_path = temp_root.join("workspace").join("demo-import-project");
+            let project_path_str = project_path.to_string_lossy().to_string();
+            let source_skill_dir = project_path.join(".claude/skills/legacy-skill");
+
+            std::fs::create_dir_all(&source_skill_dir)?;
+            std::fs::write(source_skill_dir.join("SKILL.md"), "description: legacy")?;
+
+            let targets = vec![ImportTarget {
+                name: "legacy-skill".to_string(),
+                agent_id: "claude".to_string(),
+            }];
+
+            let import_result =
+                import_scanned_skills(&project_path_str, "demo-import-project", &targets)?;
+            assert!(import_result.skills_list_updated);
+            assert!(
+                import_result
+                    .imported_to_hub
+                    .iter()
+                    .any(|name| name == "legacy-skill"),
+                "expected legacy skill to be exposed through the hub during import"
+            );
+
+            let registered = list_projects()
+                .into_iter()
+                .find(|project| project.path == project_path_str)
+                .expect("expected imported project to be auto-registered");
+            let skills_list = load_skills_list(&registered.name)
+                .expect("expected skills-list.json for registered project");
+            let claude_skills = skills_list
+                .agents
+                .get("claude")
+                .expect("expected imported skills under claude agent");
+            assert!(
+                claude_skills.iter().any(|skill| skill == "legacy-skill"),
+                "expected imported skill to be present in project's skills list"
+            );
+            let local_skill_dir = crate::core::infra::paths::local_skills_dir().join("legacy-skill");
+            let hub_skill_dir = fs_paths::hub_skills_dir().join("legacy-skill");
+            assert!(
+                local_skill_dir.is_dir(),
+                "expected imported skill to be moved into skills-local"
+            );
+            assert!(
+                hub_skill_dir.is_symlink(),
+                "expected hub entry for imported skill to be a symlink"
+            );
+            assert_eq!(
+                std::fs::read_link(&hub_skill_dir)?,
+                local_skill_dir,
+                "expected hub entry to point at skills-local storage"
+            );
+            assert!(
+                source_skill_dir.is_symlink(),
+                "expected original project skill directory to be replaced with symlink"
+            );
+            assert_eq!(
+                std::fs::read_link(&source_skill_dir)?,
+                hub_skill_dir,
+                "expected project skill directory to point at the canonical hub entry"
+            );
+
+            Ok(())
+        })();
+
+        match previous_home {
+            Some(value) => set_env("HOME", value),
+            None => remove_env("HOME"),
+        }
+        #[cfg(windows)]
+        match previous_userprofile {
+            Some(value) => set_env("USERPROFILE", value),
+            None => remove_env("USERPROFILE"),
+        }
+        let _ = std::fs::remove_dir_all(&temp_root);
+
+        result
+    }
+
+    #[test]
+    fn import_scanned_skills_skips_non_skill_directories() -> Result<()> {
+        let _guard = env_lock();
+
+        let temp_root = make_temp_root("project-import-skip-invalid")?;
+        let previous_home = std::env::var_os("HOME");
+        set_env("HOME", temp_root.join("home"));
+        #[cfg(windows)]
+        let previous_userprofile = std::env::var_os("USERPROFILE");
+        #[cfg(windows)]
+        set_env("USERPROFILE", temp_root.join("home"));
+
+        let result = (|| -> Result<()> {
+            let project_path = temp_root.join("workspace").join("demo-import-project");
+            let project_path_str = project_path.to_string_lossy().to_string();
+            let source_dir = project_path.join(".claude/skills/not-a-skill");
+
+            std::fs::create_dir_all(&source_dir)?;
+            std::fs::write(source_dir.join("README.md"), "not a skill")?;
+
+            let targets = vec![ImportTarget {
+                name: "not-a-skill".to_string(),
+                agent_id: "claude".to_string(),
+            }];
+
+            let import_result =
+                import_scanned_skills(&project_path_str, "demo-import-project", &targets)?;
+
+            assert!(
+                import_result.imported_to_hub.is_empty(),
+                "expected invalid directories to be skipped during import"
+            );
+            assert_eq!(
+                import_result.symlink_count, 0,
+                "expected invalid directories to remain untouched"
+            );
+            assert!(
+                source_dir.is_dir() && !source_dir.is_symlink(),
+                "expected invalid source directory to remain a real directory"
+            );
+
+            let registered = list_projects()
+                .into_iter()
+                .find(|project| project.path == project_path_str)
+                .expect("expected project registration during import");
+            let skills_list = load_skills_list(&registered.name)
+                .expect("expected skills-list.json for registered project");
+            assert!(
+                !skills_list
+                    .agents
+                    .values()
+                    .flatten()
+                    .any(|name| name == "not-a-skill"),
+                "expected invalid directories to be excluded from project metadata"
+            );
+
+            Ok(())
+        })();
+
+        match previous_home {
+            Some(value) => set_env("HOME", value),
+            None => remove_env("HOME"),
+        }
+        #[cfg(windows)]
+        match previous_userprofile {
+            Some(value) => set_env("USERPROFILE", value),
+            None => remove_env("USERPROFILE"),
+        }
+        let _ = std::fs::remove_dir_all(&temp_root);
+
+        result
+    }
+
+    #[test]
+    fn import_scanned_skills_preserves_shared_path_owner() -> Result<()> {
+        let _guard = env_lock();
+
+        let temp_root = make_temp_root("project-import-owner")?;
+        let previous_home = std::env::var_os("HOME");
+        set_env("HOME", temp_root.join("home"));
+        #[cfg(windows)]
+        let previous_userprofile = std::env::var_os("USERPROFILE");
+        #[cfg(windows)]
+        set_env("USERPROFILE", temp_root.join("home"));
+
+        let result = (|| -> Result<()> {
+            let project_path = temp_root.join("workspace").join("demo-import-project");
+            let project_path_str = project_path.to_string_lossy().to_string();
+            // With Codex now using .codex/skills (unique path), the import
+            // should attribute the skill to Codex directly, not merge it into
+            // antigravity's .agents/skills path.
+            let source_skill_dir = project_path.join(".codex/skills/shared-skill");
+
+            std::fs::create_dir_all(&source_skill_dir)?;
+            std::fs::write(source_skill_dir.join("SKILL.md"), "description: shared")?;
+
+            let entry = register_project(&project_path_str)?;
+            let existing = SkillsList {
+                agents: HashMap::from([("antigravity".to_string(), Vec::new())]),
+                deploy_modes: HashMap::new(),
+                updated_at: chrono::Utc::now().to_rfc3339(),
+            };
+            save_skills_list(&entry.name, &existing)?;
+
+            let targets = vec![ImportTarget {
+                name: "shared-skill".to_string(),
+                agent_id: "codex".to_string(),
+            }];
+
+            let import_result =
+                import_scanned_skills(&project_path_str, "demo-import-project", &targets)?;
+            assert_eq!(import_result.symlink_count, 1);
+
+            let skills_list = load_skills_list(&entry.name)
+                .expect("expected updated skills-list.json for registered project");
+            // Codex now has its own unique path (.codex/skills), so the import
+            // should attribute the skill to codex, not antigravity.
+            assert!(
+                skills_list
+                    .agents
+                    .get("codex")
+                    .is_some_and(|skills| skills.iter().any(|skill| skill == "shared-skill")),
+                "expected codex to own the imported skill at its unique .codex/skills path"
+            );
+
+            Ok(())
+        })();
+
+        match previous_home {
+            Some(value) => set_env("HOME", value),
+            None => remove_env("HOME"),
+        }
+        #[cfg(windows)]
+        match previous_userprofile {
+            Some(value) => set_env("USERPROFILE", value),
+            None => remove_env("USERPROFILE"),
+        }
+        let _ = std::fs::remove_dir_all(&temp_root);
+
+        result
+    }
+
+    #[test]
+    fn remove_skill_from_all_projects_cleans_metadata_and_symlinks() -> Result<()> {
+        let _guard = env_lock();
+
+        let temp_root = make_temp_root("project-remove-skill")?;
+        let previous_home = std::env::var_os("HOME");
+        set_env("HOME", temp_root.join("home"));
+        #[cfg(windows)]
+        let previous_userprofile = std::env::var_os("USERPROFILE");
+        #[cfg(windows)]
+        set_env("USERPROFILE", temp_root.join("home"));
+
+        let result = (|| -> Result<()> {
+            let hub_skill = fs_paths::hub_skills_dir().join("demo-skill");
+            std::fs::create_dir_all(&hub_skill)?;
+            std::fs::write(hub_skill.join("SKILL.md"), "description: test")?;
+
+            let project_path = temp_root.join("workspace").join("demo-project");
+            std::fs::create_dir_all(&project_path)?;
+
+            let mut agents = HashMap::new();
+            agents.insert("claude".to_string(), vec!["demo-skill".to_string()]);
+            save_and_sync(&project_path.to_string_lossy(), agents, HashMap::new())?;
+
+            let project = list_projects()
+                .into_iter()
+                .find(|project| project.path == project_path.to_string_lossy())
+                .expect("expected project to be registered");
+            let link_path = project_path.join(".claude/skills/demo-skill");
+            assert!(
+                link_path.is_symlink(),
+                "expected project skill symlink before cleanup"
+            );
+
+            let touched = remove_skill_from_all_projects("demo-skill")?;
+            assert!(
+                touched.iter().any(|name| name == &project.name),
+                "expected cleanup to report the touched project"
+            );
+
+            let skills_list = load_skills_list(&project.name)
+                .expect("expected project skills list to remain readable");
+            assert!(
+                skills_list.agents.is_empty(),
+                "expected removed skill to be pruned from project metadata"
+            );
+            assert!(
+                !link_path.symlink_metadata().is_ok(),
+                "expected project skill symlink to be removed"
+            );
+            assert!(
+                !project_path.join(".claude/skills").exists(),
+                "expected empty project skill directory to be pruned"
+            );
+
+            Ok(())
+        })();
+
+        match previous_home {
+            Some(value) => set_env("HOME", value),
+            None => remove_env("HOME"),
+        }
+        #[cfg(windows)]
+        match previous_userprofile {
+            Some(value) => set_env("USERPROFILE", value),
+            None => remove_env("USERPROFILE"),
+        }
+        let _ = std::fs::remove_dir_all(&temp_root);
+
+        result
+    }
+
+    fn make_temp_root(suffix: &str) -> Result<PathBuf> {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .context("failed to read system time")?
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "skillstar-project-manifest-{}-{}-{}",
+            suffix,
+            std::process::id(),
+            stamp
+        ));
+        std::fs::create_dir_all(&dir)
+            .with_context(|| format!("failed to create temp dir: {}", dir.display()))?;
+        Ok(dir)
+    }
+}

@@ -243,8 +243,13 @@ export interface ProjectEntry {
   created_at: string;
 }
 
+/** Per `project_skills_rel` path (e.g. `.agents/skills`), how hub skills are materialized in the project. */
+export type ProjectDeployMode = "symlink" | "copy";
+
 export interface SkillsList {
   agents: Record<string, string[]>;
+  /** Keyed by `project_skills_rel`; omitted or empty means symlink for that path. */
+  deploy_modes?: Record<string, ProjectDeployMode>;
   updated_at: string;
 }
 
@@ -325,6 +330,8 @@ export interface AiConfig {
   scan_max_response_tokens: number;
   /** Optional anonymous security scan telemetry (aggregate only, no skill names/content). */
   security_scan_telemetry_enabled: boolean;
+  /** Dedicated model for SKILL.md translation. Falls back to `model` when empty. */
+  translation_model?: string;
   /** Per-format saved presets */
   openai_preset: FormatPreset;
   anthropic_preset: FormatPreset;

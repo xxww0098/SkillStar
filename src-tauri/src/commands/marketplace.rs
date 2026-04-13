@@ -1,5 +1,5 @@
 use crate::core::{
-    error::AppError,
+    infra::error::AppError,
     marketplace,
     skill::{OfficialPublisher, Skill},
 };

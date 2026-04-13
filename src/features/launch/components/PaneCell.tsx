@@ -1,11 +1,10 @@
-import { invoke } from "@tauri-apps/api/core";
-import { Columns2, RefreshCw, Rows2, X } from "lucide-react";
-import { memo, useCallback, useEffect, useState } from "react";
+import { Columns2, Rows2, X } from "lucide-react";
+import { memo } from "react";
+import type { ModelAppId } from "../../models/components/AppCapsuleSwitcher";
+import { AgentIcon } from "../../models/components/shared/ProviderIcon";
+import { useModelProviders, useOpenCodeNativeProviders } from "../../models/hooks/useModelProviders";
 import type { AgentCliInfo } from "../hooks/useAgentClis";
 import type { PaneNode, SplitDirection } from "../hooks/useLaunchConfig";
-import { AgentIcon } from "../../models/components/shared/ProviderIcon";
-import { type ModelAppId } from "../../models/components/AppCapsuleSwitcher";
-import { useModelProviders, useOpenCodeNativeProviders } from "../../models/hooks/useModelProviders";
 import { OpenCodeModelSelect } from "./OpenCodeModelSelect";
 
 const AGENT_COLORS: Record<string, string> = {
@@ -64,9 +63,7 @@ const ProviderSelect = memo(function ProviderSelect({
         onAssign(pane.id, pane.agentId, pId, pName, pane.modelId);
       }}
     >
-      <option value={DEFAULT_PROVIDER_VALUE}>
-        Default
-      </option>
+      <option value={DEFAULT_PROVIDER_VALUE}>Default</option>
       {providers.sortedProviders.map((p) => {
         const displayName = p.name.replace(/^Google \((.+)\)$/, "$1");
         return (
@@ -78,7 +75,6 @@ const ProviderSelect = memo(function ProviderSelect({
     </select>
   );
 });
-
 
 export const PaneCell = memo(function PaneCell({
   pane,
@@ -156,7 +152,7 @@ export const PaneCell = memo(function PaneCell({
       )}
 
       {/* Action buttons */}
-      <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-20 bg-background/60 backdrop-blur-sm border border-border/30 rounded-md p-0.5 shadow-sm">
+      <div className="absolute top-2 right-2 flex items-center gap-1 z-20 rounded-md border border-border/40 bg-background/85 backdrop-blur-sm p-0.5 shadow-sm opacity-95 hover:opacity-100 transition-opacity">
         {isMulti && (
           <>
             <button

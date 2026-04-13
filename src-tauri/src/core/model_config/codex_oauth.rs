@@ -22,6 +22,7 @@ const ORIGINATOR: &str = "codex_vscode";
 const OAUTH_CALLBACK_PORT: u16 = 1455;
 const OAUTH_TIMEOUT_SECONDS: i64 = 300;
 
+#[allow(dead_code)]
 pub fn get_callback_port() -> u16 {
     OAUTH_CALLBACK_PORT
 }
@@ -651,6 +652,7 @@ pub async fn refresh_access_token(refresh_token: &str) -> Result<OAuthTokens, St
 }
 
 /// Check if the OAuth callback port is currently in use.
+#[allow(dead_code)]
 pub fn is_port_in_use() -> bool {
     matches!(
         TcpListener::bind(("127.0.0.1", OAUTH_CALLBACK_PORT)),

@@ -24,6 +24,7 @@ fn detect_macos_terminal() -> MacTerminal {
 }
 
 /// Open a launch script in the user's preferred terminal emulator.
+#[allow(unused_variables)]
 pub(crate) fn open_script_in_terminal_with_kind(
     script_path: &std::path::Path,
     script_kind: LaunchScriptKind,

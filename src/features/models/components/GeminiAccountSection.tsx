@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { AnimatePresence, motion } from "framer-motion";
 import { Key, Loader2, LogIn, RefreshCw, Save, ShieldPlus, X } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { cn } from "../../../lib/utils";
@@ -11,6 +12,7 @@ import { ApiKeyInput } from "./shared/ApiKeyInput";
 import { GeminiAccountRow } from "./shared/GeminiAccountRow";
 
 function AddApiKeyForm({ onSubmit, onCancel }: { onSubmit: (key: string) => void; onCancel: () => void }) {
+  const { t } = useTranslation();
   const [apiKey, setApiKey] = useState("");
 
   return (
@@ -23,7 +25,7 @@ function AddApiKeyForm({ onSubmit, onCancel }: { onSubmit: (key: string) => void
     >
       <div className="space-y-3 p-3.5 rounded-xl border border-border/60 bg-card/40">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-medium text-muted-foreground">添加 Gemini API Key 账号</span>
+          <span className="text-xs font-medium text-muted-foreground">{t("modelPage.geminiAddApiKeyAccount")}</span>
           <button
             type="button"
             onClick={onCancel}
@@ -37,7 +39,7 @@ function AddApiKeyForm({ onSubmit, onCancel }: { onSubmit: (key: string) => void
           type="button"
           onClick={() => {
             if (!apiKey.trim()) {
-              toast.error("请输入 API Key");
+              toast.error(t("modelPage.geminiApiKeyRequired"));
               return;
             }
             onSubmit(apiKey.trim());
@@ -45,7 +47,7 @@ function AddApiKeyForm({ onSubmit, onCancel }: { onSubmit: (key: string) => void
           className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-[#4285F4] hover:bg-[#4285F4]/80 text-white text-xs font-medium transition-colors"
         >
           <Save className="w-3.5 h-3.5" />
-          保存
+          {t("common.save")}
         </button>
       </div>
     </motion.div>
@@ -56,34 +58,45 @@ function EmptyAccountState({
   onOAuth,
   onApiKey,
   oauthLoading,
+  oauthAvailable,
 }: {
   onOAuth: () => void;
   onApiKey: () => void;
   oauthLoading: boolean;
+  oauthAvailable: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col items-center text-center py-10 px-4 border border-dashed border-border/60 rounded-xl bg-card/20">
       <div className="w-12 h-12 rounded-2xl border border-border flex items-center justify-center mb-4 bg-[#4285F4]/8 shadow-sm">
         <ShieldPlus className="w-6 h-6 text-[#4285F4]" />
       </div>
-      <p className="text-[13px] font-semibold text-foreground mb-1.5">尚未添加任何账号</p>
-      <p className="text-xs text-muted-foreground max-w-[260px] mb-6 leading-relaxed">
-        通过 OAuth 登录或添加 API Key，开始配置您的 Gemini 模型环境
+      <p className="text-[13px] font-semibold text-foreground mb-1.5">{t("modelPage.geminiEmptyTitle")}</p>
+      <p className="text-xs text-muted-foreground max-w-[280px] mb-3 leading-relaxed">
+        {t("modelPage.geminiEmptyDesc")}
       </p>
-      <div className="flex items-center gap-3">
+      {!oauthAvailable && (
+        <p className="text-[11px] text-amber-600 dark:text-amber-400 max-w-[320px] mb-4 leading-relaxed">
+          {t("modelPage.geminiOAuthUnavailable")}
+        </p>
+      )}
+      <div className="flex flex-wrap items-center justify-center gap-3">
         <button
           type="button"
           onClick={onOAuth}
-          disabled={oauthLoading}
+          disabled={oauthLoading || !oauthAvailable}
+          title={!oauthAvailable ? t("modelPage.geminiOAuthUnavailable") : undefined}
           className={cn(
             "flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium transition-all shadow-sm",
             oauthLoading
               ? "bg-[#4285F4]/20 text-[#4285F4] animate-pulse"
-              : "bg-[#4285F4] hover:bg-[#4285F4]/90 text-white",
+              : !oauthAvailable
+                ? "bg-muted text-muted-foreground cursor-not-allowed opacity-70"
+                : "bg-[#4285F4] hover:bg-[#4285F4]/90 text-white",
           )}
         >
           {oauthLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogIn className="w-3.5 h-3.5" />}
-          {oauthLoading ? "等待授权..." : "OAuth 登录"}
+          {oauthLoading ? t("modelPage.geminiOAuthWaiting") : t("modelPage.geminiOAuthLogin")}
         </button>
         <button
           type="button"
@@ -91,7 +104,7 @@ function EmptyAccountState({
           className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-all shadow-sm"
         >
           <Key className="w-3.5 h-3.5" />
-          API Key
+          {t("modelPage.geminiApiKey")}
         </button>
       </div>
     </div>
@@ -99,7 +112,15 @@ function EmptyAccountState({
 }
 
 export function GeminiAccountSection({ onAccountSwitched }: { onAccountSwitched?: () => void }) {
+  const { t } = useTranslation();
   const { providers, addProvider, updateProvider, deleteProvider, switchTo, currentId } = useModelProviders("gemini");
+  const [geminiOauthConfigured, setGeminiOauthConfigured] = useState(true);
+
+  useEffect(() => {
+    invoke<boolean>("gemini_oauth_is_configured")
+      .then(setGeminiOauthConfigured)
+      .catch(() => setGeminiOauthConfigured(false));
+  }, []);
 
   // We consider "Accounts" to be entries explicitly added via OAuth or the inline API Key form.
   const accounts = Object.values(providers).filter(
@@ -216,7 +237,7 @@ export function GeminiAccountSection({ onAccountSwitched }: { onAccountSwitched?
       {/* Section header */}
       <div className="flex items-center justify-between px-1">
         <h3 className="text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-widest">
-          Google Gemini 账号
+          {t("modelPage.geminiSectionTitle")}
         </h3>
         {hasAccounts && (
           <button
@@ -226,7 +247,7 @@ export function GeminiAccountSection({ onAccountSwitched }: { onAccountSwitched?
             className="flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
           >
             <RefreshCw className={cn("w-3 h-3", refreshing.size > 0 && "animate-spin")} />
-            刷新全部
+            {t("modelPage.geminiRefreshAll")}
           </button>
         )}
       </div>
@@ -257,7 +278,7 @@ export function GeminiAccountSection({ onAccountSwitched }: { onAccountSwitched?
             {geminiState.oauthLoading ? (
               <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-medium transition-all bg-primary/10 text-primary animate-pulse border border-transparent">
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                等待授权...
+                {t("modelPage.geminiOAuthWaiting")}
                 <button
                   type="button"
                   onClick={geminiState.cancelOAuth}
@@ -270,14 +291,24 @@ export function GeminiAccountSection({ onAccountSwitched }: { onAccountSwitched?
             ) : (
               <button
                 type="button"
-                onClick={geminiState.startOAuth}
+                onClick={() => {
+                  if (!geminiOauthConfigured) {
+                    toast.error(t("modelPage.geminiOAuthUnavailable"));
+                    return;
+                  }
+                  geminiState.startOAuth();
+                }}
+                disabled={!geminiOauthConfigured}
+                title={!geminiOauthConfigured ? t("modelPage.geminiOAuthUnavailable") : undefined}
                 className={cn(
                   "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-medium transition-all group",
-                  "bg-transparent text-muted-foreground hover:text-[#4285F4] hover:bg-[#4285F4]/10 border border-border hover:border-[#4285F4]/30",
+                  geminiOauthConfigured
+                    ? "bg-transparent text-muted-foreground hover:text-[#4285F4] hover:bg-[#4285F4]/10 border border-border hover:border-[#4285F4]/30"
+                    : "bg-muted/50 text-muted-foreground cursor-not-allowed opacity-70 border border-border",
                 )}
               >
                 <LogIn className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100" />
-                添加 OAuth
+                {t("modelPage.geminiAddOAuth")}
               </button>
             )}
             <button
@@ -286,7 +317,7 @@ export function GeminiAccountSection({ onAccountSwitched }: { onAccountSwitched?
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-medium bg-transparent text-muted-foreground hover:text-foreground hover:bg-secondary border border-border hover:border-border/80 transition-all group"
             >
               <Key className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100" />
-              添加 API Key
+              {t("modelPage.geminiAddApiKey")}
             </button>
           </div>
         </div>
@@ -295,6 +326,7 @@ export function GeminiAccountSection({ onAccountSwitched }: { onAccountSwitched?
           onOAuth={geminiState.startOAuth}
           onApiKey={() => setShowAddApiKey(!showAddApiKey)}
           oauthLoading={geminiState.oauthLoading}
+          oauthAvailable={geminiOauthConfigured}
         />
       )}
 

@@ -50,6 +50,7 @@ const OAUTH_TIMEOUT_SECONDS: i64 = 300;
 const OAUTH_CALLBACK_PATH: &str = "/oauth2callback";
 const OAUTH_POLL_INTERVAL_SECONDS: u64 = 1;
 const HTTP_REDIRECT_STATUS: u16 = 301;
+#[allow(dead_code)]
 const OAUTH_STATE_FILE: &str = "gemini_oauth_pending.json";
 const SIGN_IN_SUCCESS_URL: &str =
     "https://developers.google.com/gemini-code-assist/auth_success_gemini";
@@ -94,6 +95,7 @@ struct GoogleUserInfoResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct GoogleTokenRefreshResponse {
     pub access_token: Option<String>,
     pub expires_in: Option<i64>,
@@ -730,6 +732,7 @@ pub fn submit_callback_url(login_id: &str, callback_url: &str) -> Result<(), Str
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn restore_pending_oauth_state() {
     hydrate_pending_login_if_missing();
 }

@@ -1,6 +1,14 @@
 use crate::core::{
-    agent_profile, ai_provider, dismissed_skills, error::AppError, gh_manager, local_skill,
-    lockfile, paths, repo_history, repo_scanner, security_scan, skill_pack, sync,
+    ai_provider,
+    git::{dismissed_skills, gh_manager, repo_history},
+    infra::error::AppError,
+    infra::{fs_ops, paths},
+    local_skill,
+    lockfile,
+    projects::{agents as agent_profile, sync},
+    repo_scanner,
+    security_scan,
+    skill_pack,
 };
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -24,7 +32,7 @@ pub async fn check_git_status() -> Result<gh_manager::GitStatus, AppError> {
 
 #[tauri::command]
 pub async fn check_developer_mode() -> Result<bool, AppError> {
-    Ok(tokio::task::spawn_blocking(paths::check_developer_mode).await?)
+    Ok(tokio::task::spawn_blocking(fs_ops::check_developer_mode).await?)
 }
 
 #[tauri::command]
@@ -146,14 +154,14 @@ fn resolve_skill_dir_for_publish(skill_name: &str, was_local: bool) -> Result<Pa
         paths::hub_skills_dir().join(skill_name)
     };
 
-    if !path.exists() && !paths::is_link(&path) {
+    if !path.exists() && !fs_ops::is_link(&path) {
         return Err(AppError::Other(format!(
             "Skill '{}' directory not found for pre-publish scan",
             skill_name
         )));
     }
 
-    if paths::is_link(&path) {
+    if fs_ops::is_link(&path) {
         std::fs::canonicalize(&path).map_err(|e| {
             AppError::Other(format!(
                 "Failed to resolve symlink for skill '{}': {}",
@@ -354,7 +362,7 @@ pub async fn clear_all_caches() -> Result<CacheCleanResult, AppError> {
 #[tauri::command]
 pub async fn force_delete_installed_skills() -> Result<usize, AppError> {
     tokio::task::spawn_blocking(|| -> Result<usize, AppError> {
-        let hub_dir = crate::core::paths::hub_skills_dir();
+        let hub_dir = crate::core::infra::paths::hub_skills_dir();
         let removed_count = count_children(&hub_dir);
 
         // Remove all global skill symlinks from known agents to avoid dangling links.
@@ -363,7 +371,7 @@ pub async fn force_delete_installed_skills() -> Result<usize, AppError> {
         }
 
         if hub_dir.exists() {
-            paths::remove_dir_all_retry(&hub_dir)?;
+            fs_ops::remove_dir_all_retry(&hub_dir)?;
         }
         std::fs::create_dir_all(&hub_dir)?;
 
@@ -389,24 +397,24 @@ pub async fn force_delete_repo_caches() -> Result<usize, AppError> {
     tokio::task::spawn_blocking(|| -> Result<usize, AppError> {
         let cache_dir = repos_cache_dir();
         let repos_removed = count_directories(&cache_dir);
-        let hub_dir = crate::core::paths::hub_skills_dir();
+        let hub_dir = crate::core::infra::paths::hub_skills_dir();
         let mut removed_skill_names: HashSet<String> = HashSet::new();
 
         // Drop hub symlinks that point into repo cache before deleting cache dirs.
         if let Ok(entries) = std::fs::read_dir(&hub_dir) {
             for entry in entries.flatten() {
                 let skill_path = entry.path();
-                if !paths::is_link(&skill_path) {
+                if !fs_ops::is_link(&skill_path) {
                     continue;
                 }
-                let Some(target) = resolve_symlink_target(&skill_path) else {
+                let Some(target) = fs_ops::read_link_resolved(&skill_path).ok() else {
                     continue;
                 };
                 if target.starts_with(&cache_dir) {
                     if let Some(name) = entry.file_name().to_str() {
                         removed_skill_names.insert(name.to_string());
                     }
-                    let _ = paths::remove_symlink(&skill_path);
+                    let _ = fs_ops::remove_symlink(&skill_path);
                 }
             }
         }
@@ -430,7 +438,7 @@ pub async fn force_delete_repo_caches() -> Result<usize, AppError> {
         }
 
         if cache_dir.exists() {
-            paths::remove_dir_all_retry(&cache_dir)?;
+            fs_ops::remove_dir_all_retry(&cache_dir)?;
         }
         std::fs::create_dir_all(&cache_dir)?;
 
@@ -501,7 +509,7 @@ fn dir_size_recursive(path: &std::path::Path) -> u64 {
             // Do not follow symlink/junction targets when sizing storage.
             // Following links can double-count repo cache content and can hang
             // on cyclic link graphs (especially on Windows junction-heavy setups).
-            if paths::is_link(&entry_path) {
+            if fs_ops::is_link(&entry_path) {
                 continue;
             }
 
@@ -544,7 +552,7 @@ fn count_hub_skills(hub_dir: &Path) -> (usize, usize) {
             let Ok(meta) = path.symlink_metadata() else {
                 continue;
             };
-            if paths::is_link(&path) {
+            if fs_ops::is_link(&path) {
                 // Symlink: check if the target still exists
                 if path.exists() {
                     valid += 1;
@@ -579,7 +587,7 @@ fn count_hub_skills(hub_dir: &Path) -> (usize, usize) {
 #[tauri::command]
 pub async fn clean_broken_skills() -> Result<usize, AppError> {
     tokio::task::spawn_blocking(|| -> Result<usize, AppError> {
-        let hub_dir = crate::core::paths::hub_skills_dir();
+        let hub_dir = crate::core::infra::paths::hub_skills_dir();
         let mut fixed: usize = 0;
         let mut removed_names: HashSet<String> = HashSet::new();
 
@@ -590,9 +598,9 @@ pub async fn clean_broken_skills() -> Result<usize, AppError> {
                 if path.symlink_metadata().is_err() {
                     continue;
                 }
-                if paths::is_link(&path) && !path.exists() {
+                if fs_ops::is_link(&path) && !path.exists() {
                     // Broken symlink — target is gone
-                    if paths::remove_symlink(&path).is_ok() {
+                    if fs_ops::remove_symlink(&path).is_ok() {
                         if let Some(name) = entry.file_name().to_str() {
                             removed_names.insert(name.to_string());
                         }
@@ -618,7 +626,7 @@ pub async fn clean_broken_skills() -> Result<usize, AppError> {
             let skill_path = hub_dir.join(&entry.name);
             // Keep entries that have a valid directory or valid symlink
             skill_path.symlink_metadata().is_ok()
-                && (!paths::is_link(&skill_path) || skill_path.exists())
+                && (!fs_ops::is_link(&skill_path) || skill_path.exists())
         });
         let orphans_removed = before - lf.skills.len();
         if orphans_removed > 0 {
@@ -642,7 +650,7 @@ fn count_directories(path: &Path) -> usize {
                 .flatten()
                 .filter(|entry| {
                     let p = entry.path();
-                    if paths::is_link(&p) {
+                    if fs_ops::is_link(&p) {
                         return false;
                     }
                     p.symlink_metadata().map(|m| m.is_dir()).unwrap_or(false)
@@ -650,20 +658,6 @@ fn count_directories(path: &Path) -> usize {
                 .count()
         })
         .unwrap_or(0)
-}
-
-fn resolve_symlink_target(symlink_path: &Path) -> Option<PathBuf> {
-    // `read_link` handles symlinks; Windows junctions may require `junction::get_target`.
-    let link_target = std::fs::read_link(symlink_path);
-    #[cfg(windows)]
-    let link_target = link_target.or_else(|_| junction::get_target(symlink_path));
-    let target = link_target.ok()?;
-
-    Some(if target.is_absolute() {
-        target
-    } else {
-        symlink_path.parent().unwrap_or(Path::new(".")).join(target)
-    })
 }
 
 fn repos_cache_dir() -> PathBuf {

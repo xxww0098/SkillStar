@@ -24,6 +24,7 @@ pub(super) fn home_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
 }
 
+#[allow(dead_code)]
 pub(super) fn config_dir() -> PathBuf {
     #[cfg(test)]
     if let Some(path) = env_path("SKILLSTAR_TEST_CONFIG_DIR") {

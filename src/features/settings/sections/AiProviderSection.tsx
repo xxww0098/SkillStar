@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
 import { Switch } from "../../../components/ui/switch";
+import { useNavigation } from "../../../hooks/useNavigation";
 import { cn } from "../../../lib/utils";
 import type { AiConfig, FormatPreset } from "../../../types";
 
@@ -59,6 +60,7 @@ export function AiProviderSection({
   aiTestLatency,
 }: AiProviderSectionProps) {
   const { t } = useTranslation();
+  const { navigateToModels } = useNavigation();
   const isAnthropicFormat = localAiConfig.api_format === "anthropic";
   const isLocalFormat = localAiConfig.api_format === "local";
   const aiApiKeyPlaceholder = isLocalFormat
@@ -126,6 +128,18 @@ export function AiProviderSection({
 
         {aiExpanded && (
           <div className="px-4 pb-4 pt-1 border-t border-border space-y-3">
+            <div className="rounded-lg border border-emerald-500/15 bg-emerald-500/[0.06] px-3 py-2.5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-muted-foreground leading-relaxed">{t("settings.modelAgentsHint")}</p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="shrink-0 h-8 text-xs border-emerald-500/25 hover:bg-emerald-500/10"
+                onClick={() => navigateToModels()}
+              >
+                {t("settings.modelAgentsCta")}
+              </Button>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">{t("settings.apiFormat")}</label>
@@ -270,6 +284,46 @@ export function AiProviderSection({
                     <option value="claude-sonnet-4-20250514" />
                   </>
                 )}
+              </datalist>
+            </div>
+
+            {/* ── Translation Model ─── */}
+            <div className="border-t border-border/40 pt-3">
+              <div className="flex items-center gap-1.5 mb-2.5">
+                <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                  {t("settings.translationModel", { defaultValue: "Translation Model" })}
+                </span>
+              </div>
+              <p className="text-[10px] text-muted-foreground mb-2">
+                {t("settings.translationModelHint", {
+                  defaultValue:
+                    "Dedicated model for SKILL.md translation. Leave empty to use the model above. DeepSeek Reasoner recommended for Chinese.",
+                })}
+              </p>
+              <Input
+                type="text"
+                value={localAiConfig.translation_model ?? ""}
+                onChange={(e) =>
+                  onConfigChange({
+                    ...localAiConfig,
+                    translation_model: e.target.value || undefined,
+                  })
+                }
+                placeholder={t("settings.translationModelPlaceholder", {
+                  defaultValue: "e.g. deepseek-reasoner, o3, gpt-5.4",
+                })}
+                list="translation-model-suggestions"
+              />
+              <datalist id="translation-model-suggestions">
+                <option value="deepseek-reasoner" />
+                <option value="deepseek-chat" />
+                <option value="o3" />
+                <option value="gpt-5.4" />
+                <option value="gpt-4o" />
+                <option value="claude-sonnet-4-20250514" />
+                <option value="claude-opus-4-20250514" />
+                <option value="llama3.1:8b" />
+                <option value="qwen-plus" />
               </datalist>
             </div>
 

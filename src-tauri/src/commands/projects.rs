@@ -1,4 +1,4 @@
-use crate::core::{error::AppError, project_manifest, sync};
+use crate::core::{infra::error::AppError, project_manifest, projects::sync};
 use std::collections::HashMap;
 
 #[tauri::command]
@@ -38,9 +38,14 @@ pub async fn get_project_skills(
 pub async fn save_and_sync_project(
     project_path: String,
     agents: HashMap<String, Vec<String>>,
+    deploy_modes: Option<HashMap<String, project_manifest::ProjectDeployMode>>,
 ) -> Result<u32, AppError> {
-    let (_name, count) = project_manifest::save_and_sync(&project_path, agents)
-        .map_err(|e| AppError::Project(e.to_string()))?;
+    let (_name, count) = project_manifest::save_and_sync(
+        &project_path,
+        agents,
+        deploy_modes.unwrap_or_default(),
+    )
+    .map_err(|e| AppError::Project(e.to_string()))?;
     Ok(count)
 }
 
@@ -69,6 +74,14 @@ pub async fn scan_project_skills(
     project_path: String,
 ) -> Result<project_manifest::ProjectScanResult, AppError> {
     project_manifest::scan_project_skills(&project_path)
+        .map_err(|e| AppError::Project(e.to_string()))
+}
+
+#[tauri::command]
+pub async fn refresh_stale_project_copies(
+    project_path: String,
+) -> Result<u32, AppError> {
+    project_manifest::refresh_stale_copies(&project_path)
         .map_err(|e| AppError::Project(e.to_string()))
 }
 

@@ -11,7 +11,6 @@
 use anyhow::{Context, Result};
 use regex::Regex;
 use rusqlite::Connection;
-use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
@@ -19,572 +18,54 @@ use std::sync::{Arc, Mutex, OnceLock};
 use tokio::sync::Semaphore;
 
 use super::ai_provider::{AiConfig, chat_completion, chat_completion_capped};
+mod constants;
+mod types;
+mod policy;
+mod snippet;
+mod static_patterns;
 mod orchestrator;
 mod smart_rules;
 
-// ── Compile-time prompt embedding ───────────────────────────────────
+pub use policy::{get_policy, save_policy};
+pub use static_patterns::static_pattern_scan;
+pub use types::{
+    AiFinding, AnalyzerExecutionSummary, FileRole, RiskLevel, ScanEstimate, ScanMode, ScannedFile,
+    SecurityScanLogEntry, SecurityScanPolicy, SecurityScanResult, SecurityScanTelemetryEntry,
+    StaticFinding,
+};
 
-#[allow(dead_code)]
-const SKILL_AGENT_PROMPT: &str = include_str!("../../../prompts/security/skill_agent.md");
-#[allow(dead_code)]
-const SCRIPT_AGENT_PROMPT: &str = include_str!("../../../prompts/security/script_agent.md");
-#[allow(dead_code)]
-const RESOURCE_AGENT_PROMPT: &str = include_str!("../../../prompts/security/resource_agent.md");
-#[allow(dead_code)]
-const GENERAL_AGENT_PROMPT: &str = include_str!("../../../prompts/security/general_agent.md");
-const AGGREGATOR_PROMPT: &str = include_str!("../../../prompts/security/aggregator.md");
-const CHUNK_BATCH_PROMPT: &str = include_str!("../../../prompts/security/chunk_batch.md");
-const DEFAULT_SECURITY_SCAN_POLICY_YAML: &str = include_str!("security_policy_default.yaml");
+pub(crate) use constants::SNIPPET_MAX_CHARS;
+pub(crate) use policy::{
+    apply_policy_to_static_finding, resolve_enabled_analyzers, resolve_policy,
+};
+pub(crate) use snippet::safe_snippet;
+pub(crate) use static_patterns::static_pattern_scan_with_policy;
+pub(crate) use types::{
+    clamp_confidence, default_confidence_for_severity, default_confidence_score,
+    default_ai_finding_confidence, default_static_finding_confidence, parse_confidence_from_json,
+    FileScanResult, PreparedChunk, PreparedSkillScan, ResolvedSecurityScanPolicy,
+};
 
-// ── Constants ───────────────────────────────────────────────────────
-
-const MAX_FILE_CHARS: usize = 8_000;
-const CACHE_MAX_ENTRIES: usize = 200;
-const MAX_RECURSION_DEPTH: usize = 10;
-const SNIPPET_MAX_CHARS: usize = 200;
-const CACHE_SCHEMA_VERSION: &str = "security-scan-v4";
-const SCAN_LOG_ARCHIVE_MAX_ENTRIES: usize = 500;
-const SCAN_TELEMETRY_MAX_ENTRIES: usize = 2_000;
-const CHUNK_MAX_RETRIES: usize = 2;
-const CHUNK_RETRY_DELAY_MS: u64 = 1500;
-
-const FILE_CACHE_MAX_ENTRIES: usize = 5_000;
-
-const SCANNABLE_EXTENSIONS: &[&str] = &[
-    "md", "sh", "py", "js", "ts", "yaml", "yml", "json", "toml", "txt", "cfg", "ini", "bat", "ps1",
-    "rb", "lua", "bash", "zsh", "fish", "pl", "r",
-];
-
-const SKIP_DIRS: &[&str] = &[
-    ".git",
-    "node_modules",
-    "target",
-    "dist",
-    "__pycache__",
-    ".next",
-    "build",
-    ".venv",
-    "venv",
-];
-
-// ── Data Types ──────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum RiskLevel {
-    Safe,
-    Low,
-    Medium,
-    High,
-    Critical,
-}
-
-impl RiskLevel {
-    fn from_str_loose(s: &str) -> Self {
-        match s.to_lowercase().trim() {
-            "safe" | "none" => Self::Safe,
-            "low" | "info" => Self::Low,
-            "medium" | "moderate" => Self::Medium,
-            "high" => Self::High,
-            "critical" | "severe" => Self::Critical,
-            _ => Self::Low, // Conservative: unknown values → Low, not Safe
-        }
-    }
-
-    fn severity_ord(&self) -> u8 {
-        match self {
-            Self::Safe => 0,
-            Self::Low => 1,
-            Self::Medium => 2,
-            Self::High => 3,
-            Self::Critical => 4,
-        }
-    }
-
-    pub fn max(a: Self, b: Self) -> Self {
-        if a.severity_ord() >= b.severity_ord() {
-            a
-        } else {
-            b
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ScannedFile {
-    pub relative_path: String,
-    pub content: String,
-    pub size_bytes: usize,
-    #[serde(skip)]
-    pub content_digest: String,
-}
-
-impl ScannedFile {
-    fn file_name(&self) -> &str {
-        Path::new(&self.relative_path)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(&self.relative_path)
-    }
-
-    fn extension(&self) -> &str {
-        Path::new(&self.relative_path)
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("")
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FileRole {
-    Skill,    // SKILL.md + referenced .md files
-    Script,   // Executable scripts
-    Resource, // Config/data files
-    General,  // Catch-all fallback
-}
-
-impl std::fmt::Display for FileRole {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_label())
-    }
-}
-
-impl FileRole {
-    pub fn as_label(&self) -> &'static str {
-        match self {
-            Self::Skill => "Skill",
-            Self::Script => "Script",
-            Self::Resource => "Resource",
-            Self::General => "General",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ScanMode {
-    Static,
-    Smart,
-    Deep,
-}
-
-impl ScanMode {
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::Static => "static",
-            Self::Smart => "smart",
-            Self::Deep => "deep",
-        }
-    }
-
-    pub fn requires_ai(&self) -> bool {
-        matches!(self, Self::Smart | Self::Deep)
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StaticFinding {
-    pub file_path: String,
-    pub line_number: usize,
-    pub pattern_id: String,
-    pub snippet: String,
-    pub severity: RiskLevel,
-    #[serde(default = "default_static_finding_confidence")]
-    pub confidence: f32,
-    pub description: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AiFinding {
-    pub category: String,
-    pub severity: RiskLevel,
-    #[serde(default = "default_ai_finding_confidence")]
-    pub confidence: f32,
-    pub file_path: String,
-    pub description: String,
-    pub evidence: String,
-    pub recommendation: String,
-}
-
-/// Per-file worker result (internal, not serialized to frontend)
-#[derive(Debug, Clone)]
-pub(crate) struct FileScanResult {
-    pub file_path: String,
-    pub role: FileRole,
-    pub findings: Vec<AiFinding>,
-    pub file_risk: RiskLevel,
-    #[allow(dead_code)]
-    pub tokens_hint: usize,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct PreparedChunk {
-    pub chunk_num: usize,
-    pub total_chunks: usize,
-    pub chunk_content: String,
-    pub chunk_paths: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AnalyzerExecutionSummary {
-    pub id: String,
-    pub status: String,
-    pub findings: usize,
-    #[serde(default)]
-    pub error: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct PreparedSkillScan {
-    pub skill_name: String,
-    pub files: Vec<ScannedFile>,
-    pub classifications: Vec<(FileRole, usize)>,
-    pub static_findings: Vec<StaticFinding>,
-    pub analyzer_executions: Vec<AnalyzerExecutionSummary>,
-    pub cached_file_results: Vec<FileScanResult>,
-    pub cached_file_hits: usize,
-    pub chunks: Vec<PreparedChunk>,
-    pub content_hash: String,
-    pub total_chars_analyzed: usize,
-    pub actual_mode: ScanMode,
-    pub run_ai: bool,
-    pub ai_files_analyzed: usize,
-    pub log_ctx: SkillScanLogCtx,
-    pub scan_start: std::time::Instant,
-}
-
-/// Final per-skill result (cached + sent to frontend)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SecurityScanResult {
-    pub skill_name: String,
-    pub scanned_at: String,
-    pub tree_hash: Option<String>,
-    #[serde(default = "default_scan_mode")]
-    pub scan_mode: String,
-    #[serde(default = "default_scanner_version")]
-    pub scanner_version: String,
-    #[serde(default = "default_target_language")]
-    pub target_language: String,
-    pub risk_level: RiskLevel,
-    #[serde(default)]
-    pub risk_score: f32,
-    #[serde(default = "default_confidence_score")]
-    pub confidence_score: f32,
-    #[serde(default)]
-    pub meta_deduped_count: usize,
-    #[serde(default)]
-    pub meta_consensus_count: usize,
-    #[serde(default)]
-    pub analyzer_executions: Vec<AnalyzerExecutionSummary>,
-    pub static_findings: Vec<StaticFinding>,
-    pub ai_findings: Vec<AiFinding>,
-    pub summary: String,
-    pub files_scanned: usize,
-    pub total_chars_analyzed: usize,
-    #[serde(default)]
-    pub incomplete: bool,
-    #[serde(default)]
-    pub ai_files_analyzed: usize,
-    #[serde(default)]
-    pub chunks_used: usize,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ScanEstimate {
-    pub total_files: usize,
-    pub ai_eligible_files: usize,
-    pub estimated_chunks: usize,
-    pub estimated_api_calls: usize,
-    pub estimated_total_chars: usize,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct SecurityScanLogEntry {
-    pub file_name: String,
-    pub path: String,
-    pub created_at: String,
-    pub size_bytes: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SecurityScanTelemetryEntry {
-    pub recorded_at: String,
-    pub request_hash: String,
-    pub requested_mode: String,
-    pub effective_mode: String,
-    pub force: bool,
-    pub duration_ms: i64,
-    pub targets_total: usize,
-    pub results_total: usize,
-    pub pass_count: usize,
-    /// 0.0~1.0 ratio based on total targets in this run.
-    pub pass_rate: f32,
-    pub incomplete_count: usize,
-    pub error_count: usize,
-    pub risk_distribution: BTreeMap<String, usize>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SecurityScanPolicy {
-    #[serde(default = "default_policy_preset")]
-    pub preset: String,
-    #[serde(default = "default_policy_severity_threshold")]
-    pub severity_threshold: String,
-    #[serde(default)]
-    pub enabled_analyzers: Vec<String>,
-    #[serde(default)]
-    pub ignore_rules: Vec<String>,
-    #[serde(default)]
-    pub rule_overrides: HashMap<String, SecurityScanRuleOverride>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct SecurityScanRuleOverride {
-    pub enabled: Option<bool>,
-    pub severity: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct ResolvedSecurityScanPolicy {
-    min_severity: RiskLevel,
-    ignore_rules: HashSet<String>,
-    rule_overrides: HashMap<String, SecurityScanRuleOverride>,
-}
-
-fn default_scan_mode() -> String {
-    "static".to_string()
-}
-
-fn default_scanner_version() -> String {
-    CACHE_SCHEMA_VERSION.to_string()
-}
-
-fn default_target_language() -> String {
-    "zh-CN".to_string()
-}
-
-fn default_policy_preset() -> String {
-    "balanced".to_string()
-}
-
-fn default_policy_severity_threshold() -> String {
-    "low".to_string()
-}
-
-fn default_static_finding_confidence() -> f32 {
-    0.78
-}
-
-fn default_ai_finding_confidence() -> f32 {
-    0.72
-}
-
-fn default_confidence_score() -> f32 {
-    0.5
-}
+use constants::{
+    AGGREGATOR_PROMPT, CACHE_MAX_ENTRIES, CACHE_SCHEMA_VERSION, CHUNK_BATCH_PROMPT,
+    CHUNK_MAX_RETRIES, CHUNK_RETRY_DELAY_MS, FILE_CACHE_MAX_ENTRIES, GENERAL_AGENT_PROMPT,
+    MAX_FILE_CHARS, MAX_RECURSION_DEPTH, RESOURCE_AGENT_PROMPT, SCAN_LOG_ARCHIVE_MAX_ENTRIES,
+    SCAN_TELEMETRY_MAX_ENTRIES, SCANNABLE_EXTENSIONS, SCRIPT_AGENT_PROMPT, SKILL_AGENT_PROMPT,
+    SKIP_DIRS,
+};
 
 // ── Logging ─────────────────────────────────────────────────────────
 
 fn log_path() -> PathBuf {
-    super::paths::security_scan_log_path()
+    crate::core::infra::paths::security_scan_log_path()
 }
 
 pub fn scan_logs_dir() -> PathBuf {
-    super::paths::security_scan_logs_dir()
+    crate::core::infra::paths::security_scan_logs_dir()
 }
 
 fn scan_telemetry_path() -> PathBuf {
     scan_logs_dir().join("scan_telemetry.jsonl")
-}
-
-fn policy_path() -> PathBuf {
-    super::paths::security_scan_policy_path()
-}
-
-fn normalize_rule_id(rule_id: &str) -> String {
-    rule_id.trim().to_lowercase()
-}
-
-fn parse_policy_preset(raw: &str) -> &'static str {
-    match raw.trim().to_lowercase().as_str() {
-        "strict" => "strict",
-        "permissive" => "permissive",
-        _ => "balanced",
-    }
-}
-
-fn parse_min_severity(raw: &str) -> RiskLevel {
-    RiskLevel::from_str_loose(raw)
-}
-
-fn preset_ignore_rules(preset: &str) -> Vec<&'static str> {
-    match preset {
-        // Strict keeps all rules enabled with broad coverage.
-        "strict" => vec![],
-        // Balanced suppresses very noisy install-only hints by default.
-        "balanced" => vec!["pip_install"],
-        // Permissive focuses on medium+ signals and disables noisy low-risk hints.
-        "permissive" => vec![
-            "pip_install",
-            "npm_global_install",
-            "sensitive_env",
-            "long_base64",
-        ],
-        _ => vec![],
-    }
-}
-
-fn preset_enabled_analyzers(preset: &str) -> Vec<&'static str> {
-    match preset {
-        "strict" => vec![
-            "pattern",
-            "doc_consistency",
-            "secrets",
-            "semantic",
-            "dynamic",
-            "semgrep",
-            "trivy",
-            "osv",
-            "grype",
-            "gitleaks",
-            "shellcheck",
-            "bandit",
-            "sbom",
-            "virustotal",
-        ],
-        "permissive" => vec!["pattern"],
-        _ => vec![
-            "pattern",
-            "doc_consistency",
-            "secrets",
-            "semantic",
-            "gitleaks",
-        ],
-    }
-}
-
-fn preset_severity_threshold(preset: &str) -> RiskLevel {
-    match preset {
-        "strict" => RiskLevel::Low,
-        "permissive" => RiskLevel::Medium,
-        _ => RiskLevel::Low,
-    }
-}
-
-fn resolve_enabled_analyzers(policy: &SecurityScanPolicy) -> HashSet<String> {
-    let preset = parse_policy_preset(&policy.preset);
-    let configured = if policy.enabled_analyzers.is_empty() {
-        preset_enabled_analyzers(preset)
-            .into_iter()
-            .map(String::from)
-            .collect::<Vec<_>>()
-    } else {
-        policy.enabled_analyzers.clone()
-    };
-
-    configured
-        .into_iter()
-        .map(|id| normalize_rule_id(&id))
-        .filter(|id| !id.is_empty())
-        .collect()
-}
-
-fn parse_policy_from_yaml(yaml: &str) -> Option<SecurityScanPolicy> {
-    serde_yaml::from_str::<SecurityScanPolicy>(yaml).ok()
-}
-
-fn default_policy() -> SecurityScanPolicy {
-    parse_policy_from_yaml(DEFAULT_SECURITY_SCAN_POLICY_YAML).unwrap_or_else(|| {
-        SecurityScanPolicy {
-            preset: default_policy_preset(),
-            severity_threshold: default_policy_severity_threshold(),
-            enabled_analyzers: vec![],
-            ignore_rules: vec![],
-            rule_overrides: HashMap::new(),
-        }
-    })
-}
-
-fn resolve_policy(policy: &SecurityScanPolicy) -> ResolvedSecurityScanPolicy {
-    let preset = parse_policy_preset(&policy.preset);
-    let mut ignore_rules: HashSet<String> = preset_ignore_rules(preset)
-        .into_iter()
-        .map(normalize_rule_id)
-        .collect();
-    for rule in &policy.ignore_rules {
-        ignore_rules.insert(normalize_rule_id(rule));
-    }
-    let mut overrides = HashMap::new();
-    for (rule, override_cfg) in &policy.rule_overrides {
-        overrides.insert(normalize_rule_id(rule), override_cfg.clone());
-    }
-    let min_severity = if policy.severity_threshold.trim().is_empty() {
-        preset_severity_threshold(&preset)
-    } else {
-        parse_min_severity(&policy.severity_threshold)
-    };
-
-    ResolvedSecurityScanPolicy {
-        min_severity,
-        ignore_rules,
-        rule_overrides: overrides,
-    }
-}
-
-fn load_effective_policy() -> ResolvedSecurityScanPolicy {
-    let base = default_policy();
-    let path = policy_path();
-    if let Ok(raw) = std::fs::read_to_string(path) {
-        if let Some(custom) = parse_policy_from_yaml(&raw) {
-            return resolve_policy(&custom);
-        }
-    }
-    resolve_policy(&base)
-}
-
-pub fn get_policy() -> SecurityScanPolicy {
-    let path = policy_path();
-    if let Ok(raw) = std::fs::read_to_string(path) {
-        if let Some(custom) = parse_policy_from_yaml(&raw) {
-            return custom;
-        }
-    }
-    default_policy()
-}
-
-pub fn save_policy(policy: &SecurityScanPolicy) -> Result<()> {
-    if let Some(parent) = policy_path().parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create policy directory: {}", parent.display()))?;
-    }
-
-    let normalized = SecurityScanPolicy {
-        preset: parse_policy_preset(&policy.preset).to_string(),
-        severity_threshold: if policy.severity_threshold.trim().is_empty() {
-            default_policy_severity_threshold()
-        } else {
-            policy.severity_threshold.trim().to_string()
-        },
-        enabled_analyzers: policy
-            .enabled_analyzers
-            .iter()
-            .map(|id| normalize_rule_id(id))
-            .filter(|id| !id.is_empty())
-            .collect(),
-        ignore_rules: policy
-            .ignore_rules
-            .iter()
-            .map(|id| normalize_rule_id(id))
-            .collect(),
-        rule_overrides: policy
-            .rule_overrides
-            .iter()
-            .map(|(k, v)| (normalize_rule_id(k), v.clone()))
-            .collect(),
-    };
-
-    let yaml = serde_yaml::to_string(&normalized).context("Failed to serialize scan policy")?;
-    std::fs::write(policy_path(), yaml).context("Failed to write scan policy file")?;
-    Ok(())
 }
 
 static SCAN_LOG_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -706,36 +187,12 @@ fn score_to_risk_level(score: f32) -> RiskLevel {
     }
 }
 
-fn clamp_confidence(value: f32) -> f32 {
-    if !value.is_finite() {
-        return default_confidence_score();
-    }
-    value.clamp(0.0, 1.0)
-}
-
 fn normalize_risk_score(score: f32) -> f32 {
     ((score.clamp(0.0, 10.0) * 10.0).round()) / 10.0
 }
 
 fn normalize_confidence_score(score: f32) -> f32 {
     ((clamp_confidence(score) * 100.0).round()) / 100.0
-}
-
-fn default_confidence_for_severity(level: RiskLevel) -> f32 {
-    match level {
-        RiskLevel::Safe => 0.60,
-        RiskLevel::Low => 0.68,
-        RiskLevel::Medium => 0.75,
-        RiskLevel::High => 0.84,
-        RiskLevel::Critical => 0.92,
-    }
-}
-
-fn parse_confidence_from_json(value: Option<&serde_json::Value>, fallback: f32) -> f32 {
-    value
-        .and_then(|v| v.as_f64())
-        .map(|v| clamp_confidence(v as f32))
-        .unwrap_or_else(|| clamp_confidence(fallback))
 }
 
 fn normalize_fingerprint_text(input: &str) -> String {
@@ -2238,21 +1695,6 @@ fn truncate_content(content: &str) -> String {
     }
 }
 
-/// Safely truncate a line snippet to `max_chars` without panicking on multi-byte UTF-8.
-fn safe_snippet(line: &str, max_chars: usize) -> String {
-    if line.len() <= max_chars {
-        return line.to_string();
-    }
-    // Find the last char boundary at or before max_chars
-    let end = line
-        .char_indices()
-        .take_while(|(i, _)| *i <= max_chars)
-        .last()
-        .map(|(i, _)| i)
-        .unwrap_or(0);
-    format!("{}...", &line[..end])
-}
-
 // ── File Classification ─────────────────────────────────────────────
 
 /// Classify all files, using two-pass logic:
@@ -2928,268 +2370,6 @@ async fn analyze_chunk_with_retry(
     }
 
     Err(last_error.unwrap_or_else(|| anyhow::anyhow!("Chunk analysis failed after retries")))
-}
-
-// ── Static Pattern Scan ─────────────────────────────────────────────
-
-struct PatternDef {
-    id: &'static str,
-    regex: &'static str,
-    severity: RiskLevel,
-    description: &'static str,
-}
-
-fn resolve_pattern_policy(
-    pattern: &PatternDef,
-    policy: &ResolvedSecurityScanPolicy,
-) -> Option<RiskLevel> {
-    resolve_rule_severity(pattern.id, pattern.severity, policy)
-}
-
-fn resolve_rule_severity(
-    rule_id: &str,
-    default_severity: RiskLevel,
-    policy: &ResolvedSecurityScanPolicy,
-) -> Option<RiskLevel> {
-    let normalized = normalize_rule_id(rule_id);
-    if policy.ignore_rules.contains(&normalized) {
-        return None;
-    }
-
-    if let Some(override_cfg) = policy.rule_overrides.get(&normalized) {
-        if matches!(override_cfg.enabled, Some(false)) {
-            return None;
-        }
-        if let Some(ref severity) = override_cfg.severity {
-            return Some(RiskLevel::from_str_loose(severity));
-        }
-    }
-
-    Some(default_severity)
-}
-
-pub(crate) fn apply_policy_to_static_finding(
-    mut finding: StaticFinding,
-    policy: &ResolvedSecurityScanPolicy,
-) -> Option<StaticFinding> {
-    let severity = resolve_rule_severity(&finding.pattern_id, finding.severity, policy)?;
-    if severity.severity_ord() < policy.min_severity.severity_ord() {
-        return None;
-    }
-    finding.severity = severity;
-    finding.confidence = clamp_confidence(
-        finding
-            .confidence
-            .max(default_confidence_for_severity(severity)),
-    );
-    Some(finding)
-}
-
-const STATIC_PATTERNS: &[PatternDef] = &[
-    PatternDef {
-        id: "curl_pipe_sh",
-        regex: r"curl\s+[^\|]+\|\s*(sh|bash|zsh)",
-        severity: RiskLevel::Critical,
-        description: "Remote script piping: curl output piped to shell",
-    },
-    PatternDef {
-        id: "wget_pipe_sh",
-        regex: r"wget\s+[^\|]+\|\s*(sh|bash|zsh)",
-        severity: RiskLevel::Critical,
-        description: "Remote script piping: wget output piped to shell",
-    },
-    PatternDef {
-        id: "base64_decode_exec",
-        regex: r"base64\s+(-d|--decode)\s*\|",
-        severity: RiskLevel::High,
-        description: "Base64 decode piped to execution",
-    },
-    PatternDef {
-        id: "eval_fetch",
-        regex: r"eval\s*\(\s*(fetch|require|import)\s*\(",
-        severity: RiskLevel::Critical,
-        description: "Dynamic code execution from remote source",
-    },
-    PatternDef {
-        id: "exec_requests",
-        regex: r"exec\s*\(\s*requests\.(get|post)",
-        severity: RiskLevel::Critical,
-        description: "Python exec() with HTTP request",
-    },
-    PatternDef {
-        id: "sensitive_ssh",
-        regex: r"~/\.ssh/|~/.ssh/|\.ssh/id_|\.ssh/authorized_keys|\.ssh/config",
-        severity: RiskLevel::High,
-        description: "Access to SSH keys or config",
-    },
-    PatternDef {
-        id: "sensitive_aws",
-        regex: r"~/\.aws/|~/.aws/|\.aws/credentials|\.aws/config",
-        severity: RiskLevel::High,
-        description: "Access to AWS credentials",
-    },
-    PatternDef {
-        id: "sensitive_env",
-        regex: r"(?i)(cat|read|source|load)\s+.*\.env\b",
-        severity: RiskLevel::Medium,
-        description: "Reading .env file (may contain secrets)",
-    },
-    PatternDef {
-        id: "sensitive_etc_passwd",
-        regex: r"/etc/passwd|/etc/shadow",
-        severity: RiskLevel::High,
-        description: "Access to system password files",
-    },
-    PatternDef {
-        id: "sensitive_gnupg",
-        regex: r"~/\.gnupg/|~/.gnupg/",
-        severity: RiskLevel::High,
-        description: "Access to GPG keys",
-    },
-    PatternDef {
-        id: "npm_global_install",
-        regex: r"npm\s+install\s+(-g|--global)",
-        severity: RiskLevel::Medium,
-        description: "Global npm package installation",
-    },
-    PatternDef {
-        id: "pip_install",
-        regex: r"pip3?\s+install\s",
-        severity: RiskLevel::Low,
-        description: "Python package installation",
-    },
-    PatternDef {
-        id: "unicode_bidi",
-        regex: r"[\u{202A}-\u{202E}\u{2066}-\u{2069}]",
-        severity: RiskLevel::High,
-        description: "Unicode bidirectional control character (potential text spoofing)",
-    },
-    PatternDef {
-        id: "reverse_shell",
-        regex: r"(?i)(nc|ncat|netcat)\s+(-e|--exec|-c)",
-        severity: RiskLevel::Critical,
-        description: "Potential reverse shell via netcat",
-    },
-    PatternDef {
-        id: "bash_reverse",
-        regex: r"bash\s+-i\s+>&\s*/dev/tcp/",
-        severity: RiskLevel::Critical,
-        description: "Bash reverse shell via /dev/tcp",
-    },
-    PatternDef {
-        id: "modify_shell_rc",
-        regex: r">>?\s*~/?\.(bashrc|zshrc|profile|bash_profile)",
-        severity: RiskLevel::High,
-        description: "Modifying shell startup config for persistence",
-    },
-    PatternDef {
-        id: "cron_persistence",
-        regex: r"crontab\s+(-e|-l|-r)|/etc/cron",
-        severity: RiskLevel::High,
-        description: "Cron job manipulation for persistence",
-    },
-    // Windows-specific patterns
-    PatternDef {
-        id: "powershell_encoded",
-        regex: r"(?i)powershell\s+.*-enc(odedcommand)?\s+[A-Za-z0-9+/=]{20,}",
-        severity: RiskLevel::Critical,
-        description: "PowerShell encoded command execution (may conceal payload)",
-    },
-    PatternDef {
-        id: "schtasks_persistence",
-        regex: r"(?i)schtasks\s+/create\s",
-        severity: RiskLevel::High,
-        description: "Windows scheduled task creation for persistence",
-    },
-    PatternDef {
-        id: "registry_persistence",
-        regex: r"(?i)reg\s+add\s+.*(Run|RunOnce|Startup)",
-        severity: RiskLevel::High,
-        description: "Windows registry modification for auto-start persistence",
-    },
-];
-
-/// Run static pattern matching on all files (zero AI cost).
-/// All regex patterns (including base64) are compiled once via LazyLock.
-pub fn static_pattern_scan(files: &[ScannedFile]) -> Vec<StaticFinding> {
-    let policy = load_effective_policy();
-    static_pattern_scan_with_policy(files, &policy)
-}
-
-pub(crate) fn static_pattern_scan_with_policy(
-    files: &[ScannedFile],
-    policy: &ResolvedSecurityScanPolicy,
-) -> Vec<StaticFinding> {
-    static COMPILED_PATTERNS: std::sync::LazyLock<Vec<(&'static PatternDef, Regex)>> =
-        std::sync::LazyLock::new(|| {
-            STATIC_PATTERNS
-                .iter()
-                .filter_map(|p| Regex::new(p.regex).ok().map(|re| (p, re)))
-                .collect()
-        });
-    static B64_RE: std::sync::LazyLock<Regex> =
-        std::sync::LazyLock::new(|| Regex::new(r"[A-Za-z0-9+/]{100,}={0,3}").unwrap());
-
-    let compiled = &*COMPILED_PATTERNS;
-    let b64_re = &*B64_RE;
-    let mut enabled_pattern_severity: HashMap<&'static str, RiskLevel> = HashMap::new();
-    for pattern in STATIC_PATTERNS {
-        if let Some(severity) = resolve_pattern_policy(pattern, policy) {
-            if severity.severity_ord() >= policy.min_severity.severity_ord() {
-                enabled_pattern_severity.insert(pattern.id, severity);
-            }
-        }
-    }
-
-    let b64_rule = PatternDef {
-        id: "long_base64",
-        regex: "",
-        severity: RiskLevel::Medium,
-        description: "Long base64-encoded string (may conceal payload)",
-    };
-    let b64_rule_enabled = resolve_pattern_policy(&b64_rule, policy)
-        .map(|severity| severity.severity_ord() >= policy.min_severity.severity_ord())
-        .unwrap_or(false);
-    let b64_rule_severity = resolve_pattern_policy(&b64_rule, policy).unwrap_or(RiskLevel::Medium);
-
-    let mut findings = Vec::new();
-
-    // Single pass: check both static patterns and base64 on each line
-    for file in files {
-        for (line_number, line) in file.content.lines().enumerate() {
-            for (pattern, re) in compiled {
-                let Some(severity) = enabled_pattern_severity.get(pattern.id).copied() else {
-                    continue;
-                };
-                if re.is_match(line) {
-                    let snippet = safe_snippet(line, SNIPPET_MAX_CHARS);
-                    findings.push(StaticFinding {
-                        file_path: file.relative_path.clone(),
-                        line_number: line_number + 1,
-                        pattern_id: pattern.id.to_string(),
-                        snippet,
-                        severity,
-                        confidence: default_confidence_for_severity(severity),
-                        description: pattern.description.to_string(),
-                    });
-                }
-            }
-            // Base64 check in the same pass (was a separate iteration before)
-            if b64_rule_enabled && b64_re.is_match(line) {
-                findings.push(StaticFinding {
-                    file_path: file.relative_path.clone(),
-                    line_number: line_number + 1,
-                    pattern_id: "long_base64".to_string(),
-                    snippet: safe_snippet(line, SNIPPET_MAX_CHARS),
-                    severity: b64_rule_severity,
-                    confidence: default_confidence_for_severity(b64_rule_severity),
-                    description: "Long base64-encoded string (may conceal payload)".to_string(),
-                });
-            }
-        }
-    }
-
-    findings
 }
 
 // ── AI Worker (per-file analysis — retained for tests + fallback) ───
@@ -4379,7 +3559,7 @@ fn compute_quantitative_risk(
 // ── Cache ───────────────────────────────────────────────────────────
 
 fn db_path() -> PathBuf {
-    super::paths::security_scan_db_path()
+    crate::core::infra::paths::security_scan_db_path()
 }
 
 /// Schema migration for the security scan database.
@@ -4425,10 +3605,11 @@ fn migrate_scan_schema(conn: &Connection) -> Result<()> {
 /// Ensure schema migration runs exactly once via the pool.
 #[cfg(not(test))]
 static SCAN_SCHEMA_READY: std::sync::LazyLock<()> = std::sync::LazyLock::new(|| {
-    let conn = super::db_pool::security_scan_pool()
+    let conn = crate::core::infra::db_pool::security_scan_pool()
         .get()
-        .expect("security scan DB pool connection for schema migration");
-    migrate_scan_schema(&conn).expect("security scan DB schema migration failed");
+        .expect("security scan DB pool connection: ~/.skillstar/db/ must be writable");
+    migrate_scan_schema(&conn)
+        .expect("security scan schema migration failed: DB may be corrupted");
 });
 
 /// Get a connection from the pool.
@@ -4437,7 +3618,7 @@ static SCAN_SCHEMA_READY: std::sync::LazyLock<()> = std::sync::LazyLock::new(|| 
 #[cfg(not(test))]
 fn get_conn() -> Result<r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>> {
     std::sync::LazyLock::force(&SCAN_SCHEMA_READY);
-    super::db_pool::security_scan_pool()
+    crate::core::infra::db_pool::security_scan_pool()
         .get()
         .map_err(|e| anyhow::anyhow!("Failed to get security scan pool connection: {e}"))
 }
@@ -4615,7 +3796,7 @@ pub fn save_to_cache(result: &SecurityScanResult) -> Result<()> {
 
 pub fn clear_cache() -> Result<()> {
     // Delete legacy json file if exists
-    let legacy_path = super::paths::data_root().join("security_scan_cache.json");
+    let legacy_path = crate::core::infra::paths::data_root().join("security_scan_cache.json");
     if legacy_path.exists() {
         let _ = std::fs::remove_file(legacy_path);
     }
@@ -4923,6 +4104,10 @@ fn extract_json(response: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::policy::{
+        default_policy, load_effective_policy, normalize_rule_id, parse_policy_preset,
+    };
+    use super::types::SecurityScanRuleOverride;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::MutexGuard;
@@ -4961,7 +4146,7 @@ mod tests {
 
     impl TestDataRoot {
         fn new(prefix: &str) -> Self {
-            let guard = crate::core::test_env_lock().lock().expect("lock test env");
+            let guard = crate::core::lock_test_env();
             let dir = TempDir::new(prefix);
             unsafe {
                 std::env::set_var("SKILLSTAR_DATA_DIR", dir.path());

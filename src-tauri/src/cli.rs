@@ -1,8 +1,16 @@
 use clap::{Parser, Subcommand};
 
 use crate::core::{
-    agent_profile, ai_provider, gh_manager, git_ops, launch_deck, lockfile, project_manifest,
-    security_scan, skill_install, skill_pack, sync, terminal_backend,
+    ai_provider,
+    git::{gh_manager, ops as git_ops},
+    lockfile,
+    project_manifest,
+    projects::{agents as agent_profile, sync},
+    security_scan,
+    skill_install,
+    skill_pack,
+    terminal::config as launch_deck,
+    terminal_backend,
 };
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -110,7 +118,7 @@ pub enum LaunchAction {
 
 pub fn run(args: Vec<String>) {
     // Migrate v1 flat layout → v2 categorised layout (idempotent)
-    crate::core::paths::migrate_legacy_paths();
+    crate::core::infra::migration::migrate_legacy_paths();
 
     let cli = Cli::parse_from(args);
 
@@ -199,7 +207,7 @@ fn resolve_installed_name(
     explicit_name: Option<&str>,
     name_hint: &str,
 ) -> Result<Option<String>, String> {
-    let skills_dir = crate::core::paths::hub_skills_dir();
+    let skills_dir = crate::core::infra::paths::hub_skills_dir();
     let lock_path = lockfile::lockfile_path();
     let lockfile = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
     let has_matching_lock = |name: &str| {
@@ -504,7 +512,7 @@ fn cmd_update(name: Option<&str>) {
         }
     };
 
-    let skills_dir = crate::core::paths::hub_skills_dir();
+    let skills_dir = crate::core::infra::paths::hub_skills_dir();
     let skills_to_update: Vec<_> = if let Some(name) = name {
         lockfile.skills.iter().filter(|s| s.name == name).collect()
     } else {
@@ -811,7 +819,7 @@ fn cmd_launch_deploy(project_name: &str) {
     };
 
     // Find project path from registered projects
-    let projects_path = crate::core::paths::projects_manifest_path();
+    let projects_path = crate::core::infra::paths::projects_manifest_path();
     let project_path = if projects_path.exists() {
         let data = std::fs::read_to_string(&projects_path).unwrap_or_default();
         let projects: Vec<serde_json::Value> = serde_json::from_str(&data).unwrap_or_default();

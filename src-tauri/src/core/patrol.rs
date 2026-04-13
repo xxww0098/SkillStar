@@ -12,7 +12,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::watch;
 use tracing::{error, warn};
 
-use super::{git_ops, local_skill, repo_scanner};
+use super::{git::ops as git_ops, local_skill, repo_scanner};
 
 // ── Persistent Configuration ────────────────────────────────────────
 
@@ -34,7 +34,7 @@ impl Default for PatrolConfig {
 }
 
 fn config_path() -> std::path::PathBuf {
-    super::paths::patrol_state_path()
+    crate::core::infra::paths::patrol_state_path()
 }
 
 pub fn load_config() -> PatrolConfig {
@@ -362,7 +362,7 @@ fn check_skill_update_local(
 /// Uses a lightweight directory scan instead of `list_installed_skills` to
 /// avoid the overhead of parsing every SKILL.md on each patrol cycle.
 async fn collect_hub_skills() -> Result<Vec<HubSkillEntry>> {
-    let skills_dir = super::paths::hub_skills_dir();
+    let skills_dir = crate::core::infra::paths::hub_skills_dir();
     tokio::task::spawn_blocking(move || {
         let entries = match std::fs::read_dir(&skills_dir) {
             Ok(e) => e,

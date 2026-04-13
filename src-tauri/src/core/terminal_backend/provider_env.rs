@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::core::launch_deck::LayoutNode;
+use crate::core::terminal::config::LayoutNode;
 
 fn non_empty_claude_auth(env: &HashMap<String, String>, key: &str) -> Option<String> {
     env.get(key)

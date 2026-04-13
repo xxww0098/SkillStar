@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use super::{FileRole, ScannedFile};
-use crate::core::paths;
+use crate::core::infra::paths;
 
 const DEFAULT_SMART_RULES_YAML: &str = include_str!("security_smart_rules_default.yaml");
 

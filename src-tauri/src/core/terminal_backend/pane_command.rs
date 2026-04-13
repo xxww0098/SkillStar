@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::core::launch_deck::LayoutNode;
+use crate::core::terminal::config::LayoutNode;
 
 use super::provider_env::extract_env_for_pane;
 use super::registry::binary_name_for_agent;

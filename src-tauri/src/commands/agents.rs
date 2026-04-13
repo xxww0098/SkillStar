@@ -1,4 +1,8 @@
-use crate::core::{agent_profile, error::AppError, installed_skill, sync};
+use crate::core::{
+    infra::error::AppError,
+    installed_skill,
+    projects::{agents as agent_profile, sync},
+};
 
 #[tauri::command]
 pub async fn list_agent_profiles() -> Result<Vec<agent_profile::AgentProfile>, AppError> {

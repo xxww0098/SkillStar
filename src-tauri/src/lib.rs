@@ -99,13 +99,13 @@ pub fn run() {
         .manage(commands::updater::PendingUpdate::new())
         .setup(|app| {
             // Migrate v1 flat layout → v2 categorised layout (idempotent)
-            core::paths::migrate_legacy_paths();
+            core::infra::migration::migrate_legacy_paths();
 
             if let Err(err) = core::marketplace::initialize_local_snapshot() {
                 error!(target: "marketplace_snapshot", "init failed: {err}");
             }
             // Run translation cache LRU cleanup (once per process, non-blocking)
-            core::translation_cache::startup_cleanup();
+            core::ai::translation_cache::startup_cleanup();
 
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -239,6 +239,7 @@ pub fn run() {
             commands::projects::update_project_path,
             commands::projects::remove_project,
             commands::projects::scan_project_skills,
+            commands::projects::refresh_stale_project_copies,
             commands::projects::rebuild_project_skills_from_disk,
             commands::projects::import_project_skills,
             commands::projects::detect_project_agents,
@@ -328,6 +329,7 @@ pub fn run() {
             commands::models::gemini_oauth_complete,
             commands::models::gemini_oauth_cancel,
             commands::models::gemini_oauth_submit_callback,
+            commands::models::gemini_oauth_is_configured,
             commands::models::list_codex_accounts,
             commands::models::get_current_codex_account_id,
             commands::models::switch_codex_account,
@@ -346,6 +348,8 @@ pub fn run() {
             commands::models::get_opencode_auth_providers,
             commands::models::add_opencode_auth_provider,
             commands::models::remove_opencode_auth_provider,
+            commands::models::open_opencode_config_dir,
+            commands::models::open_opencode_auth_dir,
             commands::models::get_model_providers,
             commands::models::switch_model_provider,
             commands::models::add_model_provider,

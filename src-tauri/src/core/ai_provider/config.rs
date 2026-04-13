@@ -1,0 +1,189 @@
+//! AI configuration types, serde helpers, and defaults.
+
+use serde::{Deserialize, Deserializer, Serialize};
+
+// ── Configuration ───────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ApiFormat {
+    Openai,
+    Anthropic,
+    Local,
+}
+
+impl ApiFormat {
+    pub(crate) fn parse_loose(raw: &str) -> Self {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "openai" => Self::Openai,
+            "anthropic" => Self::Anthropic,
+            "local" => Self::Local,
+            _ => Self::Openai,
+        }
+    }
+}
+
+impl Default for ApiFormat {
+    fn default() -> Self {
+        Self::Openai
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ShortTextPriority {
+    AiFirst,
+    MymemoryFirst,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ShortTextSource {
+    Ai,
+    Mymemory,
+}
+
+impl ShortTextSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ai => "ai",
+            Self::Mymemory => "mymemory",
+        }
+    }
+}
+
+impl ShortTextPriority {
+    pub(crate) fn parse_loose(raw: &str) -> Self {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "mymemory_first" | "mymemoryfirst" | "my_memory_first" => Self::MymemoryFirst,
+            _ => Self::AiFirst,
+        }
+    }
+}
+
+impl Default for ShortTextPriority {
+    fn default() -> Self {
+        Self::AiFirst
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MymemoryUsageStats {
+    #[serde(default)]
+    pub total_chars_sent: u64,
+    #[serde(default)]
+    pub daily_chars_sent: u64,
+    #[serde(default)]
+    pub daily_reset_date: String,
+    #[serde(default)]
+    pub updated_at: String,
+}
+
+fn deserialize_api_format<'de, D>(deserializer: D) -> Result<ApiFormat, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw = String::deserialize(deserializer)?;
+    Ok(ApiFormat::parse_loose(&raw))
+}
+
+fn deserialize_short_text_priority<'de, D>(deserializer: D) -> Result<ShortTextPriority, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw = String::deserialize(deserializer)?;
+    Ok(ShortTextPriority::parse_loose(&raw))
+}
+
+/// Per-format saved preset (base_url, api_key, model).
+/// When the user switches api_format, the active fields are swapped from/to
+/// the corresponding preset so each format remembers its own values.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FormatPreset {
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub api_key: String,
+    #[serde(default)]
+    pub model: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiConfig {
+    pub enabled: bool,
+    #[serde(default, deserialize_with = "deserialize_api_format")]
+    pub api_format: ApiFormat,
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+    pub target_language: String,
+    #[serde(default, deserialize_with = "deserialize_short_text_priority")]
+    pub short_text_priority: ShortTextPriority,
+    /// Model context window in K tokens (e.g. 128 = 128K tokens).
+    /// All scan parameters are auto-derived from this value.
+    #[serde(default = "default_context_window_k")]
+    pub context_window_k: u32,
+    /// Override: 0 = auto-derive from context_window_k
+    #[serde(default)]
+    pub max_concurrent_requests: u32,
+    /// Override: 0 = auto-derive from context_window_k
+    #[serde(default)]
+    pub chunk_char_limit: usize,
+    /// Override: 0 = auto-derive from context_window_k
+    #[serde(default)]
+    pub scan_max_response_tokens: u32,
+    /// Optional anonymous telemetry for security scan quality metrics.
+    /// When enabled, SkillStar only records aggregate run stats (no skill names/content).
+    #[serde(default = "default_security_scan_telemetry_enabled")]
+    pub security_scan_telemetry_enabled: bool,
+    /// Dedicated model for SKILL.md and document translation.
+    /// When set, this model is used instead of `model` for all translation tasks,
+    /// enabling better translation quality (e.g. deepseek-reasoner, o3) without
+    /// affecting AI chat, summarization, or other features.
+    #[serde(default)]
+    pub translation_model: Option<String>,
+    /// Saved preset for OpenAI-compatible format.
+    #[serde(default)]
+    pub openai_preset: FormatPreset,
+    /// Saved preset for Anthropic Messages format.
+    #[serde(default)]
+    pub anthropic_preset: FormatPreset,
+    /// Saved preset for Local (Ollama) format.
+    #[serde(default)]
+    pub local_preset: FormatPreset,
+}
+
+fn default_context_window_k() -> u32 {
+    128
+}
+
+fn default_security_scan_telemetry_enabled() -> bool {
+    false
+}
+
+impl Default for AiConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            api_format: ApiFormat::default(),
+            base_url: String::new(),
+            api_key: String::new(),
+            model: "gpt-5.4".to_string(),
+            target_language: "zh-CN".to_string(),
+            short_text_priority: ShortTextPriority::default(),
+            context_window_k: default_context_window_k(),
+            max_concurrent_requests: 4,
+            chunk_char_limit: 0,
+            scan_max_response_tokens: 0,
+            security_scan_telemetry_enabled: default_security_scan_telemetry_enabled(),
+            translation_model: None,
+            openai_preset: FormatPreset::default(),
+            anthropic_preset: FormatPreset::default(),
+            local_preset: FormatPreset {
+                base_url: "http://127.0.0.1:11434/v1".to_string(),
+                model: "llama3.1:8b".to_string(),
+                ..Default::default()
+            },
+        }
+    }
+}

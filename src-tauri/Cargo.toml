@@ -8,7 +8,7 @@ rust-version = "1.94.1"
 
 [workspace]
 resolver = "3"
-members = ["crates/marketplace-core"]
+members = ["crates/marketplace-core", "crates/skill-core"]
 
 [lib]
 name = "skillstar_lib"
@@ -56,6 +56,7 @@ tokio-util = { version = "0.7", features = ["compat"] }
 futures = "0.3"
 async-trait = "0.1"
 skillstar-marketplace-core = { path = "crates/marketplace-core" }
+skillstar-skill-core = { path = "crates/skill-core" }
 url = "2.5.8"
 toml_edit = "0.25.10"
 rand = "0.10.0"

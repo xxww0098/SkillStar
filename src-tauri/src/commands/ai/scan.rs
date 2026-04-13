@@ -204,7 +204,7 @@ pub async fn estimate_security_scan(
     let resolved = ai_provider::resolve_scan_params(&config);
     let chunk_limit = resolved.chunk_char_limit;
 
-    let hub_dir = crate::core::paths::hub_skills_dir();
+    let hub_dir = crate::core::infra::paths::hub_skills_dir();
     let target_names: Vec<String> = if skill_names.is_empty() {
         match std::fs::read_dir(&hub_dir) {
             Ok(entries) => entries
@@ -428,7 +428,7 @@ async fn run_ai_scan_pipeline(
     let telemetry_enabled = config.security_scan_telemetry_enabled;
 
     // Resolve skill directories
-    let hub_dir = crate::core::paths::hub_skills_dir();
+    let hub_dir = crate::core::infra::paths::hub_skills_dir();
     let target_names: Vec<String> = if skill_names.is_empty() {
         // Scan all installed skills — is_dir() already follows symlinks
         match std::fs::read_dir(&hub_dir) {
@@ -1033,12 +1033,12 @@ pub async fn ai_security_scan(
 /// Load all cached scan results (used by skill cards for badge display).
 #[tauri::command]
 pub async fn get_cached_scan_results() -> Result<Vec<SecurityScanResult>, String> {
-    let hub_dir = crate::core::paths::hub_skills_dir();
+    let hub_dir = crate::core::infra::paths::hub_skills_dir();
     Ok(security_scan::load_all_cached()
         .into_iter()
         .filter(|result| {
             let skill_path = hub_dir.join(&result.skill_name);
-            skill_path.is_dir() || crate::core::paths::is_link(&skill_path)
+            skill_path.is_dir() || crate::core::infra::fs_ops::is_link(&skill_path)
         })
         .collect())
 }
@@ -1078,12 +1078,12 @@ pub async fn export_security_scan_sarif(
     skill_names: Option<Vec<String>>,
     request_label: Option<String>,
 ) -> Result<String, String> {
-    let hub_dir = crate::core::paths::hub_skills_dir();
+    let hub_dir = crate::core::infra::paths::hub_skills_dir();
     let mut results = security_scan::load_all_cached()
         .into_iter()
         .filter(|result| {
             let skill_path = hub_dir.join(&result.skill_name);
-            skill_path.is_dir() || crate::core::paths::is_link(&skill_path)
+            skill_path.is_dir() || crate::core::infra::fs_ops::is_link(&skill_path)
         })
         .collect::<Vec<_>>();
 
@@ -1105,12 +1105,12 @@ pub async fn export_security_scan_report(
     skill_names: Option<Vec<String>>,
     request_label: Option<String>,
 ) -> Result<String, String> {
-    let hub_dir = crate::core::paths::hub_skills_dir();
+    let hub_dir = crate::core::infra::paths::hub_skills_dir();
     let mut results = security_scan::load_all_cached()
         .into_iter()
         .filter(|result| {
             let skill_path = hub_dir.join(&result.skill_name);
-            skill_path.is_dir() || crate::core::paths::is_link(&skill_path)
+            skill_path.is_dir() || crate::core::infra::fs_ops::is_link(&skill_path)
         })
         .collect::<Vec<_>>();
 

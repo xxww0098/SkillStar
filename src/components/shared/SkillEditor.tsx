@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useTranslation } from "react-i18next";
 import { useAiStream } from "../../hooks/useAiStream";
 import {
@@ -42,6 +43,7 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
   const [editedContent, setEditedContent] = useState("");
   const [hasChanges, setHasChanges] = useState(false);
   const [isLeftPaneOpen, setIsLeftPaneOpen] = useState(false);
+  const prefersReducedMotion = useReducedMotion();
 
   // AI features via shared hook
   const [retranslating, setRetranslating] = useState(false);
@@ -228,7 +230,7 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
 
             {/* AI Action Buttons */}
             <div className="ml-auto flex items-center gap-1 shrink-0">
-              <button
+              <motion.button
                 onClick={() => {
                   if (loadError) return;
                   if (!aiConfigured) {
@@ -238,9 +240,18 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
                   void handleTranslate();
                 }}
                 disabled={!!loadError}
-                className={`flex items-center gap-1 px-2 py-1 rounded-md text-micro font-medium transition-colors cursor-pointer ${
+                whileTap={!loadError ? { scale: 0.94 } : {}}
+                animate={translating && !prefersReducedMotion ? {
+                  boxShadow: [
+                    "0 0 0px 0px rgba(239,68,68,0)",
+                    "0 0 12px 3px rgba(239,68,68,0.35)",
+                    "0 0 0px 0px rgba(239,68,68,0)",
+                  ],
+                } : {}}
+                transition={{ duration: 1.2, repeat: translating && !prefersReducedMotion ? Infinity : 0, ease: "easeInOut" }}
+                className={`relative flex items-center gap-1 px-2 py-1 rounded-md text-micro font-medium transition-colors cursor-pointer overflow-hidden ${
                   translating
-                    ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
+                    ? "bg-destructive/10 text-destructive"
                     : translationVisible
                       ? "bg-primary/15 text-primary"
                       : aiConfigured && !loadError
@@ -261,23 +272,74 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
                       : "AI not configured (optional). Editing is still available."
                 }
               >
-                {translating ? (
-                  <Square className="w-3 h-3 fill-current" />
-                ) : translationVisible ? (
-                  <RotateCcw className="w-3 h-3" />
-                ) : (
-                  <Globe className="w-3 h-3" />
-                )}
-                {translating
-                  ? t("common.cancel")
-                  : translationVisible
-                    ? t("skillEditor.original")
-                    : translatedContent && translatedSource === editedContent
-                      ? t("skillEditor.showTranslation")
-                      : t("skillEditor.translate")}
-              </button>
+                <AnimatePresence mode="wait">
+                  {translating ? (
+                    <motion.span
+                      key="square"
+                      initial={{ opacity: 0, rotate: -90, scale: 0.7 }}
+                      animate={{ opacity: 1, rotate: 0, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.7 }}
+                      transition={{ duration: 0.18 }}
+                      className="flex items-center"
+                    >
+                      <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                      >
+                        <Square className="w-3 h-3 fill-current" />
+                      </motion.div>
+                    </motion.span>
+                  ) : translationVisible ? (
+                    <motion.span
+                      key="rotate"
+                      initial={{ opacity: 0, rotate: -90, scale: 0.7 }}
+                      animate={{ opacity: 1, rotate: 0, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.7 }}
+                      transition={{ duration: 0.18 }}
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                    </motion.span>
+                  ) : (
+                    <motion.span
+                      key="globe"
+                      initial={{ opacity: 0, scale: 0.6 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.6 }}
+                      transition={{ duration: 0.18 }}
+                    >
+                      <Globe className="w-3 h-3" />
+                    </motion.span>
+                  )}
+                </AnimatePresence>
+
+                <AnimatePresence mode="wait">
+                  <motion.span
+                    key={
+                      translating
+                        ? "cancel"
+                        : translationVisible
+                          ? "original"
+                          : translatedContent && translatedSource === editedContent
+                            ? "show"
+                            : "translate"
+                    }
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.16 }}
+                  >
+                    {translating
+                      ? t("common.cancel")
+                      : translationVisible
+                        ? t("skillEditor.original")
+                        : translatedContent && translatedSource === editedContent
+                          ? t("skillEditor.showTranslation")
+                          : t("skillEditor.translate")}
+                  </motion.span>
+                </AnimatePresence>
+              </motion.button>
               {translatedContent && translatedSource === editedContent && (
-                <button
+                <motion.button
                   onClick={() => {
                     if (loadError) return;
                     if (!aiConfigured) {
@@ -287,26 +349,40 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
                     void handleAiRetranslate();
                   }}
                   disabled={!!loadError || translating}
-                  className={`flex items-center gap-1 px-2 py-1 rounded-md text-micro font-medium transition-colors cursor-pointer ${
+                  whileTap={{ scale: 0.94 }}
+                  animate={translating && retranslating && !prefersReducedMotion ? {
+                    boxShadow: [
+                      "0 0 0px 0px rgba(239,68,68,0)",
+                      "0 0 10px 2px rgba(239,68,68,0.3)",
+                      "0 0 0px 0px rgba(239,68,68,0)",
+                    ],
+                  } : {}}
+                  transition={{ duration: 1, repeat: translating && retranslating && !prefersReducedMotion ? Infinity : 0, ease: "easeInOut" }}
+                  className={`relative flex items-center gap-1 px-2 py-1 rounded-md text-micro font-medium transition-colors cursor-pointer ${
                     translating && retranslating
-                      ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
+                      ? "bg-destructive/10 text-destructive"
                       : aiConfigured && !loadError
                         ? "text-muted-foreground hover:text-foreground hover:bg-card-hover"
                         : loadError
                           ? "text-muted-foreground/50 cursor-not-allowed"
                           : "text-primary/80 bg-primary/5 border border-primary/20 hover:bg-primary/10"
-                  }`}
+                  } disabled:cursor-not-allowed disabled:opacity-60`}
                   title={t("skillEditor.retranslateWithAi")}
                 >
                   {translating && retranslating ? (
-                    <Square className="w-3 h-3 fill-current" />
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                    >
+                      <Square className="w-3 h-3 fill-current" />
+                    </motion.div>
                   ) : (
                     <Sparkles className="w-3 h-3" />
                   )}
                   {translating && retranslating
                     ? t("skillEditor.retranslatingWithAi")
                     : t("skillEditor.retranslateWithAi")}
-                </button>
+                </motion.button>
               )}
               <button
                 onClick={() => {

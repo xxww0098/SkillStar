@@ -1,7 +1,7 @@
 use crate::{
     ExitControl,
     core::{
-        error::AppError,
+        infra::error::AppError,
         patrol::{PatrolManager, PatrolStatus},
     },
 };

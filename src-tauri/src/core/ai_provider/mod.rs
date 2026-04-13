@@ -1,102 +1,30 @@
 use anyhow::{Context, Result};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 use tracing::{debug, error, warn};
 
-const AI_MAX_TOKENS: u32 = 196_608;
-const SHORT_TEXT_MAX_TOKENS: u32 = 1024;
-const SUMMARY_MAX_TOKENS: u32 = 4_096;
-const SKILL_PICK_MAX_CANDIDATES: usize = 64;
-const SKILL_PICK_LOW_SIGNAL_MAX_CANDIDATES: usize = 96;
-const SKILL_PICK_MAX_RECOMMENDATIONS: usize = 12;
-const SKILL_PICK_ROUND_MAX_TOKENS: u32 = 2_048;
+mod constants;
+mod config;
+mod http_client;
+mod scan_params;
+mod skill_pick;
 
-/// Estimate a reasonable max_tokens for translation output.
-/// Translation output is roughly proportional to input length.
-/// Uses chars/3 as a rough token estimate, adds 2x headroom, min 1024, max 32K.
-fn estimate_translation_max_tokens(input: &str) -> u32 {
-    let estimated_input_tokens = (input.len() as u32) / 3;
-    let estimate = (estimated_input_tokens * 2).max(1024);
-    estimate.min(32_768)
-}
+#[allow(unused_imports)]
+pub use config::{
+    AiConfig, ApiFormat, FormatPreset, MymemoryUsageStats, ShortTextPriority, ShortTextSource,
+};
+#[allow(unused_imports)]
+pub use scan_params::{
+    estimate_translation_max_tokens, resolve_scan_params, skill_translation_single_pass_char_budget,
+    ResolvedScanParams,
+};
 
-// ── Configuration ───────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum ApiFormat {
-    Openai,
-    Anthropic,
-    Local,
-}
-
-impl ApiFormat {
-    fn parse_loose(raw: &str) -> Self {
-        match raw.trim().to_ascii_lowercase().as_str() {
-            "openai" => Self::Openai,
-            "anthropic" => Self::Anthropic,
-            "local" => Self::Local,
-            _ => Self::Openai,
-        }
-    }
-}
-
-impl Default for ApiFormat {
-    fn default() -> Self {
-        Self::Openai
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ShortTextPriority {
-    AiFirst,
-    MymemoryFirst,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ShortTextSource {
-    Ai,
-    Mymemory,
-}
-
-impl ShortTextSource {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Ai => "ai",
-            Self::Mymemory => "mymemory",
-        }
-    }
-}
-
-impl ShortTextPriority {
-    fn parse_loose(raw: &str) -> Self {
-        match raw.trim().to_ascii_lowercase().as_str() {
-            "mymemory_first" | "mymemoryfirst" | "my_memory_first" => Self::MymemoryFirst,
-            _ => Self::AiFirst,
-        }
-    }
-}
-
-impl Default for ShortTextPriority {
-    fn default() -> Self {
-        Self::AiFirst
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct MymemoryUsageStats {
-    #[serde(default)]
-    pub total_chars_sent: u64,
-    #[serde(default)]
-    pub daily_chars_sent: u64,
-    #[serde(default)]
-    pub daily_reset_date: String,
-    #[serde(default)]
-    pub updated_at: String,
-}
+use constants::{
+    AI_CONFIG_CACHE_TTL, AI_MAX_TOKENS, MARKETPLACE_SEARCH_MAX_TOKENS, SHORT_TEXT_MAX_TOKENS,
+    SKILL_PICK_MAX_CANDIDATES, SKILL_PICK_LOW_SIGNAL_MAX_CANDIDATES, SKILL_PICK_MAX_RECOMMENDATIONS,
+    SKILL_PICK_ROUND_MAX_TOKENS, SUMMARY_MAX_TOKENS, TRANSLATION_CHUNK_RETRY_MIN_CHARS,
+};
 
 static MYMEMORY_USAGE_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 static AI_REQUEST_SEMAPHORE: LazyLock<Mutex<Option<(u32, Arc<tokio::sync::Semaphore>)>>> =
@@ -106,8 +34,6 @@ static AI_REQUEST_SEMAPHORE: LazyLock<Mutex<Option<(u32, Arc<tokio::sync::Semaph
 //
 // Avoids repeated disk reads + AES-256-GCM decryption on every AI command.
 // TTL = 5 seconds; invalidated immediately on save_config.
-
-const AI_CONFIG_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5);
 
 static AI_CONFIG_CACHE: LazyLock<Mutex<Option<(std::time::Instant, AiConfig)>>> =
     LazyLock::new(|| Mutex::new(None));
@@ -150,158 +76,8 @@ async fn acquire_ai_request_permit(config: &AiConfig) -> Result<tokio::sync::Own
         .map_err(|_| anyhow::anyhow!("AI request semaphore closed"))
 }
 
-fn deserialize_api_format<'de, D>(deserializer: D) -> Result<ApiFormat, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let raw = String::deserialize(deserializer)?;
-    Ok(ApiFormat::parse_loose(&raw))
-}
-
-fn deserialize_short_text_priority<'de, D>(deserializer: D) -> Result<ShortTextPriority, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let raw = String::deserialize(deserializer)?;
-    Ok(ShortTextPriority::parse_loose(&raw))
-}
-
-/// Per-format saved preset (base_url, api_key, model).
-/// When the user switches api_format, the active fields are swapped from/to
-/// the corresponding preset so each format remembers its own values.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct FormatPreset {
-    #[serde(default)]
-    pub base_url: String,
-    #[serde(default)]
-    pub api_key: String,
-    #[serde(default)]
-    pub model: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AiConfig {
-    pub enabled: bool,
-    #[serde(default, deserialize_with = "deserialize_api_format")]
-    pub api_format: ApiFormat,
-    pub base_url: String,
-    pub api_key: String,
-    pub model: String,
-    pub target_language: String,
-    #[serde(default, deserialize_with = "deserialize_short_text_priority")]
-    pub short_text_priority: ShortTextPriority,
-    /// Model context window in K tokens (e.g. 128 = 128K tokens).
-    /// All scan parameters are auto-derived from this value.
-    #[serde(default = "default_context_window_k")]
-    pub context_window_k: u32,
-    /// Override: 0 = auto-derive from context_window_k
-    #[serde(default)]
-    pub max_concurrent_requests: u32,
-    /// Override: 0 = auto-derive from context_window_k
-    #[serde(default)]
-    pub chunk_char_limit: usize,
-    /// Override: 0 = auto-derive from context_window_k
-    #[serde(default)]
-    pub scan_max_response_tokens: u32,
-    /// Optional anonymous telemetry for security scan quality metrics.
-    /// When enabled, SkillStar only records aggregate run stats (no skill names/content).
-    #[serde(default = "default_security_scan_telemetry_enabled")]
-    pub security_scan_telemetry_enabled: bool,
-    /// Saved preset for OpenAI-compatible format.
-    #[serde(default)]
-    pub openai_preset: FormatPreset,
-    /// Saved preset for Anthropic Messages format.
-    #[serde(default)]
-    pub anthropic_preset: FormatPreset,
-    /// Saved preset for Local (Ollama) format.
-    #[serde(default)]
-    pub local_preset: FormatPreset,
-}
-
-fn default_context_window_k() -> u32 {
-    128
-}
-
-fn default_security_scan_telemetry_enabled() -> bool {
-    false
-}
-
-impl Default for AiConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            api_format: ApiFormat::default(),
-            base_url: String::new(),
-            api_key: String::new(),
-            model: "gpt-5.4".to_string(),
-            target_language: "zh-CN".to_string(),
-            short_text_priority: ShortTextPriority::default(),
-            context_window_k: default_context_window_k(),
-            max_concurrent_requests: 4,
-            chunk_char_limit: 0,
-            scan_max_response_tokens: 0,
-            security_scan_telemetry_enabled: default_security_scan_telemetry_enabled(),
-            openai_preset: FormatPreset::default(),
-            anthropic_preset: FormatPreset::default(),
-            local_preset: FormatPreset {
-                base_url: "http://127.0.0.1:11434/v1".to_string(),
-                model: "llama3.1:8b".to_string(),
-                ..Default::default()
-            },
-        }
-    }
-}
-
-// ── Auto-derived scan parameters ────────────────────────────────────
-
-/// Resolved scan parameters — auto-calculated from context_window_k,
-/// with optional manual overrides from AiConfig fields (when > 0).
-#[derive(Debug, Clone, Copy)]
-pub struct ResolvedScanParams {
-    pub chunk_char_limit: usize,
-    pub max_concurrent_requests: u32,
-    pub scan_max_response_tokens: u32,
-}
-
-/// Derive optimal scan parameters from the user's context_window_k setting.
-/// If individual override fields are > 0, they take precedence (power-user escape hatch).
-pub fn resolve_scan_params(config: &AiConfig) -> ResolvedScanParams {
-    let ctx_k = config.context_window_k.max(1) as usize;
-    let ctx_tokens = ctx_k * 1000;
-
-    // chunk_char_limit: use ~40% of context window for file content
-    // 1 token ≈ 2-4 chars; use conservative multiplier of 2
-    let auto_chunk = (ctx_tokens * 2 * 40 / 100).max(10_000);
-    let chunk_char_limit = if config.chunk_char_limit > 0 {
-        config.chunk_char_limit
-    } else {
-        auto_chunk
-    };
-
-    // max_concurrent_requests: scale with context window, clamped
-    let max_concurrent_requests = if config.max_concurrent_requests > 0 {
-        config.max_concurrent_requests
-    } else {
-        4 // User requested default fallback to 4 if 0
-    };
-
-    // scan_max_response_tokens: small fraction of context, enough for JSON output
-    let auto_max_response = (ctx_tokens / 20).clamp(2048, 16384) as u32;
-    let scan_max_response_tokens = if config.scan_max_response_tokens > 0 {
-        config.scan_max_response_tokens
-    } else {
-        auto_max_response
-    };
-
-    ResolvedScanParams {
-        chunk_char_limit,
-        max_concurrent_requests,
-        scan_max_response_tokens,
-    }
-}
-
 fn config_path() -> PathBuf {
-    super::paths::ai_config_path()
+    crate::core::infra::paths::ai_config_path()
 }
 
 fn get_encryption_key() -> aes_gcm::Key<aes_gcm::Aes256Gcm> {
@@ -472,8 +248,56 @@ fn language_display_name(code: &str) -> &str {
     }
 }
 
-const TRANSLATION_CHUNK_SOFT_LIMIT_CHARS: usize = 10_000;
-const TRANSLATION_CHUNK_RETRY_MIN_CHARS: usize = 4_000;
+/// Semantic section split: preserves markdown heading boundaries and code fences.
+/// Always used for translation (never character-level hard chunking).
+fn split_markdown_sections(content: &str) -> Vec<String> {
+    if content.is_empty() {
+        return vec![String::new()];
+    }
+
+    fn is_markdown_heading(trimmed_line: &str) -> bool {
+        let hash_count = trimmed_line.chars().take_while(|c| *c == '#').count();
+        if hash_count == 0 || hash_count > 6 {
+            return false;
+        }
+        trimmed_line
+            .chars()
+            .nth(hash_count)
+            .map(|ch| ch == ' ')
+            .unwrap_or(false)
+    }
+
+    let mut sections = Vec::new();
+    let mut current = String::new();
+    let mut in_fenced_code_block = false;
+
+    for line in content.split_inclusive('\n') {
+        let trimmed_start = line.trim_start();
+        let starts_fence = trimmed_start.starts_with("```") || trimmed_start.starts_with("~~~");
+        let heading_boundary = !in_fenced_code_block && is_markdown_heading(trimmed_start);
+
+        if heading_boundary && !current.is_empty() {
+            sections.push(current);
+            current = String::new();
+        }
+
+        current.push_str(line);
+
+        if starts_fence {
+            in_fenced_code_block = !in_fenced_code_block;
+        }
+    }
+
+    if !current.is_empty() {
+        sections.push(current);
+    }
+
+    if sections.is_empty() {
+        vec![content.to_string()]
+    } else {
+        sections
+    }
+}
 
 // ── Prompts ─────────────────────────────────────────────────────────
 
@@ -487,8 +311,6 @@ const SUMMARY_PROMPT: &str = include_str!("../../../prompts/ai/summary.md");
 const TRANSLATE_CHUNK_PROMPT: &str = include_str!("../../../prompts/ai/translate_chunk.md");
 const PICK_SKILLS_PROMPT: &str = include_str!("../../../prompts/ai/pick_skills.md");
 const MARKETPLACE_SEARCH_PROMPT: &str = include_str!("../../../prompts/ai/marketplace_search.md");
-
-const MARKETPLACE_SEARCH_MAX_TOKENS: u32 = 256;
 
 fn is_empty_ai_response_error(err: &anyhow::Error) -> bool {
     err.to_string().contains("AI returned empty response")
@@ -534,7 +356,7 @@ fn build_summary_system_prompt(lang: &str) -> String {
     SUMMARY_PROMPT.replace("{lang}", lang)
 }
 
-fn build_skill_pick_system_prompt(skill_catalog: &str) -> String {
+pub(super) fn build_skill_pick_system_prompt(skill_catalog: &str) -> String {
     PICK_SKILLS_PROMPT
         .replace("{skill_catalog}", skill_catalog)
         .replace(
@@ -554,6 +376,7 @@ fn build_translation_chunk_prompt(
         .replace("{total}", &total.to_string())
 }
 
+#[allow(dead_code)]
 fn split_translation_chunks(text: &str, soft_limit_chars: usize) -> Vec<String> {
     if text.len() <= soft_limit_chars || soft_limit_chars == 0 {
         return vec![text.to_string()];
@@ -594,75 +417,89 @@ fn split_translation_chunks(text: &str, soft_limit_chars: usize) -> Vec<String> 
     }
 }
 
+/// Translate text in semantic sections (by markdown heading), never by character count.
+/// Each section gets its own timeout and retry, so one slow/failed section does not
+/// kill the whole document translation. Falls back to the previous section's heading
+/// as context to maintain terminology consistency.
 async fn translate_text_in_chunks(
     config: &AiConfig,
     base_system_prompt: &str,
     text: &str,
 ) -> Result<String> {
-    let chunks = split_translation_chunks(text, TRANSLATION_CHUNK_SOFT_LIMIT_CHARS);
-    if chunks.len() <= 1 {
-        return chat_completion_capped(
-            config,
+    let sections = split_markdown_sections(text);
+    let effective_config = effective_translation_config(config);
+
+    // Single section — translate directly without chunking overhead.
+    if sections.len() <= 1 {
+        let result = chat_completion_capped(
+            &effective_config,
             base_system_prompt,
             text,
             estimate_translation_max_tokens(text),
         )
-        .await;
+        .await?;
+        if result.trim().is_empty() {
+            anyhow::bail!("AI returned empty response");
+        }
+        return Ok(result);
     }
 
-    let total = chunks.len();
-    let max_parallel = resolve_scan_params(config)
+    // Multi-section: translate each section with per-section timeout + retry.
+    // Convert to owned strings so spawned tasks can hold them for as long as needed.
+    let sections: Vec<String> = sections.into_iter().collect();
+    let total = sections.len();
+    let max_parallel = resolve_scan_params(&effective_config)
         .max_concurrent_requests
-        .clamp(1, 8) as usize;
+        .clamp(1, 4) as usize;
     let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(max_parallel));
+
+    // (ends_with_newline, translated_text_or_empty_on_error) per section index.
+    let results: std::sync::Arc<tokio::sync::Mutex<std::collections::HashMap<usize, (bool, String)>>> =
+        std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::with_capacity(
+            total,
+        )));
+
     let mut tasks = tokio::task::JoinSet::new();
 
-    for (index, chunk) in chunks.iter().cloned().enumerate() {
-        let cfg = config.clone();
-        let prompt = build_translation_chunk_prompt(base_system_prompt, index + 1, total);
+    for (idx, section_text) in sections.into_iter().enumerate() {
+        let cfg = effective_config.clone();
+        let prompt = build_translation_chunk_prompt(base_system_prompt, idx + 1, total);
         let permit_pool = semaphore.clone();
+        let results = results.clone();
+
         tasks.spawn(async move {
-            let _permit = permit_pool
-                .acquire_owned()
-                .await
-                .map_err(|_| anyhow::anyhow!("Chunk translation semaphore closed"))?;
+            let _permit = permit_pool.acquire_owned().await.ok();
 
-            let chunk_number = index + 1;
-            let chunk_result = chat_completion_capped(
-                &cfg,
-                &prompt,
-                &chunk,
-                estimate_translation_max_tokens(&chunk),
-            )
-            .await
-            .with_context(|| format!("Failed to translate chunk {chunk_number}/{total}"))?;
+            let ends_nl = section_text.ends_with('\n');
 
-            if chunk_result.trim().is_empty() {
-                anyhow::bail!("AI returned empty response for chunk {chunk_number}/{total}");
-            }
+            let translated = match translate_section_with_retry(&cfg, &prompt, &section_text).await {
+                Ok(t) => t,
+                Err(e) => {
+                    warn!(target: "translate", idx, error = %e, "section translate failed, using empty");
+                    String::new()
+                }
+            };
 
-            Ok::<(usize, bool, String), anyhow::Error>((index, chunk.ends_with('\n'), chunk_result))
+            let mut guard = results.lock().await;
+            guard.insert(idx, (ends_nl, translated));
         });
     }
 
-    let mut ordered_results: Vec<Option<(bool, String)>> = vec![None; total];
     while let Some(joined) = tasks.join_next().await {
-        let (index, ends_with_newline, chunk_result) =
-            joined.map_err(|e| anyhow::anyhow!("Chunk translation task panicked: {}", e))??;
-        ordered_results[index] = Some((ends_with_newline, chunk_result));
+        if let Err(e) = joined {
+            warn!(target: "translate", error = %e, "section task panicked");
+        }
     }
 
+    let guard = results.lock().await;
     let mut translated = String::new();
-    for (index, item) in ordered_results.into_iter().enumerate() {
-        let (ends_with_newline, chunk_result) = item.ok_or_else(|| {
-            anyhow::anyhow!(
-                "Missing translation result for chunk {}/{}",
-                index + 1,
-                total
-            )
-        })?;
+    for idx in 0..total {
+        let (ends_nl, chunk_result) = guard
+            .get(&idx)
+            .map(|(a, b)| (*a, b.clone()))
+            .unwrap_or((false, String::new()));
         translated.push_str(&chunk_result);
-        if ends_with_newline && !chunk_result.ends_with('\n') {
+        if ends_nl && !chunk_result.ends_with('\n') {
             translated.push('\n');
         }
     }
@@ -670,103 +507,104 @@ async fn translate_text_in_chunks(
     Ok(translated)
 }
 
-// ── HTTP Client Builder ─────────────────────────────────────────────
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ProxyFingerprint {
-    enabled: bool,
-    scheme: String,
-    host: String,
-    port: u16,
-    username: String,
-    password: String,
-}
-
-impl ProxyFingerprint {
-    fn from_config(config: &super::proxy::ProxyConfig) -> Self {
-        Self {
-            enabled: config.enabled && !config.host.trim().is_empty(),
-            scheme: config.proxy_type.as_scheme().to_string(),
-            host: config.host.trim().to_string(),
-            port: config.port,
-            username: config
-                .username
-                .as_deref()
-                .unwrap_or_default()
-                .trim()
-                .to_string(),
-            password: config.password.clone().unwrap_or_default(),
+/// Extract the first markdown heading from a section for use as context, e.g. "## Installation".
+#[allow(dead_code)]
+fn extract_section_heading(section: &str) -> String {
+    for line in section.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') {
+            return trimmed.to_string();
+        }
+        if !trimmed.is_empty() {
+            break;
         }
     }
+    String::new()
 }
 
-static SHARED_HTTP_CLIENT: LazyLock<Mutex<Option<(ProxyFingerprint, reqwest::Client)>>> =
-    LazyLock::new(|| Mutex::new(None));
+/// Retryable per-section translation: 30s timeout + up to 3 attempts with exponential backoff
+/// for transient errors (rate-limit, network, timeout). Permanent errors (empty response, quota)
+/// fail fast without retry.
+async fn translate_section_with_retry(
+    config: &AiConfig,
+    prompt: &str,
+    section: &str,
+) -> Result<String> {
+    const SECTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+    const MAX_RETRIES: u8 = 3;
 
-fn current_proxy_fingerprint() -> ProxyFingerprint {
-    match super::proxy::load_config() {
-        Ok(config) => ProxyFingerprint::from_config(&config),
-        Err(_) => ProxyFingerprint {
-            enabled: false,
-            scheme: "http".to_string(),
-            host: String::new(),
-            port: 7897,
-            username: String::new(),
-            password: String::new(),
-        },
-    }
-}
+    let effective_config = effective_translation_config(config);
 
-/// Build a reqwest client, optionally honouring the user's proxy config.
-fn build_http_client_inner(fingerprint: &ProxyFingerprint) -> Result<reqwest::Client> {
-    let mut builder = reqwest::Client::builder()
-        // Total request timeout (covers entire request lifecycle).
-        .timeout(std::time::Duration::from_secs(120))
-        // Fast-fail on network-unreachable / DNS-timeout scenarios
-        // instead of waiting the full 120s.
-        .connect_timeout(std::time::Duration::from_secs(10))
-        // Keep idle connections alive to reuse TLS sessions.
-        .pool_idle_timeout(std::time::Duration::from_secs(90))
-        // Match the AI concurrency budget default.
-        .pool_max_idle_per_host(4);
+    for attempt in 0..=MAX_RETRIES {
+        let start = std::time::Instant::now();
 
-    if fingerprint.enabled {
-        let proxy_url = format!(
-            "{}://{}:{}",
-            fingerprint.scheme, fingerprint.host, fingerprint.port
-        );
+        let result = tokio::time::timeout(
+            SECTION_TIMEOUT,
+            chat_completion_capped(
+                &effective_config,
+                prompt,
+                section,
+                estimate_translation_max_tokens(section),
+            ),
+        )
+        .await;
 
-        let mut proxy = reqwest::Proxy::all(&proxy_url).context("Invalid proxy URL")?;
-        if !fingerprint.username.is_empty() {
-            proxy = proxy.basic_auth(&fingerprint.username, &fingerprint.password);
+        match result {
+            Ok(Ok(text)) if !text.trim().is_empty() => {
+                // Validate translation quality before returning.
+                if translation_looks_translated(&config.target_language, section, &text) {
+                    return Ok(text);
+                }
+                // Output doesn't look translated — treat as empty.
+                if attempt < MAX_RETRIES {
+                    let backoff = std::time::Duration::from_secs(2u64.saturating_pow(attempt as u32));
+                    debug!(target: "translate", attempt, "section output not translated, retrying after {:?}", backoff);
+                    tokio::time::sleep(backoff).await;
+                    continue;
+                }
+                anyhow::bail!("Section returned untranslated content after {} attempts", MAX_RETRIES);
+            }
+            Ok(Ok(_)) | Ok(Err(_)) => {
+                // Empty or error — check if retryable.
+                if attempt < MAX_RETRIES {
+                    let backoff = std::time::Duration::from_secs(2u64.saturating_pow(attempt as u32));
+                    tokio::time::sleep(backoff).await;
+                    continue;
+                }
+                anyhow::bail!("Section translation failed after {} attempts", MAX_RETRIES);
+            }
+            Err(_) => {
+                // Timeout.
+                warn!(target: "translate", elapsed_ms = start.elapsed().as_millis() as u64, attempt, "section translate timed out");
+                if attempt < MAX_RETRIES {
+                    let backoff = std::time::Duration::from_secs(2u64.saturating_pow(attempt as u32));
+                    tokio::time::sleep(backoff).await;
+                    continue;
+                }
+                anyhow::bail!("Section translation timed out after {} attempts", MAX_RETRIES);
+            }
         }
-
-        builder = builder.proxy(proxy);
     }
-
-    builder.build().context("Failed to build HTTP client")
+    anyhow::bail!("Section translation exhausted all retries")
 }
 
-/// Get or lazily create the shared HTTP client.  Reuses TLS sessions and
-/// HTTP/2 connections between requests — eliminates ~100-200ms per request.
-/// The cache auto-refreshes when proxy settings change.
-fn get_http_client() -> Result<reqwest::Client> {
-    let fingerprint = current_proxy_fingerprint();
-    let mut guard = SHARED_HTTP_CLIENT
-        .lock()
-        .map_err(|_| anyhow::anyhow!("HTTP client cache lock poisoned"))?;
+/// Returns an AiConfig with the translation model if one is configured, otherwise
+/// the default model.
+fn effective_translation_config(config: &AiConfig) -> AiConfig {
+    let model = config
+        .translation_model
+        .as_deref()
+        .filter(|m| !m.is_empty())
+        .unwrap_or(&config.model);
 
-    if let Some((cached_fp, client)) = guard.as_ref() {
-        if *cached_fp == fingerprint {
-            return Ok(client.clone());
-        }
-    }
-
-    let rebuilt = build_http_client_inner(&fingerprint)
-        .with_context(|| "Failed to build HTTP client with current proxy settings")?;
-    *guard = Some((fingerprint, rebuilt.clone()));
-    Ok(rebuilt)
+    let mut cfg = config.clone();
+    cfg.model = model.to_string();
+    cfg
 }
+
+// ── HTTP Client (delegated to http_client.rs) ───────────────────────
+
+use http_client::get_http_client;
 
 // ── OpenAI-Compatible Chat Completion ────────────────────────────────
 
@@ -1137,6 +975,10 @@ where
     Ok(translated)
 }
 
+/// Streaming version of section-based translation. Uses semantic split (markdown headings)
+/// instead of character-level chunking. Each section is streamed sequentially; on section
+/// failure after retries, emits an error event and aborts the whole stream (streaming
+/// cannot recover gracefully from mid-stream gaps the way non-streaming can).
 async fn translate_text_in_chunks_streaming<F>(
     config: &AiConfig,
     base_system_prompt: &str,
@@ -1146,46 +988,121 @@ async fn translate_text_in_chunks_streaming<F>(
 where
     F: FnMut(&str) -> Result<()>,
 {
-    let chunks = split_translation_chunks(text, TRANSLATION_CHUNK_SOFT_LIMIT_CHARS);
-    if chunks.len() <= 1 {
-        return chat_completion_stream(
-            config,
+    let sections = split_markdown_sections(text);
+    let effective_config = effective_translation_config(config);
+
+    // Single section — stream directly without chunking overhead.
+    if sections.len() <= 1 {
+        let result = chat_completion_stream(
+            &effective_config,
             base_system_prompt,
             text,
             estimate_translation_max_tokens(text),
             on_delta,
         )
-        .await;
+        .await?;
+        if result.trim().is_empty() {
+            anyhow::bail!("AI returned empty response");
+        }
+        return Ok(result);
     }
 
-    let total = chunks.len();
+    let total = sections.len();
     let mut translated = String::new();
 
-    for (index, chunk) in chunks.iter().enumerate() {
-        let chunk_number = index + 1;
+    for (idx, section) in sections.iter().enumerate() {
+        let chunk_number = idx + 1;
         let chunk_prompt = build_translation_chunk_prompt(base_system_prompt, chunk_number, total);
-        let chunk_result = chat_completion_stream(
-            config,
-            &chunk_prompt,
-            chunk,
-            estimate_translation_max_tokens(chunk),
-            on_delta,
-        )
-        .await
-        .with_context(|| format!("Failed to stream-translate chunk {chunk_number}/{total}"))?;
 
-        if chunk_result.trim().is_empty() {
-            anyhow::bail!("AI returned empty response for chunk {chunk_number}/{total}");
-        }
+        let section_result =
+            translate_streaming_section(&effective_config, &chunk_prompt, section, on_delta).await;
 
-        translated.push_str(&chunk_result);
-        if chunk.ends_with('\n') && !chunk_result.ends_with('\n') {
-            translated.push('\n');
-            on_delta("\n")?;
+        match section_result {
+            Ok(section_translated) => {
+                translated.push_str(&section_translated);
+                if section.ends_with('\n') && !section_translated.ends_with('\n') {
+                    translated.push('\n');
+                    on_delta("\n")?;
+                }
+            }
+            Err(e) => {
+                // In streaming mode, we cannot gracefully skip a failed section because
+                // that would produce garbled output. Fail the whole stream.
+                anyhow::bail!(
+                    "Section {}/{} translation failed after retries: {}",
+                    chunk_number,
+                    total,
+                    e
+                );
+            }
         }
     }
 
     Ok(translated)
+}
+
+/// Translate a single section with streaming, with per-section timeout and retry.
+/// Returns the full section text on success; returns an error on persistent failure.
+async fn translate_streaming_section<F>(
+    config: &AiConfig,
+    prompt: &str,
+    section: &str,
+    on_delta: &mut F,
+) -> Result<String>
+where
+    F: FnMut(&str) -> Result<()>,
+{
+    const SECTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+    const MAX_RETRIES: u8 = 3;
+
+    for attempt in 0..=MAX_RETRIES {
+        let result = tokio::time::timeout(
+            SECTION_TIMEOUT,
+            chat_completion_stream(
+                config,
+                prompt,
+                section,
+                estimate_translation_max_tokens(section),
+                on_delta,
+            ),
+        )
+        .await;
+
+        match result {
+            Ok(Ok(text)) if !text.trim().is_empty() => {
+                if translation_looks_translated(&config.target_language, section, &text) {
+                    return Ok(text);
+                }
+                // Output doesn't look translated.
+                if attempt < MAX_RETRIES {
+                    let backoff =
+                        std::time::Duration::from_secs(2u64.saturating_pow(attempt as u32));
+                    debug!(target: "translate", attempt, "streaming section not translated, retrying");
+                    tokio::time::sleep(backoff).await;
+                    continue;
+                }
+                anyhow::bail!("Streaming section returned untranslated content");
+            }
+            Ok(Ok(_)) | Ok(Err(_)) => {
+                if attempt < MAX_RETRIES {
+                    let backoff = std::time::Duration::from_secs(2u64.saturating_pow(attempt as u32));
+                    tokio::time::sleep(backoff).await;
+                    continue;
+                }
+                anyhow::bail!("Streaming section translation failed after {} attempts", MAX_RETRIES);
+            }
+            Err(_) => {
+                warn!(target: "translate", attempt, "streaming section timed out");
+                if attempt < MAX_RETRIES {
+                    let backoff = std::time::Duration::from_secs(2u64.saturating_pow(attempt as u32));
+                    tokio::time::sleep(backoff).await;
+                    continue;
+                }
+                anyhow::bail!("Streaming section timed out after {} attempts", MAX_RETRIES);
+            }
+        }
+    }
+    anyhow::bail!("Streaming section exhausted all retries")
 }
 
 async fn anthropic_messages_completion(
@@ -1437,7 +1354,7 @@ pub(crate) async fn chat_completion_capped(
 }
 
 /// Chat completion with temperature and seed overrides for deterministic output.
-async fn chat_completion_deterministic(
+pub(super) async fn chat_completion_deterministic(
     config: &AiConfig,
     system_prompt: &str,
     user_content: &str,
@@ -1497,7 +1414,7 @@ fn ai_short_text_available(config: &AiConfig) -> bool {
 ///
 /// This prevents caching English text as a "translation" when the AI model
 /// returns the input verbatim.
-fn translation_looks_translated(target_language: &str, source: &str, result: &str) -> bool {
+pub(crate) fn translation_looks_translated(target_language: &str, source: &str, result: &str) -> bool {
     let target_needs_cjk = matches!(
         target_language,
         "zh-CN" | "zh-TW" | "zh-cn" | "zh-tw" | "ja" | "ko"
@@ -1623,7 +1540,7 @@ fn source_lang_hint_from_code(code: &str) -> String {
 /// stored at `~/.skillstar/.mymemory_de`.
 fn get_mymemory_de() -> String {
     use std::fs;
-    let path = crate::core::paths::mymemory_disabled_path();
+    let path = crate::core::infra::paths::mymemory_disabled_path();
     if let Ok(email) = fs::read_to_string(&path) {
         let trimmed = email.trim().to_string();
         if !trimmed.is_empty() {
@@ -1640,7 +1557,7 @@ fn get_mymemory_de() -> String {
 }
 
 fn mymemory_usage_path() -> PathBuf {
-    crate::core::paths::mymemory_usage_path()
+    crate::core::infra::paths::mymemory_usage_path()
 }
 
 fn load_mymemory_usage_stats_inner() -> MymemoryUsageStats {
@@ -2370,515 +2287,15 @@ pub async fn extract_search_keywords(config: &AiConfig, user_query: &str) -> Res
     Ok(deduped)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SkillPickCandidate {
-    pub name: String,
-    pub description: String,
-}
+// ── Skill Pick (delegated to skill_pick.rs) ─────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SkillPickRecommendation {
-    pub name: String,
-    pub score: u8,
-    pub reason: String,
-}
+pub use skill_pick::{
+    SkillPickCandidate, SkillPickRecommendation, SkillPickResponse, pick_skills,
+};
+// Internal types needed by tests:
+#[cfg(test)]
+use skill_pick::{RankedSkillPickCandidate, SkillPickRoundRecommendation, shortlist_skill_pick_candidates, fallback_skill_pick, parse_skill_pick_response};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SkillPickResponse {
-    pub recommendations: Vec<SkillPickRecommendation>,
-    pub fallback_used: bool,
-    pub rounds_succeeded: usize,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SkillPickCatalogEntry {
-    name: String,
-    description: String,
-    local_score: u8,
-}
-
-#[derive(Debug, Clone)]
-struct RankedSkillPickCandidate {
-    name: String,
-    description: String,
-    local_score: u8,
-}
-
-#[derive(Debug, Clone)]
-struct SkillPickRoundRecommendation {
-    name: String,
-    score: u8,
-    reason: String,
-    rank: usize,
-}
-
-#[derive(Debug, Default)]
-struct AggregatedSkillPick {
-    votes: usize,
-    score_sum: u32,
-    best_rank: usize,
-    local_score: u8,
-    reason: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum ParsedSkillPickEnvelope {
-    Array(Vec<ParsedSkillPickItem>),
-    Wrapped {
-        recommendations: Vec<ParsedSkillPickItem>,
-    },
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum ParsedSkillPickItem {
-    Name(String),
-    Rich {
-        name: String,
-        #[serde(default)]
-        score: Option<u8>,
-        #[serde(default)]
-        reason: Option<String>,
-    },
-}
-
-fn is_low_signal_match_token(token: &str) -> bool {
-    matches!(
-        token,
-        "a" | "an"
-            | "and"
-            | "app"
-            | "apps"
-            | "assistant"
-            | "build"
-            | "for"
-            | "from"
-            | "help"
-            | "in"
-            | "into"
-            | "of"
-            | "on"
-            | "or"
-            | "project"
-            | "skill"
-            | "skills"
-            | "system"
-            | "the"
-            | "to"
-            | "tool"
-            | "tools"
-            | "use"
-            | "using"
-            | "with"
-            | "workflow"
-            | "workflows"
-            | "ai"
-    )
-}
-
-fn push_match_token_variant(
-    tokens: &mut Vec<String>,
-    seen: &mut std::collections::HashSet<String>,
-    raw_token: &str,
-) {
-    let token = raw_token
-        .trim_matches(|c: char| matches!(c, '.' | '-' | '_' | '/'))
-        .trim();
-    if token.len() < 2 || is_low_signal_match_token(token) {
-        return;
-    }
-
-    let owned = token.to_string();
-    if seen.insert(owned.clone()) {
-        tokens.push(owned.clone());
-    }
-
-    for part in token.split(['.', '-', '_', '/']) {
-        let part = part.trim();
-        if part.len() < 2 || is_low_signal_match_token(part) {
-            continue;
-        }
-        let owned = part.to_string();
-        if seen.insert(owned.clone()) {
-            tokens.push(owned);
-        }
-    }
-}
-
-fn extract_match_tokens(text: &str) -> Vec<String> {
-    let mut tokens = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    let mut current = String::new();
-
-    for ch in text.to_lowercase().chars() {
-        if ch.is_ascii_alphanumeric() || matches!(ch, '+' | '#' | '.' | '-' | '_' | '/') {
-            current.push(ch);
-            continue;
-        }
-
-        if !current.is_empty() {
-            push_match_token_variant(&mut tokens, &mut seen, &current);
-            current.clear();
-        }
-    }
-
-    if !current.is_empty() {
-        push_match_token_variant(&mut tokens, &mut seen, &current);
-    }
-
-    tokens
-}
-
-fn compute_local_skill_pick_score(
-    prompt_lower: &str,
-    prompt_tokens: &std::collections::HashSet<String>,
-    skill: &SkillPickCandidate,
-) -> u8 {
-    let skill_name_lower = skill.name.to_lowercase();
-    let name_tokens = extract_match_tokens(&skill.name);
-    let description_tokens = extract_match_tokens(&skill.description);
-    let mut score = 0u32;
-    let mut name_hits = 0u32;
-
-    if !skill_name_lower.is_empty() && prompt_lower.contains(&skill_name_lower) {
-        score += 70;
-        name_hits += 1;
-    }
-
-    for token in &name_tokens {
-        if prompt_tokens.contains(token) {
-            name_hits += 1;
-            score += 18 + (token.len() as u32).min(10) * 2;
-        }
-    }
-
-    for token in description_tokens.iter().take(24) {
-        if prompt_tokens.contains(token) {
-            score += 6 + (token.len() as u32).min(8);
-        }
-    }
-
-    if name_hits >= 2 {
-        score += 12;
-    }
-
-    if !name_tokens.is_empty()
-        && name_tokens
-            .iter()
-            .all(|token| prompt_tokens.contains(token))
-    {
-        score += 10;
-    }
-
-    score.min(100) as u8
-}
-
-fn shortlist_skill_pick_candidates(
-    prompt: &str,
-    skills: Vec<SkillPickCandidate>,
-) -> Vec<RankedSkillPickCandidate> {
-    let prompt_lower = prompt.to_lowercase();
-    let prompt_tokens: std::collections::HashSet<String> =
-        extract_match_tokens(prompt).into_iter().collect();
-
-    let mut ranked: Vec<RankedSkillPickCandidate> = skills
-        .into_iter()
-        .map(|skill| RankedSkillPickCandidate {
-            local_score: compute_local_skill_pick_score(&prompt_lower, &prompt_tokens, &skill),
-            name: skill.name,
-            description: skill.description,
-        })
-        .collect();
-
-    ranked.sort_by(|a, b| {
-        b.local_score
-            .cmp(&a.local_score)
-            .then_with(|| a.name.cmp(&b.name))
-    });
-
-    if ranked.len() <= SKILL_PICK_MAX_CANDIDATES {
-        return ranked;
-    }
-
-    let top_score = ranked.first().map(|skill| skill.local_score).unwrap_or(0);
-    if top_score == 0 {
-        ranked.sort_by(|a, b| a.name.cmp(&b.name));
-        ranked.truncate(SKILL_PICK_LOW_SIGNAL_MAX_CANDIDATES.min(ranked.len()));
-        return ranked;
-    }
-
-    ranked.truncate(SKILL_PICK_MAX_CANDIDATES);
-    ranked
-}
-
-fn extract_json_payload(raw: &str) -> &str {
-    let trimmed = raw.trim();
-    let array_start = trimmed.find('[');
-    let object_start = trimmed.find('{');
-
-    match (array_start, object_start) {
-        (Some(array_idx), Some(object_idx)) if object_idx < array_idx => trimmed
-            .rfind('}')
-            .map(|end| &trimmed[object_idx..=end])
-            .unwrap_or(trimmed),
-        (Some(array_idx), _) => trimmed
-            .rfind(']')
-            .map(|end| &trimmed[array_idx..=end])
-            .unwrap_or(trimmed),
-        (_, Some(object_idx)) => trimmed
-            .rfind('}')
-            .map(|end| &trimmed[object_idx..=end])
-            .unwrap_or(trimmed),
-        _ => trimmed,
-    }
-}
-
-fn default_skill_pick_score(rank: usize) -> u8 {
-    std::cmp::max(80u8.saturating_sub((rank as u8).saturating_mul(6)), 55)
-}
-
-fn fallback_skill_pick_rank_score(rank: usize) -> u8 {
-    std::cmp::max(82u8.saturating_sub((rank as u8).saturating_mul(4)), 40)
-}
-
-fn normalize_skill_pick_reason(reason: &str) -> String {
-    reason.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn parse_skill_pick_response(
-    raw: &str,
-    valid_names: &std::collections::HashSet<String>,
-) -> Result<Vec<SkillPickRoundRecommendation>> {
-    let json_str = extract_json_payload(raw);
-    let envelope: ParsedSkillPickEnvelope = serde_json::from_str(json_str).with_context(|| {
-        format!(
-            "Failed to parse AI skill-pick response as structured JSON: {}",
-            json_str
-        )
-    })?;
-
-    let items = match envelope {
-        ParsedSkillPickEnvelope::Array(items) => items,
-        ParsedSkillPickEnvelope::Wrapped { recommendations } => recommendations,
-    };
-
-    let mut seen = std::collections::HashSet::new();
-    let mut parsed = Vec::new();
-
-    for (rank, item) in items.into_iter().enumerate() {
-        let (name, score, reason) = match item {
-            ParsedSkillPickItem::Name(name) => {
-                (name, default_skill_pick_score(rank), String::new())
-            }
-            ParsedSkillPickItem::Rich {
-                name,
-                score,
-                reason,
-            } => (
-                name,
-                score
-                    .unwrap_or_else(|| default_skill_pick_score(rank))
-                    .clamp(0, 100),
-                reason.unwrap_or_default(),
-            ),
-        };
-
-        if !valid_names.contains(&name) || !seen.insert(name.clone()) {
-            continue;
-        }
-
-        parsed.push(SkillPickRoundRecommendation {
-            name,
-            score,
-            reason: normalize_skill_pick_reason(&reason),
-            rank,
-        });
-    }
-
-    Ok(parsed)
-}
-
-fn fallback_skill_pick(ranked: &[RankedSkillPickCandidate]) -> Vec<SkillPickRecommendation> {
-    let mut recommendations: Vec<SkillPickRecommendation> = ranked
-        .iter()
-        .filter(|skill| skill.local_score > 0)
-        .take(SKILL_PICK_MAX_RECOMMENDATIONS)
-        .enumerate()
-        .map(|(rank, skill)| SkillPickRecommendation {
-            name: skill.name.clone(),
-            score: fallback_skill_pick_rank_score(rank).max(skill.local_score),
-            reason: String::new(),
-        })
-        .collect();
-
-    if recommendations.is_empty() {
-        recommendations = ranked
-            .iter()
-            .take(std::cmp::min(SKILL_PICK_MAX_RECOMMENDATIONS, 6))
-            .enumerate()
-            .map(|(rank, skill)| SkillPickRecommendation {
-                name: skill.name.clone(),
-                score: fallback_skill_pick_rank_score(rank),
-                reason: String::new(),
-            })
-            .collect();
-    }
-
-    recommendations
-}
-
-/// Pick the most relevant skills from installed skills based on a user-provided project description.
-/// The picker first applies a deterministic local shortlist, then runs a 3-round AI consensus pass,
-/// and finally falls back to the deterministic shortlist if the AI output is partial or invalid.
-pub async fn pick_skills(
-    config: &AiConfig,
-    prompt: &str,
-    skills: Vec<SkillPickCandidate>,
-) -> Result<SkillPickResponse> {
-    if skills.is_empty() {
-        return Ok(SkillPickResponse {
-            recommendations: Vec::new(),
-            fallback_used: false,
-            rounds_succeeded: 0,
-        });
-    }
-
-    let ranked_candidates = shortlist_skill_pick_candidates(prompt, skills);
-    let valid_names: std::collections::HashSet<String> = ranked_candidates
-        .iter()
-        .map(|skill| skill.name.clone())
-        .collect();
-    let skill_catalog = serde_json::to_string_pretty(
-        &ranked_candidates
-            .iter()
-            .map(|skill| SkillPickCatalogEntry {
-                name: skill.name.clone(),
-                description: skill.description.clone(),
-                local_score: skill.local_score,
-            })
-            .collect::<Vec<_>>(),
-    )
-    .context("Failed to serialize skill-pick catalog")?;
-    let system_prompt = build_skill_pick_system_prompt(&skill_catalog);
-
-    let seeds = [42u64, 123, 7];
-    let mut handles = Vec::new();
-
-    for &seed in &seeds {
-        let cfg = config.clone();
-        let sp = system_prompt.clone();
-        let user_prompt = prompt.to_string();
-        handles.push(tokio::spawn(async move {
-            chat_completion_deterministic(
-                &cfg,
-                &sp,
-                &user_prompt,
-                Some(seed),
-                SKILL_PICK_ROUND_MAX_TOKENS,
-            )
-            .await
-        }));
-    }
-
-    let local_score_lookup: std::collections::HashMap<&str, u8> = ranked_candidates
-        .iter()
-        .map(|skill| (skill.name.as_str(), skill.local_score))
-        .collect();
-    let mut aggregated: std::collections::HashMap<String, AggregatedSkillPick> =
-        std::collections::HashMap::new();
-    let mut raw_success_count = 0usize;
-    let mut parse_success_count = 0usize;
-
-    for handle in handles {
-        let result = handle
-            .await
-            .map_err(|e| anyhow::anyhow!("Skill-pick task panicked: {}", e))?;
-
-        match result {
-            Ok(raw) => {
-                raw_success_count += 1;
-                match parse_skill_pick_response(&raw, &valid_names) {
-                    Ok(round_recommendations) => {
-                        parse_success_count += 1;
-                        for recommendation in round_recommendations {
-                            let entry = aggregated
-                                .entry(recommendation.name.clone())
-                                .or_insert_with(|| AggregatedSkillPick {
-                                    best_rank: recommendation.rank,
-                                    local_score: *local_score_lookup
-                                        .get(recommendation.name.as_str())
-                                        .unwrap_or(&0),
-                                    ..Default::default()
-                                });
-
-                            entry.votes += 1;
-                            entry.score_sum += recommendation.score as u32;
-                            entry.best_rank = entry.best_rank.min(recommendation.rank);
-                            if entry.reason.is_empty() && !recommendation.reason.is_empty() {
-                                entry.reason = recommendation.reason.clone();
-                            }
-                        }
-                    }
-                    Err(err) => {
-                        warn!(target: "ai_pick_skills", error = %err, "failed to parse round response");
-                    }
-                }
-            }
-            Err(err) => {
-                warn!(target: "ai_pick_skills", error = %err, "round failed");
-            }
-        }
-    }
-
-    if raw_success_count == 0 {
-        anyhow::bail!("All 3 AI skill-pick rounds failed. Please check your AI provider settings.");
-    }
-
-    let threshold = if parse_success_count >= 2 { 2 } else { 1 };
-    let mut recommendations: Vec<SkillPickRecommendation> = aggregated
-        .into_iter()
-        .filter(|(_, aggregate)| aggregate.votes >= threshold)
-        .map(|(name, aggregate)| {
-            let average_score = (aggregate.score_sum / aggregate.votes as u32) as u8;
-            SkillPickRecommendation {
-                name,
-                score: average_score.max(aggregate.local_score),
-                reason: aggregate.reason,
-            }
-        })
-        .collect();
-
-    recommendations.sort_by(|a, b| {
-        let left = local_score_lookup
-            .get(a.name.as_str())
-            .copied()
-            .unwrap_or(0);
-        let right = local_score_lookup
-            .get(b.name.as_str())
-            .copied()
-            .unwrap_or(0);
-        b.score
-            .cmp(&a.score)
-            .then_with(|| right.cmp(&left))
-            .then_with(|| a.name.cmp(&b.name))
-    });
-    recommendations.truncate(SKILL_PICK_MAX_RECOMMENDATIONS);
-
-    let fallback_used = parse_success_count == 0 || recommendations.is_empty();
-    if fallback_used {
-        recommendations = fallback_skill_pick(&ranked_candidates);
-    }
-
-    Ok(SkillPickResponse {
-        recommendations,
-        fallback_used,
-        rounds_succeeded: parse_success_count,
-    })
-}
 
 /// Test API connectivity with a minimal request.
 pub async fn test_connection(config: &AiConfig) -> Result<u64> {
@@ -3100,7 +2517,7 @@ mod tests {
         with_temp_data_root(|_dir| {
             let first = super::get_mymemory_de();
             let written =
-                std::fs::read_to_string(crate::core::paths::mymemory_disabled_path()).unwrap();
+                std::fs::read_to_string(crate::core::infra::paths::mymemory_disabled_path()).unwrap();
             assert_eq!(first, written.trim());
 
             let second = super::get_mymemory_de();
@@ -3114,7 +2531,7 @@ mod tests {
     #[test]
     fn mymemory_de_overwrites_corrupt_file() {
         with_temp_data_root(|_dir| {
-            let path = crate::core::paths::mymemory_disabled_path();
+            let path = crate::core::infra::paths::mymemory_disabled_path();
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent).unwrap();
             }

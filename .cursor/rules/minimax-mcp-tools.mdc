@@ -1,0 +1,69 @@
+---
+description: "MCP and web-tool guidance: current-doc retrieval, direct-tool preference, and version-aware external lookups."
+alwaysApply: false
+---
+
+# MCP and Web Tools
+
+Use this rule when current documentation, external systems, or plugin-backed tools matter.
+
+## Preferred Order
+
+When multiple paths exist, prefer:
+
+1. direct native tools exposed in the prompt
+2. direct plugin or MCP-backed tools exposed in the prompt
+3. MCP resource functions when available
+4. `WebSearch` and `WebFetch`
+
+Do not assume old wrapper APIs are present just because they appear in older docs or rules.
+
+## Web Search Discipline
+
+Use `WebSearch` for:
+- package versions
+- breaking changes
+- compatibility questions
+- recent framework behavior
+- error messages after repeated failures
+
+Use `WebFetch` for:
+- official docs pages
+- changelogs
+- reference pages that need close reading
+
+Before presenting advice as `current`, `official`, `recommended`, or `best practice`, verify it against a current authoritative source such as official docs, release notes, or changelogs.
+
+When versions matter:
+- use the actual current month and year
+- do not leave placeholders in the search query
+- do not rely on stale memory when a current source is available
+
+## MCP Discipline
+
+- Follow the exact schema of currently exposed tools.
+- If the environment exposes direct tools, use them directly.
+- If the environment exposes resources instead of actions, use the resource discovery and fetch path.
+- Keep assumptions about server names and tool IDs out of general rules.
+
+## Typical Chains
+
+```text
+Version check -> install or configure -> verify
+Docs lookup -> implement -> behavior check
+Resource discovery -> targeted fetch -> synthesize
+```
+
+For version-sensitive setup guidance, prefer:
+
+```text
+Current authoritative source -> install or configure -> executable verification
+```
+
+## Failure Handling
+
+If an MCP or plugin call fails:
+- re-check the current schema
+- simplify the arguments
+- remove stale placeholder text
+- fall back to another available source if the integration is optional

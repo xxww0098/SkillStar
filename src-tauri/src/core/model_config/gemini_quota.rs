@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use super::gemini_oauth;
 use super::providers::{self, ProviderEntry};
-use crate::core::error::AppError;
+use crate::core::infra::error::AppError;
 
 // ── Cloud Code API endpoints ────────────────────────────────────────
 const CLOUD_CODE_DAILY_BASE_URL: &str = "https://daily-cloudcode-pa.googleapis.com";

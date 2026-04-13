@@ -13,7 +13,8 @@ use std::sync::{Arc, Mutex};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tracing::{debug, error, info, warn};
 
-use super::{path_env, paths};
+use super::path_env;
+use super::infra::paths;
 
 // ── ACP Config ──────────────────────────────────────────────────────
 
@@ -1144,7 +1145,7 @@ echo second
         let collected = Arc::new(Mutex::new(String::new()));
         let collected_for_client = collected.clone();
 
-        let result = tokio::task::spawn_blocking(move || {
+        let _result = tokio::task::spawn_blocking(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()

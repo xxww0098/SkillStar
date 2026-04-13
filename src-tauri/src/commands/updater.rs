@@ -16,7 +16,7 @@ use serde::Serialize;
 use tauri::Manager;
 use tracing::{info, warn};
 
-use crate::core::github_mirror;
+use crate::core::config::github_mirror;
 
 /// The original (non-mirrored) update endpoint from tauri.conf.json.
 const UPSTREAM_ENDPOINT: &str =

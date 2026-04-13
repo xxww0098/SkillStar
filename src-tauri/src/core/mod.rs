@@ -1,36 +1,51 @@
+// ═══════════════════════════════════════════════════════════════════
+//  Domain modules
+// ═══════════════════════════════════════════════════════════════════
+
+pub mod infra;
+pub mod ai;
+pub mod config;
+pub mod git;
+pub mod projects;
+pub mod terminal;
+
+// ═══════════════════════════════════════════════════════════════════
+//  Application core
+// ═══════════════════════════════════════════════════════════════════
+
 pub mod acp_client;
-pub mod agent_profile;
 pub mod ai_provider;
-pub mod db_pool;
-pub mod dismissed_skills;
-pub mod error;
-pub mod gh_manager;
-pub mod git_ops;
-pub mod github_mirror;
-pub mod installed_skill;
-pub mod launch_deck;
-pub mod local_skill;
 pub mod lockfile;
 pub mod marketplace;
 pub mod marketplace_snapshot;
 pub mod model_config;
 pub mod path_env;
-pub mod paths;
 pub mod patrol;
 pub mod project_manifest;
-pub mod proxy;
-pub mod repo_history;
-pub mod repo_scanner;
 pub mod security_scan;
 pub mod skill;
-pub mod skill_bundle;
-pub mod skill_group;
-pub mod skill_install;
-pub mod skill_pack;
-pub mod sync;
+pub mod skills;
 pub mod terminal_backend;
-pub mod translation_cache;
-pub mod util;
+pub mod update_checker;
+
+// ── Public API re-exports (Tauri commands / CLI) ─────────────────────
+
+#[allow(unused_imports)]
+pub use skills::installed_skill;
+#[allow(unused_imports)]
+pub use skills::local_skill;
+#[allow(unused_imports)]
+pub use skills::repo_scanner;
+#[allow(unused_imports)]
+pub use skills::skill_bundle;
+#[allow(unused_imports)]
+pub use skills::skill_group;
+#[allow(unused_imports)]
+pub use skills::skill_install;
+#[allow(unused_imports)]
+pub use skills::skill_pack;
+#[allow(unused_imports)]
+pub use skills::skill_update;
 
 #[cfg(test)]
 pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {
@@ -38,4 +53,17 @@ pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {
 
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
+}
+
+/// Acquire the test environment lock, recovering from poisoned state.
+///
+/// When a test panics while holding the lock, `Mutex::lock()` returns
+/// `PoisonError` for all subsequent callers. This helper transparently
+/// recovers by calling `into_inner()`, preventing cascading failures
+/// across the entire test suite.
+#[cfg(test)]
+pub(crate) fn lock_test_env() -> std::sync::MutexGuard<'static, ()> {
+    test_env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }

@@ -38,6 +38,7 @@ pub fn write_settings(config: &Value) -> Result<()> {
 
 /// Extract the `env` object from settings.json.
 /// Returns an empty map if `env` is missing.
+#[allow(dead_code)]
 pub fn get_env(settings: &Value) -> Map<String, Value> {
     settings
         .get("env")
@@ -47,6 +48,7 @@ pub fn get_env(settings: &Value) -> Map<String, Value> {
 }
 
 /// Update the `env` object in settings.json, preserving all other fields.
+#[allow(dead_code)]
 pub fn set_env(env: Map<String, Value>) -> Result<()> {
     let path = settings_path();
     let mut settings = read_json_file(&path).unwrap_or(Value::Object(Map::new()));
@@ -82,6 +84,7 @@ pub fn set_field(key: &str, value: Value) -> Result<()> {
 
 /// Get a single top-level field from settings.json.
 /// Returns `Value::Null` if the key is missing.
+#[allow(dead_code)]
 pub fn get_field(key: &str) -> Result<Value> {
     let settings = read_settings()?;
     Ok(settings.get(key).cloned().unwrap_or(Value::Null))

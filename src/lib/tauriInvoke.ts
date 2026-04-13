@@ -32,6 +32,7 @@ import type {
   MymemoryUsageStats,
   OfficialPublisher,
   ProjectAgentDetection,
+  ProjectDeployMode,
   ProjectEntry,
   ProjectScanResult,
   ProxyConfig,
@@ -149,7 +150,11 @@ interface TauriCommands {
   list_projects: { args: Record<string, never>; result: ProjectEntry[] };
   get_project_skills: { args: { name: string }; result: SkillsList | null };
   save_and_sync_project: {
-    args: { projectPath: string; agents: Record<string, string[]> };
+    args: {
+      projectPath: string;
+      agents: Record<string, string[]>;
+      deployModes?: Record<string, ProjectDeployMode>;
+    };
     result: number;
   };
   save_project_skills_list: {

@@ -9,6 +9,8 @@ interface DeployButtonProps {
   config: LaunchConfig;
   projectPath: string;
   disabled?: boolean;
+  /** Shown as native tooltip when the button is disabled */
+  disabledReason?: string | null;
 }
 
 interface DeployResult {
@@ -17,7 +19,7 @@ interface DeployResult {
   script_path: string | null;
 }
 
-export function DeployButton({ config, projectPath, disabled }: DeployButtonProps) {
+export function DeployButton({ config, projectPath, disabled, disabledReason }: DeployButtonProps) {
   const { t } = useTranslation();
   const [deploying, setDeploying] = useState(false);
 
@@ -43,20 +45,23 @@ export function DeployButton({ config, projectPath, disabled }: DeployButtonProp
     }
   };
 
+  const enabledHint = t("launch.openTerminalHint");
+  const isDisabled = disabled || deploying;
+
   return (
     <button
       type="button"
       onClick={handleDeploy}
-      disabled={disabled || deploying}
+      disabled={isDisabled}
+      title={isDisabled ? (disabledReason ?? undefined) : enabledHint}
       className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-        disabled || deploying
+        isDisabled
           ? "bg-muted text-muted-foreground cursor-not-allowed opacity-60"
           : "bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm hover:shadow-md cursor-pointer active:scale-[0.98]"
       }`}
     >
       {deploying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Rocket className="w-4 h-4" />}
-      {t("launch.deploy", "部署")}
+      {deploying ? t("launch.opening") : t("launch.openTerminal")}
     </button>
   );
 }
-

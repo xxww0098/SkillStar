@@ -19,6 +19,7 @@ pub struct TmuxStatus {
 
 /// Launch script runtime type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum LaunchScriptKind {
     Bash,
     PowerShell,

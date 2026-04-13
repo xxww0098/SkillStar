@@ -847,8 +847,8 @@ export function DetailPanel({
                 </div>
               )}
 
-              {/* SKILL.md — open in reader */}
-              {skillDetails?.readme && (
+              {/* SKILL.md — reader uses marketplace snapshot; skip when editor is available (same AI preview there). */}
+              {skillDetails?.readme && !canEdit && (
                 <Button variant="outline" className="w-full" onClick={() => setReading(true)}>
                   <BookOpen className="w-4 h-4 mr-2" />
                   {t("detailPanel.readSkillMd")}

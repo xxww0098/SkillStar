@@ -1,5 +1,5 @@
 use crate::core::ai_provider;
-use crate::core::translation_cache::{self, TranslationKind};
+use crate::core::ai::translation_cache::{self, TranslationKind};
 
 use super::{emit_summarize_stream_event, ensure_ai_config};
 

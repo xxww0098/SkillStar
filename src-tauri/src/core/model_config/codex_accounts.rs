@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 use super::codex_oauth;
-use crate::core::paths;
+use crate::core::infra::paths;
 
 // ── Types ───────────────────────────────────────────────────────────
 

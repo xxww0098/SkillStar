@@ -9,8 +9,8 @@ pub use skillstar_marketplace_core::{LocalFirstResult, MarketplacePack, SyncStat
 
 fn runtime_config() -> skillstar_marketplace_core::snapshot::SnapshotRuntimeConfig {
     skillstar_marketplace_core::snapshot::SnapshotRuntimeConfig::new(
-        super::paths::marketplace_db_path(),
-        super::paths::data_root(),
+        crate::core::infra::paths::marketplace_db_path(),
+        crate::core::infra::paths::data_root(),
         super::installed_skill::installed_snapshot_markers,
         || -> InstalledSkillsFuture {
             Box::pin(super::installed_skill::list_installed_skills_fast())

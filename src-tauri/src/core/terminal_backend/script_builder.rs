@@ -1,8 +1,10 @@
-use crate::core::launch_deck::{LaunchConfig, LayoutNode, SplitDirection};
+use crate::core::terminal::config::{LaunchConfig, LayoutNode, SplitDirection};
 #[cfg(target_os = "windows")]
 use std::collections::HashSet;
 
-use super::pane_command::{build_posix_pane_command, pane_command_spec, shell_escape};
+use super::pane_command::{build_posix_pane_command, shell_escape};
+#[cfg(target_os = "windows")]
+use super::pane_command::pane_command_spec;
 use super::session::session_name;
 use super::types::LaunchScriptKind;
 

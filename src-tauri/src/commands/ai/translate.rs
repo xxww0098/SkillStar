@@ -1,5 +1,5 @@
 use crate::core::ai_provider;
-use crate::core::translation_cache::{self, TranslationKind};
+use crate::core::ai::translation_cache::{self, TranslationKind};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::future::Future;
@@ -277,17 +277,25 @@ where
     Ok(assembled)
 }
 
-/// Section-splitting is only worthwhile for documents large enough to benefit
-/// from per-section caching.
-const SECTION_SPLIT_MIN_CHARS: usize = 4_000;
+fn skill_should_split_translation_sections(config: &ai_provider::AiConfig, content: &str) -> bool {
+    let budget = ai_provider::skill_translation_single_pass_char_budget(config);
+    let sections = split_markdown_sections(content);
+    sections.len() > 1 && content.len() >= budget
+}
 
 pub(super) async fn translate_skill_with_section_cache(
     config: &ai_provider::AiConfig,
     content: &str,
     force_refresh: bool,
 ) -> Result<String, String> {
-    if content.len() < SECTION_SPLIT_MIN_CHARS {
-        debug!(target: "translate", chars = content.len(), threshold = SECTION_SPLIT_MIN_CHARS, "small doc → single request");
+    if !skill_should_split_translation_sections(config, content) {
+        let budget = ai_provider::skill_translation_single_pass_char_budget(config);
+        debug!(
+            target: "translate",
+            chars = content.len(),
+            budget,
+            "whole-doc or small → single translate request"
+        );
         return ai_provider::translate_text(config, content)
             .await
             .map_err(|e| e.to_string());
@@ -341,7 +349,7 @@ async fn translate_skill_stream_with_section_cache(
     force_refresh: bool,
 ) -> Result<String, String> {
     let sections = split_markdown_sections(content);
-    if sections.len() <= 1 || content.len() < SECTION_SPLIT_MIN_CHARS {
+    if sections.len() <= 1 || !skill_should_split_translation_sections(config, content) {
         let mut on_delta = |delta: &str| -> anyhow::Result<()> {
             emit_translate_stream_event(window, request_id, "delta", Some(delta.to_string()), None)
                 .map_err(anyhow::Error::msg)
@@ -656,7 +664,7 @@ const BATCH_DESC_CHUNK_SIZE: usize = 10;
 
 /// Path to the pending batch translation task file.
 fn batch_translate_pending_path() -> std::path::PathBuf {
-    crate::core::paths::batch_translate_pending_path()
+    crate::core::infra::paths::batch_translate_pending_path()
 }
 
 fn save_pending_batch(names: &[String]) {
@@ -733,8 +741,16 @@ pub async fn ai_batch_process_skills(
                     desc,
                 )
                 .unwrap_or(None);
+                // A cached entry is usable only if:
+                // 1. It came from AI (not MyMemory), AND
+                // 2. The cached text actually looks translated (passes quality ratio check)
                 let is_usable = cached.as_ref().map_or(false, |c| {
                     matches!(c.source_provider.as_deref(), Some("ai"))
+                        && ai_provider::translation_looks_translated(
+                            &config.target_language,
+                            desc,
+                            &c.translated_text,
+                        )
                 });
                 if !is_usable {
                     desc_items.push((i, desc.clone()));
@@ -749,7 +765,16 @@ pub async fn ai_batch_process_skills(
                 Ok(translations) => {
                     for (j, (_idx, original_desc)) in chunk.iter().enumerate() {
                         if let Some(translated) = translations.get(j) {
-                            if !translated.trim().is_empty() {
+                            // Only cache if the result actually looks translated.
+                            // This prevents partial Chinese + English hybrids from being cached.
+                            let looks_valid = ai_provider::translation_looks_translated(
+                                &config.target_language,
+                                original_desc,
+                                translated,
+                            );
+                            if translated.trim().is_empty() || !looks_valid {
+                                debug!(target: "ai_batch", desc_len = original_desc.len(), "skipping cache — empty or not translated");
+                            } else {
                                 let _ = translation_cache::upsert_translation(
                                     TranslationKind::Short,
                                     &config.target_language,

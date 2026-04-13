@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 
-use super::launch_deck::{LaunchConfig, LaunchMode, LayoutNode};
+use super::terminal::config::{LaunchConfig, LaunchMode, LayoutNode};
 
 mod pane_command;
 mod provider_env;
@@ -40,6 +40,7 @@ pub fn open_script_in_terminal_with_kind(
 }
 
 /// Generate a shell script for single-terminal mode (no tmux).
+#[allow(dead_code)]
 pub fn generate_single_script(layout: &LayoutNode, project_path: &str) -> String {
     script_builder::generate_single_script(layout, project_path)
 }
@@ -58,17 +59,7 @@ pub fn generate_multi_script(config: &LaunchConfig, project_path: &str) -> Strin
 
 /// Deploy a launch config: validate, generate script, execute in terminal.
 pub fn deploy(config: &LaunchConfig, project_path: &str) -> Result<DeployResult> {
-    #[cfg(target_os = "windows")]
-    if config.mode == LaunchMode::Multi {
-        return Ok(DeployResult {
-            success: false,
-            message: "Multi mode (tmux) is disabled on Windows. Please use single mode."
-                .to_string(),
-            script_path: None,
-        });
-    }
-
-    if let Err(errors) = super::launch_deck::validate(config) {
+    if let Err(errors) = super::terminal::config::validate(config) {
         return Ok(DeployResult {
             success: false,
             message: errors.join("; "),
@@ -76,6 +67,9 @@ pub fn deploy(config: &LaunchConfig, project_path: &str) -> Result<DeployResult>
         });
     }
 
+    // On Unix, check tmux availability for multi mode. On Windows, validate() already
+    // rejects Multi mode so this is unreachable.
+    #[cfg(not(target_os = "windows"))]
     if config.mode == LaunchMode::Multi {
         let status = check_tmux();
         if !status.installed {
@@ -89,6 +83,12 @@ pub fn deploy(config: &LaunchConfig, project_path: &str) -> Result<DeployResult>
         }
     }
 
+    // On Windows, validate() already rejects Multi mode, so this always resolves to Single.
+    #[cfg(target_os = "windows")]
+    let (script, extension, script_kind) =
+        generate_single_script_for_current_os(&config.single_layout, project_path);
+
+    #[cfg(not(target_os = "windows"))]
     let (script, extension, script_kind) = match config.mode {
         LaunchMode::Single => {
             generate_single_script_for_current_os(&config.single_layout, project_path)
@@ -133,7 +133,7 @@ pub fn deploy(config: &LaunchConfig, project_path: &str) -> Result<DeployResult>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::launch_deck::SplitDirection;
+    use crate::core::terminal::config::SplitDirection;
     use std::collections::HashMap;
 
     fn pane(id: &str, agent: &str) -> LayoutNode {

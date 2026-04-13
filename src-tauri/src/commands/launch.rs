@@ -1,8 +1,12 @@
 //! Launch Deck Tauri commands.
 //!
-//! Thin wrappers around `core::launch_deck` and `core::terminal_backend`.
+//! Thin wrappers around `core::terminal::config` and `core::terminal_backend`.
 
-use crate::core::{error::AppError, launch_deck, terminal_backend};
+use crate::core::{
+    infra::error::AppError,
+    terminal::config as launch_deck,
+    terminal_backend,
+};
 
 #[tauri::command]
 pub async fn get_launch_config(

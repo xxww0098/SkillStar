@@ -1,4 +1,4 @@
-use crate::core::{acp_client, error::AppError};
+use crate::core::{acp_client, infra::error::AppError};
 
 /// Get the ACP configuration.
 #[tauri::command]

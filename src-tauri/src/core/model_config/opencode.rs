@@ -87,3 +87,27 @@ pub fn config_exists() -> bool {
 pub fn config_path_string() -> String {
     config_path().to_string_lossy().to_string()
 }
+
+/// OpenCode CLI stores `auth.json` under the user data directory (not `~/.config/opencode`).
+pub fn auth_json_path() -> PathBuf {
+    if let Ok(path) = std::env::var("XDG_DATA_HOME") {
+        PathBuf::from(path).join("opencode").join("auth.json")
+    } else {
+        #[cfg(target_os = "windows")]
+        {
+            dirs::data_local_dir()
+                .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")))
+                .join("opencode")
+                .join("auth.json")
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".local")
+                .join("share")
+                .join("opencode")
+                .join("auth.json")
+        }
+    }
+}

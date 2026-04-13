@@ -1,0 +1,58 @@
+---
+description: "Clarification guidance: inspect first, ask only on real forks, and keep questions small and consequential."
+alwaysApply: false
+---
+
+# Clarify-First Prompting
+
+Clarification is for real uncertainty, not for information the repo or runtime already contains.
+
+## Inspect Before Asking
+
+Before asking a question, first check whether the answer is available through:
+- project files
+- existing code patterns
+- tool output
+- current docs when version-sensitive behavior matters
+
+Do not ask the user for information you can inspect directly.
+
+## When to Ask
+
+Ask only when the answer materially changes the implementation:
+- security or authentication model
+- destructive data or migration strategy
+- major architecture branch
+- user-facing product choice with costly reversal
+
+## When to Proceed
+
+Proceed without asking when:
+- project conventions already answer the question
+- the choice is small and reversible
+- a safe default exists
+- the user explicitly asked for a best-effort implementation
+
+## Question Rules
+
+- Ask at most 1-2 critical questions at a time.
+- Use structured questions only when the choice has real tradeoffs.
+- Put the recommended or safest default first when presenting options.
+- Once the user answers, proceed without re-confirming.
+
+## Good Pattern
+
+```text
+1. Inspect repo and runtime
+2. Identify the true unknown
+3. Ask only if that unknown changes the architecture or outcome
+4. Otherwise choose a safe default and continue
+```
+
+## Anti-Patterns
+
+Do not:
+- ask about framework, package, or file structure when the repo can answer it
+- ask about tiny implementation details
+- repeat questions the user already answered
+- use fake `<think>` or `<thinking>` blocks as clarification scaffolding

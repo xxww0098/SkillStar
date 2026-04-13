@@ -1,6 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import type { ModelAppId } from "../features/models/components/AppCapsuleSwitcher";
 import type { TabId as MarketplaceTabId } from "../pages/Marketplace";
 import type { NavPage, SubPage } from "../types";
+
+/** Session key: next Models page visit selects this agent tab (see `ModelsPanel`). */
+export const SKILLSTAR_MODELS_PENDING_APP_KEY = "skillstar-models-app";
 
 // ── Page imports (for prefetching) ──────────────────────────────────
 const importMySkillsPage = () => import("../pages/MySkills");
@@ -90,6 +94,8 @@ interface NavigationActions {
   goToSkillCardsWithSkills: (skills: string[]) => void;
   /** Navigate to my-skills and focus a skill */
   goToMySkillsFocus: (skill: string) => void;
+  /** Open Models page; optional tab (Claude / Codex / OpenCode / Gemini) applied on next visit */
+  navigateToModels: (app?: ModelAppId) => void;
 }
 
 type NavigationContext = NavigationState & NavigationActions;
@@ -124,6 +130,20 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
     setSubPage(null);
     window.location.hash = PAGE_TO_HASH[page];
   }, []);
+
+  const navigateToModels = useCallback(
+    (app?: ModelAppId) => {
+      if (app) {
+        try {
+          sessionStorage.setItem(SKILLSTAR_MODELS_PENDING_APP_KEY, app);
+        } catch {
+          /* ignore */
+        }
+      }
+      navigate("models");
+    },
+    [navigate],
+  );
 
   // ── Convenience navigators ──────────────────────────────────────
   const goToProjectsWithSkills = useCallback(
@@ -228,6 +248,7 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
       goToProjectsWithSkills,
       goToSkillCardsWithSkills,
       goToMySkillsFocus,
+      navigateToModels,
     }),
     [
       activePage,
@@ -238,15 +259,10 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
       marketplaceTab,
       clipboardShareCode,
       navigate,
-      setSubPage,
-      setProjectsPreSelectedSkills,
-      setSkillCardsPreSelectedSkills,
-      setMySkillsFocusSkill,
-      setMarketplaceTab,
-      setClipboardShareCode,
       goToProjectsWithSkills,
       goToSkillCardsWithSkills,
       goToMySkillsFocus,
+      navigateToModels,
     ],
   );
 

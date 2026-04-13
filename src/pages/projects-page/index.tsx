@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Layers, Plus } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
@@ -341,7 +342,11 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
   );
 
   const presentProjectState = useCallback(
-    (project: ProjectEntry, agents: Record<string, string[]>, isDirty = false) => {
+    (
+      project: ProjectEntry,
+      agents: Record<string, string[]>,
+      isDirty = false,
+    ) => {
       setSelectedProject(project);
       setSyncResult(null);
       setSkillFilter("");
@@ -375,6 +380,7 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
       let agentsFromConfig: Record<string, string[]> = skills
         ? filterAgentsByEnabledProfiles({ ...skills.agents })
         : {};
+
 
       // First scan happens immediately on project selection so we can hydrate
       // existing symlinked skills before agent detection/disambiguation.
@@ -439,7 +445,12 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
       }
       agents = canonicalizeAgentsBySharedPath(agents, preferredOwnerByPath);
 
-      presentProjectState(project, agents);
+      presentProjectState(project, agents, false);
+
+      // Refresh stale copy-deployed skills in background
+      invoke<number>("refresh_stale_project_copies", { projectPath: project.path }).catch((e) =>
+        console.warn("Stale copy refresh failed:", e),
+      );
 
       if (pendingGroupSkills && pendingGroupSkills.length > 0) {
         openDeployAgentDialog(project, agents);
@@ -619,12 +630,18 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
     setDirty(true);
   }, []);
 
+
+
   const handleApply = useCallback(async () => {
     if (!selectedProject) return;
     setSaving(true);
     setSyncResult(null);
     try {
-      const count = await saveAndSync(selectedProject.path, filterAgentsByEnabledProfiles(agentSkills));
+      const filteredAgents = filterAgentsByEnabledProfiles(agentSkills);
+      const count = await saveAndSync(
+        selectedProject.path,
+        filteredAgents,
+      );
       setSyncResult(count);
       setDirty(false);
       loadProjects();
@@ -635,7 +652,14 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
     } finally {
       setSaving(false);
     }
-  }, [selectedProject, agentSkills, filterAgentsByEnabledProfiles, saveAndSync, loadProjects, t]);
+  }, [
+    selectedProject,
+    agentSkills,
+    filterAgentsByEnabledProfiles,
+    saveAndSync,
+    loadProjects,
+    t,
+  ]);
 
   const handleRemoveProject = useCallback(
     async (e: React.MouseEvent, name: string) => {

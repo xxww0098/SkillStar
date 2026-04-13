@@ -1,6 +1,8 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { FileCode2, Loader2, Package } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { SKILLSTAR_MODELS_PENDING_APP_KEY } from "../../../hooks/useNavigation";
 import { openExternalUrl } from "../../../lib/externalOpen";
 import { DRAG_CSS, useDragReorder } from "../hooks/useDragReorder";
 import { type ProviderEntry, useModelProviders, useOpenCodeNativeProviders } from "../hooks/useModelProviders";
@@ -9,9 +11,29 @@ import { BehaviorStrip } from "./BehaviorStrip";
 import { CodexAccountSection } from "./CodexAccountSection";
 import { ConfigFileEditor, type ConfigFileKey } from "./ConfigFileEditor";
 import { GeminiAccountSection } from "./GeminiAccountSection";
+import { OpenCodeQuickLinks } from "./OpenCodeQuickLinks";
 import { PresetCatalog } from "./PresetCatalog";
 import { ProviderCard } from "./ProviderCard";
 import { AgentIcon } from "./shared/ProviderIcon";
+
+function readInitialModelsApp(): ModelAppId {
+  try {
+    const pending = sessionStorage.getItem(SKILLSTAR_MODELS_PENDING_APP_KEY);
+    if (pending === "claude" || pending === "codex" || pending === "opencode" || pending === "gemini") {
+      sessionStorage.removeItem(SKILLSTAR_MODELS_PENDING_APP_KEY);
+      return pending;
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    const saved = localStorage.getItem("models-active-app");
+    if (saved === "claude" || saved === "codex" || saved === "opencode" || saved === "gemini") return saved;
+  } catch {
+    /* ignore */
+  }
+  return "claude";
+}
 
 const APP_COLORS: Record<ModelAppId, string> = {
   claude: "#D97757",
@@ -31,15 +53,8 @@ const APP_CONFIG_FILES: Record<ModelAppId, { key: ConfigFileKey; label: string; 
 /* ── Drag state is now fully managed in useDragReorder hook ── */
 
 export function ModelsPanel() {
-  const [activeApp, setActiveApp] = useState<ModelAppId>(() => {
-    try {
-      const saved = localStorage.getItem("models-active-app");
-      if (saved === "claude" || saved === "codex" || saved === "opencode") return saved;
-    } catch {
-      /* ignore */
-    }
-    return "claude";
-  });
+  const { t } = useTranslation();
+  const [activeApp, setActiveApp] = useState<ModelAppId>(readInitialModelsApp);
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [configEditorOpen, setConfigEditorOpen] = useState<ConfigFileKey | null>(null);
@@ -106,72 +121,83 @@ export function ModelsPanel() {
   return (
     <div className="flex-1 flex flex-col overflow-hidden relative">
       {/* Header */}
-      <div className="shrink-0 px-6 py-4 border-b border-border flex items-center justify-between">
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-3">
-            <div
-              className="w-10 h-10 rounded-xl border border-border flex items-center justify-center transition-colors duration-300"
-              style={{ backgroundColor: `${appColor}15` }}
-            >
-              <AgentIcon appId={activeApp} color={appColor} size="w-5 h-5" className="transition-all duration-300" />
+      <div className="shrink-0 px-6 py-4 border-b border-border space-y-2">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6 min-w-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <div
+                className="w-10 h-10 rounded-xl border border-border flex items-center justify-center transition-colors duration-300 shrink-0"
+                style={{ backgroundColor: `${appColor}15` }}
+              >
+                <AgentIcon appId={activeApp} color={appColor} size="w-5 h-5" className="transition-all duration-300" />
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-lg font-semibold text-foreground leading-tight">{t("modelPage.title")}</h1>
+                <p className="text-[11px] text-muted-foreground leading-snug mt-0.5 max-w-xl">
+                  {t("modelPage.subtitle")}
+                </p>
+              </div>
             </div>
-            <h1 className="text-lg font-semibold text-foreground">模型</h1>
+            <AppCapsuleSwitcher value={activeApp} onChange={setActiveApp} />
           </div>
 
-          <AppCapsuleSwitcher value={activeApp} onChange={setActiveApp} />
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Config file editor button */}
+            {APP_CONFIG_FILES[activeApp]?.length > 0 && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const files = APP_CONFIG_FILES[activeApp];
+                    if (files.length === 1) {
+                      setConfigEditorOpen(files[0].key);
+                    } else {
+                      setConfigDropdownOpen((v) => !v);
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 border border-border transition-all"
+                >
+                  <FileCode2 className="w-3.5 h-3.5" />
+                  {t("modelPage.configFiles")}
+                </button>
+                {/* Dropdown for multi-file apps (Codex) */}
+                {configDropdownOpen && APP_CONFIG_FILES[activeApp].length > 1 && (
+                  <>
+                    <button
+                      type="button"
+                      className="fixed inset-0 z-40 cursor-default"
+                      onClick={() => setConfigDropdownOpen(false)}
+                      tabIndex={-1}
+                      aria-label="Close dropdown"
+                    />
+                    <div className="absolute right-0 top-full mt-1 z-50 min-w-[160px] rounded-lg border border-border bg-card shadow-lg py-1">
+                      {APP_CONFIG_FILES[activeApp].map((f) => (
+                        <button
+                          key={f.key}
+                          type="button"
+                          onClick={() => {
+                            setConfigEditorOpen(f.key);
+                            setConfigDropdownOpen(false);
+                          }}
+                          className="w-full text-left px-3 py-2 text-xs text-foreground hover:bg-muted/50 transition-colors flex items-center gap-2"
+                        >
+                          <FileCode2 className="w-3 h-3 text-muted-foreground" />
+                          {f.label}
+                          <span className="text-[10px] text-muted-foreground/50 ml-auto font-mono">{f.path}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </div>
-
-        <div className="flex items-center gap-1.5">
-          {/* Config file editor button */}
-          {APP_CONFIG_FILES[activeApp]?.length > 0 && (
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => {
-                  const files = APP_CONFIG_FILES[activeApp];
-                  if (files.length === 1) {
-                    setConfigEditorOpen(files[0].key);
-                  } else {
-                    setConfigDropdownOpen((v) => !v);
-                  }
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 border border-border transition-all"
-              >
-                <FileCode2 className="w-3.5 h-3.5" />
-                配置文件
-              </button>
-              {/* Dropdown for multi-file apps (Codex) */}
-              {configDropdownOpen && APP_CONFIG_FILES[activeApp].length > 1 && (
-                <>
-                  <button
-                    type="button"
-                    className="fixed inset-0 z-40 cursor-default"
-                    onClick={() => setConfigDropdownOpen(false)}
-                    tabIndex={-1}
-                    aria-label="Close dropdown"
-                  />
-                  <div className="absolute right-0 top-full mt-1 z-50 min-w-[160px] rounded-lg border border-border bg-card shadow-lg py-1">
-                    {APP_CONFIG_FILES[activeApp].map((f) => (
-                      <button
-                        key={f.key}
-                        type="button"
-                        onClick={() => {
-                          setConfigEditorOpen(f.key);
-                          setConfigDropdownOpen(false);
-                        }}
-                        className="w-full text-left px-3 py-2 text-xs text-foreground hover:bg-muted/50 transition-colors flex items-center gap-2"
-                      >
-                        <FileCode2 className="w-3 h-3 text-muted-foreground" />
-                        {f.label}
-                        <span className="text-[10px] text-muted-foreground/50 ml-auto font-mono">{f.path}</span>
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-        </div>
+        {activeApp === "opencode" && (
+          <div className="pt-1">
+            <OpenCodeQuickLinks />
+          </div>
+        )}
       </div>
 
       {/* Floating Side Tools */}
@@ -203,9 +229,7 @@ export function ModelsPanel() {
                   {activeApp === "codex" && (
                     <CodexAccountSection isOAuthActive={isOAuthActive} onAccountSwitched={handleAccountSwitched} />
                   )}
-                  {activeApp === "gemini" && (
-                    <GeminiAccountSection onAccountSwitched={handleAccountSwitched} />
-                  )}
+                  {activeApp === "gemini" && <GeminiAccountSection onAccountSwitched={handleAccountSwitched} />}
 
                   <div className="flex flex-col items-center justify-center py-12 text-center">
                     <div
@@ -214,11 +238,11 @@ export function ModelsPanel() {
                     >
                       <Package className="w-7 h-7" style={{ color: appColor }} />
                     </div>
-                    <p className="text-sm font-medium text-foreground mb-1">暂无供应商配置</p>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-sm font-medium text-foreground mb-1">{t("modelPage.emptyProvidersTitle")}</p>
+                    <p className="text-xs text-muted-foreground max-w-sm">
                       {activeApp === "opencode"
-                        ? "请通过配置文件或 OpenCode CLI 管理供应商授权"
-                        : "从下方预设中选择，一键添加"}
+                        ? t("modelPage.emptyProvidersOpenCode")
+                        : t("modelPage.emptyProvidersHint")}
                     </p>
                   </div>
 
@@ -239,40 +263,35 @@ export function ModelsPanel() {
                   {activeApp === "codex" && (
                     <CodexAccountSection isOAuthActive={isOAuthActive} onAccountSwitched={handleAccountSwitched} />
                   )}
-                  {activeApp === "gemini" && (
-                    <GeminiAccountSection onAccountSwitched={handleAccountSwitched} />
-                  )}
+                  {activeApp === "gemini" && <GeminiAccountSection onAccountSwitched={handleAccountSwitched} />}
 
                   <div className="space-y-3" ref={listContainerRef}>
                     <AnimatePresence>
                       {localProviders
                         .filter(
                           (provider) =>
-                            !(
-                              provider.id.startsWith("gemini_oauth_") ||
-                              provider.id.startsWith("gemini_apikey_")
-                            )
+                            !(provider.id.startsWith("gemini_oauth_") || provider.id.startsWith("gemini_apikey_")),
                         )
                         .map((provider) => (
-                        <ProviderCard
-                          key={provider.id}
-                          provider={provider}
-                          isCurrent={provider.id === providers.currentId}
-                          expanded={expandedId === provider.id}
-                          appId={activeApp}
-                          appColor={appColor}
-                          dragId={provider.id}
-                          onSwitch={() => providers.switchTo(provider.id)}
-                          onToggleExpand={() => handleToggleExpand(provider.id)}
-                          onUpdate={(entry) => providers.updateProvider(entry)}
-                          onDelete={() => providers.deleteProvider(provider.id)}
-                          onOpenWebsite={
-                            provider.websiteUrl ? () => void openExternalUrl(provider.websiteUrl!) : undefined
-                          }
-                          onDragHandlePointerDown={(e) => handleDragStart(provider.id, e)}
-                          readOnly={activeApp === "opencode"}
-                        />
-                      ))}
+                          <ProviderCard
+                            key={provider.id}
+                            provider={provider}
+                            isCurrent={provider.id === providers.currentId}
+                            expanded={expandedId === provider.id}
+                            appId={activeApp}
+                            appColor={appColor}
+                            dragId={provider.id}
+                            onSwitch={() => providers.switchTo(provider.id)}
+                            onToggleExpand={() => handleToggleExpand(provider.id)}
+                            onUpdate={(entry) => providers.updateProvider(entry)}
+                            onDelete={() => providers.deleteProvider(provider.id)}
+                            onOpenWebsite={
+                              provider.websiteUrl ? () => void openExternalUrl(provider.websiteUrl!) : undefined
+                            }
+                            onDragHandlePointerDown={(e) => handleDragStart(provider.id, e)}
+                            readOnly={activeApp === "opencode"}
+                          />
+                        ))}
                     </AnimatePresence>
                   </div>
 
@@ -302,8 +321,12 @@ export function ModelsPanel() {
             APP_CONFIG_FILES[activeApp].find((f) => f.key === configEditorOpen) || APP_CONFIG_FILES[activeApp][0];
           return (
             <>
-              {/* Invisible backdrop to close when clicking outside */}
-              <div className="fixed inset-0 z-40 cursor-default" onClick={() => setConfigEditorOpen(null)} />
+              <button
+                type="button"
+                aria-label={t("common.close")}
+                className="fixed inset-0 z-40 cursor-default border-0 bg-transparent p-0"
+                onClick={() => setConfigEditorOpen(null)}
+              />
               <ConfigFileEditor
                 fileKey={configEditorOpen}
                 title={file.label}

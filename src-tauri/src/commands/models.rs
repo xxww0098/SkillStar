@@ -1,6 +1,6 @@
 //! Tauri commands for model configuration (Claude Code / Codex / OpenCode).
 
-use crate::core::error::AppError;
+use crate::core::infra::error::AppError;
 use crate::core::model_config::{
     claude, codex, codex_accounts, codex_oauth, opencode, providers, speedtest,
 };
@@ -497,30 +497,28 @@ pub async fn get_opencode_cli_models() -> Result<Vec<String>, AppError> {
 }
 
 fn get_opencode_auth_path() -> std::path::PathBuf {
-    if let Ok(path) = std::env::var("XDG_DATA_HOME") {
-        std::path::PathBuf::from(path)
-            .join("opencode")
-            .join("auth.json")
-    } else {
-        #[cfg(target_os = "windows")]
-        {
-            dirs::data_local_dir()
-                .unwrap_or_else(|| {
-                    dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."))
-                })
-                .join("opencode")
-                .join("auth.json")
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            dirs::home_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join(".local")
-                .join("share")
-                .join("opencode")
-                .join("auth.json")
-        }
-    }
+    opencode::auth_json_path()
+}
+
+#[tauri::command]
+pub async fn open_opencode_config_dir() -> Result<(), AppError> {
+    let dir = opencode::config_dir();
+    super::open_folder(dir.to_string_lossy().to_string()).await
+}
+
+#[tauri::command]
+pub async fn open_opencode_auth_dir() -> Result<(), AppError> {
+    let auth = opencode::auth_json_path();
+    let dir = auth
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| auth.clone());
+    super::open_folder(dir.to_string_lossy().to_string()).await
+}
+
+#[tauri::command]
+pub fn gemini_oauth_is_configured() -> bool {
+    !crate::core::model_config::gemini_oauth::gemini_oauth_client_id().is_empty()
 }
 
 #[tauri::command]

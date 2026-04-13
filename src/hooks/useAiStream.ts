@@ -176,16 +176,15 @@ export function useAiStream({
       }));
 
       try {
-        const flushDelta = () => {
-          rafId = null;
-          if (activeIdRef.current !== requestId) return;
-          setState((prev) => ({
-            ...prev,
-            content: streamedRaw || null,
-            visible: true,
-            hasDelta: deltaCount >= 2,
-          }));
-        };
+      const flushDelta = () => {
+        rafId = null;
+        // NOTE: We intentionally do NOT call setState here.
+        // Delta updates are accumulated internally (streamedRaw) so the final
+        // result is available immediately on completion, but the UI does NOT
+        // re-render per-delta — the completed translation is rendered all at
+        // once when the backend finishes.
+        // If the backend hangs, the safety timer recovers with streamedRaw.
+      };
 
         const unlisten = await listen<AiStreamPayload>(eventChannel, (event) => {
           if (activeIdRef.current !== requestId) return;
