@@ -1,9 +1,7 @@
 use crate::core::{
     git::ops as git_ops,
     infra::{fs_ops, paths},
-    installed_skill,
-    lockfile,
-    repo_scanner,
+    installed_skill, lockfile, repo_scanner,
     skill::{
         Skill, SkillCategory, SkillType, extract_github_source_from_url, extract_skill_description,
     },
@@ -36,9 +34,9 @@ fn find_target_skill<'a>(
     let search_key = requested_name.unwrap_or(name_hint);
     let search_key_lower = search_key.to_lowercase();
 
-    skills_found.iter().find(|s| {
-        s.id == search_key || s.id.to_lowercase() == search_key_lower
-    })
+    skills_found
+        .iter()
+        .find(|s| s.id == search_key || s.id.to_lowercase() == search_key_lower)
 }
 
 /// Normalize URL, materialize repo cache, run lockfile-aware scan.
@@ -222,6 +220,7 @@ pub fn install_skills_batch(url: &str, names: &[String]) -> Result<Vec<Skill>, S
 
     let mut targets = Vec::new();
     let mut fallback_names = Vec::new();
+    let mut missing_names = Vec::new();
 
     for name in names {
         // First try to find a match in the scanned repo
@@ -244,9 +243,15 @@ pub fn install_skills_batch(url: &str, names: &[String]) -> Result<Vec<Skill>, S
                 folder_path: skill.folder_path.clone(),
             });
         } else {
-            // Not found in repo -> fallback to direct clone path later
-            fallback_names.push(name.clone());
+            missing_names.push(name.clone());
         }
+    }
+
+    if !missing_names.is_empty() {
+        return Err(format!(
+            "Requested skills not found in scanned repository: {}",
+            missing_names.join(", ")
+        ));
     }
 
     let mut installed_skills = Vec::new();

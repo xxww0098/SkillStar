@@ -190,7 +190,10 @@ pub async fn list_installed_skills() -> Result<Vec<Skill>> {
 
 pub async fn refresh_skill_updates(names: Option<Vec<String>>) -> Result<Vec<SkillUpdateState>> {
     let name_filter = names.map(|values| values.into_iter().collect::<HashSet<_>>());
-    let skill_dirs = collect_skill_dirs(&crate::core::infra::paths::hub_skills_dir(), name_filter.as_ref())?;
+    let skill_dirs = collect_skill_dirs(
+        &crate::core::infra::paths::hub_skills_dir(),
+        name_filter.as_ref(),
+    )?;
 
     if skill_dirs.is_empty() {
         return Ok(Vec::new());

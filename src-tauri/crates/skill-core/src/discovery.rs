@@ -135,7 +135,11 @@ pub fn discover_skills(repo_dir: &Path, full_depth: bool) -> Vec<DiscoveredSkill
         };
 
         let folder_path = match skill_dir.strip_prefix(repo_dir) {
-            Ok(rel) => rel.to_string_lossy().replace('\\', "/").trim_matches('/').to_string(),
+            Ok(rel) => rel
+                .to_string_lossy()
+                .replace('\\', "/")
+                .trim_matches('/')
+                .to_string(),
             Err(_) => continue,
         };
 
@@ -144,11 +148,10 @@ pub fn discover_skills(repo_dir: &Path, full_depth: bool) -> Vec<DiscoveredSkill
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| "skill".to_string());
-            let clean_name = if repo_name.contains("--") {
-                repo_name.rsplit("--").next().unwrap_or(&repo_name).to_string()
-            } else {
-                repo_name
-            };
+            let clean_name = repo_name
+                .split_once("--")
+                .map(|(_, tail)| tail.to_string())
+                .unwrap_or(repo_name);
             (clean_name, String::new())
         } else {
             (skill_name, folder_path)
@@ -169,14 +172,16 @@ pub fn discover_skills(repo_dir: &Path, full_depth: bool) -> Vec<DiscoveredSkill
     }
 
     // Root-first: if a root skill exists and full-depth is disabled, return root only.
-    if !full_depth {
-        if let Some(root_skill) = discovered
-            .iter()
-            .find(|skill| skill.folder_path.is_empty())
-            .cloned()
-        {
-            discovered = vec![root_skill];
-        }
+    if let Some(root_skill) = (!full_depth)
+        .then(|| {
+            discovered
+                .iter()
+                .find(|skill| skill.folder_path.is_empty())
+                .cloned()
+        })
+        .flatten()
+    {
+        discovered = vec![root_skill];
     }
 
     let mut deduped = dedupe_discovered_skills(discovered);
@@ -193,7 +198,8 @@ pub fn dedupe_discovered_skills(skills: Vec<DiscoveredSkill>) -> Vec<DiscoveredS
     for skill in skills {
         let key = skill.id.to_lowercase();
         if let Some(&existing_idx) = seen.get(&key) {
-            if discovered_skill_priority(&skill) > discovered_skill_priority(&deduped[existing_idx]) {
+            if discovered_skill_priority(&skill) > discovered_skill_priority(&deduped[existing_idx])
+            {
                 deduped[existing_idx] = skill;
             }
         } else {
@@ -333,9 +339,7 @@ mod tests {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let content = format!(
-            "---\nname: {name}\ndescription: {description}\n---\n\n# {name}\n",
-        );
+        let content = format!("---\nname: {name}\ndescription: {description}\n---\n\n# {name}\n",);
         std::fs::write(path, content)
     }
 
@@ -378,9 +382,11 @@ mod tests {
                 .iter()
                 .any(|s| s.id == "root-skill" && s.folder_path.is_empty())
         );
-        assert!(skills
-            .iter()
-            .any(|s| s.id == "nested-skill" && s.folder_path == "skills/nested-skill"));
+        assert!(
+            skills
+                .iter()
+                .any(|s| s.id == "nested-skill" && s.folder_path == "skills/nested-skill")
+        );
     }
 
     #[test]
@@ -392,6 +398,18 @@ mod tests {
         let skills = discover_skills(&repo, false);
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].id, "custom-name");
+    }
+
+    #[test]
+    fn discover_root_default_name_keeps_repo_double_dash_segments() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("owner--my--tool");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::write(repo.join("SKILL.md"), "# demo\n").unwrap();
+
+        let skills = discover_skills(&repo, false);
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].id, "my--tool");
     }
 
     #[test]
@@ -507,11 +525,15 @@ mod tests {
 
         let skills = discover_skills(repo, true);
         assert_eq!(skills.len(), 2);
-        assert!(skills
-            .iter()
-            .any(|s| s.id == "opencli-browser" && s.folder_path == "skills/opencli-browser"));
-        assert!(skills
-            .iter()
-            .any(|s| s.id == "antigravity" && s.folder_path == "clis/antigravity"));
+        assert!(
+            skills
+                .iter()
+                .any(|s| s.id == "opencli-browser" && s.folder_path == "skills/opencli-browser")
+        );
+        assert!(
+            skills
+                .iter()
+                .any(|s| s.id == "antigravity" && s.folder_path == "clis/antigravity")
+        );
     }
 }

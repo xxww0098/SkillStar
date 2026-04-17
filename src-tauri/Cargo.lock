@@ -3351,6 +3351,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "markdown-translator"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures",
+ "pulldown-cmark",
+ "regex",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2 0.11.0",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "markup5ever"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5385,6 +5406,7 @@ dependencies = [
  "junction",
  "lazy_static",
  "machine-uid",
+ "markdown-translator",
  "pbkdf2",
  "petgraph",
  "pulldown-cmark",

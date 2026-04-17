@@ -110,7 +110,10 @@ pub fn toggle_skill_for_agent(skill_name: &str, agent_id: &str, enable: bool) ->
         std::fs::create_dir_all(&profile.global_skills_dir)?;
 
         // Remove existing symlink/junction/copy if present
-        if target.symlink_metadata().is_ok() || crate::core::infra::fs_ops::is_link(&target) || target.exists() {
+        if target.symlink_metadata().is_ok()
+            || crate::core::infra::fs_ops::is_link(&target)
+            || target.exists()
+        {
             if !remove_managed_entry_for_overwrite(&target)? {
                 tracing::error!(target: "sync", target = %target.display(), "Cannot overwrite real directory");
                 anyhow::bail!("Target cannot be overwritten because it is a real directory");
@@ -216,8 +219,8 @@ pub fn list_linked_skills(agent_id: &str) -> Result<Vec<String>> {
         let entry = entry?;
         let path = entry.path();
         // Include symlinks/junctions AND copy-based deployments
-        let is_managed =
-            crate::core::infra::fs_ops::is_link(&path) || (path.is_dir() && path.join("SKILL.md").exists());
+        let is_managed = crate::core::infra::fs_ops::is_link(&path)
+            || (path.is_dir() && path.join("SKILL.md").exists());
         if is_managed {
             if let Some(name) = entry.file_name().to_str() {
                 names.push(name.to_string());

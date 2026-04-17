@@ -9,7 +9,7 @@ use std::sync::LazyLock;
 use std::sync::RwLock;
 use tracing::{debug, info};
 
-const CACHE_SCHEMA_VERSION: &str = "v1";
+const CACHE_SCHEMA_VERSION: &str = "v2";
 
 // ── In-memory cache for short translations ──────────────────────────
 //
@@ -18,7 +18,7 @@ const CACHE_SCHEMA_VERSION: &str = "v1";
 // concurrently on blocking threads, each needing its description translation).
 
 static SHORT_TRANSLATION_MEM: std::sync::LazyLock<
-    RwLock<HashMap<(String, String), CachedTranslation>>,
+    RwLock<HashMap<(String, String, String), CachedTranslation>>,
 > = std::sync::LazyLock::new(|| RwLock::new(HashMap::new()));
 
 const CORRUPTED_MARKERS: &[&str] = &[
@@ -58,6 +58,9 @@ pub struct CachedTranslation {
 
 #[cfg(test)]
 fn db_path() -> PathBuf {
+    if let Ok(path) = std::env::var("SKILLSTAR_TRANSLATION_DB_PATH") {
+        return PathBuf::from(path);
+    }
     crate::core::infra::paths::translation_db_path()
 }
 
@@ -101,8 +104,8 @@ fn create_connection() -> Result<Connection> {
         std::fs::create_dir_all(parent).context("Failed to create translation cache directory")?;
     }
     let conn = Connection::open(&path).context("Failed to open translation cache db")?;
-    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")
-        .context("Failed to set WAL mode")?;
+    conn.execute_batch("PRAGMA journal_mode=DELETE; PRAGMA busy_timeout=5000;")
+        .context("Failed to configure translation cache test DB")?;
     migrate_schema(&conn)?;
     Ok(conn)
 }
@@ -181,12 +184,26 @@ fn translation_looks_translated_for_cache(
     true
 }
 
-fn build_cache_key(kind: TranslationKind, target_language: &str, source_text_hash: &str) -> String {
+fn normalize_provider_identity(provider_identity: Option<&str>) -> String {
+    provider_identity
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("default")
+        .to_ascii_lowercase()
+}
+
+fn build_cache_key(
+    kind: TranslationKind,
+    target_language: &str,
+    source_text_hash: &str,
+    provider_identity: Option<&str>,
+) -> String {
     format!(
-        "{}::{}::{}::{}",
+        "{}::{}::{}::{}::{}",
         kind.as_str(),
         normalize_target_language(target_language),
         source_text_hash,
+        normalize_provider_identity(provider_identity),
         CACHE_SCHEMA_VERSION
     )
 }
@@ -200,19 +217,33 @@ pub fn get_cached_translation(
     target_language: &str,
     source_text: &str,
 ) -> Result<Option<CachedTranslation>> {
+    get_cached_translation_for_provider(kind, target_language, source_text, None)
+}
+
+pub fn get_cached_translation_for_provider(
+    kind: TranslationKind,
+    target_language: &str,
+    source_text: &str,
+    provider_identity: Option<&str>,
+) -> Result<Option<CachedTranslation>> {
     let hash = source_hash(source_text);
     let normalized_lang = normalize_target_language(target_language);
+    let normalized_provider = normalize_provider_identity(provider_identity);
 
     // Fast path: check in-memory cache for Short translations.
     if kind == TranslationKind::Short {
         if let Ok(mem) = SHORT_TRANSLATION_MEM.read() {
-            if let Some(cached) = mem.get(&(hash.clone(), normalized_lang.clone())) {
+            if let Some(cached) = mem.get(&(
+                hash.clone(),
+                normalized_lang.clone(),
+                normalized_provider.clone(),
+            )) {
                 return Ok(Some(cached.clone()));
             }
         }
     }
 
-    let cache_key = build_cache_key(kind, &normalized_lang, &hash);
+    let cache_key = build_cache_key(kind, &normalized_lang, &hash, Some(&normalized_provider));
 
     let result = with_conn(|conn| {
         let entry = conn
@@ -247,7 +278,7 @@ pub fn get_cached_translation(
     if kind == TranslationKind::Short {
         if let Some(ref cached) = result {
             if let Ok(mut mem) = SHORT_TRANSLATION_MEM.write() {
-                mem.insert((hash, normalized_lang), cached.clone());
+                mem.insert((hash, normalized_lang, normalized_provider), cached.clone());
             }
         }
     }
@@ -261,6 +292,24 @@ pub fn upsert_translation(
     source_text: &str,
     translated_text: &str,
     source_provider: Option<&str>,
+) -> Result<()> {
+    upsert_translation_for_provider(
+        kind,
+        target_language,
+        source_text,
+        translated_text,
+        source_provider,
+        None,
+    )
+}
+
+pub fn upsert_translation_for_provider(
+    kind: TranslationKind,
+    target_language: &str,
+    source_text: &str,
+    translated_text: &str,
+    source_provider: Option<&str>,
+    provider_identity: Option<&str>,
 ) -> Result<()> {
     if translated_text.trim().is_empty() {
         debug!(target: "translate", kind = kind.as_str(), "cache upsert SKIP empty text");
@@ -284,7 +333,8 @@ pub fn upsert_translation(
 
     let normalized_lang = normalize_target_language(target_language);
     let hash = source_hash(source_text);
-    let cache_key = build_cache_key(kind, &normalized_lang, &hash);
+    let normalized_provider = normalize_provider_identity(provider_identity);
+    let cache_key = build_cache_key(kind, &normalized_lang, &hash, Some(&normalized_provider));
     let now = Utc::now().to_rfc3339();
     let provider = source_provider
         .map(str::trim)
@@ -325,7 +375,7 @@ pub fn upsert_translation(
     if kind == TranslationKind::Short {
         if let Ok(mut mem) = SHORT_TRANSLATION_MEM.write() {
             mem.insert(
-                (hash, normalized_lang),
+                (hash, normalized_lang, normalized_provider),
                 CachedTranslation {
                     translated_text: translated_text.to_string(),
                     source_provider: provider,
@@ -525,12 +575,9 @@ pub fn preload_short_translations(
         Ok(result)
     })?;
 
-    // Warm in-memory cache with the bulk-loaded data.
-    if let Ok(mut mem) = SHORT_TRANSLATION_MEM.write() {
-        for (hash, cached) in &map {
-            mem.insert((hash.clone(), normalized_lang.clone()), cached.clone());
-        }
-    }
+    // Do not warm the provider-aware in-memory cache here because this bulk
+    // preload is intentionally provider-agnostic and used only for skill-card
+    // description rendering.
     info!(target: "translate", entries = map.len(), "preload_short_translations done");
 
     Ok(map)
@@ -538,26 +585,37 @@ pub fn preload_short_translations(
 
 #[cfg(test)]
 mod tests {
-    use super::{TranslationKind, clear_cache, get_cached_translation, upsert_translation};
+    use super::{
+        TranslationKind, clear_cache, get_cached_translation, get_cached_translation_for_provider,
+        upsert_translation, upsert_translation_for_provider,
+    };
 
     fn with_temp_data_root<F: FnOnce()>(f: F) {
         let _guard = crate::core::lock_test_env();
         let temp = tempfile::tempdir().expect("create temp dir");
-        let key = "SKILLSTAR_DATA_DIR";
-        let previous = std::env::var(key).ok();
+        let data_dir_key = "SKILLSTAR_DATA_DIR";
+        let db_path_key = "SKILLSTAR_TRANSLATION_DB_PATH";
+        let previous_data_dir = std::env::var(data_dir_key).ok();
+        let previous_db_path = std::env::var(db_path_key).ok();
+        let db_path = temp.path().join("db").join("translation.db");
 
         // SAFETY: test-only env mutation guarded by global mutex.
         unsafe {
-            std::env::set_var(key, temp.path());
+            std::env::set_var(data_dir_key, temp.path());
+            std::env::set_var(db_path_key, &db_path);
         }
 
         f();
 
-        // SAFETY: restore env var after test in the same critical section.
+        // SAFETY: restore env vars after test in the same critical section.
         unsafe {
-            match previous {
-                Some(value) => std::env::set_var(key, value),
-                None => std::env::remove_var(key),
+            match previous_data_dir {
+                Some(value) => std::env::set_var(data_dir_key, value),
+                None => std::env::remove_var(data_dir_key),
+            }
+            match previous_db_path {
+                Some(value) => std::env::set_var(db_path_key, value),
+                None => std::env::remove_var(db_path_key),
             }
         }
     }
@@ -647,6 +705,70 @@ mod tests {
                 .expect("query cache")
                 .expect("entry should exist");
             assert_eq!(hit.translated_text, "# 标题\n你好v2");
+        });
+    }
+
+    #[test]
+    fn provider_aware_cache_keeps_engines_isolated() {
+        with_temp_data_root(|| {
+            clear_cache().expect("clear cache");
+
+            upsert_translation_for_provider(
+                TranslationKind::Short,
+                "zh-CN",
+                "Hello world",
+                "你好，世界",
+                Some("DeepL"),
+                Some("translation_api:deepl"),
+            )
+            .expect("write deepl cache");
+            upsert_translation_for_provider(
+                TranslationKind::Short,
+                "zh-CN",
+                "Hello world",
+                "您好，世界",
+                Some("MiniMax"),
+                Some("llm:codex:minimax"),
+            )
+            .expect("write minimax cache");
+            upsert_translation_for_provider(
+                TranslationKind::Short,
+                "zh-CN",
+                "Hello world",
+                "哈喽，世界",
+                Some("MyMemory"),
+                Some("fallback:mymemory"),
+            )
+            .expect("write mymemory cache");
+
+            let deepl = get_cached_translation_for_provider(
+                TranslationKind::Short,
+                "zh-CN",
+                "Hello world",
+                Some("translation_api:deepl"),
+            )
+            .expect("read deepl")
+            .expect("deepl entry");
+            let minimax = get_cached_translation_for_provider(
+                TranslationKind::Short,
+                "zh-CN",
+                "Hello world",
+                Some("llm:codex:minimax"),
+            )
+            .expect("read minimax")
+            .expect("minimax entry");
+            let mymemory = get_cached_translation_for_provider(
+                TranslationKind::Short,
+                "zh-CN",
+                "Hello world",
+                Some("fallback:mymemory"),
+            )
+            .expect("read mymemory")
+            .expect("mymemory entry");
+
+            assert_eq!(deepl.translated_text, "你好，世界");
+            assert_eq!(minimax.translated_text, "您好，世界");
+            assert_eq!(mymemory.translated_text, "哈喽，世界");
         });
     }
 

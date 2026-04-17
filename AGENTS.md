@@ -125,7 +125,7 @@ SkillStar/
 - Keep heavy logic in `core/*`, not in command wrappers.
 - Installed-skill list should render fast from local snapshot first.
 - Remote update checks run in bounded background work.
-- Project sync is reconciliation: add selected skills per agent, remove stale entries, prune empty agent folders; deployment always tries symlink first — if symlink creation fails (e.g. Windows without Developer Mode), falls back to full directory copy automatically. The `deploy_modes` field in `skills-list.json` is retained for backward-compat but ignored.
+- Project sync is reconciliation: add selected skills per agent, remove stale entries, prune empty agent folders; zero-skill agent selections must be dropped instead of creating empty project folders or persisting as active project agents; deployment always tries symlink first — if symlink creation fails (e.g. Windows without Developer Mode), falls back to full directory copy automatically. The `deploy_modes` field in `skills-list.json` is retained for backward-compat but ignored.
 - When a project is selected, `refresh_stale_project_copies` compares SHA-256 content hashes of copy-deployed skill directories against their hub sources; stale copies are re-deployed while intentionally deleted skills are not restored.
 - Windows/global agent unlink must attempt `remove_link_or_copy` for any existing entry (link/junction/copy), and only treat missing targets as no-op.
 - Repo scan/import defaults to **root-first**: when repo root has a valid `SKILL.md`, treat the root as the primary single skill by default.
@@ -149,22 +149,30 @@ SkillStar/
 
 ### Launch Deck / Terminal
 
+- Launch Deck is **single-pane only**; tmux-based multi-pane mode is removed across platforms.
 - On Windows, **single mode** launch must run through a generated PowerShell script (`.ps1`) and must not require `bash`.
-- On Windows, **multi mode (tmux)** is disabled; Launch Deck must force/keep single mode and reject multi deploy attempts with a clear message.
 
 ### AI Integration
 
 - AI provider config is backend-owned (`config/ai.json`); frontend never stores API keys.
 - Long translation should fallback to chunked translation when full pass returns empty content.
-- Short description translation always includes MyMemory (public API) path; users choose priority (`ai_first` or `mymemory_first`) but no longer toggle MyMemory on/off.
-- Short description translation source must be exposed to frontend (`ai` or `mymemory`) so UI can show where the result came from.
+- Translation settings are backend-owned and centered on a unified Translation Center (`target_language`, route mode, fast engine, quality engine, fallback flags); frontend must not reconstruct routing locally.
+- Translation routing must not derive from legacy AI config fields. Quality translation requires an explicit Models provider reference from Translation Center.
+- Translation routing defaults to **Balanced**: short text prefers traditional translation APIs, Markdown / `SKILL.md` prefers the selected quality LLM provider, and failures degrade through explicit fallback hops.
+- Translation quality providers should reuse the Models provider registry by reference (`app_id + provider_id`) instead of duplicating LLM credentials inside translation settings.
+- Translation Center frontend/backend payloads use snake_case only; remove compatibility aliases instead of extending them.
+- MyMemory is emergency fallback only; it must remain available for automatic degradation and usage telemetry, but should not be presented as a primary engine in settings.
+- Translation result metadata returned to the frontend must distinguish provider id, provider type (`translation_api` / `llm` / `fallback`), route mode, and fallback hop; do not collapse traditional APIs into generic `ai`.
 - AI skill pick must pre-rank installed skills locally before calling the model, keep the AI candidate catalog bounded, aggregate multi-round AI votes/scores into a stable ranking, and fall back to deterministic local ranking when AI output is partial or invalid.
 - AI skill pick responses returned to the frontend must preserve relevance order and expose enough metadata (for example score/reason/fallback state) for the UI to explain why a skill was recommended.
-- All translation entry points must use SQLite (`~/.skillstar/db/translation.db`) as the durable cache keyed by text hash + target language; frontend may keep transient display state but must not become the source of truth for translation reuse.
-- Short description translation and SKILL.md translation are persisted in SQLite (`~/.skillstar/db/translation.db`) keyed by text hash + target language; normal translate uses cache and explicit "retranslate" bypasses then overwrites cache.
+- All translation entry points must use SQLite (`~/.skillstar/db/translation.db`) as the durable cache; cache identity must include target language plus provider identity / route version so DeepL, MiniMax, MyMemory, and future engines do not collide.
+- Short description translation and SKILL.md translation are persisted in SQLite (`~/.skillstar/db/translation.db`) keyed by content hash + target language + provider identity; normal translate uses cache and explicit high-quality retranslate bypasses then overwrites the matching provider cache entry.
 - `Retranslate via AI` must mean AI-only refresh (not just cache bypass with provider fallback).
 - `ai_translate_skill_stream` must run as a single global SKILL.md translation session; concurrent requests should serialize so one API-key session is active at a time.
 - SKILL.md translation prefers a **single full-document** API call when the file fits a budget derived from `context_window_k` (heading-based section fan-out only above that size), to cut round trips and reduce network failure rates.
+- SKILL.md translation uses **two different pipelines by provider type**: quality LLM routes use the `Markdown-Translator` / `mdtx_bridge` Markdown-aware pipeline, while traditional / free translation APIs use a placeholder-protected Markdown fragment pipeline so frontmatter, code fences, inline code, LaTeX, links, lists, headings, blockquotes, and HTML tags survive translation.
+- Experimental fast translation should expose both **DeepLX** (using the configured URL or bundled free endpoint default) and **GTX** as actual route candidates; DeepLX availability must not depend on the user manually re-entering the default free endpoint URL.
+- Translation provider probes should behave like health checks: save-time validation may warm provider health state, while runtime routing should honor cooldown / circuit-breaker state instead of repeatedly hammering known-bad endpoints.
 - Security scan prompts must explicitly enforce `target_language` for model-generated natural language fields (`summary`, `description`, `recommendation`) while keeping schema enums stable.
 - Security scan AI analysis should fallback to the configured local OpenAI-compatible endpoint (for example Ollama) when primary provider calls fail, while preserving the same response schema.
 - Security scan writes both rolling runtime logs (`~/.skillstar/logs/security.log`) and per-run timestamped reports (`~/.skillstar/logs/scans/scan-<timestamp>-<request>.log`).
@@ -299,4 +307,3 @@ Use Conventional Commits: `type(scope): description`
 - Tauri IPC is auto-mocked in test setup (`src/test/setup.ts`).
 - CI supply chain audit: `cargo-deny` checks advisories, licenses, and sources against `src-tauri/deny.toml`.
 - CI lockfile: all `bun install` steps use `--frozen-lockfile` for reproducibility.
-

@@ -1,15 +1,17 @@
-import { Eye, FileText, Globe, Loader2, RotateCcw, Sparkles, Square, X } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { Eye, FileText, Globe, Loader2, RotateCcw, Sparkles, Square, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAiStream } from "../../hooks/useAiStream";
+import { isMarkdownTranslationReady, useTranslationSettings } from "../../hooks/useTranslationSettings";
 import {
   normalizeSkillMarkdownForPreview,
   parseFrontmatterEntries,
   splitFrontmatter,
   unwrapOuterMarkdownFence,
 } from "../../lib/frontmatter";
-import { formatAiErrorMessage, navigateToAiSettings } from "../../lib/utils";
+import { formatTranslationProviderLabel } from "../../lib/translationProvider";
+import { formatAiErrorMessage, navigateToAiSettings, navigateToTranslationSettings } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Markdown } from "../ui/Markdown";
 import { ResizablePanel } from "../ui/ResizablePanel";
@@ -48,26 +50,47 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
   const translationStream = useAiStream({
     command: "ai_translate_skill_stream",
     eventChannel: "ai://translate-stream",
+    requiresAiConfig: false,
+    parseInvokeResult: (raw) => {
+      if (typeof raw === "string") {
+        return { text: raw };
+      }
+      const payload = raw as { text?: unknown; provider?: unknown };
+      return {
+        text: typeof payload.text === "string" ? payload.text : "",
+        provider: typeof payload.provider === "string" ? payload.provider : undefined,
+      };
+    },
     normalizeResult: (_source, result) => normalizeSkillMarkdownForPreview(unwrapOuterMarkdownFence(result).trim()),
   });
   const summaryStream = useAiStream({
     command: "ai_summarize_skill_stream",
     eventChannel: "ai://summarize-stream",
   });
+  const {
+    settings: translationSettings,
+    readiness: translationReadiness,
+    loading: translationReadinessLoading,
+  } = useTranslationSettings();
 
   const translatedContent = translationStream.content;
   const translationVisible = translationStream.visible;
   const translating = translationStream.loading;
   const translationHasDelta = translationStream.hasDelta;
   const translationWasNonStreaming = translationStream.wasNonStreaming;
+  const translationProvider = formatTranslationProviderLabel(translationStream.provider, t);
   const summaryContent = summaryStream.content;
   const summaryVisible = summaryStream.visible;
   const summarizing = summaryStream.loading;
   const summaryHasDelta = summaryStream.hasDelta;
-  const aiConfigured = translationStream.aiConfigured;
+  const summaryAiConfigured = summaryStream.aiConfigured;
   const targetLanguage = translationStream.targetLanguage;
   const aiError = translationStream.error ?? summaryStream.error;
   const localizedAiError = formatAiErrorMessage(aiError, t);
+  const translationReady = isMarkdownTranslationReady(translationSettings, translationReadiness);
+  const translationCanStart = translationReadinessLoading || translationReady;
+  const qualityCanStart = translationReadinessLoading || translationReadiness.quality_ready;
+  const canToggleTranslation = translating || translationVisible || translatedContent != null;
 
   const previewSource = normalizeSkillMarkdownForPreview(
     translationVisible && translatedContent != null ? translatedContent : content,
@@ -87,7 +110,16 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
     summaryStream.setError(null);
 
     setRetranslating(false);
-  }, [content, targetLanguage]);
+  }, [
+    content,
+    summaryStream.hydrate,
+    summaryStream.setError,
+    summaryStream.setVisible,
+    targetLanguage,
+    translationStream.hydrate,
+    translationStream.setError,
+    translationStream.setVisible,
+  ]);
 
   const clearAiError = () => {
     translationStream.setError(null);
@@ -95,8 +127,6 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
   };
 
   const handleTranslate = async () => {
-    if (!aiConfigured) return;
-
     if (translating) {
       translationStream.cancel();
       setRetranslating(false);
@@ -109,7 +139,7 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
   };
 
   const handleAiRetranslate = async () => {
-    if (!aiConfigured || translating) return;
+    if (!qualityCanStart || translating) return;
 
     setRetranslating(true);
     clearAiError();
@@ -117,6 +147,7 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
       await translationStream.execute(content, {
         forceRefresh: true,
         keepVisibleWhileLoading: true,
+        extraInvokeParams: { forceQuality: true },
       });
     } finally {
       setRetranslating(false);
@@ -124,7 +155,7 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
   };
 
   const handleSummarize = async () => {
-    if (!aiConfigured) return;
+    if (!summaryAiConfigured) return;
 
     if (summarizing) {
       summaryStream.cancel();
@@ -167,38 +198,46 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
         <div className="ml-auto flex items-center gap-1 shrink-0">
           <motion.button
             onClick={() => {
-              if (!aiConfigured) {
-                navigateToAiSettings();
+              if (!canToggleTranslation && !translationCanStart) {
+                navigateToTranslationSettings();
                 return;
               }
               void handleTranslate();
             }}
             whileTap={{ scale: 0.94 }}
-            animate={translating && !prefersReducedMotion ? {
-              boxShadow: [
-                "0 0 0px 0px rgba(239,68,68,0)",
-                "0 0 12px 3px rgba(239,68,68,0.35)",
-                "0 0 0px 0px rgba(239,68,68,0)",
-              ],
-            } : {}}
-            transition={{ duration: 1.2, repeat: translating && !prefersReducedMotion ? Infinity : 0, ease: "easeInOut" }}
+            animate={
+              translating && !prefersReducedMotion
+                ? {
+                    boxShadow: [
+                      "0 0 0px 0px rgba(239,68,68,0)",
+                      "0 0 12px 3px rgba(239,68,68,0.35)",
+                      "0 0 0px 0px rgba(239,68,68,0)",
+                    ],
+                  }
+                : {}
+            }
+            transition={{
+              duration: 1.2,
+              repeat: translating && !prefersReducedMotion ? Infinity : 0,
+              ease: "easeInOut",
+            }}
             className={`relative flex items-center gap-1 px-2 py-1 rounded-md text-micro font-medium transition-colors cursor-pointer overflow-hidden ${
               translating
                 ? "bg-destructive/10 text-destructive"
                 : translationVisible
                   ? "bg-primary/15 text-primary"
-                  : aiConfigured
+                  : translationCanStart
                     ? "text-muted-foreground hover:text-foreground hover:bg-card-hover"
                     : "text-primary/80 bg-primary/5 border border-primary/20 hover:bg-primary/10"
             }`}
             title={
-              aiConfigured
-                ? translationVisible
-                  ? "Show original"
-                  : translatedContent
-                    ? "Show cached translation"
-                    : "Translate to target language"
-                : "AI not configured"
+              translationVisible
+                ? "Show original"
+                : translatedContent
+                  ? "Show cached translation"
+                  : translationCanStart
+                    ? "Translate to target language"
+                    : "Translation Center is not ready"
             }
           >
             {/* Spinning icon when translating */}
@@ -212,10 +251,7 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
                   transition={{ duration: 0.18 }}
                   className="flex items-center"
                 >
-                  <motion.div
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                  >
+                  <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }}>
                     <Square className="w-3 h-3 fill-current" />
                   </motion.div>
                 </motion.span>
@@ -246,13 +282,7 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
             <AnimatePresence mode="wait">
               <motion.span
                 key={
-                  translating
-                    ? "cancel"
-                    : translationVisible
-                      ? "original"
-                      : translatedContent
-                        ? "show"
-                        : "translate"
+                  translating ? "cancel" : translationVisible ? "original" : translatedContent ? "show" : "translate"
                 }
                 initial={{ opacity: 0, y: 4 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -272,49 +302,55 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
           {translatedContent && (
             <motion.button
               onClick={() => {
-                if (!aiConfigured) {
-                  navigateToAiSettings();
+                if (!qualityCanStart) {
+                  navigateToTranslationSettings();
                   return;
                 }
                 void handleAiRetranslate();
               }}
               disabled={translating}
               whileTap={{ scale: 0.94 }}
-              animate={translating && retranslating ? {
-                boxShadow: [
-                  "0 0 0px 0px rgba(239,68,68,0)",
-                  "0 0 10px 2px rgba(239,68,68,0.3)",
-                  "0 0 0px 0px rgba(239,68,68,0)",
-                ],
-              } : {}}
+              animate={
+                translating && retranslating
+                  ? {
+                      boxShadow: [
+                        "0 0 0px 0px rgba(239,68,68,0)",
+                        "0 0 10px 2px rgba(239,68,68,0.3)",
+                        "0 0 0px 0px rgba(239,68,68,0)",
+                      ],
+                    }
+                  : {}
+              }
               transition={{ duration: 1, repeat: translating && retranslating ? Infinity : 0, ease: "easeInOut" }}
               className={`relative flex items-center gap-1 px-2 py-1 rounded-md text-micro font-medium transition-colors cursor-pointer ${
                 translating && retranslating
                   ? "bg-destructive/10 text-destructive"
-                  : aiConfigured
+                  : qualityCanStart
                     ? "text-muted-foreground hover:text-foreground hover:bg-card-hover"
                     : "text-primary/80 bg-primary/5 border border-primary/20 hover:bg-primary/10"
               } disabled:cursor-not-allowed disabled:opacity-60`}
-              title={t("skillEditor.retranslateWithAi")}
+              title={
+                qualityCanStart
+                  ? t("skillEditor.retranslateWithAi")
+                  : t("skillEditor.qualityTranslationNotReady", {
+                      defaultValue: "Quality lane is not ready. Open Translation Center.",
+                    })
+              }
             >
               {translating && retranslating ? (
-                <motion.div
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                >
+                <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }}>
                   <Square className="w-3 h-3 fill-current" />
                 </motion.div>
               ) : (
                 <Sparkles className="w-3 h-3" />
               )}
-              {translating && retranslating
-                ? t("skillEditor.retranslatingWithAi")
-                : t("skillEditor.retranslateWithAi")}
+              {translating && retranslating ? t("skillEditor.retranslatingWithAi") : t("skillEditor.retranslateWithAi")}
             </motion.button>
           )}
           <button
+            type="button"
             onClick={() => {
-              if (!aiConfigured) {
+              if (!summaryAiConfigured) {
                 navigateToAiSettings();
                 return;
               }
@@ -325,12 +361,12 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
                 ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
                 : summaryContent
                   ? "bg-primary/15 text-primary"
-                  : aiConfigured
+                  : summaryAiConfigured
                     ? "text-muted-foreground hover:text-foreground hover:bg-card-hover"
                     : "text-primary/80 bg-primary/5 border border-primary/20 hover:bg-primary/10"
             }`}
             title={
-              aiConfigured
+              summaryAiConfigured
                 ? summarizing
                   ? "Click to cancel"
                   : summaryContent
@@ -351,7 +387,14 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
         </div>
       </div>
 
-      <AiNotConfiguredBanner show={!aiConfigured} />
+      <AiNotConfiguredBanner
+        show={!translationReadinessLoading && !translationReady}
+        message={t("skillEditor.translationNotReady", {
+          defaultValue: "Translation is not ready. Connect a Fast or Quality engine in Translation Center.",
+        })}
+        actionLabel={t("skillEditor.openTranslationCenter", { defaultValue: "Open Translation Center" })}
+        onAction={navigateToTranslationSettings}
+      />
 
       {/* AI Error Banner */}
       <AiErrorBanner error={localizedAiError} onDismiss={clearAiError} />
@@ -364,6 +407,13 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
       {!translating && translationVisible && translatedContent && translationWasNonStreaming && (
         <div className="px-4 py-2 bg-muted/40 border-b border-border">
           <span className="text-xs text-muted-foreground">{t("skillEditor.nonStreamingNotice")}</span>
+        </div>
+      )}
+      {translationProvider && (translating || translatedContent) && (
+        <div className="px-4 py-2 bg-muted/40 border-b border-border">
+          <span className="text-xs text-muted-foreground">
+            {t("skillEditor.translationServiceNotice", { provider: translationProvider })}
+          </span>
         </div>
       )}
 

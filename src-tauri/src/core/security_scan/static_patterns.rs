@@ -7,7 +7,8 @@ use super::constants::SNIPPET_MAX_CHARS;
 use super::policy::{load_effective_policy, resolve_rule_severity};
 use super::snippet::safe_snippet;
 use super::types::{
-    default_confidence_for_severity, ResolvedSecurityScanPolicy, RiskLevel, ScannedFile, StaticFinding,
+    ResolvedSecurityScanPolicy, RiskLevel, ScannedFile, StaticFinding,
+    default_confidence_for_severity,
 };
 
 struct PatternDef {

@@ -2,10 +2,10 @@
 //  Domain modules
 // ═══════════════════════════════════════════════════════════════════
 
-pub mod infra;
 pub mod ai;
 pub mod config;
 pub mod git;
+pub mod infra;
 pub mod projects;
 pub mod terminal;
 
@@ -26,6 +26,7 @@ pub mod security_scan;
 pub mod skill;
 pub mod skills;
 pub mod terminal_backend;
+pub mod translation_api;
 pub mod update_checker;
 
 // ── Public API re-exports (Tauri commands / CLI) ─────────────────────

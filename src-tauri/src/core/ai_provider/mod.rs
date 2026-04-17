@@ -4,9 +4,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 use tracing::{debug, error, warn};
 
+pub(crate) mod config;
 mod constants;
-mod config;
-mod http_client;
+pub(crate) mod http_client;
 mod scan_params;
 mod skill_pick;
 
@@ -16,14 +16,13 @@ pub use config::{
 };
 #[allow(unused_imports)]
 pub use scan_params::{
-    estimate_translation_max_tokens, resolve_scan_params, skill_translation_single_pass_char_budget,
-    ResolvedScanParams,
+    ResolvedScanParams, estimate_translation_max_tokens, resolve_scan_params,
+    skill_translation_single_pass_char_budget,
 };
 
 use constants::{
     AI_CONFIG_CACHE_TTL, AI_MAX_TOKENS, MARKETPLACE_SEARCH_MAX_TOKENS, SHORT_TEXT_MAX_TOKENS,
-    SKILL_PICK_MAX_CANDIDATES, SKILL_PICK_LOW_SIGNAL_MAX_CANDIDATES, SKILL_PICK_MAX_RECOMMENDATIONS,
-    SKILL_PICK_ROUND_MAX_TOKENS, SUMMARY_MAX_TOKENS, TRANSLATION_CHUNK_RETRY_MIN_CHARS,
+    SKILL_PICK_MAX_RECOMMENDATIONS, SUMMARY_MAX_TOKENS, TRANSLATION_CHUNK_RETRY_MIN_CHARS,
 };
 
 static MYMEMORY_USAGE_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
@@ -168,6 +167,7 @@ fn load_config_from_disk() -> AiConfig {
         Ok(content) => match serde_json::from_str::<AiConfig>(&content) {
             Ok(mut config) => {
                 config.api_key = decrypt_api_key(&config.api_key);
+                config.translation_api.decrypt_keys();
                 config
             }
             Err(err) => {
@@ -199,6 +199,7 @@ pub fn save_config(config: &AiConfig) -> Result<()> {
     }
     let mut config_to_save = config.clone();
     config_to_save.api_key = encrypt_api_key(&config_to_save.api_key);
+    config_to_save.translation_api.encrypt_keys();
 
     let content =
         serde_json::to_string_pretty(&config_to_save).context("Failed to serialize AI config")?;
@@ -230,7 +231,7 @@ pub async fn save_config_async(config: &AiConfig) -> Result<()> {
 
 // ── Language Mapping ────────────────────────────────────────────────
 
-fn language_display_name(code: &str) -> &str {
+pub(crate) fn language_display_name(code: &str) -> &str {
     match code {
         "zh-CN" => "Simplified Chinese",
         "zh-TW" => "Traditional Chinese",
@@ -427,12 +428,11 @@ async fn translate_text_in_chunks(
     text: &str,
 ) -> Result<String> {
     let sections = split_markdown_sections(text);
-    let effective_config = effective_translation_config(config);
 
     // Single section — translate directly without chunking overhead.
     if sections.len() <= 1 {
         let result = chat_completion_capped(
-            &effective_config,
+            config,
             base_system_prompt,
             text,
             estimate_translation_max_tokens(text),
@@ -448,21 +448,22 @@ async fn translate_text_in_chunks(
     // Convert to owned strings so spawned tasks can hold them for as long as needed.
     let sections: Vec<String> = sections.into_iter().collect();
     let total = sections.len();
-    let max_parallel = resolve_scan_params(&effective_config)
+    let max_parallel = resolve_scan_params(config)
         .max_concurrent_requests
         .clamp(1, 4) as usize;
     let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(max_parallel));
 
     // (ends_with_newline, translated_text_or_empty_on_error) per section index.
-    let results: std::sync::Arc<tokio::sync::Mutex<std::collections::HashMap<usize, (bool, String)>>> =
-        std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::with_capacity(
-            total,
-        )));
+    let results: std::sync::Arc<
+        tokio::sync::Mutex<std::collections::HashMap<usize, (bool, String)>>,
+    > = std::sync::Arc::new(tokio::sync::Mutex::new(
+        std::collections::HashMap::with_capacity(total),
+    ));
 
     let mut tasks = tokio::task::JoinSet::new();
 
     for (idx, section_text) in sections.into_iter().enumerate() {
-        let cfg = effective_config.clone();
+        let cfg = config.clone();
         let prompt = build_translation_chunk_prompt(base_system_prompt, idx + 1, total);
         let permit_pool = semaphore.clone();
         let results = results.clone();
@@ -533,15 +534,13 @@ async fn translate_section_with_retry(
     const SECTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
     const MAX_RETRIES: u8 = 3;
 
-    let effective_config = effective_translation_config(config);
-
     for attempt in 0..=MAX_RETRIES {
         let start = std::time::Instant::now();
 
         let result = tokio::time::timeout(
             SECTION_TIMEOUT,
             chat_completion_capped(
-                &effective_config,
+                config,
                 prompt,
                 section,
                 estimate_translation_max_tokens(section),
@@ -557,17 +556,22 @@ async fn translate_section_with_retry(
                 }
                 // Output doesn't look translated — treat as empty.
                 if attempt < MAX_RETRIES {
-                    let backoff = std::time::Duration::from_secs(2u64.saturating_pow(attempt as u32));
+                    let backoff =
+                        std::time::Duration::from_secs(2u64.saturating_pow(attempt as u32));
                     debug!(target: "translate", attempt, "section output not translated, retrying after {:?}", backoff);
                     tokio::time::sleep(backoff).await;
                     continue;
                 }
-                anyhow::bail!("Section returned untranslated content after {} attempts", MAX_RETRIES);
+                anyhow::bail!(
+                    "Section returned untranslated content after {} attempts",
+                    MAX_RETRIES
+                );
             }
             Ok(Ok(_)) | Ok(Err(_)) => {
                 // Empty or error — check if retryable.
                 if attempt < MAX_RETRIES {
-                    let backoff = std::time::Duration::from_secs(2u64.saturating_pow(attempt as u32));
+                    let backoff =
+                        std::time::Duration::from_secs(2u64.saturating_pow(attempt as u32));
                     tokio::time::sleep(backoff).await;
                     continue;
                 }
@@ -577,29 +581,19 @@ async fn translate_section_with_retry(
                 // Timeout.
                 warn!(target: "translate", elapsed_ms = start.elapsed().as_millis() as u64, attempt, "section translate timed out");
                 if attempt < MAX_RETRIES {
-                    let backoff = std::time::Duration::from_secs(2u64.saturating_pow(attempt as u32));
+                    let backoff =
+                        std::time::Duration::from_secs(2u64.saturating_pow(attempt as u32));
                     tokio::time::sleep(backoff).await;
                     continue;
                 }
-                anyhow::bail!("Section translation timed out after {} attempts", MAX_RETRIES);
+                anyhow::bail!(
+                    "Section translation timed out after {} attempts",
+                    MAX_RETRIES
+                );
             }
         }
     }
     anyhow::bail!("Section translation exhausted all retries")
-}
-
-/// Returns an AiConfig with the translation model if one is configured, otherwise
-/// the default model.
-fn effective_translation_config(config: &AiConfig) -> AiConfig {
-    let model = config
-        .translation_model
-        .as_deref()
-        .filter(|m| !m.is_empty())
-        .unwrap_or(&config.model);
-
-    let mut cfg = config.clone();
-    cfg.model = model.to_string();
-    cfg
 }
 
 // ── HTTP Client (delegated to http_client.rs) ───────────────────────
@@ -989,12 +983,11 @@ where
     F: FnMut(&str) -> Result<()>,
 {
     let sections = split_markdown_sections(text);
-    let effective_config = effective_translation_config(config);
 
     // Single section — stream directly without chunking overhead.
     if sections.len() <= 1 {
         let result = chat_completion_stream(
-            &effective_config,
+            config,
             base_system_prompt,
             text,
             estimate_translation_max_tokens(text),
@@ -1014,8 +1007,7 @@ where
         let chunk_number = idx + 1;
         let chunk_prompt = build_translation_chunk_prompt(base_system_prompt, chunk_number, total);
 
-        let section_result =
-            translate_streaming_section(&effective_config, &chunk_prompt, section, on_delta).await;
+        let section_result = translate_streaming_section(config, &chunk_prompt, section, on_delta).await;
 
         match section_result {
             Ok(section_translated) => {
@@ -1085,16 +1077,21 @@ where
             }
             Ok(Ok(_)) | Ok(Err(_)) => {
                 if attempt < MAX_RETRIES {
-                    let backoff = std::time::Duration::from_secs(2u64.saturating_pow(attempt as u32));
+                    let backoff =
+                        std::time::Duration::from_secs(2u64.saturating_pow(attempt as u32));
                     tokio::time::sleep(backoff).await;
                     continue;
                 }
-                anyhow::bail!("Streaming section translation failed after {} attempts", MAX_RETRIES);
+                anyhow::bail!(
+                    "Streaming section translation failed after {} attempts",
+                    MAX_RETRIES
+                );
             }
             Err(_) => {
                 warn!(target: "translate", attempt, "streaming section timed out");
                 if attempt < MAX_RETRIES {
-                    let backoff = std::time::Duration::from_secs(2u64.saturating_pow(attempt as u32));
+                    let backoff =
+                        std::time::Duration::from_secs(2u64.saturating_pow(attempt as u32));
                     tokio::time::sleep(backoff).await;
                     continue;
                 }
@@ -1414,7 +1411,11 @@ fn ai_short_text_available(config: &AiConfig) -> bool {
 ///
 /// This prevents caching English text as a "translation" when the AI model
 /// returns the input verbatim.
-pub(crate) fn translation_looks_translated(target_language: &str, source: &str, result: &str) -> bool {
+pub(crate) fn translation_looks_translated(
+    target_language: &str,
+    source: &str,
+    result: &str,
+) -> bool {
     let target_needs_cjk = matches!(
         target_language,
         "zh-CN" | "zh-TW" | "zh-cn" | "zh-tw" | "ja" | "ko"
@@ -1778,6 +1779,10 @@ async fn mymemory_translate_short_text(config: &AiConfig, text: &str) -> Result<
     Ok(output)
 }
 
+pub async fn translate_short_text_via_mymemory(config: &AiConfig, text: &str) -> Result<String> {
+    mymemory_translate_short_text(config, text).await
+}
+
 // ── Public API ───────────────────────────────────────────────────────
 
 /// Translate a SKILL.md content to the target language.
@@ -1990,16 +1995,21 @@ fn parse_batch_translation_response(response: &str, expected_count: usize) -> Re
     let mut last_idx: Option<usize> = None;
     let mut last_start: usize = 0;
 
-    for cap in re.find_iter(response) {
+    for caps in re.captures_iter(response) {
+        let Some(full_match) = caps.get(0) else {
+            continue;
+        };
         if let Some(prev_idx) = last_idx {
-            let text = response[last_start..cap.start()].trim().to_string();
+            let text = response[last_start..full_match.start()].trim().to_string();
             items.push((prev_idx, text));
         }
-        // Extract the number from [N]
-        let num_str = &response[cap.start() + 1..cap.end() - 1].trim();
-        if let Ok(num) = num_str.parse::<usize>() {
+        // Extract the index from capture group 1 (digits only).
+        let Some(num_match) = caps.get(1) else {
+            continue;
+        };
+        if let Ok(num) = num_match.as_str().parse::<usize>() {
             last_idx = Some(num);
-            last_start = cap.end();
+            last_start = full_match.end();
         }
     }
     // Capture the last item
@@ -2289,13 +2299,14 @@ pub async fn extract_search_keywords(config: &AiConfig, user_query: &str) -> Res
 
 // ── Skill Pick (delegated to skill_pick.rs) ─────────────────────────
 
-pub use skill_pick::{
-    SkillPickCandidate, SkillPickRecommendation, SkillPickResponse, pick_skills,
-};
+#[allow(unused_imports)]
+pub use skill_pick::{SkillPickCandidate, SkillPickRecommendation, SkillPickResponse, pick_skills};
 // Internal types needed by tests:
 #[cfg(test)]
-use skill_pick::{RankedSkillPickCandidate, SkillPickRoundRecommendation, shortlist_skill_pick_candidates, fallback_skill_pick, parse_skill_pick_response};
-
+use skill_pick::{
+    RankedSkillPickCandidate, fallback_skill_pick, parse_skill_pick_response,
+    shortlist_skill_pick_candidates,
+};
 
 /// Test API connectivity with a minimal request.
 pub async fn test_connection(config: &AiConfig) -> Result<u64> {
@@ -2309,9 +2320,9 @@ pub async fn test_connection(config: &AiConfig) -> Result<u64> {
 mod tests {
     use super::{
         AiConfig, ApiFormat, RankedSkillPickCandidate, SkillPickCandidate, fallback_skill_pick,
-        parse_skill_pick_response, shortlist_skill_pick_candidates, split_translation_chunks,
+        parse_batch_translation_response, parse_skill_pick_response,
+        shortlist_skill_pick_candidates, split_translation_chunks,
     };
-
     #[test]
     fn split_translation_chunks_preserves_full_content() {
         let text = "## Intro\nline 1\nline 2\n\n## Next\nline 3\nline 4\n";
@@ -2334,6 +2345,16 @@ mod tests {
         assert_eq!(chunks.concat(), text);
         assert!(chunks.iter().any(|chunk| chunk.contains("```bash\nline-a")));
         assert!(chunks.iter().any(|chunk| chunk.contains("line-c\n```")));
+    }
+
+    #[test]
+    fn parse_batch_translation_response_accepts_markers_with_trailing_spaces() {
+        let raw = "[1] first item\n[2] second item";
+        let parsed = parse_batch_translation_response(raw, 2).expect("should parse");
+        assert_eq!(
+            parsed,
+            vec!["first item".to_string(), "second item".to_string()]
+        );
     }
 
     #[test]
@@ -2517,7 +2538,8 @@ mod tests {
         with_temp_data_root(|_dir| {
             let first = super::get_mymemory_de();
             let written =
-                std::fs::read_to_string(crate::core::infra::paths::mymemory_disabled_path()).unwrap();
+                std::fs::read_to_string(crate::core::infra::paths::mymemory_disabled_path())
+                    .unwrap();
             assert_eq!(first, written.trim());
 
             let second = super::get_mymemory_de();
@@ -2595,6 +2617,41 @@ mod tests {
             assert_eq!(loaded.enabled, defaults.enabled);
             assert_eq!(loaded.model, defaults.model);
             assert_eq!(loaded.api_key, defaults.api_key);
+        });
+    }
+
+    #[test]
+    fn load_config_does_not_derive_translation_settings_from_legacy_fields() {
+        with_temp_data_root(|_dir| {
+            let config_path = super::config_path();
+            std::fs::create_dir_all(config_path.parent().expect("config dir"))
+                .expect("create config dir");
+            std::fs::write(
+                &config_path,
+                serde_json::json!({
+                    "enabled": true,
+                    "api_format": "openai",
+                    "base_url": "https://api.openai.com/v1",
+                    "api_key": "legacy-key",
+                    "model": "gpt-5.4",
+                    "target_language": "ja",
+                    "short_text_priority": "ai_first",
+                    "translation_api": {
+                        "deeplx_url": "http://127.0.0.1:1188"
+                    }
+                })
+                .to_string(),
+            )
+            .expect("write legacy config");
+
+            let loaded = super::load_config();
+
+            assert_eq!(
+                loaded.translation_settings,
+                crate::core::translation_api::config::TranslationSettings::default()
+            );
+            assert_eq!(loaded.target_language, "ja");
+            assert_eq!(loaded.translation_api.deeplx_url, "http://127.0.0.1:1188");
         });
     }
 

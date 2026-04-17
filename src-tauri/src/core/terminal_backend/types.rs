@@ -10,13 +10,6 @@ pub struct AgentCliInfo {
     pub path: Option<String>,
 }
 
-/// tmux availability status.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TmuxStatus {
-    pub installed: bool,
-    pub version: Option<String>,
-}
-
 /// Launch script runtime type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]

@@ -21,17 +21,12 @@ impl std::fmt::Display for SkillCategory {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum SkillType {
+    #[default]
     Hub,
     Local,
-}
-
-impl Default for SkillType {
-    fn default() -> Self {
-        Self::Hub
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

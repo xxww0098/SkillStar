@@ -5,8 +5,8 @@ use std::collections::{HashMap, HashSet};
 
 use super::constants::DEFAULT_SECURITY_SCAN_POLICY_YAML;
 use super::types::{
-    clamp_confidence, default_confidence_for_severity, ResolvedSecurityScanPolicy, RiskLevel,
-    SecurityScanPolicy, StaticFinding,
+    ResolvedSecurityScanPolicy, RiskLevel, SecurityScanPolicy, StaticFinding, clamp_confidence,
+    default_confidence_for_severity,
 };
 
 fn policy_path() -> std::path::PathBuf {
@@ -103,12 +103,14 @@ fn parse_policy_from_yaml(yaml: &str) -> Option<SecurityScanPolicy> {
 }
 
 pub(crate) fn default_policy() -> SecurityScanPolicy {
-    parse_policy_from_yaml(DEFAULT_SECURITY_SCAN_POLICY_YAML).unwrap_or_else(|| SecurityScanPolicy {
-        preset: default_policy_preset(),
-        severity_threshold: default_policy_severity_threshold(),
-        enabled_analyzers: vec![],
-        ignore_rules: vec![],
-        rule_overrides: HashMap::new(),
+    parse_policy_from_yaml(DEFAULT_SECURITY_SCAN_POLICY_YAML).unwrap_or_else(|| {
+        SecurityScanPolicy {
+            preset: default_policy_preset(),
+            severity_threshold: default_policy_severity_threshold(),
+            enabled_analyzers: vec![],
+            ignore_rules: vec![],
+            rule_overrides: HashMap::new(),
+        }
     })
 }
 

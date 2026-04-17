@@ -1,12 +1,12 @@
 //! Repo-root resolution, repo-cached skill updates, and update-checker shims.
 
+use crate::core::skills::update_checker;
 use crate::core::{
     config::github_mirror,
     git::ops as git_ops,
     infra::{fs_ops, paths},
     path_env::command_with_path,
 };
-use crate::core::skills::update_checker;
 use anyhow::{Context, Result, anyhow};
 use std::path::{Path, PathBuf};
 
@@ -57,8 +57,7 @@ pub fn resolve_skill_repo_root(skill_path: &Path) -> Option<PathBuf> {
 
 /// Pull updates for a repo-cached skill.
 pub fn pull_repo_skill_update(skill_path: &Path, folder_path: Option<&str>) -> Result<String> {
-    let absolute_path =
-        fs_ops::read_link_resolved(skill_path).context("Skill is not a symlink")?;
+    let absolute_path = fs_ops::read_link_resolved(skill_path).context("Skill is not a symlink")?;
 
     let repo_root = git_ops::find_repo_root(&absolute_path)
         .ok_or_else(|| anyhow!("Cannot find git repo root for symlinked skill"))?;
@@ -120,9 +119,7 @@ fn is_shallow_repo(repo_dir: &Path) -> bool {
 }
 
 /// Pre-fetch unique repo roots for a batch of skill paths.
-pub fn prefetch_unique_repos(
-    skill_paths: &[PathBuf],
-) -> std::collections::HashSet<PathBuf> {
+pub fn prefetch_unique_repos(skill_paths: &[PathBuf]) -> std::collections::HashSet<PathBuf> {
     update_checker::prefetch_unique_repos(skill_paths)
 }
 

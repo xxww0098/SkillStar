@@ -10,7 +10,7 @@ fn non_empty_claude_auth(env: &HashMap<String, String>, key: &str) -> Option<Str
 
 fn has_non_empty_claude_base_url(env: &HashMap<String, String>) -> bool {
     env.get("ANTHROPIC_BASE_URL")
-        .map_or(false, |value| !value.trim().is_empty())
+        .is_some_and(|value| !value.trim().is_empty())
 }
 
 pub(crate) fn normalize_claude_model_env(env: &mut HashMap<String, String>) {
@@ -26,10 +26,12 @@ pub(crate) fn normalize_claude_model_env(env: &mut HashMap<String, String>) {
         .map(str::trim)
         .filter(|value| !value.is_empty());
 
-    if claude_code_model.is_none() {
-        if let Some(model) = anthropic_model {
-            env.insert("CLAUDE_CODE_MODEL".to_string(), model.to_string());
-        }
+    if let Some(model) = claude_code_model
+        .is_none()
+        .then_some(anthropic_model)
+        .flatten()
+    {
+        env.insert("CLAUDE_CODE_MODEL".to_string(), model.to_string());
     }
 }
 
@@ -170,7 +172,10 @@ mod tests {
 
         normalize_claude_auth_keys(&mut env);
 
-        assert_eq!(env.get("ANTHROPIC_API_KEY").map(String::as_str), Some("key"));
+        assert_eq!(
+            env.get("ANTHROPIC_API_KEY").map(String::as_str),
+            Some("key")
+        );
         assert!(!env.contains_key("ANTHROPIC_AUTH_TOKEN"));
     }
 }

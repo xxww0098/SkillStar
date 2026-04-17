@@ -17,7 +17,7 @@ pub async fn start_patrol(
         .start(app.clone(), interval_secs)
         .map_err(|e| AppError::Other(e.to_string()))?;
     let _ = app.emit("patrol://enabled-changed", true);
-    crate::refresh_tray_menu(&app).map_err(|e| AppError::Other(e))?;
+    crate::refresh_tray_menu(&app).map_err(AppError::Other)?;
     Ok(())
 }
 
@@ -28,7 +28,7 @@ pub async fn stop_patrol(
 ) -> Result<(), AppError> {
     state.stop();
     let _ = app.emit("patrol://enabled-changed", false);
-    crate::refresh_tray_menu(&app).map_err(|e| AppError::Other(e))?;
+    crate::refresh_tray_menu(&app).map_err(AppError::Other)?;
     Ok(())
 }
 
@@ -52,7 +52,7 @@ pub async fn set_patrol_enabled(
     }
 
     let _ = app.emit("patrol://enabled-changed", enabled);
-    crate::refresh_tray_menu(&app).map_err(|e| AppError::Other(e))?;
+    crate::refresh_tray_menu(&app).map_err(AppError::Other)?;
     Ok(())
 }
 

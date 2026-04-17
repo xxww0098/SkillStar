@@ -173,7 +173,7 @@ pub async fn get_leaderboard_local(
 ) -> Result<marketplace::LocalFirstResult<Vec<Skill>>, AppError> {
     marketplace::get_leaderboard_local(&category)
         .await
-        .map_err(|e| AppError::Anyhow(e))
+        .map_err(AppError::Anyhow)
 }
 
 #[tauri::command]
@@ -183,7 +183,7 @@ pub async fn search_marketplace_local(
 ) -> Result<marketplace::LocalFirstResult<Vec<Skill>>, AppError> {
     marketplace::search_marketplace_local(&query, limit)
         .await
-        .map_err(|e| AppError::Anyhow(e))
+        .map_err(AppError::Anyhow)
 }
 
 #[tauri::command]
@@ -191,7 +191,7 @@ pub async fn get_publishers_local()
 -> Result<marketplace::LocalFirstResult<Vec<OfficialPublisher>>, AppError> {
     marketplace::get_publishers_local()
         .await
-        .map_err(|e| AppError::Anyhow(e))
+        .map_err(AppError::Anyhow)
 }
 
 #[tauri::command]
@@ -200,7 +200,7 @@ pub async fn get_publisher_repos_local(
 ) -> Result<marketplace::LocalFirstResult<Vec<marketplace::PublisherRepo>>, AppError> {
     marketplace::get_publisher_repos_local(&publisher_name)
         .await
-        .map_err(|e| AppError::Anyhow(e))
+        .map_err(AppError::Anyhow)
 }
 
 #[tauri::command]
@@ -209,7 +209,7 @@ pub async fn get_repo_skills_local(
 ) -> Result<marketplace::LocalFirstResult<Vec<Skill>>, AppError> {
     marketplace::get_repo_skills_local(&source)
         .await
-        .map_err(|e| AppError::Anyhow(e))
+        .map_err(AppError::Anyhow)
 }
 
 #[tauri::command]
@@ -219,7 +219,7 @@ pub async fn get_skill_detail_local(
 ) -> Result<marketplace::LocalFirstResult<marketplace::MarketplaceSkillDetails>, AppError> {
     marketplace::get_skill_detail_local(&source, &name)
         .await
-        .map_err(|e| AppError::Anyhow(e))
+        .map_err(AppError::Anyhow)
 }
 
 #[tauri::command]
@@ -229,19 +229,19 @@ pub async fn ai_search_marketplace_local(
 ) -> Result<marketplace::LocalFirstResult<marketplace::AiKeywordSearchResult>, AppError> {
     marketplace::ai_search_marketplace_local(&keywords, limit)
         .await
-        .map_err(|e| AppError::Anyhow(e))
+        .map_err(AppError::Anyhow)
 }
 
 #[tauri::command]
 pub async fn sync_marketplace_scope(scope: String) -> Result<(), AppError> {
     marketplace::sync_marketplace_scope_local(&scope)
         .await
-        .map_err(|e| AppError::Anyhow(e))
+        .map_err(AppError::Anyhow)
 }
 
 #[tauri::command]
 pub async fn get_marketplace_sync_states() -> Result<Vec<marketplace::SyncStateEntry>, AppError> {
-    marketplace::get_marketplace_local_sync_states().map_err(|e| AppError::Anyhow(e))
+    marketplace::get_marketplace_local_sync_states().map_err(AppError::Anyhow)
 }
 
 // ── Pack Commands ────────────────────────────────────────────────────
@@ -252,12 +252,12 @@ pub async fn search_marketplace_packs(
     limit: Option<u32>,
 ) -> Result<Vec<marketplace::MarketplacePack>, AppError> {
     marketplace::search_marketplace_packs_local(&query, limit.unwrap_or(20))
-        .map_err(|e| AppError::Anyhow(e))
+        .map_err(AppError::Anyhow)
 }
 
 #[tauri::command]
 pub async fn list_marketplace_packs(
     limit: Option<u32>,
 ) -> Result<Vec<marketplace::MarketplacePack>, AppError> {
-    marketplace::list_marketplace_packs_local(limit.unwrap_or(50)).map_err(|e| AppError::Anyhow(e))
+    marketplace::list_marketplace_packs_local(limit.unwrap_or(50)).map_err(AppError::Anyhow)
 }

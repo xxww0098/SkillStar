@@ -14,9 +14,7 @@ pub(crate) struct PaneCommandSpec {
 }
 
 fn has_explicit_provider(provider_id: Option<&str>) -> bool {
-    provider_id
-        .map(str::trim)
-        .map_or(false, |id| !id.is_empty())
+    provider_id.map(str::trim).is_some_and(|id| !id.is_empty())
 }
 
 fn claude_forced_model(
@@ -41,10 +39,10 @@ fn claude_forced_model(
 fn claude_conflicting_env_vars_to_unset(env_vars: &HashMap<String, String>) -> Vec<String> {
     let has_auth_token = env_vars
         .get("ANTHROPIC_AUTH_TOKEN")
-        .map_or(false, |value| !value.trim().is_empty());
+        .is_some_and(|value| !value.trim().is_empty());
     let has_api_key = env_vars
         .get("ANTHROPIC_API_KEY")
-        .map_or(false, |value| !value.trim().is_empty());
+        .is_some_and(|value| !value.trim().is_empty());
 
     match (has_auth_token, has_api_key) {
         (true, false) => vec!["ANTHROPIC_API_KEY".to_string()],
@@ -81,13 +79,12 @@ pub(crate) fn pane_command_spec(pane: &LayoutNode) -> Option<PaneCommandSpec> {
         args.push("--dangerously-skip-permissions".to_string());
     }
 
-    if agent_id == "opencode" {
-        if let Some(model) = model_id {
-            if !model.is_empty() {
-                args.push("--model".to_string());
-                args.push(model.to_string());
-            }
-        }
+    if let Some(model) = (agent_id == "opencode")
+        .then(|| model_id.filter(|model| !model.is_empty()))
+        .flatten()
+    {
+        args.push("--model".to_string());
+        args.push(model.to_string());
     }
 
     args.extend(extra_args.iter().cloned());

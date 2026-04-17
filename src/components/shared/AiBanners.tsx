@@ -19,6 +19,7 @@ export function AiErrorBanner({ error, onDismiss }: AiErrorBannerProps) {
     <div className="px-4 py-2 bg-destructive/10 border-b border-destructive/20 flex items-center gap-2">
       <span className="text-xs text-destructive flex-1">{error}</span>
       <button
+        type="button"
         onClick={onDismiss}
         className="text-destructive/60 hover:text-destructive cursor-pointer p-1.5 rounded focus-ring"
       >
@@ -34,21 +35,28 @@ export function AiErrorBanner({ error, onDismiss }: AiErrorBannerProps) {
 interface AiNotConfiguredBannerProps {
   /** When true the banner is rendered. */
   show: boolean;
+  /** Override the default message when needed. */
+  message?: string;
+  /** Override button label. */
+  actionLabel?: string;
+  /** Override button action. */
+  onAction?: () => void;
 }
 
-export function AiNotConfiguredBanner({ show }: AiNotConfiguredBannerProps) {
+export function AiNotConfiguredBanner({ show, message, actionLabel, onAction }: AiNotConfiguredBannerProps) {
   const { t } = useTranslation();
 
   if (!show) return null;
 
   return (
     <div className="px-4 py-2 border-b border-border bg-muted/30 flex items-center gap-2">
-      <span className="text-micro text-muted-foreground flex-1">{t("skillEditor.aiNotConfigured")}</span>
+      <span className="text-micro text-muted-foreground flex-1">{message ?? t("skillEditor.aiNotConfigured")}</span>
       <button
-        onClick={navigateToAiSettings}
+        type="button"
+        onClick={onAction ?? navigateToAiSettings}
         className="px-2 py-1 rounded-md text-micro font-medium border border-border hover:bg-card-hover transition-colors cursor-pointer"
       >
-        {t("skillEditor.configureAI")}
+        {actionLabel ?? t("skillEditor.configureAI")}
       </button>
     </div>
   );

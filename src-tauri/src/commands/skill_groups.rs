@@ -3,8 +3,7 @@ use tracing::{error, warn};
 
 use crate::core::{
     infra::error::AppError,
-    marketplace,
-    project_manifest,
+    marketplace, project_manifest,
     skill_group::{self, SkillGroup},
     skill_install,
 };
@@ -29,7 +28,7 @@ pub async fn create_skill_group(
         skills,
         skill_sources.unwrap_or_default(),
     )
-    .map_err(|e| AppError::Anyhow(e))
+    .map_err(AppError::Anyhow)
 }
 
 #[tauri::command]
@@ -42,17 +41,17 @@ pub async fn update_skill_group(
     skill_sources: Option<HashMap<String, String>>,
 ) -> Result<SkillGroup, AppError> {
     skill_group::update_group(id, name, description, icon, skills, skill_sources)
-        .map_err(|e| AppError::Anyhow(e))
+        .map_err(AppError::Anyhow)
 }
 
 #[tauri::command]
 pub async fn delete_skill_group(id: String) -> Result<(), AppError> {
-    skill_group::delete_group(&id).map_err(|e| AppError::Anyhow(e))
+    skill_group::delete_group(&id).map_err(AppError::Anyhow)
 }
 
 #[tauri::command]
 pub async fn duplicate_skill_group(id: String) -> Result<SkillGroup, AppError> {
-    skill_group::duplicate_group(&id).map_err(|e| AppError::Anyhow(e))
+    skill_group::duplicate_group(&id).map_err(AppError::Anyhow)
 }
 
 #[tauri::command]

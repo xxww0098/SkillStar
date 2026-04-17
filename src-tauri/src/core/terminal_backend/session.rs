@@ -1,6 +1,6 @@
 use sha2::{Digest, Sha256};
 
-/// Generate a deterministic tmux/session identifier for a project.
+/// Generate a deterministic session/script identifier for a project.
 pub(crate) fn session_name(project_name: &str) -> String {
     let sanitized: String = project_name
         .chars()

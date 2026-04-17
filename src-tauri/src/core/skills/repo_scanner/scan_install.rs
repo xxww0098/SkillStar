@@ -3,8 +3,7 @@
 use crate::core::{
     git::{ops as git_ops, repo_history, source_resolver},
     infra::{fs_ops, paths},
-    local_skill,
-    lockfile,
+    local_skill, lockfile,
     path_env::command_with_path,
     security_scan,
     skills::discover as skill_discover,

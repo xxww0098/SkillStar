@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 
-use super::terminal::config::{LaunchConfig, LaunchMode, LayoutNode};
+use super::terminal::config::{LaunchConfig, LayoutNode, deployable_layout};
 
 mod pane_command;
 mod provider_env;
@@ -11,10 +11,9 @@ mod registry;
 mod script_builder;
 mod session;
 mod terminal_launcher;
-mod tmux_support;
 mod types;
 
-pub use types::{AgentCliInfo, DeployResult, LaunchScriptKind, TmuxStatus};
+pub use types::{AgentCliInfo, DeployResult, LaunchScriptKind};
 
 /// Find the binary path for a given agent id.
 pub fn find_cli_binary(agent_id: &str) -> Option<PathBuf> {
@@ -26,11 +25,6 @@ pub fn list_available_clis() -> Vec<AgentCliInfo> {
     registry::list_available_clis()
 }
 
-/// Check if tmux is installed and get version information.
-pub fn check_tmux() -> TmuxStatus {
-    tmux_support::check_tmux()
-}
-
 /// Open a launch script in the user's preferred terminal emulator.
 pub fn open_script_in_terminal_with_kind(
     script_path: &std::path::Path,
@@ -39,7 +33,7 @@ pub fn open_script_in_terminal_with_kind(
     terminal_launcher::open_script_in_terminal_with_kind(script_path, script_kind)
 }
 
-/// Generate a shell script for single-terminal mode (no tmux).
+/// Generate a shell script for single-terminal mode.
 #[allow(dead_code)]
 pub fn generate_single_script(layout: &LayoutNode, project_path: &str) -> String {
     script_builder::generate_single_script(layout, project_path)
@@ -52,11 +46,6 @@ pub(crate) fn generate_single_script_for_current_os(
     script_builder::generate_single_script_for_current_os(layout, project_path)
 }
 
-/// Generate a tmux script for multi-terminal mode.
-pub fn generate_multi_script(config: &LaunchConfig, project_path: &str) -> String {
-    script_builder::generate_multi_script(config, project_path)
-}
-
 /// Deploy a launch config: validate, generate script, execute in terminal.
 pub fn deploy(config: &LaunchConfig, project_path: &str) -> Result<DeployResult> {
     if let Err(errors) = super::terminal::config::validate(config) {
@@ -67,38 +56,8 @@ pub fn deploy(config: &LaunchConfig, project_path: &str) -> Result<DeployResult>
         });
     }
 
-    // On Unix, check tmux availability for multi mode. On Windows, validate() already
-    // rejects Multi mode so this is unreachable.
-    #[cfg(not(target_os = "windows"))]
-    if config.mode == LaunchMode::Multi {
-        let status = check_tmux();
-        if !status.installed {
-            return Ok(DeployResult {
-                success: false,
-                message:
-                    "tmux is not available in a bash runtime. Install tmux in Git Bash/MSYS2/WSL and verify `bash --login -c \"tmux -V\"`."
-                        .to_string(),
-                script_path: None,
-            });
-        }
-    }
-
-    // On Windows, validate() already rejects Multi mode, so this always resolves to Single.
-    #[cfg(target_os = "windows")]
     let (script, extension, script_kind) =
-        generate_single_script_for_current_os(&config.single_layout, project_path);
-
-    #[cfg(not(target_os = "windows"))]
-    let (script, extension, script_kind) = match config.mode {
-        LaunchMode::Single => {
-            generate_single_script_for_current_os(&config.single_layout, project_path)
-        }
-        LaunchMode::Multi => (
-            generate_multi_script(config, project_path),
-            "sh",
-            LaunchScriptKind::Bash,
-        ),
-    };
+        generate_single_script_for_current_os(deployable_layout(config), project_path);
 
     let script_path = std::env::temp_dir().join(format!(
         "ss-launch-{}.{}",
@@ -118,14 +77,7 @@ pub fn deploy(config: &LaunchConfig, project_path: &str) -> Result<DeployResult>
 
     Ok(DeployResult {
         success: true,
-        message: format!(
-            "Launched {} mode for '{}'",
-            match config.mode {
-                LaunchMode::Single => "single",
-                LaunchMode::Multi => "multi",
-            },
-            config.project_name
-        ),
+        message: format!("Launched '{}'", config.project_name),
         script_path: Some(script_path.to_string_lossy().to_string()),
     })
 }
@@ -133,7 +85,7 @@ pub fn deploy(config: &LaunchConfig, project_path: &str) -> Result<DeployResult>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::terminal::config::SplitDirection;
+    use crate::core::terminal::config::LaunchMode;
     use std::collections::HashMap;
 
     fn pane(id: &str, agent: &str) -> LayoutNode {
@@ -145,14 +97,6 @@ mod tests {
             model_id: None,
             safe_mode: false,
             extra_args: vec![],
-        }
-    }
-
-    fn split(dir: SplitDirection, ratio: f64, a: LayoutNode, b: LayoutNode) -> LayoutNode {
-        LayoutNode::Split {
-            direction: dir,
-            ratio,
-            children: Box::new([a, b]),
         }
     }
 
@@ -272,79 +216,6 @@ mod tests {
     }
 
     #[test]
-    fn test_multi_script_2_panes() {
-        let config = LaunchConfig {
-            project_name: "test".to_string(),
-            mode: LaunchMode::Multi,
-            single_layout: pane("a", "claude"),
-            multi_layout: split(
-                SplitDirection::H,
-                0.5,
-                pane("a", "claude"),
-                pane("b", "codex"),
-            ),
-            updated_at: 0,
-        };
-        let script = generate_multi_script(&config, "/tmp/project");
-
-        assert!(script.contains("split-window -h"));
-        assert!(script.contains("claude"));
-        assert!(script.contains("codex"));
-        assert!(script.contains("Phase 1"));
-        assert!(script.contains("Phase 2"));
-        assert!(script.contains("Phase 3"));
-    }
-
-    #[test]
-    fn test_multi_script_5_panes_allocation() {
-        let tree = split(
-            SplitDirection::H,
-            0.6,
-            split(
-                SplitDirection::V,
-                0.5,
-                pane("a", "claude"),
-                pane("b", "codex"),
-            ),
-            split(
-                SplitDirection::V,
-                0.33,
-                pane("c", "gemini"),
-                split(
-                    SplitDirection::H,
-                    0.5,
-                    pane("d", "claude"),
-                    pane("e", "opencode"),
-                ),
-            ),
-        );
-
-        let mut split_commands = vec![];
-        let mut pane_commands = vec![];
-        let mut next_pane = 1usize;
-        script_builder::collect_commands(
-            &tree,
-            0,
-            &mut next_pane,
-            &mut split_commands,
-            &mut pane_commands,
-        );
-
-        assert_eq!(split_commands.len(), 4);
-        assert_eq!(pane_commands.len(), 5);
-
-        let command_map: HashMap<usize, &str> = pane_commands
-            .iter()
-            .map(|(id, command)| (*id, command.as_str()))
-            .collect();
-        assert!(command_map[&0].contains("claude"));
-        assert!(command_map[&2].contains("codex"));
-        assert!(command_map[&1].contains("gemini"));
-        assert!(command_map[&3].contains("claude"));
-        assert!(command_map[&4].contains("opencode"));
-    }
-
-    #[test]
     fn test_list_available_clis() {
         let clis = list_available_clis();
         assert_eq!(clis.len(), 4);
@@ -353,96 +224,21 @@ mod tests {
     }
 
     #[test]
-    fn test_check_tmux() {
-        let _status = check_tmux();
-    }
-
-    #[test]
-    fn test_3pane_vsplit_hsplit_layout() {
-        let tree = split(
-            SplitDirection::V,
-            0.5,
-            split(
-                SplitDirection::H,
-                0.5,
-                pane("1", "claude"),
-                pane("5", "opencode"),
-            ),
-            pane("2", "gemini"),
-        );
-
-        let mut split_commands = vec![];
-        let mut pane_commands = vec![];
-        let mut next_pane = 1usize;
-        script_builder::collect_commands(
-            &tree,
-            0,
-            &mut next_pane,
-            &mut split_commands,
-            &mut pane_commands,
-        );
-
-        assert_eq!(split_commands.len(), 2);
-        assert_eq!(pane_commands.len(), 3);
-
-        let command_map: HashMap<usize, &str> = pane_commands
-            .iter()
-            .map(|(id, command)| (*id, command.as_str()))
-            .collect();
-
-        assert!(command_map[&0].contains("claude"));
-        assert!(command_map[&2].contains("opencode"));
-        assert!(command_map[&1].contains("gemini"));
-        assert!(split_commands[0].contains("-v"));
-        assert!(split_commands[0].contains("0.0"));
-        assert!(split_commands[1].contains("-h"));
-        assert!(split_commands[1].contains("0.0"));
-    }
-
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn test_multi_script_normalizes_windows_project_path() {
+    fn test_preferred_layout_falls_back_to_legacy_multi_layout() {
         let config = LaunchConfig {
-            project_name: "win".to_string(),
-            mode: LaunchMode::Multi,
-            single_layout: pane("a", "claude"),
-            multi_layout: pane("a", "claude"),
-            updated_at: 0,
-        };
-        let script = generate_multi_script(&config, r"D:\code\SkillStar");
-        assert!(script.contains("D=D:/code/SkillStar"));
-    }
-
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn test_multi_script_includes_dynamic_windows_path_bootstrap() {
-        let config = LaunchConfig {
-            project_name: "win".to_string(),
-            mode: LaunchMode::Multi,
-            single_layout: pane("a", "claude"),
-            multi_layout: pane("a", "claude"),
-            updated_at: 0,
-        };
-        let script = generate_multi_script(&config, r"D:\code\SkillStar");
-        assert!(script.contains("# Phase 0: import Windows PATH into bash PATH"));
-        assert!(script.contains("PATH=\"$PATH:"));
-        assert!(script.contains("export PATH"));
-    }
-
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn test_deploy_rejects_multi_mode_on_windows() {
-        let config = LaunchConfig {
-            project_name: "win".to_string(),
+            project_name: "legacy".to_string(),
             mode: LaunchMode::Multi,
             single_layout: pane("a", ""),
-            multi_layout: pane("a", ""),
+            multi_layout: pane("b", "codex"),
             updated_at: 0,
         };
 
-        let result = deploy(&config, r"D:\code\SkillStar").expect("deploy should return a result");
-        assert!(!result.success);
-        assert!(result.message.contains("disabled on Windows"));
-        assert!(result.script_path.is_none());
+        match deployable_layout(&config) {
+            LayoutNode::Pane { id, agent_id, .. } => {
+                assert_eq!(id, "b");
+                assert_eq!(agent_id, "codex");
+            }
+            LayoutNode::Split { .. } => panic!("expected pane layout"),
+        }
     }
 }

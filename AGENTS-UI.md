@@ -62,8 +62,10 @@ src/
 - Skill translation: invoke `ai_translate_skill_stream`, listen to `ai://translate-stream` events.
 - Quick summary: invoke `ai_summarize_skill_stream`, listen to `ai://summarize-stream` events.
 - Event phases are `start` / `delta` / `complete` / `error`; UI should render incrementally and handle interruption safely.
+- Translation UI should treat routing as backend-owned: display route mode, provider, and fallback state from payload metadata instead of inferring engine choice on the client.
 - Durable translation reuse is backend-owned via SQLite cache; frontend translation state may only cache the active panel/session, not replace backend cache decisions.
 - `Retranslate via AI` UI must request an AI-only refresh, not the generic priority/fallback path.
+- Settings should expose translation as a single Translation Center with readiness states and simple mode choices; detailed provider credentials and diagnostics belong in advanced drawers, not in the primary flow.
 - AI skill pick UI should render backend-provided relevance order as-is and surface lightweight explanation metadata (for example score or reason) rather than re-sorting or hiding why a skill was recommended.
 - Security scan progress must distinguish file-prep progress from AI chunk progress; concurrent worker state should be visible in the scanning UI rather than collapsed to a single active skill.
 

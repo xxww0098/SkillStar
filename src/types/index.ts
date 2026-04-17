@@ -193,13 +193,62 @@ export interface AiStreamPayload {
   event: AiStreamEvent;
   delta?: string | null;
   message?: string | null;
+  providerId?: string | null;
+  providerType?: "translation_api" | "llm" | "fallback" | null;
+  routeMode?: "fast" | "balanced" | "quality" | null;
+  fallbackHop?: number | null;
 }
 
-export type ShortTextTranslationSource = "ai" | "mymemory";
+export interface AiTranslatePipelineProgress {
+  phase: "prepare" | "translate" | "finalize" | "guard";
+  current: number;
+  total: number;
+}
+
+export type ShortTextTranslationSource = "ai" | "translation_api" | "llm" | "mymemory" | "fallback";
+
+export type TranslationMode = "fast" | "balanced" | "quality";
+export type TranslationFastProvider = "deepl" | "google" | "azure" | "experimental";
+
+export interface TranslationQualityProviderRef {
+  app_id: string;
+  provider_id: string;
+}
+
+export interface TranslationSettings {
+  target_language: string;
+  mode: TranslationMode;
+  fast_provider: TranslationFastProvider;
+  quality_provider_ref: TranslationQualityProviderRef | null;
+  allow_emergency_fallback: boolean;
+  experimental_providers_enabled: boolean;
+}
+
+export interface TranslationReadiness {
+  fast_ready: boolean;
+  quality_ready: boolean;
+  emergency_ready: boolean;
+  issues: string[];
+  recommended_mode: TranslationMode;
+}
 
 export interface ShortTextTranslationResult {
   text: string;
   source: ShortTextTranslationSource;
+  provider: string;
+  provider_id?: string | null;
+  provider_type?: "translation_api" | "llm" | "fallback" | null;
+  route_mode?: TranslationMode | null;
+  fallback_hop?: number | null;
+}
+
+export interface SkillTranslationResult {
+  text: string;
+  provider: string;
+  provider_id?: string | null;
+  provider_type?: "translation_api" | "llm" | "fallback" | null;
+  route_mode?: TranslationMode | null;
+  fallback_hop?: number | null;
 }
 
 export interface MymemoryUsageStats {
@@ -330,12 +379,62 @@ export interface AiConfig {
   scan_max_response_tokens: number;
   /** Optional anonymous security scan telemetry (aggregate only, no skill names/content). */
   security_scan_telemetry_enabled: boolean;
-  /** Dedicated model for SKILL.md translation. Falls back to `model` when empty. */
-  translation_model?: string;
   /** Per-format saved presets */
   openai_preset: FormatPreset;
   anthropic_preset: FormatPreset;
   local_preset: FormatPreset;
+}
+
+// ── Translation API Config ────────────────────────────────────────────
+
+/** Per-provider settings for the unified translation API layer */
+export interface TranslationProviderSettings {
+  api_key: string;
+  /** Custom base URL (optional, defaults per provider) */
+  base_url?: string;
+  /** Custom model (optional, defaults per provider) */
+  model?: string;
+  /** Temperature for LLM providers (default 0.7) */
+  temperature?: number;
+}
+
+export interface TranslationApiConfig {
+  // Traditional API keys
+  deepl_key: string;
+  deeplx_url: string;
+  google_key: string;
+  azure_key: string;
+  azure_region: string;
+  gtx_api_key: string;
+  // LLM API keys
+  deepseek_key: string;
+  claude_key: string;
+  openai_key: string;
+  gemini_key: string;
+  perplexity_key: string;
+  azure_openai_key: string;
+  siliconflow_key: string;
+  groq_key: string;
+  openrouter_key: string;
+  nvidia_key: string;
+  custom_llm_key: string;
+  custom_llm_base_url: string;
+  // Per-provider settings (model, temperature, etc.)
+  deepseek_settings: TranslationProviderSettings;
+  claude_settings: TranslationProviderSettings;
+  openai_settings: TranslationProviderSettings;
+  gemini_settings: TranslationProviderSettings;
+  perplexity_settings: TranslationProviderSettings;
+  azure_openai_settings: TranslationProviderSettings;
+  siliconflow_settings: TranslationProviderSettings;
+  groq_settings: TranslationProviderSettings;
+  openrouter_settings: TranslationProviderSettings;
+  nvidia_settings: TranslationProviderSettings;
+  custom_llm_settings: TranslationProviderSettings;
+  // Defaults
+  enabled_providers: string[];
+  default_provider: string;
+  default_skill_provider: string;
 }
 
 // ── GitHub Repo Scanner ─────────────────────────────────────────────

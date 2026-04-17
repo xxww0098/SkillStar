@@ -1,16 +1,22 @@
 //! Compile-time prompts and scan limits shared across security scan modules.
 
 #[allow(dead_code)]
-pub(crate) const SKILL_AGENT_PROMPT: &str = include_str!("../../../prompts/security/skill_agent.md");
+pub(crate) const SKILL_AGENT_PROMPT: &str =
+    include_str!("../../../prompts/security/skill_agent.md");
 #[allow(dead_code)]
-pub(crate) const SCRIPT_AGENT_PROMPT: &str = include_str!("../../../prompts/security/script_agent.md");
+pub(crate) const SCRIPT_AGENT_PROMPT: &str =
+    include_str!("../../../prompts/security/script_agent.md");
 #[allow(dead_code)]
-pub(crate) const RESOURCE_AGENT_PROMPT: &str = include_str!("../../../prompts/security/resource_agent.md");
+pub(crate) const RESOURCE_AGENT_PROMPT: &str =
+    include_str!("../../../prompts/security/resource_agent.md");
 #[allow(dead_code)]
-pub(crate) const GENERAL_AGENT_PROMPT: &str = include_str!("../../../prompts/security/general_agent.md");
+pub(crate) const GENERAL_AGENT_PROMPT: &str =
+    include_str!("../../../prompts/security/general_agent.md");
 pub(crate) const AGGREGATOR_PROMPT: &str = include_str!("../../../prompts/security/aggregator.md");
-pub(crate) const CHUNK_BATCH_PROMPT: &str = include_str!("../../../prompts/security/chunk_batch.md");
-pub(crate) const DEFAULT_SECURITY_SCAN_POLICY_YAML: &str = include_str!("security_policy_default.yaml");
+pub(crate) const CHUNK_BATCH_PROMPT: &str =
+    include_str!("../../../prompts/security/chunk_batch.md");
+pub(crate) const DEFAULT_SECURITY_SCAN_POLICY_YAML: &str =
+    include_str!("security_policy_default.yaml");
 
 pub(crate) const MAX_FILE_CHARS: usize = 8_000;
 pub(crate) const CACHE_MAX_ENTRIES: usize = 200;

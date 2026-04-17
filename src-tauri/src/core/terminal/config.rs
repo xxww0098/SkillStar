@@ -1,8 +1,9 @@
 //! Launch Deck — per-project CLI launch configuration.
 //!
 //! Each project gets a `LaunchConfig` defining how to launch agent CLIs:
-//! - **Single mode**: open one CLI directly in the user's terminal (no tmux).
-//! - **Multi mode**: tmux session with a custom-designed pane layout.
+//! - Active launch behavior is single-terminal only.
+//! - Legacy `mode` / `multiLayout` fields are retained for config compatibility
+//!   and fallback-loaded when older configs are encountered.
 //!
 //! Persistence: `~/.skillstar/config/launch_configs.json`
 //! Structure: `HashMap<project_name, LaunchConfig>`
@@ -103,17 +104,8 @@ fn load_all() -> HashMap<String, LaunchConfig> {
             if obj.contains_key("layout") && !obj.contains_key("singleLayout") {
                 // SAFETY: remove() after contains_key() guarantees the key exists.
                 let layout = obj.remove("layout").unwrap();
-                let mode = obj.get("mode").and_then(|m| m.as_str()).unwrap_or("single");
-                if mode == "multi" {
-                    obj.insert("multiLayout".to_string(), layout);
-                    obj.insert(
-                        "singleLayout".to_string(),
-                        serde_json::to_value(default_layout_node()).unwrap(),
-                    );
-                } else {
-                    obj.insert("singleLayout".to_string(), layout.clone());
-                    obj.insert("multiLayout".to_string(), layout);
-                }
+                obj.insert("singleLayout".to_string(), layout.clone());
+                obj.insert("multiLayout".to_string(), layout);
             }
         }
         if let Ok(cfg) = serde_json::from_value(val) {
@@ -166,18 +158,7 @@ pub fn delete_config(project_name: &str) -> Result<()> {
 /// Validate that a config is deployable. Returns errors for each problem.
 pub fn validate(config: &LaunchConfig) -> Result<(), Vec<String>> {
     let mut errors = vec![];
-
-    #[cfg(target_os = "windows")]
-    if config.mode == LaunchMode::Multi {
-        errors.push("Multi mode (tmux) is not available on Windows. Please use single mode.".to_string());
-        return Err(errors);
-    }
-
-    let layout_node = match config.mode {
-        LaunchMode::Single => &config.single_layout,
-        LaunchMode::Multi => &config.multi_layout,
-    };
-    let panes = collect_leaf_panes(layout_node);
+    let panes = collect_leaf_panes(deployable_layout(config));
 
     if panes.is_empty() {
         errors.push("No panes configured".to_string());
@@ -217,6 +198,20 @@ pub fn collect_leaf_panes(node: &LayoutNode) -> Vec<(String, String)> {
     let mut result = vec![];
     collect_panes_recursive(node, &mut result);
     result
+}
+
+fn layout_has_assigned_agent(node: &LayoutNode) -> bool {
+    collect_leaf_panes(node)
+        .into_iter()
+        .any(|(_, agent_id)| !agent_id.is_empty())
+}
+
+pub(crate) fn deployable_layout(config: &LaunchConfig) -> &LayoutNode {
+    if layout_has_assigned_agent(&config.single_layout) {
+        &config.single_layout
+    } else {
+        &config.multi_layout
+    }
 }
 
 fn collect_panes_recursive(node: &LayoutNode, out: &mut Vec<(String, String)>) {

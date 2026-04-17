@@ -2,11 +2,7 @@
 //!
 //! Thin wrappers around `core::terminal::config` and `core::terminal_backend`.
 
-use crate::core::{
-    infra::error::AppError,
-    terminal::config as launch_deck,
-    terminal_backend,
-};
+use crate::core::{infra::error::AppError, terminal::config as launch_deck, terminal_backend};
 
 #[tauri::command]
 pub async fn get_launch_config(
@@ -51,12 +47,6 @@ pub async fn deploy_launch(
             .map_err(|e| AppError::Other(format!("Deploy failed: {}", e)))
     })
     .await?
-}
-
-/// Check tmux availability.
-#[tauri::command]
-pub async fn check_tmux() -> Result<terminal_backend::TmuxStatus, AppError> {
-    Ok(terminal_backend::check_tmux())
 }
 
 /// List all agent CLIs with installation status.

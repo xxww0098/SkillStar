@@ -313,7 +313,11 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
                     variant="ghost"
                     className="h-7 w-7 text-muted-foreground hover:text-foreground"
                     title={t("settings.openFolder")}
-                    onClick={() => void handleOpenFolder(item.openPath)}
+                    onClick={() => {
+                      if (item.openPath) {
+                        void handleOpenFolder(item.openPath);
+                      }
+                    }}
                   >
                     <FolderOpen className="w-4 h-4" />
                   </Button>

@@ -3,12 +3,9 @@ use crate::core::{
     git::{dismissed_skills, gh_manager, repo_history},
     infra::error::AppError,
     infra::{fs_ops, paths},
-    local_skill,
-    lockfile,
+    local_skill, lockfile,
     projects::{agents as agent_profile, sync},
-    repo_scanner,
-    security_scan,
-    skill_pack,
+    repo_scanner, security_scan, skill_pack,
 };
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -228,7 +225,7 @@ pub async fn get_repo_cache_info() -> Result<repo_scanner::RepoCacheInfo, AppErr
 pub async fn clean_repo_cache() -> Result<usize, AppError> {
     tokio::task::spawn_blocking(repo_scanner::clean_unused_cache)
         .await?
-        .map_err(|e| AppError::Anyhow(e))
+        .map_err(AppError::Anyhow)
 }
 
 // ── Storage management ──────────────────────────────────────────────

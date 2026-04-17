@@ -39,6 +39,12 @@ impl TrayState {
     }
 }
 
+impl Default for ExitControl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ExitControl {
     pub fn new() -> Self {
         Self {
@@ -245,6 +251,12 @@ pub fn run() {
             commands::projects::detect_project_agents,
             commands::ai::get_ai_config,
             commands::ai::save_ai_config,
+            commands::ai::get_translation_api_config,
+            commands::ai::save_translation_api_config,
+            commands::ai::get_translation_settings,
+            commands::ai::save_translation_settings,
+            commands::ai::get_translation_readiness,
+            commands::ai::test_translation_provider,
             commands::ai::translate::ai_translate_skill,
             commands::ai::translate::ai_translate_skill_stream,
             commands::ai::translate::get_mymemory_usage_stats,
@@ -308,7 +320,6 @@ pub fn run() {
             commands::launch::save_launch_config,
             commands::launch::delete_launch_config,
             commands::launch::deploy_launch,
-            commands::launch::check_tmux,
             commands::launch::list_agent_clis,
             commands::updater::check_app_update,
             commands::updater::download_and_install_update,

@@ -13,8 +13,8 @@ use std::sync::{Arc, Mutex};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tracing::{debug, error, info, warn};
 
-use super::path_env;
 use super::infra::paths;
+use super::path_env;
 
 // ── ACP Config ──────────────────────────────────────────────────────
 

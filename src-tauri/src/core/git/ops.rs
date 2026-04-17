@@ -341,7 +341,9 @@ pub fn run_git_shallow_fetch(repo_path: &Path, args: &[&str]) -> Result<String> 
     // Poisoned mutex: another thread panicked while holding the lock (e.g. antivirus
     // injection). `into_inner()` recovers the guard safely — the HashMap inside holds
     // only PathBuf keys and has no permanent invariant to corrupt.
-    let _fetch_guard = repo_lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _fetch_guard = repo_lock
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
 
     let mut last_err = None;
     for attempt in 0..SHALLOW_FETCH_MAX_RETRIES {

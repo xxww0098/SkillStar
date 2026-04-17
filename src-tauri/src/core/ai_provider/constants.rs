@@ -8,8 +8,7 @@ pub(crate) const SKILL_PICK_LOW_SIGNAL_MAX_CANDIDATES: usize = 96;
 pub(crate) const SKILL_PICK_MAX_RECOMMENDATIONS: usize = 12;
 pub(crate) const SKILL_PICK_ROUND_MAX_TOKENS: u32 = 2_048;
 
-pub(crate) const AI_CONFIG_CACHE_TTL: std::time::Duration =
-    std::time::Duration::from_secs(5);
+pub(crate) const AI_CONFIG_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub(crate) const TRANSLATION_CHUNK_RETRY_MIN_CHARS: usize = 4_000;
 

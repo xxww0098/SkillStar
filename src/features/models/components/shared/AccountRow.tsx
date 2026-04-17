@@ -5,7 +5,7 @@
  * Displays account info, plan badge, quota bars, and contextual actions.
  */
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertCircle, Check, ChevronDown, Key, RefreshCw, Trash2, User, Zap } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, Key, RefreshCw, Trash2, Zap } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { cn } from "../../../../lib/utils";

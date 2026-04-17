@@ -71,6 +71,13 @@ const BUILTIN_AGENT_DEFS: &[(&str, &str, &str, &[&str], &str)] = &[
         &[".openclaw", "skills"],
         "",
     ),
+    (
+        "hermes",
+        "Hermes",
+        "agents/hermes.svg",
+        &[".hermes", "skills"],
+        ".hermes/skills",
+    ),
 ];
 
 /// A single Agent profile describing where its skills directory lives.

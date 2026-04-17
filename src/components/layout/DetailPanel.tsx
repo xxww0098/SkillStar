@@ -21,8 +21,15 @@ import {
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAiStream } from "../../hooks/useAiStream";
+import { useTranslationSettings } from "../../hooks/useTranslationSettings";
 import { unwrapOuterMarkdownFence } from "../../lib/frontmatter";
-import { formatAiErrorMessage, formatInstalls, navigateToAiSettings } from "../../lib/utils";
+import { formatTranslationProviderLabel } from "../../lib/translationProvider";
+import {
+  formatAiErrorMessage,
+  formatInstalls,
+  navigateToAiSettings,
+  navigateToTranslationSettings,
+} from "../../lib/utils";
 import type {
   AiStreamPayload,
   LocalFirstResult,
@@ -97,7 +104,7 @@ export function DetailPanel({
       const result = raw as ShortTextTranslationResult;
       return {
         text: unwrapOuterMarkdownFence(result.text).trim(),
-        provider: result.source,
+        provider: result.provider ?? result.source,
       };
     },
   });
@@ -108,10 +115,19 @@ export function DetailPanel({
   const translatingDescription = descriptionStream.loading;
   const descriptionHasDelta = descriptionStream.hasDelta;
   const descriptionTranslateError = descriptionStream.error;
-  const descriptionTranslationProvider = descriptionStream.provider as "ai" | "mymemory" | null;
+  const descriptionTranslationProvider = descriptionStream.provider;
   const descriptionTranslationSource = descriptionStream.source;
-  const aiConfigured = descriptionStream.aiConfigured;
-  const shortDescriptionTranslationEnabled = true;
+  const summaryAiConfigured = descriptionStream.aiConfigured;
+  const {
+    readiness: translationReadiness,
+    loading: translationReadinessLoading,
+  } = useTranslationSettings();
+  const descriptionTranslationReady =
+    translationReadiness.fast_ready || translationReadiness.quality_ready;
+  const descriptionTranslationCanStart =
+    translationReadinessLoading || descriptionTranslationReady;
+  const qualityDescriptionCanStart =
+    translationReadinessLoading || translationReadiness.quality_ready;
 
   // AI Quick Read
   const [quickReadContent, setQuickReadContent] = useState<string | null>(null);
@@ -233,9 +249,10 @@ export function DetailPanel({
   const handleTranslateDescription = useCallback(
     async (mode: "manual" | "auto" = "manual") => {
       const renderedDescription = skillDetails?.summary?.trim() || skill?.description?.trim() || "";
-      if (!renderedDescription || !shortDescriptionTranslationEnabled) return;
+      if (!renderedDescription) return;
 
       if (mode === "auto") {
+        if (!descriptionTranslationReady) return;
         // Auto mode: skip if already translating the same text, or if visible/cached for the same text
         if (translatingDescription && descriptionTranslationSource === renderedDescription) return;
         if (descriptionTranslationVisible && descriptionTranslationSource === renderedDescription) return;
@@ -252,7 +269,7 @@ export function DetailPanel({
       await descriptionStream.execute(renderedDescription);
     },
     [
-      shortDescriptionTranslationEnabled,
+      descriptionTranslationReady,
       descriptionTranslationSource,
       descriptionTranslationVisible,
       translatingDescription,
@@ -264,7 +281,7 @@ export function DetailPanel({
   );
 
   const handleAiRetranslateDescription = useCallback(async () => {
-    if (!aiConfigured || translatingDescription) return;
+    if (!qualityDescriptionCanStart || translatingDescription) return;
     const renderedDescription = skillDetails?.summary?.trim() || skill?.description?.trim() || "";
     if (!renderedDescription) return;
 
@@ -273,7 +290,13 @@ export function DetailPanel({
       keepVisibleWhileLoading: true,
       extraInvokeParams: { forceAi: true },
     });
-  }, [aiConfigured, translatingDescription, skill, skillDetails?.summary, descriptionStream]);
+  }, [
+    qualityDescriptionCanStart,
+    translatingDescription,
+    skill,
+    skillDetails?.summary,
+    descriptionStream,
+  ]);
 
   // Deferred timeout for auto-translate
   useEffect(() => {
@@ -299,7 +322,14 @@ export function DetailPanel({
 
   // Auto-translate trigger
   useEffect(() => {
-    if (!skill || !autoTranslateDescription || !shortDescriptionTranslationEnabled) return;
+    if (
+      !skill ||
+      !autoTranslateDescription ||
+      translationReadinessLoading ||
+      !descriptionTranslationReady
+    ) {
+      return;
+    }
     // If the skill already ships with a pre-cached localized_description
     // (hydrated in the reset effect), skip auto-translate entirely.
     // We check the prop directly because effects from the same render cycle
@@ -312,12 +342,13 @@ export function DetailPanel({
     autoTranslateAttemptedKeyRef.current = autoKey;
     void handleTranslateDescription("auto");
   }, [
-    shortDescriptionTranslationEnabled,
     autoTranslateDescription,
+    descriptionTranslationReady,
     handleTranslateDescription,
     skill,
     skillDetails?.summary,
     targetLanguage,
+    translationReadinessLoading,
   ]);
 
   const toggleAutoTranslateDescription = (enabled: boolean) => {
@@ -355,7 +386,7 @@ export function DetailPanel({
       return;
     }
 
-    if (!skill || !onReadContent || !aiConfigured) return;
+    if (!skill || !onReadContent || !summaryAiConfigured) return;
 
     const requestId =
       typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -460,12 +491,13 @@ export function DetailPanel({
     (descriptionTranslationSource === enrichedDescription || descriptionTranslationSource === rawDescription);
   const descriptionTranslationActive =
     descriptionTranslationVisible && translatedDescription != null && descriptionTranslationMatches;
-  const displayDescriptionProvider = descriptionTranslationProvider ?? (descriptionTranslationActive ? "ai" : null);
+  const displayDescriptionProvider =
+    formatTranslationProviderLabel(descriptionTranslationProvider, t) ?? null;
   const localizedDescriptionError = formatAiErrorMessage(descriptionTranslateError, t);
   const localizedQuickReadError = formatAiErrorMessage(quickReadError, t);
   const shouldDeferDescriptionRender =
     autoTranslateDescription &&
-    shortDescriptionTranslationEnabled &&
+    descriptionTranslationReady &&
     hasDescription &&
     !skill?.localized_description &&
     !hasTranslationForCurrentDescription &&
@@ -647,14 +679,14 @@ export function DetailPanel({
                   {hasDescription && (
                     <button
                       onClick={
-                        shortDescriptionTranslationEnabled
+                        descriptionTranslationCanStart
                           ? () => void handleTranslateDescription("manual")
-                          : navigateToAiSettings
+                          : navigateToTranslationSettings
                       }
                       className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition duration-300 cursor-pointer shadow-sm relative overflow-hidden group focus-ring ${
-                        shortDescriptionTranslationEnabled && translatingDescription
+                        descriptionTranslationCanStart && translatingDescription
                           ? "bg-destructive/10 text-destructive border border-destructive/20"
-                          : shortDescriptionTranslationEnabled && descriptionTranslationActive
+                          : descriptionTranslationCanStart && descriptionTranslationActive
                             ? "bg-primary/10 text-primary border border-primary/20"
                             : "bg-gradient-to-br from-background to-muted/50 border border-border hover:border-primary/40 text-muted-foreground hover:text-foreground"
                       }`}
@@ -677,16 +709,16 @@ export function DetailPanel({
                       >
                         <Check className="h-3 w-3" />
                       </span>
-                      {shortDescriptionTranslationEnabled && translatingDescription ? (
+                      {descriptionTranslationCanStart && translatingDescription ? (
                         <Square className="w-3.5 h-3.5 fill-current animate-pulse relative z-10" />
                       ) : (
                         <Languages
-                          className={`w-3.5 h-3.5 relative z-10 ${shortDescriptionTranslationEnabled && !descriptionTranslationActive ? "text-primary/70" : ""}`}
+                          className={`w-3.5 h-3.5 relative z-10 ${descriptionTranslationCanStart && !descriptionTranslationActive ? "text-primary/70" : ""}`}
                         />
                       )}
                       <span className="relative z-10">
-                        {!shortDescriptionTranslationEnabled
-                          ? t("detailPanel.goToAiConfig")
+                        {!descriptionTranslationCanStart
+                          ? t("skillEditor.openTranslationCenter")
                           : translatingDescription
                             ? t("common.cancel")
                             : descriptionTranslationActive
@@ -696,7 +728,7 @@ export function DetailPanel({
                     </button>
                   )}
 
-                  {skill.installed && onReadContent && aiConfigured && (
+                  {skill.installed && onReadContent && summaryAiConfigured && (
                     <button
                       onClick={handleQuickRead}
                       className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition duration-300 cursor-pointer shadow-sm relative overflow-hidden group focus-ring ${
@@ -735,29 +767,33 @@ export function DetailPanel({
                     {t("detailPanel.streamingDescriptionPreview")}
                   </div>
                 )}
-                {descriptionTranslationActive && (displayDescriptionProvider || aiConfigured) && (
+                {descriptionTranslationActive && (
                   <div className="text-xs text-muted-foreground bg-muted/40 rounded-md px-3 py-2 border border-border flex items-center justify-between gap-3">
                     <span>
                       {displayDescriptionProvider
-                        ? t("detailPanel.translationSourceNotice", {
-                            source:
-                              displayDescriptionProvider === "mymemory"
-                                ? t("detailPanel.translationSourceMyMemory")
-                                : t("detailPanel.translationSourceAi"),
+                        ? t("skillEditor.translationServiceNotice", {
+                            provider: displayDescriptionProvider,
                           })
                         : null}
                     </span>
-                    {aiConfigured && (
-                      <button
-                        onClick={() => void handleAiRetranslateDescription()}
-                        disabled={translatingDescription}
-                        className="text-primary hover:text-primary/80 disabled:opacity-60 disabled:cursor-not-allowed transition-colors cursor-pointer whitespace-nowrap"
-                      >
-                        {translatingDescription
-                          ? t("detailPanel.retranslatingWithAi")
-                          : t("detailPanel.retranslateWithAi")}
-                      </button>
-                    )}
+                    <button
+                      onClick={() =>
+                        qualityDescriptionCanStart
+                          ? void handleAiRetranslateDescription()
+                          : navigateToTranslationSettings()
+                      }
+                      disabled={translatingDescription}
+                      title={
+                        qualityDescriptionCanStart
+                          ? t("detailPanel.retranslateWithAi")
+                          : t("skillEditor.qualityTranslationNotReady")
+                      }
+                      className="text-primary hover:text-primary/80 disabled:opacity-60 disabled:cursor-not-allowed transition-colors cursor-pointer whitespace-nowrap"
+                    >
+                      {translatingDescription
+                        ? t("detailPanel.retranslatingWithAi")
+                        : t("detailPanel.retranslateWithAi")}
+                    </button>
                   </div>
                 )}
               </div>
@@ -765,7 +801,7 @@ export function DetailPanel({
               {/* AI Quick Read Content */}
               {skill.installed &&
                 onReadContent &&
-                aiConfigured &&
+                summaryAiConfigured &&
                 (quickReadError || quickReading || quickReadVisible) && (
                   <div className="space-y-2">
                     {localizedQuickReadError && (
@@ -796,7 +832,7 @@ export function DetailPanel({
                   </div>
                 )}
 
-              {skill.installed && onReadContent && !aiConfigured && (
+              {skill.installed && onReadContent && !summaryAiConfigured && (
                 <div className="rounded-lg border border-border bg-card px-3 py-2 flex items-center gap-2">
                   <p className="text-xs text-muted-foreground flex-1">{t("detailPanel.aiPromptHint")}</p>
                   <button

@@ -1,27 +1,56 @@
-import { invoke } from "@tauri-apps/api/core";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertCircle, ChevronDown, Loader2, Rocket, Save } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigation } from "../../../hooks/useNavigation";
-import { cn, detectPlatform } from "../../../lib/utils";
+import { cn } from "../../../lib/utils";
 import { useAgentClis } from "../hooks/useAgentClis";
-import type { LaunchMode, LayoutNode } from "../hooks/useLaunchConfig";
+import type { LaunchConfig, LayoutNode, PaneNode } from "../hooks/useLaunchConfig";
 import { useLaunchConfig } from "../hooks/useLaunchConfig";
-import { countPanes, useLayoutTree } from "../hooks/useLayoutTree";
 import { DeployButton } from "./DeployButton";
-import { ModeSwitch } from "./ModeSwitch";
-import { PaneLayoutEditor } from "./PaneLayoutEditor";
-import { TmuxPrompt } from "./TmuxPrompt";
+import { PaneCell } from "./PaneCell";
 
 interface LaunchDeckSectionProps {
   projectName: string;
   projectPath: string;
 }
 
-interface TmuxStatus {
-  installed: boolean;
-  version: string | null;
+function defaultPane(): PaneNode {
+  return {
+    type: "pane",
+    id: "pane-1",
+    agentId: "",
+    safeMode: false,
+    extraArgs: [],
+  };
+}
+
+function findFirstPane(node: LayoutNode | null | undefined): PaneNode | null {
+  if (!node) return null;
+  if (node.type === "pane") return node;
+  return findFirstPane(node.children[0]) ?? findFirstPane(node.children[1]);
+}
+
+function primaryPane(config: LaunchConfig): PaneNode {
+  const pane = findFirstPane(config.singleLayout) ?? findFirstPane(config.multiLayout) ?? defaultPane();
+  return {
+    ...defaultPane(),
+    ...pane,
+    type: "pane",
+  };
+}
+
+function paneEquals(a: PaneNode | null, b: PaneNode): boolean {
+  if (!a) return false;
+  return (
+    a.id === b.id &&
+    a.agentId === b.agentId &&
+    a.providerId === b.providerId &&
+    a.providerName === b.providerName &&
+    a.modelId === b.modelId &&
+    a.safeMode === b.safeMode &&
+    a.extraArgs.join(",") === b.extraArgs.join(",")
+  );
 }
 
 function LaunchDeckSkeleton() {
@@ -50,57 +79,54 @@ function LaunchDeckSkeleton() {
 export function LaunchDeckSection({ projectName, projectPath }: LaunchDeckSectionProps) {
   const { t } = useTranslation();
   const { navigateToModels } = useNavigation();
-  const isWindows = detectPlatform() === "windows";
   const [expanded, setExpanded] = useState(true);
-  const [tmuxStatus, setTmuxStatus] = useState<TmuxStatus | null>(null);
   const agents = useAgentClis();
   const { config, setConfig, saving, loading } = useLaunchConfig(projectName);
 
-  // Windows policy: force single mode and disable tmux multi mode.
+  // Launch Deck is single-pane only. Keep config normalized to single mode.
   useEffect(() => {
-    if (isWindows && config?.mode === "multi") {
-      setConfig((prev) => ({ ...prev, mode: "single" }));
+    if (!config) return;
+    const pane = primaryPane(config);
+    const single = findFirstPane(config.singleLayout);
+    const multi = findFirstPane(config.multiLayout);
+    const normalized =
+      config.mode === "single" &&
+      config.singleLayout.type === "pane" &&
+      config.multiLayout.type === "pane" &&
+      paneEquals(single, pane) &&
+      paneEquals(multi, pane);
+    if (!normalized) {
+      setConfig((prev) => ({
+        ...prev,
+        mode: "single",
+        singleLayout: pane,
+        multiLayout: { ...pane },
+      }));
     }
-  }, [isWindows, config?.mode, setConfig]);
+  }, [config, setConfig]);
 
-  // Check tmux on expand
-  useEffect(() => {
-    if (isWindows) {
-      return;
-    }
-    if (expanded && tmuxStatus === null) {
-      invoke<TmuxStatus>("check_tmux")
-        .then(setTmuxStatus)
-        .catch(() => setTmuxStatus({ installed: false, version: null }));
-    }
-  }, [expanded, isWindows, tmuxStatus]);
-
-  const handleModeChange = useCallback(
-    (mode: LaunchMode) => {
-      if (!config) return;
-      if (isWindows && mode === "multi") return;
-
-      setConfig((prev) => ({ ...prev, mode }));
-    },
-    [config, isWindows, setConfig],
-  );
-
-  const handleLayoutUpdate = useCallback(
-    (newLayout: LayoutNode) => {
+  const assign = useCallback(
+    (paneId: string, agentId: string, providerId?: string, providerName?: string, modelId?: string) => {
       setConfig((prev) => {
-        const targetMode: LaunchMode = isWindows ? "single" : prev.mode;
-        if (targetMode === "single") {
-          return { ...prev, singleLayout: newLayout };
-        }
-        return { ...prev, multiLayout: newLayout };
+        const current = primaryPane(prev);
+        const nextPane: PaneNode = {
+          ...current,
+          id: paneId || current.id,
+          agentId,
+          providerId,
+          providerName,
+          modelId,
+        };
+        return {
+          ...prev,
+          mode: "single",
+          singleLayout: nextPane,
+          multiLayout: { ...nextPane },
+        };
       });
     },
-    [isWindows, setConfig],
+    [setConfig],
   );
-
-  const effectiveMode: LaunchMode = isWindows ? "single" : (config?.mode ?? "single");
-  const currentLayout = config ? (effectiveMode === "single" ? config.singleLayout : config.multiLayout) : null;
-  const { split, remove, resize, assign } = useLayoutTree(currentLayout, handleLayoutUpdate);
 
   const goModels = useCallback(() => {
     navigateToModels();
@@ -110,33 +136,23 @@ export function LaunchDeckSection({ projectName, projectPath }: LaunchDeckSectio
     return <LaunchDeckSkeleton />;
   }
 
-  const isMulti = effectiveMode === "multi";
+  const currentPane = primaryPane(config);
   const editorHeight = 320;
-  const needsTmux = !isWindows && isMulti && tmuxStatus !== null && !tmuxStatus.installed;
-  const deployConfig = isWindows && config.mode === "multi" ? { ...config, mode: "single" as LaunchMode } : config;
-  const paneCount = countPanes(currentLayout!);
-  const hasEmptyPanes = (() => {
-    const checkEmpty = (node: LayoutNode): boolean => {
-      if (node.type === "pane") return !node.agentId;
-      return checkEmpty(node.children[0]) || checkEmpty(node.children[1]);
-    };
-    return checkEmpty(currentLayout!);
-  })();
+  const deployConfig: LaunchConfig = {
+    ...config,
+    mode: "single",
+    singleLayout: currentPane,
+    multiLayout: { ...currentPane },
+  };
+  const hasEmptyPanes = !currentPane.agentId;
 
   const noAgentClis = agents.filter((a) => a.installed).length === 0;
 
-  const deployDisabled = hasEmptyPanes || needsTmux || (isWindows && config.mode === "multi");
-  const deployDisabledReason = needsTmux
-    ? t("launch.disabledTmux")
-    : hasEmptyPanes
-      ? t("launch.disabledEmptyPanes")
-      : isWindows && config.mode === "multi"
-        ? t("launch.disabledWindowsMulti")
-        : null;
+  const deployDisabled = hasEmptyPanes;
+  const deployDisabledReason = hasEmptyPanes ? t("launch.disabledEmptyPanes") : null;
 
   return (
     <div className="rounded-xl border border-border-subtle overflow-hidden">
-      {/* Header — collapse toggle separate from mode so mode stays visible when collapsed */}
       <div className="flex items-stretch gap-1 px-3 sm:px-4 py-2.5 border-b border-border-subtle/50 bg-muted/[0.08]">
         <button
           type="button"
@@ -148,11 +164,6 @@ export function LaunchDeckSection({ projectName, projectPath }: LaunchDeckSectio
             <Rocket className="w-3.5 h-3.5 text-primary/70" />
           </div>
           <span className="text-sm font-semibold text-foreground truncate">{t("launch.title")}</span>
-          {paneCount > 1 && (
-            <span className="text-[10px] font-medium text-muted-foreground bg-muted/50 px-1.5 py-0.5 rounded shrink-0">
-              {paneCount} {t("launch.panes")}
-            </span>
-          )}
           <span className="flex-1" />
           {saving && (
             <span className="flex items-center gap-1 text-[10px] text-muted-foreground shrink-0">
@@ -166,9 +177,6 @@ export function LaunchDeckSection({ projectName, projectPath }: LaunchDeckSectio
             )}
           />
         </button>
-        <div className="flex items-center shrink-0 py-0.5">
-          <ModeSwitch mode={effectiveMode} onModeChange={handleModeChange} disableMulti={isWindows} />
-        </div>
       </div>
 
       {/* Body */}
@@ -206,7 +214,7 @@ export function LaunchDeckSection({ projectName, projectPath }: LaunchDeckSectio
                     <AlertCircle className="w-4 h-4 text-amber-500" />
                   </div>
                   <div className="min-w-0 flex-1 space-y-2">
-                    <p className="text-xs leading-relaxed text-muted-foreground">{t("launch.bannerEmptyPanes")}</p>
+                    <p className="text-xs leading-relaxed text-muted-foreground">{t("launch.bannerNoAgent")}</p>
                     <button
                       type="button"
                       onClick={goModels}
@@ -218,27 +226,14 @@ export function LaunchDeckSection({ projectName, projectPath }: LaunchDeckSectio
                 </div>
               )}
 
-              {/* tmux prompt */}
-              {needsTmux && <TmuxPrompt />}
-
-              {/* Layout editor */}
               <div
                 className="relative rounded-xl border border-border/50 bg-background overflow-hidden p-2 shadow-sm transition-all duration-300 min-h-[240px]"
                 style={{ height: `${editorHeight}px` }}
               >
-                {/* Subtle grid background for the entire editor */}
                 <div className="absolute inset-0 pointer-events-none bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZD0iTTAgMGg0MHY0MEgweiIgZmlsbD0ibm9uZSIvPjxwYXRoIGQ9Ik0wIDAuNWg0ME0wIDM5LjVoNDBNMC41IDB2NDBNMzkuNSAwdjQwIiBzdHJva2U9InJnYmEoMCwgMCwgMCwgMC4wNCkiIHN0cm9rZS13aWR0aD0iMSIvPjwvc3ZnPg==')] [mask-image:radial-gradient(ellipse_at_center,black,transparent_70%)] opacity-50" />
 
                 <div className="relative w-full h-full flex flex-col z-10">
-                  <PaneLayoutEditor
-                    node={currentLayout!}
-                    agents={agents}
-                    isMulti={isMulti}
-                    onSplit={split}
-                    onAssign={assign}
-                    onRemove={remove}
-                    onResize={resize}
-                  />
+                  <PaneCell pane={currentPane} agents={agents} onAssign={assign} />
                 </div>
               </div>
 

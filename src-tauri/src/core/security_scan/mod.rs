@@ -19,12 +19,12 @@ use tokio::sync::Semaphore;
 
 use super::ai_provider::{AiConfig, chat_completion, chat_completion_capped};
 mod constants;
-mod types;
+mod orchestrator;
 mod policy;
+mod smart_rules;
 mod snippet;
 mod static_patterns;
-mod orchestrator;
-mod smart_rules;
+mod types;
 
 pub use policy::{get_policy, save_policy};
 pub use static_patterns::static_pattern_scan;
@@ -41,9 +41,9 @@ pub(crate) use policy::{
 pub(crate) use snippet::safe_snippet;
 pub(crate) use static_patterns::static_pattern_scan_with_policy;
 pub(crate) use types::{
-    clamp_confidence, default_confidence_for_severity, default_confidence_score,
-    default_ai_finding_confidence, default_static_finding_confidence, parse_confidence_from_json,
-    FileScanResult, PreparedChunk, PreparedSkillScan, ResolvedSecurityScanPolicy,
+    FileScanResult, PreparedChunk, PreparedSkillScan, ResolvedSecurityScanPolicy, clamp_confidence,
+    default_ai_finding_confidence, default_confidence_for_severity, default_confidence_score,
+    default_static_finding_confidence, parse_confidence_from_json,
 };
 
 use constants::{
@@ -3608,8 +3608,7 @@ static SCAN_SCHEMA_READY: std::sync::LazyLock<()> = std::sync::LazyLock::new(|| 
     let conn = crate::core::infra::db_pool::security_scan_pool()
         .get()
         .expect("security scan DB pool connection: ~/.skillstar/db/ must be writable");
-    migrate_scan_schema(&conn)
-        .expect("security scan schema migration failed: DB may be corrupted");
+    migrate_scan_schema(&conn).expect("security scan schema migration failed: DB may be corrupted");
 });
 
 /// Get a connection from the pool.
@@ -4103,11 +4102,11 @@ fn extract_json(response: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::policy::{
         default_policy, load_effective_policy, normalize_rule_id, parse_policy_preset,
     };
     use super::types::SecurityScanRuleOverride;
+    use super::*;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::MutexGuard;

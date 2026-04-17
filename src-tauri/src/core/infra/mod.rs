@@ -3,6 +3,7 @@
 //!
 //! All domain modules depend on `infra` — never the reverse.
 
+pub mod daily_log;
 pub mod db_pool;
 pub mod error;
 pub mod fs_ops;

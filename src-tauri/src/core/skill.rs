@@ -7,5 +7,5 @@ pub use skillstar_marketplace_core::{
     OfficialPublisher, Skill, SkillCategory, SkillType, extract_github_source_from_url,
 };
 pub use skillstar_skill_core::shared::{
-    parse_skill_content, extract_skill_description, SkillContent,
+    SkillContent, extract_skill_description, parse_skill_content,
 };

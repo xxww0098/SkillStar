@@ -47,7 +47,7 @@ pub async fn batch_link_skills_to_agent(
 
 #[tauri::command]
 pub async fn list_linked_skills(agent_id: String) -> Result<Vec<String>, AppError> {
-    sync::list_linked_skills(&agent_id).map_err(|e| AppError::Anyhow(e))
+    sync::list_linked_skills(&agent_id).map_err(AppError::Anyhow)
 }
 
 #[tauri::command]

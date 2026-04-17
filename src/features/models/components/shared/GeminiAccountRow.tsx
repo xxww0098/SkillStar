@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { Check, ChevronDown, Key, RefreshCw, Trash2, User, ShieldPlus, X, Zap } from "lucide-react";
+import { Check, ChevronDown, Key, RefreshCw, Trash2, ShieldPlus, X, Zap } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { cn } from "../../../../lib/utils";

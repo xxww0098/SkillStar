@@ -1,16 +1,10 @@
 use crate::core::{
     git::ops as git_ops,
     infra::error::AppError,
-    installed_skill,
-    local_skill,
-    lockfile,
-    project_manifest,
+    installed_skill, local_skill, lockfile, project_manifest,
     projects::sync,
-    repo_scanner,
-    security_scan,
-    skill::{
-        Skill, extract_github_source_from_url, extract_skill_description,
-    },
+    repo_scanner, security_scan,
+    skill::{Skill, extract_github_source_from_url, extract_skill_description},
     skill_install,
 };
 
@@ -32,7 +26,7 @@ pub struct UpdateResult {
 pub async fn list_skills() -> Result<Vec<Skill>, AppError> {
     installed_skill::list_installed_skills()
         .await
-        .map_err(|e| AppError::Anyhow(e))
+        .map_err(AppError::Anyhow)
 }
 
 #[tauri::command]
@@ -41,7 +35,7 @@ pub async fn refresh_skill_updates(
 ) -> Result<Vec<installed_skill::SkillUpdateState>, AppError> {
     installed_skill::refresh_skill_updates(names)
         .await
-        .map_err(|e| AppError::Anyhow(e))
+        .map_err(AppError::Anyhow)
 }
 
 #[tauri::command]
@@ -61,7 +55,7 @@ pub async fn uninstall_skill(name: String) -> Result<(), AppError> {
 
 fn uninstall_skill_sync(name: String) -> Result<(), AppError> {
     if local_skill::is_local_skill(&name) {
-        local_skill::delete(&name).map_err(|e| AppError::Anyhow(e))?;
+        local_skill::delete(&name).map_err(AppError::Anyhow)?;
         crate::core::installed_skill::invalidate_cache();
         security_scan::invalidate_skill_cache(&name);
         return Ok(());

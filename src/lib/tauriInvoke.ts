@@ -46,6 +46,7 @@ import type {
   SecurityScanPolicy,
   SecurityScanResult,
   ShortTextTranslationResult,
+  SkillTranslationResult,
   Skill,
   SkillCardDeck,
   SkillContent,
@@ -54,6 +55,8 @@ import type {
   SkillUpdateState,
   StorageOverview,
   SyncStateEntry,
+  TranslationReadiness,
+  TranslationSettings,
   UpdateResult,
   UserRepo,
 } from "../types";
@@ -251,15 +254,21 @@ interface TauriCommands {
   // AI
   get_ai_config: { args: Record<string, never>; result: AiConfig };
   save_ai_config: { args: { config: AiConfig }; result: void };
-  ai_translate_skill: { args: { name: string }; result: string };
-  ai_translate_skill_stream: { args: { name: string; requestId: string }; result: void };
+  get_translation_settings: { args: Record<string, never>; result: TranslationSettings };
+  save_translation_settings: { args: { settings: TranslationSettings }; result: void };
+  get_translation_readiness: { args: Record<string, never>; result: TranslationReadiness };
+  ai_translate_skill: { args: { content: string; force?: boolean; forceQuality?: boolean }; result: string };
+  ai_translate_skill_stream: {
+    args: { content: string; requestId: string; force?: boolean; forceQuality?: boolean };
+    result: SkillTranslationResult;
+  };
   get_mymemory_usage_stats: { args: Record<string, never>; result: MymemoryUsageStats };
   ai_translate_short_text_stream_with_source: {
-    args: { text: string; requestId: string };
+    args: { content: string; requestId: string; forceRefresh?: boolean; forceAi?: boolean };
     result: ShortTextTranslationResult;
   };
   ai_retranslate_short_text_stream_with_source: {
-    args: { text: string; requestId: string };
+    args: { content: string; requestId: string };
     result: ShortTextTranslationResult;
   };
   ai_summarize_skill: { args: { name: string }; result: string };

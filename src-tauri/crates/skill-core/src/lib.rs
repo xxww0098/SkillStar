@@ -16,8 +16,12 @@ pub mod source_resolver;
 
 // ── Convenience re-exports ─────────────────────────────────────────
 
-pub use discovery::{discover_skills, find_all_skill_md_files, dedupe_discovered_skills,
-    source_priority, DiscoveredSkill, PRIORITY_SKILL_DIRS};
+pub use discovery::{
+    DiscoveredSkill, PRIORITY_SKILL_DIRS, dedupe_discovered_skills, discover_skills,
+    find_all_skill_md_files, source_priority,
+};
 pub use lockfile::{LockEntry, Lockfile};
-pub use shared::{parse_skill_content, extract_skill_description, extract_github_source_from_url,
-    Skill, SkillCategory, SkillType, SkillContent};
+pub use shared::{
+    Skill, SkillCategory, SkillContent, SkillType, extract_github_source_from_url,
+    extract_skill_description, parse_skill_content,
+};

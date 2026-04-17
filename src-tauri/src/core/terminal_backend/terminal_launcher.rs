@@ -1,7 +1,5 @@
 use anyhow::{Context, Result};
 
-#[cfg(target_os = "windows")]
-use super::tmux_support::resolve_windows_bash_with_tmux;
 use super::types::LaunchScriptKind;
 
 #[cfg(target_os = "macos")]
@@ -59,7 +57,7 @@ pub(crate) fn open_script_in_terminal_with_kind(
                     .context("Failed to launch Terminal.app")?;
             }
         }
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(target_os = "linux")]
@@ -180,35 +178,9 @@ pub(crate) fn open_script_in_terminal_with_kind(
                         .context("Failed to launch terminal via cmd")?;
                 }
             }
-            LaunchScriptKind::Bash => {
-                let (bash_path, _) = resolve_windows_bash_with_tmux().ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "No tmux-capable bash runtime found. Install Git Bash/MSYS2/WSL with tmux, then ensure `bash --login -c \"tmux -V\"` works."
-                    )
-                })?;
-
-                if which::which("wt").is_ok() {
-                    tracing::info!("Detected Windows Terminal");
-                    std::process::Command::new("wt")
-                        .arg("new-tab")
-                        .arg(&bash_path)
-                        .arg("--login")
-                        .arg(&script)
-                        .spawn()
-                        .context("Failed to launch Windows Terminal")?;
-                } else {
-                    tracing::info!("Falling back to cmd.exe");
-                    std::process::Command::new("cmd")
-                        .arg("/C")
-                        .arg("start")
-                        .arg("")
-                        .arg(&bash_path)
-                        .arg("--login")
-                        .arg(&script)
-                        .spawn()
-                        .context("Failed to launch terminal via cmd")?;
-                }
-            }
+            LaunchScriptKind::Bash => anyhow::bail!(
+                "Bash launch scripts are no longer supported on Windows. Single-launch uses PowerShell instead."
+            ),
         }
 
         return Ok(());

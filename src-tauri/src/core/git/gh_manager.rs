@@ -504,7 +504,8 @@ pub fn publish_skill(
     };
 
     // Update lockfile
-    let tree_hash = crate::core::git::ops::compute_tree_hash(&skill_source_resolved).unwrap_or_default();
+    let tree_hash =
+        crate::core::git::ops::compute_tree_hash(&skill_source_resolved).unwrap_or_default();
     let lock_path = lockfile::lockfile_path();
     let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
     lf.upsert(lockfile::LockEntry {

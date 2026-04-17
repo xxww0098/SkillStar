@@ -3,9 +3,9 @@
 //! All config data lives in SkillStar's data directory (`skillstar/projects/`).
 //! Project directories receive symlinks or explicit directory copies.
 
-mod types;
-mod manifest_paths;
 mod helpers;
+mod manifest_paths;
+mod types;
 
 pub use types::{
     AmbiguousGroup, CascadeUpdateSummary, DetectedAgent, ImportResult, ImportTarget,
@@ -166,6 +166,37 @@ fn save_skills_list(name: &str, list: &SkillsList) -> Result<()> {
     Ok(())
 }
 
+fn normalize_project_agents(agents: HashMap<String, Vec<String>>) -> HashMap<String, Vec<String>> {
+    agents
+        .into_iter()
+        .filter_map(|(agent_id, skill_names)| {
+            let mut seen = HashSet::new();
+            let normalized = skill_names
+                .into_iter()
+                .filter_map(|name| {
+                    let trimmed = name.trim();
+                    if trimmed.is_empty() {
+                        return None;
+                    }
+
+                    let normalized = trimmed.to_string();
+                    if seen.insert(normalized.clone()) {
+                        Some(normalized)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            if normalized.is_empty() {
+                None
+            } else {
+                Some((agent_id, normalized))
+            }
+        })
+        .collect()
+}
+
 /// Remove a skill from every registered project's persisted metadata and
 /// project-level symlinks.
 ///
@@ -241,7 +272,8 @@ pub fn remove_skill_from_all_projects(skill_name: &str) -> Result<Vec<String>> {
 /// Only touches agent directories that appear in `skills_list.agents` or in
 /// `cleanup_agents` (agents removed from a previous config).  Agent directories
 /// not mentioned in either are left untouched, preventing cross-agent data loss
-/// from CLI-deployed or externally-managed symlinks.
+/// from CLI-deployed or externally-managed symlinks. Empty/invalid skill lists
+/// never create placeholder project folders.
 ///
 /// Returns the total number of symlinks created.
 pub fn full_sync(
@@ -283,8 +315,8 @@ pub fn full_sync(
         }
 
         let target_dir = project.join(&profile.project_skills_rel);
-        std::fs::create_dir_all(&target_dir)
-            .with_context(|| format!("failed to create skill dir: {}", target_dir.display()))?;
+        let mut prepared_target_dir = false;
+        let mut created_for_agent = 0u32;
 
         // Create new symlinks (auto-fallback to copy if symlink fails)
         for skill_name in skill_names {
@@ -292,14 +324,27 @@ pub fn full_sync(
             if !source.exists() {
                 continue;
             }
+            if !prepared_target_dir {
+                std::fs::create_dir_all(&target_dir).with_context(|| {
+                    format!("failed to create skill dir: {}", target_dir.display())
+                })?;
+                prepared_target_dir = true;
+            }
             let target = target_dir.join(skill_name);
             match deploy_skill_auto(&source, &target) {
-                Ok(()) => total += 1,
+                Ok(()) => {
+                    total += 1;
+                    created_for_agent += 1;
+                }
                 Err(err) => failures.push(format!(
                     "Failed to link '{skill_name}' for agent '{agent_id}' at {target}: {err}",
                     target = target.display()
                 )),
             }
+        }
+
+        if created_for_agent == 0 && target_dir.exists() {
+            prune_empty_dirs_upward(&target_dir, project.as_path())?;
         }
     }
 
@@ -330,6 +375,7 @@ pub fn save_and_sync(
     deploy_modes: HashMap<String, ProjectDeployMode>,
 ) -> Result<(String, u32)> {
     let entry = register_project(project_path)?;
+    let agents = normalize_project_agents(agents);
 
     // Snapshot the old config so we can compute which agents were removed.
     let old_list = load_skills_list(&entry.name);
@@ -376,9 +422,13 @@ pub fn save_skills_list_only(
 
     let profiles = agent_profile::list_profiles();
     let mut skills_list = load_skills_list(&entry.name).unwrap_or_default();
-    skills_list.agents = agents;
+    skills_list.agents = normalize_project_agents(agents);
     skills_list.updated_at = chrono::Utc::now().to_rfc3339();
-    prune_deploy_modes_for_agents(&mut skills_list.deploy_modes, &skills_list.agents, &profiles);
+    prune_deploy_modes_for_agents(
+        &mut skills_list.deploy_modes,
+        &skills_list.agents,
+        &profiles,
+    );
 
     save_skills_list(&entry.name, &skills_list)?;
 
@@ -420,6 +470,12 @@ pub fn add_skills_to_project(
         .collect();
 
     if target_agent_ids.is_empty() {
+        if !agent_ids.is_empty() {
+            return Err(anyhow::anyhow!(
+                "No valid project-level agents selected: {}",
+                agent_ids.join(", ")
+            ));
+        }
         // Fallback: prefer the profile using .agents/skills, then first available
         if let Some(fallback) = profiles
             .iter()
@@ -1145,11 +1201,11 @@ mod tests {
             full_sync(&project_path.to_string_lossy(), &second, Some(&cleanup))?;
 
             assert!(
-                !claude_link.symlink_metadata().is_ok(),
+                claude_link.symlink_metadata().is_err(),
                 "expected stale symlink to be removed after deselecting agent"
             );
             assert!(
-                !codex_link.symlink_metadata().is_ok(),
+                codex_link.symlink_metadata().is_err(),
                 "expected stale .codex symlink to be removed after deselecting agent"
             );
             assert!(
@@ -1167,6 +1223,86 @@ mod tests {
             assert!(
                 !project_path.join(".codex").exists(),
                 "expected empty .codex directory to be pruned"
+            );
+
+            Ok(())
+        })();
+
+        match previous_home {
+            Some(value) => set_env("HOME", value),
+            None => remove_env("HOME"),
+        }
+        #[cfg(windows)]
+        match previous_userprofile {
+            Some(value) => set_env("USERPROFILE", value),
+            None => remove_env("USERPROFILE"),
+        }
+        let _ = std::fs::remove_dir_all(&temp_root);
+
+        result
+    }
+
+    #[test]
+    fn save_and_sync_prunes_zero_skill_agents_without_creating_empty_dirs() -> Result<()> {
+        let _guard = env_lock();
+
+        let temp_root = make_temp_root("project-sync-empty-agent")?;
+        let previous_home = std::env::var_os("HOME");
+        set_env("HOME", temp_root.join("home"));
+        #[cfg(windows)]
+        let previous_userprofile = std::env::var_os("USERPROFILE");
+        #[cfg(windows)]
+        set_env("USERPROFILE", temp_root.join("home"));
+
+        let result = (|| -> Result<()> {
+            let hub_skill = fs_paths::hub_skills_dir().join("demo-skill");
+            std::fs::create_dir_all(&hub_skill)?;
+            std::fs::write(hub_skill.join("SKILL.md"), "description: test")?;
+
+            let project_path = temp_root.join("workspace").join("demo-project");
+            std::fs::create_dir_all(&project_path)?;
+            let project_path_str = project_path.to_string_lossy().to_string();
+
+            let initial_agents =
+                HashMap::from([("claude".to_string(), vec!["demo-skill".to_string()])]);
+            save_and_sync(&project_path_str, initial_agents, HashMap::new())?;
+
+            let claude_link = project_path.join(".claude/skills/demo-skill");
+            assert!(
+                claude_link.is_symlink(),
+                "expected initial skill deployment"
+            );
+
+            let emptied_agents = HashMap::from([
+                ("claude".to_string(), Vec::new()),
+                ("codex".to_string(), Vec::new()),
+            ]);
+            let (project_name, count) =
+                save_and_sync(&project_path_str, emptied_agents, HashMap::new())?;
+
+            assert_eq!(count, 0, "expected no skills to be synced");
+
+            let skills_list = load_skills_list(&project_name)
+                .expect("expected persisted skills list after empty sync");
+            assert!(
+                skills_list.agents.is_empty(),
+                "expected zero-skill agents to be pruned from metadata"
+            );
+            assert!(
+                claude_link.symlink_metadata().is_err(),
+                "expected prior skill deployment to be removed"
+            );
+            assert!(
+                !project_path.join(".claude/skills").exists(),
+                "expected .claude/skills to be pruned after last skill removal"
+            );
+            assert!(
+                !project_path.join(".claude").exists(),
+                "expected .claude to be pruned after last skill removal"
+            );
+            assert!(
+                !project_path.join(".codex").exists(),
+                "expected unused codex folder to never be created"
             );
 
             Ok(())
@@ -1236,7 +1372,8 @@ mod tests {
                 claude_skills.iter().any(|skill| skill == "legacy-skill"),
                 "expected imported skill to be present in project's skills list"
             );
-            let local_skill_dir = crate::core::infra::paths::local_skills_dir().join("legacy-skill");
+            let local_skill_dir =
+                crate::core::infra::paths::local_skills_dir().join("legacy-skill");
             let hub_skill_dir = fs_paths::hub_skills_dir().join("legacy-skill");
             assert!(
                 local_skill_dir.is_dir(),
@@ -1467,7 +1604,7 @@ mod tests {
                 "expected removed skill to be pruned from project metadata"
             );
             assert!(
-                !link_path.symlink_metadata().is_ok(),
+                link_path.symlink_metadata().is_err(),
                 "expected project skill symlink to be removed"
             );
             assert!(
@@ -1475,6 +1612,52 @@ mod tests {
                 "expected empty project skill directory to be pruned"
             );
 
+            Ok(())
+        })();
+
+        match previous_home {
+            Some(value) => set_env("HOME", value),
+            None => remove_env("HOME"),
+        }
+        #[cfg(windows)]
+        match previous_userprofile {
+            Some(value) => set_env("USERPROFILE", value),
+            None => remove_env("USERPROFILE"),
+        }
+        let _ = std::fs::remove_dir_all(&temp_root);
+
+        result
+    }
+
+    #[test]
+    fn add_skills_to_project_rejects_invalid_explicit_agents() -> Result<()> {
+        let _guard = env_lock();
+
+        let temp_root = make_temp_root("project-add-invalid-agent")?;
+        let previous_home = std::env::var_os("HOME");
+        set_env("HOME", temp_root.join("home"));
+        #[cfg(windows)]
+        let previous_userprofile = std::env::var_os("USERPROFILE");
+        #[cfg(windows)]
+        set_env("USERPROFILE", temp_root.join("home"));
+
+        let result = (|| -> Result<()> {
+            let hub_skill = fs_paths::hub_skills_dir().join("demo-skill");
+            std::fs::create_dir_all(&hub_skill)?;
+            std::fs::write(hub_skill.join("SKILL.md"), "description: test")?;
+
+            let project_path = temp_root.join("workspace").join("demo-project");
+            std::fs::create_dir_all(&project_path)?;
+
+            let skills = vec!["demo-skill".to_string()];
+            let agents = vec!["nonexistent-agent".to_string()];
+            let err = add_skills_to_project(&project_path.to_string_lossy(), &skills, &agents)
+                .expect_err("expected invalid explicit agent selection to fail");
+            assert!(
+                err.to_string()
+                    .contains("No valid project-level agents selected"),
+                "unexpected error: {err}"
+            );
             Ok(())
         })();
 

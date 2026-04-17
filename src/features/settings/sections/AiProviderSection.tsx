@@ -112,11 +112,12 @@ export function AiProviderSection({
         )}
       >
         <button
+          type="button"
           onClick={onToggleExpanded}
           className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer"
         >
           <span className="text-sm font-medium text-foreground">
-            {t("settings.aiConfigTitle", { defaultValue: "AI Configuration" })}
+            {t("settings.aiConfigTitle", { defaultValue: "AI Summary & Scan" })}
           </span>
           <ChevronDown
             className={cn(
@@ -140,10 +141,13 @@ export function AiProviderSection({
                 {t("settings.modelAgentsCta")}
               </Button>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3">
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">{t("settings.apiFormat")}</label>
+                <label htmlFor="ai-provider-api-format" className="text-xs text-muted-foreground block mb-1">
+                  {t("settings.apiFormat")}
+                </label>
                 <select
+                  id="ai-provider-api-format"
                   value={localAiConfig.api_format}
                   onChange={(e) => {
                     const nextFormat = e.target.value as "openai" | "anthropic" | "local";
@@ -185,32 +189,14 @@ export function AiProviderSection({
                   <option value="local">{t("settings.localModel", { defaultValue: "Local Model (Ollama)" })}</option>
                 </select>
               </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">{t("settings.translationLanguage")}</label>
-                <select
-                  value={localAiConfig.target_language}
-                  onChange={(e) => onConfigChange({ ...localAiConfig, target_language: e.target.value })}
-                  className={`${formControlClass} pr-8`}
-                >
-                  <option value="zh-CN">{t("settings.langZhCn")}</option>
-                  <option value="zh-TW">{t("settings.langZhTw")}</option>
-                  <option value="en">{t("settings.langEn")}</option>
-                  <option value="hi">{t("settings.langHi")}</option>
-                  <option value="es">{t("settings.langEs")}</option>
-                  <option value="ar">{t("settings.langAr")}</option>
-                  <option value="pt-BR">{t("settings.langPtBr")}</option>
-                  <option value="ru">{t("settings.langRu")}</option>
-                  <option value="ja">{t("settings.langJa")}</option>
-                  <option value="fr">{t("settings.langFr")}</option>
-                  <option value="de">{t("settings.langDe")}</option>
-                  <option value="ko">{t("settings.langKo")}</option>
-                </select>
-              </div>
             </div>
 
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">{t("settings.baseUrl")}</label>
+              <label htmlFor="ai-provider-base-url" className="text-xs text-muted-foreground block mb-1">
+                {t("settings.baseUrl")}
+              </label>
               <Input
+                id="ai-provider-base-url"
                 type="text"
                 value={localAiConfig.base_url}
                 onChange={(e) => onConfigChange({ ...localAiConfig, base_url: e.target.value })}
@@ -220,7 +206,7 @@ export function AiProviderSection({
             </div>
 
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">
+              <label htmlFor="ai-provider-api-key" className="text-xs text-muted-foreground block mb-1">
                 {t("settings.apiKey")}
                 {isLocalFormat && (
                   <span className="ml-1.5 text-[10px] text-muted-foreground/60">({t("common.optional")})</span>
@@ -228,6 +214,7 @@ export function AiProviderSection({
               </label>
               <div className="relative">
                 <Input
+                  id="ai-provider-api-key"
                   type={showApiKey ? "text" : "password"}
                   value={localAiConfig.api_key}
                   onChange={(e) => onConfigChange({ ...localAiConfig, api_key: e.target.value })}
@@ -245,8 +232,11 @@ export function AiProviderSection({
             </div>
 
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">{t("settings.model")}</label>
+              <label htmlFor="ai-provider-model" className="text-xs text-muted-foreground block mb-1">
+                {t("settings.model")}
+              </label>
               <Input
+                id="ai-provider-model"
                 type="text"
                 value={localAiConfig.model}
                 onChange={(e) => onConfigChange({ ...localAiConfig, model: e.target.value })}
@@ -287,46 +277,6 @@ export function AiProviderSection({
               </datalist>
             </div>
 
-            {/* ── Translation Model ─── */}
-            <div className="border-t border-border/40 pt-3">
-              <div className="flex items-center gap-1.5 mb-2.5">
-                <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-                  {t("settings.translationModel", { defaultValue: "Translation Model" })}
-                </span>
-              </div>
-              <p className="text-[10px] text-muted-foreground mb-2">
-                {t("settings.translationModelHint", {
-                  defaultValue:
-                    "Dedicated model for SKILL.md translation. Leave empty to use the model above. DeepSeek Reasoner recommended for Chinese.",
-                })}
-              </p>
-              <Input
-                type="text"
-                value={localAiConfig.translation_model ?? ""}
-                onChange={(e) =>
-                  onConfigChange({
-                    ...localAiConfig,
-                    translation_model: e.target.value || undefined,
-                  })
-                }
-                placeholder={t("settings.translationModelPlaceholder", {
-                  defaultValue: "e.g. deepseek-reasoner, o3, gpt-5.4",
-                })}
-                list="translation-model-suggestions"
-              />
-              <datalist id="translation-model-suggestions">
-                <option value="deepseek-reasoner" />
-                <option value="deepseek-chat" />
-                <option value="o3" />
-                <option value="gpt-5.4" />
-                <option value="gpt-4o" />
-                <option value="claude-sonnet-4-20250514" />
-                <option value="claude-opus-4-20250514" />
-                <option value="llama3.1:8b" />
-                <option value="qwen-plus" />
-              </datalist>
-            </div>
-
             {/* ── Context & Concurrency ─── */}
             <div className="pt-2 border-t border-border/40">
               <div className="flex items-center gap-1.5 mb-2.5">
@@ -336,11 +286,12 @@ export function AiProviderSection({
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-muted-foreground block mb-1">
+                  <label htmlFor="ai-provider-context-window" className="text-xs text-muted-foreground block mb-1">
                     {t("settings.contextWindow", { defaultValue: "Context Window" })}
                   </label>
                   <div className="flex items-center gap-2.5">
                     <Input
+                      id="ai-provider-context-window"
                       type="number"
                       min={1}
                       max={2048}
@@ -361,11 +312,12 @@ export function AiProviderSection({
                 </div>
 
                 <div>
-                  <label className="text-xs text-muted-foreground block mb-1">
+                  <label htmlFor="ai-provider-concurrency" className="text-xs text-muted-foreground block mb-1">
                     {t("settings.aiConcurrency", { defaultValue: "AI Concurrency" })}
                   </label>
                   <div className="flex items-center gap-2.5">
                     <Input
+                      id="ai-provider-concurrency"
                       type="number"
                       min={1}
                       max={20}

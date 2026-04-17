@@ -128,7 +128,7 @@ export function formatInstalls(count: number): string {
   return count.toLocaleString();
 }
 
-export type SettingsFocusTarget = "ai-provider" | "storage";
+export type SettingsFocusTarget = "ai-provider" | "translation" | "storage";
 
 /** Navigate to Settings and request focus on a specific section. */
 export function navigateToSettingsSection(target: SettingsFocusTarget) {
@@ -144,6 +144,11 @@ export function navigateToSettingsSection(target: SettingsFocusTarget) {
 /** Navigate to AI settings page via custom event */
 export function navigateToAiSettings() {
   navigateToSettingsSection("ai-provider");
+}
+
+/** Navigate to Translation Center via custom event */
+export function navigateToTranslationSettings() {
+  navigateToSettingsSection("translation");
 }
 
 type Translator = (key: string, options?: Record<string, unknown>) => string;
@@ -166,6 +171,12 @@ export function formatAiErrorMessage(error: string | null | undefined, t: Transl
   if (lower.includes("mymemory")) {
     return t("detailPanel.mymemoryUnavailable", {
       defaultValue: "MyMemory translation is unavailable right now. Please try again later.",
+    });
+  }
+
+  if (lower.includes("translation center is not ready")) {
+    return t("skillEditor.translationNotReady", {
+      defaultValue: "Translation is not ready. Connect a Fast or Quality engine in Translation Center.",
     });
   }
 

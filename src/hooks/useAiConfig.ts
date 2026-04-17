@@ -15,7 +15,6 @@ const DEFAULT_CONFIG: AiConfig = {
   chunk_char_limit: 0,
   scan_max_response_tokens: 0,
   security_scan_telemetry_enabled: false,
-  translation_model: undefined,
   openai_preset: { base_url: "", api_key: "", model: "" },
   anthropic_preset: { base_url: "", api_key: "", model: "" },
   local_preset: { base_url: "http://127.0.0.1:11434/v1", api_key: "", model: "llama3.1:8b" },

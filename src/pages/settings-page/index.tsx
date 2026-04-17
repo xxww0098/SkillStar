@@ -17,22 +17,15 @@ import {
 import { GitHubMirrorSection } from "../../features/settings/sections/GitHubMirrorSection";
 import { LanguageSection } from "../../features/settings/sections/LanguageSection";
 import { ProxySection } from "../../features/settings/sections/ProxySection";
-import { ShortTextServiceSection } from "../../features/settings/sections/ShortTextServiceSection";
 import { StorageSection } from "../../features/settings/sections/StorageSection";
+import { TranslationSection } from "../../features/settings/sections/TranslationSection";
 import { useAgentProfiles } from "../../hooks/useAgentProfiles";
 import { useAiConfig } from "../../hooks/useAiConfig";
 import { setLanguage } from "../../i18n";
 import { applyBackgroundStyle, type BackgroundStyle, readBackgroundStyle } from "../../lib/backgroundStyle";
 import { toast } from "../../lib/toast";
 import type { SettingsFocusTarget } from "../../lib/utils";
-import type {
-  AiConfig,
-  CacheCleanResult,
-  GitHubMirrorConfig,
-  MymemoryUsageStats,
-  ProxyConfig,
-  StorageOverview,
-} from "../../types";
+import type { AiConfig, CacheCleanResult, GitHubMirrorConfig, ProxyConfig, StorageOverview } from "../../types";
 
 type ForceDeleteTarget = "hub" | "cache" | "config";
 
@@ -300,7 +293,6 @@ import {
   HardDrive,
   Languages as LanguagesIcon,
   type LucideIcon,
-  MessageSquareText,
   Paintbrush,
   Sparkles,
   Terminal,
@@ -313,7 +305,7 @@ const SETTINGS_SECTIONS: { id: string; labelKey: string; icon: LucideIcon }[] = 
   { id: "settings-proxy", labelKey: "settings.networkProxy", icon: Globe },
   { id: "settings-mirror", labelKey: "settings.githubMirror", icon: Zap },
   { id: "settings-ai", labelKey: "settings.aiProvider", icon: Sparkles },
-  { id: "settings-shorttext", labelKey: "settings.shortTextServiceTitle", icon: MessageSquareText },
+  { id: "settings-translation", labelKey: "settings.translationApis", icon: Globe },
   { id: "settings-acp", labelKey: "settings.acpTitle", icon: Bot },
   { id: "settings-background", labelKey: "settings.backgroundRun", icon: EyeOff },
   { id: "settings-appearance", labelKey: "settings.backgroundStyle", icon: Paintbrush },
@@ -324,6 +316,7 @@ const SETTINGS_SECTIONS: { id: string; labelKey: string; icon: LucideIcon }[] = 
 
 const SETTINGS_FOCUS_TO_SECTION_ID: Record<SettingsFocusTarget, string> = {
   "ai-provider": "settings-ai",
+  translation: "settings-translation",
   storage: "settings-storage",
 };
 
@@ -513,7 +506,6 @@ export function Settings({
   });
 
   const [storageOverview, setStorageOverview] = useState<StorageOverview | null>(null);
-  const [mymemoryUsage, setMymemoryUsage] = useState<MymemoryUsageStats | null>(null);
   const [fetchingStorage, setFetchingStorage] = useState(false);
   const [cleaningCaches, setCleaningCaches] = useState(false);
   const [cleaningBroken, setCleaningBroken] = useState(false);
@@ -641,27 +633,9 @@ export function Settings({
     }
   }, []);
 
-  const fetchMymemoryUsage = useCallback(async () => {
-    try {
-      const usage = await invoke<MymemoryUsageStats>("get_mymemory_usage_stats");
-      setMymemoryUsage(usage);
-    } catch {
-      // ignore
-    }
-  }, []);
-
   useEffect(() => {
     fetchStorageOverview();
   }, [fetchStorageOverview]);
-
-  useEffect(() => {
-    void fetchMymemoryUsage();
-  }, [fetchMymemoryUsage]);
-
-  useEffect(() => {
-    if (!aiState.expanded) return;
-    void fetchMymemoryUsage();
-  }, [aiState.expanded, fetchMymemoryUsage]);
 
   useEffect(() => {
     invoke<boolean>("check_gh_installed")
@@ -700,7 +674,7 @@ export function Settings({
     const applyStoredFocus = () => {
       try {
         const focus = localStorage.getItem("skillstar:settings-focus");
-        if (focus === "ai-provider" || focus === "storage") {
+        if (focus === "ai-provider" || focus === "translation" || focus === "storage") {
           localStorage.removeItem("skillstar:settings-focus");
           focusSettingsSection(focus);
         }
@@ -711,7 +685,7 @@ export function Settings({
 
     const handleFocusEvent = (event: Event) => {
       const target = (event as CustomEvent<{ target?: SettingsFocusTarget }>).detail?.target;
-      if (target === "ai-provider" || target === "storage") {
+      if (target === "ai-provider" || target === "translation" || target === "storage") {
         focusSettingsSection(target);
       }
     };
@@ -1085,12 +1059,8 @@ export function Settings({
                 />
               </section>
 
-              <section id="settings-shorttext" className="scroll-mt-3">
-                <ShortTextServiceSection
-                  localAiConfig={aiState.config}
-                  mymemoryUsage={mymemoryUsage}
-                  onConfigChange={handleAiConfigChange}
-                />
+              <section id="settings-translation" className="scroll-mt-3">
+                <TranslationSection />
               </section>
 
               <section id="settings-acp" className="scroll-mt-3">

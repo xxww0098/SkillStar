@@ -746,24 +746,26 @@ fn parse_repo_skills_html(html: &str, publisher: &str, repo: &str) -> Vec<Publis
     for cap in re_json.find_iter(&normalized) {
         let json_str = cap.as_str();
         // Try direct parse
-        if let Ok(entry) = serde_json::from_str::<SkillJsonEntry>(json_str) {
-            if entry.source.to_lowercase() == source_match {
-                skills.push(PublisherRepoSkill {
-                    name: entry.name,
-                    installs: entry.installs,
-                });
-                continue;
-            }
+        if let Some(entry) = serde_json::from_str::<SkillJsonEntry>(json_str)
+            .ok()
+            .filter(|entry| entry.source.to_lowercase() == source_match)
+        {
+            skills.push(PublisherRepoSkill {
+                name: entry.name,
+                installs: entry.installs,
+            });
+            continue;
         }
         // Try unescaped
         let unescaped = json_str.replace("\\\"", "\"").replace("\\/", "/");
-        if let Ok(entry) = serde_json::from_str::<SkillJsonEntry>(&unescaped) {
-            if entry.source.to_lowercase() == source_match {
-                skills.push(PublisherRepoSkill {
-                    name: entry.name,
-                    installs: entry.installs,
-                });
-            }
+        if let Some(entry) = serde_json::from_str::<SkillJsonEntry>(&unescaped)
+            .ok()
+            .filter(|entry| entry.source.to_lowercase() == source_match)
+        {
+            skills.push(PublisherRepoSkill {
+                name: entry.name,
+                installs: entry.installs,
+            });
         }
     }
 
@@ -844,24 +846,25 @@ pub async fn get_publisher_repos(publisher_name: &str) -> Result<Vec<PublisherRe
     let publisher_lower = publisher_name.to_lowercase();
 
     // Strategy 1: official page SSR payload (complete data)
-    if let Ok(official_html) = client
+    if let Ok(html) = match client
         .get("https://skills.sh/official")
         .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         .header("Accept", "text/html,application/xhtml+xml")
         .send()
         .await
     {
-        if let Ok(html) = official_html.text().await {
-            let repos = parse_publisher_repos_from_official_payload(&html, &publisher_lower);
-            if !repos.is_empty() {
-                debug!(
-                    target: "skills_sh",
-                    count = repos.len(),
-                    publisher = %publisher_name,
-                    "parsed repos from official payload"
-                );
-                return Ok(repos);
-            }
+        Ok(official_html) => official_html.text().await,
+        Err(err) => Err(err),
+    } {
+        let repos = parse_publisher_repos_from_official_payload(&html, &publisher_lower);
+        if !repos.is_empty() {
+            debug!(
+                target: "skills_sh",
+                count = repos.len(),
+                publisher = %publisher_name,
+                "parsed repos from official payload"
+            );
+            return Ok(repos);
         }
     }
 
@@ -988,7 +991,7 @@ fn parse_publisher_repos_from_official_payload(
         .into_iter()
         .map(|e| {
             // e.repo is like "github/awesome-copilot"
-            let repo_name = e.repo.split('/').last().unwrap_or(&e.repo).to_string();
+            let repo_name = e.repo.split('/').next_back().unwrap_or(&e.repo).to_string();
             let installs_label = format_installs_label(e.total_installs);
 
             let skills: Vec<PublisherRepoSkill> = e

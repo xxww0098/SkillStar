@@ -32,11 +32,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tracing::warn;
 
-use crate::core::{
-    config::github_mirror,
-    git::ops as git_ops,
-    path_env::command_with_path,
-};
+use crate::core::{config::github_mirror, git::ops as git_ops, path_env::command_with_path};
 
 // ── Symlink Resolution Helpers ──────────────────────────────────────
 

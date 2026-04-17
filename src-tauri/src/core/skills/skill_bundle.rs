@@ -52,7 +52,8 @@ pub fn export_bundle(skill_name: &str, output_path: Option<&str>) -> Result<Path
     }
 
     let effective_dir = if crate::core::infra::fs_ops::is_link(&skill_dir) {
-        crate::core::infra::fs_ops::read_link_resolved(&skill_dir).unwrap_or_else(|_| skill_dir.clone())
+        crate::core::infra::fs_ops::read_link_resolved(&skill_dir)
+            .unwrap_or_else(|_| skill_dir.clone())
     } else {
         skill_dir.clone()
     };
@@ -289,7 +290,8 @@ pub fn export_multi_bundle(skill_names: &[String], output_path: &str) -> Result<
         }
 
         let effective_dir = if crate::core::infra::fs_ops::is_link(&skill_dir) {
-            crate::core::infra::fs_ops::read_link_resolved(&skill_dir).unwrap_or_else(|_| skill_dir.clone())
+            crate::core::infra::fs_ops::read_link_resolved(&skill_dir)
+                .unwrap_or_else(|_| skill_dir.clone())
         } else {
             skill_dir.clone()
         };

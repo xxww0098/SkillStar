@@ -6,13 +6,13 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, warn};
+use tracing::warn;
 
-use super::{AiConfig, chat_completion_deterministic, build_skill_pick_system_prompt};
 use super::constants::{
-    SKILL_PICK_MAX_CANDIDATES, SKILL_PICK_LOW_SIGNAL_MAX_CANDIDATES,
+    SKILL_PICK_LOW_SIGNAL_MAX_CANDIDATES, SKILL_PICK_MAX_CANDIDATES,
     SKILL_PICK_MAX_RECOMMENDATIONS, SKILL_PICK_ROUND_MAX_TOKENS,
 };
+use super::{AiConfig, build_skill_pick_system_prompt, chat_completion_deterministic};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillPickCandidate {
@@ -346,7 +346,9 @@ pub(super) fn parse_skill_pick_response(
     Ok(parsed)
 }
 
-pub(super) fn fallback_skill_pick(ranked: &[RankedSkillPickCandidate]) -> Vec<SkillPickRecommendation> {
+pub(super) fn fallback_skill_pick(
+    ranked: &[RankedSkillPickCandidate],
+) -> Vec<SkillPickRecommendation> {
     let mut recommendations: Vec<SkillPickRecommendation> = ranked
         .iter()
         .filter(|skill| skill.local_score > 0)

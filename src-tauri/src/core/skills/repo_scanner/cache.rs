@@ -1,10 +1,7 @@
 //! Sparse clone / fetch and cache directory layout for GitHub-backed skills.
 
 use crate::core::{
-    config::github_mirror,
-    git::ops as git_ops,
-    infra::paths,
-    path_env::command_with_path,
+    config::github_mirror, git::ops as git_ops, infra::paths, path_env::command_with_path,
     skills::discover as skill_discover,
 };
 use anyhow::{Context, Result};
@@ -128,8 +125,7 @@ fn derive_sparse_skill_dirs(all_paths: &[String]) -> Vec<String> {
         })
         .collect();
 
-    let mut canonical: std::collections::HashMap<String, String> =
-        std::collections::HashMap::new();
+    let mut canonical: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
     for dir in &skill_dirs {
         let skill_name = Path::new(dir)
@@ -175,7 +171,10 @@ fn compact_to_common_parents(dirs: &[String]) -> Vec<String> {
         if let Some(parent) = Path::new(dir).parent() {
             let parent_str = parent.to_string_lossy().to_string();
             *parent_counts.entry(parent_str.clone()).or_insert(0) += 1;
-            parent_to_dirs.entry(parent_str).or_default().push(dir.clone());
+            parent_to_dirs
+                .entry(parent_str)
+                .or_default()
+                .push(dir.clone());
         }
     }
 

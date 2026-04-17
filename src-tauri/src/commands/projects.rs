@@ -40,12 +40,9 @@ pub async fn save_and_sync_project(
     agents: HashMap<String, Vec<String>>,
     deploy_modes: Option<HashMap<String, project_manifest::ProjectDeployMode>>,
 ) -> Result<u32, AppError> {
-    let (_name, count) = project_manifest::save_and_sync(
-        &project_path,
-        agents,
-        deploy_modes.unwrap_or_default(),
-    )
-    .map_err(|e| AppError::Project(e.to_string()))?;
+    let (_name, count) =
+        project_manifest::save_and_sync(&project_path, agents, deploy_modes.unwrap_or_default())
+            .map_err(|e| AppError::Project(e.to_string()))?;
     Ok(count)
 }
 
@@ -78,9 +75,7 @@ pub async fn scan_project_skills(
 }
 
 #[tauri::command]
-pub async fn refresh_stale_project_copies(
-    project_path: String,
-) -> Result<u32, AppError> {
+pub async fn refresh_stale_project_copies(project_path: String) -> Result<u32, AppError> {
     project_manifest::refresh_stale_copies(&project_path)
         .map_err(|e| AppError::Project(e.to_string()))
 }

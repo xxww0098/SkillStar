@@ -23,10 +23,10 @@ use serde::{Deserialize, Serialize};
 pub use super::skill_discover::DiscoveredSkill;
 pub use super::source_resolver::normalize_repo_url;
 
+pub use crate::core::git::ops::find_repo_root;
 pub use cache::{cache_dir_name, clone_or_fetch_repo};
 pub use detect::detect_new_skills_in_cached_repos;
 pub use maintenance::{RepoCacheInfo, clean_unused_cache, get_cache_info};
-pub use crate::core::git::ops::find_repo_root;
 pub use ops::{
     check_repo_skill_update_local, is_repo_cached_skill, prefetch_unique_repos,
     pull_repo_skill_update, resolve_skill_repo_root,
@@ -70,8 +70,8 @@ pub struct RepoNewSkill {
 
 /// Full scan flow: normalize URL → clone/fetch → scan → save history → return results.
 pub fn scan_repo_with_mode(input: &str, full_depth: bool) -> Result<ScanResult> {
-    let (repo_url, source) =
-        crate::core::git::source_resolver::normalize_repo_url(input).context("Invalid repository URL")?;
+    let (repo_url, source) = crate::core::git::source_resolver::normalize_repo_url(input)
+        .context("Invalid repository URL")?;
 
     let repo_dir = clone_or_fetch_repo(&repo_url, &source)?;
 

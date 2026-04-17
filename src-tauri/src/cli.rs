@@ -3,12 +3,9 @@ use clap::{Parser, Subcommand};
 use crate::core::{
     ai_provider,
     git::{gh_manager, ops as git_ops},
-    lockfile,
-    project_manifest,
+    lockfile, project_manifest,
     projects::{agents as agent_profile, sync},
-    security_scan,
-    skill_install,
-    skill_pack,
+    security_scan, skill_install, skill_pack,
     terminal::config as launch_deck,
     terminal_backend,
 };
@@ -164,7 +161,7 @@ fn cmd_list() {
                 println!("No skills installed. Use 'skillstar install <url>' to add one.");
                 return;
             }
-            println!("{:<25} {:<50} {}", "NAME", "GIT URL", "TREE HASH");
+            println!("{:<25} {:<50} TREE HASH", "NAME", "GIT URL");
             println!("{}", "-".repeat(90));
             for skill in &lockfile.skills {
                 println!(
@@ -726,7 +723,7 @@ fn cmd_doctor(name: Option<&str>) {
                     if report.overall_healthy { "YES" } else { "NO" }
                 );
                 println!();
-                println!("{:<25} {:<8} {}", "CHECK", "PASSED", "DETAIL");
+                println!("{:<25} {:<8} DETAIL", "CHECK", "PASSED");
                 println!("{}", "-".repeat(60));
                 for check in &report.checks {
                     println!(
@@ -769,10 +766,7 @@ fn cmd_pack_list() {
         println!("No packs installed.");
         return;
     }
-    println!(
-        "{:<25} {:<10} {:<15} {}",
-        "NAME", "VERSION", "STATUS", "SKILLS"
-    );
+    println!("{:<25} {:<10} {:<15} SKILLS", "NAME", "VERSION", "STATUS");
     println!("{}", "-".repeat(70));
     for pack in &packs {
         let skill_names: Vec<&str> = pack.skills.iter().map(|s| s.name.as_str()).collect();

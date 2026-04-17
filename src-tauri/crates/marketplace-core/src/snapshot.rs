@@ -166,10 +166,10 @@ pub fn configure_runtime(config: SnapshotRuntimeConfig) {
             *ready = None;
         }
         if let Ok(mut guard) = SNAPSHOT_POOL.lock() {
-            if guard
+            let should_clear = guard
                 .as_ref()
-                .is_some_and(|(current_path, _)| current_path != &new_db_path)
-            {
+                .is_some_and(|(current_path, _)| current_path != &new_db_path);
+            if should_clear {
                 *guard = None;
             }
         }
@@ -227,10 +227,14 @@ fn snapshot_pool(db_path: &PathBuf) -> Result<db::DbPool> {
         .lock()
         .map_err(|_| anyhow!("Failed to lock marketplace snapshot pool state"))?;
 
-    if let Some((current_path, pool)) = guard.as_ref() {
+    if let Some(pool) = guard.as_ref().and_then(|(current_path, pool)| {
         if current_path == db_path {
-            return Ok(pool.clone());
+            Some(pool.clone())
+        } else {
+            None
         }
+    }) {
+        return Ok(pool);
     }
 
     let pool = db::create_pool(db_path, 4)?;
@@ -880,7 +884,7 @@ pub fn get_marketplace_sync_states() -> Result<Vec<SyncStateEntry>> {
     })
 }
 
-fn skill_from_snapshot_row(
+struct SnapshotSkillRow {
     source: String,
     name: String,
     git_url: String,
@@ -889,7 +893,19 @@ fn skill_from_snapshot_row(
     installs: u32,
     last_updated: Option<String>,
     rank: Option<u32>,
-) -> Skill {
+}
+
+fn skill_from_snapshot_row(row: SnapshotSkillRow) -> Skill {
+    let SnapshotSkillRow {
+        source,
+        name,
+        git_url,
+        author,
+        description,
+        installs,
+        last_updated,
+        rank,
+    } = row;
     let skill_author = author.unwrap_or_else(|| source.clone());
     let mut skill =
         Skill::from_skills_sh(name, description, installs, skill_author.clone(), git_url);
@@ -928,17 +944,18 @@ fn load_leaderboard_snapshot(conn: &Connection, scope: &str) -> Result<Vec<Skill
 
     let rows = stmt
         .query_map([scope], |row| {
-            Ok(skill_from_snapshot_row(
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
-                row.get::<_, i64>(5)?.max(0) as u32,
-                row.get(6)?,
-                row.get::<_, Option<i64>>(7)?
+            Ok(skill_from_snapshot_row(SnapshotSkillRow {
+                source: row.get(0)?,
+                name: row.get(1)?,
+                git_url: row.get(2)?,
+                author: row.get(3)?,
+                description: row.get(4)?,
+                installs: row.get::<_, i64>(5)?.max(0) as u32,
+                last_updated: row.get(6)?,
+                rank: row
+                    .get::<_, Option<i64>>(7)?
                     .map(|value| value.max(0) as u32),
-            ))
+            }))
         })
         .context("Failed to read leaderboard snapshot rows")?;
 
@@ -970,7 +987,7 @@ fn load_search_snapshot(
     query: &str,
     limit: u32,
 ) -> Result<(Vec<Skill>, Option<String>)> {
-    let limit = (limit.max(1)).min(200) as i64;
+    let limit = limit.clamp(1, 200) as i64;
     let normalized_query = query.trim().to_ascii_lowercase();
 
     if normalized_query.is_empty() {
@@ -991,16 +1008,16 @@ fn load_search_snapshot(
             .context("Failed to prepare blank search snapshot query")?;
         let rows = stmt
             .query_map([limit], |row| {
-                Ok(skill_from_snapshot_row(
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get::<_, i64>(5)?.max(0) as u32,
-                    row.get(6)?,
-                    None,
-                ))
+                Ok(skill_from_snapshot_row(SnapshotSkillRow {
+                    source: row.get(0)?,
+                    name: row.get(1)?,
+                    git_url: row.get(2)?,
+                    author: row.get(3)?,
+                    description: row.get(4)?,
+                    installs: row.get::<_, i64>(5)?.max(0) as u32,
+                    last_updated: row.get(6)?,
+                    rank: None,
+                }))
             })
             .context("Failed to read blank search snapshot rows")?;
 
@@ -1055,16 +1072,16 @@ fn load_search_snapshot(
         .query_map(
             params![fts_query, normalized_query, prefix_query, limit],
             |row| {
-                Ok(skill_from_snapshot_row(
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get::<_, i64>(5)?.max(0) as u32,
-                    row.get(6)?,
-                    None,
-                ))
+                Ok(skill_from_snapshot_row(SnapshotSkillRow {
+                    source: row.get(0)?,
+                    name: row.get(1)?,
+                    git_url: row.get(2)?,
+                    author: row.get(3)?,
+                    description: row.get(4)?,
+                    installs: row.get::<_, i64>(5)?.max(0) as u32,
+                    last_updated: row.get(6)?,
+                    rank: None,
+                }))
             },
         )
         .context("Failed to execute marketplace FTS query")?;
@@ -1172,17 +1189,18 @@ fn load_repo_skills_snapshot(conn: &Connection, source: &str) -> Result<Vec<Skil
 
     let rows = stmt
         .query_map([source], |row| {
-            Ok(skill_from_snapshot_row(
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
-                row.get::<_, i64>(5)?.max(0) as u32,
-                row.get(6)?,
-                row.get::<_, Option<i64>>(7)?
+            Ok(skill_from_snapshot_row(SnapshotSkillRow {
+                source: row.get(0)?,
+                name: row.get(1)?,
+                git_url: row.get(2)?,
+                author: row.get(3)?,
+                description: row.get(4)?,
+                installs: row.get::<_, i64>(5)?.max(0) as u32,
+                last_updated: row.get(6)?,
+                rank: row
+                    .get::<_, Option<i64>>(7)?
                     .map(|value| value.max(0) as u32),
-            ))
+            }))
         })
         .context("Failed to read repo-skill snapshot rows")?;
 
@@ -1816,7 +1834,7 @@ pub fn upsert_pack(
 
 /// Search for packs matching a query string.
 pub fn search_packs_local(query: &str, limit: u32) -> Result<Vec<MarketplacePack>> {
-    let limit = (limit.max(1)).min(50) as i64;
+    let limit = limit.clamp(1, 50) as i64;
     let normalized = query.trim().to_ascii_lowercase();
 
     if normalized.is_empty() {
@@ -1860,7 +1878,7 @@ pub fn search_packs_local(query: &str, limit: u32) -> Result<Vec<MarketplacePack
 
 /// List all known packs, ordered by installs descending.
 pub fn list_packs_local(limit: u32) -> Result<Vec<MarketplacePack>> {
-    let limit = (limit.max(1)).min(50) as i64;
+    let limit = limit.clamp(1, 50) as i64;
     with_conn(|conn| {
         let mut stmt = conn.prepare(
             "SELECT pack_key, source, name, description, skill_count,
@@ -2164,10 +2182,12 @@ async fn apply_installed_state(mut skills: Vec<Skill>) -> Vec<Skill> {
             agent_links: skill.agent_links.clone(),
         };
 
-        if let Some(source) = skill.source.as_deref() {
-            if let Some(skill_key) = build_skill_key(source, &skill.name) {
-                by_key.insert(skill_key, state.clone());
-            }
+        if let Some(skill_key) = skill
+            .source
+            .as_deref()
+            .and_then(|source| build_skill_key(source, &skill.name))
+        {
+            by_key.insert(skill_key, state.clone());
         }
         by_name.insert(skill.name.to_ascii_lowercase(), state);
     }
@@ -2507,16 +2527,16 @@ pub async fn get_repo_skills_local(source: &str) -> Result<LocalFirstResult<Vec<
                     let data = skills
                         .into_iter()
                         .map(|skill| {
-                            skill_from_snapshot_row(
-                                source.clone(),
-                                skill.name,
-                                format!("https://github.com/{source}"),
-                                Some(source.clone()),
-                                String::new(),
-                                skill.installs,
-                                Some(now_rfc3339()),
-                                None,
-                            )
+                            skill_from_snapshot_row(SnapshotSkillRow {
+                                source: source.clone(),
+                                name: skill.name,
+                                git_url: format!("https://github.com/{source}"),
+                                author: Some(source.clone()),
+                                description: String::new(),
+                                installs: skill.installs,
+                                last_updated: Some(now_rfc3339()),
+                                rank: None,
+                            })
                         })
                         .collect();
                     Ok(LocalFirstResult {
@@ -2671,16 +2691,11 @@ pub async fn ai_search_local(
     let mut loaded = load_ai_search_snapshot(&keywords, limit).await?;
     let snapshot_rows = with_conn(skill_row_count)?;
 
-    if loaded.0.is_empty() && !with_conn(any_skill_rows)? {
-        for keyword in &keywords {
-            seed_search_results(keyword, limit).await?;
-        }
-        loaded = load_ai_search_snapshot(&keywords, limit).await?;
-        snapshot_status = SnapshotStatus::Seeding;
-    } else if !keywords.is_empty()
-        && loaded.0.len() < AI_SEARCH_REMOTE_SEED_MIN_HITS
-        && snapshot_rows < AI_SEARCH_LOW_COVERAGE_ROWS
-    {
+    let should_seed = (loaded.0.is_empty() && !with_conn(any_skill_rows)?)
+        || (!keywords.is_empty()
+            && loaded.0.len() < AI_SEARCH_REMOTE_SEED_MIN_HITS
+            && snapshot_rows < AI_SEARCH_LOW_COVERAGE_ROWS);
+    if should_seed {
         for keyword in &keywords {
             seed_search_results(keyword, limit).await?;
         }

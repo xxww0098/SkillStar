@@ -86,7 +86,7 @@ fn build_http_client_inner(fingerprint: &ProxyFingerprint) -> Result<reqwest::Cl
 /// Get or lazily create the shared HTTP client.  Reuses TLS sessions and
 /// HTTP/2 connections between requests — eliminates ~100-200ms per request.
 /// The cache auto-refreshes when proxy settings change.
-pub(super) fn get_http_client() -> Result<reqwest::Client> {
+pub(crate) fn get_http_client() -> Result<reqwest::Client> {
     let fingerprint = current_proxy_fingerprint();
     let mut guard = SHARED_HTTP_CLIENT
         .lock()

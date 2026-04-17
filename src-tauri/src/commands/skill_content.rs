@@ -1,8 +1,7 @@
 use crate::core::{
     git::ops as git_ops,
     infra::error::AppError,
-    local_skill,
-    security_scan,
+    local_skill, security_scan,
     skill::{Skill, SkillContent, parse_skill_content},
 };
 
@@ -35,7 +34,7 @@ pub async fn create_local_skill_from_content(
         return Ok(());
     }
 
-    let _ = local_skill::create(&name, Some(&content)).map_err(|e| AppError::Anyhow(e))?;
+    let _ = local_skill::create(&name, Some(&content)).map_err(AppError::Anyhow)?;
     crate::core::installed_skill::invalidate_cache();
 
     Ok(())
@@ -43,14 +42,14 @@ pub async fn create_local_skill_from_content(
 
 #[tauri::command]
 pub async fn create_local_skill(name: String, content: Option<String>) -> Result<Skill, AppError> {
-    let skill = local_skill::create(&name, content.as_deref()).map_err(|e| AppError::Anyhow(e))?;
+    let skill = local_skill::create(&name, content.as_deref()).map_err(AppError::Anyhow)?;
     crate::core::installed_skill::invalidate_cache();
     Ok(skill)
 }
 
 #[tauri::command]
 pub async fn delete_local_skill(name: String) -> Result<(), AppError> {
-    local_skill::delete(&name).map_err(|e| AppError::Anyhow(e))?;
+    local_skill::delete(&name).map_err(AppError::Anyhow)?;
     crate::core::installed_skill::invalidate_cache();
     Ok(())
 }
@@ -59,7 +58,7 @@ pub async fn delete_local_skill(name: String) -> Result<(), AppError> {
 pub async fn migrate_local_skills() -> Result<u32, AppError> {
     tokio::task::spawn_blocking(|| local_skill::migrate_existing())
         .await?
-        .map_err(|e| AppError::Anyhow(e))
+        .map_err(AppError::Anyhow)
 }
 
 #[tauri::command]

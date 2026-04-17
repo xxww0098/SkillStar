@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 
+use crate::core::translation_api::config::{TranslationApiConfig, TranslationSettings};
+
 // ── Configuration ───────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -136,12 +138,6 @@ pub struct AiConfig {
     /// When enabled, SkillStar only records aggregate run stats (no skill names/content).
     #[serde(default = "default_security_scan_telemetry_enabled")]
     pub security_scan_telemetry_enabled: bool,
-    /// Dedicated model for SKILL.md and document translation.
-    /// When set, this model is used instead of `model` for all translation tasks,
-    /// enabling better translation quality (e.g. deepseek-reasoner, o3) without
-    /// affecting AI chat, summarization, or other features.
-    #[serde(default)]
-    pub translation_model: Option<String>,
     /// Saved preset for OpenAI-compatible format.
     #[serde(default)]
     pub openai_preset: FormatPreset,
@@ -151,6 +147,12 @@ pub struct AiConfig {
     /// Saved preset for Local (Ollama) format.
     #[serde(default)]
     pub local_preset: FormatPreset,
+    /// All traditional translation API keys and provider settings.
+    #[serde(default)]
+    pub translation_api: crate::core::translation_api::config::TranslationApiConfig,
+    /// Unified routing + target language settings for translation features.
+    #[serde(default)]
+    pub translation_settings: crate::core::translation_api::config::TranslationSettings,
 }
 
 fn default_context_window_k() -> u32 {
@@ -176,7 +178,6 @@ impl Default for AiConfig {
             chunk_char_limit: 0,
             scan_max_response_tokens: 0,
             security_scan_telemetry_enabled: default_security_scan_telemetry_enabled(),
-            translation_model: None,
             openai_preset: FormatPreset::default(),
             anthropic_preset: FormatPreset::default(),
             local_preset: FormatPreset {
@@ -184,6 +185,8 @@ impl Default for AiConfig {
                 model: "llama3.1:8b".to_string(),
                 ..Default::default()
             },
+            translation_api: TranslationApiConfig::default(),
+            translation_settings: TranslationSettings::default(),
         }
     }
 }

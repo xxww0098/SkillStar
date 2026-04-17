@@ -1,10 +1,9 @@
-import { Columns2, Rows2, X } from "lucide-react";
 import { memo } from "react";
 import type { ModelAppId } from "../../models/components/AppCapsuleSwitcher";
 import { AgentIcon } from "../../models/components/shared/ProviderIcon";
 import { useModelProviders, useOpenCodeNativeProviders } from "../../models/hooks/useModelProviders";
 import type { AgentCliInfo } from "../hooks/useAgentClis";
-import type { PaneNode, SplitDirection } from "../hooks/useLaunchConfig";
+import type { PaneNode } from "../hooks/useLaunchConfig";
 import { OpenCodeModelSelect } from "./OpenCodeModelSelect";
 
 const AGENT_COLORS: Record<string, string> = {
@@ -25,11 +24,7 @@ const AGENT_HEX_COLORS: Record<string, string> = {
 interface PaneCellProps {
   pane: PaneNode;
   agents: AgentCliInfo[];
-  isMulti: boolean;
-  canRemove: boolean;
-  onSplit: (paneId: string, direction: SplitDirection) => void;
   onAssign: (paneId: string, agentId: string, providerId?: string, providerName?: string, modelId?: string) => void;
-  onRemove: (paneId: string) => void;
 }
 
 const ProviderSelect = memo(function ProviderSelect({
@@ -76,15 +71,7 @@ const ProviderSelect = memo(function ProviderSelect({
   );
 });
 
-export const PaneCell = memo(function PaneCell({
-  pane,
-  agents,
-  isMulti,
-  canRemove,
-  onSplit,
-  onAssign,
-  onRemove,
-}: PaneCellProps) {
+export const PaneCell = memo(function PaneCell({ pane, agents, onAssign }: PaneCellProps) {
   const agentInfo = agents.find((a) => a.id === pane.agentId);
   const hasAgent = pane.agentId && agentInfo;
   const isOpencode = pane.agentId === "opencode";
@@ -150,41 +137,6 @@ export const PaneCell = memo(function PaneCell({
           </select>
         </div>
       )}
-
-      {/* Action buttons */}
-      <div className="absolute top-2 right-2 flex items-center gap-1 z-20 rounded-md border border-border/40 bg-background/85 backdrop-blur-sm p-0.5 shadow-sm opacity-95 hover:opacity-100 transition-opacity">
-        {isMulti && (
-          <>
-            <button
-              type="button"
-              onClick={() => onSplit(pane.id, "h")}
-              className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-              title="水平分割"
-            >
-              <Columns2 className="w-3.5 h-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => onSplit(pane.id, "v")}
-              className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-              title="垂直分割"
-            >
-              <Rows2 className="w-3.5 h-3.5" />
-            </button>
-            {canRemove && <div className="w-[1px] h-3 bg-border mx-0.5" />}
-          </>
-        )}
-        {canRemove && (
-          <button
-            type="button"
-            onClick={() => onRemove(pane.id)}
-            className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
-            title="删除面板"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        )}
-      </div>
     </div>
   );
 });

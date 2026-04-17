@@ -92,24 +92,15 @@ pub fn migrate_legacy_paths() {
         &root.join("projects.json"),
         &paths::projects_manifest_path(),
     );
-    migrate_dir(
-        &root.join("projects"),
-        &paths::state_dir().join("projects"),
-    );
+    migrate_dir(&root.join("projects"), &paths::state_dir().join("projects"));
     migrate_file(&root.join("groups.json"), &paths::groups_path());
     migrate_file(&root.join("packs.json"), &paths::packs_path());
-    migrate_file(
-        &root.join("repo_history.json"),
-        &paths::repo_history_path(),
-    );
+    migrate_file(&root.join("repo_history.json"), &paths::repo_history_path());
     migrate_file(
         &root.join("mymemory_usage.json"),
         &paths::mymemory_usage_path(),
     );
-    migrate_file(
-        &root.join(".mymemory_de"),
-        &paths::mymemory_disabled_path(),
-    );
+    migrate_file(&root.join(".mymemory_de"), &paths::mymemory_disabled_path());
     migrate_file(
         &root.join("batch_translate_pending.json"),
         &paths::batch_translate_pending_path(),

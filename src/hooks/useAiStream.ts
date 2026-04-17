@@ -2,7 +2,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AiStreamPayload } from "../types";
+import { estimateAiStreamSafetyTimeoutMs, estimateMarkdownSectionCount } from "./aiStreamTimeouts";
 import { getAiConfigCached } from "./useAiConfig";
+import { getTranslationSettingsCached } from "./useTranslationSettings";
+
+export { estimateAiStreamSafetyTimeoutMs, estimateMarkdownSectionCount };
 
 /**
  * Shared hook for AI streaming operations (translate / summarize).
@@ -20,6 +24,10 @@ interface AiStreamState {
   source: string | null;
   /** Provider that produced the translation (e.g. "ai" | "mymemory"). */
   provider: string | null;
+  providerId: string | null;
+  providerType: "translation_api" | "llm" | "fallback" | null;
+  routeMode: "fast" | "balanced" | "quality" | null;
+  fallbackHop: number | null;
 }
 
 const INITIAL_STATE: AiStreamState = {
@@ -31,6 +39,10 @@ const INITIAL_STATE: AiStreamState = {
   error: null,
   source: null,
   provider: null,
+  providerId: null,
+  providerType: null,
+  routeMode: null,
+  fallbackHop: null,
 };
 
 interface UseAiStreamOptions {
@@ -66,6 +78,16 @@ interface ExecuteAiStreamOptions {
   extraInvokeParams?: Record<string, unknown>;
 }
 
+function buildForceRefreshParams(command: string, forceRefresh: boolean): Record<string, boolean> {
+  if (!forceRefresh) return {};
+  // `ai_translate_skill(_stream)` expects `force`, while short-text streams
+  // use the camel-cased `forceRefresh` argument.
+  if (command === "ai_translate_skill" || command === "ai_translate_skill_stream") {
+    return { force: true };
+  }
+  return { forceRefresh: true };
+}
+
 export function useAiStream({
   command,
   eventChannel,
@@ -86,14 +108,20 @@ export function useAiStream({
   // Guard async setState after component unmount
   const mountedRef = useRef(true);
 
-  // Load AI config on mount (uses module-level singleton cache)
+  // Load AI readiness plus Translation Center target language on mount.
   useEffect(() => {
     (async () => {
       try {
-        const config = await getAiConfigCached();
+        const [config, translationSettings] = await Promise.all([
+          getAiConfigCached(),
+          getTranslationSettingsCached().catch(() => null),
+        ]);
         if (!mountedRef.current) return;
         setAiConfigured(config.enabled && (config.api_format === "local" || config.api_key.trim().length > 0));
-        if (config.target_language) setTargetLanguage(config.target_language);
+        const translationTarget = translationSettings?.target_language?.trim();
+        if (translationTarget) {
+          setTargetLanguage(translationTarget);
+        }
       } catch {
         if (mountedRef.current) setAiConfigured(false);
       }
@@ -162,7 +190,49 @@ export function useAiStream({
       let streamedRaw = "";
       let deltaCount = 0;
       let rafId: number | null = null;
+      let requestUnlisten: (() => void) | null = null;
       let safetyTimer: ReturnType<typeof setTimeout> | undefined;
+
+      const cleanupRequestUnlisten = () => {
+        if (!requestUnlisten) return;
+        requestUnlisten();
+        if (unlistenRef.current === requestUnlisten) {
+          unlistenRef.current = null;
+        }
+        requestUnlisten = null;
+      };
+
+      const clearSafetyTimer = () => {
+        if (safetyTimer !== undefined) {
+          clearTimeout(safetyTimer);
+          safetyTimer = undefined;
+        }
+      };
+
+      const SAFETY_TIMEOUT_MS = estimateAiStreamSafetyTimeoutMs(command, sourceContent);
+
+      const armSafetyTimer = () => {
+        clearSafetyTimer();
+        safetyTimer = setTimeout(() => {
+          if (activeIdRef.current !== requestId) return;
+          activeIdRef.current = null;
+          cleanupRequestUnlisten();
+          setState({
+            content: streamedRaw.trim() ? streamedRaw : null,
+            visible: !!streamedRaw.trim(),
+            loading: false,
+            hasDelta: deltaCount >= 2,
+            wasNonStreaming: false,
+            error: "Translation timed out",
+            source: sourceContent,
+            provider: null,
+            providerId: null,
+            providerType: null,
+            routeMode: null,
+            fallbackHop: null,
+          });
+        }, SAFETY_TIMEOUT_MS);
+      };
 
       setState((prev) => ({
         content: keepVisibleWhileLoading ? prev.content : null,
@@ -173,18 +243,22 @@ export function useAiStream({
         error: null,
         source: keepVisibleWhileLoading ? prev.source : sourceContent,
         provider: keepVisibleWhileLoading ? prev.provider : null,
+        providerId: keepVisibleWhileLoading ? prev.providerId : null,
+        providerType: keepVisibleWhileLoading ? prev.providerType : null,
+        routeMode: keepVisibleWhileLoading ? prev.routeMode : null,
+        fallbackHop: keepVisibleWhileLoading ? prev.fallbackHop : null,
       }));
 
       try {
-      const flushDelta = () => {
-        rafId = null;
-        // NOTE: We intentionally do NOT call setState here.
-        // Delta updates are accumulated internally (streamedRaw) so the final
-        // result is available immediately on completion, but the UI does NOT
-        // re-render per-delta — the completed translation is rendered all at
-        // once when the backend finishes.
-        // If the backend hangs, the safety timer recovers with streamedRaw.
-      };
+        const flushDelta = () => {
+          rafId = null;
+          // NOTE: We intentionally do NOT call setState here.
+          // Delta updates are accumulated internally (streamedRaw) so the final
+          // result is available immediately on completion, but the UI does NOT
+          // re-render per-delta — the completed translation is rendered all at
+          // once when the backend finishes.
+          // If the backend hangs, the safety timer recovers with streamedRaw.
+        };
 
         const unlisten = await listen<AiStreamPayload>(eventChannel, (event) => {
           if (activeIdRef.current !== requestId) return;
@@ -195,6 +269,7 @@ export function useAiStream({
             if (payload.delta === "\0CLEAR\0") {
               streamedRaw = "";
               deltaCount = 0;
+              armSafetyTimer();
               if (rafId == null) {
                 rafId = requestAnimationFrame(flushDelta);
               }
@@ -202,9 +277,24 @@ export function useAiStream({
             }
             deltaCount += 1;
             streamedRaw += payload.delta;
+            armSafetyTimer();
             if (rafId == null) {
               rafId = requestAnimationFrame(flushDelta);
             }
+            return;
+          }
+
+          if (payload.event === "start" && payload.message) {
+            const provider = payload.message.trim();
+            setState((prev) => ({
+              ...prev,
+              provider: provider || prev.provider,
+              providerId: payload.providerId ?? prev.providerId,
+              providerType: payload.providerType ?? prev.providerType,
+              routeMode: payload.routeMode ?? prev.routeMode,
+              fallbackHop: payload.fallbackHop ?? prev.fallbackHop,
+            }));
+            armSafetyTimer();
             return;
           }
 
@@ -212,33 +302,20 @@ export function useAiStream({
             setState((prev) => ({ ...prev, error: String(payload.message) }));
           }
         });
+        requestUnlisten = unlisten;
         unlistenRef.current = unlisten;
+        if (activeIdRef.current !== requestId) {
+          cleanupRequestUnlisten();
+          return null;
+        }
 
         // Safety timeout — if the backend hangs beyond this, force-recover the UI.
-        const SAFETY_TIMEOUT_MS = 60_000;
-        safetyTimer = setTimeout(() => {
-          if (activeIdRef.current !== requestId) return;
-          activeIdRef.current = null;
-          if (unlistenRef.current) {
-            unlistenRef.current();
-            unlistenRef.current = null;
-          }
-          setState({
-            content: streamedRaw.trim() ? streamedRaw : null,
-            visible: !!streamedRaw.trim(),
-            loading: false,
-            hasDelta: deltaCount >= 2,
-            wasNonStreaming: false,
-            error: "Translation timed out",
-            source: sourceContent,
-            provider: null,
-          });
-        }, SAFETY_TIMEOUT_MS);
+        armSafetyTimer();
 
         const invokePayload = {
           requestId,
           content: sourceContent,
-          ...(forceRefresh ? { forceRefresh: true } : {}),
+          ...buildForceRefreshParams(command, forceRefresh),
           ...extraInvokeParams,
         };
         const rawResult = await invoke(command, invokePayload);
@@ -257,7 +334,7 @@ export function useAiStream({
         if (normalizeResult) {
           finalText = normalizeResult(sourceContent, finalText);
         }
-        setState({
+        setState((prev) => ({
           content: finalText,
           visible: true,
           loading: false,
@@ -265,12 +342,16 @@ export function useAiStream({
           wasNonStreaming: deltaCount < 2,
           error: null,
           source: sourceContent,
-          provider: resultProvider,
-        });
+          provider: resultProvider ?? prev.provider,
+          providerId: prev.providerId,
+          providerType: prev.providerType,
+          routeMode: prev.routeMode,
+          fallbackHop: prev.fallbackHop,
+        }));
         return finalText;
       } catch (e) {
         if (activeIdRef.current !== requestId) return null;
-        setState({
+        setState((prev) => ({
           content: streamedRaw.trim() ? streamedRaw : null,
           visible: !!streamedRaw.trim(),
           loading: false,
@@ -278,19 +359,20 @@ export function useAiStream({
           wasNonStreaming: false,
           error: String(e),
           source: null,
-          provider: null,
-        });
+          provider: prev.provider,
+          providerId: prev.providerId,
+          providerType: prev.providerType,
+          routeMode: prev.routeMode,
+          fallbackHop: prev.fallbackHop,
+        }));
         return null;
       } finally {
-        if (safetyTimer !== undefined) clearTimeout(safetyTimer);
+        clearSafetyTimer();
         if (rafId != null) {
           cancelAnimationFrame(rafId);
           rafId = null;
         }
-        if (unlistenRef.current) {
-          unlistenRef.current();
-          unlistenRef.current = null;
-        }
+        cleanupRequestUnlisten();
         if (activeIdRef.current === requestId) {
           activeIdRef.current = null;
         }
@@ -312,6 +394,22 @@ export function useAiStream({
     };
   }, []);
 
+  const hydrate = useCallback((content: string | null, source: string | null) => {
+    setState((prev) => ({ ...prev, content, source }));
+  }, []);
+
+  const setVisible = useCallback((visible: boolean) => {
+    setState((prev) => ({ ...prev, visible }));
+  }, []);
+
+  const setContent = useCallback((content: string | null) => {
+    setState((prev) => ({ ...prev, content }));
+  }, []);
+
+  const setError = useCallback((error: string | null) => {
+    setState((prev) => ({ ...prev, error }));
+  }, []);
+
   return {
     ...state,
     aiConfigured,
@@ -319,9 +417,9 @@ export function useAiStream({
     execute,
     cancel,
     dismiss,
-    hydrate: (c: string | null, source: string | null) => setState((prev) => ({ ...prev, content: c, source })),
-    setVisible: (v: boolean) => setState((prev) => ({ ...prev, visible: v })),
-    setContent: (c: string | null) => setState((prev) => ({ ...prev, content: c })),
-    setError: (e: string | null) => setState((prev) => ({ ...prev, error: e })),
+    hydrate,
+    setVisible,
+    setContent,
+    setError,
   };
 }

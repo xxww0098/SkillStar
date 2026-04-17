@@ -10,6 +10,7 @@ import {
   inferUserHomeRoot,
   navigateToAiSettings,
   navigateToSettingsSection,
+  navigateToTranslationSettings,
   resolveSkillstarDataPath,
 } from "./utils";
 
@@ -203,6 +204,22 @@ describe("settings navigation helpers", () => {
     expect(handleFocus).toHaveBeenCalledTimes(1);
     expect((handleFocus.mock.calls[0][0] as CustomEvent<{ target?: string }>).detail).toEqual({
       target: "ai-provider",
+    });
+
+    window.removeEventListener("skillstar:settings-focus", handleFocus as EventListener);
+  });
+
+  it("should keep translation navigation focused on the translation section", () => {
+    const handleFocus = vi.fn();
+
+    window.addEventListener("skillstar:settings-focus", handleFocus as EventListener);
+
+    navigateToTranslationSettings();
+
+    expect(localStorage.getItem("skillstar:settings-focus")).toBe("translation");
+    expect(handleFocus).toHaveBeenCalledTimes(1);
+    expect((handleFocus.mock.calls[0][0] as CustomEvent<{ target?: string }>).detail).toEqual({
+      target: "translation",
     });
 
     window.removeEventListener("skillstar:settings-focus", handleFocus as EventListener);

@@ -48,7 +48,7 @@ function defaultConfig(projectName: string): LaunchConfig {
     projectName,
     mode: "single",
     singleLayout: defaultPane,
-    multiLayout: { ...defaultPane, id: "pane-2" },
+    multiLayout: { ...defaultPane },
     updatedAt: Date.now(),
   };
 }
