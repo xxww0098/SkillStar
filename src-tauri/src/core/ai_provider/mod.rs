@@ -2475,6 +2475,8 @@ mod tests {
                 cfg.api_key = "test-secret-key".to_string();
                 cfg.model = "gpt-5.4".to_string();
                 cfg.target_language = "en".to_string();
+                cfg.translation_api.deeplx_key = "deeplx-secret-key".to_string();
+                cfg.translation_api.deeplx_url = "https://example.com/deeplx/translate".to_string();
 
                 super::save_config_async(&cfg)
                     .await
@@ -2486,6 +2488,8 @@ mod tests {
                 assert_eq!(loaded.api_key, cfg.api_key);
                 assert_eq!(loaded.model, cfg.model);
                 assert_eq!(loaded.target_language, cfg.target_language);
+                assert_eq!(loaded.translation_api.deeplx_key, cfg.translation_api.deeplx_key);
+                assert_eq!(loaded.translation_api.deeplx_url, cfg.translation_api.deeplx_url);
             });
         });
     }

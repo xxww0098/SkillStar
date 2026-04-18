@@ -253,9 +253,7 @@ export function AiProviderSection({
                 className={`${formControlClass} pr-8`}
                 disabled={claudeProviders.loading || codexProviders.loading}
               >
-                <option value="">
-                  {t("settings.providerNone", { defaultValue: "None — choose from Models" })}
-                </option>
+                <option value="">{t("settings.providerNone", { defaultValue: "None — choose from Models" })}</option>
                 <option value={LOCAL_PROVIDER_VALUE}>
                   {t("settings.localOllama", { defaultValue: "Local Model (Ollama)" })}
                 </option>
@@ -304,8 +302,7 @@ export function AiProviderSection({
             ) : (
               <div className="rounded-xl border border-border bg-card/40 px-3.5 py-3 space-y-1.5">
                 <div className="text-xs font-medium text-foreground">
-                  {selectedProvider?.label ??
-                    t("settings.providerNone", { defaultValue: "None — choose from Models" })}
+                  {selectedProvider?.label ?? t("settings.providerNone", { defaultValue: "None — choose from Models" })}
                 </div>
                 <div className="text-[11px] leading-relaxed text-muted-foreground">
                   {selectedProvider

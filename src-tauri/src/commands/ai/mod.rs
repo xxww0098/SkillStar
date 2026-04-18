@@ -166,6 +166,8 @@ pub struct TranslationApiConfigPayload {
     #[serde(default)]
     pub deepl_key: String,
     #[serde(default)]
+    pub deeplx_key: String,
+    #[serde(default)]
     pub deeplx_url: String,
 }
 
@@ -177,6 +179,7 @@ impl TranslationApiConfigPayload {
     fn from_core(core: &crate::core::translation_api::config::TranslationApiConfig) -> Self {
         Self {
             deepl_key: core.deepl_key.clone(),
+            deeplx_key: core.deeplx_key.clone(),
             deeplx_url: core.deeplx_url.clone(),
         }
     }
@@ -184,6 +187,7 @@ impl TranslationApiConfigPayload {
     fn into_core(self) -> crate::core::translation_api::config::TranslationApiConfig {
         let mut core = crate::core::translation_api::config::TranslationApiConfig::default();
         core.deepl_key = self.deepl_key;
+        core.deeplx_key = self.deeplx_key;
         core.deeplx_url = self.deeplx_url;
         core
     }
@@ -329,7 +333,7 @@ pub async fn test_translation_provider(provider: String) -> Result<u64, String> 
         // Only deepl and deeplx are valid provider names now
         let provider_name = match provider.trim().to_ascii_lowercase().as_str() {
             "deepl" | "deepl_key" => "deepl",
-            "deeplx" | "deeplx_url" => "deeplx",
+            "deeplx" | "deeplx_url" | "deeplx_key" => "deeplx",
             _ => return Err(format!("Unsupported translation provider: {}", provider)),
         };
 

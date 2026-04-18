@@ -127,6 +127,8 @@ pub struct TranslationApiConfig {
     #[serde(default)]
     pub deepl_key: String,
     #[serde(default)]
+    pub deeplx_key: String,
+    #[serde(default)]
     pub deeplx_url: String,
     // Legacy fields — serde(default) absorbs old config values on load,
     // skip_serializing prevents them from being written back.
@@ -167,12 +169,14 @@ impl TranslationApiConfig {
     /// Call after loading from disk, before use.
     pub fn decrypt_keys(&mut self) {
         self.deepl_key = decrypt_api_key(&self.deepl_key);
+        self.deeplx_key = decrypt_api_key(&self.deeplx_key);
     }
 
     /// Encrypt all API keys in-place.
     /// Call before saving to disk.
     pub fn encrypt_keys(&mut self) {
         self.deepl_key = encrypt_api_key(&self.deepl_key);
+        self.deeplx_key = encrypt_api_key(&self.deeplx_key);
     }
 
     /// Check whether any API key is configured for a given provider.

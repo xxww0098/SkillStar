@@ -106,6 +106,7 @@ impl TranslationProvider for DeepLService {
 
 pub struct DeepLXService {
     url: String,
+    api_key: Option<String>,
 }
 
 impl DeepLXService {
@@ -118,7 +119,15 @@ impl DeepLXService {
                 configured.to_string()
             }
         };
-        Self { url }
+        let api_key = {
+            let configured = ai_config.translation_api.deeplx_key.trim();
+            if configured.is_empty() {
+                None
+            } else {
+                Some(configured.to_string())
+            }
+        };
+        Self { url, api_key }
     }
 }
 
@@ -154,12 +163,17 @@ impl TranslationProvider for DeepLXService {
             }
 
             let client = crate::core::ai_provider::http_client::get_http_client()?;
-            let resp = client
+            let mut request = client
                 .post(&self.url)
-                .header("Content-Type", "application/json")
-                .json(&body)
-                .send()
-                .await?;
+                .header("Content-Type", "application/json");
+
+            if let Some(api_key) = self.api_key.as_deref() {
+                request = request.header("Authorization", format!("Bearer {api_key}"));
+                request = request.header("X-API-Key", api_key);
+                request = request.header("api-key", api_key);
+            }
+
+            let resp = request.json(&body).send().await?;
 
             let status = resp.status();
             let body_text = resp.text().await?;

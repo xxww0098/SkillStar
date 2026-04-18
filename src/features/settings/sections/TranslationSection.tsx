@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { ChevronDown, Eye, EyeOff, Loader2, TestTube2 } from "lucide-react";
+import { ChevronDown, Eye, EyeOff, Globe, Languages, Loader2, Sparkles, TestTube2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ExternalAnchor } from "../../../components/ui/ExternalAnchor";
@@ -25,7 +25,7 @@ function sameTranslationSettings(a: TranslationSettings, b: TranslationSettings)
 }
 
 function sameApiConfig(a: TranslationApiConfig, b: TranslationApiConfig) {
-  return a.deepl_key === b.deepl_key && a.deeplx_url === b.deeplx_url;
+  return a.deepl_key === b.deepl_key && a.deeplx_key === b.deeplx_key && a.deeplx_url === b.deeplx_url;
 }
 
 function hasClaudeApiKey(provider: ProviderEntry) {
@@ -60,17 +60,17 @@ export function TranslationSection() {
 
   const ready = !apiLoading && !settingsLoading;
 
-  // Sync remote → local
   useEffect(() => {
     if (ready) setLocalApiConfig(apiConfig);
   }, [apiConfig, ready]);
+
   useEffect(() => {
     if (ready) setLocalSettings(settings);
   }, [settings, ready]);
 
-  // Auto-save API config
   useEffect(() => {
     if (!ready || savingApi || sameApiConfig(localApiConfig, apiConfig)) return;
+
     const timer = setTimeout(() => {
       setSavingApi(true);
       saveApiConfig(localApiConfig)
@@ -79,19 +79,20 @@ export function TranslationSection() {
           setSavedIndicator(true);
           setTimeout(() => setSavedIndicator(false), 2000);
         })
-        .catch((e) => {
-          console.error("Failed to save translation API config:", e);
+        .catch((error) => {
+          console.error("Failed to save translation API config:", error);
           toast.error(t("settings.saveTranslationApiFailed", { defaultValue: "Failed to save translation config" }));
           setLocalApiConfig(apiConfig);
         })
         .finally(() => setSavingApi(false));
     }, AUTO_SAVE_DELAY_MS);
+
     return () => clearTimeout(timer);
   }, [localApiConfig, apiConfig, ready, savingApi, saveApiConfig, refreshReadiness, t]);
 
-  // Auto-save translation settings
   useEffect(() => {
     if (!ready || savingSettingsState || sameTranslationSettings(localSettings, settings)) return;
+
     const timer = setTimeout(() => {
       setSavingSettingsState(true);
       saveSettings(localSettings)
@@ -99,19 +100,20 @@ export function TranslationSection() {
           setSavedIndicator(true);
           setTimeout(() => setSavedIndicator(false), 2000);
         })
-        .catch((e) => {
-          console.error("Failed to save translation settings:", e);
+        .catch((error) => {
+          console.error("Failed to save translation settings:", error);
           toast.error(t("settings.saveTranslationFailed", { defaultValue: "Failed to save settings" }));
           setLocalSettings(settings);
         })
         .finally(() => setSavingSettingsState(false));
     }, AUTO_SAVE_DELAY_MS);
+
     return () => clearTimeout(timer);
   }, [localSettings, settings, ready, savingSettingsState, saveSettings, t]);
 
-  // Quality provider candidates
   const qualityCandidates = useMemo(() => {
     const items: { appId: string; providerId: string; label: string; hasKey: boolean }[] = [];
+
     for (const provider of Object.values(claudeProviders.providers)) {
       items.push({
         appId: "claude",
@@ -120,6 +122,7 @@ export function TranslationSection() {
         hasKey: hasClaudeApiKey(provider),
       });
     }
+
     for (const provider of Object.values(codexProviders.providers)) {
       items.push({
         appId: "codex",
@@ -128,19 +131,56 @@ export function TranslationSection() {
         hasKey: hasCodexApiKey(provider),
       });
     }
+
     return items;
   }, [claudeProviders.providers, codexProviders.providers]);
 
+  const languageOptions = useMemo(
+    () => [
+      { value: "zh-CN", emoji: "🇨🇳", label: t("settings.langZhCn", { defaultValue: "Chinese (Simplified)" }) },
+      { value: "zh-TW", emoji: "繁", label: t("settings.langZhTw", { defaultValue: "Chinese (Traditional)" }) },
+      { value: "en", emoji: "🇺🇸", label: t("settings.langEn", { defaultValue: "English" }) },
+      { value: "ja", emoji: "🇯🇵", label: t("settings.langJa", { defaultValue: "Japanese" }) },
+      { value: "ko", emoji: "🇰🇷", label: t("settings.langKo", { defaultValue: "Korean" }) },
+      { value: "fr", emoji: "🇫🇷", label: t("settings.langFr", { defaultValue: "French" }) },
+      { value: "de", emoji: "🇩🇪", label: t("settings.langDe", { defaultValue: "German" }) },
+      { value: "es", emoji: "🇪🇸", label: t("settings.langEs", { defaultValue: "Spanish" }) },
+      { value: "ru", emoji: "🇷🇺", label: t("settings.langRu", { defaultValue: "Russian" }) },
+    ],
+    [t],
+  );
+
+  const selectedLanguage =
+    languageOptions.find((option) => option.value === localSettings.target_language) ?? languageOptions[0];
   const selectedQualityId = localSettings.quality_provider_ref
     ? `${localSettings.quality_provider_ref.app_id}:${localSettings.quality_provider_ref.provider_id}`
     : "";
+  const qualityTestKey = selectedQualityId ? `quality:${selectedQualityId}` : null;
+  const selectedQualityCandidate = qualityCandidates.find(
+    (candidate) => `${candidate.appId}:${candidate.providerId}` === selectedQualityId,
+  );
+  const hasQualityProvider = qualityCandidates.some((candidate) => candidate.hasKey);
+  const translationStatus = readiness.ready
+    ? readiness.quality_ready
+      ? t("settings.translationReady", { defaultValue: "DeepL/DeepLX + Quality LLM ready" })
+      : t("settings.translationBasicReady", { defaultValue: "DeepL/DeepLX ready (no quality LLM)" })
+    : t("settings.translationNotReady", { defaultValue: "Not configured" });
+  const readinessBadgeLabel = readiness.quality_ready
+    ? t("settings.qualityReady", { defaultValue: "Quality Ready" })
+    : readiness.ready
+      ? t("settings.instantReady", { defaultValue: "Instant Ready" })
+      : t("settings.translationNotReady", { defaultValue: "Not configured" });
+  const isSaving = savingApi || savingSettingsState;
 
   const handleQualityChange = (value: string) => {
     if (!value) {
       setLocalSettings({ ...localSettings, quality_provider_ref: null });
       return;
     }
+
     const [appId, providerId] = value.split(":");
+    if (!appId || !providerId) return;
+
     setLocalSettings({
       ...localSettings,
       quality_provider_ref: { app_id: appId, provider_id: providerId },
@@ -150,273 +190,387 @@ export function TranslationSection() {
   const handleTest = async (target: string) => {
     setTestingTarget(target);
     try {
+      if (!sameApiConfig(localApiConfig, apiConfig)) {
+        setSavingApi(true);
+        try {
+          await saveApiConfig(localApiConfig);
+          await refreshReadiness();
+          setSavedIndicator(true);
+          setTimeout(() => setSavedIndicator(false), 2000);
+        } finally {
+          setSavingApi(false);
+        }
+      }
+
       const latency = await invoke<number>("test_translation_provider", { provider: target });
       setTestResults((prev) => ({ ...prev, [target]: { ok: true, latency, error: null } }));
-    } catch (e) {
-      setTestResults((prev) => ({ ...prev, [target]: { ok: false, latency: null, error: String(e) } }));
+    } catch (error) {
+      setTestResults((prev) => ({ ...prev, [target]: { ok: false, latency: null, error: String(error) } }));
     } finally {
       setTestingTarget(null);
     }
   };
 
   const formControlClass =
-    "flex h-9 rounded-xl border border-input-border bg-input backdrop-blur-sm px-3 text-sm text-foreground shadow-sm transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:border-primary/60";
-  const labelClass = "text-xs font-medium text-muted-foreground mb-1.5 block";
+    "flex h-9 w-full rounded-xl border border-input-border bg-input backdrop-blur-sm px-3 text-sm text-foreground shadow-sm transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:border-primary/60";
+  const sectionCardClass = "rounded-xl border border-border bg-card/40 px-4 py-4 space-y-3";
+  const providerPanelClass = "rounded-xl border border-border/70 bg-background/30 px-3.5 py-3 space-y-3";
+  const actionIconButtonClass =
+    "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-border bg-card/70 text-muted-foreground transition-colors hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-40";
+  const labelClass = "block text-xs text-muted-foreground";
 
   if (!ready) return null;
 
   return (
-    <section id="settings-translation">
-      {/* Header */}
-      <button
-        type="button"
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between gap-3 rounded-2xl border border-border bg-card px-5 py-4 cursor-pointer hover:bg-muted/30 transition-colors"
-      >
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0 border border-primary/20">
-            <span className="text-primary text-base">🌐</span>
+    <section>
+      <div className="mb-3 flex items-center justify-between gap-3 px-1">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-sky-500/20 bg-sky-500/10">
+            <Languages className="h-4 w-4 text-sky-400" />
           </div>
-          <div className="text-left min-w-0">
-            <div className="text-sm font-semibold text-foreground">
-              {t("settings.translationApis", { defaultValue: "Translation Center" })}
-            </div>
-            <div className="text-[11px] text-muted-foreground mt-0.5">
-              {readiness.ready
-                ? readiness.quality_ready
-                  ? t("settings.translationReady", { defaultValue: "DeepL/DeepLX + Quality LLM ready" })
-                  : t("settings.translationBasicReady", { defaultValue: "DeepL/DeepLX ready (no quality LLM)" })
-                : t("settings.translationNotReady", { defaultValue: "Not configured" })}
-              {savedIndicator && (
-                <span className="ml-2 text-green-500">{t("settings.saved", { defaultValue: "✓ Saved" })}</span>
-              )}
-            </div>
-          </div>
+          <h2 className="truncate text-sm font-semibold tracking-tight text-foreground">
+            {t("settings.translationCenterTitle", { defaultValue: "Translation Center" })}
+          </h2>
         </div>
-        <ChevronDown
-          className={cn("w-4 h-4 text-muted-foreground transition-transform duration-200", expanded && "rotate-180")}
-        />
-      </button>
 
-      {expanded && (
-        <div className="mt-3 space-y-4 px-1">
+        <div className="flex shrink-0 items-center gap-2">
+          {isSaving ? <span className="text-xs text-muted-foreground">{t("common.saving")}</span> : null}
+          {!isSaving && savedIndicator ? <span className="text-xs text-success">{t("common.saved")}</span> : null}
+          <span
+            className={cn(
+              "rounded-md border px-2 py-0.5 text-[10px] font-medium",
+              readiness.quality_ready
+                ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
+                : readiness.ready
+                  ? "border-sky-500/25 bg-sky-500/10 text-sky-400"
+                  : "border-amber-500/25 bg-amber-500/10 text-amber-400",
+            )}
+          >
+            {readinessBadgeLabel}
+          </span>
+        </div>
+      </div>
 
-
-          {/* ── Target Language ────────────────────────────────────── */}
-          <div className="rounded-xl border border-border bg-card/50 p-4 space-y-3">
-            <div className="text-xs font-semibold text-foreground">
-              {t("settings.targetLanguage", { defaultValue: "Target Language" })}
-              <span className="ml-2 text-muted-foreground font-normal">
-                {t("settings.translationTargetLanguageHint", {
-                  defaultValue: "Target language for all AI translations.",
-                })}
-              </span>
+      <div className="overflow-hidden rounded-xl border border-border bg-card transition-colors">
+        <button
+          type="button"
+          onClick={() => setExpanded((prev) => !prev)}
+          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/30 cursor-pointer"
+        >
+          <div className="min-w-0 flex-1">
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-foreground">
+                {t("settings.translationApiTitle", { defaultValue: "Translation API Configuration" })}
+              </div>
+              <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                {selectedLanguage.label} · {translationStatus}
+              </div>
             </div>
+          </div>
 
-            <div>
+          <ChevronDown
+            className={cn(
+              "h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200",
+              !expanded && "-rotate-90",
+            )}
+          />
+        </button>
+
+        {expanded ? (
+          <div className="space-y-3 border-t border-border px-4 pb-4 pt-1">
+            <div className={sectionCardClass}>
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-teal-500/20 bg-teal-500/10">
+                  <Languages className="h-4 w-4 text-teal-400" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-foreground">
+                    {t("settings.targetLanguage", { defaultValue: "Target Language" })}
+                  </div>
+                  <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                    {t("settings.translationTargetLanguageHint", {
+                      defaultValue: "Target language for all AI translations.",
+                    })}
+                  </p>
+                </div>
+              </div>
+
               <select
+                id="translation-target-language"
                 value={localSettings.target_language}
-                onChange={(e) => setLocalSettings({ ...localSettings, target_language: e.target.value })}
-                className={cn(formControlClass, "w-full")}
+                onChange={(event) => setLocalSettings({ ...localSettings, target_language: event.target.value })}
+                className={cn(formControlClass, "pr-8")}
               >
-                <option value="zh-CN">🇨🇳 {t("settings.langZhCn", { defaultValue: "Chinese (Simplified)" })}</option>
-                <option value="zh-TW">🇹🇼 {t("settings.langZhTw", { defaultValue: "Chinese (Traditional)" })}</option>
-                <option value="en">🇺🇸 {t("settings.langEn", { defaultValue: "English" })}</option>
-                <option value="ja">🇯🇵 {t("settings.langJa", { defaultValue: "Japanese" })}</option>
-                <option value="ko">🇰🇷 {t("settings.langKo", { defaultValue: "Korean" })}</option>
-                <option value="fr">🇫🇷 {t("settings.langFr", { defaultValue: "French" })}</option>
-                <option value="de">🇩🇪 {t("settings.langDe", { defaultValue: "German" })}</option>
-                <option value="es">🇪🇸 {t("settings.langEs", { defaultValue: "Spanish" })}</option>
-                <option value="ru">🇷🇺 {t("settings.langRu", { defaultValue: "Russian" })}</option>
+                {languageOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.emoji} {option.label}
+                  </option>
+                ))}
               </select>
             </div>
-          </div>
 
-          {/* ── DeepL Key ────────────────────────────────────────── */}
-          <div className="rounded-xl border border-border bg-card/50 p-4 space-y-3">
-            <div className="text-xs font-semibold text-foreground">
-              DeepL
-              <span className="ml-2 text-muted-foreground font-normal">
-                {t("settings.deeplHint", { defaultValue: "Official API — best quality for traditional translation" })}
-              </span>
-            </div>
-
-            <div>
-              <label className={labelClass}>{t("settings.deeplKey", { defaultValue: "API Key" })}</label>
-              <div className="flex items-center gap-2">
-                <Input
-                  type={showSecrets ? "text" : "password"}
-                  value={localApiConfig.deepl_key}
-                  onChange={(e) => setLocalApiConfig({ ...localApiConfig, deepl_key: e.target.value })}
-                  placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx"
-                  className={formControlClass}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowSecrets(!showSecrets)}
-                  className="w-9 h-9 flex items-center justify-center rounded-xl border border-border hover:bg-muted/50 text-muted-foreground cursor-pointer shrink-0"
-                >
-                  {showSecrets ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleTest("deepl")}
-                  disabled={!!testingTarget || !localApiConfig.deepl_key.trim()}
-                  className="w-9 h-9 flex items-center justify-center rounded-xl border border-border hover:bg-muted/50 text-muted-foreground cursor-pointer shrink-0 disabled:opacity-40"
-                >
-                  {testingTarget === "deepl" ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <TestTube2 className="w-4 h-4" />
-                  )}
-                </button>
-              </div>
-              {testResults.deepl && (
-                <div className={cn("text-[10px] mt-1", testResults.deepl.ok ? "text-green-500" : "text-red-400")}>
-                  {testResults.deepl.ok ? `✓ ${testResults.deepl.latency}ms` : `✗ ${testResults.deepl.error}`}
+            <div className={sectionCardClass}>
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-sky-500/20 bg-sky-500/10">
+                  <Globe className="h-4 w-4 text-sky-400" />
                 </div>
-              )}
-            </div>
-          </div>
-
-          {/* ── DeepLX URL ───────────────────────────────────────── */}
-          <div className="rounded-xl border border-border bg-card/50 p-4 space-y-3">
-            <div className="text-xs font-semibold text-foreground">
-              DeepLX
-              <span className="ml-2 text-muted-foreground font-normal">
-                <ExternalAnchor
-                  href="https://connect.linux.do"
-                  className="underline decoration-muted-foreground/40 underline-offset-4 transition-colors hover:text-foreground"
-                >
-                  {t("settings.deeplxCommunityEndpoint", { defaultValue: "Free community endpoint" })}
-                </ExternalAnchor>
-                {" — "}
-                {t("settings.deeplxHintSuffix", { defaultValue: "always available as fallback" })}
-              </span>
-            </div>
-
-            <div>
-              <label className={labelClass}>
-                {t("settings.deeplxUrl", { defaultValue: "Endpoint URL (optional)" })}
-              </label>
-              <div className="flex items-center gap-2">
-                <Input
-                  type="text"
-                  value={localApiConfig.deeplx_url}
-                  onChange={(e) => setLocalApiConfig({ ...localApiConfig, deeplx_url: e.target.value })}
-                  placeholder="https://api.deeplx.org/translate"
-                  className={formControlClass}
-                />
-                <button
-                  type="button"
-                  onClick={() => handleTest("deeplx")}
-                  disabled={!!testingTarget}
-                  className="w-9 h-9 flex items-center justify-center rounded-xl border border-border hover:bg-muted/50 text-muted-foreground cursor-pointer shrink-0 disabled:opacity-40"
-                >
-                  {testingTarget === "deeplx" ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <TestTube2 className="w-4 h-4" />
-                  )}
-                </button>
-              </div>
-              {testResults.deeplx && (
-                <div className={cn("text-[10px] mt-1", testResults.deeplx.ok ? "text-green-500" : "text-red-400")}>
-                  {testResults.deeplx.ok ? `✓ ${testResults.deeplx.latency}ms` : `✗ ${testResults.deeplx.error}`}
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-foreground">
+                    {t("settings.fastProviderCredentials", { defaultValue: "Fast Engine Credentials" })}
+                  </div>
+                  <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                    {t("settings.fastProviderCredentialsHint", {
+                      defaultValue:
+                        "Manage only classic translation API credentials here. Quality accounts stay in Models.",
+                    })}
+                  </p>
                 </div>
-              )}
-            </div>
-          </div>
+              </div>
 
-          {/* ── Quality LLM Provider ─────────────────────────────── */}
-          <div className="rounded-xl border border-border bg-card/50 p-4 space-y-3">
-            <div className="text-xs font-semibold text-foreground">
-              {t("settings.qualityEngine", { defaultValue: "Quality Engine (SKILL.md)" })}
-              <span className="ml-2 text-muted-foreground font-normal">
-                {t("settings.qualityEngineHint", {
-                  defaultValue: "Uses a Models provider for AI-powered Markdown translation",
-                })}
-              </span>
-            </div>
+              <div className={providerPanelClass}>
+                <div className="space-y-1">
+                  <div className="text-xs font-medium text-foreground">DeepL</div>
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    {t("settings.deeplHint", {
+                      defaultValue: "Official API — best quality for traditional translation",
+                    })}
+                  </p>
+                </div>
 
-            <div>
-              <label className={labelClass}>{t("settings.qualityProvider", { defaultValue: "Provider" })}</label>
-              <div className="flex items-center gap-2">
-                <select
-                  value={selectedQualityId}
-                  onChange={(e) => handleQualityChange(e.target.value)}
-                  className={`${formControlClass} flex-1`}
-                >
-                  <option value="">
-                    {t("settings.qualityProviderNone", { defaultValue: "None — use DeepL/DeepLX for SKILL.md" })}
-                  </option>
-                  {qualityCandidates.map((candidate) => (
-                    <option
-                      key={`${candidate.appId}:${candidate.providerId}`}
-                      value={`${candidate.appId}:${candidate.providerId}`}
-                      disabled={!candidate.hasKey}
+                <div className="space-y-1.5">
+                  <label htmlFor="translation-deepl-key" className={labelClass}>
+                    {t("settings.deeplKey", { defaultValue: "API Key" })}
+                  </label>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Input
+                      id="translation-deepl-key"
+                      type={showSecrets ? "text" : "password"}
+                      value={localApiConfig.deepl_key}
+                      onChange={(event) => setLocalApiConfig({ ...localApiConfig, deepl_key: event.target.value })}
+                      placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx"
+                      className="font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSecrets((prev) => !prev)}
+                      className={actionIconButtonClass}
+                      aria-label={showSecrets ? t("common.hide") : t("settings.showSecrets", { defaultValue: "Show" })}
                     >
-                      {candidate.label}
-                      {!candidate.hasKey ? ` (${t("settings.noApiKey", { defaultValue: "no key" })})` : ""}
-                    </option>
-                  ))}
-                </select>
-                {selectedQualityId && (
-                  <button
-                    type="button"
-                    onClick={() => handleTest(`quality:${selectedQualityId}`)}
-                    disabled={!!testingTarget}
-                    className="w-9 h-9 flex items-center justify-center rounded-xl border border-border hover:bg-muted/50 text-muted-foreground cursor-pointer shrink-0 disabled:opacity-40"
-                  >
-                    {testingTarget?.startsWith("quality:") ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <TestTube2 className="w-4 h-4" />
-                    )}
-                  </button>
-                )}
-              </div>
-              {testResults[`quality:${selectedQualityId}`] && (
-                <div
-                  className={cn(
-                    "text-[10px] mt-1",
-                    testResults[`quality:${selectedQualityId}`].ok ? "text-green-500" : "text-red-400",
-                  )}
-                >
-                  {testResults[`quality:${selectedQualityId}`].ok
-                    ? `✓ ${testResults[`quality:${selectedQualityId}`].latency}ms`
-                    : `✗ ${testResults[`quality:${selectedQualityId}`].error}`}
+                      {showSecrets ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleTest("deepl")}
+                      disabled={!!testingTarget || !localApiConfig.deepl_key.trim()}
+                      className={actionIconButtonClass}
+                      aria-label={t("settings.testConnection", { defaultValue: "Test Connection" })}
+                    >
+                      {testingTarget === "deepl" ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <TestTube2 className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
+                  {testResults.deepl ? (
+                    <div className={cn("text-[10px]", testResults.deepl.ok ? "text-success" : "text-destructive")}>
+                      {testResults.deepl.ok ? `✓ ${testResults.deepl.latency}ms` : `✗ ${testResults.deepl.error}`}
+                    </div>
+                  ) : null}
                 </div>
-              )}
-            </div>
-          </div>
+              </div>
 
-          {/* Route explanation */}
-          <div className="rounded-xl border border-dashed border-border/60 bg-muted/20 px-4 py-3 text-[11px] text-muted-foreground space-y-1">
-            <div className="font-medium text-foreground/70 mb-1">
-              {t("settings.routeExplanationTitle", { defaultValue: "How translation routes work" })}
+              <div className={providerPanelClass}>
+                <div className="space-y-1">
+                  <div className="text-xs font-medium text-foreground">DeepLX</div>
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    <ExternalAnchor
+                      href="https://connect.linux.do/dash/deeplx"
+                      className="underline decoration-muted-foreground/40 underline-offset-4 transition-colors hover:text-foreground"
+                    >
+                      {t("settings.deeplxCommunityEndpoint", { defaultValue: "Free community endpoint" })}
+                    </ExternalAnchor>
+                    {" · "}
+                    {t("settings.deeplxHintSuffix", { defaultValue: "always available as fallback" })}
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label htmlFor="translation-deeplx-url" className={labelClass}>
+                    {t("settings.deeplxUrl", { defaultValue: "Endpoint URL" })}
+                  </label>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Input
+                      id="translation-deeplx-url"
+                      type="text"
+                      value={localApiConfig.deeplx_url}
+                      onChange={(event) => setLocalApiConfig({ ...localApiConfig, deeplx_url: event.target.value })}
+                      placeholder="https://api.deeplx.org/translate"
+                      className="font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleTest("deeplx")}
+                      disabled={!!testingTarget}
+                      className={actionIconButtonClass}
+                      aria-label={t("settings.testConnection", { defaultValue: "Test Connection" })}
+                    >
+                      {testingTarget === "deeplx" ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <TestTube2 className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
+                  {testResults.deeplx ? (
+                    <div className={cn("text-[10px]", testResults.deeplx.ok ? "text-success" : "text-destructive")}>
+                      {testResults.deeplx.ok ? `✓ ${testResults.deeplx.latency}ms` : `✗ ${testResults.deeplx.error}`}
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="space-y-1.5">
+                  <label htmlFor="translation-deeplx-key" className={labelClass}>
+                    {t("settings.apiKey", { defaultValue: "API Key" })} ({t("common.optional")})
+                  </label>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Input
+                      id="translation-deeplx-key"
+                      type={showSecrets ? "text" : "password"}
+                      value={localApiConfig.deeplx_key}
+                      onChange={(event) => setLocalApiConfig({ ...localApiConfig, deeplx_key: event.target.value })}
+                      placeholder={t("settings.deeplxKeyPlaceholder", {
+                        defaultValue: "Optional auth key or token for self-hosted DeepLX nodes",
+                      })}
+                      className="font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSecrets((prev) => !prev)}
+                      className={actionIconButtonClass}
+                      aria-label={showSecrets ? t("common.hide") : t("settings.showSecrets", { defaultValue: "Show" })}
+                    >
+                      {showSecrets ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div>
-              •{" "}
-              {t("settings.routeShortText", {
-                defaultValue: "Short text (descriptions): DeepL → DeepLX",
-              })}
+
+            <div className={sectionCardClass}>
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-emerald-500/20 bg-emerald-500/10">
+                  <Sparkles className="h-4 w-4 text-emerald-400" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-foreground">
+                    {t("settings.qualityEngine", { defaultValue: "Quality Engine (SKILL.md)" })}
+                  </div>
+                  <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                    {t("settings.qualityEngineHint", {
+                      defaultValue: "Uses a Models provider for AI-powered Markdown translation",
+                    })}
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label htmlFor="translation-quality-provider" className={labelClass}>
+                  {t("settings.qualityProvider", { defaultValue: "Provider" })}
+                </label>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <select
+                    id="translation-quality-provider"
+                    value={selectedQualityId}
+                    onChange={(event) => handleQualityChange(event.target.value)}
+                    className={cn(formControlClass, "pr-8")}
+                  >
+                    <option value="">
+                      {t("settings.qualityProviderNone", { defaultValue: "None — use DeepL/DeepLX for SKILL.md" })}
+                    </option>
+                    {qualityCandidates.map((candidate) => (
+                      <option
+                        key={`${candidate.appId}:${candidate.providerId}`}
+                        value={`${candidate.appId}:${candidate.providerId}`}
+                        disabled={!candidate.hasKey}
+                      >
+                        {candidate.label}
+                        {!candidate.hasKey ? ` (${t("settings.noApiKey", { defaultValue: "no key" })})` : ""}
+                      </option>
+                    ))}
+                  </select>
+
+                  {qualityTestKey ? (
+                    <button
+                      type="button"
+                      onClick={() => handleTest(qualityTestKey)}
+                      disabled={!!testingTarget}
+                      className={actionIconButtonClass}
+                      aria-label={t("settings.testConnection", { defaultValue: "Test Connection" })}
+                    >
+                      {testingTarget === qualityTestKey ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <TestTube2 className="h-4 w-4" />
+                      )}
+                    </button>
+                  ) : null}
+                </div>
+
+                {qualityTestKey && testResults[qualityTestKey] ? (
+                  <div
+                    className={cn("text-[10px]", testResults[qualityTestKey].ok ? "text-success" : "text-destructive")}
+                  >
+                    {testResults[qualityTestKey].ok
+                      ? `✓ ${testResults[qualityTestKey].latency}ms`
+                      : `✗ ${testResults[qualityTestKey].error}`}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="rounded-xl border border-border bg-card/40 px-3.5 py-3 space-y-1.5">
+                <div className="text-xs font-medium text-foreground">
+                  {selectedQualityCandidate?.label ??
+                    t("settings.qualityProviderNone", { defaultValue: "None — use DeepL/DeepLX for SKILL.md" })}
+                </div>
+                <div className="text-[11px] leading-relaxed text-muted-foreground">
+                  {selectedQualityCandidate
+                    ? t("settings.qualityEngineCopy", {
+                        defaultValue:
+                          "Used for Markdown fidelity, terminology consistency, and high-quality retranslation. Reuses a provider from Models.",
+                      })
+                    : hasQualityProvider
+                      ? t("settings.qualityEngineFastModeHint", {
+                          defaultValue:
+                            "Leaving this empty does not affect normal translation. Only high-quality retranslate depends on it.",
+                        })
+                      : t("settings.noQualityProviders", { defaultValue: "No Models providers connected yet" })}
+                </div>
+              </div>
             </div>
-            <div>
-              •{" "}
-              {t("settings.routeMarkdown", {
-                defaultValue: "SKILL.md: Quality LLM (if set) → DeepL → DeepLX",
-              })}
-            </div>
-            <div>
-              •{" "}
-              {t("settings.routeFallback", {
-                defaultValue: "DeepLX is always available as a free fallback.",
-              })}
+
+            <div className="rounded-xl border border-dashed border-border/60 bg-muted/20 px-4 py-3">
+              <div className="text-xs font-medium text-foreground">
+                {t("settings.routeExplanationTitle", { defaultValue: "How translation routes work" })}
+              </div>
+              <div className="mt-2 space-y-1 text-[11px] leading-relaxed text-muted-foreground">
+                <div>
+                  • {t("settings.routeShortText", { defaultValue: "Short text (descriptions): DeepL → DeepLX → MyMemory" })}
+                </div>
+                <div>
+                  •{" "}
+                  {t("settings.routeMarkdown", {
+                    defaultValue: "SKILL.md: Quality LLM (if set) → DeepL → DeepLX",
+                  })}
+                </div>
+                <div>
+                  • {t("settings.routeFallback", { defaultValue: "DeepLX is always available. MyMemory is the final short text fallback." })}
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        ) : null}
+      </div>
     </section>
   );
 }

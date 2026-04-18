@@ -386,6 +386,7 @@ export interface TranslationProviderSettings {
 
 export interface TranslationApiConfig {
   deepl_key: string;
+  deeplx_key: string;
   deeplx_url: string;
 }
 

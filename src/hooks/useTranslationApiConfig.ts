@@ -4,6 +4,7 @@ import type { TranslationApiConfig } from "../types";
 
 const DEFAULT_CONFIG: TranslationApiConfig = {
   deepl_key: "",
+  deeplx_key: "",
   deeplx_url: "",
 };
 
