@@ -2,27 +2,10 @@
 
 //! # Translation API Integration
 //!
-//! Unified translation service supporting:
-//! - Traditional APIs: DeepL, DeepLX, Google Translate, Azure Translate, GTX
-//! - AI LLM Providers: DeepSeek, Claude, OpenAI, Gemini, Perplexity,
-//!   Azure OpenAI, SiliconFlow, Groq, OpenRouter, Nvidia NIM, Custom LLM
-//!
-//! ## Architecture
-//!
-//! ```
-//! TranslationServiceFactory ──creates──> dyn TranslationProvider
-//!                                              │
-//!                           ┌─────────────────┼─────────────────┐
-//!                      Traditional          LLM (OpenAI compat)    LLM (Anthropic)
-//!                           │                      │                    │
-//!                        DeepL               DeepSeek               Claude
-//!                     Google                  Perplexity            Gemini
-//!                      Azure                  Groq                  (native)
-//!                       GTX                    OpenRouter
-//!                                            Siliconflow
-//!                                             Nvidia
-//!                                          AzureOpenAI
-//! ```
+//! Simplified translation service supporting:
+//! - DeepL (paid API with free tier)
+//! - DeepLX (community free endpoint)
+//! - Quality LLM via Models provider reference (for SKILL.md translation)
 
 pub mod config;
 pub mod markdown;
@@ -79,50 +62,14 @@ impl From<anyhow::Error> for TranslationError {
 
 // ── Provider Names ─────────────────────────────────────────────────
 
-/// All supported translation provider identifiers.
-/// Used for UI selection and factory lookup.
+/// Supported translation provider identifiers.
 pub const TRADITIONAL_PROVIDERS: &[&str] = &[
     "deepl",  // DeepL Pro/Free
     "deeplx", // DeepLX free endpoint
-    "google", // Google Translate v2
-    "azure",  // Azure Translator v3
-    "gtx",    // Google Translate AJAX (free, rate-limited)
+    "mymemory", // MyMemory free endpoint
 ];
 
-pub const LLM_PROVIDERS: &[&str] = &[
-    "deepseek",
-    "claude",
-    "openai",
-    "gemini",
-    "perplexity",
-    "azureopenai",
-    "siliconflow",
-    "groq",
-    "openrouter",
-    "nvidia",
-    "customllm",
-];
-
-pub const ALL_PROVIDERS: &[&str] = &[
-    // Traditional first (free options at top)
-    "gtx",
-    "deepl",
-    "deeplx",
-    "google",
-    "azure",
-    // LLM providers
-    "deepseek",
-    "claude",
-    "openai",
-    "gemini",
-    "perplexity",
-    "azureopenai",
-    "siliconflow",
-    "groq",
-    "openrouter",
-    "nvidia",
-    "customllm",
-];
+pub const ALL_PROVIDERS: &[&str] = &["deepl", "deeplx", "mymemory"];
 
 // ── Language Codes ─────────────────────────────────────────────────
 
@@ -137,9 +84,7 @@ pub fn normalize_lang(provider: &str, code: &str, target: bool) -> String {
             "fil" => "TL".to_string(),
             _ => code.to_uppercase(),
         },
-        "google" | "gtx" => code.to_string(),
-        "azure" => code.to_string(),
-        // LLM providers use standard codes
+        // DeepLX and LLM providers use standard codes
         _ => code.to_string(),
     }
 }
@@ -147,11 +92,6 @@ pub fn normalize_lang(provider: &str, code: &str, target: bool) -> String {
 /// Returns true if the provider is a traditional (non-LLM) API.
 pub fn is_traditional_provider(provider: &str) -> bool {
     TRADITIONAL_PROVIDERS.contains(&provider)
-}
-
-/// Returns true if the provider is an LLM-based translation service.
-pub fn is_llm_provider(provider: &str) -> bool {
-    LLM_PROVIDERS.contains(&provider)
 }
 
 // ── Translation Result ───────────────────────────────────────────────

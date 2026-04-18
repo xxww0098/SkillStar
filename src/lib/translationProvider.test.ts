@@ -3,20 +3,15 @@ import { formatTranslationProviderLabel } from "./translationProvider";
 
 describe("formatTranslationProviderLabel", () => {
   it("formats known translation-api providers into user-facing labels", () => {
+    expect(formatTranslationProviderLabel("deepl")).toBe("DeepL");
     expect(formatTranslationProviderLabel("deeplx")).toBe("DeepLX");
-    expect(formatTranslationProviderLabel("azureopenai")).toBe("Azure OpenAI");
-    expect(formatTranslationProviderLabel("custom_llm")).toBe("Custom LLM");
+    expect(formatTranslationProviderLabel("mymemory")).toBe("MyMemory");
   });
 
-  it("uses i18n labels for generic ai and mymemory sources when available", () => {
-    const t = (key: string) =>
-      ({
-        "detailPanel.translationSourceAi": "AI",
-        "detailPanel.translationSourceMyMemory": "MyMemory",
-      })[key] ?? key;
-
-    expect(formatTranslationProviderLabel("ai", t as never)).toBe("AI");
-    expect(formatTranslationProviderLabel("mymemory", t as never)).toBe("MyMemory");
+  it("formats quality LLM provider references (app:provider)", () => {
+    const t = (key: string, opts?: { defaultValue?: string }) => opts?.defaultValue ?? key;
+    expect(formatTranslationProviderLabel("claude:my-key", t as never)).toBe("Claude");
+    expect(formatTranslationProviderLabel("codex:provider-1", t as never)).toBe("Codex");
   });
 
   it("falls back to the raw provider token when it is unknown", () => {

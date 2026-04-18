@@ -53,11 +53,12 @@ function isSameAiConfig(a: AiConfig, b: AiConfig): boolean {
   return (
     a.enabled === b.enabled &&
     a.api_format === b.api_format &&
+    (a.provider_ref?.app_id ?? "") === (b.provider_ref?.app_id ?? "") &&
+    (a.provider_ref?.provider_id ?? "") === (b.provider_ref?.provider_id ?? "") &&
     a.base_url === b.base_url &&
     a.api_key === b.api_key &&
     a.model === b.model &&
     a.target_language === b.target_language &&
-    a.short_text_priority === b.short_text_priority &&
     a.context_window_k === b.context_window_k &&
     a.max_concurrent_requests === b.max_concurrent_requests &&
     a.chunk_char_limit === b.chunk_char_limit &&
@@ -204,7 +205,6 @@ type AiAction =
   | { type: "START_TEST" }
   | { type: "FINISH_TEST"; result: "success" | "error"; latency?: number }
   | { type: "CLEAR_TEST_RESULT" }
-  | { type: "TOGGLE_SHOW_API_KEY" }
   | { type: "REVERT"; config: AiConfig };
 
 interface AiState {
@@ -216,7 +216,6 @@ interface AiState {
   testing: boolean;
   testResult: "success" | "error" | null;
   testLatency: number | null;
-  showApiKey: boolean;
   loaded: boolean;
 }
 
@@ -246,8 +245,6 @@ function aiReducer(state: AiState, action: AiAction): AiState {
       return { ...state, testing: false, testResult: action.result, testLatency: action.latency ?? null };
     case "CLEAR_TEST_RESULT":
       return { ...state, testResult: null, testLatency: null };
-    case "TOGGLE_SHOW_API_KEY":
-      return { ...state, showApiKey: !state.showApiKey };
     case "REVERT":
       return { ...state, config: action.config, saving: false };
     default:
@@ -495,7 +492,6 @@ export function Settings({
     testing: false,
     testResult: null,
     testLatency: null,
-    showApiKey: false,
     loaded: false,
   });
 
@@ -1050,11 +1046,9 @@ export function Settings({
                   aiTesting={aiState.testing}
                   aiTestResult={aiState.testResult}
                   aiTestLatency={aiState.testLatency}
-                  showApiKey={aiState.showApiKey}
                   onToggleExpanded={() => dispatchAi({ type: "TOGGLE_EXPANDED" })}
                   onEnabledChange={handleAiEnabledChange}
                   onConfigChange={handleAiConfigChange}
-                  onToggleShowApiKey={() => dispatchAi({ type: "TOGGLE_SHOW_API_KEY" })}
                   onTestConnection={handleAiTestConnection}
                 />
               </section>

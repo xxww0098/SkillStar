@@ -133,7 +133,11 @@ export function AccountRow({
             backgroundColor: isOAuth ? (isCurrent ? "#00A67E20" : "#00A67E10") : isCurrent ? "#F59E0B20" : "#F59E0B10",
           }}
         >
-          {isOAuth ? <AgentIcon appId="codex" color="#34d399" className="w-4 h-4" /> : <Key className="w-3.5 h-3.5 text-amber-400" />}
+          {isOAuth ? (
+            <AgentIcon appId="codex" color="#34d399" className="w-4 h-4" />
+          ) : (
+            <Key className="w-3.5 h-3.5 text-amber-400" />
+          )}
         </div>
 
         {/* Info */}

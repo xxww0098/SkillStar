@@ -31,70 +31,12 @@ impl Default for ApiFormat {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ShortTextPriority {
-    AiFirst,
-    MymemoryFirst,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ShortTextSource {
-    Ai,
-    Mymemory,
-}
-
-impl ShortTextSource {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Ai => "ai",
-            Self::Mymemory => "mymemory",
-        }
-    }
-}
-
-impl ShortTextPriority {
-    pub(crate) fn parse_loose(raw: &str) -> Self {
-        match raw.trim().to_ascii_lowercase().as_str() {
-            "mymemory_first" | "mymemoryfirst" | "my_memory_first" => Self::MymemoryFirst,
-            _ => Self::AiFirst,
-        }
-    }
-}
-
-impl Default for ShortTextPriority {
-    fn default() -> Self {
-        Self::AiFirst
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct MymemoryUsageStats {
-    #[serde(default)]
-    pub total_chars_sent: u64,
-    #[serde(default)]
-    pub daily_chars_sent: u64,
-    #[serde(default)]
-    pub daily_reset_date: String,
-    #[serde(default)]
-    pub updated_at: String,
-}
-
 fn deserialize_api_format<'de, D>(deserializer: D) -> Result<ApiFormat, D::Error>
 where
     D: Deserializer<'de>,
 {
     let raw = String::deserialize(deserializer)?;
     Ok(ApiFormat::parse_loose(&raw))
-}
-
-fn deserialize_short_text_priority<'de, D>(deserializer: D) -> Result<ShortTextPriority, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let raw = String::deserialize(deserializer)?;
-    Ok(ShortTextPriority::parse_loose(&raw))
 }
 
 /// Per-format saved preset (base_url, api_key, model).
@@ -110,17 +52,25 @@ pub struct FormatPreset {
     pub model: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct AiProviderRef {
+    #[serde(default)]
+    pub app_id: String,
+    #[serde(default)]
+    pub provider_id: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiConfig {
     pub enabled: bool,
     #[serde(default, deserialize_with = "deserialize_api_format")]
     pub api_format: ApiFormat,
+    #[serde(default)]
+    pub provider_ref: Option<AiProviderRef>,
     pub base_url: String,
     pub api_key: String,
     pub model: String,
     pub target_language: String,
-    #[serde(default, deserialize_with = "deserialize_short_text_priority")]
-    pub short_text_priority: ShortTextPriority,
     /// Model context window in K tokens (e.g. 128 = 128K tokens).
     /// All scan parameters are auto-derived from this value.
     #[serde(default = "default_context_window_k")]
@@ -153,6 +103,9 @@ pub struct AiConfig {
     /// Unified routing + target language settings for translation features.
     #[serde(default)]
     pub translation_settings: crate::core::translation_api::config::TranslationSettings,
+    // Legacy fields — absorbed on load, not written back.
+    #[serde(default, skip_serializing)]
+    pub short_text_priority: Option<serde_json::Value>,
 }
 
 fn default_context_window_k() -> u32 {
@@ -168,11 +121,11 @@ impl Default for AiConfig {
         Self {
             enabled: false,
             api_format: ApiFormat::default(),
+            provider_ref: None,
             base_url: String::new(),
             api_key: String::new(),
             model: "gpt-5.4".to_string(),
             target_language: "zh-CN".to_string(),
-            short_text_priority: ShortTextPriority::default(),
             context_window_k: default_context_window_k(),
             max_concurrent_requests: 4,
             chunk_char_limit: 0,
@@ -187,6 +140,7 @@ impl Default for AiConfig {
             },
             translation_api: TranslationApiConfig::default(),
             translation_settings: TranslationSettings::default(),
+            short_text_priority: None,
         }
     }
 }

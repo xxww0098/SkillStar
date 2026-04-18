@@ -1,26 +1,9 @@
 import type { TFunction } from "i18next";
 
 const PROVIDER_LABELS: Record<string, string> = {
-  ai: "AI",
-  mymemory: "MyMemory",
   deepl: "DeepL",
   deeplx: "DeepLX",
-  google: "Google Translate",
-  azure: "Azure Translator",
-  gtx: "GTX",
-  deepseek: "DeepSeek",
-  claude: "Claude",
-  openai: "OpenAI",
-  gemini: "Gemini",
-  perplexity: "Perplexity",
-  azureopenai: "Azure OpenAI",
-  azure_openai: "Azure OpenAI",
-  siliconflow: "SiliconFlow",
-  groq: "Groq",
-  openrouter: "OpenRouter",
-  nvidia: "NVIDIA",
-  customllm: "Custom LLM",
-  custom_llm: "Custom LLM",
+  mymemory: "MyMemory",
 };
 
 export function formatTranslationProviderLabel(provider: string | null | undefined, t?: TFunction): string | null {
@@ -28,11 +11,11 @@ export function formatTranslationProviderLabel(provider: string | null | undefin
   const normalized = provider.trim().toLowerCase();
   if (!normalized) return null;
 
-  if (normalized === "ai") {
-    return t ? t("detailPanel.translationSourceAi") : PROVIDER_LABELS.ai;
-  }
-  if (normalized === "mymemory") {
-    return t ? t("detailPanel.translationSourceMyMemory") : PROVIDER_LABELS.mymemory;
+  // Quality LLM providers use "app:provider" format (e.g. "claude:my-key")
+  if (normalized.includes(":")) {
+    const [app] = normalized.split(":");
+    const appLabel = app === "claude" ? "Claude" : app === "codex" ? "Codex" : app;
+    return t ? t("detailPanel.translationSourceAi", { defaultValue: appLabel }) : appLabel;
   }
 
   return PROVIDER_LABELS[normalized] ?? provider.trim();

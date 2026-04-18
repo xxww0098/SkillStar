@@ -29,7 +29,6 @@ import type {
   MarketplaceResult,
   MarketplaceSkillDetails,
   MultiManifest,
-  MymemoryUsageStats,
   OfficialPublisher,
   ProjectAgentDetection,
   ProjectDeployMode,
@@ -262,7 +261,7 @@ interface TauriCommands {
     args: { content: string; requestId: string; force?: boolean; forceQuality?: boolean };
     result: SkillTranslationResult;
   };
-  get_mymemory_usage_stats: { args: Record<string, never>; result: MymemoryUsageStats };
+
   ai_translate_short_text_stream_with_source: {
     args: { content: string; requestId: string; forceRefresh?: boolean; forceAi?: boolean };
     result: ShortTextTranslationResult;

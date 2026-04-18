@@ -665,7 +665,7 @@ fn cmd_scan(path: &str, static_only: bool) {
 
     // Full AI scan
     let config = ai_provider::load_config();
-    if !config.enabled || config.api_key.trim().is_empty() {
+    if !ai_provider::ai_runtime_ready(&config) {
         eprintln!("⚠ AI provider not configured. Running static-only scan.");
         eprintln!("  Configure AI in SkillStar Settings, or use --static-only flag.");
         let max_severity = static_findings

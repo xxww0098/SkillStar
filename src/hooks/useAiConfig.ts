@@ -5,11 +5,11 @@ import type { AiConfig } from "../types";
 const DEFAULT_CONFIG: AiConfig = {
   enabled: false,
   api_format: "openai",
+  provider_ref: null,
   base_url: "",
   api_key: "",
   model: "gpt-5.4",
   target_language: "zh-CN",
-  short_text_priority: "ai_first",
   context_window_k: 128,
   max_concurrent_requests: 4,
   chunk_char_limit: 0,

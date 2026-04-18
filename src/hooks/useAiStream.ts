@@ -25,8 +25,7 @@ interface AiStreamState {
   /** Provider that produced the translation (e.g. "ai" | "mymemory"). */
   provider: string | null;
   providerId: string | null;
-  providerType: "translation_api" | "llm" | "fallback" | null;
-  routeMode: "fast" | "balanced" | "quality" | null;
+  providerType: "translation_api" | "llm" | null;
   fallbackHop: number | null;
 }
 
@@ -41,7 +40,6 @@ const INITIAL_STATE: AiStreamState = {
   provider: null,
   providerId: null,
   providerType: null,
-  routeMode: null,
   fallbackHop: null,
 };
 
@@ -60,7 +58,7 @@ interface UseAiStreamOptions {
   parseInvokeResult?: (raw: unknown) => { text: string; provider?: string };
   /**
    * When false, execute() will proceed even when AI is not configured.
-   * This allows backends that have non-AI fallbacks (e.g. MyMemory) to work.
+   * This allows backends that have non-AI fallbacks (e.g. DeepLX) to work.
    * Default: true.
    */
   requiresAiConfig?: boolean;
@@ -117,7 +115,7 @@ export function useAiStream({
           getTranslationSettingsCached().catch(() => null),
         ]);
         if (!mountedRef.current) return;
-        setAiConfigured(config.enabled && (config.api_format === "local" || config.api_key.trim().length > 0));
+        setAiConfigured(config.enabled && (config.provider_ref != null || config.api_format === "local"));
         const translationTarget = translationSettings?.target_language?.trim();
         if (translationTarget) {
           setTargetLanguage(translationTarget);
@@ -228,7 +226,6 @@ export function useAiStream({
             provider: null,
             providerId: null,
             providerType: null,
-            routeMode: null,
             fallbackHop: null,
           });
         }, SAFETY_TIMEOUT_MS);
@@ -245,7 +242,6 @@ export function useAiStream({
         provider: keepVisibleWhileLoading ? prev.provider : null,
         providerId: keepVisibleWhileLoading ? prev.providerId : null,
         providerType: keepVisibleWhileLoading ? prev.providerType : null,
-        routeMode: keepVisibleWhileLoading ? prev.routeMode : null,
         fallbackHop: keepVisibleWhileLoading ? prev.fallbackHop : null,
       }));
 
@@ -291,7 +287,6 @@ export function useAiStream({
               provider: provider || prev.provider,
               providerId: payload.providerId ?? prev.providerId,
               providerType: payload.providerType ?? prev.providerType,
-              routeMode: payload.routeMode ?? prev.routeMode,
               fallbackHop: payload.fallbackHop ?? prev.fallbackHop,
             }));
             armSafetyTimer();
@@ -345,7 +340,6 @@ export function useAiStream({
           provider: resultProvider ?? prev.provider,
           providerId: prev.providerId,
           providerType: prev.providerType,
-          routeMode: prev.routeMode,
           fallbackHop: prev.fallbackHop,
         }));
         return finalText;
@@ -362,7 +356,6 @@ export function useAiStream({
           provider: prev.provider,
           providerId: prev.providerId,
           providerType: prev.providerType,
-          routeMode: prev.routeMode,
           fallbackHop: prev.fallbackHop,
         }));
         return null;

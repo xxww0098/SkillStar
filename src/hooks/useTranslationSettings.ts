@@ -4,19 +4,13 @@ import type { TranslationReadiness, TranslationSettings } from "../types";
 
 const DEFAULT_SETTINGS: TranslationSettings = {
   target_language: "zh-CN",
-  mode: "balanced",
-  fast_provider: "deepl",
   quality_provider_ref: null,
-  allow_emergency_fallback: true,
-  experimental_providers_enabled: false,
 };
 
 const DEFAULT_READINESS: TranslationReadiness = {
-  fast_ready: false,
+  ready: true,
   quality_ready: false,
-  emergency_ready: true,
   issues: [],
-  recommended_mode: "balanced",
 };
 
 const CONFIG_CACHE_TTL_MS = 3_000;
@@ -75,8 +69,9 @@ export async function getTranslationReadinessCached(forceRefresh = false): Promi
   return inflightReadiness;
 }
 
-export function isMarkdownTranslationReady(settings: TranslationSettings, readiness: TranslationReadiness): boolean {
-  return settings.mode === "quality" ? readiness.quality_ready : readiness.fast_ready || readiness.quality_ready;
+export function isMarkdownTranslationReady(_settings: TranslationSettings, readiness: TranslationReadiness): boolean {
+  // Always ready because DeepLX is always available as free fallback
+  return readiness.ready;
 }
 
 export function useTranslationSettings() {

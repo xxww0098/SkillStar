@@ -48,21 +48,15 @@ export function useProjectManifest() {
     }
   }, []);
 
-  const saveAndSync = useCallback(
-    async (
-      projectPath: string,
-      agents: Record<string, string[]>,
-    ) => {
-      const count = await invoke<number>("save_and_sync_project", {
-        projectPath,
-        agents,
-      });
-      const updated = await invoke<ProjectEntry[]>("list_projects");
-      setProjects(updated);
-      return count;
-    },
-    [],
-  );
+  const saveAndSync = useCallback(async (projectPath: string, agents: Record<string, string[]>) => {
+    const count = await invoke<number>("save_and_sync_project", {
+      projectPath,
+      agents,
+    });
+    const updated = await invoke<ProjectEntry[]>("list_projects");
+    setProjects(updated);
+    return count;
+  }, []);
 
   const saveProjectSkillsList = useCallback(async (projectPath: string, agents: Record<string, string[]>) => {
     const result = await invoke<SkillsList>("save_project_skills_list", {

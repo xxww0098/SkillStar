@@ -118,6 +118,11 @@
     "openaiCompatible": "OpenAI Compatible",
     "anthropicMessages": "Anthropic Messages API",
     "localModel": "Local Model (Ollama)",
+    "localOllama": "Local Model (Ollama)",
+    "selectProvider": "Select Provider",
+    "providerNone": "None — choose a Claude or Codex provider from Models",
+    "selectProviderHint": "Choose a Claude or Codex provider from Models for summary and security scan.",
+    "aiProviderManagedHint": "Base URL, API key, and model are reused directly from the Models provider.",
     "localApiKeyOptional": "Optional — most local models don't need this",
     "baseUrl": "Base URL",
     "baseUrlHintOpenai": "OpenAI compatible: request will be sent to {base_url}/chat/completions",
@@ -318,7 +323,9 @@
     "devModeBannerStepsWin10": "Settings → Update & Security → For developers → Developer Mode → On",
     "devModeBannerStepsWin11": "Settings → System → For developers → Developer Mode → On",
     "devModeBannerDismiss": "Got it",
-    "devModeBannerLearnMore": "Learn More"
+    "devModeBannerLearnMore": "Learn More",
+    "deeplxCommunityEndpoint": "Free community endpoint",
+    "deeplxHintSuffix": "always available as fallback"
   },
   "mySkills": {
     "title": "Cards",

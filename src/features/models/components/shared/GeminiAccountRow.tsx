@@ -41,7 +41,7 @@ export function GeminiAccountRow({
 }: GeminiAccountRowProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  
+
   const isOAuth = account.id.includes("oauth");
   const planColor = getPlanColor(quota?.planName);
   const planLabel = getPlanLabel(quota?.planName);
@@ -59,15 +59,18 @@ export function GeminiAccountRow({
     };
   }, []);
 
-  const handleDeleteClick = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!confirmDelete) {
-      setConfirmDelete(true);
-      timerRef.current = setTimeout(() => setConfirmDelete(false), 3500);
-      return;
-    }
-    onDelete();
-  }, [confirmDelete, onDelete]);
+  const handleDeleteClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (!confirmDelete) {
+        setConfirmDelete(true);
+        timerRef.current = setTimeout(() => setConfirmDelete(false), 3500);
+        return;
+      }
+      onDelete();
+    },
+    [confirmDelete, onDelete],
+  );
 
   // Extract compact quota for collapse view
   let compactSummary = null;
@@ -83,7 +86,7 @@ export function GeminiAccountRow({
             } else if (labelName.toLowerCase().includes("claude")) {
               labelName = labelName.replace(/claude-?-?/i, "Cld. ").replace(/-(sonnet|opus|haiku)(-[0-9.]+)?/i, " $1");
             }
-            labelName = labelName.replace(/\b\w/g, c => c.toUpperCase());
+            labelName = labelName.replace(/\b\w/g, (c) => c.toUpperCase());
             if (labelName.length > 15) labelName = labelName.substring(0, 15) + ".";
             return <CodexQuotaBar key={i} label={labelName} percentage={m.percentage} compact />;
           })}
@@ -142,14 +145,23 @@ export function GeminiAccountRow({
             backgroundColor: isOAuth ? (isCurrent ? "#4285F420" : "#4285F410") : isCurrent ? "#F59E0B20" : "#F59E0B10",
           }}
         >
-          {isOAuth ? <AgentIcon appId="gemini" color="#4285F4" className="w-4 h-4" /> : <Key className="w-3.5 h-3.5 text-amber-400" />}
+          {isOAuth ? (
+            <AgentIcon appId="gemini" color="#4285F4" className="w-4 h-4" />
+          ) : (
+            <Key className="w-3.5 h-3.5 text-amber-400" />
+          )}
         </div>
 
         {/* Info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className="text-sm font-semibold text-foreground truncate max-w-[200px]" title={isOAuth ? friendlyName : "API Key"}>
-              {isOAuth ? friendlyName : `API Key: ${((account.settingsConfig?.env as any)?.GEMINI_API_KEY || "**********").slice(0, 12)}...`}
+            <span
+              className="text-sm font-semibold text-foreground truncate max-w-[200px]"
+              title={isOAuth ? friendlyName : "API Key"}
+            >
+              {isOAuth
+                ? friendlyName
+                : `API Key: ${((account.settingsConfig?.env as any)?.GEMINI_API_KEY || "**********").slice(0, 12)}...`}
             </span>
             {isCurrent && (
               <span
@@ -248,7 +260,6 @@ export function GeminiAccountRow({
             className="overflow-hidden"
           >
             <div className="px-3.5 pb-3.5 pt-1 border-t border-border/30 space-y-3">
-              
               {/* Detailed view */}
               {isOAuth && (
                 <div className="space-y-4">
@@ -256,7 +267,7 @@ export function GeminiAccountRow({
                     <div className="animate-pulse h-12 bg-muted/40 rounded-lg shrink-0 mt-2" />
                   ) : quota ? (
                     <div className="space-y-2 p-3 rounded-lg bg-muted/20 shrink-0 mt-2">
-                       {quota.isForbidden ? (
+                      {quota.isForbidden ? (
                         <div className="flex flex-col gap-1.5 p-3 border border-amber-500/20 bg-amber-500/5 rounded-xl">
                           <div className="flex items-center gap-1.5 text-amber-500/90 text-xs font-semibold">
                             <ShieldPlus className="w-3.5 h-3.5" />
@@ -281,28 +292,32 @@ export function GeminiAccountRow({
                           {quota.models.map((model, idx) => {
                             let detailedName = model.displayName || model.name;
                             if (detailedName.toLowerCase().includes("gemini")) {
-                              detailedName = detailedName.replace(/gemini-?/i, "Gemini ").replace(/-(pro|flash|ultra)(-[0-9.]+)?/i, " $1");
+                              detailedName = detailedName
+                                .replace(/gemini-?/i, "Gemini ")
+                                .replace(/-(pro|flash|ultra)(-[0-9.]+)?/i, " $1");
                             } else if (detailedName.toLowerCase().includes("claude")) {
-                              detailedName = detailedName.replace(/claude-?-?/i, "Claude ").replace(/-(sonnet|opus|haiku)(-[0-9.]+)?/i, " $1");
+                              detailedName = detailedName
+                                .replace(/claude-?-?/i, "Claude ")
+                                .replace(/-(sonnet|opus|haiku)(-[0-9.]+)?/i, " $1");
                             }
-                            detailedName = detailedName.replace(/\b\w/g, c => c.toUpperCase());
+                            detailedName = detailedName.replace(/\b\w/g, (c) => c.toUpperCase());
                             if (detailedName.length > 20) detailedName = detailedName.substring(0, 20) + "...";
-                            
+
                             return (
-                              <CodexQuotaBar 
+                              <CodexQuotaBar
                                 key={idx}
-                                label={detailedName} 
-                                percentage={model.percentage} 
-                                resetTime={model.resetTime as any} 
+                                label={detailedName}
+                                percentage={model.percentage}
+                                resetTime={model.resetTime as any}
                               />
                             );
                           })}
                         </div>
                       ) : (
-                        <CodexQuotaBar 
-                          label="当前配额" 
-                          percentage={quota.percentage} 
-                          resetTime={quota.resetTime as any} 
+                        <CodexQuotaBar
+                          label="当前配额"
+                          percentage={quota.percentage}
+                          resetTime={quota.resetTime as any}
                         />
                       )}
                       {quota.availableCredits && (
@@ -325,7 +340,10 @@ export function GeminiAccountRow({
                 {isOAuth && (
                   <button
                     type="button"
-                    onClick={(e) => { e.stopPropagation(); onRefreshQuota(); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRefreshQuota();
+                    }}
                     disabled={quotaRefreshing}
                     className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-medium bg-muted/30 hover:bg-muted/50 text-muted-foreground transition-colors disabled:opacity-50"
                   >

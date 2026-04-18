@@ -1,15 +1,17 @@
-import { CheckCircle, ChevronDown, Eye, EyeOff, Loader2, Sparkles, XCircle, Zap } from "lucide-react";
+import { CheckCircle, ChevronDown, Loader2, Sparkles, XCircle, Zap } from "lucide-react";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
 import { Switch } from "../../../components/ui/switch";
 import { useNavigation } from "../../../hooks/useNavigation";
 import { cn } from "../../../lib/utils";
-import type { AiConfig, FormatPreset } from "../../../types";
+import type { AiConfig } from "../../../types";
+import type { ProviderEntry } from "../../models/hooks/useModelProviders";
+import { useModelProviders } from "../../models/hooks/useModelProviders";
 
 interface AiProviderSectionProps {
   localAiConfig: AiConfig;
-
   ready: boolean;
   aiExpanded: boolean;
   aiSaving: boolean;
@@ -17,66 +19,169 @@ interface AiProviderSectionProps {
   aiTesting: boolean;
   aiTestResult: "success" | "error" | null;
   aiTestLatency: number | null;
-  showApiKey: boolean;
   onToggleExpanded: () => void;
   onEnabledChange: (enabled: boolean) => void;
   onConfigChange: (next: AiConfig) => void;
-  onToggleShowApiKey: () => void;
   onTestConnection: () => void;
 }
 
-/** Get the preset key for a given api_format */
-function presetKeyFor(format: AiConfig["api_format"]): "openai_preset" | "anthropic_preset" | "local_preset" {
-  switch (format) {
-    case "anthropic":
-      return "anthropic_preset";
-    case "local":
-      return "local_preset";
-    default:
-      return "openai_preset";
-  }
+const LOCAL_PROVIDER_VALUE = "__local__";
+const DEFAULT_LOCAL_BASE_URL = "http://127.0.0.1:11434/v1";
+const DEFAULT_LOCAL_MODEL = "llama3.1:8b";
+
+function hasClaudeApiKey(provider: ProviderEntry) {
+  const env = (provider.settingsConfig?.env as Record<string, unknown> | undefined) ?? undefined;
+  return (
+    (typeof env?.ANTHROPIC_AUTH_TOKEN === "string" && env.ANTHROPIC_AUTH_TOKEN.trim().length > 0) ||
+    (typeof env?.ANTHROPIC_API_KEY === "string" && env.ANTHROPIC_API_KEY.trim().length > 0)
+  );
 }
 
-/** Build a FormatPreset from the active fields of config */
-function activeToPreset(config: AiConfig): FormatPreset {
-  return { base_url: config.base_url, api_key: config.api_key, model: config.model };
+function hasCodexApiKey(provider: ProviderEntry) {
+  const auth = (provider.settingsConfig?.auth as Record<string, unknown> | undefined) ?? undefined;
+  return typeof auth?.OPENAI_API_KEY === "string" && auth.OPENAI_API_KEY.trim().length > 0;
+}
+
+function currentLocalPreset(config: AiConfig) {
+  return {
+    ...config.local_preset,
+    base_url: config.api_format === "local" ? config.base_url : config.local_preset.base_url,
+    api_key: "",
+    model: config.api_format === "local" ? config.model : config.local_preset.model,
+  };
 }
 
 export function AiProviderSection({
   localAiConfig,
-
   ready,
   aiExpanded,
   aiSaving,
   aiSaved,
   aiTesting,
   aiTestResult,
-  showApiKey,
+  aiTestLatency,
   onToggleExpanded,
   onEnabledChange,
   onConfigChange,
-  onToggleShowApiKey,
   onTestConnection,
-  aiTestLatency,
 }: AiProviderSectionProps) {
   const { t } = useTranslation();
   const { navigateToModels } = useNavigation();
-  const isAnthropicFormat = localAiConfig.api_format === "anthropic";
-  const isLocalFormat = localAiConfig.api_format === "local";
-  const aiApiKeyPlaceholder = isLocalFormat
-    ? t("settings.localApiKeyOptional", { defaultValue: "Optional — most local models don't need this" })
-    : isAnthropicFormat
-      ? "sk-ant-..."
-      : "sk-...";
-  const aiBaseUrlPlaceholder = isLocalFormat
-    ? "http://127.0.0.1:11434/v1"
-    : isAnthropicFormat
-      ? "https://api.anthropic.com"
-      : "https://api.openai.com/v1";
-  const aiModelPlaceholder = isLocalFormat ? "llama3.1:8b" : isAnthropicFormat ? "claude-sonnet-4-20250514" : "gpt-5.4";
+  const claudeProviders = useModelProviders("claude");
+  const codexProviders = useModelProviders("codex");
+
+  const providerCandidates = useMemo(() => {
+    const items: { appId: "claude" | "codex"; providerId: string; label: string; hasKey: boolean }[] = [];
+
+    for (const provider of Object.values(claudeProviders.providers)) {
+      items.push({
+        appId: "claude",
+        providerId: provider.id,
+        label: `Claude · ${provider.name}`,
+        hasKey: hasClaudeApiKey(provider),
+      });
+    }
+
+    for (const provider of Object.values(codexProviders.providers)) {
+      items.push({
+        appId: "codex",
+        providerId: provider.id,
+        label: `Codex · ${provider.name}`,
+        hasKey: hasCodexApiKey(provider),
+      });
+    }
+
+    return items;
+  }, [claudeProviders.providers, codexProviders.providers]);
+
+  const isLocalMode = localAiConfig.api_format === "local" && !localAiConfig.provider_ref;
+  const selectedProviderValue = isLocalMode
+    ? LOCAL_PROVIDER_VALUE
+    : localAiConfig.provider_ref
+      ? `${localAiConfig.provider_ref.app_id}:${localAiConfig.provider_ref.provider_id}`
+      : "";
+  const selectedProvider = providerCandidates.find(
+    (candidate) => `${candidate.appId}:${candidate.providerId}` === selectedProviderValue,
+  );
+  const hasResolvedProvider = !!selectedProvider?.hasKey;
   const clampConcurrency = (value: number) => Math.min(20, Math.max(1, value || 1));
   const formControlClass =
     "flex h-9 w-full rounded-xl border border-input-border bg-input backdrop-blur-sm px-3 text-sm text-foreground shadow-sm transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:border-primary/60";
+
+  const handleProviderChange = (value: string) => {
+    const nextLocalPreset = currentLocalPreset(localAiConfig);
+
+    if (value === LOCAL_PROVIDER_VALUE) {
+      onConfigChange({
+        ...localAiConfig,
+        api_format: "local",
+        provider_ref: null,
+        base_url: nextLocalPreset.base_url || DEFAULT_LOCAL_BASE_URL,
+        api_key: "",
+        model: nextLocalPreset.model || DEFAULT_LOCAL_MODEL,
+        local_preset: nextLocalPreset,
+      });
+      return;
+    }
+
+    if (!value) {
+      onConfigChange({
+        ...localAiConfig,
+        provider_ref: null,
+        local_preset: nextLocalPreset,
+      });
+      return;
+    }
+
+    const [appId, providerId] = value.split(":");
+    if (!appId || !providerId) return;
+
+    onConfigChange({
+      ...localAiConfig,
+      api_format: appId === "claude" ? "anthropic" : "openai",
+      provider_ref: { app_id: appId, provider_id: providerId },
+      local_preset: nextLocalPreset,
+    });
+  };
+
+  const handleLocalBaseUrlChange = (value: string) => {
+    onConfigChange({
+      ...localAiConfig,
+      api_format: "local",
+      provider_ref: null,
+      base_url: value,
+      api_key: "",
+      local_preset: {
+        ...localAiConfig.local_preset,
+        base_url: value,
+        api_key: "",
+        model: localAiConfig.model,
+      },
+    });
+  };
+
+  const handleLocalModelChange = (value: string) => {
+    onConfigChange({
+      ...localAiConfig,
+      api_format: "local",
+      provider_ref: null,
+      api_key: "",
+      model: value,
+      local_preset: {
+        ...localAiConfig.local_preset,
+        base_url: localAiConfig.base_url,
+        api_key: "",
+        model: value,
+      },
+    });
+  };
+
+  const badgeLabel =
+    isLocalMode && localAiConfig.enabled
+      ? `${t("settings.localOllama", { defaultValue: "Local Model (Ollama)" })} · ${localAiConfig.model}`
+      : selectedProvider && localAiConfig.enabled
+        ? selectedProvider.label
+        : null;
 
   return (
     <section>
@@ -86,14 +191,9 @@ export function AiProviderSection({
             <Sparkles className="w-4 h-4 text-emerald-500" />
           </div>
           <h2 className="text-sm font-semibold text-foreground tracking-tight">{t("settings.aiProvider")}</h2>
-          {localAiConfig.enabled && (localAiConfig.api_key || isLocalFormat) && (
+          {badgeLabel && (
             <span className="text-xs text-muted-foreground ml-2 px-2 py-0.5 rounded-md bg-muted/50 border border-border">
-              {isLocalFormat
-                ? t("settings.localModel", { defaultValue: "Local" })
-                : localAiConfig.api_format === "anthropic"
-                  ? "Anthropic"
-                  : "OpenAI"}{" "}
-              · {localAiConfig.model}
+              {badgeLabel}
             </span>
           )}
         </div>
@@ -141,143 +241,90 @@ export function AiProviderSection({
                 {t("settings.modelAgentsCta")}
               </Button>
             </div>
-            <div className="grid grid-cols-1 gap-3">
-              <div>
-                <label htmlFor="ai-provider-api-format" className="text-xs text-muted-foreground block mb-1">
-                  {t("settings.apiFormat")}
-                </label>
-                <select
-                  id="ai-provider-api-format"
-                  value={localAiConfig.api_format}
-                  onChange={(e) => {
-                    const nextFormat = e.target.value as "openai" | "anthropic" | "local";
-                    const currentFormat = localAiConfig.api_format;
 
-                    if (nextFormat === currentFormat) return;
+            <div>
+              <label htmlFor="ai-provider-select" className="text-xs text-muted-foreground block mb-1">
+                {t("settings.selectProvider", { defaultValue: "Provider" })}
+              </label>
+              <select
+                id="ai-provider-select"
+                value={selectedProviderValue}
+                onChange={(e) => handleProviderChange(e.target.value)}
+                className={`${formControlClass} pr-8`}
+                disabled={claudeProviders.loading || codexProviders.loading}
+              >
+                <option value="">
+                  {t("settings.providerNone", { defaultValue: "None — choose from Models" })}
+                </option>
+                <option value={LOCAL_PROVIDER_VALUE}>
+                  {t("settings.localOllama", { defaultValue: "Local Model (Ollama)" })}
+                </option>
+                {providerCandidates.map((candidate) => (
+                  <option
+                    key={`${candidate.appId}:${candidate.providerId}`}
+                    value={`${candidate.appId}:${candidate.providerId}`}
+                    disabled={!candidate.hasKey}
+                  >
+                    {candidate.label}
+                    {!candidate.hasKey ? ` (${t("settings.noApiKey", { defaultValue: "no key" })})` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-                    // Save current active values to the current format's preset
-                    const currentPresetKey = presetKeyFor(currentFormat);
-                    const savedPresets = {
-                      ...localAiConfig,
-                      [currentPresetKey]: activeToPreset(localAiConfig),
-                    };
+            {isLocalMode ? (
+              <div className="grid grid-cols-1 gap-3">
+                <div>
+                  <label htmlFor="ai-provider-base-url" className="text-xs text-muted-foreground block mb-1">
+                    {t("settings.baseUrl")}
+                  </label>
+                  <Input
+                    id="ai-provider-base-url"
+                    type="text"
+                    value={localAiConfig.base_url}
+                    onChange={(e) => handleLocalBaseUrlChange(e.target.value)}
+                    placeholder={DEFAULT_LOCAL_BASE_URL}
+                    className="font-mono"
+                  />
+                </div>
 
-                    // Load the target format's preset values
-                    const nextPresetKey = presetKeyFor(nextFormat);
-                    const nextPreset = savedPresets[nextPresetKey] as FormatPreset;
-
-                    // Default model fallbacks for empty presets
-                    const defaultModel =
-                      nextFormat === "anthropic"
-                        ? "claude-sonnet-4-20250514"
-                        : nextFormat === "local"
-                          ? "llama3.1:8b"
-                          : "gpt-5.4";
-
-                    onConfigChange({
-                      ...savedPresets,
-                      api_format: nextFormat,
-                      base_url: nextPreset.base_url,
-                      api_key: nextPreset.api_key,
-                      model: nextPreset.model || defaultModel,
-                    });
-                  }}
-                  className={`${formControlClass} pr-8`}
-                >
-                  <option value="openai">{t("settings.openaiCompatible")}</option>
-                  <option value="anthropic">{t("settings.anthropicMessages")}</option>
-                  <option value="local">{t("settings.localModel", { defaultValue: "Local Model (Ollama)" })}</option>
-                </select>
+                <div>
+                  <label htmlFor="ai-provider-model" className="text-xs text-muted-foreground block mb-1">
+                    {t("settings.model")}
+                  </label>
+                  <Input
+                    id="ai-provider-model"
+                    type="text"
+                    value={localAiConfig.model}
+                    onChange={(e) => handleLocalModelChange(e.target.value)}
+                    placeholder={DEFAULT_LOCAL_MODEL}
+                  />
+                </div>
               </div>
-            </div>
-
-            <div>
-              <label htmlFor="ai-provider-base-url" className="text-xs text-muted-foreground block mb-1">
-                {t("settings.baseUrl")}
-              </label>
-              <Input
-                id="ai-provider-base-url"
-                type="text"
-                value={localAiConfig.base_url}
-                onChange={(e) => onConfigChange({ ...localAiConfig, base_url: e.target.value })}
-                placeholder={aiBaseUrlPlaceholder}
-                className="font-mono"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="ai-provider-api-key" className="text-xs text-muted-foreground block mb-1">
-                {t("settings.apiKey")}
-                {isLocalFormat && (
-                  <span className="ml-1.5 text-[10px] text-muted-foreground/60">({t("common.optional")})</span>
-                )}
-              </label>
-              <div className="relative">
-                <Input
-                  id="ai-provider-api-key"
-                  type={showApiKey ? "text" : "password"}
-                  value={localAiConfig.api_key}
-                  onChange={(e) => onConfigChange({ ...localAiConfig, api_key: e.target.value })}
-                  placeholder={aiApiKeyPlaceholder}
-                  className="pr-9 font-mono"
-                />
-                <button
-                  type="button"
-                  onClick={onToggleShowApiKey}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer p-1.5 rounded-md focus-ring"
-                >
-                  {showApiKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                </button>
+            ) : (
+              <div className="rounded-xl border border-border bg-card/40 px-3.5 py-3 space-y-1.5">
+                <div className="text-xs font-medium text-foreground">
+                  {selectedProvider?.label ??
+                    t("settings.providerNone", { defaultValue: "None — choose from Models" })}
+                </div>
+                <div className="text-[11px] leading-relaxed text-muted-foreground">
+                  {selectedProvider
+                    ? selectedProvider.hasKey
+                      ? t("settings.aiProviderManagedHint", {
+                          defaultValue: "Base URL, API key, and model are reused from the Models provider.",
+                        })
+                      : t("settings.qualityEngineMissingHint", {
+                          defaultValue: "Connect a provider in Models before using the quality lane.",
+                        })
+                    : providerCandidates.length === 0
+                      ? t("settings.noQualityProviders", { defaultValue: "No Models providers connected yet" })
+                      : t("settings.selectProviderHint", {
+                          defaultValue: "Choose a Claude or Codex provider from Models for summary and scan.",
+                        })}
+                </div>
               </div>
-            </div>
+            )}
 
-            <div>
-              <label htmlFor="ai-provider-model" className="text-xs text-muted-foreground block mb-1">
-                {t("settings.model")}
-              </label>
-              <Input
-                id="ai-provider-model"
-                type="text"
-                value={localAiConfig.model}
-                onChange={(e) => onConfigChange({ ...localAiConfig, model: e.target.value })}
-                placeholder={aiModelPlaceholder}
-                list="ai-model-suggestions"
-              />
-              <datalist id="ai-model-suggestions">
-                {isAnthropicFormat ? (
-                  <>
-                    <option value="claude-sonnet-4-20250514" />
-                    <option value="claude-opus-4-20250514" />
-                    <option value="claude-3-7-sonnet-20250219" />
-                    <option value="claude-3-5-sonnet-20241022" />
-                  </>
-                ) : isLocalFormat ? (
-                  <>
-                    <option value="llama3.1:8b" />
-                    <option value="llama3.1:70b" />
-                    <option value="qwen2.5:7b" />
-                    <option value="qwen2.5:32b" />
-                    <option value="deepseek-r1:7b" />
-                    <option value="deepseek-r1:32b" />
-                    <option value="gemma2:9b" />
-                    <option value="mistral:7b" />
-                    <option value="phi3:mini" />
-                  </>
-                ) : (
-                  <>
-                    <option value="gpt-5.4" />
-                    <option value="gpt-4o" />
-                    <option value="gpt-4.1-mini" />
-                    <option value="gpt-4.1-nano" />
-                    <option value="deepseek-chat" />
-                    <option value="qwen-plus" />
-                    <option value="claude-sonnet-4-20250514" />
-                  </>
-                )}
-              </datalist>
-            </div>
-
-            {/* ── Context & Concurrency ─── */}
             <div className="pt-2 border-t border-border/40">
               <div className="flex items-center gap-1.5 mb-2.5">
                 <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
@@ -353,9 +400,7 @@ export function AiProviderSection({
                 size="sm"
                 variant="outline"
                 onClick={onTestConnection}
-                disabled={
-                  aiSaving || aiTesting || !localAiConfig.enabled || (!localAiConfig.api_key.trim() && !isLocalFormat)
-                }
+                disabled={aiSaving || aiTesting || !localAiConfig.enabled || (!isLocalMode && !hasResolvedProvider)}
                 className="min-w-[112px] px-3 relative"
               >
                 <div className="flex items-center justify-center gap-1.5 min-w-max">

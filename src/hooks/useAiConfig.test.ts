@@ -9,11 +9,11 @@ const mockedInvoke = vi.mocked(invoke);
 const MOCK_CONFIG: AiConfig = {
   enabled: true,
   api_format: "openai",
+  provider_ref: null,
   base_url: "https://api.example.com",
   api_key: "sk-test-key",
   model: "gpt-5.4",
   target_language: "zh-CN",
-  short_text_priority: "ai_first",
   context_window_k: 128,
   max_concurrent_requests: 4,
   chunk_char_limit: 0,

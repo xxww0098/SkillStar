@@ -32,25 +32,22 @@ export const OpenCodeModelSelect = memo(function OpenCodeModelSelect({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const fetchModels = useCallback(
-    async () => {
-      setLoading(true);
+  const fetchModels = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await invoke<string[]>("get_opencode_cli_models");
+      setModels(result);
       try {
-        const result = await invoke<string[]>("get_opencode_cli_models");
-        setModels(result);
-        try {
-          localStorage.setItem(cacheKey, JSON.stringify(result));
-        } catch {
-          // ignore
-        }
-      } catch (err) {
-        console.error("Failed to fetch OpenCode models:", err);
-      } finally {
-        setLoading(false);
+        localStorage.setItem(cacheKey, JSON.stringify(result));
+      } catch {
+        // ignore
       }
-    },
-    [],
-  );
+    } catch (err) {
+      console.error("Failed to fetch OpenCode models:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   return (
     <div className="flex items-center gap-0.5 mt-0.5">
@@ -63,9 +60,7 @@ export const OpenCodeModelSelect = memo(function OpenCodeModelSelect({
       >
         <option value="">默认模型</option>
         {/* Ensure current value is shown even if not in fetched list */}
-        {pane.modelId && !models.includes(pane.modelId) && (
-          <option value={pane.modelId}>{pane.modelId}</option>
-        )}
+        {pane.modelId && !models.includes(pane.modelId) && <option value={pane.modelId}>{pane.modelId}</option>}
         {models.map((m) => (
           <option key={m} value={m}>
             {m}

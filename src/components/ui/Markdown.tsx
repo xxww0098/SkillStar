@@ -102,18 +102,9 @@ const SANITIZE_SCHEMA = {
     circle: mergeList((defaultSchema.attributes as Record<string, string[] | undefined>)?.circle, SVG_COMMON_ATTRS),
     rect: mergeList((defaultSchema.attributes as Record<string, string[] | undefined>)?.rect, SVG_COMMON_ATTRS),
     line: mergeList((defaultSchema.attributes as Record<string, string[] | undefined>)?.line, SVG_COMMON_ATTRS),
-    polyline: mergeList(
-      (defaultSchema.attributes as Record<string, string[] | undefined>)?.polyline,
-      SVG_COMMON_ATTRS,
-    ),
-    polygon: mergeList(
-      (defaultSchema.attributes as Record<string, string[] | undefined>)?.polygon,
-      SVG_COMMON_ATTRS,
-    ),
-    ellipse: mergeList(
-      (defaultSchema.attributes as Record<string, string[] | undefined>)?.ellipse,
-      SVG_COMMON_ATTRS,
-    ),
+    polyline: mergeList((defaultSchema.attributes as Record<string, string[] | undefined>)?.polyline, SVG_COMMON_ATTRS),
+    polygon: mergeList((defaultSchema.attributes as Record<string, string[] | undefined>)?.polygon, SVG_COMMON_ATTRS),
+    ellipse: mergeList((defaultSchema.attributes as Record<string, string[] | undefined>)?.ellipse, SVG_COMMON_ATTRS),
     defs: mergeList((defaultSchema.attributes as Record<string, string[] | undefined>)?.defs, SVG_COMMON_ATTRS),
     linearGradient: mergeList(
       (defaultSchema.attributes as Record<string, string[] | undefined>)?.linearGradient,
@@ -124,10 +115,7 @@ const SANITIZE_SCHEMA = {
       SVG_COMMON_ATTRS,
     ),
     stop: mergeList((defaultSchema.attributes as Record<string, string[] | undefined>)?.stop, SVG_COMMON_ATTRS),
-    clipPath: mergeList(
-      (defaultSchema.attributes as Record<string, string[] | undefined>)?.clipPath,
-      SVG_COMMON_ATTRS,
-    ),
+    clipPath: mergeList((defaultSchema.attributes as Record<string, string[] | undefined>)?.clipPath, SVG_COMMON_ATTRS),
     mask: mergeList((defaultSchema.attributes as Record<string, string[] | undefined>)?.mask, SVG_COMMON_ATTRS),
     pattern: mergeList((defaultSchema.attributes as Record<string, string[] | undefined>)?.pattern, SVG_COMMON_ATTRS),
     symbol: mergeList((defaultSchema.attributes as Record<string, string[] | undefined>)?.symbol, SVG_COMMON_ATTRS),
@@ -138,16 +126,8 @@ const SANITIZE_SCHEMA = {
   },
   protocols: {
     ...(defaultSchema.protocols ?? {}),
-    src: mergeList((defaultSchema.protocols as Record<string, string[] | undefined>)?.src, [
-      "http",
-      "https",
-      "data",
-    ]),
-    href: mergeList((defaultSchema.protocols as Record<string, string[] | undefined>)?.href, [
-      "http",
-      "https",
-      "data",
-    ]),
+    src: mergeList((defaultSchema.protocols as Record<string, string[] | undefined>)?.src, ["http", "https", "data"]),
+    href: mergeList((defaultSchema.protocols as Record<string, string[] | undefined>)?.href, ["http", "https", "data"]),
     "xlink:href": mergeList((defaultSchema.protocols as Record<string, string[] | undefined>)?.["xlink:href"], [
       "http",
       "https",

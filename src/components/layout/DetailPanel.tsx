@@ -118,16 +118,10 @@ export function DetailPanel({
   const descriptionTranslationProvider = descriptionStream.provider;
   const descriptionTranslationSource = descriptionStream.source;
   const summaryAiConfigured = descriptionStream.aiConfigured;
-  const {
-    readiness: translationReadiness,
-    loading: translationReadinessLoading,
-  } = useTranslationSettings();
-  const descriptionTranslationReady =
-    translationReadiness.fast_ready || translationReadiness.quality_ready;
-  const descriptionTranslationCanStart =
-    translationReadinessLoading || descriptionTranslationReady;
-  const qualityDescriptionCanStart =
-    translationReadinessLoading || translationReadiness.quality_ready;
+  const { readiness: translationReadiness, loading: translationReadinessLoading } = useTranslationSettings();
+  const descriptionTranslationReady = translationReadiness.ready;
+  const descriptionTranslationCanStart = translationReadinessLoading || descriptionTranslationReady;
+  const qualityDescriptionCanStart = translationReadinessLoading || translationReadiness.quality_ready;
 
   // AI Quick Read
   const [quickReadContent, setQuickReadContent] = useState<string | null>(null);
@@ -290,13 +284,7 @@ export function DetailPanel({
       keepVisibleWhileLoading: true,
       extraInvokeParams: { forceAi: true },
     });
-  }, [
-    qualityDescriptionCanStart,
-    translatingDescription,
-    skill,
-    skillDetails?.summary,
-    descriptionStream,
-  ]);
+  }, [qualityDescriptionCanStart, translatingDescription, skill, skillDetails?.summary, descriptionStream]);
 
   // Deferred timeout for auto-translate
   useEffect(() => {
@@ -322,12 +310,7 @@ export function DetailPanel({
 
   // Auto-translate trigger
   useEffect(() => {
-    if (
-      !skill ||
-      !autoTranslateDescription ||
-      translationReadinessLoading ||
-      !descriptionTranslationReady
-    ) {
+    if (!skill || !autoTranslateDescription || translationReadinessLoading || !descriptionTranslationReady) {
       return;
     }
     // If the skill already ships with a pre-cached localized_description
@@ -491,8 +474,7 @@ export function DetailPanel({
     (descriptionTranslationSource === enrichedDescription || descriptionTranslationSource === rawDescription);
   const descriptionTranslationActive =
     descriptionTranslationVisible && translatedDescription != null && descriptionTranslationMatches;
-  const displayDescriptionProvider =
-    formatTranslationProviderLabel(descriptionTranslationProvider, t) ?? null;
+  const displayDescriptionProvider = formatTranslationProviderLabel(descriptionTranslationProvider, t) ?? null;
   const localizedDescriptionError = formatAiErrorMessage(descriptionTranslateError, t);
   const localizedQuickReadError = formatAiErrorMessage(quickReadError, t);
   const shouldDeferDescriptionRender =

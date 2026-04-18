@@ -1,8 +1,10 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
+use std::sync::{Arc, LazyLock, Mutex};
 use tracing::{debug, error, warn};
+
+use crate::core::model_config::providers;
 
 pub(crate) mod config;
 mod constants;
@@ -11,9 +13,7 @@ mod scan_params;
 mod skill_pick;
 
 #[allow(unused_imports)]
-pub use config::{
-    AiConfig, ApiFormat, FormatPreset, MymemoryUsageStats, ShortTextPriority, ShortTextSource,
-};
+pub use config::{AiConfig, AiProviderRef, ApiFormat, FormatPreset};
 #[allow(unused_imports)]
 pub use scan_params::{
     ResolvedScanParams, estimate_translation_max_tokens, resolve_scan_params,
@@ -25,7 +25,7 @@ use constants::{
     SKILL_PICK_MAX_RECOMMENDATIONS, SUMMARY_MAX_TOKENS, TRANSLATION_CHUNK_RETRY_MIN_CHARS,
 };
 
-static MYMEMORY_USAGE_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
 static AI_REQUEST_SEMAPHORE: LazyLock<Mutex<Option<(u32, Arc<tokio::sync::Semaphore>)>>> =
     LazyLock::new(|| Mutex::new(None));
 
@@ -227,6 +227,175 @@ pub async fn save_config_async(config: &AiConfig) -> Result<()> {
     tokio::task::spawn_blocking(move || save_config(&config))
         .await
         .map_err(|err| anyhow::anyhow!("save_config task failed: {}", err))?
+}
+
+fn parse_toml_string_field(config_text: &str, field: &str) -> Option<String> {
+    for line in config_text.lines() {
+        let trimmed = line.trim();
+        let prefix = format!("{field} =");
+        if !trimmed.starts_with(&prefix) {
+            continue;
+        }
+        let rhs = trimmed.split_once('=')?.1.trim();
+        if rhs.starts_with('"') {
+            let mut chars = rhs.chars();
+            let _ = chars.next();
+            let mut collected = String::new();
+            for ch in chars {
+                if ch == '"' {
+                    break;
+                }
+                collected.push(ch);
+            }
+            return Some(collected).filter(|value| !value.trim().is_empty());
+        }
+    }
+    None
+}
+
+fn select_provider_app<'a>(
+    store: &'a providers::ProvidersStore,
+    app_id: &str,
+) -> Option<&'a providers::AppProviders> {
+    match app_id {
+        "claude" => Some(&store.claude),
+        "codex" => Some(&store.codex),
+        _ => None,
+    }
+}
+
+pub fn resolve_provider_ref_parts(
+    config: &mut AiConfig,
+    app_id: &str,
+    provider_id: &str,
+) -> Result<String> {
+    let app_id = app_id.trim();
+    let provider_id = provider_id.trim();
+
+    if provider_id.is_empty() || !matches!(app_id, "claude" | "codex") {
+        anyhow::bail!("Unsupported AI provider reference: {app_id}:{provider_id}");
+    }
+
+    let store = providers::read_store().context("Failed to read model providers")?;
+    let app = select_provider_app(&store, app_id)
+        .ok_or_else(|| anyhow::anyhow!("Unsupported AI provider app: {app_id}"))?;
+    let entry = app
+        .providers
+        .get(provider_id)
+        .ok_or_else(|| anyhow::anyhow!("Unknown AI provider: {app_id}:{provider_id}"))?;
+
+    let label = entry.name.clone();
+
+    match app_id {
+        "claude" => {
+            let env = entry
+                .settings_config
+                .get("env")
+                .and_then(|value| value.as_object())
+                .ok_or_else(|| anyhow::anyhow!("Claude provider env is missing"))?;
+
+            let api_key = env
+                .get("ANTHROPIC_AUTH_TOKEN")
+                .or_else(|| env.get("ANTHROPIC_API_KEY"))
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("{label} is missing an API key"))?;
+
+            let base_url = env
+                .get("ANTHROPIC_BASE_URL")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("https://api.anthropic.com");
+
+            let model = env
+                .get("ANTHROPIC_MODEL")
+                .or_else(|| env.get("CLAUDE_CODE_MODEL"))
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("claude-sonnet-4-20250514");
+
+            config.api_format = ApiFormat::Anthropic;
+            config.api_key = api_key.to_string();
+            config.base_url = base_url.to_string();
+            config.model = model.to_string();
+        }
+        "codex" => {
+            let auth = entry
+                .settings_config
+                .get("auth")
+                .and_then(|value| value.as_object())
+                .ok_or_else(|| anyhow::anyhow!("Codex provider auth is missing"))?;
+            let config_text = entry
+                .settings_config
+                .get("config")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default();
+
+            let api_key = auth
+                .get("OPENAI_API_KEY")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("{label} is missing an API key"))?;
+
+            let base_url = parse_toml_string_field(config_text, "openai_base_url")
+                .or_else(|| parse_toml_string_field(config_text, "base_url"))
+                .or_else(|| {
+                    entry
+                        .meta
+                        .as_ref()
+                        .and_then(|meta| meta.get("baseURL"))
+                        .and_then(|value| value.as_str())
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_string)
+                })
+                .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+            let model = parse_toml_string_field(config_text, "model").unwrap_or_else(|| {
+                if config.model.trim().is_empty() {
+                    "gpt-5.4".to_string()
+                } else {
+                    config.model.clone()
+                }
+            });
+
+            config.api_format = ApiFormat::Openai;
+            config.api_key = api_key.to_string();
+            config.base_url = base_url;
+            config.model = model;
+        }
+        _ => anyhow::bail!("Unsupported AI provider app: {app_id}"),
+    }
+
+    Ok(label)
+}
+
+pub fn resolve_provider_ref(config: &mut AiConfig) -> Result<()> {
+    let Some(provider_ref) = config.provider_ref.clone() else {
+        return Ok(());
+    };
+
+    resolve_provider_ref_parts(config, &provider_ref.app_id, &provider_ref.provider_id).map(|_| ())
+}
+
+pub fn resolve_runtime_config(config: &AiConfig) -> Result<AiConfig> {
+    let mut resolved = config.clone();
+    resolve_provider_ref(&mut resolved)?;
+    Ok(resolved)
+}
+
+pub fn ai_runtime_ready(config: &AiConfig) -> bool {
+    if !config.enabled {
+        return false;
+    }
+
+    match resolve_runtime_config(config) {
+        Ok(resolved) => !resolved.api_key.trim().is_empty() || is_local_format(&resolved),
+        Err(_) => false,
+    }
 }
 
 // ── Language Mapping ────────────────────────────────────────────────
@@ -1402,7 +1571,7 @@ where
 }
 
 fn ai_short_text_available(config: &AiConfig) -> bool {
-    config.enabled && (!config.api_key.trim().is_empty() || is_local_format(config))
+    ai_runtime_ready(config)
 }
 
 /// Check if a translation result actually contains characters from the target
@@ -1427,8 +1596,8 @@ pub(crate) fn translation_looks_translated(
 
     // If source is already in the target script, any result is fine.
     let source_lang = detect_short_text_source_lang(source);
-    let target_normalized = normalize_mymemory_lang(target_language);
-    let source_normalized = normalize_mymemory_lang(source_lang);
+    let target_normalized = normalize_lang_code(target_language);
+    let source_normalized = normalize_lang_code(source_lang);
     if source_normalized == target_normalized {
         return true;
     }
@@ -1448,7 +1617,7 @@ pub(crate) fn translation_looks_translated(
     target_script_chars >= 2 && ratio >= 0.08
 }
 
-fn normalize_mymemory_lang(code: &str) -> String {
+fn normalize_lang_code(code: &str) -> String {
     let trimmed = code.trim();
     if trimmed.is_empty() {
         return "zh-CN".to_string();
@@ -1533,255 +1702,7 @@ fn source_lang_hint_from_code(code: &str) -> String {
     )
 }
 
-/// Return a persistent `de` email for MyMemory API usage.
-///
-/// MyMemory gives anonymous users 5000 words/day. By sending a stable `de`
-/// parameter the quota is tracked per-email instead of per-IP, which is more
-/// reliable for desktop apps behind NATs. The email is generated once and
-/// stored at `~/.skillstar/.mymemory_de`.
-fn get_mymemory_de() -> String {
-    use std::fs;
-    let path = crate::core::infra::paths::mymemory_disabled_path();
-    if let Ok(email) = fs::read_to_string(&path) {
-        let trimmed = email.trim().to_string();
-        if !trimmed.is_empty() {
-            return trimmed;
-        }
-    }
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    let id = uuid::Uuid::new_v4();
-    let email = format!("{id}@skillstar.local");
-    let _ = fs::write(&path, &email);
-    email
-}
 
-fn mymemory_usage_path() -> PathBuf {
-    crate::core::infra::paths::mymemory_usage_path()
-}
-
-fn load_mymemory_usage_stats_inner() -> MymemoryUsageStats {
-    let path = mymemory_usage_path();
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|raw| serde_json::from_str::<MymemoryUsageStats>(&raw).ok())
-        .unwrap_or_default()
-}
-
-fn save_mymemory_usage_stats_inner(stats: &MymemoryUsageStats) {
-    let path = mymemory_usage_path();
-    if let Some(parent) = path.parent() {
-        if std::fs::create_dir_all(parent).is_err() {
-            return;
-        }
-    }
-    if let Ok(raw) = serde_json::to_string_pretty(stats) {
-        let _ = std::fs::write(path, raw);
-    }
-}
-
-fn lock_mymemory_usage() -> MutexGuard<'static, ()> {
-    match MYMEMORY_USAGE_LOCK.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => {
-            warn!(target: "mymemory", "usage lock poisoned, continuing with recovered state");
-            poisoned.into_inner()
-        }
-    }
-}
-
-fn current_daily_reset_date() -> String {
-    chrono::Local::now().date_naive().to_string()
-}
-
-fn normalize_mymemory_daily_stats(stats: &mut MymemoryUsageStats) -> bool {
-    let today = current_daily_reset_date();
-    if stats.daily_reset_date == today {
-        return false;
-    }
-    stats.daily_reset_date = today;
-    stats.daily_chars_sent = 0;
-    true
-}
-
-fn record_mymemory_sent_chars(chars_sent: usize) {
-    if chars_sent == 0 {
-        return;
-    }
-    let _guard = lock_mymemory_usage();
-    let mut stats = load_mymemory_usage_stats_inner();
-    normalize_mymemory_daily_stats(&mut stats);
-    stats.total_chars_sent = stats.total_chars_sent.saturating_add(chars_sent as u64);
-    stats.daily_chars_sent = stats.daily_chars_sent.saturating_add(chars_sent as u64);
-    stats.updated_at = chrono::Utc::now().to_rfc3339();
-    save_mymemory_usage_stats_inner(&stats);
-}
-
-#[must_use]
-pub fn get_mymemory_usage_stats() -> MymemoryUsageStats {
-    let _guard = lock_mymemory_usage();
-    let mut stats = load_mymemory_usage_stats_inner();
-    if normalize_mymemory_daily_stats(&mut stats) {
-        save_mymemory_usage_stats_inner(&stats);
-    }
-    stats
-}
-
-async fn get_mymemory_de_async() -> String {
-    tokio::task::spawn_blocking(get_mymemory_de)
-        .await
-        .unwrap_or_else(|err| {
-            error!(target: "mymemory", error = %err, "get_mymemory_de task failed");
-            String::new()
-        })
-}
-
-async fn record_mymemory_sent_chars_async(chars_sent: usize) {
-    if chars_sent == 0 {
-        return;
-    }
-    if let Err(err) =
-        tokio::task::spawn_blocking(move || record_mymemory_sent_chars(chars_sent)).await
-    {
-        error!(target: "mymemory", error = %err, "record_mymemory_sent_chars task failed");
-    }
-}
-
-#[must_use]
-pub async fn get_mymemory_usage_stats_async() -> MymemoryUsageStats {
-    tokio::task::spawn_blocking(get_mymemory_usage_stats)
-        .await
-        .unwrap_or_else(|err| {
-            error!(target: "mymemory", error = %err, "get_mymemory_usage_stats task failed");
-            MymemoryUsageStats::default()
-        })
-}
-
-async fn mymemory_call(
-    client: &reqwest::Client,
-    text: &str,
-    langpair: &str,
-    de: Option<&str>,
-) -> Result<String> {
-    record_mymemory_sent_chars_async(text.chars().count()).await;
-    let mut params: Vec<(&str, &str)> = vec![("q", text), ("langpair", langpair)];
-    if let Some(email) = de {
-        params.push(("de", email));
-    }
-    let url = reqwest::Url::parse_with_params("https://api.mymemory.translated.net/get", &params)
-        .context("Failed to build MyMemory URL")?;
-
-    let resp = tokio::time::timeout(std::time::Duration::from_secs(15), client.get(url).send())
-        .await
-        .map_err(|_| anyhow::anyhow!("MyMemory API request timed out after 15s"))?
-        .context("Failed to send request to MyMemory API")?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body_text = resp.text().await.unwrap_or_default();
-        anyhow::bail!("MyMemory API returned {} — {}", status, body_text);
-    }
-
-    let payload = resp
-        .json::<serde_json::Value>()
-        .await
-        .context("Failed to parse MyMemory API response")?;
-
-    let api_status = payload
-        .get("responseStatus")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(200);
-    if api_status != 200 {
-        let details = payload
-            .get("responseDetails")
-            .and_then(|v| v.as_str())
-            .unwrap_or("Unknown MyMemory error");
-        anyhow::bail!("MyMemory API responseStatus={} — {}", api_status, details);
-    }
-
-    let translated = payload
-        .pointer("/responseData/translatedText")
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .unwrap_or("");
-
-    if translated.is_empty() {
-        anyhow::bail!("MyMemory returned empty translation");
-    }
-
-    if translated.contains("PLEASE SELECT TWO DISTINCT LANGUAGES")
-        || translated.contains("MYMEMORY WARNING:")
-        || translated.contains("LIMIT EXCEEDED")
-    {
-        anyhow::bail!("MyMemory returned API warning: {}", translated);
-    }
-
-    Ok(translated.to_string())
-}
-
-async fn mymemory_translate_short_text(config: &AiConfig, text: &str) -> Result<String> {
-    if text.trim().is_empty() {
-        return Ok(String::new());
-    }
-
-    let source_lang = detect_short_text_source_lang(text);
-    let normalized_source = normalize_mymemory_lang(source_lang);
-    let target = normalize_mymemory_lang(&config.target_language);
-    debug!(
-        target: "translate",
-        src = %source_lang,
-        pair = %format!("{normalized_source}|{target}"),
-        text_len = text.len(),
-        "mymemory ENTER"
-    );
-
-    if normalized_source == target {
-        debug!(target: "translate", "mymemory SKIP same-language");
-        return Ok(text.to_string());
-    }
-
-    let client = get_http_client()?;
-    let langpair = format!("{}|{}", normalized_source, target);
-    let de = get_mymemory_de_async().await;
-    let de_param = (!de.trim().is_empty()).then_some(de);
-
-    // Fast path: skip Markdown↔HTML round-trip for plain text (no formatting)
-    let is_plain = !text.contains(['#', '*', '`', '[', '|', '>', '~']);
-
-    let api_input = if is_plain {
-        text.to_string()
-    } else {
-        // Parse Markdown to HTML so MyMemory properly preserves the structural tags
-        let parser = pulldown_cmark::Parser::new(text);
-        let mut html_input = String::new();
-        pulldown_cmark::html::push_html(&mut html_input, parser);
-        html_input
-    };
-
-    // Try with de (per-email quota)
-    let raw_result = match mymemory_call(&client, &api_input, &langpair, de_param.as_deref()).await
-    {
-        Ok(result) => result,
-        Err(e) => {
-            warn!(target: "mymemory", error = %e, "de request failed, retrying anonymous");
-            // Fallback: anonymous (no de, per-IP quota)
-            mymemory_call(&client, &api_input, &langpair, None).await?
-        }
-    };
-
-    // Convert back to Markdown only if we sent HTML
-    let output = if is_plain {
-        raw_result.trim().to_string()
-    } else {
-        html2md::parse_html(&raw_result).trim().to_string()
-    };
-    Ok(output)
-}
-
-pub async fn translate_short_text_via_mymemory(config: &AiConfig, text: &str) -> Result<String> {
-    mymemory_translate_short_text(config, text).await
-}
 
 // ── Public API ───────────────────────────────────────────────────────
 
@@ -2037,141 +1958,29 @@ fn parse_batch_translation_response(response: &str, expected_count: usize) -> Re
     Ok(result)
 }
 
-/// Translate short text with provider-priority policy while supporting
-/// streaming deltas when the active path uses AI.
-pub async fn translate_short_text_streaming_with_priority_source<F>(
+/// Translate short text via AI streaming with delta callbacks.
+pub async fn translate_short_text_streaming_with_source<F>(
     config: &AiConfig,
     text: &str,
     on_delta: &mut F,
-) -> Result<(String, ShortTextSource)>
+) -> Result<String>
 where
     F: FnMut(&str) -> Result<()>,
 {
-    let ai_available = ai_short_text_available(config);
-    let mymemory_available = true;
-
-    if !ai_available && !mymemory_available {
+    if !ai_short_text_available(config) {
         anyhow::bail!(
-            "Short-text translation is not configured. Configure AI API key in Settings."
+            "Short-text translation is not configured. Choose a Models provider or local model in Settings."
         );
     }
 
-    match config.short_text_priority {
-        ShortTextPriority::AiFirst => {
-            debug!(target: "translate", priority = "AiFirst", ai_available, "short text priority");
-            let mut ai_err: Option<anyhow::Error> = None;
-            if ai_available {
-                match translate_short_text_streaming(config, text, on_delta).await {
-                    Ok(result) if !result.trim().is_empty() => {
-                        if translation_looks_translated(&config.target_language, text, &result) {
-                            return Ok((result, ShortTextSource::Ai));
-                        }
-                        warn!(
-                            target: "short_text",
-                            "AI returned untranslated result, falling back to MyMemory"
-                        );
-                        let _ = on_delta("\0CLEAR\0");
-                        ai_err = Some(anyhow::anyhow!("AI returned untranslated result"));
-                    }
-                    Ok(_) => {
-                        warn!(
-                            target: "short_text",
-                            "AI returned empty response, falling back to MyMemory"
-                        );
-                        let _ = on_delta("\0CLEAR\0");
-                        ai_err = Some(anyhow::anyhow!("AI returned empty response"));
-                    }
-                    Err(err) => {
-                        warn!(
-                            target: "short_text",
-                            error = %err,
-                            "AI translation failed, falling back to MyMemory"
-                        );
-                        let _ = on_delta("\0CLEAR\0");
-                        ai_err = Some(err);
-                    }
-                }
-            }
-
-            if mymemory_available {
-                let context = match ai_err {
-                    Some(err) => format!(
-                        "MyMemory short-text translation failed after AI path failed: {}",
-                        err
-                    ),
-                    None => "MyMemory short-text translation failed".to_string(),
-                };
-                let result = mymemory_translate_short_text(config, text)
-                    .await
-                    .with_context(|| context)?;
-                if !translation_looks_translated(&config.target_language, text, &result) {
-                    anyhow::bail!("Both AI and MyMemory returned untranslated results");
-                }
-                return Ok((result, ShortTextSource::Mymemory));
-            }
-
-            if let Some(err) = ai_err {
-                return Err(err);
-            }
-        }
-        ShortTextPriority::MymemoryFirst => {
-            debug!(target: "translate", priority = "MymemoryFirst", ai_available, "short text priority");
-            let mut mymemory_err: Option<anyhow::Error> = None;
-            if mymemory_available {
-                match mymemory_translate_short_text(config, text).await {
-                    Ok(result) if !result.trim().is_empty() => {
-                        if translation_looks_translated(&config.target_language, text, &result) {
-                            return Ok((result, ShortTextSource::Mymemory));
-                        }
-                        warn!(
-                            target: "short_text",
-                            "MyMemory returned untranslated result, falling back to AI"
-                        );
-                        mymemory_err =
-                            Some(anyhow::anyhow!("MyMemory returned untranslated result"));
-                    }
-                    Ok(_) => {
-                        warn!(
-                            target: "short_text",
-                            "MyMemory returned empty response, falling back to AI"
-                        );
-                        mymemory_err = Some(anyhow::anyhow!("MyMemory returned empty response"));
-                    }
-                    Err(err) => {
-                        warn!(
-                            target: "short_text",
-                            error = %err,
-                            "MyMemory translation failed, falling back to AI"
-                        );
-                        mymemory_err = Some(err);
-                    }
-                }
-            }
-
-            if ai_available {
-                let context = match mymemory_err {
-                    Some(err) => format!(
-                        "AI short-text translation failed after MyMemory path failed: {}",
-                        err
-                    ),
-                    None => "AI short-text translation failed".to_string(),
-                };
-                let result = translate_short_text_streaming(config, text, on_delta)
-                    .await
-                    .with_context(|| context)?;
-                if !translation_looks_translated(&config.target_language, text, &result) {
-                    anyhow::bail!("Both MyMemory and AI returned untranslated results");
-                }
-                return Ok((result, ShortTextSource::Ai));
-            }
-
-            if let Some(err) = mymemory_err {
-                return Err(err);
-            }
-        }
+    let result = translate_short_text_streaming(config, text, on_delta).await?;
+    if result.trim().is_empty() {
+        anyhow::bail!("AI returned empty response");
     }
-
-    anyhow::bail!("Short-text translation is not configured. Configure AI API key in Settings.");
+    if !translation_looks_translated(&config.target_language, text, &result) {
+        anyhow::bail!("AI returned untranslated result");
+    }
+    Ok(result)
 }
 
 /// Translate a short description with streaming delta callbacks.
@@ -2494,7 +2303,7 @@ mod tests {
         );
     }
 
-    // ── get_mymemory_de tests ───────────────────────────────────────
+    // (MyMemory tests removed — MyMemory support was dropped)
 
     /// Helper: generate a unique temp dir, set env, run, restore.
     /// Uses a global mutex to serialize env-var mutation across parallel tests.
@@ -2681,103 +2490,7 @@ mod tests {
         });
     }
 
-    // ── MyMemory Formatting Stability Tests ─────────────────────────────
-    // These tests verify that the `Markdown -> HTML -> TranslatedHTML -> Markdown`
-    // pipeline correctly preserves structural elements regardless of MyMemory's translation.
 
-    fn simulate_mymemory_format_pipeline(original_md: &str, translated_html: &str) -> String {
-        // Step 1: parse Markdown to HTML (what we send)
-        let parser = pulldown_cmark::Parser::new(original_md);
-        let mut html_input = String::new();
-        pulldown_cmark::html::push_html(&mut html_input, parser);
-
-        // (Mock: MyMemory translates internal text, preserves HTML. `translated_html` is returned.)
-
-        // Step 2: parse HTML back to Markdown
-        html2md::parse_html(translated_html).trim().to_string()
-    }
-
-    #[test]
-    fn test_mymemory_format_plain_text() {
-        let md = "Hello world";
-        let translated_html = "<p>你好，世界</p>\n";
-        let result = simulate_mymemory_format_pipeline(md, translated_html);
-        assert_eq!(result, "你好，世界");
-    }
-
-    #[test]
-    fn test_mymemory_format_bullet_list() {
-        let md = "- Item 1\n- Item 2";
-        let translated_html = "<ul>\n<li>项目 1</li>\n<li>项目 2</li>\n</ul>\n";
-        let result = simulate_mymemory_format_pipeline(md, translated_html);
-        assert_eq!(result, "* 项目 1\n* 项目 2");
-    }
-
-    #[test]
-    fn test_mymemory_format_numbered_list() {
-        let md = "1. First\n2. Second";
-        let translated_html = "<ol>\n<li>第一</li>\n<li>第二</li>\n</ol>\n";
-        let result = simulate_mymemory_format_pipeline(md, translated_html);
-        assert_eq!(result, "1. 第一\n2. 第二");
-    }
-
-    #[test]
-    fn test_mymemory_format_bold_text() {
-        let md = "This is **bold** text";
-        let translated_html = "<p>这是 <strong>粗体</strong> 文本</p>\n";
-        let result = simulate_mymemory_format_pipeline(md, translated_html);
-        // html2md might use `**` or `__` for strong, but we check if it's correct valid MD
-        assert!(result.contains("**粗体**") || result.contains("__粗体__"));
-    }
-
-    #[test]
-    fn test_mymemory_format_italic_text() {
-        let md = "This is *italic* text";
-        let translated_html = "<p>这是 <em>斜体</em> 文本</p>\n";
-        let result = simulate_mymemory_format_pipeline(md, translated_html);
-        assert!(result.contains("*斜体*") || result.contains("_斜体_"));
-    }
-
-    #[test]
-    fn test_mymemory_format_headers() {
-        let md = "### Section Header\nContent";
-        let translated_html = "<h3>章节标题</h3>\n<p>内容</p>\n";
-        let result = simulate_mymemory_format_pipeline(md, translated_html);
-        assert_eq!(result, "### 章节标题 ###\n\n内容");
-    }
-
-    #[test]
-    fn test_mymemory_format_inline_code() {
-        let md = "Run `npm install`";
-        let translated_html = "<p>运行 <code>npm install</code></p>\n";
-        let result = simulate_mymemory_format_pipeline(md, translated_html);
-        assert_eq!(result, "运行 `npm install`");
-    }
-
-    #[test]
-    fn test_mymemory_format_links() {
-        let md = "[Click here](https://example.com)";
-        let translated_html = "<p><a href=\"https://example.com\">点击这里</a></p>\n";
-        let result = simulate_mymemory_format_pipeline(md, translated_html);
-        assert_eq!(result, "[点击这里](https://example.com)");
-    }
-
-    #[test]
-    fn test_mymemory_format_complex_nested_list() {
-        let md = "- **Feature A**: Description\n- **Feature B**: Desc";
-        let translated_html = "<ul>\n<li><strong>功能 A</strong>: 描述</li>\n<li><strong>功能 B</strong>: 描述</li>\n</ul>\n";
-        let result = simulate_mymemory_format_pipeline(md, translated_html);
-        assert!(result.contains("* **功能 A**: 描述") || result.contains("* __功能 A__: 描述"));
-        assert!(result.contains("* **功能 B**: 描述") || result.contains("* __功能 B__: 描述"));
-    }
-
-    #[test]
-    fn test_mymemory_format_multiline_paragraphs() {
-        let md = "Paragraph 1\n\nParagraph 2";
-        let translated_html = "<p>段落 1</p>\n<p>段落 2</p>\n";
-        let result = simulate_mymemory_format_pipeline(md, translated_html);
-        assert_eq!(result, "段落 1\n\n段落 2");
-    }
 
     #[test]
     fn translation_looks_translated_rejects_english_for_zh_cn() {

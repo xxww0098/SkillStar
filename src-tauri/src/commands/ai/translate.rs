@@ -92,8 +92,6 @@ pub(crate) struct SkillTranslationPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     provider_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    route_mode: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     fallback_hop: Option<u8>,
 }
 
@@ -101,7 +99,6 @@ fn short_text_source_from_provider_type(provider_type: TranslationProviderType) 
     match provider_type {
         TranslationProviderType::TranslationApi => "translation_api",
         TranslationProviderType::Llm => "llm",
-        TranslationProviderType::Fallback => "mymemory",
     }
 }
 
@@ -116,7 +113,6 @@ fn build_short_text_payload(
         provider: attempt.provider_label.clone(),
         provider_id: Some(attempt.provider_id.clone()),
         provider_type: Some(attempt.provider_type.as_str().to_string()),
-        route_mode: Some(plan.mode.as_str().to_string()),
         fallback_hop: Some(attempt.fallback_hop),
     }
 }
@@ -131,7 +127,6 @@ fn build_skill_translation_payload(
         provider: attempt.provider_label.clone(),
         provider_id: Some(attempt.provider_id.clone()),
         provider_type: Some(attempt.provider_type.as_str().to_string()),
-        route_mode: Some(plan.mode.as_str().to_string()),
         fallback_hop: Some(attempt.fallback_hop),
     }
 }
@@ -141,20 +136,18 @@ struct AttemptEventMeta {
     provider_label: Option<String>,
     provider_id: Option<String>,
     provider_type: Option<String>,
-    route_mode: Option<String>,
     fallback_hop: Option<u8>,
 }
 
 impl AttemptEventMeta {
     fn from_attempt(
-        plan: Option<&TranslationRoutePlan>,
+        _plan: Option<&TranslationRoutePlan>,
         attempt: Option<&TranslationAttempt>,
     ) -> Self {
         Self {
             provider_label: attempt.map(|attempt| attempt.provider_label.clone()),
             provider_id: attempt.map(|attempt| attempt.provider_id.clone()),
             provider_type: attempt.map(|attempt| attempt.provider_type.as_str().to_string()),
-            route_mode: plan.map(|plan| plan.mode.as_str().to_string()),
             fallback_hop: attempt.map(|attempt| attempt.fallback_hop),
         }
     }
@@ -176,7 +169,7 @@ fn emit_translate_attempt_event(
         message.or_else(|| meta.provider_label.clone()),
         meta.provider_id.clone(),
         meta.provider_type.clone(),
-        meta.route_mode.clone(),
+        None,
         meta.fallback_hop,
     )
 }
@@ -429,28 +422,6 @@ async fn execute_short_attempt(
                 validate_translated_text(&plan.target_language, content, translated, attempt)?;
             Ok((translated, emitted_delta))
         }
-        TranslationAttemptEngine::EmergencyMymemory => {
-            let translated = tokio::time::timeout(
-                SHORT_TEXT_TIMEOUT,
-                ai_provider::translate_short_text_via_mymemory(base_config, content),
-            )
-            .await
-            .map_err(|_| format!("{} timed out", attempt.provider_label))?
-            .map_err(|err| err.to_string())?;
-
-            let translated =
-                validate_translated_text(&plan.target_language, content, translated, attempt)?;
-            emit_translate_attempt_event(
-                window,
-                request_id,
-                "delta",
-                Some(translated.clone()),
-                None,
-                &meta,
-            )?;
-            emitted_delta = true;
-            Ok((translated, emitted_delta))
-        }
     }
 }
 
@@ -486,9 +457,6 @@ async fn execute_skill_attempt(
             .and_then(|translated| {
                 validate_translated_text(&plan.target_language, content, translated, attempt)
             })
-        }
-        TranslationAttemptEngine::EmergencyMymemory => {
-            Err("MyMemory is not available for markdown translation.".to_string())
         }
     }
 }
@@ -846,7 +814,7 @@ pub async fn ai_translate_skill(
                     target: "translate",
                     provider_id = %attempt.provider_id,
                     provider_type = %attempt.provider_type.as_str(),
-                    route_mode = %plan.mode.as_str(),
+                    route_mode = "auto",
                     fallback_hop = attempt.fallback_hop,
                     error = %err,
                     "markdown attempt failed"
@@ -977,9 +945,6 @@ pub async fn ai_translate_skill_stream(
                 validate_translated_text(&plan.target_language, &content, translated, attempt)
             })
             .map(|translated| (translated, false)),
-            TranslationAttemptEngine::EmergencyMymemory => {
-                Err("MyMemory is not available for markdown translation.".to_string())
-            }
         };
 
         match result {
@@ -1020,7 +985,7 @@ pub async fn ai_translate_skill_stream(
                     target: "translate",
                     provider_id = %attempt.provider_id,
                     provider_type = %attempt.provider_type.as_str(),
-                    route_mode = %plan.mode.as_str(),
+                    route_mode = "auto",
                     fallback_hop = attempt.fallback_hop,
                     error = %err,
                     "markdown stream attempt failed"
@@ -1046,16 +1011,7 @@ pub async fn ai_translate_skill_stream(
     Err(message)
 }
 
-#[tauri::command]
-pub async fn get_mymemory_usage_stats() -> Result<super::MymemoryUsagePayload, String> {
-    let stats = ai_provider::get_mymemory_usage_stats_async().await;
-    Ok(super::MymemoryUsagePayload {
-        total_chars_sent: stats.total_chars_sent,
-        daily_chars_sent: stats.daily_chars_sent,
-        daily_reset_date: stats.daily_reset_date,
-        updated_at: stats.updated_at,
-    })
-}
+
 
 #[tauri::command]
 pub async fn ai_translate_short_text_stream_with_source(
@@ -1169,7 +1125,7 @@ pub async fn ai_translate_short_text_stream_with_source(
                     target: "translate",
                     provider_id = %attempt.provider_id,
                     provider_type = %attempt.provider_type.as_str(),
-                    route_mode = %plan.mode.as_str(),
+                    route_mode = "auto",
                     fallback_hop = attempt.fallback_hop,
                     error = %err,
                     "short-text attempt failed"

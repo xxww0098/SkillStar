@@ -20,10 +20,7 @@ const fs = require("fs");
 const path = require("path");
 
 const SKILLS_SH_API = "https://skills.sh/api/search";
-const DEFAULT_OUTPUT = path.join(
-  __dirname,
-  "../../src-tauri/resources/seed_registry.json"
-);
+const DEFAULT_OUTPUT = path.join(__dirname, "../../src-tauri/resources/seed_registry.json");
 const USER_AGENT = "SkillStar-RegistryGen/1.0";
 
 // Rate limit: 30 req/min → 2s between requests (with margin)
@@ -35,20 +32,69 @@ const FRESHNESS_HOURS = 24;
 
 // Known publishers — same list as known_official_publishers() in remote.rs
 const PUBLISHERS = [
-  "vercel-labs", "microsoft", "anthropics", "google-labs-code", "github",
-  "cloudflare", "expo", "firebase", "openai", "supabase", "langchain-ai",
-  "hashicorp", "stripe", "posthog", "prisma", "figma", "firecrawl",
-  "flutter", "vercel", "shadcn", "google-gemini", "huggingface",
-  "remotion-dev", "tavily-ai", "browser-use", "facebook", "better-auth",
-  "resend", "sentry", "neondatabase", "dagster-io", "datadog-labs",
-  "bitwarden", "upstash", "sanity-io", "pulumi", "mapbox", "semgrep", "clerk",
+  "vercel-labs",
+  "microsoft",
+  "anthropics",
+  "google-labs-code",
+  "github",
+  "cloudflare",
+  "expo",
+  "firebase",
+  "openai",
+  "supabase",
+  "langchain-ai",
+  "hashicorp",
+  "stripe",
+  "posthog",
+  "prisma",
+  "figma",
+  "firecrawl",
+  "flutter",
+  "vercel",
+  "shadcn",
+  "google-gemini",
+  "huggingface",
+  "remotion-dev",
+  "tavily-ai",
+  "browser-use",
+  "facebook",
+  "better-auth",
+  "resend",
+  "sentry",
+  "neondatabase",
+  "dagster-io",
+  "datadog-labs",
+  "bitwarden",
+  "upstash",
+  "sanity-io",
+  "pulumi",
+  "mapbox",
+  "semgrep",
+  "clerk",
 ];
 
 // Broad categories to catch popular community skills
 const BROAD_QUERIES = [
-  "react", "nextjs", "python", "typescript", "rust", "go", "docker",
-  "kubernetes", "aws", "testing", "security", "database", "api",
-  "frontend", "backend", "devops", "ai", "coding", "git", "debug",
+  "react",
+  "nextjs",
+  "python",
+  "typescript",
+  "rust",
+  "go",
+  "docker",
+  "kubernetes",
+  "aws",
+  "testing",
+  "security",
+  "database",
+  "api",
+  "frontend",
+  "backend",
+  "devops",
+  "ai",
+  "coding",
+  "git",
+  "debug",
 ];
 
 function fetch(url) {
@@ -67,7 +113,10 @@ function fetch(url) {
       });
     });
     req.on("error", reject);
-    req.setTimeout(15000, () => { req.destroy(); reject(new Error("Timeout")); });
+    req.setTimeout(15000, () => {
+      req.destroy();
+      reject(new Error("Timeout"));
+    });
   });
 }
 

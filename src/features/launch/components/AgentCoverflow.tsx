@@ -45,12 +45,15 @@ export function AgentCoverflow({ agents, value, onChange, instanceId }: AgentCov
   if (installedAgents.length === 0) return null;
 
   return (
-    <div className="relative w-full max-w-[200px] h-16 flex items-center justify-center my-2 select-none group" style={{ perspective: "800px" }}>
+    <div
+      className="relative w-full max-w-[200px] h-16 flex items-center justify-center my-2 select-none group"
+      style={{ perspective: "800px" }}
+    >
       {installedAgents.map((agent, i) => {
         const offset = i - safeActiveIndex;
         const absOffset = Math.abs(offset);
         const zIndex = 10 - absOffset;
-        
+
         let x = 0;
         let scale = 1;
         let opacity = 1;
@@ -87,7 +90,9 @@ export function AgentCoverflow({ agents, value, onChange, instanceId }: AgentCov
             transition={{ type: "spring", stiffness: 350, damping: 30 }}
             className={cn(
               "absolute top-0 bottom-0 m-auto w-12 h-12 rounded-xl flex items-center justify-center cursor-pointer border transition-colors",
-              isActive ? "border-primary/50 bg-background/80 shadow-md backdrop-blur-md" : "border-border/30 bg-background/30"
+              isActive
+                ? "border-primary/50 bg-background/80 shadow-md backdrop-blur-md"
+                : "border-border/30 bg-background/30",
             )}
             style={{ zIndex }}
             onClick={(e) => {
@@ -95,7 +100,11 @@ export function AgentCoverflow({ agents, value, onChange, instanceId }: AgentCov
               onChange(agent.id);
             }}
           >
-            <AgentIcon appId={agent.id} color={AGENT_HEX_COLORS[agent.id] ?? "#94a3b8"} size={isActive ? "w-6 h-6" : "w-5 h-5"} />
+            <AgentIcon
+              appId={agent.id}
+              color={AGENT_HEX_COLORS[agent.id] ?? "#94a3b8"}
+              size={isActive ? "w-6 h-6" : "w-5 h-5"}
+            />
           </motion.div>
         );
       })}

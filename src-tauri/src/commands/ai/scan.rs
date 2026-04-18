@@ -160,7 +160,7 @@ fn emit_scan_event(window: &tauri::Window, payload: SecurityScanPayload) {
 }
 
 fn effective_scan_mode(requested: ScanMode, config: &ai_provider::AiConfig) -> ScanMode {
-    if requested.requires_ai() && config.enabled && !config.api_key.trim().is_empty() {
+    if requested.requires_ai() && ai_provider::ai_runtime_ready(config) {
         requested
     } else {
         ScanMode::Static

@@ -159,7 +159,9 @@ export function useProviderHealth(
           setHealth((prev) => ({ ...prev, quotaPct: cached.usagePercent }));
         }
       })
-      .catch(() => {/* ignore */});
+      .catch(() => {
+        /* ignore */
+      });
 
     // Probe health + refresh quota concurrently
     const [probeResult, _quotaResult] = await Promise.all([

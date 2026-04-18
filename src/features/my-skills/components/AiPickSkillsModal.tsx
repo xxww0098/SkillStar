@@ -44,7 +44,7 @@ export function AiPickSkillsModal({ open, onClose, skills, onResult }: AiPickSki
       const loadAiConfig = async () => {
         try {
           const config = await getAiConfigCached();
-          setAiConfigured(config.enabled && (config.api_format === "local" || config.api_key.trim().length > 0));
+          setAiConfigured(config.enabled && (config.provider_ref != null || config.api_format === "local"));
         } catch {
           setAiConfigured(false);
         }
@@ -130,6 +130,7 @@ export function AiPickSkillsModal({ open, onClose, skills, onResult }: AiPickSki
                     {t("aiPickModal.title")}
                   </h2>
                   <button
+                    type="button"
                     onClick={onClose}
                     aria-label={t("common.close")}
                     className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors cursor-pointer"
@@ -148,6 +149,7 @@ export function AiPickSkillsModal({ open, onClose, skills, onResult }: AiPickSki
                     >
                       <div className="flex-1 text-sm text-warning/90">{t("aiPickModal.aiNotConfigured")}</div>
                       <button
+                        type="button"
                         onClick={() => {
                           onClose();
                           navigateToAiSettings();
@@ -167,7 +169,6 @@ export function AiPickSkillsModal({ open, onClose, skills, onResult }: AiPickSki
                         onChange={(e) => setPrompt(e.target.value)}
                         placeholder={t("aiPickModal.placeholder")}
                         className="w-full h-28 resize-none rounded-xl border border-border bg-sidebar/50 px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/40 transition"
-                        autoFocus
                         onKeyDown={(e) => {
                           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                             handlePick();
@@ -225,6 +226,7 @@ export function AiPickSkillsModal({ open, onClose, skills, onResult }: AiPickSki
                               const showDescription = !!displayDesc && displayDesc !== reason;
                               return (
                                 <button
+                                  type="button"
                                   key={item.name}
                                   onClick={() => toggleSkill(item.name)}
                                   className={cn(

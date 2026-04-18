@@ -155,6 +155,7 @@ SkillStar/
 ### AI Integration
 
 - AI provider config is backend-owned (`config/ai.json`); frontend never stores API keys.
+- AI summary / quick read / security scan should prefer a Models provider reference (`provider_ref`) for Claude or Codex instead of duplicating URL/API key in `ai.json`; only `api_format=local` keeps manual base URL / model fields for Ollama-style local endpoints.
 - Long translation should fallback to chunked translation when full pass returns empty content.
 - Translation settings are backend-owned and centered on a unified Translation Center (`target_language`, route mode, fast engine, quality engine, fallback flags); frontend must not reconstruct routing locally.
 - Translation routing must not derive from legacy AI config fields. Quality translation requires an explicit Models provider reference from Translation Center.

@@ -259,7 +259,6 @@ pub fn run() {
             commands::ai::test_translation_provider,
             commands::ai::translate::ai_translate_skill,
             commands::ai::translate::ai_translate_skill_stream,
-            commands::ai::translate::get_mymemory_usage_stats,
             commands::ai::translate::ai_translate_short_text_stream_with_source,
             commands::ai::translate::ai_retranslate_short_text_stream_with_source,
             commands::ai::summarize::ai_summarize_skill,
