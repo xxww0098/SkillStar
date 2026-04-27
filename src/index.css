@@ -131,6 +131,7 @@
       radial-gradient(ellipse at 80% 100%, rgba(139, 92, 246, 0.06) 0%, transparent 50%);
     color: var(--color-foreground);
     min-height: 100vh;
+    /* biome-ignore lint/suspicious/noDuplicateProperties: dvh fallback for older browsers */
     min-height: 100dvh;
     overflow: hidden;
     font-kerning: normal;
@@ -144,6 +145,7 @@
 
   #root {
     height: 100vh;
+    /* biome-ignore lint/suspicious/noDuplicateProperties: dvh fallback for older browsers */
     height: 100dvh;
     display: flex;
   }

@@ -602,20 +602,18 @@ export function ProviderCard({
       >
         {/* Drag handle — hidden in readOnly mode */}
         {!readOnly && (
-          <>
-            <div
-              className="flex items-center justify-center p-1 -m-1 opacity-20 hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing text-foreground"
-              style={{ touchAction: "none" }}
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                onDragHandlePointerDown?.(e);
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <GripVertical className="w-4 h-4 text-muted-foreground hover:text-foreground transition-colors" />
-            </div>
-          </>
+          <div
+            className="flex items-center justify-center p-1 -m-1 opacity-20 hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing text-foreground"
+            style={{ touchAction: "none" }}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              onDragHandlePointerDown?.(e);
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <GripVertical className="w-4 h-4 text-muted-foreground hover:text-foreground transition-colors" />
+          </div>
         )}
 
         {/* Provider icon */}

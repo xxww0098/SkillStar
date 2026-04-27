@@ -21,13 +21,13 @@
         "noArrayIndexKey": "off",
         "noConfusingVoidType": "off",
         "useIterableCallbackReturn": "off",
-        "noDuplicateProperties": "off",
-        "noGlobalIsNan": "off",
-        "noApproximativeNumericConstant": "off"
+        "noDuplicateProperties": "error",
+        "noGlobalIsNan": "error",
+        "noApproximativeNumericConstant": "error"
       },
       "style": {
         "noNonNullAssertion": "off",
-        "useImportType": "off",
+        "useImportType": "error",
         "useTemplate": "off",
         "noDescendingSpecificity": "off"
       },
@@ -36,8 +36,8 @@
         "useLiteralKeys": "off",
         "useOptionalChain": "off",
         "noImportantStyles": "off",
-        "noUselessSwitchCase": "off",
-        "noUselessFragments": "off"
+        "noUselessSwitchCase": "error",
+        "noUselessFragments": "error"
       },
       "a11y": {
         "noSvgWithoutTitle": "off",

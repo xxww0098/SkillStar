@@ -98,7 +98,7 @@ export function RadarSweep({
     // Diagonal lines
     ctx.strokeStyle = `rgba(${successRgb}, 0.06)`;
     ctx.beginPath();
-    const diagonalOffset = maxR * 0.707;
+    const diagonalOffset = maxR * Math.SQRT1_2;
     ctx.moveTo(cx - diagonalOffset, cy - diagonalOffset);
     ctx.lineTo(cx + diagonalOffset, cy + diagonalOffset);
     ctx.moveTo(cx + diagonalOffset, cy - diagonalOffset);
