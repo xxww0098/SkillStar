@@ -1,5 +1,0 @@
-{
-  "version": 1,
-  "_comment": "No hooks are enabled by default in this repo. Add hook entries under hooks when you want to opt into a workflow.",
-  "hooks": {}
-}

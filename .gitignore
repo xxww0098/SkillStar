@@ -58,3 +58,15 @@ test_parse
 # Tauri updater keys
 *.key
 *.key.pub
+
+# Cursor agent config
+.cursor/
+
+# GitHub config (Actions workflows only tracked in CI)
+.github/
+
+# Sisyphus planning workspace
+.sisyphus/
+
+# Documentation (local only)
+docs/

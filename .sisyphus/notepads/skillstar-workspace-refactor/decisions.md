@@ -1,8 +1,0 @@
-- T2 retry decision: preserve only the new core-types crate, workspace/member wiring, dependent crate manifest links, and legacy Rust re-export/adapter shims strictly required for behavior-preserving extraction.
-- User clarification: the Markdown translation module should remain intentionally empty for now; reserve only a folder/placeholder structure because the real translator will come from another project that is still under construction.
-- T3 decision: `skillstar-infra` now owns the infrastructure implementation; `src-tauri/src/core/infra/*` and `src-tauri/src/core/path_env.rs` are compatibility shims that preserve existing call sites without reintroducing domain logic.
-
-- T4: reused `skillstar-infra::paths` for config file locations so proxy/github_mirror path semantics stayed unchanged during extraction.
-
-- T10 decision: extracted the smallest reusable core of `model_config` into `skillstar-model-config`, leaving app-specific OAuth/account/Tauri logic in `src-tauri`. The boundary was chosen so that `providers.rs` (which calls `claude::write_settings`, `codex::write_config`, `opencode::write_config` in `apply_config_to_app`) moves together with its three config-file helper modules, forming a coherent reusable domain. OAuth/account modules (`codex_oauth`, `gemini_oauth`, `codex_accounts`, `gemini_quota`) remain local because they depend on `tauri::AppHandle`, `Emitter`, or each other.
-- `atomic_write` and JSON helpers were promoted to `pub` in the new crate and re-exported through the shim so that `codex_accounts.rs` (the one remaining local consumer) continues to compile without modification.
