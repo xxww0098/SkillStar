@@ -648,7 +648,7 @@ function InlineNumber({
               return;
             }
             const val = parseInt(e.target.value, 10);
-            if (!isNaN(val)) onChange(val);
+            if (!Number.isNaN(val)) onChange(val);
           }}
           className="h-7 w-[80px] px-2 rounded-lg bg-muted/50 border border-border/60 text-[11px] font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40 appearance-none"
           style={{ MozAppearance: "textfield" }}

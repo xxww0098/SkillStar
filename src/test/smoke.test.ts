@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-describe("smoke test", () => {
-  it("should pass basic assertion", () => {
-    expect(1 + 1).toBe(2);
+describe("test infrastructure smoke", () => {
+  it("should provide jsdom window and document", () => {
+    expect(typeof window).toBe("object");
+    expect(typeof document).toBe("object");
   });
 
-  it("should handle string operations", () => {
-    expect("SkillStar".toLowerCase()).toBe("skillstar");
+  it("should mock Tauri invoke", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    expect(invoke).toBeDefined();
+    expect(typeof invoke).toBe("function");
   });
 });

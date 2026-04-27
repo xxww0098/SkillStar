@@ -204,7 +204,6 @@ export function MySkills({
           return (
             new Date(b.last_updated).getTime() - new Date(a.last_updated).getTime() || a.name.localeCompare(b.name)
           );
-        case "name":
         default:
           return a.name.localeCompare(b.name);
       }

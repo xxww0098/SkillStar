@@ -11,13 +11,19 @@ import {
   useRef,
   useState,
 } from "react";
-import { getSkillUpdateRefreshIntervalMs } from "../../../lib/skillUpdateRefresh";
 import type { RepoNewSkill, Skill, SkillContent, SkillUpdateState, UpdateResult } from "../../../types";
 
 const SKILLS_QUERY_KEY = ["skills"] as const;
 const SKILL_UPDATES_QUERY_KEY = ["skills", "updates"] as const;
 const GHOST_SKILLS_QUERY_KEY = ["skills", "ghost"] as const;
 const SKILL_LIST_REFRESH_INTERVAL_MS = 30_000;
+const SKILL_UPDATE_REFRESH_FOREGROUND_MS = 5 * 60 * 1000;
+const SKILL_UPDATE_REFRESH_BACKGROUND_MS = 15 * 60 * 1000;
+
+function getSkillUpdateRefreshIntervalMs(): number {
+  const isVisible = typeof document === "undefined" ? true : !document.hidden;
+  return isVisible ? SKILL_UPDATE_REFRESH_FOREGROUND_MS : SKILL_UPDATE_REFRESH_BACKGROUND_MS;
+}
 
 type SkillsState = ReturnType<typeof useSkillsState>;
 
