@@ -12,7 +12,7 @@ skillstar-infra = { version = "0.1.0", path = "../skillstar-infra" }
 skillstar-config = { version = "0.1.0", path = "../skillstar-config" }
 skillstar-projects = { version = "0.1.0", path = "../skillstar-projects" }
 skillstar-terminal = { version = "0.1.0", path = "../skillstar-terminal" }
-skillstar-marketplace-core = { version = "0.1.0", path = "../../src-tauri/crates/marketplace-core" }
+skillstar-marketplace-core = { version = "0.1.0", path = "../skillstar-marketplace-core" }
 skillstar-ai = { version = "0.1.0", path = "../skillstar-ai" }
 anyhow = "1"
 tokio = { version = "1", features = ["full"] }

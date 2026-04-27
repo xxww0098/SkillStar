@@ -2,14 +2,7 @@
 resolver = "3"
 members = [
   "src-tauri",
-  "src-tauri/crates/marketplace-core",
-  "src-tauri/crates/Markdown-Translator",
   "crates/*",
-  "crates/skillstar-patrol",
-  "crates/skillstar-terminal",
-  "crates/skillstar-commands",
-  "crates/skillstar-cli",
-  "crates/skillstar-skill-core",
 ]
 default-members = ["src-tauri"]
 

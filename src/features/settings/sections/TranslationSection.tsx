@@ -555,7 +555,10 @@ export function TranslationSection() {
               </div>
               <div className="mt-2 space-y-1 text-[11px] leading-relaxed text-muted-foreground">
                 <div>
-                  • {t("settings.routeShortText", { defaultValue: "Short text (descriptions): DeepL → DeepLX → MyMemory" })}
+                  •{" "}
+                  {t("settings.routeShortText", {
+                    defaultValue: "Short text (descriptions): DeepL → DeepLX → MyMemory",
+                  })}
                 </div>
                 <div>
                   •{" "}
@@ -564,7 +567,10 @@ export function TranslationSection() {
                   })}
                 </div>
                 <div>
-                  • {t("settings.routeFallback", { defaultValue: "DeepLX is always available. MyMemory is the final short text fallback." })}
+                  •{" "}
+                  {t("settings.routeFallback", {
+                    defaultValue: "DeepLX is always available. MyMemory is the final short text fallback.",
+                  })}
                 </div>
               </div>
             </div>

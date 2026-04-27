@@ -8,11 +8,11 @@
 
 **统一编排 Skill，按项目精准分发到不同 Agent CLI。**
 
-[![Version](https://img.shields.io/badge/version-0.1.2-blueviolet)](https://github.com/xxww0098/SkillStar/releases/latest)
+[![Version](https://img.shields.io/badge/version-0.2.2-blueviolet)](https://github.com/xxww0098/SkillStar/releases/latest)
 [![Tauri v2](https://img.shields.io/badge/Tauri-v2-blue?logo=tauri&logoColor=white)](https://v2.tauri.app)
-[![React 18](https://img.shields.io/badge/React-18-61dafb?logo=react&logoColor=white)](https://react.dev)
+[![React 19](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)](https://react.dev)
 [![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust&logoColor=white)](https://www.rust-lang.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-green.svg)](./LICENSE)
 
 </div>
 
@@ -203,7 +203,7 @@ skillstar gui
 | Desktop Shell | Tauri v2 | 桌面容器与 IPC |
 | Backend | Rust 2024 + tokio + reqwest 0.13 | 业务逻辑与异步任务 |
 | Git Engine | gix 0.80 (gitoxide) | 克隆/拉取/哈希对比 |
-| Frontend | React 18 + TypeScript + Vite 5 | SPA UI |
+| Frontend | React 19 + TypeScript + Vite 8 | SPA UI |
 | UI | TailwindCSS v4 + Framer Motion 12 + Radix | 设计系统与交互 |
 | Storage | JSON files + SQLite | 配置持久化 + 翻译/安全扫描缓存 |
 | Crypto | AES-256-GCM | API Key 加密存储 |
@@ -212,6 +212,7 @@ skillstar gui
 ```text
 SkillStar/
 ├── src/                # React 前端
+│   ├── features/       #   domain slices（my-skills, marketplace, projects, security, settings）
 │   ├── hooks/          #   数据 hooks（skills, projects, marketplace, AI, updater, security）
 │   ├── pages/          #   MySkills, Marketplace, SecurityScan, SkillCards, Projects, Settings
 │   ├── components/     #   ui/, layout/, skills/, marketplace/, security/
@@ -219,8 +220,7 @@ SkillStar/
 │   └── types/          #   共享 TS 类型
 ├── src-tauri/          # Rust 后端（Tauri + CLI）
 │   ├── src/commands/   #   marketplace, agents, projects, github, ai, patrol
-│   ├── src/core/       #   domain modules（skills, sync, repo, security_scan, ai_provider ...）
-│   └── prompts/        #   AI/Security 系统提示词
+│   └── src/core/       #   domain modules（skills, sync, repo, security_scan, ai_provider ...）
 ├── docs/
 │   ├── Error.md           # 关键问题与修复记录
 │   ├── CHANGELOG.md       # 版本变更日志
@@ -253,4 +253,4 @@ SkillStar/
 - 重要 bug 修复：在 `docs/Error.md` 追加条目
 
 ## 许可证
-[MIT](./LICENSE)
+[Apache-2.0](./LICENSE)

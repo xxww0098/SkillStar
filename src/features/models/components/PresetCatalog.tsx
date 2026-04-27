@@ -56,7 +56,7 @@ export function PresetCatalog({ appId, appColor, onAddPreset, existingProviders 
       }));
   }, [filtered]);
 
-    const handlePresetClick = useCallback(
+  const handlePresetClick = useCallback(
     (preset: ProviderEntry) => {
       // ── Dedup check: block adding providers with the same name ──
       if (existingNames.has(preset.name.toLowerCase())) {

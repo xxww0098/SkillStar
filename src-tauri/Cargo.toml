@@ -51,9 +51,9 @@ agent-client-protocol = "0.10"
 tokio-util = { version = "0.7", features = ["compat"] }
 futures = "0.3"
 async-trait = "0.1"
-skillstar-marketplace-core = { path = "crates/marketplace-core" }
+skillstar-marketplace-core = { path = "../crates/skillstar-marketplace-core" }
 skillstar-skill-core = { version = "0.1.0", path = "../crates/skillstar-skill-core" }
-markdown-translator = { path = "crates/Markdown-Translator" }
+markdown-translator = { path = "../crates/markdown-translator" }
 url = "2.5.8"
 toml_edit = "0.25.10"
 rand = "0.10.0"

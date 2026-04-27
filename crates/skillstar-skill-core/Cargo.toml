@@ -11,8 +11,22 @@ dirs = "5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
+flate2 = "1"
+sha2 = "0.11"
+tar = "0.4"
+toml = "1.1"
+tokio = { version = "1", features = ["sync", "rt"] }
+tracing = "0.1"
+markdown-translator = { path = "../markdown-translator" }
+skillstar-ai = { version = "0.1.0", path = "../skillstar-ai" }
+skillstar-config = { version = "0.1.0", path = "../skillstar-config" }
 skillstar-core-types = { version = "0.1.0", path = "../skillstar-core-types" }
-skillstar-marketplace-core = { path = "../../src-tauri/crates/marketplace-core" }
+skillstar-git = { version = "0.1.0", path = "../skillstar-git" }
+skillstar-infra = { version = "0.1.0", path = "../skillstar-infra" }
+skillstar-marketplace-core = { path = "../skillstar-marketplace-core" }
+skillstar-projects = { version = "0.1.0", path = "../skillstar-projects" }
+skillstar-security-scan = { version = "0.1.0", path = "../skillstar-security-scan" }
+skillstar-translation = { version = "0.1.0", path = "../skillstar-translation" }
 
 [dev-dependencies]
 tempfile = "3"

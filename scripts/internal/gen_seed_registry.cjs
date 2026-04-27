@@ -15,9 +15,9 @@
  * unless --force is passed.
  */
 
-const https = require("https");
-const fs = require("fs");
-const path = require("path");
+const https = require("node:https");
+const fs = require("node:fs");
+const path = require("node:path");
 
 const SKILLS_SH_API = "https://skills.sh/api/search";
 const DEFAULT_OUTPUT = path.join(__dirname, "../../src-tauri/resources/seed_registry.json");

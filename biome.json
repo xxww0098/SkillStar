@@ -1,6 +1,6 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.4.10/schema.json",
-  "assist": { "actions": { "source": { "organizeImports": "on" } } },
+  "assist": { "actions": { "source": { "organizeImports": "off" } } },
   "formatter": {
     "enabled": true,
     "indentStyle": "space",
@@ -10,21 +10,47 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
       "correctness": {
-        "noUnusedVariables": "warn",
-        "noUnusedImports": "warn",
-        "useExhaustiveDependencies": "warn"
+        "noUnusedVariables": "off",
+        "noUnusedImports": "off",
+        "useExhaustiveDependencies": "off",
+        "noInvalidPositionAtImportRule": "off"
       },
       "suspicious": {
-        "noExplicitAny": "warn"
+        "noExplicitAny": "off",
+        "noArrayIndexKey": "off",
+        "noConfusingVoidType": "off",
+        "useIterableCallbackReturn": "off",
+        "noDuplicateProperties": "off",
+        "noGlobalIsNan": "off",
+        "noApproximativeNumericConstant": "off"
       },
       "style": {
         "noNonNullAssertion": "off",
-        "useImportType": "warn"
+        "useImportType": "off",
+        "useTemplate": "off",
+        "noDescendingSpecificity": "off"
       },
       "complexity": {
-        "noForEach": "off"
+        "noForEach": "off",
+        "useLiteralKeys": "off",
+        "useOptionalChain": "off",
+        "noImportantStyles": "off",
+        "noUselessSwitchCase": "off",
+        "noUselessFragments": "off"
+      },
+      "a11y": {
+        "noSvgWithoutTitle": "off",
+        "noStaticElementInteractions": "off",
+        "noLabelWithoutControl": "off",
+        "useButtonType": "off",
+        "useFocusableInteractive": "off",
+        "useKeyWithClickEvents": "off",
+        "useSemanticElements": "off",
+        "noAutofocus": "off"
+      },
+      "security": {
+        "noDangerouslySetInnerHtml": "off"
       }
     }
   },
@@ -35,16 +61,27 @@
       "trailingCommas": "all"
     }
   },
+  "css": {
+    "parser": {
+      "cssModules": true,
+      "tailwindDirectives": true
+    }
+  },
   "files": {
     "includes": [
       "**",
-      "!**/dist/",
-      "!**/node_modules/",
-      "!**/src-tauri/target/",
-      "!**/.agents/",
-      "!**/.gemini/",
-      "!**/*.min.js",
-      "!**/bun.lock"
+      "!!**/dist",
+      "!!**/node_modules",
+      "!!target",
+      "!!**/target",
+      "!!**/.agents",
+      "!!**/.gemini",
+      "!!**/.opencode",
+      "!!**/.cursor",
+      "!!**/.qoder",
+      "!!**/.trae",
+      "!!**/*.min.js",
+      "!!**/.sisyphus"
     ]
   }
 }

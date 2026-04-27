@@ -309,7 +309,7 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                     let account_id = parts[2].to_string();
                     let app_handle = app.clone();
                     tauri::async_runtime::spawn(async move {
-                        match crate::commands::models::switch_codex_account(
+                        match crate::commands::oauth_commands::switch_codex_account(
                             app_handle.clone(),
                             account_id.clone(),
                         )

@@ -6,7 +6,7 @@ SkillStar is a Tauri v2 desktop app with a React SPA frontend and Rust backend.
 
 - Frontend calls backend via `invoke()` and Tauri events.
 - Tauri commands are defined in `src-tauri/src/commands/mod.rs` (root handlers) with feature modules under `src-tauri/src/commands/`.
-- Core domain logic lives in `src-tauri/src/core/`.
+- Core domain logic lives in workspace crates under `crates/`; `src-tauri/src/core/` retains thin adapter stubs and Tauri-specific glue.
 - Persistence is mixed storage under `~/.skillstar/`: JSON for config/project metadata plus SQLite for marketplace and translation caches.
 - Skill distribution is symlink-based to keep project directories clean.
 
@@ -48,21 +48,41 @@ SkillStar/
 │   ├── src/
 │   │   ├── commands/              # mod.rs: skills, bundles, shell, network; + marketplace, agents, projects, github, patrol, acp
 │   │   │   └── ai/               # AI commands split: translate, summarize, scan
-│   │   └── core/                  # domain modules (domain-first layout)
-│   │       ├── infra/             # cross-cutting infrastructure (paths, fs_ops, migration, error, db_pool, util)
+│   │   │   └── models_commands.rs # provider CRUD / health dashboard (split from models.rs)
+│   │   │   └── oauth_commands.rs  # Codex/Gemini OAuth + account management
+│   │   │   └── quota_commands.rs  # quota refresh / usage / speedtest
+│   │   └── core/                  # thin adapters + Tauri-specific glue (heavy logic moved to crates/)
+│   │       ├── infra/             # re-export stub → skillstar-infra
 │   │       ├── ai/               # AI domain facade (translation_cache, re-exports ai_provider)
-│   │       ├── ai_provider/       # AI config, HTTP client, translation, summarization, skill pick
-│   │       ├── config/            # user-editable config (proxy, github_mirror)
+│   │       ├── ai_provider/       # re-export stub → skillstar-ai
+│   │       ├── config/            # re-export stub → skillstar-config (proxy, github_mirror)
 │   │       ├── git/              # git operations (ops, gh_manager, repo_history, source_resolver, dismissed_skills)
-│   │       ├── projects/          # project management (agents, sync, manifest re-export)
+│   │       ├── projects/          # re-export stub → skillstar-projects (agents, sync)
 │   │       ├── terminal/          # Launch Deck config + terminal_backend re-export
-│   │       ├── skills/            # skill lifecycle (install, update, bundle, local, group, discover)
+│   │       ├── skills/            # thin adapters over skillstar-skill-core (install, update, bundle, local, group, discover)
 │   │       ├── security_scan/     # static/AI scanning, orchestrator, cache, logging
 │   │       ├── marketplace_snapshot/ # local-first marketplace DB
 │   │       ├── model_config/      # per-provider model config (codex, claude, gemini, opencode)
 │   │       └── project_manifest/  # project manifest types, helpers, path resolution
 │   ├── Cargo.toml
 │   └── tauri.conf.json
+├── crates/                        # workspace crates (domain logic)
+│   ├── skillstar-skill-core/      # skill lifecycle (install, update, bundle, local, repo_scanner, ...)
+│   ├── skillstar-marketplace-core/ # marketplace snapshot + FTS (flattened from src-tauri/crates/)
+│   ├── markdown-translator/       # Markdown-aware translation pipeline (flattened from src-tauri/crates/)
+│   ├── skillstar-ai/              # AI provider registry, translation, summarization
+│   ├── skillstar-security-scan/   # security scan analyzers + orchestrator
+│   ├── skillstar-terminal/        # Launch Deck / terminal backend
+│   ├── skillstar-patrol/          # background update patrol
+│   ├── skillstar-projects/        # project management + agent profiles
+│   ├── skillstar-git/             # git operations wrapper
+│   ├── skillstar-translation/     # traditional translation APIs (DeepL, MiniMax, MyMemory, ...)
+│   ├── skillstar-model-config/    # provider model config + health/quota
+│   ├── skillstar-config/          # user config (proxy, github_mirror, ACP)
+│   ├── skillstar-infra/           # paths, fs_ops, db_pool, migration, error, util
+│   ├── skillstar-core-types/      # shared domain types
+│   ├── skillstar-commands/        # Tauri-agnostic command helpers (shell, network, launch, marketplace, ACP)
+│   └── skillstar-cli/             # CLI argument parsing + entry point
 ├── docs/
 │   ├── Error.md
 │   ├── CHANGELOG.md
@@ -116,13 +136,19 @@ SkillStar/
 | `async-trait`           | 0.1       | Async trait support (for ACP)   |
 | `tokio-util`            | 0.7       | Compat adapters (ACP stdio)     |
 | `futures`               | 0.3       | Async streams                   |
+| `markdown-translator`   | —         | Markdown-aware AI translation   |
+| `skillstar-marketplace-core` | —    | Marketplace snapshot + FTS      |
+| `skillstar-skill-core`  | —         | Skill lifecycle + repo scanning |
+| `skillstar-ai`          | —         | Provider registry + translation |
+| `skillstar-security-scan` | —       | Security scan orchestrator      |
 
 
 ## Backend Behavior Rules
 
 ### Skills and Sync
 
-- Keep heavy logic in `core/*`, not in command wrappers.
+- Keep heavy logic in `core/*` or workspace crates, not in command wrappers.
+- `src-tauri/src/core/skills/` is a thin adapter layer over `skillstar-skill-core`; domain logic lives in the crate.
 - Installed-skill list should render fast from local snapshot first.
 - Remote update checks run in bounded background work.
 - Project sync is reconciliation: add selected skills per agent, remove stale entries, prune empty agent folders; zero-skill agent selections must be dropped instead of creating empty project folders or persisting as active project agents; deployment always tries symlink first — if symlink creation fails (e.g. Windows without Developer Mode), falls back to full directory copy automatically. The `deploy_modes` field in `skills-list.json` is retained for backward-compat but ignored.

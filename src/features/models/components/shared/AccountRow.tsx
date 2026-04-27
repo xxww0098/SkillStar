@@ -107,7 +107,6 @@ export function AccountRow({
       )}
 
       {/* Header */}
-      {/* biome-ignore lint/a11y/useSemanticElements: Complex interactive row */}
       <div
         role="button"
         tabIndex={0}
@@ -182,8 +181,6 @@ export function AccountRow({
         </div>
 
         {/* Right actions */}
-        {/* biome-ignore lint/a11y/useKeyWithClickEvents: Action buttons group */}
-        {/* biome-ignore lint/a11y/noStaticElementInteractions: Wrapping action buttons to prevent click propagation */}
         <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
           {!isCurrent && (
             <button

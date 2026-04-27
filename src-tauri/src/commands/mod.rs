@@ -1,9 +1,12 @@
 pub mod agents;
 pub mod ai;
 pub mod github;
-pub mod models;
+pub mod models_commands;
+pub mod models_dto;
+pub mod oauth_commands;
 pub mod patrol;
 pub mod projects;
+pub mod quota_commands;
 pub mod updater;
 
 pub use skillstar_commands::acp;

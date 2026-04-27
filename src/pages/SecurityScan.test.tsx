@@ -7,16 +7,25 @@ const mockedInvoke = vi.mocked(invoke);
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, fallbackOrOptions?: string | { defaultValue?: string; [key: string]: unknown }, maybeOptions?: { [key: string]: unknown }) => {
+    t: (
+      key: string,
+      fallbackOrOptions?: string | { defaultValue?: string; [key: string]: unknown },
+      maybeOptions?: { [key: string]: unknown },
+    ) => {
       const options =
-        typeof fallbackOrOptions === "object" && fallbackOrOptions !== null
+        typeof fallbackOrOptions === "object" && fallbackOrOptions !== null ? fallbackOrOptions : maybeOptions;
+      const fallback =
+        typeof fallbackOrOptions === "string"
           ? fallbackOrOptions
-          : maybeOptions;
-      const fallback = typeof fallbackOrOptions === "string" ? fallbackOrOptions : typeof options?.defaultValue === "string" ? options.defaultValue : undefined;
+          : typeof options?.defaultValue === "string"
+            ? options.defaultValue
+            : undefined;
 
       if (!fallback) return key;
 
-      return fallback.replace(/\{\{\s*(\w+)\s*\}\}/g, (_match: string, token: string) => String(options?.[token] ?? ""));
+      return fallback.replace(/\{\{\s*(\w+)\s*\}\}/g, (_match: string, token: string) =>
+        String(options?.[token] ?? ""),
+      );
     },
   }),
 }));
