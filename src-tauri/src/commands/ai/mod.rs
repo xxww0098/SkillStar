@@ -194,9 +194,7 @@ impl TranslationApiConfigPayload {
 }
 
 impl TranslationSettingsPayload {
-    fn from_core(
-        core: &crate::core::translation_api::config::TranslationSettings,
-    ) -> Self {
+    fn from_core(core: &crate::core::translation_api::config::TranslationSettings) -> Self {
         Self {
             target_language: core.target_language.clone(),
             quality_provider_ref: core.quality_provider_ref.as_ref().and_then(|provider_ref| {
@@ -210,9 +208,7 @@ impl TranslationSettingsPayload {
         }
     }
 
-    fn into_core(
-        self,
-    ) -> crate::core::translation_api::config::TranslationSettings {
+    fn into_core(self) -> crate::core::translation_api::config::TranslationSettings {
         crate::core::translation_api::config::TranslationSettings {
             target_language: if self.target_language.trim().is_empty() {
                 default_translation_target_language()
@@ -363,7 +359,10 @@ pub use scan::CANCEL_SCAN;
 
 #[cfg(test)]
 mod tests {
-    use super::{TranslationQualityProviderRefPayload, TranslationSettingsPayload};
+    use super::{
+        TranslationApiConfigPayload, TranslationQualityProviderRefPayload,
+        TranslationSettingsPayload, normalize_quality_provider_ref,
+    };
 
     #[test]
     fn translation_settings_payload_accepts_snake_case_quality_provider_ref() {
@@ -396,5 +395,62 @@ mod tests {
         let json = serde_json::to_value(payload).expect("payload should serialize");
         assert!(json.get("quality_provider_ref").is_some());
         assert!(json.get("qualityProviderRef").is_none());
+    }
+
+    #[test]
+    fn normalize_quality_provider_ref_claude_valid() {
+        let result = normalize_quality_provider_ref("claude", "my-provider");
+        assert!(result.is_some());
+        let r = result.unwrap();
+        assert_eq!(r.app_id, "claude");
+        assert_eq!(r.provider_id, "my-provider");
+    }
+
+    #[test]
+    fn normalize_quality_provider_ref_codex_valid() {
+        let result = normalize_quality_provider_ref("codex", "codex-provider");
+        assert!(result.is_some());
+        let r = result.unwrap();
+        assert_eq!(r.app_id, "codex");
+        assert_eq!(r.provider_id, "codex-provider");
+    }
+
+    #[test]
+    fn normalize_quality_provider_ref_invalid_app_id() {
+        assert!(normalize_quality_provider_ref("openai", "provider").is_none());
+        assert!(normalize_quality_provider_ref("gemini", "provider").is_none());
+        assert!(normalize_quality_provider_ref("", "provider").is_none());
+    }
+
+    #[test]
+    fn normalize_quality_provider_ref_empty_provider_id() {
+        assert!(normalize_quality_provider_ref("claude", "").is_none());
+        assert!(normalize_quality_provider_ref("codex", "  ").is_none());
+    }
+
+    #[test]
+    fn normalize_quality_provider_ref_trims_whitespace() {
+        let result = normalize_quality_provider_ref("  claude  ", "  provider  ").unwrap();
+        assert_eq!(result.app_id, "claude");
+        assert_eq!(result.provider_id, "provider");
+    }
+
+    #[test]
+    fn translation_api_config_payload_roundtrips() {
+        let core = crate::core::translation_api::config::TranslationApiConfig {
+            deepl_key: "key1".to_string(),
+            deeplx_key: "key2".to_string(),
+            deeplx_url: "https://example.com".to_string(),
+            ..Default::default()
+        };
+        let payload = TranslationApiConfigPayload::from_core(&core);
+        assert_eq!(payload.deepl_key, "key1");
+        assert_eq!(payload.deeplx_key, "key2");
+        assert_eq!(payload.deeplx_url, "https://example.com");
+
+        let back = payload.into_core();
+        assert_eq!(back.deepl_key, "key1");
+        assert_eq!(back.deeplx_key, "key2");
+        assert_eq!(back.deeplx_url, "https://example.com");
     }
 }

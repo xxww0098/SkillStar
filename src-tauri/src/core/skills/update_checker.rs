@@ -41,53 +41,39 @@ use crate::core::{config::github_mirror, git::ops as git_ops, path_env::command_
 /// If the symlink target is relative, it is resolved relative to the
 /// symlink's parent directory.
 pub(crate) fn resolve_symlink(link_path: &Path) -> Option<PathBuf> {
-    crate::core::infra::fs_ops::read_link_resolved(link_path).ok()
+    skillstar_core_types::resolve_symlink(link_path)
 }
 
 /// Check whether a skill directory is a symlink into the repo cache.
 pub fn is_repo_cached_skill(skill_path: &Path) -> bool {
-    if !crate::core::infra::fs_ops::is_link(skill_path) {
-        return false;
-    }
-    let Ok(target) = crate::core::infra::fs_ops::read_link_resolved(skill_path) else {
-        return false;
-    };
-    is_repo_cached_skill_target_path(&target)
+    skillstar_core_types::is_repo_cached_skill(
+        skill_path,
+        &crate::core::infra::paths::repos_cache_dir(),
+    )
 }
 
 fn normalize_path_for_compare(path: &Path) -> String {
-    let normalized = path
-        .to_string_lossy()
-        .replace('\\', "/")
-        .trim_end_matches('/')
-        .to_string();
-    #[cfg(windows)]
-    {
-        normalized.to_ascii_lowercase()
-    }
-    #[cfg(not(windows))]
-    {
-        normalized
-    }
+    skillstar_core_types::normalize_path_for_compare(path)
 }
 
 /// Check whether a resolved path lies within the repo cache directory.
 ///
 pub(crate) fn is_repo_cached_skill_target_path(target: &Path) -> bool {
-    let target_norm = normalize_path_for_compare(target);
-    let repo_root_norm = normalize_path_for_compare(&crate::core::infra::paths::repos_cache_dir());
-    target_norm == repo_root_norm || target_norm.starts_with(&(repo_root_norm + "/"))
+    skillstar_core_types::is_repo_cached_skill_target_path(
+        target,
+        &crate::core::infra::paths::repos_cache_dir(),
+    )
 }
 
 /// Resolve a repo-cached skill path to its repository root.
 ///
 /// Returns `None` if the skill is not a repo-cached symlink or resolution fails.
 pub fn resolve_skill_repo_root(skill_path: &Path) -> Option<PathBuf> {
-    if !is_repo_cached_skill(skill_path) {
-        return None;
-    }
-    let real_path = resolve_symlink(skill_path)?;
-    git_ops::find_repo_root(&real_path)
+    skillstar_core_types::resolve_skill_repo_root(
+        skill_path,
+        &crate::core::infra::paths::repos_cache_dir(),
+        git_ops::find_repo_root,
+    )
 }
 
 // ── Batch Prefetch ──────────────────────────────────────────────────
@@ -102,27 +88,24 @@ pub fn resolve_skill_repo_root(skill_path: &Path) -> Option<PathBuf> {
 /// file has changed since we read it"). Callers should treat skills in
 /// failed-fetch repos as "update status unknown" rather than "up-to-date".
 pub fn prefetch_unique_repos(skill_paths: &[PathBuf]) -> HashSet<PathBuf> {
-    let mut fetched = HashSet::new();
-    let mut failed = HashSet::new();
-    for path in skill_paths {
-        if let Some(root) = resolve_skill_repo_root(path) {
-            if fetched.insert(root.clone()) {
-                match git_ops::run_git_shallow_fetch(&root, &["fetch", "--depth", "1", "--quiet"]) {
-                    Ok(_) => {}
-                    Err(e) => {
-                        warn!(
-                            target: "update_checker",
-                            path = %root.display(),
-                            error = %e,
-                            "prefetch git fetch failed — will preserve existing update state"
-                        );
-                        failed.insert(root);
-                    }
-                }
-            }
-        }
-    }
-    failed
+    skillstar_core_types::prefetch_unique_repos(
+        skill_paths,
+        &crate::core::infra::paths::repos_cache_dir(),
+        git_ops::find_repo_root,
+        |root| {
+            git_ops::run_git_shallow_fetch(root, &["fetch", "--depth", "1", "--quiet"])
+                .map(|_| ())
+                .map_err(|e| {
+                    warn!(
+                        target: "update_checker",
+                        path = %root.display(),
+                        error = %e,
+                        "prefetch git fetch failed — will preserve existing update state"
+                    );
+                    e
+                })
+        },
+    )
 }
 
 // ── Update Detection ────────────────────────────────────────────────
@@ -133,24 +116,24 @@ pub fn prefetch_unique_repos(skill_paths: &[PathBuf]) -> HashSet<PathBuf> {
 /// [`check_update_local`] to avoid redundant fetches.
 #[allow(dead_code)]
 pub fn check_update(skill_path: &Path) -> bool {
-    let real_path = match resolve_symlink(skill_path) {
-        Some(p) => p,
-        None => return false,
-    };
-
-    let repo_root = match git_ops::find_repo_root(&real_path) {
-        Some(root) => root,
-        None => return false,
-    };
-
-    let mut fetch_cmd = command_with_path("git");
-    github_mirror::apply_mirror_args(&mut fetch_cmd);
-    let _ = fetch_cmd
-        .current_dir(&repo_root)
-        .args(["fetch", "--depth", "1", "--quiet"])
-        .output();
-
-    compare_heads(&repo_root).unwrap_or(false)
+    skillstar_core_types::check_update(
+        skill_path,
+        |repo_root| {
+            let mut fetch_cmd = command_with_path("git");
+            github_mirror::apply_mirror_args(&mut fetch_cmd);
+            let output = fetch_cmd
+                .current_dir(repo_root)
+                .args(["fetch", "--depth", "1", "--quiet"])
+                .output()
+                .map_err(anyhow::Error::from)?;
+            if output.status.success() {
+                Ok(())
+            } else {
+                anyhow::bail!(String::from_utf8_lossy(&output.stderr).trim().to_string())
+            }
+        },
+        git_ops::find_repo_root,
+    )
 }
 
 /// Check if a repo-cached skill has updates **without fetching**.
@@ -163,21 +146,11 @@ pub fn check_update_local(
     skill_path: &Path,
     failed_fetch_roots: &HashSet<PathBuf>,
 ) -> Option<bool> {
-    let real_path = match resolve_symlink(skill_path) {
-        Some(p) => p,
-        None => return Some(false),
-    };
-
-    let repo_root = match git_ops::find_repo_root(&real_path) {
-        Some(root) => root,
-        None => return Some(false),
-    };
-
-    if failed_fetch_roots.contains(&repo_root) {
-        return None;
-    }
-
-    Some(compare_heads(&repo_root).unwrap_or(false))
+    skillstar_core_types::check_update_local(
+        skill_path,
+        failed_fetch_roots,
+        git_ops::find_repo_root,
+    )
 }
 
 /// Compare local HEAD vs origin/HEAD, returning true if they differ.
@@ -202,16 +175,38 @@ fn git_rev_parse(repo_dir: &Path, rev: &str) -> Option<String> {
 /// after a shared repo pull.
 #[allow(dead_code)]
 pub fn compute_subtree_hash(repo_dir: &Path, folder_path: &str) -> Result<String> {
-    let output = command_with_path("git")
-        .current_dir(repo_dir)
-        .args(["rev-parse", &format!("HEAD:{}", folder_path)])
-        .output()
-        .map_err(|e| anyhow::anyhow!("Failed to execute git rev-parse for subtree: {}", e))?;
+    skillstar_core_types::compute_subtree_hash(repo_dir, folder_path)
+}
 
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow::anyhow!("git rev-parse failed: {}", err.trim()));
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn app_level_is_repo_cached_skill_uses_repos_cache_dir() {
+        let _guard = crate::core::lock_test_env();
+        let temp = tempfile::tempdir().unwrap();
+        unsafe {
+            std::env::set_var("SKILLSTAR_DATA_DIR", temp.path());
+        }
+
+        let repo_cache = crate::core::infra::paths::repos_cache_dir();
+        fs::create_dir_all(&repo_cache).unwrap();
+        let repo = repo_cache.join("demo-repo");
+        fs::create_dir_all(&repo).unwrap();
+
+        let link_parent = tempfile::tempdir().unwrap();
+        let link = link_parent.path().join("demo");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&repo, &link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&repo, &link).unwrap();
+
+        assert!(is_repo_cached_skill(&link));
+
+        unsafe {
+            std::env::remove_var("SKILLSTAR_DATA_DIR");
+        }
     }
-
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }

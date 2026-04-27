@@ -6,10 +6,7 @@ import { cn } from "../../../lib/utils";
 import { useCodexAccounts } from "../hooks/useCodexAccounts";
 import { useGeminiOAuth } from "../hooks/useGeminiOAuth";
 import type { ProviderEntry } from "../hooks/useModelProviders";
-import { claudePresets } from "../presets/claudePresets";
-import { codexPresets } from "../presets/codexPresets";
-import { geminiPresets } from "../presets/geminiPresets";
-import { opencodePresets } from "../presets/opencodePresets";
+import { useProviderPresets } from "../hooks/useProviderPresets";
 import type { ModelAppId } from "./AppCapsuleSwitcher";
 import { ProviderIcon } from "./shared/ProviderIcon";
 
@@ -28,63 +25,18 @@ export function PresetCatalog({ appId, appColor, onAddPreset, existingProviders 
   const [showCustom, setShowCustom] = useState(false);
   const codexState = useCodexAccounts();
   const geminiState = useGeminiOAuth({ onAccountAdded: onAddPreset });
+  const { loading: presetsLoading, presets } = useProviderPresets(appId);
 
   // Build a Set of existing provider names (lowercase) for O(1) dedup lookups
   const existingNames = useMemo(() => new Set(existingProviders.map((p) => p.name.toLowerCase())), [existingProviders]);
 
-  // Build preset list based on app
-  const presets = useMemo(() => {
-    switch (appId) {
-      case "claude":
-        return claudePresets.map((p) => ({
-          id: p.name.toLowerCase().replace(/[^a-z0-9]/g, "_"),
-          name: p.name,
-          category: p.category,
-          websiteUrl: p.websiteUrl,
-          apiKeyUrl: p.apiKeyUrl,
-          iconColor: p.iconColor,
-          settingsConfig: { env: p.env },
-        }));
-      case "codex":
-        return codexPresets.map((p) => ({
-          id: p.name.toLowerCase().replace(/[^a-z0-9]/g, "_"),
-          name: p.name,
-          category: p.category,
-          websiteUrl: p.websiteUrl,
-          apiKeyUrl: p.apiKeyUrl,
-          iconColor: p.iconColor,
-          settingsConfig: { config: p.config },
-        }));
-      case "opencode":
-        return opencodePresets.map((p) => ({
-          id: p.name.toLowerCase().replace(/[^a-z0-9]/g, "_"),
-          name: p.name,
-          category: p.category,
-          websiteUrl: p.websiteUrl,
-          apiKeyUrl: p.apiKeyUrl,
-          iconColor: p.iconColor,
-          settingsConfig: { provider: { [p.name.toLowerCase().replace(/[^a-z0-9]/g, "_")]: p.settingsConfig } },
-        }));
-      case "gemini":
-        return geminiPresets.map((p) => ({
-          id: p.name.toLowerCase().replace(/[^a-z0-9]/g, "_"),
-          name: p.name,
-          category: p.category,
-          websiteUrl: p.websiteUrl,
-          apiKeyUrl: p.apiKeyUrl,
-          iconColor: p.iconColor,
-          settingsConfig: { env: p.env },
-        }));
-      default:
-        return [];
-    }
-  }, [appId]);
+  const builtInPresets = useMemo(() => presets.filter((preset) => preset.category !== "custom"), [presets]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return presets;
-    return presets.filter((p) => p.name.toLowerCase().includes(q));
-  }, [presets, search]);
+    if (!q) return builtInPresets;
+    return builtInPresets.filter((p) => p.name.toLowerCase().includes(q));
+  }, [builtInPresets, search]);
 
   // Group by category
   const grouped = useMemo(() => {
@@ -104,8 +56,8 @@ export function PresetCatalog({ appId, appColor, onAddPreset, existingProviders 
       }));
   }, [filtered]);
 
-  const handlePresetClick = useCallback(
-    (preset: (typeof presets)[0]) => {
+    const handlePresetClick = useCallback(
+    (preset: ProviderEntry) => {
       // ── Dedup check: block adding providers with the same name ──
       if (existingNames.has(preset.name.toLowerCase())) {
         toast.warning(`${preset.name} 已存在，无需重复添加`);
@@ -126,7 +78,7 @@ export function PresetCatalog({ appId, appColor, onAddPreset, existingProviders 
       onAddPreset(entry);
       setSearch("");
     },
-    [onAddPreset, existingNames, appId],
+    [onAddPreset, existingNames],
   );
 
   const handleCustomAdd = useCallback(() => {
@@ -199,6 +151,12 @@ export function PresetCatalog({ appId, appColor, onAddPreset, existingProviders 
                   className="w-full h-8 pl-8 pr-3 rounded-lg bg-background/60 border border-border text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
                 />
               </div>
+
+              {presetsLoading && (
+                <div className="flex items-center justify-center py-4 text-muted-foreground">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                </div>
+              )}
 
               {/* Grouped preset chips */}
               {grouped.map((group) => (

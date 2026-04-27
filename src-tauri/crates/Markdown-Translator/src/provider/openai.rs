@@ -111,12 +111,11 @@ impl LlmProvider for OpenAiProvider {
         );
         debug!(call_label, raw_output = content, "LLM raw output");
 
-        let parsed: serde_json::Value = serde_json::from_str(content).map_err(|e| {
-            Error::LlmOutputParse {
+        let parsed: serde_json::Value =
+            serde_json::from_str(content).map_err(|e| Error::LlmOutputParse {
                 bundle_id: call_label.to_owned(),
                 source: e,
-            }
-        })?;
+            })?;
 
         Ok(parsed)
     }

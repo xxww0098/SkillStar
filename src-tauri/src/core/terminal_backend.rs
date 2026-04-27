@@ -1,54 +1,22 @@
 //! Terminal backend: CLI detection, script generation, terminal launch, and deploy orchestration.
+//!
+//! Delegates to skillstar-terminal crate for script generation and terminal launch.
 
 use anyhow::{Context, Result};
-use std::path::PathBuf;
+use skillstar_terminal::{LaunchConfig, LayoutNode, deployable_layout, session_name, validate};
 
-use super::terminal::config::{LaunchConfig, LayoutNode, deployable_layout};
+pub use skillstar_terminal::{
+    AgentCliInfo, DeployResult, LaunchScriptKind, binary_name_for_agent, find_cli_binary,
+    list_available_clis,
+};
 
-mod pane_command;
-mod provider_env;
-mod registry;
-mod script_builder;
-mod session;
-mod terminal_launcher;
-mod types;
-
-pub use types::{AgentCliInfo, DeployResult, LaunchScriptKind};
-
-/// Find the binary path for a given agent id.
-pub fn find_cli_binary(agent_id: &str) -> Option<PathBuf> {
-    registry::find_cli_binary(agent_id)
-}
-
-/// List all known agent CLIs with installation status.
-pub fn list_available_clis() -> Vec<AgentCliInfo> {
-    registry::list_available_clis()
-}
-
-/// Open a launch script in the user's preferred terminal emulator.
-pub fn open_script_in_terminal_with_kind(
-    script_path: &std::path::Path,
-    script_kind: LaunchScriptKind,
-) -> Result<()> {
-    terminal_launcher::open_script_in_terminal_with_kind(script_path, script_kind)
-}
-
-/// Generate a shell script for single-terminal mode.
-#[allow(dead_code)]
-pub fn generate_single_script(layout: &LayoutNode, project_path: &str) -> String {
-    script_builder::generate_single_script(layout, project_path)
-}
-
-pub(crate) fn generate_single_script_for_current_os(
-    layout: &LayoutNode,
-    project_path: &str,
-) -> (String, &'static str, LaunchScriptKind) {
-    script_builder::generate_single_script_for_current_os(layout, project_path)
-}
+pub use skillstar_terminal::script_builder::generate_single_script;
+pub use skillstar_terminal::script_builder::generate_single_script_for_current_os;
+pub use skillstar_terminal::terminal_launcher::open_script_in_terminal_with_kind;
 
 /// Deploy a launch config: validate, generate script, execute in terminal.
 pub fn deploy(config: &LaunchConfig, project_path: &str) -> Result<DeployResult> {
-    if let Err(errors) = super::terminal::config::validate(config) {
+    if let Err(errors) = validate(config) {
         return Ok(DeployResult {
             success: false,
             message: errors.join("; "),
@@ -61,7 +29,7 @@ pub fn deploy(config: &LaunchConfig, project_path: &str) -> Result<DeployResult>
 
     let script_path = std::env::temp_dir().join(format!(
         "ss-launch-{}.{}",
-        session::session_name(&config.project_name),
+        session_name(&config.project_name),
         extension
     ));
     std::fs::write(&script_path, &script)
@@ -85,7 +53,7 @@ pub fn deploy(config: &LaunchConfig, project_path: &str) -> Result<DeployResult>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::terminal::config::LaunchMode;
+    use skillstar_terminal::LaunchMode;
     use std::collections::HashMap;
 
     fn pane(id: &str, agent: &str) -> LayoutNode {
@@ -102,10 +70,10 @@ mod tests {
 
     #[test]
     fn test_session_name_deterministic() {
-        let name = session::session_name("my project");
+        let name = session_name("my project");
         assert!(name.starts_with("ss-"));
         assert!(name.contains("my-project"));
-        assert_eq!(name, session::session_name("my project"));
+        assert_eq!(name, session_name("my project"));
     }
 
     #[test]
@@ -148,7 +116,7 @@ mod tests {
             "token-from-provider".to_string(),
         );
 
-        provider_env::normalize_claude_auth_keys(&mut env);
+        skillstar_terminal::provider_env::normalize_claude_auth_keys(&mut env);
 
         assert_eq!(
             env.get("ANTHROPIC_AUTH_TOKEN"),
@@ -166,7 +134,7 @@ mod tests {
             "https://api.minimaxi.com/anthropic".to_string(),
         );
 
-        provider_env::normalize_claude_auth_keys(&mut env);
+        skillstar_terminal::provider_env::normalize_claude_auth_keys(&mut env);
 
         assert_eq!(env.get("ANTHROPIC_AUTH_TOKEN"), Some(&"token".to_string()));
         assert!(!env.contains_key("ANTHROPIC_API_KEY"));
@@ -180,7 +148,7 @@ mod tests {
             "api-key-from-provider".to_string(),
         );
 
-        provider_env::normalize_claude_auth_keys(&mut env);
+        skillstar_terminal::provider_env::normalize_claude_auth_keys(&mut env);
 
         assert_eq!(
             env.get("ANTHROPIC_API_KEY"),
@@ -195,7 +163,7 @@ mod tests {
         env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), "token".to_string());
         env.insert("ANTHROPIC_API_KEY".to_string(), "key".to_string());
 
-        provider_env::normalize_claude_auth_keys(&mut env);
+        skillstar_terminal::provider_env::normalize_claude_auth_keys(&mut env);
 
         assert_eq!(env.get("ANTHROPIC_API_KEY"), Some(&"key".to_string()));
         assert!(!env.contains_key("ANTHROPIC_AUTH_TOKEN"));
@@ -208,7 +176,7 @@ mod tests {
             "ANTHROPIC_MODEL".to_string(),
             "MiniMax-M2.7-highspeed".to_string(),
         );
-        provider_env::normalize_claude_model_env(&mut env);
+        skillstar_terminal::provider_env::normalize_claude_model_env(&mut env);
         assert_eq!(
             env.get("CLAUDE_CODE_MODEL"),
             Some(&"MiniMax-M2.7-highspeed".to_string())

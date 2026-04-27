@@ -20,7 +20,10 @@ pub fn apply(doc: &ParsedDocument, translations: &[TranslationResult]) -> String
     let mut body_replacements: Vec<_> = doc
         .segments
         .iter()
-        .filter(|s| s.node_type != NodeType::FrontMatter && translation_map.contains_key(s.segment_id.as_str()))
+        .filter(|s| {
+            s.node_type != NodeType::FrontMatter
+                && translation_map.contains_key(s.segment_id.as_str())
+        })
         .collect();
     body_replacements.sort_by(|a, b| b.byte_range.start.cmp(&a.byte_range.start));
 
@@ -85,19 +88,17 @@ mod tests {
             target_lang: "chinese".into(),
             front_matter: None,
             body_line_offset: 0,
-            segments: vec![
-                Segment {
-                    segment_id: "body-0".into(),
-                    node_type: NodeType::Paragraph,
-                    source_text: "Hello world".into(),
-                    context_path: vec![],
-                    byte_range: 0..11,
-                    line_start: 0,
-                    line_end: 1,
-                    protected_spans: vec![],
-                    metadata: Default::default(),
-                },
-            ],
+            segments: vec![Segment {
+                segment_id: "body-0".into(),
+                node_type: NodeType::Paragraph,
+                source_text: "Hello world".into(),
+                context_path: vec![],
+                byte_range: 0..11,
+                line_start: 0,
+                line_end: 1,
+                protected_spans: vec![],
+                metadata: Default::default(),
+            }],
         };
         let translations = vec![TranslationResult {
             segment_id: "body-0".into(),

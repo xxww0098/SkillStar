@@ -1,0 +1,28 @@
+[package]
+name = "skillstar-translation"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94.1"
+
+[dependencies]
+anyhow = "1.0.102"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+thiserror = "2.0.18"
+reqwest = { version = "0.13.2", default-features = false, features = ["rustls", "json", "stream"] }
+chrono = { version = "0.4.44", features = ["serde"] }
+rusqlite = { version = "0.39.0", features = ["bundled"] }
+r2d2 = "0.8.10"
+r2d2_sqlite = "0.33.0"
+tracing = "0.1.44"
+regex = "1.12"
+futures = "0.3"
+async-trait = "0.1"
+tokio = { version = "1.52.1", features = ["full"] }
+uuid = { version = "1", features = ["v4"] }
+skillstar-ai = { version = "0.1.0", path = "../skillstar-ai" }
+skillstar-infra = { version = "0.1.0", path = "../skillstar-infra" }
+skillstar-model-config = { version = "0.1.0", path = "../skillstar-model-config" }
+
+[dev-dependencies]
+tempfile = "3.27.0"

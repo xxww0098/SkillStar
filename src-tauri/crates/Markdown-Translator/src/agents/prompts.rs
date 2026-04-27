@@ -92,7 +92,8 @@ fn build_translation_user_prompt(
     }
 
     prompt.push_str("=== END OF SEGMENTS ===\n");
-    prompt.push_str("Now return ALL translations using the [[BEGIN id]]...[[END id]] format above.");
+    prompt
+        .push_str("Now return ALL translations using the [[BEGIN id]]...[[END id]] format above.");
 
     prompt
 }

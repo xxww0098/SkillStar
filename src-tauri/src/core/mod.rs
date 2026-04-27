@@ -15,6 +15,7 @@ pub mod terminal;
 
 pub mod acp_client;
 pub mod ai_provider;
+pub mod app_shell;
 pub mod lockfile;
 pub mod marketplace;
 pub mod marketplace_snapshot;

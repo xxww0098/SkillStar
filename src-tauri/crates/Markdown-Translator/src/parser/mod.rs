@@ -20,11 +20,7 @@ pub fn parse(source_text: &str, source_path: &Path, target_lang: &str) -> Parsed
         None
     };
 
-    let segments = extractor::extract(
-        &fm_split.body,
-        fm_split.line_count,
-        &fm_split.data,
-    );
+    let segments = extractor::extract(&fm_split.body, fm_split.line_count, &fm_split.data);
 
     ParsedDocument {
         source_path: source_path.to_owned(),

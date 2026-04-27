@@ -2,62 +2,99 @@ mod cli;
 mod commands;
 mod core;
 
-use tracing::error;
+use tracing::{error, warn};
 
-use std::sync::{
-    Mutex,
-    atomic::{AtomicBool, Ordering},
-};
 use tauri::{Emitter, Manager};
+use tauri_plugin_deep_link::DeepLinkExt;
 
-pub struct ExitControl {
-    allow_exit: AtomicBool,
+pub(crate) const DEEP_LINK_SCHEME: &str = "skillstar";
+pub(crate) const DEEP_LINK_EVENT: &str = "skillstar://deep-link";
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeepLinkPayload {
+    url: String,
+    scheme: String,
+    host: Option<String>,
+    path: String,
+    query: Option<String>,
+    fragment: Option<String>,
 }
 
-pub struct TrayState {
-    lang: Mutex<String>,
+fn deep_link_payload(url: &url::Url) -> Option<DeepLinkPayload> {
+    if url.scheme() != DEEP_LINK_SCHEME {
+        warn!(target: "deep_link", "ignored unsupported scheme: {}", url.scheme());
+        return None;
+    }
+
+    Some(DeepLinkPayload {
+        url: url.to_string(),
+        scheme: url.scheme().to_string(),
+        host: url.host_str().map(ToString::to_string),
+        path: url.path().to_string(),
+        query: url.query().map(ToString::to_string),
+        fragment: url.fragment().map(ToString::to_string),
+    })
 }
 
-impl TrayState {
-    pub fn new(lang: impl Into<String>) -> Self {
-        Self {
-            lang: Mutex::new(lang.into()),
+fn emit_deep_link(app: &tauri::AppHandle, url: url::Url) {
+    let Some(payload) = deep_link_payload(&url) else {
+        return;
+    };
+
+    if let Err(err) = app.emit(DEEP_LINK_EVENT, payload) {
+        warn!(target: "deep_link", "failed to emit deep-link event: {err}");
+    }
+}
+
+fn setup_deep_links(app: &mut tauri::App) {
+    let app_handle = app.handle().clone();
+
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    if let Err(err) = app.deep_link().register_all() {
+        warn!(target: "deep_link", "failed to register configured desktop schemes: {err}");
+    }
+
+    match app.deep_link().get_current() {
+        Ok(Some(urls)) => {
+            for url in urls {
+                emit_deep_link(&app_handle, url);
+            }
         }
+        Ok(None) => {}
+        Err(err) => warn!(target: "deep_link", "failed to read current deep-link URLs: {err}"),
     }
 
-    pub fn lang(&self) -> String {
-        self.lang
-            .lock()
-            .map(|lang| lang.clone())
-            .unwrap_or_else(|_| detect_system_lang().to_string())
-    }
-
-    pub fn set_lang(&self, lang: String) {
-        if let Ok(mut current_lang) = self.lang.lock() {
-            *current_lang = lang;
+    app.deep_link().on_open_url(move |event| {
+        for url in event.urls() {
+            emit_deep_link(&app_handle, url);
         }
-    }
+    });
 }
 
-impl Default for ExitControl {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+#[cfg(test)]
+mod tests {
+    use super::{DEEP_LINK_EVENT, DEEP_LINK_SCHEME, deep_link_payload};
 
-impl ExitControl {
-    pub fn new() -> Self {
-        Self {
-            allow_exit: AtomicBool::new(false),
-        }
+    #[test]
+    fn deep_link_payload_accepts_configured_scheme() {
+        let url = url::Url::parse("skillstar://models/cloud-sync?mode=merge#provider").unwrap();
+        let payload = deep_link_payload(&url).expect("skillstar scheme should be accepted");
+
+        assert_eq!(DEEP_LINK_SCHEME, "skillstar");
+        assert_eq!(DEEP_LINK_EVENT, "skillstar://deep-link");
+        assert_eq!(payload.scheme, "skillstar");
+        assert_eq!(payload.host.as_deref(), Some("models"));
+        assert_eq!(payload.path, "/cloud-sync");
+        assert_eq!(payload.query.as_deref(), Some("mode=merge"));
+        assert_eq!(payload.fragment.as_deref(), Some("provider"));
     }
 
-    pub fn allow_next_exit(&self) {
-        self.allow_exit.store(true, Ordering::SeqCst);
-    }
+    #[test]
+    fn deep_link_payload_rejects_other_schemes() {
+        let url = url::Url::parse("https://skillstar.local/models").unwrap();
 
-    pub fn consume_allow_flag(&self) -> bool {
-        self.allow_exit.swap(false, Ordering::SeqCst)
+        assert!(deep_link_payload(&url).is_none());
     }
 }
 
@@ -89,7 +126,8 @@ pub fn run() {
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_dialog::init());
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_deep_link::init());
 
     #[cfg(desktop)]
     {
@@ -100,8 +138,10 @@ pub fn run() {
 
     builder
         .manage(core::patrol::PatrolManager::new())
-        .manage(TrayState::new(detect_system_lang()))
-        .manage(ExitControl::new())
+        .manage(core::app_shell::TrayState::new(
+            core::app_shell::detect_system_lang(),
+        ))
+        .manage(core::app_shell::ExitControl::new())
         .manage(commands::updater::PendingUpdate::new())
         .setup(|app| {
             // Migrate v1 flat layout → v2 categorised layout (idempotent)
@@ -112,6 +152,8 @@ pub fn run() {
             }
             // Run translation cache LRU cleanup (once per process, non-blocking)
             core::ai::translation_cache::startup_cleanup();
+
+            setup_deep_links(app);
 
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -145,7 +187,7 @@ pub fn run() {
                 }
             }
 
-            setup_tray(app)?;
+            core::app_shell::setup_tray(app)?;
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -167,7 +209,7 @@ pub fn run() {
                     let _ = window.emit("skillstar://window-hidden", ());
                 } else {
                     api.prevent_close();
-                    let exit_control = app.state::<ExitControl>();
+                    let exit_control = app.state::<core::app_shell::ExitControl>();
                     exit_control.allow_next_exit();
                     app.exit(0);
                 }
@@ -198,6 +240,26 @@ pub fn run() {
             commands::marketplace::ai_search_marketplace_local,
             commands::marketplace::sync_marketplace_scope,
             commands::marketplace::get_marketplace_sync_states,
+            commands::marketplace::list_curated_registries,
+            commands::marketplace::upsert_curated_registry,
+            commands::marketplace::list_marketplace_source_observations,
+            commands::marketplace::list_known_marketplace_sources,
+            commands::marketplace::upsert_marketplace_rating_summary,
+            commands::marketplace::list_marketplace_rating_summaries,
+            commands::marketplace::upsert_marketplace_category,
+            commands::marketplace::list_marketplace_categories,
+            commands::marketplace::assign_marketplace_skill_categories,
+            commands::marketplace::list_marketplace_skill_categories,
+            commands::marketplace::upsert_marketplace_tag,
+            commands::marketplace::list_marketplace_tags,
+            commands::marketplace::assign_marketplace_skill_tags,
+            commands::marketplace::list_marketplace_skill_tags,
+            commands::marketplace::upsert_marketplace_review,
+            commands::marketplace::list_marketplace_reviews,
+            commands::marketplace::upsert_marketplace_update_notification,
+            commands::marketplace::list_marketplace_update_notifications,
+            commands::marketplace::list_marketplace_update_notifications_for_skill,
+            commands::marketplace::dismiss_marketplace_update_notification,
             commands::marketplace::search_marketplace_packs,
             commands::marketplace::list_marketplace_packs,
             commands::github::check_gh_installed,
@@ -273,6 +335,8 @@ pub fn run() {
             commands::ai::scan::get_cached_scan_results,
             commands::ai::scan::clear_security_scan_cache,
             commands::ai::scan::list_security_scan_logs,
+            commands::ai::scan::list_security_scan_audits,
+            commands::ai::scan::get_security_scan_audit_detail,
             commands::ai::scan::get_security_scan_log_dir,
             commands::ai::scan::get_security_scan_policy,
             commands::ai::scan::save_security_scan_policy,
@@ -361,6 +425,7 @@ pub fn run() {
             commands::models::open_opencode_config_dir,
             commands::models::open_opencode_auth_dir,
             commands::models::get_model_providers,
+            commands::models::get_model_provider_presets,
             commands::models::switch_model_provider,
             commands::models::add_model_provider,
             commands::models::update_model_provider,
@@ -370,6 +435,12 @@ pub fn run() {
             commands::models::read_model_config_text,
             commands::models::write_model_config_text,
             commands::models::format_model_config_text,
+            commands::models::get_provider_health_dashboard,
+            commands::models::refresh_provider_health_dashboard,
+            commands::models::get_provider_usage_tracker,
+            commands::models::get_provider_usage_summary,
+            commands::models::export_model_cloud_sync_snapshot,
+            commands::models::import_model_cloud_sync_snapshot,
             update_tray_language,
         ])
         .build(tauri::generate_context!())
@@ -378,7 +449,7 @@ pub fn run() {
             // Prevent the app from exiting when the last window is hidden.
             // This keeps the process alive for background patrol and tray icon.
             if let tauri::RunEvent::ExitRequested { api, .. } = &event {
-                let exit_control = app_handle.state::<ExitControl>();
+                let exit_control = app_handle.state::<core::app_shell::ExitControl>();
                 if !exit_control.consume_allow_flag() {
                     api.prevent_exit();
                 }
@@ -386,303 +457,10 @@ pub fn run() {
         });
 }
 
-// ── System Tray ─────────────────────────────────────────────────────
-
-/// Returns (show_label, toggle_patrol_label, quit_label) for the given language.
-fn tray_labels(lang: &str, patrol_enabled: bool) -> (&'static str, &'static str, &'static str) {
-    if lang.starts_with("zh") {
-        (
-            "显示窗口",
-            if patrol_enabled {
-                "停止后台检查"
-            } else {
-                "启动后台检查"
-            },
-            "退出",
-        )
-    } else {
-        (
-            "Show Window",
-            if patrol_enabled {
-                "Stop Background Check"
-            } else {
-                "Start Background Check"
-            },
-            "Quit",
-        )
-    }
-}
-
-fn build_tray_menu(
-    app: &impl Manager<tauri::Wry>,
-    lang: &str,
-    patrol_enabled: bool,
-) -> Result<tauri::menu::Menu<tauri::Wry>, Box<dyn std::error::Error>> {
-    use tauri::menu::{CheckMenuItem, MenuBuilder, MenuItem, SubmenuBuilder};
-
-    let (show_label, toggle_label, quit_label) = tray_labels(lang, patrol_enabled);
-    let empty_label = if lang.starts_with("zh") {
-        "空"
-    } else {
-        "Empty"
-    };
-
-    let show_i = MenuItem::with_id(app, "show", show_label, true, None::<&str>)?;
-    let toggle_i = MenuItem::with_id(app, "toggle_patrol", toggle_label, true, None::<&str>)?;
-    let quit_i = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
-
-    let store = core::model_config::providers::read_store().unwrap_or_default();
-
-    let mut menu_builder = MenuBuilder::new(app);
-
-    for (app_id, display_name, app_providers) in [
-        ("codex", "Codex", &store.codex),
-        ("claude", "Claude", &store.claude),
-    ] {
-        let mut sub_builder = SubmenuBuilder::new(app, display_name);
-
-        let mut sorted_providers: Vec<_> = app_providers.providers.values().collect();
-        sorted_providers.sort_by_key(|p| p.sort_index.unwrap_or(u32::MAX));
-
-        let mut has_items = false;
-
-        if !sorted_providers.is_empty() {
-            has_items = true;
-            for provider in sorted_providers {
-                let is_checked = app_providers.current.as_deref() == Some(provider.id.as_str());
-                let id = format!("provider_{}_{}", app_id, provider.id);
-                let check_item = CheckMenuItem::with_id(
-                    app,
-                    &id,
-                    &provider.name,
-                    true,
-                    is_checked,
-                    None::<&str>,
-                )?;
-                let _ = check_item.set_checked(is_checked);
-                sub_builder = sub_builder.item(&check_item);
-            }
-        }
-
-        if app_id == "codex" {
-            let accounts = core::model_config::codex_accounts::list_accounts()
-                .into_iter()
-                .filter(|a| a.auth_mode == "oauth" || a.auth_mode == "apikey")
-                .collect::<Vec<_>>();
-
-            if !accounts.is_empty() {
-                if has_items {
-                    sub_builder = sub_builder.separator();
-                }
-                has_items = true;
-                let current_account_id =
-                    core::model_config::codex_accounts::get_current_account_id();
-                for account in accounts {
-                    let is_checked = current_account_id.as_deref() == Some(account.id.as_str());
-                    let display_text = if account.email.contains('@') {
-                        account
-                            .email
-                            .split('@')
-                            .next()
-                            .unwrap_or(&account.email)
-                            .to_string()
-                    } else {
-                        account.email.clone()
-                    };
-
-                    let id = format!("account_{}_{}", app_id, account.id);
-                    let check_item = CheckMenuItem::with_id(
-                        app,
-                        &id,
-                        &display_text,
-                        true,
-                        is_checked,
-                        None::<&str>,
-                    )?;
-                    let _ = check_item.set_checked(is_checked);
-                    sub_builder = sub_builder.item(&check_item);
-                }
-            }
-        }
-
-        if !has_items {
-            let empty_item = MenuItem::with_id(
-                app,
-                format!("empty_{}", app_id),
-                empty_label,
-                false,
-                None::<&str>,
-            )?;
-            sub_builder = sub_builder.item(&empty_item);
-        }
-        let submenu = sub_builder.build()?;
-        menu_builder = menu_builder.item(&submenu);
-    }
-
-    let menu = menu_builder
-        .separator()
-        .item(&show_i)
-        .separator()
-        .item(&toggle_i)
-        .separator()
-        .item(&quit_i)
-        .build()?;
-
-    Ok(menu)
-}
-
-/// Detect system language at startup — "zh" prefix → Chinese, else English.
-fn detect_system_lang() -> &'static str {
-    let locale = sys_locale::get_locale().unwrap_or_default();
-    if locale.starts_with("zh") {
-        "zh-CN"
-    } else {
-        "en"
-    }
-}
-
-fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-
-    let lang = app.state::<TrayState>().lang();
-    let patrol_enabled = app.state::<core::patrol::PatrolManager>().status().enabled;
-    let menu = build_tray_menu(app, &lang, patrol_enabled)?;
-
-    TrayIconBuilder::with_id("main-tray")
-        .tooltip("SkillStar")
-        .icon(
-            app.default_window_icon()
-                .expect("SkillStar must have a default window icon")
-                .clone(),
-        )
-        .menu(&menu)
-        .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| match event.id.as_ref() {
-            "show" => {
-                // Restore Dock icon before showing.
-                #[cfg(target_os = "macos")]
-                {
-                    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
-                }
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.unminimize();
-                    let _ = window.set_focus();
-                }
-            }
-            "toggle_patrol" => {
-                let manager = app.state::<core::patrol::PatrolManager>();
-                let status = manager.status();
-
-                if status.enabled {
-                    manager.stop();
-                } else {
-                    let _ = manager.start(app.clone(), status.interval_secs);
-                }
-
-                let _ = app.emit("patrol://enabled-changed", !status.enabled);
-                let _ = refresh_tray_menu(app);
-            }
-            "quit" => {
-                let manager = app.state::<core::patrol::PatrolManager>();
-                manager.stop();
-                let exit_control = app.state::<ExitControl>();
-                exit_control.allow_next_exit();
-                app.exit(0);
-            }
-            id if id.starts_with("provider_") => {
-                let parts: Vec<&str> = id.splitn(3, '_').collect();
-                if parts.len() == 3 {
-                    let app_id = parts[1];
-                    let provider_id = parts[2];
-                    if let Err(e) =
-                        core::model_config::providers::switch_provider(app_id, provider_id)
-                    {
-                        tracing::error!("Failed to switch provider from tray: {}", e);
-                    } else {
-                        let _ = app.emit(
-                            "model-config://switched",
-                            serde_json::json!({
-                                "appId": app_id,
-                                "providerId": provider_id
-                            }),
-                        );
-                        if let Err(e) = refresh_tray_menu(app) {
-                            tracing::error!("Failed to refresh tray menu: {}", e);
-                        }
-                    }
-                }
-            }
-            id if id.starts_with("account_") => {
-                let parts: Vec<&str> = id.splitn(3, '_').collect();
-                if parts.len() == 3 {
-                    let account_id = parts[2].to_string();
-                    let app_handle = app.clone();
-                    tauri::async_runtime::spawn(async move {
-                        match crate::commands::models::switch_codex_account(
-                            app_handle.clone(),
-                            account_id.clone(),
-                        )
-                        .await
-                        {
-                            Ok(_) => {
-                                let _ = app_handle.emit(
-                                    "codex-account://switched",
-                                    serde_json::json!({
-                                        "accountId": account_id
-                                    }),
-                                );
-                            }
-                            Err(e) => {
-                                tracing::error!("Failed to switch codex account from tray: {}", e);
-                            }
-                        }
-                    });
-                }
-            }
-            _ => {}
-        })
-        .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            } = event
-            {
-                let app = tray.app_handle();
-                // Restore Dock icon before showing.
-                #[cfg(target_os = "macos")]
-                {
-                    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
-                }
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.unminimize();
-                    let _ = window.set_focus();
-                }
-            }
-        })
-        .build(app)?;
-
-    Ok(())
-}
-
-pub(crate) fn refresh_tray_menu(app: &tauri::AppHandle) -> Result<(), String> {
-    let lang = app.state::<TrayState>().lang();
-    let patrol_enabled = app.state::<core::patrol::PatrolManager>().status().enabled;
-
-    let menu = build_tray_menu(app, &lang, patrol_enabled).map_err(|e| e.to_string())?;
-    let tray = app
-        .tray_by_id("main-tray")
-        .ok_or_else(|| "tray not found".to_string())?;
-    tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
 // ── Tray language update command ────────────────────────────────────
 
 #[tauri::command]
 async fn update_tray_language(app: tauri::AppHandle, lang: String) -> Result<(), String> {
-    app.state::<TrayState>().set_lang(lang);
-    refresh_tray_menu(&app)
+    app.state::<core::app_shell::TrayState>().set_lang(lang);
+    core::app_shell::refresh_tray_menu(&app)
 }

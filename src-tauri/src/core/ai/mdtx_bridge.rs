@@ -70,8 +70,9 @@ impl LlmProvider for SkillStarProvider {
                     system_prompt,
                     user_prompt,
                     max_tokens,
-                )
-            ).await;
+                ),
+            )
+            .await;
 
             match result {
                 Ok(Ok(text)) => {
@@ -111,7 +112,9 @@ impl LlmProvider for SkillStarProvider {
         }
 
         Err(markdown_translator::error::Error::Pipeline(format!(
-            "failed after {} attempts. Last error: {}", MAX_RETRIES + 1, last_error
+            "failed after {} attempts. Last error: {}",
+            MAX_RETRIES + 1,
+            last_error
         )))
     }
 
@@ -145,8 +148,9 @@ impl LlmProvider for SkillStarProvider {
                     system_prompt,
                     user_prompt,
                     max_tokens,
-                )
-            ).await;
+                ),
+            )
+            .await;
 
             match result {
                 Ok(Ok(text)) => return Ok(text),
@@ -177,7 +181,9 @@ impl LlmProvider for SkillStarProvider {
         }
 
         Err(markdown_translator::error::Error::Pipeline(format!(
-            "chat_text failed after {} attempts. Last error: {}", MAX_RETRIES + 1, last_error
+            "chat_text failed after {} attempts. Last error: {}",
+            MAX_RETRIES + 1,
+            last_error
         )))
     }
 }
@@ -321,8 +327,7 @@ pub(crate) async fn translate_skill_content_with_provider(
     progress: Option<Arc<dyn Fn(PipelineProgressEvent) + Send + Sync>>,
     log_ctx: Option<TranslationMdtxLogCtx>,
 ) -> Result<String, String> {
-    let target_lang =
-        ai_provider::language_display_name(&config.target_language).to_string();
+    let target_lang = ai_provider::language_display_name(&config.target_language).to_string();
     let content_sha256 = sha256_hex(content.as_bytes());
     let mdtx_started = Instant::now();
 
@@ -422,7 +427,10 @@ pub(crate) async fn translate_skill_content_with_provider(
         );
     }
 
-    Ok(restore_frontmatter_if_missing(content, result.translated_text))
+    Ok(restore_frontmatter_if_missing(
+        content,
+        result.translated_text,
+    ))
 }
 
 #[cfg(test)]
@@ -455,19 +463,14 @@ mod tests {
             let payload: serde_json::Value = serde_json::from_str(user_prompt).map_err(|e| {
                 MdtxError::Pipeline(format!("mock {call_label}: invalid user JSON: {e}"))
             })?;
-            let task = payload
-                .get("task")
-                .and_then(|t| t.as_str())
-                .unwrap_or("");
+            let task = payload.get("task").and_then(|t| t.as_str()).unwrap_or("");
             if task != "translate" {
                 return Err(MdtxError::Pipeline(format!(
                     "mock: unexpected task {task:?} in {call_label}"
                 )));
             }
             let Some(segments) = payload.get("segments").and_then(|s| s.as_array()) else {
-                return Err(MdtxError::Pipeline(
-                    "mock: missing segments array".into(),
-                ));
+                return Err(MdtxError::Pipeline("mock: missing segments array".into()));
             };
             let translations: Vec<serde_json::Value> = segments
                 .iter()
@@ -545,5 +548,137 @@ mod tests {
             out.contains("demo-skill") || out.contains("name:"),
             "expected front matter preserved: {out}"
         );
+    }
+
+    #[test]
+    fn build_translator_config_maps_ai_config() {
+        let mut config = AiConfig::default();
+        config.target_language = "ja".to_string();
+        config.base_url = "https://api.example.com".to_string();
+        config.api_key = "secret".to_string();
+        config.model = "gpt-4".to_string();
+        config.context_window_k = 64;
+        config.max_concurrent_requests = 2;
+
+        let tc = build_translator_config(&config);
+
+        assert_eq!(tc.target_languages, vec!["Japanese"]);
+        assert_eq!(tc.provider.name, "skillstar-bridge");
+        assert_eq!(tc.provider.base_url, "https://api.example.com");
+        assert_eq!(tc.provider.api_key, Some("secret".to_string()));
+        assert_eq!(tc.provider.model, "gpt-4");
+        assert_eq!(tc.execution.max_parallel_translations, 2);
+        assert_eq!(tc.provider.temperature, 0.2);
+        assert!(tc.pipeline.mode == PipelineMode::Balanced);
+    }
+
+    #[test]
+    fn split_leading_frontmatter_basic() {
+        let text = "---\nname: demo\n---\n\n# Body\n";
+        let (fm, rest) = split_leading_frontmatter(text).unwrap();
+        assert_eq!(fm, "---\nname: demo\n---\n");
+        assert_eq!(rest, "\n# Body\n");
+    }
+
+    #[test]
+    fn split_leading_frontmatter_no_terminator() {
+        let text = "---\nname: demo\n";
+        assert!(split_leading_frontmatter(text).is_none());
+    }
+
+    #[test]
+    fn split_leading_frontmatter_no_leading_dashes() {
+        let text = "# Title\n---\nname: demo\n---\n";
+        assert!(split_leading_frontmatter(text).is_none());
+    }
+
+    #[test]
+    fn restore_frontmatter_if_missing_preserves_when_present() {
+        let original = "---\nname: demo\n---\n\n# Title\n";
+        let translated = "---\nname: demo\n---\n\n# 标题\n".to_string();
+        assert_eq!(
+            restore_frontmatter_if_missing(original, translated.clone()),
+            translated
+        );
+    }
+
+    #[test]
+    fn restore_frontmatter_if_missing_adds_when_absent() {
+        let original = "---\nname: demo\n---\n\n# Title\n";
+        let translated = "# 标题\n".to_string();
+        let result = restore_frontmatter_if_missing(original, translated);
+        assert!(result.starts_with("---\nname: demo\n---\n"));
+        assert!(result.contains("# 标题"));
+    }
+
+    #[test]
+    fn restore_frontmatter_if_missing_handles_empty_translation() {
+        let original = "---\nname: demo\n---\n\n# Title\n";
+        let translated = String::new();
+        let result = restore_frontmatter_if_missing(original, translated);
+        assert_eq!(result, "---\nname: demo\n---\n");
+    }
+
+    #[test]
+    fn restore_frontmatter_if_missing_handles_leading_newline() {
+        let original = "---\nname: demo\n---\n\n# Title\n";
+        let translated = "\n# 标题\n".to_string();
+        let result = restore_frontmatter_if_missing(original, translated);
+        assert!(result.starts_with("---\nname: demo\n---\n"));
+        assert!(result.contains("# 标题"));
+    }
+
+    struct FailingMock;
+
+    #[async_trait::async_trait]
+    impl LlmProvider for FailingMock {
+        async fn chat_json(
+            &self,
+            _system_prompt: &str,
+            _user_prompt: &str,
+            _call_label: &str,
+        ) -> MdtxResult<serde_json::Value> {
+            Err(MdtxError::Pipeline("mock failure".into()))
+        }
+
+        async fn chat_text(
+            &self,
+            _system_prompt: &str,
+            _user_prompt: &str,
+            _call_label: &str,
+        ) -> MdtxResult<String> {
+            Err(MdtxError::Pipeline("mock failure".into()))
+        }
+
+        fn usage(&self) -> &ApiUsage {
+            static USAGE: std::sync::OnceLock<ApiUsage> = std::sync::OnceLock::new();
+            USAGE.get_or_init(ApiUsage::new)
+        }
+    }
+
+    #[tokio::test]
+    async fn skill_md_chain_returns_error_when_pipeline_fails() {
+        let config = AiConfig::default();
+        let skill = "# Title\n\nParagraph.\n";
+        let provider = Arc::new(FailingMock);
+        let result =
+            translate_skill_content_with_provider(&config, skill, true, provider, None, None).await;
+
+        assert!(result.is_err(), "expected error when pipeline fails");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("mdtx pipeline") || err.contains("mock failure"),
+            "error should mention pipeline or mock: {err}"
+        );
+    }
+
+    #[test]
+    fn build_translator_config_clamps_max_parallel() {
+        let mut config = AiConfig::default();
+        config.context_window_k = 128;
+        config.max_concurrent_requests = 10;
+
+        let tc = build_translator_config(&config);
+        assert_eq!(tc.execution.max_parallel_translations, 4);
     }
 }

@@ -64,7 +64,10 @@ pub fn split_front_matter(text: &str) -> FrontMatterSplit {
 
 /// Serialize front matter data back to a YAML string (without delimiters).
 pub fn dump_front_matter(data: &HashMap<String, serde_yaml::Value>) -> String {
-    serde_yaml::to_string(data).unwrap_or_default().trim().to_owned()
+    serde_yaml::to_string(data)
+        .unwrap_or_default()
+        .trim()
+        .to_owned()
 }
 
 /// Reconstruct the full document text from optional front matter and body.

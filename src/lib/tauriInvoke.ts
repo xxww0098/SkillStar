@@ -40,9 +40,12 @@ import type {
   PublishResult,
   RepoHistoryEntry,
   ScanResult,
+  SecurityScanAuditDetail,
+  SecurityScanAuditSummary,
   SecurityScanEstimate,
   SecurityScanLogEntry,
   SecurityScanPolicy,
+  SecurityScanReportExportResult,
   SecurityScanResult,
   ShortTextTranslationResult,
   SkillTranslationResult,
@@ -300,16 +303,24 @@ interface TauriCommands {
     args: { limit?: number };
     result: SecurityScanLogEntry[];
   };
+  list_security_scan_audits: {
+    args: { limit?: number };
+    result: SecurityScanAuditSummary[];
+  };
+  get_security_scan_audit_detail: {
+    args: { fileName: string };
+    result: SecurityScanAuditDetail;
+  };
   get_security_scan_log_dir: { args: Record<string, never>; result: string };
   get_security_scan_policy: { args: Record<string, never>; result: SecurityScanPolicy };
   save_security_scan_policy: { args: { policy: SecurityScanPolicy }; result: void };
   export_security_scan_sarif: {
     args: { skillNames?: string[]; requestLabel?: string };
-    result: string;
+    result: SecurityScanReportExportResult;
   };
   export_security_scan_report: {
     args: { format: string; skillNames?: string[]; requestLabel?: string };
-    result: string;
+    result: SecurityScanReportExportResult;
   };
 
   // Bundles

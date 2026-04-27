@@ -38,9 +38,9 @@ pub fn build(
             continue;
         }
         let path = seg.context_path.join(" / ");
-        section_summaries.entry(path).or_insert_with(|| {
-            seg.source_text.chars().take(200).collect()
-        });
+        section_summaries
+            .entry(path)
+            .or_insert_with(|| seg.source_text.chars().take(200).collect());
     }
 
     // Style guide assembly.

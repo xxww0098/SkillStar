@@ -10,13 +10,22 @@ use std::sync::{Arc, LazyLock, Mutex, RwLock};
 use tracing::{error, warn};
 
 use crate::db;
+use crate::models::{
+    CuratedRegistryEntry, CuratedRegistryKind, CuratedRegistryUpsert, MarketplaceCategory,
+    MarketplaceCategoryUpsert, MarketplaceRatingSummary, MarketplaceRatingSummaryUpsert,
+    MarketplaceReview, MarketplaceReviewUpsert, MarketplaceSkillCategoryAssignment,
+    MarketplaceSkillCategoryAssignmentInput, MarketplaceSkillTagAssignment,
+    MarketplaceSkillTagAssignmentInput, MarketplaceSourceObservation,
+    MarketplaceSourceObservationUpsert, MarketplaceSourceSummary, MarketplaceTag,
+    MarketplaceTagUpsert, MarketplaceUpdateNotification, MarketplaceUpdateNotificationUpsert,
+};
 use crate::remote::{
     self, AiKeywordSearchResult, MarketplaceResult, MarketplaceSkillDetails, PublisherRepo,
     SecurityAudit,
 };
 use crate::{OfficialPublisher, Skill, SkillType, extract_github_source_from_url};
 
-const SNAPSHOT_SCHEMA_VERSION: i64 = 2;
+const SNAPSHOT_SCHEMA_VERSION: i64 = 7;
 const LEADERBOARD_TTL_HOURS: i64 = 6;
 const PUBLISHER_TTL_HOURS: i64 = 24;
 const DETAIL_TTL_HOURS: i64 = 48;
@@ -25,6 +34,7 @@ const STALE_SKILL_RETENTION_DAYS: i64 = 30;
 const AI_SEARCH_REMOTE_SEED_MIN_HITS: usize = 3;
 const AI_SEARCH_LOW_COVERAGE_ROWS: i64 = 500;
 const RESOLVE_SOURCE_REMOTE_LIMIT: u32 = 20;
+const DEFAULT_CURATED_REGISTRY_ID: &str = "skills_sh";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalFirstResult<T> {
@@ -445,6 +455,21 @@ fn migrate_schema(conn: &Connection) -> Result<()> {
         if version < 2 {
             migrate_v1_to_v2(conn)?;
         }
+        if version < 3 {
+            migrate_v2_to_v3(conn)?;
+        }
+        if version < 4 {
+            migrate_v3_to_v4(conn)?;
+        }
+        if version < 5 {
+            migrate_v4_to_v5(conn)?;
+        }
+        if version < 6 {
+            migrate_v5_to_v6(conn)?;
+        }
+        if version < 7 {
+            migrate_v6_to_v7(conn)?;
+        }
         conn.pragma_update(None, "user_version", SNAPSHOT_SCHEMA_VERSION)
             .context("Failed to update marketplace user_version")?;
     }
@@ -575,6 +600,170 @@ fn migrate_v1_to_v2(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+fn migrate_v2_to_v3(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS marketplace_curated_registry (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            endpoint TEXT NOT NULL DEFAULT '',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            priority INTEGER NOT NULL DEFAULT 100,
+            trust TEXT NOT NULL DEFAULT '',
+            last_sync_at TEXT,
+            last_error TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_curated_registry_enabled_priority
+            ON marketplace_curated_registry(enabled, priority, name);",
+    )
+    .context("Failed to create curated marketplace registry tables (v3)")?;
+    seed_default_curated_registry(conn)?;
+    Ok(())
+}
+
+fn migrate_v3_to_v4(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS marketplace_skill_source_observation (
+            source_id TEXT NOT NULL,
+            source_skill_id TEXT NOT NULL,
+            skill_key TEXT NOT NULL REFERENCES marketplace_skill(skill_key) ON DELETE CASCADE,
+            source_url TEXT NOT NULL DEFAULT '',
+            repo_url TEXT NOT NULL DEFAULT '',
+            version TEXT,
+            sha TEXT,
+            metadata_json TEXT,
+            fetched_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (source_id, source_skill_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_skill_source_observation_skill_key
+            ON marketplace_skill_source_observation(skill_key);
+        CREATE INDEX IF NOT EXISTS idx_skill_source_observation_source_id
+            ON marketplace_skill_source_observation(source_id, fetched_at DESC);",
+    )
+    .context("Failed to create marketplace source observation tables (v4)")?;
+    Ok(())
+}
+
+fn migrate_v4_to_v5(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS marketplace_rating_summary (
+            skill_key TEXT NOT NULL REFERENCES marketplace_skill(skill_key) ON DELETE CASCADE,
+            source_id TEXT NOT NULL DEFAULT '',
+            rating_avg REAL NOT NULL DEFAULT 0,
+            rating_count INTEGER NOT NULL DEFAULT 0,
+            review_count INTEGER NOT NULL DEFAULT 0,
+            last_review_at TEXT,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (skill_key, source_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_rating_summary_skill_key
+            ON marketplace_rating_summary(skill_key);
+        CREATE INDEX IF NOT EXISTS idx_rating_summary_source_id
+            ON marketplace_rating_summary(source_id, updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS marketplace_review (
+            review_id TEXT PRIMARY KEY,
+            skill_key TEXT NOT NULL REFERENCES marketplace_skill(skill_key) ON DELETE CASCADE,
+            source_id TEXT NOT NULL DEFAULT '',
+            author_hash TEXT,
+            rating INTEGER NOT NULL,
+            title TEXT,
+            body TEXT,
+            locale TEXT,
+            status TEXT NOT NULL DEFAULT 'published',
+            reviewed_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_marketplace_review_skill_key
+            ON marketplace_review(skill_key, source_id, reviewed_at DESC, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_marketplace_review_source_id
+            ON marketplace_review(source_id, reviewed_at DESC);",
+    )
+    .context("Failed to create marketplace rating/review tables (v5)")?;
+    Ok(())
+}
+
+fn migrate_v5_to_v6(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS marketplace_category (
+            id TEXT PRIMARY KEY,
+            label TEXT NOT NULL,
+            slug TEXT NOT NULL UNIQUE,
+            parent_id TEXT REFERENCES marketplace_category(id) ON DELETE SET NULL,
+            position INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_marketplace_category_parent_position
+            ON marketplace_category(parent_id, position, label);
+        CREATE INDEX IF NOT EXISTS idx_marketplace_category_slug
+            ON marketplace_category(slug);
+
+        CREATE TABLE IF NOT EXISTS marketplace_skill_category (
+            skill_key TEXT NOT NULL REFERENCES marketplace_skill(skill_key) ON DELETE CASCADE,
+            category_id TEXT NOT NULL REFERENCES marketplace_category(id) ON DELETE CASCADE,
+            assigned_at TEXT NOT NULL,
+            PRIMARY KEY (skill_key, category_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_marketplace_skill_category_category
+            ON marketplace_skill_category(category_id, skill_key);
+
+        CREATE TABLE IF NOT EXISTS marketplace_tag (
+            slug TEXT PRIMARY KEY,
+            label TEXT NOT NULL,
+            usage_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_marketplace_tag_usage
+            ON marketplace_tag(usage_count DESC, label);
+
+        CREATE TABLE IF NOT EXISTS marketplace_skill_tag (
+            skill_key TEXT NOT NULL REFERENCES marketplace_skill(skill_key) ON DELETE CASCADE,
+            tag_slug TEXT NOT NULL REFERENCES marketplace_tag(slug) ON DELETE CASCADE,
+            source_id TEXT NOT NULL DEFAULT '',
+            assigned_at TEXT NOT NULL,
+            PRIMARY KEY (skill_key, tag_slug, source_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_marketplace_skill_tag_skill
+            ON marketplace_skill_tag(skill_key, tag_slug);
+        CREATE INDEX IF NOT EXISTS idx_marketplace_skill_tag_tag
+            ON marketplace_skill_tag(tag_slug, skill_key);",
+    )
+    .context("Failed to create marketplace category/tag tables (v6)")?;
+    Ok(())
+}
+
+fn migrate_v6_to_v7(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS marketplace_update_notification (
+            skill_key TEXT NOT NULL REFERENCES marketplace_skill(skill_key) ON DELETE CASCADE,
+            source_id TEXT NOT NULL,
+            installed_version TEXT,
+            available_version TEXT,
+            installed_hash TEXT,
+            available_hash TEXT,
+            detected_at TEXT NOT NULL,
+            dismissed_at TEXT,
+            message TEXT,
+            metadata_json TEXT,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (skill_key, source_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_marketplace_update_notification_active
+            ON marketplace_update_notification(dismissed_at, detected_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_marketplace_update_notification_source
+            ON marketplace_update_notification(source_id, updated_at DESC);",
+    )
+    .context("Failed to create marketplace update notification table (v7)")?;
+    Ok(())
+}
+
 fn table_exists(conn: &Connection, table_name: &str) -> Result<bool> {
     let exists = conn
         .query_row(
@@ -621,6 +810,295 @@ fn split_source(source: &str) -> (String, String) {
     let publisher = parts.next().unwrap_or_default().to_string();
     let repo = parts.next().unwrap_or_default().to_string();
     (publisher, repo)
+}
+
+fn default_curated_registry(now: &str) -> CuratedRegistryEntry {
+    CuratedRegistryEntry {
+        id: DEFAULT_CURATED_REGISTRY_ID.to_string(),
+        name: "skills.sh".to_string(),
+        kind: CuratedRegistryKind::SkillsSh,
+        endpoint: "https://skills.sh".to_string(),
+        enabled: true,
+        priority: 0,
+        trust: "official".to_string(),
+        last_sync_at: None,
+        last_error: None,
+        created_at: Some(now.to_string()),
+        updated_at: Some(now.to_string()),
+    }
+}
+
+fn normalize_curated_registry_id(id: &str) -> Result<String> {
+    let normalized = id.trim().to_ascii_lowercase().replace('.', "_");
+    if normalized.is_empty() {
+        return Err(anyhow!("Curated registry id cannot be empty"));
+    }
+    Ok(normalized)
+}
+
+fn normalize_observation_source_id(id: &str) -> Result<String> {
+    let normalized = id.trim().to_ascii_lowercase().replace('.', "_");
+    if normalized.is_empty() {
+        return Err(anyhow!("Marketplace source id cannot be empty"));
+    }
+    Ok(normalized)
+}
+
+fn normalize_source_skill_id(id: &str) -> Result<String> {
+    let normalized = id.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return Err(anyhow!("Marketplace source skill id cannot be empty"));
+    }
+    Ok(normalized)
+}
+
+fn normalize_skill_key_value(skill_key: &str) -> Result<String> {
+    let normalized = skill_key.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return Err(anyhow!("Marketplace skill_key cannot be empty"));
+    }
+    Ok(normalized)
+}
+
+fn normalize_marketplace_slug(raw: &str, field: &str) -> Result<String> {
+    let mut slug = String::new();
+    let mut last_was_separator = false;
+    for ch in raw.trim().to_ascii_lowercase().chars() {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch);
+            last_was_separator = false;
+        } else if matches!(ch, ' ' | '_' | '-' | '.' | '/')
+            && !slug.is_empty()
+            && !last_was_separator
+        {
+            slug.push('-');
+            last_was_separator = true;
+        }
+    }
+    while slug.ends_with('-') {
+        slug.pop();
+    }
+    if slug.is_empty() {
+        return Err(anyhow!("Marketplace {field} slug cannot be empty"));
+    }
+    Ok(slug)
+}
+
+fn normalize_required_label(raw: &str, field: &str) -> Result<String> {
+    let label = raw.trim().to_string();
+    if label.is_empty() {
+        return Err(anyhow!("Marketplace {field} label cannot be empty"));
+    }
+    Ok(label)
+}
+
+fn normalize_optional_source_id(source_id: Option<String>) -> String {
+    source_id
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
+        .replace('.', "_")
+}
+
+fn none_if_empty(value: String) -> Option<String> {
+    if value.is_empty() { None } else { Some(value) }
+}
+
+fn trim_optional(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn validate_rating_value(rating: i64) -> Result<()> {
+    if !(1..=5).contains(&rating) {
+        return Err(anyhow!("Marketplace review rating must be between 1 and 5"));
+    }
+    Ok(())
+}
+
+fn validate_rating_summary_values(
+    rating_avg: f64,
+    rating_count: i64,
+    review_count: i64,
+) -> Result<()> {
+    if !rating_avg.is_finite() || !(0.0..=5.0).contains(&rating_avg) {
+        return Err(anyhow!(
+            "Marketplace rating average must be between 0 and 5"
+        ));
+    }
+    if rating_count < 0 || review_count < 0 {
+        return Err(anyhow!("Marketplace rating counts cannot be negative"));
+    }
+    Ok(())
+}
+
+fn curated_registry_kind_from_db(raw: &str) -> CuratedRegistryKind {
+    raw.parse().unwrap_or(CuratedRegistryKind::Custom)
+}
+
+fn row_to_curated_registry(row: &rusqlite::Row<'_>) -> rusqlite::Result<CuratedRegistryEntry> {
+    let kind: String = row.get(2)?;
+    Ok(CuratedRegistryEntry {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        kind: curated_registry_kind_from_db(&kind),
+        endpoint: row.get(3)?,
+        enabled: row.get::<_, i64>(4)? != 0,
+        priority: row.get(5)?,
+        trust: row.get(6)?,
+        last_sync_at: row.get(7)?,
+        last_error: row.get(8)?,
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
+    })
+}
+
+fn row_to_source_observation(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<MarketplaceSourceObservation> {
+    Ok(MarketplaceSourceObservation {
+        source_id: row.get(0)?,
+        source_skill_id: row.get(1)?,
+        skill_key: row.get(2)?,
+        source_url: row.get(3)?,
+        repo_url: row.get(4)?,
+        version: row.get(5)?,
+        sha: row.get(6)?,
+        metadata_json: row.get(7)?,
+        fetched_at: row.get(8)?,
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
+    })
+}
+
+fn row_to_category(row: &rusqlite::Row<'_>) -> rusqlite::Result<MarketplaceCategory> {
+    Ok(MarketplaceCategory {
+        id: row.get(0)?,
+        label: row.get(1)?,
+        slug: row.get(2)?,
+        parent_id: row.get(3)?,
+        position: row.get(4)?,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
+    })
+}
+
+fn row_to_tag(row: &rusqlite::Row<'_>) -> rusqlite::Result<MarketplaceTag> {
+    Ok(MarketplaceTag {
+        slug: row.get(0)?,
+        label: row.get(1)?,
+        usage_count: row.get(2)?,
+        created_at: row.get(3)?,
+        updated_at: row.get(4)?,
+    })
+}
+
+fn row_to_skill_category_assignment(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<MarketplaceSkillCategoryAssignment> {
+    Ok(MarketplaceSkillCategoryAssignment {
+        skill_key: row.get(0)?,
+        category_id: row.get(1)?,
+        assigned_at: row.get(2)?,
+    })
+}
+
+fn row_to_skill_tag_assignment(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<MarketplaceSkillTagAssignment> {
+    let source_id: String = row.get(2)?;
+    Ok(MarketplaceSkillTagAssignment {
+        skill_key: row.get(0)?,
+        tag_slug: row.get(1)?,
+        source_id: none_if_empty(source_id),
+        assigned_at: row.get(3)?,
+    })
+}
+
+fn row_to_rating_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<MarketplaceRatingSummary> {
+    let source_id: String = row.get(1)?;
+    Ok(MarketplaceRatingSummary {
+        skill_key: row.get(0)?,
+        source_id: none_if_empty(source_id),
+        rating_avg: row.get(2)?,
+        rating_count: row.get(3)?,
+        review_count: row.get(4)?,
+        last_review_at: row.get(5)?,
+        updated_at: row.get(6)?,
+    })
+}
+
+fn row_to_review(row: &rusqlite::Row<'_>) -> rusqlite::Result<MarketplaceReview> {
+    let source_id: String = row.get(2)?;
+    Ok(MarketplaceReview {
+        review_id: row.get(0)?,
+        skill_key: row.get(1)?,
+        source_id: none_if_empty(source_id),
+        author_hash: row.get(3)?,
+        rating: row.get(4)?,
+        title: row.get(5)?,
+        body: row.get(6)?,
+        locale: row.get(7)?,
+        status: row.get(8)?,
+        reviewed_at: row.get(9)?,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
+    })
+}
+
+fn row_to_update_notification(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<MarketplaceUpdateNotification> {
+    Ok(MarketplaceUpdateNotification {
+        skill_key: row.get(0)?,
+        source_id: row.get(1)?,
+        installed_version: row.get(2)?,
+        available_version: row.get(3)?,
+        installed_hash: row.get(4)?,
+        available_hash: row.get(5)?,
+        detected_at: row.get(6)?,
+        dismissed_at: row.get(7)?,
+        message: row.get(8)?,
+        metadata_json: row.get(9)?,
+        updated_at: row.get(10)?,
+    })
+}
+
+fn seed_default_curated_registry(conn: &Connection) -> Result<()> {
+    let now = now_rfc3339();
+    let entry = default_curated_registry(&now);
+    conn.execute(
+        "INSERT INTO marketplace_curated_registry (
+            id,
+            name,
+            kind,
+            endpoint,
+            enabled,
+            priority,
+            trust,
+            last_sync_at,
+            last_error,
+            created_at,
+            updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+        ON CONFLICT(id) DO NOTHING",
+        params![
+            entry.id,
+            entry.name,
+            entry.kind.as_str(),
+            entry.endpoint,
+            i64::from(entry.enabled),
+            entry.priority,
+            entry.trust,
+            entry.last_sync_at,
+            entry.last_error,
+            entry.created_at,
+            entry.updated_at
+        ],
+    )
+    .context("Failed to seed default curated marketplace registry")?;
+    Ok(())
 }
 
 fn build_skill_key(source: &str, name: &str) -> Option<String> {
@@ -882,6 +1360,945 @@ pub fn get_marketplace_sync_states() -> Result<Vec<SyncStateEntry>> {
         }
         Ok(entries)
     })
+}
+
+pub fn list_curated_registries() -> Result<Vec<CuratedRegistryEntry>> {
+    with_conn(|conn| {
+        seed_default_curated_registry(conn)?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    id,
+                    name,
+                    kind,
+                    endpoint,
+                    enabled,
+                    priority,
+                    trust,
+                    last_sync_at,
+                    last_error,
+                    created_at,
+                    updated_at
+                 FROM marketplace_curated_registry
+                 ORDER BY enabled DESC, priority ASC, name ASC, id ASC",
+            )
+            .context("Failed to prepare curated marketplace registry query")?;
+
+        let rows = stmt
+            .query_map([], row_to_curated_registry)
+            .context("Failed to read curated marketplace registry rows")?;
+
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row.context("Failed to decode curated marketplace registry row")?);
+        }
+        Ok(entries)
+    })
+}
+
+pub fn upsert_curated_registry(input: CuratedRegistryUpsert) -> Result<CuratedRegistryEntry> {
+    with_conn(|conn| {
+        let id = normalize_curated_registry_id(&input.id)?;
+        let name = input.name.trim();
+        if name.is_empty() {
+            return Err(anyhow!("Curated registry name cannot be empty"));
+        }
+
+        let now = now_rfc3339();
+        conn.execute(
+            "INSERT INTO marketplace_curated_registry (
+                id,
+                name,
+                kind,
+                endpoint,
+                enabled,
+                priority,
+                trust,
+                last_sync_at,
+                last_error,
+                created_at,
+                updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                kind = excluded.kind,
+                endpoint = excluded.endpoint,
+                enabled = excluded.enabled,
+                priority = excluded.priority,
+                trust = excluded.trust,
+                last_sync_at = excluded.last_sync_at,
+                last_error = excluded.last_error,
+                updated_at = excluded.updated_at",
+            params![
+                id,
+                name,
+                input.kind.as_str(),
+                input.endpoint.trim(),
+                i64::from(input.enabled),
+                input.priority,
+                input.trust.trim(),
+                input.last_sync_at,
+                input.last_error,
+                now
+            ],
+        )
+        .context("Failed to upsert curated marketplace registry")?;
+
+        conn.query_row(
+            "SELECT
+                id,
+                name,
+                kind,
+                endpoint,
+                enabled,
+                priority,
+                trust,
+                last_sync_at,
+                last_error,
+                created_at,
+                updated_at
+             FROM marketplace_curated_registry
+             WHERE id = ?1",
+            [id],
+            row_to_curated_registry,
+        )
+        .optional()
+        .context("Failed to load upserted curated marketplace registry")?
+        .ok_or_else(|| anyhow!("Curated marketplace registry was not persisted"))
+    })
+}
+
+fn upsert_source_observation_in_tx(
+    tx: &Transaction<'_>,
+    observation: MarketplaceSourceObservationUpsert,
+) -> Result<MarketplaceSourceObservation> {
+    let source_id = normalize_observation_source_id(&observation.source_id)?;
+    let source_skill_id = normalize_source_skill_id(&observation.source_skill_id)?;
+    let skill_key = observation.skill_key.trim().to_ascii_lowercase();
+    if skill_key.is_empty() {
+        return Err(anyhow!(
+            "Marketplace source observation skill_key cannot be empty"
+        ));
+    }
+
+    let now = now_rfc3339();
+    let source_url = observation.source_url.trim().to_string();
+    let repo_url = observation.repo_url.trim().to_string();
+    tx.execute(
+        "INSERT INTO marketplace_skill_source_observation (
+            source_id,
+            source_skill_id,
+            skill_key,
+            source_url,
+            repo_url,
+            version,
+            sha,
+            metadata_json,
+            fetched_at,
+            created_at,
+            updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)
+        ON CONFLICT(source_id, source_skill_id) DO UPDATE SET
+            skill_key = excluded.skill_key,
+            source_url = excluded.source_url,
+            repo_url = excluded.repo_url,
+            version = excluded.version,
+            sha = excluded.sha,
+            metadata_json = excluded.metadata_json,
+            fetched_at = excluded.fetched_at,
+            updated_at = excluded.updated_at",
+        params![
+            source_id,
+            source_skill_id,
+            skill_key,
+            source_url,
+            repo_url,
+            observation.version,
+            observation.sha,
+            observation.metadata_json,
+            observation.fetched_at,
+            now
+        ],
+    )
+    .context("Failed to upsert marketplace source observation")?;
+
+    tx.query_row(
+        "SELECT
+            source_id,
+            source_skill_id,
+            skill_key,
+            source_url,
+            repo_url,
+            version,
+            sha,
+            metadata_json,
+            fetched_at,
+            created_at,
+            updated_at
+         FROM marketplace_skill_source_observation
+         WHERE source_id = ?1 AND source_skill_id = ?2",
+        params![source_id, source_skill_id],
+        row_to_source_observation,
+    )
+    .context("Failed to load upserted marketplace source observation")
+}
+
+pub fn upsert_source_observation(
+    observation: MarketplaceSourceObservationUpsert,
+) -> Result<MarketplaceSourceObservation> {
+    with_conn(|conn| {
+        let tx = conn
+            .unchecked_transaction()
+            .context("Failed to start source-observation upsert transaction")?;
+        let persisted = upsert_source_observation_in_tx(&tx, observation)?;
+        tx.commit()
+            .context("Failed to commit source-observation upsert transaction")?;
+        Ok(persisted)
+    })
+}
+
+pub fn list_source_observations_for_skill(
+    skill_key: &str,
+) -> Result<Vec<MarketplaceSourceObservation>> {
+    let skill_key = skill_key.trim().to_ascii_lowercase();
+    if skill_key.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    with_conn(|conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    source_id,
+                    source_skill_id,
+                    skill_key,
+                    source_url,
+                    repo_url,
+                    version,
+                    sha,
+                    metadata_json,
+                    fetched_at,
+                    created_at,
+                    updated_at
+                 FROM marketplace_skill_source_observation
+                 WHERE skill_key = ?1
+                 ORDER BY source_id ASC, COALESCE(fetched_at, updated_at) DESC, source_skill_id ASC",
+            )
+            .context("Failed to prepare marketplace source-observation query")?;
+        let rows = stmt
+            .query_map([skill_key], row_to_source_observation)
+            .context("Failed to read marketplace source-observation rows")?;
+
+        let mut observations = Vec::new();
+        for row in rows {
+            observations.push(row.context("Failed to decode marketplace source observation")?);
+        }
+        Ok(observations)
+    })
+}
+
+pub fn list_known_marketplace_sources() -> Result<Vec<MarketplaceSourceSummary>> {
+    with_conn(|conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    source_id,
+                    COUNT(1) AS observation_count,
+                    MAX(fetched_at) AS last_fetched_at,
+                    MAX(updated_at) AS last_updated_at
+                 FROM marketplace_skill_source_observation
+                 GROUP BY source_id
+                 ORDER BY source_id ASC",
+            )
+            .context("Failed to prepare known marketplace source query")?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(MarketplaceSourceSummary {
+                    source_id: row.get(0)?,
+                    observation_count: row.get(1)?,
+                    last_fetched_at: row.get(2)?,
+                    last_updated_at: row.get(3)?,
+                })
+            })
+            .context("Failed to read known marketplace source rows")?;
+
+        let mut sources = Vec::new();
+        for row in rows {
+            sources.push(row.context("Failed to decode known marketplace source row")?);
+        }
+        Ok(sources)
+    })
+}
+
+pub fn upsert_category(input: MarketplaceCategoryUpsert) -> Result<MarketplaceCategory> {
+    with_conn(|conn| {
+        let label = normalize_required_label(&input.label, "category")?;
+        let slug_source = input.slug.as_deref().unwrap_or(&label);
+        let slug = normalize_marketplace_slug(slug_source, "category")?;
+        let id = slug.clone();
+        let parent_id = input
+            .parent_id
+            .as_deref()
+            .map(|value| normalize_marketplace_slug(value, "category parent"))
+            .transpose()?;
+        if parent_id.as_deref() == Some(id.as_str()) {
+            return Err(anyhow!("Marketplace category cannot be its own parent"));
+        }
+
+        let now = now_rfc3339();
+        conn.execute(
+            "INSERT INTO marketplace_category (
+                id,
+                label,
+                slug,
+                parent_id,
+                position,
+                created_at,
+                updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+            ON CONFLICT(id) DO UPDATE SET
+                label = excluded.label,
+                slug = excluded.slug,
+                parent_id = excluded.parent_id,
+                position = excluded.position,
+                updated_at = excluded.updated_at",
+            params![id, label, slug, parent_id, input.position, now],
+        )
+        .context("Failed to upsert marketplace category")?;
+
+        conn.query_row(
+            "SELECT id, label, slug, parent_id, position, created_at, updated_at
+             FROM marketplace_category
+             WHERE id = ?1",
+            [id],
+            row_to_category,
+        )
+        .context("Failed to load upserted marketplace category")
+    })
+}
+
+pub fn list_categories() -> Result<Vec<MarketplaceCategory>> {
+    with_conn(|conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, label, slug, parent_id, position, created_at, updated_at
+                 FROM marketplace_category
+                 ORDER BY COALESCE(parent_id, ''), position ASC, label ASC",
+            )
+            .context("Failed to prepare marketplace category list query")?;
+        let rows = stmt
+            .query_map([], row_to_category)
+            .context("Failed to read marketplace categories")?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("Failed to decode marketplace categories")
+    })
+}
+
+pub fn assign_categories_to_skill(
+    input: MarketplaceSkillCategoryAssignmentInput,
+) -> Result<Vec<MarketplaceSkillCategoryAssignment>> {
+    with_conn(|conn| {
+        let skill_key = normalize_skill_key_value(&input.skill_key)?;
+        let mut category_ids = Vec::new();
+        for category_id in input.category_ids {
+            let normalized = normalize_marketplace_slug(&category_id, "category")?;
+            if !category_ids.contains(&normalized) {
+                category_ids.push(normalized);
+            }
+        }
+
+        let tx = conn
+            .unchecked_transaction()
+            .context("Failed to start marketplace category assignment transaction")?;
+        tx.execute(
+            "DELETE FROM marketplace_skill_category WHERE skill_key = ?1",
+            [skill_key.as_str()],
+        )
+        .context("Failed to clear marketplace category assignments")?;
+
+        let now = now_rfc3339();
+        for category_id in &category_ids {
+            let exists = tx
+                .query_row(
+                    "SELECT 1 FROM marketplace_category WHERE id = ?1 LIMIT 1",
+                    [category_id.as_str()],
+                    |_| Ok(()),
+                )
+                .optional()
+                .context("Failed to validate marketplace category assignment")?
+                .is_some();
+            if !exists {
+                return Err(anyhow!(
+                    "Marketplace category does not exist: {category_id}"
+                ));
+            }
+            tx.execute(
+                "INSERT INTO marketplace_skill_category (skill_key, category_id, assigned_at)
+                 VALUES (?1, ?2, ?3)",
+                params![skill_key, category_id, now],
+            )
+            .context("Failed to assign marketplace category to skill")?;
+        }
+        tx.commit()
+            .context("Failed to commit marketplace category assignments")?;
+
+        list_categories_for_skill(&skill_key)
+    })
+}
+
+pub fn list_categories_for_skill(
+    skill_key: &str,
+) -> Result<Vec<MarketplaceSkillCategoryAssignment>> {
+    let skill_key = match normalize_skill_key_value(skill_key) {
+        Ok(value) => value,
+        Err(_) => return Ok(Vec::new()),
+    };
+    with_conn(|conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT sc.skill_key, sc.category_id, sc.assigned_at
+                 FROM marketplace_skill_category sc
+                 JOIN marketplace_category c ON c.id = sc.category_id
+                 WHERE sc.skill_key = ?1
+                 ORDER BY c.position ASC, c.label ASC",
+            )
+            .context("Failed to prepare marketplace skill-category list query")?;
+        let rows = stmt
+            .query_map([skill_key], row_to_skill_category_assignment)
+            .context("Failed to read marketplace skill-category rows")?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("Failed to decode marketplace skill-category rows")
+    })
+}
+
+pub fn upsert_tag(input: MarketplaceTagUpsert) -> Result<MarketplaceTag> {
+    with_conn(|conn| {
+        let label = normalize_required_label(&input.label, "tag")?;
+        let slug_source = input.slug.as_deref().unwrap_or(&label);
+        let slug = normalize_marketplace_slug(slug_source, "tag")?;
+        let now = now_rfc3339();
+        conn.execute(
+            "INSERT INTO marketplace_tag (slug, label, usage_count, created_at, updated_at)
+             VALUES (?1, ?2, 0, ?3, ?3)
+             ON CONFLICT(slug) DO UPDATE SET
+                label = excluded.label,
+                updated_at = excluded.updated_at",
+            params![slug, label, now],
+        )
+        .context("Failed to upsert marketplace tag")?;
+        refresh_tag_usage_count(conn, &slug)?;
+
+        conn.query_row(
+            "SELECT slug, label, usage_count, created_at, updated_at
+             FROM marketplace_tag
+             WHERE slug = ?1",
+            [slug],
+            row_to_tag,
+        )
+        .context("Failed to load upserted marketplace tag")
+    })
+}
+
+pub fn list_tags() -> Result<Vec<MarketplaceTag>> {
+    with_conn(|conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT slug, label, usage_count, created_at, updated_at
+                 FROM marketplace_tag
+                 ORDER BY usage_count DESC, label ASC",
+            )
+            .context("Failed to prepare marketplace tag list query")?;
+        let rows = stmt
+            .query_map([], row_to_tag)
+            .context("Failed to read marketplace tags")?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("Failed to decode marketplace tags")
+    })
+}
+
+pub fn assign_tags_to_skill(
+    input: MarketplaceSkillTagAssignmentInput,
+) -> Result<Vec<MarketplaceSkillTagAssignment>> {
+    with_conn(|conn| {
+        let skill_key = normalize_skill_key_value(&input.skill_key)?;
+        let source_id = normalize_optional_source_id(input.source_id);
+        let mut tag_slugs = Vec::new();
+        for tag_slug in input.tag_slugs {
+            let normalized = normalize_marketplace_slug(&tag_slug, "tag")?;
+            if !tag_slugs.contains(&normalized) {
+                tag_slugs.push(normalized);
+            }
+        }
+
+        let tx = conn
+            .unchecked_transaction()
+            .context("Failed to start marketplace tag assignment transaction")?;
+        tx.execute(
+            "DELETE FROM marketplace_skill_tag WHERE skill_key = ?1 AND source_id = ?2",
+            params![skill_key, source_id],
+        )
+        .context("Failed to clear marketplace tag assignments")?;
+
+        let now = now_rfc3339();
+        for tag_slug in &tag_slugs {
+            tx.execute(
+                "INSERT INTO marketplace_tag (slug, label, usage_count, created_at, updated_at)
+                 VALUES (?1, ?2, 0, ?3, ?3)
+                 ON CONFLICT(slug) DO NOTHING",
+                params![tag_slug, tag_slug, now],
+            )
+            .context("Failed to ensure marketplace tag exists")?;
+            tx.execute(
+                "INSERT INTO marketplace_skill_tag (skill_key, tag_slug, source_id, assigned_at)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![skill_key, tag_slug, source_id, now],
+            )
+            .context("Failed to assign marketplace tag to skill")?;
+        }
+        tx.commit()
+            .context("Failed to commit marketplace tag assignments")?;
+
+        refresh_all_tag_usage_counts(conn)?;
+        list_tags_for_skill(&skill_key)
+    })
+}
+
+pub fn list_tags_for_skill(skill_key: &str) -> Result<Vec<MarketplaceSkillTagAssignment>> {
+    let skill_key = match normalize_skill_key_value(skill_key) {
+        Ok(value) => value,
+        Err(_) => return Ok(Vec::new()),
+    };
+    with_conn(|conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT st.skill_key, st.tag_slug, st.source_id, st.assigned_at
+                 FROM marketplace_skill_tag st
+                 JOIN marketplace_tag t ON t.slug = st.tag_slug
+                 WHERE st.skill_key = ?1
+                 ORDER BY st.tag_slug ASC, st.source_id ASC",
+            )
+            .context("Failed to prepare marketplace skill-tag list query")?;
+        let rows = stmt
+            .query_map([skill_key], row_to_skill_tag_assignment)
+            .context("Failed to read marketplace skill-tag rows")?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("Failed to decode marketplace skill-tag rows")
+    })
+}
+
+fn refresh_tag_usage_count(conn: &Connection, slug: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE marketplace_tag
+         SET usage_count = (
+             SELECT COUNT(DISTINCT skill_key)
+             FROM marketplace_skill_tag
+             WHERE tag_slug = ?1
+         )
+         WHERE slug = ?1",
+        [slug],
+    )
+    .context("Failed to refresh marketplace tag usage count")?;
+    Ok(())
+}
+
+fn refresh_all_tag_usage_counts(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "UPDATE marketplace_tag
+         SET usage_count = (
+             SELECT COUNT(DISTINCT skill_key)
+             FROM marketplace_skill_tag
+             WHERE tag_slug = marketplace_tag.slug
+         )",
+        [],
+    )
+    .context("Failed to refresh marketplace tag usage counts")?;
+    Ok(())
+}
+
+pub fn upsert_rating_summary(
+    summary: MarketplaceRatingSummaryUpsert,
+) -> Result<MarketplaceRatingSummary> {
+    with_conn(|conn| {
+        let skill_key = normalize_skill_key_value(&summary.skill_key)?;
+        let source_id = normalize_optional_source_id(summary.source_id);
+        validate_rating_summary_values(
+            summary.rating_avg,
+            summary.rating_count,
+            summary.review_count,
+        )?;
+
+        let now = now_rfc3339();
+        conn.execute(
+            "INSERT INTO marketplace_rating_summary (
+                skill_key,
+                source_id,
+                rating_avg,
+                rating_count,
+                review_count,
+                last_review_at,
+                updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            ON CONFLICT(skill_key, source_id) DO UPDATE SET
+                rating_avg = excluded.rating_avg,
+                rating_count = excluded.rating_count,
+                review_count = excluded.review_count,
+                last_review_at = excluded.last_review_at,
+                updated_at = excluded.updated_at",
+            params![
+                skill_key,
+                source_id,
+                summary.rating_avg,
+                summary.rating_count,
+                summary.review_count,
+                summary.last_review_at,
+                now
+            ],
+        )
+        .context("Failed to upsert marketplace rating summary")?;
+
+        conn.query_row(
+            "SELECT
+                skill_key,
+                source_id,
+                rating_avg,
+                rating_count,
+                review_count,
+                last_review_at,
+                updated_at
+             FROM marketplace_rating_summary
+             WHERE skill_key = ?1 AND source_id = ?2",
+            params![skill_key, source_id],
+            row_to_rating_summary,
+        )
+        .context("Failed to load upserted marketplace rating summary")
+    })
+}
+
+pub fn list_rating_summaries_for_skill(skill_key: &str) -> Result<Vec<MarketplaceRatingSummary>> {
+    let skill_key = skill_key.trim().to_ascii_lowercase();
+    if skill_key.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    with_conn(|conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    skill_key,
+                    source_id,
+                    rating_avg,
+                    rating_count,
+                    review_count,
+                    last_review_at,
+                    updated_at
+                 FROM marketplace_rating_summary
+                 WHERE skill_key = ?1
+                 ORDER BY CASE WHEN source_id = '' THEN 0 ELSE 1 END ASC, source_id ASC",
+            )
+            .context("Failed to prepare marketplace rating-summary query")?;
+        let rows = stmt
+            .query_map([skill_key], row_to_rating_summary)
+            .context("Failed to read marketplace rating-summary rows")?;
+
+        let mut summaries = Vec::new();
+        for row in rows {
+            summaries.push(row.context("Failed to decode marketplace rating summary")?);
+        }
+        Ok(summaries)
+    })
+}
+
+pub fn upsert_review(review: MarketplaceReviewUpsert) -> Result<MarketplaceReview> {
+    with_conn(|conn| {
+        let review_id = review.review_id.trim().to_string();
+        if review_id.is_empty() {
+            return Err(anyhow!("Marketplace review_id cannot be empty"));
+        }
+        let skill_key = normalize_skill_key_value(&review.skill_key)?;
+        let source_id = normalize_optional_source_id(review.source_id);
+        validate_rating_value(review.rating)?;
+
+        let now = now_rfc3339();
+        let status = trim_optional(review.status).unwrap_or_else(|| "published".to_string());
+        conn.execute(
+            "INSERT INTO marketplace_review (
+                review_id,
+                skill_key,
+                source_id,
+                author_hash,
+                rating,
+                title,
+                body,
+                locale,
+                status,
+                reviewed_at,
+                created_at,
+                updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)
+            ON CONFLICT(review_id) DO UPDATE SET
+                skill_key = excluded.skill_key,
+                source_id = excluded.source_id,
+                author_hash = excluded.author_hash,
+                rating = excluded.rating,
+                title = excluded.title,
+                body = excluded.body,
+                locale = excluded.locale,
+                status = excluded.status,
+                reviewed_at = excluded.reviewed_at,
+                updated_at = excluded.updated_at",
+            params![
+                review_id,
+                skill_key,
+                source_id,
+                trim_optional(review.author_hash),
+                review.rating,
+                trim_optional(review.title),
+                trim_optional(review.body),
+                trim_optional(review.locale),
+                status,
+                review.reviewed_at,
+                now
+            ],
+        )
+        .context("Failed to upsert marketplace review")?;
+
+        conn.query_row(
+            "SELECT
+                review_id,
+                skill_key,
+                source_id,
+                author_hash,
+                rating,
+                title,
+                body,
+                locale,
+                status,
+                reviewed_at,
+                created_at,
+                updated_at
+             FROM marketplace_review
+             WHERE review_id = ?1",
+            [review_id],
+            row_to_review,
+        )
+        .context("Failed to load upserted marketplace review")
+    })
+}
+
+pub fn list_reviews_for_skill(skill_key: &str) -> Result<Vec<MarketplaceReview>> {
+    let skill_key = skill_key.trim().to_ascii_lowercase();
+    if skill_key.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    with_conn(|conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT
+                    review_id,
+                    skill_key,
+                    source_id,
+                    author_hash,
+                    rating,
+                    title,
+                    body,
+                    locale,
+                    status,
+                    reviewed_at,
+                    created_at,
+                    updated_at
+                 FROM marketplace_review
+                 WHERE skill_key = ?1
+                 ORDER BY COALESCE(reviewed_at, updated_at) DESC, review_id ASC",
+            )
+            .context("Failed to prepare marketplace review query")?;
+        let rows = stmt
+            .query_map([skill_key], row_to_review)
+            .context("Failed to read marketplace review rows")?;
+
+        let mut reviews = Vec::new();
+        for row in rows {
+            reviews.push(row.context("Failed to decode marketplace review")?);
+        }
+        Ok(reviews)
+    })
+}
+
+pub fn upsert_update_notification(
+    notification: MarketplaceUpdateNotificationUpsert,
+) -> Result<MarketplaceUpdateNotification> {
+    with_conn(|conn| {
+        let skill_key = normalize_skill_key_value(&notification.skill_key)?;
+        let source_id = normalize_observation_source_id(&notification.source_id)?;
+        let now = now_rfc3339();
+        let detected_at = trim_optional(notification.detected_at).unwrap_or_else(|| now.clone());
+
+        conn.execute(
+            "INSERT INTO marketplace_update_notification (
+                skill_key,
+                source_id,
+                installed_version,
+                available_version,
+                installed_hash,
+                available_hash,
+                detected_at,
+                dismissed_at,
+                message,
+                metadata_json,
+                updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8, ?9, ?10)
+            ON CONFLICT(skill_key, source_id) DO UPDATE SET
+                installed_version = excluded.installed_version,
+                available_version = excluded.available_version,
+                installed_hash = excluded.installed_hash,
+                available_hash = excluded.available_hash,
+                detected_at = excluded.detected_at,
+                dismissed_at = NULL,
+                message = excluded.message,
+                metadata_json = excluded.metadata_json,
+                updated_at = excluded.updated_at",
+            params![
+                skill_key,
+                source_id,
+                trim_optional(notification.installed_version),
+                trim_optional(notification.available_version),
+                trim_optional(notification.installed_hash),
+                trim_optional(notification.available_hash),
+                detected_at,
+                trim_optional(notification.message),
+                trim_optional(notification.metadata_json),
+                now
+            ],
+        )
+        .context("Failed to upsert marketplace update notification")?;
+
+        load_update_notification(conn, &skill_key, &source_id)?
+            .ok_or_else(|| anyhow!("Marketplace update notification was not persisted"))
+    })
+}
+
+pub fn list_update_notifications(
+    include_dismissed: bool,
+) -> Result<Vec<MarketplaceUpdateNotification>> {
+    with_conn(|conn| {
+        let where_clause = if include_dismissed {
+            ""
+        } else {
+            "WHERE dismissed_at IS NULL"
+        };
+        let sql = format!(
+            "SELECT
+                skill_key,
+                source_id,
+                installed_version,
+                available_version,
+                installed_hash,
+                available_hash,
+                detected_at,
+                dismissed_at,
+                message,
+                metadata_json,
+                updated_at
+             FROM marketplace_update_notification
+             {where_clause}
+             ORDER BY detected_at DESC, skill_key ASC, source_id ASC"
+        );
+        let mut stmt = conn
+            .prepare(&sql)
+            .context("Failed to prepare marketplace update notification list query")?;
+        let rows = stmt
+            .query_map([], row_to_update_notification)
+            .context("Failed to read marketplace update notification rows")?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("Failed to decode marketplace update notification rows")
+    })
+}
+
+pub fn list_update_notifications_for_skill(
+    skill_key: &str,
+    include_dismissed: bool,
+) -> Result<Vec<MarketplaceUpdateNotification>> {
+    let skill_key = match normalize_skill_key_value(skill_key) {
+        Ok(value) => value,
+        Err(_) => return Ok(Vec::new()),
+    };
+    with_conn(|conn| {
+        let dismissed_filter = if include_dismissed {
+            ""
+        } else {
+            "AND dismissed_at IS NULL"
+        };
+        let sql = format!(
+            "SELECT
+                skill_key,
+                source_id,
+                installed_version,
+                available_version,
+                installed_hash,
+                available_hash,
+                detected_at,
+                dismissed_at,
+                message,
+                metadata_json,
+                updated_at
+             FROM marketplace_update_notification
+             WHERE skill_key = ?1 {dismissed_filter}
+             ORDER BY detected_at DESC, source_id ASC"
+        );
+        let mut stmt = conn
+            .prepare(&sql)
+            .context("Failed to prepare marketplace update notification skill query")?;
+        let rows = stmt
+            .query_map([skill_key], row_to_update_notification)
+            .context("Failed to read marketplace update notification skill rows")?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("Failed to decode marketplace update notification skill rows")
+    })
+}
+
+pub fn dismiss_update_notification(skill_key: &str, source_id: &str) -> Result<bool> {
+    with_conn(|conn| {
+        let skill_key = normalize_skill_key_value(skill_key)?;
+        let source_id = normalize_observation_source_id(source_id)?;
+        let now = now_rfc3339();
+        let updated = conn
+            .execute(
+                "UPDATE marketplace_update_notification
+                 SET dismissed_at = ?3,
+                     updated_at = ?3
+                 WHERE skill_key = ?1 AND source_id = ?2",
+                params![skill_key, source_id, now],
+            )
+            .context("Failed to dismiss marketplace update notification")?;
+        Ok(updated > 0)
+    })
+}
+
+fn load_update_notification(
+    conn: &Connection,
+    skill_key: &str,
+    source_id: &str,
+) -> Result<Option<MarketplaceUpdateNotification>> {
+    conn.query_row(
+        "SELECT
+            skill_key,
+            source_id,
+            installed_version,
+            available_version,
+            installed_hash,
+            available_hash,
+            detected_at,
+            dismissed_at,
+            message,
+            metadata_json,
+            updated_at
+         FROM marketplace_update_notification
+         WHERE skill_key = ?1 AND source_id = ?2",
+        params![skill_key, source_id],
+        row_to_update_notification,
+    )
+    .optional()
+    .context("Failed to load marketplace update notification")
 }
 
 struct SnapshotSkillRow {
@@ -1972,7 +3389,7 @@ fn upsert_skill_in_tx(
             skill_key,
             source,
             name,
-            git_url,
+            git_url.clone(),
             author,
             publisher_name,
             repo_name,
@@ -1984,6 +3401,20 @@ fn upsert_skill_in_tx(
     .context("Failed to upsert marketplace skill snapshot row")?;
 
     refresh_fts_entry_in_tx(tx, &skill_key)?;
+    upsert_source_observation_in_tx(
+        tx,
+        MarketplaceSourceObservationUpsert {
+            source_id: DEFAULT_CURATED_REGISTRY_ID.to_string(),
+            source_skill_id: skill_key.clone(),
+            skill_key: skill_key.clone(),
+            source_url: "https://skills.sh".to_string(),
+            repo_url: git_url,
+            version: None,
+            sha: skill.tree_hash.clone(),
+            metadata_json: None,
+            fetched_at: Some(synced_at.to_string()),
+        },
+    )?;
     Ok(Some(skill_key))
 }
 
@@ -2045,6 +3476,20 @@ fn upsert_skill_identity_in_tx(
     .context("Failed to upsert marketplace repo-skill identity row")?;
 
     refresh_fts_entry_in_tx(tx, &skill_key)?;
+    upsert_source_observation_in_tx(
+        tx,
+        MarketplaceSourceObservationUpsert {
+            source_id: DEFAULT_CURATED_REGISTRY_ID.to_string(),
+            source_skill_id: skill_key.clone(),
+            skill_key: skill_key.clone(),
+            source_url: "https://skills.sh".to_string(),
+            repo_url: git_url,
+            version: None,
+            sha: None,
+            metadata_json: None,
+            fetched_at: Some(synced_at.to_string()),
+        },
+    )?;
     Ok(Some(skill_key))
 }
 
@@ -3081,9 +4526,20 @@ fn mark_scope_attempt(scope: &str) -> Result<()> {
 mod tests {
     use super::{
         ResolveSkillRequest, SNAPSHOT_SCHEMA_VERSION, SnapshotRuntimeConfig, build_skill_key,
-        configure_runtime, create_connection, leaderboard_scope, load_leaderboard_snapshot,
+        configure_runtime, create_connection, dismiss_update_notification, leaderboard_scope,
+        list_curated_registries, list_rating_summaries_for_skill, list_reviews_for_skill,
+        list_update_notifications, list_update_notifications_for_skill, load_leaderboard_snapshot,
         load_search_snapshot, load_skill_detail_snapshot, mark_scope_success_in_tx, now_rfc3339,
-        resolve_skill_sources_from_snapshot, scope_updated_at, upsert_skill_identity_in_tx,
+        resolve_skill_sources_from_snapshot, scope_updated_at, upsert_category,
+        upsert_curated_registry, upsert_rating_summary, upsert_review, upsert_skill_identity_in_tx,
+        upsert_tag, upsert_update_notification,
+    };
+    use crate::models::{
+        CuratedRegistryKind, CuratedRegistryUpsert, MarketplaceCategoryUpsert,
+        MarketplaceRatingSummaryUpsert, MarketplaceReviewUpsert,
+        MarketplaceSkillCategoryAssignmentInput, MarketplaceSkillTagAssignmentInput,
+        MarketplaceSourceObservationUpsert, MarketplaceTagUpsert,
+        MarketplaceUpdateNotificationUpsert,
     };
     use rusqlite::Connection;
     use std::collections::{HashMap, HashSet};
@@ -3145,6 +4601,1033 @@ mod tests {
                 )
                 .expect("read migrated description");
             assert_eq!(description, "Capture screenshots");
+        });
+    }
+
+    #[test]
+    fn curated_registry_fresh_schema_seeds_default_skills_sh_source() {
+        with_temp_data_root(|_| {
+            let conn = create_connection().expect("create marketplace connection");
+            let version: i64 = conn
+                .pragma_query_value(None, "user_version", |row| row.get(0))
+                .expect("read user_version");
+            assert_eq!(version, SNAPSHOT_SCHEMA_VERSION);
+
+            let entries = list_curated_registries().expect("list curated registries");
+            assert_eq!(entries.len(), 1);
+            let entry = &entries[0];
+            assert_eq!(entry.id, "skills_sh");
+            assert_eq!(entry.name, "skills.sh");
+            assert_eq!(entry.kind, CuratedRegistryKind::SkillsSh);
+            assert_eq!(entry.endpoint, "https://skills.sh");
+            assert!(entry.enabled);
+            assert_eq!(entry.priority, 0);
+            assert_eq!(entry.trust, "official");
+        });
+    }
+
+    #[test]
+    fn multi_source_fresh_schema_creates_observation_table() {
+        with_temp_data_root(|_| {
+            let conn = create_connection().expect("create marketplace connection");
+            let version: i64 = conn
+                .pragma_query_value(None, "user_version", |row| row.get(0))
+                .expect("read user_version");
+            assert_eq!(version, SNAPSHOT_SCHEMA_VERSION);
+
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(1) FROM marketplace_skill_source_observation",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("count source observations");
+            assert_eq!(count, 0);
+        });
+    }
+
+    #[test]
+    fn multi_source_migrates_v3_database_preserving_curated_registry() {
+        with_temp_data_root(|temp_root| {
+            let path = temp_root.join("marketplace.db");
+            let conn = open_raw_conn(&path);
+            conn.execute_batch(
+                "CREATE TABLE marketplace_curated_registry (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    endpoint TEXT NOT NULL DEFAULT '',
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    priority INTEGER NOT NULL DEFAULT 100,
+                    trust TEXT NOT NULL DEFAULT '',
+                    last_sync_at TEXT,
+                    last_error TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                INSERT INTO marketplace_curated_registry (
+                    id, name, kind, endpoint, enabled, priority, trust, created_at, updated_at
+                ) VALUES (
+                    'team_source', 'Team Source', 'custom', 'file:///tmp/team.json', 1, 5, 'team',
+                    '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'
+                );
+                PRAGMA user_version = 3;",
+            )
+            .expect("seed v3 schema marker");
+            drop(conn);
+
+            let conn = create_connection().expect("create migrated marketplace connection");
+            let version: i64 = conn
+                .pragma_query_value(None, "user_version", |row| row.get(0))
+                .expect("read user_version");
+            assert_eq!(version, SNAPSHOT_SCHEMA_VERSION);
+
+            let entries = list_curated_registries().expect("list curated registries");
+            assert!(entries.iter().any(|entry| entry.id == "team_source"));
+            assert!(entries.iter().any(|entry| entry.id == "skills_sh"));
+            conn.query_row(
+                "SELECT COUNT(1) FROM marketplace_skill_source_observation",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("source observation table exists");
+        });
+    }
+
+    #[test]
+    fn ratings_and_reviews_migrate_v4_database_preserving_existing_tables() {
+        with_temp_data_root(|temp_root| {
+            let path = temp_root.join("marketplace.db");
+            let conn = open_raw_conn(&path);
+            conn.execute_batch(
+                "CREATE TABLE marketplace_skill (
+                    skill_key TEXT PRIMARY KEY,
+                    source TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    git_url TEXT NOT NULL DEFAULT '',
+                    author TEXT,
+                    publisher_name TEXT,
+                    repo_name TEXT,
+                    description TEXT NOT NULL DEFAULT '',
+                    installs INTEGER NOT NULL DEFAULT 0,
+                    last_seen_remote_at TEXT,
+                    last_list_sync_at TEXT
+                );
+                CREATE TABLE marketplace_skill_source_observation (
+                    source_id TEXT NOT NULL,
+                    source_skill_id TEXT NOT NULL,
+                    skill_key TEXT NOT NULL REFERENCES marketplace_skill(skill_key) ON DELETE CASCADE,
+                    source_url TEXT NOT NULL DEFAULT '',
+                    repo_url TEXT NOT NULL DEFAULT '',
+                    version TEXT,
+                    sha TEXT,
+                    metadata_json TEXT,
+                    fetched_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (source_id, source_skill_id)
+                );
+                INSERT INTO marketplace_skill (skill_key, source, name, description)
+                VALUES ('openai/skills/search', 'openai/skills', 'search', 'desc');
+                INSERT INTO marketplace_skill_source_observation (
+                    source_id, source_skill_id, skill_key, created_at, updated_at
+                ) VALUES (
+                    'skills_sh', 'search', 'openai/skills/search',
+                    '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'
+                );
+                PRAGMA user_version = 4;",
+            )
+            .expect("seed v4 schema marker");
+            drop(conn);
+
+            let conn = create_connection().expect("create migrated marketplace connection");
+            let version: i64 = conn
+                .pragma_query_value(None, "user_version", |row| row.get(0))
+                .expect("read user_version");
+            assert_eq!(version, SNAPSHOT_SCHEMA_VERSION);
+
+            let obs_count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(1) FROM marketplace_skill_source_observation",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("count source observations");
+            assert_eq!(obs_count, 1);
+
+            let rating_count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(1) FROM marketplace_rating_summary",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("count rating summaries");
+            assert_eq!(rating_count, 0);
+
+            let review_count: i64 = conn
+                .query_row("SELECT COUNT(1) FROM marketplace_review", [], |row| {
+                    row.get(0)
+                })
+                .expect("count reviews");
+            assert_eq!(review_count, 0);
+        });
+    }
+
+    #[test]
+    fn category_tag_fresh_schema_creates_metadata_tables() {
+        with_temp_data_root(|_| {
+            let conn = create_connection().expect("create marketplace connection");
+            let version: i64 = conn
+                .pragma_query_value(None, "user_version", |row| row.get(0))
+                .expect("read user_version");
+            assert_eq!(version, SNAPSHOT_SCHEMA_VERSION);
+
+            for table in [
+                "marketplace_category",
+                "marketplace_skill_category",
+                "marketplace_tag",
+                "marketplace_skill_tag",
+            ] {
+                conn.query_row(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |_| Ok(()),
+                )
+                .unwrap_or_else(|_| panic!("{table} table exists"));
+            }
+        });
+    }
+
+    #[test]
+    fn update_notification_fresh_schema_creates_table() {
+        with_temp_data_root(|_| {
+            let conn = create_connection().expect("create marketplace connection");
+            let version: i64 = conn
+                .pragma_query_value(None, "user_version", |row| row.get(0))
+                .expect("read user_version");
+            assert_eq!(version, SNAPSHOT_SCHEMA_VERSION);
+
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(1) FROM marketplace_update_notification",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("update notification table exists");
+            assert_eq!(count, 0);
+        });
+    }
+
+    #[test]
+    fn update_notifications_migrate_v6_database_preserving_categories_and_tags() {
+        with_temp_data_root(|temp_root| {
+            let path = temp_root.join("marketplace.db");
+            let conn = open_raw_conn(&path);
+            conn.execute_batch(
+                "CREATE TABLE marketplace_category (
+                    id TEXT PRIMARY KEY,
+                    label TEXT NOT NULL,
+                    slug TEXT NOT NULL UNIQUE,
+                    parent_id TEXT REFERENCES marketplace_category(id) ON DELETE SET NULL,
+                    position INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE marketplace_tag (
+                    slug TEXT PRIMARY KEY,
+                    label TEXT NOT NULL,
+                    usage_count INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                INSERT INTO marketplace_category (id, label, slug, position, created_at, updated_at)
+                VALUES ('ai-agents', 'AI Agents', 'ai-agents', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+                INSERT INTO marketplace_tag (slug, label, usage_count, created_at, updated_at)
+                VALUES ('rust-tools', 'Rust Tools', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+                PRAGMA user_version = 6;",
+            )
+            .expect("seed v6 schema marker");
+            drop(conn);
+
+            let conn = create_connection().expect("create migrated marketplace connection");
+            let version: i64 = conn
+                .pragma_query_value(None, "user_version", |row| row.get(0))
+                .expect("read user_version");
+            assert_eq!(version, SNAPSHOT_SCHEMA_VERSION);
+
+            let category_count: i64 = conn
+                .query_row("SELECT COUNT(1) FROM marketplace_category", [], |row| {
+                    row.get(0)
+                })
+                .expect("count categories");
+            assert_eq!(category_count, 1);
+
+            let tag_count: i64 = conn
+                .query_row("SELECT COUNT(1) FROM marketplace_tag", [], |row| row.get(0))
+                .expect("count tags");
+            assert_eq!(tag_count, 1);
+
+            conn.query_row(
+                "SELECT COUNT(1) FROM marketplace_update_notification",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("update notification table exists");
+        });
+    }
+
+    #[test]
+    fn categories_and_tags_migrate_v5_database_preserving_ratings() {
+        with_temp_data_root(|temp_root| {
+            let path = temp_root.join("marketplace.db");
+            let conn = open_raw_conn(&path);
+            conn.execute_batch(
+                "CREATE TABLE marketplace_skill (
+                    skill_key TEXT PRIMARY KEY,
+                    source TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    git_url TEXT NOT NULL DEFAULT '',
+                    author TEXT,
+                    publisher_name TEXT,
+                    repo_name TEXT,
+                    description TEXT NOT NULL DEFAULT '',
+                    installs INTEGER NOT NULL DEFAULT 0,
+                    last_seen_remote_at TEXT,
+                    last_list_sync_at TEXT
+                );
+                CREATE TABLE marketplace_rating_summary (
+                    skill_key TEXT NOT NULL REFERENCES marketplace_skill(skill_key) ON DELETE CASCADE,
+                    source_id TEXT NOT NULL DEFAULT '',
+                    rating_avg REAL NOT NULL DEFAULT 0,
+                    rating_count INTEGER NOT NULL DEFAULT 0,
+                    review_count INTEGER NOT NULL DEFAULT 0,
+                    last_review_at TEXT,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (skill_key, source_id)
+                );
+                CREATE TABLE marketplace_review (
+                    review_id TEXT PRIMARY KEY,
+                    skill_key TEXT NOT NULL REFERENCES marketplace_skill(skill_key) ON DELETE CASCADE,
+                    source_id TEXT NOT NULL DEFAULT '',
+                    author_hash TEXT,
+                    rating INTEGER NOT NULL,
+                    title TEXT,
+                    body TEXT,
+                    locale TEXT,
+                    status TEXT NOT NULL DEFAULT 'published',
+                    reviewed_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                INSERT INTO marketplace_skill (skill_key, source, name, description)
+                VALUES ('openai/skills/search', 'openai/skills', 'search', 'desc');
+                INSERT INTO marketplace_rating_summary (
+                    skill_key, source_id, rating_avg, rating_count, review_count, updated_at
+                ) VALUES ('openai/skills/search', '', 4.5, 2, 1, '2026-01-01T00:00:00Z');
+                PRAGMA user_version = 5;",
+            )
+            .expect("seed v5 schema marker");
+            drop(conn);
+
+            let conn = create_connection().expect("create migrated marketplace connection");
+            let version: i64 = conn
+                .pragma_query_value(None, "user_version", |row| row.get(0))
+                .expect("read user_version");
+            assert_eq!(version, SNAPSHOT_SCHEMA_VERSION);
+
+            let rating_count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(1) FROM marketplace_rating_summary",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("count rating summaries");
+            assert_eq!(rating_count, 1);
+
+            let category_count: i64 = conn
+                .query_row("SELECT COUNT(1) FROM marketplace_category", [], |row| {
+                    row.get(0)
+                })
+                .expect("category table exists");
+            assert_eq!(category_count, 0);
+
+            let tag_count: i64 = conn
+                .query_row("SELECT COUNT(1) FROM marketplace_tag", [], |row| row.get(0))
+                .expect("tag table exists");
+            assert_eq!(tag_count, 0);
+        });
+    }
+
+    #[test]
+    fn category_upsert_list_and_assignment_round_trip() {
+        with_temp_data_root(|_| {
+            let conn = create_connection().expect("create marketplace connection");
+            let tx = conn.unchecked_transaction().expect("start tx");
+            let skill_key =
+                upsert_skill_identity_in_tx(&tx, "openai/skills", "search", 10, &now_rfc3339())
+                    .expect("upsert canonical skill")
+                    .expect("skill key");
+            tx.commit().expect("commit canonical skill");
+
+            let parent = upsert_category(MarketplaceCategoryUpsert {
+                label: " AI Agents ".to_string(),
+                slug: None,
+                parent_id: None,
+                position: 2,
+            })
+            .expect("upsert parent category");
+            assert_eq!(parent.id, "ai-agents");
+            assert_eq!(parent.label, "AI Agents");
+            assert_eq!(parent.slug, "ai-agents");
+
+            let child = upsert_category(MarketplaceCategoryUpsert {
+                label: "Code Review".to_string(),
+                slug: Some("Code_Review".to_string()),
+                parent_id: Some(parent.id.clone()),
+                position: 1,
+            })
+            .expect("upsert child category");
+            assert_eq!(child.id, "code-review");
+            assert_eq!(child.parent_id.as_deref(), Some("ai-agents"));
+
+            let assigned =
+                super::assign_categories_to_skill(MarketplaceSkillCategoryAssignmentInput {
+                    skill_key: skill_key.clone(),
+                    category_ids: vec!["AI Agents".to_string(), "code_review".to_string()],
+                })
+                .expect("assign categories");
+            assert_eq!(assigned.len(), 2);
+            assert_eq!(assigned[0].category_id, "code-review");
+            assert_eq!(assigned[1].category_id, "ai-agents");
+
+            let categories = super::list_categories().expect("list categories");
+            assert_eq!(categories.len(), 2);
+            assert_eq!(categories[0].id, "ai-agents");
+        });
+    }
+
+    #[test]
+    fn tag_upsert_list_assignment_and_usage_count_round_trip() {
+        with_temp_data_root(|_| {
+            let conn = create_connection().expect("create marketplace connection");
+            let tx = conn.unchecked_transaction().expect("start tx");
+            let search_key =
+                upsert_skill_identity_in_tx(&tx, "openai/skills", "search", 10, &now_rfc3339())
+                    .expect("upsert search skill")
+                    .expect("search key");
+            let screenshot_key =
+                upsert_skill_identity_in_tx(&tx, "openai/skills", "screenshot", 10, &now_rfc3339())
+                    .expect("upsert screenshot skill")
+                    .expect("screenshot key");
+            tx.commit().expect("commit skills");
+
+            let tag = upsert_tag(MarketplaceTagUpsert {
+                label: " Rust Tools ".to_string(),
+                slug: None,
+            })
+            .expect("upsert tag");
+            assert_eq!(tag.slug, "rust-tools");
+            assert_eq!(tag.label, "Rust Tools");
+            assert_eq!(tag.usage_count, 0);
+
+            let assigned = super::assign_tags_to_skill(MarketplaceSkillTagAssignmentInput {
+                skill_key: search_key.clone(),
+                tag_slugs: vec!["Rust_Tools".to_string(), "ai helper".to_string()],
+                source_id: Some("Skills.Sh".to_string()),
+            })
+            .expect("assign tags");
+            assert_eq!(assigned.len(), 2);
+            assert!(
+                assigned
+                    .iter()
+                    .all(|assignment| assignment.source_id.as_deref() == Some("skills_sh"))
+            );
+
+            super::assign_tags_to_skill(MarketplaceSkillTagAssignmentInput {
+                skill_key: screenshot_key,
+                tag_slugs: vec!["rust tools".to_string()],
+                source_id: None,
+            })
+            .expect("assign second skill tag");
+
+            let tags = super::list_tags().expect("list tags");
+            let rust = tags
+                .iter()
+                .find(|tag| tag.slug == "rust-tools")
+                .expect("rust tag exists");
+            assert_eq!(rust.usage_count, 2);
+            let ai = tags
+                .iter()
+                .find(|tag| tag.slug == "ai-helper")
+                .expect("ai tag exists");
+            assert_eq!(ai.usage_count, 1);
+
+            let skill_tags = super::list_tags_for_skill(&search_key).expect("list skill tags");
+            assert_eq!(skill_tags.len(), 2);
+            assert_eq!(skill_tags[0].tag_slug, "ai-helper");
+            assert_eq!(skill_tags[1].tag_slug, "rust-tools");
+        });
+    }
+
+    #[test]
+    fn category_and_tag_normalization_reject_empty_values() {
+        with_temp_data_root(|_| {
+            create_connection().expect("create marketplace connection");
+
+            assert!(
+                upsert_category(MarketplaceCategoryUpsert {
+                    label: "   ".to_string(),
+                    slug: None,
+                    parent_id: None,
+                    position: 0,
+                })
+                .is_err()
+            );
+            assert!(
+                upsert_category(MarketplaceCategoryUpsert {
+                    label: "Valid".to_string(),
+                    slug: Some("!!!".to_string()),
+                    parent_id: None,
+                    position: 0,
+                })
+                .is_err()
+            );
+            assert!(
+                upsert_tag(MarketplaceTagUpsert {
+                    label: "   ".to_string(),
+                    slug: None,
+                })
+                .is_err()
+            );
+            assert!(
+                super::assign_tags_to_skill(MarketplaceSkillTagAssignmentInput {
+                    skill_key: "openai/skills/search".to_string(),
+                    tag_slugs: vec!["!!!".to_string()],
+                    source_id: None,
+                })
+                .is_err()
+            );
+        });
+    }
+
+    #[test]
+    fn rating_summary_upsert_and_list_round_trip() {
+        with_temp_data_root(|_| {
+            let conn = create_connection().expect("create marketplace connection");
+            let tx = conn.unchecked_transaction().expect("start tx");
+            upsert_skill_identity_in_tx(&tx, "openai/skills", "search", 10, &now_rfc3339())
+                .expect("upsert canonical skill");
+            tx.commit().expect("commit canonical skill");
+
+            let global = upsert_rating_summary(MarketplaceRatingSummaryUpsert {
+                skill_key: "openai/skills/search".to_string(),
+                source_id: None,
+                rating_avg: 4.25,
+                rating_count: 8,
+                review_count: 5,
+                last_review_at: Some("2026-04-01T00:00:00Z".to_string()),
+            })
+            .expect("upsert global rating summary");
+            assert_eq!(global.skill_key, "openai/skills/search");
+            assert_eq!(global.source_id, None);
+            assert_eq!(global.rating_count, 8);
+
+            let source_specific = upsert_rating_summary(MarketplaceRatingSummaryUpsert {
+                skill_key: "openai/skills/search".to_string(),
+                source_id: Some("Skills.Sh".to_string()),
+                rating_avg: 4.5,
+                rating_count: 2,
+                review_count: 1,
+                last_review_at: None,
+            })
+            .expect("upsert source rating summary");
+            assert_eq!(source_specific.source_id.as_deref(), Some("skills_sh"));
+
+            let summaries = list_rating_summaries_for_skill("openai/skills/search")
+                .expect("list rating summaries");
+            assert_eq!(summaries.len(), 2);
+            assert_eq!(summaries[0].source_id, None);
+            assert_eq!(summaries[1].source_id.as_deref(), Some("skills_sh"));
+        });
+    }
+
+    #[test]
+    fn review_upsert_and_list_round_trip() {
+        with_temp_data_root(|_| {
+            let conn = create_connection().expect("create marketplace connection");
+            let tx = conn.unchecked_transaction().expect("start tx");
+            upsert_skill_identity_in_tx(&tx, "openai/skills", "search", 10, &now_rfc3339())
+                .expect("upsert canonical skill");
+            tx.commit().expect("commit canonical skill");
+
+            let first = upsert_review(MarketplaceReviewUpsert {
+                review_id: "review-1".to_string(),
+                skill_key: "openai/skills/search".to_string(),
+                source_id: Some("Skills.Sh".to_string()),
+                author_hash: Some("hash-a".to_string()),
+                rating: 5,
+                title: Some("Great".to_string()),
+                body: Some("Very useful".to_string()),
+                locale: Some("en-US".to_string()),
+                status: Some("published".to_string()),
+                reviewed_at: Some("2026-04-02T00:00:00Z".to_string()),
+            })
+            .expect("upsert first review");
+            assert_eq!(first.rating, 5);
+            assert_eq!(first.source_id.as_deref(), Some("skills_sh"));
+
+            let updated = upsert_review(MarketplaceReviewUpsert {
+                review_id: "review-1".to_string(),
+                skill_key: "openai/skills/search".to_string(),
+                source_id: Some("Skills.Sh".to_string()),
+                author_hash: Some("hash-b".to_string()),
+                rating: 4,
+                title: Some("Updated".to_string()),
+                body: Some("Still useful".to_string()),
+                locale: Some("en".to_string()),
+                status: Some("published".to_string()),
+                reviewed_at: Some("2026-04-03T00:00:00Z".to_string()),
+            })
+            .expect("update review");
+            assert_eq!(updated.rating, 4);
+            assert_eq!(updated.author_hash.as_deref(), Some("hash-b"));
+
+            let reviews = list_reviews_for_skill("openai/skills/search").expect("list reviews");
+            assert_eq!(reviews.len(), 1);
+            assert_eq!(reviews[0].review_id, "review-1");
+            assert_eq!(reviews[0].title.as_deref(), Some("Updated"));
+        });
+    }
+
+    #[test]
+    fn update_notification_upsert_list_and_dismiss_round_trip() {
+        with_temp_data_root(|_| {
+            let conn = create_connection().expect("create marketplace connection");
+            let tx = conn.unchecked_transaction().expect("start tx");
+            let skill_key =
+                upsert_skill_identity_in_tx(&tx, "openai/skills", "search", 10, &now_rfc3339())
+                    .expect("upsert canonical skill")
+                    .expect("skill key");
+            tx.commit().expect("commit canonical skill");
+
+            let notification = upsert_update_notification(MarketplaceUpdateNotificationUpsert {
+                skill_key: skill_key.clone(),
+                source_id: "Skills.Sh".to_string(),
+                installed_version: Some("1.0.0".to_string()),
+                available_version: Some("1.1.0".to_string()),
+                installed_hash: Some("old".to_string()),
+                available_hash: Some("new".to_string()),
+                detected_at: Some("2026-04-01T00:00:00Z".to_string()),
+                message: Some("Update available".to_string()),
+                metadata_json: Some("{\"source\":\"test\"}".to_string()),
+            })
+            .expect("upsert notification");
+            assert_eq!(notification.skill_key, skill_key);
+            assert_eq!(notification.source_id, "skills_sh");
+            assert_eq!(notification.dismissed_at, None);
+            assert_eq!(notification.available_version.as_deref(), Some("1.1.0"));
+
+            let active = list_update_notifications(false).expect("list active notifications");
+            assert_eq!(active.len(), 1);
+            let by_skill = list_update_notifications_for_skill(&skill_key, false)
+                .expect("list skill notifications");
+            assert_eq!(by_skill.len(), 1);
+
+            assert!(dismiss_update_notification(&skill_key, "skills.sh").expect("dismiss"));
+            assert!(
+                list_update_notifications(false)
+                    .expect("list active after dismiss")
+                    .is_empty()
+            );
+            let dismissed = list_update_notifications(true).expect("list dismissed notifications");
+            assert_eq!(dismissed.len(), 1);
+            assert!(dismissed[0].dismissed_at.is_some());
+        });
+    }
+
+    #[test]
+    fn update_notification_replacement_clears_dismissal_and_updates_payload() {
+        with_temp_data_root(|_| {
+            let conn = create_connection().expect("create marketplace connection");
+            let tx = conn.unchecked_transaction().expect("start tx");
+            let skill_key =
+                upsert_skill_identity_in_tx(&tx, "openai/skills", "search", 10, &now_rfc3339())
+                    .expect("upsert canonical skill")
+                    .expect("skill key");
+            tx.commit().expect("commit canonical skill");
+
+            upsert_update_notification(MarketplaceUpdateNotificationUpsert {
+                skill_key: skill_key.clone(),
+                source_id: "team.registry".to_string(),
+                installed_version: None,
+                available_version: Some("1.1.0".to_string()),
+                installed_hash: None,
+                available_hash: Some("old-hash".to_string()),
+                detected_at: Some("2026-04-01T00:00:00Z".to_string()),
+                message: Some("Old message".to_string()),
+                metadata_json: None,
+            })
+            .expect("upsert first notification");
+            assert!(dismiss_update_notification(&skill_key, "team_registry").expect("dismiss"));
+
+            let updated = upsert_update_notification(MarketplaceUpdateNotificationUpsert {
+                skill_key: skill_key.clone(),
+                source_id: "Team.Registry".to_string(),
+                installed_version: Some("1.1.0".to_string()),
+                available_version: Some("1.2.0".to_string()),
+                installed_hash: Some("old-hash".to_string()),
+                available_hash: Some("new-hash".to_string()),
+                detected_at: Some("2026-04-02T00:00:00Z".to_string()),
+                message: Some("New message".to_string()),
+                metadata_json: Some("{\"priority\":1}".to_string()),
+            })
+            .expect("replace notification");
+
+            assert_eq!(updated.source_id, "team_registry");
+            assert_eq!(updated.dismissed_at, None);
+            assert_eq!(updated.available_version.as_deref(), Some("1.2.0"));
+            assert_eq!(updated.available_hash.as_deref(), Some("new-hash"));
+            assert_eq!(updated.message.as_deref(), Some("New message"));
+            assert_eq!(updated.detected_at, "2026-04-02T00:00:00Z");
+            assert_eq!(
+                list_update_notifications(false)
+                    .expect("list active notifications")
+                    .len(),
+                1
+            );
+        });
+    }
+
+    #[test]
+    fn update_notification_rejects_empty_identity_fields() {
+        with_temp_data_root(|_| {
+            create_connection().expect("create marketplace connection");
+
+            assert!(
+                upsert_update_notification(MarketplaceUpdateNotificationUpsert {
+                    skill_key: "   ".to_string(),
+                    source_id: "skills_sh".to_string(),
+                    installed_version: None,
+                    available_version: None,
+                    installed_hash: None,
+                    available_hash: None,
+                    detected_at: None,
+                    message: None,
+                    metadata_json: None,
+                })
+                .is_err()
+            );
+
+            assert!(
+                upsert_update_notification(MarketplaceUpdateNotificationUpsert {
+                    skill_key: "openai/skills/search".to_string(),
+                    source_id: "   ".to_string(),
+                    installed_version: None,
+                    available_version: None,
+                    installed_hash: None,
+                    available_hash: None,
+                    detected_at: None,
+                    message: None,
+                    metadata_json: None,
+                })
+                .is_err()
+            );
+        });
+    }
+
+    #[test]
+    fn phase3_metadata_coexists_with_canonical_search_and_listing() {
+        with_temp_data_root(|_| {
+            let conn = create_connection().expect("create marketplace connection");
+            let tx = conn.unchecked_transaction().expect("start tx");
+            let synced_at = now_rfc3339();
+            let scope = leaderboard_scope("all");
+            let skill_key =
+                upsert_skill_identity_in_tx(&tx, "openai/skills", "search", 77, &synced_at)
+                    .expect("upsert canonical skill")
+                    .expect("skill key");
+            tx.execute(
+                "UPDATE marketplace_skill SET description = 'Search helper for AI agents' WHERE skill_key = ?1",
+                [skill_key.as_str()],
+            )
+            .expect("update canonical description");
+            super::refresh_fts_entry_in_tx(&tx, &skill_key).expect("refresh fts");
+            tx.execute(
+                "INSERT INTO marketplace_listing (listing_type, skill_key, rank, updated_at)
+                 VALUES (?1, ?2, 1, ?3)",
+                rusqlite::params![scope, skill_key, synced_at],
+            )
+            .expect("insert leaderboard row");
+            mark_scope_success_in_tx(&tx, &scope).expect("mark scope success");
+            tx.commit().expect("commit canonical fixtures");
+
+            upsert_curated_registry(CuratedRegistryUpsert {
+                id: "Team.Registry".to_string(),
+                name: "Team Registry".to_string(),
+                kind: CuratedRegistryKind::GitHub,
+                endpoint: "https://github.com/team/registry".to_string(),
+                enabled: true,
+                priority: 5,
+                trust: "team".to_string(),
+                last_sync_at: Some("2026-04-01T00:00:00Z".to_string()),
+                last_error: None,
+            })
+            .expect("upsert curated registry");
+            super::upsert_source_observation(MarketplaceSourceObservationUpsert {
+                source_id: "Team.Registry".to_string(),
+                source_skill_id: "Search".to_string(),
+                skill_key: skill_key.clone(),
+                source_url: "https://registry.example/skills/search".to_string(),
+                repo_url: "https://github.com/openai/skills".to_string(),
+                version: Some("1.2.3".to_string()),
+                sha: Some("abc123".to_string()),
+                metadata_json: Some("{\"quality\":\"curated\"}".to_string()),
+                fetched_at: Some("2026-04-01T00:00:00Z".to_string()),
+            })
+            .expect("upsert source observation");
+            upsert_rating_summary(MarketplaceRatingSummaryUpsert {
+                skill_key: skill_key.clone(),
+                source_id: Some("Team.Registry".to_string()),
+                rating_avg: 4.8,
+                rating_count: 12,
+                review_count: 3,
+                last_review_at: Some("2026-04-02T00:00:00Z".to_string()),
+            })
+            .expect("upsert rating summary");
+            upsert_review(MarketplaceReviewUpsert {
+                review_id: "phase3-review-1".to_string(),
+                skill_key: skill_key.clone(),
+                source_id: Some("Team.Registry".to_string()),
+                author_hash: Some("reviewer".to_string()),
+                rating: 5,
+                title: Some("Reliable".to_string()),
+                body: Some("Works well with canonical search".to_string()),
+                locale: Some("en".to_string()),
+                status: Some("published".to_string()),
+                reviewed_at: Some("2026-04-02T00:00:00Z".to_string()),
+            })
+            .expect("upsert review");
+            upsert_category(MarketplaceCategoryUpsert {
+                label: "AI Agents".to_string(),
+                slug: None,
+                parent_id: None,
+                position: 1,
+            })
+            .expect("upsert category");
+            super::assign_categories_to_skill(MarketplaceSkillCategoryAssignmentInput {
+                skill_key: skill_key.clone(),
+                category_ids: vec!["ai-agents".to_string()],
+            })
+            .expect("assign category");
+            upsert_tag(MarketplaceTagUpsert {
+                label: "Search Tools".to_string(),
+                slug: None,
+            })
+            .expect("upsert tag");
+            super::assign_tags_to_skill(MarketplaceSkillTagAssignmentInput {
+                skill_key: skill_key.clone(),
+                tag_slugs: vec!["search-tools".to_string()],
+                source_id: Some("Team.Registry".to_string()),
+            })
+            .expect("assign tag");
+            upsert_update_notification(MarketplaceUpdateNotificationUpsert {
+                skill_key: skill_key.clone(),
+                source_id: "Team.Registry".to_string(),
+                installed_version: Some("1.2.3".to_string()),
+                available_version: Some("1.3.0".to_string()),
+                installed_hash: Some("old".to_string()),
+                available_hash: Some("new".to_string()),
+                detected_at: Some("2026-04-03T00:00:00Z".to_string()),
+                message: Some("Team registry update available".to_string()),
+                metadata_json: Some("{\"severity\":\"info\"}".to_string()),
+            })
+            .expect("upsert update notification");
+
+            let registries = list_curated_registries().expect("list curated registries");
+            assert!(registries.iter().any(|entry| entry.id == "team_registry"));
+            assert_eq!(
+                super::list_source_observations_for_skill(&skill_key)
+                    .expect("list observations")
+                    .len(),
+                2
+            );
+            assert_eq!(
+                list_rating_summaries_for_skill(&skill_key).expect("list rating summaries")[0]
+                    .source_id
+                    .as_deref(),
+                Some("team_registry")
+            );
+            assert_eq!(
+                list_reviews_for_skill(&skill_key).expect("list reviews")[0].review_id,
+                "phase3-review-1"
+            );
+            assert_eq!(
+                super::list_categories_for_skill(&skill_key).expect("list skill categories")[0]
+                    .category_id,
+                "ai-agents"
+            );
+            assert_eq!(
+                super::list_tags_for_skill(&skill_key).expect("list skill tags")[0].tag_slug,
+                "search-tools"
+            );
+            assert_eq!(
+                list_update_notifications_for_skill(&skill_key, false)
+                    .expect("list skill notifications")[0]
+                    .source_id,
+                "team_registry"
+            );
+
+            let search_results = load_search_snapshot(&conn, "search", 10)
+                .expect("run search snapshot")
+                .0;
+            assert_eq!(search_results.len(), 1);
+            assert_eq!(search_results[0].name, "search");
+            assert_eq!(search_results[0].source.as_deref(), Some("openai/skills"));
+
+            let listing = load_leaderboard_snapshot(&conn, &scope).expect("load leaderboard");
+            assert_eq!(listing.len(), 1);
+            assert_eq!(listing[0].name, "search");
+            assert_eq!(listing[0].source.as_deref(), Some("openai/skills"));
+            assert_eq!(listing[0].rank, Some(1));
+        });
+    }
+
+    #[test]
+    fn invalid_rating_values_are_rejected() {
+        with_temp_data_root(|_| {
+            create_connection().expect("create marketplace connection");
+
+            assert!(
+                upsert_rating_summary(MarketplaceRatingSummaryUpsert {
+                    skill_key: "openai/skills/search".to_string(),
+                    source_id: None,
+                    rating_avg: 6.0,
+                    rating_count: 1,
+                    review_count: 1,
+                    last_review_at: None,
+                })
+                .is_err()
+            );
+
+            assert!(
+                upsert_review(MarketplaceReviewUpsert {
+                    review_id: "review-bad".to_string(),
+                    skill_key: "openai/skills/search".to_string(),
+                    source_id: None,
+                    author_hash: None,
+                    rating: 0,
+                    title: None,
+                    body: None,
+                    locale: None,
+                    status: None,
+                    reviewed_at: None,
+                })
+                .is_err()
+            );
+        });
+    }
+
+    #[test]
+    fn empty_skill_key_lists_return_empty_vectors() {
+        with_temp_data_root(|_| {
+            create_connection().expect("create marketplace connection");
+
+            assert!(
+                list_rating_summaries_for_skill("")
+                    .expect("empty rating list")
+                    .is_empty()
+            );
+            assert!(
+                list_reviews_for_skill("")
+                    .expect("empty review list")
+                    .is_empty()
+            );
+        });
+    }
+
+    #[test]
+    fn curated_registry_migrates_v2_database_to_current_version() {
+        with_temp_data_root(|temp_root| {
+            let path = temp_root.join("marketplace.db");
+            let conn = open_raw_conn(&path);
+            conn.execute_batch(
+                "CREATE TABLE marketplace_skill (
+                    skill_key TEXT PRIMARY KEY,
+                    source TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    git_url TEXT NOT NULL DEFAULT '',
+                    author TEXT,
+                    publisher_name TEXT,
+                    repo_name TEXT,
+                    description TEXT NOT NULL DEFAULT '',
+                    installs INTEGER NOT NULL DEFAULT 0,
+                    last_seen_remote_at TEXT,
+                    last_list_sync_at TEXT
+                );
+                PRAGMA user_version = 2;",
+            )
+            .expect("seed v2 schema marker");
+            drop(conn);
+
+            let conn = create_connection().expect("create migrated marketplace connection");
+            let version: i64 = conn
+                .pragma_query_value(None, "user_version", |row| row.get(0))
+                .expect("read user_version");
+            assert_eq!(version, SNAPSHOT_SCHEMA_VERSION);
+
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(1) FROM marketplace_curated_registry",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("count curated registry rows");
+            assert_eq!(count, 1);
+        });
+    }
+
+    #[test]
+    fn curated_registry_upsert_updates_and_lists_by_priority() {
+        with_temp_data_root(|_| {
+            create_connection().expect("create marketplace connection");
+
+            let custom = upsert_curated_registry(CuratedRegistryUpsert {
+                id: "Team.Source".to_string(),
+                name: "Team Source".to_string(),
+                kind: CuratedRegistryKind::GitHub,
+                endpoint: " https://github.com/acme/skills ".to_string(),
+                enabled: true,
+                priority: 10,
+                trust: "team".to_string(),
+                last_sync_at: Some("2026-04-01T00:00:00Z".to_string()),
+                last_error: None,
+            })
+            .expect("upsert custom curated registry");
+            assert_eq!(custom.id, "team_source");
+            assert_eq!(custom.endpoint, "https://github.com/acme/skills");
+
+            let updated = upsert_curated_registry(CuratedRegistryUpsert {
+                id: "team_source".to_string(),
+                name: "Team Source Disabled".to_string(),
+                kind: CuratedRegistryKind::Custom,
+                endpoint: "file:///tmp/registry.json".to_string(),
+                enabled: false,
+                priority: 1,
+                trust: "internal".to_string(),
+                last_sync_at: None,
+                last_error: Some("paused".to_string()),
+            })
+            .expect("update custom curated registry");
+
+            assert_eq!(updated.name, "Team Source Disabled");
+            assert_eq!(updated.kind, CuratedRegistryKind::Custom);
+            assert!(!updated.enabled);
+            assert_eq!(updated.last_error.as_deref(), Some("paused"));
+
+            let entries = list_curated_registries().expect("list curated registries");
+            assert_eq!(entries.len(), 2);
+            assert_eq!(entries[0].id, "skills_sh");
+            assert_eq!(entries[1].id, "team_source");
         });
     }
 
@@ -3248,6 +5731,86 @@ mod tests {
                 .0;
             assert_eq!(results.len(), 1);
             assert_eq!(results[0].name, "ui-design-system");
+        });
+    }
+
+    #[test]
+    fn multi_source_upsert_and_list_observations_for_one_skill() {
+        with_temp_data_root(|_| {
+            let conn = create_connection().expect("create marketplace connection");
+            let tx = conn.unchecked_transaction().expect("start tx");
+            let synced_at = now_rfc3339();
+            let skill_key =
+                upsert_skill_identity_in_tx(&tx, "openai/skills", "screenshot", 42, &synced_at)
+                    .expect("upsert canonical skill")
+                    .expect("skill key");
+            tx.commit().expect("commit canonical skill");
+
+            let custom = super::upsert_source_observation(MarketplaceSourceObservationUpsert {
+                source_id: "Team.Registry".to_string(),
+                source_skill_id: "Screenshot".to_string(),
+                skill_key: skill_key.clone(),
+                source_url: " file:///tmp/team.json ".to_string(),
+                repo_url: " https://github.com/openai/skills ".to_string(),
+                version: Some("1.2.3".to_string()),
+                sha: Some("abc123".to_string()),
+                metadata_json: Some("{\"trust\":\"team\"}".to_string()),
+                fetched_at: Some("2026-04-01T00:00:00Z".to_string()),
+            })
+            .expect("upsert custom observation");
+            assert_eq!(custom.source_id, "team_registry");
+            assert_eq!(custom.source_skill_id, "screenshot");
+            assert_eq!(custom.skill_key, skill_key);
+            assert_eq!(custom.repo_url, "https://github.com/openai/skills");
+
+            let observations = super::list_source_observations_for_skill(&skill_key)
+                .expect("list observations for skill");
+            assert_eq!(observations.len(), 2);
+            assert_eq!(observations[0].source_id, "skills_sh");
+            assert_eq!(observations[1].source_id, "team_registry");
+
+            let sources = super::list_known_marketplace_sources().expect("list known sources");
+            assert_eq!(sources.len(), 2);
+            assert_eq!(sources[0].source_id, "skills_sh");
+            assert_eq!(sources[0].observation_count, 1);
+            assert_eq!(sources[1].source_id, "team_registry");
+        });
+    }
+
+    #[test]
+    fn multi_source_canonical_search_compatibility_stays_intact() {
+        with_temp_data_root(|_| {
+            let conn = create_connection().expect("create marketplace connection");
+            let tx = conn.unchecked_transaction().expect("start tx");
+            let synced_at = now_rfc3339();
+
+            let skill_key =
+                upsert_skill_identity_in_tx(&tx, "openai/skills", "search", 10, &synced_at)
+                    .expect("upsert canonical skill")
+                    .expect("skill key");
+            super::upsert_source_observation_in_tx(
+                &tx,
+                MarketplaceSourceObservationUpsert {
+                    source_id: "team_registry".to_string(),
+                    source_skill_id: "search".to_string(),
+                    skill_key: skill_key.clone(),
+                    source_url: "file:///tmp/team.json".to_string(),
+                    repo_url: "https://github.com/openai/skills".to_string(),
+                    version: None,
+                    sha: None,
+                    metadata_json: None,
+                    fetched_at: Some(synced_at.clone()),
+                },
+            )
+            .expect("upsert extra observation");
+            tx.commit().expect("commit fixtures");
+
+            let results = load_search_snapshot(&conn, "search", 10)
+                .expect("run search snapshot")
+                .0;
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].name, "search");
+            assert_eq!(results[0].source.as_deref(), Some("openai/skills"));
         });
     }
 

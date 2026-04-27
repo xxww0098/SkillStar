@@ -1,11 +1,8 @@
 //! Shared skill types and helpers.
 //!
-//! All implementation moved to `skillstar_skill_core::shared` (which re-exports
-//! from `marketplace_core`).
+//! Implementation lives in `skillstar_core_types::skill`.
 
-pub use skillstar_marketplace_core::{
-    OfficialPublisher, Skill, SkillCategory, SkillType, extract_github_source_from_url,
-};
-pub use skillstar_skill_core::shared::{
-    SkillContent, extract_skill_description, parse_skill_content,
+pub use skillstar_core_types::skill::{
+    OfficialPublisher, Skill, SkillCategory, SkillContent, SkillType,
+    extract_github_source_from_url, extract_skill_description, parse_skill_content,
 };

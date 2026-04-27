@@ -5,88 +5,18 @@
 //! emitted as Tauri events so the frontend can merge them into the UI.
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::watch;
 use tracing::{error, warn};
 
-use super::{git::ops as git_ops, local_skill, repo_scanner};
+use super::{local_skill, repo_scanner};
+use skillstar_patrol::config::{load_config, save_config};
+use skillstar_patrol::helpers::check_skill_update_local;
+pub use skillstar_patrol::types::{HubSkillEntry, PatrolCheckEvent, PatrolConfig, PatrolStatus};
 
-// ── Persistent Configuration ────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PatrolConfig {
-    /// Whether patrol was last marked active.
-    pub enabled: bool,
-    /// Per-skill check interval in seconds.
-    pub interval_secs: u64,
-}
-
-impl Default for PatrolConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            interval_secs: 30,
-        }
-    }
-}
-
-fn config_path() -> std::path::PathBuf {
-    crate::core::infra::paths::patrol_state_path()
-}
-
-pub fn load_config() -> PatrolConfig {
-    let path = config_path();
-    if !path.exists() {
-        return PatrolConfig::default();
-    }
-    std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|content| serde_json::from_str(&content).ok())
-        .unwrap_or_default()
-}
-
-pub fn save_config(config: &PatrolConfig) -> Result<()> {
-    let path = config_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let content = serde_json::to_string_pretty(config)?;
-    std::fs::write(&path, content)?;
-    Ok(())
-}
-
-// ── Runtime Status ──────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PatrolStatus {
-    pub enabled: bool,
-    pub running: bool,
-    pub interval_secs: u64,
-    pub skills_checked: u64,
-    pub updates_found: u64,
-    /// Name of the skill currently being checked (empty when idle).
-    pub current_skill: String,
-}
-
-/// Event payload emitted after each single-skill check.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PatrolCheckEvent {
-    pub name: String,
-    pub update_available: bool,
-    pub skills_checked: u64,
-    pub updates_found: u64,
-}
-
-#[derive(Debug, Clone)]
-struct HubSkillEntry {
-    name: String,
-    path: PathBuf,
-}
-
-// ── Patrol Manager ──────────────────────────────────────────────────
+// ── Patrol Manager ──────────────────────────────────────────────────────
 
 struct PatrolInner {
     enabled: bool,
@@ -193,7 +123,7 @@ impl PatrolManager {
     }
 }
 
-// ── Patrol Loop ─────────────────────────────────────────────────────
+// ── Patrol Loop ─────────────────────────────────────────────────────────
 
 async fn patrol_loop(
     app: AppHandle,
@@ -337,32 +267,12 @@ async fn patrol_loop(
     inner.cancel_tx = None;
 }
 
-fn check_skill_update_local(
-    skill_name: &str,
-    skill_path: &Path,
-    failed_fetch_roots: &std::collections::HashSet<PathBuf>,
-) -> Option<bool> {
-    if repo_scanner::is_repo_cached_skill(skill_path) {
-        return repo_scanner::check_repo_skill_update_local(skill_path, failed_fetch_roots);
-    }
-
-    // Fallback for non-repo-cached hub skills.
-    let _ = git_ops::ensure_worktree_checked_out(skill_path);
-    match git_ops::check_update(skill_path) {
-        Ok(update_available) => Some(update_available),
-        Err(err) => {
-            warn!(target: "patrol", skill = %skill_name, error = %err, "check failed");
-            Some(false)
-        }
-    }
-}
-
 /// Collect all installed hub (non-local) skills and their paths.
 ///
 /// Uses a lightweight directory scan instead of `list_installed_skills` to
 /// avoid the overhead of parsing every SKILL.md on each patrol cycle.
 async fn collect_hub_skills() -> Result<Vec<HubSkillEntry>> {
-    let skills_dir = crate::core::infra::paths::hub_skills_dir();
+    let skills_dir = skillstar_infra::paths::hub_skills_dir();
     tokio::task::spawn_blocking(move || {
         let entries = match std::fs::read_dir(&skills_dir) {
             Ok(e) => e,

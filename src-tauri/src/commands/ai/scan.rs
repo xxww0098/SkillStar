@@ -1059,6 +1059,22 @@ pub async fn list_security_scan_logs(
 }
 
 #[tauri::command]
+pub async fn list_security_scan_audits(
+    limit: Option<usize>,
+) -> Result<Vec<security_scan::SecurityScanAuditSummary>, String> {
+    let limit = limit.unwrap_or(30).clamp(1, 200);
+    Ok(security_scan::list_scan_audit_summaries(limit))
+}
+
+#[tauri::command]
+pub async fn get_security_scan_audit_detail(
+    file_name: String,
+) -> Result<security_scan::SecurityScanAuditDetail, String> {
+    security_scan::get_scan_audit_detail(&file_name)
+        .ok_or_else(|| format!("Security scan audit not found: {file_name}"))
+}
+
+#[tauri::command]
 pub async fn get_security_scan_log_dir() -> Result<String, String> {
     Ok(security_scan::scan_logs_dir().to_string_lossy().to_string())
 }
@@ -1073,11 +1089,19 @@ pub async fn save_security_scan_policy(policy: SecurityScanPolicy) -> Result<(),
     security_scan::save_policy(&policy).map_err(|e| e.to_string())
 }
 
+#[derive(Serialize)]
+pub struct ExportReportResult {
+    pub path: String,
+    pub format: String,
+    pub skill_count: usize,
+    pub generated_at: String,
+}
+
 #[tauri::command]
 pub async fn export_security_scan_sarif(
     skill_names: Option<Vec<String>>,
     request_label: Option<String>,
-) -> Result<String, String> {
+) -> Result<ExportReportResult, String> {
     let hub_dir = crate::core::infra::paths::hub_skills_dir();
     let mut results = security_scan::load_all_cached()
         .into_iter()
@@ -1096,7 +1120,12 @@ pub async fn export_security_scan_sarif(
 
     let path = security_scan::export_sarif_report(&results, request_label.as_deref())
         .map_err(|e| e.to_string())?;
-    Ok(path.to_string_lossy().to_string())
+    Ok(ExportReportResult {
+        path: path.to_string_lossy().to_string(),
+        format: "sarif".to_string(),
+        skill_count: results.len(),
+        generated_at: chrono::Utc::now().to_rfc3339(),
+    })
 }
 
 #[tauri::command]
@@ -1104,7 +1133,7 @@ pub async fn export_security_scan_report(
     format: String,
     skill_names: Option<Vec<String>>,
     request_label: Option<String>,
-) -> Result<String, String> {
+) -> Result<ExportReportResult, String> {
     let hub_dir = crate::core::infra::paths::hub_skills_dir();
     let mut results = security_scan::load_all_cached()
         .into_iter()
@@ -1124,7 +1153,12 @@ pub async fn export_security_scan_report(
     let parsed_format = SecurityScanReportFormat::parse_loose(&format);
     let path = security_scan::export_scan_report(&results, parsed_format, request_label.as_deref())
         .map_err(|e| e.to_string())?;
-    Ok(path.to_string_lossy().to_string())
+    Ok(ExportReportResult {
+        path: path.to_string_lossy().to_string(),
+        format: parsed_format.file_extension().to_string(),
+        skill_count: results.len(),
+        generated_at: chrono::Utc::now().to_rfc3339(),
+    })
 }
 
 #[cfg(test)]

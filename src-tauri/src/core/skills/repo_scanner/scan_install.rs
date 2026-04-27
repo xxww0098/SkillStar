@@ -1,76 +1,14 @@
-//! Lockfile-aware repo scan and batch install into the hub.
-
 use crate::core::{
     git::{ops as git_ops, repo_history, source_resolver},
     infra::{fs_ops, paths},
-    local_skill, lockfile,
-    path_env::command_with_path,
-    security_scan,
-    skills::discover as skill_discover,
+    local_skill, lockfile, security_scan,
 };
 use anyhow::{Context, Result, anyhow};
 use std::path::Path;
 use tracing::warn;
 
-use super::cache::cache_dir_name;
-use super::{DiscoveredSkill, SkillInstallTarget};
+use super::{SkillInstallTarget, cache_dir_name};
 
-/// Scan a cloned repo for SKILL.md files and return discovered skills.
-///
-/// This is a **lockfile-aware** scan — it enriches each discovered skill with
-/// `already_installed` by consulting the lockfile.
-pub fn scan_skills_in_repo(
-    repo_dir: &Path,
-    repo_url: &str,
-    full_depth: bool,
-) -> Vec<DiscoveredSkill> {
-    let hub_skills_dir = paths::hub_skills_dir();
-    let lock_entries = lockfile::Lockfile::load(&lockfile::lockfile_path())
-        .map(|lf| lf.skills)
-        .unwrap_or_default();
-
-    let raw_skills = skill_discover::discover_skills(repo_dir, full_depth);
-
-    let mut discovered: Vec<DiscoveredSkill> = raw_skills;
-
-    for skill in &mut discovered {
-        let source_folder = if skill.folder_path.is_empty() {
-            None
-        } else {
-            Some(skill.folder_path.as_str())
-        };
-
-        let legacy_name = lock_entries.iter().find_map(|entry| {
-            if source_resolver::same_remote_url(&entry.git_url, repo_url)
-                && option_str_eq(entry.source_folder.as_deref(), source_folder)
-            {
-                Some(entry.name.clone())
-            } else {
-                None
-            }
-        });
-
-        if let Some(name) = legacy_name {
-            skill.id = name;
-            skill.already_installed = hub_skills_dir.join(&skill.id).exists()
-                || lock_entries.iter().any(|entry| {
-                    entry.name == skill.id
-                        && source_resolver::same_remote_url(&entry.git_url, repo_url)
-                        && option_str_eq(entry.source_folder.as_deref(), source_folder)
-                });
-        } else {
-            skill.already_installed = hub_skills_dir.join(&skill.id).exists();
-        }
-    }
-
-    skill_discover::dedupe_discovered_skills(discovered)
-}
-
-fn option_str_eq(left: Option<&str>, right: Option<&str>) -> bool {
-    left == right
-}
-
-/// Install selected skills from a scanned repo.
 pub fn install_from_repo(
     source: &str,
     repo_url: &str,
@@ -138,7 +76,8 @@ pub fn install_from_repo(
         let tree_hash = if target.folder_path.is_empty() {
             git_ops::compute_tree_hash(&cache_dir).unwrap_or_default()
         } else {
-            compute_subtree_hash(&cache_dir, &target.folder_path).unwrap_or_default()
+            skillstar_skills::repo_scanner::compute_subtree_hash(&cache_dir, &target.folder_path)
+                .unwrap_or_default()
         };
 
         let source_folder = if target.folder_path.is_empty() {
@@ -183,22 +122,6 @@ fn can_replace_existing_skill(
         .unwrap_or(false)
 }
 
-pub(super) fn compute_subtree_hash(repo_dir: &Path, folder_path: &str) -> Result<String> {
-    let output = command_with_path("git")
-        .current_dir(repo_dir)
-        .args(["rev-parse", &format!("HEAD:{}", folder_path)])
-        .output()
-        .context("Failed to execute git rev-parse for subtree")?;
-
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!("git rev-parse failed: {}", err.trim()));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
-/// Compute the git tree hash for a specific subfolder (public wrapper).
 pub fn compute_subtree_hash_pub(repo_dir: &Path, folder_path: &str) -> Result<String> {
-    compute_subtree_hash(repo_dir, folder_path)
+    skillstar_skills::repo_scanner::compute_subtree_hash(repo_dir, folder_path)
 }

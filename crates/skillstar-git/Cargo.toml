@@ -1,0 +1,14 @@
+[package]
+name = "skillstar-git"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+gix = { version = "0.80", default-features = false, features = ["max-control", "blocking-http-transport-reqwest-rust-tls", "revision", "credentials"] }
+tracing = "0.1.44"
+skillstar-infra = { version = "0.1.0", path = "../skillstar-infra" }
+skillstar-config = { version = "0.1.0", path = "../skillstar-config" }
+
+[dev-dependencies]
+tempfile = "3"

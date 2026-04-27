@@ -23,7 +23,32 @@ pub use super::security_scan;
 pub use super::skill;
 pub use crate::core::ai::translation_cache;
 pub use crate::core::git::ops as git_ops;
-pub use crate::core::git::source_resolver;
 pub use crate::core::projects::agents as agent_profile;
 pub use crate::core::projects::sync;
-pub use discover as skill_discover;
+
+use crate::core::skill::Skill;
+
+/// Unified lifecycle boundary for skill install / update / uninstall.
+pub trait SkillManager {
+    fn install_skill(&self, url: String, name: Option<String>) -> Result<Skill, String>;
+    fn update_skill(&self, name: &str) -> Result<skill_update::SkillUpdateOutcome, anyhow::Error>;
+    fn uninstall_skill(&self, name: &str) -> Result<(), String>;
+}
+
+/// Default implementation delegating to the existing free-function lifecycle helpers.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct DefaultSkillManager;
+
+impl SkillManager for DefaultSkillManager {
+    fn install_skill(&self, url: String, name: Option<String>) -> Result<Skill, String> {
+        skill_install::install_skill(url, name)
+    }
+
+    fn update_skill(&self, name: &str) -> Result<skill_update::SkillUpdateOutcome, anyhow::Error> {
+        skill_update::update_skill(name)
+    }
+
+    fn uninstall_skill(&self, name: &str) -> Result<(), String> {
+        skill_install::uninstall_skill(name)
+    }
+}

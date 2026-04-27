@@ -15,9 +15,7 @@ use crate::config::TranslatorConfig;
 use crate::error::{Error, Result};
 use crate::parser::protector;
 use crate::pipeline::line_pipeline::LinePipeline;
-use crate::types::{
-    PipelineMode, PipelineResult, SegmentBundle, TranslationResult,
-};
+use crate::types::{PipelineMode, PipelineResult, SegmentBundle, TranslationResult};
 use crate::validator;
 
 /// Incremental progress from [`TranslationPipeline::run`] (bundle granularity).
@@ -113,11 +111,14 @@ impl TranslationPipeline {
             "Pipeline: prepared"
         );
 
-        Self::emit_progress(&options.progress, PipelineProgressEvent {
-            phase: "prepare",
-            current: 0,
-            total: bundles.len() as u32,
-        });
+        Self::emit_progress(
+            &options.progress,
+            PipelineProgressEvent {
+                phase: "prepare",
+                current: 0,
+                total: bundles.len() as u32,
+            },
+        );
 
         // 3. Translate: use line_pipeline if enabled, otherwise fall back to translate_bundles.
         let mode = self.config.pipeline.mode;
@@ -133,7 +134,8 @@ impl TranslationPipeline {
             let text = translated_lines.join("\n");
 
             // Build TranslationResult for each segment (for validation/caching compatibility)
-            let translations = Self::build_translation_results_from_lines(segments, &translated_lines);
+            let translations =
+                Self::build_translation_results_from_lines(segments, &translated_lines);
 
             (translations, text)
         } else {
@@ -145,11 +147,14 @@ impl TranslationPipeline {
             (translations, text)
         };
 
-        Self::emit_progress(&options.progress, PipelineProgressEvent {
-            phase: "finalize",
-            current: 0,
-            total: 1,
-        });
+        Self::emit_progress(
+            &options.progress,
+            PipelineProgressEvent {
+                phase: "finalize",
+                current: 0,
+                total: 1,
+            },
+        );
 
         // 4. Validate.
         let validation = validator::validate(&doc, &final_text, false);
@@ -160,11 +165,14 @@ impl TranslationPipeline {
             });
         }
 
-        Self::emit_progress(&options.progress, PipelineProgressEvent {
-            phase: "finalize",
-            current: 1,
-            total: 1,
-        });
+        Self::emit_progress(
+            &options.progress,
+            PipelineProgressEvent {
+                phase: "finalize",
+                current: 1,
+                total: 1,
+            },
+        );
 
         // 6. Write output.
         let output_path = options
@@ -226,19 +234,25 @@ impl TranslationPipeline {
 
         // For single bundle, skip semaphore overhead.
         if bundles.len() == 1 {
-            Self::emit_progress(progress, PipelineProgressEvent {
-                phase: "translate",
-                current: 0,
-                total: 1,
-            });
+            Self::emit_progress(
+                progress,
+                PipelineProgressEvent {
+                    phase: "translate",
+                    current: 0,
+                    total: 1,
+                },
+            );
             let out = self
                 .process_bundle(&bundles[0], ctx, target_lang, mode)
                 .await?;
-            Self::emit_progress(progress, PipelineProgressEvent {
-                phase: "translate",
-                current: 1,
-                total: 1,
-            });
+            Self::emit_progress(
+                progress,
+                PipelineProgressEvent {
+                    phase: "translate",
+                    current: 1,
+                    total: 1,
+                },
+            );
             return Ok(out);
         }
 
@@ -247,9 +261,11 @@ impl TranslationPipeline {
 
         // We need to clone data for spawned tasks.
         for bundle in bundles {
-            let permit = semaphore.clone().acquire_owned().await.map_err(|e| {
-                Error::Pipeline(format!("semaphore acquire failed: {e}"))
-            })?;
+            let permit = semaphore
+                .clone()
+                .acquire_owned()
+                .await
+                .map_err(|e| Error::Pipeline(format!("semaphore acquire failed: {e}")))?;
             let bundle = bundle.clone();
             let ctx = ctx.clone();
             let target_lang = target_lang.to_owned();
@@ -265,11 +281,14 @@ impl TranslationPipeline {
         let n = bundles.len() as u32;
         let mut all_translations = Vec::new();
         for (i, (bundle, ctx, target_lang)) in handles.into_iter().enumerate() {
-            Self::emit_progress(progress, PipelineProgressEvent {
-                phase: "translate",
-                current: i as u32,
-                total: n,
-            });
+            Self::emit_progress(
+                progress,
+                PipelineProgressEvent {
+                    phase: "translate",
+                    current: i as u32,
+                    total: n,
+                },
+            );
             info!(
                 bundle = i + 1,
                 total = bundles.len(),
@@ -281,11 +300,14 @@ impl TranslationPipeline {
                 .process_bundle(&bundle, &ctx, &target_lang, mode)
                 .await?;
             all_translations.extend(translations);
-            Self::emit_progress(progress, PipelineProgressEvent {
-                phase: "translate",
-                current: (i + 1) as u32,
-                total: n,
-            });
+            Self::emit_progress(
+                progress,
+                PipelineProgressEvent {
+                    phase: "translate",
+                    current: (i + 1) as u32,
+                    total: n,
+                },
+            );
         }
 
         Ok(all_translations)
@@ -411,7 +433,12 @@ impl TranslationPipeline {
             .enumerate()
             .map(|(i, s)| (s.segment_id.as_str(), i))
             .collect();
-        translations.sort_by_key(|t| order.get(t.segment_id.as_str()).copied().unwrap_or(usize::MAX));
+        translations.sort_by_key(|t| {
+            order
+                .get(t.segment_id.as_str())
+                .copied()
+                .unwrap_or(usize::MAX)
+        });
 
         Ok(self.restore_all(translations, bundle))
     }
@@ -445,10 +472,7 @@ impl TranslationPipeline {
             .next()
             .unwrap_or(target_lang)
             .to_lowercase();
-        let stem = input_path
-            .file_stem()
-            .unwrap_or_default()
-            .to_string_lossy();
+        let stem = input_path.file_stem().unwrap_or_default().to_string_lossy();
         let file_name = self
             .config
             .output

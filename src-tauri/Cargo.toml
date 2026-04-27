@@ -6,10 +6,6 @@ authors = ["SkillStar"]
 edition = "2024"
 rust-version = "1.94.1"
 
-[workspace]
-resolver = "3"
-members = ["crates/marketplace-core", "crates/skill-core", "crates/Markdown-Translator"]
-
 [lib]
 name = "skillstar_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
@@ -56,7 +52,7 @@ tokio-util = { version = "0.7", features = ["compat"] }
 futures = "0.3"
 async-trait = "0.1"
 skillstar-marketplace-core = { path = "crates/marketplace-core" }
-skillstar-skill-core = { path = "crates/skill-core" }
+skillstar-skill-core = { version = "0.1.0", path = "../crates/skillstar-skill-core" }
 markdown-translator = { path = "crates/Markdown-Translator" }
 url = "2.5.8"
 toml_edit = "0.25.10"
@@ -65,6 +61,21 @@ urlencoding = "2.1.3"
 tiny_http = "0.12.0"
 lazy_static = "1.5.0"
 which = "8.0.2"
+skillstar-core-types = { version = "0.1.0", path = "../crates/skillstar-core-types" }
+skillstar-infra = { version = "0.1.0", path = "../crates/skillstar-infra" }
+skillstar-config = { version = "0.1.0", path = "../crates/skillstar-config" }
+skillstar-git = { version = "0.1.0", path = "../crates/skillstar-git" }
+skillstar-model-config = { version = "0.1.0", path = "../crates/skillstar-model-config" }
+skillstar-ai = { version = "0.1.0", path = "../crates/skillstar-ai" }
+skillstar-skills = { version = "0.1.0", path = "../crates/skillstar-skills" }
+skillstar-projects = { version = "0.1.0", path = "../crates/skillstar-projects" }
+skillstar-translation = { version = "0.1.0", path = "../crates/skillstar-translation" }
+skillstar-security-scan = { version = "0.1.0", path = "../crates/skillstar-security-scan" }
+skillstar-patrol = { version = "0.1.0", path = "../crates/skillstar-patrol" }
+skillstar-terminal = { version = "0.1.0", path = "../crates/skillstar-terminal" }
+skillstar-commands = { version = "0.1.0", path = "../crates/skillstar-commands" }
+skillstar-cli = { version = "0.1.0", path = "../crates/skillstar-cli" }
+tauri-plugin-deep-link = "2"
 
 [dev-dependencies]
 tempfile = "3"
@@ -75,8 +86,3 @@ tauri-plugin-process = "2"
 
 [target.'cfg(windows)'.dependencies]
 junction = "1"
-
-[profile.release]
-lto = "fat"
-codegen-units = 1
-strip = "symbols"

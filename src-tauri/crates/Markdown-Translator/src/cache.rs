@@ -44,7 +44,9 @@ impl TranslationCache {
         )
         .map_err(|e| Error::Cache(e.to_string()))?;
 
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
     /// Open an in-memory cache (useful for testing or one-off runs).
@@ -64,25 +66,31 @@ impl TranslationCache {
         )
         .map_err(|e| Error::Cache(e.to_string()))?;
 
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
     /// Look up a cached translation.
-    pub fn get(&self, source_text: &str, target_lang: &str, model: &str) -> Option<CachedTranslation> {
+    pub fn get(
+        &self,
+        source_text: &str,
+        target_lang: &str,
+        model: &str,
+    ) -> Option<CachedTranslation> {
         let key = Self::compute_key(source_text, target_lang, model);
         let conn = self.conn.lock().ok()?;
-        conn
-            .query_row(
-                "SELECT translated_text, confidence FROM translation_cache WHERE cache_key = ?1",
-                [&key],
-                |row| {
-                    Ok(CachedTranslation {
-                        translated_text: row.get(0)?,
-                        confidence: row.get(1)?,
-                    })
-                },
-            )
-            .ok()
+        conn.query_row(
+            "SELECT translated_text, confidence FROM translation_cache WHERE cache_key = ?1",
+            [&key],
+            |row| {
+                Ok(CachedTranslation {
+                    translated_text: row.get(0)?,
+                    confidence: row.get(1)?,
+                })
+            },
+        )
+        .ok()
     }
 
     /// Store a translation result in the cache.

@@ -6,6 +6,7 @@ use skillstar_marketplace_core::snapshot::{self as core_snapshot, InstalledSkill
 use super::skill::{OfficialPublisher, Skill};
 
 pub use skillstar_marketplace_core::{LocalFirstResult, MarketplacePack, SyncStateEntry};
+pub use skillstar_marketplace_core::{MarketplaceSourceObservation, MarketplaceSourceSummary};
 
 fn runtime_config() -> skillstar_marketplace_core::snapshot::SnapshotRuntimeConfig {
     skillstar_marketplace_core::snapshot::SnapshotRuntimeConfig::new(
@@ -103,6 +104,18 @@ pub fn list_packs_local(limit: u32) -> Result<Vec<MarketplacePack>> {
     core_snapshot::list_packs_local(limit)
 }
 
+pub fn list_source_observations_for_skill(
+    skill_key: &str,
+) -> Result<Vec<MarketplaceSourceObservation>> {
+    configure_runtime();
+    core_snapshot::list_source_observations_for_skill(skill_key)
+}
+
+pub fn list_known_marketplace_sources() -> Result<Vec<MarketplaceSourceSummary>> {
+    configure_runtime();
+    core_snapshot::list_known_marketplace_sources()
+}
+
 #[allow(dead_code)]
 pub fn upsert_pack(
     pack_key: &str,
@@ -123,4 +136,29 @@ pub fn upsert_pack(
         git_url,
         skill_keys,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_config_wires_marketplace_paths() {
+        let _guard = crate::core::lock_test_env();
+        let temp = tempfile::tempdir().unwrap();
+        unsafe {
+            std::env::set_var("SKILLSTAR_DATA_DIR", temp.path());
+        }
+
+        let config = runtime_config();
+        assert_eq!(
+            config.db_path,
+            crate::core::infra::paths::marketplace_db_path()
+        );
+        assert_eq!(config.data_root, crate::core::infra::paths::data_root());
+
+        unsafe {
+            std::env::remove_var("SKILLSTAR_DATA_DIR");
+        }
+    }
 }

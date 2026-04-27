@@ -222,9 +222,7 @@ pub enum IntegrityError {
         line_number: usize,
     },
     /// A marker was expected but not found in the output.
-    MissingMarker {
-        line_number: usize,
-    },
+    MissingMarker { line_number: usize },
 }
 
 impl std::fmt::Display for IntegrityError {
@@ -286,7 +284,10 @@ pub fn validate(
         let marker_errors_count = marker_errors.len();
 
         for (marker, error) in marker_errors {
-            all_errors.push(format!("Integrity error at line {}: {}", marker.line_number, error));
+            all_errors.push(format!(
+                "Integrity error at line {}: {}",
+                marker.line_number, error
+            ));
             metrics.insert(
                 format!("integrity_error_line_{}", marker.line_number),
                 serde_json::json!(error.to_string()),
@@ -324,13 +325,11 @@ fn extract_signature(text: &str, opts: pulldown_cmark::Options) -> Vec<String> {
                 Some(format!("heading_{}", *level as u8))
             }
             Event::Start(pulldown_cmark::Tag::CodeBlock(_)) => Some("code_block".into()),
-            Event::Start(pulldown_cmark::Tag::List(ordered)) => {
-                Some(if ordered.is_some() {
-                    "ordered_list".into()
-                } else {
-                    "bullet_list".into()
-                })
-            }
+            Event::Start(pulldown_cmark::Tag::List(ordered)) => Some(if ordered.is_some() {
+                "ordered_list".into()
+            } else {
+                "bullet_list".into()
+            }),
             Event::Start(pulldown_cmark::Tag::BlockQuote(_)) => Some("blockquote".into()),
             Event::End(pulldown_cmark::TagEnd::Heading(level)) => {
                 Some(format!("end_heading_{}", *level as u8))

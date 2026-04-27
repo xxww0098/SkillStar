@@ -1,10 +1,8 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { Plus, Search, X } from "lucide-react";
+import { Loader2, Plus, Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { ProviderEntry } from "../hooks/useModelProviders";
-import { claudePresets } from "../presets/claudePresets";
-import { codexPresets } from "../presets/codexPresets";
-import { opencodePresets } from "../presets/opencodePresets";
+import { useProviderPresets } from "../hooks/useProviderPresets";
 import type { ModelAppId } from "./AppCapsuleSwitcher";
 
 interface AddProviderDialogProps {
@@ -18,50 +16,15 @@ export function AddProviderDialog({ open, appId, onClose, onSelectDraft }: AddPr
   const [search, setSearch] = useState("");
   const [customName, setCustomName] = useState("");
   const [showCustom, setShowCustom] = useState(false);
+  const { loading: presetsLoading, presets } = useProviderPresets(appId);
 
-  // Build preset list based on app
-  const presets = useMemo(() => {
-    switch (appId) {
-      case "claude":
-        return claudePresets.map((p) => ({
-          id: p.name.toLowerCase().replace(/[^a-z0-9]/g, "_"),
-          name: p.name,
-          category: p.category,
-          websiteUrl: p.websiteUrl,
-          apiKeyUrl: p.apiKeyUrl,
-          iconColor: p.iconColor,
-          settingsConfig: { env: p.env },
-        }));
-      case "codex":
-        return codexPresets.map((p) => ({
-          id: p.name.toLowerCase().replace(/[^a-z0-9]/g, "_"),
-          name: p.name,
-          category: p.category,
-          websiteUrl: p.websiteUrl,
-          apiKeyUrl: p.apiKeyUrl,
-          iconColor: p.iconColor,
-          settingsConfig: { config: p.config },
-        }));
-      case "opencode":
-        return opencodePresets.map((p) => ({
-          id: p.name.toLowerCase().replace(/[^a-z0-9]/g, "_"),
-          name: p.name,
-          category: p.category,
-          websiteUrl: p.websiteUrl,
-          apiKeyUrl: p.apiKeyUrl,
-          iconColor: p.iconColor,
-          settingsConfig: p.settingsConfig,
-        }));
-      default:
-        return [];
-    }
-  }, [appId]);
+  const builtInPresets = useMemo(() => presets.filter((preset) => preset.category !== "custom"), [presets]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return presets;
-    return presets.filter((p) => p.name.toLowerCase().includes(q));
-  }, [presets, search]);
+    if (!q) return builtInPresets;
+    return builtInPresets.filter((p) => p.name.toLowerCase().includes(q));
+  }, [builtInPresets, search]);
 
   // Group by category
   const grouped = useMemo(() => {
@@ -82,7 +45,7 @@ export function AddProviderDialog({ open, appId, onClose, onSelectDraft }: AddPr
       }));
   }, [filtered]);
 
-  const handlePresetClick = (preset: (typeof presets)[0]) => {
+  const handlePresetClick = (preset: ProviderEntry) => {
     const entry: ProviderEntry = {
       id: `${preset.id}_${Date.now()}`,
       name: preset.name,
@@ -166,6 +129,12 @@ export function AddProviderDialog({ open, appId, onClose, onSelectDraft }: AddPr
 
             {/* Preset list */}
             <div className="px-5 py-4 max-h-[50vh] overflow-y-auto scrollbar-thin space-y-4">
+              {presetsLoading && (
+                <div className="flex items-center justify-center py-6 text-muted-foreground">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                </div>
+              )}
+
               {grouped.map((group) => (
                 <div key={group.key}>
                   <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
@@ -198,7 +167,7 @@ export function AddProviderDialog({ open, appId, onClose, onSelectDraft }: AddPr
                 </div>
               ))}
 
-              {filtered.length === 0 && !showCustom && (
+              {!presetsLoading && filtered.length === 0 && !showCustom && (
                 <p className="text-sm text-muted-foreground text-center py-4">没有匹配的预设</p>
               )}
             </div>

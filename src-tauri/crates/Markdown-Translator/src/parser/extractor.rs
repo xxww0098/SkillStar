@@ -20,9 +20,8 @@ pub fn extract(
     let mut segments: Vec<Segment> = Vec::new();
     let mut heading_stack: Vec<String> = Vec::new();
 
-    let opts = Options::ENABLE_TABLES
-        | Options::ENABLE_STRIKETHROUGH
-        | Options::ENABLE_HEADING_ATTRIBUTES;
+    let opts =
+        Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_HEADING_ATTRIBUTES;
     let parser = Parser::new_ext(body, opts);
 
     // Track the state of the current block.
@@ -138,7 +137,10 @@ pub fn extract(
     }
 
     // ── Front matter segments ────────────────────────────────────────────
-    let title = front_matter.get("title").and_then(|v| v.as_str()).unwrap_or("");
+    let title = front_matter
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let context_path: Vec<String> = if title.is_empty() {
         vec![]
     } else {
@@ -306,16 +308,15 @@ mod tests {
         let segments = extract(body, 0, &HashMap::new());
         let bullets: Vec<_> = segments
             .iter()
-            .filter(|s| s.source_text.contains("First bullet") || s.source_text.contains("Second bullet"))
+            .filter(|s| {
+                s.source_text.contains("First bullet") || s.source_text.contains("Second bullet")
+            })
             .collect();
         assert_eq!(
             bullets.len(),
             2,
             "expected two list-item segments, got: {:?}",
-            segments
-                .iter()
-                .map(|s| &s.source_text)
-                .collect::<Vec<_>>()
+            segments.iter().map(|s| &s.source_text).collect::<Vec<_>>()
         );
     }
 

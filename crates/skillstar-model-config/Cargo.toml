@@ -1,0 +1,21 @@
+[package]
+name = "skillstar-model-config"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94.1"
+
+[dependencies]
+anyhow = "1.0.102"
+chrono = { version = "0.4.44", features = ["serde"] }
+dirs = "6.0.0"
+reqwest = { version = "0.13.2", default-features = false, features = ["rustls", "json"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+tokio = { version = "1.52.1", features = ["full"] }
+toml_edit = "0.25.10"
+tracing = "0.1.44"
+lazy_static = "1.5.0"
+skillstar-infra = { version = "0.1.0", path = "../skillstar-infra" }
+
+[dev-dependencies]
+tempfile = "3.27.0"

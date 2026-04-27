@@ -66,10 +66,8 @@ impl TranslatorAgent {
             .collect();
 
         // Validate completeness
-        let translated_ids: HashSet<&str> = translations
-            .iter()
-            .map(|t| t.segment_id.as_str())
-            .collect();
+        let translated_ids: HashSet<&str> =
+            translations.iter().map(|t| t.segment_id.as_str()).collect();
         let expected_ids: HashSet<&str> = bundle
             .segments
             .iter()

@@ -1,11 +1,15 @@
 use crate::core::{
     git::ops as git_ops,
     infra::{fs_ops, paths},
-    installed_skill, lockfile, repo_scanner,
+    installed_skill, local_skill, lockfile, project_manifest,
+    projects::sync,
+    repo_scanner, security_scan,
     skill::{
         Skill, SkillCategory, SkillType, extract_github_source_from_url, extract_skill_description,
     },
 };
+use markdown_translator::parser::frontmatter::{render_with_front_matter, split_front_matter};
+use serde_yaml::{Mapping, Value};
 use std::path::{Path, PathBuf};
 use tracing::warn;
 
@@ -40,7 +44,7 @@ fn find_target_skill<'a>(
 }
 
 /// Normalize URL, materialize repo cache, run lockfile-aware scan.
-fn fetch_repo_scanned(
+pub fn fetch_repo_scanned(
     url: &str,
     full_depth: bool,
 ) -> Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>), String> {
@@ -95,13 +99,75 @@ fn new_skill_from_install(
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct RepoInstallProvenance<'a> {
+    git_url: &'a str,
+    source_folder: Option<&'a str>,
+}
+
+fn skill_markdown_path(skill_dir: &Path) -> PathBuf {
+    skill_dir.join("SKILL.md")
+}
+
+fn repo_install_provenance_mapping(provenance: RepoInstallProvenance<'_>) -> Mapping {
+    let mut mapping = Mapping::new();
+    mapping.insert(
+        Value::String("repository_url".to_string()),
+        Value::String(provenance.git_url.to_string()),
+    );
+
+    if let Some(source_folder) = provenance.source_folder.filter(|value| !value.is_empty()) {
+        mapping.insert(
+            Value::String("source_folder".to_string()),
+            Value::String(source_folder.to_string()),
+        );
+    }
+
+    mapping
+}
+
+fn merge_provenance_value(existing: Option<Value>, provenance: RepoInstallProvenance<'_>) -> Value {
+    let mut merged = match existing {
+        Some(Value::Mapping(mapping)) => mapping,
+        _ => Mapping::new(),
+    };
+
+    for (key, value) in repo_install_provenance_mapping(provenance) {
+        merged.insert(key, value);
+    }
+
+    Value::Mapping(merged)
+}
+
+fn write_repo_install_provenance(
+    skill_dir: &Path,
+    provenance: RepoInstallProvenance<'_>,
+) -> Result<(), String> {
+    let skill_md_path = skill_markdown_path(skill_dir);
+    let existing = std::fs::read_to_string(&skill_md_path)
+        .map_err(|e| format!("Failed to read '{}': {}", skill_md_path.display(), e))?;
+    let split = split_front_matter(&existing);
+    let mut front_matter = split.data;
+    let existing_provenance = front_matter.remove("provenance");
+    front_matter.insert(
+        "provenance".to_string(),
+        merge_provenance_value(existing_provenance, provenance),
+    );
+
+    let rendered = render_with_front_matter(Some(&front_matter), &split.body);
+    std::fs::write(&skill_md_path, rendered)
+        .map_err(|e| format!("Failed to write '{}': {}", skill_md_path.display(), e))
+}
+
 fn try_install_from_repo_cache(
     url: &str,
     requested_name: Option<&str>,
     name_hint: &str,
     skills_dir: &Path,
-) -> Option<Skill> {
-    let (repo_url, source, _, skills_found) = fetch_repo_scanned(url, false).ok()?;
+) -> Result<Option<Skill>, String> {
+    let Ok((repo_url, source, _, skills_found)) = fetch_repo_scanned(url, false) else {
+        return Ok(None);
+    };
     let target = find_target_skill(&skills_found, requested_name, name_hint);
 
     // Guard against overwriting a local skill whose name matches the repo skill
@@ -112,7 +178,7 @@ fn try_install_from_repo_cache(
                 skill_id = %skill.id,
                 "repo-cache skill would collide with existing local skill, skipping"
             );
-            return None;
+            return Ok(None);
         }
     }
 
@@ -123,7 +189,7 @@ fn try_install_from_repo_cache(
             found = ?skills_found.iter().map(|s| &s.id).collect::<Vec<_>>(),
             "skill not found in repo, falling back to direct clone"
         );
-        return None;
+        return Ok(None);
     };
 
     let targets = vec![repo_scanner::SkillInstallTarget {
@@ -135,20 +201,27 @@ fn try_install_from_repo_cache(
         Ok(installed) if !installed.is_empty() => {
             let installed_name = installed[0].clone();
             let dest = skills_dir.join(&installed_name);
+            write_repo_install_provenance(
+                &dest,
+                RepoInstallProvenance {
+                    git_url: &repo_url,
+                    source_folder: Some(&skill.folder_path),
+                },
+            )?;
             let description = extract_skill_description(&dest);
             installed_skill::invalidate_cache();
             let tree_hash = compute_tree_hash_for(skills_dir, &installed_name);
-            Some(new_skill_from_install(
+            Ok(Some(new_skill_from_install(
                 installed_name,
                 description,
                 repo_url,
                 tree_hash,
-            ))
+            )))
         }
-        Ok(_) => None,
+        Ok(_) => Ok(None),
         Err(err) => {
             warn!(target: "install_skill", error = %err, "repo-cache install failed, falling back");
-            None
+            Ok(None)
         }
     }
 }
@@ -167,7 +240,8 @@ pub fn install_skill(url: String, name: Option<String>) -> Result<Skill, String>
         ));
     }
 
-    if let Some(skill) = try_install_from_repo_cache(&url, name.as_deref(), &name_hint, &skills_dir)
+    if let Some(skill) =
+        try_install_from_repo_cache(&url, name.as_deref(), &name_hint, &skills_dir)?
     {
         return Ok(skill);
     }
@@ -262,6 +336,17 @@ pub fn install_skills_batch(url: &str, names: &[String]) -> Result<Vec<Skill>, S
                 installed_skill::invalidate_cache();
                 for installed_name in installed {
                     let dest = skills_dir.join(&installed_name);
+                    let source_folder = targets
+                        .iter()
+                        .find(|target| target.id == installed_name)
+                        .map(|target| target.folder_path.as_str());
+                    write_repo_install_provenance(
+                        &dest,
+                        RepoInstallProvenance {
+                            git_url: &repo_url,
+                            source_folder,
+                        },
+                    )?;
                     let description = extract_skill_description(&dest);
                     let tree_hash = compute_tree_hash_for(&skills_dir, &installed_name);
                     installed_skills.push(new_skill_from_install(
@@ -308,10 +393,50 @@ pub fn install_skill_pack(url: String) -> Result<Vec<String>, String> {
         .map_err(|e| format!("Pack install failed: {}", e))
 }
 
+pub fn uninstall_skill(name: &str) -> Result<(), String> {
+    if local_skill::is_local_skill(name) {
+        local_skill::delete(name).map_err(|e| e.to_string())?;
+        installed_skill::invalidate_cache();
+        security_scan::invalidate_skill_cache(name);
+        return Ok(());
+    }
+
+    let _ = sync::remove_skill_from_all_agents(name);
+
+    let skills_dir = paths::hub_skills_dir();
+    let path = skills_dir.join(name);
+
+    if fs_ops::is_link(&path) {
+        fs_ops::remove_symlink(&path).map_err(|e| e.to_string())?;
+    } else if path.exists() {
+        fs_ops::remove_dir_all_retry(&path).map_err(|e| e.to_string())?;
+    }
+
+    let _lock = lockfile::get_mutex()
+        .lock()
+        .map_err(|_| "Lockfile mutex poisoned".to_string())?;
+    let lock_path = lockfile::lockfile_path();
+    let mut lf = lockfile::Lockfile::load(&lock_path)
+        .map_err(|e| format!("Failed to load lockfile '{}': {}", lock_path.display(), e))?;
+    lf.remove(name);
+    lf.save(&lock_path)
+        .map_err(|e| format!("Failed to save lockfile '{}': {}", lock_path.display(), e))?;
+
+    let _ = project_manifest::remove_skill_from_all_projects(name);
+    installed_skill::invalidate_cache();
+    security_scan::invalidate_skill_cache(name);
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{derive_name_hint, find_target_skill};
+    use super::{
+        RepoInstallProvenance, derive_name_hint, find_target_skill, write_repo_install_provenance,
+    };
     use crate::core::repo_scanner::DiscoveredSkill;
+    use markdown_translator::parser::frontmatter::split_front_matter;
+    use serde_yaml::Value;
 
     fn discovered(id: &str) -> DiscoveredSkill {
         DiscoveredSkill {
@@ -349,5 +474,141 @@ mod tests {
         let skills = vec![discovered("only-one")];
         let target = find_target_skill(&skills, None, "no-match-hint");
         assert_eq!(target.map(|skill| skill.id.as_str()), Some("only-one"));
+    }
+
+    fn write_skill_md(dir: &std::path::Path, content: &str) {
+        std::fs::write(dir.join("SKILL.md"), content).unwrap();
+    }
+
+    fn read_skill_md(dir: &std::path::Path) -> String {
+        std::fs::read_to_string(dir.join("SKILL.md")).unwrap()
+    }
+
+    #[test]
+    fn provenance_writer_adds_frontmatter_when_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        write_skill_md(dir.path(), "# Skill\n\nBody\n");
+
+        write_repo_install_provenance(
+            dir.path(),
+            RepoInstallProvenance {
+                git_url: "https://github.com/example/skill-repo",
+                source_folder: None,
+            },
+        )
+        .unwrap();
+
+        let rendered = read_skill_md(dir.path());
+        let split = split_front_matter(&rendered);
+        assert!(split.line_count > 0);
+        assert_eq!(split.body, "# Skill\n\nBody\n");
+        assert_eq!(
+            split
+                .data
+                .get("provenance")
+                .and_then(Value::as_mapping)
+                .and_then(|mapping| mapping.get(Value::String("repository_url".to_string())))
+                .and_then(Value::as_str),
+            Some("https://github.com/example/skill-repo")
+        );
+    }
+
+    #[test]
+    fn provenance_writer_preserves_existing_frontmatter_keys_and_body() {
+        let dir = tempfile::tempdir().unwrap();
+        write_skill_md(
+            dir.path(),
+            "---\ntitle: Existing\ntags:\n  - rust\n---\n# Heading\n\nOriginal body\n",
+        );
+
+        write_repo_install_provenance(
+            dir.path(),
+            RepoInstallProvenance {
+                git_url: "https://github.com/example/skill-repo",
+                source_folder: Some("skills/rust"),
+            },
+        )
+        .unwrap();
+
+        let rendered = read_skill_md(dir.path());
+        let split = split_front_matter(&rendered);
+
+        assert_eq!(split.body, "# Heading\n\nOriginal body\n");
+        assert_eq!(
+            split.data.get("title").and_then(Value::as_str),
+            Some("Existing")
+        );
+        assert_eq!(
+            split
+                .data
+                .get("tags")
+                .and_then(Value::as_sequence)
+                .and_then(|tags| tags.first())
+                .and_then(Value::as_str),
+            Some("rust")
+        );
+
+        let provenance = split
+            .data
+            .get("provenance")
+            .and_then(Value::as_mapping)
+            .unwrap();
+        assert_eq!(
+            provenance
+                .get(Value::String("repository_url".to_string()))
+                .and_then(Value::as_str),
+            Some("https://github.com/example/skill-repo")
+        );
+        assert_eq!(
+            provenance
+                .get(Value::String("source_folder".to_string()))
+                .and_then(Value::as_str),
+            Some("skills/rust")
+        );
+    }
+
+    #[test]
+    fn provenance_writer_merges_existing_provenance_mapping() {
+        let dir = tempfile::tempdir().unwrap();
+        write_skill_md(
+            dir.path(),
+            "---\nprovenance:\n  imported_by: skillstar\n  repository_url: stale\n---\n# Heading\n",
+        );
+
+        write_repo_install_provenance(
+            dir.path(),
+            RepoInstallProvenance {
+                git_url: "https://github.com/example/skill-repo",
+                source_folder: Some("nested/skill"),
+            },
+        )
+        .unwrap();
+
+        let rendered = read_skill_md(dir.path());
+        let split = split_front_matter(&rendered);
+        let provenance = split
+            .data
+            .get("provenance")
+            .and_then(Value::as_mapping)
+            .unwrap();
+
+        assert_eq!(
+            provenance
+                .get(Value::String("imported_by".to_string()))
+                .and_then(Value::as_str),
+            Some("skillstar")
+        );
+        assert_eq!(
+            provenance
+                .get(Value::String("repository_url".to_string()))
+                .and_then(Value::as_str),
+            Some("https://github.com/example/skill-repo")
+        );
+        assert_eq!(
+            provenance
+                .get(Value::String("source_folder".to_string()))
+                .and_then(Value::as_str),
+            Some("nested/skill")
+        );
     }
 }

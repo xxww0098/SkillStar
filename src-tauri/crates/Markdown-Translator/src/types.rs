@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::ops::Range;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -179,7 +179,8 @@ impl ApiUsage {
     pub fn record(&self, prompt: u64, completion: u64, total: u64) {
         self.call_count.fetch_add(1, Ordering::Relaxed);
         self.prompt_tokens.fetch_add(prompt, Ordering::Relaxed);
-        self.completion_tokens.fetch_add(completion, Ordering::Relaxed);
+        self.completion_tokens
+            .fetch_add(completion, Ordering::Relaxed);
         self.total_tokens.fetch_add(total, Ordering::Relaxed);
     }
 

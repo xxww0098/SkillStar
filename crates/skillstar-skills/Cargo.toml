@@ -1,0 +1,22 @@
+[package]
+name = "skillstar-skills"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94.1"
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }
+skillstar-core-types = { version = "0.1.0", path = "../skillstar-core-types" }
+skillstar-infra = { version = "0.1.0", path = "../skillstar-infra" }
+skillstar-git = { version = "0.1.0", path = "../skillstar-git" }
+skillstar-config = { version = "0.1.0", path = "../skillstar-config" }
+skillstar-skill-core = { version = "0.1.0", path = "../skillstar-skill-core" }
+
+[dev-dependencies]
+tempfile = "3"

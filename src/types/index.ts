@@ -521,6 +521,43 @@ export interface ImportMultiBundleResult {
 
 export type RiskLevel = "Safe" | "Low" | "Medium" | "High" | "Critical";
 
+export type DetectionFamily =
+  | "pattern"
+  | "capability"
+  | "secrets"
+  | "semantic-flow"
+  | "dynamic"
+  | "external-tool"
+  | "policy"
+  | "other";
+
+export interface DetectionKind {
+  family?: DetectionFamily;
+  kind: string;
+}
+
+export interface DetectionTaxonomy {
+  detection_kind?: DetectionKind | null;
+  tags?: string[];
+}
+
+export type EvidenceTrailKind = "static-finding" | "ai-finding" | "analyzer-summary";
+
+export interface SecurityScanEvidenceTrailEntry {
+  kind: EvidenceTrailKind;
+  file_path?: string | null;
+  line_number?: number | null;
+  source_id?: string | null;
+  severity?: RiskLevel | null;
+  confidence?: number | null;
+  summary?: string | null;
+  excerpts?: string[];
+  taxonomy?: DetectionTaxonomy | null;
+  analyzer_status?: string | null;
+  analyzer_findings?: number | null;
+  analyzer_error?: string | null;
+}
+
 export interface StaticFinding {
   file_path: string;
   line_number: number;
@@ -529,6 +566,7 @@ export interface StaticFinding {
   severity: RiskLevel;
   confidence?: number;
   description: string;
+  taxonomy?: DetectionTaxonomy | null;
   owasp_agentic_tags?: string[];
 }
 
@@ -540,6 +578,7 @@ export interface AiFinding {
   description: string;
   evidence: string;
   recommendation: string;
+  taxonomy?: DetectionTaxonomy | null;
   owasp_agentic_tags?: string[];
 }
 
@@ -563,6 +602,7 @@ export interface SecurityScanResult {
   meta_deduped_count?: number;
   meta_consensus_count?: number;
   analyzer_executions?: SecurityScanAnalyzerExecution[];
+  evidence_trail?: SecurityScanEvidenceTrailEntry[];
   static_findings: StaticFinding[];
   ai_findings: AiFinding[];
   summary: string;
@@ -619,6 +659,92 @@ export interface SecurityScanLogEntry {
   size_bytes: number;
 }
 
+export interface SecurityScanAuditError {
+  skill_name: string;
+  message: string;
+}
+
+export interface SecurityScanAuditFinding {
+  finding_type: string;
+  risk_level?: RiskLevel | null;
+  confidence?: number | null;
+  file_path?: string | null;
+  line_number?: number | null;
+  label?: string | null;
+  description: string;
+  evidence?: string | null;
+  recommendation?: string | null;
+  raw_line: string;
+}
+
+export interface SecurityScanAuditSkillDetail {
+  skill_name: string;
+  scanned_at?: string | null;
+  risk_level?: RiskLevel | null;
+  risk_score?: number | null;
+  confidence_score?: number | null;
+  meta_deduped_count: number;
+  meta_consensus_count: number;
+  scan_mode?: string | null;
+  scanner_version?: string | null;
+  incomplete?: boolean | null;
+  files_scanned?: number | null;
+  total_chars_analyzed?: number | null;
+  static_findings_count: number;
+  ai_findings_count: number;
+  tree_hash?: string | null;
+  summary?: string | null;
+  findings: SecurityScanAuditFinding[];
+}
+
+export interface SecurityScanAuditTelemetrySnapshot {
+  recorded_at: string;
+  request_hash: string;
+  requested_mode: string;
+  effective_mode: string;
+  force: boolean;
+  duration_ms: number;
+  targets_total: number;
+  results_total: number;
+  pass_count: number;
+  pass_rate: number;
+  incomplete_count: number;
+  error_count: number;
+  risk_distribution: Record<string, number>;
+}
+
+export interface SecurityScanAuditSummary {
+  file_name: string;
+  path: string;
+  created_at: string;
+  size_bytes: number;
+  request_id?: string | null;
+  request_hash?: string | null;
+  requested_mode?: string | null;
+  effective_mode?: string | null;
+  force?: boolean | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  duration_ms?: number | null;
+  targets_total?: number | null;
+  cached_hits: number;
+  completed_results: number;
+  error_count: number;
+  skill_count: number;
+  incomplete_count: number;
+  highest_risk?: RiskLevel | null;
+  parse_warnings: number;
+  telemetry?: SecurityScanAuditTelemetrySnapshot | null;
+}
+
+export interface SecurityScanAuditDetail {
+  summary: SecurityScanAuditSummary;
+  cached_skills: string[];
+  errors: SecurityScanAuditError[];
+  skills: SecurityScanAuditSkillDetail[];
+  parse_warnings: string[];
+}
+
 export interface SecurityScanRuleOverride {
   enabled?: boolean;
   severity?: string;
@@ -630,4 +756,17 @@ export interface SecurityScanPolicy {
   enabled_analyzers: string[];
   ignore_rules: string[];
   rule_overrides: Record<string, SecurityScanRuleOverride>;
+}
+
+// ── Security Scan Report Export ─────────────────────────────────────
+
+export type SecurityScanReportFormat = "sarif" | "json" | "markdown" | "html";
+
+/** Result of `export_security_scan_report` — mirrors the Rust payload
+ *  so the UI knows what was exported, when, and in which format. */
+export interface SecurityScanReportExportResult {
+  path: string;
+  format: SecurityScanReportFormat;
+  skill_count: number;
+  generated_at: string;
 }

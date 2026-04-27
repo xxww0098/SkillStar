@@ -433,30 +433,24 @@ async fn execute_skill_attempt(
     force_refresh: bool,
 ) -> Result<String, String> {
     match &attempt.engine {
-        TranslationAttemptEngine::TranslationApi { provider } => {
-            tokio::time::timeout(
-                MARKDOWN_TRANSLATION_TIMEOUT,
-                crate::core::translation_api::markdown::translate_markdown_with_provider(
-                    base_config,
-                    provider,
-                    content,
-                    &plan.target_language,
-                    Some(&attempt.cache_identity),
-                ),
-            )
-            .await
-            .map_err(|_| format!("{} timed out", attempt.provider_label))?
-        }
-        TranslationAttemptEngine::QualityAi { config } => {
-            crate::core::ai::mdtx_bridge::translate_skill_content(
-                config,
+        TranslationAttemptEngine::TranslationApi { provider } => tokio::time::timeout(
+            MARKDOWN_TRANSLATION_TIMEOUT,
+            crate::core::translation_api::markdown::translate_markdown_with_provider(
+                base_config,
+                provider,
                 content,
-                force_refresh,
-            )
-            .await
-            .and_then(|translated| {
-                validate_translated_text(&plan.target_language, content, translated, attempt)
-            })
+                &plan.target_language,
+                Some(&attempt.cache_identity),
+            ),
+        )
+        .await
+        .map_err(|_| format!("{} timed out", attempt.provider_label))?,
+        TranslationAttemptEngine::QualityAi { config } => {
+            crate::core::ai::mdtx_bridge::translate_skill_content(config, content, force_refresh)
+                .await
+                .and_then(|translated| {
+                    validate_translated_text(&plan.target_language, content, translated, attempt)
+                })
         }
     }
 }
@@ -1011,8 +1005,6 @@ pub async fn ai_translate_skill_stream(
     Err(message)
 }
 
-
-
 #[tauri::command]
 pub async fn ai_translate_short_text_stream_with_source(
     window: tauri::Window,
@@ -1274,7 +1266,8 @@ pub async fn ai_batch_process_skills(
         // Translate in chunks of BATCH_DESC_CHUNK_SIZE
         for chunk in desc_items.chunks(BATCH_DESC_CHUNK_SIZE) {
             let texts: Vec<&str> = chunk.iter().map(|(_, d)| d.as_str()).collect();
-            match ai_provider::translate_short_texts_batch(&batch_translation_config, &texts).await {
+            match ai_provider::translate_short_texts_batch(&batch_translation_config, &texts).await
+            {
                 Ok(translations) => {
                     for (j, (_idx, original_desc)) in chunk.iter().enumerate() {
                         if let Some(translated) = translations.get(j) {
@@ -1428,7 +1421,10 @@ pub async fn ai_batch_process_skills(
 
 #[cfg(test)]
 mod tests {
-    use super::{assemble_sections_with_cache, split_markdown_sections};
+    use super::{
+        assemble_sections_with_cache, content_hash, is_markdown_heading,
+        maybe_fix_trailing_newline, split_markdown_sections,
+    };
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
@@ -1576,5 +1572,73 @@ mod tests {
 
         assert_eq!(translate_calls.lock().expect("translate lock").len(), 2);
         assert_eq!(result, "T\nT\n");
+    }
+
+    #[test]
+    fn content_hash_is_deterministic() {
+        let h1 = content_hash("hello world");
+        let h2 = content_hash("hello world");
+        let h3 = content_hash("different");
+        assert_eq!(h1, h2);
+        assert_ne!(h1, h3);
+    }
+
+    #[test]
+    fn maybe_fix_trailing_newline_adds_when_needed() {
+        let source = "hello\n";
+        let translated = "world";
+        assert_eq!(maybe_fix_trailing_newline(source, translated), "world\n");
+    }
+
+    #[test]
+    fn maybe_fix_trailing_newline_leaves_when_not_needed() {
+        let source = "hello";
+        let translated = "world";
+        assert_eq!(maybe_fix_trailing_newline(source, translated), "world");
+    }
+
+    #[test]
+    fn maybe_fix_trailing_newline_leaves_when_already_present() {
+        let source = "hello\n";
+        let translated = "world\n";
+        assert_eq!(maybe_fix_trailing_newline(source, translated), "world\n");
+    }
+
+    #[test]
+    fn split_markdown_sections_empty() {
+        let sections = split_markdown_sections("");
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0], "");
+    }
+
+    #[test]
+    fn split_markdown_sections_single_section() {
+        let content = "# Title\nSome text.\n";
+        let sections = split_markdown_sections(content);
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0], content);
+    }
+
+    #[test]
+    fn split_markdown_sections_multiple_headings() {
+        let content = "# A\ntext a\n# B\ntext b\n";
+        let sections = split_markdown_sections(content);
+        assert_eq!(sections.len(), 2);
+        assert!(sections[0].contains("# A"));
+        assert!(sections[1].contains("# B"));
+    }
+
+    #[test]
+    fn is_markdown_heading_valid() {
+        assert!(is_markdown_heading("# Title"));
+        assert!(is_markdown_heading("###### Small"));
+    }
+
+    #[test]
+    fn is_markdown_heading_invalid() {
+        assert!(!is_markdown_heading("Title"));
+        assert!(!is_markdown_heading("####### TooMany"));
+        assert!(!is_markdown_heading("#NoSpace"));
+        assert!(!is_markdown_heading(""));
     }
 }

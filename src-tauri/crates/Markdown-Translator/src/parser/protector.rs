@@ -10,14 +10,12 @@ static RE_BLOCKQUOTE_PREFIX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?m)^((?:>\s?)+)").unwrap());
 static RE_LIST_PREFIX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?m)^(\s*(?:[-+*]|\d+\.)\s+)").unwrap());
-static RE_INLINE_CODE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"`[^`\n]+`").unwrap());
+static RE_INLINE_CODE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`[^`\n]+`").unwrap());
 static RE_HTML_TAG: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"</?[a-zA-Z][^>\n]*?>").unwrap());
 static RE_LINK_URL: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(!?\[[^\]]*]\()([^)]+)(\))").unwrap());
-static RE_BARE_URL: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"https?://[^\s)>]+").unwrap());
+static RE_BARE_URL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"https?://[^\s)>]+").unwrap());
 static RE_LEADING_PLACEHOLDERS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(?:\{\{[A-Z_0-9]+\}\})+").unwrap());
 
@@ -29,8 +27,11 @@ pub fn protect(segment: &Segment) -> Segment {
 
     // Helper: store a match and return its placeholder.
     let mut store = |value: &str, span_type: SpanType| -> String {
-        let placeholder =
-            format!("{{{{{ty}_{i}}}}}", ty = span_type_tag(&span_type), i = spans.len());
+        let placeholder = format!(
+            "{{{{{ty}_{i}}}}}",
+            ty = span_type_tag(&span_type),
+            i = spans.len()
+        );
         spans.push(ProtectedSpan {
             placeholder: placeholder.clone(),
             original: value.to_owned(),
@@ -41,19 +42,29 @@ pub fn protect(segment: &Segment) -> Segment {
 
     // Order matters: heading/blockquote/list prefixes first, then inline elements.
     text = RE_HEADING_PREFIX
-        .replace_all(&text, |caps: &regex::Captures| store(&caps[1], SpanType::Md))
+        .replace_all(&text, |caps: &regex::Captures| {
+            store(&caps[1], SpanType::Md)
+        })
         .into_owned();
     text = RE_BLOCKQUOTE_PREFIX
-        .replace_all(&text, |caps: &regex::Captures| store(&caps[1], SpanType::Md))
+        .replace_all(&text, |caps: &regex::Captures| {
+            store(&caps[1], SpanType::Md)
+        })
         .into_owned();
     text = RE_LIST_PREFIX
-        .replace_all(&text, |caps: &regex::Captures| store(&caps[1], SpanType::Md))
+        .replace_all(&text, |caps: &regex::Captures| {
+            store(&caps[1], SpanType::Md)
+        })
         .into_owned();
     text = RE_INLINE_CODE
-        .replace_all(&text, |caps: &regex::Captures| store(&caps[0], SpanType::Code))
+        .replace_all(&text, |caps: &regex::Captures| {
+            store(&caps[0], SpanType::Code)
+        })
         .into_owned();
     text = RE_HTML_TAG
-        .replace_all(&text, |caps: &regex::Captures| store(&caps[0], SpanType::Html))
+        .replace_all(&text, |caps: &regex::Captures| {
+            store(&caps[0], SpanType::Html)
+        })
         .into_owned();
     // Links: protect the URL part only, keep the bracket structure.
     text = RE_LINK_URL
@@ -63,7 +74,9 @@ pub fn protect(segment: &Segment) -> Segment {
         })
         .into_owned();
     text = RE_BARE_URL
-        .replace_all(&text, |caps: &regex::Captures| store(&caps[0], SpanType::Url))
+        .replace_all(&text, |caps: &regex::Captures| {
+            store(&caps[0], SpanType::Url)
+        })
         .into_owned();
 
     Segment {

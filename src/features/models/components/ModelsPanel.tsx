@@ -1,11 +1,12 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { FileCode2, Loader2, Package } from "lucide-react";
+import { CheckCircle2, FileCode2, Loader2, Package } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SKILLSTAR_MODELS_PENDING_APP_KEY } from "../../../hooks/useNavigation";
 import { openExternalUrl } from "../../../lib/externalOpen";
 import { DRAG_CSS, useDragReorder } from "../hooks/useDragReorder";
 import { type ProviderEntry, useModelProviders, useOpenCodeNativeProviders } from "../hooks/useModelProviders";
+import { useProviderHealthDashboard } from "../hooks/useProviderHealthDashboard";
 import { AppCapsuleSwitcher, type ModelAppId } from "./AppCapsuleSwitcher";
 import { BehaviorStrip } from "./BehaviorStrip";
 import { CodexAccountSection } from "./CodexAccountSection";
@@ -14,6 +15,7 @@ import { GeminiAccountSection } from "./GeminiAccountSection";
 import { OpenCodeQuickLinks } from "./OpenCodeQuickLinks";
 import { PresetCatalog } from "./PresetCatalog";
 import { ProviderCard } from "./ProviderCard";
+import { ProviderHealthDashboardCard } from "./ProviderHealthDashboard";
 import { AgentIcon } from "./shared/ProviderIcon";
 
 function readInitialModelsApp(): ModelAppId {
@@ -63,6 +65,7 @@ export function ModelsPanel() {
   const genericProviders = useModelProviders(activeApp);
   const opencodeProviders = useOpenCodeNativeProviders();
   const providers = activeApp === "opencode" ? opencodeProviders : genericProviders;
+  const healthDashboard = useProviderHealthDashboard(activeApp);
   const [localProviders, setLocalProviders] = useState<ProviderEntry[]>([]);
   const localProvidersRef = useRef(localProviders);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -265,6 +268,27 @@ export function ModelsPanel() {
                   )}
                   {activeApp === "gemini" && <GeminiAccountSection onAccountSwitched={handleAccountSwitched} />}
 
+                  {activeApp !== "opencode" && providers.sortedProviders.length > 0 && (
+                    <UnifiedProviderSwitcher
+                      appColor={appColor}
+                      providers={providers.sortedProviders}
+                      currentId={providers.currentId}
+                      saving={providers.saving}
+                      onSwitch={providers.switchTo}
+                    />
+                  )}
+
+                  {activeApp !== "opencode" && (
+                    <ProviderHealthDashboardCard
+                      dashboard={healthDashboard.dashboard}
+                      loading={healthDashboard.loading}
+                      refreshing={healthDashboard.refreshing}
+                      onRefresh={healthDashboard.refresh}
+                      appId={activeApp}
+                      appColor={appColor}
+                    />
+                  )}
+
                   <div className="space-y-3" ref={listContainerRef}>
                     <AnimatePresence>
                       {localProviders
@@ -336,6 +360,61 @@ export function ModelsPanel() {
             </>
           );
         })()}
+    </div>
+  );
+}
+
+function UnifiedProviderSwitcher({
+  appColor,
+  providers,
+  currentId,
+  saving,
+  onSwitch,
+}: {
+  appColor: string;
+  providers: ProviderEntry[];
+  currentId: string | null;
+  saving: boolean;
+  onSwitch: (providerId: string) => void | Promise<void>;
+}) {
+  const currentProvider = currentId ? providers.find((provider) => provider.id === currentId) : null;
+
+  return (
+    <div className="rounded-2xl border border-border/70 bg-card/60 backdrop-blur-sm px-4 py-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-2 min-w-0">
+          <span
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl border"
+            style={{ borderColor: `${appColor}40`, backgroundColor: `${appColor}14`, color: appColor }}
+          >
+            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+          </span>
+          <div className="min-w-0">
+            <div className="text-xs font-semibold text-foreground">统一供应商切换</div>
+            <div className="truncate text-[11px] text-muted-foreground">
+              {currentProvider ? `当前：${currentProvider.name}` : "当前：OAuth / 账户授权"}
+            </div>
+          </div>
+        </div>
+
+        <select
+          value={currentId ?? ""}
+          disabled={saving}
+          onChange={(event) => {
+            const next = event.target.value;
+            if (next) void onSwitch(next);
+          }}
+          className="h-8 min-w-0 rounded-xl border border-border bg-background/80 px-3 text-xs text-foreground outline-none transition-colors hover:bg-muted/40 focus:border-primary disabled:cursor-not-allowed disabled:opacity-60 sm:w-64"
+          aria-label="切换模型供应商"
+        >
+          {!currentId && <option value="">OAuth / 账户授权</option>}
+          {providers.map((provider) => (
+            <option key={provider.id} value={provider.id}>
+              {provider.name}
+            </option>
+          ))}
+        </select>
+      </div>
     </div>
   );
 }

@@ -1,0 +1,15 @@
+[package]
+name = "skillstar-terminal"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94.1"
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+skillstar-infra = { version = "0.1.0", path = "../skillstar-infra" }
+skillstar-model-config = { version = "0.1.0", path = "../skillstar-model-config" }
+tracing = "0.1"
+which = "8.0.2"

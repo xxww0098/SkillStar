@@ -102,7 +102,9 @@ impl LinePipeline {
             return Ok(extracted.lines);
         }
 
-        let batch = self.translate_batch(&extracted, context, target_lang, mode).await?;
+        let batch = self
+            .translate_batch(&extracted, context, target_lang, mode)
+            .await?;
         let translated_lines = self.apply_translations(&extracted, &batch);
         let restored_lines = self.restore_placeholders(segments, &translated_lines);
 
@@ -123,7 +125,9 @@ impl LinePipeline {
         _mode: PipelineMode,
     ) -> Result<FragmentTranslationBatch> {
         if extracted.fragments.is_empty() {
-            return Ok(FragmentTranslationBatch { translations: vec![] });
+            return Ok(FragmentTranslationBatch {
+                translations: vec![],
+            });
         }
 
         let (system, user) = self.build_batch_prompt(extracted, context, target_lang);
@@ -208,7 +212,10 @@ FRAGMENT|fragment_id|translated_text"#,
                 let translated = &line[9 + second_pipe + 1..];
 
                 if !frag_ids.contains(&frag_id) {
-                    warn!(fragment_id = frag_id, "unknown fragment ID in response, skipping");
+                    warn!(
+                        fragment_id = frag_id,
+                        "unknown fragment ID in response, skipping"
+                    );
                     continue;
                 }
 
@@ -260,10 +267,7 @@ FRAGMENT|fragment_id|translated_text"#,
 
                     for frag in sorted_frags {
                         if let Some(&translated) = frag_map.get(frag.fragment_id.as_str()) {
-                            new_line.replace_range(
-                                frag.start_offset..frag.end_offset,
-                                translated,
-                            );
+                            new_line.replace_range(frag.start_offset..frag.end_offset, translated);
                         }
                     }
                     *line = new_line;
@@ -289,14 +293,19 @@ FRAGMENT|fragment_id|translated_text"#,
 
     /// Restore protected placeholders in translated lines using segment metadata.
     fn restore_placeholders(&self, segments: &[Segment], lines: &[String]) -> Vec<String> {
-        let seg_by_id: HashMap<&str, &Segment> =
-            segments.iter().map(|s| (s.segment_id.as_str(), s)).collect();
+        let seg_by_id: HashMap<&str, &Segment> = segments
+            .iter()
+            .map(|s| (s.segment_id.as_str(), s))
+            .collect();
 
         let mut seg_ranges: HashMap<&str, (usize, usize)> = HashMap::new();
         let mut current_line = 0usize;
         for seg in segments {
             let line_count = seg.source_text.lines().count();
-            seg_ranges.insert(seg.segment_id.as_str(), (current_line, current_line + line_count - 1));
+            seg_ranges.insert(
+                seg.segment_id.as_str(),
+                (current_line, current_line + line_count - 1),
+            );
             current_line += line_count;
         }
 
@@ -357,7 +366,12 @@ fn extract_fragments_impl(segments: &[Segment]) -> ExtractedFragments {
             );
 
             for mut frag in line_frags {
-                frag.fragment_id = format!("{}-{}-{}", seg.segment_id, line_idx, frag.text.chars().take(20).collect::<String>());
+                frag.fragment_id = format!(
+                    "{}-{}-{}",
+                    seg.segment_id,
+                    line_idx,
+                    frag.text.chars().take(20).collect::<String>()
+                );
                 frag.segment_id = seg.segment_id.clone();
                 frag.line_index = line_idx;
                 all_fragments.push(frag);
@@ -469,7 +483,11 @@ fn detect_prefix_len(line: &str) -> usize {
         return 2;
     }
     // Unordered list: - /*/+ followed by space
-    if let Some(rest) = line.strip_prefix('-').or_else(|| line.strip_prefix('*')).or_else(|| line.strip_prefix('+')) {
+    if let Some(rest) = line
+        .strip_prefix('-')
+        .or_else(|| line.strip_prefix('*'))
+        .or_else(|| line.strip_prefix('+'))
+    {
         if rest.starts_with(' ') || rest.is_empty() {
             return 1 + rest.len() - rest.trim_start_matches(' ').len();
         }
@@ -509,7 +527,11 @@ fn isolate_translatable_impl(
         if start > search_from {
             let chunk = &text[search_from..start];
             if !chunk.trim().is_empty() {
-                result.push((chunk.to_string(), base_offset + search_from, base_offset + start));
+                result.push((
+                    chunk.to_string(),
+                    base_offset + search_from,
+                    base_offset + start,
+                ));
             }
         }
         search_from = end;
@@ -518,7 +540,11 @@ fn isolate_translatable_impl(
     if search_from < text.len() {
         let chunk = &text[search_from..];
         if !chunk.trim().is_empty() {
-            result.push((chunk.to_string(), base_offset + search_from, base_offset + text.len()));
+            result.push((
+                chunk.to_string(),
+                base_offset + search_from,
+                base_offset + text.len(),
+            ));
         }
     }
 
@@ -564,9 +590,9 @@ mod tests {
     fn detect_heading_prefix() {
         // Use position of first space as prefix length
         assert_eq!(detect_prefix_len("## Hello World"), 3); // "## "
-        assert_eq!(detect_prefix_len("# Title"), 2);         // "# "
-        assert_eq!(detect_prefix_len("> A quote"), 2);      // "> "
-        assert_eq!(detect_prefix_len("- item"), 2);          // "- "
+        assert_eq!(detect_prefix_len("# Title"), 2); // "# "
+        assert_eq!(detect_prefix_len("> A quote"), 2); // "> "
+        assert_eq!(detect_prefix_len("- item"), 2); // "- "
         assert_eq!(detect_prefix_len("Just text"), 0);
     }
 
@@ -594,7 +620,11 @@ mod tests {
 
     #[test]
     fn extract_fragments_impl_single_segment() {
-        let seg = make_segment("## Hello World\n\nThis is a paragraph.", "seg-1", NodeType::Paragraph);
+        let seg = make_segment(
+            "## Hello World\n\nThis is a paragraph.",
+            "seg-1",
+            NodeType::Paragraph,
+        );
         let extracted = extract_fragments_impl(&[seg]);
 
         // 3 lines: "## Hello World", "", "This is a paragraph."
@@ -655,7 +685,9 @@ mod tests {
 
     #[test]
     fn fragment_translation_batch_empty() {
-        let batch = FragmentTranslationBatch { translations: vec![] };
+        let batch = FragmentTranslationBatch {
+            translations: vec![],
+        };
         assert!(batch.translations.is_empty());
     }
 }
