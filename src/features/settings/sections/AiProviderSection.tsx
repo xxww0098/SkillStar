@@ -1,0 +1,255 @@
+import { CheckCircle, ChevronDown, Loader2, Sparkles, XCircle, Zap } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { Button } from "../../../components/ui/button";
+import { Input } from "../../../components/ui/input";
+import { Switch } from "../../../components/ui/switch";
+import { cn } from "../../../lib/utils";
+import type { AiConfig } from "../../../types";
+
+interface AiProviderSectionProps {
+  localAiConfig: AiConfig;
+  ready: boolean;
+  aiExpanded: boolean;
+  aiSaving: boolean;
+  aiSaved: boolean;
+  aiTesting: boolean;
+  aiTestResult: "success" | "error" | null;
+  aiTestLatency: number | null;
+  onToggleExpanded: () => void;
+  onEnabledChange: (enabled: boolean) => void;
+  onConfigChange: (next: AiConfig) => void;
+  onTestConnection: () => void;
+}
+
+const DEFAULT_LOCAL_BASE_URL = "http://127.0.0.1:11434/v1";
+const DEFAULT_LOCAL_MODEL = "llama3.1:8b";
+
+export function AiProviderSection({
+  localAiConfig,
+  ready,
+  aiExpanded,
+  aiSaving,
+  aiSaved,
+  aiTesting,
+  aiTestResult,
+  aiTestLatency,
+  onToggleExpanded,
+  onEnabledChange,
+  onConfigChange,
+  onTestConnection,
+}: AiProviderSectionProps) {
+  const { t } = useTranslation();
+
+  const clampConcurrency = (value: number) => Math.min(20, Math.max(1, value || 1));
+
+  const badgeLabel = localAiConfig.enabled
+    ? `${t("settings.localOllama", { defaultValue: "Local Model (Ollama)" })} · ${localAiConfig.model}`
+    : null;
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-3 px-1">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0 border border-emerald-500/20">
+            <Sparkles className="w-4 h-4 text-emerald-500" />
+          </div>
+          <h2 className="text-sm font-semibold text-foreground tracking-tight">{t("settings.aiProvider")}</h2>
+          {badgeLabel && (
+            <span className="text-xs text-muted-foreground ml-2 px-2 py-0.5 rounded-md bg-muted/50 border border-border">
+              {badgeLabel}
+            </span>
+          )}
+        </div>
+
+        {ready ? (
+          <Switch checked={localAiConfig.enabled} onCheckedChange={onEnabledChange} disabled={aiSaving} />
+        ) : (
+          <div className="h-5 w-9 rounded-full border border-border bg-muted/60" />
+        )}
+      </div>
+
+      <div
+        className={cn(
+          "rounded-xl border border-border overflow-hidden transition-colors",
+          localAiConfig.enabled ? "bg-card" : "bg-card/50",
+        )}
+      >
+        <button
+          type="button"
+          onClick={onToggleExpanded}
+          className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer"
+        >
+          <span className="text-sm font-medium text-foreground">
+            {t("settings.aiConfigTitle", { defaultValue: "AI Summary & Scan" })}
+          </span>
+          <ChevronDown
+            className={cn(
+              "w-4 h-4 text-muted-foreground transition-transform duration-200",
+              !aiExpanded && "-rotate-90",
+            )}
+          />
+        </button>
+
+        {aiExpanded && (
+          <div className="px-4 pb-4 pt-1 border-t border-border space-y-3">
+            <div className="grid grid-cols-1 gap-3">
+              <div>
+                <label htmlFor="ai-provider-base-url" className="text-xs text-muted-foreground block mb-1">
+                  {t("settings.baseUrl")}
+                </label>
+                <Input
+                  id="ai-provider-base-url"
+                  type="text"
+                  value={localAiConfig.base_url}
+                  onChange={(e) =>
+                    onConfigChange({
+                      ...localAiConfig,
+                      api_format: "local",
+                      provider_ref: null,
+                      base_url: e.target.value,
+                      api_key: "",
+                      local_preset: {
+                        ...localAiConfig.local_preset,
+                        base_url: e.target.value,
+                        api_key: "",
+                        model: localAiConfig.model,
+                      },
+                    })
+                  }
+                  placeholder={DEFAULT_LOCAL_BASE_URL}
+                  className="font-mono"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="ai-provider-model" className="text-xs text-muted-foreground block mb-1">
+                  {t("settings.model")}
+                </label>
+                <Input
+                  id="ai-provider-model"
+                  type="text"
+                  value={localAiConfig.model}
+                  onChange={(e) =>
+                    onConfigChange({
+                      ...localAiConfig,
+                      api_format: "local",
+                      provider_ref: null,
+                      api_key: "",
+                      model: e.target.value,
+                      local_preset: {
+                        ...localAiConfig.local_preset,
+                        base_url: localAiConfig.base_url,
+                        api_key: "",
+                        model: e.target.value,
+                      },
+                    })
+                  }
+                  placeholder={DEFAULT_LOCAL_MODEL}
+                />
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-border/40">
+              <div className="flex items-center gap-1.5 mb-2.5">
+                <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                  {t("settings.scanOptimization", { defaultValue: "AI Optimization" })}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="ai-provider-context-window" className="text-xs text-muted-foreground block mb-1">
+                    {t("settings.contextWindow", { defaultValue: "Context Window" })}
+                  </label>
+                  <div className="flex items-center gap-2.5">
+                    <Input
+                      id="ai-provider-context-window"
+                      type="number"
+                      min={1}
+                      max={2048}
+                      step={1}
+                      value={localAiConfig.context_window_k}
+                      onChange={(e) => {
+                        const val = Math.min(2048, Math.max(1, Number(e.target.value) || 128));
+                        onConfigChange({ ...localAiConfig, context_window_k: val });
+                      }}
+                      className="w-24 font-mono tabular-nums"
+                    />
+                    <span className="text-xs font-mono text-foreground tabular-nums shrink-0">K</span>
+                    <span className="text-[10px] text-muted-foreground">tokens</span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground/60 mt-1">
+                    {t("settings.contextWindowHint", { defaultValue: "Your model's max context window." })}
+                  </p>
+                </div>
+
+                <div>
+                  <label htmlFor="ai-provider-concurrency" className="text-xs text-muted-foreground block mb-1">
+                    {t("settings.aiConcurrency", { defaultValue: "AI Concurrency" })}
+                  </label>
+                  <div className="flex items-center gap-2.5">
+                    <Input
+                      id="ai-provider-concurrency"
+                      type="number"
+                      min={1}
+                      max={20}
+                      step={1}
+                      value={localAiConfig.max_concurrent_requests}
+                      onChange={(e) =>
+                        onConfigChange({
+                          ...localAiConfig,
+                          max_concurrent_requests: clampConcurrency(Number(e.target.value)),
+                        })
+                      }
+                      className="w-20 font-mono tabular-nums"
+                    />
+                  </div>
+                  <p className="text-[10px] text-muted-foreground/60 mt-1">
+                    {t("settings.aiConcurrencyOverride", {
+                      defaultValue: "Adjust down if you encounter API rate limits.",
+                    })}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-1">
+              <div className="flex items-center min-h-5">
+                {aiSaving ? (
+                  <span className="text-xs text-muted-foreground">{t("common.saving")}</span>
+                ) : aiSaved ? (
+                  <span className="text-xs text-success">{t("common.saved")}</span>
+                ) : null}
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onTestConnection}
+                disabled={aiSaving || aiTesting || !localAiConfig.enabled}
+                className="min-w-[112px] px-3 relative"
+              >
+                <div className="flex items-center justify-center gap-1.5 min-w-max">
+                  {aiTesting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  {!aiTesting && aiTestResult === "success" && <CheckCircle className="w-3.5 h-3.5 text-success" />}
+                  {!aiTesting && aiTestResult === "error" && <XCircle className="w-3.5 h-3.5 text-destructive" />}
+                  {!aiTesting && !aiTestResult && <Zap className="w-3.5 h-3.5" />}
+
+                  <span>
+                    {aiTesting
+                      ? t("common.testing")
+                      : aiTestResult === "success" && typeof aiTestLatency === "number"
+                        ? `${t("common.connected")} (${aiTestLatency}ms)`
+                        : aiTestResult === "success"
+                          ? t("common.connected")
+                          : aiTestResult === "error"
+                            ? t("common.failed")
+                            : t("settings.testConnection")}
+                  </span>
+                </div>
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}

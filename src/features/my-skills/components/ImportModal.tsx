@@ -1,0 +1,576 @@
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { Download, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { tauriInvoke } from "../../../lib/ipc";
+import {
+  extractShareCode,
+  looksLikeShareCode,
+  parseShareCode,
+  type ShareCodeData,
+  type ShareCodeType,
+} from "../../../lib/shareCode";
+import type { RepoHistoryEntry, ScanResult, ShareCodeSkillInput, SkillInstallTarget } from "../../../types";
+import {
+  CompletedPhase,
+  ErrorPhase,
+  InputURLPhase,
+  LoadingPhase,
+  SelectSkillsPhase,
+  ShareCodePreviewPhase,
+} from "./import-modal";
+
+type Phase =
+  | "inputURL"
+  | "scanning"
+  | "selectSkills"
+  | "installing"
+  | "completed"
+  | "error"
+  | "shareCodePreview"
+  | "shareCodeInstalling";
+
+type ShareCodeSkipReason = "repo_missing" | "no_source" | "install_failed";
+
+interface ShareCodeSkippedSkill {
+  name: string;
+  reason: ShareCodeSkipReason;
+}
+
+/** Summary shape expected by {@link CompletedPhase}. */
+interface ShareCodeInstallSummary {
+  requestedCount: number;
+  existingNames: string[];
+  installedNames: string[];
+  skipped: ShareCodeSkippedSkill[];
+}
+
+function normalizeSkillName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+export interface ImportModalProps {
+  open: boolean;
+  onClose: () => void;
+  onInstalled: (installedNames: string[]) => void;
+  /** Pre-fill URL and auto-scan (for Marketplace Install flow) */
+  initialUrl?: string;
+  autoScan?: boolean;
+  /** When set, only pre-select this specific skill after scan (instead of all) */
+  preSelectedSkill?: string;
+  /** Callback to trigger local file (.ags) import flow */
+  onPickLocalFile?: () => void;
+  /** Callback to pack installed skills into a deck immediately */
+  onPackGroup?: (skillNames: string[]) => void;
+  /** Pre-filled share code from clipboard auto-detect */
+  initialShareCode?: string;
+  /** Called when the share code is consumed */
+  onClearShareCode?: () => void;
+}
+
+export function ImportModal({
+  open: isOpen,
+  onClose,
+  onInstalled,
+  initialUrl,
+  autoScan,
+  preSelectedSkill,
+  onPickLocalFile,
+  onPackGroup,
+  initialShareCode,
+  onClearShareCode,
+}: ImportModalProps) {
+  const { t } = useTranslation();
+  const prefersReducedMotion = useReducedMotion();
+
+  // Keep a ref so handleScan always reads the latest value
+  // (avoids stale closure when called from setTimeout)
+  const preSelectedSkillRef = useRef(preSelectedSkill);
+  preSelectedSkillRef.current = preSelectedSkill;
+
+  // ── State ──────────────────────────────────────────────────────
+  const [phase, setPhase] = useState<Phase>("inputURL");
+  const [urlInput, setUrlInput] = useState("");
+  const [fullDepthScan, setFullDepthScan] = useState(false);
+  const [scanResult, setScanResult] = useState<ScanResult | null>(null);
+  const [selectedSkills, setSelectedSkills] = useState<Set<string>>(new Set());
+  const [history, setHistory] = useState<RepoHistoryEntry[]>([]);
+  const [progressMsg, setProgressMsg] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [installedCount, setInstalledCount] = useState(0);
+  // Share code state
+  const [shareCodeData, setShareCodeData] = useState<ShareCodeData | null>(null);
+  const [shareCodePassword, setShareCodePassword] = useState("");
+  const [shareCodeError, setShareCodeError] = useState("");
+  const [shareCodeDetected, setShareCodeDetected] = useState(false);
+  const [shareCodeExistingNames, setShareCodeExistingNames] = useState<string[]>([]);
+  const [shareCodeSummary, setShareCodeSummary] = useState<ShareCodeInstallSummary | null>(null);
+  const [shareCodeType, setShareCodeType] = useState<ShareCodeType>("skills");
+
+  // ── Reset on open ──────────────────────────────────────────────
+  useEffect(() => {
+    if (isOpen) {
+      setShareCodeData(null);
+      setShareCodePassword("");
+      setShareCodeError("");
+      setScanResult(null);
+      setSelectedSkills(new Set());
+      setProgressMsg("");
+      setErrorMsg("");
+      setInstalledCount(0);
+      setShareCodeExistingNames([]);
+      setShareCodeSummary(null);
+      setFullDepthScan(false);
+
+      // If opening with a share code (clipboard detect or prop), go directly to share code flow
+      if (initialShareCode && looksLikeShareCode(initialShareCode)) {
+        setPhase("inputURL");
+        setUrlInput(initialShareCode);
+        setShareCodeDetected(true);
+        // Auto-parse after slight delay for animation
+        setTimeout(() => handleParseShareCode(initialShareCode), 150);
+        return;
+      }
+
+      setPhase("inputURL");
+      setUrlInput(initialUrl || "");
+      setShareCodeDetected(false);
+
+      // Load history
+      tauriInvoke("list_repo_history")
+        .then(setHistory)
+        .catch(() => setHistory([]));
+
+      // Auto-scan if initialUrl is provided
+      if (initialUrl && autoScan) {
+        setTimeout(() => handleScan(initialUrl), 100);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
+  const loadInstalledNameSet = useCallback(async () => {
+    try {
+      const installed = await tauriInvoke("list_skills");
+      return new Set(installed.map((skill) => normalizeSkillName(skill.name)));
+    } catch (e) {
+      console.warn("[ShareCode] Failed to list installed skills:", e);
+      return new Set<string>();
+    }
+  }, []);
+
+  const collectExistingNames = useCallback((data: ShareCodeData, installedSet: Set<string>) => {
+    const existingNames: string[] = [];
+    const seen = new Set<string>();
+
+    for (const skill of data.s) {
+      const name = skill.n?.trim();
+      if (!name) continue;
+      const key = normalizeSkillName(name);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (installedSet.has(key)) {
+        existingNames.push(name);
+      }
+    }
+
+    return existingNames;
+  }, []);
+
+  // ── Share Code Parse ─────────────────────────────────────────
+  const handleParseShareCode = useCallback(
+    async (code: string) => {
+      setShareCodeError("");
+      setShareCodeSummary(null);
+      setProgressMsg(t("shareCodeImport.parsing"));
+      try {
+        // Extract raw share code from formatted message or use as-is
+        const rawCode = extractShareCode(code);
+        const { data, type } = await parseShareCode(rawCode);
+        setShareCodeData(data);
+        setShareCodeType(type);
+        const installedSet = await loadInstalledNameSet();
+        setShareCodeExistingNames(collectExistingNames(data, installedSet));
+        setPhase("shareCodePreview");
+      } catch (e) {
+        const errMsg = String(e);
+        if (errMsg.includes("expired")) {
+          setShareCodeError(errMsg.replace(/^Error:\s*/, ""));
+          setShareCodeData(null);
+          setShareCodeExistingNames([]);
+        } else {
+          setShareCodeError(errMsg);
+          setPhase("shareCodePreview");
+          setShareCodeData(null);
+          setShareCodeExistingNames([]);
+        }
+      }
+    },
+    [collectExistingNames, loadInstalledNameSet, t],
+  );
+
+  const handleShareCodeInstall = useCallback(async () => {
+    if (!shareCodeData) return;
+    setPhase("shareCodeInstalling");
+    setProgressMsg(t("shareCodeImport.installing"));
+
+    try {
+      const payload: ShareCodeSkillInput[] = shareCodeData.s.map((skill) => ({
+        n: skill.n,
+        u: skill.u ?? "",
+        c: skill.c,
+        p: skill.p,
+      }));
+
+      const summary = await tauriInvoke("install_from_share_code", {
+        skills: payload,
+      });
+
+      const installedTotal = [...summary.installed_names, ...summary.embedded_names];
+      const knownReasons: ReadonlyArray<ShareCodeSkipReason> = ["repo_missing", "no_source", "install_failed"];
+      const skipReason = (raw: string): ShareCodeSkipReason =>
+        (knownReasons as ReadonlyArray<string>).includes(raw) ? (raw as ShareCodeSkipReason) : "install_failed";
+
+      setShareCodeSummary({
+        requestedCount: summary.requested_count,
+        existingNames: summary.existing_names,
+        installedNames: installedTotal,
+        skipped: summary.skipped.map((entry) => ({
+          name: entry.name,
+          reason: skipReason(entry.reason),
+        })),
+      });
+      setShareCodeExistingNames(summary.existing_names);
+      setInstalledCount(installedTotal.length);
+      setPhase("completed");
+      if (installedTotal.length > 0) onInstalled(installedTotal);
+
+      // Deck share code → auto-create a local group entry for convenience.
+      if (shareCodeType === "deck" && shareCodeData.n) {
+        const sources: Record<string, string> = {};
+        for (const entry of shareCodeData.s) {
+          if (entry.u) sources[entry.n] = entry.u;
+        }
+        try {
+          await tauriInvoke("create_skill_group", {
+            name: shareCodeData.n,
+            description: shareCodeData.d || "",
+            icon: shareCodeData.i || "📦",
+            skills: shareCodeData.s.map((entry) => entry.n).filter(Boolean),
+            skillSources: sources,
+          });
+        } catch (e) {
+          console.warn("[ShareCode] Failed to auto-create deck:", e);
+        }
+      }
+
+      onClearShareCode?.();
+    } catch (e) {
+      setErrorMsg(String(e));
+      setPhase("error");
+    }
+  }, [onClearShareCode, onInstalled, shareCodeData, shareCodeType, t]);
+
+  // ── Smart input handler: detect share code in URL input ──────
+  const handleUrlInputChange = useCallback(
+    (value: string) => {
+      setUrlInput(value);
+      // Auto-detect share code when pasted (handle formatted messages too)
+      const extracted = extractShareCode(value.trim());
+      if (looksLikeShareCode(extracted)) {
+        setTimeout(() => handleParseShareCode(value.trim()), 50);
+      }
+    },
+    [handleParseShareCode],
+  );
+
+  // ── Scan ───────────────────────────────────────────────────────
+  const handleScan = useCallback(
+    async (url?: string, scanDepthOverride?: boolean) => {
+      const input = (url || urlInput).trim();
+      if (!input) return;
+      const useFullDepth = scanDepthOverride ?? fullDepthScan;
+
+      setPhase("scanning");
+      setProgressMsg(t("githubImportModal.cloning"));
+
+      try {
+        const result = await tauriInvoke("scan_github_repo", {
+          url: input,
+          fullDepth: useFullDepth,
+        });
+
+        if (result.skills.length === 0) {
+          setErrorMsg(t("githubImportModal.noSkillsFound"));
+          setPhase("error");
+          return;
+        }
+
+        setScanResult(result);
+
+        // Pre-select: if a specific skill was requested, only select that one;
+        // otherwise select all uninstalled skills.
+        const targetSkill = preSelectedSkillRef.current;
+        if (targetSkill) {
+          const match = result.skills.find((s) => s.id === targetSkill);
+          setSelectedSkills(match ? new Set([match.id]) : new Set());
+        } else {
+          const uninstalled = result.skills.filter((s) => !s.already_installed).map((s) => s.id);
+          setSelectedSkills(new Set(uninstalled));
+        }
+
+        setPhase("selectSkills");
+      } catch (e) {
+        setErrorMsg(String(e));
+        setPhase("error");
+      }
+    },
+    [fullDepthScan, t, urlInput],
+  );
+
+  const handleDeepScan = useCallback(() => {
+    if (!scanResult) return;
+    setFullDepthScan(true);
+    void handleScan(scanResult.source_url, true);
+  }, [handleScan, scanResult]);
+
+  // ── Adopt from local folder ───────────────────────────────────
+  const handlePickLocalFolder = useCallback(async () => {
+    try {
+      const selected = await openDialog({
+        directory: true,
+        multiple: false,
+        title: t("importModal.adoptFolderTitle", { defaultValue: "Pick a folder containing SKILL.md" }),
+      });
+      if (!selected) return;
+      const folderPath = typeof selected === "string" ? selected : selected[0];
+      if (!folderPath) return;
+
+      setPhase("installing");
+      setProgressMsg(t("importModal.adoptingFolder", { defaultValue: "Adopting local skills..." }));
+
+      const result = await tauriInvoke("adopt_local_folder", {
+        folderPath,
+      });
+
+      setInstalledCount(result.adopted.length);
+      setPhase("completed");
+      if (result.adopted.length > 0) {
+        onInstalled(result.adopted.map((s) => s.name));
+      }
+    } catch (e) {
+      setErrorMsg(String(e));
+      setPhase("error");
+    }
+  }, [onInstalled, t]);
+
+  // ── Install ────────────────────────────────────────────────────
+  const handleInstall = useCallback(
+    async (shouldPack: boolean = false) => {
+      // If it's an event (e.g. from onClick), it'll be an object. Check type.
+      const pack = typeof shouldPack === "boolean" ? shouldPack : false;
+
+      if (!scanResult || selectedSkills.size === 0) return;
+
+      setShareCodeSummary(null);
+      setPhase("installing");
+      setProgressMsg(t("githubImportModal.installing", { count: selectedSkills.size }));
+
+      const targets: SkillInstallTarget[] = scanResult.skills
+        .filter((s) => selectedSkills.has(s.id))
+        .map((s) => ({ id: s.id, folder_path: s.folder_path }));
+
+      try {
+        const installed = await tauriInvoke("install_from_scan", {
+          repoUrl: scanResult.source_url,
+          source: scanResult.source,
+          skills: targets,
+        });
+
+        setInstalledCount(installed.length);
+        setPhase("completed");
+        onInstalled(installed);
+
+        if (pack && onPackGroup) {
+          onPackGroup(installed);
+        }
+      } catch (e) {
+        setErrorMsg(String(e));
+        setPhase("error");
+      }
+    },
+    [scanResult, selectedSkills, onInstalled, onPackGroup],
+  );
+
+  // ── Helpers ────────────────────────────────────────────────────
+  const toggleSkill = (id: string) => {
+    setSelectedSkills((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const reset = () => {
+    setPhase("inputURL");
+    setUrlInput("");
+    setFullDepthScan(false);
+    setScanResult(null);
+    setSelectedSkills(new Set());
+    setProgressMsg("");
+    setErrorMsg("");
+    setInstalledCount(0);
+    setShareCodeData(null);
+    setShareCodePassword("");
+    setShareCodeError("");
+    setShareCodeDetected(false);
+    setShareCodeExistingNames([]);
+    setShareCodeSummary(null);
+    onClearShareCode?.();
+  };
+
+  const selectAll = (ids?: string[]) => {
+    if (!scanResult) return;
+    if (ids) {
+      setSelectedSkills((prev) => {
+        const next = new Set(prev);
+        ids.forEach((id) => next.add(id));
+        return next;
+      });
+    } else {
+      const all = scanResult.skills.filter((s) => !s.already_installed).map((s) => s.id);
+      setSelectedSkills(new Set(all));
+    }
+  };
+
+  const deselectAll = (ids?: string[]) => {
+    if (ids) {
+      setSelectedSkills((prev) => {
+        const next = new Set(prev);
+        ids.forEach((id) => next.delete(id));
+        return next;
+      });
+    } else {
+      setSelectedSkills(new Set());
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <>
+          {/* Backdrop */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: prefersReducedMotion ? 0.01 : 0.15 }}
+            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm"
+            onClick={onClose}
+          />
+
+          {/* Modal */}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96, y: 12 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.96, y: 12 }}
+            transition={{ duration: prefersReducedMotion ? 0.01 : 0.3, ease: [0.16, 1, 0.3, 1] }}
+            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg z-50"
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label={t("common.import", { defaultValue: "Import" })}
+              className="modal-surface"
+            >
+              {/* Top ambient glow */}
+              <div className="pointer-events-none absolute -left-20 -top-20 h-48 w-48 rounded-full bg-primary/20 blur-[60px] opacity-70" />
+              <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-accent/10 blur-[60px] opacity-70" />
+              <div className="relative z-10">
+                {/* Header */}
+                <div className="flex items-center justify-between px-6 pt-4 pb-3 shrink-0 border-b border-border/60">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center">
+                      <Download className="w-4 h-4 text-primary" />
+                    </div>
+                    <h2 className="text-heading-sm">{t("common.import", { defaultValue: "Import" })}</h2>
+                  </div>
+                  <button
+                    onClick={onClose}
+                    aria-label={t("common.close")}
+                    className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Body — phase content */}
+                <div className="flex-1 overflow-y-auto">
+                  {phase === "inputURL" && (
+                    <InputURLPhase
+                      urlInput={urlInput}
+                      setUrlInput={handleUrlInputChange}
+                      onScan={() => handleScan()}
+                      history={history}
+                      onSelectHistory={(entry) => {
+                        setUrlInput(entry.source);
+                        handleScan(entry.source);
+                      }}
+                      onPickLocalFile={onPickLocalFile}
+                      onPickLocalFolder={handlePickLocalFolder}
+                      shareCodeDetected={shareCodeDetected}
+                    />
+                  )}
+
+                  {phase === "scanning" && <LoadingPhase message={progressMsg} />}
+
+                  {phase === "selectSkills" && scanResult && (
+                    <SelectSkillsPhase
+                      skills={scanResult.skills}
+                      source={scanResult.source}
+                      selectedSkills={selectedSkills}
+                      onToggle={toggleSkill}
+                      onSelectAll={selectAll}
+                      onDeselectAll={deselectAll}
+                      onInstall={handleInstall}
+                      fullDepthEnabled={fullDepthScan}
+                      onDeepScan={handleDeepScan}
+                      hasPackGroup={!!onPackGroup}
+                    />
+                  )}
+
+                  {phase === "installing" && <LoadingPhase message={progressMsg} />}
+
+                  {phase === "completed" && (
+                    <CompletedPhase count={installedCount} summary={shareCodeSummary} onDone={onClose} />
+                  )}
+
+                  {phase === "error" && <ErrorPhase message={errorMsg} onRetry={reset} />}
+
+                  {phase === "shareCodePreview" && (
+                    <ShareCodePreviewPhase
+                      data={shareCodeData}
+                      error={shareCodeError}
+                      password={shareCodePassword}
+                      existingNames={shareCodeExistingNames}
+                      onPasswordChange={setShareCodePassword}
+                      onRetryWithPassword={() => handleParseShareCode(urlInput.trim())}
+                      onInstall={handleShareCodeInstall}
+                      onBack={reset}
+                    />
+                  )}
+
+                  {phase === "shareCodeInstalling" && <LoadingPhase message={progressMsg} />}
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+  );
+}

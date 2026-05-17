@@ -1,0 +1,771 @@
+/* DM Sans — variable font, bundled locally to avoid Google Fonts CDN dependency.
+   Source: https://github.com/google/fonts/tree/main/ofl/dmsans (OFL-1.1) */
+@font-face {
+  font-family: "DM Sans";
+  font-style: normal;
+  font-weight: 100 1000;
+  font-display: swap;
+  src: url("/fonts/DMSans-Variable.ttf") format("truetype");
+}
+@font-face {
+  font-family: "DM Sans";
+  font-style: italic;
+  font-weight: 100 1000;
+  font-display: swap;
+  src: url("/fonts/DMSans-Variable-Italic.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("/fonts/JetBrainsMono-Variable.ttf") format("truetype");
+}
+
+@plugin "@tailwindcss/typography";
+@import "tailwindcss";
+
+/* ========== SkillStar Dark Glassmorphism Design System ========== */
+
+@theme {
+  --color-background: #0a0a0f;
+  --color-foreground: #f4f4f5;
+  --color-primary: #3b82f6;
+  --color-primary-rgb: 59, 130, 246;
+  --color-warning-rgb: 245, 158, 11;
+  --color-success-rgb: 16, 185, 129;
+  --color-primary-hover: #60a5fa;
+  --color-primary-foreground: #ffffff;
+  --color-card: rgba(255, 255, 255, 0.05);
+  --color-card-hover: rgba(255, 255, 255, 0.08);
+  --color-card-foreground: #f4f4f5;
+  --color-border: rgba(255, 255, 255, 0.1);
+  --color-border-subtle: rgba(255, 255, 255, 0.06);
+  --color-muted: rgba(255, 255, 255, 0.08);
+  --color-muted-foreground: #a1a1aa;
+  --color-accent: rgba(59, 130, 246, 0.15);
+  --color-accent-foreground: #60a5fa;
+  --color-destructive: #ef4444;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-ai: #8b5cf6;
+  --color-ai-hover: #7c3aed;
+  --color-ai-foreground: #ffffff;
+  --color-ai-text: #c4b5fd;
+  --color-ai-text-hover: #ddd6fe;
+  --color-ai-border: rgba(139, 92, 246, 0.3);
+  --color-ai-border-hover: rgba(139, 92, 246, 0.5);
+  --color-ai-bg-hover: rgba(139, 92, 246, 0.1);
+  --color-ai-shadow: rgba(139, 92, 246, 0.08);
+  --color-sidebar: rgba(255, 255, 255, 0.03);
+  --color-sidebar-hover: rgba(255, 255, 255, 0.06);
+  --color-sidebar-active: rgba(59, 130, 246, 0.15);
+  --color-input: rgba(255, 255, 255, 0.05);
+  --color-input-border: rgba(255, 255, 255, 0.1);
+  --color-overlay: rgba(0, 0, 0, 0.4);
+  --color-shadow: rgba(0, 0, 0, 0.5);
+  --color-glass-border: rgba(255, 255, 255, 0.1);
+  --color-glass-ring: rgba(255, 255, 255, 0.05);
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --font-sans: "DM Sans", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+:root[data-bg-style="paper"] {
+  --color-background: #f5f7fb;
+  --color-foreground: #0f172a;
+  --color-success: #15803d;
+  --color-success-rgb: 21, 128, 61;
+  --color-card: #ffffff;
+  --color-card-hover: #f8fafc;
+  --color-card-foreground: #0f172a;
+  --color-border: rgba(15, 23, 42, 0.12);
+  --color-border-subtle: rgba(15, 23, 42, 0.06);
+  --color-muted: rgba(15, 23, 42, 0.06);
+  --color-muted-foreground: #64748b;
+  --color-accent: rgba(59, 130, 246, 0.1);
+  --color-accent-foreground: #2563eb;
+  --color-ai: #7c3aed;
+  --color-ai-hover: #6d28d9;
+  --color-ai-text: #6d28d9;
+  --color-ai-text-hover: #5b21b6;
+  --color-ai-border: rgba(109, 40, 217, 0.4);
+  --color-ai-border-hover: rgba(109, 40, 217, 0.7);
+  --color-ai-bg-hover: rgba(109, 40, 217, 0.1);
+  --color-ai-shadow: rgba(109, 40, 217, 0.15);
+  --color-sidebar: rgba(255, 255, 255, 0.9);
+  --color-sidebar-hover: #ffffff;
+  --color-sidebar-active: rgba(59, 130, 246, 0.15);
+  --color-input: #ffffff;
+  --color-input-border: rgba(15, 23, 42, 0.12);
+  --color-primary-hover: #2563eb;
+  --color-overlay: rgba(15, 23, 42, 0.3);
+  --color-shadow: rgba(15, 23, 42, 0.15);
+  --color-glass-border: rgba(15, 23, 42, 0.12);
+  --color-glass-ring: rgba(15, 23, 42, 0.06);
+}
+
+/* ========== Base ========== */
+
+@layer base {
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background-color: var(--color-background);
+    background-image:
+      radial-gradient(ellipse at 20% 0%, rgba(59, 130, 246, 0.08) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 100%, rgba(139, 92, 246, 0.06) 0%, transparent 50%);
+    color: var(--color-foreground);
+    min-height: 100vh;
+    /* biome-ignore lint/suspicious/noDuplicateProperties: dvh fallback for older browsers */
+    min-height: 100dvh;
+    overflow: hidden;
+    font-kerning: normal;
+  }
+
+  :root[data-bg-style="paper"] body {
+    background-image:
+      radial-gradient(ellipse at 20% 0%, rgba(59, 130, 246, 0.12) 0%, transparent 55%),
+      radial-gradient(ellipse at 100% 100%, rgba(148, 163, 184, 0.14) 0%, transparent 45%);
+  }
+
+  #root {
+    height: 100vh;
+    /* biome-ignore lint/suspicious/noDuplicateProperties: dvh fallback for older browsers */
+    height: 100dvh;
+    display: flex;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.25);
+  }
+
+  :root[data-bg-style="paper"] ::-webkit-scrollbar-thumb {
+    background: rgba(15, 23, 42, 0.14);
+  }
+
+  :root[data-bg-style="paper"] ::-webkit-scrollbar-thumb:hover {
+    background: rgba(15, 23, 42, 0.24);
+  }
+
+  :root[data-bg-style="paper"] input.bg-background,
+  :root[data-bg-style="paper"] select.bg-background,
+  :root[data-bg-style="paper"] textarea.bg-background {
+    background-color: var(--color-input);
+    border-color: var(--color-input-border);
+  }
+
+  :root[data-bg-style="paper"] input::placeholder,
+  :root[data-bg-style="paper"] textarea::placeholder {
+    color: rgba(100, 116, 139, 0.9);
+    opacity: 1;
+  }
+}
+
+/* ========== Typography ========== */
+
+@layer utilities {
+  .text-heading-lg {
+    font-size: 1.5rem; /* 24px */
+    font-weight: 600;
+    line-height: 1.3;
+    letter-spacing: -0.02em;
+    color: var(--color-foreground);
+  }
+
+  .text-heading-md {
+    font-size: 1.25rem; /* 20px */
+    font-weight: 600;
+    line-height: 1.4;
+    letter-spacing: -0.01em;
+    color: var(--color-foreground);
+  }
+
+  .text-heading-sm {
+    font-size: 1rem; /* 16px */
+    font-weight: 600;
+    line-height: 1.4;
+    letter-spacing: -0.01em;
+    color: var(--color-foreground);
+  }
+
+  .text-body {
+    font-size: 0.9375rem; /* 15px */
+    font-weight: 400;
+    line-height: 1.6;
+    color: var(--color-card-foreground);
+  }
+
+  .text-caption {
+    font-size: 0.8125rem; /* 13px */
+    font-weight: 400;
+    line-height: 1.5;
+    color: var(--color-muted-foreground);
+  }
+
+  /* Micro text for badges, small meta tags */
+  .text-micro {
+    font-size: 0.6875rem; /* 11px */
+    font-weight: 500;
+    line-height: 1.4;
+    letter-spacing: 0.02em;
+  }
+
+  .focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-1 focus-visible:ring-offset-background;
+  }
+
+  .ss-page-scroll {
+    @apply flex-1 overflow-y-auto p-6;
+    scrollbar-gutter: stable;
+    container-type: inline-size;
+    overscroll-behavior-y: contain;
+  }
+
+  /**
+   * Main-column glass shell (Skills mode + Models mode): single fixed layer in App, outside route `key`.
+   */
+  .ss-main-chrome {
+    @apply flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-l-[26px] rounded-r-none border border-border/70 bg-card/70 shadow-[0_24px_80px_-48px_var(--color-shadow)] ring-1 ring-glass-ring backdrop-blur-2xl transition-shadow duration-200 hover:shadow-[0_30px_95px_-52px_var(--color-shadow)];
+  }
+
+  .ss-floating-page-inner {
+    @apply flex min-h-0 min-w-0 flex-1 overflow-hidden;
+  }
+
+  .ss-page-stack {
+    @apply space-y-6;
+    container-type: inline-size;
+  }
+
+  .ss-cards-grid {
+    display: grid;
+    gap: 1rem;
+    align-items: stretch;
+  }
+
+  /* List view: vertical rhythm between cards (Tailwind gap-2 = 0.5rem). */
+  .ss-cards-list {
+    @apply flex flex-col gap-2;
+  }
+
+  .ss-decks-grid {
+    display: grid;
+    gap: 1rem;
+    align-items: stretch;
+    width: 100%;
+    max-width: 72rem;
+    margin-inline: auto;
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+
+  @container (min-width: 660px) {
+    .ss-decks-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @container (min-width: 1000px) {
+    .ss-decks-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+
+  .ss-decks-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    width: 100%;
+    max-width: 72rem;
+    margin-inline: auto;
+  }
+
+  .ss-card-body {
+    @apply p-4;
+  }
+
+  .ss-card-footer {
+    @apply px-4 py-2.5 border-t border-border/30 min-h-[44px];
+  }
+
+  .ss-card-title {
+    @apply text-sm font-semibold leading-tight tracking-tight;
+  }
+
+  .ss-card-meta {
+    @apply text-xs text-muted-foreground;
+  }
+
+  .ss-card-desc {
+    @apply text-xs text-muted-foreground line-clamp-2;
+  }
+
+  .ss-view-toggle {
+    @apply flex items-center gap-0.5 border border-border rounded-lg overflow-hidden h-8 p-0.5 bg-sidebar/30 shadow-sm;
+  }
+
+  .ss-view-toggle-btn {
+    @apply relative h-full w-8 flex items-center justify-center rounded-md cursor-pointer z-10 text-muted-foreground hover:text-foreground hover:bg-sidebar-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-1 focus-visible:ring-offset-background;
+  }
+
+  .ss-view-toggle-btn-active {
+    @apply text-accent-foreground;
+  }
+
+  .ss-view-toggle-indicator {
+    @apply absolute inset-0 bg-accent rounded-md -z-10;
+    backface-visibility: hidden;
+  }
+}
+
+/* ========== HScrollRow Arrows ========== */
+
+@layer components {
+  .hscroll-row-wrapper {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    flex: 1;
+    gap: 2px;
+  }
+
+  .hscroll-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 1px solid var(--color-border);
+    background: var(--color-card);
+    color: var(--color-muted-foreground);
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transition:
+      opacity 0.2s ease,
+      background-color 0.15s ease,
+      color 0.15s ease;
+    flex-shrink: 0;
+  }
+
+  .hscroll-arrow-visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .hscroll-arrow:hover {
+    background: var(--color-card-hover);
+    color: var(--color-foreground);
+    border-color: var(--color-primary);
+  }
+}
+
+/* ========== Markdown ========== */
+
+@layer components {
+  :root[data-bg-style="paper"] .ss-switch[data-state="unchecked"] {
+    background-color: rgba(255, 255, 255, 0.98);
+    border-color: rgba(15, 23, 42, 0.16);
+  }
+
+  :root[data-bg-style="paper"] .ss-switch[data-state="checked"] {
+    border-color: rgba(var(--color-primary-rgb), 0.45);
+  }
+
+  :root[data-bg-style="paper"] .ss-switch .ss-switch-thumb {
+    border-color: rgba(15, 23, 42, 0.12);
+  }
+
+  .markdown-content {
+    max-width: 75ch; /* Comfortable reading length for long passages */
+  }
+
+  /* ── ScrollBox: scroll-isolated container with navigation arrows ── */
+
+  .scroll-box-wrapper {
+    position: relative;
+    /* prevent scroll chaining to parent */
+    overscroll-behavior: contain;
+  }
+
+  .scroll-box-inner {
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  /* Arrow buttons — hidden by default, fade in on wrapper hover */
+  .scroll-box-arrow {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 1px solid var(--color-border);
+    background: var(--color-card);
+    backdrop-filter: blur(8px);
+    color: var(--color-muted-foreground);
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transition:
+      opacity 0.2s ease,
+      background-color 0.15s ease,
+      color 0.15s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  }
+
+  .scroll-box-arrow-visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .scroll-box-arrow:hover {
+    background: var(--color-card-hover);
+    color: var(--color-foreground);
+    border-color: var(--color-primary);
+  }
+
+  .scroll-box-arrow-left {
+    left: 6px;
+  }
+  .scroll-box-arrow-right {
+    right: 6px;
+  }
+
+  /* Gradient fade hints at edges when scrollable */
+  .scroll-box-wrapper::before,
+  .scroll-box-wrapper::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 24px;
+    z-index: 1;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+
+  .scroll-box-wrapper::before {
+    left: 0;
+    background: linear-gradient(to right, var(--color-background), transparent);
+    border-radius: var(--radius-md) 0 0 var(--radius-md);
+  }
+
+  .scroll-box-wrapper::after {
+    right: 0;
+    background: linear-gradient(to left, var(--color-background), transparent);
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  }
+
+  /* Show gradient hints when arrows are visible */
+  .scroll-box-wrapper:hover::before,
+  .scroll-box-wrapper:hover::after {
+    opacity: 1;
+  }
+
+  /* ── Variant: code block ── */
+  .scroll-box-pre .scroll-box-inner {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background-color: var(--color-muted);
+    padding: 0.75rem;
+    max-height: 60vh;
+  }
+
+  .scroll-box-pre .scroll-box-inner code {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    font-size: inherit;
+    font-weight: inherit;
+  }
+
+  /* ── Variant: SVG image ── */
+  .scroll-box-svg .scroll-box-inner {
+    max-height: 70vh;
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-md);
+    padding: 0.5rem;
+    margin-block: 0.5rem;
+  }
+
+  .scroll-box-svg .scroll-box-inner img {
+    display: block;
+    max-width: none; /* allow natural width so horizontal scroll works */
+    height: auto;
+  }
+
+  /* ── Inline SVG fallback (not from <img>) ── */
+  .markdown-content > svg,
+  .markdown-content p > svg,
+  .markdown-content div > svg {
+    display: block;
+    max-width: 100%;
+    height: auto;
+  }
+
+  .markdown-content code {
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-sm);
+    background-color: var(--color-muted);
+    padding: 0.08rem 0.35rem;
+    font-size: 0.88em;
+    font-weight: 500;
+  }
+
+  .markdown-content code::before,
+  .markdown-content code::after {
+    content: "" !important;
+  }
+
+  /* Regular pre without scroll-box (fallback) */
+  .markdown-content pre {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background-color: var(--color-muted);
+    padding: 0.75rem;
+    overflow: auto;
+    overscroll-behavior: contain;
+    max-height: 60vh;
+  }
+
+  .markdown-content pre code {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    font-size: inherit;
+    font-weight: inherit;
+  }
+}
+
+/* ========== Shared Component Patterns ========== */
+
+@layer components {
+  /* Reusable modal dialog surface — used by 8+ modal components */
+  .modal-surface {
+    @apply relative overflow-hidden rounded-[24px] border border-glass-border bg-card/95 backdrop-blur-3xl ring-1 ring-glass-ring;
+    box-shadow: 0 0 80px -20px rgba(0, 0, 0, 0.5);
+  }
+
+  .modal-surface-subtle {
+    @apply relative overflow-hidden rounded-[24px] border border-border bg-card/95 backdrop-blur-3xl ring-1 ring-border-subtle;
+    box-shadow: 0 0 80px -20px rgba(0, 0, 0, 0.5);
+  }
+
+  /* ── Drag-to-reorder (classList-driven, zero React re-renders) ── */
+
+  .drag-source-active {
+    opacity: 0.35 !important;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+  }
+
+  .drag-drop-above {
+    position: relative;
+  }
+  .drag-drop-above::before {
+    content: "";
+    position: absolute;
+    top: -2px;
+    left: 16px;
+    right: 16px;
+    height: 3px;
+    border-radius: 999px;
+    background: var(--color-primary);
+    z-index: 50;
+    pointer-events: none;
+    animation: drag-indicator-in 0.12s ease-out;
+  }
+
+  .drag-drop-below {
+    position: relative;
+  }
+  .drag-drop-below::after {
+    content: "";
+    position: absolute;
+    bottom: -2px;
+    left: 16px;
+    right: 16px;
+    height: 3px;
+    border-radius: 999px;
+    background: var(--color-primary);
+    z-index: 50;
+    pointer-events: none;
+    animation: drag-indicator-in 0.12s ease-out;
+  }
+}
+
+/* ========== Keyframes ========== */
+
+.animate-ping-limited {
+  animation: ping 1s cubic-bezier(0, 0, 0.2, 1) 3;
+}
+
+/* Drag indicator bounce-in — subtle scale-in for drop position lines */
+@keyframes drag-indicator-in {
+  0% {
+    transform: scaleX(0.3);
+    opacity: 0;
+  }
+  100% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+}
+
+/* Shimmer loading effect — replaces flat pulse on skeletons */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-muted) 0%,
+    rgba(255, 255, 255, 0.08) 40%,
+    rgba(255, 255, 255, 0.08) 60%,
+    var(--color-muted) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s ease-in-out infinite;
+}
+
+:root[data-bg-style="paper"] .animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-muted) 0%,
+    rgba(15, 23, 42, 0.04) 40%,
+    rgba(15, 23, 42, 0.04) 60%,
+    var(--color-muted) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s ease-in-out infinite;
+}
+
+/* Logo spin — smooth deceleration for branded loading */
+@keyframes logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-logo-spin {
+  animation: logo-spin 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* Checkmark draw — SVG stroke animation for success states */
+@keyframes checkmark-draw {
+  0% {
+    stroke-dashoffset: 24;
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+}
+
+.animate-checkmark-draw {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
+  animation: checkmark-draw 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* Success glow — subtle ring expansion for celebration moments */
+@keyframes success-glow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(var(--color-success-rgb), 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(var(--color-success-rgb), 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(var(--color-success-rgb), 0);
+  }
+}
+
+.animate-success-glow {
+  animation: success-glow 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Splash fade-out */
+@keyframes splash-fade-out {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
+.animate-splash-exit {
+  animation: splash-fade-out 0.4s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* Scan line — vertical sweep for security panel */
+@keyframes scan-line {
+  0% {
+    top: 0%;
+  }
+  50% {
+    top: 100%;
+  }
+  100% {
+    top: 0%;
+  }
+}
+
+/* Spin — continuous rotation for radar sweep arm */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}

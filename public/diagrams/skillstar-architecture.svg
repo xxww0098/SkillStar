@@ -1,0 +1,225 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1080 1000" width="100%" height="auto">
+  <defs>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap');
+      text { font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif; }
+    </style>
+    <linearGradient id="glow-blue" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#6366f1" stop-opacity="0.05"/>
+    </linearGradient>
+    <linearGradient id="glow-green" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#22c55e" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#14b8a6" stop-opacity="0.04"/>
+    </linearGradient>
+    <linearGradient id="glow-purple" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a855f7" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#ec4899" stop-opacity="0.04"/>
+    </linearGradient>
+    <linearGradient id="flow-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#818cf8" stop-opacity="0.9"/>
+    </linearGradient>
+    <marker id="arr" viewBox="0 0 10 8" refX="10" refY="4" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,0 L10,4 L0,8" fill="#818cf8"/>
+    </marker>
+    <marker id="arr-g" viewBox="0 0 10 8" refX="10" refY="4" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,0 L10,4 L0,8" fill="#4ade80"/>
+    </marker>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#000" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <!-- BG -->
+  <rect width="1080" height="1000" rx="16" fill="#0a0a0b"/>
+
+  <!-- ====== TITLE ====== -->
+  <text x="540" y="52" text-anchor="middle" font-size="28" font-weight="800" fill="#fafafa">SkillStar 是怎么工作的?</text>
+  <text x="540" y="80" text-anchor="middle" font-size="15" fill="#71717a">一张图看懂：技能从哪来 → 怎么管 → 怎么用到你的项目里</text>
+
+  <!-- ====================== ROW 1: 技能从哪来 ====================== -->
+  <text x="540" y="125" text-anchor="middle" font-size="18" font-weight="700" fill="#38bdf8">① 技能从哪来？—— 三大来源</text>
+
+  <!-- Source 1: Marketplace -->
+  <rect x="60" y="145" width="300" height="105" rx="12" fill="#18181b" stroke="#27272a" stroke-width="1" filter="url(#shadow)"/>
+  <rect x="60" y="145" width="300" height="105" rx="12" fill="url(#glow-blue)" />
+  <text x="83" y="178" font-size="28">🛒</text>
+  <text x="118" y="178" font-size="16" font-weight="700" fill="#e4e4e7">skills.sh 大市场</text>
+  <text x="83" y="202" font-size="13" fill="#a1a1aa">在线浏览全球社区共享的开源技能包</text>
+  <text x="83" y="222" font-size="13" fill="#a1a1aa">SQLite 本地快照 — 支持离线秒级检索</text>
+  <text x="83" y="242" font-size="12" fill="#3b82f6" font-weight="600">一键安装 ▸</text>
+
+  <!-- Source 2: GitHub -->
+  <rect x="390" y="145" width="300" height="105" rx="12" fill="#18181b" stroke="#27272a" stroke-width="1" filter="url(#shadow)"/>
+  <rect x="390" y="145" width="300" height="105" rx="12" fill="url(#glow-blue)" />
+  <text x="413" y="178" font-size="28">🐙</text>
+  <text x="448" y="178" font-size="16" font-weight="700" fill="#e4e4e7">GitHub 仓库直装</text>
+  <text x="413" y="202" font-size="13" fill="#a1a1aa">粘贴仓库 URL → 自动扫描所有技能</text>
+  <text x="413" y="222" font-size="13" fill="#a1a1aa">本地缓存版本快照，随时一键拉取更新</text>
+  <text x="413" y="242" font-size="12" fill="#3b82f6" font-weight="600">扫描 + 安装 ▸</text>
+
+  <!-- Source 3: Local Create -->
+  <rect x="720" y="145" width="300" height="105" rx="12" fill="#18181b" stroke="#27272a" stroke-width="1" filter="url(#shadow)"/>
+  <rect x="720" y="145" width="300" height="105" rx="12" fill="url(#glow-blue)" />
+  <text x="743" y="178" font-size="28">✏️</text>
+  <text x="778" y="178" font-size="16" font-weight="700" fill="#e4e4e7">本地创作 + 发布</text>
+  <text x="743" y="202" font-size="13" fill="#a1a1aa">图形化创建自定义技能，沙箱隔离</text>
+  <text x="743" y="222" font-size="13" fill="#a1a1aa">通过 GitHub CLI 一键发布到 GitHub</text>
+  <text x="743" y="242" font-size="12" fill="#3b82f6" font-weight="600">创作 → GitHub CLI 发布 ▸</text>
+
+  <!-- Arrows: sources → hub -->
+  <path d="M 210 250 L 210 290 Q 210 300 220 300 L 530 300 Q 540 300 540 310 L 540 325" stroke="url(#flow-grad)" stroke-width="2.5" fill="none" marker-end="url(#arr)"/>
+  <path d="M 540 250 L 540 325" stroke="url(#flow-grad)" stroke-width="2.5" fill="none" marker-end="url(#arr)"/>
+  <path d="M 870 250 L 870 290 Q 870 300 860 300 L 550 300 Q 540 300 540 310 L 540 325" stroke="url(#flow-grad)" stroke-width="2.5" fill="none" marker-end="url(#arr)"/>
+
+  <!-- ====================== ROW 2: 统一管理 ====================== -->
+  <text x="540" y="355" text-anchor="middle" font-size="18" font-weight="700" fill="#a78bfa">② 怎么管？—— SkillStar 统一管理中心</text>
+
+  <!-- Main Hub Box -->
+  <rect x="60" y="372" width="960" height="200" rx="16" fill="#18181b" stroke="#3f3f46" stroke-width="1.5" filter="url(#shadow)"/>
+  <rect x="60" y="372" width="960" height="200" rx="16" fill="url(#glow-purple)"/>
+
+  <!-- F1: My Skills -->
+  <rect x="85" y="395" width="175" height="155" rx="10" fill="#27272a" stroke="#3f3f46" stroke-width="1"/>
+  <text x="172" y="425" text-anchor="middle" font-size="24">📦</text>
+  <text x="172" y="450" text-anchor="middle" font-size="14" font-weight="700" fill="#e4e4e7">My Skills</text>
+  <text x="172" y="470" text-anchor="middle" font-size="12" fill="#a1a1aa">所有技能集中管理</text>
+  <text x="172" y="488" text-anchor="middle" font-size="12" fill="#a1a1aa">编辑/启停/升级</text>
+  <text x="172" y="506" text-anchor="middle" font-size="12" fill="#a1a1aa">配置每个技能要</text>
+  <text x="172" y="524" text-anchor="middle" font-size="12" fill="#a1a1aa">挂载到哪些 Agent</text>
+  <text x="172" y="542" text-anchor="middle" font-size="11" fill="#a78bfa" font-weight="600">核心操作台</text>
+
+  <!-- F2: Security Scan -->
+  <rect x="275" y="395" width="175" height="155" rx="10" fill="#27272a" stroke="#3f3f46" stroke-width="1"/>
+  <text x="362" y="425" text-anchor="middle" font-size="24">🛡️</text>
+  <text x="362" y="450" text-anchor="middle" font-size="14" font-weight="700" fill="#e4e4e7">安全扫描</text>
+  <text x="362" y="470" text-anchor="middle" font-size="12" fill="#a1a1aa">Static 静态规则检测</text>
+  <text x="362" y="488" text-anchor="middle" font-size="12" fill="#a1a1aa">Smart 智能辅助分析</text>
+  <text x="362" y="506" text-anchor="middle" font-size="12" fill="#a1a1aa">Deep AI 源码级推断</text>
+  <text x="362" y="524" text-anchor="middle" font-size="12" fill="#a1a1aa">拦截恶意技能注入</text>
+  <text x="362" y="542" text-anchor="middle" font-size="11" fill="#f87171" font-weight="600">三模防火墙</text>
+
+  <!-- F3: AI Translation -->
+  <rect x="465" y="395" width="175" height="155" rx="10" fill="#27272a" stroke="#3f3f46" stroke-width="1"/>
+  <text x="552" y="425" text-anchor="middle" font-size="24">🌐</text>
+  <text x="552" y="450" text-anchor="middle" font-size="14" font-weight="700" fill="#e4e4e7">SKILL.md 翻译阅读</text>
+  <text x="552" y="470" text-anchor="middle" font-size="12" fill="#a1a1aa">外文技能看不懂？</text>
+  <text x="552" y="488" text-anchor="middle" font-size="12" fill="#a1a1aa">AI 流式边译边读</text>
+  <text x="552" y="506" text-anchor="middle" font-size="12" fill="#a1a1aa">双引擎翻译加速</text>
+  <text x="552" y="524" text-anchor="middle" font-size="12" fill="#a1a1aa">SQLite 离线缓存复用</text>
+  <text x="552" y="542" text-anchor="middle" font-size="11" fill="#2dd4bf" font-weight="600">打破语言壁垒</text>
+
+  <!-- F4: Smart Pick -->
+  <rect x="655" y="395" width="175" height="155" rx="10" fill="#27272a" stroke="#3f3f46" stroke-width="1"/>
+  <text x="742" y="425" text-anchor="middle" font-size="24">🎯</text>
+  <text x="742" y="450" text-anchor="middle" font-size="14" font-weight="700" fill="#e4e4e7">Smart Pick 推荐</text>
+  <text x="742" y="470" text-anchor="middle" font-size="12" fill="#a1a1aa">描述你的项目需求</text>
+  <text x="742" y="488" text-anchor="middle" font-size="12" fill="#a1a1aa">AI 从已装技能中</text>
+  <text x="742" y="506" text-anchor="middle" font-size="12" fill="#a1a1aa">自动筛选最佳匹配</text>
+  <text x="742" y="524" text-anchor="middle" font-size="12" fill="#a1a1aa">一键批量挂载到项目</text>
+  <text x="742" y="542" text-anchor="middle" font-size="11" fill="#fbbf24" font-weight="600">AI 精准推荐</text>
+
+  <!-- F5: Decks -->
+  <rect x="845" y="395" width="155" height="155" rx="10" fill="#27272a" stroke="#3f3f46" stroke-width="1"/>
+  <text x="922" y="425" text-anchor="middle" font-size="24">🃏</text>
+  <text x="922" y="450" text-anchor="middle" font-size="14" font-weight="700" fill="#e4e4e7">Decks 套牌</text>
+  <text x="922" y="470" text-anchor="middle" font-size="12" fill="#a1a1aa">多个技能组合打包</text>
+  <text x="922" y="488" text-anchor="middle" font-size="12" fill="#a1a1aa">导出 .agd/.ags 文件</text>
+  <text x="922" y="506" text-anchor="middle" font-size="12" fill="#a1a1aa">Share Code 分享</text>
+  <text x="922" y="524" text-anchor="middle" font-size="12" fill="#a1a1aa">团队内一键导入</text>
+  <text x="922" y="542" text-anchor="middle" font-size="11" fill="#60a5fa" font-weight="600">社区流转</text>
+
+  <!-- Arrow: hub → project dispatch -->
+  <path d="M 540 572 L 540 620" stroke="url(#flow-grad)" stroke-width="2.5" fill="none" marker-end="url(#arr)"/>
+
+  <!-- ====================== ROW 3: 怎么用 ====================== -->
+  <text x="540" y="650" text-anchor="middle" font-size="18" font-weight="700" fill="#4ade80">③ 怎么用？—— 按项目 × 按 Agent 精准注入</text>
+
+  <rect x="60" y="668" width="960" height="290" rx="16" fill="#18181b" stroke="#27272a" stroke-width="1.5" filter="url(#shadow)"/>
+  <rect x="60" y="668" width="960" height="290" rx="16" fill="url(#glow-green)"/>
+
+  <!-- Project A -->
+  <rect x="85" y="695" width="280" height="175" rx="10" fill="#27272a" stroke="#3f3f46" stroke-width="1"/>
+  <text x="105" y="724" font-size="16" font-weight="700" fill="#4ade80">📁 项目 A  (Web 前端)</text>
+  <line x1="95" y1="735" x2="355" y2="735" stroke="#3f3f46" stroke-width="1"/>
+  <text x="105" y="758" font-size="13" fill="#a1a1aa">自动挂载技能：</text>
+  <rect x="105" y="768" width="105" height="24" rx="6" fill="#1e3a5f" stroke="#3b82f6" stroke-width="0.8"/>
+  <text x="157" y="785" text-anchor="middle" font-size="11" fill="#93c5fd">react-patterns</text>
+  <rect x="218" y="768" width="80" height="24" rx="6" fill="#1e3a5f" stroke="#3b82f6" stroke-width="0.8"/>
+  <text x="258" y="785" text-anchor="middle" font-size="11" fill="#93c5fd">tailwind-v4</text>
+  <rect x="105" y="800" width="70" height="24" rx="6" fill="#1e3a5f" stroke="#3b82f6" stroke-width="0.8"/>
+  <text x="140" y="817" text-anchor="middle" font-size="11" fill="#93c5fd">vite-dev</text>
+  <line x1="95" y1="835" x2="355" y2="835" stroke="#3f3f46" stroke-width="0.5"/>
+  <text x="105" y="855" font-size="12" fill="#4ade80" font-weight="600">🔗 Symlink 注入 · 对 git 零污染</text>
+
+  <!-- Project B -->
+  <rect x="400" y="695" width="280" height="175" rx="10" fill="#27272a" stroke="#3f3f46" stroke-width="1"/>
+  <text x="420" y="724" font-size="16" font-weight="700" fill="#4ade80">📁 项目 B  (Rust 后端)</text>
+  <line x1="410" y1="735" x2="670" y2="735" stroke="#3f3f46" stroke-width="1"/>
+  <text x="420" y="758" font-size="13" fill="#a1a1aa">自动挂载技能：</text>
+  <rect x="420" y="768" width="90" height="24" rx="6" fill="#1e3a5f" stroke="#3b82f6" stroke-width="0.8"/>
+  <text x="465" y="785" text-anchor="middle" font-size="11" fill="#93c5fd">rust-clippy</text>
+  <rect x="518" y="768" width="110" height="24" rx="6" fill="#1e3a5f" stroke="#3b82f6" stroke-width="0.8"/>
+  <text x="573" y="785" text-anchor="middle" font-size="11" fill="#93c5fd">cargo-patterns</text>
+  <rect x="420" y="800" width="80" height="24" rx="6" fill="#1e3a5f" stroke="#3b82f6" stroke-width="0.8"/>
+  <text x="460" y="817" text-anchor="middle" font-size="11" fill="#93c5fd">tokio-best</text>
+  <line x1="410" y1="835" x2="670" y2="835" stroke="#3f3f46" stroke-width="0.5"/>
+  <text x="420" y="855" font-size="12" fill="#4ade80" font-weight="600">🔗 Symlink 注入 · 对 git 零污染</text>
+
+  <!-- connection arrows between projects and agents -->
+  <path d="M 365 790 L 400 790" stroke="#4ade80" stroke-width="1.5" fill="none" stroke-dasharray="4 3" marker-end="url(#arr-g)"/>
+  <path d="M 680 790 L 715 790" stroke="#818cf8" stroke-width="1.5" fill="none" stroke-dasharray="4 3" marker-end="url(#arr)"/>
+
+  <!-- ========== Agents Panel with Icons ========== -->
+  <rect x="715" y="695" width="280" height="250" rx="10" fill="#27272a" stroke="#3f3f46" stroke-width="1"/>
+  <text x="735" y="724" font-size="16" font-weight="700" fill="#c084fc">🤖 管理的 Agent 终端</text>
+  <line x1="725" y1="735" x2="985" y2="735" stroke="#3f3f46" stroke-width="1"/>
+  <text x="735" y="758" font-size="13" fill="#a1a1aa">每个项目独立选择目标 Agent：</text>
+
+  <!-- Row 1: Gemini / Claude / Codex -->
+  <rect x="735" y="768" width="80" height="34" rx="6" fill="#1e1b4b" stroke="#6366f1" stroke-width="0.8"/>
+  <image href="../agents/gemini.svg" x="740" y="772" width="16" height="16"/>
+  <text x="777" y="791" text-anchor="middle" font-size="10" fill="#a5b4fc">Gemini</text>
+
+  <rect x="822" y="768" width="80" height="34" rx="6" fill="#1e1b4b" stroke="#6366f1" stroke-width="0.8"/>
+  <image href="../agents/claude.svg" x="827" y="772" width="16" height="16"/>
+  <text x="864" y="791" text-anchor="middle" font-size="10" fill="#a5b4fc">Claude</text>
+
+  <rect x="909" y="768" width="72" height="34" rx="6" fill="#1e1b4b" stroke="#6366f1" stroke-width="0.8"/>
+  <image href="../agents/codex.svg" x="914" y="772" width="16" height="16"/>
+  <text x="947" y="791" text-anchor="middle" font-size="10" fill="#a5b4fc">Codex</text>
+
+  <!-- Row 2: Antigravity / OpenCode / OpenClaw -->
+  <rect x="735" y="810" width="80" height="34" rx="6" fill="#1e1b4b" stroke="#6366f1" stroke-width="0.8"/>
+  <image href="../agents/antigravity.svg" x="740" y="814" width="16" height="16"/>
+  <text x="777" y="833" text-anchor="middle" font-size="9" fill="#a5b4fc">Antigravity</text>
+
+  <rect x="822" y="810" width="80" height="34" rx="6" fill="#1e1b4b" stroke="#6366f1" stroke-width="0.8"/>
+  <image href="../agents/opencode.svg" x="827" y="814" width="16" height="16"/>
+  <text x="864" y="833" text-anchor="middle" font-size="10" fill="#a5b4fc">OpenCode</text>
+
+  <rect x="909" y="810" width="72" height="34" rx="6" fill="#1e1b4b" stroke="#6366f1" stroke-width="0.8"/>
+  <image href="../agents/openclaw.svg" x="914" y="814" width="16" height="16"/>
+  <text x="947" y="833" text-anchor="middle" font-size="10" fill="#a5b4fc">OpenClaw</text>
+
+  <!-- Row 3: Cursor / Qoder / Trae -->
+  <rect x="735" y="852" width="80" height="34" rx="6" fill="#1e1b4b" stroke="#6366f1" stroke-width="0.8"/>
+  <image href="../agents/cursor.svg" x="740" y="856" width="16" height="16"/>
+  <text x="777" y="875" text-anchor="middle" font-size="10" fill="#a5b4fc">Cursor</text>
+
+  <rect x="822" y="852" width="80" height="34" rx="6" fill="#1e1b4b" stroke="#6366f1" stroke-width="0.8"/>
+  <image href="../agents/qoder-color.svg" x="827" y="856" width="16" height="16"/>
+  <text x="864" y="875" text-anchor="middle" font-size="10" fill="#a5b4fc">Qoder</text>
+
+  <rect x="909" y="852" width="72" height="34" rx="6" fill="#1e1b4b" stroke="#6366f1" stroke-width="0.8"/>
+  <image href="../agents/trae-color.svg" x="914" y="856" width="16" height="16"/>
+  <text x="947" y="875" text-anchor="middle" font-size="10" fill="#a5b4fc">Trae</text>
+
+  <!-- Custom Agent - highlighted -->
+  <rect x="735" y="894" width="246" height="32" rx="6" fill="#3b0764" stroke="#a855f7" stroke-width="1.5"/>
+  <text x="858" y="915" text-anchor="middle" font-size="13" fill="#e9d5ff" font-weight="700">＋ 自定义 Agent （无限扩展）</text>
+
+  <!-- ====== BOTTOM TAGLINE ====== -->
+  <text x="540" y="985" text-anchor="middle" font-size="13" fill="#52525b">SkillStar — 统一编排 Skill，按项目精准分发到不同 Agent CLI</text>
+</svg>

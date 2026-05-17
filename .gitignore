@@ -1,0 +1,72 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Rust build artifacts
+src-tauri/target/
+target/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# SkillStar / Local Skills Sync — ignore .agents/ except workflows/
+.agents/*
+!.agents/workflows/
+!.agents/workflows/**
+
+# Gemini agent config
+.gemini/
+
+# Claude agent config
+.claude/
+
+# Testing
+proofshot-artifacts/
+
+# Environment Variables
+.env
+.env.*
+!.env.example
+
+# Video assets (keep compressed demo.mp4)
+*.mov
+public/演示视频.mp4
+homebrew-tap/
+
+# Dev scripts / test binaries (keep out of release)
+run-*.sh
+test_parse
+
+# Tauri updater keys
+*.key
+*.key.pub
+
+# Cursor agent config
+.cursor/
+
+# GitHub config (Actions workflows only tracked in CI)
+.github/
+
+# Sisyphus planning workspace
+.sisyphus/
+
+# Documentation (local only)
+docs/

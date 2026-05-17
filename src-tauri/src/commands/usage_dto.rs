@@ -1,0 +1,181 @@
+//! Frontend-facing DTOs for the `/usage` page.
+//!
+//! These wrap the `skillstar-usage` domain types and **never** expose raw
+//! encrypted secrets — `api_key`/`access_token`/`refresh_token` ciphertexts
+//! are stripped before serialization.
+
+use serde::{Deserialize, Serialize};
+use skillstar_usage::catalog::{AuthMode, CatalogEntry, CatalogTier};
+use skillstar_usage::subscription::{
+    AlertKind, AlertSeverity, BillingCycle, ManualQuota, MonetaryBalance, Subscription,
+    SubscriptionAlert, SubscriptionUsage, UsageWindow,
+};
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CatalogEntryDto {
+    pub id: String,
+    pub display_name: String,
+    pub description: String,
+    pub tier: CatalogTier,
+    pub auth_modes: Vec<AuthMode>,
+    pub brand_color: String,
+    pub default_currency: String,
+    pub subscription_url: String,
+    pub warning: Option<String>,
+    pub regions: Vec<String>,
+}
+
+impl From<CatalogEntry> for CatalogEntryDto {
+    fn from(e: CatalogEntry) -> Self {
+        Self {
+            id: e.id.to_string(),
+            display_name: e.display_name.to_string(),
+            description: e.description.to_string(),
+            tier: e.tier,
+            auth_modes: e.auth_modes.to_vec(),
+            brand_color: e.brand_color.to_string(),
+            default_currency: e.default_currency.to_string(),
+            subscription_url: e.subscription_url.to_string(),
+            warning: e.warning.map(|s| s.to_string()),
+            regions: e.regions.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SubscriptionDto {
+    pub id: String,
+    pub catalog_id: String,
+    pub display_name: String,
+    pub auth_mode: AuthMode,
+    pub plan_tier: Option<String>,
+    pub monthly_price: Option<f64>,
+    pub currency: String,
+    pub billing_cycle: BillingCycle,
+    pub start_date: i64,
+    pub renew_date: i64,
+    pub auto_renew: bool,
+    /// `true` when ApiKey/OAuth credentials are present (without revealing them).
+    pub has_credential: bool,
+    pub requires_reauth: bool,
+    pub manual_quota: Option<ManualQuota>,
+    pub note: Option<String>,
+    pub sort_index: i32,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub usage: Option<SubscriptionUsage>,
+}
+
+impl SubscriptionDto {
+    pub fn from_parts(sub: Subscription, usage: Option<SubscriptionUsage>) -> Self {
+        let has_credential = sub.api_key_encrypted.as_ref().is_some_and(|s| !s.is_empty())
+            || sub
+                .access_token_encrypted
+                .as_ref()
+                .is_some_and(|s| !s.is_empty());
+        Self {
+            id: sub.id,
+            catalog_id: sub.catalog_id,
+            display_name: sub.display_name,
+            auth_mode: sub.auth_mode,
+            plan_tier: sub.plan_tier,
+            monthly_price: sub.monthly_price,
+            currency: sub.currency,
+            billing_cycle: sub.billing_cycle,
+            start_date: sub.start_date,
+            renew_date: sub.renew_date,
+            auto_renew: sub.auto_renew,
+            has_credential,
+            requires_reauth: sub.requires_reauth,
+            manual_quota: sub.manual_quota,
+            note: sub.note,
+            sort_index: sub.sort_index,
+            created_at: sub.created_at,
+            updated_at: sub.updated_at,
+            usage,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CreateSubscriptionInput {
+    pub catalog_id: String,
+    pub display_name: Option<String>,
+    pub auth_mode: AuthMode,
+    pub plan_tier: Option<String>,
+    pub monthly_price: Option<f64>,
+    pub currency: Option<String>,
+    pub billing_cycle: Option<BillingCycle>,
+    pub start_date: Option<i64>,
+    pub renew_date: Option<i64>,
+    pub auto_renew: Option<bool>,
+    /// Plaintext API key (encrypted server-side before storage).
+    pub api_key: Option<String>,
+    pub oauth_region: Option<String>,
+    pub manual_quota: Option<ManualQuota>,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UpdateSubscriptionInput {
+    pub display_name: Option<String>,
+    pub plan_tier: Option<String>,
+    pub monthly_price: Option<f64>,
+    pub currency: Option<String>,
+    pub billing_cycle: Option<BillingCycle>,
+    pub start_date: Option<i64>,
+    pub renew_date: Option<i64>,
+    pub auto_renew: Option<bool>,
+    /// Send only when rotating; absent => keep existing.
+    pub api_key: Option<String>,
+    pub manual_quota: Option<ManualQuota>,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SubscriptionAlertDto {
+    pub id: String,
+    pub subscription_id: String,
+    pub severity: AlertSeverity,
+    pub kind: AlertKind,
+    pub message: String,
+}
+
+impl From<SubscriptionAlert> for SubscriptionAlertDto {
+    fn from(a: SubscriptionAlert) -> Self {
+        Self {
+            id: a.id,
+            subscription_id: a.subscription_id,
+            severity: a.severity,
+            kind: a.kind,
+            message: a.message,
+        }
+    }
+}
+
+/// Header summary for the usage page.
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct UsageSummary {
+    /// Per-currency monthly spend (folded by billing cycle).
+    pub monthly_spend: Vec<MonthlySpendEntry>,
+    pub total_subscriptions: usize,
+    pub alert_count: usize,
+    pub reauth_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MonthlySpendEntry {
+    pub currency: String,
+    pub amount: f64,
+}
+
+/// Returned by `start_oauth_login`.
+#[derive(Debug, Clone, Serialize)]
+pub struct OAuthStartDto {
+    pub pending_id: String,
+    pub auth_url: String,
+}
+
+// Re-export inner types used by handler signatures so the lib.rs `#[command]`
+// metadata generator can see them.
+pub use skillstar_usage::subscription::{MonetaryBalance as _MonetaryBalance, UsageWindow as _UsageWindow};

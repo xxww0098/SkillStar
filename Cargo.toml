@@ -1,0 +1,12 @@
+[workspace]
+resolver = "3"
+members = [
+  "src-tauri",
+  "crates/*",
+]
+default-members = ["src-tauri"]
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = "symbols"

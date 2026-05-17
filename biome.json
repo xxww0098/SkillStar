@@ -1,0 +1,88 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.10/schema.json",
+  "assist": { "actions": { "source": { "organizeImports": "off" } } },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 120
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "correctness": {
+        "noUnusedVariables": "off",
+        "noUnusedImports": "off",
+        "useExhaustiveDependencies": "off",
+        "noInvalidPositionAtImportRule": "off"
+      },
+      "suspicious": {
+        "noExplicitAny": "off",
+        "noArrayIndexKey": "off",
+        "noConfusingVoidType": "off",
+        "useIterableCallbackReturn": "off",
+        "noDuplicateProperties": "error",
+        "noGlobalIsNan": "error",
+        "noApproximativeNumericConstant": "error"
+      },
+      "style": {
+        "noNonNullAssertion": "off",
+        "useImportType": "error",
+        "useTemplate": "off",
+        "noDescendingSpecificity": "off"
+      },
+      "complexity": {
+        "noForEach": "off",
+        "useLiteralKeys": "off",
+        "useOptionalChain": "off",
+        "noImportantStyles": "off",
+        "noUselessSwitchCase": "error",
+        "noUselessFragments": "error"
+      },
+      "a11y": {
+        "noSvgWithoutTitle": "off",
+        "noStaticElementInteractions": "off",
+        "noLabelWithoutControl": "off",
+        "useButtonType": "off",
+        "useFocusableInteractive": "off",
+        "useKeyWithClickEvents": "off",
+        "useSemanticElements": "off",
+        "noAutofocus": "off"
+      },
+      "security": {
+        "noDangerouslySetInnerHtml": "off"
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always",
+      "trailingCommas": "all"
+    }
+  },
+  "css": {
+    "parser": {
+      "cssModules": true,
+      "tailwindDirectives": true
+    }
+  },
+  "files": {
+    "includes": [
+      "**",
+      "!!**/dist",
+      "!!**/node_modules",
+      "!!target",
+      "!!**/target",
+      "!!**/.agents",
+      "!!**/.gemini",
+      "!!**/.opencode",
+      "!!**/.cursor",
+      "!!**/.qoder",
+      "!!**/.trae",
+      "!!**/*.min.js",
+      "!!**/.sisyphus",
+      "!!**/src-tauri/gen"
+    ]
+  }
+}

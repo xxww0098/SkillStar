@@ -1,0 +1,79 @@
+[package]
+name = "skillstar"
+version = "0.2.2"
+description = "SkillStar — Skill management for AI agents"
+authors = ["SkillStar"]
+edition = "2024"
+rust-version = "1.94.1"
+
+[lib]
+name = "skillstar_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.13", features = ["json", "rustls", "form"], default-features = false }
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5"
+anyhow = "1"
+gix = { version = "0.80", default-features = false, features = ["max-control", "blocking-http-transport-reqwest-rust-tls", "revision", "credentials"] }
+toml = "1.1"
+tauri-plugin-dialog = "2"
+serde_yaml = "0.9"
+regex = "1"
+machine-uid = "0.5"
+aes-gcm = "0.10"
+base64 = "0.22"
+sha2 = "0.11"
+flate2 = "1"
+tar = "0.4"
+html2md = "0.2"
+uuid = { version = "1", features = ["v4"] }
+sys-locale = "0.3"
+pbkdf2 = "0.12"
+rusqlite = { version = "0.39.0", features = ["bundled"] }
+r2d2_sqlite = "0.33.0"
+r2d2 = "0.8.10"
+pulldown-cmark = "0.13.3"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["fmt", "env-filter", "json"] }
+thiserror = "2.0.18"
+petgraph = "0.8.3"
+agent-client-protocol = "0.10"
+tokio-util = { version = "0.7", features = ["compat"] }
+futures = "0.3"
+async-trait = "0.1"
+skillstar-marketplace = { path = "../crates/skillstar-marketplace" }
+url = "2.5.8"
+toml_edit = "0.25.10"
+rand = "0.10.0"
+urlencoding = "2.1.3"
+tiny_http = "0.12.0"
+lazy_static = "1.5.0"
+which = "8.0.2"
+skillstar-ai = { version = "0.1.0", path = "../crates/skillstar-ai" }
+skillstar-models = { version = "0.1.0", path = "../crates/skillstar-models" }
+skillstar-skills = { version = "0.1.0", path = "../crates/skillstar-skills" }
+skillstar-projects = { version = "0.1.0", path = "../crates/skillstar-projects" }
+tauri-plugin-deep-link = "2"
+skillstar-core = { version = "0.1.0", path = "../crates/skillstar-core" }
+skillstar-app = { version = "0.1.0", path = "../crates/skillstar-app" }
+skillstar-usage = { version = "0.1.0", path = "../crates/skillstar-usage" }
+
+[dev-dependencies]
+tempfile = "3"
+
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+
+[target.'cfg(windows)'.dependencies]
+junction = "1"

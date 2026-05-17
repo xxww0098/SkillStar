@@ -1,0 +1,29 @@
+[package]
+name = "skillstar-ai"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94.1"
+
+[dependencies]
+anyhow = "1.0.102"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+tokio = { version = "1.52.1", features = ["full"] }
+reqwest = { version = "0.13.2", default-features = false, features = ["rustls", "json", "stream"] }
+reqwest_012 = { package = "reqwest", version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+tracing = "0.1.44"
+regex = "1.12"
+machine-uid = "0.5"
+aes-gcm = "0.10"
+base64 = "0.22"
+sha2 = "0.11"
+rand = "0.10.0"
+chrono = { version = "0.4", features = ["serde"] }
+lazy_static = "1.5.0"
+async-openai = { version = "0.27", features = ["rustls"] }
+futures-util = "0.3.32"
+skillstar-core = { version = "0.1.0", path = "../skillstar-core" }
+skillstar-models = { version = "0.1.0", path = "../skillstar-models" }
+
+[dev-dependencies]
+tempfile = "3.27.0"

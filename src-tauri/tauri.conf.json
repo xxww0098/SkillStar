@@ -1,0 +1,49 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "SkillStar",
+  "version": "0.2.2",
+  "identifier": "com.skillstar.desktop",
+  "build": {
+    "beforeDevCommand": "bun run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "bun run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "SkillStar",
+        "hiddenTitle": true,
+        "titleBarStyle": "Overlay",
+        "trafficLightPosition": { "x": 22, "y": 18 },
+        "width": 1400,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
+        "decorations": true,
+        "resizable": true,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' https://api.github.com https://github.com https://avatars.githubusercontent.com; img-src 'self' asset: tauri: data: blob: https: http:; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": true,
+    "targets": "all",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"]
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["skillstar"]
+      }
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU1Qjg1NjgyRkVCNDhCRDYKUldUV2k3VCtnbGE0NVNxS05SS3dqazA4S2xzNkN1WnZFY1VnS0JWQm1kRk1nM05WWkl6em9qaWUK",
+      "endpoints": ["https://github.com/xxww0098/SkillStar/releases/latest/download/latest.json"]
+    }
+  }
+}
