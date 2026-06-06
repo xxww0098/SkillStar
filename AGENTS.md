@@ -194,6 +194,7 @@ SkillStar/
 - Provider endpoint probes (`test_endpoints_latency`, `fetch_provider_models`, connection test) use `skillstar_core::infra::http_client::probe_http_client`, which honours `config/proxy.json`. Anthropic bases (`/anthropic` in URL) probe via `POST /messages`; OpenAI bases use `GET /models`. HTTP 401/403 are treated as reachable with auth failure, not hard errors.
 - AI provider config is backend-owned (`config/ai.json`); frontend never stores API keys.
 - AI summary / quick read should prefer a Models provider reference (`provider_ref`) for Claude or Codex instead of duplicating URL/API key in `ai.json`; only `api_format=local` keeps manual base URL / model fields for Ollama-style local endpoints.
+- Skill translation is English-to-Chinese by default and lives in `skillstar-ai::ai_provider::translate`; it must preserve Markdown structure through AST extraction + XML segment batching, skip only clearly already-target Chinese content, and reuse translations through a backend-owned SQLite cache under `~/.skillstar/db/`.
 - AI skill pick must pre-rank installed skills locally before calling the model, keep the AI candidate catalog bounded, aggregate multi-round AI votes/scores into a stable ranking, and fall back to deterministic local ranking when AI output is partial or invalid.
 - AI skill pick responses returned to the frontend must preserve relevance order and expose enough metadata (for example score/reason/fallback state) for the UI to explain why a skill was recommended.
 - Streaming APIs emit:

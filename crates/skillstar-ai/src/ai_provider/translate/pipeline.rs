@@ -58,8 +58,20 @@ pub async fn translate_skill<F>(
 where
     F: FnMut(PipelineProgress) + Send,
 {
-    // ── Skip-when-already-target ─────────────────────────────────────
-    if should_skip_translation(markdown, &config.target_language) {
+    on_progress(PipelineProgress {
+        phase: PipelinePhase::Prepare,
+        current: 0,
+        total: 1,
+    });
+
+    // ── Resolve runtime config once (resolves provider_ref) ──────────
+    let resolved = resolve_runtime_config(config).context("resolving AI config")?;
+    let effective_model = resolved.model.clone();
+    let target_lang = resolved.target_language.clone();
+    let target_lang_display = language_display_name(&target_lang).to_string();
+
+    // ── Whole-document fast paths ────────────────────────────────────
+    if should_skip_translation(markdown, &target_lang) {
         on_progress(PipelineProgress {
             phase: PipelinePhase::Finalize,
             current: 1,
@@ -68,23 +80,26 @@ where
         return Ok(markdown.to_string());
     }
 
-    on_progress(PipelineProgress {
-        phase: PipelinePhase::Prepare,
-        current: 0,
-        total: 1,
-    });
+    if let Some(hit) = cache::get_document(markdown, &target_lang, &effective_model) {
+        on_progress(PipelineProgress {
+            phase: PipelinePhase::Translate,
+            current: 1,
+            total: 1,
+        });
+        on_progress(PipelineProgress {
+            phase: PipelinePhase::Finalize,
+            current: 1,
+            total: 1,
+        });
+        return Ok(hit);
+    }
 
     // ── Split frontmatter (preserve verbatim) ────────────────────────
     let (frontmatter, body) = split_frontmatter(markdown);
 
-    // ── Resolve runtime config once (resolves provider_ref) ──────────
-    let resolved = resolve_runtime_config(config).context("resolving AI config")?;
-    let effective_model = resolved.model.clone();
-    let target_lang = resolved.target_language.clone();
-    let target_lang_display = language_display_name(&target_lang).to_string();
-
     // ── Parse AST + extract translatable nodes ───────────────────────
     let nodes = ast::extract(body);
+    let total_node_count = nodes.len();
 
     on_progress(PipelineProgress {
         phase: PipelinePhase::Prepare,
@@ -105,7 +120,9 @@ where
     let mut cached_translations: HashMap<usize, String> = HashMap::new();
     let mut work: Vec<TranslatableNode> = Vec::with_capacity(nodes.len());
     for node in nodes {
-        if let Some(hit) = cache::get(&node.text, &target_lang, &effective_model) {
+        if should_skip_translation(&node.text, &target_lang) {
+            cached_translations.insert(node.id, node.text);
+        } else if let Some(hit) = cache::get(&node.text, &target_lang, &effective_model) {
             cached_translations.insert(node.id, hit);
         } else {
             work.push(node);
@@ -126,6 +143,7 @@ where
         });
         let rendered = ast::replace_and_render(body, &cached_translations);
         let result = reattach_frontmatter(frontmatter, &rendered);
+        cache::insert_document(markdown, &target_lang, &effective_model, result.clone());
         on_progress(PipelineProgress {
             phase: PipelinePhase::Finalize,
             current: 1,
@@ -175,11 +193,8 @@ where
             .filter_map(|id| parsed.get(id).map(|t| (*id, t.clone())))
             .collect();
 
-        // To populate cache we need original text for each id — recover from `work`.
         for id in &batch_info.ids {
-            if let (Some(translated), Some(original)) =
-                (id_to_text.get(id), work.iter().find(|n| n.id == *id))
-            {
+            if let (Some(translated), Some(original)) = (id_to_text.get(id), work_by_id.get(id)) {
                 cache::insert(&original.text, &target_code, &model, translated.clone());
                 llm_translations.insert(*id, translated.clone());
             }
@@ -206,6 +221,9 @@ where
 
     let rendered = ast::replace_and_render(body, &all);
     let final_md = reattach_frontmatter(frontmatter, &rendered);
+    if all.len() == total_node_count {
+        cache::insert_document(markdown, &target_lang, &effective_model, final_md.clone());
+    }
 
     on_progress(PipelineProgress {
         phase: PipelinePhase::Finalize,
@@ -381,19 +399,24 @@ fn reattach_frontmatter(frontmatter: Option<&str>, body: &str) -> String {
 fn should_skip_translation(content: &str, target_lang: &str) -> bool {
     let target = target_lang.to_ascii_lowercase();
     if target.starts_with("zh") || target == "ja" || target == "ko" {
-        return cjk_ratio(content) > 0.30;
+        let cjk = cjk_ratio(content);
+        let ascii_alpha = ascii_alpha_ratio(content);
+        // Keep mixed English/Chinese skill docs translatable. Only skip content
+        // that already reads predominantly CJK, while allowing technical names
+        // like React, Tauri, CLI, etc. to remain as-is.
+        return cjk > 0.55 && ascii_alpha < 0.35;
     }
     if target == "en" {
         // Target English: skip if the text already looks predominantly ASCII letters.
-        let total = content
-            .chars()
-            .filter(|c| !c.is_whitespace())
-            .count()
-            .max(1);
-        let ascii_alpha = content.chars().filter(|c| c.is_ascii_alphabetic()).count();
-        return (ascii_alpha as f32 / total as f32) > 0.75 && cjk_ratio(content) < 0.05;
+        return ascii_alpha_ratio(content) > 0.75 && cjk_ratio(content) < 0.05;
     }
     false
+}
+
+fn ascii_alpha_ratio(s: &str) -> f32 {
+    let total = s.chars().filter(|c| !c.is_whitespace()).count().max(1);
+    let ascii_alpha = s.chars().filter(|c| c.is_ascii_alphabetic()).count();
+    ascii_alpha as f32 / total as f32
 }
 
 fn cjk_ratio(s: &str) -> f32 {
@@ -459,6 +482,12 @@ mod tests {
     fn dont_skip_english_when_target_zh() {
         let en = "# Heading\n\nThis is some English text content.\n";
         assert!(!should_skip_translation(en, "zh-CN"));
+    }
+
+    #[test]
+    fn dont_skip_mixed_doc_when_target_zh() {
+        let mixed = "# 已有中文\n\nThis English section still needs translation.\n";
+        assert!(!should_skip_translation(mixed, "zh-CN"));
     }
 
     #[test]

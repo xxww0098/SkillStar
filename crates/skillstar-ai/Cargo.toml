@@ -28,6 +28,7 @@ quick-xml = "0.37"
 blake3 = "1.5"
 skillstar-core = { version = "0.1.0", path = "../skillstar-core" }
 skillstar-models = { version = "0.1.0", path = "../skillstar-models" }
+rusqlite = { version = "0.39.0", features = ["bundled"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"
