@@ -738,11 +738,7 @@ export function SubscriptionEditDialog({
                       </div>
 
                       <div className="rounded-2xl border border-border bg-muted/30 p-4">
-                        <FingerprintPicker
-                          value={fingerprintId}
-                          onChange={setFingerprintId}
-                          disabled={submitting}
-                        />
+                        <FingerprintPicker value={fingerprintId} onChange={setFingerprintId} disabled={submitting} />
                       </div>
 
                       {authMode !== "api-key" && (
@@ -939,10 +935,20 @@ export function SubscriptionEditDialog({
                       {t("usage.importFromLocal")}
                     </Button>
                   )}
-                  <Button size="sm" onClick={startOAuthFlow} disabled={submitting || !catalogId}>
+                  <Button
+                    size="sm"
+                    variant={isCreate ? "default" : "outline"}
+                    onClick={startOAuthFlow}
+                    disabled={submitting || !catalogId}
+                  >
                     <ExternalLink className="h-3.5 w-3.5 mr-1" />
                     {submitting ? t("usage.btnWaitingLogin") : t("usage.btnLoginBrowser")}
                   </Button>
+                  {!isCreate && (
+                    <Button size="sm" onClick={submit} disabled={submitting} className="px-5">
+                      {submitting ? t("common.saving") : t("common.save")}
+                    </Button>
+                  )}
                 </div>
               ) : (
                 <Button size="sm" onClick={submit} disabled={submitting} className="px-5">

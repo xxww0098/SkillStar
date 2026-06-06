@@ -4,6 +4,7 @@ import {
   formatQuotaNumber,
   formatUsdCents,
   isAbsoluteQuotaWindow,
+  isBreakdownQuotaWindow,
   isMonetaryQuota,
   localizeCategoryLabel,
   localizeWindowLabel,
@@ -30,6 +31,10 @@ export function UsageWindowBar({ window, compact }: UsageWindowBarProps) {
 
   if (isMonetaryQuota(window)) {
     return <UsageQuotaPanel window={window} />;
+  }
+
+  if (isBreakdownQuotaWindow(window)) {
+    return <UsageBreakdownQuotaPanel window={window} />;
   }
 
   if (isAbsoluteQuotaWindow(window)) {
@@ -96,6 +101,59 @@ function UsageQuotaPanel({ window }: { window: UsageWindow }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function UsageBreakdownQuotaPanel({ window }: { window: UsageWindow }) {
+  const { t } = useTranslation();
+  const percent = clamp(window.percent ?? computePercent(window.used, window.total));
+  const label = localizeWindowLabel(window.label, t);
+
+  const barBgClass =
+    percent >= 90
+      ? "bg-gradient-to-r from-rose-500 to-rose-400 shadow-[0_0_10px_rgba(244,63,94,0.5)] animate-pulse"
+      : percent >= 75
+        ? "bg-gradient-to-r from-amber-500 to-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.5)]"
+        : "bg-gradient-to-r from-[var(--brand-color)] to-[var(--brand-color)]/80 shadow-[0_0_10px_rgba(var(--brand-rgb),0.4)]";
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-2 rounded-2xl bg-zinc-50/40 border border-zinc-200/50 p-3 hover:bg-zinc-50/80 transition-colors relative overflow-hidden">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[11px] font-bold text-zinc-700 leading-none">{label}</p>
+          <span
+            className={cn(
+              "text-[9px] font-bold font-mono px-1.5 py-0.5 rounded-md",
+              percent >= 90
+                ? "bg-rose-500/10 text-rose-600"
+                : percent >= 75
+                  ? "bg-amber-500/10 text-amber-600"
+                  : "bg-zinc-100 text-zinc-600",
+            )}
+          >
+            {percent}%
+          </span>
+        </div>
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-100 ring-1 ring-zinc-200/20">
+          <div
+            className={cn("h-full rounded-full transition-all duration-500 ease-out", barBgClass)}
+            style={{ width: `${Math.max(2, percent)}%` }}
+          />
+        </div>
+      </div>
+
+      <div className="space-y-2 rounded-2xl border border-zinc-200/80 bg-zinc-50/50 p-2.5">
+        <div>
+          <p className="text-[10px] font-bold text-zinc-800">{t("usage.usageByCategory")}</p>
+          <p className="text-[10px] leading-snug text-zinc-500 mt-0.5">{t("usage.categoryUsageHint")}</p>
+        </div>
+        <div className="space-y-2.5">
+          {window.breakdown!.map((sub, i) => (
+            <UsageWindowBar key={`${sub.label}-${i}`} window={sub} compact />
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

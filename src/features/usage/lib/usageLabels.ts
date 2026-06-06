@@ -121,6 +121,15 @@ export function isMonetaryQuota(window: { label?: string; total: number | null; 
   return window.total != null && window.total > 100 && (window.breakdown?.length ?? 0) > 0;
 }
 
+/** Parent window with per-model/category percent breakdown (Antigravity, Copilot, etc.). */
+export function isBreakdownQuotaWindow(window: {
+  label?: string;
+  total: number | null;
+  breakdown?: unknown[];
+}): boolean {
+  return (window.breakdown?.length ?? 0) > 0 && !isMonetaryQuota(window);
+}
+
 /** Token/credit style window with absolute used + total (not rate-limit % only). */
 export function isAbsoluteQuotaWindow(window: {
   label: string;

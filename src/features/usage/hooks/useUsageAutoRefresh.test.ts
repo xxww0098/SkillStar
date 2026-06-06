@@ -1,10 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  USAGE_REFRESH_INTERVALS,
-  useUsageAutoRefreshRunner,
-  useUsageAutoRefreshSettings,
-} from "./useUsageAutoRefresh";
+import { USAGE_REFRESH_INTERVALS, useUsageAutoRefreshRunner, useUsageAutoRefreshSettings } from "./useUsageAutoRefresh";
 
 const STORAGE_KEY = "skillstar:usage-auto-refresh";
 
@@ -76,10 +72,9 @@ describe("useUsageAutoRefreshRunner", () => {
     );
     const settings = { enabled: true, intervalMs: 1_000 };
 
-    const { rerender } = renderHook(
-      ({ refreshing }) => useUsageAutoRefreshRunner(settings, onRefresh, refreshing),
-      { initialProps: { refreshing: false } },
-    );
+    const { rerender } = renderHook(({ refreshing }) => useUsageAutoRefreshRunner(settings, onRefresh, refreshing), {
+      initialProps: { refreshing: false },
+    });
 
     expect(onRefresh).toHaveBeenCalledTimes(1);
 

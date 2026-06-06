@@ -567,3 +567,42 @@ fn pick_plan_name(v: &Value) -> Option<String> {
 
 #[allow(dead_code)]
 const _TIMEOUT: Duration = Duration::from_secs(30);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_antigravity_model_quota_groups() {
+        let payload = json!({
+            "models": {
+                "claude-sonnet-4-6": {
+                    "displayName": "Claude Sonnet 4.6",
+                    "quotaInfo": { "remainingFraction": 0.25 }
+                },
+                "gemini-3.1-pro-high": {
+                    "quotaInfo": { "remainingFraction": "75%" }
+                },
+                "gemini-2.5-flash": {
+                    "quota_info": { "remaining_fraction": 1.0 }
+                },
+                "gemini-3.1-flash-image": {
+                    "displayName": "Gemini 3.1 Flash Image",
+                    "quotaInfo": { "remainingFraction": 0.5 }
+                }
+            }
+        });
+
+        let windows = parse_model_windows(&payload);
+
+        assert_eq!(windows.len(), 4);
+        assert_eq!(windows[0].label, "Claude/GPT");
+        assert_eq!(windows[0].used, 75);
+        assert_eq!(windows[1].label, "Gemini 3.1 Pro Series");
+        assert_eq!(windows[1].used, 25);
+        assert_eq!(windows[2].label, "Gemini 2.5 Flash");
+        assert_eq!(windows[2].used, 0);
+        assert_eq!(windows[3].label, "Gemini 3.1 Flash Image");
+        assert_eq!(windows[3].used, 50);
+    }
+}
