@@ -8,6 +8,7 @@
 //! it dispatches by `catalog_id` to the right implementation.
 
 pub mod api_key;
+pub mod cookie;
 pub mod oauth;
 
 use async_trait::async_trait;
@@ -34,6 +35,7 @@ pub async fn refresh(subscription: &mut Subscription) -> UsageResult<Subscriptio
     match subscription.auth_mode {
         AuthMode::ApiKey => api_key::dispatch(subscription).await,
         AuthMode::OAuth => oauth::dispatch(subscription).await,
+        AuthMode::Cookie => cookie::dispatch(subscription).await,
         AuthMode::Manual => Ok(SubscriptionUsage {
             subscription_id: subscription.id.clone(),
             fetched_at: Utc::now().timestamp(),

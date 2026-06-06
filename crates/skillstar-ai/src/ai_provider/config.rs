@@ -8,7 +8,9 @@ pub use skillstar_models::AiProviderRef;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum ApiFormat {
+    #[default]
     Openai,
     Anthropic,
     Local,
@@ -25,11 +27,6 @@ impl ApiFormat {
     }
 }
 
-impl Default for ApiFormat {
-    fn default() -> Self {
-        Self::Openai
-    }
-}
 
 fn deserialize_api_format<'de, D>(deserializer: D) -> Result<ApiFormat, D::Error>
 where
@@ -63,19 +60,10 @@ pub struct AiConfig {
     pub api_key: String,
     pub model: String,
     pub target_language: String,
-    /// Model context window in K tokens (e.g. 128 = 128K tokens).
-    /// All scan parameters are auto-derived from this value.
     #[serde(default = "default_context_window_k")]
     pub context_window_k: u32,
-    /// Override: 0 = auto-derive from context_window_k
-    #[serde(default)]
+    #[serde(default = "default_max_concurrent_requests")]
     pub max_concurrent_requests: u32,
-    /// Override: 0 = auto-derive from context_window_k
-    #[serde(default)]
-    pub chunk_char_limit: usize,
-    /// Override: 0 = auto-derive from context_window_k
-    #[serde(default)]
-    pub scan_max_response_tokens: u32,
     /// Saved preset for OpenAI-compatible format.
     #[serde(default)]
     pub openai_preset: FormatPreset,
@@ -85,6 +73,21 @@ pub struct AiConfig {
     /// Saved preset for Local (Ollama) format.
     #[serde(default)]
     pub local_preset: FormatPreset,
+    /// Claude Haiku model override — resolved at runtime from provider meta, never persisted.
+    /// Maps to `ANTHROPIC_DEFAULT_HAIKU_MODEL` in Claude Code settings.
+    #[serde(default, skip_serializing)]
+    pub claude_haiku_model: Option<String>,
+    /// Claude Sonnet model override — resolved at runtime from provider meta, never persisted.
+    /// Maps to `ANTHROPIC_DEFAULT_SONNET_MODEL` in Claude Code settings.
+    #[serde(default, skip_serializing)]
+    pub claude_sonnet_model: Option<String>,
+    /// Claude Opus model override — resolved at runtime from provider meta, never persisted.
+    /// Maps to `ANTHROPIC_DEFAULT_OPUS_MODEL` in Claude Code settings.
+    #[serde(default, skip_serializing)]
+    pub claude_opus_model: Option<String>,
+    /// HTTP request timeout (seconds) from provider meta — not persisted in ai.json.
+    #[serde(default, skip_serializing)]
+    pub request_timeout_secs: Option<u64>,
     // Legacy fields — absorbed on load, not written back.
     #[serde(default, skip_serializing)]
     pub short_text_priority: Option<serde_json::Value>,
@@ -92,6 +95,10 @@ pub struct AiConfig {
 
 fn default_context_window_k() -> u32 {
     128
+}
+
+fn default_max_concurrent_requests() -> u32 {
+    4
 }
 
 impl Default for AiConfig {
@@ -105,9 +112,7 @@ impl Default for AiConfig {
             model: "gpt-5.4".to_string(),
             target_language: "zh-CN".to_string(),
             context_window_k: default_context_window_k(),
-            max_concurrent_requests: 4,
-            chunk_char_limit: 0,
-            scan_max_response_tokens: 0,
+            max_concurrent_requests: default_max_concurrent_requests(),
             openai_preset: FormatPreset::default(),
             anthropic_preset: FormatPreset::default(),
             local_preset: FormatPreset {
@@ -115,6 +120,10 @@ impl Default for AiConfig {
                 model: "llama3.1:8b".to_string(),
                 ..Default::default()
             },
+            claude_haiku_model: None,
+            claude_sonnet_model: None,
+            claude_opus_model: None,
+            request_timeout_secs: None,
             short_text_priority: None,
         }
     }

@@ -4,6 +4,16 @@ import type { BalanceInfo } from "../../../types";
 
 const BALANCE_TIMEOUT_MS = 10_000;
 
+function getStr(record: Record<string, unknown> | undefined, key: string): string | undefined {
+  const v = record?.[key];
+  return typeof v === "string" ? v : undefined;
+}
+
+function getNumLike(record: Record<string, unknown> | undefined, key: string): string | number | undefined {
+  const v = record?.[key];
+  return typeof v === "number" || typeof v === "string" ? v : undefined;
+}
+
 /**
  * Parse raw balance API response into normalized BalanceInfo based on preset.
  *
@@ -17,35 +27,46 @@ function parseBalanceResponse(presetId: string, raw: unknown): BalanceInfo | nul
   if (!raw || typeof raw !== "object") return null;
 
   const now = Date.now();
-  // biome-ignore lint/suspicious/noExplicitAny: raw JSON parsing
-  const data = raw as any;
+  const data = raw as Record<string, unknown>;
 
   switch (presetId) {
     case "deepseek": {
-      const info = data?.balance_infos?.[0];
+      const infos = data.balance_infos;
+      const info = Array.isArray(infos) ? (infos[0] as Record<string, unknown>) : undefined;
       if (!info) return null;
-      const available = Number.parseFloat(info.total_balance ?? info.available_balance ?? "0");
+      const rawAvailable = getNumLike(info, "total_balance") ?? getNumLike(info, "available_balance") ?? "0";
+      const available = Number.parseFloat(String(rawAvailable));
       return {
         available: Number.isFinite(available) ? available : 0,
-        currency: info.currency ?? "CNY",
+        currency: getStr(info, "currency") ?? "CNY",
         updated_at: now,
       };
     }
     case "kimi": {
-      const d = data?.data ?? data;
-      const available = Number.parseFloat(String(d?.available_balance ?? d?.balance ?? "0"));
-      const total = d?.total_balance != null ? Number.parseFloat(String(d.total_balance)) : undefined;
+      const nested = data.data;
+      const d =
+        typeof nested === "object" && nested !== null && !Array.isArray(nested)
+          ? (nested as Record<string, unknown>)
+          : data;
+      const rawAvailable = getNumLike(d, "available_balance") ?? getNumLike(d, "balance") ?? "0";
+      const available = Number.parseFloat(String(rawAvailable));
+      const totalRaw = getNumLike(d, "total_balance");
+      const total = totalRaw != null ? Number.parseFloat(String(totalRaw)) : undefined;
       return {
         available: Number.isFinite(available) ? available : 0,
         total: total != null && Number.isFinite(total) ? total : undefined,
-        currency: d?.currency ?? "CNY",
+        currency: getStr(d, "currency") ?? "CNY",
         updated_at: now,
       };
     }
     case "openrouter": {
-      const d = data?.data ?? data;
-      const totalCredits = Number.parseFloat(String(d?.total_credits ?? "0"));
-      const usage = Number.parseFloat(String(d?.usage ?? "0"));
+      const nested = data.data;
+      const d =
+        typeof nested === "object" && nested !== null && !Array.isArray(nested)
+          ? (nested as Record<string, unknown>)
+          : data;
+      const totalCredits = Number.parseFloat(String(getNumLike(d, "total_credits") ?? "0"));
+      const usage = Number.parseFloat(String(getNumLike(d, "usage") ?? "0"));
       const available = totalCredits - usage;
       return {
         available: Number.isFinite(available) ? available : 0,
@@ -55,8 +76,13 @@ function parseBalanceResponse(presetId: string, raw: unknown): BalanceInfo | nul
       };
     }
     case "siliconflow": {
-      const d = data?.data ?? data;
-      const available = Number.parseFloat(String(d?.balance ?? "0"));
+      const nested = data.data;
+      const d =
+        typeof nested === "object" && nested !== null && !Array.isArray(nested)
+          ? (nested as Record<string, unknown>)
+          : data;
+      const rawAvailable = getNumLike(d, "balance") ?? "0";
+      const available = Number.parseFloat(String(rawAvailable));
       return {
         available: Number.isFinite(available) ? available : 0,
         currency: "CNY",

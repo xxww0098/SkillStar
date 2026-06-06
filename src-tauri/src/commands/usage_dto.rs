@@ -7,8 +7,8 @@
 use serde::{Deserialize, Serialize};
 use skillstar_usage::catalog::{AuthMode, CatalogEntry, CatalogTier};
 use skillstar_usage::subscription::{
-    AlertKind, AlertSeverity, BillingCycle, ManualQuota, MonetaryBalance, Subscription,
-    SubscriptionAlert, SubscriptionUsage, UsageWindow,
+    AlertKind, AlertSeverity, BillingCycle, ManualQuota, Subscription,
+    SubscriptionAlert, SubscriptionUsage,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -58,6 +58,15 @@ pub struct SubscriptionDto {
     /// `true` when ApiKey/OAuth credentials are present (without revealing them).
     pub has_credential: bool,
     pub requires_reauth: bool,
+    /// Fingerprint bound to this subscription (id in the fingerprint store).
+    /// `None` → behaves identically to pre-fingerprint SkillStar.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fingerprint_id: Option<String>,
+    /// `true` when this subscription is the active account for its
+    /// catalog_id (see Phase 7 multi-account support). At most one
+    /// row per catalog has `is_active = true`.
+    #[serde(default)]
+    pub is_active: bool,
     pub manual_quota: Option<ManualQuota>,
     pub note: Option<String>,
     pub sort_index: i32,
@@ -71,6 +80,10 @@ impl SubscriptionDto {
         let has_credential = sub.api_key_encrypted.as_ref().is_some_and(|s| !s.is_empty())
             || sub
                 .access_token_encrypted
+                .as_ref()
+                .is_some_and(|s| !s.is_empty())
+            || sub
+                .cookie_jar_encrypted
                 .as_ref()
                 .is_some_and(|s| !s.is_empty());
         Self {
@@ -87,6 +100,10 @@ impl SubscriptionDto {
             auto_renew: sub.auto_renew,
             has_credential,
             requires_reauth: sub.requires_reauth,
+            fingerprint_id: sub.fingerprint_id,
+            // Will be filled by the command layer (which consults the
+            // active-per-catalog store). The pure-data DTO can't know.
+            is_active: false,
             manual_quota: sub.manual_quota,
             note: sub.note,
             sort_index: sub.sort_index,
@@ -114,6 +131,11 @@ pub struct CreateSubscriptionInput {
     pub oauth_region: Option<String>,
     pub manual_quota: Option<ManualQuota>,
     pub note: Option<String>,
+    /// Raw `Cookie:` header string pasted by the user (Cookie mode only).
+    /// Parsed and encrypted server-side into `cookie_jar_encrypted`.
+    pub cookie_header: Option<String>,
+    /// Optional fingerprint binding when creating the subscription.
+    pub fingerprint_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -130,6 +152,17 @@ pub struct UpdateSubscriptionInput {
     pub api_key: Option<String>,
     pub manual_quota: Option<ManualQuota>,
     pub note: Option<String>,
+    /// Raw `Cookie:` header string to replace existing cookies (Cookie mode only).
+    pub cookie_header: Option<String>,
+    /// Bind this subscription to a stored fingerprint id.
+    /// Absent → leave existing binding unchanged. Use [`clear_fingerprint`]
+    /// to explicitly remove the binding.
+    pub fingerprint_id: Option<String>,
+    /// When `true`, drop the existing fingerprint binding regardless of
+    /// [`fingerprint_id`]. Frontend sends `{ clearFingerprint: true }`
+    /// when the user picks "无（默认）" from the picker.
+    #[serde(default, rename = "clearFingerprint")]
+    pub clear_fingerprint: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -174,8 +207,11 @@ pub struct MonthlySpendEntry {
 pub struct OAuthStartDto {
     pub pending_id: String,
     pub auth_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verification_uri: Option<String>,
 }
 
 // Re-export inner types used by handler signatures so the lib.rs `#[command]`
 // metadata generator can see them.
-pub use skillstar_usage::subscription::{MonetaryBalance as _MonetaryBalance, UsageWindow as _UsageWindow};

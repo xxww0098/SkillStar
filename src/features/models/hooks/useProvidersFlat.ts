@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
+import { toast } from "sonner";
 import { tauriInvoke } from "../../../lib/ipc";
 import type {
   FlatProvidersResponse,
@@ -70,6 +71,13 @@ export function useProvidersFlat() {
   const updateMutation = useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: ProviderPatchFlat }) =>
       tauriInvoke("update_provider_flat", { id, patch }),
+    onSuccess: (result) => {
+      const failed = result.tool_sync_results.filter((r) => !r.success);
+      if (failed.length > 0) {
+        const names = failed.map((r) => r.tool_id).join("、");
+        toast.warning(`供应商已保存，但工具同步失败：${names}`);
+      }
+    },
     onMutate: async ({ id, patch }) => {
       // Optimistic update: apply patch to local cache immediately
       await queryClient.cancelQueries({ queryKey: QUERY_KEY });
@@ -95,7 +103,8 @@ export function useProvidersFlat() {
 
   const updateProvider = useCallback(
     async (id: string, patch: ProviderPatchFlat): Promise<ProviderEntryFlat> => {
-      return updateMutation.mutateAsync({ id, patch });
+      const result = await updateMutation.mutateAsync({ id, patch });
+      return result.provider;
     },
     [updateMutation],
   );
@@ -188,8 +197,17 @@ export function useProvidersFlat() {
   // ── Activate Tool ───────────────────────────────────────────────────
 
   const activateMutation = useMutation({
-    mutationFn: ({ providerId, toolId, model }: { providerId: string; toolId: string; model?: string }) =>
-      tauriInvoke("activate_tool", { providerId, toolId, model }),
+    mutationFn: ({
+      providerId,
+      toolId,
+      model,
+      settings,
+    }: {
+      providerId: string;
+      toolId: string;
+      model?: string;
+      settings?: Record<string, unknown> | null;
+    }) => tauriInvoke("activate_tool", { providerId, toolId, model, settings }),
     onMutate: async ({ providerId, toolId, model }) => {
       // Optimistic update: set tool activation locally
       await queryClient.cancelQueries({ queryKey: QUERY_KEY });
@@ -219,8 +237,13 @@ export function useProvidersFlat() {
   });
 
   const activateTool = useCallback(
-    async (providerId: string, toolId: string, model?: string): Promise<ToolSyncResult> => {
-      return activateMutation.mutateAsync({ providerId, toolId, model });
+    async (
+      providerId: string,
+      toolId: string,
+      model?: string,
+      settings?: Record<string, unknown> | null,
+    ): Promise<ToolSyncResult> => {
+      return activateMutation.mutateAsync({ providerId, toolId, model, settings });
     },
     [activateMutation],
   );

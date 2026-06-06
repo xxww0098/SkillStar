@@ -110,7 +110,7 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
       try {
         await tauriInvoke("open_folder", { path });
       } catch (error) {
-        console.error("Failed to open folder:", error);
+        if (import.meta.env.DEV) console.error("Failed to open folder:", error);
         toast.error(t("settings.openFolderFailed"));
       }
     },

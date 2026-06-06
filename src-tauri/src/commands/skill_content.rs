@@ -56,7 +56,7 @@ pub async fn delete_local_skill(name: String) -> Result<(), AppError> {
 
 #[tauri::command]
 pub async fn migrate_local_skills() -> Result<u32, AppError> {
-    tokio::task::spawn_blocking(|| local_skill::migrate_existing())
+    tokio::task::spawn_blocking(local_skill::migrate_existing)
         .await?
         .map_err(AppError::Anyhow)
 }

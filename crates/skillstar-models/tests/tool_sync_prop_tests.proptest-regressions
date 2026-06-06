@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 4c422c7baffd3f47d0b0a3dcac0376e6bdd87e91ce98d8d03e35710deaed543d # shrinks to extra_sections = [("a_a", [("oi", String("A")), ("oi", String("a"))])], provider = ProviderEntryFlat { id: "test-uuid", name: "Test Provider", base_url_openai: "https://aaa.com", base_url_anthropic: "https://aaa.com", models_url: "", api_key: "sk-A0Aa0AA0a0", models: ["a-a"], default_model: "a-a", sort_index: 0, preset_id: None, icon_color: None, notes: None, created_at: Some(1719000000000), meta: None, codex_wire_api: "responses", codex_auth_mode: "api_key" }, model = "a-0"

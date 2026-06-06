@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { usageApi } from "../api";
 import type {
@@ -32,7 +32,7 @@ export function useUsageData() {
       setSummary(s);
       setAlerts(a);
     } catch (err) {
-      console.warn("[usage] summary fetch failed", err);
+      if (import.meta.env.DEV) console.warn("[usage] summary fetch failed", err);
     }
   }, []);
 
@@ -120,7 +120,7 @@ export function useUsageData() {
     try {
       await usageApi.reorderSubscriptions(orderedIds);
     } catch (err) {
-      console.warn("[usage] reorder persist failed", err);
+      if (import.meta.env.DEV) console.warn("[usage] reorder persist failed", err);
     }
   }, []);
 
@@ -129,20 +129,58 @@ export function useUsageData() {
     setAlerts((prev) => prev.filter((a) => a.id !== alertId));
   }, []);
 
-  return {
-    catalog,
-    subscriptions,
-    summary,
-    alerts,
-    loading,
-    error,
-    reload,
-    create,
-    update,
-    remove,
-    refreshOne,
-    refreshAll,
-    reorder,
-    dismissAlert,
-  };
+  /** Switch a subscription to be the active account for its catalog
+   *  (Phase 7). Locally we flip `is_active` so the UI reflects the change
+   *  without a full reload; backend has already verified consistency. */
+  const setActive = useCallback(async (id: string) => {
+    const updated = await usageApi.setActiveSubscription(id);
+    setSubscriptions((prev) =>
+      prev.map((s) => {
+        if (s.id === updated.id) return updated;
+        if (s.catalog_id === updated.catalog_id) {
+          // Demote any sibling in the same catalog.
+          return s.is_active ? { ...s, is_active: false } : s;
+        }
+        return s;
+      }),
+    );
+    return updated;
+  }, []);
+
+  return useMemo(
+    () => ({
+      catalog,
+      subscriptions,
+      summary,
+      alerts,
+      loading,
+      error,
+      reload,
+      create,
+      update,
+      remove,
+      refreshOne,
+      refreshAll,
+      reorder,
+      dismissAlert,
+      setActive,
+    }),
+    [
+      catalog,
+      subscriptions,
+      summary,
+      alerts,
+      loading,
+      error,
+      reload,
+      create,
+      update,
+      remove,
+      refreshOne,
+      refreshAll,
+      reorder,
+      dismissAlert,
+      setActive,
+    ],
+  );
 }

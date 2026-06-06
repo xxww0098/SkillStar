@@ -112,7 +112,7 @@ export function useProjectAgentDetection({
           setDisambigOpen(true);
         }
       } catch (e) {
-        console.error("Agent detection failed:", e);
+        if (import.meta.env.DEV) console.error("Agent detection failed:", e);
       }
     },
     [detectProjectAgents, enabledProfileIdSet, canonicalizeAgentsBySharedPath, onAgentSkillsChange, onDirtyChange],
@@ -174,7 +174,7 @@ export function useProjectAgentDetection({
           onDirtyChange(false);
           loadProjects();
         } catch (e) {
-          console.error("Auto-persist after disambiguation failed:", e);
+          if (import.meta.env.DEV) console.error("Auto-persist after disambiguation failed:", e);
         } finally {
           onSavingChange(false);
         }

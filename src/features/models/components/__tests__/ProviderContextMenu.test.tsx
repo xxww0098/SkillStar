@@ -51,13 +51,13 @@ vi.mock("radix-ui", () => ({
     Root: ({ children, open }: { children: React.ReactNode; open?: boolean; onOpenChange?: (v: boolean) => void }) =>
       open ? <div data-testid="alert-dialog-root">{children}</div> : null,
     Portal: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-    Overlay: ({ className }: { className?: string }) => <div data-testid="alert-dialog-overlay" />,
+    Overlay: ({ className: _className }: { className?: string }) => <div data-testid="alert-dialog-overlay" />,
     Content: ({ children }: { children: React.ReactNode; className?: string }) => (
       <div data-testid="alert-dialog-content">{children}</div>
     ),
     Title: ({ children }: { children: React.ReactNode; className?: string }) => <h2>{children}</h2>,
     Description: ({ children }: { children: React.ReactNode; className?: string }) => <p>{children}</p>,
-    Cancel: ({ children, className }: { children: React.ReactNode; className?: string }) => (
+    Cancel: ({ children, className: _className }: { children: React.ReactNode; className?: string }) => (
       <button type="button" data-testid="alert-dialog-cancel">
         {children}
       </button>
@@ -65,7 +65,7 @@ vi.mock("radix-ui", () => ({
     Action: ({
       children,
       onClick,
-      className,
+      className: _className,
     }: {
       children: React.ReactNode;
       onClick?: () => void;
@@ -221,7 +221,7 @@ describe("DeleteConfirmDialog", () => {
 
     expect(screen.getByText("确认删除供应商")).toBeInTheDocument();
     expect(screen.getByText("DeepSeek")).toBeInTheDocument();
-    expect(screen.getByText("Claude Code")).toBeInTheDocument();
+    expect(screen.getByText("Claude")).toBeInTheDocument();
     expect(screen.getByText("Codex")).toBeInTheDocument();
   });
 

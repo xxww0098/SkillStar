@@ -102,14 +102,13 @@ pub async fn deploy_skill_group(
     let mut batch_by_url: std::collections::HashMap<String, Vec<String>> =
         std::collections::HashMap::new();
     for skill_name in &group.skills {
-        if !skills_dir.join(skill_name).exists() {
-            if let Some(git_url) = sources.get(skill_name) {
+        if !skills_dir.join(skill_name).exists()
+            && let Some(git_url) = sources.get(skill_name) {
                 batch_by_url
                     .entry(git_url.clone())
                     .or_default()
                     .push(skill_name.clone());
             }
-        }
     }
 
     let mut install_tasks = tokio::task::JoinSet::new();

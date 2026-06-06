@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::{LazyLock, OnceLock};
+use std::sync::OnceLock;
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use regex::Regex;
@@ -10,23 +11,12 @@ use crate::{OfficialPublisher, Skill, SkillCategory, SkillType};
 
 /// Build-time User-Agent string derived from Cargo.toml version.
 const USER_AGENT: &str = concat!("SkillStar/", env!("CARGO_PKG_VERSION"));
+const MARKETPLACE_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Shared HTTP client for all marketplace requests.
-///
-/// Reuses TLS sessions and connection pools across calls, avoiding
-/// the ~50-100ms overhead of a fresh TLS handshake per request.
-static MARKETPLACE_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
-    reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .timeout(std::time::Duration::from_secs(30))
-        .redirect(reqwest::redirect::Policy::limited(3))
-        .user_agent(USER_AGENT)
-        .build()
-        .expect("Failed to build marketplace HTTP client")
-});
-
-fn marketplace_client() -> &'static reqwest::Client {
-    &MARKETPLACE_CLIENT
+/// Shared HTTP client for marketplace requests, rebuilt when the app proxy changes.
+fn marketplace_client() -> Result<reqwest::Client> {
+    skillstar_core::infra::http_client::probe_http_client(MARKETPLACE_TIMEOUT)
+        .context("Failed to build marketplace HTTP client")
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -87,16 +77,13 @@ impl From<SkillsShSkill> for Skill {
 
 /// Search skills.sh registry via official API
 /// API endpoint: GET https://skills.sh/api/search?q={query}&limit={limit}
-/// Note: max limit is ~100 (API returns 400 for higher values)
 /// Note: empty query returns 400 — a query is always required
 pub async fn search_skills_sh(query: &str, limit: u32) -> Result<MarketplaceResult> {
-    let client = marketplace_client();
-    // Clamp limit to API maximum
-    let clamped_limit = limit.min(100);
+    let client = marketplace_client()?;
     let url = format!(
         "https://skills.sh/api/search?q={}&limit={}",
         url_encode_query_component(query),
-        clamped_limit
+        limit
     );
 
     let response: SkillsShSearchResponse = client
@@ -112,7 +99,7 @@ pub async fn search_skills_sh(query: &str, limit: u32) -> Result<MarketplaceResu
 
     let mut skills: Vec<Skill> = response.skills.into_iter().map(Skill::from).collect();
     // Sort by installs descending and assign ranks
-    skills.sort_by(|a, b| b.stars.cmp(&a.stars));
+    skills.sort_by_key(|s| std::cmp::Reverse(s.stars));
     for (i, skill) in skills.iter_mut().enumerate() {
         skill.rank = Some((i + 1) as u32);
     }
@@ -158,7 +145,7 @@ fn re_nextjs_skill_data() -> &'static Regex {
 
 /// Get skills.sh leaderboard via HTML scraping
 pub async fn get_skills_sh_leaderboard(category: &str) -> Result<Vec<Skill>> {
-    let client = marketplace_client();
+    let client = marketplace_client()?;
 
     // Map category to URL path
     let url_path = match category {
@@ -182,13 +169,42 @@ pub async fn get_skills_sh_leaderboard(category: &str) -> Result<Vec<Skill>> {
         .await
         .context("Failed to read HTML")?;
 
-    let skills = parse_skills_sh_html(&html);
+    let mut skills = parse_skills_sh_html(&html);
     debug!(target: "skills_sh", count = skills.len(), "parsed skills from HTML");
 
-    // If HTML parsing fails, fallback to search API
+    // Supplement with search API to get ALL skills beyond the SSR payload.
+    // The SSR payload only contains ~500-600 top skills; the search API
+    // can return the full registry (~50K+).
+    let api_skills = fetch_all_skills_via_api(&client).await;
+    match api_skills {
+        Ok(mut extra) => {
+            let existing: HashSet<String> = skills.iter().map(|s| s.name.clone()).collect();
+            let next_rank = skills.len() as u32 + 1;
+            extra.sort_by_key(|s| std::cmp::Reverse(s.stars));
+            let mut appended = 0u32;
+            for mut s in extra {
+                if existing.contains(&s.name) {
+                    continue;
+                }
+                s.rank = Some(next_rank + appended);
+                appended += 1;
+                skills.push(s);
+            }
+            debug!(
+                target: "skills_sh",
+                appended,
+                total = skills.len(),
+                "supplemented leaderboard with API skills"
+            );
+        }
+        Err(err) => {
+            warn!(target: "skills_sh", error = %err, "API supplement failed, using SSR-only data");
+        }
+    }
+
     if skills.is_empty() {
         warn!(target: "skills_sh", "HTML parsing failed, using search API fallback");
-        let fallback_url = "https://skills.sh/api/search?q=ai&limit=200";
+        let fallback_url = "https://skills.sh/api/search?q=skill&limit=100000";
         let response: SkillsShSearchResponse = client
             .get(fallback_url)
             .header("User-Agent", USER_AGENT)
@@ -198,9 +214,33 @@ pub async fn get_skills_sh_leaderboard(category: &str) -> Result<Vec<Skill>> {
             .json()
             .await
             .context("Fallback parse failed")?;
-        return Ok(response.skills.into_iter().map(Skill::from).collect());
+        let mut result: Vec<Skill> = response.skills.into_iter().map(Skill::from).collect();
+        result.sort_by_key(|s| std::cmp::Reverse(s.stars));
+        for (i, skill) in result.iter_mut().enumerate() {
+            skill.rank = Some((i + 1) as u32);
+        }
+        return Ok(result);
     }
 
+    Ok(skills)
+}
+
+/// Fetch the full skills.sh registry via the search API.
+async fn fetch_all_skills_via_api(client: &reqwest::Client) -> Result<Vec<Skill>> {
+    let url = "https://skills.sh/api/search?q=skill&limit=100000";
+    debug!(target: "skills_sh", "fetching full registry via search API");
+    let response: SkillsShSearchResponse = client
+        .get(url)
+        .header("User-Agent", USER_AGENT)
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .context("Failed to fetch full skill registry")?
+        .json()
+        .await
+        .context("Failed to parse full registry response")?;
+    let skills: Vec<Skill> = response.skills.into_iter().map(Skill::from).collect();
+    debug!(target: "skills_sh", count = skills.len(), "fetched full registry");
     Ok(skills)
 }
 
@@ -379,7 +419,7 @@ fn extract_description_from_html(_html: &str, skill_name: &str) -> String {
 
 /// Get official publishers from skills.sh/official via HTML scraping
 pub async fn get_official_publishers() -> Result<Vec<OfficialPublisher>> {
-    let client = marketplace_client();
+    let client = marketplace_client()?;
 
     let html = client
         .get("https://skills.sh/official")
@@ -693,7 +733,7 @@ pub async fn get_publisher_repo_skills(
     let repo_lower = repo_name.to_lowercase();
     let url = format!("https://skills.sh/{}/{}", publisher_lower, repo_lower);
 
-    let client = marketplace_client();
+    let client = marketplace_client()?;
     let html = client
         .get(&url)
         .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -773,7 +813,7 @@ fn parse_repo_skills_html(html: &str, publisher: &str, repo: &str) -> Vec<Publis
         // Deduplicate and sort
         let mut seen = HashSet::new();
         skills.retain(|s| seen.insert(s.name.clone()));
-        skills.sort_by(|a, b| b.installs.cmp(&a.installs));
+        skills.sort_by_key(|s| std::cmp::Reverse(s.installs));
         return skills;
     }
 
@@ -831,7 +871,7 @@ fn parse_repo_skills_html(html: &str, publisher: &str, repo: &str) -> Vec<Publis
         });
     }
 
-    skills.sort_by(|a, b| b.installs.cmp(&a.installs));
+    skills.sort_by_key(|s| std::cmp::Reverse(s.installs));
     skills
 }
 
@@ -842,7 +882,7 @@ fn parse_repo_skills_html(html: &str, publisher: &str, repo: &str) -> Vec<Publis
 ///    (the per-publisher page may omit low-traffic repos).
 /// 2. Fall back to `skills.sh/<publisher>` HTML scraping if the official payload fails.
 pub async fn get_publisher_repos(publisher_name: &str) -> Result<Vec<PublisherRepo>> {
-    let client = marketplace_client();
+    let client = marketplace_client()?;
     let publisher_lower = publisher_name.to_lowercase();
 
     // Strategy 1: official page SSR payload (complete data)
@@ -1015,7 +1055,7 @@ fn parse_publisher_repos_from_official_payload(
         })
         .collect();
 
-    repos.sort_by(|a, b| b.installs.cmp(&a.installs));
+    repos.sort_by_key(|s| std::cmp::Reverse(s.installs));
     repos
 }
 
@@ -1103,7 +1143,7 @@ fn parse_publisher_repos_html(html: &str, publisher_name: &str) -> Vec<Publisher
     }
 
     // Sort by installs descending
-    repos.sort_by(|a, b| b.installs.cmp(&a.installs));
+    repos.sort_by_key(|s| std::cmp::Reverse(s.installs));
 
     repos
 }
@@ -1168,7 +1208,7 @@ pub async fn fetch_marketplace_skill_details(
     let url = format!("https://skills.sh/{}/{}", source, name);
     debug!(target: "skills_sh", url = %url, "fetching skill details");
 
-    let client = marketplace_client();
+    let client = marketplace_client()?;
 
     let response = client
         .get(&url)
@@ -1435,7 +1475,7 @@ pub async fn ai_search_by_keywords(keywords: &[String]) -> Result<AiKeywordSearc
     }
 
     let mut skills: Vec<Skill> = seen.into_values().collect();
-    skills.sort_by(|a, b| b.stars.cmp(&a.stars));
+    skills.sort_by_key(|s| std::cmp::Reverse(s.stars));
     for (i, skill) in skills.iter_mut().enumerate() {
         skill.rank = Some((i + 1) as u32);
     }

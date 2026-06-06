@@ -32,13 +32,11 @@ pub fn invalidate_profile_cache() {
 /// commands may run in quick succession (apply/import/toggle), so we keep a
 /// tiny in-process cache to avoid repeated filesystem scans.
 fn cached_profiles() -> Vec<agent_profile::AgentProfile> {
-    if let Ok(cache) = profile_cache().read() {
-        if let Some(loaded_at) = cache.loaded_at {
-            if loaded_at.elapsed() < PROFILE_CACHE_TTL {
+    if let Ok(cache) = profile_cache().read()
+        && let Some(loaded_at) = cache.loaded_at
+            && loaded_at.elapsed() < PROFILE_CACHE_TTL {
                 return cache.profiles.clone();
             }
-        }
-    }
 
     let profiles = agent_profile::list_profiles();
 
@@ -110,15 +108,13 @@ pub fn toggle_skill_for_agent(skill_name: &str, agent_id: &str, enable: bool) ->
         std::fs::create_dir_all(&profile.global_skills_dir)?;
 
         // Remove existing symlink/junction/copy if present
-        if target.symlink_metadata().is_ok()
+        if (target.symlink_metadata().is_ok()
             || skillstar_core::infra::fs_ops::is_link(&target)
-            || target.exists()
-        {
-            if !remove_managed_entry_for_overwrite(&target)? {
+            || target.exists())
+            && !remove_managed_entry_for_overwrite(&target)? {
                 tracing::error!(target: "sync", target = %target.display(), "Cannot overwrite real directory");
                 anyhow::bail!("Target cannot be overwritten because it is a real directory");
             }
-        }
         skillstar_core::infra::fs_ops::create_symlink(&skill_path, &target)?;
         tracing::info!(target: "sync", skill_name, agent_id, "Skill linked successfully");
     } else {
@@ -221,11 +217,10 @@ pub fn list_linked_skills(agent_id: &str) -> Result<Vec<String>> {
         // Include symlinks/junctions AND copy-based deployments
         let is_managed = skillstar_core::infra::fs_ops::is_link(&path)
             || (path.is_dir() && path.join("SKILL.md").exists());
-        if is_managed {
-            if let Some(name) = entry.file_name().to_str() {
+        if is_managed
+            && let Some(name) = entry.file_name().to_str() {
                 names.push(name.to_string());
             }
-        }
     }
     names.sort();
     Ok(names)

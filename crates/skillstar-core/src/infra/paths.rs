@@ -193,6 +193,9 @@ mod tests {
 
     #[test]
     fn data_root_honors_override() {
+        let _env_lock = crate::config::test_env_lock()
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let temp = TempDir::new().unwrap();
         unsafe {
             std::env::set_var("SKILLSTAR_DATA_DIR", temp.path());
@@ -205,6 +208,9 @@ mod tests {
 
     #[test]
     fn hub_root_defaults_under_data_root() {
+        let _env_lock = crate::config::test_env_lock()
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let temp = TempDir::new().unwrap();
         unsafe {
             std::env::remove_var("SKILLSTAR_HUB_DIR");
@@ -218,6 +224,9 @@ mod tests {
 
     #[test]
     fn hub_root_honors_override() {
+        let _env_lock = crate::config::test_env_lock()
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let temp = TempDir::new().unwrap();
         unsafe {
             std::env::set_var("SKILLSTAR_HUB_DIR", temp.path());

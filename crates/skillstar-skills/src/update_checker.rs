@@ -32,8 +32,8 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tracing::warn;
 
-use skillstar_core::config::github_mirror;
 use crate::git::ops as git_ops;
+use skillstar_core::config::github_mirror;
 use skillstar_core::infra::path_env::command_with_path;
 
 // ── Symlink Resolution Helpers ──────────────────────────────────────

@@ -186,6 +186,13 @@ pub async fn get_leaderboard_local(
 }
 
 #[tauri::command]
+pub async fn list_marketplace_skills_local() -> Result<LocalFirstResult<Vec<Skill>>, AppError> {
+    snapshot::list_skills_local()
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))
+}
+
+#[tauri::command]
 pub async fn search_marketplace_local(
     query: String,
     limit: Option<u32>,

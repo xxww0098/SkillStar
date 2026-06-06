@@ -35,9 +35,8 @@ pub async fn wait_for_callback(
     let timeout = timeout.unwrap_or(Duration::from_secs(300));
     let addr = format!("127.0.0.1:{}", port);
 
-    let server = Server::http(&addr).map_err(|e| {
-        UsageError::Other(format!("无法监听 {}: {}", addr, e))
-    })?;
+    let server =
+        Server::http(&addr).map_err(|e| UsageError::Other(format!("无法监听 {}: {}", addr, e)))?;
     let server = Arc::new(server);
 
     let (tx, rx) = oneshot::channel::<UsageResult<String>>();
@@ -66,7 +65,13 @@ pub async fn wait_for_callback(
                     };
                     let resp = Response::new(
                         200.into(),
-                        vec![Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]).unwrap()],
+                        vec![
+                            Header::from_bytes(
+                                &b"Content-Type"[..],
+                                &b"text/html; charset=utf-8"[..],
+                            )
+                            .unwrap(),
+                        ],
                         Cursor::new(body.as_bytes().to_vec()),
                         Some(body.len()),
                         None,
@@ -103,9 +108,9 @@ pub async fn wait_for_callback(
 
 fn parse_callback(url: &str, expected_state: &str) -> UsageResult<String> {
     // url looks like "/auth/callback?code=...&state=..."
-    let q_idx = url.find('?').ok_or_else(|| {
-        UsageError::Other("回调缺少查询参数".into())
-    })?;
+    let q_idx = url
+        .find('?')
+        .ok_or_else(|| UsageError::Other("回调缺少查询参数".into()))?;
     let query = &url[q_idx + 1..];
 
     let mut code = None;
@@ -116,8 +121,7 @@ fn parse_callback(url: &str, expected_state: &str) -> UsageResult<String> {
             Some(kv) => kv,
             None => continue,
         };
-        let decoded =
-            percent_decode(v).unwrap_or_else(|| v.to_string());
+        let decoded = percent_decode(v).unwrap_or_else(|| v.to_string());
         match k {
             "code" => code = Some(decoded),
             "state" => state = Some(decoded),
@@ -133,7 +137,9 @@ fn parse_callback(url: &str, expected_state: &str) -> UsageResult<String> {
     let code = code.ok_or_else(|| UsageError::Other("回调缺少 code".into()))?;
     let state = state.ok_or_else(|| UsageError::Other("回调缺少 state".into()))?;
     if state != expected_state {
-        return Err(UsageError::Other("OAuth state 不匹配，可能被 CSRF 攻击".into()));
+        return Err(UsageError::Other(
+            "OAuth state 不匹配，可能被 CSRF 攻击".into(),
+        ));
     }
     Ok(code)
 }
@@ -181,10 +187,7 @@ mod tests {
 
     #[test]
     fn parse_error_branch() {
-        let r = parse_callback(
-            "/auth/callback?error=access_denied&state=xyz",
-            "xyz",
-        );
+        let r = parse_callback("/auth/callback?error=access_denied&state=xyz", "xyz");
         assert!(r.is_err());
     }
 }

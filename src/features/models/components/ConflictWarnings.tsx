@@ -17,6 +17,7 @@ interface ConfigConflict {
   description: string;
   file_path?: string | null;
   details?: string | null;
+  tool_id?: string | null;
 }
 
 /** Actions available for external modification conflicts. */
@@ -60,7 +61,7 @@ function ExternalModificationDialog({ open, conflict, onAction }: ExternalModifi
               </Button>
             </AlertDialog.Cancel>
             <Button variant="outline" size="sm" onClick={() => onAction("diff")}>
-              查看差异
+              打开目录
             </Button>
             <AlertDialog.Action asChild>
               <Button size="sm" onClick={() => onAction("overwrite")}>
@@ -136,7 +137,7 @@ export function ConflictWarnings({ providerId }: ConflictWarningsProps) {
 
     async function detect() {
       try {
-        const result = await tauriInvoke("detect_env_conflicts");
+        const result = await tauriInvoke("detect_provider_conflicts", { providerId });
         if (!cancelled) {
           setConflicts(result);
           setDismissedIds(new Set());
@@ -163,19 +164,33 @@ export function ConflictWarnings({ providerId }: ConflictWarningsProps) {
     setDismissedIds((prev) => new Set(prev).add(key));
   }, []);
 
-  const handleExternalAction = useCallback((action: ConflictAction) => {
-    setExternalConflict(null);
+  const handleExternalAction = useCallback(
+    async (action: ConflictAction) => {
+      const conflict = externalConflict;
+      setExternalConflict(null);
+      if (!conflict) return;
 
-    // The parent component or hook can handle the actual action.
-    // For now, we just close the dialog. In a full implementation,
-    // "overwrite" would proceed with the write, "diff" would open a diff view.
-    if (action === "overwrite") {
-      // TODO: Emit event or call callback to proceed with overwrite
-    } else if (action === "diff") {
-      // TODO: Open diff view for the conflicting file
-    }
-    // "cancel" just closes the dialog (already handled above)
-  }, []);
+      if (action === "overwrite" && conflict.tool_id) {
+        // Re-sync our config to disk, overwriting the external edits.
+        try {
+          await tauriInvoke("resync_tool", { toolId: conflict.tool_id });
+        } catch (err) {
+          if (import.meta.env.DEV) console.error("resync_tool failed:", err);
+        }
+      } else if (action === "diff" && conflict.file_path) {
+        // Open the folder containing the externally-modified config file so the
+        // user can inspect it. (A full in-app diff view is not yet implemented.)
+        const dir = conflict.file_path.replace(/[/\\][^/\\]*$/, "");
+        try {
+          await tauriInvoke("open_folder", { path: dir || conflict.file_path });
+        } catch (err) {
+          if (import.meta.env.DEV) console.error("open_folder failed:", err);
+        }
+      }
+      // "cancel" just closes the dialog (already handled above)
+    },
+    [externalConflict],
+  );
 
   // Filter to only banner-type conflicts (not ExternalModification)
   const bannerConflicts = conflicts.filter((c) => {

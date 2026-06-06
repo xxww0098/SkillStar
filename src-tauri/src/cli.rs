@@ -64,16 +64,14 @@ fn classify_add_input(input: &str) -> AddKind {
 }
 
 fn expand_tilde(input: &str) -> String {
-    if let Some(rest) = input.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
+    if let Some(rest) = input.strip_prefix("~/")
+        && let Some(home) = dirs::home_dir() {
             return home.join(rest).to_string_lossy().to_string();
         }
-    }
-    if input == "~" {
-        if let Some(home) = dirs::home_dir() {
+    if input == "~"
+        && let Some(home) = dirs::home_dir() {
             return home.to_string_lossy().to_string();
         }
-    }
     input.to_string()
 }
 
@@ -433,11 +431,10 @@ fn install_or_reuse_skill(
         match skill_install::install_skill(url.to_string(), explicit_name.map(str::to_string)) {
             Ok(skill) => Ok((vec![skill.name], true)),
             Err(err) => {
-                if err.contains("already installed") {
-                    if let Some(name) = resolve_installed_name(url, explicit_name, &name_hint)? {
+                if err.contains("already installed")
+                    && let Some(name) = resolve_installed_name(url, explicit_name, &name_hint)? {
                         return Ok((vec![name], false));
                     }
-                }
                 Err(err)
             }
         }

@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
-use crate::{installed_skill, lockfile, project_manifest, repo_scanner, update_checker};
 use crate::git::ops as git_ops;
+use crate::{installed_skill, lockfile, project_manifest, repo_scanner, update_checker};
 use skillstar_projects::projects::sync;
 
 /// Result of a hub skill update, including any project-level cascade work.

@@ -2,12 +2,13 @@
 //!
 //! Provides a unified data model and storage for tracking subscriptions across
 //! AI coding plan providers (DeepSeek, GLM, Kimi, MiniMax, Cursor, Codex,
-//! Antigravity, Trae, Qoder, plus a curated set of manual-entry providers).
+//! Antigravity, Trae, Qoder, Kiro, Windsurf, GitHub Copilot,
+//! plus cookie/manual-entry providers).
 //!
 //! The crate is organized into:
 //! - [`subscription`] — Domain types (Subscription, SubscriptionUsage, UsageWindow, ...)
 //! - [`storage`]      — JSON persistence at `~/.skillstar/config/usage/`
-//! - [`catalog`]      — Fixed catalog of 18 supported providers
+//! - [`catalog`]      — Fixed catalog of 16 supported providers
 //! - [`crypto`]       — AES-256-GCM helpers for API keys / OAuth tokens
 //! - [`alerts`]       — Threshold-based alert computation
 //! - [`oauth`]        — PKCE / local-server / poll-flow / device-flow primitives
@@ -15,16 +16,25 @@
 
 pub mod alerts;
 pub mod catalog;
+pub mod cloud_code;
+pub mod cookie_jar;
 pub mod crypto;
 pub mod fetchers;
+pub mod http_client;
+pub mod local_import;
 pub mod oauth;
+pub mod protobuf_oauth;
+pub mod qoder_machine;
+pub mod refresh_guard;
 pub mod storage;
 pub mod subscription;
+pub mod tool_paths;
+pub mod vscdb;
 
 pub use catalog::{AuthMode, CatalogEntry, catalog};
 pub use subscription::{
-    BillingCycle, ManualQuota, MonetaryBalance, Subscription, SubscriptionAlert,
-    SubscriptionUsage, UsageWindow,
+    BillingCycle, ManualQuota, MonetaryBalance, Subscription, SubscriptionAlert, SubscriptionUsage,
+    UsageWindow,
 };
 
 /// Crate-level error type (wraps anyhow under the hood for IO/serialization).

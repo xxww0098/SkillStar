@@ -155,7 +155,7 @@ fn install_share_code_sync(
 
         // Git-backed entry → use the scan+install path.
         if !entry.u.trim().is_empty() {
-            match skill_install::install_skills_batch(&entry.u, &[name.clone()]) {
+            match skill_install::install_skills_batch(&entry.u, std::slice::from_ref(&name)) {
                 Ok(result) if !result.is_empty() => {
                     installed_skill::invalidate_cache();
                     for skill in result {

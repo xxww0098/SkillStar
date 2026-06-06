@@ -69,7 +69,7 @@ SkillStar/
 │   ├── skillstar-core/            # shared types + infra (paths, fs_ops, db_pool, migration, error, util) + user config (proxy, github_mirror, ACP)
 │   ├── skillstar-skills/          # skill lifecycle (install, update, bundle, local, repo_scanner, discovery) + git operations
 │   ├── skillstar-marketplace/     # marketplace snapshot + FTS
-│   ├── skillstar-models/          # model provider configuration: providers store + tool sync (Claude Code / Codex) + latency + circuit breaker
+│   ├── skillstar-models/          # model provider configuration: providers store + tool sync (Claude Code / Codex / OpenCode) + on-disk config I/O + latency + circuit breaker
 │   ├── skillstar-ai/              # AI inference: chat completion (OpenAI / Anthropic / local), summarization, skill pick, scan params
 │   ├── skillstar-projects/        # project management + agent profiles + patrol + terminal (Launch Deck)
 │   └── skillstar-app/             # Tauri-agnostic command helpers (shell, network, marketplace, ACP) + CLI entry point
@@ -170,6 +170,18 @@ SkillStar/
 
 - Completing Codex OAuth login only adds or refreshes the account record; it must not auto-switch the current active Codex account.
 
+### Usage / Subscriptions (`skillstar-usage`)
+
+- Subscription + usage snapshots persist under `~/.skillstar/config/usage/`; Tauri commands live in `src-tauri/src/commands/usage_commands.rs`.
+- Catalog is fixed; OAuth fetchers in `crates/skillstar-usage/src/fetchers/oauth/`; API-key fetchers in `fetchers/api_key/`. All HTTP uses `skillstar_core::infra::http_client::probe_http_client` (honours `config/proxy.json`).
+- OAuth login returns `OAuthStartDto` (`auth_url`, `pending_id`, optional `user_code` for GitHub Copilot Device Flow). Frontend shows device code in `SubscriptionEditDialog`.
+- Grok (`xai`) usage uses the xAI Grok CLI OAuth flow and reads `https://cli-chat-proxy.grok.com/v1/billing`; `monthlyLimit`, `used`, and `onDemandCap` are cents and should be rendered as monthly billing credits.
+- **Local import** (`import_subscription_from_local`): default-install paths only — `codex` (`~/.codex/auth.json`), `antigravity` (IDE `state.vscdb` + protobuf oauth blob), `qoder` (IDE `state.vscdb` `secret://aicoding.auth.userInfo`). No multi-instance / `*_instance` binding.
+- **Out of scope (do not implement):** per-provider multi-account lists, active-account switching UI, or cockpit-style `*_instance` / account picker flows. Usage page is one `Subscription` row per user-created entry; multiple rows for the same `catalog_id` are allowed but there is no “switch active account” concept.
+- Google-family quota (Antigravity) lives in `crates/skillstar-usage/src/cloud_code.rs` (`loadCodeAssist`, `fetchAvailableModels`, token refresh).
+- Qoder OpenAPI requests inject `Cosy-*` headers from `SharedClientCache/cache/machine_token.json` when present (`qoder_machine.rs`).
+- **Do not modify** `fetchers/oauth/cursor.rs` unless explicitly requested; Cursor OAuth/usage is treated as complete.
+
 ### Launch Deck / Terminal
 
 - Launch Deck is **single-pane only**; tmux-based multi-pane mode is removed across platforms.
@@ -178,6 +190,8 @@ SkillStar/
 ### AI Integration
 
 - Model provider configuration (provider store + presets + external tool sync + latency + circuit breaker) lives in the `skillstar-models` crate; pure inference (chat completion, summarize, skill pick) lives in `skillstar-ai`. `skillstar-ai` depends on `skillstar-models` for provider resolution. Tauri commands in `commands/models_commands.rs` use `skillstar_models::*`; commands in `commands/ai/*` use `skillstar_ai::ai_provider`.
+- External tool sync targets `claude-code` (`~/.claude/settings.json`), `codex` (`~/.codex/config.toml` + `auth.json`), and `opencode` (`~/.config/opencode/opencode.json`, `provider.skillstar` block with `@ai-sdk/openai-compatible`). Tauri also exposes read/write/format/list for those on-disk configs plus `push_provider_to_tool_config` to re-apply the active provider for a tool.
+- Provider endpoint probes (`test_endpoints_latency`, `fetch_provider_models`, connection test) use `skillstar_core::infra::http_client::probe_http_client`, which honours `config/proxy.json`. Anthropic bases (`/anthropic` in URL) probe via `POST /messages`; OpenAI bases use `GET /models`. HTTP 401/403 are treated as reachable with auth failure, not hard errors.
 - AI provider config is backend-owned (`config/ai.json`); frontend never stores API keys.
 - AI summary / quick read should prefer a Models provider reference (`provider_ref`) for Claude or Codex instead of duplicating URL/API key in `ai.json`; only `api_format=local` keeps manual base URL / model fields for Ollama-style local endpoints.
 - AI skill pick must pre-rank installed skills locally before calling the model, keep the AI candidate catalog bounded, aggregate multi-round AI votes/scores into a stable ranking, and fall back to deterministic local ranking when AI output is partial or invalid.
@@ -190,6 +204,7 @@ SkillStar/
 - Marketplace data is local-first via `~/.skillstar/db/marketplace.db`; UI reads snapshots first and only syncs remote scopes on-demand/background refresh.
 - `marketplace.db` owns marketplace list/search/publisher/repo/detail snapshots plus FTS; schema changes must be handled through `PRAGMA user_version` migrations.
 - Marketplace snapshot DB access should prefer short-lived WAL connections per operation so local read paths can run concurrently; avoid process-wide single-connection locking.
+- Marketplace remote HTTP calls must use `skillstar_core::infra::http_client::probe_http_client` so `config/proxy.json` is honoured.
 - Local marketplace search must prefer the snapshot/FTS corpus and only do explicit remote seeding when the user asks or the scope has never been synced.
 - GitHub repo import is two-phase: `scan_github_repo` then `install_from_scan`.
 - Repo-level updates and checks operate on `~/.skillstar/hub/repos/` cached repositories.

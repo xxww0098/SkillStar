@@ -19,6 +19,7 @@
 
 pub mod circuit_breaker;
 pub mod latency;
+pub mod mcp;
 pub mod provider_ref;
 pub mod providers;
 pub mod tool_sync;

@@ -1,8 +1,10 @@
 //! AI command module — split into domain-specific submodules.
 //!
 //! - `summarize`: summarization, AI connection test, skill pick
+//! - `translate`: AST-based Markdown translation pipeline
 
 pub mod summarize;
+pub mod translate;
 
 use skillstar_ai::ai_provider;
 use serde::Serialize;
@@ -56,6 +58,16 @@ fn emit_summarize_stream_event(
         delta,
         message,
     )
+}
+
+fn emit_translate_pipeline_event(
+    window: &tauri::Window,
+    request_id: &str,
+    event: &str,
+    progress: Option<ai_provider::translate::PipelineProgress>,
+    message: Option<String>,
+) -> Result<(), String> {
+    translate::emit_translate_pipeline_event_impl(window, request_id, event, progress, message)
 }
 
 async fn ensure_ai_config() -> Result<ai_provider::AiConfig, String> {

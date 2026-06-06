@@ -1,6 +1,6 @@
 use skillstar_core::infra::error::AppError;
 use skillstar_projects::projects::project_manifest::{
-    self, ImportResult, ImportTarget, SkillsList,
+    ImportResult, ImportTarget,
 };
 use skillstar_projects::projects::project_manifest as pm;
 use std::collections::HashMap;
@@ -155,6 +155,7 @@ pub(crate) fn import_scanned_skills(
 mod tests {
     use super::*;
     use pm::{list_projects, load_skills_list, register_project, save_skills_list};
+    use skillstar_projects::projects::project_manifest::SkillsList;
     use anyhow::Result;
     use std::ffi::OsStr;
     use std::path::PathBuf;

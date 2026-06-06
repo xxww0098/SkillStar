@@ -194,7 +194,7 @@ impl<'a> SkillDiscovery<'a> {
 
     fn finalize(&self, discovered: Vec<DiscoveredSkill>) -> Vec<DiscoveredSkill> {
         let mut deduped = dedupe_discovered_skills(discovered);
-        deduped.sort_by(|a, b| a.id.to_lowercase().cmp(&b.id.to_lowercase()));
+        deduped.sort_by_key(|a| a.id.to_lowercase());
         deduped
     }
 }

@@ -1,16 +1,21 @@
 import { ExternalLink, Loader2, Play, RefreshCw, WalletCards } from "lucide-react";
-import { memo, useCallback } from "react";
+import { memo, useCallback, useMemo } from "react";
 import { Button } from "../../../components/ui/button";
 import { openExternalUrl } from "../../../lib/externalOpen";
 import { cn } from "../../../lib/utils";
 import { useBalanceQuery } from "../hooks/useBalanceQuery";
+import { useEndpointSpeedTest } from "../hooks/useEndpointSpeedTest";
 import { useLatencyTest } from "../hooks/useLatencyTest";
+import { endpointProbeLabel, endpointProbeTone } from "../lib/endpointProbe";
 
 export interface ConnectionStatusPanelProps {
   providerId: string;
   presetId?: string;
   apiKey: string;
-  baseUrl: string;
+  /** @deprecated Use baseUrlOpenai */
+  baseUrl?: string;
+  baseUrlOpenai?: string;
+  baseUrlAnthropic?: string;
 }
 
 const BALANCE_CONSOLE_URLS = {
@@ -44,7 +49,7 @@ function formatBalanceAmount(available: number, currency: string) {
 
 function getConnectionStatus(result: ReturnType<typeof useLatencyTest>["result"]) {
   if (!result) {
-    return { label: "未测试", dotClass: "bg-success", textClass: "text-muted-foreground" };
+    return { label: "未测试", dotClass: "bg-muted-foreground/40", textClass: "text-muted-foreground" };
   }
   if (result.status === "ok") {
     return {
@@ -62,20 +67,39 @@ function getConnectionStatus(result: ReturnType<typeof useLatencyTest>["result"]
   return { label: "连接失败", dotClass: "bg-destructive", textClass: "text-destructive" };
 }
 
-function ConnectionStatusPanelInner({ presetId, apiKey, baseUrl }: ConnectionStatusPanelProps) {
+function ConnectionStatusPanelInner({
+  presetId,
+  apiKey,
+  baseUrl,
+  baseUrlOpenai,
+  baseUrlAnthropic,
+}: ConnectionStatusPanelProps) {
+  const openaiUrl = (baseUrlOpenai ?? baseUrl ?? "").trim();
+  const anthropicUrl = (baseUrlAnthropic ?? "").trim();
+  const primaryUrl = openaiUrl || anthropicUrl;
+
   const { testConnection, isLoading: isTesting, result: latencyResult } = useLatencyTest();
+  const { testEndpoints, results: endpointResults, isLoading: isEndpointTesting } = useEndpointSpeedTest();
+
   const balancePresetId = isBalancePreset(presetId) ? presetId : null;
   const {
     balance,
     isLoading: isBalanceLoading,
     error: balanceError,
     refresh: refreshBalance,
-  } = useBalanceQuery(balancePresetId, apiKey, baseUrl);
+  } = useBalanceQuery(balancePresetId, apiKey, primaryUrl);
+
+  const probeUrls = useMemo(() => [openaiUrl, anthropicUrl].filter(Boolean), [openaiUrl, anthropicUrl]);
 
   const handleTestConnection = useCallback(() => {
-    if (!baseUrl || !apiKey) return;
-    testConnection(baseUrl, apiKey, "", "openai");
-  }, [baseUrl, apiKey, testConnection]);
+    if (!primaryUrl || !apiKey) return;
+    const format = openaiUrl ? "openai" : "anthropic";
+    testConnection(primaryUrl, apiKey, "", format);
+  }, [primaryUrl, apiKey, openaiUrl, testConnection]);
+
+  const handleProbeEndpoints = useCallback(() => {
+    void testEndpoints(probeUrls, apiKey);
+  }, [testEndpoints, probeUrls, apiKey]);
 
   const handleRefreshBalance = useCallback(() => {
     void refreshBalance();
@@ -96,16 +120,18 @@ function ConnectionStatusPanelInner({ presetId, apiKey, baseUrl }: ConnectionSta
     balanceHint = "余额获取失败";
   }
 
+  const isBusy = isTesting || isEndpointTesting;
+
   return (
     <div className="space-y-3">
-      <section className="space-y-3 rounded-2xl border border-border/55 bg-card/55 p-4 shadow-sm backdrop-blur-sm transition duration-200 hover:-translate-y-0.5 hover:border-primary/25 hover:bg-card/75 hover:shadow-[0_16px_36px_-28px_var(--color-shadow)]">
+      <section className="space-y-3 rounded-xl border border-border/55 bg-card/55 p-4 shadow-sm backdrop-blur-sm transition duration-200 hover:-translate-y-0.5 hover:border-primary/25 hover:bg-card/75 hover:shadow-[0_16px_36px_-28px_var(--color-shadow)]">
         <h4 className="flex items-center gap-2 text-sm font-semibold text-foreground">
           <span className="h-2.5 w-2.5 rounded-full bg-success shadow-[0_0_0_3px_rgba(var(--color-success-rgb),0.12)]" />
           连接状态
         </h4>
 
         <div className="flex items-center gap-2 text-xs font-medium">
-          {isTesting ? (
+          {isBusy ? (
             <>
               <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
               <span className="text-muted-foreground">测试中...</span>
@@ -118,25 +144,64 @@ function ConnectionStatusPanelInner({ presetId, apiKey, baseUrl }: ConnectionSta
           )}
         </div>
 
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={handleTestConnection}
-          disabled={isTesting || !baseUrl || !apiKey}
-          className="h-9 w-full justify-center border-border/60 bg-background/50 text-xs font-semibold text-foreground/80 hover:border-primary/40 hover:bg-background/70 hover:text-foreground"
-        >
-          {isTesting ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-          ) : (
-            <Play className="h-3.5 w-3.5 text-primary" />
+        <div className="grid gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleTestConnection}
+            disabled={isBusy || !primaryUrl || !apiKey}
+            className="h-9 w-full justify-center border-border/60 bg-background/50 text-xs font-semibold text-foreground/80 hover:border-primary/40 hover:bg-background/70 hover:text-foreground"
+          >
+            {isTesting ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+            ) : (
+              <Play className="h-3.5 w-3.5 text-primary" />
+            )}
+            深度连接测试
+          </Button>
+          {probeUrls.length > 0 && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleProbeEndpoints}
+              disabled={isBusy || !apiKey}
+              className="h-9 w-full justify-center border-border/60 bg-background/50 text-xs font-semibold text-foreground/80 hover:border-primary/40 hover:bg-background/70 hover:text-foreground"
+            >
+              {isEndpointTesting ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+              ) : (
+                <Play className="h-3.5 w-3.5 text-primary" />
+              )}
+              端点测速 ({probeUrls.length})
+            </Button>
           )}
-          测试连接
-        </Button>
+        </div>
+
+        {endpointResults.length > 0 && (
+          <ul className="space-y-1 border-t border-border/40 pt-2">
+            {endpointResults.map((r) => (
+              <li key={r.url} className="flex justify-between gap-2 text-[10px]">
+                <span className="min-w-0 truncate font-mono text-muted-foreground">{r.url}</span>
+                <span
+                  className={cn(
+                    "shrink-0 font-medium",
+                    endpointProbeTone(r) === "ok" && "text-success",
+                    endpointProbeTone(r) === "auth" && "text-amber-500",
+                    endpointProbeTone(r) === "error" && "text-destructive",
+                  )}
+                >
+                  {endpointProbeLabel(r)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       {balancePresetId ? (
-        <section className="rounded-2xl border border-border/55 bg-card/55 p-4 shadow-sm backdrop-blur-sm transition duration-200 hover:-translate-y-0.5 hover:border-primary/25 hover:bg-card/75 hover:shadow-[0_16px_36px_-28px_var(--color-shadow)]">
+        <section className="rounded-xl border border-border/55 bg-card/55 p-4 shadow-sm backdrop-blur-sm transition duration-200 hover:-translate-y-0.5 hover:border-primary/25 hover:bg-card/75 hover:shadow-[0_16px_36px_-28px_var(--color-shadow)]">
           <div className="flex items-center justify-between gap-3">
             <h4 className="flex items-center gap-2 text-sm font-semibold text-foreground">
               <span className="flex h-7 w-7 items-center justify-center rounded-full border border-primary/15 bg-primary/10 text-primary">

@@ -16,6 +16,10 @@ export interface AiCommands {
     result: string;
   };
   ai_translate_skill: { args: { content: string }; result: string };
+  ai_translate_skill_stream: {
+    args: { requestId: string; content: string };
+    result: string;
+  };
 
   ai_test_connection: { args: Record<string, never>; result: number };
   ai_pick_skills: {

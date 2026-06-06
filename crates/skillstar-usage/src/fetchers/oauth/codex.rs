@@ -74,7 +74,7 @@ struct Window {
     reset_at: Option<i64>,
 }
 
-pub async fn start_login(_region: Option<&str>) -> UsageResult<(String, String)> {
+pub async fn start_login(_region: Option<&str>) -> UsageResult<super::OAuthStartInfo> {
     let pkce = PkcePair::generate();
     let state = crate::oauth::pkce::random_state();
     let redirect_uri = format!("http://127.0.0.1:{}/auth/callback", CALLBACK_PORT);
@@ -88,8 +88,7 @@ pub async fn start_login(_region: Option<&str>) -> UsageResult<(String, String)>
         state,
     );
 
-    let pending_id =
-        crate::oauth::pending_state::register("codex", None, auth_url.clone());
+    let pending_id = crate::oauth::pending_state::register("codex", None, auth_url.clone());
 
     let pid = pending_id.clone();
     let verifier = pkce.verifier.clone();
@@ -102,7 +101,7 @@ pub async fn start_login(_region: Option<&str>) -> UsageResult<(String, String)>
         }
     });
 
-    Ok((auth_url, pending_id))
+    Ok(super::OAuthStartInfo::browser(auth_url, pending_id))
 }
 
 async fn drive_login(
@@ -110,7 +109,9 @@ async fn drive_login(
     verifier: String,
     redirect_uri: String,
 ) -> UsageResult<Subscription> {
-    let code = local_server::wait_for_callback(CALLBACK_PORT, state, Some(Duration::from_secs(300))).await?;
+    let code =
+        local_server::wait_for_callback(CALLBACK_PORT, state, Some(Duration::from_secs(300)))
+            .await?;
     let tokens = exchange_code(&code, &verifier, &redirect_uri).await?;
     let access_token = tokens
         .access_token
@@ -191,6 +192,9 @@ async fn finalize(
         oauth_account_id: account_id.clone(),
         oauth_region: None,
         requires_reauth: false,
+        fingerprint_id: None,
+        cookie_jar_encrypted: None,
+        cookie_session_expires_at: None,
         manual_quota: None,
         note: None,
         sort_index: 0,
@@ -207,13 +211,75 @@ async fn finalize(
 }
 
 pub async fn fetch(subscription: &mut Subscription) -> UsageResult<SubscriptionUsage> {
+    let fp_id = subscription.fingerprint_id.clone();
+    crate::http_client::with_fingerprint(fp_id, fetch_inner(subscription)).await
+}
+
+async fn fetch_inner(subscription: &mut Subscription) -> UsageResult<SubscriptionUsage> {
+    if token_refresh::needs_refresh(subscription.access_token_expires_at) {
+        refresh_codex_tokens(subscription).await?;
+    }
     let access_token = decrypt_required(&subscription.access_token_encrypted)?;
-    fetch_with_token(
-        &subscription.id,
-        &access_token,
-        subscription.oauth_account_id.as_deref(),
-    )
-    .await
+    let account_id = subscription.oauth_account_id.clone();
+    match fetch_with_token(&subscription.id, &access_token, account_id.as_deref()).await {
+        Err(UsageError::AuthRequired) => {
+            refresh_codex_tokens(subscription).await?;
+            let access_token = decrypt_required(&subscription.access_token_encrypted)?;
+            fetch_with_token(
+                &subscription.id,
+                &access_token,
+                subscription.oauth_account_id.as_deref(),
+            )
+            .await
+        }
+        other => other,
+    }
+}
+
+async fn refresh_codex_tokens(subscription: &mut Subscription) -> UsageResult<()> {
+    let rt_cipher = subscription
+        .refresh_token_encrypted
+        .as_deref()
+        .ok_or(UsageError::AuthRequired)?;
+    let refresh = crypto::decrypt(rt_cipher);
+    if refresh.is_empty() {
+        return Err(UsageError::AuthRequired);
+    }
+    let client = crate::http_client::usage_reqwest_with_active_fingerprint()?;
+    let resp = client
+        .post(TOKEN_URL)
+        .form(&[
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh.as_str()),
+            ("client_id", CLIENT_ID),
+        ])
+        .send()
+        .await
+        .map_err(|e| UsageError::Fetcher(format!("Codex refresh：{}", e)))?;
+    if !resp.status().is_success() {
+        return Err(UsageError::AuthRequired);
+    }
+    let tokens: TokenResponse = resp
+        .json()
+        .await
+        .map_err(|e| UsageError::Fetcher(format!("Codex refresh 解析：{}", e)))?;
+    let access_token = tokens.access_token.ok_or(UsageError::AuthRequired)?;
+    subscription.access_token_encrypted = Some(crypto::encrypt(&access_token));
+    if let Some(rt) = tokens.refresh_token {
+        subscription.refresh_token_encrypted = Some(crypto::encrypt(&rt));
+    }
+    subscription.access_token_expires_at = tokens
+        .expires_in
+        .map(|s| Utc::now().timestamp() + s)
+        .or_else(|| token_refresh::jwt_exp(&access_token));
+    if let Some(id_token) = tokens.id_token.as_deref() {
+        let account_id = token_refresh::jwt_string(id_token, &["chatgpt_account_id"])
+            .or_else(|| token_refresh::jwt_string(id_token, &["sub"]));
+        if account_id.is_some() {
+            subscription.oauth_account_id = account_id;
+        }
+    }
+    Ok(())
 }
 
 async fn fetch_with_token(
@@ -236,7 +302,10 @@ async fn fetch_with_token(
         return Err(UsageError::AuthRequired);
     }
     if !status.is_success() {
-        return Err(UsageError::Fetcher(format!("Codex wham/usage 状态码 {}", status)));
+        return Err(UsageError::Fetcher(format!(
+            "Codex wham/usage 状态码 {}",
+            status
+        )));
     }
     let body: UsageResponse = resp
         .json()
@@ -245,7 +314,10 @@ async fn fetch_with_token(
 
     let plan_name = body.plan_type.clone().unwrap_or_else(|| "FREE".to_string());
     let (hourly, weekly) = match &body.rate_limit {
-        Some(rl) => (window(rl.primary_window.as_ref(), "5h"), window(rl.secondary_window.as_ref(), "7d")),
+        Some(rl) => (
+            window(rl.primary_window.as_ref(), "5h"),
+            window(rl.secondary_window.as_ref(), "7d"),
+        ),
         None => (None, None),
     };
 
@@ -257,7 +329,9 @@ async fn fetch_with_token(
         weekly,
         monthly: None,
         balance: None,
+        credits: Vec::new(),
         error: None,
+        api_keys: Vec::new(),
     })
 }
 
@@ -270,14 +344,12 @@ fn window(w: Option<&Window>, label: &str) -> Option<UsageWindow> {
         total: Some(100),
         percent: Some(percent),
         reset_at: w.reset_at,
+        breakdown: Vec::new(),
     })
 }
 
 fn http_client() -> UsageResult<reqwest::Client> {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .build()
-        .map_err(|e| UsageError::Other(format!("http client: {}", e)))
+    crate::http_client::usage_reqwest_with_active_fingerprint()
 }
 
 fn decrypt_required(cipher: &Option<String>) -> UsageResult<String> {
@@ -295,7 +367,9 @@ fn urlencoding(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 3);
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             _ => out.push_str(&format!("%{:02X}", b)),
         }
     }

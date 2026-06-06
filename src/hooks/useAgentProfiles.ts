@@ -12,7 +12,7 @@ export function useAgentProfiles() {
       const result = await tauriInvoke("list_agent_profiles");
       setProfiles(result);
     } catch (e) {
-      console.error("Failed to load agent profiles:", e);
+      if (import.meta.env.DEV) console.error("Failed to load agent profiles:", e);
     } finally {
       setLoading(false);
     }

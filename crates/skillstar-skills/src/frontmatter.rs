@@ -3,8 +3,8 @@
 //! Replaces the dependency on `markdown_translator::parser::frontmatter`
 //! after the translation feature was removed.
 
-use std::collections::HashMap;
 use serde_yaml::Value;
+use std::collections::HashMap;
 
 /// Result of splitting a Markdown document at its YAML frontmatter boundary.
 #[derive(Debug)]
@@ -82,7 +82,10 @@ pub fn split_front_matter(content: &str) -> SplitResult {
 /// Render a Markdown document with optional YAML frontmatter.
 ///
 /// If `front_matter` is `None` or empty, returns the body unchanged.
-pub fn render_with_front_matter(front_matter: Option<&HashMap<String, Value>>, body: &str) -> String {
+pub fn render_with_front_matter(
+    front_matter: Option<&HashMap<String, Value>>,
+    body: &str,
+) -> String {
     match front_matter {
         Some(data) if !data.is_empty() => {
             let yaml = serde_yaml::to_string(data).unwrap_or_default();

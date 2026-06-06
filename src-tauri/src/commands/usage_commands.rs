@@ -5,20 +5,69 @@
 //! when truly needed; for ~18 subscriptions JSON I/O is fast enough.
 
 use chrono::Utc;
+use skillstar_core::config::proxy;
 use skillstar_core::infra::error::AppError;
 use skillstar_usage::catalog::AuthMode;
+use skillstar_usage::cookie_jar;
 use skillstar_usage::subscription::{BillingCycle, Subscription};
 use skillstar_usage::{alerts, catalog, crypto, fetchers, storage, UsageError};
 
 use super::usage_dto::*;
 
 fn map_err(e: UsageError) -> AppError {
-    AppError::Other(format!("Usage: {}", e))
+    let message = append_network_hint(e.to_string());
+    AppError::Other(format!("Usage: {}", message))
+}
+
+fn append_network_hint(message: String) -> String {
+    if !looks_like_network_transport_error(&message) || message.contains("网络代理") {
+        return message;
+    }
+
+    format!("{}。{}", message, usage_network_hint())
+}
+
+fn looks_like_network_transport_error(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    [
+        "error sending request",
+        "operation timed out",
+        "timed out",
+        "connection refused",
+        "connection reset",
+        "dns",
+        "failed to lookup address",
+        "tcp connect error",
+        "network is unreachable",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+fn usage_network_hint() -> String {
+    match proxy::load_config() {
+        Ok(config) if config.enabled && !config.host.trim().is_empty() => format!(
+            "请检查 SkillStar 网络代理（{}://{}:{}）能访问目标服务，或切换到可访问 Google/GitHub 的节点后重试",
+            config.proxy_type.as_scheme(),
+            config.host.trim(),
+            config.port
+        ),
+        _ => "当前 SkillStar 网络代理未启用；如果所在网络无法直连 Google/GitHub，请在设置 > 网络代理启用代理后重试"
+            .to_string(),
+    }
 }
 
 fn ensure_catalog(id: &str) -> Result<catalog::CatalogEntry, AppError> {
     catalog::find(id)
         .ok_or_else(|| AppError::Other(format!("Usage: unknown catalog id `{}`", id)))
+}
+
+/// Stamp `is_active` on a DTO based on the active-per-catalog map.
+fn fill_active(mut dto: SubscriptionDto, active: &std::collections::HashMap<String, String>) -> SubscriptionDto {
+    dto.is_active = active
+        .get(&dto.catalog_id)
+        .is_some_and(|sub_id| sub_id == &dto.id);
+    dto
 }
 
 // ── Catalog ───────────────────────────────────────────────────────────
@@ -34,11 +83,12 @@ pub fn list_usage_catalog() -> Vec<CatalogEntryDto> {
 pub fn list_subscriptions() -> Result<Vec<SubscriptionDto>, AppError> {
     let subs = storage::list_subscriptions().map_err(map_err)?;
     let snapshots = storage::list_usage_snapshots().map_err(map_err)?;
+    let active = storage::list_active_per_catalog().map_err(map_err)?;
     Ok(subs
         .into_iter()
         .map(|sub| {
             let usage = snapshots.get(&sub.id).cloned();
-            SubscriptionDto::from_parts(sub, usage)
+            fill_active(SubscriptionDto::from_parts(sub, usage), &active)
         })
         .collect())
 }
@@ -55,6 +105,15 @@ pub fn create_subscription(input: CreateSubscriptionInput) -> Result<Subscriptio
     }
 
     let now = Utc::now().timestamp();
+    let cookie_jar_encrypted = input
+        .cookie_header
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .map(|raw| {
+            let entries = cookie_jar::parse_cookie_header(raw);
+            let json = cookie_jar::serialize_cookie_jar(&entries);
+            crypto::encrypt(&json)
+        });
     let sub = Subscription {
         id: uuid::Uuid::new_v4().to_string(),
         catalog_id: input.catalog_id,
@@ -83,6 +142,9 @@ pub fn create_subscription(input: CreateSubscriptionInput) -> Result<Subscriptio
         oauth_account_id: None,
         oauth_region: input.oauth_region,
         requires_reauth: false,
+        fingerprint_id: input.fingerprint_id.filter(|s| !s.trim().is_empty()),
+        cookie_jar_encrypted,
+        cookie_session_expires_at: None,
         manual_quota: input.manual_quota,
         note: input.note,
         sort_index: 0,
@@ -90,7 +152,13 @@ pub fn create_subscription(input: CreateSubscriptionInput) -> Result<Subscriptio
         updated_at: now,
     };
     let saved = storage::upsert_subscription(sub).map_err(map_err)?;
-    Ok(SubscriptionDto::from_parts(saved, None))
+    // If this catalog has no active account yet, auto-pin the brand-new one.
+    let active = storage::list_active_per_catalog().unwrap_or_default();
+    if !active.contains_key(&saved.catalog_id) {
+        let _ = storage::set_active_subscription(&saved.catalog_id, &saved.id);
+    }
+    let active = storage::list_active_per_catalog().map_err(map_err)?;
+    Ok(fill_active(SubscriptionDto::from_parts(saved, None), &active))
 }
 
 #[tauri::command]
@@ -99,22 +167,20 @@ pub fn update_subscription(
     input: UpdateSubscriptionInput,
 ) -> Result<SubscriptionDto, AppError> {
     let mut sub = storage::get_subscription(&id).map_err(map_err)?;
-    if let Some(name) = input.display_name {
-        if !name.trim().is_empty() {
+    if let Some(name) = input.display_name
+        && !name.trim().is_empty() {
             sub.display_name = name;
         }
-    }
     if input.plan_tier.is_some() {
         sub.plan_tier = input.plan_tier;
     }
     if input.monthly_price.is_some() {
         sub.monthly_price = input.monthly_price;
     }
-    if let Some(c) = input.currency {
-        if !c.is_empty() {
+    if let Some(c) = input.currency
+        && !c.is_empty() {
             sub.currency = c;
         }
-    }
     if let Some(cycle) = input.billing_cycle {
         sub.billing_cycle = cycle;
     }
@@ -130,15 +196,29 @@ pub fn update_subscription(
     if let Some(key) = input.api_key.filter(|k| !k.is_empty()) {
         sub.api_key_encrypted = Some(crypto::encrypt(&key));
     }
+    if let Some(raw) = input.cookie_header.filter(|c| !c.trim().is_empty()) {
+        let entries = cookie_jar::parse_cookie_header(&raw);
+        let json = cookie_jar::serialize_cookie_jar(&entries);
+        sub.cookie_jar_encrypted = Some(crypto::encrypt(&json));
+        sub.cookie_session_expires_at = None;
+    }
     if input.manual_quota.is_some() {
         sub.manual_quota = input.manual_quota;
     }
     if input.note.is_some() {
         sub.note = input.note;
     }
+    // Fingerprint binding: `clear` wins over `set` so the frontend can be
+    // explicit when the user picks "无（默认）".
+    if input.clear_fingerprint {
+        sub.fingerprint_id = None;
+    } else if let Some(fp_id) = input.fingerprint_id {
+        sub.fingerprint_id = Some(fp_id);
+    }
     let saved = storage::upsert_subscription(sub).map_err(map_err)?;
     let usage = storage::get_usage_snapshot(&id).map_err(map_err)?;
-    Ok(SubscriptionDto::from_parts(saved, usage))
+    let active = storage::list_active_per_catalog().map_err(map_err)?;
+    Ok(fill_active(SubscriptionDto::from_parts(saved, usage), &active))
 }
 
 #[tauri::command]
@@ -153,75 +233,88 @@ pub fn reorder_subscriptions(ids: Vec<String>) -> Result<(), AppError> {
 
 // ── Usage refresh ─────────────────────────────────────────────────────
 
+async fn refresh_subscription_usage_inner(id: String) -> Result<SubscriptionDto, AppError> {
+    let mut sub = storage::get_subscription(&id).map_err(map_err)?;
+    let catalog_id = sub.catalog_id.clone();
+    skillstar_usage::refresh_guard::with_catalog_refresh(&catalog_id, || async {
+        let usage = match fetchers::refresh(&mut sub).await {
+            Ok(usage) => {
+                // Persist any token updates that may have happened during refresh.
+                sub.requires_reauth = false;
+                storage::upsert_subscription(sub.clone()).map_err(map_err)?;
+                storage::save_usage_snapshot(usage.clone()).map_err(map_err)?;
+                Some(usage)
+            }
+            Err(UsageError::AuthRequired) => {
+                sub.requires_reauth = true;
+                storage::upsert_subscription(sub.clone()).map_err(map_err)?;
+                let snapshot = skillstar_usage::subscription::SubscriptionUsage {
+                    subscription_id: sub.id.clone(),
+                    fetched_at: chrono::Utc::now().timestamp(),
+                    error: Some("登录已失效，请重新授权。".into()),
+                    ..Default::default()
+                };
+                storage::save_usage_snapshot(snapshot.clone()).map_err(map_err)?;
+                Some(snapshot)
+            }
+            Err(other) => {
+                let snapshot = skillstar_usage::subscription::SubscriptionUsage {
+                    subscription_id: sub.id.clone(),
+                    fetched_at: chrono::Utc::now().timestamp(),
+                    error: Some(other.to_string()),
+                    ..Default::default()
+                };
+                storage::save_usage_snapshot(snapshot.clone()).map_err(map_err)?;
+                Some(snapshot)
+            }
+        };
+        let active = storage::list_active_per_catalog().map_err(map_err)?;
+        Ok(fill_active(SubscriptionDto::from_parts(sub, usage), &active))
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn refresh_subscription_usage(id: String) -> Result<SubscriptionDto, AppError> {
-    let mut sub = storage::get_subscription(&id).map_err(map_err)?;
-    let usage = match fetchers::refresh(&mut sub).await {
-        Ok(usage) => {
-            // Persist any token updates that may have happened during refresh.
-            sub.requires_reauth = false;
-            storage::upsert_subscription(sub.clone()).map_err(map_err)?;
-            storage::save_usage_snapshot(usage.clone()).map_err(map_err)?;
-            Some(usage)
-        }
-        Err(UsageError::AuthRequired) => {
-            sub.requires_reauth = true;
-            storage::upsert_subscription(sub.clone()).map_err(map_err)?;
-            let snapshot = skillstar_usage::subscription::SubscriptionUsage {
-                subscription_id: sub.id.clone(),
-                fetched_at: chrono::Utc::now().timestamp(),
-                error: Some("登录已失效，请重新授权。".into()),
-                ..Default::default()
-            };
-            storage::save_usage_snapshot(snapshot.clone()).map_err(map_err)?;
-            Some(snapshot)
-        }
-        Err(other) => {
-            let snapshot = skillstar_usage::subscription::SubscriptionUsage {
-                subscription_id: sub.id.clone(),
-                fetched_at: chrono::Utc::now().timestamp(),
-                error: Some(other.to_string()),
-                ..Default::default()
-            };
-            storage::save_usage_snapshot(snapshot.clone()).map_err(map_err)?;
-            Some(snapshot)
-        }
-    };
-    Ok(SubscriptionDto::from_parts(sub, usage))
+    refresh_subscription_usage_inner(id).await
 }
 
 #[tauri::command]
 pub async fn refresh_all_subscriptions() -> Result<Vec<SubscriptionDto>, AppError> {
-    let subs = storage::list_subscriptions().map_err(map_err)?;
-    let mut results = Vec::with_capacity(subs.len());
-    for sub in subs {
-        // Manual entries skip the round-trip but still get a "snapshot" with
-        // whatever the user has on file.
-        if sub.auth_mode == AuthMode::Manual {
-            let usage = storage::get_usage_snapshot(&sub.id)
-                .map_err(map_err)?
-                .or_else(|| {
-                    Some(skillstar_usage::subscription::SubscriptionUsage {
-                        subscription_id: sub.id.clone(),
-                        fetched_at: chrono::Utc::now().timestamp(),
-                        plan_name: sub.plan_tier.clone(),
-                        ..Default::default()
-                    })
-                });
-            results.push(SubscriptionDto::from_parts(sub, usage));
-            continue;
-        }
-        let id = sub.id.clone();
-        match refresh_subscription_usage(id).await {
-            Ok(dto) => results.push(dto),
-            Err(e) => {
-                tracing::warn!("[usage] refresh {} failed: {}", sub.id, e);
-                let usage = storage::get_usage_snapshot(&sub.id).map_err(map_err)?;
-                results.push(SubscriptionDto::from_parts(sub, usage));
+    skillstar_usage::refresh_guard::with_refresh_all_lock(|| async {
+        let subs = storage::list_subscriptions().map_err(map_err)?;
+        let active_map = storage::list_active_per_catalog().map_err(map_err)?;
+        let mut results = Vec::with_capacity(subs.len());
+        for sub in subs {
+            // Manual entries skip the round-trip but still get a "snapshot" with
+            // whatever the user has on file.
+            if sub.auth_mode == AuthMode::Manual {
+                let usage = storage::get_usage_snapshot(&sub.id)
+                    .map_err(map_err)?
+                    .or_else(|| {
+                        Some(skillstar_usage::subscription::SubscriptionUsage {
+                            subscription_id: sub.id.clone(),
+                            fetched_at: chrono::Utc::now().timestamp(),
+                            plan_name: sub.plan_tier.clone(),
+                            ..Default::default()
+                        })
+                    });
+                results.push(fill_active(SubscriptionDto::from_parts(sub, usage), &active_map));
+                continue;
+            }
+            let id = sub.id.clone();
+            match refresh_subscription_usage_inner(id).await {
+                Ok(dto) => results.push(dto),
+                Err(e) => {
+                    tracing::warn!("[usage] refresh {} failed: {}", sub.id, e);
+                    let usage = storage::get_usage_snapshot(&sub.id).map_err(map_err)?;
+                    results.push(fill_active(SubscriptionDto::from_parts(sub, usage), &active_map));
+                }
             }
         }
-    }
-    Ok(results)
+        Ok(results)
+    })
+    .await
 }
 
 // ── Alerts ────────────────────────────────────────────────────────────
@@ -280,15 +373,37 @@ pub fn get_usage_summary() -> Result<UsageSummary, AppError> {
 pub async fn start_oauth_login(
     catalog_id: String,
     region: Option<String>,
+    subscription_id: Option<String>,
 ) -> Result<OAuthStartDto, AppError> {
-    let (auth_url, pending_id) =
-        fetchers::oauth::start_login(&catalog_id, region.as_deref())
-            .await
-            .map_err(map_err)?;
+    let target_subscription_id = subscription_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty());
+    let info = fetchers::oauth::start_login(&catalog_id, region.as_deref(), target_subscription_id)
+        .await
+        .map_err(map_err)?;
     Ok(OAuthStartDto {
-        pending_id,
-        auth_url,
+        pending_id: info.pending_id,
+        auth_url: info.auth_url,
+        user_code: info.user_code,
+        verification_uri: info.verification_uri,
     })
+}
+
+#[tauri::command]
+pub async fn import_subscription_from_local(catalog_id: String) -> Result<SubscriptionDto, AppError> {
+    if !skillstar_usage::local_import::local_import_supported(&catalog_id) {
+        return Err(AppError::Other(format!(
+            "Usage: 不支持从本地导入 {}",
+            catalog_id
+        )));
+    }
+    let sub = skillstar_usage::local_import::import_subscription_from_local(&catalog_id)
+        .await
+        .map_err(map_err)?;
+    let usage = storage::get_usage_snapshot(&sub.id).map_err(map_err)?;
+    let active = storage::list_active_per_catalog().map_err(map_err)?;
+    Ok(fill_active(SubscriptionDto::from_parts(sub, usage), &active))
 }
 
 #[tauri::command]
@@ -302,11 +417,62 @@ pub async fn await_oauth_completion(pending_id: String) -> Result<SubscriptionDt
     pending_state::remove(&pending_id);
     let sub = result.map_err(map_err)?;
     let usage = storage::get_usage_snapshot(&sub.id).map_err(map_err)?;
-    Ok(SubscriptionDto::from_parts(sub, usage))
+    let active = storage::list_active_per_catalog().map_err(map_err)?;
+    Ok(fill_active(SubscriptionDto::from_parts(sub, usage), &active))
 }
 
 #[tauri::command]
 pub fn cancel_oauth_login(pending_id: String) -> Result<(), AppError> {
     use skillstar_usage::oauth::pending_state;
     pending_state::cancel(&pending_id).map_err(map_err)
+}
+
+// ── Multi-account: active-per-catalog (Phase 7) ───────────────────────
+
+/// Return `catalog_id -> active subscription_id` for every catalog that
+/// currently has an account pinned. Catalogs without a pin are absent.
+#[tauri::command]
+pub fn get_active_subscriptions() -> Result<std::collections::HashMap<String, String>, AppError> {
+    storage::list_active_per_catalog().map_err(map_err)
+}
+
+/// Pin `subscription_id` as the active account for its catalog. Returns
+/// the freshly-flagged DTO so the frontend can swap it in-place.
+///
+/// The backend verifies that the subscription exists and that its
+/// `catalog_id` matches the one we're pinning under (so the store can't
+/// drift out of sync with the subscription list).
+#[tauri::command]
+pub fn set_active_subscription(subscription_id: String) -> Result<SubscriptionDto, AppError> {
+    let sub = storage::get_subscription(&subscription_id).map_err(map_err)?;
+    storage::set_active_subscription(&sub.catalog_id, &sub.id).map_err(map_err)?;
+    let usage = storage::get_usage_snapshot(&sub.id).map_err(map_err)?;
+    let active = storage::list_active_per_catalog().map_err(map_err)?;
+    Ok(fill_active(SubscriptionDto::from_parts(sub, usage), &active))
+}
+
+/// Drop the pin for `catalog_id`. UI will fall back to no active account
+/// for that catalog (typically displayed as a neutral state).
+#[tauri::command]
+pub fn clear_active_subscription(catalog_id: String) -> Result<(), AppError> {
+    storage::clear_active_subscription(&catalog_id).map_err(map_err)
+}
+
+// ── API key retrieval (for clipboard copy) ──────────────────────────────
+
+/// Return the decrypted plaintext API key for a subscription.
+///
+/// Only works when the subscription has an `api_key_encrypted` credential
+/// (i.e. API-key mode or Cookie-mode where the provider stores a key).
+/// Returns `null` when no key is available.
+#[tauri::command]
+pub fn get_subscription_api_key(id: String) -> Result<Option<String>, AppError> {
+    let sub = storage::get_subscription(&id).map_err(map_err)?;
+    let key = sub
+        .api_key_encrypted
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(crypto::decrypt)
+        .filter(|pt| !pt.is_empty());
+    Ok(key)
 }

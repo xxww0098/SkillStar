@@ -1,35 +1,37 @@
 import { motion } from "framer-motion";
-import { RefreshCw, Wallet } from "lucide-react";
+import { Wallet } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { useNavigation } from "@/hooks/useNavigation";
 import { useUsageDataContext } from "../context/UsageDataContext";
-import { FILTER_ALL, type Subscription, type UsageSummary } from "../types";
+import { FILTER_ALL, type Subscription } from "../types";
 import { SubscriptionEditDialog } from "./SubscriptionEditDialog";
+import { UsageActionBar } from "./UsageActionBar";
 import { UsageAlertBanner } from "./UsageAlertBanner";
 import { UsageGrid } from "./UsageGrid";
+import { UsageRefreshControl } from "./UsageRefreshControl";
 
 export function UsagePanel() {
+  const { t } = useTranslation();
   const data = useUsageDataContext();
-  const {
-    usageCatalogFilter: filter,
-    usageCreateRequest,
-    clearUsageCreateRequest,
-    openUsageCreate,
-  } = useNavigation();
+  const { usageCatalogFilter: filter, usageCreateRequest, clearUsageCreateRequest } = useNavigation();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingSub, setEditingSub] = useState<Subscription | null>(null);
   const [preselectId, setPreselectId] = useState<string | null>(null);
-  const [refreshingAll, setRefreshingAll] = useState(false);
-
   const filtered = useMemo(() => {
     if (filter === FILTER_ALL) return data.subscriptions;
     return data.subscriptions.filter((s) => s.catalog_id === filter);
   }, [data.subscriptions, filter]);
 
   const openCreate = (catalogId?: string | null) => {
+    const resolved = catalogId ?? (filter === FILTER_ALL ? null : filter);
+    if (!resolved) {
+      toast.info(t("usage.pickProviderFromSidebar"));
+      return;
+    }
     setEditingSub(null);
-    setPreselectId(catalogId ?? (filter === FILTER_ALL ? null : filter));
+    setPreselectId(resolved);
     setDialogOpen(true);
   };
 
@@ -53,36 +55,60 @@ export function UsagePanel() {
     clearUsageCreateRequest();
   }, [usageCreateRequest, clearUsageCreateRequest]);
 
-  const refreshAll = async () => {
-    setRefreshingAll(true);
-    try {
-      await data.refreshAll();
-    } finally {
-      setRefreshingAll(false);
-    }
-  };
-
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <Header summary={data.summary} onRefreshAll={refreshAll} refreshing={refreshingAll} />
+      <Header
+        onRefresh={data.refreshAllWithUi}
+        refreshing={data.refreshingAll}
+        refreshDisabled={data.refreshBusy}
+        autoRefreshEnabled={data.autoRefresh.autoRefreshEnabled}
+        intervalMs={data.autoRefresh.intervalMs}
+        setAutoRefreshEnabled={data.autoRefresh.setAutoRefreshEnabled}
+        setIntervalMs={data.autoRefresh.setIntervalMs}
+      />
+      <UsageActionBar
+        subscriptions={data.subscriptions}
+        allSubscriptions={data.subscriptions}
+        catalog={data.catalog}
+        filter={filter}
+        onReorder={data.reorder}
+      />
       <UsageAlertBanner alerts={data.alerts} onDismiss={data.dismissAlert} />
       <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {data.loading ? (
-          <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">加载中…</div>
+          <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+            {t("usage.loading")}
+          </div>
         ) : data.error ? (
-          <div className="flex flex-1 items-center justify-center text-sm text-red-400">加载失败：{data.error}</div>
+          <div className="flex flex-1 items-center justify-center text-sm text-red-400">
+            {t("usage.loadError", { error: data.error })}
+          </div>
         ) : (
           <UsageGrid
             subscriptions={filtered}
             catalog={data.catalog}
-            onRefresh={async (id) => {
-              await data.refreshOne(id);
-            }}
+            filter={filter}
+            onBrowseProviders={() => toast.info(t("usage.pickProviderFromSidebar"))}
+            onRefresh={data.refreshOneWithUi}
+            refreshDisabled={data.refreshBusy}
             onEdit={openEdit}
+            onDelete={(id) => {
+              void data.remove(id);
+            }}
             onReauth={(id) => {
               openEdit(id);
             }}
-            onAddNew={() => openUsageCreate(filter === FILTER_ALL ? null : filter)}
+            onSetActive={async (id) => {
+              try {
+                const updated = await data.setActive(id);
+                toast.success(t("usage.activeAccountSet", "已切为当前账号"), {
+                  description: updated.display_name,
+                });
+              } catch (err) {
+                toast.error(err instanceof Error ? err.message : String(err));
+              }
+            }}
+            onAddNew={(catalogId) => openCreate(catalogId ?? (filter === FILTER_ALL ? null : filter))}
           />
         )}
       </main>
@@ -100,54 +126,64 @@ export function UsagePanel() {
           closeDialog();
           void data.reload();
         }}
+        onDeleted={async () => {
+          if (editingSub) {
+            await data.remove(editingSub.id);
+          }
+          closeDialog();
+        }}
       />
     </div>
   );
 }
 
-interface HeaderProps {
-  summary: UsageSummary | null;
-  onRefreshAll: () => void;
+function Header({
+  onRefresh,
+  refreshing,
+  refreshDisabled = false,
+  autoRefreshEnabled,
+  intervalMs,
+  setAutoRefreshEnabled,
+  setIntervalMs,
+}: {
+  onRefresh: () => Promise<void>;
   refreshing: boolean;
-}
-
-function Header({ summary, onRefreshAll, refreshing }: HeaderProps) {
+  refreshDisabled?: boolean;
+  autoRefreshEnabled: boolean;
+  intervalMs: number;
+  setAutoRefreshEnabled: (enabled: boolean) => void;
+  setIntervalMs: (intervalMs: number) => void;
+}) {
+  const { t } = useTranslation();
   return (
     <motion.header
       initial={{ opacity: 0, y: -8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
-      className="flex items-center justify-between border-b border-border/40 px-4 py-3"
+      data-tauri-drag-region
+      className="flex h-14 shrink-0 items-center gap-3 border-b border-border/40 px-4"
     >
-      <div className="flex items-center gap-3">
+      <div className="flex shrink-0 items-center gap-3">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15 text-primary">
           <Wallet className="w-4 h-4" />
         </div>
         <div>
-          <h1 className="text-base font-semibold leading-tight">用量</h1>
-          <p className="text-[11px] text-muted-foreground">订阅 · 用量 · 续费提醒</p>
+          <h1 className="text-base font-semibold leading-tight">{t("sidebar.usage")}</h1>
+          <p className="text-[11px] text-muted-foreground">{t("usage.panelSubtitle")}</p>
         </div>
       </div>
-      <div className="flex items-center gap-3">
-        {summary && summary.monthly_spend.length > 0 && (
-          <div className="text-right">
-            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">本月支出</div>
-            <div className="text-sm font-semibold tabular-nums">
-              {summary.monthly_spend.map((e, i) => (
-                <span key={e.currency}>
-                  {i > 0 && <span className="mx-1 text-muted-foreground/50">·</span>}
-                  {e.currency === "CNY" ? "¥" : e.currency === "USD" ? "$" : ""}
-                  {e.amount.toFixed(2)}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-        <Button onClick={onRefreshAll} disabled={refreshing} size="sm" variant="outline">
-          <RefreshCw className={refreshing ? "animate-spin" : ""} />
-          刷新全部
-        </Button>
-      </div>
+
+      <div data-tauri-drag-region className="h-full min-w-[48px] flex-1" aria-hidden />
+
+      <UsageRefreshControl
+        onRefresh={onRefresh}
+        refreshing={refreshing}
+        refreshDisabled={refreshDisabled}
+        autoRefreshEnabled={autoRefreshEnabled}
+        intervalMs={intervalMs}
+        setAutoRefreshEnabled={setAutoRefreshEnabled}
+        setIntervalMs={setIntervalMs}
+      />
     </motion.header>
   );
 }

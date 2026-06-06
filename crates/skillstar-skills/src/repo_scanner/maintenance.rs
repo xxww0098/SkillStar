@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::git::ops::find_repo_root;
+use serde::{Deserialize, Serialize};
 use skillstar_core::infra::{fs_ops, paths};
 use std::path::{Path, PathBuf};
 
@@ -84,11 +84,10 @@ pub fn clean_unused_cache() -> anyhow::Result<usize> {
             if !meta.is_dir() {
                 continue;
             }
-            if !referenced.contains(&path) {
-                if std::fs::remove_dir_all(&path).is_ok() {
+            if !referenced.contains(&path)
+                && std::fs::remove_dir_all(&path).is_ok() {
                     removed += 1;
                 }
-            }
         }
     }
 
@@ -115,13 +114,11 @@ fn collect_referenced_cache_dirs(
             continue;
         };
 
-        if let Some(repo_root) = find_repo_root(&target) {
-            if let Some(parent) = repo_root.parent() {
-                if parent == cache_dir {
+        if let Some(repo_root) = find_repo_root(&target)
+            && let Some(parent) = repo_root.parent()
+                && parent == cache_dir {
                     referenced.insert(repo_root);
                 }
-            }
-        }
     }
 
     referenced

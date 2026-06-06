@@ -117,6 +117,21 @@ pub fn apply_mirror_args(cmd: &mut Command) {
     }
 }
 
+/// True when git stderr suggests the configured GitHub mirror is unreachable.
+pub fn is_mirror_transport_error(stderr: &str) -> bool {
+    let s = stderr.to_lowercase();
+    s.contains("ssl_connect")
+        || s.contains("ssl_error_syscall")
+        || s.contains("could not resolve host")
+        || s.contains("couldn't resolve host")
+        || s.contains("failed to connect")
+        || s.contains("connection refused")
+        || s.contains("connection timed out")
+        || s.contains("unable to access 'https://gh-")
+        || s.contains("ghproxy")
+        || s.contains("gh-proxy")
+}
+
 pub async fn test_mirror(url: &str) -> Result<u64> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
@@ -160,7 +175,7 @@ mod tests {
 
     #[test]
     fn load_config_returns_default_when_missing() {
-        let _guard = super::test_env_lock()
+        let _guard = crate::config::test_env_lock()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let temp = TempDir::new().unwrap();
@@ -181,7 +196,7 @@ mod tests {
 
     #[test]
     fn save_and_load_config_roundtrip() {
-        let _guard = super::test_env_lock()
+        let _guard = crate::config::test_env_lock()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let temp = TempDir::new().unwrap();
@@ -210,6 +225,12 @@ mod tests {
         unsafe {
             std::env::remove_var("SKILLSTAR_DATA_DIR");
         }
+    }
+
+    #[test]
+    fn mirror_transport_error_detects_ssl_failures() {
+        let stderr = "fatal: unable to access 'https://gh-proxy.com/https://github.com/foo.git/': LibreSSL SSL_connect: SSL_ERROR_SYSCALL";
+        assert!(super::is_mirror_transport_error(stderr));
     }
 
     #[test]

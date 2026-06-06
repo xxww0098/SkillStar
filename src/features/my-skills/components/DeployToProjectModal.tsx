@@ -45,7 +45,7 @@ export function DeployToProjectModal({
       const count = await onDeploy(projectPath, selectedSkills, selectedAgents);
       setResult(count);
     } catch (e) {
-      console.error("Deploy failed:", e);
+      if (import.meta.env.DEV) console.error("Deploy failed:", e);
     } finally {
       setDeploying(false);
     }

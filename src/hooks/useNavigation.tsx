@@ -9,16 +9,18 @@ const importMarketplacePage = () => import("../pages/Marketplace");
 const importPublisherDetailPage = () => import("../pages/PublisherDetail");
 const importSkillCardsPage = () => import("../pages/SkillCards");
 const importProjectsPage = () => import("../pages/Projects");
+const importMcpPage = () => import("../pages/Mcp");
 const importSettingsPage = () => import("../pages/Settings");
 const importUsagePage = () => import("../pages/Usage");
 
-const ALL_PAGES: NavPage[] = ["my-skills", "marketplace", "skill-cards", "projects", "settings"];
+const ALL_PAGES: NavPage[] = ["my-skills", "marketplace", "skill-cards", "projects", "mcp", "settings"];
 
 const DEFAULT_NEXT_PAGES: Record<NavPage, NavPage[]> = {
   "my-skills": ["marketplace", "projects"],
   marketplace: ["my-skills", "skill-cards"],
   "skill-cards": ["projects", "my-skills"],
   projects: ["my-skills", "settings"],
+  mcp: ["my-skills", "marketplace"],
   settings: ["my-skills", "projects"],
 };
 
@@ -30,6 +32,7 @@ const PAGE_IMPORTERS: Record<NavPage, () => Promise<unknown>> = {
   },
   "skill-cards": importSkillCardsPage,
   projects: importProjectsPage,
+  mcp: importMcpPage,
   settings: importSettingsPage,
 };
 
@@ -66,6 +69,7 @@ const PAGE_TO_HASH: Record<NavPage, string> = {
   marketplace: "marketplace",
   "skill-cards": "cards",
   projects: "projects",
+  mcp: "mcp",
   settings: "settings",
 };
 
@@ -74,23 +78,26 @@ const HASH_TO_PAGE: Record<string, NavPage> = Object.fromEntries(
 );
 
 // ── Models mode hash mapping ────────────────────────────────────────
-const MODELS_PAGES: ModelsNavPage[] = ["providers", "health", "tool-configs", "models-settings"];
-const MODELS_HASH_PREFIX = "models/";
-const DEFAULT_MODELS_PAGE: ModelsNavPage = "providers";
+//
+// The Models hub merges what used to be four sub-pages into a single workbench.
+// We keep `ModelsNavPage` (typed as `"hub"`) and the `navigateModels` API for
+// back-compat with downstream callers, but every entry just lands on the hub.
+const MODELS_HASH = "models";
+const MODELS_LEGACY_HASH_PREFIX = "models/";
+const DEFAULT_MODELS_PAGE: ModelsNavPage = "hub";
 
 const USAGE_HASH = "usage";
 
 function isModelsHash(hash: string): boolean {
-  return hash.startsWith(MODELS_HASH_PREFIX);
+  return hash === MODELS_HASH || hash.startsWith(MODELS_LEGACY_HASH_PREFIX);
 }
 
 function isUsageHash(hash: string): boolean {
   return hash === USAGE_HASH;
 }
 
-function modelsPageFromHash(hash: string): ModelsNavPage {
-  const page = hash.slice(MODELS_HASH_PREFIX.length);
-  return (MODELS_PAGES as string[]).includes(page) ? (page as ModelsNavPage) : DEFAULT_MODELS_PAGE;
+function modelsPageFromHash(_hash: string): ModelsNavPage {
+  return DEFAULT_MODELS_PAGE;
 }
 
 function pageFromHash(): NavPage {
@@ -218,11 +225,9 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
     (mode: AppMode) => {
       setAppModeState(mode);
       if (mode === "models") {
-        // Land on the provider detail (using the rehydrated
-        // selectedProviderId), not the "新增供应商" preset wizard,
-        // even if it was open before the mode switch.
+        // Drawer is closed by default — the user re-opens it explicitly.
         setShowPresetSelector(false);
-        window.location.hash = `${MODELS_HASH_PREFIX}${modelsActivePage}`;
+        window.location.hash = MODELS_HASH;
       } else if (mode === "usage") {
         setShowPresetSelector(false);
         window.location.hash = USAGE_HASH;
@@ -231,14 +236,16 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
         window.location.hash = PAGE_TO_HASH[activePage];
       }
     },
-    [modelsActivePage, activePage],
+    [activePage],
   );
 
-  // ── Navigate within Models mode ─────────────────────────────────
-  const navigateModels = useCallback((page: ModelsNavPage) => {
-    setModelsActivePage(page);
+  // ── Navigate within Models mode (kept for back-compat) ─────────
+  // After the hub redesign every entry lands on the same hub page; we still
+  // expose the action so existing call sites keep compiling.
+  const navigateModels = useCallback((_page: ModelsNavPage) => {
+    setModelsActivePage(DEFAULT_MODELS_PAGE);
     setAppModeState("models");
-    window.location.hash = `${MODELS_HASH_PREFIX}${page}`;
+    window.location.hash = MODELS_HASH;
   }, []);
 
   // ── Convenience navigators ──────────────────────────────────────

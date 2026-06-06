@@ -90,10 +90,18 @@ pub async fn check_app_update(app: tauri::AppHandle) -> Result<UpdateCheckResult
         .build()
         .map_err(|e| format!("failed to build updater: {e}"))?;
 
-    let update = updater
-        .check()
-        .await
-        .map_err(|e| format!("update check failed: {e}"))?;
+    let update = match updater.check().await {
+        Ok(u) => u,
+        Err(e) => {
+            warn!(target: "updater", "update check returned error (no release published?): {e}");
+            return Ok(UpdateCheckResult {
+                available: false,
+                version: None,
+                date: None,
+                body: None,
+            });
+        }
+    };
 
     match update {
         Some(update) => {

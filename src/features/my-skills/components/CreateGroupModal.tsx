@@ -81,7 +81,7 @@ export function CreateGroupModal({
       await onSave(name.trim(), description.trim(), icon, selectedSkills);
       handleClose();
     } catch (e) {
-      console.error("Save failed:", e);
+      if (import.meta.env.DEV) console.error("Save failed:", e);
     } finally {
       setSaving(false);
     }

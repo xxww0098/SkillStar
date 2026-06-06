@@ -1,4 +1,4 @@
-import { FolderKanban, Globe, Layers, Package } from "lucide-react";
+import { Boxes, FolderKanban, Globe, Layers, Package } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../../lib/utils";
 import type { NavPage } from "../../types";
@@ -31,6 +31,7 @@ export function SkillsNav({
     { id: "marketplace", label: t("sidebar.market"), icon: Globe },
     { id: "skill-cards", label: t("sidebar.groups"), icon: Layers },
     { id: "projects", label: t("sidebar.projects"), icon: FolderKanban },
+    { id: "mcp", label: t("sidebar.mcp"), icon: Boxes },
   ];
 
   return (

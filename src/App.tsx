@@ -1,5 +1,5 @@
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import React, { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CommandPalette } from "./components/layout/CommandPalette";
 import { Sidebar } from "./components/layout/Sidebar";
 import { LoadingLogo } from "./components/ui/LoadingLogo";
@@ -11,6 +11,7 @@ import { useNavigation } from "./hooks/useNavigation";
 import { useTauriSetup } from "./hooks/useTauriSetup";
 import { useUpdater } from "./hooks/useUpdater";
 import { looksLikeShareCode } from "./lib/shareCode";
+import type { NavPage, OfficialPublisher } from "./types";
 
 const MySkillsPage = lazy(() => import("./pages/MySkills").then((mod) => ({ default: mod.MySkills })));
 const MarketplacePage = lazy(() => import("./pages/Marketplace").then((mod) => ({ default: mod.Marketplace })));
@@ -19,13 +20,11 @@ const PublisherDetailPage = lazy(() =>
 );
 const SkillCardsPage = lazy(() => import("./pages/SkillCards").then((mod) => ({ default: mod.SkillCards })));
 const ProjectsPage = lazy(() => import("./pages/Projects").then((mod) => ({ default: mod.Projects })));
+const McpPage = lazy(() => import("./pages/Mcp").then((mod) => ({ default: mod.Mcp })));
 const SettingsPage = lazy(() => import("./pages/Settings").then((mod) => ({ default: mod.Settings })));
 
-// Models mode pages (lazy-loaded to avoid impacting Skills mode startup)
-const ModelsProvidersPage = lazy(() => import("./pages/Models").then((mod) => ({ default: mod.ModelsProviders })));
-const ModelsHealthPage = lazy(() => import("./pages/Models").then((mod) => ({ default: mod.ModelsHealth })));
-const ModelsToolConfigsPage = lazy(() => import("./pages/Models").then((mod) => ({ default: mod.ModelsToolConfigs })));
-const ModelsSettingsPage = lazy(() => import("./pages/Models").then((mod) => ({ default: mod.ModelsSettings })));
+// Models mode (single hub page that merges agent connections / providers / health / tool configs)
+const ModelsPage = lazy(() => import("./pages/Models").then((mod) => ({ default: mod.Models })));
 
 // Usage mode (single page: subscription tracker)
 const UsagePage = lazy(() => import("./pages/Usage").then((mod) => ({ default: mod.Usage })));
@@ -43,6 +42,8 @@ const MAIN_CONTENT_PAD_EXPANDED_PX = 8 + 180;
 /** `w-14` is 3.5rem; default 16px root → 56px. */
 const MAIN_CONTENT_PAD_COLLAPSED_PX = 8 + 56;
 
+const noop = () => {};
+
 function UsageModeShell({ children }: { children: React.ReactNode }) {
   const { appMode } = useNavigation();
   if (appMode === "usage") {
@@ -56,7 +57,7 @@ function AppContent() {
   const prefersReducedMotion = useReducedMotion();
   const updater = useUpdater();
   const { ghostSkills, skills } = useSkills();
-  const pendingUpdatesCount = skills.filter((s) => s.update_available).length;
+  const pendingUpdatesCount = useMemo(() => skills.filter((s) => s.update_available).length, [skills]);
   const lastClipboardValue = useRef("");
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 
@@ -79,6 +80,40 @@ function AppContent() {
       return false;
     }
   });
+
+  const handleToggleCollapse = useCallback(() => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("sidebar-collapsed", String(next));
+      } catch (e) {
+        if (import.meta.env.DEV) console.warn("[App] Failed to persist sidebar collapsed state:", e);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleCloseCommandPalette = useCallback(() => {
+    setCommandPaletteOpen(false);
+  }, []);
+
+  const handleCommandPaletteNavigate = useCallback(
+    (page: NavPage) => {
+      nav.navigate(page);
+      setCommandPaletteOpen(false);
+    },
+    [nav],
+  );
+
+  const handleEnterModelsMode = useCallback(() => {
+    nav.setAppMode("models");
+    setCommandPaletteOpen(false);
+  }, [nav]);
+
+  const handleEnterUsageMode = useCallback(() => {
+    nav.setAppMode("usage");
+    setCommandPaletteOpen(false);
+  }, [nav]);
 
   // ── Tauri lifecycle (patrol, tray, window-hidden) ──────────────
   useTauriSetup();
@@ -120,25 +155,36 @@ function AppContent() {
     return () => window.removeEventListener("focus", handleFocus);
   }, [nav]);
 
+  const handlePublisherBack = useCallback(() => nav.setSubPage(null), [nav]);
+  const handleClearFocus = useCallback(() => nav.setMySkillsFocusSkill(null), [nav]);
+  const handlePackSkills = useCallback(
+    (skills: string[]) => {
+      if (skills.length > 0) nav.goToSkillCardsWithSkills(skills);
+    },
+    [nav],
+  );
+  const handleClearShareCode = useCallback(() => nav.setClipboardShareCode(null), [nav]);
+  const handleNavigateToPublisher = useCallback(
+    (pub_: OfficialPublisher) => nav.setSubPage({ type: "publisher-detail", publisher: pub_ }),
+    [nav],
+  );
+  const handleClearPreSelectedCards = useCallback(() => nav.setSkillCardsPreSelectedSkills(null), [nav]);
+  const handleNavigateToProjects = useCallback(
+    (skills?: string[]) => {
+      if (skills) nav.goToProjectsWithSkills(skills);
+    },
+    [nav],
+  );
+  const handleClearPreSelectedProjects = useCallback(() => nav.setProjectsPreSelectedSkills(null), [nav]);
+
   const renderPage = () => {
     if (nav.appMode === "usage") {
       return <UsagePage />;
     }
 
-    // Models mode pages
+    // Models mode (single hub page)
     if (nav.appMode === "models") {
-      switch (nav.modelsActivePage) {
-        case "providers":
-          return <ModelsProvidersPage />;
-        case "health":
-          return <ModelsHealthPage />;
-        case "tool-configs":
-          return <ModelsToolConfigsPage />;
-        case "models-settings":
-          return <ModelsSettingsPage />;
-        default:
-          return <ModelsProvidersPage />;
-      }
+      return <ModelsPage />;
     }
 
     // Skills mode pages
@@ -152,7 +198,7 @@ function AppContent() {
           transition={{ duration: 0.2, ease: "easeOut" }}
           className="flex-1 min-w-0 flex overflow-hidden"
         >
-          <PublisherDetailPage publisher={nav.subPage.publisher} onBack={() => nav.setSubPage(null)} />
+          <PublisherDetailPage publisher={nav.subPage.publisher} onBack={handlePublisherBack} />
         </motion.div>
       );
     }
@@ -162,12 +208,10 @@ function AppContent() {
         return (
           <MySkillsPage
             initialFocusSkill={nav.mySkillsFocusSkill}
-            onClearFocus={() => nav.setMySkillsFocusSkill(null)}
-            onPackSkills={(skills) => {
-              if (skills.length > 0) nav.goToSkillCardsWithSkills(skills);
-            }}
+            onClearFocus={handleClearFocus}
+            onPackSkills={handlePackSkills}
             initialShareCode={nav.clipboardShareCode ?? undefined}
-            onClearShareCode={() => nav.setClipboardShareCode(null)}
+            onClearShareCode={handleClearShareCode}
           />
         );
       case "marketplace":
@@ -175,26 +219,26 @@ function AppContent() {
           <MarketplacePage
             activeTab={nav.marketplaceTab}
             onTabChange={nav.setMarketplaceTab}
-            onNavigateToPublisher={(pub_) => nav.setSubPage({ type: "publisher-detail", publisher: pub_ })}
+            onNavigateToPublisher={handleNavigateToPublisher}
           />
         );
       case "skill-cards":
         return (
           <SkillCardsPage
             preSelectedSkills={nav.skillCardsPreSelectedSkills}
-            onClearPreSelected={() => nav.setSkillCardsPreSelectedSkills(null)}
-            onNavigateToProjects={(skills) => {
-              if (skills) nav.goToProjectsWithSkills(skills);
-            }}
+            onClearPreSelected={handleClearPreSelectedCards}
+            onNavigateToProjects={handleNavigateToProjects}
           />
         );
       case "projects":
         return (
           <ProjectsPage
             preSelectedSkills={nav.projectsPreSelectedSkills}
-            onClearPreSelected={() => nav.setProjectsPreSelectedSkills(null)}
+            onClearPreSelected={handleClearPreSelectedProjects}
           />
         );
+      case "mcp":
+        return <McpPage />;
       case "settings":
         return <SettingsPage onCheckUpdate={updater.check} isCheckingUpdate={updater.state.status === "checking"} />;
       default:
@@ -202,89 +246,67 @@ function AppContent() {
     }
   };
 
+  const mainContentStyle = useMemo(
+    () => ({ paddingLeft: sidebarCollapsed ? MAIN_CONTENT_PAD_COLLAPSED_PX : MAIN_CONTENT_PAD_EXPANDED_PX }),
+    [sidebarCollapsed],
+  );
+
   return (
     <UsageModeShell>
-    <div className="relative h-screen w-screen overflow-hidden bg-background border border-border/50">
-      <a
-        href="#main-content"
-        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[200] focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded-lg focus:text-sm"
-      >
-        Skip to content
-      </a>
-      <Sidebar
-        activePage={nav.activePage}
-        onNavigate={nav.navigate}
-        onPrefetch={() => {}}
-        collapsed={sidebarCollapsed}
-        onToggleCollapse={() => {
-          setSidebarCollapsed((prev) => {
-            const next = !prev;
-            try {
-              localStorage.setItem("sidebar-collapsed", String(next));
-            } catch (e) {
-              console.warn("[App] Failed to persist sidebar collapsed state:", e);
-            }
-            return next;
-          });
-        }}
-        updateStatus={updater.state.status}
-        updateVersion={updater.state.version}
-        updateProgress={updater.state.progress}
-        updateError={updater.state.error}
-        onUpdate={updater.download}
-        onRestart={updater.apply}
-        onSkip={updater.skip}
-        onDismiss={updater.dismiss}
-        onRetry={updater.retry}
-        ghostSkillCount={ghostSkills.length}
-        pendingUpdatesCount={pendingUpdatesCount}
-      />
-      <div
-        id="main-content"
-        className="h-full w-full flex flex-col overflow-hidden pt-0 transition-[padding-left] duration-200 ease-out"
-        style={{
-          paddingLeft: sidebarCollapsed ? MAIN_CONTENT_PAD_COLLAPSED_PX : MAIN_CONTENT_PAD_EXPANDED_PX,
-        }}
-      >
-        <div className="ss-main-chrome">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={
-                nav.appMode === "models"
-                  ? `models-${nav.modelsActivePage}`
-                  : nav.appMode === "usage"
-                    ? "usage"
-                    : nav.activePage
-              }
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: prefersReducedMotion ? 0.01 : 0.2, ease: [0.22, 1, 0.36, 1] }}
-              className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
-            >
-              <Suspense fallback={<PageFallback />}>{renderPage()}</Suspense>
-            </motion.div>
-          </AnimatePresence>
+      <div className="relative h-screen w-screen overflow-hidden bg-background border border-border/50">
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[200] focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded-lg focus:text-sm"
+        >
+          Skip to content
+        </a>
+        <Sidebar
+          activePage={nav.activePage}
+          onNavigate={nav.navigate}
+          onPrefetch={noop}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={handleToggleCollapse}
+          updateStatus={updater.state.status}
+          updateVersion={updater.state.version}
+          updateProgress={updater.state.progress}
+          updateError={updater.state.error}
+          onUpdate={updater.download}
+          onRestart={updater.apply}
+          onSkip={updater.skip}
+          onDismiss={updater.dismiss}
+          onRetry={updater.retry}
+          ghostSkillCount={ghostSkills.length}
+          pendingUpdatesCount={pendingUpdatesCount}
+        />
+        <div
+          id="main-content"
+          className="h-full w-full flex flex-col overflow-hidden pt-0 transition-[padding-left] duration-200 ease-out will-change-[padding-left]"
+          style={mainContentStyle}
+        >
+          <div className="ss-main-chrome">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={nav.appMode === "models" ? "models" : nav.appMode === "usage" ? "usage" : nav.activePage}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: prefersReducedMotion ? 0.01 : 0.2, ease: [0.22, 1, 0.36, 1] }}
+                className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+              >
+                <Suspense fallback={<PageFallback />}>{renderPage()}</Suspense>
+              </motion.div>
+            </AnimatePresence>
+          </div>
         </div>
+        <CommandPalette
+          open={commandPaletteOpen}
+          onClose={handleCloseCommandPalette}
+          onNavigate={handleCommandPaletteNavigate}
+          onEnterModelsMode={handleEnterModelsMode}
+          onEnterUsageMode={handleEnterUsageMode}
+        />
+        <Toaster />
       </div>
-      <CommandPalette
-        open={commandPaletteOpen}
-        onClose={() => setCommandPaletteOpen(false)}
-        onNavigate={(page) => {
-          nav.navigate(page);
-          setCommandPaletteOpen(false);
-        }}
-        onNavigateModels={(page) => {
-          nav.navigateModels(page);
-          setCommandPaletteOpen(false);
-        }}
-        onEnterUsageMode={() => {
-          nav.setAppMode("usage");
-          setCommandPaletteOpen(false);
-        }}
-      />
-      <Toaster />
-    </div>
     </UsageModeShell>
   );
 }

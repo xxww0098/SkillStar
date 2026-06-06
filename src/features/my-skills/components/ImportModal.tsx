@@ -155,7 +155,7 @@ export function ImportModal({
       const installed = await tauriInvoke("list_skills");
       return new Set(installed.map((skill) => normalizeSkillName(skill.name)));
     } catch (e) {
-      console.warn("[ShareCode] Failed to list installed skills:", e);
+      if (import.meta.env.DEV) console.warn("[ShareCode] Failed to list installed skills:", e);
       return new Set<string>();
     }
   }, []);
@@ -261,7 +261,7 @@ export function ImportModal({
             skillSources: sources,
           });
         } catch (e) {
-          console.warn("[ShareCode] Failed to auto-create deck:", e);
+          if (import.meta.env.DEV) console.warn("[ShareCode] Failed to auto-create deck:", e);
         }
       }
 

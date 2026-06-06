@@ -107,17 +107,14 @@ pub struct OfficialPublisher {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum CuratedRegistryKind {
+    #[default]
     SkillsSh,
     GitHub,
     Custom,
 }
 
-impl Default for CuratedRegistryKind {
-    fn default() -> Self {
-        Self::SkillsSh
-    }
-}
 
 impl CuratedRegistryKind {
     pub fn as_str(&self) -> &'static str {

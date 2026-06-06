@@ -12,7 +12,7 @@ export function useSkillCards() {
       const result = await tauriInvoke("list_skill_groups");
       setGroups(result);
     } catch (e) {
-      console.error("Failed to load skill cards:", e);
+      if (import.meta.env.DEV) console.error("Failed to load skill cards:", e);
     } finally {
       setLoading(false);
     }

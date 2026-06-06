@@ -19,7 +19,114 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::providers::{FlatProvidersStore, ProviderEntry, ProviderEntryFlat, ProviderSettings};
+use crate::providers::{FlatProvidersStore, ProviderEntry, ProviderEntryFlat, ProviderSettings, ToolActivation};
+
+// ---------------------------------------------------------------------------
+// Sandboxed home resolution (single source of truth for tool-config paths)
+// ---------------------------------------------------------------------------
+
+/// Env var that re-roots every tool-config path under a sandbox directory.
+///
+/// When set to a non-empty path, resolution of `~/.claude`, `~/.codex`,
+/// `~/.gemini`, `~/.config/opencode`, etc. happens *inside that directory*
+/// instead of the user's real home. Tests MUST set this so the suite never
+/// overwrites a developer's live tool configuration (a real bug we hit:
+/// `resync_active_tools` tests clobbered `~/.codex/config.toml` and
+/// `~/.claude/settings.json`). It also lets advanced users sandbox sync.
+pub const TOOL_SYNC_HOME_ENV: &str = "SKILLSTAR_TOOL_SYNC_HOME";
+
+/// The sandbox root: [`TOOL_SYNC_HOME_ENV`] if set, otherwise — in this crate's
+/// own unit tests only — a per-process throwaway temp dir. The `cfg(test)`
+/// fallback is a hard safety net: it guarantees a unit test can NEVER resolve
+/// the developer's real `~/.codex`/`~/.claude` even if it forgot to set the
+/// override (a recurring footgun). Integration tests compile this lib in
+/// non-test mode, so they must set [`TOOL_SYNC_HOME_ENV`] explicitly.
+fn sandbox_home() -> Option<PathBuf> {
+    if let Some(v) = std::env::var_os(TOOL_SYNC_HOME_ENV) {
+        if !v.is_empty() {
+            return Some(PathBuf::from(v));
+        }
+    }
+    #[cfg(test)]
+    {
+        return Some(test_sandbox_home());
+    }
+    #[cfg(not(test))]
+    None
+}
+
+/// Per-process throwaway home used as the unit-test default (see [`sandbox_home`]).
+#[cfg(test)]
+fn test_sandbox_home() -> PathBuf {
+    use std::sync::LazyLock;
+    static DIR: LazyLock<PathBuf> = LazyLock::new(|| {
+        let dir = std::env::temp_dir().join(format!("skillstar-toolsync-test-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    });
+    DIR.clone()
+}
+
+/// Resolve the home directory for tool-config sync — the **single** home
+/// resolution point for this module.
+///
+/// Honors [`TOOL_SYNC_HOME_ENV`]. Do not call `dirs::home_dir()` directly
+/// elsewhere in this file: funnelling every path through here is what makes the
+/// whole module sandboxable and keeps tests off the real `~/.codex` etc.
+fn sync_home_dir() -> Result<PathBuf> {
+    if let Some(dir) = sandbox_home() {
+        return Ok(dir);
+    }
+    dirs::home_dir().context("Could not determine home directory")
+}
+
+/// `Option`-returning variant of [`sync_home_dir`] for callers that propagate
+/// `Option` rather than `Result`.
+fn sync_home_dir_opt() -> Option<PathBuf> {
+    sandbox_home().or_else(dirs::home_dir)
+}
+
+/// Resolve the OS config directory (`~/Library/Application Support`, `%APPDATA%`,
+/// or `~/.config`) for tool-config sync, re-rooted under the sandbox when
+/// [`TOOL_SYNC_HOME_ENV`] is set.
+fn sync_config_dir() -> Result<PathBuf> {
+    if let Some(dir) = sandbox_home() {
+        return Ok(dir.join(".config"));
+    }
+    dirs::config_dir().context("Could not determine config directory")
+}
+
+// ---------------------------------------------------------------------------
+// Per-tool typed settings helpers
+// ---------------------------------------------------------------------------
+
+/// Typed accessor for Codex-specific settings stored in `ToolActivation.settings`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CodexSettings {
+    #[serde(default = "default_wire_api")]
+    pub wire_api: String,
+    #[serde(default = "default_auth_mode")]
+    pub auth_mode: String,
+}
+
+fn default_wire_api() -> String { "responses".to_string() }
+fn default_auth_mode() -> String { "api_key".to_string() }
+
+impl CodexSettings {
+    /// Parse from a generic `Value`, filling in defaults for missing fields.
+    pub fn from_value(value: &serde_json::Value) -> Self {
+        serde_json::from_value(value.clone()).unwrap_or_default()
+    }
+}
+
+impl Default for CodexSettings {
+    fn default() -> Self {
+        Self {
+            wire_api: default_wire_api(),
+            auth_mode: default_auth_mode(),
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Config conflict detection types
@@ -38,6 +145,10 @@ pub struct ConfigConflict {
     /// Additional details (e.g., which env var, what value was found).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub details: Option<String>,
+    /// The tool this conflict pertains to (set for tool-specific conflicts like
+    /// external modification). `None` for global conflicts like env overrides.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_id: Option<String>,
 }
 
 /// The type of configuration conflict.
@@ -85,6 +196,28 @@ pub struct ToolSyncResultFlat {
     pub backup_path: Option<String>,
 }
 
+/// A single on-disk config file belonging to an agent tool.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolConfigFileInfo {
+    pub file_id: String,
+    pub label: String,
+    pub path: String,
+    /// `"json"` or `"toml"`
+    pub format: String,
+    pub exists: bool,
+    pub managed_by_skillstar: bool,
+}
+
+/// Result of writing a tool config file from the UI editor.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriteToolConfigFileResult {
+    pub success: bool,
+    pub backup_path: Option<String>,
+    pub error: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // Constants: managed field names
 // ---------------------------------------------------------------------------
@@ -94,10 +227,23 @@ const CLAUDE_MANAGED_ENV_KEYS: &[&str] = &[
     "ANTHROPIC_BASE_URL",
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
 ];
 
 /// The key for the model_providers section managed by SkillStar in Codex's config.toml.
 const CODEX_MANAGED_PROVIDER_KEY: &str = "skillstar";
+
+/// Provider block key under `opencode.json` → `provider`.
+const OPENCODE_MANAGED_PROVIDER_KEY: &str = "skillstar";
+
+/// Fields managed by SkillStar in Gemini CLI's `~/.gemini/.env` file.
+const GEMINI_MANAGED_ENV_KEYS: &[&str] = &[
+    "GOOGLE_GEMINI_BASE_URL",
+    "GEMINI_API_KEY",
+    "GEMINI_MODEL",
+];
 
 // ---------------------------------------------------------------------------
 // Path resolution (security: only hardcoded known paths)
@@ -105,15 +251,326 @@ const CODEX_MANAGED_PROVIDER_KEY: &str = "skillstar";
 
 /// Resolve the config file path for a given tool_id.
 ///
-/// Only accepts "claude-code" and "codex" as valid tool IDs.
+/// Only accepts "claude-code", "codex", "opencode", and "claude-desktop" as valid tool IDs.
 /// Returns an error for any other tool_id to prevent arbitrary file writes.
 pub fn resolve_tool_config_path(tool_id: &str) -> Result<PathBuf> {
-    let home = dirs::home_dir().context("Could not determine home directory")?;
+    let home = sync_home_dir()?;
     match tool_id {
         "claude-code" => Ok(home.join(".claude").join("settings.json")),
         "codex" => Ok(home.join(".codex").join("config.toml")),
-        _ => bail!("Unknown tool_id: '{}'. Only 'claude-code' and 'codex' are supported.", tool_id),
+        "opencode" => Ok(resolve_opencode_config_path()?),
+        "claude-desktop" => Ok(resolve_claude_desktop_config_path()?),
+        "gemini" => Ok(resolve_gemini_env_path()?),
+        _ => bail!(
+            "Unknown tool_id: '{}'. Supported: claude-code, codex, opencode, claude-desktop, gemini.",
+            tool_id
+        ),
     }
+}
+
+/// `~/.config/opencode/opencode.json`
+pub fn resolve_opencode_config_path() -> Result<PathBuf> {
+    let home = sync_home_dir()?;
+    Ok(home.join(".config").join("opencode").join("opencode.json"))
+}
+
+/// `~/.gemini/.env` — Gemini CLI reads provider credentials from this dotenv file.
+pub fn resolve_gemini_env_path() -> Result<PathBuf> {
+    let home = sync_home_dir()?;
+    Ok(home.join(".gemini").join(".env"))
+}
+
+/// Resolve the Claude Desktop config file path.
+///
+/// - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+/// - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+/// - Linux: `~/.config/Claude/claude_desktop_config.json` (no official Linux Claude Desktop yet,
+///   but we mirror the macOS/Windows layout so power users running it via Wine/Flatpak still work).
+///
+/// Claude Desktop only honours the `mcpServers` section of this file — it does NOT accept
+/// custom `base_url` or API keys, since it authenticates via the user's Claude.ai account.
+pub fn resolve_claude_desktop_config_path() -> Result<PathBuf> {
+    let base = sync_config_dir()?;
+    Ok(base.join("Claude").join("claude_desktop_config.json"))
+}
+
+/// Resolve a config file path for `(tool_id, file_id)`.
+pub fn resolve_tool_config_file_path(tool_id: &str, file_id: &str) -> Result<PathBuf> {
+    match (tool_id, file_id) {
+        ("claude-code", "settings") => resolve_tool_config_path("claude-code"),
+        ("codex", "config") => resolve_codex_config_path(),
+        ("codex", "auth") => resolve_codex_auth_path(),
+        ("opencode", "opencode") => resolve_opencode_config_path(),
+        ("claude-desktop", "config") => resolve_claude_desktop_config_path(),
+        ("gemini", "env") => resolve_gemini_env_path(),
+        _ => bail!("Unknown tool config file: {tool_id}/{file_id}"),
+    }
+}
+
+/// List editable config files for a tool (used by the JSON/TOML editor UI).
+pub fn list_tool_config_files(tool_id: &str) -> Result<Vec<ToolConfigFileInfo>> {
+    match tool_id {
+        "claude-code" => {
+            let path = resolve_tool_config_path("claude-code")?;
+            Ok(vec![ToolConfigFileInfo {
+                file_id: "settings".to_string(),
+                label: "settings.json".to_string(),
+                path: path.to_string_lossy().to_string(),
+                format: "json".to_string(),
+                exists: path.exists(),
+                managed_by_skillstar: true,
+            }])
+        }
+        "codex" => {
+            let config = resolve_codex_config_path()?;
+            let auth = resolve_codex_auth_path()?;
+            Ok(vec![
+                ToolConfigFileInfo {
+                    file_id: "config".to_string(),
+                    label: "config.toml".to_string(),
+                    path: config.to_string_lossy().to_string(),
+                    format: "toml".to_string(),
+                    exists: config.exists(),
+                    managed_by_skillstar: true,
+                },
+                ToolConfigFileInfo {
+                    file_id: "auth".to_string(),
+                    label: "auth.json".to_string(),
+                    path: auth.to_string_lossy().to_string(),
+                    format: "json".to_string(),
+                    exists: auth.exists(),
+                    managed_by_skillstar: true,
+                },
+            ])
+        }
+        "opencode" => {
+            let path = resolve_opencode_config_path()?;
+            Ok(vec![ToolConfigFileInfo {
+                file_id: "opencode".to_string(),
+                label: "opencode.json".to_string(),
+                path: path.to_string_lossy().to_string(),
+                format: "json".to_string(),
+                exists: path.exists(),
+                managed_by_skillstar: true,
+            }])
+        }
+        "claude-desktop" => {
+            let path = resolve_claude_desktop_config_path()?;
+            Ok(vec![ToolConfigFileInfo {
+                file_id: "config".to_string(),
+                label: "claude_desktop_config.json".to_string(),
+                path: path.to_string_lossy().to_string(),
+                format: "json".to_string(),
+                exists: path.exists(),
+                // Claude Desktop config is NOT "managed by SkillStar" in the usual sense —
+                // SkillStar only edits the `mcpServers` node, leaving everything else untouched.
+                managed_by_skillstar: false,
+            }])
+        }
+        "gemini" => {
+            let path = resolve_gemini_env_path()?;
+            Ok(vec![ToolConfigFileInfo {
+                file_id: "env".to_string(),
+                label: ".env".to_string(),
+                path: path.to_string_lossy().to_string(),
+                format: "env".to_string(),
+                exists: path.exists(),
+                managed_by_skillstar: true,
+            }])
+        }
+        _ => bail!("Unknown tool_id: '{tool_id}'"),
+    }
+}
+
+/// Read raw config file contents (empty string if missing).
+pub fn read_tool_config_file(tool_id: &str, file_id: &str) -> Result<String> {
+    let path = resolve_tool_config_file_path(tool_id, file_id)?;
+    if !path.exists() {
+        return Ok(default_empty_config_content(tool_id, file_id));
+    }
+    std::fs::read_to_string(&path)
+        .with_context(|| format!("Failed to read {}", path.display()))
+}
+
+fn default_empty_config_content(tool_id: &str, file_id: &str) -> String {
+    match (tool_id, file_id) {
+        ("claude-code", "settings") => "{\n  \"env\": {}\n}\n".to_string(),
+        ("codex", "auth") => "{\n  \"OPENAI_API_KEY\": \"\"\n}\n".to_string(),
+        ("codex", "config") => {
+            "model_provider = \"skillstar\"\nmodel = \"\"\n\n[model_providers.skillstar]\nname = \"SkillStar\"\nbase_url = \"\"\nwire_api = \"responses\"\nrequires_openai_auth = true\n".to_string()
+        }
+        ("opencode", "opencode") => {
+            "{\n  \"$schema\": \"https://opencode.ai/config.json\",\n  \"provider\": {}\n}\n".to_string()
+        }
+        // Claude Desktop only honours `mcpServers` — start with an empty list so the user
+        // can drop entries in without first reading the schema.
+        ("claude-desktop", "config") => "{\n  \"mcpServers\": {}\n}\n".to_string(),
+        ("gemini", "env") => {
+            "GOOGLE_GEMINI_BASE_URL=\nGEMINI_API_KEY=\nGEMINI_MODEL=\n".to_string()
+        }
+        _ => "{}".to_string(),
+    }
+}
+
+/// Validate and write config file contents (creates rolling backup when file exists).
+pub fn write_tool_config_file(tool_id: &str, file_id: &str, content: &str) -> WriteToolConfigFileResult {
+    match write_tool_config_file_inner(tool_id, file_id, content) {
+        Ok(backup) => WriteToolConfigFileResult {
+            success: true,
+            backup_path: backup.map(|p| p.to_string_lossy().to_string()),
+            error: None,
+        },
+        Err(e) => WriteToolConfigFileResult {
+            success: false,
+            backup_path: None,
+            error: Some(e.to_string()),
+        },
+    }
+}
+
+fn write_tool_config_file_inner(tool_id: &str, file_id: &str, content: &str) -> Result<Option<PathBuf>> {
+    let path = resolve_tool_config_file_path(tool_id, file_id)?;
+    let info = list_tool_config_files(tool_id)?
+        .into_iter()
+        .find(|f| f.file_id == file_id)
+        .context("Config file descriptor not found")?;
+
+    if info.format == "json" {
+        let _: Value = serde_json::from_str(content)
+            .context("Invalid JSON — fix syntax before saving")?;
+    } else if info.format == "toml" {
+        let _: toml::Table = toml::from_str(content).context("Invalid TOML — fix syntax before saving")?;
+    }
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
+    }
+
+    let backup = if path.exists() {
+        Some(create_rolling_backup(&path)?)
+    } else {
+        None
+    };
+
+    let normalized = match info.format.as_str() {
+        "json" => {
+            let value: Value = serde_json::from_str(content)?;
+            serde_json::to_string_pretty(&value).context("Failed to format JSON")?
+        }
+        "toml" => {
+            let table: toml::Table = toml::from_str(content)?;
+            toml::to_string_pretty(&table).context("Failed to format TOML")?
+        }
+        // dotenv files (Gemini): preserve as-is so user comments/ordering survive.
+        _ => content.to_string(),
+    };
+
+    std::fs::write(&path, normalized).with_context(|| format!("Failed to write {}", path.display()))?;
+    Ok(backup)
+}
+
+/// Pretty-format existing file contents without changing semantics.
+pub fn format_tool_config_file(tool_id: &str, file_id: &str) -> Result<String> {
+    let content = read_tool_config_file(tool_id, file_id)?;
+    let info = list_tool_config_files(tool_id)?
+        .into_iter()
+        .find(|f| f.file_id == file_id)
+        .context("Config file descriptor not found")?;
+    match info.format.as_str() {
+        "json" => {
+            let value: Value = serde_json::from_str(&content).context("Invalid JSON")?;
+            Ok(serde_json::to_string_pretty(&value)?)
+        }
+        "toml" => {
+            let table: toml::Table = toml::from_str(&content).context("Invalid TOML")?;
+            Ok(toml::to_string_pretty(&table)?)
+        }
+        // dotenv: normalize by re-serializing parsed key/value pairs (sorted, comments dropped).
+        _ => Ok(serialize_env_file(&parse_env_file(&content))),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// dotenv (.env) helpers — used by the Gemini CLI integration
+// ---------------------------------------------------------------------------
+
+/// Parse a `.env` file into an ordered list of `(key, value)` pairs, skipping
+/// blank lines and comments. Order is preserved so a merge write keeps the
+/// user's existing layout stable.
+fn parse_env_file(content: &str) -> Vec<(String, String)> {
+    let mut pairs = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some((key, value)) = trimmed.split_once('=') {
+            let key = key.trim();
+            if !key.is_empty() && key.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                pairs.push((key.to_string(), value.trim().to_string()));
+            }
+        }
+    }
+    pairs
+}
+
+/// Serialize ordered `(key, value)` pairs back into `.env` text.
+fn serialize_env_file(pairs: &[(String, String)]) -> String {
+    let mut out: String = pairs
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    out
+}
+
+/// Merge managed key/value pairs into a `.env` file, preserving unmanaged keys
+/// and creating a rolling backup when the file already exists.
+///
+/// A `None` value removes the key (used on deactivation). Existing keys keep
+/// their position; new keys are appended in the supplied order.
+fn merge_env_write(path: &Path, managed: &[(&str, Option<String>)]) -> Result<Option<PathBuf>> {
+    let backup = if path.exists() {
+        Some(create_rolling_backup(path)?)
+    } else {
+        None
+    };
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
+    }
+
+    let existing = if path.exists() {
+        std::fs::read_to_string(path)
+            .with_context(|| format!("Failed to read {}", path.display()))?
+    } else {
+        String::new()
+    };
+
+    let mut pairs = parse_env_file(&existing);
+
+    for (key, value) in managed {
+        match value {
+            Some(v) => {
+                if let Some(slot) = pairs.iter_mut().find(|(k, _)| k == key) {
+                    slot.1 = v.clone();
+                } else {
+                    pairs.push(((*key).to_string(), v.clone()));
+                }
+            }
+            None => pairs.retain(|(k, _)| k != key),
+        }
+    }
+
+    std::fs::write(path, serialize_env_file(&pairs))
+        .with_context(|| format!("Failed to write {}", path.display()))?;
+
+    Ok(backup)
 }
 
 // ---------------------------------------------------------------------------
@@ -122,7 +579,12 @@ pub fn resolve_tool_config_path(tool_id: &str) -> Result<PathBuf> {
 
 /// Returns the list of supported tool config targets with their paths and existence status.
 pub fn get_tool_config_targets() -> Result<Vec<ToolConfigTarget>> {
-    let tool_ids = [("claude-code", "Claude Code"), ("codex", "Codex")];
+    let tool_ids = [
+        ("claude-code", "Claude Code"),
+        ("codex", "Codex"),
+        ("opencode", "OpenCode"),
+        ("gemini", "Gemini CLI"),
+    ];
     let mut targets = Vec::new();
 
     for (tool_id, display_name) in &tool_ids {
@@ -165,13 +627,37 @@ fn detect_current_provider(tool_id: &str, path: &Path) -> Result<Option<String>>
         "codex" => {
             let content = std::fs::read_to_string(path)?;
             let table: toml::Table = toml::from_str(&content)?;
-            // Try to read [provider].base_url as a hint
-            if let Some(provider) = table.get("provider").and_then(|v| v.as_table()) {
-                if let Some(base_url) = provider.get("base_url").and_then(|v| v.as_str()) {
+            if let Some(mp) = table.get("model_providers").and_then(|v| v.as_table())
+                && let Some(ss) = mp.get(CODEX_MANAGED_PROVIDER_KEY).and_then(|v| v.as_table())
+                    && let Some(url) = ss.get("base_url").and_then(|v| v.as_str()) {
+                        return Ok(Some(url.to_string()));
+                    }
+            if let Some(provider) = table.get("provider").and_then(|v| v.as_table())
+                && let Some(base_url) = provider.get("base_url").and_then(|v| v.as_str()) {
                     return Ok(Some(base_url.to_string()));
                 }
+            Ok(None)
+        }
+        "opencode" => {
+            let content = std::fs::read_to_string(path)?;
+            let json: Value = serde_json::from_str(&content)?;
+            if let Some(name) = json
+                .get("provider")
+                .and_then(|p| p.get(OPENCODE_MANAGED_PROVIDER_KEY))
+                .and_then(|c| c.get("name"))
+                .and_then(|v| v.as_str())
+            {
+                return Ok(Some(name.to_string()));
             }
             Ok(None)
+        }
+        "gemini" => {
+            let content = std::fs::read_to_string(path)?;
+            let pairs = parse_env_file(&content);
+            Ok(pairs
+                .into_iter()
+                .find(|(k, _)| k == "GOOGLE_GEMINI_BASE_URL")
+                .map(|(_, v)| v))
         }
         _ => Ok(None),
     }
@@ -274,13 +760,13 @@ pub fn sync_provider_to_all_tools(
 
 /// Resolve the path to Codex's auth.json file.
 pub fn resolve_codex_auth_path() -> Result<PathBuf> {
-    let home = dirs::home_dir().context("Could not determine home directory")?;
+    let home = sync_home_dir()?;
     Ok(home.join(".codex").join("auth.json"))
 }
 
 /// Resolve the path to Codex's config.toml file.
 pub fn resolve_codex_config_path() -> Result<PathBuf> {
-    let home = dirs::home_dir().context("Could not determine home directory")?;
+    let home = sync_home_dir()?;
     Ok(home.join(".codex").join("config.toml"))
 }
 
@@ -293,6 +779,8 @@ pub fn resolve_codex_config_path() -> Result<PathBuf> {
 /// - `ANTHROPIC_BASE_URL`: the provider's Anthropic-compatible base URL
 /// - `ANTHROPIC_AUTH_TOKEN`: the provider's API key
 /// - `ANTHROPIC_MODEL`: the selected model
+/// - `ANTHROPIC_DEFAULT_HAIKU_MODEL` / `_SONNET_MODEL` / `_OPUS_MODEL`: optional
+///   tier overrides read from `provider.meta` (the key is removed when blank)
 pub fn sync_to_claude_code(
     provider: &ProviderEntryFlat,
     model: &str,
@@ -342,11 +830,16 @@ fn sync_to_claude_code_inner(
             .with_context(|| format!("Failed to create directory {}", parent.display()))?;
     }
 
-    // Build managed fields for the env block
+    // Build managed fields for the env block. The tier-model overrides
+    // (Haiku/Sonnet/Opus) come from `provider.meta`; each is written when set,
+    // or passed as Null (→ key removed) when the user left it blank.
     let managed_fields: Vec<(&str, Value)> = vec![
         ("ANTHROPIC_BASE_URL", Value::String(provider.base_url_anthropic.clone())),
         ("ANTHROPIC_AUTH_TOKEN", Value::String(provider.api_key.clone())),
         ("ANTHROPIC_MODEL", Value::String(model.to_string())),
+        ("ANTHROPIC_DEFAULT_HAIKU_MODEL", meta_model_field(provider, "claude_haiku_model")),
+        ("ANTHROPIC_DEFAULT_SONNET_MODEL", meta_model_field(provider, "claude_sonnet_model")),
+        ("ANTHROPIC_DEFAULT_OPUS_MODEL", meta_model_field(provider, "claude_opus_model")),
     ];
 
     // Merge write into the env block
@@ -355,23 +848,42 @@ fn sync_to_claude_code_inner(
     Ok(backup_path)
 }
 
+/// Read a Claude tier-model override from `provider.meta`. Returns a
+/// `Value::String` when the field is a non-empty string, otherwise
+/// `Value::Null` (which `merge_json_env_write` treats as "remove the key").
+fn meta_model_field(provider: &ProviderEntryFlat, key: &str) -> Value {
+    provider
+        .meta
+        .as_ref()
+        .and_then(|m| m.get(key))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| Value::String(s.to_string()))
+        .unwrap_or(Value::Null)
+}
+
 /// Sync a provider's credentials to Codex's config files.
 ///
 /// Writes to:
-/// - `~/.codex/auth.json`: `{ "OPENAI_API_KEY": "<api_key>" }`
+/// - `~/.codex/auth.json`: `{ "OPENAI_API_KEY": "<api_key>" }` (only when auth_mode is "api_key")
 /// - `~/.codex/config.toml`: `model_provider = "skillstar"`, `model = "<model>"`,
 ///   and `[model_providers.skillstar]` table
+///
+/// `activation.settings` controls Codex-specific options:
+/// - `wire_api`: `"responses"` (default) or `"chat"`
+/// - `auth_mode`: `"api_key"` (default) or `"oauth"`
 ///
 /// Creates rolling backups before writing (keeps last 5 per file).
 /// Preserves existing non-managed fields in both files.
 pub fn sync_to_codex(
     provider: &ProviderEntryFlat,
-    model: &str,
+    activation: &ToolActivation,
 ) -> Result<ToolSyncResultFlat> {
     let config_path = resolve_codex_config_path()?;
     let config_path_str = config_path.to_string_lossy().to_string();
 
-    match sync_to_codex_inner(provider, model) {
+    match sync_to_codex_inner(provider, activation) {
         Ok(backup_path) => Ok(ToolSyncResultFlat {
             tool_id: "codex".to_string(),
             success: true,
@@ -392,12 +904,22 @@ pub fn sync_to_codex(
 /// Inner implementation for Codex sync.
 fn sync_to_codex_inner(
     provider: &ProviderEntryFlat,
-    model: &str,
+    activation: &ToolActivation,
 ) -> Result<Option<PathBuf>> {
     // Validate that base_url_openai is non-empty
     if provider.base_url_openai.is_empty() {
         bail!("Provider '{}' does not have an OpenAI-compatible endpoint (base_url_openai is empty)", provider.name);
     }
+
+    // Resolve settings: activation overrides > provider-level defaults > hardcoded defaults
+    let settings = activation
+        .settings
+        .as_ref()
+        .map(CodexSettings::from_value)
+        .unwrap_or_else(|| CodexSettings {
+            wire_api: provider.codex_wire_api.clone(),
+            auth_mode: provider.codex_auth_mode.clone(),
+        });
 
     let auth_path = resolve_codex_auth_path()?;
     let config_path = resolve_codex_config_path()?;
@@ -406,25 +928,39 @@ fn sync_to_codex_inner(
     let mut first_backup: Option<PathBuf> = None;
 
     // --- Write auth.json ---
-    // Create rolling backup if file exists
-    if auth_path.exists() {
-        let backup = create_rolling_backup(&auth_path)?;
-        if first_backup.is_none() {
-            first_backup = Some(backup);
+    if settings.auth_mode == "api_key" {
+        // Create rolling backup if file exists
+        if auth_path.exists() {
+            let backup = create_rolling_backup(&auth_path)?;
+            if first_backup.is_none() {
+                first_backup = Some(backup);
+            }
+        }
+
+        // Ensure parent directory exists
+        if let Some(parent) = auth_path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create directory {}", parent.display()))?;
+        }
+
+        // Merge write auth.json — set OPENAI_API_KEY
+        let auth_fields: Vec<(&str, Value)> = vec![
+            ("OPENAI_API_KEY", Value::String(provider.api_key.clone())),
+        ];
+        merge_json_write(&auth_path, &auth_fields)?;
+    } else {
+        // OAuth mode: clear or skip OPENAI_API_KEY so Codex CLI handles auth itself
+        if auth_path.exists() {
+            let backup = create_rolling_backup(&auth_path)?;
+            if first_backup.is_none() {
+                first_backup = Some(backup);
+            }
+            let auth_fields: Vec<(&str, Value)> = vec![
+                ("OPENAI_API_KEY", Value::String("".to_string())),
+            ];
+            merge_json_write(&auth_path, &auth_fields)?;
         }
     }
-
-    // Ensure parent directory exists
-    if let Some(parent) = auth_path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
-    }
-
-    // Merge write auth.json — set OPENAI_API_KEY
-    let auth_fields: Vec<(&str, Value)> = vec![
-        ("OPENAI_API_KEY", Value::String(provider.api_key.clone())),
-    ];
-    merge_json_write(&auth_path, &auth_fields)?;
 
     // --- Write config.toml ---
     // Create rolling backup if file exists
@@ -442,9 +978,239 @@ fn sync_to_codex_inner(
     }
 
     // Write config.toml with merge semantics
-    write_codex_config_flat(&config_path, provider, model)?;
+    write_codex_config_flat(&config_path, provider, activation, &settings)?;
 
     Ok(first_backup)
+}
+
+/// Sync a provider to OpenCode's `opencode.json` under `provider.skillstar`.
+pub fn sync_to_opencode(
+    provider: &ProviderEntryFlat,
+    model: &str,
+) -> Result<ToolSyncResultFlat> {
+    let config_path = resolve_opencode_config_path()?;
+    let config_path_str = config_path.to_string_lossy().to_string();
+
+    match sync_to_opencode_inner(provider, model, &config_path) {
+        Ok(backup_path) => Ok(ToolSyncResultFlat {
+            tool_id: "opencode".to_string(),
+            success: true,
+            config_path: Some(config_path_str),
+            error: None,
+            backup_path: backup_path.map(|p| p.to_string_lossy().to_string()),
+        }),
+        Err(e) => Ok(ToolSyncResultFlat {
+            tool_id: "opencode".to_string(),
+            success: false,
+            config_path: Some(config_path_str),
+            error: Some(e.to_string()),
+            backup_path: None,
+        }),
+    }
+}
+
+fn build_opencode_provider_block(provider: &ProviderEntryFlat, model: &str) -> Value {
+    let model_id = if model.trim().is_empty() {
+        if provider.default_model.trim().is_empty() {
+            "default".to_string()
+        } else {
+            provider.default_model.clone()
+        }
+    } else {
+        model.to_string()
+    };
+
+    let base_url = provider.base_url_openai.trim().trim_end_matches('/');
+
+    serde_json::json!({
+        "npm": "@ai-sdk/openai-compatible",
+        "name": provider.name,
+        "options": {
+            "baseURL": base_url,
+            "apiKey": provider.api_key,
+        },
+        "models": {
+            model_id.clone(): {
+                "name": model_id,
+            }
+        }
+    })
+}
+
+fn sync_to_opencode_inner(
+    provider: &ProviderEntryFlat,
+    model: &str,
+    config_path: &Path,
+) -> Result<Option<PathBuf>> {
+    if provider.base_url_openai.trim().is_empty() {
+        bail!(
+            "Provider '{}' has no OpenAI-compatible endpoint (base_url_openai is empty)",
+            provider.name
+        );
+    }
+
+    let backup_path = if config_path.exists() {
+        Some(create_rolling_backup(config_path)?)
+    } else {
+        None
+    };
+
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
+    }
+
+    let mut root: Value = if config_path.exists() {
+        let content = std::fs::read_to_string(config_path)
+            .with_context(|| format!("Failed to read {}", config_path.display()))?;
+        serde_json::from_str(&content).unwrap_or_else(|_| {
+            serde_json::json!({
+                "$schema": "https://opencode.ai/config.json",
+                "provider": {}
+            })
+        })
+    } else {
+        serde_json::json!({
+            "$schema": "https://opencode.ai/config.json",
+            "provider": {}
+        })
+    };
+
+    if root.get("$schema").is_none()
+        && let Some(obj) = root.as_object_mut() {
+            obj.insert(
+                "$schema".to_string(),
+                Value::String("https://opencode.ai/config.json".to_string()),
+            );
+        }
+
+    let provider_block = build_opencode_provider_block(provider, model);
+    let root_obj = root.as_object_mut().context("opencode.json root must be an object")?;
+    let providers = root_obj
+        .entry("provider")
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+    if let Some(map) = providers.as_object_mut() {
+        map.insert(
+            OPENCODE_MANAGED_PROVIDER_KEY.to_string(),
+            provider_block,
+        );
+    }
+
+    let output = serde_json::to_string_pretty(&root).context("Failed to serialize opencode.json")?;
+    std::fs::write(config_path, output)
+        .with_context(|| format!("Failed to write {}", config_path.display()))?;
+
+    Ok(backup_path)
+}
+
+/// Remove managed OpenCode provider block from `opencode.json`.
+pub fn unsync_opencode() -> Result<()> {
+    let config_path = resolve_opencode_config_path()?;
+    if !config_path.exists() {
+        return Ok(());
+    }
+
+    create_rolling_backup(&config_path)?;
+
+    let content = std::fs::read_to_string(&config_path)
+        .with_context(|| format!("Failed to read {}", config_path.display()))?;
+    let mut json: Value = serde_json::from_str(&content)
+        .with_context(|| format!("Failed to parse JSON in {}", config_path.display()))?;
+
+    if let Some(providers) = json.get_mut("provider").and_then(|v| v.as_object_mut()) {
+        providers.remove(OPENCODE_MANAGED_PROVIDER_KEY);
+        if providers.is_empty()
+            && let Some(root) = json.as_object_mut() {
+                root.remove("provider");
+            }
+    }
+
+    let output = serde_json::to_string_pretty(&json).context("Failed to serialize opencode.json")?;
+    std::fs::write(&config_path, output)
+        .with_context(|| format!("Failed to write {}", config_path.display()))?;
+
+    Ok(())
+}
+
+/// Sync a provider's credentials to Gemini CLI's `~/.gemini/.env`.
+///
+/// Writes `GOOGLE_GEMINI_BASE_URL`, `GEMINI_API_KEY`, and `GEMINI_MODEL`,
+/// preserving any other user-defined env entries. Creates a rolling backup
+/// before writing (keeps last 5).
+pub fn sync_to_gemini(provider: &ProviderEntryFlat, model: &str) -> Result<ToolSyncResultFlat> {
+    let config_path = match resolve_gemini_env_path() {
+        Ok(p) => p,
+        Err(e) => {
+            return Ok(ToolSyncResultFlat {
+                tool_id: "gemini".to_string(),
+                success: false,
+                config_path: None,
+                error: Some(e.to_string()),
+                backup_path: None,
+            });
+        }
+    };
+    let config_path_str = config_path.to_string_lossy().to_string();
+
+    match sync_to_gemini_inner(provider, model, &config_path) {
+        Ok(backup_path) => Ok(ToolSyncResultFlat {
+            tool_id: "gemini".to_string(),
+            success: true,
+            config_path: Some(config_path_str),
+            error: None,
+            backup_path: backup_path.map(|p| p.to_string_lossy().to_string()),
+        }),
+        Err(e) => Ok(ToolSyncResultFlat {
+            tool_id: "gemini".to_string(),
+            success: false,
+            config_path: Some(config_path_str),
+            error: Some(e.to_string()),
+            backup_path: None,
+        }),
+    }
+}
+
+fn sync_to_gemini_inner(
+    provider: &ProviderEntryFlat,
+    model: &str,
+    config_path: &Path,
+) -> Result<Option<PathBuf>> {
+    let base_url = provider.base_url_openai.trim().trim_end_matches('/');
+    if base_url.is_empty() {
+        bail!(
+            "Provider '{}' has no OpenAI-compatible endpoint (base_url_openai is empty); Gemini CLI needs a base URL",
+            provider.name
+        );
+    }
+
+    let model_id = if model.trim().is_empty() {
+        provider.default_model.trim().to_string()
+    } else {
+        model.trim().to_string()
+    };
+
+    let managed: Vec<(&str, Option<String>)> = vec![
+        ("GOOGLE_GEMINI_BASE_URL", Some(base_url.to_string())),
+        ("GEMINI_API_KEY", Some(provider.api_key.clone())),
+        (
+            "GEMINI_MODEL",
+            if model_id.is_empty() { None } else { Some(model_id) },
+        ),
+    ];
+
+    merge_env_write(config_path, &managed)
+}
+
+/// Remove managed Gemini env keys from `~/.gemini/.env` (deactivation).
+pub fn unsync_gemini() -> Result<()> {
+    let config_path = resolve_gemini_env_path()?;
+    if !config_path.exists() {
+        return Ok(());
+    }
+    let managed: Vec<(&str, Option<String>)> =
+        GEMINI_MANAGED_ENV_KEYS.iter().map(|k| (*k, None)).collect();
+    merge_env_write(&config_path, &managed)?;
+    Ok(())
 }
 
 /// Remove managed fields from Claude Code's config (deactivation).
@@ -475,11 +1241,10 @@ pub fn unsync_claude_code() -> Result<()> {
             env_obj.remove(*key);
         }
         // If env block is now empty, remove it entirely
-        if env_obj.is_empty() {
-            if let Some(root_obj) = json.as_object_mut() {
+        if env_obj.is_empty()
+            && let Some(root_obj) = json.as_object_mut() {
                 root_obj.remove("env");
             }
-        }
     }
 
     // Write back
@@ -535,15 +1300,14 @@ pub fn unsync_codex() -> Result<()> {
         table.remove("model");
 
         // Remove [model_providers.skillstar] section
-        if let Some(model_providers) = table.get_mut("model_providers") {
-            if let Some(mp_table) = model_providers.as_table_mut() {
+        if let Some(model_providers) = table.get_mut("model_providers")
+            && let Some(mp_table) = model_providers.as_table_mut() {
                 mp_table.remove(CODEX_MANAGED_PROVIDER_KEY);
                 // If model_providers is now empty, remove it entirely
                 if mp_table.is_empty() {
                     table.remove("model_providers");
                 }
             }
-        }
 
         let output = toml::to_string_pretty(&table)
             .context("Failed to serialize Codex config.toml")?;
@@ -599,16 +1363,15 @@ fn cleanup_old_backups(path: &Path, keep: usize) -> Result<()> {
         for entry in entries.flatten() {
             let entry_name = entry.file_name();
             let entry_name_str = entry_name.to_string_lossy();
-            if let Some(suffix) = entry_name_str.strip_prefix(&prefix) {
-                if let Ok(ts) = suffix.parse::<u128>() {
+            if let Some(suffix) = entry_name_str.strip_prefix(&prefix)
+                && let Ok(ts) = suffix.parse::<u128>() {
                     backups.push((ts, entry.path()));
                 }
-            }
         }
     }
 
     // Sort by timestamp descending (newest first)
-    backups.sort_by(|a, b| b.0.cmp(&a.0));
+    backups.sort_by_key(|b| std::cmp::Reverse(b.0));
 
     // Remove backups beyond the keep limit
     for (_ts, backup_path) in backups.iter().skip(keep) {
@@ -679,15 +1442,23 @@ pub fn merge_json_env_write(path: &Path, managed_fields: &[(&str, Value)]) -> Re
         .or_insert_with(|| Value::Object(serde_json::Map::new()));
 
     if let Some(env_map) = env_obj.as_object_mut() {
-        // Update managed fields in the env block
+        // Update managed fields in the env block. A `Null` value means
+        // "remove this key" — used to clear optional fields (e.g. the Claude
+        // tier-model overrides) when the user leaves them blank.
         for (key, value) in managed_fields {
-            env_map.insert(key.to_string(), value.clone());
+            if value.is_null() {
+                env_map.remove(*key);
+            } else {
+                env_map.insert(key.to_string(), value.clone());
+            }
         }
     } else {
         // env exists but is not an object — replace it
         let mut new_env = serde_json::Map::new();
         for (key, value) in managed_fields {
-            new_env.insert(key.to_string(), value.clone());
+            if !value.is_null() {
+                new_env.insert(key.to_string(), value.clone());
+            }
         }
         json.insert("env".to_string(), Value::Object(new_env));
     }
@@ -711,14 +1482,19 @@ pub fn merge_json_env_write(path: &Path, managed_fields: &[(&str, Value)]) -> Re
 ///
 /// Sets:
 /// - `model_provider = "skillstar"`
-/// - `model = "<model>"`
+/// - `model = "<activation.model>"`
 /// - `[model_providers.skillstar]` table with name, base_url, wire_api, requires_openai_auth
+///
+/// `settings` controls:
+/// - `wire_api`: `"responses"` (default) or `"chat"`
+/// - `auth_mode`: `"api_key"` (default) or `"oauth"`
 ///
 /// Preserves all other existing sections/fields.
 pub fn write_codex_config_flat(
     path: &Path,
     provider: &ProviderEntryFlat,
-    model: &str,
+    activation: &ToolActivation,
+    settings: &CodexSettings,
 ) -> Result<()> {
     // Read existing config or start with empty table
     let mut table: toml::Table = if path.exists() {
@@ -736,7 +1512,7 @@ pub fn write_codex_config_flat(
     );
     table.insert(
         "model".to_string(),
-        toml::Value::String(model.to_string()),
+        toml::Value::String(activation.model.clone()),
     );
 
     // Build [model_providers.skillstar] section
@@ -751,11 +1527,11 @@ pub fn write_codex_config_flat(
     );
     skillstar_section.insert(
         "wire_api".to_string(),
-        toml::Value::String("responses".to_string()),
+        toml::Value::String(settings.wire_api.clone()),
     );
     skillstar_section.insert(
         "requires_openai_auth".to_string(),
-        toml::Value::Boolean(true),
+        toml::Value::Boolean(settings.auth_mode == "api_key"),
     );
 
     // Get or create [model_providers] table
@@ -861,7 +1637,7 @@ pub fn resync_active_tools(
                 }
             }
             "codex" => {
-                match sync_to_codex(provider, &activation.model) {
+                match sync_to_codex(provider, activation) {
                     Ok(r) => r,
                     Err(e) => ToolSyncResultFlat {
                         tool_id: tool_id.clone(),
@@ -872,19 +1648,40 @@ pub fn resync_active_tools(
                     },
                 }
             }
-            _ => {
-                // Unknown tool_id — record error but continue with others
-                ToolSyncResultFlat {
-                    tool_id: tool_id.clone(),
-                    success: false,
-                    config_path: None,
-                    error: Some(format!(
-                        "Unknown tool_id '{}'. Only 'claude-code' and 'codex' are supported.",
-                        tool_id
-                    )),
-                    backup_path: None,
+            "opencode" => {
+                match sync_to_opencode(provider, &activation.model) {
+                    Ok(r) => r,
+                    Err(e) => ToolSyncResultFlat {
+                        tool_id: tool_id.clone(),
+                        success: false,
+                        config_path: None,
+                        error: Some(e.to_string()),
+                        backup_path: None,
+                    },
                 }
             }
+            "gemini" => {
+                match sync_to_gemini(provider, &activation.model) {
+                    Ok(r) => r,
+                    Err(e) => ToolSyncResultFlat {
+                        tool_id: tool_id.clone(),
+                        success: false,
+                        config_path: None,
+                        error: Some(e.to_string()),
+                        backup_path: None,
+                    },
+                }
+            }
+            _ => ToolSyncResultFlat {
+                tool_id: tool_id.clone(),
+                success: false,
+                config_path: None,
+                error: Some(format!(
+                    "Unknown tool_id '{}'. Supported: claude-code, codex, opencode, gemini.",
+                    tool_id
+                )),
+                backup_path: None,
+            },
         };
 
         results.push(result);
@@ -1002,18 +1799,17 @@ pub fn detect_conflicts(tool_id: &str, last_sync_timestamp: Option<u64>) -> Vec<
     let mut conflicts = Vec::new();
 
     // Check external modification of the tool's config file
-    if let Ok(config_path) = resolve_tool_config_path(tool_id) {
-        if let Some(conflict) = check_external_modification(&config_path, last_sync_timestamp) {
+    if let Ok(config_path) = resolve_tool_config_path(tool_id)
+        && let Some(mut conflict) = check_external_modification(&config_path, last_sync_timestamp) {
+            conflict.tool_id = Some(tool_id.to_string());
             conflicts.push(conflict);
         }
-    }
 
     // Check legacy ~/.claude.json for claude-code tool
-    if tool_id == "claude-code" {
-        if let Some(conflict) = check_legacy_claude_config() {
+    if tool_id == "claude-code"
+        && let Some(conflict) = check_legacy_claude_config() {
             conflicts.push(conflict);
         }
-    }
 
     // Check environment variable overrides
     conflicts.extend(detect_env_conflicts());
@@ -1032,8 +1828,8 @@ pub fn detect_env_conflicts() -> Vec<ConfigConflict> {
 
     // Check Anthropic/Claude-related env vars
     for &var_name in CLAUDE_ENV_VARS {
-        if let Ok(value) = std::env::var(var_name) {
-            if !value.is_empty() {
+        if let Ok(value) = std::env::var(var_name)
+            && !value.is_empty() {
                 conflicts.push(ConfigConflict {
                     conflict_type: ConflictType::EnvVarOverride,
                     description: format!(
@@ -1042,15 +1838,15 @@ pub fn detect_env_conflicts() -> Vec<ConfigConflict> {
                     ),
                     file_path: None,
                     details: Some(format!("{}={}***", var_name, &value[..value.len().min(4)])),
+                    tool_id: None,
                 });
             }
-        }
     }
 
     // Check OpenAI/Codex-related env vars
     for &var_name in CODEX_ENV_VARS {
-        if let Ok(value) = std::env::var(var_name) {
-            if !value.is_empty() {
+        if let Ok(value) = std::env::var(var_name)
+            && !value.is_empty() {
                 conflicts.push(ConfigConflict {
                     conflict_type: ConflictType::EnvVarOverride,
                     description: format!(
@@ -1059,9 +1855,9 @@ pub fn detect_env_conflicts() -> Vec<ConfigConflict> {
                     ),
                     file_path: None,
                     details: Some(format!("{}={}***", var_name, &value[..value.len().min(4)])),
+                    tool_id: None,
                 });
             }
-        }
     }
 
     conflicts
@@ -1103,6 +1899,7 @@ fn check_external_modification(path: &Path, last_sync_ts: Option<u64>) -> Option
                 last_sync_ts,
                 mtime_secs - last_sync_ts
             )),
+            tool_id: None,
         })
     } else {
         None
@@ -1115,7 +1912,7 @@ fn check_external_modification(path: &Path, last_sync_ts: Option<u64>) -> Option
 /// ANTHROPIC_* fields, it may conflict with the primary config location
 /// at `~/.claude/settings.json`.
 fn check_legacy_claude_config() -> Option<ConfigConflict> {
-    let home = dirs::home_dir()?;
+    let home = sync_home_dir_opt()?;
     let legacy_path = home.join(".claude.json");
 
     if !legacy_path.exists() {
@@ -1148,6 +1945,7 @@ fn check_legacy_claude_config() -> Option<ConfigConflict> {
                 ),
                 file_path: Some(legacy_path.to_string_lossy().to_string()),
                 details: Some(format!("conflicting_keys=[{}]", keys_str)),
+                tool_id: None,
             });
         }
     }
@@ -1205,6 +2003,29 @@ mod tests {
     use proptest::prelude::*;
     use tempfile::TempDir;
 
+    /// A throwaway HOME sandbox shared by every test that invokes a
+    /// home-resolving sync path (`resync_active_tools`, `sync_to_*`, …).
+    ///
+    /// Initialised exactly once under `LazyLock`, whose synchronization sets
+    /// [`TOOL_SYNC_HOME_ENV`] before any test observes it — so the real
+    /// `~/.claude`, `~/.codex`, `~/.gemini`, … are NEVER touched by the suite.
+    /// Any future test that drives a real sync MUST call [`use_sandbox_home`]
+    /// first, or it will write to the developer's live tool configs.
+    static TOOL_SYNC_SANDBOX: std::sync::LazyLock<TempDir> = std::sync::LazyLock::new(|| {
+        let dir = TempDir::new().expect("create tool-sync sandbox home");
+        // SAFETY: runs exactly once under LazyLock's one-time synchronization,
+        // establishing happens-before with every later read of the env var; no
+        // concurrent `set_var` occurs because the value is set only here.
+        unsafe { std::env::set_var(TOOL_SYNC_HOME_ENV, dir.path()) };
+        dir
+    });
+
+    /// Force the sandbox HOME override into effect. Call at the top of any test
+    /// that exercises a home-resolving sync function.
+    fn use_sandbox_home() {
+        let _ = TOOL_SYNC_SANDBOX.path();
+    }
+
     fn make_test_settings() -> ProviderSettings {
         ProviderSettings {
             base_url: "https://api.example.com/v1".to_string(),
@@ -1224,7 +2045,7 @@ mod tests {
             id: "test-provider".to_string(),
             name: "Test Provider".to_string(),
             category: "cloud".to_string(),
-            settings_config: serde_json::to_value(&make_test_settings()).unwrap(),
+            settings_config: serde_json::to_value(make_test_settings()).unwrap(),
             preset_id: None,
             website_url: None,
             api_key_url: None,
@@ -1440,7 +2261,7 @@ api_key = "old-key"
     #[test]
     fn test_get_tool_config_targets_returns_both_tools() {
         let targets = get_tool_config_targets().unwrap();
-        assert_eq!(targets.len(), 2);
+        assert_eq!(targets.len(), 4);
 
         let claude_target = targets.iter().find(|t| t.tool_id == "claude-code").unwrap();
         assert_eq!(claude_target.display_name, "Claude Code");
@@ -1449,6 +2270,10 @@ api_key = "old-key"
         let codex_target = targets.iter().find(|t| t.tool_id == "codex").unwrap();
         assert_eq!(codex_target.display_name, "Codex");
         assert!(codex_target.config_path.contains(".codex"));
+
+        let gemini_target = targets.iter().find(|t| t.tool_id == "gemini").unwrap();
+        assert_eq!(gemini_target.display_name, "Gemini CLI");
+        assert!(gemini_target.config_path.contains(".gemini"));
     }
 
     // =========================================================================
@@ -1471,7 +2296,56 @@ api_key = "old-key"
             notes: None,
             created_at: Some(1719000000000),
             meta: None,
+            codex_wire_api: "responses".to_string(),
+            codex_auth_mode: "api_key".to_string(),
         }
+    }
+
+    #[test]
+    fn test_sync_to_gemini_inner_new_file() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join(".gemini").join(".env");
+        let provider = make_test_provider_flat();
+
+        let result = sync_to_gemini_inner(&provider, "model-b", &config_path).unwrap();
+        assert!(result.is_none(), "no backup when file is new");
+
+        let pairs = parse_env_file(&std::fs::read_to_string(&config_path).unwrap());
+        let get = |k: &str| pairs.iter().find(|(key, _)| key == k).map(|(_, v)| v.clone());
+        assert_eq!(get("GOOGLE_GEMINI_BASE_URL").as_deref(), Some("https://api.example.com/v1"));
+        assert_eq!(get("GEMINI_API_KEY").as_deref(), Some("sk-test-key-flat-12345"));
+        assert_eq!(get("GEMINI_MODEL").as_deref(), Some("model-b"));
+    }
+
+    #[test]
+    fn test_sync_to_gemini_inner_preserves_user_keys_and_backs_up() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join(".gemini");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join(".env");
+        std::fs::write(&config_path, "# comment\nMY_CUSTOM=keepme\nGEMINI_API_KEY=old\n").unwrap();
+
+        let provider = make_test_provider_flat();
+        let backup = sync_to_gemini_inner(&provider, "", &config_path).unwrap();
+        assert!(backup.is_some(), "existing file should be backed up");
+
+        let pairs = parse_env_file(&std::fs::read_to_string(&config_path).unwrap());
+        let get = |k: &str| pairs.iter().find(|(key, _)| key == k).map(|(_, v)| v.clone());
+        // Unmanaged key preserved
+        assert_eq!(get("MY_CUSTOM").as_deref(), Some("keepme"));
+        // Managed key overwritten
+        assert_eq!(get("GEMINI_API_KEY").as_deref(), Some("sk-test-key-flat-12345"));
+        // Empty model falls back to provider default_model ("model-a")
+        assert_eq!(get("GEMINI_MODEL").as_deref(), Some("model-a"));
+    }
+
+    #[test]
+    fn test_sync_to_gemini_inner_fails_without_base_url() {
+        let tmp = TempDir::new().unwrap();
+        let config_path = tmp.path().join(".gemini").join(".env");
+        let mut provider = make_test_provider_flat();
+        provider.base_url_openai = String::new();
+        assert!(sync_to_gemini_inner(&provider, "model-a", &config_path).is_err());
     }
 
     #[test]
@@ -1581,7 +2455,13 @@ api_key = "old-key"
         let config_path = codex_dir.join("config.toml");
 
         let provider = make_test_provider_flat();
-        write_codex_config_flat(&config_path, &provider, "model-a").unwrap();
+        let activation = ToolActivation {
+            provider_id: provider.id.clone(),
+            model: "model-a".to_string(),
+            settings: None,
+            last_sync_at: None,
+        };
+        write_codex_config_flat(&config_path, &provider, &activation, &CodexSettings::default()).unwrap();
 
         let content = std::fs::read_to_string(&config_path).unwrap();
         let parsed: toml::Table = toml::from_str(&content).unwrap();
@@ -1603,13 +2483,12 @@ api_key = "old-key"
             skillstar.get("wire_api").unwrap().as_str().unwrap(),
             "responses"
         );
-        assert_eq!(
+        assert!(
             skillstar
                 .get("requires_openai_auth")
                 .unwrap()
                 .as_bool()
-                .unwrap(),
-            true
+                .unwrap()
         );
     }
 
@@ -1633,7 +2512,13 @@ base_url = "https://custom.example.com"
         std::fs::write(&config_path, existing).unwrap();
 
         let provider = make_test_provider_flat();
-        write_codex_config_flat(&config_path, &provider, "model-b").unwrap();
+        let activation = ToolActivation {
+            provider_id: provider.id.clone(),
+            model: "model-b".to_string(),
+            settings: None,
+            last_sync_at: None,
+        };
+        write_codex_config_flat(&config_path, &provider, &activation, &CodexSettings::default()).unwrap();
 
         let content = std::fs::read_to_string(&config_path).unwrap();
         let parsed: toml::Table = toml::from_str(&content).unwrap();
@@ -1648,9 +2533,8 @@ base_url = "https://custom.example.com"
         // Existing sections preserved
         let general = parsed.get("general").unwrap().as_table().unwrap();
         assert_eq!(general.get("theme").unwrap().as_str().unwrap(), "dark");
-        assert_eq!(
-            general.get("auto_update").unwrap().as_bool().unwrap(),
-            true
+        assert!(
+            general.get("auto_update").unwrap().as_bool().unwrap()
         );
 
         // Existing model_providers.custom preserved
@@ -1884,11 +2768,10 @@ base_url = "https://custom.example.com"
         let mut table: toml::Table = toml::from_str(&content).unwrap();
         table.remove("model_provider");
         table.remove("model");
-        if let Some(model_providers) = table.get_mut("model_providers") {
-            if let Some(mp_table) = model_providers.as_table_mut() {
+        if let Some(model_providers) = table.get_mut("model_providers")
+            && let Some(mp_table) = model_providers.as_table_mut() {
                 mp_table.remove(CODEX_MANAGED_PROVIDER_KEY);
             }
-        }
         std::fs::write(&config_path, toml::to_string_pretty(&table).unwrap()).unwrap();
 
         // Verify config.toml
@@ -2026,6 +2909,8 @@ base_url = "https://custom.example.com"
     fn test_resync_active_tools_syncs_correct_tools() {
         use crate::providers::{FlatProvidersStore, ToolActivation};
 
+        // Sandbox: resync writes real config files; keep them off the dev's home.
+        use_sandbox_home();
         let provider = make_test_provider_flat();
         let store = FlatProvidersStore {
             version: 2,
@@ -2037,6 +2922,8 @@ base_url = "https://custom.example.com"
                     Some(ToolActivation {
                         provider_id: "test-uuid-1234".to_string(),
                         model: "model-a".to_string(),
+                        settings: None,
+                        last_sync_at: None,
                     }),
                 );
                 map.insert(
@@ -2044,14 +2931,17 @@ base_url = "https://custom.example.com"
                     Some(ToolActivation {
                         provider_id: "test-uuid-1234".to_string(),
                         model: "model-b".to_string(),
+                        settings: None,
+                        last_sync_at: None,
                     }),
                 );
                 map
             },
         };
 
-        // resync_active_tools will try to write to real home dir paths,
-        // so we just verify it returns results for both tools
+        // resync_active_tools writes to real config paths; `use_sandbox_home()`
+        // above re-roots them under a temp dir. We verify it returns results for
+        // both tools.
         let results = resync_active_tools(&store, "test-uuid-1234");
         assert_eq!(results.len(), 2);
 
@@ -2081,6 +2971,8 @@ base_url = "https://custom.example.com"
     fn test_resync_active_tools_skips_other_providers() {
         use crate::providers::{FlatProvidersStore, ToolActivation};
 
+        // Sandbox: resync writes real config files; keep them off the dev's home.
+        use_sandbox_home();
         let provider = make_test_provider_flat();
         let store = FlatProvidersStore {
             version: 2,
@@ -2093,6 +2985,8 @@ base_url = "https://custom.example.com"
                     Some(ToolActivation {
                         provider_id: "other-provider-id".to_string(),
                         model: "other-model".to_string(),
+                        settings: None,
+                        last_sync_at: None,
                     }),
                 );
                 // Codex uses our provider
@@ -2101,6 +2995,8 @@ base_url = "https://custom.example.com"
                     Some(ToolActivation {
                         provider_id: "test-uuid-1234".to_string(),
                         model: "model-a".to_string(),
+                        settings: None,
+                        last_sync_at: None,
                     }),
                 );
                 map
@@ -2196,7 +3092,7 @@ base_url = "https://custom.example.com"
                 serde_json::from_str(&backup_content).unwrap();
             for (key, value) in &original_content {
                 let backup_val = backup_parsed.get(key)
-                    .expect(&format!("Backup should contain key '{}'", key));
+                    .unwrap_or_else(|| panic!("Backup should contain key '{}'", key));
                 prop_assert_eq!(
                     backup_val.as_str().unwrap(),
                     value.as_str(),
@@ -2605,7 +3501,7 @@ base_url = "https://custom.example.com"
             .find(|c| {
                 c.details
                     .as_ref()
-                    .map_or(false, |d| d.contains("ANTHROPIC_API_KEY"))
+                    .is_some_and(|d| d.contains("ANTHROPIC_API_KEY"))
             });
         assert!(anthropic_conflict.is_some());
         let conflict = anthropic_conflict.unwrap();
@@ -2629,7 +3525,7 @@ base_url = "https://custom.example.com"
             .find(|c| {
                 c.details
                     .as_ref()
-                    .map_or(false, |d| d.contains("OPENAI_BASE_URL"))
+                    .is_some_and(|d| d.contains("OPENAI_BASE_URL"))
             });
         assert!(openai_base_conflict.is_none());
 
@@ -2669,6 +3565,7 @@ base_url = "https://custom.example.com"
             description: "File was modified externally".to_string(),
             file_path: Some("/home/user/.claude/settings.json".to_string()),
             details: Some("mtime=1700000000, last_sync=1699999000".to_string()),
+            tool_id: None,
         };
 
         let json = serde_json::to_string(&conflict).unwrap();

@@ -107,7 +107,7 @@ function SkillCardInner({
         <Button
           size="sm"
           variant="outline"
-          className="h-7 px-2.5 text-xs bg-card hover:bg-muted font-medium border-warning text-warning-foreground shadow-[0_0_10px_rgba(234,179,8,0.1)] transition-colors"
+          className="h-7 px-2.5 text-xs bg-card hover:bg-muted font-medium border-warning text-warning-foreground transition-colors"
           disabled={updating}
           onClick={(e) => {
             e.stopPropagation();

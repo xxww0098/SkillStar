@@ -67,6 +67,7 @@ tauri-plugin-deep-link = "2"
 skillstar-core = { version = "0.1.0", path = "../crates/skillstar-core" }
 skillstar-app = { version = "0.1.0", path = "../crates/skillstar-app" }
 skillstar-usage = { version = "0.1.0", path = "../crates/skillstar-usage" }
+skillstar-fingerprint = { version = "0.1.0", path = "../crates/skillstar-fingerprint", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"

@@ -86,13 +86,15 @@ export function useMarketplace() {
     }
   }, []);
 
-  const fetchLocalLeaderboard = useCallback(
-    (category: LeaderboardCategory) =>
-      tauriInvoke("get_leaderboard_local", {
-        category,
-      }),
-    [],
-  );
+  const fetchLocalLeaderboard = useCallback((category: LeaderboardCategory) => {
+    if (category === "all") {
+      return tauriInvoke("list_marketplace_skills_local");
+    }
+
+    return tauriInvoke("get_leaderboard_local", {
+      category,
+    });
+  }, []);
 
   const fetchLocalPublishers = useCallback(() => tauriInvoke("get_publishers_local"), []);
 

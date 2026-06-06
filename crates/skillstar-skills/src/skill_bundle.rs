@@ -8,8 +8,6 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use tar::{Archive, Builder};
 
-
-
 // ── Types ───────────────────────────────────────────────────────────
 
 const FORMAT_VERSION: u32 = 1;

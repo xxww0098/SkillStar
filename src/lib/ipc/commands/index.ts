@@ -7,6 +7,8 @@ import type { AgentCommands } from "./agents";
 import type { AiCommands } from "./ai";
 import type { GitHubCommands } from "./github";
 import type { MarketplaceCommands } from "./marketplace";
+import type { McpCommands } from "./mcp";
+import type { McpMarketplaceCommands } from "./mcpMarketplace";
 import type { ModelsCommands } from "./models";
 import type { ProjectCommands } from "./projects";
 import type { SkillCommands } from "./skills";
@@ -21,6 +23,8 @@ export type TauriCommands = SkillCommands &
   StorageCommands &
   AiCommands &
   ModelsCommands &
+  McpCommands &
+  McpMarketplaceCommands &
   SystemCommands;
 
 export type {
@@ -28,6 +32,8 @@ export type {
   AiCommands,
   GitHubCommands,
   MarketplaceCommands,
+  McpCommands,
+  McpMarketplaceCommands,
   ModelsCommands,
   ProjectCommands,
   SkillCommands,

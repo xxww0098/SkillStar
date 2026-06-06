@@ -1,16 +1,25 @@
-//! OAuth fetchers (Cursor, Codex, Antigravity, Trae, Qoder).
+//! OAuth fetchers for IDE / CLI subscription providers.
 //!
 //! Each submodule is independent. They share helpers from
 //! `crate::oauth::{pkce, local_server, poll_flow, token_refresh, ...}`.
 
+mod start_info;
+
 pub mod antigravity;
 pub mod codex;
 pub mod cursor;
+pub mod github_copilot;
+pub mod kiro;
+pub mod opencode;
 pub mod qoder;
 pub mod trae;
+pub mod windsurf;
+pub mod xai;
 
-use crate::subscription::{Subscription, SubscriptionUsage};
+pub use start_info::OAuthStartInfo;
+
 use crate::UsageResult;
+use crate::subscription::{Subscription, SubscriptionUsage};
 
 /// Dispatch by `catalog_id`. Called from `fetchers::refresh` for OAuth subs.
 pub async fn dispatch(subscription: &mut Subscription) -> UsageResult<SubscriptionUsage> {
@@ -20,6 +29,11 @@ pub async fn dispatch(subscription: &mut Subscription) -> UsageResult<Subscripti
         "antigravity" => antigravity::fetch(subscription).await,
         "trae" => trae::fetch(subscription).await,
         "qoder" => qoder::fetch(subscription).await,
+        "kiro" => kiro::fetch(subscription).await,
+        "windsurf" => windsurf::fetch(subscription).await,
+        "github-copilot" => github_copilot::fetch(subscription).await,
+        "xai" => xai::fetch(subscription).await,
+        "opencode" => opencode::fetch(subscription).await,
         other => Err(super::unsupported(other)),
     }
 }
@@ -28,13 +42,19 @@ pub async fn dispatch(subscription: &mut Subscription) -> UsageResult<Subscripti
 pub async fn start_login(
     catalog_id: &str,
     region: Option<&str>,
-) -> UsageResult<(String, String)> {
+    target_subscription_id: Option<&str>,
+) -> UsageResult<OAuthStartInfo> {
     match catalog_id {
         "cursor" => cursor::start_login(region).await,
         "codex" => codex::start_login(region).await,
         "antigravity" => antigravity::start_login(region).await,
         "trae" => trae::start_login(region).await,
         "qoder" => qoder::start_login(region).await,
+        "kiro" => kiro::start_login(region).await,
+        "windsurf" => windsurf::start_login(region).await,
+        "github-copilot" => github_copilot::start_login(region).await,
+        "xai" => xai::start_login(region).await,
+        "opencode" => opencode::start_login(region, target_subscription_id).await,
         other => Err(super::unsupported(other)),
     }
 }

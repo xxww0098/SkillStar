@@ -184,7 +184,11 @@ export function AgentDisambiguationDialog({
                           )}
                         >
                           <AgentIcon
-                            profile={candidate as any}
+                            profile={{
+                              id: candidate.agent_id,
+                              icon: candidate.icon,
+                              display_name: candidate.display_name,
+                            }}
                             className={cn(
                               agentIconCls(candidate.icon, "w-6 h-6"),
                               "transition duration-500 drop-shadow-sm",

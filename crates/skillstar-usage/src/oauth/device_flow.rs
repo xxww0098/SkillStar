@@ -4,7 +4,7 @@
 //! `fetchers/oauth/qoder.rs` (it uses `poll_flow` internally because the
 //! "state → poll → token" shape is slightly different from canonical RFC 8628).
 //!
-//! v2: GitHub Copilot / CodeBuddy will land here.
+//! v2: GitHub Copilot will land here.
 
 use serde::Deserialize;
 

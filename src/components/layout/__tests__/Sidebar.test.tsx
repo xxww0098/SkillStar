@@ -14,7 +14,7 @@ vi.mock("framer-motion", () => ({
         {children}
       </div>
     ),
-    img: (props: React.ImgHTMLAttributes<HTMLImageElement>) => <img {...props} />,
+    img: ({ alt, ...props }: React.ImgHTMLAttributes<HTMLImageElement>) => <img alt={alt || ""} {...props} />,
     span: ({ children, className, ...props }: React.HTMLAttributes<HTMLSpanElement>) => (
       <span className={className} {...props}>
         {children}
@@ -41,9 +41,7 @@ vi.mock("../../../hooks/useNavigation", () => ({
   useNavigation: () => ({
     appMode: mockAppMode,
     setAppMode: mockSetAppMode,
-    modelsActivePage: "providers",
     navigate: vi.fn(),
-    navigateModels: vi.fn(),
     selectedProviderId: null,
     setSelectedProviderId: vi.fn(),
     setShowPresetSelector: vi.fn(),
@@ -59,13 +57,13 @@ vi.mock("../../../lib/backgroundStyle", () => ({
   applyBackgroundStyle: vi.fn(),
 }));
 
-// Mock SkillsNav and ModelsNav to verify conditional rendering
+// Mock the per-mode nav strips to verify conditional rendering
 vi.mock("../SkillsNav", () => ({
   SkillsNav: () => <div data-testid="skills-nav">SkillsNav</div>,
 }));
 
-vi.mock("../ModelsNav", () => ({
-  ModelsNav: () => <div data-testid="models-nav">ModelsNav</div>,
+vi.mock("../ModelsSidebar", () => ({
+  ModelsSidebar: () => <div data-testid="models-sidebar">ModelsSidebar</div>,
 }));
 
 vi.mock("../UsageNav", () => ({
@@ -94,14 +92,14 @@ describe("Sidebar", () => {
     render(<Sidebar {...defaultProps} />);
 
     expect(screen.getByTestId("skills-nav")).toBeInTheDocument();
-    expect(screen.queryByTestId("models-nav")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("models-sidebar")).not.toBeInTheDocument();
   });
 
-  it("renders ModelsNav when appMode is 'models'", () => {
+  it("renders ModelsSidebar when appMode is 'models'", () => {
     mockAppMode = "models";
     render(<Sidebar {...defaultProps} />);
 
-    expect(screen.getByTestId("models-nav")).toBeInTheDocument();
+    expect(screen.getByTestId("models-sidebar")).toBeInTheDocument();
     expect(screen.queryByTestId("skills-nav")).not.toBeInTheDocument();
     expect(screen.queryByTestId("usage-nav")).not.toBeInTheDocument();
   });
@@ -112,7 +110,7 @@ describe("Sidebar", () => {
 
     expect(screen.getByTestId("usage-nav")).toBeInTheDocument();
     expect(screen.queryByTestId("skills-nav")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("models-nav")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("models-sidebar")).not.toBeInTheDocument();
   });
 
   it("always renders the logo regardless of mode", () => {

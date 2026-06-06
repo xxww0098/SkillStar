@@ -22,10 +22,11 @@ use tauri::State;
 use tokio::sync::Mutex;
 
 use skillstar_ai::ai_provider;
-use skillstar_models::latency::{self, LatencyResult};
+use skillstar_models::latency::{self, EndpointLatencyResult, LatencyResult};
+use skillstar_models::providers::ProviderPresetFlat;
 use skillstar_models::provider_ref::AiProviderRef;
 use skillstar_models::providers::{
-    self, AppProviders, FlatProvidersStore, ProviderEntry, ProviderEntryFlat, ProviderPatch,
+    self, AppProviders, ProviderEntry, ProviderEntryFlat, ProviderPatch,
     ProviderPatchFlat, ProviderPreset, ProviderSettings, ProvidersStore, ToolActivation,
 };
 use skillstar_models::tool_sync::{self, ToolConfigTarget, ToolSyncResult, ToolSyncResultFlat};
@@ -67,6 +68,14 @@ pub struct FlatProvidersResponse {
     pub tool_activations: std::collections::HashMap<String, Option<ToolActivation>>,
 }
 
+/// Result of updating a flat provider, including tool re-sync outcomes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderUpdateFlatResult {
+    pub provider: ProviderEntryFlat,
+    pub tool_sync_results: Vec<ToolSyncResultFlat>,
+}
+
 // ---------------------------------------------------------------------------
 // Read commands (no lock needed)
 // ---------------------------------------------------------------------------
@@ -95,6 +104,71 @@ pub async fn get_app_providers(app_id: String) -> Result<AppProviders, String> {
 #[tauri::command]
 pub async fn get_provider_presets() -> Result<Vec<ProviderPreset>, String> {
     Ok(providers::get_provider_presets())
+}
+
+/// Returns built-in flat provider presets (v2) — single source of truth for the UI.
+#[tauri::command]
+pub async fn get_provider_presets_flat() -> Result<Vec<ProviderPresetFlat>, String> {
+    Ok(providers::get_all_presets_flat())
+}
+
+/// Probe multiple API endpoints in parallel and return per-URL latency.
+#[tauri::command]
+pub async fn test_endpoints_latency(
+    urls: Vec<String>,
+    api_key: Option<String>,
+    timeout_ms: Option<u64>,
+) -> Result<Vec<EndpointLatencyResult>, String> {
+    Ok(latency::test_endpoints_latency(urls, api_key, timeout_ms).await)
+}
+
+/// Point application AI (`ai.json`) at a flat-store provider.
+///
+/// `app_id` must be `claude` (Anthropic) or `codex` (OpenAI). Validates that the
+/// provider exists and can be resolved before persisting.
+#[tauri::command]
+pub async fn set_app_ai_provider_ref(
+    app_id: String,
+    provider_id: String,
+) -> Result<(), String> {
+    let app_id = app_id.trim();
+    let provider_id = provider_id.trim();
+    if !matches!(app_id, "claude" | "codex") {
+        return Err(format!("Unsupported app_id for app AI: '{app_id}'"));
+    }
+    if provider_id.is_empty() {
+        return Err("provider_id cannot be empty".to_string());
+    }
+
+    let path = providers::flat_store_path();
+    let store = providers::migrate_store_if_needed(&path).map_err(|e| e.to_string())?;
+    if !store.providers.iter().any(|p| p.id == provider_id) {
+        return Err(format!("Provider '{}' not found", provider_id));
+    }
+
+    let mut ai_config = ai_provider::load_config();
+    ai_config.enabled = true;
+    ai_config.provider_ref = Some(AiProviderRef {
+        app_id: app_id.to_string(),
+        provider_id: provider_id.to_string(),
+    });
+    ai_config.api_format = match app_id {
+        "claude" => ai_provider::ApiFormat::Anthropic,
+        _ => ai_provider::ApiFormat::Openai,
+    };
+
+    ai_provider::resolve_provider_ref(&mut ai_config).map_err(|e| e.to_string())?;
+    ai_provider::save_config(&ai_config).map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+/// Clear application AI provider reference (switch back to manual/local config).
+#[tauri::command]
+pub async fn clear_app_ai_provider_ref() -> Result<(), String> {
+    let mut ai_config = ai_provider::load_config();
+    ai_config.provider_ref = None;
+    ai_provider::save_config(&ai_config).map_err(|e| e.to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -396,7 +470,7 @@ pub async fn update_provider_flat(
     lock: State<'_, ProvidersWriteLock>,
     id: String,
     patch: ProviderPatchFlat,
-) -> Result<ProviderEntryFlat, String> {
+) -> Result<ProviderUpdateFlatResult, String> {
     let _guard = lock.0.lock().await;
     let path = providers::flat_store_path();
     let mut store = providers::migrate_store_if_needed(&path).map_err(|e| e.to_string())?;
@@ -405,10 +479,12 @@ pub async fn update_provider_flat(
         providers::update_provider_flat(&mut store, &id, patch).map_err(|e| e.to_string())?;
     providers::write_flat_store(&store, &path).map_err(|e| e.to_string())?;
 
-    // Re-sync active tools that use this provider (per Requirement 3.10)
-    let _sync_results = tool_sync::resync_active_tools(&store, &id);
+    let tool_sync_results = tool_sync::resync_active_tools(&store, &id);
 
-    Ok(updated)
+    Ok(ProviderUpdateFlatResult {
+        provider: updated,
+        tool_sync_results,
+    })
 }
 
 /// Delete a provider from the flat store.
@@ -457,12 +533,16 @@ pub async fn reorder_providers(
 /// activating a new provider replaces any previous activation.
 ///
 /// If `model` is None, the provider's `default_model` is used.
+///
+/// `settings` is an optional per-tool config object (e.g. `{ "wire_api": "chat", "auth_mode": "oauth" }` for Codex).
+/// When omitted, the previous activation's settings are preserved if re-activating the same tool.
 #[tauri::command]
 pub async fn activate_tool(
     lock: State<'_, ProvidersWriteLock>,
     provider_id: String,
     tool_id: String,
     model: Option<String>,
+    settings: Option<serde_json::Value>,
 ) -> Result<ToolSyncResultFlat, String> {
     let _guard = lock.0.lock().await;
     let path = providers::flat_store_path();
@@ -474,6 +554,7 @@ pub async fn activate_tool(
         &provider_id,
         &tool_id,
         model.as_deref(),
+        settings,
     )
     .map_err(|e| e.to_string())?;
 
@@ -490,16 +571,32 @@ pub async fn activate_tool(
     let sync_result = match tool_id.as_str() {
         "claude-code" => tool_sync::sync_to_claude_code(provider, &activation.model)
             .map_err(|e| e.to_string())?,
-        "codex" => tool_sync::sync_to_codex(provider, &activation.model)
+        "codex" => tool_sync::sync_to_codex(provider, &activation)
+            .map_err(|e| e.to_string())?,
+        "opencode" => tool_sync::sync_to_opencode(provider, &activation.model)
+            .map_err(|e| e.to_string())?,
+        "gemini" => tool_sync::sync_to_gemini(provider, &activation.model)
             .map_err(|e| e.to_string())?,
         _ => ToolSyncResultFlat {
             tool_id: tool_id.clone(),
             success: false,
             config_path: None,
-            error: Some(format!("Unknown tool_id '{}'. Only 'claude-code' and 'codex' are supported.", tool_id)),
+            error: Some(format!(
+                "Unknown tool_id '{}'. Supported: claude-code, codex, opencode, gemini.",
+                tool_id
+            )),
             backup_path: None,
         },
     };
+
+    // On a successful disk write, stamp last_sync_at (baseline for
+    // external-modification detection) and persist.
+    if sync_result.success {
+        if let Some(Some(act)) = store.tool_activations.get_mut(&tool_id) {
+            act.last_sync_at = Some(now_unix_secs());
+        }
+        providers::write_flat_store(&store, &path).map_err(|e| e.to_string())?;
+    }
 
     Ok(sync_result)
 }
@@ -553,9 +650,7 @@ pub async fn test_provider_connection(
 
     let timeout = Duration::from_secs(10);
 
-    let client = reqwest::Client::builder()
-        .timeout(timeout)
-        .build()
+    let client = skillstar_core::infra::http_client::probe_http_client(timeout)
         .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
 
     let base = base_url.trim_end_matches('/');
@@ -563,17 +658,7 @@ pub async fn test_provider_connection(
     let start = Instant::now();
 
     let response = if model.trim().is_empty() {
-        // Reachability probe: GET /models with both auth styles. Works for
-        // OpenAI-compatible and Anthropic-compatible endpoints; servers ignore
-        // the header they don't understand.
-        let url = format!("{base}/models");
-        client
-            .get(&url)
-            .header("Authorization", format!("Bearer {api_key}"))
-            .header("x-api-key", &api_key)
-            .header("anthropic-version", "2023-06-01")
-            .send()
-            .await
+        latency::send_reachability_probe(&client, base, &api_key).await
     } else {
         match format.as_str() {
             "anthropic" => {
@@ -691,12 +776,68 @@ pub async fn deactivate_tool(
         "codex" => {
             tool_sync::unsync_codex().map_err(|e| e.to_string())?;
         }
-        _ => {
-            // Unknown tool — nothing to unsync, but not an error
+        "opencode" => {
+            tool_sync::unsync_opencode().map_err(|e| e.to_string())?;
         }
+        "gemini" => {
+            tool_sync::unsync_gemini().map_err(|e| e.to_string())?;
+        }
+        _ => {}
     }
 
     Ok(())
+}
+
+/// Update only the settings of an active tool without changing provider or model.
+///
+/// Useful for toggling per-tool options (e.g. Codex's `wire_api` or `auth_mode`)
+/// without a full re-activation. Automatically re-syncs the tool's config file.
+#[tauri::command]
+pub async fn update_tool_settings(
+    lock: State<'_, ProvidersWriteLock>,
+    tool_id: String,
+    settings: serde_json::Value,
+) -> Result<ToolSyncResultFlat, String> {
+    let _guard = lock.0.lock().await;
+    let path = providers::flat_store_path();
+    let mut store = providers::migrate_store_if_needed(&path).map_err(|e| e.to_string())?;
+
+    // 1. Update settings in the activation map
+    let activation = providers::update_tool_settings(&mut store, &tool_id, settings)
+        .map_err(|e| e.to_string())?;
+
+    // 2. Persist the updated store
+    providers::write_flat_store(&store, &path).map_err(|e| e.to_string())?;
+
+    // 3. Re-sync the tool's config file
+    let provider = store
+        .providers
+        .iter()
+        .find(|p| p.id == activation.provider_id)
+        .ok_or_else(|| format!("Provider '{}' not found", activation.provider_id))?;
+
+    let sync_result = match tool_id.as_str() {
+        "claude-code" => tool_sync::sync_to_claude_code(provider, &activation.model)
+            .map_err(|e| e.to_string())?,
+        "codex" => tool_sync::sync_to_codex(provider, &activation)
+            .map_err(|e| e.to_string())?,
+        "opencode" => tool_sync::sync_to_opencode(provider, &activation.model)
+            .map_err(|e| e.to_string())?,
+        "gemini" => tool_sync::sync_to_gemini(provider, &activation.model)
+            .map_err(|e| e.to_string())?,
+        _ => ToolSyncResultFlat {
+            tool_id: tool_id.clone(),
+            success: false,
+            config_path: None,
+            error: Some(format!(
+                "Unknown tool_id '{}'. Supported: claude-code, codex, opencode, gemini.",
+                tool_id
+            )),
+            backup_path: None,
+        },
+    };
+
+    Ok(sync_result)
 }
 
 // ===========================================================================
@@ -733,9 +874,7 @@ pub async fn fetch_provider_models(
     }
     let url = trimmed.to_string();
 
-    let client = reqwest::Client::builder()
-        .timeout(timeout)
-        .build()
+    let client = skillstar_core::infra::http_client::probe_http_client(timeout)
         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
     let response = client
@@ -866,18 +1005,43 @@ pub async fn query_provider_balance(
 /// but not yet configured, or config may exist from a previous installation).
 #[tauri::command]
 pub async fn detect_tool_installation(tool_id: String) -> Result<serde_json::Value, String> {
-    let (binary_name, config_dir_name) = match tool_id.as_str() {
-        "claude-code" => ("claude", ".claude"),
-        "codex" => ("codex", ".codex"),
-        _ => return Err(format!("Unknown tool_id: '{}'. Only 'claude-code' and 'codex' are supported.", tool_id)),
+    // Claude Desktop is a GUI app, not a CLI — detect by app bundle / install path instead
+    // of by binary on PATH.
+    if tool_id == "claude-desktop" {
+        let binary_found = detect_claude_desktop_app();
+        let config_dir_found = dirs::config_dir()
+            .map(|base| base.join("Claude").is_dir())
+            .unwrap_or(false);
+        return Ok(serde_json::json!({
+            "installed": binary_found,
+            "binary_found": binary_found,
+            "config_dir_found": config_dir_found,
+        }));
+    }
+
+    let binary_name = match tool_id.as_str() {
+        "claude-code" => "claude",
+        "codex" => "codex",
+        "opencode" => "opencode",
+        "gemini" => "gemini",
+        _ => {
+            return Err(format!(
+                "Unknown tool_id: '{}'. Supported: claude-code, codex, opencode, claude-desktop, gemini.",
+                tool_id
+            ));
+        }
     };
 
-    // Check if binary exists in PATH
     let binary_found = which::which(binary_name).is_ok();
 
-    // Check if config directory exists
     let config_dir_found = dirs::home_dir()
-        .map(|home| home.join(config_dir_name).is_dir())
+        .map(|home| match tool_id.as_str() {
+            "claude-code" => home.join(".claude").is_dir(),
+            "codex" => home.join(".codex").is_dir(),
+            "opencode" => home.join(".config").join("opencode").is_dir(),
+            "gemini" => home.join(".gemini").is_dir(),
+            _ => false,
+        })
         .unwrap_or(false);
 
     // A tool is considered installed if the binary is found in PATH
@@ -888,6 +1052,118 @@ pub async fn detect_tool_installation(tool_id: String) -> Result<serde_json::Val
         "binary_found": binary_found,
         "config_dir_found": config_dir_found
     }))
+}
+
+/// Detect Claude Desktop App installation by scanning common install paths per OS.
+///
+/// - macOS: `/Applications/Claude.app` or `~/Applications/Claude.app`
+/// - Windows: `%LOCALAPPDATA%\Programs\Claude\Claude.exe` (per-user) or
+///   `%ProgramFiles%\Claude\Claude.exe` (machine-wide)
+/// - Linux: no official Linux Claude Desktop — returns false.
+fn detect_claude_desktop_app() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        if std::path::Path::new("/Applications/Claude.app").exists() {
+            return true;
+        }
+        if let Some(home) = dirs::home_dir()
+            && home.join("Applications").join("Claude.app").exists() {
+                return true;
+            }
+        false
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(local) = dirs::data_local_dir() {
+            if local.join("Programs").join("Claude").join("Claude.exe").exists() {
+                return true;
+            }
+        }
+        if let Ok(pf) = std::env::var("ProgramFiles") {
+            if std::path::Path::new(&pf).join("Claude").join("Claude.exe").exists() {
+                return true;
+            }
+        }
+        false
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        false
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tool config file read/write (JSON / TOML editor)
+// ---------------------------------------------------------------------------
+
+/// List on-disk config files for a tool (Claude / Codex / OpenCode).
+#[tauri::command]
+pub async fn list_tool_config_files(tool_id: String) -> Result<Vec<tool_sync::ToolConfigFileInfo>, String> {
+    tool_sync::list_tool_config_files(&tool_id).map_err(|e| e.to_string())
+}
+
+/// Read raw config file contents.
+#[tauri::command]
+pub async fn read_tool_config_file(tool_id: String, file_id: String) -> Result<String, String> {
+    tool_sync::read_tool_config_file(&tool_id, &file_id).map_err(|e| e.to_string())
+}
+
+/// Validate and save config file contents (with rolling backup).
+#[tauri::command]
+pub async fn write_tool_config_file(
+    tool_id: String,
+    file_id: String,
+    content: String,
+) -> Result<tool_sync::WriteToolConfigFileResult, String> {
+    Ok(tool_sync::write_tool_config_file(&tool_id, &file_id, &content))
+}
+
+/// Pretty-format JSON/TOML without writing to disk.
+#[tauri::command]
+pub async fn format_tool_config_file(tool_id: String, file_id: String) -> Result<String, String> {
+    tool_sync::format_tool_config_file(&tool_id, &file_id).map_err(|e| e.to_string())
+}
+
+/// Push the active flat-store provider credentials to a tool's config files.
+#[tauri::command]
+pub async fn push_provider_to_tool_config(
+    lock: State<'_, ProvidersWriteLock>,
+    provider_id: String,
+    tool_id: String,
+) -> Result<ToolSyncResultFlat, String> {
+    let _guard = lock.0.lock().await;
+    let path = providers::flat_store_path();
+    let store = providers::migrate_store_if_needed(&path).map_err(|e| e.to_string())?;
+
+    let activation = store
+        .tool_activations
+        .get(&tool_id)
+        .and_then(|a| a.as_ref())
+        .filter(|a| a.provider_id == provider_id)
+        .ok_or_else(|| format!("Tool '{}' is not activated for provider '{}'", tool_id, provider_id))?;
+
+    let provider = store
+        .providers
+        .iter()
+        .find(|p| p.id == provider_id)
+        .ok_or_else(|| format!("Provider '{}' not found", provider_id))?;
+
+    let result = match tool_id.as_str() {
+        "claude-code" => tool_sync::sync_to_claude_code(provider, &activation.model)
+            .map_err(|e| e.to_string())?,
+        "codex" => tool_sync::sync_to_codex(provider, activation)
+            .map_err(|e| e.to_string())?,
+        "opencode" => tool_sync::sync_to_opencode(provider, &activation.model)
+            .map_err(|e| e.to_string())?,
+        _ => {
+            return Err(format!(
+                "Unknown tool_id '{}'. Supported: claude-code, codex, opencode.",
+                tool_id
+            ));
+        }
+    };
+
+    Ok(result)
 }
 
 // ---------------------------------------------------------------------------
@@ -909,4 +1185,87 @@ pub async fn detect_env_conflicts() -> Result<Vec<serde_json::Value>, String> {
         .map(|c| serde_json::to_value(c).unwrap_or_default())
         .collect();
     Ok(serialized)
+}
+
+/// Current Unix time in seconds (best-effort; 0 if the clock is before epoch).
+fn now_unix_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Detect config conflicts relevant to a provider: for each tool this provider
+/// is active on, check external modification (vs that tool's `last_sync_at`) and
+/// legacy `~/.claude.json`; plus global shell env overrides (added once).
+#[tauri::command]
+pub async fn detect_provider_conflicts(
+    provider_id: String,
+) -> Result<Vec<serde_json::Value>, String> {
+    let path = providers::flat_store_path();
+    let store = providers::read_flat_store(&path).map_err(|e| e.to_string())?;
+
+    let mut conflicts: Vec<tool_sync::ConfigConflict> = Vec::new();
+    for (tool_id, activation) in &store.tool_activations {
+        if let Some(act) = activation
+            && act.provider_id == provider_id {
+                for c in tool_sync::detect_conflicts(tool_id, act.last_sync_at) {
+                    // Env overrides are global — added once below to avoid dupes.
+                    if !matches!(c.conflict_type, tool_sync::ConflictType::EnvVarOverride) {
+                        conflicts.push(c);
+                    }
+                }
+            }
+    }
+    conflicts.extend(tool_sync::detect_env_conflicts());
+
+    let serialized: Vec<serde_json::Value> = conflicts
+        .into_iter()
+        .map(|c| serde_json::to_value(c).unwrap_or_default())
+        .collect();
+    Ok(serialized)
+}
+
+/// Re-sync a tool's current activation to disk, overwriting any external edits,
+/// and refresh its `last_sync_at`. Backs the "overwrite" conflict action.
+#[tauri::command]
+pub async fn resync_tool(
+    lock: State<'_, ProvidersWriteLock>,
+    tool_id: String,
+) -> Result<ToolSyncResultFlat, String> {
+    let _guard = lock.0.lock().await;
+    let path = providers::flat_store_path();
+    let mut store = providers::migrate_store_if_needed(&path).map_err(|e| e.to_string())?;
+
+    let activation = store
+        .tool_activations
+        .get(&tool_id)
+        .and_then(|opt| opt.clone())
+        .ok_or_else(|| format!("Tool '{}' is not active", tool_id))?;
+
+    let provider = store
+        .providers
+        .iter()
+        .find(|p| p.id == activation.provider_id)
+        .ok_or_else(|| format!("Provider '{}' not found", activation.provider_id))?;
+
+    let sync_result = match tool_id.as_str() {
+        "claude-code" => {
+            tool_sync::sync_to_claude_code(provider, &activation.model).map_err(|e| e.to_string())?
+        }
+        "codex" => tool_sync::sync_to_codex(provider, &activation).map_err(|e| e.to_string())?,
+        "opencode" => {
+            tool_sync::sync_to_opencode(provider, &activation.model).map_err(|e| e.to_string())?
+        }
+        other => return Err(format!("Unknown tool_id '{}'", other)),
+    };
+
+    if sync_result.success {
+        if let Some(Some(act)) = store.tool_activations.get_mut(&tool_id) {
+            act.last_sync_at = Some(now_unix_secs());
+        }
+        providers::write_flat_store(&store, &path).map_err(|e| e.to_string())?;
+    }
+
+    Ok(sync_result)
 }

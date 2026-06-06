@@ -4,7 +4,9 @@ use std::path::PathBuf;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum ProxyType {
+    #[default]
     Http,
     Https,
     Socks5,
@@ -29,11 +31,6 @@ impl ProxyType {
     }
 }
 
-impl Default for ProxyType {
-    fn default() -> Self {
-        Self::Http
-    }
-}
 
 fn deserialize_proxy_type<'de, D>(deserializer: D) -> Result<ProxyType, D::Error>
 where
@@ -100,7 +97,7 @@ mod tests {
 
     #[test]
     fn load_config_returns_default_when_missing() {
-        let _guard = super::test_env_lock()
+        let _guard = crate::config::test_env_lock()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let temp = TempDir::new().unwrap();
@@ -121,7 +118,7 @@ mod tests {
 
     #[test]
     fn save_and_load_config_roundtrip() {
-        let _guard = super::test_env_lock()
+        let _guard = crate::config::test_env_lock()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let temp = TempDir::new().unwrap();

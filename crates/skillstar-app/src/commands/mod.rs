@@ -6,6 +6,7 @@
 pub mod acp;
 pub mod agents;
 pub mod marketplace;
+pub mod mcp_marketplace;
 pub mod network;
 pub mod projects;
 pub mod shell;

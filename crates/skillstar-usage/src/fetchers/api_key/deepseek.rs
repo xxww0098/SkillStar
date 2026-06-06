@@ -2,14 +2,17 @@
 //!
 //! `GET https://api.deepseek.com/user/balance` with `Authorization: Bearer <key>`.
 //! Returns `is_available` + `balance_infos[]` (per-currency totals).
+//!
+//! The request path is shared (see [`super::fetch_spec`]); this module only
+//! describes how to turn the DeepSeek response into a [`SubscriptionUsage`].
 
 use chrono::Utc;
 use serde::Deserialize;
+use skillstar_fingerprint::DeviceFingerprint;
+use skillstar_providers::balance;
 
+use crate::UsageResult;
 use crate::subscription::{MonetaryBalance, SubscriptionUsage};
-use crate::{UsageError, UsageResult};
-
-const ENDPOINT: &str = "https://api.deepseek.com/user/balance";
 
 #[derive(Debug, Deserialize)]
 struct BalanceResponse {
@@ -31,37 +34,12 @@ struct BalanceInfo {
     topped_up_balance: String,
 }
 
-pub async fn fetch(subscription_id: &str, api_key: &str) -> UsageResult<SubscriptionUsage> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| UsageError::Fetcher(e.to_string()))?;
-
-    let resp = client
-        .get(ENDPOINT)
-        .bearer_auth(api_key)
-        .header(reqwest::header::ACCEPT, "application/json")
-        .send()
-        .await
-        .map_err(|e| UsageError::Fetcher(format!("DeepSeek 请求失败：{}", e)))?;
-
-    let status = resp.status();
-    if status == reqwest::StatusCode::UNAUTHORIZED {
-        return Err(UsageError::AuthRequired);
-    }
-    if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        return Err(UsageError::Fetcher(format!(
-            "DeepSeek 返回 {}: {}",
-            status,
-            body.chars().take(200).collect::<String>()
-        )));
-    }
-
-    let body: BalanceResponse = resp
-        .json()
-        .await
-        .map_err(|e| UsageError::Fetcher(format!("DeepSeek 响应解析失败：{}", e)))?;
+pub async fn fetch(
+    subscription_id: &str,
+    api_key: &str,
+    fingerprint: Option<&DeviceFingerprint>,
+) -> UsageResult<SubscriptionUsage> {
+    let body: BalanceResponse = super::fetch_spec(&balance::DEEPSEEK, api_key, fingerprint).await?;
 
     // Pick the first balance entry; if user has both CNY and USD we surface CNY first.
     let primary = body
@@ -94,7 +72,9 @@ pub async fn fetch(subscription_id: &str, api_key: &str) -> UsageResult<Subscrip
         hourly: None,
         weekly: None,
         monthly: None,
+        credits: Vec::new(),
         error,
+        api_keys: Vec::new(),
     })
 }
 

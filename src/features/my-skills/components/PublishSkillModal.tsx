@@ -90,7 +90,7 @@ export function PublishSkillModal({ open, onClose, skillName, skillDescription, 
       const userRepos = await tauriInvoke("list_user_repos", { limit: 50 });
       setRepos(userRepos);
     } catch (e) {
-      console.warn("Failed to load repos", e);
+      if (import.meta.env.DEV) console.warn("Failed to load repos", e);
       setRepos([]);
       setError(`Failed to load repositories: ${String(e)}`);
     } finally {

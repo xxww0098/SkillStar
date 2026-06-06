@@ -12,13 +12,13 @@
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::Value;
-use std::time::Duration;
 
 use crate::catalog::AuthMode;
 use crate::crypto;
 use crate::oauth::pkce::PkcePair;
 use crate::oauth::poll_flow::{Poll, PollConfig, run};
 use crate::oauth::token_refresh;
+use crate::qoder_machine::{build_qoder_headers, read_machine_info};
 use crate::storage;
 use crate::subscription::{BillingCycle, Subscription, SubscriptionUsage, UsageWindow};
 use crate::{UsageError, UsageResult};
@@ -46,7 +46,7 @@ struct PollResponse {
     msg: Option<String>,
 }
 
-pub async fn start_login(_region: Option<&str>) -> UsageResult<(String, String)> {
+pub async fn start_login(_region: Option<&str>) -> UsageResult<super::OAuthStartInfo> {
     let pkce = PkcePair::generate();
     let nonce = crate::oauth::pkce::random_state();
     let auth_url = format!(
@@ -54,8 +54,7 @@ pub async fn start_login(_region: Option<&str>) -> UsageResult<(String, String)>
         LOGIN_BASE_URL, nonce, pkce.challenge
     );
 
-    let pending_id =
-        crate::oauth::pending_state::register("qoder", None, auth_url.clone());
+    let pending_id = crate::oauth::pending_state::register("qoder", None, auth_url.clone());
 
     let pid = pending_id.clone();
     let verifier = pkce.verifier.clone();
@@ -67,7 +66,7 @@ pub async fn start_login(_region: Option<&str>) -> UsageResult<(String, String)>
         }
     });
 
-    Ok((auth_url, pending_id))
+    Ok(super::OAuthStartInfo::browser(auth_url, pending_id))
 }
 
 async fn poll_for_tokens(nonce: String, verifier: String) -> UsageResult<Subscription> {
@@ -153,6 +152,9 @@ async fn finalize_subscription(
         oauth_account_id: None,
         oauth_region: None,
         requires_reauth: false,
+        fingerprint_id: None,
+        cookie_jar_encrypted: None,
+        cookie_session_expires_at: None,
         manual_quota: None,
         note: None,
         sort_index: 0,
@@ -169,8 +171,23 @@ async fn finalize_subscription(
 }
 
 pub async fn fetch(subscription: &mut Subscription) -> UsageResult<SubscriptionUsage> {
+    let fp_id = subscription.fingerprint_id.clone();
+    crate::http_client::with_fingerprint(fp_id, fetch_inner(subscription)).await
+}
+
+async fn fetch_inner(subscription: &mut Subscription) -> UsageResult<SubscriptionUsage> {
     let access_token = decrypt_required(&subscription.access_token_encrypted)?;
-    fetch_with_token(&subscription.id, &access_token).await
+    match fetch_with_token(&subscription.id, &access_token).await {
+        Ok(usage) => {
+            subscription.requires_reauth = false;
+            Ok(usage)
+        }
+        Err(UsageError::AuthRequired) => {
+            subscription.requires_reauth = true;
+            Err(UsageError::AuthRequired)
+        }
+        Err(e) => Err(e),
+    }
 }
 
 async fn fetch_with_token(
@@ -178,13 +195,24 @@ async fn fetch_with_token(
     access_token: &str,
 ) -> UsageResult<SubscriptionUsage> {
     let client = http_client()?;
+    let machine = read_machine_info();
 
-    let plan_json = fetch_json(&client, &format!("{}{}", OPENAPI_BASE_URL, USER_PLAN_PATH), access_token)
-        .await
-        .ok();
-    let usage_json = fetch_json(&client, &format!("{}{}", OPENAPI_BASE_URL, CREDIT_USAGE_PATH), access_token)
-        .await
-        .ok();
+    let plan_json = fetch_json(
+        &client,
+        &format!("{}{}", OPENAPI_BASE_URL, USER_PLAN_PATH),
+        access_token,
+        &machine,
+    )
+    .await
+    .ok();
+    let usage_json = fetch_json(
+        &client,
+        &format!("{}{}", OPENAPI_BASE_URL, CREDIT_USAGE_PATH),
+        access_token,
+        &machine,
+    )
+    .await
+    .ok();
 
     let plan_name = plan_json
         .as_ref()
@@ -201,7 +229,9 @@ async fn fetch_with_token(
         weekly: None,
         monthly,
         balance: None,
+        credits: Vec::new(),
         error: None,
+        api_keys: Vec::new(),
     })
 }
 
@@ -209,11 +239,12 @@ async fn fetch_json(
     client: &reqwest::Client,
     url: &str,
     access_token: &str,
+    machine: &crate::qoder_machine::QoderMachineInfo,
 ) -> UsageResult<Value> {
+    let headers = build_qoder_headers(access_token, machine);
     let resp = client
         .get(url)
-        .bearer_auth(access_token)
-        .header(reqwest::header::ACCEPT, "application/json")
+        .headers(headers)
         .send()
         .await
         .map_err(|e| UsageError::Fetcher(format!("Qoder GET {} 失败：{}", url, e)))?;
@@ -255,12 +286,10 @@ fn extract_plan_name(value: &Value) -> Option<String> {
                 }
             }
         }
-        if ok {
-            if let Some(s) = cur.as_str() {
-                let t = s.trim();
-                if !t.is_empty() {
-                    return Some(t.to_string());
-                }
+        if ok && let Some(s) = cur.as_str() {
+            let t = s.trim();
+            if !t.is_empty() {
+                return Some(t.to_string());
             }
         }
     }
@@ -269,31 +298,65 @@ fn extract_plan_name(value: &Value) -> Option<String> {
 
 fn parse_usage_window(value: &Value) -> Option<UsageWindow> {
     let data = value.get("data").unwrap_or(value);
-    let used = data
-        .get("used")
-        .or_else(|| data.get("usedCredits"))
-        .and_then(|v| v.as_i64())?;
-    let total = data
-        .get("total")
-        .or_else(|| data.get("totalCredits"))
+    let used = pick_i64(
+        data,
+        &[
+            "used",
+            "usedCredits",
+            "used_credits",
+            "consumed",
+            "consumedCredits",
+        ],
+    )?;
+    let total = pick_i64(
+        data,
+        &[
+            "total",
+            "totalCredits",
+            "total_credits",
+            "limit",
+            "creditLimit",
+            "quota",
+        ],
+    );
+    let percent = data
+        .get("usedPercent")
+        .or_else(|| data.get("used_percent"))
+        .and_then(|v| v.as_i64().map(|n| n as i32))
+        .or_else(|| {
+            total
+                .filter(|t| *t > 0)
+                .map(|t| ((used as f64 / t as f64) * 100.0).round() as i32)
+        });
+    let reset_at = data
+        .get("resetAt")
+        .or_else(|| data.get("reset_at"))
+        .or_else(|| data.get("nextResetAt"))
         .and_then(|v| v.as_i64());
-    let percent = total
-        .filter(|t| *t > 0)
-        .map(|t| ((used as f64 / t as f64) * 100.0).round() as i32);
     Some(UsageWindow {
         label: "本月".to_string(),
         used,
         total,
         percent,
-        reset_at: data.get("resetAt").and_then(|v| v.as_i64()),
+        reset_at,
+        breakdown: Vec::new(),
     })
 }
 
+fn pick_i64(value: &Value, keys: &[&str]) -> Option<i64> {
+    for key in keys {
+        if let Some(n) = value.get(*key).and_then(|v| v.as_i64()) {
+            return Some(n);
+        }
+        if let Some(n) = value.get(*key).and_then(|v| v.as_f64()) {
+            return Some(n.round() as i64);
+        }
+    }
+    None
+}
+
 fn http_client() -> UsageResult<reqwest::Client> {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .build()
-        .map_err(|e| UsageError::Other(format!("http client: {}", e)))
+    crate::http_client::usage_reqwest_with_active_fingerprint()
 }
 
 fn decrypt_required(cipher: &Option<String>) -> UsageResult<String> {

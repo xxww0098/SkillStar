@@ -6,9 +6,9 @@
 //! This mirrors the `.repos/` pattern used for repo-cached skills.
 
 use crate::{lockfile, project_manifest};
+use anyhow::{Context, Result};
 use skillstar_core::types::{Skill, SkillCategory, extract_skill_description};
 use skillstar_projects::projects::sync;
-use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use tracing::{info, warn};
 
@@ -132,8 +132,9 @@ pub fn adopt_existing_dir(name: &str, source_dir: &Path) -> Result<PathBuf> {
         )
     })?;
 
-    if let Err(err) = skillstar_core::infra::fs_ops::create_symlink(&skill_local_path, &skill_hub_path)
-        .with_context(|| format!("Failed to create hub symlink for '{}'", name))
+    if let Err(err) =
+        skillstar_core::infra::fs_ops::create_symlink(&skill_local_path, &skill_hub_path)
+            .with_context(|| format!("Failed to create hub symlink for '{}'", name))
     {
         if let Err(rollback_err) = move_dir(&skill_local_path, source_dir).with_context(|| {
             format!(
@@ -285,7 +286,7 @@ pub fn migrate_existing() -> Result<u32> {
     // Load lockfile to check for git URLs
     let lock_path = lockfile::lockfile_path();
     let lockfile = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
-    let lock_map: std::collections::HashMap<String, &lockfile::LockEntry> = lockfile
+    let lock_map: std::collections::HashMap<String, &skillstar_core::types::lockfile::LockEntry> = lockfile
         .skills
         .iter()
         .map(|e| (e.name.clone(), e))
@@ -322,11 +323,10 @@ pub fn migrate_existing() -> Result<u32> {
         }
 
         // Skip if lockfile has a non-empty git_url for this skill
-        if let Some(lock_entry) = lock_map.get(&name) {
-            if !lock_entry.git_url.is_empty() {
+        if let Some(lock_entry) = lock_map.get(&name)
+            && !lock_entry.git_url.is_empty() {
                 continue;
             }
-        }
 
         // Skip if destination already exists in skills-local
         let dest = local_dir.join(&name);

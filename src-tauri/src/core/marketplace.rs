@@ -1,12 +1,7 @@
 pub use skillstar_marketplace::{
-    AiKeywordSearchResult, MarketplaceResult, MarketplaceSkillDetails, PublisherRepo,
-    PublisherRepoSkill,
+    AiKeywordSearchResult, MarketplaceSkillDetails, PublisherRepo,
 };
 
-pub use skillstar_marketplace::remote::{
-    ai_search_by_keywords, fetch_marketplace_skill_details, get_official_publishers,
-    get_publisher_repo_skills, get_publisher_repos, get_skills_sh_leaderboard, search_skills_sh,
-};
 
 pub use super::marketplace_snapshot::{LocalFirstResult, MarketplacePack, SyncStateEntry};
 

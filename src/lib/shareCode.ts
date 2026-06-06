@@ -56,7 +56,7 @@ export async function createShareCode(data: ShareCodeData, type: ShareCodeType =
       payload = new Uint8Array(await new Response(stream).arrayBuffer());
       isCompressed = 1;
     } catch (e) {
-      console.warn("CompressionStream failed, using raw data", e);
+      if (import.meta.env.DEV) console.warn("CompressionStream failed, using raw data", e);
     }
   }
 

@@ -294,13 +294,12 @@ mod tests {
                     });
                 }
                 // Add a delete on the last provider (if more than 1)
-                if ids_for_ops.len() > 1 {
-                    if let Some(last_id) = ids_for_ops.last() {
+                if ids_for_ops.len() > 1
+                    && let Some(last_id) = ids_for_ops.last() {
                         ops.push(CrudOp::Delete {
                             id: last_id.clone(),
                         });
                     }
-                }
                 ops
             })
         })

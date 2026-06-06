@@ -646,38 +646,48 @@
   }
 }
 
-/* Shimmer loading effect — replaces flat pulse on skeletons */
+/* Shimmer loading effect — GPU-accelerated via ::after pseudo-element */
 @keyframes shimmer {
   0% {
-    background-position: -200% 0;
+    transform: translateX(-100%);
   }
   100% {
-    background-position: 200% 0;
+    transform: translateX(100%);
   }
 }
 
 .animate-shimmer {
-  background: linear-gradient(
-    90deg,
-    var(--color-muted) 0%,
-    rgba(255, 255, 255, 0.08) 40%,
-    rgba(255, 255, 255, 0.08) 60%,
-    var(--color-muted) 100%
-  );
-  background-size: 200% 100%;
-  animation: shimmer 1.8s ease-in-out infinite;
+  position: relative;
+  overflow: hidden;
+  background: var(--color-muted);
 }
 
-:root[data-bg-style="paper"] .animate-shimmer {
+.animate-shimmer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
   background: linear-gradient(
     90deg,
-    var(--color-muted) 0%,
+    transparent 0%,
+    rgba(255, 255, 255, 0.08) 40%,
+    rgba(255, 255, 255, 0.08) 60%,
+    transparent 100%
+  );
+  animation: shimmer 1.8s ease-in-out infinite;
+  will-change: transform;
+}
+
+:root[data-bg-style="paper"] .animate-shimmer::after {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
     rgba(15, 23, 42, 0.04) 40%,
     rgba(15, 23, 42, 0.04) 60%,
-    var(--color-muted) 100%
+    transparent 100%
   );
-  background-size: 200% 100%;
-  animation: shimmer 1.8s ease-in-out infinite;
 }
 
 /* Logo spin — smooth deceleration for branded loading */
@@ -767,5 +777,38 @@
   }
   to {
     transform: rotate(360deg);
+  }
+}
+
+/* ========== Accessibility: Reduced Motion ========== */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .animate-shimmer::after {
+    animation: none !important;
+  }
+
+  .animate-logo-spin {
+    animation: none !important;
+  }
+
+  .animate-ping-limited {
+    animation: none !important;
+  }
+
+  .animate-spin {
+    animation: none !important;
+  }
+
+  .animate-pulse {
+    animation: none !important;
   }
 }

@@ -38,6 +38,9 @@ describe("ToolActivationPanel", () => {
         expect(mockInvoke).toHaveBeenCalledWith("detect_tool_installation", {
           toolId: "codex",
         });
+        expect(mockInvoke).toHaveBeenCalledWith("detect_tool_installation", {
+          toolId: "opencode",
+        });
       });
     });
 
@@ -78,7 +81,7 @@ describe("ToolActivationPanel", () => {
       });
 
       // Expand the Claude Code panel
-      const claudePanel = screen.getByLabelText("Claude Code 工具面板");
+      const claudePanel = screen.getByLabelText("Claude 工具面板");
       fireEvent.click(claudePanel);
 
       await waitFor(() => {
@@ -151,11 +154,11 @@ describe("ToolActivationPanel", () => {
       );
 
       await waitFor(() => {
-        expect(screen.getAllByRole("switch").length).toBe(2);
+        expect(screen.getAllByRole("switch").length).toBe(4);
       });
 
       // Expand Claude Code panel
-      const claudePanel = screen.getByLabelText("Claude Code 工具面板");
+      const claudePanel = screen.getByLabelText("Claude 工具面板");
       fireEvent.click(claudePanel);
 
       await waitFor(() => {
@@ -166,7 +169,7 @@ describe("ToolActivationPanel", () => {
 
   describe("toggle activation/deactivation", () => {
     it("calls activate_tool when toggle is turned on", async () => {
-      mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      mockInvoke.mockImplementation(async (cmd: string, _args?: unknown) => {
         if (cmd === "get_tool_activations") return {};
         if (cmd === "detect_tool_installation") return { installed: true, binary_found: true, config_dir_found: true };
         if (cmd === "activate_tool") return { tool_id: "claude-code", success: true, message: "ok" };
@@ -176,11 +179,11 @@ describe("ToolActivationPanel", () => {
       render(<ToolActivationPanel {...defaultProps} />);
 
       await waitFor(() => {
-        expect(screen.getAllByRole("switch").length).toBe(2);
+        expect(screen.getAllByRole("switch").length).toBe(4);
       });
 
       // Toggle on Claude Code
-      const claudeSwitch = screen.getByLabelText("启用 Claude Code");
+      const claudeSwitch = screen.getByLabelText("启用 Claude");
       fireEvent.click(claudeSwitch);
 
       await waitFor(() => {
@@ -188,6 +191,7 @@ describe("ToolActivationPanel", () => {
           providerId: "provider-1",
           toolId: "claude-code",
           model: "deepseek-chat",
+          settings: null,
         });
       });
     });
@@ -210,7 +214,7 @@ describe("ToolActivationPanel", () => {
       });
 
       // Toggle off Claude Code
-      const claudeSwitch = screen.getByLabelText("停用 Claude Code");
+      const claudeSwitch = screen.getByLabelText("停用 Claude");
       fireEvent.click(claudeSwitch);
 
       await waitFor(() => {

@@ -70,18 +70,12 @@ export interface AiKeywordSearchResult {
   keyword_skill_map: Record<string, string[]>;
 }
 
-export interface SecurityAudit {
-  name: string;
-  result: string;
-}
-
 export interface MarketplaceSkillDetails {
   summary: string | null;
   readme: string | null;
   weekly_installs: string | null;
   github_stars: number | null;
   first_seen: string | null;
-  security_audits: SecurityAudit[];
 }
 
 export interface OfficialPublisher {
@@ -147,7 +141,7 @@ export interface SkillCardDeck {
 
 export type SortOption = "stars-desc" | "updated" | "name";
 export type ViewMode = "grid" | "list";
-export type NavPage = "my-skills" | "marketplace" | "skill-cards" | "projects" | "settings";
+export type NavPage = "my-skills" | "marketplace" | "skill-cards" | "projects" | "mcp" | "settings";
 
 /** Sub-page navigation for drill-down views */
 export type SubPage = {
@@ -187,6 +181,24 @@ export interface AiStreamPayload {
   delta?: string | null;
   message?: string | null;
   providerId?: string | null;
+}
+
+/** Phases of the AST-based translation pipeline reported by the backend. */
+export type AiTranslatePipelinePhase = "prepare" | "translate" | "finalize" | "guard";
+
+/** Per-event bundle progress reported on `ai://translate-stream`. */
+export interface AiTranslatePipelineProgress {
+  phase: AiTranslatePipelinePhase;
+  current: number;
+  total: number;
+}
+
+/** Payload emitted on the `ai://translate-stream` Tauri event. */
+export interface AiTranslateStreamPayload {
+  requestId: string;
+  event: "start" | "progress" | "complete" | "error";
+  pipelineProgress?: AiTranslatePipelineProgress | null;
+  message?: string | null;
 }
 
 export interface AiProviderRef {
@@ -307,12 +319,7 @@ export interface AiConfig {
   target_language: string;
   /** Model context window in K tokens (e.g. 128 = 128K tokens) */
   context_window_k: number;
-  /** Override: 0 = auto-derive from context_window_k */
   max_concurrent_requests: number;
-  /** Override: 0 = auto-derive from context_window_k */
-  chunk_char_limit: number;
-  /** Override: 0 = auto-derive from context_window_k */
-  scan_max_response_tokens: number;
   /** Per-format saved presets */
   openai_preset: FormatPreset;
   anthropic_preset: FormatPreset;
@@ -478,7 +485,12 @@ export interface ShareCodeInstallSummary {
 // === Models Mode Types ===
 
 export type AppMode = "skills" | "usage" | "models";
-export type ModelsNavPage = "providers" | "health" | "tool-configs" | "models-settings";
+/**
+ * Historically the Models mode had multiple sub-pages. They have been merged
+ * into a single hub; this type is kept as a single literal for back-compat
+ * with call sites that still reference it.
+ */
+export type ModelsNavPage = "hub";
 export type AllNavPage = NavPage | ModelsNavPage;
 export type AppId = "claude" | "codex";
 
@@ -553,6 +565,147 @@ export interface SwitchResult {
   tools_synced: ToolSyncResult[];
 }
 
+// === MCP (Model Context Protocol) Types ===
+// NOTE: these mirror `skillstar_models::mcp` structs, which serialize with
+// `#[serde(rename_all = "camelCase")]` — hence camelCase fields here.
+
+export type McpTransport = "stdio" | "http" | "sse";
+
+/** Tool ids that can receive MCP servers (matches `MCP_TOOL_IDS`). */
+export const MCP_TOOL_IDS = ["claude-code", "claude-desktop", "codex", "gemini", "opencode"] as const;
+export type McpToolId = (typeof MCP_TOOL_IDS)[number];
+
+export interface McpServerEntry {
+  id: string;
+  /** Server key written verbatim into each tool's config. */
+  name: string;
+  transport: McpTransport | string;
+  // stdio
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+  // http / sse
+  url?: string;
+  headers?: Record<string, string>;
+  // metadata
+  description?: string;
+  homepage?: string;
+  tags?: string[];
+  /** Per-tool enable flags, keyed by tool id. */
+  enabled: Record<string, boolean>;
+  sortIndex: number;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
+/** Partial update — only present fields are applied. */
+export interface McpServerPatch {
+  name?: string;
+  transport?: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+  url?: string;
+  headers?: Record<string, string>;
+  description?: string;
+  homepage?: string;
+  tags?: string[];
+}
+
+export interface McpStore {
+  version: number;
+  servers: McpServerEntry[];
+}
+
+export interface McpSyncResult {
+  toolId: string;
+  serverId: string;
+  success: boolean;
+  skipped?: boolean;
+  configPath?: string;
+  backupPath?: string;
+  error?: string;
+}
+
+export interface McpToolStatus {
+  toolId: string;
+  label: string;
+  configPath: string;
+  installed: boolean;
+  /** Number of MCP servers currently present in the live config file. */
+  serverCount: number;
+}
+
+export interface McpServerWithSync {
+  server: McpServerEntry;
+  syncResults: McpSyncResult[];
+}
+
+// --- MCP marketplace (GitHub MCP Registry) — mirrors skillstar_marketplace::mcp_models ---
+
+export type McpServerKind = "stdio" | "remote" | "both" | "unknown";
+
+export interface McpRegistryPackageSummary {
+  /** Runner command: npx / uvx / docker / dnx / … */
+  runtime: string;
+  identifier: string;
+  version?: string | null;
+  /** Env var names the user must supply (required or secret). */
+  requiredEnv: string[];
+}
+
+export interface McpRegistryRemoteSummary {
+  /** Normalized transport: "http" | "sse". */
+  transport: string;
+  url: string;
+  requiredHeaders: string[];
+}
+
+/** Card model for the MCP marketplace list/search. */
+export interface McpMarketEntry {
+  id: string;
+  /** Cleaned display name (last path segment of `namespace`). */
+  name: string;
+  /** Full registry name, e.g. "io.github.netdata/mcp-server". */
+  namespace: string;
+  description: string;
+  repoUrl: string;
+  stars: number;
+  license?: string | null;
+  version?: string | null;
+  kind: McpServerKind;
+  /** Distinct runner hints across packages, e.g. ["uvx"], ["npx"]. */
+  runtimes: string[];
+  updatedAt?: string | null;
+}
+
+/** Detail model: card fields + readme + package/remote display. */
+export interface McpMarketServerDetail extends McpMarketEntry {
+  readme?: string | null;
+  packages: McpRegistryPackageSummary[];
+  remotes: McpRegistryRemoteSummary[];
+}
+
+/** A built-in / recommended-to-install MCP server template (mirrors `skillstar_models::mcp::McpPreset`). */
+export interface McpPreset {
+  id: string;
+  /** Server key written verbatim into each tool's config (and the entry name). */
+  name: string;
+  description: string;
+  homepage: string;
+  transport: McpTransport | string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+  tags?: string[];
+  /** Env keys the user must fill in before the server works (e.g. ["API_KEY"]). */
+  requiredEnv?: string[];
+}
+
 export interface ProviderPreset {
   id: string;
   name: string;
@@ -586,11 +739,24 @@ export interface ProviderEntryFlat {
   notes?: string;
   created_at?: number;
   meta?: Record<string, unknown>;
+  /** Codex API format: "responses" (default) or "chat". */
+  codex_wire_api?: string;
+  /** Codex auth mode: "api_key" (default) or "oauth". */
+  codex_auth_mode?: string;
+}
+
+/** Typed settings for Codex CLI activation (wire_api and auth_mode). */
+export interface CodexSettings {
+  wire_api: "responses" | "chat";
+  auth_mode: "api_key" | "oauth";
 }
 
 export interface ToolActivation {
   provider_id: string;
   model: string;
+  settings?: CodexSettings | null;
+  /** Unix seconds of the last successful disk sync (baseline for conflict detection). */
+  last_sync_at?: number | null;
 }
 
 export type ToolActivationsMap = Record<string, ToolActivation | null>;
@@ -613,6 +779,8 @@ export interface ProviderPatchFlat {
   icon_color?: string;
   notes?: string;
   meta?: Record<string, unknown>;
+  codex_wire_api?: string;
+  codex_auth_mode?: string;
 }
 
 export interface ProviderPresetFlat {
@@ -630,6 +798,27 @@ export interface ProviderPresetFlat {
   api_key_url?: string;
   balance_endpoint?: string;
   balance_parser?: string;
+  endpoint_candidates?: string[];
+}
+
+export interface ProviderUpdateFlatResult {
+  provider: ProviderEntryFlat;
+  tool_sync_results: ToolSyncResult[];
+}
+
+export interface ToolConfigFileInfo {
+  file_id: string;
+  label: string;
+  path: string;
+  format: "json" | "toml" | string;
+  exists: boolean;
+  managed_by_skillstar: boolean;
+}
+
+export interface WriteToolConfigFileResult {
+  success: boolean;
+  backup_path?: string | null;
+  error?: string | null;
 }
 
 export interface BalanceInfo {
@@ -643,4 +832,12 @@ export interface ConnectionTestResult {
   status: "ok" | "auth_failed" | "timeout" | "network_error" | "model_unavailable";
   latency_ms?: number;
   error?: string;
+}
+
+/** Per-URL result from batch endpoint latency probe. */
+export interface EndpointLatencyResult {
+  url: string;
+  latency_ms?: number | null;
+  status?: number | null;
+  error?: string | null;
 }

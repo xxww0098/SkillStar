@@ -26,7 +26,10 @@ impl PkcePair {
         fill_random(&mut bytes);
         let verifier = URL_SAFE_NO_PAD.encode(bytes);
         let challenge = challenge_from(&verifier);
-        Self { verifier, challenge }
+        Self {
+            verifier,
+            challenge,
+        }
     }
 }
 
@@ -65,8 +68,9 @@ mod tests {
     fn state_is_url_safe() {
         let s = random_state();
         // base64url alphabet only.
-        assert!(s.chars().all(|c| {
-            c.is_ascii_alphanumeric() || c == '-' || c == '_'
-        }));
+        assert!(
+            s.chars()
+                .all(|c| { c.is_ascii_alphanumeric() || c == '-' || c == '_' })
+        );
     }
 }

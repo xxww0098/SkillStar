@@ -13,8 +13,10 @@ use tokio::sync::Mutex;
 /// Circuit breaker state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum CircuitState {
     /// Normal operation — requests pass through.
+    #[default]
     Closed,
     /// Too many failures — requests are blocked.
     Open,
@@ -22,11 +24,6 @@ pub enum CircuitState {
     HalfOpen,
 }
 
-impl Default for CircuitState {
-    fn default() -> Self {
-        CircuitState::Closed
-    }
-}
 
 /// A provider's circuit breaker record.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,11 +64,10 @@ impl CircuitBreakerRecord {
         match self.state {
             CircuitState::Closed => true,
             CircuitState::Open => {
-                if let Some(opened_at) = self.opened_at {
-                    if now >= opened_at + RECOVERY_TIMEOUT_SECS {
+                if let Some(opened_at) = self.opened_at
+                    && now >= opened_at + RECOVERY_TIMEOUT_SECS {
                         return true;
                     }
-                }
                 false
             }
             CircuitState::HalfOpen => true,
@@ -82,11 +78,10 @@ impl CircuitBreakerRecord {
     pub fn current_state(&self) -> CircuitState {
         if self.state == CircuitState::Open {
             let now = chrono::Utc::now().timestamp();
-            if let Some(opened_at) = self.opened_at {
-                if now >= opened_at + RECOVERY_TIMEOUT_SECS {
+            if let Some(opened_at) = self.opened_at
+                && now >= opened_at + RECOVERY_TIMEOUT_SECS {
                     return CircuitState::HalfOpen;
                 }
-            }
         }
         self.state
     }

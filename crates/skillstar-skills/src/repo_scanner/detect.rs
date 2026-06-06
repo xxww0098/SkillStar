@@ -1,6 +1,6 @@
-use skillstar_core::types::lockfile;
-use skillstar_core::infra::paths;
 use crate::source_resolver;
+use skillstar_core::infra::paths;
+use skillstar_core::types::lockfile;
 
 use super::RepoNewSkill;
 use super::cache::cache_dir_name;
@@ -40,7 +40,7 @@ pub fn detect_new_skills_in_cached_repos() -> Vec<RepoNewSkill> {
     let cache_dir = paths::repos_cache_dir();
     let mut new_skills = Vec::new();
 
-    for (_norm_url, (source, repo_url)) in &repo_groups {
+    for (source, repo_url) in repo_groups.values() {
         let repo_dir = cache_dir.join(cache_dir_name(source));
         if !repo_dir.join(".git").exists() {
             continue;

@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { Plus, Unlink, X } from "lucide-react";
-import { useState } from "react";
+import { memo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AgentIcon } from "../../../components/ui/AgentIcon";
 import { Badge } from "../../../components/ui/badge";
@@ -44,7 +44,7 @@ function displayPaths(profile: AgentProfile, platform: Platform): string[] {
   return [primary, codexLegacyPath];
 }
 
-export function AgentConnectionsSection({
+export const AgentConnectionsSection = memo(function AgentConnectionsSection({
   profiles,
   profilesLoading,
   expandedAgentId,
@@ -229,4 +229,4 @@ export function AgentConnectionsSection({
       )}
     </section>
   );
-}
+});

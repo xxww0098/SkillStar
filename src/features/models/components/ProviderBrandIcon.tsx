@@ -1,5 +1,6 @@
 import AnthropicIcon from "@lobehub/icons/es/Anthropic/components/Mono";
 import DeepSeekIcon from "@lobehub/icons/es/DeepSeek/components/Color";
+import GrokIcon from "@lobehub/icons/es/Grok/components/Mono";
 import KimiIcon from "@lobehub/icons/es/Kimi/components/Mono";
 import MiniMaxIcon from "@lobehub/icons/es/Minimax/components/Color";
 import OpenAIIcon from "@lobehub/icons/es/OpenAI/components/Mono";
@@ -35,6 +36,7 @@ const ICON_BY_PRESET_ID: Record<string, IconComponent> = {
   mimo: XiaomiMiMoIcon,
   openrouter: OpenRouterIcon,
   siliconflow: SiliconCloudIcon,
+  grok: GrokIcon,
   anthropic: AnthropicIcon,
   "openai-compatible": OpenAIIcon,
   official: OpenAIIcon,
@@ -78,6 +80,7 @@ function resolvePresetId(presetId?: string | null, providerName?: string | null)
   if (name.includes("siliconflow") || providerName.includes("硅基")) return "siliconflow";
   if (name.includes("anthropic") || name.includes("claude")) return "anthropic";
   if (name.includes("openai")) return "openai-compatible";
+  if (name.includes("grok") || name.includes("x.ai") || name.includes("xai")) return "grok";
   if (name.includes("alibaba") || providerName.includes("阿里")) return "qwen";
 
   return null;
@@ -98,7 +101,8 @@ export function ProviderBrandIcon({
     resolvedPresetId === "openrouter" ||
     resolvedPresetId === "openai-compatible" ||
     resolvedPresetId === "official" ||
-    resolvedPresetId === "anthropic"
+    resolvedPresetId === "anthropic" ||
+    resolvedPresetId === "grok"
       ? fallbackColor
       : undefined;
 

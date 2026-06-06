@@ -1,8 +1,8 @@
 use super::upsert_repo_history_entry;
-use crate::{local_skill, lockfile, source_resolver};
 use crate::git::ops as git_ops;
-use skillstar_core::infra::{fs_ops, paths};
+use crate::{local_skill, lockfile, source_resolver};
 use anyhow::{Context, Result, anyhow};
+use skillstar_core::infra::{fs_ops, paths};
 use std::path::Path;
 use tracing::warn;
 
@@ -75,8 +75,7 @@ pub fn install_from_repo(
         let tree_hash = if target.folder_path.is_empty() {
             git_ops::compute_tree_hash(&cache_dir).unwrap_or_default()
         } else {
-            super::compute_subtree_hash(&cache_dir, &target.folder_path)
-                .unwrap_or_default()
+            super::compute_subtree_hash(&cache_dir, &target.folder_path).unwrap_or_default()
         };
 
         let source_folder = if target.folder_path.is_empty() {
@@ -85,7 +84,7 @@ pub fn install_from_repo(
             Some(target.folder_path.clone())
         };
 
-        lf.upsert(lockfile::LockEntry {
+        lf.upsert(skillstar_core::types::lockfile::LockEntry {
             name: target.id.clone(),
             git_url: repo_url.to_string(),
             tree_hash,
@@ -107,7 +106,7 @@ pub fn install_from_repo(
 fn can_replace_existing_skill(
     skill_name: &str,
     repo_url: &str,
-    existing_entry: Option<&lockfile::LockEntry>,
+    existing_entry: Option<&skillstar_core::types::lockfile::LockEntry>,
 ) -> bool {
     if local_skill::is_local_skill(skill_name) {
         return false;

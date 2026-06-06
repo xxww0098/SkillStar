@@ -20,7 +20,7 @@ function isTauriRuntime(): boolean {
 export async function openExternalUrl(rawUrl: string): Promise<boolean> {
   const url = rawUrl.trim();
   if (!isHttpUrl(url)) {
-    console.warn("[externalOpen] blocked non-http(s) URL:", rawUrl);
+    if (import.meta.env.DEV) console.warn("[externalOpen] blocked non-http(s) URL:", rawUrl);
     return false;
   }
 
@@ -40,7 +40,7 @@ export async function openExternalUrl(rawUrl: string): Promise<boolean> {
       window.open(url, "_blank", "noopener,noreferrer");
       return true;
     }
-    console.error("[externalOpen] tauriInvoke(open_external_url) failed:", error);
+    if (import.meta.env.DEV) console.error("[externalOpen] tauriInvoke(open_external_url) failed:", error);
     return false;
   }
 }

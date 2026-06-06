@@ -2,8 +2,11 @@ import { useEffect, useState } from "react";
 import type { AgentProfile } from "../../types";
 import { AntigravityIcon } from "./icons/AntigravityIcon";
 
+/** Minimal shape required to render an agent icon. */
+type AgentIconProfile = Pick<AgentProfile, "id" | "icon" | "display_name">;
+
 interface AgentIconProps {
-  profile: AgentProfile;
+  profile: AgentIconProfile;
   className?: string;
   alt?: string;
 }
@@ -59,7 +62,7 @@ function InlineSvgIcon({ path, className }: { path: string; className?: string }
         if (!cancelled) setMarkup(text);
       })
       .catch((err) => {
-        console.warn(`[AgentIcon] failed to inline SVG "${path}":`, err);
+        if (import.meta.env.DEV) console.warn(`[AgentIcon] failed to inline SVG "${path}":`, err);
       });
 
     return () => {
@@ -81,7 +84,9 @@ function InlineSvgIcon({ path, className }: { path: string; className?: string }
   }
 
   return (
+    // eslint-disable-next-line react/no-danger
     <span
+      // Safe: markup is loaded from locally-hosted SVG files (never user input).
       dangerouslySetInnerHTML={{ __html: markup }}
       className={`inline-flex items-center justify-center shrink-0 pointer-events-none [&>svg]:w-[inherit] [&>svg]:h-[inherit] [&>svg]:block ${className ?? ""}`}
     />

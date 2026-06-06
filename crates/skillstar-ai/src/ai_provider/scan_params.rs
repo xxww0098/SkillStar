@@ -17,27 +17,18 @@ pub fn resolve_scan_params(config: &AiConfig) -> ResolvedScanParams {
 
     // chunk_char_limit: use ~40% of context window for file content
     // 1 token ≈ 2-4 chars; use conservative multiplier of 2
-    let auto_chunk = (ctx_tokens * 2 * 40 / 100).max(10_000);
-    let chunk_char_limit = if config.chunk_char_limit > 0 {
-        config.chunk_char_limit
-    } else {
-        auto_chunk
-    };
+    let chunk_char_limit = (ctx_tokens * 2 * 40 / 100).max(10_000);
 
-    // max_concurrent_requests: scale with context window, clamped
+    // max_concurrent_requests: honour the configured value, fall back to 4
+    // if the field was zeroed (legacy configs).
     let max_concurrent_requests = if config.max_concurrent_requests > 0 {
         config.max_concurrent_requests
     } else {
-        4 // User requested default fallback to 4 if 0
+        4
     };
 
     // scan_max_response_tokens: small fraction of context, enough for JSON output
-    let auto_max_response = (ctx_tokens / 20).clamp(2048, 16384) as u32;
-    let scan_max_response_tokens = if config.scan_max_response_tokens > 0 {
-        config.scan_max_response_tokens
-    } else {
-        auto_max_response
-    };
+    let scan_max_response_tokens = (ctx_tokens / 20).clamp(2048, 16384) as u32;
 
     ResolvedScanParams {
         chunk_char_limit,

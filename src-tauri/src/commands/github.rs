@@ -387,33 +387,29 @@ pub async fn force_delete_app_config() -> Result<usize, AppError> {
 
         // Delete config dir contents
         let config_dir = paths::config_dir();
-        if config_dir.exists() {
-            if let Ok(entries) = std::fs::read_dir(&config_dir) {
+        if config_dir.exists()
+            && let Ok(entries) = std::fs::read_dir(&config_dir) {
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    if path.is_file() {
-                        if std::fs::remove_file(&path).is_ok() {
+                    if path.is_file()
+                        && std::fs::remove_file(&path).is_ok() {
                             removed += 1;
                         }
-                    }
                 }
             }
-        }
 
         // Also delete state dir contents (rebuildable)
         let state_dir = paths::state_dir();
-        if state_dir.exists() {
-            if let Ok(entries) = std::fs::read_dir(&state_dir) {
+        if state_dir.exists()
+            && let Ok(entries) = std::fs::read_dir(&state_dir) {
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    if path.is_file() {
-                        if std::fs::remove_file(&path).is_ok() {
+                    if path.is_file()
+                        && std::fs::remove_file(&path).is_ok() {
                             removed += 1;
                         }
-                    }
                 }
             }
-        }
 
         removed
     })

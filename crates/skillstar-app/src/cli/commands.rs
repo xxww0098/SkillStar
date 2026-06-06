@@ -76,7 +76,7 @@ pub fn cmd_init(name: Option<&str>) {
 }
 
 fn title_case(slug: &str) -> String {
-    slug.split(|c: char| c == '-' || c == '_')
+    slug.split(['-', '_'])
         .filter(|part| !part.is_empty())
         .map(|part| {
             let mut chars = part.chars();
@@ -152,8 +152,8 @@ pub fn cmd_list(filter: ListFilter) {
     }
 
     // Local authored skills
-    if matches!(filter, ListFilter::All | ListFilter::LocalOnly) {
-        if let Ok(entries) = std::fs::read_dir(&local_dir) {
+    if matches!(filter, ListFilter::All | ListFilter::LocalOnly)
+        && let Ok(entries) = std::fs::read_dir(&local_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if !path.is_dir() {
@@ -171,7 +171,6 @@ pub fn cmd_list(filter: ListFilter) {
                 });
             }
         }
-    }
 
     if rows.is_empty() {
         match filter {
@@ -190,7 +189,7 @@ pub fn cmd_list(filter: ListFilter) {
         return;
     }
 
-    rows.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    rows.sort_by_key(|a| a.name.to_lowercase());
 
     println!(
         "{:<4} {:<25} {:<8} {:<50} TREE",
@@ -349,10 +348,9 @@ fn install_hint_for(skill: &skillstar_marketplace::Skill) -> String {
     if !skill.git_url.trim().is_empty() {
         return skill.git_url.clone();
     }
-    if let Some(source) = skill.source.as_deref() {
-        if !source.trim().is_empty() {
+    if let Some(source) = skill.source.as_deref()
+        && !source.trim().is_empty() {
             return source.to_string();
         }
-    }
     skill.name.clone()
 }

@@ -1,4 +1,5 @@
 import { Plus } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { type CatalogEntry, type CatalogFilter, FILTER_ALL, type Subscription } from "../types";
@@ -13,6 +14,7 @@ interface UsageSidebarProps {
 }
 
 export function UsageSidebar({ catalog, subscriptions, selected, onSelect, onAddNew }: UsageSidebarProps) {
+  const { t } = useTranslation();
   const totalCount = subscriptions.length;
   const counts = new Map<string, number>();
   for (const sub of subscriptions) {
@@ -23,14 +25,14 @@ export function UsageSidebar({ catalog, subscriptions, selected, onSelect, onAdd
     <aside className="hidden md:flex w-[200px] shrink-0 flex-col border-r border-border/60 bg-sidebar/60 backdrop-blur-sm">
       <div className="p-3">
         <SidebarItem
-          label="全部"
+          label={t("usage.allProviders")}
           count={totalCount}
           selected={selected === FILTER_ALL}
           onClick={() => onSelect(FILTER_ALL)}
         />
       </div>
       <div className="border-t border-border/40" />
-      <nav className="flex-1 overflow-y-auto px-3 py-2 space-y-0.5" aria-label="供应商">
+      <nav className="flex-1 overflow-y-auto px-3 py-2 space-y-0.5" aria-label={t("usage.sidebarNav")}>
         {catalog.map((entry) => (
           <SidebarItem
             key={entry.id}
@@ -53,7 +55,7 @@ export function UsageSidebar({ catalog, subscriptions, selected, onSelect, onAdd
       <div className="border-t border-border/40 p-2">
         <Button onClick={onAddNew} size="sm" className="w-full justify-start gap-2">
           <Plus className="w-3.5 h-3.5" />
-          新增订阅
+          {t("usage.newSubscription")}
         </Button>
       </div>
     </aside>

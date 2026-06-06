@@ -17,6 +17,7 @@ use crate::{UsageError, UsageResult};
 pub struct PendingLogin {
     pub catalog_id: String,
     pub region: Option<String>,
+    pub target_subscription_id: Option<String>,
     pub auth_url: String,
     pub started_at: Instant,
     /// Sender resolved when the OAuth completes (success or failure).
@@ -38,6 +39,7 @@ pub fn register(catalog_id: &str, region: Option<&str>, auth_url: String) -> Str
         PendingLogin {
             catalog_id: catalog_id.to_string(),
             region: region.map(str::to_string),
+            target_subscription_id: None,
             auth_url,
             started_at: Instant::now(),
             completion: Some(tx),
@@ -47,15 +49,34 @@ pub fn register(catalog_id: &str, region: Option<&str>, auth_url: String) -> Str
     pending_id
 }
 
+/// Attach an existing subscription id to a login session. OAuth fetchers that
+/// support reauthorization can use this to refresh the old row instead of
+/// creating a duplicate subscription.
+pub fn set_target_subscription_id(pending_id: &str, subscription_id: Option<String>) {
+    if let Some(pending) = REGISTRY.lock().unwrap().get_mut(pending_id) {
+        pending.target_subscription_id = subscription_id;
+    }
+}
+
+pub fn target_subscription_id(pending_id: &str) -> Option<String> {
+    REGISTRY
+        .lock()
+        .unwrap()
+        .get(pending_id)
+        .and_then(|p| p.target_subscription_id.clone())
+}
+
 /// Look up the auth_url for a pending session.
 pub fn auth_url(pending_id: &str) -> Option<String> {
-    REGISTRY.lock().unwrap().get(pending_id).map(|p| p.auth_url.clone())
+    REGISTRY
+        .lock()
+        .unwrap()
+        .get(pending_id)
+        .map(|p| p.auth_url.clone())
 }
 
 /// Take the receiver half; caller awaits this. Idempotent — second take returns None.
-pub fn take_receiver(
-    pending_id: &str,
-) -> Option<oneshot::Receiver<UsageResult<Subscription>>> {
+pub fn take_receiver(pending_id: &str) -> Option<oneshot::Receiver<UsageResult<Subscription>>> {
     REGISTRY
         .lock()
         .unwrap()
@@ -64,9 +85,7 @@ pub fn take_receiver(
 }
 
 /// Take the sender half; the spawned OAuth worker resolves the login through this.
-pub fn take_sender(
-    pending_id: &str,
-) -> Option<oneshot::Sender<UsageResult<Subscription>>> {
+pub fn take_sender(pending_id: &str) -> Option<oneshot::Sender<UsageResult<Subscription>>> {
     REGISTRY
         .lock()
         .unwrap()
@@ -88,4 +107,25 @@ pub fn cancel(pending_id: &str) -> UsageResult<()> {
         let _ = tx.send(Err(UsageError::Other("用户取消登录".to_string())));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stores_target_subscription_id_for_pending_login() {
+        let pending_id = register("opencode", None, "https://auth.example.test".to_string());
+
+        assert_eq!(target_subscription_id(&pending_id), None);
+
+        set_target_subscription_id(&pending_id, Some("sub-opencode-old".to_string()));
+
+        assert_eq!(
+            target_subscription_id(&pending_id).as_deref(),
+            Some("sub-opencode-old")
+        );
+
+        remove(&pending_id);
+    }
 }

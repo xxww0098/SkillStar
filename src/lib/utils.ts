@@ -128,7 +128,7 @@ export function formatInstalls(count: number): string {
   return count.toLocaleString();
 }
 
-export type SettingsFocusTarget = "ai-provider" | "storage";
+export type SettingsFocusTarget = "ai-provider" | "storage" | "cookie-bridge";
 
 /** Navigate to Settings and request focus on a specific section. */
 export function navigateToSettingsSection(target: SettingsFocusTarget) {
@@ -184,10 +184,11 @@ export async function copyToClipboard(text: string): Promise<boolean> {
       return true;
     }
   } catch (err) {
-    console.warn(
-      "navigator.clipboard.writeText failed (likely due to async context loss), falling back to execCommand:",
-      err,
-    );
+    if (import.meta.env.DEV)
+      console.warn(
+        "navigator.clipboard.writeText failed (likely due to async context loss), falling back to execCommand:",
+        err,
+      );
   }
 
   try {
@@ -203,7 +204,7 @@ export async function copyToClipboard(text: string): Promise<boolean> {
     textArea.remove();
     return success;
   } catch (e) {
-    console.error("Fallback execCommand('copy') failed:", e);
+    if (import.meta.env.DEV) console.error("Fallback execCommand('copy') failed:", e);
     return false;
   }
 }

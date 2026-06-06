@@ -2,10 +2,12 @@ import { ChevronDown, ExternalLink, RefreshCw, Terminal } from "lucide-react";
 import { memo, useCallback, useEffect, useState } from "react";
 import { Button } from "../../../components/ui/button";
 import { Switch } from "../../../components/ui/switch";
+import { ExternalAnchor } from "../../../components/ui/ExternalAnchor";
 import { tauriInvoke } from "../../../lib/ipc";
 import { cn } from "../../../lib/utils";
 import type { ToolSyncResult } from "../../../types";
 import { useToolActivations } from "../hooks/useToolActivations";
+import { AgentToolIcon, type AgentToolIconId } from "./AgentToolIcon";
 
 export interface ToolActivationPanelProps {
   providerId: string;
@@ -15,13 +17,15 @@ export interface ToolActivationPanelProps {
   baseUrlAnthropic: string;
   showHeader?: boolean;
   defaultExpanded?: boolean;
+  /** Flatter rows for Agent 高级配置 */
+  variant?: "default" | "compact";
 }
 
 /** Known agent tools that can be activated. */
 const KNOWN_TOOLS = [
   {
     toolId: "claude-code",
-    displayName: "Claude Code",
+    displayName: "Claude",
     icon: "C",
     requiredUrlField: "anthropic" as const,
     disabledTooltip: "此供应商未提供 Anthropic 兼容端点",
@@ -34,6 +38,22 @@ const KNOWN_TOOLS = [
     requiredUrlField: "openai" as const,
     disabledTooltip: "此供应商未提供 OpenAI 兼容端点",
     installDocsUrl: "https://github.com/openai/codex",
+  },
+  {
+    toolId: "opencode",
+    displayName: "OpenCode",
+    icon: "O",
+    requiredUrlField: "openai" as const,
+    disabledTooltip: "此供应商未提供 OpenAI 兼容端点",
+    installDocsUrl: "https://opencode.ai/docs",
+  },
+  {
+    toolId: "gemini",
+    displayName: "Gemini CLI",
+    icon: "G",
+    requiredUrlField: "openai" as const,
+    disabledTooltip: "此供应商未提供 OpenAI 兼容端点",
+    installDocsUrl: "https://github.com/google-gemini/gemini-cli",
   },
 ] as const;
 
@@ -59,12 +79,13 @@ interface ToolItemProps {
   /** Link to installation documentation. */
   installDocsUrl: string;
   defaultExpanded?: boolean;
+  compact?: boolean;
 }
 
 function ToolItem({
   toolId,
   displayName,
-  icon,
+  icon: _icon,
   isActive,
   selectedModel,
   lastSyncAt,
@@ -78,6 +99,7 @@ function ToolItem({
   disabledTooltip,
   installDocsUrl,
   defaultExpanded = false,
+  compact = false,
 }: ToolItemProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [localModel, setLocalModel] = useState(selectedModel || defaultModel);
@@ -132,10 +154,11 @@ function ToolItem({
   return (
     <div
       className={cn(
-        "rounded-2xl border shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_16px_36px_-28px_var(--color-shadow)]",
-        isActive
-          ? "border-primary/30 bg-primary/10 hover:border-primary/40"
-          : "border-border/55 bg-card/55 hover:border-primary/25 hover:bg-card/75",
+        compact
+          ? "rounded-lg border"
+          : "rounded-2xl border shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_16px_36px_-28px_var(--color-shadow)]",
+        isActive ? "border-primary/30 bg-primary/10" : "border-border/55 bg-card/55",
+        !compact && !isActive && "hover:border-primary/25 hover:bg-card/75",
         !isInstalled && !installLoading && "opacity-60",
       )}
     >
@@ -154,15 +177,11 @@ function ToolItem({
         aria-expanded={expanded}
         aria-label={`${displayName} 工具面板`}
       >
-        {/* Tool icon */}
-        <span
-          className={cn(
-            "flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs font-bold",
-            isActive ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground",
-          )}
-        >
-          {icon}
-        </span>
+        <AgentToolIcon
+          toolId={toolId as AgentToolIconId}
+          size="sm"
+          className={cn(!isInstalled && !installLoading && "opacity-70")}
+        />
 
         {/* Tool name + status */}
         <div className="flex-1 min-w-0">
@@ -203,16 +222,14 @@ function ToolItem({
         <div className="px-3 pb-2 pt-1 border-t border-border/30">
           <div className="flex items-center gap-1.5 text-[11px] text-amber-500">
             <span>未检测到 {displayName}，请先安装</span>
-            <a
+            <ExternalAnchor
               href={installDocsUrl}
-              target="_blank"
-              rel="noopener noreferrer"
               className="inline-flex items-center gap-0.5 text-primary hover:underline"
               onClick={(e) => e.stopPropagation()}
             >
               安装文档
               <ExternalLink className="w-3 h-3" />
-            </a>
+            </ExternalAnchor>
           </div>
         </div>
       )}
@@ -307,7 +324,9 @@ function formatSyncTime(timestamp: string): string {
 /** Config paths for known tools (display only). */
 const TOOL_CONFIG_PATHS: Record<string, string> = {
   "claude-code": "~/.claude/settings.json",
-  codex: "~/.codex/config.toml",
+  codex: "~/.codex/config.toml · ~/.codex/auth.json",
+  opencode: "~/.config/opencode/opencode.json",
+  gemini: "~/.gemini/.env",
 };
 
 /** Tool installation status per tool_id. */
@@ -325,7 +344,9 @@ function ToolActivationPanelInner({
   baseUrlAnthropic,
   showHeader = true,
   defaultExpanded = false,
+  variant = "default",
 }: ToolActivationPanelProps) {
+  const compact = variant === "compact";
   const { activations, isActive, toggle, isLoading } = useToolActivations(providerId);
   const [installStatus, setInstallStatus] = useState<Record<string, ToolInstallStatus>>({});
   const [installLoading, setInstallLoading] = useState(true);
@@ -394,7 +415,10 @@ function ToolActivationPanelInner({
           const activation = activations[tool.toolId];
           const toolIsActive = isActive(tool.toolId);
           const selectedModel = toolIsActive ? activation?.model || null : null;
-          const lastSyncAt = null; // TODO: fetch from backend when available
+          const lastSyncAt =
+            toolIsActive && activation?.last_sync_at != null
+              ? new Date(activation.last_sync_at * 1000).toISOString()
+              : null;
 
           // Determine if the required URL is missing for this tool
           const urlMissing = tool.requiredUrlField === "anthropic" ? !baseUrlAnthropic : !baseUrlOpenai;
@@ -422,6 +446,7 @@ function ToolActivationPanelInner({
               disabledTooltip={tool.disabledTooltip}
               installDocsUrl={tool.installDocsUrl}
               defaultExpanded={defaultExpanded}
+              compact={compact}
             />
           );
         })}

@@ -61,6 +61,7 @@ const SAFETY_TIMEOUT_MS = 60_000;
 export function useAiStream({ command, eventChannel, normalizeResult, parseInvokeResult }: UseAiStreamOptions) {
   const [state, setState] = useState<AiStreamState>(INITIAL_STATE);
   const [aiConfigured, setAiConfigured] = useState(false);
+  const [targetLanguage, setTargetLanguage] = useState<string>("en");
 
   const activeIdRef = useRef<string | null>(null);
   const unlistenRef = useRef<(() => void) | null>(null);
@@ -78,6 +79,7 @@ export function useAiStream({ command, eventChannel, normalizeResult, parseInvok
         const config = await getAiConfigCached();
         if (!mountedRef.current) return;
         setAiConfigured(config.enabled && (config.provider_ref != null || config.api_format === "local"));
+        if (config.target_language) setTargetLanguage(config.target_language);
       } catch {
         if (mountedRef.current) setAiConfigured(false);
       }
@@ -336,6 +338,7 @@ export function useAiStream({ command, eventChannel, normalizeResult, parseInvok
   return {
     ...state,
     aiConfigured,
+    targetLanguage,
     execute,
     cancel,
     dismiss,

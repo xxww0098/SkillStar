@@ -5,8 +5,19 @@
 
 use anyhow::{Context, Result};
 use std::sync::{LazyLock, Mutex};
+use std::time::Duration;
 
+use super::config::AiConfig;
 use skillstar_core::config::proxy;
+
+/// Per-request timeout from resolved provider meta (falls back to 120s).
+pub fn request_timeout_duration(config: &AiConfig) -> Duration {
+    config
+        .request_timeout_secs
+        .filter(|&s| (5..=600).contains(&s))
+        .map(Duration::from_secs)
+        .unwrap_or(Duration::from_secs(120))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ProxyFingerprint {
@@ -92,11 +103,10 @@ pub fn get_http_client() -> Result<reqwest::Client> {
         .lock()
         .map_err(|_| anyhow::anyhow!("HTTP client cache lock poisoned"))?;
 
-    if let Some((cached_fp, client)) = guard.as_ref() {
-        if *cached_fp == fingerprint {
+    if let Some((cached_fp, client)) = guard.as_ref()
+        && *cached_fp == fingerprint {
             return Ok(client.clone());
         }
-    }
 
     let rebuilt = build_http_client_inner(&fingerprint)
         .with_context(|| "Failed to build HTTP client with current proxy settings")?;

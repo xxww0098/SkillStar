@@ -314,7 +314,7 @@ pub fn install_pack(repo_dir: &Path, source: &str, repo_url: &str) -> Result<Vec
         } else {
             Some(skill.path.clone())
         };
-        lf.upsert(crate::lockfile::LockEntry {
+        lf.upsert(skillstar_core::types::lockfile::LockEntry {
             name: skill.name.clone(),
             git_url: repo_url.to_string(),
             tree_hash: tree_hash.clone(),

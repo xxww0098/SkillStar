@@ -1,8 +1,8 @@
+use crate::git::ops as git_ops;
 use anyhow::{Context, Result, anyhow};
 use skillstar_core::config::github_mirror;
-use skillstar_core::types::update_checker;
-use crate::git::ops as git_ops;
 use skillstar_core::infra::{fs_ops, path_env::command_with_path, paths};
+use skillstar_core::types::update_checker;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -84,8 +84,8 @@ pub fn pull_repo_skill_update(skill_path: &Path, folder_path: Option<&str>) -> R
         return Err(anyhow!("git reset failed: {}", err.trim()));
     }
 
-    if is_sparse_checkout(&repo_root) {
-        if let Ok(dirs) = discover_skill_dirs_from_tree(&repo_root) {
+    if is_sparse_checkout(&repo_root)
+        && let Ok(dirs) = discover_skill_dirs_from_tree(&repo_root) {
             if dirs.is_empty() {
                 let _ = command_with_path("git")
                     .current_dir(&repo_root)
@@ -99,7 +99,6 @@ pub fn pull_repo_skill_update(skill_path: &Path, folder_path: Option<&str>) -> R
                 let _ = git_ops::apply_sparse_checkout(&repo_root, &dir_refs);
             }
         }
-    }
 
     match folder_path {
         Some(fp) if !fp.is_empty() => compute_subtree_hash(&repo_root, fp),

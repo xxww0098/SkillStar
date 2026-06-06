@@ -24,7 +24,6 @@ fn main() {
             "update",
             "create",
             "publish",
-            "scan",
             "doctor",
             "pack",
             "launch",

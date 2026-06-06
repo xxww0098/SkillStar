@@ -41,18 +41,14 @@ mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn test_env_lock() -> &'static std::sync::Mutex<()> {
-        static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-        LOCK.get_or_init(|| std::sync::Mutex::new(()))
-    }
-
     fn with_temp_dir<F>(suffix: &str, f: F)
     where
         F: FnOnce(std::path::PathBuf) -> anyhow::Result<()>,
     {
-        let _guard = test_env_lock()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // Share the crate-wide env lock so patrol tests serialize with the
+        // `projects` tests — they all mutate the process-global
+        // `SKILLSTAR_DATA_DIR`, so a per-module lock would let them race.
+        let _guard = crate::projects::lock_test_env();
 
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -83,7 +79,7 @@ mod tests {
         with_temp_dir("missing", |_data_dir| {
             // Config file does not exist — should return default
             let config = load_config();
-            assert_eq!(config.enabled, false);
+            assert!(!config.enabled);
             assert_eq!(config.interval_secs, 30);
             Ok(())
         });
@@ -99,7 +95,7 @@ mod tests {
 
             // Should fall back to default
             let config = load_config();
-            assert_eq!(config.enabled, false);
+            assert!(!config.enabled);
             assert_eq!(config.interval_secs, 30);
             Ok(())
         });
@@ -117,7 +113,7 @@ mod tests {
 
             // Load it back
             let loaded = load_config();
-            assert_eq!(loaded.enabled, true);
+            assert!(loaded.enabled);
             assert_eq!(loaded.interval_secs, 60);
             Ok(())
         });

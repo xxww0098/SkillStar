@@ -1,9 +1,9 @@
-import { Plus, Search } from "lucide-react";
+import { LayoutGrid, Plus, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ProviderLogo } from "@/features/usage/components/ProviderLogo";
 import { useUsageDataContext } from "@/features/usage/context/UsageDataContext";
-import { type CatalogEntry, type CatalogFilter, FILTER_ALL } from "@/features/usage/types";
+import { FILTER_ALL, type CatalogEntry, type CatalogFilter } from "@/features/usage/types";
 import { cn } from "@/lib/utils";
 
 export interface UsageNavProps {
@@ -29,7 +29,6 @@ export function UsageNav({ selected, onSelect, onAddNew, collapsed }: UsageNavPr
   const { catalog, subscriptions } = useUsageDataContext();
   const [searchQuery, setSearchQuery] = useState("");
 
-  const totalCount = subscriptions.length;
   const counts = useMemo(() => {
     const map = new Map<string, number>();
     for (const sub of subscriptions) {
@@ -39,9 +38,27 @@ export function UsageNav({ selected, onSelect, onAddNew, collapsed }: UsageNavPr
   }, [subscriptions]);
 
   const filteredCatalog = useMemo(() => filterCatalog(catalog, searchQuery), [catalog, searchQuery]);
+  const totalCount = subscriptions.length;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      <div className={cn("mb-1 shrink-0", collapsed ? "px-1.5" : "px-0")}>
+        <NavItem
+          label={t("usage.allSubscriptions", "全部订阅")}
+          count={totalCount}
+          selected={selected === FILTER_ALL}
+          onClick={() => onSelect(FILTER_ALL)}
+          collapsed={collapsed}
+          logo={
+            collapsed ? (
+              <LayoutGrid className="h-4 w-4 shrink-0" aria-hidden />
+            ) : (
+              <LayoutGrid className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+            )
+          }
+        />
+      </div>
+
       {!collapsed && (
         <div className="mb-2 shrink-0 px-2">
           <div className="relative">
@@ -59,18 +76,6 @@ export function UsageNav({ selected, onSelect, onAddNew, collapsed }: UsageNavPr
           </div>
         </div>
       )}
-
-      <div className={cn("shrink-0", collapsed ? "px-1" : "px-0")}>
-        <NavItem
-          label={t("usage.navAll", "全部")}
-          count={totalCount}
-          selected={selected === FILTER_ALL}
-          onClick={() => onSelect(FILTER_ALL)}
-          collapsed={collapsed}
-        />
-      </div>
-
-      <div className={cn("my-1.5 h-px bg-border/40", collapsed ? "mx-1" : "mx-0")} />
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {filteredCatalog.length === 0 && searchQuery.trim() ? (
@@ -160,7 +165,9 @@ function NavItem({ label, description, count, selected, onClick, collapsed, logo
       aria-current={selected ? "page" : undefined}
       className={cn(
         "group mb-0.5 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition duration-150 cursor-pointer focus-ring",
-        selected ? "bg-primary/10 font-medium text-primary ring-1 ring-primary/25" : "text-muted-foreground hover:bg-muted/30",
+        selected
+          ? "bg-primary/10 font-medium text-primary ring-1 ring-primary/25"
+          : "text-muted-foreground hover:bg-muted/30",
       )}
     >
       {logo}

@@ -1,7 +1,15 @@
 pub mod db;
+pub mod mcp_models;
+pub mod mcp_remote;
+pub mod mcp_snapshot;
 pub mod models;
 pub mod remote;
 pub mod snapshot;
+
+pub use mcp_models::{
+    McpMarketEntry, McpMarketServerDetail, McpRegistryPackageSummary, McpRegistryRemoteSummary,
+    McpRegistryServer, McpServerKind,
+};
 
 pub use models::{
     CuratedRegistryEntry, CuratedRegistryKind, CuratedRegistryUpsert, MarketplaceCategory,

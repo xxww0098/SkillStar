@@ -329,8 +329,8 @@ mod tests {
 
         let result = check_update(&link, fetch_repo, find_repo_root);
         assert!(fetch_called.get(), "fetch should be called");
-        assert_eq!(
-            result, false,
+        assert!(
+            !result,
             "should return false when heads can't be compared (not a git repo)"
         );
     }

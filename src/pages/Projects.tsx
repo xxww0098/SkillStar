@@ -186,7 +186,7 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
       try {
         await installSkill(url, name);
       } catch (e) {
-        console.error("Install from detail panel failed:", e);
+        if (import.meta.env.DEV) console.error("Install from detail panel failed:", e);
       }
     },
     [installSkill],
@@ -197,7 +197,7 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
       try {
         await updateSkill(name);
       } catch (e) {
-        console.error("Update from detail panel failed:", e);
+        if (import.meta.env.DEV) console.error("Update from detail panel failed:", e);
       }
     },
     [updateSkill],
@@ -209,7 +209,7 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
         await uninstallSkill(name);
         setDetailSkillName((current) => (current === name ? null : current));
       } catch (e) {
-        console.error("Uninstall from detail panel failed:", e);
+        if (import.meta.env.DEV) console.error("Uninstall from detail panel failed:", e);
       }
     },
     [uninstallSkill],
@@ -385,7 +385,7 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
         const firstScan = await scanProjectSkills(project.path);
         scannedSkills = firstScan.skills;
       } catch (e) {
-        console.error("Initial scan failed:", e);
+        if (import.meta.env.DEV) console.error("Initial scan failed:", e);
         toast.error(String(e) || t("projects.scanFailed", { defaultValue: "Project scan failed" }));
       }
 
@@ -406,7 +406,7 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
             ...rebuilt.agents,
           });
         } catch (e) {
-          console.error("Rebuild project skills from disk failed:", e);
+          if (import.meta.env.DEV) console.error("Rebuild project skills from disk failed:", e);
         }
       }
 
@@ -444,9 +444,9 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
       presentProjectState(project, agents, false);
 
       // Refresh stale copy-deployed skills in background
-      tauriInvoke("refresh_stale_project_copies", { projectPath: project.path }).catch((e) =>
-        console.warn("Stale copy refresh failed:", e),
-      );
+      tauriInvoke("refresh_stale_project_copies", { projectPath: project.path }).catch((e) => {
+        if (import.meta.env.DEV) console.warn("Stale copy refresh failed:", e);
+      });
 
       if (pendingGroupSkills && pendingGroupSkills.length > 0) {
         openDeployAgentDialog(project, agents);
@@ -501,7 +501,7 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
       const entry = await registerProject(projectPath);
       await handleSelectProject(entry);
     } catch (e) {
-      console.error("Register project failed:", e);
+      if (import.meta.env.DEV) console.error("Register project failed:", e);
       toast.error(String(e) || t("projects.registerFailed", { defaultValue: "Register project failed" }));
     }
   }, [projects, handleSelectProject, registerProject, t]);
@@ -638,7 +638,7 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
       loadProjects();
       setTimeout(() => setSyncResult(null), 4000);
     } catch (e) {
-      console.error("Save and sync failed:", e);
+      if (import.meta.env.DEV) console.error("Save and sync failed:", e);
       toast.error(String(e) || t("projects.syncFailed", { defaultValue: "Sync failed" }));
     } finally {
       setSaving(false);
@@ -658,7 +658,7 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
           setDirty(false);
         }
       } catch (e) {
-        console.error("Remove failed:", e);
+        if (import.meta.env.DEV) console.error("Remove failed:", e);
       }
     },
     [removeProject, selectedProject],
@@ -672,7 +672,7 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
       await updateProjectPath(selectedProject.name, path as string);
       setSelectedProject((prev) => (prev ? { ...prev, path: path as string } : null));
     } catch (e) {
-      console.error("Relink failed:", e);
+      if (import.meta.env.DEV) console.error("Relink failed:", e);
       toast.error(String(e) || t("projects.relinkFailed", { defaultValue: "Change path failed" }));
     }
   }, [selectedProject, updateProjectPath, t]);

@@ -133,7 +133,9 @@ export function MySkills({
         .then((overview) => {
           if (!cancelled) setBrokenCount(overview.broken_count);
         })
-        .catch((e) => console.warn("[MySkills] Failed to get storage overview:", e));
+        .catch((e) => {
+          if (import.meta.env.DEV) console.warn("[MySkills] Failed to get storage overview:", e);
+        });
       return () => {
         cancelled = true;
       };
@@ -214,11 +216,15 @@ export function MySkills({
     [profiles],
   );
 
+  // Stable reference for the per-card agent toggles — a fresh `profiles.filter(...)`
+  // array in JSX would defeat SkillCard's React.memo and re-render every card.
+  const enabledProfiles = useMemo(() => profiles.filter((profile) => profile.enabled), [profiles]);
+
   const handleInstall = async (url: string) => {
     try {
       await installSkill(url);
     } catch (e) {
-      console.error("[MySkills] installSkill failed:", e);
+      if (import.meta.env.DEV) console.error("[MySkills] installSkill failed:", e);
       toast.error(t("mySkills.installFailed"));
       throw e;
     }
@@ -641,7 +647,7 @@ export function MySkills({
               selectable
               selectedSkills={selectedSkillNames}
               onSelectSkill={handleSelectSkill}
-              profiles={profiles.filter((p) => p.enabled)}
+              profiles={enabledProfiles}
               onToggleAgent={toggleSkillForAgent}
               pendingUpdateNames={pendingUpdateNames}
               pendingAgentToggleKeys={pendingAgentToggleKeys}

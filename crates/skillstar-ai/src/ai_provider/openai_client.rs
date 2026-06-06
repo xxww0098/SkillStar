@@ -21,6 +21,7 @@ use futures_util::StreamExt;
 use tracing::{error, warn};
 
 use super::config::{AiConfig, ApiFormat};
+use super::http_client::request_timeout_duration;
 
 /// Build an `async-openai` [`Client`] configured with the user's base URL,
 /// API key, and proxy-aware HTTP client (reqwest 0.12).
@@ -32,39 +33,37 @@ fn build_openai_client(config: &AiConfig) -> Result<Client<OpenAIConfig>> {
         .with_api_base(&base_url)
         .with_api_key(&api_key);
 
-    let http_client = build_proxy_aware_client()?;
+    let http_client = build_proxy_aware_client(config)?;
 
     Ok(Client::with_config(openai_config).with_http_client(http_client))
 }
 
 /// Build a `reqwest` 0.12 client with SkillStar's proxy settings applied.
-fn build_proxy_aware_client() -> Result<reqwest_012::Client> {
+fn build_proxy_aware_client(config: &AiConfig) -> Result<reqwest_012::Client> {
     use skillstar_core::config::proxy;
 
     let mut builder = reqwest_012::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
+        .timeout(request_timeout_duration(config))
         .connect_timeout(std::time::Duration::from_secs(10))
         .pool_idle_timeout(std::time::Duration::from_secs(90))
         .pool_max_idle_per_host(4);
 
-    if let Ok(proxy_config) = proxy::load_config() {
-        if proxy_config.enabled && !proxy_config.host.trim().is_empty() {
+    if let Ok(proxy_config) = proxy::load_config()
+        && proxy_config.enabled && !proxy_config.host.trim().is_empty() {
             let scheme = proxy_config.proxy_type.as_scheme();
             let proxy_url = format!("{}://{}:{}", scheme, proxy_config.host, proxy_config.port);
 
             let mut proxy =
                 reqwest_012::Proxy::all(&proxy_url).context("Invalid proxy URL for AI client")?;
 
-            if let Some(ref username) = proxy_config.username {
-                if !username.is_empty() {
+            if let Some(ref username) = proxy_config.username
+                && !username.is_empty() {
                     let password = proxy_config.password.as_deref().unwrap_or("");
                     proxy = proxy.basic_auth(username, password);
                 }
-            }
 
             builder = builder.proxy(proxy);
         }
-    }
 
     builder.build().context("Failed to build AI HTTP client")
 }
@@ -81,11 +80,10 @@ fn normalize_base_url(base_url: &str) -> String {
         base = base.trim_end_matches("/chat/completions").trim_end_matches('/');
     }
     // Auto-insert /v1 for bare host:port URLs (e.g. http://host:1234)
-    if let Some(after_scheme) = base.split_once("://").map(|(_, rest)| rest) {
-        if !after_scheme.contains('/') {
+    if let Some(after_scheme) = base.split_once("://").map(|(_, rest)| rest)
+        && !after_scheme.contains('/') {
             return format!("{}/v1", base);
         }
-    }
     base.to_string()
 }
 
@@ -202,12 +200,11 @@ where
         match result {
             Ok(response) => {
                 for choice in &response.choices {
-                    if let Some(ref content) = choice.delta.content {
-                        if !content.is_empty() {
+                    if let Some(ref content) = choice.delta.content
+                        && !content.is_empty() {
                             translated.push_str(content);
                             on_delta(content)?;
                         }
-                    }
                 }
             }
             Err(e) => {

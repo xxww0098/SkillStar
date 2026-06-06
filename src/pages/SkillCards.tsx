@@ -153,7 +153,7 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
       setBackendInstalledNames(next);
       return next;
     } catch (e) {
-      console.error("Failed to refresh installed skills snapshot:", e);
+      if (import.meta.env.DEV) console.error("Failed to refresh installed skills snapshot:", e);
       return null;
     }
   }, []);
@@ -202,7 +202,7 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
             await toggleSkillForAgent(skillName, agentId, !allLinked, agentName);
           } catch (e) {
             failed += 1;
-            console.error("Batch toggle failed for skill:", skillName, e);
+            if (import.meta.env.DEV) console.error("Batch toggle failed for skill:", skillName, e);
           }
         }
 
@@ -233,7 +233,7 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
       await deleteGroup(id);
       setMenuOpenId(null);
     } catch (e) {
-      console.error("Delete failed:", e);
+      if (import.meta.env.DEV) console.error("Delete failed:", e);
     }
   };
 
@@ -242,7 +242,7 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
       await duplicateGroup(id);
       setMenuOpenId(null);
     } catch (e) {
-      console.error("Duplicate failed:", e);
+      if (import.meta.env.DEV) console.error("Duplicate failed:", e);
     }
   };
 
@@ -290,7 +290,7 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
           if (url) nextSources[name] = url;
         }
       } catch (e) {
-        console.error("[SkillCards] resolve_skill_sources failed:", e);
+        if (import.meta.env.DEV) console.error("[SkillCards] resolve_skill_sources failed:", e);
       }
     }
 
@@ -340,7 +340,7 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
           await installSkill(item.url, item.name);
           successCount++;
         } catch (e) {
-          console.error(`Failed to install ${item.name}:`, e);
+          if (import.meta.env.DEV) console.error(`Failed to install ${item.name}:`, e);
           failedNames.push(item.name);
         }
         // Update progress

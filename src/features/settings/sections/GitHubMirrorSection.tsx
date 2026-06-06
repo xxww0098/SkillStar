@@ -1,5 +1,5 @@
 import { Check, ChevronDown, Loader2, Wifi, WifiOff, Zap } from "lucide-react";
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Input } from "../../../components/ui/input";
 import { Switch } from "../../../components/ui/switch";
@@ -17,7 +17,7 @@ interface GitHubMirrorSectionProps {
   onConfigChange: (next: GitHubMirrorConfig) => void;
 }
 
-export function GitHubMirrorSection({
+export const GitHubMirrorSection = memo(function GitHubMirrorSection({
   mirrorConfig,
   ready,
   mirrorExpanded,
@@ -304,4 +304,4 @@ export function GitHubMirrorSection({
       </div>
     </section>
   );
-}
+});

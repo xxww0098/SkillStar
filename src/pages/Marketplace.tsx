@@ -193,7 +193,7 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
           setTimeout(() => setInstallStatus(null), 4000);
           return;
         }
-        console.error("[Marketplace] Install failed:", e);
+        if (import.meta.env.DEV) console.error("[Marketplace] Install failed:", e);
         toast.error(String(e) ? `${t("mySkills.installFailed")}: ${String(e)}` : t("mySkills.installFailed"));
       } finally {
         setInstallingNames((prev) => {
@@ -216,7 +216,7 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
         }));
         setSelectedSkill((prev) => (prev?.name === name ? { ...prev, update_available: false } : prev));
       } catch (e) {
-        console.error("Update failed:", e);
+        if (import.meta.env.DEV) console.error("Update failed:", e);
         const reason = e instanceof Error ? e.message : String(e);
         toast.error(reason ? `${t("marketplace.updateFailed")}: ${reason}` : t("marketplace.updateFailed"));
       }
@@ -247,7 +247,7 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
           );
         }
       } catch (e) {
-        console.error("[Marketplace] Uninstall failed:", e);
+        if (import.meta.env.DEV) console.error("[Marketplace] Uninstall failed:", e);
         toast.error(t("marketplace.uninstallFailed"));
       }
     },
@@ -260,7 +260,7 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
         await uninstallSkill(name);
         await handleInstall(url, name);
       } catch (e) {
-        console.error("[Marketplace] Reinstall failed:", e);
+        if (import.meta.env.DEV) console.error("[Marketplace] Reinstall failed:", e);
         toast.error(t("marketplace.reinstallFailed"));
       }
     },
@@ -555,6 +555,7 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
               viewMode={viewMode}
               columnStrategy="auto-fill"
               minColumnWidth={320}
+              scrollParentRef={scrollRef}
               onSkillClick={(skill) => setSelectedSkill((prev) => (prev?.name === skill.name ? null : skill))}
               onInstall={handleInstall}
               installingNames={installingNames}

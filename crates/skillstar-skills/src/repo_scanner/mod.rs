@@ -43,13 +43,19 @@ pub struct RepoNewSkill {
     pub description: String,
 }
 
-fn upsert_repo_history_entry(_source: &str, _repo_url: &str) -> anyhow::Result<()> { Ok(()) }
+fn upsert_repo_history_entry(_source: &str, _repo_url: &str) -> anyhow::Result<()> {
+    Ok(())
+}
 
 pub fn scan_repo_with_mode(input: &str, full_depth: bool) -> anyhow::Result<ScanResult> {
-    let (repo_url, source) = crate::source_resolver::normalize_repo_url(input)
-        .context("Invalid repository URL")?;
+    let (repo_url, source) =
+        crate::source_resolver::normalize_repo_url(input).context("Invalid repository URL")?;
     let repo_dir = clone_or_fetch_repo(&repo_url, &source)?;
     let skills = scan_skills_in_repo(&repo_dir, &repo_url, full_depth);
     let _ = upsert_repo_history_entry(&source, &repo_url);
-    Ok(ScanResult { source, source_url: repo_url, skills })
+    Ok(ScanResult {
+        source,
+        source_url: repo_url,
+        skills,
+    })
 }

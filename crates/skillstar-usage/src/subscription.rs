@@ -57,6 +57,22 @@ pub struct Subscription {
     #[serde(default)]
     pub requires_reauth: bool,
 
+    /// Optional fingerprint id (see `skillstar-fingerprint`). When `Some`,
+    /// the fetcher dispatcher resolves the fingerprint from the store and
+    /// builds a `FingerprintAwareClient`; when `None`, falls back to the
+    /// reqwest-default client used by SkillStar before v0.4.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fingerprint_id: Option<String>,
+
+    // -- Cookie mode --
+    /// JSON-serialised Vec<CookieEntry> encrypted with AES-256-GCM.
+    /// Cookies are parsed from the raw `Cookie:` header the user pastes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cookie_jar_encrypted: Option<String>,
+    /// Epoch seconds after which the session is assumed dead (user must re-paste).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cookie_session_expires_at: Option<i64>,
+
     // -- Manual mode --
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub manual_quota: Option<ManualQuota>,
@@ -118,8 +134,27 @@ pub struct SubscriptionUsage {
     pub monthly: Option<UsageWindow>,
     pub balance: Option<MonetaryBalance>,
 
+    /// Credits visible in paid tiers (e.g. Antigravity paidTier.availableCredits).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub credits: Vec<CreditInfo>,
+
     /// Set when the fetch failed but the subscription is still valid.
     pub error: Option<String>,
+
+    /// OpenCode API keys discovered from the control panel (display only).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub api_keys: Vec<OpenCodeApiKey>,
+}
+
+/// Display-only metadata for an OpenCode API key. The full key is **never**
+/// stored here — it lives encrypted on the [`Subscription`] itself.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenCodeApiKey {
+    pub id: String,
+    pub name: String,
+    /// Masked display like `"sk-ZFY8...9ESf"`.
+    pub display: String,
+    pub email: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,6 +170,20 @@ pub struct UsageWindow {
     /// Epoch seconds at which this window resets (if known).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reset_at: Option<i64>,
+    /// Nested sub-quotas (e.g. Cursor's Auto+Composer / API split under Total).
+    /// The UI renders these inside a visual container beneath the main bar.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub breakdown: Vec<UsageWindow>,
+}
+
+/// Credit info extracted from paid tiers (e.g. Antigravity paidTier.availableCredits).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreditInfo {
+    pub credit_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credit_amount: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minimum_credit_amount_for_usage: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

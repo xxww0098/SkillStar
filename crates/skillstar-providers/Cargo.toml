@@ -1,0 +1,11 @@
+[package]
+name = "skillstar-providers"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94.1"
+
+# Zero-dependency leaf crate: the single source of truth for provider metadata
+# (balance endpoints, auth schemes, …). Both the usage-side fetchers and the
+# models-side presets derive from the tables defined here, so the data lives in
+# exactly one place. Keep this crate dependency-free so every layer can use it.
+[dependencies]

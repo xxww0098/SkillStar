@@ -1,4 +1,4 @@
-//! Fixed catalog of 18 supported providers.
+//! Fixed catalog of supported providers.
 //!
 //! Users can only create subscriptions from this list — there is no
 //! "custom provider" escape hatch in v1. Missing providers should be added
@@ -11,16 +11,19 @@ use serde::{Deserialize, Serialize};
 pub enum AuthMode {
     ApiKey,
     OAuth,
+    Cookie,
     Manual,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum CatalogTier {
-    /// OAuth — v1 implements 5 of these.
+    /// OAuth — v1 implements 12 of these.
     OAuth,
     /// Public API-key endpoint — v1 implements 4.
     ApiKey,
+    /// Cookie-based web session.
+    Cookie,
     /// Manual entry only.
     Manual,
 }
@@ -48,6 +51,9 @@ pub struct CatalogEntry {
 const NO_REGIONS: &[&str] = &[];
 const TRAE_REGIONS: &[&str] = &["cn", "sg", "us", "ttp"];
 
+// A flat positional builder keeps the static catalog table below compact and
+// readable; a struct-with-builder would bloat each of the ~20 rows.
+#[allow(clippy::too_many_arguments)]
 const fn entry(
     id: &'static str,
     display_name: &'static str,
@@ -74,21 +80,22 @@ const fn entry(
 
 // Authentication-mode tuples (cannot reference statics inside a const struct
 // literal directly across all toolchains, so define as `&[AuthMode]` consts).
-const OAUTH_ONLY: &[AuthMode] = &[AuthMode::OAuth, AuthMode::Manual];
-const APIKEY_ONLY: &[AuthMode] = &[AuthMode::ApiKey, AuthMode::Manual];
+const OAUTH_ONLY: &[AuthMode] = &[AuthMode::OAuth];
+const APIKEY_ONLY: &[AuthMode] = &[AuthMode::ApiKey];
 const MANUAL_ONLY: &[AuthMode] = &[AuthMode::Manual];
+const COOKIE_MANUAL: &[AuthMode] = &[AuthMode::Cookie, AuthMode::Manual];
 
-/// Returns the full fixed catalog (18 entries).
+/// Returns the full fixed catalog.
 pub fn catalog() -> Vec<CatalogEntry> {
     vec![
-        // ── Tier 1: OAuth (5) ──────────────────────────────────────────
+        // ── Tier 1: OAuth (9) ──────────────────────────────────────────
         CatalogEntry {
             id: "cursor",
             display_name: "Cursor",
             description: "AI Code Editor",
             tier: CatalogTier::OAuth,
             auth_modes: OAUTH_ONLY,
-            brand_color: "000000",
+            brand_color: "00E5BC",
             default_currency: "USD",
             subscription_url: "https://cursor.com/settings",
             warning: None,
@@ -142,11 +149,59 @@ pub fn catalog() -> Vec<CatalogEntry> {
             warning: None,
             regions: NO_REGIONS,
         },
+        CatalogEntry {
+            id: "kiro",
+            display_name: "Kiro",
+            description: "AWS AI IDE",
+            tier: CatalogTier::OAuth,
+            auth_modes: OAUTH_ONLY,
+            brand_color: "6366F1",
+            default_currency: "USD",
+            subscription_url: "https://kiro.dev/docs/billing/upgrading",
+            warning: Some(
+                "OAuth 流程基于社区蓝本，请优先使用 Google / GitHub 登录；Builder ID / IdC 需 Kiro 客户端完成认证。",
+            ),
+            regions: NO_REGIONS,
+        },
+        CatalogEntry {
+            id: "windsurf",
+            display_name: "Windsurf",
+            description: "Codeium IDE",
+            tier: CatalogTier::OAuth,
+            auth_modes: OAUTH_ONLY,
+            brand_color: "0EA5E9",
+            default_currency: "USD",
+            subscription_url: "https://windsurf.com/pricing",
+            warning: None,
+            regions: NO_REGIONS,
+        },
+        CatalogEntry {
+            id: "github-copilot",
+            display_name: "GitHub Copilot",
+            description: "IDE Copilot",
+            tier: CatalogTier::OAuth,
+            auth_modes: OAUTH_ONLY,
+            brand_color: "24292F",
+            default_currency: "USD",
+            subscription_url: "https://github.com/settings/copilot",
+            warning: None,
+            regions: NO_REGIONS,
+        },
+        entry(
+            "xai",
+            "Grok",
+            "xAI Grok CLI",
+            CatalogTier::OAuth,
+            OAUTH_ONLY,
+            "111111",
+            "USD",
+            "https://x.ai",
+        ),
         // ── Tier 2: API Key (4) ────────────────────────────────────────
         entry(
             "deepseek",
             "DeepSeek",
-            "Coding Plan",
+            "API Key 余额",
             CatalogTier::ApiKey,
             APIKEY_ONLY,
             "1A56DB",
@@ -183,7 +238,7 @@ pub fn catalog() -> Vec<CatalogEntry> {
             "CNY",
             "https://platform.minimaxi.com/user-center/basic-information/interface-key",
         ),
-        // ── Tier 3: Manual (9) ─────────────────────────────────────────
+        // ── Tier 3: Manual (2) + Cookie (1) ────────────────────────────
         entry(
             "xiaomi-mimo",
             "小米 MiMo",
@@ -193,30 +248,6 @@ pub fn catalog() -> Vec<CatalogEntry> {
             "FF6700",
             "CNY",
             "https://platform.xiaomimimo.com/console/plan-manage",
-        ),
-        CatalogEntry {
-            id: "volc-ark",
-            display_name: "火山方舟",
-            description: "豆包 Coding Plan",
-            tier: CatalogTier::Manual,
-            auth_modes: MANUAL_ONLY,
-            brand_color: "1664FF",
-            default_currency: "CNY",
-            subscription_url: "https://www.volcengine.com/product/ark",
-            warning: Some(
-                "服务条款禁止直接 API 调用 Coding Plan key，请在控制台查看后手动维护。",
-            ),
-            regions: NO_REGIONS,
-        },
-        entry(
-            "tencent-hy3",
-            "腾讯 Hy3",
-            "Token Plan",
-            CatalogTier::Manual,
-            MANUAL_ONLY,
-            "00A4FF",
-            "CNY",
-            "https://hunyuan.tencent.com",
         ),
         entry(
             "stepfun",
@@ -228,56 +259,21 @@ pub fn catalog() -> Vec<CatalogEntry> {
             "CNY",
             "https://platform.stepfun.com/account-overview",
         ),
-        entry(
-            "alibaba-bailian",
-            "阿里百炼",
-            "通义 / Bailian",
-            CatalogTier::Manual,
-            MANUAL_ONLY,
-            "FF6A00",
-            "CNY",
-            "https://bailian.console.aliyun.com",
-        ),
-        entry(
-            "iflytek-spark",
-            "讯飞星火",
-            "Astron Coding Plan",
-            CatalogTier::Manual,
-            MANUAL_ONLY,
-            "1E88E5",
-            "CNY",
-            "https://console.xfyun.cn",
-        ),
-        entry(
-            "baichuan",
-            "百川 Baichuan",
-            "Baichuan API",
-            CatalogTier::Manual,
-            MANUAL_ONLY,
-            "FFB400",
-            "CNY",
-            "https://platform.baichuan-ai.com",
-        ),
-        entry(
-            "lingyi",
-            "零一万物",
-            "Yi / 01.AI",
-            CatalogTier::Manual,
-            MANUAL_ONLY,
-            "0EA5E9",
-            "CNY",
-            "https://platform.lingyiwanwu.com",
-        ),
-        entry(
-            "shangtang",
-            "商汤日日新",
-            "SenseChat",
-            CatalogTier::Manual,
-            MANUAL_ONLY,
-            "EF4444",
-            "CNY",
-            "https://console.sensecore.cn",
-        ),
+        // ── OpenCode first-party services ──────────────────────────────
+        CatalogEntry {
+            id: "opencode",
+            display_name: "OpenCode",
+            description: "$10/月 Go 订阅 · Zen 按量付费",
+            tier: CatalogTier::Cookie,
+            auth_modes: COOKIE_MANUAL,
+            brand_color: "6366F1",
+            default_currency: "USD",
+            subscription_url: "https://opencode.ai/workspace",
+            warning: Some(
+                "OpenCode 官方 OAuth token 无法读取控制台用量；请使用 Cookie 模式，从 opencode.ai 控制台请求中复制 Cookie。",
+            ),
+            regions: NO_REGIONS,
+        },
     ]
 }
 
@@ -291,8 +287,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn catalog_has_18_entries() {
-        assert_eq!(catalog().len(), 18);
+    fn catalog_has_16_entries() {
+        assert_eq!(catalog().len(), 16);
     }
 
     #[test]
@@ -309,10 +305,12 @@ mod tests {
         let c = catalog();
         let oauth = c.iter().filter(|e| e.tier == CatalogTier::OAuth).count();
         let api_key = c.iter().filter(|e| e.tier == CatalogTier::ApiKey).count();
+        let cookie = c.iter().filter(|e| e.tier == CatalogTier::Cookie).count();
         let manual = c.iter().filter(|e| e.tier == CatalogTier::Manual).count();
-        assert_eq!(oauth, 5);
+        assert_eq!(oauth, 9);
         assert_eq!(api_key, 4);
-        assert_eq!(manual, 9);
+        assert_eq!(cookie, 1);
+        assert_eq!(manual, 2);
     }
 
     #[test]
@@ -322,8 +320,31 @@ mod tests {
     }
 
     #[test]
-    fn volc_ark_has_warning() {
-        let volc = find("volc-ark").expect("volc-ark catalog entry");
-        assert!(volc.warning.is_some());
+    fn auto_fetch_providers_exclude_manual_auth() {
+        for entry in catalog() {
+            let auto_fetch = entry.auth_modes.contains(&AuthMode::OAuth)
+                || entry.auth_modes.contains(&AuthMode::ApiKey);
+            if auto_fetch {
+                assert!(
+                    !entry.auth_modes.contains(&AuthMode::Manual),
+                    "catalog `{}` supports auto fetch but still exposes manual auth",
+                    entry.id
+                );
+            }
+        }
+    }
+
+    /// Every catalog id must resolve to exactly one canonical provider identity
+    /// in `skillstar-providers`. This pins the usage-side half of the
+    /// catalog↔preset id reconciliation so the two can never silently drift.
+    #[test]
+    fn every_catalog_id_resolves_to_a_provider_identity() {
+        for entry in catalog() {
+            assert!(
+                skillstar_providers::identity::identity_for_catalog(entry.id).is_some(),
+                "catalog id `{}` has no provider identity in skillstar-providers",
+                entry.id
+            );
+        }
     }
 }

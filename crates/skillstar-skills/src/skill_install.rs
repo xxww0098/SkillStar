@@ -1,10 +1,12 @@
-use crate::{installed_skill, local_skill, lockfile, project_manifest, repo_scanner};
-use skillstar_core::types::{Skill, SkillCategory, SkillType, extract_github_source_from_url, extract_skill_description};
-use crate::git::ops as git_ops;
-use skillstar_core::infra::{fs_ops, paths};
-use skillstar_projects::projects::sync;
 use crate::frontmatter::{render_with_front_matter, split_front_matter};
+use crate::git::ops as git_ops;
+use crate::{installed_skill, local_skill, lockfile, project_manifest, repo_scanner};
 use serde_yaml::{Mapping, Value};
+use skillstar_core::infra::{fs_ops, paths};
+use skillstar_core::types::{
+    Skill, SkillCategory, SkillType, extract_github_source_from_url, extract_skill_description,
+};
+use skillstar_projects::projects::sync;
 use std::path::{Path, PathBuf};
 use tracing::warn;
 
@@ -166,8 +168,8 @@ fn try_install_from_repo_cache(
     let target = find_target_skill(&skills_found, requested_name, name_hint);
 
     // Guard against overwriting a local skill whose name matches the repo skill
-    if let Some(skill) = &target {
-        if local_skill_blocks_repo_install(&skill.id) {
+    if let Some(skill) = &target
+        && local_skill_blocks_repo_install(&skill.id) {
             warn!(
                 target: "install_skill",
                 skill_id = %skill.id,
@@ -175,7 +177,6 @@ fn try_install_from_repo_cache(
             );
             return Ok(None);
         }
-    }
 
     let Some(skill) = target else {
         warn!(
@@ -255,7 +256,7 @@ pub fn install_skill(url: String, name: Option<String>) -> Result<Skill, String>
     let lock_path = lockfile::lockfile_path();
     let mut lockfile = lockfile::Lockfile::load(&lock_path)
         .map_err(|e| format!("Failed to load lockfile '{}': {}", lock_path.display(), e))?;
-    lockfile.upsert(lockfile::LockEntry {
+    lockfile.upsert(skillstar_core::types::lockfile::LockEntry {
         name: name_hint.clone(),
         git_url: url.clone(),
         tree_hash: tree_hash.clone(),
@@ -427,8 +428,8 @@ mod tests {
     use super::{
         RepoInstallProvenance, derive_name_hint, find_target_skill, write_repo_install_provenance,
     };
-    use crate::repo_scanner::DiscoveredSkill;
     use crate::frontmatter::split_front_matter;
+    use crate::repo_scanner::DiscoveredSkill;
     use serde_yaml::Value;
 
     fn discovered(id: &str) -> DiscoveredSkill {

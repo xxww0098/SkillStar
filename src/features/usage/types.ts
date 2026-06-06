@@ -1,8 +1,14 @@
 // Mirrors `src-tauri/src/commands/usage_dto.rs`. Keep in sync.
 
-export type AuthMode = "api-key" | "o-auth" | "manual";
+export type AuthMode = "api-key" | "o-auth" | "cookie" | "manual";
 
-export type CatalogTier = "o-auth" | "api-key" | "manual";
+/** Auth modes shown in the subscription dialog — drops manual when auto-fetch is available. */
+export function selectableAuthModes(modes: AuthMode[]): AuthMode[] {
+  const hasAutoFetch = modes.includes("o-auth") || modes.includes("api-key");
+  return hasAutoFetch ? modes.filter((mode) => mode !== "manual") : modes;
+}
+
+export type CatalogTier = "o-auth" | "api-key" | "cookie" | "manual";
 
 export type BillingCycle = "monthly" | "annual" | "one-time";
 
@@ -35,6 +41,8 @@ export interface UsageWindow {
   total: number | null;
   percent: number | null;
   reset_at: number | null;
+  /** Nested sub-quotas rendered inside a visual container under this bar. */
+  breakdown?: UsageWindow[];
 }
 
 export interface MonetaryBalance {
@@ -42,6 +50,19 @@ export interface MonetaryBalance {
   total: number;
   granted: number;
   topped_up: number;
+}
+
+export interface CreditInfo {
+  credit_type: string;
+  credit_amount?: string | null;
+  minimum_credit_amount_for_usage?: string | null;
+}
+
+export interface OpenCodeApiKey {
+  id: string;
+  name: string;
+  display: string;
+  email: string | null;
 }
 
 export interface SubscriptionUsage {
@@ -52,7 +73,9 @@ export interface SubscriptionUsage {
   weekly: UsageWindow | null;
   monthly: UsageWindow | null;
   balance: MonetaryBalance | null;
+  credits: CreditInfo[];
   error: string | null;
+  api_keys: OpenCodeApiKey[];
 }
 
 export interface Subscription {
@@ -69,6 +92,12 @@ export interface Subscription {
   auto_renew: boolean;
   has_credential: boolean;
   requires_reauth: boolean;
+  /** Bound fingerprint id (see `features/fingerprints`). Absent → reqwest default. */
+  fingerprint_id?: string;
+  /** `true` when this row is the currently-pinned account for its catalog
+   *  (Phase 7 multi-account). At most one per catalog_id. */
+  is_active?: boolean;
+  oauth_region?: string;
   manual_quota: ManualQuota | null;
   note: string | null;
   sort_index: number;
@@ -92,6 +121,10 @@ export interface CreateSubscriptionInput {
   oauth_region?: string;
   manual_quota?: ManualQuota;
   note?: string;
+  /** Raw `Cookie:` header pasted from browser DevTools (Cookie mode only). */
+  cookie_header?: string;
+  /** Bind this new subscription to a stored fingerprint id. */
+  fingerprint_id?: string;
 }
 
 export interface UpdateSubscriptionInput {
@@ -106,6 +139,12 @@ export interface UpdateSubscriptionInput {
   api_key?: string;
   manual_quota?: ManualQuota;
   note?: string;
+  /** Raw `Cookie:` header to replace existing cookies (Cookie mode only). */
+  cookie_header?: string;
+  /** Bind to a fingerprint id (use `clearFingerprint` to remove the binding). */
+  fingerprint_id?: string;
+  /** When `true`, drop any existing fingerprint binding regardless of `fingerprint_id`. */
+  clearFingerprint?: boolean;
 }
 
 export interface SubscriptionAlert {
@@ -131,7 +170,35 @@ export interface UsageSummary {
 export interface OAuthStart {
   pending_id: string;
   auth_url: string;
+  /** GitHub Device Flow — show in UI for manual entry. */
+  user_code?: string | null;
+  verification_uri?: string | null;
 }
+
+export interface CookieImportSession {
+  session_id: string;
+  token: string;
+  bind_url: string;
+  provider: string;
+  url: string;
+  expires_in_secs: number;
+}
+
+export interface CookieImportStatus {
+  status: "pending" | "completed" | "error" | "expired";
+  subscription_id: string | null;
+  error: string | null;
+}
+
+export interface CookieBridgeBindingStatus {
+  provider: string;
+  bound: boolean;
+  subscription_id: string | null;
+  updated_at: number | null;
+}
+
+/** Catalog ids that support `import_subscription_from_local`. */
+export const LOCAL_IMPORT_CATALOG_IDS = ["codex", "antigravity", "qoder"] as const;
 
 /** Sidebar selection: "all" | a specific catalog id. */
 export type CatalogFilter = string;

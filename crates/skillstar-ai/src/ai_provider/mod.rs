@@ -12,6 +12,7 @@ pub mod http_client;
 pub mod openai_client;
 pub mod scan_params;
 pub mod skill_pick;
+pub mod translate;
 
 #[allow(unused_imports)]
 pub use config::{AiConfig, AiProviderRef, ApiFormat, FormatPreset};
@@ -23,8 +24,10 @@ use constants::{
     SKILL_PICK_MAX_RECOMMENDATIONS, SUMMARY_MAX_TOKENS,
 };
 
-static AI_REQUEST_SEMAPHORE: LazyLock<Mutex<Option<(u32, Arc<tokio::sync::Semaphore>)>>> =
-    LazyLock::new(|| Mutex::new(None));
+/// Cached concurrency limiter: `(budget, semaphore)` rebuilt when the budget changes.
+type SemaphoreCache = Mutex<Option<(u32, Arc<tokio::sync::Semaphore>)>>;
+
+static AI_REQUEST_SEMAPHORE: LazyLock<SemaphoreCache> = LazyLock::new(|| Mutex::new(None));
 
 // ── AiConfig In-Memory Cache ────────────────────────────────────────
 //
@@ -44,7 +47,7 @@ pub fn invalidate_config_cache() {
 }
 
 fn ai_request_concurrency_budget(config: &AiConfig) -> u32 {
-    resolve_scan_params(config).max_concurrent_requests.max(1)
+    config.max_concurrent_requests.max(1)
 }
 
 fn get_ai_request_semaphore(config: &AiConfig) -> Result<Arc<tokio::sync::Semaphore>> {
@@ -53,11 +56,10 @@ fn get_ai_request_semaphore(config: &AiConfig) -> Result<Arc<tokio::sync::Semaph
         .lock()
         .map_err(|_| anyhow::anyhow!("AI request semaphore lock poisoned"))?;
 
-    if let Some((cached_budget, semaphore)) = guard.as_ref() {
-        if *cached_budget == budget {
+    if let Some((cached_budget, semaphore)) = guard.as_ref()
+        && *cached_budget == budget {
             return Ok(semaphore.clone());
         }
-    }
 
     let semaphore = Arc::new(tokio::sync::Semaphore::new(budget as usize));
     *guard = Some((budget, semaphore.clone()));
@@ -135,13 +137,11 @@ fn decrypt_api_key(encoded: &str) -> String {
 #[must_use]
 pub fn load_config() -> AiConfig {
     // Try in-memory cache first (avoids disk read + AES decrypt).
-    if let Ok(guard) = AI_CONFIG_CACHE.lock() {
-        if let Some((ts, cached)) = guard.as_ref() {
-            if ts.elapsed() < AI_CONFIG_CACHE_TTL {
+    if let Ok(guard) = AI_CONFIG_CACHE.lock()
+        && let Some((ts, cached)) = guard.as_ref()
+            && ts.elapsed() < AI_CONFIG_CACHE_TTL {
                 return cached.clone();
             }
-        }
-    }
 
     let fresh = load_config_from_disk();
 
@@ -224,17 +224,24 @@ pub async fn save_config_async(config: &AiConfig) -> Result<()> {
         .map_err(|err| anyhow::anyhow!("save_config task failed: {}", err))?
 }
 
+// ── TOML helpers (legacy Codex config.toml parsing) ─────────────────
+
+/// Scan all lines in `config_text` for a top-level `field = "value"` assignment.
+///
+/// Intentionally ignores TOML section headers so it can find fields regardless
+/// of nesting level — Codex uses both flat (`base_url = "…"`) and nested
+/// (`[model_providers.X] / base_url = "…"`) formats, and the first match wins.
 fn parse_toml_string_field(config_text: &str, field: &str) -> Option<String> {
+    let prefix = format!("{field} =");
     for line in config_text.lines() {
         let trimmed = line.trim();
-        let prefix = format!("{field} =");
         if !trimmed.starts_with(&prefix) {
             continue;
         }
         let rhs = trimmed.split_once('=')?.1.trim();
         if rhs.starts_with('"') {
             let mut chars = rhs.chars();
-            let _ = chars.next();
+            let _ = chars.next(); // consume opening quote
             let mut collected = String::new();
             for ch in chars {
                 if ch == '"' {
@@ -242,11 +249,179 @@ fn parse_toml_string_field(config_text: &str, field: &str) -> Option<String> {
                 }
                 collected.push(ch);
             }
-            return Some(collected).filter(|value| !value.trim().is_empty());
+            return Some(collected).filter(|v| !v.trim().is_empty());
         }
     }
     None
 }
+
+/// Extract `base_url` from the active `[model_providers.<id>]` table.
+///
+/// Codex config.toml can use the nested format:
+/// ```toml
+/// model_provider = "ccswitch"
+///
+/// [model_providers.ccswitch]
+/// base_url = "https://..."
+/// wire_api = "responses"
+/// ```
+/// This helper finds the active provider section and returns its `base_url`.
+fn parse_codex_active_provider_base_url(config_text: &str) -> Option<String> {
+    let model_provider = parse_toml_string_field(config_text, "model_provider")?;
+    let section_header = format!("[model_providers.{model_provider}]");
+    let mut in_section = false;
+
+    for line in config_text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            in_section = trimmed == section_header.as_str();
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        let prefix = "base_url =";
+        if trimmed.starts_with(prefix) {
+            let rhs = trimmed.split_once('=')?.1.trim();
+            if rhs.starts_with('"') {
+                let inner: String = rhs
+                    .chars()
+                    .skip(1)
+                    .take_while(|&c| c != '"')
+                    .collect();
+                let inner = inner.trim();
+                if !inner.is_empty() {
+                    return Some(inner.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+// ── Meta helpers ────────────────────────────────────────────────────
+
+/// Extract a non-empty string value from a JSON meta object.
+fn get_meta_str(meta: &Option<serde_json::Value>, key: &str) -> Option<String> {
+    meta.as_ref()
+        .and_then(|m| m.get(key))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+fn meta_u64(meta: &Option<serde_json::Value>, key: &str) -> Option<u64> {
+    meta.as_ref().and_then(|m| m.get(key)).and_then(|v| {
+        v.as_u64()
+            .or_else(|| v.as_i64().and_then(|n| u64::try_from(n).ok()))
+            .or_else(|| v.as_f64().map(|n| n as u64))
+    })
+}
+
+/// Apply per-provider HTTP tuning from `model_providers.json` meta into runtime config.
+fn apply_provider_request_meta(config: &mut AiConfig, meta: &Option<serde_json::Value>) {
+    let timeout = meta_u64(meta, "timeout").filter(|&s| (5..=600).contains(&s));
+    config.request_timeout_secs = timeout;
+}
+
+// ── Provider resolution: flat store (v2) ────────────────────────────
+
+/// Resolve a provider reference from the flat (v2) provider store.
+///
+/// The flat store is the primary source of truth for providers configured
+/// through the Models UI. It stores structured fields (`base_url_openai`,
+/// `base_url_anthropic`, `api_key`, `default_model`, `meta`) rather than
+/// app-specific raw config blobs.
+///
+/// Claude config field mapping:
+/// - `base_url_anthropic` (→ fallback `base_url_openai`) → `ANTHROPIC_BASE_URL`
+/// - `api_key`            → `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY`
+/// - `meta.claude_main_model` | `default_model`  → `ANTHROPIC_MODEL`
+/// - `meta.claude_haiku_model`   → `ANTHROPIC_DEFAULT_HAIKU_MODEL`
+/// - `meta.claude_sonnet_model`  → `ANTHROPIC_DEFAULT_SONNET_MODEL`
+/// - `meta.claude_opus_model`    → `ANTHROPIC_DEFAULT_OPUS_MODEL`
+///
+/// Codex config field mapping:
+/// - `base_url_openai`    → `~/.codex/config.toml: base_url`
+/// - `api_key`            → `~/.codex/auth.json: OPENAI_API_KEY`
+/// - `default_model`      → `~/.codex/config.toml: model`
+fn resolve_from_flat_store(
+    config: &mut AiConfig,
+    app_id: &str,
+    provider_id: &str,
+) -> Result<String> {
+    let path = providers::flat_store_path();
+    let store = providers::read_flat_store(&path)
+        .context("Failed to read flat provider store")?;
+
+    let entry = store
+        .providers
+        .iter()
+        .find(|p| p.id == provider_id)
+        .ok_or_else(|| anyhow::anyhow!("Provider not found in flat store: {provider_id}"))?;
+
+    let label = entry.name.clone();
+
+    match app_id {
+        "claude" => {
+            if entry.api_key.trim().is_empty() {
+                anyhow::bail!("{label} is missing an API key");
+            }
+
+            // Prefer dedicated Anthropic endpoint; fall back to OpenAI-compatible.
+            let base_url = [entry.base_url_anthropic.trim(), entry.base_url_openai.trim()]
+                .iter()
+                .copied()
+                .find(|s| !s.is_empty())
+                .unwrap_or("https://api.anthropic.com")
+                .to_string();
+
+            // Main model: claude_main_model meta > default_model > hard default
+            let model = get_meta_str(&entry.meta, "claude_main_model")
+                .or_else(|| {
+                    let dm = entry.default_model.trim();
+                    if dm.is_empty() { None } else { Some(dm.to_string()) }
+                })
+                .unwrap_or_else(|| "claude-sonnet-4-20250514".to_string());
+
+            config.api_format = ApiFormat::Anthropic;
+            config.api_key = entry.api_key.trim().to_string();
+            config.base_url = base_url;
+            config.model = model;
+            config.claude_haiku_model  = get_meta_str(&entry.meta, "claude_haiku_model");
+            config.claude_sonnet_model = get_meta_str(&entry.meta, "claude_sonnet_model");
+            config.claude_opus_model   = get_meta_str(&entry.meta, "claude_opus_model");
+            apply_provider_request_meta(config, &entry.meta);
+        }
+        "codex" => {
+            if entry.api_key.trim().is_empty() {
+                anyhow::bail!("{label} is missing an API key");
+            }
+
+            let base_url = {
+                let url = entry.base_url_openai.trim();
+                if url.is_empty() { "https://api.openai.com/v1".to_string() } else { url.to_string() }
+            };
+
+            let model = {
+                let dm = entry.default_model.trim();
+                if dm.is_empty() { "gpt-5.4".to_string() } else { dm.to_string() }
+            };
+
+            config.api_format = ApiFormat::Openai;
+            config.api_key = entry.api_key.trim().to_string();
+            config.base_url = base_url;
+            config.model = model;
+            apply_provider_request_meta(config, &entry.meta);
+        }
+        _ => anyhow::bail!("Unsupported AI provider app: {app_id}"),
+    }
+
+    Ok(label)
+}
+
+// ── Provider resolution: legacy store (v1) ──────────────────────────
 
 fn select_provider_app<'a>(
     store: &'a providers::ProvidersStore,
@@ -259,18 +434,18 @@ fn select_provider_app<'a>(
     }
 }
 
-pub fn resolve_provider_ref_parts(
+/// Resolve a provider reference from the legacy (v1) per-app provider store.
+///
+/// The v1 store uses app-specific config blobs:
+///
+/// Claude: `settings_config["env"]` — ANTHROPIC_* env vars
+/// Codex:  `settings_config["auth"]["OPENAI_API_KEY"]` +
+///         `settings_config["config"]` (TOML string)
+fn resolve_from_legacy_store(
     config: &mut AiConfig,
     app_id: &str,
     provider_id: &str,
 ) -> Result<String> {
-    let app_id = app_id.trim();
-    let provider_id = provider_id.trim();
-
-    if provider_id.is_empty() || !matches!(app_id, "claude" | "codex") {
-        anyhow::bail!("Unsupported AI provider reference: {app_id}:{provider_id}");
-    }
-
     let store = providers::read_store().context("Failed to read model providers")?;
     let app = select_provider_app(&store, app_id)
         .ok_or_else(|| anyhow::anyhow!("Unsupported AI provider app: {app_id}"))?;
@@ -286,76 +461,103 @@ pub fn resolve_provider_ref_parts(
             let env = entry
                 .settings_config
                 .get("env")
-                .and_then(|value| value.as_object())
+                .and_then(|v| v.as_object())
                 .ok_or_else(|| anyhow::anyhow!("Claude provider env is missing"))?;
 
+            // API key: prefer ANTHROPIC_AUTH_TOKEN (Claude Code native), accept ANTHROPIC_API_KEY
             let api_key = env
                 .get("ANTHROPIC_AUTH_TOKEN")
                 .or_else(|| env.get("ANTHROPIC_API_KEY"))
-                .and_then(|value| value.as_str())
+                .and_then(|v| v.as_str())
                 .map(str::trim)
-                .filter(|value| !value.is_empty())
+                .filter(|v| !v.is_empty())
                 .ok_or_else(|| anyhow::anyhow!("{label} is missing an API key"))?;
 
             let base_url = env
                 .get("ANTHROPIC_BASE_URL")
-                .and_then(|value| value.as_str())
+                .and_then(|v| v.as_str())
                 .map(str::trim)
-                .filter(|value| !value.is_empty())
+                .filter(|v| !v.is_empty())
                 .unwrap_or("https://api.anthropic.com");
 
+            // Primary model: ANTHROPIC_MODEL, fallback CLAUDE_CODE_MODEL
             let model = env
                 .get("ANTHROPIC_MODEL")
                 .or_else(|| env.get("CLAUDE_CODE_MODEL"))
-                .and_then(|value| value.as_str())
+                .and_then(|v| v.as_str())
                 .map(str::trim)
-                .filter(|value| !value.is_empty())
+                .filter(|v| !v.is_empty())
                 .unwrap_or("claude-sonnet-4-20250514");
 
             config.api_format = ApiFormat::Anthropic;
             config.api_key = api_key.to_string();
             config.base_url = base_url.to_string();
             config.model = model.to_string();
+
+            // Secondary model tier overrides (ANTHROPIC_DEFAULT_*_MODEL)
+            config.claude_haiku_model = env
+                .get("ANTHROPIC_DEFAULT_HAIKU_MODEL")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+            config.claude_sonnet_model = env
+                .get("ANTHROPIC_DEFAULT_SONNET_MODEL")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+            config.claude_opus_model = env
+                .get("ANTHROPIC_DEFAULT_OPUS_MODEL")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
         }
         "codex" => {
             let auth = entry
                 .settings_config
                 .get("auth")
-                .and_then(|value| value.as_object())
+                .and_then(|v| v.as_object())
                 .ok_or_else(|| anyhow::anyhow!("Codex provider auth is missing"))?;
             let config_text = entry
                 .settings_config
                 .get("config")
-                .and_then(|value| value.as_str())
+                .and_then(|v| v.as_str())
                 .unwrap_or_default();
 
             let api_key = auth
                 .get("OPENAI_API_KEY")
-                .and_then(|value| value.as_str())
+                .and_then(|v| v.as_str())
                 .map(str::trim)
-                .filter(|value| !value.is_empty())
+                .filter(|v| !v.is_empty())
                 .ok_or_else(|| anyhow::anyhow!("{label} is missing an API key"))?;
 
+            // Base URL lookup order:
+            // 1. top-level openai_base_url (legacy cc-switch field)
+            // 2. [model_providers.<active>].base_url (new cc-switch nested format)
+            // 3. top-level base_url (simple flat format)
+            // 4. meta.baseURL
+            // 5. default OpenAI endpoint
             let base_url = parse_toml_string_field(config_text, "openai_base_url")
+                .or_else(|| parse_codex_active_provider_base_url(config_text))
                 .or_else(|| parse_toml_string_field(config_text, "base_url"))
                 .or_else(|| {
                     entry
                         .meta
                         .as_ref()
-                        .and_then(|meta| meta.get("baseURL"))
-                        .and_then(|value| value.as_str())
+                        .and_then(|m| m.get("baseURL"))
+                        .and_then(|v| v.as_str())
                         .map(str::trim)
-                        .filter(|value| !value.is_empty())
+                        .filter(|v| !v.is_empty())
                         .map(str::to_string)
                 })
                 .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
-            let model = parse_toml_string_field(config_text, "model").unwrap_or_else(|| {
-                if config.model.trim().is_empty() {
-                    "gpt-5.4".to_string()
-                } else {
-                    config.model.clone()
-                }
-            });
+
+            let model = parse_toml_string_field(config_text, "model")
+                .unwrap_or_else(|| {
+                    if config.model.trim().is_empty() { "gpt-5.4".to_string() } else { config.model.clone() }
+                });
 
             config.api_format = ApiFormat::Openai;
             config.api_key = api_key.to_string();
@@ -366,6 +568,38 @@ pub fn resolve_provider_ref_parts(
     }
 
     Ok(label)
+}
+
+// ── Public resolution entry point ────────────────────────────────────
+
+pub fn resolve_provider_ref_parts(
+    config: &mut AiConfig,
+    app_id: &str,
+    provider_id: &str,
+) -> Result<String> {
+    let app_id = app_id.trim();
+    let provider_id = provider_id.trim();
+
+    if provider_id.is_empty() || !matches!(app_id, "claude" | "codex") {
+        anyhow::bail!("Unsupported AI provider reference: {app_id}:{provider_id}");
+    }
+
+    // Try the flat store (v2) first — this is where the Models UI stores providers.
+    match resolve_from_flat_store(config, app_id, provider_id) {
+        Ok(label) => return Ok(label),
+        Err(e) => {
+            warn!(
+                target: "ai_provider",
+                app_id,
+                provider_id,
+                error = %e,
+                "flat store lookup failed, falling back to legacy store"
+            );
+        }
+    }
+
+    // Fall back to the legacy per-app store (v1) for backward compatibility.
+    resolve_from_legacy_store(config, app_id, provider_id)
 }
 
 pub fn resolve_provider_ref(config: &mut AiConfig) -> Result<()> {
@@ -435,7 +669,7 @@ pub fn build_skill_pick_system_prompt(skill_catalog: &str) -> String {
 
 // ── OpenAI-Compatible Chat Completion (via async-openai) ─────────────
 
-use http_client::get_http_client;
+use http_client::{get_http_client, request_timeout_duration};
 
 #[derive(Serialize)]
 struct AnthropicMessage {
@@ -500,11 +734,10 @@ fn build_openai_chat_url(base_url: &str) -> String {
     }
     // Auto-insert /v1 for bare host:port URLs (e.g. http://host:1234)
     // that have no path segment — common with Ollama endpoints.
-    if let Some(after_scheme) = base.split_once("://").map(|(_, rest)| rest) {
-        if !after_scheme.contains('/') {
+    if let Some(after_scheme) = base.split_once("://").map(|(_, rest)| rest)
+        && !after_scheme.contains('/') {
             return format!("{}/v1/chat/completions", base);
         }
-    }
     format!("{}/chat/completions", base)
 }
 
@@ -587,6 +820,7 @@ async fn anthropic_messages_completion(
 
     let resp = client
         .post(&url)
+        .timeout(request_timeout_duration(config))
         .header("Content-Type", "application/json")
         .header("x-api-key", effective_api_key(config))
         .header("anthropic-version", "2023-06-01")
@@ -650,6 +884,7 @@ where
 
     let mut resp = client
         .post(&url)
+        .timeout(request_timeout_duration(config))
         .header("Content-Type", "application/json")
         .header("Accept", "text/event-stream")
         .header("x-api-key", effective_api_key(config))
@@ -760,18 +995,15 @@ where
     }
 
     // content_block_delta: extract delta.text
-    if event_type == "content_block_delta" {
-        if let Some(delta_text) = value
+    if event_type == "content_block_delta"
+        && let Some(delta_text) = value
             .get("delta")
             .and_then(|d| d.get("text"))
             .and_then(|t| t.as_str())
-        {
-            if !delta_text.is_empty() {
+            && !delta_text.is_empty() {
                 translated.push_str(delta_text);
                 on_delta(delta_text)?;
             }
-        }
-    }
 
     Ok(())
 }
@@ -788,9 +1020,8 @@ pub async fn chat_completion(
     }
 }
 
-/// Chat completion with a capped max_tokens for responses that are known to
-/// be small (e.g. security scan JSON).  Reduces inference latency on providers
-/// that pre-allocate KV cache proportional to max_tokens.
+/// Chat completion with a capped max_tokens.  Reduces inference latency on
+/// providers that pre-allocate KV cache proportional to max_tokens.
 pub async fn chat_completion_capped(
     config: &AiConfig,
     system_prompt: &str,
@@ -1112,12 +1343,14 @@ mod tests {
         with_temp_data_root(|_dir| {
             let rt = tokio::runtime::Runtime::new().expect("create runtime");
             rt.block_on(async {
-                let mut cfg = super::AiConfig::default();
-                cfg.enabled = true;
-                cfg.base_url = "https://api.openai.com/v1".to_string();
-                cfg.api_key = "test-secret-key".to_string();
-                cfg.model = "gpt-5.4".to_string();
-                cfg.target_language = "en".to_string();
+                let cfg = super::AiConfig {
+                    enabled: true,
+                    base_url: "https://api.openai.com/v1".to_string(),
+                    api_key: "test-secret-key".to_string(),
+                    model: "gpt-5.4".to_string(),
+                    target_language: "en".to_string(),
+                    ..Default::default()
+                };
 
                 super::save_config_async(&cfg)
                     .await
@@ -1135,26 +1368,32 @@ mod tests {
 
     #[test]
     fn ai_runtime_ready_false_when_disabled() {
-        let mut cfg = AiConfig::default();
-        cfg.enabled = false;
+        let cfg = AiConfig {
+            enabled: false,
+            ..Default::default()
+        };
         assert!(!super::ai_runtime_ready(&cfg));
     }
 
     #[test]
     fn ai_runtime_ready_true_with_api_key() {
-        let mut cfg = AiConfig::default();
-        cfg.enabled = true;
-        cfg.api_key = "sk-test".to_string();
+        let cfg = AiConfig {
+            enabled: true,
+            api_key: "sk-test".to_string(),
+            ..Default::default()
+        };
         assert!(super::ai_runtime_ready(&cfg));
     }
 
     #[test]
     fn ai_runtime_ready_true_for_local_format_without_key() {
-        let mut cfg = AiConfig::default();
-        cfg.enabled = true;
-        cfg.api_format = ApiFormat::Local;
-        cfg.api_key = "".to_string();
-        cfg.base_url = "http://127.0.0.1:11434".to_string();
+        let cfg = AiConfig {
+            enabled: true,
+            api_format: ApiFormat::Local,
+            api_key: String::new(),
+            base_url: "http://127.0.0.1:11434".to_string(),
+            ..Default::default()
+        };
         assert!(super::ai_runtime_ready(&cfg));
     }
 
@@ -1214,17 +1453,348 @@ mod tests {
 
     #[test]
     fn effective_api_key_returns_ollama_for_local_format() {
-        let mut cfg = AiConfig::default();
-        cfg.api_format = ApiFormat::Local;
-        cfg.api_key = "".to_string();
+        let cfg = AiConfig {
+            api_format: ApiFormat::Local,
+            api_key: String::new(),
+            ..Default::default()
+        };
         assert_eq!(super::effective_api_key(&cfg), "ollama");
     }
 
     #[test]
     fn effective_api_key_returns_actual_key_for_non_local() {
-        let mut cfg = AiConfig::default();
-        cfg.api_format = ApiFormat::Openai;
-        cfg.api_key = "sk-test".to_string();
+        let cfg = AiConfig {
+            api_format: ApiFormat::Openai,
+            api_key: "sk-test".to_string(),
+            ..Default::default()
+        };
         assert_eq!(super::effective_api_key(&cfg), "sk-test");
+    }
+
+    // ── TOML parsing helpers ─────────────────────────────────────────
+
+    #[test]
+    fn parse_toml_string_field_finds_top_level_field() {
+        let toml = r#"model = "gpt-4o"
+base_url = "https://api.example.com/v1"
+"#;
+        assert_eq!(
+            super::parse_toml_string_field(toml, "model"),
+            Some("gpt-4o".to_string())
+        );
+        assert_eq!(
+            super::parse_toml_string_field(toml, "base_url"),
+            Some("https://api.example.com/v1".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_toml_string_field_finds_field_inside_section() {
+        let toml = r#"model_provider = "ccswitch"
+
+[model_providers.ccswitch]
+name = "Custom"
+base_url = "https://example.com/v1"
+wire_api = "responses"
+"#;
+        assert_eq!(
+            super::parse_toml_string_field(toml, "base_url"),
+            Some("https://example.com/v1".to_string())
+        );
+        assert_eq!(
+            super::parse_toml_string_field(toml, "wire_api"),
+            Some("responses".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_codex_active_provider_base_url_reads_nested_table() {
+        let toml = r#"model_provider = "myprovider"
+model = "gpt-4o"
+
+[model_providers.myprovider]
+name = "My Provider"
+base_url = "https://myprovider.ai/v1"
+wire_api = "chat"
+"#;
+        assert_eq!(
+            super::parse_codex_active_provider_base_url(toml),
+            Some("https://myprovider.ai/v1".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_codex_active_provider_base_url_returns_none_when_no_model_provider() {
+        let toml = r#"model = "gpt-4o"
+base_url = "https://api.openai.com/v1"
+"#;
+        assert_eq!(super::parse_codex_active_provider_base_url(toml), None);
+    }
+
+    #[test]
+    fn parse_codex_active_provider_base_url_ignores_wrong_section() {
+        let toml = r#"model_provider = "myp"
+
+[model_providers.other]
+base_url = "https://wrong.example/v1"
+"#;
+        // The active provider is "myp" but only [model_providers.other] exists
+        assert_eq!(super::parse_codex_active_provider_base_url(toml), None);
+    }
+
+    // ── Flat store resolution ─────────────────────────────────────────
+
+    #[test]
+    fn resolve_from_flat_store_claude_uses_anthropic_endpoint() {
+        with_temp_data_root(|_dir| {
+            use skillstar_models::providers::{FlatProvidersStore, ProviderEntryFlat, write_flat_store, flat_store_path};
+
+            let entry = ProviderEntryFlat {
+                id: "test-uuid-claude".to_string(),
+                name: "Test Claude".to_string(),
+                base_url_openai: "https://openai.example.com/v1".to_string(),
+                base_url_anthropic: "https://anthropic.example.com".to_string(),
+                models_url: String::new(),
+                api_key: "sk-ant-test".to_string(),
+                models: vec!["claude-sonnet-4-6".to_string()],
+                default_model: "claude-sonnet-4-6".to_string(),
+                sort_index: 0,
+                codex_wire_api: "responses".to_string(),
+                codex_auth_mode: "api_key".to_string(),
+                preset_id: None,
+                icon_color: None,
+                notes: None,
+                created_at: None,
+                meta: Some(serde_json::json!({
+                    "claude_main_model": "claude-sonnet-4-6",
+                    "claude_haiku_model": "claude-haiku-4-5-20251001",
+                    "claude_sonnet_model": "claude-sonnet-4-6",
+                    "claude_opus_model": "claude-opus-4-7",
+                })),
+            };
+
+            let store = FlatProvidersStore {
+                version: 2,
+                providers: vec![entry],
+                tool_activations: std::collections::HashMap::new(),
+            };
+            write_flat_store(&store, &flat_store_path()).expect("write flat store");
+
+            let mut cfg = AiConfig::default();
+            let label = super::resolve_from_flat_store(&mut cfg, "claude", "test-uuid-claude")
+                .expect("resolve should succeed");
+
+            assert_eq!(label, "Test Claude");
+            assert_eq!(cfg.api_format, ApiFormat::Anthropic);
+            assert_eq!(cfg.api_key, "sk-ant-test");
+            assert_eq!(cfg.base_url, "https://anthropic.example.com");
+            assert_eq!(cfg.model, "claude-sonnet-4-6");
+            assert_eq!(cfg.claude_haiku_model, Some("claude-haiku-4-5-20251001".to_string()));
+            assert_eq!(cfg.claude_sonnet_model, Some("claude-sonnet-4-6".to_string()));
+            assert_eq!(cfg.claude_opus_model, Some("claude-opus-4-7".to_string()));
+        });
+    }
+
+    #[test]
+    fn resolve_from_flat_store_claude_falls_back_to_openai_url_when_anthropic_empty() {
+        with_temp_data_root(|_dir| {
+            use skillstar_models::providers::{FlatProvidersStore, ProviderEntryFlat, write_flat_store, flat_store_path};
+
+            let entry = ProviderEntryFlat {
+                id: "test-uuid-relay".to_string(),
+                name: "Relay".to_string(),
+                base_url_openai: "https://relay.example.com/anthropic".to_string(),
+                base_url_anthropic: "".to_string(),
+                models_url: String::new(),
+                api_key: "relay-key".to_string(),
+                models: vec![],
+                default_model: String::new(),
+                sort_index: 0,
+                codex_wire_api: "responses".to_string(),
+                codex_auth_mode: "api_key".to_string(),
+                preset_id: None,
+                icon_color: None,
+                notes: None,
+                created_at: None,
+                meta: None,
+            };
+
+            let store = FlatProvidersStore {
+                version: 2,
+                providers: vec![entry],
+                tool_activations: std::collections::HashMap::new(),
+            };
+            write_flat_store(&store, &flat_store_path()).expect("write flat store");
+
+            let mut cfg = AiConfig::default();
+            super::resolve_from_flat_store(&mut cfg, "claude", "test-uuid-relay")
+                .expect("resolve should succeed");
+
+            assert_eq!(cfg.base_url, "https://relay.example.com/anthropic");
+            assert_eq!(cfg.model, "claude-sonnet-4-20250514"); // hard default
+        });
+    }
+
+    #[test]
+    fn resolve_from_flat_store_codex_uses_openai_endpoint() {
+        with_temp_data_root(|_dir| {
+            use skillstar_models::providers::{FlatProvidersStore, ProviderEntryFlat, write_flat_store, flat_store_path};
+
+            let entry = ProviderEntryFlat {
+                id: "test-uuid-codex".to_string(),
+                name: "Custom Codex".to_string(),
+                base_url_openai: "https://codex.example.com/v1".to_string(),
+                base_url_anthropic: "https://should-be-ignored.example.com".to_string(),
+                models_url: String::new(),
+                api_key: "sk-openai-test".to_string(),
+                models: vec!["gpt-4o".to_string()],
+                default_model: "gpt-4o".to_string(),
+                sort_index: 0,
+                codex_wire_api: "responses".to_string(),
+                codex_auth_mode: "api_key".to_string(),
+                preset_id: None,
+                icon_color: None,
+                notes: None,
+                created_at: None,
+                meta: None,
+            };
+
+            let store = FlatProvidersStore {
+                version: 2,
+                providers: vec![entry],
+                tool_activations: std::collections::HashMap::new(),
+            };
+            write_flat_store(&store, &flat_store_path()).expect("write flat store");
+
+            let mut cfg = AiConfig::default();
+            let label = super::resolve_from_flat_store(&mut cfg, "codex", "test-uuid-codex")
+                .expect("resolve should succeed");
+
+            assert_eq!(label, "Custom Codex");
+            assert_eq!(cfg.api_format, ApiFormat::Openai);
+            assert_eq!(cfg.api_key, "sk-openai-test");
+            assert_eq!(cfg.base_url, "https://codex.example.com/v1");
+            assert_eq!(cfg.model, "gpt-4o");
+        });
+    }
+
+    #[test]
+    fn resolve_from_flat_store_fails_when_api_key_missing() {
+        with_temp_data_root(|_dir| {
+            use skillstar_models::providers::{FlatProvidersStore, ProviderEntryFlat, write_flat_store, flat_store_path};
+
+            let entry = ProviderEntryFlat {
+                id: "test-no-key".to_string(),
+                name: "No Key".to_string(),
+                base_url_openai: "https://api.example.com/v1".to_string(),
+                base_url_anthropic: String::new(),
+                models_url: String::new(),
+                api_key: "".to_string(),
+                models: vec![],
+                default_model: "gpt-4o".to_string(),
+                sort_index: 0,
+                codex_wire_api: "responses".to_string(),
+                codex_auth_mode: "api_key".to_string(),
+                preset_id: None,
+                icon_color: None,
+                notes: None,
+                created_at: None,
+                meta: None,
+            };
+
+            let store = FlatProvidersStore {
+                version: 2,
+                providers: vec![entry],
+                tool_activations: std::collections::HashMap::new(),
+            };
+            write_flat_store(&store, &flat_store_path()).expect("write flat store");
+
+            let mut cfg = AiConfig::default();
+            let result = super::resolve_from_flat_store(&mut cfg, "codex", "test-no-key");
+            assert!(result.is_err());
+            assert!(result.unwrap_err().to_string().contains("missing an API key"));
+        });
+    }
+
+    // ── Legacy store: Claude model variant fields ─────────────────────
+
+    #[test]
+    fn resolve_from_legacy_store_reads_claude_model_variants() {
+        with_temp_data_root(|_dir| {
+            use skillstar_models::providers::{ProvidersStore, AppProviders, ProviderEntry, write_store};
+            use std::collections::HashMap;
+
+            let settings_config = serde_json::json!({
+                "env": {
+                    "ANTHROPIC_AUTH_TOKEN": "sk-ant-legacy",
+                    "ANTHROPIC_BASE_URL": "https://legacy.example.com",
+                    "ANTHROPIC_MODEL": "claude-sonnet-4-6",
+                    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-4-5-20251001",
+                    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4-6",
+                    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4-7",
+                }
+            });
+
+            let entry = ProviderEntry {
+                id: "legacy-claude".to_string(),
+                name: "Legacy Claude".to_string(),
+                category: "custom".to_string(),
+                settings_config,
+                preset_id: None,
+                website_url: None,
+                api_key_url: None,
+                icon_color: None,
+                notes: None,
+                created_at: None,
+                sort_index: None,
+                meta: None,
+            };
+
+            let mut providers_map = HashMap::new();
+            providers_map.insert("legacy-claude".to_string(), entry);
+
+            let store = ProvidersStore {
+                claude: AppProviders { providers: providers_map, current: None },
+                codex: AppProviders::default(),
+                opencode: AppProviders::default(),
+                gemini: AppProviders::default(),
+            };
+            write_store(&store).expect("write legacy store");
+
+            let mut cfg = AiConfig::default();
+            let label = super::resolve_from_legacy_store(&mut cfg, "claude", "legacy-claude")
+                .expect("resolve should succeed");
+
+            assert_eq!(label, "Legacy Claude");
+            assert_eq!(cfg.api_format, ApiFormat::Anthropic);
+            assert_eq!(cfg.api_key, "sk-ant-legacy");
+            assert_eq!(cfg.model, "claude-sonnet-4-6");
+            assert_eq!(cfg.claude_haiku_model, Some("claude-haiku-4-5-20251001".to_string()));
+            assert_eq!(cfg.claude_sonnet_model, Some("claude-sonnet-4-6".to_string()));
+            assert_eq!(cfg.claude_opus_model, Some("claude-opus-4-7".to_string()));
+        });
+    }
+
+    // ── Claude model variants not persisted ──────────────────────────
+
+    #[test]
+    fn claude_model_variants_are_not_written_to_disk() {
+        with_temp_data_root(|_dir| {
+            let cfg = AiConfig {
+                enabled: true,
+                api_key: "sk-test".to_string(),
+                claude_haiku_model: Some("claude-haiku-4-5-20251001".to_string()),
+                claude_sonnet_model: Some("claude-sonnet-4-6".to_string()),
+                claude_opus_model: Some("claude-opus-4-7".to_string()),
+                ..Default::default()
+            };
+
+            super::save_config(&cfg).expect("save should succeed");
+            let loaded = super::load_config();
+
+            assert_eq!(loaded.claude_haiku_model, None);
+            assert_eq!(loaded.claude_sonnet_model, None);
+            assert_eq!(loaded.claude_opus_model, None);
+        });
     }
 }

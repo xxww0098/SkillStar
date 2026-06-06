@@ -9,7 +9,6 @@ import {
   ExternalLink,
   GitBranch,
   RefreshCw,
-  ShieldCheck,
   Sparkles,
   Square,
   Star,
@@ -149,12 +148,12 @@ export function DetailPanel({
             if (!mountedRef.current) return;
             setSkillDetails(fresh.data);
           } catch (e) {
-            console.warn("[DetailPanel] Failed to refresh local skill detail:", e);
+            if (import.meta.env.DEV) console.warn("[DetailPanel] Failed to refresh local skill detail:", e);
           }
         })();
       }
     } catch (e) {
-      console.warn("[DetailPanel] Failed to fetch skill details:", e);
+      if (import.meta.env.DEV) console.warn("[DetailPanel] Failed to fetch skill details:", e);
       if (!mountedRef.current) return;
       setSkillDetails(null);
     } finally {
@@ -433,28 +432,6 @@ export function DetailPanel({
                   </div>
                 )}
               </div>
-
-              {/* Security Audits */}
-              {skillDetails && skillDetails.security_audits.length > 0 && (
-                <div className="flex items-center gap-2 flex-wrap">
-                  <ShieldCheck className="w-3.5 h-3.5 text-green-500/70" />
-                  {skillDetails.security_audits.map((audit) => (
-                    <Badge
-                      key={audit.name}
-                      variant="outline"
-                      className={`text-micro font-mono ${
-                        audit.result === "Pass"
-                          ? "border-green-500/30 text-green-400"
-                          : audit.result === "Fail"
-                            ? "border-red-500/30 text-red-400"
-                            : "border-yellow-500/30 text-yellow-400"
-                      }`}
-                    >
-                      {audit.name}: {audit.result}
-                    </Badge>
-                  ))}
-                </div>
-              )}
 
               {/* Detail loading skeleton */}
               {detailsLoading && (

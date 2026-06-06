@@ -38,6 +38,7 @@ export interface MarketplaceCommands {
 
   // Local-first (preferred)
   get_leaderboard_local: { args: { category: string }; result: LocalFirstResult<Skill[]> };
+  list_marketplace_skills_local: { args: Record<string, never>; result: LocalFirstResult<Skill[]> };
   search_marketplace_local: {
     args: { query: string; limit?: number };
     result: LocalFirstResult<Skill[]>;

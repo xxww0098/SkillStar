@@ -13,7 +13,6 @@
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::Value;
-use std::time::Duration;
 
 use crate::catalog::AuthMode;
 use crate::crypto;
@@ -27,7 +26,7 @@ use crate::{UsageError, UsageResult};
 const LOGIN_URL: &str = "https://cursor.com/loginDeepControl";
 const POLL_ENDPOINT: &str = "https://api2.cursor.sh/auth/poll";
 const USAGE_SUMMARY_URL: &str = "https://cursor.com/api/usage-summary";
-const STRIPE_PROFILE_URL: &str = "https://api2.cursor.sh/auth/stripe_profile";
+const STRIPE_PROFILE_URL: &str = "https://api2.cursor.sh/auth/full_stripe_profile";
 const OAUTH_TOKEN_URL: &str = "https://api2.cursor.sh/oauth/token";
 const CLIENT_ID: &str = "KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB";
 const POLL_INTERVAL_MS: u64 = 2000;
@@ -59,7 +58,7 @@ struct RefreshTokenResponse {
 }
 
 /// Spawn the browser-driven login. Returns `(auth_url, pending_id)`.
-pub async fn start_login(_region: Option<&str>) -> UsageResult<(String, String)> {
+pub async fn start_login(_region: Option<&str>) -> UsageResult<super::OAuthStartInfo> {
     let pkce = PkcePair::generate();
     let uuid = uuid::Uuid::new_v4().to_string();
     let auth_url = format!(
@@ -80,7 +79,7 @@ pub async fn start_login(_region: Option<&str>) -> UsageResult<(String, String)>
         }
     });
 
-    Ok((auth_url, pending_id))
+    Ok(super::OAuthStartInfo::browser(auth_url, pending_id))
 }
 
 async fn poll_for_tokens(uuid: String, verifier: String) -> UsageResult<Subscription> {
@@ -157,6 +156,9 @@ async fn finalize_subscription(
         oauth_account_id: auth_id,
         oauth_region: None,
         requires_reauth: false,
+        fingerprint_id: None,
+        cookie_jar_encrypted: None,
+        cookie_session_expires_at: None,
         manual_quota: None,
         note: None,
         sort_index: 0,
@@ -179,19 +181,19 @@ async fn finalize_subscription(
 
 pub async fn fetch(subscription: &mut Subscription) -> UsageResult<SubscriptionUsage> {
     let mut access_token = decrypt_required(&subscription.access_token_encrypted)?;
-    if token_refresh::needs_refresh(subscription.access_token_expires_at) {
-        if let Some(rt_cipher) = subscription.refresh_token_encrypted.as_deref() {
-            let refresh_token = crypto::decrypt(rt_cipher);
-            if !refresh_token.is_empty() {
-                if let Ok((at, rt_new)) = exchange_refresh(&refresh_token).await {
-                    subscription.access_token_encrypted = Some(crypto::encrypt(&at));
-                    subscription.access_token_expires_at = token_refresh::jwt_exp(&at);
-                    if let Some(rt) = rt_new {
-                        subscription.refresh_token_encrypted = Some(crypto::encrypt(&rt));
-                    }
-                    access_token = at;
-                }
+    if token_refresh::needs_refresh(subscription.access_token_expires_at)
+        && let Some(rt_cipher) = subscription.refresh_token_encrypted.as_deref()
+    {
+        let refresh_token = crypto::decrypt(rt_cipher);
+        if !refresh_token.is_empty()
+            && let Ok((at, rt_new)) = exchange_refresh(&refresh_token).await
+        {
+            subscription.access_token_encrypted = Some(crypto::encrypt(&at));
+            subscription.access_token_expires_at = token_refresh::jwt_exp(&at);
+            if let Some(rt) = rt_new {
+                subscription.refresh_token_encrypted = Some(crypto::encrypt(&rt));
             }
+            access_token = at;
         }
     }
     match fetch_with_tokens(&subscription.id, &access_token).await {
@@ -207,13 +209,40 @@ async fn fetch_with_tokens(
 ) -> UsageResult<SubscriptionUsage> {
     let client = http_client()?;
 
-    // Stripe profile — for plan tier.
-    let profile = fetch_stripe_profile(&client, access_token).await.ok();
+    // Stripe profile — for plan tier. AuthRequired propagates so the UI can
+    // flag re-auth; other errors are surfaced on the snapshot so the user can
+    // see why the plan/usage didn't resolve instead of silently falling back
+    // to "FREE".
+    let (profile, profile_err) = match fetch_stripe_profile(&client, access_token).await {
+        Ok(p) => (Some(p), None),
+        Err(UsageError::AuthRequired) => return Err(UsageError::AuthRequired),
+        Err(e) => (None, Some(format!("stripe_profile: {}", e))),
+    };
     let plan_name = resolve_plan_name(profile.as_ref());
 
     // Usage summary — needs WorkOS cookie + browser UA.
-    let usage_json = fetch_usage_summary(&client, access_token).await.ok();
-    let monthly = usage_json.as_ref().and_then(parse_monthly_window);
+    let (usage_json, usage_err) = match fetch_usage_summary(&client, access_token).await {
+        Ok(v) => (Some(v), None),
+        Err(UsageError::AuthRequired) => return Err(UsageError::AuthRequired),
+        Err(e) => (None, Some(format!("usage-summary: {}", e))),
+    };
+    let total_window = usage_json.as_ref().and_then(parse_total_with_breakdown);
+    if total_window.is_none()
+        && let Some(v) = usage_json.as_ref()
+    {
+        tracing::warn!(
+            target: "cursor_fetcher",
+            "usage-summary 未识别字段：subscription_id={} body={}",
+            subscription_id,
+            v
+        );
+    }
+
+    let error = match (profile_err, usage_err) {
+        (Some(a), Some(b)) => Some(format!("{a}; {b}")),
+        (Some(e), None) | (None, Some(e)) => Some(e),
+        (None, None) => None,
+    };
 
     Ok(SubscriptionUsage {
         subscription_id: subscription_id.to_string(),
@@ -221,9 +250,11 @@ async fn fetch_with_tokens(
         plan_name: Some(plan_name),
         hourly: None,
         weekly: None,
-        monthly,
+        monthly: total_window,
         balance: None,
-        error: None,
+        credits: Vec::new(),
+        error,
+        api_keys: Vec::new(),
     })
 }
 
@@ -248,15 +279,18 @@ async fn fetch_stripe_profile(
             status
         )));
     }
-    resp.json::<StripeProfile>()
+    let body = resp
+        .text()
         .await
-        .map_err(|e| UsageError::Fetcher(format!("解析 stripe_profile: {}", e)))
+        .map_err(|e| UsageError::Fetcher(format!("读取 stripe_profile 响应: {}", e)))?;
+    tracing::debug!("[cursor] stripe_profile raw body: {}", body);
+    serde_json::from_str::<StripeProfile>(&body).map_err(|e| {
+        let snippet = body.chars().take(200).collect::<String>();
+        UsageError::Fetcher(format!("解析 stripe_profile: {} | body={}", e, snippet))
+    })
 }
 
-async fn fetch_usage_summary(
-    client: &reqwest::Client,
-    access_token: &str,
-) -> UsageResult<Value> {
+async fn fetch_usage_summary(client: &reqwest::Client, access_token: &str) -> UsageResult<Value> {
     let cookie = build_session_cookie(access_token)
         .ok_or_else(|| UsageError::Other("无法从 access_token 解析 WorkOS user id".into()))?;
     let resp = client
@@ -280,9 +314,15 @@ async fn fetch_usage_summary(
             status
         )));
     }
-    resp.json::<Value>()
+    let body = resp
+        .text()
         .await
-        .map_err(|e| UsageError::Fetcher(format!("解析 usage-summary: {}", e)))
+        .map_err(|e| UsageError::Fetcher(format!("读取 usage-summary 响应: {}", e)))?;
+    tracing::debug!("[cursor] usage-summary raw body: {}", body);
+    serde_json::from_str::<Value>(&body).map_err(|e| {
+        let snippet = body.chars().take(200).collect::<String>();
+        UsageError::Fetcher(format!("解析 usage-summary: {} | body={}", e, snippet))
+    })
 }
 
 async fn exchange_refresh(refresh_token: &str) -> UsageResult<(String, Option<String>)> {
@@ -303,7 +343,10 @@ async fn exchange_refresh(refresh_token: &str) -> UsageResult<(String, Option<St
         return Err(UsageError::AuthRequired);
     }
     if !status.is_success() {
-        return Err(UsageError::Fetcher(format!("Cursor refresh 状态码 {}", status)));
+        return Err(UsageError::Fetcher(format!(
+            "Cursor refresh 状态码 {}",
+            status
+        )));
     }
     let body: RefreshTokenResponse = resp
         .json()
@@ -316,10 +359,7 @@ async fn exchange_refresh(refresh_token: &str) -> UsageResult<(String, Option<St
 }
 
 fn http_client() -> UsageResult<reqwest::Client> {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .build()
-        .map_err(|e| UsageError::Other(format!("http client: {}", e)))
+    crate::http_client::usage_http_client()
 }
 
 fn decrypt_required(cipher: &Option<String>) -> UsageResult<String> {
@@ -370,9 +410,67 @@ fn resolve_plan_name(profile: Option<&StripeProfile>) -> String {
         .unwrap_or_else(|| "FREE".to_string())
 }
 
-fn parse_monthly_window(usage: &Value) -> Option<UsageWindow> {
-    // Cursor's `usage-summary` is loosely structured; try a handful of common
-    // shapes. We expose whatever we find as a `30d`-labeled bar.
+/// Parse the `usage-summary` response into a single **Total** window with two
+/// **breakdown** sub-windows (Auto + Composer, API), mirroring Cursor's
+/// in-app UI:
+///
+/// ```text
+/// Total                                              49%
+/// $46.22 / $94.95
+/// [████████████░░░░░░░░░░░░░░░░░]
+///                          重置 3d20h
+///   ├ Auto + Composer                               51%
+///   │ [█████████░░░░░░░░]
+///   └ API                                           43%
+///     [████████░░░░░░░░░]
+/// ```
+///
+/// Cursor reports values in **cents (USD)**. Sub-quotas only ship as
+/// percentages — Cursor doesn't expose the per-category cap.
+fn parse_total_with_breakdown(usage: &Value) -> Option<UsageWindow> {
+    let reset_at = usage
+        .get("billingCycleEnd")
+        .and_then(Value::as_str)
+        .and_then(parse_iso_epoch);
+
+    if let Some(plan) = usage.pointer("/individualUsage/plan") {
+        // Total (included + bonus). Reconstruct used from totalPercentUsed
+        // because the raw `used` field caps at the included limit.
+        let total_cents = pick_i64(plan, &[&["breakdown", "total"]]);
+        let percent_total = plan.get("totalPercentUsed").and_then(Value::as_f64);
+
+        let sub_window = |label: &str, percent: f64| UsageWindow {
+            label: label.to_string(),
+            used: percent.round() as i64,
+            total: Some(100),
+            percent: Some(percent.round() as i32),
+            reset_at,
+            breakdown: Vec::new(),
+        };
+        let mut sub_bars = Vec::new();
+        if let Some(p) = plan.get("autoPercentUsed").and_then(Value::as_f64) {
+            sub_bars.push(sub_window("Auto + Composer", p));
+        }
+        if let Some(p) = plan.get("apiPercentUsed").and_then(Value::as_f64) {
+            sub_bars.push(sub_window("API", p));
+        }
+
+        if let (Some(p), Some(t)) = (percent_total, total_cents)
+            && t > 0
+        {
+            let used = ((p / 100.0) * t as f64).round() as i64;
+            return Some(UsageWindow {
+                label: "Total".to_string(),
+                used,
+                total: Some(t),
+                percent: Some(p.round() as i32),
+                reset_at,
+                breakdown: sub_bars,
+            });
+        }
+    }
+
+    // Legacy shapes — keep as fallback in case Cursor ships variants.
     let used = pick_i64(
         usage,
         &[
@@ -399,11 +497,15 @@ fn parse_monthly_window(usage: &Value) -> Option<UsageWindow> {
         used,
         total,
         percent,
-        reset_at: pick_i64(
-            usage,
-            &[&["resetAt"], &["periodEnd"], &["billingCycleEnd"]],
-        ),
+        reset_at: pick_i64(usage, &[&["resetAt"], &["periodEnd"], &["billingCycleEnd"]]),
+        breakdown: Vec::new(),
     })
+}
+
+fn parse_iso_epoch(s: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(s)
+        .ok()
+        .map(|d| d.timestamp())
 }
 
 fn pick_i64(value: &Value, paths: &[&[&str]]) -> Option<i64> {

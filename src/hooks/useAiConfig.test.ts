@@ -16,8 +16,6 @@ const MOCK_CONFIG: AiConfig = {
   target_language: "zh-CN",
   context_window_k: 128,
   max_concurrent_requests: 4,
-  chunk_char_limit: 0,
-  scan_max_response_tokens: 0,
   openai_preset: { base_url: "", api_key: "", model: "" },
   anthropic_preset: { base_url: "", api_key: "", model: "" },
   local_preset: { base_url: "http://127.0.0.1:11434/v1", api_key: "", model: "llama3.1:8b" },

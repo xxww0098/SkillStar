@@ -79,7 +79,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
           }
         }
       } catch (e) {
-        console.error("Failed to fetch publisher repos:", e);
+        if (import.meta.env.DEV) console.error("Failed to fetch publisher repos:", e);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -125,7 +125,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
           }
         }
       } catch (e) {
-        console.error("Failed to resolve repo skills:", e);
+        if (import.meta.env.DEV) console.error("Failed to resolve repo skills:", e);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -201,7 +201,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
           setTimeout(() => setInstallStatus(null), 4000);
           return;
         }
-        console.error("[PublisherDetail] Install failed:", e);
+        if (import.meta.env.DEV) console.error("[PublisherDetail] Install failed:", e);
         setInstallStatus(`✗ ${String(e)}`);
         setTimeout(() => setInstallStatus(null), 5000);
       } finally {
@@ -222,7 +222,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
         setSkills((prev) => prev.map((entry) => (entry.name === name ? { ...entry, update_available: false } : entry)));
         setSelectedSkill((prev) => (prev?.name === name ? { ...prev, update_available: false } : prev));
       } catch (e) {
-        console.error("Update failed:", e);
+        if (import.meta.env.DEV) console.error("Update failed:", e);
       }
     },
     [updateSkill],
@@ -257,7 +257,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
           );
         }
       } catch (e) {
-        console.error("[PublisherDetail] Uninstall failed:", e);
+        if (import.meta.env.DEV) console.error("[PublisherDetail] Uninstall failed:", e);
       }
     },
     [uninstallSkill, selectedSkill],
@@ -269,7 +269,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
         await uninstallSkill(name);
         await handleInstall(url, name);
       } catch (e) {
-        console.error("[PublisherDetail] Reinstall failed:", e);
+        if (import.meta.env.DEV) console.error("[PublisherDetail] Reinstall failed:", e);
       }
     },
     [uninstallSkill, handleInstall],

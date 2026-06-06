@@ -207,7 +207,7 @@ export function ExportShareCodeModal({
         setTimeout(() => setCopied(false), 2000);
       }
     } catch (e) {
-      console.error("Export error", e);
+      if (import.meta.env.DEV) console.error("Export error", e);
     } finally {
       setLoading(false);
     }

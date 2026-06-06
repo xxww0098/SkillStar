@@ -1,4 +1,5 @@
 import { ChevronDown, Globe } from "lucide-react";
+import { memo } from "react";
 import { useTranslation } from "react-i18next";
 import { Input } from "../../../components/ui/input";
 import { Switch } from "../../../components/ui/switch";
@@ -15,7 +16,7 @@ interface ProxySectionProps {
   onConfigChange: (next: ProxyConfig) => void;
 }
 
-export function ProxySection({
+export const ProxySection = memo(function ProxySection({
   proxyConfig,
   ready,
   proxyExpanded,
@@ -157,4 +158,4 @@ export function ProxySection({
       </div>
     </section>
   );
-}
+});

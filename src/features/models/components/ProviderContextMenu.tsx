@@ -30,7 +30,7 @@ export interface DeleteConfirmDialogProps {
 // ---------------------------------------------------------------------------
 
 const TOOL_DISPLAY_NAMES: Record<string, string> = {
-  "claude-code": "Claude Code",
+  "claude-code": "Claude",
   codex: "Codex",
 };
 

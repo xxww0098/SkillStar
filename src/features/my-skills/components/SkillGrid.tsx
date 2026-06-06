@@ -1,6 +1,6 @@
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { X } from "lucide-react";
-import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MOTION_DURATION, MOTION_TRANSITION } from "../../../comm/motion";
 import { EmptyState } from "../../../components/ui/EmptyState";
@@ -10,19 +10,21 @@ import { GhostSkillCard } from "./GhostSkillCard";
 import { SkillCard } from "./SkillCard";
 
 /**
- * Above this count we use progressive loading (infinite scroll)
- * instead of rendering everything at once.
+ * Above this count we use virtualized row rendering
+ * to keep the DOM small.
  */
-const PROGRESSIVE_THRESHOLD = 60;
-
-/** How many items to add per scroll-to-bottom batch. */
-const PAGE_SIZE = 30;
+const VIRTUALIZE_THRESHOLD = 500;
 
 /**
  * Above this count we skip framer-motion layout animations
  * (AnimatePresence + layout="position") for performance.
  */
 const ANIMATE_THRESHOLD = 100;
+
+const CARD_ROW_HEIGHT_GRID = 160;
+const CARD_ROW_HEIGHT_LIST = 56;
+const GRID_GAP_PX = 16;
+const OVERSCAN_ROWS = 4;
 
 const fullItemVariants = {
   hidden: { opacity: 0, y: 6 },
@@ -53,6 +55,7 @@ interface SkillGridProps {
   onInstall: (url: string, name: string) => void;
   onUpdate: (name: string) => void;
   onVisibleCountChange?: (visible: number, total: number) => void;
+  scrollParentRef?: RefObject<HTMLElement | null>;
   emptyMessage?: string;
   emptyAction?: React.ReactNode;
   selectable?: boolean;
@@ -63,14 +66,78 @@ interface SkillGridProps {
   installingNames?: Set<string>;
   pendingUpdateNames?: Set<string>;
   pendingAgentToggleKeys?: Set<string>;
-  /** Ghost skills (new repo skills not yet installed) */
   ghostSkills?: RepoNewSkill[];
   onInstallGhost?: (skill: RepoNewSkill) => void;
   onDismissGhost?: (repoSource: string, skillId: string) => void;
-  /** Dismiss all ghost skills from a repo at once */
   onDismissGhostRepo?: (repoSource: string) => void;
-  /** Click a ghost card to show detail */
   onGhostClick?: (skill: RepoNewSkill) => void;
+}
+
+function useScrollParent(
+  ref: React.RefObject<HTMLElement | null>,
+  explicitScrollParentRef?: RefObject<HTMLElement | null>,
+): HTMLElement | null {
+  const [parent, setParent] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    if (explicitScrollParentRef?.current) {
+      setParent(explicitScrollParentRef.current);
+      return;
+    }
+
+    let el = ref.current?.parentElement ?? null;
+    while (el) {
+      const style = getComputedStyle(el);
+      if (/(auto|scroll)/.test(style.overflow + style.overflowY)) {
+        setParent(el);
+        return;
+      }
+      el = el.parentElement;
+    }
+    setParent(null);
+  }, [ref, explicitScrollParentRef]);
+  return parent;
+}
+
+function useVirtualRows(
+  scrollParent: HTMLElement | null,
+  containerRef: React.RefObject<HTMLElement | null>,
+  rowCount: number,
+  rowHeight: number,
+  enabled: boolean,
+) {
+  const [range, setRange] = useState({ start: 0, end: 20 });
+
+  useEffect(() => {
+    if (!enabled || !scrollParent || rowCount === 0) return;
+
+    const update = () => {
+      const container = containerRef.current;
+      if (!container) return;
+
+      const containerTop = container.getBoundingClientRect().top;
+      const scrollTop = scrollParent.getBoundingClientRect().top;
+      const offset = scrollTop - containerTop;
+      const viewportH = scrollParent.clientHeight;
+
+      const firstVisible = Math.max(0, Math.floor(offset / rowHeight) - OVERSCAN_ROWS);
+      const lastVisible = Math.min(rowCount - 1, Math.ceil((offset + viewportH) / rowHeight) + OVERSCAN_ROWS);
+      setRange((prev) => {
+        if (prev.start === firstVisible && prev.end === lastVisible) return prev;
+        return { start: firstVisible, end: lastVisible };
+      });
+    };
+
+    update();
+    scrollParent.addEventListener("scroll", update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(scrollParent);
+    return () => {
+      scrollParent.removeEventListener("scroll", update);
+      ro.disconnect();
+    };
+  }, [scrollParent, containerRef, rowCount, rowHeight, enabled]);
+
+  return range;
 }
 
 export function SkillGrid({
@@ -82,6 +149,7 @@ export function SkillGrid({
   onInstall,
   onUpdate,
   onVisibleCountChange,
+  scrollParentRef,
   emptyMessage,
   emptyAction,
   selectable,
@@ -103,50 +171,11 @@ export function SkillGrid({
   const itemVariants = prefersReducedMotion ? reducedItemVariants : fullItemVariants;
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const sentinelRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
 
-  // ── Progressive loading state ──
-  const needsProgressive = skills.length > PROGRESSIVE_THRESHOLD;
-  const [visibleCount, setVisibleCount] = useState(PROGRESSIVE_THRESHOLD);
+  const useLayoutAnimations = skills.length <= ANIMATE_THRESHOLD;
+  const needsVirtualize = skills.length > VIRTUALIZE_THRESHOLD;
 
-  // Reset visible count when data source changes (tab switch, search, etc.)
-  const dataKeyRef = useRef(skills);
-  if (dataKeyRef.current !== skills) {
-    dataKeyRef.current = skills;
-    // Reset inline so the very first render after data change shows the right slice
-    if (needsProgressive && visibleCount !== PROGRESSIVE_THRESHOLD) {
-      setVisibleCount(PROGRESSIVE_THRESHOLD);
-    }
-  }
-
-  const displayedSkills = needsProgressive ? skills.slice(0, visibleCount) : skills;
-  const hasMore = needsProgressive && visibleCount < skills.length;
-
-  // Load more when sentinel enters viewport
-  const loadMore = useCallback(() => {
-    setVisibleCount((prev) => Math.min(prev + PAGE_SIZE, skills.length));
-  }, [skills.length]);
-
-  useEffect(() => {
-    if (!hasMore) return;
-    const sentinel = sentinelRef.current;
-    if (!sentinel) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting) {
-          loadMore();
-        }
-      },
-      { rootMargin: "200px" },
-    );
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [hasMore, loadMore, displayedSkills.length]);
-
-  const useLayoutAnimations = displayedSkills.length <= ANIMATE_THRESHOLD;
-  const GRID_GAP_PX = 16;
   const HYSTERESIS_PX = 8;
   const prevColCountRef = useRef(0);
   const gridColumnCount = useMemo(() => {
@@ -171,9 +200,7 @@ export function SkillGrid({
     return cols;
   }, [columnStrategy, containerWidth, minColumnWidth, viewMode]);
 
-  // Re-run when the grid div first appears in the DOM (skills goes from empty → non-empty)
   const gridRendered = skills.length > 0;
-  // Synchronous measurement before first paint prevents the 0→N column flash
   useLayoutEffect(() => {
     const element = containerRef.current;
     if (!element) return;
@@ -186,12 +213,10 @@ export function SkillGrid({
     return () => observer.disconnect();
   }, [gridRendered]);
 
-  // Report visible count
   useLayoutEffect(() => {
-    onVisibleCountChange?.(displayedSkills.length, skills.length);
-  }, [onVisibleCountChange, displayedSkills.length, skills.length]);
+    onVisibleCountChange?.(skills.length, skills.length);
+  }, [onVisibleCountChange, skills.length]);
 
-  // Group ghost skills by repo source
   const ghostGroups = useMemo(() => {
     if (!ghostSkills || ghostSkills.length === 0) return [];
     const groups: Map<string, RepoNewSkill[]> = new Map();
@@ -202,6 +227,19 @@ export function SkillGrid({
     }
     return Array.from(groups.entries());
   }, [ghostSkills]);
+
+  // ── Virtualization ──
+  const rowCount = useMemo(() => Math.ceil(skills.length / gridColumnCount), [skills.length, gridColumnCount]);
+  const cardHeight = viewMode === "grid" ? CARD_ROW_HEIGHT_GRID : CARD_ROW_HEIGHT_LIST;
+  const stride = cardHeight + GRID_GAP_PX;
+  const scrollParent = useScrollParent(containerRef, scrollParentRef);
+  const { start: startRow, end: endRow } = useVirtualRows(
+    scrollParent,
+    containerRef,
+    rowCount,
+    stride,
+    needsVirtualize,
+  );
 
   if (skills.length === 0 && ghostGroups.length === 0) {
     return <EmptyState title={emptyMessage ?? t("skillGrid.noSkills")} action={emptyAction} size="lg" />;
@@ -231,10 +269,6 @@ export function SkillGrid({
     />
   );
 
-  // Sentinel element for infinite scroll trigger
-  const sentinel = hasMore ? <div ref={sentinelRef} className="h-px w-full" aria-hidden /> : null;
-
-  // Ghost skills section rendered above the grid
   const ghostSection =
     ghostGroups.length > 0 && onInstallGhost && onDismissGhost ? (
       <div className="mb-4">
@@ -248,7 +282,6 @@ export function SkillGrid({
               transition={{ duration: 0.25 }}
               className="mb-3"
             >
-              {/* Group header */}
               <div className="flex items-center gap-2 px-1 mb-2">
                 <div className="h-px flex-1 bg-primary/15" />
                 <span className="text-[11px] font-medium text-primary/60 whitespace-nowrap">
@@ -258,7 +291,6 @@ export function SkillGrid({
                     defaultValue: `发现 ${groupSkills.length} 个新技能`,
                   })}
                 </span>
-                {/* Repo-level dismiss all button */}
                 {onDismissGhostRepo && (
                   <button
                     onClick={() => onDismissGhostRepo(repoSource)}
@@ -270,7 +302,6 @@ export function SkillGrid({
                 )}
                 <div className="h-px flex-1 bg-primary/15" />
               </div>
-              {/* Ghost cards grid */}
               <div className={cn(viewMode === "grid" ? "ss-cards-grid" : "ss-cards-list")} style={gridStyle}>
                 <AnimatePresence>
                   {groupSkills.map((gs) => (
@@ -290,18 +321,57 @@ export function SkillGrid({
       </div>
     ) : null;
 
-  // ── Large dataset: plain CSS grid, no layout animations ──
+  // ── Virtualized: only render visible rows ──
+  if (needsVirtualize) {
+    const totalHeight = rowCount * stride - GRID_GAP_PX;
+    const visibleRows: React.ReactNode[] = [];
+    for (let rowIdx = startRow; rowIdx <= endRow && rowIdx < rowCount; rowIdx++) {
+      const startIdx = rowIdx * gridColumnCount;
+      const rowSkills = skills.slice(startIdx, startIdx + gridColumnCount);
+      visibleRows.push(
+        <div
+          key={rowIdx}
+          style={{
+            position: "absolute",
+            top: rowIdx * stride,
+            left: 0,
+            width: "100%",
+            height: cardHeight,
+          }}
+        >
+          <div
+            className={cn(viewMode === "grid" ? "ss-cards-grid" : "ss-cards-list")}
+            style={{ ...gridStyle, height: "100%" }}
+          >
+            {rowSkills.map((skill) => (
+              <div key={skill.name + skill.git_url} className="h-full">
+                {renderCard(skill)}
+              </div>
+            ))}
+          </div>
+        </div>,
+      );
+    }
+
+    return (
+      <div ref={containerRef}>
+        {ghostSection}
+        <div style={{ position: "relative", height: totalHeight, width: "100%" }}>{visibleRows}</div>
+      </div>
+    );
+  }
+
+  // ── Large dataset without virtualization: plain CSS grid ──
   if (!useLayoutAnimations) {
     return (
       <div ref={containerRef}>
         {ghostSection}
         <div className={cn(viewMode === "grid" ? "ss-cards-grid" : "ss-cards-list")} style={gridStyle}>
-          {displayedSkills.map((skill) => (
+          {skills.map((skill) => (
             <div key={skill.name + skill.git_url} className="h-full">
               {renderCard(skill)}
             </div>
           ))}
-          {sentinel}
         </div>
       </div>
     );
@@ -313,7 +383,7 @@ export function SkillGrid({
       {ghostSection}
       <div className={cn(viewMode === "grid" ? "ss-cards-grid" : "ss-cards-list")} style={gridStyle}>
         <AnimatePresence mode="popLayout">
-          {displayedSkills.map((skill) => (
+          {skills.map((skill) => (
             <motion.div
               key={skill.name + skill.git_url}
               layout="position"
@@ -327,7 +397,6 @@ export function SkillGrid({
             </motion.div>
           ))}
         </AnimatePresence>
-        {sentinel}
       </div>
     </div>
   );

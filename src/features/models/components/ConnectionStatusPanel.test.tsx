@@ -18,6 +18,15 @@ vi.mock("../hooks/useBalanceQuery", () => ({
   useBalanceQuery: vi.fn(),
 }));
 
+vi.mock("../hooks/useEndpointSpeedTest", () => ({
+  useEndpointSpeedTest: () => ({
+    testEndpoints: vi.fn(),
+    clearResults: vi.fn(),
+    results: [],
+    isLoading: false,
+  }),
+}));
+
 vi.mock("../../../lib/externalOpen", () => ({
   openExternalUrl: vi.fn(),
 }));

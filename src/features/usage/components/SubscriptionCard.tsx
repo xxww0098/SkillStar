@@ -1,11 +1,29 @@
 import { motion } from "framer-motion";
-import { ExternalLink, GripVertical, Pencil, RefreshCw, ShieldAlert } from "lucide-react";
+import {
+  BadgeCheck,
+  Check,
+  Copy,
+  ExternalLink,
+  GripVertical,
+  Pencil,
+  RefreshCw,
+  ShieldAlert,
+  Trash2,
+} from "lucide-react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { ExternalAnchor } from "@/components/ui/ExternalAnchor";
 import { cn } from "@/lib/utils";
-import type { CatalogEntry, Subscription } from "../types";
+import { formatCurrencyAmount, monthlyEquivalentPrice } from "../lib/pricing";
+import { formatUsageErrorForDisplay } from "../lib/usageErrors";
+import { authModeLabel, formatRelativeSync, getPrimaryResetInfo } from "../lib/usageLabels";
+import type { CatalogEntry, CreditInfo, Subscription } from "../types";
+import { usageApi } from "../api";
 import { PlanBadge } from "./PlanBadge";
 import { ProviderLogo } from "./ProviderLogo";
+import { priorityCardClass, ResetCountdown, UsagePriorityHint } from "./ResetCountdown";
 import { UsageWindowBar } from "./UsageWindowBar";
 
 interface SubscriptionCardProps {
@@ -13,7 +31,12 @@ interface SubscriptionCardProps {
   catalog: CatalogEntry | undefined;
   onRefresh: (id: string) => Promise<void>;
   onEdit: (id: string) => void;
+  onDelete: (id: string) => void;
   onReauth?: (id: string) => void;
+  /** Switch this subscription to be the active account for its catalog
+   *  (Phase 7 multi-account). When omitted, the switch button is hidden. */
+  onSetActive?: (id: string) => Promise<void>;
+  refreshDisabled?: boolean;
   /** Drag handle pointer-down; passed through to dnd lib. */
   onDragHandlePointerDown?: (e: React.PointerEvent) => void;
 }
@@ -23,14 +46,29 @@ export function SubscriptionCard({
   catalog,
   onRefresh,
   onEdit,
+  onDelete,
   onReauth,
+  onSetActive,
+  refreshDisabled = false,
   onDragHandlePointerDown,
 }: SubscriptionCardProps) {
+  const { t } = useTranslation();
   const [refreshing, setRefreshing] = useState(false);
+  const [deletePending, setDeletePending] = useState(false);
   const usage = sub.usage ?? null;
   const planName = (usage?.plan_name ?? sub.plan_tier ?? null) || null;
   const balance = usage?.balance ?? null;
+  const credits = usage?.credits ?? [];
+  const apiKeys = usage?.api_keys ?? [];
+  const hasCredits = credits.length > 0;
+  const hasApiKeys = apiKeys.length > 0;
+  const hasAutoUsage = Boolean(usage?.hourly || usage?.weekly || usage?.monthly || balance || hasCredits || hasApiKeys);
   const renewDays = daysUntil(sub.renew_date);
+  const monthlyCost = monthlyEquivalentPrice(sub);
+  const resetInfo = getPrimaryResetInfo(usage);
+  const brandColorHex = catalog?.brand_color ?? "6B7280";
+  const brandRgb = hexToRgb(brandColorHex);
+  const usageError = formatUsageErrorForDisplay(usage?.error, t);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -41,6 +79,17 @@ export function SubscriptionCard({
     }
   };
 
+  const [activating, setActivating] = useState(false);
+  const handleSetActive = async () => {
+    if (!onSetActive || sub.is_active) return;
+    setActivating(true);
+    try {
+      await onSetActive(sub.id);
+    } finally {
+      setActivating(false);
+    }
+  };
+
   return (
     <motion.article
       layout
@@ -48,103 +97,234 @@ export function SubscriptionCard({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.96 }}
       transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+      style={
+        {
+          "--brand-rgb": brandRgb,
+          "--brand-color": `#${brandColorHex}`,
+        } as React.CSSProperties
+      }
       className={cn(
-        "group relative flex flex-col rounded-2xl border bg-card/60 backdrop-blur-sm overflow-hidden",
-        "border-border/60 hover:border-border transition-colors",
-        "w-full sm:w-[240px] h-[280px] shrink-0",
-        sub.requires_reauth && "border-red-500/40 ring-2 ring-red-500/20",
+        "group relative flex flex-col rounded-3xl border bg-white/95 backdrop-blur-xl overflow-hidden",
+        "border-zinc-200/80 hover:border-zinc-300 transition-all duration-300",
+        "w-full sm:w-[280px] min-h-[320px] shrink-0 shadow-[0_8px_30px_rgba(0,0,0,0.03)]",
+        "hover:shadow-[0_8px_30px_rgba(var(--brand-rgb),0.08)]",
+        sub.is_active && "border-emerald-400/60 ring-1 ring-emerald-300/40",
+        sub.requires_reauth && "border-red-500/40 ring-1 ring-red-500/20",
+        resetInfo && priorityCardClass(resetInfo.resetAt, resetInfo.usedPercent, resetInfo.mode),
       )}
       aria-label={sub.display_name}
     >
-      {/* ── Top bar ─────────────────────────────────────── */}
-      <header className="flex items-start gap-2 p-3 pb-2">
-        <ProviderLogo
-          catalogId={sub.catalog_id}
-          displayName={sub.display_name}
-          brandColor={catalog?.brand_color ?? "6B7280"}
-          size="md"
-        />
-        <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-semibold truncate text-foreground">{sub.display_name}</h3>
-          {catalog?.description && <p className="text-[10px] text-muted-foreground truncate">{catalog.description}</p>}
+      {/* ── Brand Gradient Radial Glow ── */}
+      <div
+        className="absolute -top-16 -right-16 w-36 h-36 rounded-full filter blur-[40px] opacity-10 pointer-events-none transition-all duration-500 group-hover:opacity-15 group-hover:scale-110"
+        style={{ backgroundColor: `rgb(${brandRgb})` }}
+      />
+
+      {/* ── Header: identity (left) + reset/plan (top-right) ── */}
+      <header className="relative z-10 space-y-2 p-4 pb-2">
+        <div className="flex items-start gap-2.5">
+          <ProviderLogo
+            catalogId={sub.catalog_id}
+            displayName={sub.display_name}
+            brandColor={brandColorHex}
+            size="md"
+            className="shrink-0"
+          />
+          <div className="min-w-0 flex-1">
+            <h3
+              className="pr-1 text-sm font-bold leading-snug text-zinc-900 transition-colors group-hover:text-zinc-800 line-clamp-2"
+              title={sub.display_name}
+            >
+              {sub.display_name}
+            </h3>
+            {catalog?.description && (
+              <p
+                className="mt-0.5 text-[10px] leading-snug text-zinc-500 line-clamp-2 break-words"
+                title={catalog.description}
+              >
+                {catalog.description}
+              </p>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-1 self-start">
+            {resetInfo && (
+              <ResetCountdown resetAt={resetInfo.resetAt} usedPercent={resetInfo.usedPercent} mode={resetInfo.mode} />
+            )}
+            <PlanBadge plan={planName} />
+            <button
+              type="button"
+              onPointerDown={onDragHandlePointerDown}
+              className="cursor-grab text-zinc-400 opacity-0 transition-opacity group-hover:opacity-100 hover:text-zinc-600"
+              aria-label={t("usage.dragHandle")}
+              tabIndex={-1}
+            >
+              <GripVertical className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-1 shrink-0">
-          <PlanBadge plan={planName} />
-          <button
-            type="button"
-            onPointerDown={onDragHandlePointerDown}
-            className="cursor-grab text-muted-foreground/40 opacity-0 group-hover:opacity-100 hover:text-muted-foreground transition-opacity"
-            aria-label="拖动调整顺序"
-            tabIndex={-1}
-          >
-            <GripVertical className="w-3.5 h-3.5" />
-          </button>
+
+        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <span className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider bg-zinc-100 text-zinc-600 ring-1 ring-zinc-200/60">
+              {authModeLabel(sub.auth_mode, t)}
+            </span>
+            {sub.is_active && (
+              <span
+                className="inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/60"
+                title="该 catalog 当前活跃的账号"
+              >
+                <BadgeCheck className="h-2.5 w-2.5" />
+                当前
+              </span>
+            )}
+          </div>
+          <p className="shrink-0 text-[9px] font-mono tabular-nums text-zinc-400">
+            {formatRelativeSync(usage?.fetched_at ?? 0, t)}
+          </p>
         </div>
+
+        {resetInfo && (
+          <UsagePriorityHint resetAt={resetInfo.resetAt} usedPercent={resetInfo.usedPercent} mode={resetInfo.mode} />
+        )}
       </header>
 
       {/* ── Body: progress bars / balance / fallback ─────────────── */}
-      <div className="flex-1 px-3 space-y-2 overflow-hidden">
+      <div className="relative z-10 flex-1 px-4 pb-2 space-y-3.5 overflow-hidden">
         {usage?.hourly && <UsageWindowBar window={usage.hourly} />}
         {usage?.weekly && <UsageWindowBar window={usage.weekly} />}
         {usage?.monthly && <UsageWindowBar window={usage.monthly} />}
-        {balance && <BalanceLine balance={balance} />}
-        {!usage?.hourly && !usage?.weekly && !usage?.monthly && !balance && renderManual(sub)}
-        {usage?.error && (
-          <p className="text-[11px] text-amber-500 line-clamp-2" title={usage.error}>
-            ⚠ {usage.error}
+        {balance && <BalanceLine balance={balance} brandColor={brandColorHex} />}
+        {hasCredits && <CreditsLine credits={credits} brandColor={brandColorHex} />}
+        {!hasAutoUsage && <ManualUsage sub={sub} />}
+        {usageError && (
+          <p
+            className="text-[11px] text-amber-500/90 line-clamp-2 rounded-lg bg-amber-500/[0.04] border border-amber-500/10 p-2"
+            title={usage?.error ?? usageError}
+          >
+            ⚠ {usageError}
           </p>
         )}
+        {hasApiKeys && <OpenCodeApiKeyCopyBar subscriptionId={sub.id} apiKeys={apiKeys} />}
       </div>
 
-      {/* ── Footer ─────────────────────────────────────────────── */}
-      <footer className="flex items-center justify-between gap-2 px-3 py-2 border-t border-border/40">
-        <div className="text-[11px] text-muted-foreground truncate">
-          {renewDays !== null ? (
-            renewDays < 0 ? (
-              <span className="text-red-400">已到期 {-renewDays}d</span>
-            ) : renewDays === 0 ? (
-              <span className="text-amber-400">今天到期</span>
-            ) : renewDays <= 7 ? (
-              <span className="text-amber-400">剩 {renewDays} 天</span>
-            ) : (
-              <span>剩 {renewDays} 天</span>
-            )
-          ) : (
-            <span className="text-muted-foreground/60">未设到期</span>
+      <footer className="relative z-10 flex flex-col gap-2.5 px-4 py-3 border-t border-zinc-100 bg-zinc-50/50">
+        <div className={cn("grid gap-2.5 text-[10px]", monthlyCost !== null ? "grid-cols-2" : "grid-cols-1")}>
+          {monthlyCost !== null && (
+            <div className="rounded-xl bg-zinc-100/60 border border-zinc-200/40 px-2.5 py-2 min-w-0">
+              <p className="text-[10px] text-zinc-500 whitespace-nowrap mb-1">{t("usage.subscriptionCost")}</p>
+              <p className="font-bold text-[11px] tabular-nums text-zinc-800 whitespace-nowrap">
+                {formatCurrencyAmount(monthlyCost, sub.currency)}
+                <span className="text-[9px] font-normal text-zinc-400 ml-0.5">{t("usage.perMonth")}</span>
+              </p>
+            </div>
           )}
+          <div className="rounded-xl bg-zinc-100/60 border border-zinc-200/40 px-2.5 py-2 min-w-0">
+            <p className="text-[10px] text-zinc-500 whitespace-nowrap mb-1">{t("usage.nextRenew")}</p>
+            <div className="font-bold text-[11px] whitespace-nowrap">
+              {renewDays !== null ? (
+                renewDays < 0 ? (
+                  <span className="text-rose-600">{t("usage.expired", { days: -renewDays })}</span>
+                ) : renewDays === 0 ? (
+                  <span className="text-amber-600">{t("usage.expiresToday")}</span>
+                ) : renewDays <= 7 ? (
+                  <span className="text-amber-600">{t("usage.renewInDays", { days: renewDays })}</span>
+                ) : (
+                  <span className="text-zinc-700">{t("usage.renewInDays", { days: renewDays })}</span>
+                )
+              ) : (
+                <span className="text-zinc-400 font-normal">{t("usage.noExpiry")}</span>
+              )}
+            </div>
+          </div>
         </div>
-        <div className="flex items-center gap-0.5">
+        <div className="flex items-center justify-end gap-0.5">
+          {onSetActive && !sub.is_active && (
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              title="切为当前账号"
+              onClick={handleSetActive}
+              disabled={activating}
+              className="text-zinc-500 hover:text-emerald-600 hover:scale-105 transition-transform"
+            >
+              <BadgeCheck className={cn("w-3.5 h-3.5", activating && "animate-pulse")} />
+            </Button>
+          )}
           {sub.requires_reauth ? (
-            <Button size="icon-sm" variant="destructive" title="需要重新登录" onClick={() => onReauth?.(sub.id)}>
+            <Button
+              size="icon-sm"
+              variant="destructive"
+              title={t("usage.requiresReauth")}
+              onClick={() => onReauth?.(sub.id)}
+              className="hover:scale-105 transition-transform"
+            >
               <ShieldAlert className="w-3.5 h-3.5" />
             </Button>
           ) : (
             <Button
               size="icon-sm"
               variant="ghost"
-              title="同步用量"
+              title={t("usage.syncUsage")}
               onClick={handleRefresh}
-              disabled={refreshing || sub.auth_mode === "manual"}
+              disabled={refreshing || refreshDisabled || sub.auth_mode === "manual"}
+              className="text-zinc-500 hover:text-zinc-800 hover:scale-105 transition-transform"
             >
               <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin")} />
             </Button>
           )}
-          <Button size="icon-sm" variant="ghost" title="编辑" onClick={() => onEdit(sub.id)}>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            title={t("common.edit")}
+            onClick={() => onEdit(sub.id)}
+            className="text-zinc-500 hover:text-zinc-800 hover:scale-105 transition-transform"
+          >
             <Pencil className="w-3.5 h-3.5" />
           </Button>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            title={t("common.delete")}
+            onClick={() => setDeletePending(true)}
+            className="text-zinc-400 hover:text-red-500 hover:scale-105 transition-transform"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </Button>
           {catalog?.subscription_url && (
-            <a
+            <ExternalAnchor
               href={catalog.subscription_url}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/10 hover:text-foreground"
-              title="去续费 / 打开控制台"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-white/5 hover:text-foreground hover:scale-105 transition-all"
+              title={t("usage.renewConsole")}
             >
               <ExternalLink className="w-3.5 h-3.5" />
-            </a>
+            </ExternalAnchor>
           )}
         </div>
       </footer>
+
+      {deletePending && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center rounded-3xl bg-white/90 backdrop-blur-sm">
+          <div className="mx-4 rounded-2xl border border-red-200 bg-white p-5 shadow-xl">
+            <p className="mb-1 text-sm font-semibold text-zinc-900">{t("usage.confirmDeleteTitle", "确认删除")}</p>
+            <p className="mb-4 text-xs text-zinc-500">{t("usage.confirmDeleteMsg", { name: sub.display_name })}</p>
+            <div className="flex justify-end gap-2">
+              <Button size="sm" variant="ghost" onClick={() => setDeletePending(false)}>
+                {t("common.cancel")}
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={() => {
+                  setDeletePending(false);
+                  onDelete(sub.id);
+                }}
+              >
+                {t("common.delete")}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </motion.article>
   );
 }
@@ -156,28 +336,80 @@ function daysUntil(epoch: number): number | null {
   return Math.floor(diff / 86_400);
 }
 
-function BalanceLine({ balance }: { balance: NonNullable<Subscription["usage"]>["balance"] }) {
+function hexToRgb(hex: string): string {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  return Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b) ? "107, 114, 128" : `${r}, ${g}, ${b}`;
+}
+
+function BalanceLine({
+  balance,
+  brandColor = "10B981",
+}: {
+  balance: NonNullable<Subscription["usage"]>["balance"];
+  brandColor?: string;
+}) {
+  const { t } = useTranslation();
   if (!balance) return null;
+  const fmt = (n: number) => formatNumber(n, t("usage.numberUnit10k"));
+  const c = `#${brandColor}`;
   return (
-    <div className="rounded-lg bg-muted/40 px-2 py-1.5">
-      <div className="text-[10px] text-muted-foreground">余额</div>
-      <div className="text-base font-semibold tabular-nums">
+    <div
+      className="rounded-xl border p-3 flex flex-col relative overflow-hidden"
+      style={{ backgroundColor: `${c}08`, borderColor: `${c}1A` }}
+    >
+      <div
+        className="absolute top-0 right-0 w-12 h-12 rounded-full filter blur-md pointer-events-none"
+        style={{ backgroundColor: `${c}0D` }}
+      />
+      <div className="text-[10px] font-medium uppercase tracking-wider mb-0.5" style={{ color: c }}>
+        {t("usage.balanceLabel")}
+      </div>
+      <div className="text-xl font-bold font-mono tabular-nums drop-shadow-sm" style={{ color: c }}>
         {balance.currency === "CNY" ? "¥" : balance.currency === "USD" ? "$" : ""}
-        {formatNumber(balance.total)}
+        {fmt(balance.total)}
       </div>
       {(balance.granted > 0 || balance.topped_up > 0) && (
-        <div className="text-[10px] text-muted-foreground mt-0.5">
-          赠 {formatNumber(balance.granted)} · 充 {formatNumber(balance.topped_up)}
+        <div
+          className="text-[9px] text-muted-foreground/75 mt-1.5 pt-1.5 flex items-center justify-between"
+          style={{ borderTopColor: `${c}0D`, borderTopWidth: 1 }}
+        >
+          <span>{t("usage.balanceGranted", { granted: fmt(balance.granted), topup: fmt(balance.topped_up) })}</span>
         </div>
       )}
     </div>
   );
 }
 
-function renderManual(sub: Subscription) {
+function CreditsLine({ credits, brandColor = "10B981" }: { credits: CreditInfo[]; brandColor?: string }) {
+  const { t } = useTranslation();
+  if (!credits || credits.length === 0) return null;
+  const c = `#${brandColor}`;
+  return (
+    <div
+      className="rounded-xl border p-2.5 flex flex-col gap-1.5 relative overflow-hidden"
+      style={{ backgroundColor: `${c}06`, borderColor: `${c}14` }}
+    >
+      <div className="text-[10px] font-medium uppercase tracking-wider" style={{ color: c }}>
+        {t("usage.creditsLabel", "AI 积分")}
+      </div>
+      {credits.map((credit, i) => (
+        <div key={i} className="flex items-center justify-between gap-2 text-[10px]">
+          <span className="text-muted-foreground capitalize">{credit.credit_type.replace(/_/g, " ")}</span>
+          <span className="font-mono font-semibold tabular-nums text-foreground">{credit.credit_amount ?? "—"}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ManualUsage({ sub }: { sub: Subscription }) {
+  const { t } = useTranslation();
   const q = sub.manual_quota;
   if (!q || (!q.total_tokens && !q.used_tokens)) {
-    return <p className="text-[11px] text-muted-foreground/70">未录入用量数据。点击编辑按钮维护。</p>;
+    return <p className="text-[11px] text-zinc-400 italic py-2">{t("usage.noUsageData")}</p>;
   }
   const total = q.total_tokens ?? 0;
   const used = q.used_tokens ?? 0;
@@ -185,7 +417,7 @@ function renderManual(sub: Subscription) {
   return (
     <UsageWindowBar
       window={{
-        label: q.period_label ?? "本月",
+        label: q.period_label ?? t("usage.defaultPeriod"),
         used,
         total: q.total_tokens,
         percent,
@@ -195,10 +427,61 @@ function renderManual(sub: Subscription) {
   );
 }
 
-function formatNumber(n: number): string {
+function formatNumber(n: number, unit10k: string): string {
   if (!Number.isFinite(n)) return "—";
   if (Math.abs(n) >= 10_000) {
-    return `${(n / 10_000).toFixed(2)}万`;
+    return `${(n / 10_000).toFixed(2)}${unit10k}`;
   }
   return n.toFixed(2);
+}
+
+function OpenCodeApiKeyCopyBar({
+  subscriptionId,
+  apiKeys,
+}: {
+  subscriptionId: string;
+  apiKeys: { id: string; name: string; display: string; email: string | null }[];
+}) {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+  const [copying, setCopying] = useState(false);
+
+  const handleCopy = async () => {
+    if (copying) return;
+    setCopying(true);
+    try {
+      const key = await usageApi.getSubscriptionApiKey(subscriptionId);
+      if (!key) {
+        toast.error(t("usage.copyApiKeyEmpty"));
+        return;
+      }
+      await navigator.clipboard.writeText(key);
+      setCopied(true);
+      toast.success(t("usage.copyApiKeySuccess"));
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error(t("usage.copyApiKeyFailed"));
+    } finally {
+      setCopying(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-zinc-200/60 bg-zinc-50/80 px-2.5 py-1.5">
+      <div className="flex-1 min-w-0">
+        <p className="text-[9px] font-medium uppercase tracking-wider text-zinc-500">{t("usage.apiKeyLabel")}</p>
+        <p className="text-[10px] font-mono text-zinc-600 truncate">{apiKeys[0]?.display ?? "—"}</p>
+      </div>
+      <Button
+        size="icon-sm"
+        variant="ghost"
+        onClick={handleCopy}
+        disabled={copying}
+        title={t("usage.copyApiKey")}
+        className={cn("shrink-0 transition-all", copied ? "text-emerald-500" : "text-zinc-400 hover:text-zinc-700")}
+      >
+        {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+      </Button>
+    </div>
+  );
 }

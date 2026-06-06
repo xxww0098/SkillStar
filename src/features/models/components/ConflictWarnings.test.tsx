@@ -16,7 +16,7 @@ describe("ConflictWarnings", () => {
     mockInvoke.mockResolvedValue([]);
     const { container } = render(<ConflictWarnings providerId="test-id" />);
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("detect_env_conflicts");
+      expect(mockInvoke).toHaveBeenCalledWith("detect_provider_conflicts", { providerId: "test-id" });
     });
     expect(container.querySelector("[data-testid='conflict-warnings']")).not.toBeInTheDocument();
   });
@@ -120,7 +120,7 @@ describe("ConflictWarnings", () => {
     // Dialog should show three action buttons
     expect(screen.getByText("覆盖")).toBeInTheDocument();
     expect(screen.getByText("取消")).toBeInTheDocument();
-    expect(screen.getByText("查看差异")).toBeInTheDocument();
+    expect(screen.getByText("打开目录")).toBeInTheDocument();
   });
 
   it("closes ExternalModification dialog on cancel", async () => {

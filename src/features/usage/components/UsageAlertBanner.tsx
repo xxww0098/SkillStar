@@ -1,5 +1,6 @@
 import { AlertTriangle, Info, ShieldAlert, X } from "lucide-react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import type { SubscriptionAlert } from "../types";
 
@@ -9,6 +10,7 @@ interface UsageAlertBannerProps {
 }
 
 export function UsageAlertBanner({ alerts, onDismiss }: UsageAlertBannerProps) {
+  const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(false);
   if (alerts.length === 0) return null;
   const top = alerts.slice(0, collapsed ? 1 : 4);
@@ -31,7 +33,7 @@ export function UsageAlertBanner({ alerts, onDismiss }: UsageAlertBannerProps) {
             type="button"
             className="text-current/60 hover:text-current"
             onClick={() => onDismiss(alert.id)}
-            aria-label="忽略提醒"
+            aria-label={t("usage.dismissAlert")}
           >
             <X className="w-3.5 h-3.5" />
           </button>
@@ -43,7 +45,7 @@ export function UsageAlertBanner({ alerts, onDismiss }: UsageAlertBannerProps) {
           className="text-[11px] text-muted-foreground hover:text-foreground"
           onClick={() => setCollapsed(true)}
         >
-          收起更多 {alerts.length - 4} 条提醒
+          {t("usage.collapseAlerts", { count: alerts.length - 4 })}
         </button>
       )}
       {collapsed && alerts.length > 1 && (
@@ -52,7 +54,7 @@ export function UsageAlertBanner({ alerts, onDismiss }: UsageAlertBannerProps) {
           className="text-[11px] text-muted-foreground hover:text-foreground"
           onClick={() => setCollapsed(false)}
         >
-          展开全部 {alerts.length} 条提醒
+          {t("usage.expandAlerts", { count: alerts.length })}
         </button>
       )}
     </div>

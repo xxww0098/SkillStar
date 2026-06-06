@@ -319,7 +319,7 @@ proptest! {
         // Partial JSON is either invalid (returns empty default) or happens to parse
         // into a valid ProvidersStore (unlikely but possible). Either way, no error.
         // For most partial JSON, serde will fail and we get the default.
-        if serde_json::from_str::<skillstar_models::providers::ProvidersStore>(&std::fs::read_to_string(&path).unwrap().trim_start_matches('\u{FEFF}')).is_err() {
+        if serde_json::from_str::<skillstar_models::providers::ProvidersStore>(std::fs::read_to_string(&path).unwrap().trim_start_matches('\u{FEFF}')).is_err() {
             assert_empty_store(&store);
         }
     }
@@ -516,7 +516,7 @@ fn arb_tool_activation() -> impl Strategy<Value = ToolActivation> {
         "[a-zA-Z0-9\\-]{1,36}",  // provider_id (UUID-like)
         "[a-zA-Z0-9\\-\\.]{1,50}", // model name
     )
-        .prop_map(|(provider_id, model)| ToolActivation { provider_id, model })
+        .prop_map(|(provider_id, model)| ToolActivation { provider_id, model, settings: None, last_sync_at: None })
 }
 
 /// Strategy: generate an optional ToolActivation for the tool_activations map.
@@ -575,6 +575,8 @@ fn arb_provider_entry_flat() -> impl Strategy<Value = ProviderEntryFlat> {
                 notes,
                 created_at,
                 meta: None, // Keep meta as None for simplicity (JSON Value is hard to generate arbitrarily)
+                codex_wire_api: "responses".to_string(),
+                codex_auth_mode: "api_key".to_string(),
             }
         })
 }
@@ -804,9 +806,12 @@ fn arb_provider_entry() -> impl Strategy<Value = (ProviderEntry, String, String,
         })
 }
 
+/// Per-provider expectations: `provider_id → (base_url, api_key, enabled_models)`.
+type ProviderExpectations = HashMap<String, (String, String, Vec<String>)>;
+
 /// Strategy: generate a random AppProviders with 0..=3 providers.
 /// Returns the AppProviders and a map of provider_id → (base_url, api_key, enabled_models).
-fn arb_app_providers() -> impl Strategy<Value = (AppProviders, HashMap<String, (String, String, Vec<String>)>)> {
+fn arb_app_providers() -> impl Strategy<Value = (AppProviders, ProviderExpectations)> {
     prop::collection::vec(arb_provider_entry(), 0..=3)
         .prop_flat_map(|entries| {
             let len = entries.len();
@@ -893,7 +898,7 @@ proptest! {
         let mut v1_providers: HashMap<(String, String), (String, HashSet<String>)> = HashMap::new();
 
         for app in apps {
-            for (_id, entry) in &app.providers {
+            for entry in app.providers.values() {
                 let (base_url, api_key, models) = extract_settings_for_test(&entry.settings_config);
                 let key = (base_url.clone(), api_key.clone());
                 let entry_models: HashSet<String> = models.into_iter().collect();
@@ -1204,6 +1209,8 @@ fn arb_flat_store_with_unique_ids() -> impl Strategy<Value = FlatProvidersStore>
                                 notes: None,
                                 created_at: None,
                                 meta: None,
+                                codex_wire_api: "responses".to_string(),
+                                codex_auth_mode: "api_key".to_string(),
                             })
                             .collect();
 
@@ -1555,6 +1562,8 @@ proptest! {
             notes: None,
             created_at: None,
             meta: None,
+            codex_wire_api: "responses".to_string(),
+            codex_auth_mode: "api_key".to_string(),
         };
 
         let result = create_provider_flat(&mut store_mut, entry);
@@ -1604,6 +1613,8 @@ proptest! {
             notes: None,
             created_at: None,
             meta: None,
+            codex_wire_api: "responses".to_string(),
+            codex_auth_mode: "api_key".to_string(),
         };
 
         let result = create_provider_flat(&mut store_mut, entry);
@@ -1776,6 +1787,8 @@ fn arb_store_with_valid_providers() -> impl Strategy<Value = FlatProvidersStore>
                 notes: None,
                 created_at: None,
                 meta: None,
+                codex_wire_api: "responses".to_string(),
+                codex_auth_mode: "api_key".to_string(),
             })
             .collect();
 
@@ -1847,7 +1860,7 @@ proptest! {
             let model_ref = op.model.as_deref();
 
             // Perform activation
-            let result = activate_tool(&mut store_mut, &provider_id, tool_id, model_ref);
+            let result = activate_tool(&mut store_mut, &provider_id, tool_id, model_ref, None);
             prop_assert!(
                 result.is_ok(),
                 "activate_tool should succeed at step {} (provider_idx={}, tool='{}'), got: {:?}",

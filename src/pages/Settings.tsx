@@ -14,6 +14,8 @@ import {
   readBackgroundRun,
   writeBackgroundRun,
 } from "../features/settings/sections/BackgroundRunSection";
+import { CookieBridgeSection } from "../features/settings/sections/CookieBridgeSection";
+import { FingerprintsSection } from "../features/settings/sections/FingerprintsSection";
 import { GitHubMirrorSection } from "../features/settings/sections/GitHubMirrorSection";
 import { LanguageSection } from "../features/settings/sections/LanguageSection";
 import { ProxySection } from "../features/settings/sections/ProxySection";
@@ -60,8 +62,6 @@ function isSameAiConfig(a: AiConfig, b: AiConfig): boolean {
     a.target_language === b.target_language &&
     a.context_window_k === b.context_window_k &&
     a.max_concurrent_requests === b.max_concurrent_requests &&
-    a.chunk_char_limit === b.chunk_char_limit &&
-    a.scan_max_response_tokens === b.scan_max_response_tokens &&
     JSON.stringify(a.openai_preset) === JSON.stringify(b.openai_preset) &&
     JSON.stringify(a.anthropic_preset) === JSON.stringify(b.anthropic_preset) &&
     JSON.stringify(a.local_preset) === JSON.stringify(b.local_preset)
@@ -283,6 +283,7 @@ function agentReducer(state: AgentState, action: AgentAction): AgentState {
 
 import {
   Bot,
+  Cookie,
   EyeOff,
   Globe,
   HardDrive,
@@ -301,6 +302,7 @@ const SETTINGS_SECTIONS: { id: string; labelKey: string; icon: LucideIcon }[] = 
   { id: "settings-mirror", labelKey: "settings.githubMirror", icon: Zap },
   { id: "settings-ai", labelKey: "settings.aiProvider", icon: Sparkles },
   { id: "settings-acp", labelKey: "settings.acpTitle", icon: Bot },
+  { id: "settings-cookie-bridge", labelKey: "Cookie Bridge", icon: Cookie },
   { id: "settings-background", labelKey: "settings.backgroundRun", icon: EyeOff },
   { id: "settings-appearance", labelKey: "settings.backgroundStyle", icon: Paintbrush },
   { id: "settings-language", labelKey: "settings.language", icon: LanguagesIcon },
@@ -310,6 +312,7 @@ const SETTINGS_SECTIONS: { id: string; labelKey: string; icon: LucideIcon }[] = 
 
 const SETTINGS_FOCUS_TO_SECTION_ID: Record<SettingsFocusTarget, string> = {
   "ai-provider": "settings-ai",
+  "cookie-bridge": "settings-cookie-bridge",
   storage: "settings-storage",
 };
 
@@ -534,7 +537,7 @@ export function Settings({
           setTimeout(() => dispatchProxy({ type: "CLEAR_SAVED_INDICATOR" }), 2000);
         })
         .catch((e) => {
-          console.error("Failed to save proxy config:", e);
+          if (import.meta.env.DEV) console.error("Failed to save proxy config:", e);
           dispatchProxy({ type: "REVERT", config: previousConfig });
           toast.error(t("settings.saveProxyFailed"));
         })
@@ -569,7 +572,7 @@ export function Settings({
           setTimeout(() => dispatchMirror({ type: "CLEAR_SAVED_INDICATOR" }), 2000);
         })
         .catch((e) => {
-          console.error("Failed to save mirror config:", e);
+          if (import.meta.env.DEV) console.error("Failed to save mirror config:", e);
           dispatchMirror({ type: "REVERT", config: previousConfig });
           toast.error(t("settings.saveMirrorFailed"));
         })
@@ -619,7 +622,7 @@ export function Settings({
       const storageOverview = await tauriInvoke("get_storage_overview");
       setStorageOverview(storageOverview);
     } catch (e) {
-      console.error("Failed to fetch storage overview:", e);
+      if (import.meta.env.DEV) console.error("Failed to fetch storage overview:", e);
     } finally {
       setFetchingStorage(false);
     }
@@ -694,7 +697,7 @@ export function Settings({
       try {
         await toggleProfile(profile.id);
       } catch (e) {
-        console.error("Toggle failed:", e);
+        if (import.meta.env.DEV) console.error("Toggle failed:", e);
         toast.error(t("settings.toggleFailed"));
       }
     },
@@ -712,7 +715,7 @@ export function Settings({
         const skills = await tauriInvoke("list_linked_skills", { agentId });
         dispatchAgent({ type: "SET_LINKED_SKILLS", agentId, skills });
       } catch (e) {
-        console.error("Failed to list linked skills:", e);
+        if (import.meta.env.DEV) console.error("Failed to list linked skills:", e);
         toast.error(t("settings.listLinkedFailed"));
       }
     },
@@ -726,7 +729,7 @@ export function Settings({
         dispatchAgent({ type: "REMOVE_LINKED_SKILL", agentId, skillName });
         notifySkillsRefresh();
       } catch (e) {
-        console.error("Unlink failed:", e);
+        if (import.meta.env.DEV) console.error("Unlink failed:", e);
         toast.error(t("settings.unlinkFailed"));
       }
     },
@@ -756,7 +759,7 @@ export function Settings({
       }
     } catch (e) {
       writeBackgroundRun(!enabled);
-      console.error("Update patrol background run failed:", e);
+      if (import.meta.env.DEV) console.error("Update patrol background run failed:", e);
     }
   }, []);
 
@@ -807,7 +810,7 @@ export function Settings({
       }
       await fetchStorageOverview();
     } catch (e) {
-      console.error("Cache clean failed:", e);
+      if (import.meta.env.DEV) console.error("Cache clean failed:", e);
       toast.error("Cleanup failed");
     } finally {
       setCleaningCaches(false);
@@ -888,7 +891,7 @@ export function Settings({
               );
             })
             .catch((e) => {
-              console.error("Background force delete failed:", e);
+              if (import.meta.env.DEV) console.error("Background force delete failed:", e);
               toast.error(
                 t("settings.forceDeleteBackgroundFailed", {
                   target: targetLabel,
@@ -905,7 +908,7 @@ export function Settings({
         reportDeleteResult(raced);
         void fetchStorageOverview();
       } catch (e) {
-        console.error("Force delete failed:", e);
+        if (import.meta.env.DEV) console.error("Force delete failed:", e);
         toast.error(t("settings.forceDeleteFailed"));
       } finally {
         if (timeoutTimer) {
@@ -934,7 +937,7 @@ export function Settings({
       notifySkillsRefresh();
       await fetchStorageOverview();
     } catch (e) {
-      console.error("Clean broken skills failed:", e);
+      if (import.meta.env.DEV) console.error("Clean broken skills failed:", e);
       toast.error(t("settings.forceDeleteFailed"));
     } finally {
       setCleaningBroken(false);
@@ -966,6 +969,21 @@ export function Settings({
   const handleAiConfigChange = useCallback((next: AiConfig) => {
     dispatchAi({ type: "SET_CONFIG", config: next });
   }, []);
+
+  const handleToggleProxyExpanded = useCallback(() => {
+    dispatchProxy({ type: "TOGGLE_EXPANDED" });
+  }, []);
+
+  const handleToggleMirrorExpanded = useCallback(() => {
+    dispatchMirror({ type: "TOGGLE_EXPANDED" });
+  }, []);
+
+  const handleToggleAiExpanded = useCallback(() => {
+    dispatchAi({ type: "TOGGLE_EXPANDED" });
+  }, []);
+
+  const handleForceDeleteHub = useCallback(() => handleForceDelete("hub"), [handleForceDelete]);
+  const handleForceDeleteCache = useCallback(() => handleForceDelete("cache"), [handleForceDelete]);
 
   return (
     <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden bg-background">
@@ -1018,7 +1036,7 @@ export function Settings({
                   proxyExpanded={proxyState.expanded}
                   proxySaving={proxyState.saving}
                   proxySaved={proxyState.savedIndicator}
-                  onToggleExpanded={() => dispatchProxy({ type: "TOGGLE_EXPANDED" })}
+                  onToggleExpanded={handleToggleProxyExpanded}
                   onConfigChange={handleProxyConfigChange}
                 />
               </section>
@@ -1030,7 +1048,7 @@ export function Settings({
                   mirrorExpanded={mirrorState.expanded}
                   mirrorSaving={mirrorState.saving}
                   mirrorSaved={mirrorState.savedIndicator}
-                  onToggleExpanded={() => dispatchMirror({ type: "TOGGLE_EXPANDED" })}
+                  onToggleExpanded={handleToggleMirrorExpanded}
                   onConfigChange={handleMirrorConfigChange}
                 />
               </section>
@@ -1045,7 +1063,7 @@ export function Settings({
                   aiTesting={aiState.testing}
                   aiTestResult={aiState.testResult}
                   aiTestLatency={aiState.testLatency}
-                  onToggleExpanded={() => dispatchAi({ type: "TOGGLE_EXPANDED" })}
+                  onToggleExpanded={handleToggleAiExpanded}
                   onEnabledChange={handleAiEnabledChange}
                   onConfigChange={handleAiConfigChange}
                   onTestConnection={handleAiTestConnection}
@@ -1054,6 +1072,14 @@ export function Settings({
 
               <section id="settings-acp" className="scroll-mt-3">
                 <AcpSection />
+              </section>
+
+              <section id="settings-cookie-bridge" className="scroll-mt-3">
+                <CookieBridgeSection />
+              </section>
+
+              <section id="settings-fingerprints" className="scroll-mt-3">
+                <FingerprintsSection />
               </section>
 
               <section id="settings-background" className="scroll-mt-3">
@@ -1081,8 +1107,8 @@ export function Settings({
                   slowForceDeletingTarget={slowForceDeletingTarget}
                   formatBytes={formatBytes}
                   onCleanAll={handleCleanAllCaches}
-                  onForceDeleteHub={() => handleForceDelete("hub")}
-                  onForceDeleteCache={() => handleForceDelete("cache")}
+                  onForceDeleteHub={handleForceDeleteHub}
+                  onForceDeleteCache={handleForceDeleteCache}
                   onCleanBroken={handleCleanBroken}
                 />
               </section>

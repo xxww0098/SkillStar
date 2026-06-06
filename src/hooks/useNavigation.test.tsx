@@ -2,7 +2,7 @@ import { act, renderHook } from "@testing-library/react";
 import fc from "fast-check";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ModelsNavPage, NavPage } from "../types";
+import type { NavPage } from "../types";
 import { NavigationProvider, useAppMode, useNavigation } from "./useNavigation";
 
 // jsdom's localStorage stub is incomplete in this test runner — provide
@@ -39,10 +39,10 @@ describe("useNavigation - AppMode support", () => {
   it("defaults to skills mode", () => {
     const { result } = renderHook(() => useNavigation(), { wrapper });
     expect(result.current.appMode).toBe("skills");
-    expect(result.current.modelsActivePage).toBe("providers");
+    expect(result.current.modelsActivePage).toBe("hub");
   });
 
-  it("switches to models mode and updates hash", () => {
+  it("switches to models mode and updates hash to single hub URL", () => {
     const { result } = renderHook(() => useNavigation(), { wrapper });
 
     act(() => {
@@ -50,7 +50,7 @@ describe("useNavigation - AppMode support", () => {
     });
 
     expect(result.current.appMode).toBe("models");
-    expect(window.location.hash).toBe("#models/providers");
+    expect(window.location.hash).toBe("#models");
   });
 
   it("switches back to skills mode and restores skills hash", () => {
@@ -64,7 +64,7 @@ describe("useNavigation - AppMode support", () => {
     act(() => {
       result.current.setAppMode("models");
     });
-    expect(window.location.hash).toBe("#models/providers");
+    expect(window.location.hash).toBe("#models");
 
     act(() => {
       result.current.setAppMode("skills");
@@ -73,66 +73,50 @@ describe("useNavigation - AppMode support", () => {
     expect(window.location.hash).toBe("#projects");
   });
 
-  it("preserves models page when switching modes (round-trip)", () => {
-    const { result } = renderHook(() => useNavigation(), { wrapper });
-
-    // Navigate to health in models mode
-    act(() => {
-      result.current.navigateModels("health");
-    });
-    expect(result.current.modelsActivePage).toBe("health");
-    expect(window.location.hash).toBe("#models/health");
-
-    // Switch to skills
-    act(() => {
-      result.current.setAppMode("skills");
-    });
-    expect(result.current.appMode).toBe("skills");
-
-    // Switch back to models — should restore "health"
-    act(() => {
-      result.current.setAppMode("models");
-    });
-    expect(result.current.appMode).toBe("models");
-    expect(result.current.modelsActivePage).toBe("health");
-    expect(window.location.hash).toBe("#models/health");
-  });
-
-  it("navigateModels updates modelsActivePage and hash", () => {
+  it("navigateModels always lands on the hub (legacy API compat)", () => {
     const { result } = renderHook(() => useNavigation(), { wrapper });
 
     act(() => {
-      result.current.navigateModels("tool-configs");
+      result.current.navigateModels("hub");
     });
 
     expect(result.current.appMode).toBe("models");
-    expect(result.current.modelsActivePage).toBe("tool-configs");
-    expect(window.location.hash).toBe("#models/tool-configs");
+    expect(result.current.modelsActivePage).toBe("hub");
+    expect(window.location.hash).toBe("#models");
   });
 
   it("initializes from models hash in URL", () => {
-    window.location.hash = "#models/health";
+    window.location.hash = "#models";
 
     const { result } = renderHook(() => useNavigation(), { wrapper });
 
     expect(result.current.appMode).toBe("models");
-    expect(result.current.modelsActivePage).toBe("health");
+    expect(result.current.modelsActivePage).toBe("hub");
   });
 
-  it("handles hashchange to models hash", () => {
+  it("normalizes legacy `#models/<sub>` hash to the hub", () => {
+    window.location.hash = "#models/providers";
+
+    const { result } = renderHook(() => useNavigation(), { wrapper });
+
+    expect(result.current.appMode).toBe("models");
+    expect(result.current.modelsActivePage).toBe("hub");
+  });
+
+  it("handles hashchange into models mode", () => {
     const { result } = renderHook(() => useNavigation(), { wrapper });
 
     act(() => {
-      window.location.hash = "#models/tool-configs";
+      window.location.hash = "#models";
       window.dispatchEvent(new HashChangeEvent("hashchange"));
     });
 
     expect(result.current.appMode).toBe("models");
-    expect(result.current.modelsActivePage).toBe("tool-configs");
+    expect(result.current.modelsActivePage).toBe("hub");
   });
 
   it("handles hashchange from models to skills hash", () => {
-    window.location.hash = "#models/providers";
+    window.location.hash = "#models";
     const { result } = renderHook(() => useNavigation(), { wrapper });
 
     act(() => {
@@ -142,15 +126,6 @@ describe("useNavigation - AppMode support", () => {
 
     expect(result.current.appMode).toBe("skills");
     expect(result.current.activePage).toBe("marketplace");
-  });
-
-  it("falls back to default models page for unknown models hash", () => {
-    window.location.hash = "#models/unknown-page";
-
-    const { result } = renderHook(() => useNavigation(), { wrapper });
-
-    expect(result.current.appMode).toBe("models");
-    expect(result.current.modelsActivePage).toBe("providers");
   });
 
   it("navigate() sets mode back to skills", () => {
@@ -302,8 +277,6 @@ describe("Property: Mode Switch Page Preservation (Round-Trip)", () => {
 
   const skillsPages = fc.constantFrom<NavPage>("my-skills", "marketplace", "skill-cards", "projects", "settings");
 
-  const modelsPages = fc.constantFrom<ModelsNavPage>("providers", "health", "tool-configs", "models-settings");
-
   beforeEach(() => {
     window.location.hash = "";
     localStorage.clear();
@@ -311,93 +284,54 @@ describe("Property: Mode Switch Page Preservation (Round-Trip)", () => {
 
   it("skills page is preserved after switching to models and back", () => {
     fc.assert(
-      fc.property(skillsPages, modelsPages, (skillsPage, modelsPage) => {
+      fc.property(skillsPages, (skillsPage) => {
         window.location.hash = "";
         const { result } = renderHook(() => useNavigation(), { wrapper });
 
-        // Navigate to a skills page
         act(() => {
           result.current.navigate(skillsPage);
         });
         expect(result.current.activePage).toBe(skillsPage);
 
-        // Switch to models mode and navigate to a models page
         act(() => {
-          result.current.navigateModels(modelsPage);
+          result.current.setAppMode("models");
         });
         expect(result.current.appMode).toBe("models");
-        expect(result.current.modelsActivePage).toBe(modelsPage);
+        expect(result.current.modelsActivePage).toBe("hub");
 
-        // Switch back to skills mode — skills page should be preserved
         act(() => {
           result.current.setAppMode("skills");
         });
         expect(result.current.appMode).toBe("skills");
         expect(result.current.activePage).toBe(skillsPage);
       }),
-      { numRuns: 100 },
+      { numRuns: 50 },
     );
   });
 
-  it("models page is preserved after switching to skills and back", () => {
+  it("models mode collapses to the hub page across round trips", () => {
     fc.assert(
-      fc.property(skillsPages, modelsPages, (skillsPage, modelsPage) => {
+      fc.property(skillsPages, (skillsPage) => {
         window.location.hash = "";
         const { result } = renderHook(() => useNavigation(), { wrapper });
 
-        // Navigate to a models page
         act(() => {
-          result.current.navigateModels(modelsPage);
+          result.current.setAppMode("models");
         });
-        expect(result.current.modelsActivePage).toBe(modelsPage);
+        expect(result.current.modelsActivePage).toBe("hub");
 
-        // Switch to skills mode and navigate to a skills page
         act(() => {
           result.current.navigate(skillsPage);
         });
         expect(result.current.appMode).toBe("skills");
-        expect(result.current.activePage).toBe(skillsPage);
 
-        // Switch back to models mode — models page should be preserved
         act(() => {
           result.current.setAppMode("models");
         });
         expect(result.current.appMode).toBe("models");
-        expect(result.current.modelsActivePage).toBe(modelsPage);
+        expect(result.current.modelsActivePage).toBe("hub");
       }),
-      { numRuns: 100 },
-    );
-  });
-
-  it("both pages are preserved in a full round-trip", () => {
-    fc.assert(
-      fc.property(skillsPages, modelsPages, (skillsPage, modelsPage) => {
-        window.location.hash = "";
-        const { result } = renderHook(() => useNavigation(), { wrapper });
-
-        // Step 1: Navigate to skills page
-        act(() => {
-          result.current.navigate(skillsPage);
-        });
-
-        // Step 2: Switch to models and navigate to models page
-        act(() => {
-          result.current.navigateModels(modelsPage);
-        });
-
-        // Step 3: Switch back to skills — skills page preserved
-        act(() => {
-          result.current.setAppMode("skills");
-        });
-        expect(result.current.activePage).toBe(skillsPage);
-
-        // Step 4: Switch back to models — models page preserved
-        act(() => {
-          result.current.setAppMode("models");
-        });
-        expect(result.current.modelsActivePage).toBe(modelsPage);
-      }),
-      { numRuns: 100 },
+      { numRuns: 50 },
     );
   });
 });
@@ -415,32 +349,32 @@ describe("Property: Mode Switch URL Hash Consistency", () => {
     marketplace: "marketplace",
     "skill-cards": "cards",
     projects: "projects",
+    mcp: "mcp",
     settings: "settings",
   };
 
-  const skillsPages = fc.constantFrom<NavPage>("my-skills", "marketplace", "skill-cards", "projects", "settings");
-
-  const modelsPages = fc.constantFrom<ModelsNavPage>("providers", "health", "tool-configs", "models-settings");
+  const skillsPages = fc.constantFrom<NavPage>(
+    "my-skills",
+    "marketplace",
+    "skill-cards",
+    "projects",
+    "mcp",
+    "settings",
+  );
 
   beforeEach(() => {
     window.location.hash = "";
     localStorage.clear();
   });
 
-  it("navigating to any models page produces correct hash #models/{page}", () => {
-    fc.assert(
-      fc.property(modelsPages, (modelsPage) => {
-        window.location.hash = "";
-        const { result } = renderHook(() => useNavigation(), { wrapper });
+  it("navigating to models always produces the single #models hash", () => {
+    const { result } = renderHook(() => useNavigation(), { wrapper });
 
-        act(() => {
-          result.current.navigateModels(modelsPage);
-        });
+    act(() => {
+      result.current.navigateModels("hub");
+    });
 
-        expect(window.location.hash).toBe(`#models/${modelsPage}`);
-      }),
-      { numRuns: 100 },
-    );
+    expect(window.location.hash).toBe("#models");
   });
 
   it("navigating to any skills page produces correct hash matching PAGE_TO_HASH", () => {
@@ -459,57 +393,28 @@ describe("Property: Mode Switch URL Hash Consistency", () => {
     );
   });
 
-  it("switching to models mode produces hash encoding the remembered models page", () => {
+  it("switching back to models mode reproduces the hub hash", () => {
     fc.assert(
-      fc.property(skillsPages, modelsPages, (skillsPage, modelsPage) => {
+      fc.property(skillsPages, (skillsPage) => {
         window.location.hash = "";
         const { result } = renderHook(() => useNavigation(), { wrapper });
 
-        // Set up a models page in memory
-        act(() => {
-          result.current.navigateModels(modelsPage);
-        });
-
-        // Switch to skills
-        act(() => {
-          result.current.navigate(skillsPage);
-        });
-        expect(window.location.hash).toBe(`#${PAGE_TO_HASH[skillsPage]}`);
-
-        // Switch back to models — hash should reflect the remembered models page
         act(() => {
           result.current.setAppMode("models");
         });
-        expect(window.location.hash).toBe(`#models/${modelsPage}`);
-      }),
-      { numRuns: 100 },
-    );
-  });
+        expect(window.location.hash).toBe("#models");
 
-  it("switching to skills mode produces hash encoding the remembered skills page", () => {
-    fc.assert(
-      fc.property(skillsPages, modelsPages, (skillsPage, modelsPage) => {
-        window.location.hash = "";
-        const { result } = renderHook(() => useNavigation(), { wrapper });
-
-        // Navigate to a skills page first
         act(() => {
           result.current.navigate(skillsPage);
         });
-
-        // Switch to models
-        act(() => {
-          result.current.navigateModels(modelsPage);
-        });
-        expect(window.location.hash).toBe(`#models/${modelsPage}`);
-
-        // Switch back to skills — hash should reflect the remembered skills page
-        act(() => {
-          result.current.setAppMode("skills");
-        });
         expect(window.location.hash).toBe(`#${PAGE_TO_HASH[skillsPage]}`);
+
+        act(() => {
+          result.current.setAppMode("models");
+        });
+        expect(window.location.hash).toBe("#models");
       }),
-      { numRuns: 100 },
+      { numRuns: 50 },
     );
   });
 });

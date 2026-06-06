@@ -16,7 +16,6 @@ use tracing::{debug, error, info, warn};
 use skillstar_core::infra::paths;
 use super::path_env;
 
-pub use skillstar_core::config::acp::{AcpConfig, load_config, save_config};
 
 /// Result of an ACP setup session.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -786,11 +785,10 @@ fn resolve_repo_root(skill_path: &std::path::Path) -> PathBuf {
         return canonical;
     }
 
-    if let Ok(rel) = canonical.strip_prefix(&repos_cache) {
-        if let Some(first) = rel.components().next() {
+    if let Ok(rel) = canonical.strip_prefix(&repos_cache)
+        && let Some(first) = rel.components().next() {
             return repos_cache.join(first);
         }
-    }
     canonical
 }
 
@@ -800,6 +798,7 @@ fn resolve_repo_root(skill_path: &std::path::Path) -> PathBuf {
 mod tests {
     use super::*;
     use agent_client_protocol::Client as _;
+    use skillstar_core::config::acp::AcpConfig;
 
     // ── Script extraction ───────────────────────────────────────────
 
@@ -1086,7 +1085,7 @@ echo second
         let collected = Arc::new(Mutex::new(String::new()));
         let collected_for_client = collected.clone();
 
-        let _result = tokio::task::spawn_blocking(move || {
+        tokio::task::spawn_blocking(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()

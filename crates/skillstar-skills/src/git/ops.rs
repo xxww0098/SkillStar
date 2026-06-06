@@ -122,13 +122,37 @@ pub fn clone_repo_shallow(url: &str, dest: &Path) -> Result<()> {
 
 /// Shared implementation for shallow clones.
 fn clone_repo_shallow_inner(url: &str, dest: &Path, single_branch: bool) -> Result<()> {
-    let mut cmd = command_with_path("git");
-    github_mirror::apply_mirror_args(&mut cmd);
-    cmd.args(["clone", "--depth", "1"]);
+    run_git_clone(url, dest, single_branch)
+}
+
+fn run_git_clone(url: &str, dest: &Path, single_branch: bool) -> Result<()> {
+    let mut args = vec!["clone", "--depth", "1"];
     if single_branch {
-        cmd.arg("--single-branch");
+        args.push("--single-branch");
+    }
+    match run_git_clone_attempt(url, dest, &args, true) {
+        Ok(()) => Ok(()),
+        Err(e) if github_mirror::effective_mirror_url().is_some()
+            && github_mirror::is_mirror_transport_error(&e.to_string()) =>
+        {
+            warn!(
+                target: "git_ops",
+                url = url,
+                "mirror git clone failed, retrying direct GitHub"
+            );
+            run_git_clone_attempt(url, dest, &args, false)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn run_git_clone_attempt(url: &str, dest: &Path, args: &[&str], use_mirror: bool) -> Result<()> {
+    let mut cmd = command_with_path("git");
+    if use_mirror {
+        github_mirror::apply_mirror_args(&mut cmd);
     }
     let output = cmd
+        .args(args)
         .arg(url)
         .arg(dest)
         .output()
@@ -149,28 +173,28 @@ fn clone_repo_shallow_inner(url: &str, dest: &Path, single_branch: bool) -> Resu
 /// must follow up with `git sparse-checkout set <dirs>` + `git checkout` to
 /// materialize only the directories they need.
 pub fn clone_repo_sparse(url: &str, dest: &Path) -> Result<()> {
-    let mut cmd = command_with_path("git");
-    github_mirror::apply_mirror_args(&mut cmd);
-    let output = cmd
-        .args([
-            "clone",
-            "--filter=blob:none",
-            "--depth",
-            "1",
-            "--no-checkout",
-            "--sparse",
-        ])
-        .arg(url)
-        .arg(dest)
-        .output()
-        .context("Failed to execute sparse treeless clone")?;
-
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!("git sparse clone failed: {}", err.trim()));
+    let args = [
+        "clone",
+        "--filter=blob:none",
+        "--depth",
+        "1",
+        "--no-checkout",
+        "--sparse",
+    ];
+    match run_git_clone_attempt(url, dest, &args, true) {
+        Ok(()) => Ok(()),
+        Err(e) if github_mirror::effective_mirror_url().is_some()
+            && github_mirror::is_mirror_transport_error(&e.to_string()) =>
+        {
+            warn!(
+                target: "git_ops",
+                url = url,
+                "mirror sparse git clone failed, retrying direct GitHub"
+            );
+            run_git_clone_attempt(url, dest, &args, false)
+        }
+        Err(e) => Err(e),
     }
-
-    Ok(())
 }
 
 /// List all file paths in the repository tree without a checkout.
@@ -386,10 +410,30 @@ fn shallow_fetch_lock(repo_path: &Path) -> Arc<Mutex<()>> {
 }
 
 fn run_git(repo_path: &Path, args: &[&str]) -> Result<String> {
+    match run_git_with_mirror(repo_path, args, true) {
+        Ok(output) => Ok(output),
+        Err(e) if github_mirror::effective_mirror_url().is_some()
+            && github_mirror::is_mirror_transport_error(&e.to_string()) =>
+        {
+            warn!(
+                target: "git_ops",
+                path = %repo_path.display(),
+                command = args.join(" "),
+                "mirror git command failed, retrying direct GitHub"
+            );
+            run_git_with_mirror(repo_path, args, false)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn run_git_with_mirror(repo_path: &Path, args: &[&str], use_mirror: bool) -> Result<String> {
     let mut cmd = command_with_path("git");
     // Mirror args (-c url.*.insteadOf) must precede the subcommand.
     // For local-only operations (rev-parse, reset) this is harmless.
-    github_mirror::apply_mirror_args(&mut cmd);
+    if use_mirror {
+        github_mirror::apply_mirror_args(&mut cmd);
+    }
     let output = cmd
         .current_dir(repo_path)
         .args(args)

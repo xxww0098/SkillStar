@@ -20,6 +20,13 @@ const NOT_IN_TAURI_SHELL =
 
 function invokeInTauriShell<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   if (!isTauri()) {
+    // Outside the Tauri shell, production cannot reach the backend. In DEV we
+    // serve realistic sample data (see ./devMock) so the full UI renders in a
+    // plain browser for design iteration. The dynamic import keeps devMock out
+    // of production bundles entirely.
+    if (import.meta.env.DEV) {
+      return import("./devMock").then((m) => m.devInvoke<T>(command, args));
+    }
     return Promise.reject(new Error(NOT_IN_TAURI_SHELL));
   }
   return args === undefined ? invoke<T>(command) : invoke<T>(command, args);

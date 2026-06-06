@@ -1,8 +1,8 @@
+use crate::discovery as skill_discover;
+use crate::git::ops as git_ops;
 use anyhow::{Context, Result};
 use skillstar_core::config::github_mirror;
-use crate::git::ops as git_ops;
 use skillstar_core::infra::{path_env::command_with_path, paths};
-use crate::discovery as skill_discover;
 use std::path::{Path, PathBuf};
 use tracing::warn;
 
@@ -35,8 +35,8 @@ pub fn clone_or_fetch_repo(repo_url: &str, source: &str) -> Result<PathBuf> {
             .args(["reset", "--hard", "origin/HEAD"])
             .output();
 
-        if is_sparse_checkout(&repo_dir) {
-            if let Ok(dirs) = discover_skill_dirs_from_tree(&repo_dir) {
+        if is_sparse_checkout(&repo_dir)
+            && let Ok(dirs) = discover_skill_dirs_from_tree(&repo_dir) {
                 if dirs.is_empty() {
                     let _ = command_with_path("git")
                         .current_dir(&repo_dir)
@@ -50,7 +50,6 @@ pub fn clone_or_fetch_repo(repo_url: &str, source: &str) -> Result<PathBuf> {
                     let _ = git_ops::apply_sparse_checkout(&repo_dir, &dir_refs);
                 }
             }
-        }
 
         Ok(repo_dir)
     } else {

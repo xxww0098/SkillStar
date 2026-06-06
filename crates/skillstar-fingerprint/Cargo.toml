@@ -1,0 +1,50 @@
+[package]
+name = "skillstar-fingerprint"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94.1"
+
+[dependencies]
+anyhow = "1.0.102"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+thiserror = "2"
+tracing = "0.1.44"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4.44", features = ["serde"] }
+rand = "0.10"
+sha2 = "0.11"
+
+# Default-impl HTTP client (rustls, kept for "original" fingerprint).
+reqwest = { version = "0.13.2", default-features = false, features = ["rustls", "json", "form"] }
+
+# Fingerprint-aware HTTP client (BoringSSL, JA3/JA4/H2 emulation).
+# Optional behind feature flag so the rest of the workspace doesn't pay
+# BoringSSL build cost unless explicitly opted-in.
+wreq = { version = "6.0.0-rc.28", features = ["json", "form"], optional = true }
+wreq-util = { version = "3.0.0-rc.6", optional = true }
+
+# Runtime + logging — used by the tls_poc binary and downstream tests.
+tokio = { version = "1.52.1", features = ["macros", "rt-multi-thread"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+skillstar-core = { version = "0.1.0", path = "../skillstar-core" }
+
+[features]
+default = ["impersonate"]
+# Enables wreq + wreq-util for JA3/JA4/HTTP2 emulation.
+# Disable for fast CI builds that don't need fingerprint emulation.
+impersonate = ["dep:wreq", "dep:wreq-util"]
+
+[[bin]]
+name = "tls_poc"
+path = "src/bin/tls_poc.rs"
+required-features = ["impersonate"]
+
+[[bin]]
+name = "deepseek_poc"
+path = "src/bin/deepseek_poc.rs"
+required-features = ["impersonate"]
+
+[dev-dependencies]
+tempfile = "3.27.0"

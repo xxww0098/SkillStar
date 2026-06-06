@@ -509,8 +509,7 @@ pub fn publish_skill(
 
     // Update lockfile
     use skillstar_core::types::lockfile::{LockEntry, Lockfile};
-    let tree_hash =
-        super::ops::compute_tree_hash(&skill_source_resolved).unwrap_or_default();
+    let tree_hash = super::ops::compute_tree_hash(&skill_source_resolved).unwrap_or_default();
     let mut lf = Lockfile::load(lockfile_path).unwrap_or_default();
     lf.upsert(LockEntry {
         name: skill_name.to_string(),

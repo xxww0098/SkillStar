@@ -17,11 +17,6 @@ pub mod update_checker;
 
 // ── Re-exports for `use super::{…}` inside skill submodules ───────────
 
-pub use super::lockfile;
-pub use super::skill;
-pub use skillstar_skills::git::ops as git_ops;
-pub use skillstar_projects::projects::agents as agent_profile;
-pub use skillstar_projects::projects::sync;
 
 use crate::core::skill::Skill;
 

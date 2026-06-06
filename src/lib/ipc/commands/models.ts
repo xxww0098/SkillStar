@@ -7,11 +7,16 @@ import type {
   ProviderEntry,
   ProviderEntryFlat,
   ProviderPatchFlat,
+  ProviderUpdateFlatResult,
+  EndpointLatencyResult,
   ProviderPreset,
+  ProviderPresetFlat,
   SwitchResult,
   ToolActivationsMap,
   ToolConfigTarget,
+  ToolConfigFileInfo,
   ToolSyncResult,
+  WriteToolConfigFileResult,
 } from "../../../types";
 
 interface ConfigConflict {
@@ -19,6 +24,7 @@ interface ConfigConflict {
   description: string;
   file_path?: string | null;
   details?: string | null;
+  tool_id?: string | null;
 }
 
 interface ToolInstallStatus {
@@ -52,17 +58,38 @@ export interface ModelsCommands {
   // Flat provider store (v2)
   get_providers_flat: { args: Record<string, never>; result: FlatProvidersResponse };
   create_provider_flat: { args: { entry: Partial<ProviderEntryFlat> }; result: ProviderEntryFlat };
-  update_provider_flat: { args: { id: string; patch: ProviderPatchFlat }; result: ProviderEntryFlat };
+  update_provider_flat: {
+    args: { id: string; patch: ProviderPatchFlat };
+    result: ProviderUpdateFlatResult;
+  };
+  set_app_ai_provider_ref: { args: { appId: string; providerId: string }; result: void };
+  clear_app_ai_provider_ref: { args: Record<string, never>; result: void };
+
+  list_tool_config_files: { args: { toolId: string }; result: ToolConfigFileInfo[] };
+  read_tool_config_file: { args: { toolId: string; fileId: string }; result: string };
+  write_tool_config_file: {
+    args: { toolId: string; fileId: string; content: string };
+    result: WriteToolConfigFileResult;
+  };
+  format_tool_config_file: { args: { toolId: string; fileId: string }; result: string };
+  push_provider_to_tool_config: {
+    args: { providerId: string; toolId: string };
+    result: ToolSyncResult;
+  };
   delete_provider_flat: { args: { id: string }; result: void };
   reorder_providers: { args: { orderedIds: string[] }; result: void };
 
   // Tool activations (v2)
   get_tool_activations: { args: Record<string, never>; result: ToolActivationsMap };
   activate_tool: {
-    args: { providerId: string; toolId: string; model?: string | null };
+    args: { providerId: string; toolId: string; model?: string | null; settings?: Record<string, unknown> | null };
     result: ToolSyncResult;
   };
   deactivate_tool: { args: { toolId: string }; result: void };
+  update_tool_settings: {
+    args: { toolId: string; settings: Record<string, unknown> };
+    result: ToolSyncResult;
+  };
 
   // Tool config targets (v1)
   get_tool_config_targets: { args: { app_id: AppId }; result: ToolConfigTarget[] };
@@ -77,6 +104,11 @@ export interface ModelsCommands {
 
   // Presets and discovery
   get_provider_presets: { args: Record<string, never>; result: ProviderPreset[] };
+  get_provider_presets_flat: { args: Record<string, never>; result: ProviderPresetFlat[] };
+  test_endpoints_latency: {
+    args: { urls: string[]; apiKey?: string | null; timeoutMs?: number };
+    result: EndpointLatencyResult[];
+  };
   fetch_provider_models: {
     args: { url: string; apiKey: string; timeoutMs?: number };
     result: string[];
@@ -105,6 +137,8 @@ export interface ModelsCommands {
 
   // Environment / conflict detection
   detect_env_conflicts: { args: Record<string, never>; result: ConfigConflict[] };
+  detect_provider_conflicts: { args: { providerId: string }; result: ConfigConflict[] };
+  resync_tool: { args: { toolId: string }; result: ToolSyncResult };
   detect_tool_installation: { args: { toolId: string }; result: ToolInstallStatus };
 }
 

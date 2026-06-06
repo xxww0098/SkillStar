@@ -36,8 +36,7 @@ pub fn decode_jwt_payload(token: &str) -> Option<serde_json::Value> {
 
 /// Extract `exp` claim from a JWT.
 pub fn jwt_exp(token: &str) -> Option<i64> {
-    let claims: JwtClaims =
-        serde_json::from_value(decode_jwt_payload(token)?).ok()?;
+    let claims: JwtClaims = serde_json::from_value(decode_jwt_payload(token)?).ok()?;
     claims.exp
 }
 

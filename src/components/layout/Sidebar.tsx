@@ -26,7 +26,7 @@ import type { NavPage } from "../../types";
 import { FILTER_ALL } from "@/features/usage/types";
 import { ModeSwitcher } from "./ModeSwitcher";
 import { SkillsNav } from "./SkillsNav";
-import { ModelsNav } from "./ModelsNav";
+import { ModelsSidebar } from "./ModelsSidebar";
 import { UsageNav } from "./UsageNav";
 
 interface SidebarProps {
@@ -315,9 +315,7 @@ export function Sidebar({
   const {
     appMode,
     setAppMode,
-    modelsActivePage,
     navigate,
-    navigateModels,
     selectedProviderId,
     setSelectedProviderId,
     setShowPresetSelector,
@@ -326,16 +324,11 @@ export function Sidebar({
     openUsageCreate,
   } = useNavigation();
 
-  const isSettingsActive =
-    appMode === "models" ? modelsActivePage === "models-settings" : appMode === "usage" ? false : activePage === "settings";
+  const isSettingsActive = appMode === "skills" && activePage === "settings";
 
   const openSettings = useCallback(() => {
-    if (appMode === "models") {
-      navigateModels("models-settings");
-    } else {
-      navigate("settings");
-    }
-  }, [appMode, navigate, navigateModels]);
+    navigate("settings");
+  }, [navigate]);
 
   const handleLogoClick = async () => {
     if (!isDev) return;
@@ -343,7 +336,7 @@ export function Sidebar({
     try {
       await tauriInvokeDynamic("plugin:webview|internal_toggle_devtools");
     } catch (error) {
-      console.warn("[Sidebar] Failed to toggle devtools from logo click", error);
+      if (import.meta.env.DEV) console.warn("[Sidebar] Failed to toggle devtools from logo click", error);
     }
   };
 
@@ -359,10 +352,6 @@ export function Sidebar({
     },
     [setSelectedProviderId, setShowPresetSelector],
   );
-
-  const handleClearProviderSelection = useCallback(() => {
-    setSelectedProviderId(null);
-  }, [setSelectedProviderId]);
 
   const handleUsageAddNew = useCallback(() => {
     const preselect = usageCatalogFilter === FILTER_ALL ? null : usageCatalogFilter;
@@ -440,7 +429,7 @@ export function Sidebar({
       transition={{ duration: prefersReducedMotion ? 0.01 : 0.2 }}
       className={cn(
         "fixed top-0 left-2 bottom-2 flex flex-col z-50",
-        "transition-[width] duration-200 ease-out",
+        "transition-[width] duration-200 ease-out will-change-[width]",
         collapsed ? "w-14" : "w-[180px]",
         collapsed ? "overflow-hidden" : "",
       )}
@@ -475,10 +464,9 @@ export function Sidebar({
       {/* ── Navigation (conditional based on appMode) ── */}
       <nav className={cn("flex-1 py-2 overflow-y-auto", collapsed ? "px-1.5" : "px-2")}>
         {appMode === "models" ? (
-          <ModelsNav
+          <ModelsSidebar
             selectedProviderId={selectedProviderId}
             onSelectProvider={handleSelectProvider}
-            onClearSelection={handleClearProviderSelection}
             onAddProvider={handleAddProvider}
             collapsed={collapsed}
           />

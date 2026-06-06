@@ -47,7 +47,13 @@ function LatencyIndicatorInner({ latencyMs, variant = "dot", lastTestedAt, onRet
   const bgClass = colorToBgClass[color];
 
   if (variant === "dot") {
-    return <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", bgClass)} aria-label={`延迟状态: ${color}`} />;
+    return (
+      <span
+        className={cn("w-1.5 h-1.5 rounded-full shrink-0", bgClass)}
+        role="status"
+        aria-label={`延迟状态: ${color}`}
+      />
+    );
   }
 
   // Full variant

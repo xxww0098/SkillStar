@@ -1,8 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  Activity,
   Command,
-  Database,
   Download,
   FolderKanban,
   Gauge,
@@ -11,13 +9,13 @@ import {
   Package,
   RefreshCw,
   Search,
+  Server,
   Settings,
   Sparkles,
-  Wrench,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { ModelsNavPage, NavPage } from "../../types";
+import type { NavPage } from "../../types";
 
 interface CommandPaletteAction {
   id: string;
@@ -33,7 +31,7 @@ interface CommandPaletteProps {
   open: boolean;
   onClose: () => void;
   onNavigate: (page: NavPage) => void;
-  onNavigateModels?: (page: ModelsNavPage) => void;
+  onEnterModelsMode?: () => void;
   onEnterUsageMode?: () => void;
   onImport?: () => void;
   onRefresh?: () => void;
@@ -43,7 +41,7 @@ export function CommandPalette({
   open,
   onClose,
   onNavigate,
-  onNavigateModels,
+  onEnterModelsMode,
   onEnterUsageMode,
   onImport,
   onRefresh,
@@ -119,42 +117,15 @@ export function CommandPalette({
 
     const actionItems: CommandPaletteAction[] = [];
 
-    if (onNavigateModels) {
-      const modelsNavActions: CommandPaletteAction[] = [
-        {
-          id: "nav-models-providers",
-          label: "Providers",
-          icon: <Database className="w-4 h-4" />,
-          section: "Models",
-          onSelect: () => onNavigateModels("providers"),
-          keywords: ["providers", "models", "ai", "provider", "模型"],
-        },
-        {
-          id: "nav-models-health",
-          label: "Health",
-          icon: <Activity className="w-4 h-4" />,
-          section: "Models",
-          onSelect: () => onNavigateModels("health"),
-          keywords: ["health", "latency", "test", "ping", "延迟"],
-        },
-        {
-          id: "nav-models-tool-configs",
-          label: "Tool Configs",
-          icon: <Wrench className="w-4 h-4" />,
-          section: "Models",
-          onSelect: () => onNavigateModels("tool-configs"),
-          keywords: ["tool", "config", "claude", "codex", "sync", "工具"],
-        },
-        {
-          id: "nav-models-settings",
-          label: "Models Settings",
-          icon: <Settings className="w-4 h-4" />,
-          section: "Models",
-          onSelect: () => onNavigateModels("models-settings"),
-          keywords: ["models settings", "模型设置"],
-        },
-      ];
-      navActions.push(...modelsNavActions);
+    if (onEnterModelsMode) {
+      navActions.push({
+        id: "nav-models",
+        label: "Models 工作台",
+        icon: <Server className="w-4 h-4" />,
+        section: "Models",
+        onSelect: onEnterModelsMode,
+        keywords: ["providers", "models", "ai", "provider", "agent", "claude", "codex", "模型"],
+      });
     }
 
     if (onImport) {
@@ -182,7 +153,7 @@ export function CommandPalette({
     }
 
     return [...navActions, ...actionItems];
-  }, [t, onNavigate, onNavigateModels, onEnterUsageMode, onImport, onRefresh]);
+  }, [t, onNavigate, onEnterModelsMode, onEnterUsageMode, onImport, onRefresh]);
 
   // Filter actions by query
   const filteredActions = useMemo(() => {

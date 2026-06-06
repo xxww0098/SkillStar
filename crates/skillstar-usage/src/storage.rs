@@ -46,6 +46,10 @@ fn alerts_dismissed_path() -> PathBuf {
     usage_dir().join("alerts_dismissed.json")
 }
 
+fn active_per_catalog_path() -> PathBuf {
+    usage_dir().join("active_per_catalog.json")
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct SubscriptionsFile {
     #[serde(default)]
@@ -125,7 +129,12 @@ pub fn upsert_subscription(mut sub: Subscription) -> UsageResult<Subscription> {
         }
         subs.push(sub.clone());
     }
-    write_json(&subscriptions_path(), &SubscriptionsFile { subscriptions: subs })?;
+    write_json(
+        &subscriptions_path(),
+        &SubscriptionsFile {
+            subscriptions: subs,
+        },
+    )?;
     Ok(sub)
 }
 
@@ -136,11 +145,18 @@ pub fn delete_subscription(id: &str) -> UsageResult<()> {
     if subs.len() == len_before {
         return Err(UsageError::NotFound(id.to_string()));
     }
-    write_json(&subscriptions_path(), &SubscriptionsFile { subscriptions: subs })?;
+    write_json(
+        &subscriptions_path(),
+        &SubscriptionsFile {
+            subscriptions: subs,
+        },
+    )?;
     // Also drop any cached usage snapshot.
     let mut snapshots = read_usage_snapshots_file()?;
     snapshots.snapshots.remove(id);
     write_json(&usage_snapshots_path(), &snapshots)?;
+    // Garbage-collect active-per-catalog bindings pointing at this row.
+    let _ = prune_active_bindings_for(id);
     Ok(())
 }
 
@@ -155,7 +171,12 @@ pub fn reorder_subscriptions(ordered_ids: &[String]) -> UsageResult<()> {
             s.updated_at = now;
         }
     }
-    write_json(&subscriptions_path(), &SubscriptionsFile { subscriptions: subs })?;
+    write_json(
+        &subscriptions_path(),
+        &SubscriptionsFile {
+            subscriptions: subs,
+        },
+    )?;
     Ok(())
 }
 
@@ -191,5 +212,76 @@ pub fn dismiss_alert(alert_id: &str) -> UsageResult<()> {
     let mut file: AlertsDismissedFile = read_json(&alerts_dismissed_path())?;
     file.dismissed.insert(alert_id.to_string());
     write_json(&alerts_dismissed_path(), &file)?;
+    Ok(())
+}
+
+// ── Active subscription per catalog (Phase 7 — multi-account) ─────────
+
+/// `catalog_id → subscription_id` map persisted to
+/// `~/.skillstar/config/usage/active_per_catalog.json`.
+///
+/// SkillStar lets the user maintain multiple subscriptions sharing the
+/// same `catalog_id` (e.g. two DeepSeek accounts). This map records which
+/// one is currently "the active one" for that catalog — used by future
+/// CLI-injection workflows and by the UI to render an active-account
+/// badge on the right card.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct ActivePerCatalogFile {
+    #[serde(default)]
+    active: HashMap<String, String>,
+}
+
+fn read_active_per_catalog_file() -> UsageResult<ActivePerCatalogFile> {
+    read_json(&active_per_catalog_path())
+}
+
+/// All `catalog_id → subscription_id` bindings currently set.
+pub fn list_active_per_catalog() -> UsageResult<HashMap<String, String>> {
+    Ok(read_active_per_catalog_file()?.active)
+}
+
+/// Resolve a single catalog's active subscription id, or `None` if no
+/// preference is set.
+pub fn get_active_subscription(catalog_id: &str) -> UsageResult<Option<String>> {
+    Ok(read_active_per_catalog_file()?.active.remove(catalog_id))
+}
+
+/// Pin `subscription_id` as the active account for `catalog_id`. Verifies
+/// that the subscription exists and actually belongs to this catalog so
+/// the store can't get out-of-sync with reality.
+pub fn set_active_subscription(catalog_id: &str, subscription_id: &str) -> UsageResult<()> {
+    // Validate consistency.
+    let sub = get_subscription(subscription_id)?;
+    if sub.catalog_id != catalog_id {
+        return Err(UsageError::Other(format!(
+            "订阅 {} 的 catalog 是 {}，不匹配 {}",
+            subscription_id, sub.catalog_id, catalog_id
+        )));
+    }
+    let mut file = read_active_per_catalog_file()?;
+    file.active
+        .insert(catalog_id.to_string(), subscription_id.to_string());
+    write_json(&active_per_catalog_path(), &file)?;
+    Ok(())
+}
+
+/// Drop the binding for `catalog_id` (UI defaults back to nothing pinned).
+pub fn clear_active_subscription(catalog_id: &str) -> UsageResult<()> {
+    let mut file = read_active_per_catalog_file()?;
+    if file.active.remove(catalog_id).is_some() {
+        write_json(&active_per_catalog_path(), &file)?;
+    }
+    Ok(())
+}
+
+/// Garbage-collect bindings whose subscription has been deleted or whose
+/// catalog id no longer matches. Called from `delete_subscription`.
+fn prune_active_bindings_for(deleted_sub_id: &str) -> UsageResult<()> {
+    let mut file = read_active_per_catalog_file()?;
+    let before = file.active.len();
+    file.active.retain(|_, sub_id| sub_id != deleted_sub_id);
+    if file.active.len() != before {
+        write_json(&active_per_catalog_path(), &file)?;
+    }
     Ok(())
 }

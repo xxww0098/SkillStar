@@ -12,10 +12,29 @@ use skillstar_models::providers::{
 };
 use skillstar_models::tool_sync::{
     generate_claude_code_config, generate_codex_config, merge_json_env_write,
-    resync_active_tools, write_codex_config_flat,
+    resync_active_tools, write_codex_config_flat, CodexSettings, TOOL_SYNC_HOME_ENV,
 };
 use std::collections::HashMap;
 use tempfile::TempDir;
+
+/// A throwaway HOME sandbox for tests that drive a real `resync_active_tools`.
+///
+/// `resync_active_tools` resolves `~/.claude`, `~/.codex`, etc. and **writes**
+/// to them. Without this sandbox the property tests overwrote the developer's
+/// live tool configs (a bug we hit in practice). Initialised exactly once under
+/// `LazyLock`, which sets [`TOOL_SYNC_HOME_ENV`] before any case observes it.
+static TOOL_SYNC_SANDBOX: std::sync::LazyLock<TempDir> = std::sync::LazyLock::new(|| {
+    let dir = TempDir::new().expect("create tool-sync sandbox home");
+    // SAFETY: runs once under LazyLock's one-time synchronization (happens-before
+    // every later env read); no concurrent `set_var` occurs.
+    unsafe { std::env::set_var(TOOL_SYNC_HOME_ENV, dir.path()) };
+    dir
+});
+
+/// Force the sandbox HOME override before any home-resolving sync runs.
+fn use_sandbox_home() {
+    let _ = TOOL_SYNC_SANDBOX.path();
+}
 
 // ---------------------------------------------------------------------------
 // Strategies
@@ -112,7 +131,7 @@ fn non_env_top_level_key_strategy() -> impl Strategy<Value = String> {
 /// Strategy that generates a simple JSON value (string, number, or bool).
 fn simple_json_value_strategy() -> impl Strategy<Value = Value> {
     prop_oneof![
-        "[a-zA-Z0-9_ ]{1,30}".prop_map(|s| Value::String(s)),
+        "[a-zA-Z0-9_ ]{1,30}".prop_map(Value::String),
         (0i64..10000).prop_map(|n| Value::Number(serde_json::Number::from(n))),
         any::<bool>().prop_map(Value::Bool),
     ]
@@ -157,6 +176,8 @@ fn provider_entry_flat_strategy() -> impl Strategy<Value = ProviderEntryFlat> {
             notes: None,
             created_at: Some(1719000000000),
             meta: None,
+            codex_wire_api: "responses".to_string(),
+            codex_auth_mode: "api_key".to_string(),
         })
 }
 
@@ -176,8 +197,8 @@ fn non_managed_toml_section_strategy() -> impl Strategy<Value = String> {
 /// Strategy that generates a simple TOML value (string, integer, or bool).
 fn simple_toml_value_strategy() -> impl Strategy<Value = toml::Value> {
     prop_oneof![
-        "[a-zA-Z0-9_ ]{1,20}".prop_map(|s| toml::Value::String(s)),
-        (0i64..10000).prop_map(|n| toml::Value::Integer(n)),
+        "[a-zA-Z0-9_ ]{1,20}".prop_map(toml::Value::String),
+        (0i64..10000).prop_map(toml::Value::Integer),
         any::<bool>().prop_map(toml::Value::Boolean),
     ]
 }
@@ -195,6 +216,24 @@ fn extra_toml_sections_strategy(
         ),
         1..=4,
     )
+    // TOML can't represent duplicate keys/sections, so drop collisions: keep the
+    // first occurrence of each section name, and of each key within a section.
+    // This keeps the generated table and the per-entry assertions consistent.
+    .prop_map(|sections| {
+        let mut seen_sections = std::collections::HashSet::new();
+        sections
+            .into_iter()
+            .filter(|(name, _)| seen_sections.insert(name.clone()))
+            .map(|(name, fields)| {
+                let mut seen_keys = std::collections::HashSet::new();
+                let unique = fields
+                    .into_iter()
+                    .filter(|(key, _)| seen_keys.insert(key.clone()))
+                    .collect();
+                (name, unique)
+            })
+            .collect()
+    })
 }
 
 /// Strategy that generates a model name for Codex sync.
@@ -411,7 +450,13 @@ proptest! {
             .expect("Failed to write initial config");
 
         // Call write_codex_config_flat
-        write_codex_config_flat(&config_path, &provider, &model)
+        let activation = ToolActivation {
+            provider_id: provider.id.clone(),
+            model: model.clone(),
+            settings: None,
+            last_sync_at: None,
+        };
+        write_codex_config_flat(&config_path, &provider, &activation, &CodexSettings::default())
             .expect("write_codex_config_flat should succeed");
 
         // Read back the result
@@ -514,6 +559,8 @@ fn store_with_active_tools_strategy(
                 notes: None,
                 created_at: Some(1719000000000),
                 meta: None,
+                codex_wire_api: "responses".to_string(),
+                codex_auth_mode: "api_key".to_string(),
             };
 
             // Generate a subset of known tool_ids that will be activated for this provider
@@ -544,6 +591,8 @@ fn store_with_active_tools_strategy(
                         Some(ToolActivation {
                             provider_id: target_id_clone.clone(),
                             model: target_provider_clone.default_model.clone(),
+                            settings: None,
+                            last_sync_at: None,
                         }),
                     );
                 }
@@ -595,6 +644,8 @@ fn store_with_mixed_activations_strategy(
                     notes: None,
                     created_at: Some(1719000000000),
                     meta: None,
+                    codex_wire_api: "responses".to_string(),
+                    codex_auth_mode: "api_key".to_string(),
                 };
 
                 let other_provider = ProviderEntryFlat {
@@ -612,6 +663,8 @@ fn store_with_mixed_activations_strategy(
                     notes: None,
                     created_at: Some(1719000000001),
                     meta: None,
+                    codex_wire_api: "responses".to_string(),
+                    codex_auth_mode: "api_key".to_string(),
                 };
 
                 // Build tool_activations: each tool points to either target or other
@@ -625,6 +678,8 @@ fn store_with_mixed_activations_strategy(
                         Some(ToolActivation {
                             provider_id: target_id.clone(),
                             model: model_target.clone(),
+                            settings: None,
+                            last_sync_at: None,
                         }),
                     );
                     expected_active_tools.push("claude-code".to_string());
@@ -634,6 +689,8 @@ fn store_with_mixed_activations_strategy(
                         Some(ToolActivation {
                             provider_id: other_id.clone(),
                             model: model_other.clone(),
+                            settings: None,
+                            last_sync_at: None,
                         }),
                     );
                 }
@@ -645,6 +702,8 @@ fn store_with_mixed_activations_strategy(
                         Some(ToolActivation {
                             provider_id: target_id.clone(),
                             model: model_target.clone(),
+                            settings: None,
+                            last_sync_at: None,
                         }),
                     );
                     expected_active_tools.push("codex".to_string());
@@ -654,6 +713,8 @@ fn store_with_mixed_activations_strategy(
                         Some(ToolActivation {
                             provider_id: other_id.clone(),
                             model: model_other,
+                            settings: None,
+                            last_sync_at: None,
                         }),
                     );
                 }
@@ -681,12 +742,15 @@ proptest! {
     /// - Verify the result contains exactly K entries (one per active tool)
     /// - Verify each result's tool_id matches one of the tools where this provider is active
     ///
-    /// Note: The actual sync will fail in tests (no real config files at ~/.claude or ~/.codex),
-    /// but we verify the COUNT of results matches K and that each result has the correct tool_id.
+    /// Note: the sync performs real file writes; `use_sandbox_home()` re-roots
+    /// every config path under a temp dir so the dev's `~/.claude`/`~/.codex` are
+    /// never touched. We verify the COUNT of results matches K and each result
+    /// has the correct tool_id.
     #[test]
     fn prop_resync_active_tools_returns_correct_count(
         (store, target_id, expected_active_tools) in store_with_active_tools_strategy()
     ) {
+        use_sandbox_home();
         let results = resync_active_tools(&store, &target_id);
 
         // Verify: result count matches the number of active tools for this provider
@@ -731,6 +795,7 @@ proptest! {
     fn prop_resync_active_tools_only_syncs_target_provider(
         (store, target_id, expected_active_tools) in store_with_mixed_activations_strategy()
     ) {
+        use_sandbox_home();
         let results = resync_active_tools(&store, &target_id);
 
         // Verify: result count matches expected active tools for target provider

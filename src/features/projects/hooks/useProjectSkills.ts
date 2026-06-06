@@ -95,7 +95,7 @@ export function useProjectSkills({
 
         setTimeout(() => setImportDone(null), 4000);
       } catch (e) {
-        console.error("Import failed:", e);
+        if (import.meta.env.DEV) console.error("Import failed:", e);
       } finally {
         setImporting(false);
       }

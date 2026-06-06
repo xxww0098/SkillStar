@@ -92,15 +92,14 @@ pub fn update_group(
     skill_sources: Option<std::collections::HashMap<String, String>>,
 ) -> Result<SkillGroup> {
     let mut store = load_store();
-    if let Some(ref new_name) = name {
-        if store
+    if let Some(ref new_name) = name
+        && store
             .groups
             .iter()
-            .any(|g| &g.id != &id && &g.name == new_name)
+            .any(|g| g.id != id && &g.name == new_name)
         {
             anyhow::bail!("A group with the name '{}' already exists", new_name);
         }
-    }
 
     let group = store
         .groups

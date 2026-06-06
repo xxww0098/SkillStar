@@ -15,7 +15,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { memo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { tauriInvoke } from "../../../lib/ipc";
@@ -36,7 +36,7 @@ interface StorageSectionProps {
   onCleanBroken: () => void;
 }
 
-export function StorageSection({
+export const StorageSection = memo(function StorageSection({
   overview,
   loading,
   cleaning,
@@ -56,7 +56,7 @@ export function StorageSection({
     try {
       await tauriInvoke("open_folder", { path });
     } catch (error) {
-      console.error("Failed to open folder:", error);
+      if (import.meta.env.DEV) console.error("Failed to open folder:", error);
       toast.error(t("settings.openFolderFailed"));
     }
   };
@@ -333,7 +333,7 @@ export function StorageSection({
       </div>
     </section>
   );
-}
+});
 
 function OpenFolderButton({ onClick, label }: { onClick: () => void; label: string }) {
   return (

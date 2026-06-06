@@ -1,7 +1,8 @@
 //! 智谱 GLM Coding Plan fetcher.
 //!
 //! `GET https://open.bigmodel.cn/api/monitor/usage/quota/limit`
-//! NOTE: `Authorization: <token>` — no `Bearer ` prefix.
+//! NOTE: `Authorization: <token>` — no `Bearer ` prefix (see the spec's
+//! [`AuthScheme::RawHeader`] in `skillstar-providers`).
 //!
 //! Response shape (CN domestic; intl is `api.z.ai/...`):
 //! ```json
@@ -15,11 +16,11 @@
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::Value;
+use skillstar_fingerprint::DeviceFingerprint;
+use skillstar_providers::balance;
 
 use crate::subscription::{SubscriptionUsage, UsageWindow};
 use crate::{UsageError, UsageResult};
-
-const ENDPOINT_CN: &str = "https://open.bigmodel.cn/api/monitor/usage/quota/limit";
 
 #[derive(Debug, Deserialize)]
 struct Envelope {
@@ -33,38 +34,13 @@ struct Envelope {
     data: Value,
 }
 
-pub async fn fetch(subscription_id: &str, api_key: &str) -> UsageResult<SubscriptionUsage> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| UsageError::Fetcher(e.to_string()))?;
+pub async fn fetch(
+    subscription_id: &str,
+    api_key: &str,
+    fingerprint: Option<&DeviceFingerprint>,
+) -> UsageResult<SubscriptionUsage> {
+    let env: Envelope = super::fetch_spec(&balance::GLM, api_key, fingerprint).await?;
 
-    let resp = client
-        .get(ENDPOINT_CN)
-        // GLM uses raw token, NOT Bearer.
-        .header(reqwest::header::AUTHORIZATION, api_key)
-        .header(reqwest::header::ACCEPT, "application/json")
-        .send()
-        .await
-        .map_err(|e| UsageError::Fetcher(format!("GLM 请求失败：{}", e)))?;
-
-    let status = resp.status();
-    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-        return Err(UsageError::AuthRequired);
-    }
-    if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        return Err(UsageError::Fetcher(format!(
-            "GLM 返回 {}: {}",
-            status,
-            body.chars().take(200).collect::<String>()
-        )));
-    }
-
-    let env: Envelope = resp
-        .json()
-        .await
-        .map_err(|e| UsageError::Fetcher(format!("GLM 响应解析失败：{}", e)))?;
     if !env.success && env.code != 200 {
         return Err(UsageError::Fetcher(format!(
             "GLM 业务错误：{}",
@@ -89,7 +65,9 @@ pub async fn fetch(subscription_id: &str, api_key: &str) -> UsageResult<Subscrip
         weekly,
         monthly: None,
         balance: None,
+        credits: Vec::new(),
         error: None,
+        api_keys: Vec::new(),
     })
 }
 
@@ -111,5 +89,6 @@ fn parse_window(data: &Value, key: &str, label: &str) -> Option<UsageWindow> {
         total,
         percent,
         reset_at,
+        breakdown: Vec::new(),
     })
 }

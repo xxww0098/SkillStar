@@ -279,11 +279,10 @@ async fn patrol_loop(
         let new_skills_result =
             tokio::task::spawn_blocking(repo_scanner::detect_new_skills_in_cached_repos).await;
 
-        if let Ok(new_skills) = new_skills_result {
-            if !new_skills.is_empty() {
+        if let Ok(new_skills) = new_skills_result
+            && !new_skills.is_empty() {
                 let _ = app.emit("patrol://new-skills-detected", &new_skills);
             }
-        }
 
         // Wait between patrol cycles.
         tokio::select! {

@@ -85,7 +85,7 @@ export function ImportShareCodeModal({ open, onClose, onImport, existingGroups =
           for (const name of summary.embedded_names) embeddedSkills.push(name);
           for (const name of summary.installed_names) embeddedSkills.push(name);
         } catch (e) {
-          console.warn("[ShareCode] install_from_share_code failed:", e);
+          if (import.meta.env.DEV) console.warn("[ShareCode] install_from_share_code failed:", e);
         }
       }
 

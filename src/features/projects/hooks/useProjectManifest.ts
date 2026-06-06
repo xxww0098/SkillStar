@@ -20,7 +20,7 @@ export function useProjectManifest() {
       const result = await tauriInvoke("list_projects");
       setProjects(result);
     } catch (e) {
-      console.error("Failed to load projects:", e);
+      if (import.meta.env.DEV) console.error("Failed to load projects:", e);
     } finally {
       setLoading(false);
     }
@@ -43,7 +43,7 @@ export function useProjectManifest() {
       setSkillsList(result);
       return result;
     } catch (e) {
-      console.error("Failed to load project skills:", e);
+      if (import.meta.env.DEV) console.error("Failed to load project skills:", e);
       return null;
     }
   }, []);
