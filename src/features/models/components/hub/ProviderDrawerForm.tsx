@@ -202,7 +202,8 @@ function ProviderDrawerFormInner({ provider, onSave, onSaveStateChange }: Provid
       >
         <ToolActivationPanel
           providerId={provider.id}
-          providerModels={provider.models}
+          providerModels={form.models}
+          modelCatalog={form.modelCatalog}
           defaultModel={form.defaultModel}
           baseUrlOpenai={form.baseUrlOpenai}
           baseUrlAnthropic={form.baseUrlAnthropic}

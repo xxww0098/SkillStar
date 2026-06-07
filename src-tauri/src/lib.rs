@@ -399,6 +399,7 @@ pub fn run() {
             commands::models_commands::get_tool_activations,
             // Model discovery, balance, and tool detection commands
             commands::models_commands::fetch_provider_models,
+            commands::models_commands::fetch_provider_model_catalog,
             commands::models_commands::query_provider_balance,
             commands::models_commands::detect_tool_installation,
             commands::models_commands::detect_env_conflicts,

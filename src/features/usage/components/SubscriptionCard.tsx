@@ -154,7 +154,10 @@ export function SubscriptionCard({
             <button
               type="button"
               onPointerDown={onDragHandlePointerDown}
-              className="cursor-grab text-zinc-400 opacity-0 transition-opacity group-hover:opacity-100 hover:text-zinc-600"
+              className={cn(
+                "cursor-grab text-zinc-400 hover:text-zinc-600 active:cursor-grabbing",
+                onDragHandlePointerDown ? "opacity-70 group-hover:opacity-100" : "opacity-0 group-hover:opacity-100",
+              )}
               aria-label={t("usage.dragHandle")}
               tabIndex={-1}
             >

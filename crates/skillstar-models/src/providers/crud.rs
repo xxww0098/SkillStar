@@ -134,6 +134,12 @@ pub fn update_provider_flat(
     if let Some(meta) = patch.meta {
         provider.meta = Some(meta);
     }
+    if let Some(codex_wire_api) = patch.codex_wire_api {
+        provider.codex_wire_api = codex_wire_api;
+    }
+    if let Some(codex_auth_mode) = patch.codex_auth_mode {
+        provider.codex_auth_mode = codex_auth_mode;
+    }
 
     Ok(provider.clone())
 }

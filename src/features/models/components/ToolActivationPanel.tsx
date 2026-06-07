@@ -1,11 +1,11 @@
-import { ChevronDown, ExternalLink, RefreshCw, Terminal } from "lucide-react";
+import { ChevronDown, Copy, ExternalLink, RefreshCw, Terminal } from "lucide-react";
 import { memo, useCallback, useEffect, useState } from "react";
 import { Button } from "../../../components/ui/button";
 import { Switch } from "../../../components/ui/switch";
 import { ExternalAnchor } from "../../../components/ui/ExternalAnchor";
 import { tauriInvoke } from "../../../lib/ipc";
 import { cn } from "../../../lib/utils";
-import type { ToolSyncResult } from "../../../types";
+import type { ModelCatalogEntry, ToolSyncResult } from "../../../types";
 import { useToolActivations } from "../hooks/useToolActivations";
 import { AgentToolIcon, type AgentToolIconId } from "./AgentToolIcon";
 
@@ -15,6 +15,7 @@ export interface ToolActivationPanelProps {
   defaultModel: string;
   baseUrlOpenai: string;
   baseUrlAnthropic: string;
+  modelCatalog?: ModelCatalogEntry[];
   showHeader?: boolean;
   defaultExpanded?: boolean;
   /** Flatter rows for Agent 高级配置 */
@@ -66,6 +67,7 @@ interface ToolItemProps {
   lastSyncAt: string | null;
   configPath: string | null;
   providerModels: string[];
+  modelCatalog: ModelCatalogEntry[];
   defaultModel: string;
   onToggle: (toolId: string, model?: string) => Promise<ToolSyncResult | void>;
   /** Whether the tool is installed on the system. */
@@ -82,6 +84,8 @@ interface ToolItemProps {
   compact?: boolean;
 }
 
+type ClaudeCommandShell = "unix" | "powershell";
+
 function ToolItem({
   toolId,
   displayName,
@@ -91,6 +95,7 @@ function ToolItem({
   lastSyncAt,
   configPath,
   providerModels,
+  modelCatalog,
   defaultModel,
   onToggle,
   isInstalled,
@@ -104,6 +109,7 @@ function ToolItem({
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [localModel, setLocalModel] = useState(selectedModel || defaultModel);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [claudeCommandShell, setClaudeCommandShell] = useState<ClaudeCommandShell>("unix");
 
   // Determine if the toggle should be disabled
   const isDisabled = isSyncing || !isInstalled || urlMissing || installLoading;
@@ -130,6 +136,18 @@ function ToolItem({
       setIsSyncing(false);
     }
   }, [toolId, localModel, isActive, onToggle]);
+
+  const selectedMetadata = modelCatalog.find((entry) => entry.id === localModel);
+  const claudeCommand = toolId === "claude-code" ? buildClaudeLaunchCommand(localModel, claudeCommandShell) : "";
+
+  const handleCopyClaudeCommand = useCallback(async () => {
+    if (!claudeCommand || typeof navigator === "undefined" || !navigator.clipboard) return;
+    try {
+      await navigator.clipboard.writeText(claudeCommand);
+    } catch {
+      // Clipboard access can be unavailable in test runners or locked-down shells.
+    }
+  }, [claudeCommand]);
 
   // Compute status text based on state
   let statusText: string;
@@ -260,11 +278,58 @@ function ToolItem({
               {providerModels.length === 0 && <option value="">无可用模型</option>}
               {providerModels.map((model) => (
                 <option key={model} value={model}>
-                  {model}
+                  {formatModelOptionLabel(
+                    model,
+                    modelCatalog.find((entry) => entry.id === model),
+                  )}
                 </option>
               ))}
             </select>
           </div>
+
+          {selectedMetadata && (
+            <div className="rounded-lg border border-border/40 bg-background/35 px-2.5 py-2">
+              <p className="truncate text-[11px] font-medium text-foreground">
+                {selectedMetadata.display_name || selectedMetadata.id}
+              </p>
+              <p className="mt-1 text-[11px] text-muted-foreground">{formatModelMetadata(selectedMetadata)}</p>
+            </div>
+          )}
+
+          {toolId === "claude-code" && localModel && (
+            <div className="space-y-2 rounded-lg border border-border/40 bg-background/35 px-2.5 py-2">
+              <div className="flex items-center gap-1.5">
+                {(["unix", "powershell"] as const).map((shell) => (
+                  <button
+                    key={shell}
+                    type="button"
+                    onClick={() => setClaudeCommandShell(shell)}
+                    className={cn(
+                      "h-6 rounded-md border px-2 text-[11px] font-medium transition-colors",
+                      claudeCommandShell === shell
+                        ? "border-primary/45 bg-primary/10 text-primary"
+                        : "border-border/50 text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {shell === "unix" ? "macOS / Linux" : "Windows"}
+                  </button>
+                ))}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleCopyClaudeCommand}
+                  className="ml-auto h-6 px-2 text-[11px]"
+                >
+                  <Copy className="mr-1 h-3 w-3" />
+                  复制命令
+                </Button>
+              </div>
+              <pre className="max-h-28 overflow-auto whitespace-pre-wrap rounded-md bg-muted/40 p-2 font-mono text-[10px] leading-relaxed text-muted-foreground">
+                {claudeCommand}
+              </pre>
+            </div>
+          )}
 
           {/* Config path */}
           {configPath && (
@@ -297,6 +362,85 @@ function ToolItem({
       )}
     </div>
   );
+}
+
+function formatModelOptionLabel(modelId: string, metadata?: ModelCatalogEntry): string {
+  if (!metadata) return modelId;
+  const name = metadata.display_name || modelId;
+  const details = [
+    metadata.context_length ? `${Math.round(metadata.context_length / 1000)}K ctx` : null,
+    metadata.max_completion_tokens ? `${Math.round(metadata.max_completion_tokens / 1000)}K out` : null,
+    formatCost(metadata.cost),
+  ].filter(Boolean);
+  return details.length > 0 ? `${name} (${modelId}) · ${details.join(" · ")}` : `${name} (${modelId})`;
+}
+
+function formatModelMetadata(metadata: ModelCatalogEntry): string {
+  const details = [
+    metadata.context_length ? `上下文 ${metadata.context_length.toLocaleString()}` : null,
+    metadata.max_completion_tokens ? `输出 ${metadata.max_completion_tokens.toLocaleString()}` : null,
+    formatCost(metadata.cost),
+  ].filter(Boolean);
+  return details.length > 0 ? details.join(" · ") : metadata.id;
+}
+
+function formatCost(cost: ModelCatalogEntry["cost"]): string | null {
+  if (!cost || typeof cost !== "object") return null;
+  const input = typeof cost.input === "number" ? cost.input : null;
+  const output = typeof cost.output === "number" ? cost.output : null;
+  if (input == null && output == null) return null;
+  return `$${input ?? "?"}/$${output ?? "?"} / 1M`;
+}
+
+function buildClaudeLaunchCommand(model: string, shell: ClaudeCommandShell): string {
+  const commandName = `cc-${slugifyCommandName(model) || "model"}`;
+  if (shell === "powershell") {
+    return [
+      `function ${commandName} {`,
+      `  $env:ANTHROPIC_MODEL = "${escapePowerShell(model)}"`,
+      `  $env:CLAUDE_CODE_SUBAGENT_MODEL = "${escapePowerShell(model)}"`,
+      `  $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"`,
+      `  $env:CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK = "1"`,
+      `  $env:CLAUDE_CODE_EFFORT_LEVEL = "max"`,
+      `  try { claude --dangerously-skip-permissions @args }`,
+      `  finally {`,
+      `    Remove-Item Env:\\ANTHROPIC_MODEL -ErrorAction SilentlyContinue`,
+      `    Remove-Item Env:\\CLAUDE_CODE_SUBAGENT_MODEL -ErrorAction SilentlyContinue`,
+      `    Remove-Item Env:\\CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -ErrorAction SilentlyContinue`,
+      `    Remove-Item Env:\\CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -ErrorAction SilentlyContinue`,
+      `    Remove-Item Env:\\CLAUDE_CODE_EFFORT_LEVEL -ErrorAction SilentlyContinue`,
+      `  }`,
+      `}`,
+    ].join("\n");
+  }
+
+  return [
+    `${commandName}() {`,
+    `  ANTHROPIC_MODEL="${escapeShell(model)}" \\`,
+    `  CLAUDE_CODE_SUBAGENT_MODEL="${escapeShell(model)}" \\`,
+    `  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \\`,
+    `  CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1 \\`,
+    `  CLAUDE_CODE_EFFORT_LEVEL="max" \\`,
+    `  claude --dangerously-skip-permissions "$@"`,
+    `}`,
+  ].join("\n");
+}
+
+function slugifyCommandName(model: string): string {
+  return model
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 32);
+}
+
+function escapeShell(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\$/g, "\\$").replace(/`/g, "\\`");
+}
+
+function escapePowerShell(value: string): string {
+  return value.replace(/`/g, "``").replace(/"/g, '`"').replace(/\$/g, "`$");
 }
 
 function formatSyncTime(timestamp: string): string {
@@ -342,6 +486,7 @@ function ToolActivationPanelInner({
   defaultModel,
   baseUrlOpenai,
   baseUrlAnthropic,
+  modelCatalog = [],
   showHeader = true,
   defaultExpanded = false,
   variant = "default",
@@ -438,6 +583,7 @@ function ToolActivationPanelInner({
               lastSyncAt={lastSyncAt}
               configPath={TOOL_CONFIG_PATHS[tool.toolId] ?? null}
               providerModels={providerModels}
+              modelCatalog={modelCatalog}
               defaultModel={defaultModel}
               onToggle={toggle}
               isInstalled={isToolInstalled}

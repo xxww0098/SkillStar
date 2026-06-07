@@ -12,6 +12,7 @@ use url::Url;
 use uuid::Uuid;
 
 mod crud;
+mod model_catalog;
 mod presets;
 mod store;
 mod types;
@@ -23,6 +24,7 @@ mod types;
 // submodules and the test modules can reach `store_path`, `get_app`, and the
 // `default_codex_*` defaults through `super::*` / `crate::providers::*`.
 pub use crud::*;
+pub use model_catalog::*;
 pub use presets::*;
 pub use store::*;
 pub use types::*;

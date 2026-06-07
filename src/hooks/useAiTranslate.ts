@@ -1,7 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { tauriInvoke } from "../lib/ipc";
-import type { AiTranslatePipelineProgress, AiTranslateStreamPayload } from "../types";
+import type { AiTranslateMetrics, AiTranslatePipelineProgress, AiTranslateStreamPayload } from "../types";
 import { getAiConfigCached } from "./useAiConfig";
 
 /**
@@ -12,9 +12,8 @@ import { getAiConfigCached } from "./useAiConfig";
  * `TranslationWaitBanner`. The final translated content is the resolved value
  * of the invoke call.
  *
- * Caching note: the backend keeps a 1-hour content-hash cache per
- * target_lang + model, so re-translating the same SKILL.md within a session
- * returns near-instantly.
+ * Caching note: the backend owns durable content-hash caching per target_lang
+ * + model. Frontend state only caches the active panel/session.
  */
 
 interface TranslateState {
@@ -24,6 +23,7 @@ interface TranslateState {
   loading: boolean;
   error: string | null;
   pipelineProgress: AiTranslatePipelineProgress | null;
+  metrics: AiTranslateMetrics | null;
   /** Content the translation was produced from — used to invalidate on edit. */
   source: string | null;
   /** Elapsed seconds since the current invocation began. */
@@ -36,12 +36,17 @@ const INITIAL: TranslateState = {
   loading: false,
   error: null,
   pipelineProgress: null,
+  metrics: null,
   source: null,
   elapsedSec: 0,
 };
 
 /** Safety budget — wall clock cap before the UI force-recovers. */
 export const TRANSLATE_BUDGET_MS = 180_000;
+
+interface TranslateOptions {
+  forceRefresh?: boolean;
+}
 
 export function useAiTranslate() {
   const [state, setState] = useState<TranslateState>(INITIAL);
@@ -50,6 +55,7 @@ export function useAiTranslate() {
   const unlistenRef = useRef<(() => void) | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startedAtRef = useRef<number>(0);
+  const completionMetricsRef = useRef<AiTranslateMetrics | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -94,6 +100,7 @@ export function useAiTranslate() {
 
   const cancel = useCallback(() => {
     activeIdRef.current = null;
+    completionMetricsRef.current = null;
     if (unlistenRef.current) unlistenRef.current();
     unlistenRef.current = null;
     stopTicker();
@@ -104,12 +111,17 @@ export function useAiTranslate() {
     setState((p) => (p.translated == null ? p : { ...p, showTranslated: !p.showTranslated }));
   }, []);
 
+  const setError = useCallback((error: string | null) => {
+    setState((p) => ({ ...p, error }));
+  }, []);
+
   const translate = useCallback(
-    async (content: string): Promise<string | null> => {
+    async (content: string, options: TranslateOptions = {}): Promise<string | null> => {
       if (!aiConfigured) return null;
+      const forceRefresh = options.forceRefresh ?? false;
 
       // If we already have a translation for THIS content, just toggle the view.
-      if (!state.loading && state.translated != null && state.source === content) {
+      if (!forceRefresh && !state.loading && state.translated != null && state.source === content) {
         setState((p) => ({ ...p, showTranslated: !p.showTranslated }));
         return state.translated;
       }
@@ -132,6 +144,7 @@ export function useAiTranslate() {
         safetyTimer = setTimeout(() => {
           if (activeIdRef.current !== requestId) return;
           activeIdRef.current = null;
+          completionMetricsRef.current = null;
           if (unlistenRef.current) unlistenRef.current();
           unlistenRef.current = null;
           stopTicker();
@@ -145,9 +158,11 @@ export function useAiTranslate() {
         loading: true,
         error: null,
         pipelineProgress: null,
+        metrics: null,
         source: content,
         elapsedSec: 0,
       });
+      completionMetricsRef.current = null;
       startTicker();
 
       try {
@@ -163,6 +178,9 @@ export function useAiTranslate() {
             setState((p) => ({ ...p, error: String(payload.message) }));
           } else if (payload.event === "start") {
             armSafety();
+          } else if (payload.event === "complete") {
+            completionMetricsRef.current = payload.metrics ?? null;
+            setState((p) => ({ ...p, metrics: payload.metrics ?? null }));
           }
         });
         unlistenRef.current = unlisten;
@@ -174,22 +192,25 @@ export function useAiTranslate() {
 
         armSafety();
 
-        const translated = await tauriInvoke("ai_translate_skill_stream", {
+        const result = await tauriInvoke("ai_translate_skill_stream", {
           requestId,
           content,
+          ...(forceRefresh ? { forceRefresh: true } : {}),
         });
+        const metrics = result.metrics ?? completionMetricsRef.current;
 
         if (activeIdRef.current !== requestId) return null;
         setState({
-          translated,
+          translated: result.content,
           showTranslated: true,
           loading: false,
           error: null,
           pipelineProgress: null,
+          metrics,
           source: content,
           elapsedSec: Math.floor((Date.now() - startedAtRef.current) / 1000),
         });
-        return translated;
+        return result.content;
       } catch (e) {
         if (activeIdRef.current !== requestId) return null;
         setState((p) => ({
@@ -221,5 +242,6 @@ export function useAiTranslate() {
     cancel,
     toggleShow,
     reset,
+    setError,
   };
 }

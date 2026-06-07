@@ -4,6 +4,9 @@
 
 use super::*;
 
+const CLIPROXY_MODEL_REGISTRY_URL: &str = "https://raw.githubusercontent.com/router-for-me/CLIProxyAPI/main/internal/registry/models/models.json";
+const MODELS_DEV_REGISTRY_URL: &str = "https://models.dev/api.json";
+
 /// Probe multiple API endpoints in parallel and return per-URL latency.
 #[tauri::command]
 pub async fn test_endpoints_latency(
@@ -237,7 +240,9 @@ pub async fn fetch_provider_models(
 
     let trimmed = url.trim();
     if trimmed.is_empty() {
-        return Err("models URL is empty — configure '获取模型 URL' in the provider settings".to_string());
+        return Err(
+            "models URL is empty — configure '获取模型 URL' in the provider settings".to_string(),
+        );
     }
     let url = trimmed.to_string();
 
@@ -287,6 +292,99 @@ pub async fn fetch_provider_models(
     }
 
     Ok(model_ids)
+}
+
+/// Fetch available models plus normalized metadata for OpenCode and UI display.
+///
+/// The provider endpoint is authoritative for model IDs. Public registries are
+/// optional enrichers; if either registry is unavailable, the command still
+/// returns the model IDs discovered from the provider.
+#[tauri::command]
+pub async fn fetch_provider_model_catalog(
+    url: String,
+    api_key: String,
+    timeout_ms: Option<u64>,
+) -> Result<ModelCatalogFetchResult, String> {
+    let timeout = Duration::from_millis(timeout_ms.unwrap_or(15_000));
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return Err(
+            "models URL is empty — configure '获取模型 URL' in the provider settings".to_string(),
+        );
+    }
+
+    let client = skillstar_core::infra::http_client::probe_http_client(timeout)
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+
+    let provider_body = fetch_json_with_auth(&client, trimmed, &api_key).await?;
+    let provider_catalog = providers::catalog_from_provider_models(&provider_body);
+    if provider_catalog.is_empty() {
+        return Err("invalid response: no model IDs found in response".to_string());
+    }
+
+    let mut registries = Vec::new();
+    let mut metadata_sources = Vec::new();
+
+    for registry_url in [CLIPROXY_MODEL_REGISTRY_URL, MODELS_DEV_REGISTRY_URL] {
+        if let Ok(body) = fetch_json_public(&client, registry_url).await {
+            let catalog = providers::catalog_from_registry(&body);
+            if !catalog.is_empty() {
+                registries.push(catalog);
+                metadata_sources.push(registry_url.to_string());
+            }
+        }
+    }
+
+    let mut result = providers::merge_model_catalog(provider_catalog, &registries);
+    result.metadata_sources = metadata_sources;
+    Ok(result)
+}
+
+async fn fetch_json_with_auth(
+    client: &reqwest::Client,
+    url: &str,
+    api_key: &str,
+) -> Result<serde_json::Value, String> {
+    let response = client
+        .get(url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("x-api-key", api_key)
+        .header("anthropic-version", "2023-06-01")
+        .send()
+        .await
+        .map_err(request_error)?;
+
+    parse_json_response(response).await
+}
+
+async fn fetch_json_public(
+    client: &reqwest::Client,
+    url: &str,
+) -> Result<serde_json::Value, String> {
+    let response = client.get(url).send().await.map_err(request_error)?;
+    parse_json_response(response).await
+}
+
+async fn parse_json_response(response: reqwest::Response) -> Result<serde_json::Value, String> {
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("HTTP {}", status.as_u16()));
+    }
+
+    response
+        .json()
+        .await
+        .map_err(|e| format!("invalid response: {}", e))
+}
+
+fn request_error(e: reqwest::Error) -> String {
+    if e.is_timeout() {
+        "请求超时".to_string()
+    } else if e.is_connect() {
+        format!("网络错误: {}", e)
+    } else {
+        format!("请求失败: {}", e)
+    }
 }
 
 // ---------------------------------------------------------------------------

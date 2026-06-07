@@ -21,16 +21,18 @@ pub async fn ai_translate_skill(content: String) -> Result<String, String> {
 /// Event payload shape (camelCase, matches AiStreamPayload + pipelineProgress):
 ///   { requestId, event: "start" | "progress" | "complete" | "error",
 ///     pipelineProgress?: { phase, current, total },
+///     metrics?: { model, tps, completionTokens, elapsedMs, ... },
 ///     message?: string }
 #[tauri::command]
 pub async fn ai_translate_skill_stream(
     window: tauri::Window,
     request_id: String,
     content: String,
-) -> Result<String, String> {
+    force_refresh: Option<bool>,
+) -> Result<TranslateSkillStreamResponse, String> {
     let config = ensure_ai_config().await?;
 
-    let _ = emit_translate_pipeline_event(&window, &request_id, "start", None, None);
+    let _ = emit_translate_pipeline_event(&window, &request_id, "start", None, None, None);
 
     let window_clone = window.clone();
     let request_id_clone = request_id.clone();
@@ -41,13 +43,36 @@ pub async fn ai_translate_skill_stream(
             "progress",
             Some(progress),
             None,
+            None,
         );
     };
 
-    match ai_provider::translate::translate_skill(&config, &content, on_progress).await {
-        Ok(translated) => {
-            let _ = emit_translate_pipeline_event(&window, &request_id, "complete", None, None);
-            Ok(translated)
+    let options = ai_provider::translate::TranslateOptions {
+        force_refresh: force_refresh.unwrap_or(false),
+    };
+
+    match ai_provider::translate::translate_skill_with_report(
+        &config,
+        &content,
+        options,
+        on_progress,
+    )
+    .await
+    {
+        Ok(result) => {
+            let metrics = result.metrics.clone();
+            let _ = emit_translate_pipeline_event(
+                &window,
+                &request_id,
+                "complete",
+                None,
+                Some(metrics.clone()),
+                None,
+            );
+            Ok(TranslateSkillStreamResponse {
+                content: result.content,
+                metrics,
+            })
         }
         Err(err) => {
             let message = err.to_string();
@@ -55,6 +80,7 @@ pub async fn ai_translate_skill_stream(
                 &window,
                 &request_id,
                 "error",
+                None,
                 None,
                 Some(message.clone()),
             );
@@ -65,10 +91,18 @@ pub async fn ai_translate_skill_stream(
 
 #[derive(serde::Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct TranslateSkillStreamResponse {
+    pub content: String,
+    pub metrics: ai_provider::translate::TranslationMetrics,
+}
+
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct TranslatePipelinePayload {
     pub request_id: String,
     pub event: String,
     pub pipeline_progress: Option<ai_provider::translate::PipelineProgress>,
+    pub metrics: Option<ai_provider::translate::TranslationMetrics>,
     pub message: Option<String>,
 }
 
@@ -77,12 +111,14 @@ pub(super) fn emit_translate_pipeline_event_impl(
     request_id: &str,
     event: &str,
     progress: Option<ai_provider::translate::PipelineProgress>,
+    metrics: Option<ai_provider::translate::TranslationMetrics>,
     message: Option<String>,
 ) -> Result<(), String> {
     let payload = TranslatePipelinePayload {
         request_id: request_id.to_string(),
         event: event.to_string(),
         pipeline_progress: progress,
+        metrics,
         message,
     };
     window

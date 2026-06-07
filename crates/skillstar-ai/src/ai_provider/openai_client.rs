@@ -22,6 +22,7 @@ use tracing::{error, warn};
 
 use super::config::{AiConfig, ApiFormat};
 use super::http_client::request_timeout_duration;
+use super::{ChatCompletionOutput, ChatCompletionUsage};
 
 /// Build an `async-openai` [`Client`] configured with the user's base URL,
 /// API key, and proxy-aware HTTP client (reqwest 0.12).
@@ -49,21 +50,24 @@ fn build_proxy_aware_client(config: &AiConfig) -> Result<reqwest_012::Client> {
         .pool_max_idle_per_host(4);
 
     if let Ok(proxy_config) = proxy::load_config()
-        && proxy_config.enabled && !proxy_config.host.trim().is_empty() {
-            let scheme = proxy_config.proxy_type.as_scheme();
-            let proxy_url = format!("{}://{}:{}", scheme, proxy_config.host, proxy_config.port);
+        && proxy_config.enabled
+        && !proxy_config.host.trim().is_empty()
+    {
+        let scheme = proxy_config.proxy_type.as_scheme();
+        let proxy_url = format!("{}://{}:{}", scheme, proxy_config.host, proxy_config.port);
 
-            let mut proxy =
-                reqwest_012::Proxy::all(&proxy_url).context("Invalid proxy URL for AI client")?;
+        let mut proxy =
+            reqwest_012::Proxy::all(&proxy_url).context("Invalid proxy URL for AI client")?;
 
-            if let Some(ref username) = proxy_config.username
-                && !username.is_empty() {
-                    let password = proxy_config.password.as_deref().unwrap_or("");
-                    proxy = proxy.basic_auth(username, password);
-                }
-
-            builder = builder.proxy(proxy);
+        if let Some(ref username) = proxy_config.username
+            && !username.is_empty()
+        {
+            let password = proxy_config.password.as_deref().unwrap_or("");
+            proxy = proxy.basic_auth(username, password);
         }
+
+        builder = builder.proxy(proxy);
+    }
 
     builder.build().context("Failed to build AI HTTP client")
 }
@@ -77,13 +81,16 @@ fn normalize_base_url(base_url: &str) -> String {
     }
     // Strip trailing /chat/completions if present — async-openai appends it.
     if base.ends_with("/chat/completions") {
-        base = base.trim_end_matches("/chat/completions").trim_end_matches('/');
+        base = base
+            .trim_end_matches("/chat/completions")
+            .trim_end_matches('/');
     }
     // Auto-insert /v1 for bare host:port URLs (e.g. http://host:1234)
     if let Some(after_scheme) = base.split_once("://").map(|(_, rest)| rest)
-        && !after_scheme.contains('/') {
-            return format!("{}/v1", base);
-        }
+        && !after_scheme.contains('/')
+    {
+        return format!("{}/v1", base);
+    }
     base.to_string()
 }
 
@@ -105,6 +112,27 @@ pub async fn chat_completion(
     seed: Option<u64>,
     max_tokens: Option<u32>,
 ) -> Result<String> {
+    chat_completion_with_usage(
+        config,
+        system_prompt,
+        user_content,
+        temperature,
+        seed,
+        max_tokens,
+    )
+    .await
+    .map(|output| output.content)
+}
+
+/// Non-streaming chat completion with token usage when the provider returns it.
+pub async fn chat_completion_with_usage(
+    config: &AiConfig,
+    system_prompt: &str,
+    user_content: &str,
+    temperature: f32,
+    seed: Option<u64>,
+    max_tokens: Option<u32>,
+) -> Result<ChatCompletionOutput> {
     let client = build_openai_client(config)?;
 
     let mut request_builder = CreateChatCompletionRequestArgs::default();
@@ -140,6 +168,12 @@ pub async fn chat_completion(
         .await
         .context("Failed to send request to AI provider")?;
 
+    let usage = response.usage.as_ref().map(|usage| ChatCompletionUsage {
+        prompt_tokens: Some(usage.prompt_tokens),
+        completion_tokens: Some(usage.completion_tokens),
+        total_tokens: Some(usage.total_tokens),
+    });
+
     let content = response
         .choices
         .into_iter()
@@ -147,7 +181,7 @@ pub async fn chat_completion(
         .and_then(|choice| choice.message.content);
 
     match content {
-        Some(c) if !c.trim().is_empty() => Ok(c),
+        Some(c) if !c.trim().is_empty() => Ok(ChatCompletionOutput { content: c, usage }),
         _ => {
             warn!(target: "ai_provider", "AI returned empty/null content");
             anyhow::bail!("AI returned empty response");
@@ -201,10 +235,11 @@ where
             Ok(response) => {
                 for choice in &response.choices {
                     if let Some(ref content) = choice.delta.content
-                        && !content.is_empty() {
-                            translated.push_str(content);
-                            on_delta(content)?;
-                        }
+                        && !content.is_empty()
+                    {
+                        translated.push_str(content);
+                        on_delta(content)?;
+                    }
                 }
             }
             Err(e) => {

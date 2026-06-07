@@ -26,7 +26,7 @@ use skillstar_models::latency::{self, EndpointLatencyResult, LatencyResult};
 use skillstar_models::providers::ProviderPresetFlat;
 use skillstar_models::provider_ref::AiProviderRef;
 use skillstar_models::providers::{
-    self, AppProviders, ProviderEntry, ProviderEntryFlat, ProviderPatch,
+    self, AppProviders, ModelCatalogFetchResult, ProviderEntry, ProviderEntryFlat, ProviderPatch,
     ProviderPatchFlat, ProviderPreset, ProviderSettings, ProvidersStore, ToolActivation,
 };
 use skillstar_models::tool_sync::{self, ToolConfigTarget, ToolSyncResult, ToolSyncResultFlat};

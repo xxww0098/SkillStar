@@ -6,8 +6,8 @@
 pub mod summarize;
 pub mod translate;
 
-use skillstar_ai::ai_provider;
 use serde::Serialize;
+use skillstar_ai::ai_provider;
 use tauri::Emitter;
 
 // ── Shared Types ────────────────────────────────────────────────────
@@ -65,9 +65,12 @@ fn emit_translate_pipeline_event(
     request_id: &str,
     event: &str,
     progress: Option<ai_provider::translate::PipelineProgress>,
+    metrics: Option<ai_provider::translate::TranslationMetrics>,
     message: Option<String>,
 ) -> Result<(), String> {
-    translate::emit_translate_pipeline_event_impl(window, request_id, event, progress, message)
+    translate::emit_translate_pipeline_event_impl(
+        window, request_id, event, progress, metrics, message,
+    )
 }
 
 async fn ensure_ai_config() -> Result<ai_provider::AiConfig, String> {

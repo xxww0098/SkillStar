@@ -193,11 +193,32 @@ export interface AiTranslatePipelineProgress {
   total: number;
 }
 
+/** Translation model speed and usage reported when SKILL.md translation completes. */
+export interface AiTranslateMetrics {
+  model: string;
+  targetLanguage: string;
+  elapsedMs: number;
+  inputChars: number;
+  outputChars: number;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
+  totalTokens?: number | null;
+  tps?: number | null;
+  cacheHit: boolean;
+  modelCalls: number;
+}
+
+export interface AiTranslateSkillStreamResult {
+  content: string;
+  metrics: AiTranslateMetrics;
+}
+
 /** Payload emitted on the `ai://translate-stream` Tauri event. */
 export interface AiTranslateStreamPayload {
   requestId: string;
   event: "start" | "progress" | "complete" | "error";
   pipelineProgress?: AiTranslatePipelineProgress | null;
+  metrics?: AiTranslateMetrics | null;
   message?: string | null;
 }
 
@@ -743,6 +764,24 @@ export interface ProviderEntryFlat {
   codex_wire_api?: string;
   /** Codex auth mode: "api_key" (default) or "oauth". */
   codex_auth_mode?: string;
+}
+
+export interface ModelCatalogEntry {
+  id: string;
+  display_name?: string | null;
+  source_name?: string | null;
+  description?: string | null;
+  context_length?: number | null;
+  max_completion_tokens?: number | null;
+  cost?: Record<string, unknown> | null;
+  raw?: Record<string, unknown> | null;
+}
+
+export interface ModelCatalogFetchResult {
+  models: string[];
+  catalog: ModelCatalogEntry[];
+  metadata_sources: string[];
+  missing_cost_count: number;
 }
 
 /** Typed settings for Codex CLI activation (wire_api and auth_mode). */

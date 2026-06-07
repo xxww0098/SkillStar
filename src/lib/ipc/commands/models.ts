@@ -4,6 +4,7 @@ import type {
   ConnectionTestResult,
   FlatProvidersResponse,
   LatencyResult,
+  ModelCatalogFetchResult,
   ProviderEntry,
   ProviderEntryFlat,
   ProviderPatchFlat,
@@ -112,6 +113,10 @@ export interface ModelsCommands {
   fetch_provider_models: {
     args: { url: string; apiKey: string; timeoutMs?: number };
     result: string[];
+  };
+  fetch_provider_model_catalog: {
+    args: { url: string; apiKey: string; timeoutMs?: number };
+    result: ModelCatalogFetchResult;
   };
 
   // Tests

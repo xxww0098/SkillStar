@@ -348,8 +348,8 @@ pub fn sync_to_opencode(
     }
 }
 
-fn build_opencode_provider_block(provider: &ProviderEntryFlat, model: &str) -> Value {
-    let model_id = if model.trim().is_empty() {
+pub(crate) fn build_opencode_provider_block(provider: &ProviderEntryFlat, model: &str) -> Value {
+    let selected_model_id = if model.trim().is_empty() {
         if provider.default_model.trim().is_empty() {
             "default".to_string()
         } else {
@@ -360,6 +360,18 @@ fn build_opencode_provider_block(provider: &ProviderEntryFlat, model: &str) -> V
     };
 
     let base_url = provider.base_url_openai.trim().trim_end_matches('/');
+    let catalog = catalog_from_meta(provider.meta.as_ref());
+    let model_ids = build_opencode_model_ids(provider, &selected_model_id, &catalog);
+    let models = model_ids
+        .iter()
+        .map(|model_id| {
+            let entry = catalog.iter().find(|entry| entry.id == *model_id);
+            (
+                model_id.clone(),
+                build_opencode_model_entry(model_id, entry),
+            )
+        })
+        .collect::<serde_json::Map<String, Value>>();
 
     serde_json::json!({
         "npm": "@ai-sdk/openai-compatible",
@@ -368,12 +380,62 @@ fn build_opencode_provider_block(provider: &ProviderEntryFlat, model: &str) -> V
             "baseURL": base_url,
             "apiKey": provider.api_key,
         },
-        "models": {
-            model_id.clone(): {
-                "name": model_id,
-            }
-        }
+        "models": models
     })
+}
+
+fn build_opencode_model_ids(
+    provider: &ProviderEntryFlat,
+    selected_model_id: &str,
+    catalog: &[ModelCatalogEntry],
+) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut ids = Vec::new();
+
+    for candidate in std::iter::once(selected_model_id)
+        .chain(std::iter::once(provider.default_model.as_str()))
+        .chain(provider.models.iter().map(String::as_str))
+        .chain(catalog.iter().map(|entry| entry.id.as_str()))
+    {
+        let id = candidate.trim();
+        if !id.is_empty() && seen.insert(id.to_string()) {
+            ids.push(id.to_string());
+        }
+    }
+
+    ids
+}
+
+fn build_opencode_model_entry(model_id: &str, catalog_entry: Option<&ModelCatalogEntry>) -> Value {
+    let mut model = serde_json::Map::new();
+    let display_name = catalog_entry
+        .and_then(|entry| entry.display_name.as_deref())
+        .unwrap_or(model_id);
+    model.insert("name".to_string(), Value::String(display_name.to_string()));
+
+    if let Some(entry) = catalog_entry {
+        if let Some(source_name) = entry.source_name.as_deref()
+            && source_name != model_id
+        {
+            model.insert("id".to_string(), Value::String(source_name.to_string()));
+        }
+
+        let mut limit = serde_json::Map::new();
+        if let Some(context) = entry.context_length {
+            limit.insert("context".to_string(), Value::Number(context.into()));
+        }
+        if let Some(output) = entry.max_completion_tokens {
+            limit.insert("output".to_string(), Value::Number(output.into()));
+        }
+        if !limit.is_empty() {
+            model.insert("limit".to_string(), Value::Object(limit));
+        }
+        if let Some(cost) = entry.cost.clone() {
+            model.insert("cost".to_string(), cost);
+        }
+    }
+
+    Value::Object(model)
 }
 
 fn sync_to_opencode_inner(
@@ -656,4 +718,3 @@ pub fn unsync_codex() -> Result<()> {
 
     Ok(())
 }
-

@@ -9,6 +9,55 @@ use tempfile::TempDir;
         assert!(store.providers.is_empty());
         assert!(store.tool_activations.is_empty());
     }
+
+    #[test]
+    fn test_model_catalog_merges_provider_ids_with_registry_metadata() {
+        let provider_body = serde_json::json!({
+            "data": [
+                { "id": "gpt-4o" },
+                { "id": "deepseek-chat" }
+            ]
+        });
+        let registry_body = serde_json::json!({
+            "openai": {
+                "models": {
+                    "gpt-4o": {
+                        "id": "gpt-4o",
+                        "name": "GPT-4o",
+                        "limit": { "context": 128000, "output": 16384 },
+                        "cost": { "input": 2.5, "output": 10.0 }
+                    }
+                }
+            },
+            "deepseek": [
+                {
+                    "id": "deepseek-chat",
+                    "display_name": "DeepSeek Chat",
+                    "context_length": 64000,
+                    "max_completion_tokens": 8192
+                }
+            ]
+        });
+
+        let provider_catalog = catalog_from_provider_models(&provider_body);
+        let registry_catalog = catalog_from_registry(&registry_body);
+        let result = merge_model_catalog(provider_catalog, &[registry_catalog]);
+
+        assert_eq!(result.models, vec!["gpt-4o", "deepseek-chat"]);
+        let gpt_4o = result.catalog.iter().find(|entry| entry.id == "gpt-4o").unwrap();
+        assert_eq!(gpt_4o.display_name.as_deref(), Some("GPT-4o"));
+        assert_eq!(gpt_4o.context_length, Some(128000));
+        assert_eq!(gpt_4o.max_completion_tokens, Some(16384));
+        assert_eq!(
+            gpt_4o
+                .cost
+                .as_ref()
+                .and_then(|cost| cost.get("output"))
+                .and_then(Value::as_f64),
+            Some(10.0)
+        );
+    }
+
     #[test]
     fn test_read_flat_store_malformed_json() {
         let (_tmp, path) = setup_temp_store();

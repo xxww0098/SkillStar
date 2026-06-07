@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import type { ProviderEntryFlat, ProviderPatchFlat } from "../../../../types";
+import type { ModelCatalogEntry, ProviderEntryFlat, ProviderPatchFlat } from "../../../../types";
 import { useModelFetch } from "../../hooks/useModelFetch";
 import { useProviderPresets } from "../../hooks/useProviderPresets";
 
@@ -27,6 +27,7 @@ export const CLAUDE_MODEL_META_KEYS = {
 
 export const CODEX_WIRE_API_META_KEY = "codex_wire_api" as const;
 export const CODEX_AUTH_MODE_META_KEY = "codex_auth_mode" as const;
+export const MODEL_CATALOG_META_KEY = "model_catalog" as const;
 
 export const LATEST_CLAUDE_MODELS = {
   main: "claude-sonnet-4-6",
@@ -35,16 +36,7 @@ export const LATEST_CLAUDE_MODELS = {
   opus: "claude-opus-4-7",
 } as const;
 
-export const LATEST_CODEX_MODELS = [
-  "codex-mini-latest",
-  "gpt-4.1",
-  "gpt-4.1-mini",
-  "gpt-4.1-nano",
-  "gpt-4o",
-  "gpt-4o-mini",
-  "o3",
-  "o4-mini",
-] as const;
+export const LATEST_CODEX_MODELS = ["gpt-5.5", "gpt-5.4-mini", "gpt-5.3-codex-spark", "gpt-5.4"] as const;
 
 const AUTO_SAVE_DEBOUNCE_MS = 600;
 
@@ -64,6 +56,14 @@ export function buildModelCatalog(values: string[]): string[] {
     }
   }
   return catalog;
+}
+
+export function getModelCatalogFromMeta(meta: Record<string, unknown> | undefined): ModelCatalogEntry[] {
+  const value = meta?.[MODEL_CATALOG_META_KEY];
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is ModelCatalogEntry => {
+    return Boolean(entry && typeof entry === "object" && typeof (entry as ModelCatalogEntry).id === "string");
+  });
 }
 
 function isValidHttpUrl(value: string): boolean {
@@ -102,6 +102,7 @@ export function useProviderFormState({ provider, onSave, onSaveStateChange }: Us
   const [notes, setNotes] = useState(provider.notes ?? "");
   const [apiKey, setApiKey] = useState(provider.api_key);
   const [models, setModels] = useState<string[]>(provider.models);
+  const [modelCatalog, setModelCatalog] = useState<ModelCatalogEntry[]>(() => getModelCatalogFromMeta(provider.meta));
   const [defaultModel, setDefaultModel] = useState(provider.default_model);
   const [claudeMainModel, setClaudeMainModel] = useState(getMetaString(provider.meta, CLAUDE_MODEL_META_KEYS.main));
   const [claudeHaikuModel, setClaudeHaikuModel] = useState(getMetaString(provider.meta, CLAUDE_MODEL_META_KEYS.haiku));
@@ -110,7 +111,9 @@ export function useProviderFormState({ provider, onSave, onSaveStateChange }: Us
   );
   const [claudeOpusModel, setClaudeOpusModel] = useState(getMetaString(provider.meta, CLAUDE_MODEL_META_KEYS.opus));
   const [codexWireApi, setCodexWireApi] = useState<CodexWireApi>(
-    (getMetaString(provider.meta, CODEX_WIRE_API_META_KEY) as CodexWireApi) || "chat",
+    (provider.codex_wire_api as CodexWireApi) ||
+      (getMetaString(provider.meta, CODEX_WIRE_API_META_KEY) as CodexWireApi) ||
+      "responses",
   );
   const [codexAuthMode, setCodexAuthMode] = useState<"api_key" | "oauth">(
     (provider.codex_auth_mode as "api_key" | "oauth") ||
@@ -127,7 +130,7 @@ export function useProviderFormState({ provider, onSave, onSaveStateChange }: Us
   const [saving, setSaving] = useState(false);
   const [showAnthropicUrl, setShowAnthropicUrl] = useState(Boolean(provider.base_url_anthropic?.trim()));
 
-  const { fetchModels, isLoading: isFetchingModels, error: fetchError } = useModelFetch();
+  const { fetchModelCatalog, isLoading: isFetchingModels, error: fetchError } = useModelFetch();
   const [claudeModelOptions, setClaudeModelOptions] = useState<string[]>(() =>
     buildModelCatalog([
       LATEST_CLAUDE_MODELS.main,
@@ -159,12 +162,17 @@ export function useProviderFormState({ provider, onSave, onSaveStateChange }: Us
     setNotes(provider.notes ?? "");
     setApiKey(provider.api_key);
     setModels(provider.models);
+    setModelCatalog(getModelCatalogFromMeta(provider.meta));
     setDefaultModel(provider.default_model);
     setClaudeMainModel(providerClaudeMainModel);
     setClaudeHaikuModel(providerClaudeHaikuModel);
     setClaudeSonnetModel(providerClaudeSonnetModel);
     setClaudeOpusModel(providerClaudeOpusModel);
-    setCodexWireApi((getMetaString(provider.meta, CODEX_WIRE_API_META_KEY) as CodexWireApi) || "chat");
+    setCodexWireApi(
+      (provider.codex_wire_api as CodexWireApi) ||
+        (getMetaString(provider.meta, CODEX_WIRE_API_META_KEY) as CodexWireApi) ||
+        "responses",
+    );
     setCodexAuthMode(
       (provider.codex_auth_mode as "api_key" | "oauth") ||
         (getMetaString(provider.meta, CODEX_AUTH_MODE_META_KEY) as "api_key" | "oauth") ||
@@ -197,19 +205,20 @@ export function useProviderFormState({ provider, onSave, onSaveStateChange }: Us
     const url = modelsUrl.trim();
     if (!url || !apiKey.trim()) return;
     try {
-      const result = await fetchModels(url, apiKey.trim());
-      const fetchedCatalog = buildModelCatalog(result);
+      const result = await fetchModelCatalog(url, apiKey.trim());
+      const fetchedCatalog = buildModelCatalog(result.models);
       setModels((prev) => buildModelCatalog([...prev, ...fetchedCatalog]));
+      setModelCatalog(result.catalog);
       setClaudeModelOptions((prev) => buildModelCatalog([...fetchedCatalog, ...prev]));
       setCodexModelOptions((prev) => buildModelCatalog([...fetchedCatalog, ...prev]));
       setModelFetchStatus({ target: "claude", count: fetchedCatalog.length });
     } catch {
       setModelFetchStatus(null);
     }
-  }, [fetchModels, modelsUrl, apiKey]);
+  }, [fetchModelCatalog, modelsUrl, apiKey]);
 
   const buildPatch = useCallback((): ProviderPatchFlat => {
-    const modelCatalog = buildModelCatalog([
+    const modelIds = buildModelCatalog([
       ...models,
       defaultModel,
       claudeMainModel,
@@ -224,7 +233,7 @@ export function useProviderFormState({ provider, onSave, onSaveStateChange }: Us
       base_url_anthropic: baseUrlAnthropic.trim(),
       models_url: modelsUrl.trim(),
       api_key: apiKey,
-      models: modelCatalog,
+      models: modelIds,
       default_model: defaultModel.trim(),
       notes: notes.trim() || undefined,
       codex_wire_api: codexWireApi,
@@ -236,6 +245,7 @@ export function useProviderFormState({ provider, onSave, onSaveStateChange }: Us
         timeout: timeout,
         retry_count: retryCount,
         streaming,
+        [MODEL_CATALOG_META_KEY]: modelCatalog,
         [CLAUDE_MODEL_META_KEYS.main]: claudeMainModel.trim(),
         [CLAUDE_MODEL_META_KEYS.haiku]: claudeHaikuModel.trim(),
         [CLAUDE_MODEL_META_KEYS.sonnet]: claudeSonnetModel.trim(),
@@ -264,6 +274,7 @@ export function useProviderFormState({ provider, onSave, onSaveStateChange }: Us
     timeout,
     retryCount,
     streaming,
+    modelCatalog,
     provider.meta,
   ]);
 
@@ -301,12 +312,15 @@ export function useProviderFormState({ provider, onSave, onSaveStateChange }: Us
     const providerClaudeHaikuModel = getMetaString(providerMeta, CLAUDE_MODEL_META_KEYS.haiku);
     const providerClaudeSonnetModel = getMetaString(providerMeta, CLAUDE_MODEL_META_KEYS.sonnet);
     const providerClaudeOpusModel = getMetaString(providerMeta, CLAUDE_MODEL_META_KEYS.opus);
-    const providerCodexWireApi = (getMetaString(providerMeta, CODEX_WIRE_API_META_KEY) as CodexWireApi) || "chat";
+    const providerCodexWireApi =
+      (provider.codex_wire_api as CodexWireApi) ||
+      (getMetaString(providerMeta, CODEX_WIRE_API_META_KEY) as CodexWireApi) ||
+      "responses";
     const providerCodexAuthMode =
       (provider.codex_auth_mode as "api_key" | "oauth") ||
       (getMetaString(providerMeta, CODEX_AUTH_MODE_META_KEY) as "api_key" | "oauth") ||
       "api_key";
-    const modelCatalog = buildModelCatalog([
+    const modelCatalogIds = buildModelCatalog([
       ...models,
       defaultModel,
       claudeMainModel,
@@ -315,8 +329,10 @@ export function useProviderFormState({ provider, onSave, onSaveStateChange }: Us
       claudeOpusModel,
     ]);
     const modelsChanged =
-      modelCatalog.length !== provider.models.length ||
-      modelCatalog.some((model, index) => model !== provider.models[index]);
+      modelCatalogIds.length !== provider.models.length ||
+      modelCatalogIds.some((model, index) => model !== provider.models[index]);
+    const providerModelCatalog = getModelCatalogFromMeta(providerMeta);
+    const modelCatalogChanged = JSON.stringify(modelCatalog) !== JSON.stringify(providerModelCatalog);
 
     return (
       name !== provider.name ||
@@ -326,6 +342,7 @@ export function useProviderFormState({ provider, onSave, onSaveStateChange }: Us
       notes !== (provider.notes ?? "") ||
       apiKey !== provider.api_key ||
       modelsChanged ||
+      modelCatalogChanged ||
       defaultModel.trim() !== provider.default_model ||
       claudeMainModel !== providerClaudeMainModel ||
       claudeHaikuModel !== providerClaudeHaikuModel ||
@@ -359,6 +376,7 @@ export function useProviderFormState({ provider, onSave, onSaveStateChange }: Us
     timeout,
     retryCount,
     streaming,
+    modelCatalog,
     provider,
   ]);
 
@@ -412,6 +430,7 @@ export function useProviderFormState({ provider, onSave, onSaveStateChange }: Us
     setNotes,
     apiKey,
     setApiKey,
+    models,
     defaultModel,
     setDefaultModel,
     claudeMainModel,
@@ -445,6 +464,7 @@ export function useProviderFormState({ provider, onSave, onSaveStateChange }: Us
     fetchError,
     handleFetchModels,
     modelFetchStatus,
+    modelCatalog,
     claudeModelOptions,
     codexModelOptions,
     speedTestUrls,

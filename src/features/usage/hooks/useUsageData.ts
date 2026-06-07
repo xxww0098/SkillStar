@@ -112,9 +112,9 @@ export function useUsageData() {
     // Optimistically reorder locally; backend persistence follows.
     setSubscriptions((prev) => {
       const map = new Map(prev.map((s) => [s.id, s]));
-      return orderedIds.flatMap((id) => {
+      return orderedIds.flatMap((id, index) => {
         const found = map.get(id);
-        return found ? [found] : [];
+        return found ? [{ ...found, sort_index: index }] : [];
       });
     });
     try {

@@ -1,13 +1,16 @@
-import { Eye, FileText, Loader2, Sparkles, Square, X } from "lucide-react";
+import { Eye, FileText, Languages, Loader2, RefreshCw, Sparkles, Square, X } from "lucide-react";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useAiStream } from "../../hooks/useAiStream";
+import { TRANSLATE_BUDGET_MS, useAiTranslate } from "../../hooks/useAiTranslate";
 import { normalizeSkillMarkdownForPreview, parseFrontmatterEntries, splitFrontmatter } from "../../lib/frontmatter";
 import { formatAiErrorMessage, navigateToAiSettings } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Markdown } from "../ui/Markdown";
 import { ResizablePanel } from "../ui/ResizablePanel";
 import { AiErrorBanner } from "./AiBanners";
+import { TranslationWaitBanner } from "./TranslationWaitBanner";
+import { TranslationMetricsPill } from "./TranslationMetricsPill";
 
 interface SkillReaderProps {
   skillName: string;
@@ -41,6 +44,7 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
     command: "ai_summarize_skill_stream",
     eventChannel: "ai://summarize-stream",
   });
+  const translateStream = useAiTranslate();
 
   const summaryContent = summaryStream.content;
   const summaryVisible = summaryStream.visible;
@@ -48,10 +52,14 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
   const summaryHasDelta = summaryStream.hasDelta;
   const summaryAiConfigured = summaryStream.aiConfigured;
   const targetLanguage = summaryStream.targetLanguage;
-  const aiError = summaryStream.error;
+  const aiError = summaryStream.error ?? translateStream.error;
   const localizedAiError = formatAiErrorMessage(aiError, t);
+  const hasTranslationForCurrentContent = translateStream.translated != null && translateStream.source === content;
+  const showTranslated =
+    translateStream.showTranslated && translateStream.translated != null && translateStream.source === content;
 
-  const previewSource = normalizeSkillMarkdownForPreview(content);
+  const effectiveContent = showTranslated && translateStream.translated != null ? translateStream.translated : content;
+  const previewSource = normalizeSkillMarkdownForPreview(effectiveContent);
   const previewFrontmatterEntries = parseFrontmatterEntries(splitFrontmatter(previewSource).frontmatter);
   const previewContent = splitFrontmatter(previewSource).body;
 
@@ -61,10 +69,19 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
     summaryStream.hydrate(cachedSummary, cachedSummary ? content : null);
     summaryStream.setVisible(false);
     summaryStream.setError(null);
-  }, [content, summaryStream.hydrate, summaryStream.setError, summaryStream.setVisible, targetLanguage]);
+    translateStream.reset();
+  }, [
+    content,
+    summaryStream.hydrate,
+    summaryStream.setError,
+    summaryStream.setVisible,
+    targetLanguage,
+    translateStream.reset,
+  ]);
 
   const clearAiError = () => {
     summaryStream.setError(null);
+    translateStream.setError(null);
   };
 
   const handleSummarize = async () => {
@@ -82,6 +99,31 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
       summaryCache.set(key, result);
       trimCache(summaryCache);
     }
+  };
+
+  const handleTranslate = async () => {
+    if (!translateStream.aiConfigured) {
+      navigateToAiSettings();
+      return;
+    }
+
+    if (translateStream.loading) {
+      translateStream.cancel();
+      return;
+    }
+
+    clearAiError();
+    await translateStream.translate(content);
+  };
+
+  const handleRetranslate = async () => {
+    if (!translateStream.aiConfigured || translateStream.loading) {
+      if (!translateStream.aiConfigured) navigateToAiSettings();
+      return;
+    }
+
+    clearAiError();
+    await translateStream.translate(content, { forceRefresh: true });
   };
 
   return (
@@ -109,6 +151,60 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
 
         {/* AI Action Buttons */}
         <div className="ml-auto flex items-center gap-1 shrink-0">
+          {hasTranslationForCurrentContent && !translateStream.loading && (
+            <span className="hidden sm:inline-flex items-center rounded-md border border-primary/20 bg-primary/10 px-2 py-1 text-micro font-medium text-primary">
+              {t("skillEditor.translationReady")}
+            </span>
+          )}
+          {hasTranslationForCurrentContent && !translateStream.loading && (
+            <TranslationMetricsPill metrics={translateStream.metrics} />
+          )}
+          <button
+            type="button"
+            onClick={() => void handleTranslate()}
+            className={`flex items-center gap-1 px-2 py-1 rounded-md text-micro font-medium transition-colors cursor-pointer ${
+              translateStream.loading
+                ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
+                : hasTranslationForCurrentContent
+                  ? "bg-primary/15 text-primary"
+                  : translateStream.aiConfigured
+                    ? "text-muted-foreground hover:text-foreground hover:bg-card-hover"
+                    : "text-primary/80 bg-primary/5 border border-primary/20 hover:bg-primary/10"
+            }`}
+            title={
+              translateStream.loading
+                ? t("common.cancel")
+                : hasTranslationForCurrentContent
+                  ? showTranslated
+                    ? t("skillEditor.showOriginal")
+                    : t("skillEditor.showTranslated")
+                  : translateStream.aiConfigured
+                    ? t("skillEditor.translate")
+                    : t("skillEditor.aiNotConfigured")
+            }
+          >
+            {translateStream.loading ? <Square className="w-3 h-3 fill-current" /> : <Languages className="w-3 h-3" />}
+            {translateStream.loading
+              ? t("skillEditor.translating")
+              : hasTranslationForCurrentContent
+                ? showTranslated
+                  ? t("skillEditor.showOriginal")
+                  : t("skillEditor.showTranslated")
+                : t("skillEditor.translate")}
+          </button>
+
+          {hasTranslationForCurrentContent && !translateStream.loading && (
+            <button
+              type="button"
+              onClick={() => void handleRetranslate()}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-card-hover hover:text-foreground"
+              title={t("skillEditor.retranslate")}
+              aria-label={t("skillEditor.retranslate")}
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => {
@@ -148,6 +244,15 @@ export function SkillReader({ skillName, content, onClose }: SkillReaderProps) {
           </button>
         </div>
       </div>
+
+      {/* Translation progress banner */}
+      {translateStream.loading && (
+        <TranslationWaitBanner
+          elapsedSec={translateStream.elapsedSec}
+          budgetMs={TRANSLATE_BUDGET_MS}
+          pipelineProgress={translateStream.pipelineProgress}
+        />
+      )}
 
       {/* AI Error Banner */}
       <AiErrorBanner error={localizedAiError} onDismiss={clearAiError} />

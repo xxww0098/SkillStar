@@ -26,6 +26,19 @@ use constants::{
     SUMMARY_MAX_TOKENS,
 };
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ChatCompletionUsage {
+    pub prompt_tokens: Option<u32>,
+    pub completion_tokens: Option<u32>,
+    pub total_tokens: Option<u32>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChatCompletionOutput {
+    pub content: String,
+    pub usage: Option<ChatCompletionUsage>,
+}
+
 // ── Prompts ─────────────────────────────────────────────────────────
 
 const SUMMARY_PROMPT: &str = include_str!("../../../../src-tauri/prompts/ai/summary.md");
@@ -83,6 +96,13 @@ struct AnthropicTextBlock {
 #[derive(Deserialize)]
 struct AnthropicResponse {
     content: Vec<AnthropicTextBlock>,
+    usage: Option<AnthropicUsage>,
+}
+
+#[derive(Deserialize)]
+struct AnthropicUsage {
+    input_tokens: Option<u32>,
+    output_tokens: Option<u32>,
 }
 
 fn is_anthropic_format(config: &AiConfig) -> bool {
@@ -114,9 +134,10 @@ pub(crate) fn build_openai_chat_url(base_url: &str) -> String {
     // Auto-insert /v1 for bare host:port URLs (e.g. http://host:1234)
     // that have no path segment — common with Ollama endpoints.
     if let Some(after_scheme) = base.split_once("://").map(|(_, rest)| rest)
-        && !after_scheme.contains('/') {
-            return format!("{}/v1/chat/completions", base);
-        }
+        && !after_scheme.contains('/')
+    {
+        return format!("{}/v1/chat/completions", base);
+    }
     format!("{}/chat/completions", base)
 }
 
@@ -150,8 +171,28 @@ async fn openai_chat_completion_with_opts(
     seed: Option<u64>,
     max_tokens_override: Option<u32>,
 ) -> Result<String> {
+    openai_chat_completion_with_usage(
+        config,
+        system_prompt,
+        user_content,
+        temperature,
+        seed,
+        max_tokens_override,
+    )
+    .await
+    .map(|output| output.content)
+}
+
+async fn openai_chat_completion_with_usage(
+    config: &AiConfig,
+    system_prompt: &str,
+    user_content: &str,
+    temperature: f32,
+    seed: Option<u64>,
+    max_tokens_override: Option<u32>,
+) -> Result<ChatCompletionOutput> {
     let _permit = acquire_ai_request_permit(config).await?;
-    openai_client::chat_completion(
+    openai_client::chat_completion_with_usage(
         config,
         system_prompt,
         user_content,
@@ -183,6 +224,17 @@ async fn anthropic_messages_completion(
     user_content: &str,
     max_tokens: u32,
 ) -> Result<String> {
+    anthropic_messages_completion_with_usage(config, system_prompt, user_content, max_tokens)
+        .await
+        .map(|output| output.content)
+}
+
+async fn anthropic_messages_completion_with_usage(
+    config: &AiConfig,
+    system_prompt: &str,
+    user_content: &str,
+    max_tokens: u32,
+) -> Result<ChatCompletionOutput> {
     let _permit = acquire_ai_request_permit(config).await?;
     let client = get_http_client()?;
     let url = build_anthropic_messages_url(&config.base_url);
@@ -230,7 +282,19 @@ async fn anthropic_messages_completion(
         anyhow::bail!("AI returned empty response");
     }
 
-    Ok(text)
+    let usage = anthropic_resp.usage.map(|usage| ChatCompletionUsage {
+        prompt_tokens: usage.input_tokens,
+        completion_tokens: usage.output_tokens,
+        total_tokens: match (usage.input_tokens, usage.output_tokens) {
+            (Some(input), Some(output)) => Some(input + output),
+            _ => None,
+        },
+    });
+
+    Ok(ChatCompletionOutput {
+        content: text,
+        usage,
+    })
 }
 
 /// Anthropic Messages API with real SSE streaming.
@@ -379,10 +443,11 @@ where
             .get("delta")
             .and_then(|d| d.get("text"))
             .and_then(|t| t.as_str())
-            && !delta_text.is_empty() {
-                translated.push_str(delta_text);
-                on_delta(delta_text)?;
-            }
+        && !delta_text.is_empty()
+    {
+        translated.push_str(delta_text);
+        on_delta(delta_text)?;
+    }
 
     Ok(())
 }
@@ -407,11 +472,29 @@ pub async fn chat_completion_capped(
     user_content: &str,
     max_response_tokens: u32,
 ) -> Result<String> {
+    chat_completion_capped_with_usage(config, system_prompt, user_content, max_response_tokens)
+        .await
+        .map(|output| output.content)
+}
+
+/// Chat completion with a capped max_tokens plus provider token usage when
+/// the API returns it.
+pub async fn chat_completion_capped_with_usage(
+    config: &AiConfig,
+    system_prompt: &str,
+    user_content: &str,
+    max_response_tokens: u32,
+) -> Result<ChatCompletionOutput> {
     if is_anthropic_format(config) {
-        anthropic_messages_completion(config, system_prompt, user_content, max_response_tokens)
-            .await
+        anthropic_messages_completion_with_usage(
+            config,
+            system_prompt,
+            user_content,
+            max_response_tokens,
+        )
+        .await
     } else {
-        openai_chat_completion_with_opts(
+        openai_chat_completion_with_usage(
             config,
             system_prompt,
             user_content,

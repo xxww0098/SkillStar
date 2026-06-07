@@ -12,10 +12,13 @@ use quick_xml::events::{BytesStart, Event};
 
 use super::ast::TranslatableNode;
 
-/// Speed-first defaults: small batches → high parallelism → low wall-clock time.
-/// (md-translator-rs's 5000/50 defaults are cost-optimized; we want latency.)
-pub const DEFAULT_MAX_CHARS_PER_BATCH: usize = 1500;
-pub const DEFAULT_MAX_ITEMS_PER_BATCH: usize = 8;
+/// Speed-first defaults for current OpenAI-compatible providers.
+///
+/// The live large-file test showed per-request overhead dominates tiny batches,
+/// while very large XML batches can stall slower providers. These defaults sit
+/// between the earlier 1500/8 setting and the too-heavy 3000/16 experiment.
+pub const DEFAULT_MAX_CHARS_PER_BATCH: usize = 2200;
+pub const DEFAULT_MAX_ITEMS_PER_BATCH: usize = 12;
 
 #[derive(Debug, Clone)]
 pub struct XmlBatch {
@@ -89,7 +92,9 @@ pub enum XmlParseError {
 impl std::fmt::Display for XmlParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::MissingSegment { id } => write!(f, "translation response missing <seg id=\"{id}\">"),
+            Self::MissingSegment { id } => {
+                write!(f, "translation response missing <seg id=\"{id}\">")
+            }
             Self::MalformedXml(msg) => write!(f, "translation response malformed: {msg}"),
         }
     }
@@ -108,7 +113,10 @@ impl std::error::Error for XmlParseError {}
 ///   - Leading/trailing prose around segments (it's ignored)
 ///   - Markdown code fences wrapping the XML
 ///   - Whitespace between segments
-pub fn parse(response: &str, expected_ids: &[usize]) -> Result<HashMap<usize, String>, XmlParseError> {
+pub fn parse(
+    response: &str,
+    expected_ids: &[usize],
+) -> Result<HashMap<usize, String>, XmlParseError> {
     let xml = strip_fences(response);
     let mut reader = Reader::from_reader(Cursor::new(xml.as_bytes()));
     let cfg = reader.config_mut();
@@ -242,8 +250,14 @@ mod tests {
     #[test]
     fn packs_into_single_batch_for_small_input() {
         let nodes = vec![
-            TranslatableNode { id: 1, text: "Hello".into() },
-            TranslatableNode { id: 2, text: "World".into() },
+            TranslatableNode {
+                id: 1,
+                text: "Hello".into(),
+            },
+            TranslatableNode {
+                id: 2,
+                text: "World".into(),
+            },
         ];
         let batches = pack(&nodes, &BatchConfig::default());
         assert_eq!(batches.len(), 1);
@@ -255,7 +269,10 @@ mod tests {
     #[test]
     fn splits_when_exceeding_items_limit() {
         let nodes: Vec<_> = (1..=5)
-            .map(|id| TranslatableNode { id, text: format!("t{id}") })
+            .map(|id| TranslatableNode {
+                id,
+                text: format!("t{id}"),
+            })
             .collect();
         let batches = pack(
             &nodes,

@@ -29,6 +29,21 @@ function pipelineProgressPercent(p: AiTranslatePipelineProgress): number {
   }
 }
 
+function phaseLabelKey(p: AiTranslatePipelineProgress): string {
+  switch (p.phase) {
+    case "prepare":
+      return "skillEditor.translationPhasePrepare";
+    case "translate":
+      return "skillEditor.translationPhaseTranslate";
+    case "finalize":
+      return "skillEditor.translationPhaseFinalize";
+    case "guard":
+      return "skillEditor.translationPhaseGuard";
+    default:
+      return "skillEditor.translationPhaseTranslate";
+  }
+}
+
 /**
  * Calm loading state for long-running SKILL.md translation: soft motion + honest time ceiling,
  * with optional determinate fill when the backend reports pipeline progress.
@@ -48,6 +63,7 @@ export function TranslationWaitBanner({ elapsedSec, budgetMs, pipelineProgress =
     : { width: determinateWidth };
 
   const ariaNow = showDeterminateFill ? Math.round(Math.min(100, backendPct)) : Math.round(Math.min(100, linearPct));
+  const phaseLabel = pipelineProgress ? t(phaseLabelKey(pipelineProgress)) : t("skillEditor.translationPhaseTranslate");
 
   return (
     <div
@@ -71,7 +87,18 @@ export function TranslationWaitBanner({ elapsedSec, budgetMs, pipelineProgress =
               {t("skillEditor.translationBudgetHint", { minutes: budgetMin })}
             </span>
           </div>
-          <p className="text-[11px] leading-snug text-muted-foreground/85">{t("skillEditor.translationMayTakeLong")}</p>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] leading-snug text-muted-foreground/85">
+            <span>{phaseLabel}</span>
+            {pipelineProgress ? (
+              <span className="tabular-nums text-muted-foreground/80">
+                {t("skillEditor.translationBatchProgress", {
+                  current: pipelineProgress.current,
+                  total: pipelineProgress.total,
+                })}
+              </span>
+            ) : null}
+          </div>
+          <p className="text-[11px] leading-snug text-muted-foreground/80">{t("skillEditor.translationMayTakeLong")}</p>
         </div>
       </div>
 

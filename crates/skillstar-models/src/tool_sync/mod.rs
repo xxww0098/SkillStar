@@ -18,7 +18,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::providers::{FlatProvidersStore, ProviderEntry, ProviderEntryFlat, ProviderSettings, ToolActivation};
+use crate::providers::{
+    catalog_from_meta, FlatProvidersStore, ModelCatalogEntry, ProviderEntry, ProviderEntryFlat,
+    ProviderSettings, ToolActivation,
+};
 
 mod types;
 pub use types::*;

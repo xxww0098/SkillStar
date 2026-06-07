@@ -124,9 +124,7 @@ function AgentModelConfigInner({ form }: AgentModelConfigProps) {
         </div>
       </div>
 
-      <p className="text-[11px] text-muted-foreground">
-        OpenCode 使用上方默认模型与 OpenAI 端点；可在「磁盘配置」中直接编辑 opencode.json。
-      </p>
+      <p className="text-[11px] text-muted-foreground">OpenCode 会写入已拉取模型的名称、上下文、输出上限与价格信息。</p>
     </div>
   );
 }

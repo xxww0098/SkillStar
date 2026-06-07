@@ -162,8 +162,45 @@ pub struct ProviderEntryFlat {
     pub codex_auth_mode: String,
 }
 
-pub(crate) fn default_codex_wire_api() -> String { "responses".to_string() }
-pub(crate) fn default_codex_auth_mode() -> String { "api_key".to_string() }
+pub(crate) fn default_codex_wire_api() -> String {
+    "responses".to_string()
+}
+pub(crate) fn default_codex_auth_mode() -> String {
+    "api_key".to_string()
+}
+
+/// Normalized model metadata cached under `ProviderEntryFlat.meta.model_catalog`.
+///
+/// The shape intentionally mirrors the fields OpenCode can use directly while
+/// remaining tolerant of upstream registries such as CLIProxyAPI and models.dev.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct ModelCatalogEntry {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_length: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_completion_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw: Option<Value>,
+}
+
+/// Result returned by the model-catalog discovery command.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct ModelCatalogFetchResult {
+    pub models: Vec<String>,
+    pub catalog: Vec<ModelCatalogEntry>,
+    #[serde(default)]
+    pub metadata_sources: Vec<String>,
+    pub missing_cost_count: usize,
+}
 
 /// Records which provider and model a specific Agent tool is currently using.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

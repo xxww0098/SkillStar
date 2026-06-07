@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { tauriInvoke } from "../../../lib/ipc";
+import type { ModelCatalogFetchResult } from "../../../types";
 
 /**
  * Hook for fetching available models from a provider's unique models URL.
@@ -42,8 +43,30 @@ export function useModelFetch() {
     }
   }, []);
 
+  const fetchModelCatalog = useCallback(async (url: string, apiKey: string): Promise<ModelCatalogFetchResult> => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const result = await tauriInvoke("fetch_provider_model_catalog", {
+        url,
+        apiKey,
+        timeoutMs: 15000,
+      });
+      setModels(result.models);
+      return result;
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      setError(error);
+      throw error;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
   return {
     fetchModels,
+    fetchModelCatalog,
     isLoading,
     models,
     error,

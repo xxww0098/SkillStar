@@ -264,4 +264,56 @@ describe("ToolActivationPanel", () => {
       }
     });
   });
+
+  describe("model metadata and Claude launch command", () => {
+    it("shows catalog metadata for the selected model", async () => {
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "get_tool_activations") return {};
+        if (cmd === "detect_tool_installation") return { installed: true, binary_found: true, config_dir_found: true };
+        return undefined;
+      });
+
+      render(
+        <ToolActivationPanel
+          {...defaultProps}
+          defaultExpanded
+          modelCatalog={[
+            {
+              id: "deepseek-chat",
+              display_name: "DeepSeek Chat",
+              context_length: 64000,
+              max_completion_tokens: 8192,
+              cost: { input: 0.27, output: 1.1 },
+            },
+          ]}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getAllByText("DeepSeek Chat").length).toBeGreaterThan(0);
+        expect(screen.getAllByText(/上下文 64,000/).length).toBeGreaterThan(0);
+        expect(screen.getAllByText(/\$0.27\/\$1.1 \/ 1M/).length).toBeGreaterThan(0);
+      });
+    });
+
+    it("renders POSIX and PowerShell Claude command variants", async () => {
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "get_tool_activations") return {};
+        if (cmd === "detect_tool_installation") return { installed: true, binary_found: true, config_dir_found: true };
+        return undefined;
+      });
+
+      render(<ToolActivationPanel {...defaultProps} defaultExpanded />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/ANTHROPIC_MODEL="deepseek-chat"/)).toBeInTheDocument();
+        expect(screen.getByText(/claude --dangerously-skip-permissions "\$@"/)).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText("Windows"));
+
+      expect(screen.getByText(/\$env:ANTHROPIC_MODEL = "deepseek-chat"/)).toBeInTheDocument();
+      expect(screen.getByText(/claude --dangerously-skip-permissions @args/)).toBeInTheDocument();
+    });
+  });
 });

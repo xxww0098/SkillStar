@@ -273,6 +273,57 @@ api_key = "old-key"
     }
 
     #[test]
+    fn test_build_opencode_provider_block_uses_model_catalog_metadata() {
+        let mut provider = make_test_provider_flat();
+        provider.models = vec!["model-a".to_string(), "model-b".to_string()];
+        provider.meta = Some(serde_json::json!({
+            "model_catalog": [
+                {
+                    "id": "model-a",
+                    "display_name": "Model A Display",
+                    "context_length": 200000,
+                    "max_completion_tokens": 65536,
+                    "cost": { "input": 0.2, "output": 0.8 }
+                },
+                {
+                    "id": "model-b",
+                    "display_name": "Model B Display",
+                    "context_length": 128000
+                }
+            ]
+        }));
+
+        let block = build_opencode_provider_block(&provider, "model-a");
+        let model_a = block
+            .get("models")
+            .and_then(|v| v.get("model-a"))
+            .expect("model-a entry");
+
+        assert_eq!(model_a.get("name").and_then(Value::as_str), Some("Model A Display"));
+        assert_eq!(
+            model_a
+                .get("limit")
+                .and_then(|v| v.get("context"))
+                .and_then(Value::as_u64),
+            Some(200000)
+        );
+        assert_eq!(
+            model_a
+                .get("limit")
+                .and_then(|v| v.get("output"))
+                .and_then(Value::as_u64),
+            Some(65536)
+        );
+        assert_eq!(
+            model_a
+                .get("cost")
+                .and_then(|v| v.get("input"))
+                .and_then(Value::as_f64),
+            Some(0.2)
+        );
+    }
+
+    #[test]
     fn test_sync_to_claude_code_inner_new_file() {
         let tmp = TempDir::new().unwrap();
         let config_path = tmp.path().join(".claude").join("settings.json");

@@ -86,8 +86,10 @@ export function UsagePanel() {
         ) : (
           <UsageGrid
             subscriptions={filtered}
+            allSubscriptions={data.subscriptions}
             catalog={data.catalog}
             filter={filter}
+            onReorder={data.reorder}
             onBrowseProviders={() => toast.info(t("usage.pickProviderFromSidebar"))}
             onRefresh={data.refreshOneWithUi}
             refreshDisabled={data.refreshBusy}

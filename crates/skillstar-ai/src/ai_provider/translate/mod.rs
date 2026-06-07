@@ -13,4 +13,7 @@ mod batch;
 mod cache;
 mod pipeline;
 
-pub use pipeline::{PipelinePhase, PipelineProgress, translate_skill};
+pub use pipeline::{
+    PipelinePhase, PipelineProgress, TranslateOptions, TranslateResult, TranslationMetrics,
+    translate_skill, translate_skill_with_options, translate_skill_with_report,
+};
