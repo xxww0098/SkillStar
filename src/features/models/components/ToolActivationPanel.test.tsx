@@ -1,5 +1,7 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToolActivationPanel } from "./ToolActivationPanel";
 
@@ -16,6 +18,33 @@ const defaultProps = {
   baseUrlAnthropic: "https://api.deepseek.com/anthropic",
 };
 
+/** Providers-flat payload wrapping a tool_activations map (the panel reads activations from this cache). */
+function flatResponse(activations: Record<string, unknown>) {
+  return {
+    version: 2,
+    providers: [
+      {
+        id: "provider-1",
+        name: "DeepSeek",
+        api_key: "sk-test",
+        base_url_openai: "https://api.deepseek.com/v1",
+        base_url_anthropic: "https://api.deepseek.com/anthropic",
+        models: ["deepseek-chat", "deepseek-reasoner"],
+        default_model: "deepseek-chat",
+        sort_index: 0,
+      },
+    ],
+    tool_activations: activations,
+  };
+}
+
+function renderWithClient(ui: ReactElement) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } },
+  });
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
+
 describe("ToolActivationPanel", () => {
   beforeEach(() => {
     mockInvoke.mockReset();
@@ -24,12 +53,12 @@ describe("ToolActivationPanel", () => {
   describe("tool installation detection", () => {
     it("calls detect_tool_installation for each known tool on mount", async () => {
       mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === "get_tool_activations") return {};
+        if (cmd === "get_providers_flat") return flatResponse({});
         if (cmd === "detect_tool_installation") return { installed: true, binary_found: true, config_dir_found: true };
         return undefined;
       });
 
-      render(<ToolActivationPanel {...defaultProps} />);
+      renderWithClient(<ToolActivationPanel {...defaultProps} />);
 
       await waitFor(() => {
         expect(mockInvoke).toHaveBeenCalledWith("detect_tool_installation", {
@@ -46,13 +75,13 @@ describe("ToolActivationPanel", () => {
 
     it("shows '○ 未安装' label and disables toggle when tool is not installed", async () => {
       mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === "get_tool_activations") return {};
+        if (cmd === "get_providers_flat") return flatResponse({});
         if (cmd === "detect_tool_installation")
           return { installed: false, binary_found: false, config_dir_found: false };
         return undefined;
       });
 
-      render(<ToolActivationPanel {...defaultProps} />);
+      renderWithClient(<ToolActivationPanel {...defaultProps} />);
 
       await waitFor(() => {
         const statusTexts = screen.getAllByText("○ 未安装");
@@ -68,13 +97,13 @@ describe("ToolActivationPanel", () => {
 
     it("shows installation docs link when tool is not installed and panel is expanded", async () => {
       mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === "get_tool_activations") return {};
+        if (cmd === "get_providers_flat") return flatResponse({});
         if (cmd === "detect_tool_installation")
           return { installed: false, binary_found: false, config_dir_found: false };
         return undefined;
       });
 
-      render(<ToolActivationPanel {...defaultProps} />);
+      renderWithClient(<ToolActivationPanel {...defaultProps} />);
 
       await waitFor(() => {
         expect(screen.getAllByText("○ 未安装").length).toBeGreaterThan(0);
@@ -97,12 +126,12 @@ describe("ToolActivationPanel", () => {
   describe("base_url missing - disabled state", () => {
     it("disables Claude Code toggle when base_url_anthropic is empty", async () => {
       mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === "get_tool_activations") return {};
+        if (cmd === "get_providers_flat") return flatResponse({});
         if (cmd === "detect_tool_installation") return { installed: true, binary_found: true, config_dir_found: true };
         return undefined;
       });
 
-      render(
+      renderWithClient(
         <ToolActivationPanel
           {...defaultProps}
           baseUrlAnthropic="" // Empty anthropic URL
@@ -119,12 +148,12 @@ describe("ToolActivationPanel", () => {
 
     it("disables Codex toggle when base_url_openai is empty", async () => {
       mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === "get_tool_activations") return {};
+        if (cmd === "get_providers_flat") return flatResponse({});
         if (cmd === "detect_tool_installation") return { installed: true, binary_found: true, config_dir_found: true };
         return undefined;
       });
 
-      render(
+      renderWithClient(
         <ToolActivationPanel
           {...defaultProps}
           baseUrlOpenai="" // Empty openai URL
@@ -141,12 +170,12 @@ describe("ToolActivationPanel", () => {
 
     it("shows tooltip message when URL is missing and panel is expanded", async () => {
       mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === "get_tool_activations") return {};
+        if (cmd === "get_providers_flat") return flatResponse({});
         if (cmd === "detect_tool_installation") return { installed: true, binary_found: true, config_dir_found: true };
         return undefined;
       });
 
-      render(
+      renderWithClient(
         <ToolActivationPanel
           {...defaultProps}
           baseUrlAnthropic="" // Empty anthropic URL
@@ -170,13 +199,13 @@ describe("ToolActivationPanel", () => {
   describe("toggle activation/deactivation", () => {
     it("calls activate_tool when toggle is turned on", async () => {
       mockInvoke.mockImplementation(async (cmd: string, _args?: unknown) => {
-        if (cmd === "get_tool_activations") return {};
+        if (cmd === "get_providers_flat") return flatResponse({});
         if (cmd === "detect_tool_installation") return { installed: true, binary_found: true, config_dir_found: true };
         if (cmd === "activate_tool") return { tool_id: "claude-code", success: true, message: "ok" };
         return undefined;
       });
 
-      render(<ToolActivationPanel {...defaultProps} />);
+      renderWithClient(<ToolActivationPanel {...defaultProps} />);
 
       await waitFor(() => {
         expect(screen.getAllByRole("switch").length).toBe(4);
@@ -198,16 +227,16 @@ describe("ToolActivationPanel", () => {
 
     it("calls deactivate_tool when toggle is turned off", async () => {
       mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === "get_tool_activations")
-          return {
+        if (cmd === "get_providers_flat")
+          return flatResponse({
             "claude-code": { provider_id: "provider-1", model: "deepseek-chat" },
-          };
+          });
         if (cmd === "detect_tool_installation") return { installed: true, binary_found: true, config_dir_found: true };
         if (cmd === "deactivate_tool") return undefined;
         return undefined;
       });
 
-      render(<ToolActivationPanel {...defaultProps} />);
+      renderWithClient(<ToolActivationPanel {...defaultProps} />);
 
       await waitFor(() => {
         expect(screen.getByText(/● 已启用/)).toBeInTheDocument();
@@ -226,15 +255,15 @@ describe("ToolActivationPanel", () => {
 
     it("shows active status when provider is activated for a tool", async () => {
       mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === "get_tool_activations")
-          return {
+        if (cmd === "get_providers_flat")
+          return flatResponse({
             "claude-code": { provider_id: "provider-1", model: "deepseek-chat" },
-          };
+          });
         if (cmd === "detect_tool_installation") return { installed: true, binary_found: true, config_dir_found: true };
         return undefined;
       });
 
-      render(<ToolActivationPanel {...defaultProps} />);
+      renderWithClient(<ToolActivationPanel {...defaultProps} />);
 
       await waitFor(() => {
         expect(screen.getByText("● 已启用 · deepseek-chat")).toBeInTheDocument();
@@ -245,17 +274,18 @@ describe("ToolActivationPanel", () => {
   describe("graceful fallback on detection failure", () => {
     it("assumes tool is installed when detection fails", async () => {
       mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === "get_tool_activations") return {};
+        if (cmd === "get_providers_flat") return flatResponse({});
         if (cmd === "detect_tool_installation") throw new Error("Detection failed");
         return undefined;
       });
 
-      render(<ToolActivationPanel {...defaultProps} />);
+      renderWithClient(<ToolActivationPanel {...defaultProps} />);
 
       await waitFor(() => {
-        // Should not show "未安装" since we fallback to installed=true
-        expect(screen.queryByText("○ 未安装")).not.toBeInTheDocument();
+        expect(screen.getAllByRole("switch").length).toBe(4);
       });
+      // Should not show "未安装" since we fallback to installed=true
+      expect(screen.queryByText("○ 未安装")).not.toBeInTheDocument();
 
       // Toggles should be enabled (not disabled due to install check)
       const switches = screen.getAllByRole("switch");
@@ -268,12 +298,12 @@ describe("ToolActivationPanel", () => {
   describe("model metadata and Claude launch command", () => {
     it("shows catalog metadata for the selected model", async () => {
       mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === "get_tool_activations") return {};
+        if (cmd === "get_providers_flat") return flatResponse({});
         if (cmd === "detect_tool_installation") return { installed: true, binary_found: true, config_dir_found: true };
         return undefined;
       });
 
-      render(
+      renderWithClient(
         <ToolActivationPanel
           {...defaultProps}
           defaultExpanded
@@ -298,12 +328,12 @@ describe("ToolActivationPanel", () => {
 
     it("renders POSIX and PowerShell Claude command variants", async () => {
       mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === "get_tool_activations") return {};
+        if (cmd === "get_providers_flat") return flatResponse({});
         if (cmd === "detect_tool_installation") return { installed: true, binary_found: true, config_dir_found: true };
         return undefined;
       });
 
-      render(<ToolActivationPanel {...defaultProps} defaultExpanded />);
+      renderWithClient(<ToolActivationPanel {...defaultProps} defaultExpanded />);
 
       await waitFor(() => {
         expect(screen.getByText(/ANTHROPIC_MODEL="deepseek-chat"/)).toBeInTheDocument();

@@ -5,12 +5,12 @@ import { toast } from "sonner";
 import { Button } from "../../../../components/ui/button";
 import { Input } from "../../../../components/ui/input";
 import { useNavigation } from "../../../../hooks/useNavigation";
-import { tauriInvoke } from "../../../../lib/ipc";
 import { cn } from "../../../../lib/utils";
 import type { ProviderEntryFlat, ProviderPatchFlat } from "../../../../types";
 import { useProvidersFlat } from "../../hooks/useProvidersFlat";
 import { ProviderBrandIcon } from "../shared/ProviderBrandIcon";
 import type { ProviderSaveState } from "../providerForm/useProviderFormState";
+import { useToolInstallStatuses } from "../../api/install";
 import { CLAUDE_DESKTOP_TOOL_ID, PROVIDER_AGENTS } from "../../lib/agentRegistry";
 import { AgentHeroCard } from "./AgentHeroCard";
 import { ClaudeDesktopDrawerContent } from "./ClaudeDesktopDrawerContent";
@@ -21,11 +21,7 @@ import { DrawerShell } from "../shared/DrawerShell";
 import { ProviderDrawerForm } from "./ProviderDrawerForm";
 import { ProviderGalleryCard } from "./ProviderGalleryCard";
 
-interface InstallStatus {
-  installed: boolean;
-  binary_found: boolean;
-  config_dir_found: boolean;
-}
+const HUB_TOOL_IDS = [...PROVIDER_AGENTS.map((a) => a.toolId), CLAUDE_DESKTOP_TOOL_ID];
 
 type DrawerMode =
   | { type: "closed" }
@@ -86,8 +82,7 @@ export function ModelsHub() {
   const { selectedProviderId, setSelectedProviderId, showPresetSelector, setShowPresetSelector } = useNavigation();
 
   const [drawer, setDrawer] = useState<DrawerMode>({ type: "closed" });
-  const [installStatus, setInstallStatus] = useState<Record<string, InstallStatus>>({});
-  const [installLoading, setInstallLoading] = useState(true);
+  const { byTool: installStatus, isLoading: installLoading } = useToolInstallStatuses(HUB_TOOL_IDS);
   const [saveState, setSaveState] = useState<ProviderSaveState>("idle");
   const [galleryQuery, setGalleryQuery] = useState("");
 
@@ -101,32 +96,6 @@ export function ModelsHub() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showPresetSelector]);
-
-  // Detect agent installations once (provider-bound agents + Claude Desktop).
-  useEffect(() => {
-    let cancelled = false;
-    async function detect() {
-      setInstallLoading(true);
-      const results: Record<string, InstallStatus> = {};
-      const toolIds = [...PROVIDER_AGENTS.map((a) => a.toolId), CLAUDE_DESKTOP_TOOL_ID];
-      for (const toolId of toolIds) {
-        try {
-          const result = await tauriInvoke("detect_tool_installation", { toolId });
-          if (!cancelled) results[toolId] = result;
-        } catch {
-          if (!cancelled) results[toolId] = { installed: false, binary_found: false, config_dir_found: false };
-        }
-      }
-      if (!cancelled) {
-        setInstallStatus(results);
-        setInstallLoading(false);
-      }
-    }
-    detect();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   // ── Drawer handlers ────────────────────────────────────────────
   const openCreateDrawer = useCallback(
@@ -163,12 +132,9 @@ export function ModelsHub() {
             : !!provider.base_url_openai
           : false;
         if (compatible) {
-          try {
-            await activateTool(provider.id, autoBind, provider.default_model || undefined);
-            toast.success(`已为 ${agent?.displayName ?? autoBind} 绑定 ${provider.name}`);
-          } catch (err) {
-            toast.error(err instanceof Error ? err.message : String(err));
-          }
+          await activateTool(provider.id, autoBind, provider.default_model || undefined)
+            .then(() => toast.success(`已为 ${agent?.displayName ?? autoBind} 绑定 ${provider.name}`))
+            .catch(() => {});
         }
       }
       setSelectedProviderId(provider.id);
@@ -187,24 +153,17 @@ export function ModelsHub() {
     [drawer, updateProvider],
   );
 
+  // Error toasts live in the api layer mutations; swallow to avoid unhandled rejections.
   const handleAgentActivate = useCallback(
     async (toolId: string, providerId: string, model?: string) => {
-      try {
-        await activateTool(providerId, toolId, model);
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : String(err));
-      }
+      await activateTool(providerId, toolId, model).catch(() => {});
     },
     [activateTool],
   );
 
   const handleAgentDeactivate = useCallback(
     async (toolId: string) => {
-      try {
-        await deactivateTool(toolId);
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : String(err));
-      }
+      await deactivateTool(toolId).catch(() => {});
     },
     [deactivateTool],
   );

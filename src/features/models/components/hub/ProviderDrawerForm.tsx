@@ -22,7 +22,7 @@ import { Input } from "../../../../components/ui/input";
 import { Switch } from "../../../../components/ui/switch";
 import { cn } from "../../../../lib/utils";
 import type { ProviderEntryFlat, ProviderPatchFlat } from "../../../../types";
-import { useToolActivations } from "../../hooks/useToolActivations";
+import { useToolActivationsMap } from "../../api/activations";
 import { ConflictWarnings } from "../diagnostics/ConflictWarnings";
 import { ConnectionStatusPanel } from "../diagnostics/ConnectionStatusPanel";
 import { EndpointSpeedPanel } from "../diagnostics/EndpointSpeedPanel";
@@ -41,7 +41,11 @@ export interface ProviderDrawerFormProps {
 
 function ProviderDrawerFormInner({ provider, onSave, onSaveStateChange }: ProviderDrawerFormProps) {
   const form = useProviderFormState({ provider, onSave, onSaveStateChange });
-  const { isActive: isToolActive } = useToolActivations(provider.id);
+  const { data: activationsMap } = useToolActivationsMap();
+  const isToolActive = useCallback(
+    (toolId: string) => activationsMap?.[toolId]?.provider_id === provider.id,
+    [activationsMap, provider.id],
+  );
 
   const [openSection, setOpenSection] = useState<string | null>("connection");
 

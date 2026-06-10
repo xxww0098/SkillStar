@@ -38,6 +38,8 @@ import {
   USAGE_SUMMARY,
 } from "./devMockData";
 
+let devProviderSeq = 0;
+
 const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   // ── Global / app shell ──
   list_agent_profiles: () => AGENTS,
@@ -183,8 +185,89 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   mcp_market_entry_to_draft: (args) => mcpMarketDraft(String((args?.id as string) ?? "")),
 
   // ── Models ──
+  // The flat store is intentionally STATEFUL in dev: write commands mutate
+  // FLAT_PROVIDERS in place so the full create → edit → activate → delete flow
+  // can be exercised in the browser without the Tauri backend.
   get_providers_flat: () => FLAT_PROVIDERS,
   get_tool_activations: () => FLAT_PROVIDERS.tool_activations,
+  create_provider_flat: (args) => {
+    const entry = (args?.entry ?? {}) as Record<string, unknown>;
+    const created = {
+      ...entry,
+      id: `p-dev-${++devProviderSeq}`,
+      sort_index: FLAT_PROVIDERS.providers.length,
+      created_at: Date.now(),
+    };
+    FLAT_PROVIDERS.providers.push(created as never);
+    return created;
+  },
+  update_provider_flat: (args) => {
+    const id = String(args?.id ?? "");
+    const patch = (args?.patch ?? {}) as Record<string, unknown>;
+    const index = FLAT_PROVIDERS.providers.findIndex((p) => p.id === id);
+    if (index >= 0) {
+      FLAT_PROVIDERS.providers[index] = { ...FLAT_PROVIDERS.providers[index], ...patch } as never;
+    }
+    return { provider: FLAT_PROVIDERS.providers[index] ?? null, tool_sync_results: [] };
+  },
+  delete_provider_flat: (args) => {
+    const id = String(args?.id ?? "");
+    FLAT_PROVIDERS.providers = FLAT_PROVIDERS.providers.filter((p) => p.id !== id);
+    for (const [toolId, activation] of Object.entries(FLAT_PROVIDERS.tool_activations)) {
+      if ((activation as { provider_id?: string } | null)?.provider_id === id) {
+        (FLAT_PROVIDERS.tool_activations as Record<string, unknown>)[toolId] = null;
+      }
+    }
+    return undefined;
+  },
+  reorder_providers: (args) => {
+    const orderedIds = (args?.orderedIds ?? []) as string[];
+    FLAT_PROVIDERS.providers = FLAT_PROVIDERS.providers
+      .map((p) => ({ ...p, sort_index: orderedIds.indexOf(p.id) === -1 ? p.sort_index : orderedIds.indexOf(p.id) }))
+      .sort((a, b) => a.sort_index - b.sort_index) as never;
+    return undefined;
+  },
+  activate_tool: (args) => {
+    const toolId = String(args?.toolId ?? "");
+    const providerId = String(args?.providerId ?? "");
+    const provider = FLAT_PROVIDERS.providers.find((p) => p.id === providerId);
+    (FLAT_PROVIDERS.tool_activations as Record<string, unknown>)[toolId] = {
+      provider_id: providerId,
+      model: (args?.model as string) || provider?.default_model || "",
+      settings: args?.settings ?? null,
+      last_sync_at: Math.floor(Date.now() / 1000),
+    };
+    return { tool_id: toolId, success: true, config_path: `~/.${toolId}/settings.json` };
+  },
+  deactivate_tool: (args) => {
+    (FLAT_PROVIDERS.tool_activations as Record<string, unknown>)[String(args?.toolId ?? "")] = null;
+    return undefined;
+  },
+  update_tool_settings: (args) => {
+    const toolId = String(args?.toolId ?? "");
+    const existing = (FLAT_PROVIDERS.tool_activations as Record<string, { settings?: unknown } | null>)[toolId];
+    if (existing) existing.settings = args?.settings ?? null;
+    return { tool_id: toolId, success: true };
+  },
+  push_provider_to_tool_config: (args) => ({ tool_id: String(args?.toolId ?? ""), success: true }),
+  set_app_ai_provider_ref: () => undefined,
+  clear_app_ai_provider_ref: () => undefined,
+  test_provider_connection: () => ({ status: "ok", latency_ms: 180 + Math.floor(Math.random() * 240) }),
+  test_endpoints_latency: (args) =>
+    ((args?.urls ?? []) as string[]).map((url, i) => ({ url, latency_ms: 160 + i * 70, status: 200, error: null })),
+  query_provider_balance: () => ({ balance: "12.50", currency: "USD" }),
+  fetch_provider_model_catalog: () => ({
+    models: ["dev-model-pro", "dev-model-mini"],
+    catalog: [
+      { id: "dev-model-pro", display_name: "Dev Model Pro", context_length: 200000, max_completion_tokens: 8192 },
+      { id: "dev-model-mini", display_name: "Dev Model Mini", context_length: 128000, max_completion_tokens: 4096 },
+    ],
+    metadata_sources: ["mock"],
+    missing_cost_count: 2,
+  }),
+  fetch_provider_models: () => ["dev-model-pro", "dev-model-mini"],
+  write_tool_config_file: () => ({ success: true }),
+  format_tool_config_file: () => '{\n  "// demo": "formatted sample (browser dev mock)"\n}',
   get_provider_presets_flat: () => PRESETS_FLAT,
   get_provider_presets: () =>
     PRESETS_FLAT.map((p) => ({

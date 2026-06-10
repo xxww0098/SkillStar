@@ -1,16 +1,18 @@
 import { ChevronDown, Copy, ExternalLink, RefreshCw, Terminal } from "lucide-react";
-import { memo, useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useState } from "react";
 import { Button } from "../../../components/ui/button";
 import { Switch } from "../../../components/ui/switch";
 import { ExternalAnchor } from "../../../components/ui/ExternalAnchor";
-import { tauriInvoke } from "../../../lib/ipc";
 import { cn } from "../../../lib/utils";
 import type { ModelCatalogEntry, ToolSyncResult } from "../../../types";
-import { useToolActivations } from "../hooks/useToolActivations";
 import { AgentToolIcon, type AgentToolIconId } from "./shared/AgentToolIcon";
+import { useActivationMutations, useToolActivationsMap } from "../api/activations";
+import { useToolInstallStatuses } from "../api/install";
 import { PROVIDER_AGENTS } from "../lib/agentRegistry";
 import { buildClaudeLaunchCommand, type ClaudeCommandShell } from "../lib/launchCommand";
 import { formatModelMetadata, formatModelOptionLabel, formatSyncTime } from "../lib/modelFormat";
+
+const PANEL_TOOL_IDS = PROVIDER_AGENTS.map((a) => a.toolId);
 
 export interface ToolActivationPanelProps {
   providerId: string;
@@ -36,6 +38,8 @@ interface ToolItemProps {
   modelCatalog: ModelCatalogEntry[];
   defaultModel: string;
   onToggle: (toolId: string, model?: string) => Promise<ToolSyncResult | void>;
+  /** Re-write the config file without toggling activation off. */
+  onResync: (toolId: string, model?: string) => Promise<ToolSyncResult | void>;
   /** Whether the tool is installed on the system. */
   isInstalled: boolean;
   /** Whether installation detection is still loading. */
@@ -61,6 +65,7 @@ function ToolItem({
   modelCatalog,
   defaultModel,
   onToggle,
+  onResync,
   isInstalled,
   installLoading,
   urlMissing,
@@ -94,11 +99,11 @@ function ToolItem({
     if (!isActive) return;
     setIsSyncing(true);
     try {
-      await onToggle(toolId, localModel);
+      await onResync(toolId, localModel);
     } finally {
       setIsSyncing(false);
     }
-  }, [toolId, localModel, isActive, onToggle]);
+  }, [toolId, localModel, isActive, onResync]);
 
   const selectedMetadata = modelCatalog.find((entry) => entry.id === localModel);
   const claudeCommand = toolId === "claude-code" ? buildClaudeLaunchCommand(localModel, claudeCommandShell) : "";
@@ -327,13 +332,6 @@ function ToolItem({
   );
 }
 
-/** Tool installation status per tool_id. */
-interface ToolInstallStatus {
-  installed: boolean;
-  binary_found: boolean;
-  config_dir_found: boolean;
-}
-
 function ToolActivationPanelInner({
   providerId,
   providerModels,
@@ -346,45 +344,33 @@ function ToolActivationPanelInner({
   variant = "default",
 }: ToolActivationPanelProps) {
   const compact = variant === "compact";
-  const { activations, isActive, toggle, isLoading } = useToolActivations(providerId);
-  const [installStatus, setInstallStatus] = useState<Record<string, ToolInstallStatus>>({});
-  const [installLoading, setInstallLoading] = useState(true);
+  const { data: activationsData, isLoading } = useToolActivationsMap();
+  const activations = activationsData ?? {};
+  const { activateTool, deactivateTool } = useActivationMutations();
+  const { byTool: installStatus, isLoading: installLoading } = useToolInstallStatuses(PANEL_TOOL_IDS);
 
-  // Detect tool installation status on mount and when navigating to this panel
-  useEffect(() => {
-    let cancelled = false;
+  const isActive = useCallback(
+    (toolId: string) => activations[toolId]?.provider_id === providerId,
+    [activations, providerId],
+  );
 
-    async function detectInstallation() {
-      setInstallLoading(true);
-      const results: Record<string, ToolInstallStatus> = {};
-
-      for (const tool of PROVIDER_AGENTS) {
-        try {
-          const result = await tauriInvoke("detect_tool_installation", {
-            toolId: tool.toolId,
-          });
-          if (!cancelled) {
-            results[tool.toolId] = result;
-          }
-        } catch {
-          // If detection fails, assume installed to avoid blocking the user
-          if (!cancelled) {
-            results[tool.toolId] = { installed: true, binary_found: false, config_dir_found: false };
-          }
-        }
+  /** Switch semantics: active for this provider -> deactivate, else activate. */
+  const toggle = useCallback(
+    async (toolId: string, model?: string): Promise<ToolSyncResult | void> => {
+      if (activations[toolId]?.provider_id === providerId) {
+        await deactivateTool(toolId);
+        return;
       }
+      return activateTool(providerId, toolId, model);
+    },
+    [activations, providerId, activateTool, deactivateTool],
+  );
 
-      if (!cancelled) {
-        setInstallStatus(results);
-        setInstallLoading(false);
-      }
-    }
-
-    detectInstallation();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  /** Re-write the on-disk config for an already-active tool (NOT a toggle). */
+  const resync = useCallback(
+    (toolId: string, model?: string): Promise<ToolSyncResult> => activateTool(providerId, toolId, model),
+    [providerId, activateTool],
+  );
 
   if (isLoading) {
     return (
@@ -439,6 +425,7 @@ function ToolActivationPanelInner({
               modelCatalog={modelCatalog}
               defaultModel={defaultModel}
               onToggle={toggle}
+              onResync={resync}
               isInstalled={isToolInstalled}
               installLoading={installLoading}
               urlMissing={urlMissing}
