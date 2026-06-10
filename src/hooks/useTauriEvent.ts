@@ -1,3 +1,4 @@
+import { isTauri } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useEffect, useRef } from "react";
 
@@ -15,6 +16,9 @@ export function useTauriEvent<T>(event: string, handler: (payload: T) => void) {
   handlerRef.current = handler;
 
   useEffect(() => {
+    // Browser dev / vitest run without the Tauri shell — no events to hear.
+    if (!isTauri()) return;
+
     let disposed = false;
     let unlisten: UnlistenFn | null = null;
 
