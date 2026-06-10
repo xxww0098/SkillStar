@@ -1,4 +1,4 @@
-import { McpManager } from "../features/models/components/hub/McpManager";
+import { McpManager } from "../features/mcp/components/McpManager";
 
 export interface McpProps {
   onOpenMarket: () => void;

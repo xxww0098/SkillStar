@@ -1,10 +1,10 @@
 import { Globe, Terminal } from "lucide-react";
-import { AgentIcon } from "../../../../components/ui/AgentIcon";
-import { CardDescription, CardTitle } from "../../../../components/ui/card";
-import { CardTemplate } from "../../../../components/ui/card-template";
-import { HScrollRow } from "../../../../components/ui/HScrollRow";
-import { agentIconCls, cn } from "../../../../lib/utils";
-import { MCP_TOOL_IDS, type McpServerEntry, type McpToolId, type McpToolStatus } from "../../../../types";
+import { AgentIcon } from "../../../components/ui/AgentIcon";
+import { CardDescription, CardTitle } from "../../../components/ui/card";
+import { CardTemplate } from "../../../components/ui/card-template";
+import { HScrollRow } from "../../../components/ui/HScrollRow";
+import { agentIconCls, cn } from "../../../lib/utils";
+import { MCP_TOOL_IDS, type McpServerEntry, type McpToolId, type McpToolStatus } from "../../../types";
 
 /**
  * Map each MCP tool id to its agent SVG logo (under `public/agents/`) so the

@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { Button } from "../../../../components/ui/button";
-import { Input } from "../../../../components/ui/input";
-import { cn } from "../../../../lib/utils";
-import { MCP_TOOL_IDS, type McpServerEntry, type McpToolId } from "../../../../types";
+import { Button } from "../../../components/ui/button";
+import { Input } from "../../../components/ui/input";
+import { cn } from "../../../lib/utils";
+import { MCP_TOOL_IDS, type McpServerEntry, type McpToolId } from "../../../types";
 
 const TOOL_LABELS: Record<McpToolId, string> = {
   "claude-code": "Claude Code",

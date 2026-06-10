@@ -2,19 +2,19 @@ import { Boxes, Check, Download, ExternalLink, PackageSearch, Plug, RefreshCw, S
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { PageToolbar } from "../../../../components/layout/PageToolbar";
-import { Button } from "../../../../components/ui/button";
-import { EmptyState } from "../../../../components/ui/EmptyState";
-import { ExternalAnchor } from "../../../../components/ui/ExternalAnchor";
-import { LoadingLogo } from "../../../../components/ui/LoadingLogo";
-import { SearchInput } from "../../../../components/ui/SearchInput";
-import { cn } from "../../../../lib/utils";
-import type { McpPreset, McpServerEntry } from "../../../../types";
-import { useMcpPresets } from "../../hooks/useMcpPresets";
-import { useMcpServers } from "../../hooks/useMcpServers";
+import { PageToolbar } from "../../../components/layout/PageToolbar";
+import { Button } from "../../../components/ui/button";
+import { EmptyState } from "../../../components/ui/EmptyState";
+import { ExternalAnchor } from "../../../components/ui/ExternalAnchor";
+import { LoadingLogo } from "../../../components/ui/LoadingLogo";
+import { SearchInput } from "../../../components/ui/SearchInput";
+import { cn } from "../../../lib/utils";
+import type { McpPreset, McpServerEntry } from "../../../types";
+import { useMcpPresets } from "../hooks/useMcpPresets";
+import { useMcpServers } from "../hooks/useMcpServers";
 import { McpServerCard } from "./McpServerCard";
 import { McpServerForm, type McpServerFormValue } from "./McpServerForm";
-import { ProviderDrawer } from "./ProviderDrawer";
+import { ProviderDrawer } from "../../models/components/hub/ProviderDrawer";
 
 type DrawerMode =
   | { type: "closed" }
