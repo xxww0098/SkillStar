@@ -36,6 +36,9 @@ export interface UpdateResult {
   /** Names of sibling skills from the same repo whose update_available was
    *  also cleared by the repo pull. */
   siblings_cleared: string[];
+  /** Per-agent re-link failures after the update ("Agent: error"). The update
+   *  itself succeeded; warn the user that an agent deployment may be stale. */
+  agent_link_failures: string[];
 }
 
 /** A new skill found in a cached repo that the user hasn't installed yet. */

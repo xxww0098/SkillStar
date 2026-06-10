@@ -12,7 +12,9 @@ import {
 } from "react";
 import { useTauriEvent } from "../../../hooks/useTauriEvent";
 import { tauriInvoke } from "../../../lib/ipc";
+import { toast } from "../../../lib/toast";
 import type { RepoNewSkill, Skill, SkillUpdateState } from "../../../types";
+import i18n from "../../../i18n";
 
 const SKILLS_QUERY_KEY = ["skills"] as const;
 const SKILL_UPDATES_QUERY_KEY = ["skills", "updates"] as const;
@@ -317,6 +319,14 @@ function useSkillsState() {
             return item;
           }),
         );
+        if (result.agent_link_failures?.length) {
+          // The update succeeded but one or more agent deployments could not
+          // be refreshed (e.g. symlink privileges revoked) — surface it so
+          // the user knows which agent may be stale instead of failing silently.
+          toast.warning(
+            `${i18n.t("mySkills.agentRelinkFailed")}\n${result.agent_link_failures.join("\n")}`,
+          );
+        }
         void refetchUpdates();
         return result.skill;
       } catch (e) {

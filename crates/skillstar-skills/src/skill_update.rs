@@ -12,6 +12,9 @@ pub struct SkillUpdateOutcome {
     pub git_url: String,
     pub sibling_names: Vec<String>,
     pub agent_links: Vec<String>,
+    /// Per-agent re-link failures ("Agent: error"). The update itself
+    /// succeeded; these tell the UI which agent deployments need attention.
+    pub agent_link_failures: Vec<String>,
     pub cascade: project_manifest::CascadeUpdateSummary,
 }
 
@@ -127,10 +130,26 @@ pub fn update_skill(name: &str) -> Result<SkillUpdateOutcome> {
     }
 
     let mut agent_links = Vec::new();
+    let mut agent_link_failures = Vec::new();
     for skill_name in &affected_skills {
-        let links = sync::resync_existing_links(skill_name).unwrap_or_default();
-        if skill_name == name {
-            agent_links = links;
+        match sync::resync_existing_links(skill_name) {
+            Ok(report) => {
+                for failure in report.failures {
+                    agent_link_failures.push(if skill_name == name {
+                        failure
+                    } else {
+                        format!("{skill_name} → {failure}")
+                    });
+                }
+                if skill_name == name {
+                    agent_links = report.linked_to;
+                }
+            }
+            Err(err) => {
+                // The update itself succeeded — report the re-link problem
+                // instead of failing the whole update or silently dropping it.
+                agent_link_failures.push(format!("{skill_name}: {err:#}"));
+            }
         }
     }
 
@@ -145,6 +164,7 @@ pub fn update_skill(name: &str) -> Result<SkillUpdateOutcome> {
         git_url,
         sibling_names,
         agent_links,
+        agent_link_failures,
         cascade,
     })
 }

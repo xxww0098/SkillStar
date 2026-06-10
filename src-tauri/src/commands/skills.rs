@@ -18,6 +18,10 @@ pub struct UpdateResult {
     /// also cleared by the pull. The frontend should set
     /// `update_available = false` for these.
     pub siblings_cleared: Vec<String>,
+    /// Per-agent re-link failures after the update ("Agent: error"). The
+    /// update itself succeeded; the frontend should warn so the user knows
+    /// an agent deployment may be stale or unlinked.
+    pub agent_link_failures: Vec<String>,
 }
 
 #[tauri::command]
@@ -126,5 +130,6 @@ fn update_skill_sync(name: String) -> Result<UpdateResult, AppError> {
             source,
         },
         siblings_cleared: outcome.sibling_names,
+        agent_link_failures: outcome.agent_link_failures,
     })
 }

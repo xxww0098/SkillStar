@@ -115,7 +115,17 @@ pub fn toggle_skill_for_agent(skill_name: &str, agent_id: &str, enable: bool) ->
                 tracing::error!(target: "sync", target = %target.display(), "Cannot overwrite real directory");
                 anyhow::bail!("Target cannot be overwritten because it is a real directory");
             }
-        skillstar_core::infra::fs_ops::create_symlink(&skill_path, &target)?;
+        // Symlink → junction → directory-copy ladder, same semantics as
+        // project-level deploys (Windows without Developer Mode must not fail).
+        let was_copy = skillstar_core::infra::fs_ops::create_symlink_or_copy(&skill_path, &target)?;
+        if was_copy {
+            tracing::warn!(
+                target: "sync",
+                skill_name,
+                agent_id,
+                "Symlink unavailable — skill deployed to agent via copy fallback"
+            );
+        }
         tracing::info!(target: "sync", skill_name, agent_id, "Skill linked successfully");
     } else {
         // Remove symlink, junction, or directory copy
@@ -280,6 +290,7 @@ pub fn batch_link_skills_to_agent(skill_names: &[String], agent_id: &str) -> Res
 
     let mut linked = 0u32;
     let mut skipped = 0u32;
+    let mut failures: Vec<String> = Vec::new();
     for name in skill_names {
         let skill_path = hub_dir.join(name);
         let target = target_dir.join(name);
@@ -323,8 +334,16 @@ pub fn batch_link_skills_to_agent(skill_names: &[String], agent_id: &str) -> Res
             continue;
         }
 
-        match skillstar_core::infra::fs_ops::create_symlink(&skill_path, &target) {
-            Ok(()) => {
+        match skillstar_core::infra::fs_ops::create_symlink_or_copy(&skill_path, &target) {
+            Ok(was_copy) => {
+                if was_copy {
+                    tracing::warn!(
+                        target: "sync",
+                        skill = %name,
+                        target = %target.display(),
+                        "Symlink unavailable — skill deployed to agent via copy fallback"
+                    );
+                }
                 tracing::info!(
                     target: "sync",
                     skill = %name,
@@ -341,11 +360,22 @@ pub fn batch_link_skills_to_agent(skill_names: &[String], agent_id: &str) -> Res
                     source = %skill_path.display(),
                     target = %target.display(),
                     error = %e,
-                    "Failed to create symlink for skill"
+                    "Failed to deploy skill to agent"
                 );
-                return Err(e);
+                failures.push(format!("{name}: {e:#}"));
             }
         }
+    }
+
+    if !failures.is_empty() {
+        // Links created before a failure stay in place — re-running is
+        // idempotent (already-linked skills are skipped above).
+        anyhow::bail!(
+            "Failed to deploy {} of {} skills: {}",
+            failures.len(),
+            skill_names.len(),
+            failures.join("; ")
+        );
     }
 
     tracing::info!(
@@ -380,13 +410,77 @@ pub fn create_project_skills(
     )
 }
 
-/// Re-sync a skill only to agents that already have it linked.
+/// Outcome of [`resync_existing_links`]: which agents were refreshed and
+/// which failed (per-agent, formatted as "Display Name: error").
+#[derive(Debug, Clone, Default)]
+pub struct ResyncReport {
+    pub linked_to: Vec<String>,
+    pub failures: Vec<String>,
+}
+
+/// Staging sibling used by [`swap_in_fresh_deploy`]; same directory so the
+/// final rename never crosses filesystems.
+fn resync_staging_path(target: &Path) -> std::path::PathBuf {
+    let name = target
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "skill".to_string());
+    target.with_file_name(format!(".{name}.skillstar-resync"))
+}
+
+/// Replace the deployment at `target` with a fresh one, never destroying the
+/// existing entry unless the replacement already materialized.
 ///
-/// After a `git pull` updates the skill content, the symlinks themselves stay
-/// valid (they point at the directory, not individual files), but this function
-/// ensures the link is recreated cleanly and returns the agent display names
-/// that remain linked.
-pub fn resync_existing_links(skill_name: &str) -> Result<Vec<String>> {
+/// Order matters: the fresh deploy is created under a staging name FIRST, so
+/// the common failure (symlink creation denied — e.g. Windows after Developer
+/// Mode was turned off) leaves the user's existing link untouched. Only after
+/// staging succeeds is the old entry removed and the staging renamed in.
+/// Returns `true` when the fresh deploy is a directory copy.
+fn swap_in_fresh_deploy(skill_path: &Path, target: &Path) -> Result<bool> {
+    use skillstar_core::infra::fs_ops;
+
+    let staging = resync_staging_path(target);
+    if staging.symlink_metadata().is_ok() {
+        // Stale leftovers from an interrupted resync — clear before reuse.
+        fs_ops::remove_link_or_copy(&staging)
+            .with_context(|| format!("Failed to clear stale staging '{}'", staging.display()))?;
+    }
+
+    // 1. Materialize the fresh deploy beside the target (symlink → junction →
+    //    copy ladder). Failure here is safe: the old deployment still works.
+    let was_copy = fs_ops::create_symlink_or_copy(skill_path, &staging)
+        .with_context(|| format!("Failed to stage fresh deploy at '{}'", staging.display()))?;
+
+    // 2. Swap it in.
+    if let Err(remove_err) = fs_ops::remove_link_or_copy(target) {
+        let _ = fs_ops::remove_link_or_copy(&staging);
+        return Err(remove_err)
+            .with_context(|| format!("Failed to remove old deploy '{}'", target.display()));
+    }
+    if let Err(rename_err) = std::fs::rename(&staging, target) {
+        // Old entry is gone; land the fresh deploy directly as a last resort
+        // before reporting, so we never finish in an unlinked state silently.
+        let direct = fs_ops::create_symlink_or_copy(skill_path, target);
+        let _ = fs_ops::remove_link_or_copy(&staging);
+        return direct.with_context(|| {
+            format!(
+                "Failed to move staged deploy into '{}' ({rename_err}); direct re-deploy also failed",
+                target.display()
+            )
+        });
+    }
+
+    Ok(was_copy)
+}
+
+/// Re-sync a skill only to agents that already have it deployed.
+///
+/// After a `git pull` updates the skill content, symlinks stay live on their
+/// own (they point at the directory), but copy deployments go stale and links
+/// benefit from a clean re-create. Refreshes both forms via a staged swap
+/// that preserves the existing deployment when re-creation fails, and never
+/// aborts the remaining agents on a per-agent failure.
+pub fn resync_existing_links(skill_name: &str) -> Result<ResyncReport> {
     let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
     let skill_path = hub_dir.join(skill_name);
     if !skill_path.exists() {
@@ -394,17 +488,122 @@ pub fn resync_existing_links(skill_name: &str) -> Result<Vec<String>> {
     }
 
     let profiles = cached_profiles();
-    let mut linked_to = Vec::with_capacity(profiles.len());
+    let mut report = ResyncReport::default();
 
     for profile in profiles.iter() {
         let target = profile.global_skills_dir.join(skill_name);
-        // Only re-link if a symlink/junction already exists (preserves user's assignment)
-        if skillstar_core::infra::fs_ops::is_link(&target) {
-            skillstar_core::infra::fs_ops::remove_symlink(&target)?;
-            skillstar_core::infra::fs_ops::create_symlink(&skill_path, &target)?;
-            linked_to.push(profile.display_name.clone());
+        let is_link = skillstar_core::infra::fs_ops::is_link(&target);
+        let is_managed_copy = !is_link && target.is_dir() && target.join("SKILL.md").exists();
+        // Only refresh existing deployments (preserves user's assignment).
+        if !is_link && !is_managed_copy {
+            continue;
+        }
+
+        match swap_in_fresh_deploy(&skill_path, &target) {
+            Ok(was_copy) => {
+                if was_copy {
+                    tracing::info!(
+                        target: "sync",
+                        skill = %skill_name,
+                        agent = %profile.id,
+                        "Resynced via copy fallback (symlink unavailable)"
+                    );
+                }
+                report.linked_to.push(profile.display_name.clone());
+            }
+            Err(err) => {
+                tracing::error!(
+                    target: "sync",
+                    skill = %skill_name,
+                    agent = %profile.id,
+                    error = %err,
+                    "Failed to resync skill deployment for agent"
+                );
+                report.failures.push(format!("{}: {err:#}", profile.display_name));
+            }
         }
     }
 
-    Ok(linked_to)
+    Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn make_skill_dir(root: &Path, name: &str) -> std::path::PathBuf {
+        let dir = root.join(name);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("SKILL.md"), "# test skill\n").unwrap();
+        dir
+    }
+
+    #[test]
+    fn swap_refreshes_an_existing_symlink() {
+        let tmp = tempfile::tempdir().unwrap();
+        let skill = make_skill_dir(tmp.path(), "hub-skill");
+        let agent_dir = tmp.path().join("agent");
+        fs::create_dir_all(&agent_dir).unwrap();
+        let target = agent_dir.join("hub-skill");
+        skillstar_core::infra::fs_ops::create_symlink(&skill, &target).unwrap();
+
+        let was_copy = swap_in_fresh_deploy(&skill, &target).unwrap();
+
+        assert!(!was_copy);
+        assert!(skillstar_core::infra::fs_ops::is_link(&target));
+        assert!(target.join("SKILL.md").exists());
+        assert!(
+            !resync_staging_path(&target).symlink_metadata().is_ok(),
+            "staging entry must not be left behind"
+        );
+    }
+
+    #[test]
+    fn swap_refreshes_a_stale_copy_deployment() {
+        let tmp = tempfile::tempdir().unwrap();
+        let skill = make_skill_dir(tmp.path(), "hub-skill");
+        fs::write(skill.join("SKILL.md"), "# fresh content\n").unwrap();
+
+        let agent_dir = tmp.path().join("agent");
+        fs::create_dir_all(&agent_dir).unwrap();
+        let target = agent_dir.join("hub-skill");
+        // Simulate an old copy deployment with stale content.
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("SKILL.md"), "# stale content\n").unwrap();
+
+        swap_in_fresh_deploy(&skill, &target).unwrap();
+
+        let refreshed = fs::read_to_string(
+            skillstar_core::infra::fs_ops::read_link_resolved(&target)
+                .map(|p| p.join("SKILL.md"))
+                .unwrap_or_else(|_| target.join("SKILL.md")),
+        )
+        .unwrap();
+        assert!(refreshed.contains("fresh content"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn swap_keeps_old_link_when_staging_fails() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let skill = make_skill_dir(tmp.path(), "hub-skill");
+        let agent_dir = tmp.path().join("agent");
+        fs::create_dir_all(&agent_dir).unwrap();
+        let target = agent_dir.join("hub-skill");
+        skillstar_core::infra::fs_ops::create_symlink(&skill, &target).unwrap();
+
+        // Make the agent dir read-only so staging creation fails.
+        fs::set_permissions(&agent_dir, fs::Permissions::from_mode(0o555)).unwrap();
+        let result = swap_in_fresh_deploy(&skill, &target);
+        fs::set_permissions(&agent_dir, fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert!(result.is_err());
+        assert!(
+            skillstar_core::infra::fs_ops::is_link(&target),
+            "the pre-existing link must survive a failed resync"
+        );
+    }
 }

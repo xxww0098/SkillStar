@@ -143,6 +143,8 @@ SkillStar/
 - Installed-skill list should render fast from local snapshot first.
 - Remote update checks run in bounded background work.
 - Project sync is reconciliation: add selected skills per agent, remove stale entries, prune empty agent folders; zero-skill agent selections must be dropped instead of creating empty project folders or persisting as active project agents; deployment always tries symlink first — if symlink creation fails (e.g. Windows without Developer Mode), falls back to full directory copy automatically. The `deploy_modes` field in `skills-list.json` is retained for backward-compat but ignored.
+- Global agent linking (`toggle_skill_for_agent`, `batch_link_skills_to_agent`) uses the same symlink → junction → copy ladder as project deploys; batch linking processes every skill and reports accumulated failures instead of aborting on the first one.
+- `resync_existing_links` (after skill update) refreshes BOTH link and copy deployments via a staged swap: the fresh deploy is created under a staging name first, so a failed re-create never destroys the user's existing link. Per-agent failures are collected into `SkillUpdateOutcome.agent_link_failures` and surfaced as a UI warning toast — never silently swallowed.
 - When a project is selected, `refresh_stale_project_copies` compares SHA-256 content hashes of copy-deployed skill directories against their hub sources; stale copies are re-deployed while intentionally deleted skills are not restored.
 - Windows/global agent unlink must attempt `remove_link_or_copy` for any existing entry (link/junction/copy), and only treat missing targets as no-op.
 - Repo scan/import defaults to **root-first**: when repo root has a valid `SKILL.md`, treat the root as the primary single skill by default.

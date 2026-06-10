@@ -293,7 +293,8 @@
     "createSuccess": "本地技能创建成功！",
     "createFailed": "创建技能失败",
     "batchUpdateSuccess": "已成功更新 {{count}} 个技能",
-    "batchUpdatePartial": "{{success}} 个更新成功，{{failed}} 个更新失败"
+    "batchUpdatePartial": "{{success}} 个更新成功，{{failed}} 个更新失败",
+    "agentRelinkFailed": "更新完成，但以下 Agent 部署刷新失败："
   },
   "toolbar": {
     "searchPlaceholder": "搜索技能...",

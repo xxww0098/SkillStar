@@ -103,6 +103,7 @@ describe("useSkills", () => {
               last_updated: "2026-04-08T08:00:00.000Z",
             },
             siblings_cleared: [],
+            agent_link_failures: [],
           };
           return result;
         }

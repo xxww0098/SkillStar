@@ -293,7 +293,8 @@
     "createSuccess": "Local skill created!",
     "createFailed": "Failed to create skill",
     "batchUpdateSuccess": "{{count}} skill(s) updated successfully",
-    "batchUpdatePartial": "{{success}} updated, {{failed}} failed"
+    "batchUpdatePartial": "{{success}} updated, {{failed}} failed",
+    "agentRelinkFailed": "Updated, but some agent deployments could not be refreshed:"
   },
   "toolbar": {
     "searchPlaceholder": "Search cards...",
