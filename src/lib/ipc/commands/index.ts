@@ -41,5 +41,6 @@ export type {
   SystemCommands,
 };
 export type { PatrolStatus, UpdateCheckResult, AcpConfig } from "./system";
+export type { AgentDeployStatus, DeployKind } from "./agents";
 export type { RepoCacheInfo } from "./storage";
 export type { ConfigConflict, ToolInstallStatus } from "./models";

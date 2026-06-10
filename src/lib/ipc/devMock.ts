@@ -65,6 +65,34 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   read_skill_file_raw: (args) =>
     `---\nname: ${String((args?.name as string) ?? "pdf-tools")}\ndescription: Read, merge, split, and OCR PDF files.\n---\n\n# PDF Tools\n\nA skill for working with **PDF** files.`,
   list_skill_files: () => ["SKILL.md", "scripts/merge.py", "README.md"],
+  get_skill_deploy_status: (args) => {
+    const name = String((args?.skillName as string) ?? "pdf-tools");
+    // Mixed kinds so the degraded-deploy badges are visible in browser dev:
+    // healthy link (no badge), copy fallback, and a dangling link.
+    return [
+      {
+        agent_id: "claude",
+        agent_name: "Claude Code",
+        target_path: `/Users/dev/claude/skills/${name}`,
+        kind: "link",
+        link_alive: true,
+      },
+      {
+        agent_id: "codex",
+        agent_name: "Codex CLI",
+        target_path: `/Users/dev/codex/skills/${name}`,
+        kind: "copy",
+        link_alive: true,
+      },
+      {
+        agent_id: "opencode",
+        agent_name: "OpenCode",
+        target_path: `/Users/dev/opencode/skills/${name}`,
+        kind: "link",
+        link_alive: false,
+      },
+    ];
+  },
   list_skill_groups: () => DECKS,
   list_projects: () => PROJECTS,
   get_project_skills: () => ({ agents: { claude: ["pdf-tools", "xlsx"] }, updated_at: iso(1) }),

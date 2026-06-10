@@ -9,7 +9,9 @@ export { tauriInvoke, tauriInvokeDynamic, useTauriMutation, useTauriQuery, useTa
 export type {
   AcpConfig,
   AgentCommands,
+  AgentDeployStatus,
   AiCommands,
+  DeployKind,
   ConfigConflict,
   GitHubCommands,
   MarketplaceCommands,

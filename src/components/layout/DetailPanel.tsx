@@ -2,6 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { tauriInvoke } from "../../lib/ipc";
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  AlertTriangle,
   BookOpen,
   Calendar,
   Download,
@@ -17,12 +18,14 @@ import {
 } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { degradedDeploys, useDeployStatus } from "../../features/my-skills/hooks/useDeployStatus";
 import { formatAiErrorMessage, formatInstalls, navigateToAiSettings } from "../../lib/utils";
 import type { AiStreamPayload, MarketplaceSkillDetails, Skill, SkillContent } from "../../types";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { ExternalAnchor } from "../ui/ExternalAnchor";
 import { Github as GitHub } from "../ui/icons/Github";
+import { InfoTip } from "../ui/InfoTip";
 import { LoadingLogo } from "../ui/LoadingLogo";
 import { Markdown } from "../ui/Markdown";
 import { Skeleton } from "../ui/Skeleton";
@@ -305,6 +308,11 @@ export function DetailPanel({
 
   const canEdit = skill?.installed && onReadContent && onSaveContent;
 
+  // Per-agent deploy kind — fetched lazily when the panel opens for an installed
+  // skill. Only degraded deployments (copy fallback / dangling link) get a badge.
+  const deployStatus = useDeployStatus(skill?.installed ? skill.name : null);
+  const degraded = degradedDeploys(deployStatus);
+
   // skills.sh URL
   const skillsShUrl = skill?.source ? `https://skills.sh/${skill.source}/${skill.name}` : null;
   const rawDescription = skill?.description?.trim() || "";
@@ -432,6 +440,30 @@ export function DetailPanel({
                   </div>
                 )}
               </div>
+
+              {/* Degraded deploys — copy fallback (e.g. Windows without Developer Mode) or dangling link */}
+              {degraded.length > 0 && (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                  {degraded.map((row) => (
+                    <div key={row.agent_id} className="flex items-center gap-1" title={row.target_path}>
+                      <span className="text-caption">{row.agent_name}</span>
+                      {row.kind === "copy" ? (
+                        <>
+                          <Badge variant="outline" className="text-micro px-1.5 py-0 h-4 font-normal">
+                            {t("projects.deployCopy")}
+                          </Badge>
+                          <InfoTip content={t("projects.deployModeCopyHint")} />
+                        </>
+                      ) : (
+                        <Badge variant="warning" className="text-micro px-1.5 py-0 h-4 font-normal">
+                          <AlertTriangle className="w-3 h-3" />
+                          {t("projects.deploySymlink")}
+                        </Badge>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {/* Detail loading skeleton */}
               {detailsLoading && (

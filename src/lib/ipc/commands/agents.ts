@@ -1,5 +1,18 @@
 import type { AgentProfile, CustomProfileDef } from "../../../types";
 
+/** How a skill physically landed in an agent's skills dir (mirrors Rust `DeployKind`). */
+export type DeployKind = "missing" | "link" | "copy" | "unknown";
+
+/** Per-agent deploy inspection row returned by `get_skill_deploy_status`. */
+export interface AgentDeployStatus {
+  agent_id: string;
+  agent_name: string;
+  target_path: string;
+  kind: DeployKind;
+  /** Only meaningful when `kind === "link"`: `false` means the link is dangling. */
+  link_alive: boolean;
+}
+
 /** Global agent profile configuration + per-agent skill links. */
 export interface AgentCommands {
   list_agent_profiles: { args: Record<string, never>; result: AgentProfile[] };
@@ -17,4 +30,6 @@ export interface AgentCommands {
     args: { skillName: string; agentId: string; enable: boolean };
     result: void;
   };
+
+  get_skill_deploy_status: { args: { skillName: string }; result: AgentDeployStatus[] };
 }

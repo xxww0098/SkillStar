@@ -3,7 +3,9 @@ import { initReactI18next } from "react-i18next";
 import en from "./locales/en.json";
 import zhCN from "./locales/zh-CN.json";
 
-const savedLang = localStorage.getItem("skillstar:lang") || "zh-CN";
+// Optional chaining: localStorage can be unavailable outside a real browser
+// window (e.g. vitest workers), and this module is imported by data hooks.
+const savedLang = globalThis.localStorage?.getItem("skillstar:lang") || "zh-CN";
 
 i18n.use(initReactI18next).init({
   resources: {
