@@ -10,7 +10,7 @@ import { Markdown } from "../../../components/ui/Markdown";
 import { tauriInvoke } from "../../../lib/ipc";
 import { cn } from "../../../lib/utils";
 import type { LocalFirstResult, McpMarketEntry, McpMarketServerDetail, SnapshotStatus, ViewMode } from "../../../types";
-import { ProviderDrawer } from "../../models/components/hub/ProviderDrawer";
+import { DrawerShell } from "../../models";
 import { McpMarketCard } from "./McpMarketCard";
 
 const GRID_GAP_PX = 16;
@@ -134,7 +134,7 @@ export function McpMarketBrowser({
         </div>
       )}
 
-      <ProviderDrawer
+      <DrawerShell
         open={detailId != null}
         onOpenChange={(open) => {
           if (!open) setDetailId(null);
@@ -238,7 +238,7 @@ export function McpMarketBrowser({
         ) : (
           <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">{t("mcp.notFound")}</div>
         )}
-      </ProviderDrawer>
+      </DrawerShell>
     </section>
   );
 }

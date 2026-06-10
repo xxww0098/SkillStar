@@ -4,7 +4,7 @@ import { Dialog } from "radix-ui";
 import type { ReactNode } from "react";
 import { cn } from "../../../../lib/utils";
 
-export interface ProviderDrawerProps {
+export interface DrawerShellProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Renders inside the drawer header on the left; usually a brand icon + title. */
@@ -24,15 +24,7 @@ export interface ProviderDrawerProps {
  * providers. Built on Radix `Dialog` for focus management + accessibility, and
  * Framer Motion for the slide animation.
  */
-export function ProviderDrawer({
-  open,
-  onOpenChange,
-  title,
-  subtitle,
-  footer,
-  children,
-  className,
-}: ProviderDrawerProps) {
+export function DrawerShell({ open, onOpenChange, title, subtitle, footer, children, className }: DrawerShellProps) {
   const prefersReducedMotion = useReducedMotion();
 
   return (

@@ -4,7 +4,7 @@ import { Button } from "../../../../components/ui/button";
 import { ExternalAnchor } from "../../../../components/ui/ExternalAnchor";
 import { tauriInvoke } from "../../../../lib/ipc";
 import { cn } from "../../../../lib/utils";
-import { useToolConfigFiles } from "../../hooks/useToolConfigFiles";
+import { useToolConfigFiles } from "../../api/configFiles";
 
 /**
  * Drawer body for the Claude Desktop App agent.

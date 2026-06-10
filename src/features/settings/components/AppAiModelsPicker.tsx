@@ -17,15 +17,15 @@ import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
 import { cn } from "../../../lib/utils";
 import type { AiConfig, ProviderEntryFlat, ProviderPatchFlat } from "../../../types";
-import { ProviderBrandIcon } from "../../models/components/ProviderBrandIcon";
+import { ProviderBrandIcon } from "../../models";
 import {
   buildModelCatalog,
   CLAUDE_MODEL_META_KEYS,
   getMetaString,
 } from "../../models/components/providerForm/useProviderFormState";
-import { useAppAiProvider, type AppAiAppId } from "../../models/hooks/useAppAiProvider";
-import { useModelFetch } from "../../models/hooks/useModelFetch";
-import { useProvidersFlat } from "../../models/hooks/useProvidersFlat";
+import { useAppAiProvider, type AppAiAppId } from "../../models";
+import { useModelFetch } from "../../models";
+import { useProvidersFlat } from "../../models";
 
 export interface AppAiModelsPickerProps {
   config: AiConfig;

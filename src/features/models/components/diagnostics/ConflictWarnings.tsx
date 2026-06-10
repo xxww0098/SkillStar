@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, FileWarning, X } from "lucide-react";
 import { AlertDialog } from "radix-ui";
-import { Button } from "../../../components/ui/button";
-import { tauriInvoke } from "../../../lib/ipc";
-import { cn } from "../../../lib/utils";
+import { Button } from "../../../../components/ui/button";
+import { tauriInvoke } from "../../../../lib/ipc";
+import { cn } from "../../../../lib/utils";
 
 export interface ConflictWarningsProps {
   providerId: string;

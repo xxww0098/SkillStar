@@ -5,8 +5,8 @@ import { useState, useMemo } from "react";
 import { cn } from "../../../../lib/utils";
 import type { ProviderEntryFlat, ToolActivationsMap } from "../../../../types";
 import { getProviderToolBadges } from "../../hooks/useProvidersFlat";
-import { AgentToolIcon, type AgentToolIconId } from "../AgentToolIcon";
-import { ProviderBrandIcon } from "../ProviderBrandIcon";
+import { AgentToolIcon, type AgentToolIconId } from "../shared/AgentToolIcon";
+import { ProviderBrandIcon } from "../shared/ProviderBrandIcon";
 
 const TOOL_ID_TO_ICON: Record<string, AgentToolIconId> = {
   "claude-code": "claude-code",

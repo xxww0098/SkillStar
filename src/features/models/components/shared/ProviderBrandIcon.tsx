@@ -9,7 +9,7 @@ import SiliconCloudIcon from "@lobehub/icons/es/SiliconCloud/components/Color";
 import XiaomiMiMoIcon from "@lobehub/icons/es/XiaomiMiMo/components/Mono";
 import ZhipuIcon from "@lobehub/icons/es/Zhipu/components/Color";
 import { type ComponentType, type CSSProperties, useLayoutEffect, useRef } from "react";
-import { cn } from "../../../lib/utils";
+import { cn } from "../../../../lib/utils";
 
 type IconComponent = ComponentType<{ size?: number | string; className?: string; style?: CSSProperties }>;
 

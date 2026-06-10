@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import type { ModelCatalogEntry, ProviderEntryFlat, ProviderPatchFlat } from "../../../../types";
-import { useModelFetch } from "../../hooks/useModelFetch";
-import { useProviderPresets } from "../../hooks/useProviderPresets";
+import { useModelFetch } from "../../api/modelCatalog";
+import { useProviderPresets } from "../../api/presets";
 
 /**
  * Auto-save lifecycle state surfaced to the form host (drawer header / footer).

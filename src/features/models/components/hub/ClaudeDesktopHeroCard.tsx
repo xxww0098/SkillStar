@@ -4,8 +4,8 @@ import { useMemo } from "react";
 import { Button } from "../../../../components/ui/button";
 import { ExternalAnchor } from "../../../../components/ui/ExternalAnchor";
 import { cn } from "../../../../lib/utils";
-import { useToolConfigFiles } from "../../hooks/useToolConfigFiles";
-import { AgentToolIcon } from "../AgentToolIcon";
+import { useToolConfigFiles } from "../../api/configFiles";
+import { AgentToolIcon } from "../shared/AgentToolIcon";
 
 export interface ClaudeDesktopHeroCardProps {
   installed: boolean;

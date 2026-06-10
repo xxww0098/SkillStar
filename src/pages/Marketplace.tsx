@@ -12,7 +12,7 @@ import { useMcpMarketplace } from "../features/mcp/hooks/useMcpMarketplace";
 import { OfficialPublishers } from "../features/marketplace/components/OfficialPublishers";
 import { useMarketplace } from "../features/marketplace/hooks/useMarketplace";
 import { McpServerForm, type McpServerFormValue } from "../features/mcp/components/McpServerForm";
-import { ProviderDrawer } from "../features/models/components/hub/ProviderDrawer";
+import { DrawerShell } from "../features/models";
 import { useMcpServers } from "../features/mcp/hooks/useMcpServers";
 import { SkillGrid } from "../features/my-skills/components/SkillGrid";
 import { useSkills } from "../features/my-skills/hooks/useSkills";
@@ -770,7 +770,7 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
         </Suspense>
       )}
 
-      <ProviderDrawer
+      <DrawerShell
         open={mcpInstallDrawer != null}
         onOpenChange={(open) => {
           if (!open) setMcpInstallDrawer(null);
@@ -792,7 +792,7 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
             submitting={mcpSaving}
           />
         ) : null}
-      </ProviderDrawer>
+      </DrawerShell>
     </div>
   );
 }

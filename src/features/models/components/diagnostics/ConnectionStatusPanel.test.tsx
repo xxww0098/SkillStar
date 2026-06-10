@@ -1,8 +1,8 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { openExternalUrl } from "../../../lib/externalOpen";
-import { useBalanceQuery } from "../hooks/useBalanceQuery";
-import { useLatencyTest } from "../hooks/useLatencyTest";
+import { openExternalUrl } from "../../../../lib/externalOpen";
+import { useBalanceQuery } from "../../api/balance";
+import { useLatencyTest } from "../../api/diagnostics";
 import { ConnectionStatusPanel } from "./ConnectionStatusPanel";
 
 const mocks = vi.hoisted(() => ({
@@ -10,15 +10,8 @@ const mocks = vi.hoisted(() => ({
   refreshBalance: vi.fn(),
 }));
 
-vi.mock("../hooks/useLatencyTest", () => ({
+vi.mock("../../api/diagnostics", () => ({
   useLatencyTest: vi.fn(),
-}));
-
-vi.mock("../hooks/useBalanceQuery", () => ({
-  useBalanceQuery: vi.fn(),
-}));
-
-vi.mock("../hooks/useEndpointSpeedTest", () => ({
   useEndpointSpeedTest: () => ({
     testEndpoints: vi.fn(),
     clearResults: vi.fn(),
@@ -27,7 +20,11 @@ vi.mock("../hooks/useEndpointSpeedTest", () => ({
   }),
 }));
 
-vi.mock("../../../lib/externalOpen", () => ({
+vi.mock("../../api/balance", () => ({
+  useBalanceQuery: vi.fn(),
+}));
+
+vi.mock("../../../../lib/externalOpen", () => ({
   openExternalUrl: vi.fn(),
 }));
 

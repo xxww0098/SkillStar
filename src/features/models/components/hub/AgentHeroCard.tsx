@@ -17,8 +17,8 @@ import { Button } from "../../../../components/ui/button";
 import { ExternalAnchor } from "../../../../components/ui/ExternalAnchor";
 import { cn } from "../../../../lib/utils";
 import type { ProviderEntryFlat, ToolActivation } from "../../../../types";
-import { AgentToolIcon, type AgentToolIconId } from "../AgentToolIcon";
-import { ProviderBrandIcon } from "../ProviderBrandIcon";
+import { AgentToolIcon, type AgentToolIconId } from "../shared/AgentToolIcon";
+import { ProviderBrandIcon } from "../shared/ProviderBrandIcon";
 
 export interface AgentHeroAgent {
   toolId: string;

@@ -7,7 +7,7 @@ import { tauriInvoke } from "../../../lib/ipc";
 import { cn } from "../../../lib/utils";
 import type { ModelCatalogEntry, ToolSyncResult } from "../../../types";
 import { useToolActivations } from "../hooks/useToolActivations";
-import { AgentToolIcon, type AgentToolIconId } from "./AgentToolIcon";
+import { AgentToolIcon, type AgentToolIconId } from "./shared/AgentToolIcon";
 
 export interface ToolActivationPanelProps {
   providerId: string;

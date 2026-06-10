@@ -1,9 +1,9 @@
 import { Loader2, Zap } from "lucide-react";
 import { memo, useCallback, useMemo } from "react";
-import { Button } from "../../../components/ui/button";
-import { cn } from "../../../lib/utils";
-import { useEndpointSpeedTest } from "../hooks/useEndpointSpeedTest";
-import { endpointProbeLabel, endpointProbeTone, isEndpointReachable } from "../lib/endpointProbe";
+import { Button } from "../../../../components/ui/button";
+import { cn } from "../../../../lib/utils";
+import { useEndpointSpeedTest } from "../../api/diagnostics";
+import { endpointProbeLabel, endpointProbeTone, isEndpointReachable } from "../../lib/endpointProbe";
 
 export interface EndpointSpeedPanelProps {
   urls: string[];

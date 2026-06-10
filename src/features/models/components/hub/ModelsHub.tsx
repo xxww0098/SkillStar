@@ -9,14 +9,14 @@ import { tauriInvoke } from "../../../../lib/ipc";
 import { cn } from "../../../../lib/utils";
 import type { ProviderEntryFlat, ProviderPatchFlat } from "../../../../types";
 import { useProvidersFlat } from "../../hooks/useProvidersFlat";
-import { ProviderBrandIcon } from "../ProviderBrandIcon";
+import { ProviderBrandIcon } from "../shared/ProviderBrandIcon";
 import type { ProviderSaveState } from "../providerForm/useProviderFormState";
 import { AgentHeroCard, type AgentHeroAgent } from "./AgentHeroCard";
 import { ClaudeDesktopDrawerContent } from "./ClaudeDesktopDrawerContent";
 import { ClaudeDesktopHeroCard } from "./ClaudeDesktopHeroCard";
 import { HealthBar } from "./HealthBar";
 import { PresetPicker } from "./PresetPicker";
-import { ProviderDrawer } from "./ProviderDrawer";
+import { DrawerShell } from "../shared/DrawerShell";
 import { ProviderDrawerForm } from "./ProviderDrawerForm";
 import { ProviderGalleryCard } from "./ProviderGalleryCard";
 
@@ -418,7 +418,7 @@ export function ModelsHub() {
       </main>
 
       {/* ── Drawer ────────────────────────────────────────────── */}
-      <ProviderDrawer
+      <DrawerShell
         open={drawer.type !== "closed"}
         onOpenChange={(open) => {
           if (!open) closeDrawer();
@@ -498,7 +498,7 @@ export function ModelsHub() {
         ) : drawer.type === "edit" && !drawerProvider ? (
           <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">供应商不存在</div>
         ) : null}
-      </ProviderDrawer>
+      </DrawerShell>
     </div>
   );
 }

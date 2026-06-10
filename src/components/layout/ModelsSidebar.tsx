@@ -1,6 +1,5 @@
 import { Plug, Server, Sparkles } from "lucide-react";
-import { useProvidersFlat } from "@/features/models/hooks/useProvidersFlat";
-import { ProviderBrandIcon } from "@/features/models/components/ProviderBrandIcon";
+import { ProviderBrandIcon, useProvidersFlat } from "@/features/models";
 import { cn } from "@/lib/utils";
 
 export interface ModelsSidebarProps {

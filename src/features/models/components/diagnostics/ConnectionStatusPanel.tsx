@@ -1,12 +1,12 @@
 import { ExternalLink, Loader2, Play, RefreshCw, WalletCards } from "lucide-react";
 import { memo, useCallback, useMemo } from "react";
-import { Button } from "../../../components/ui/button";
-import { openExternalUrl } from "../../../lib/externalOpen";
-import { cn } from "../../../lib/utils";
-import { useBalanceQuery } from "../hooks/useBalanceQuery";
-import { useEndpointSpeedTest } from "../hooks/useEndpointSpeedTest";
-import { useLatencyTest } from "../hooks/useLatencyTest";
-import { endpointProbeLabel, endpointProbeTone } from "../lib/endpointProbe";
+import { Button } from "../../../../components/ui/button";
+import { openExternalUrl } from "../../../../lib/externalOpen";
+import { cn } from "../../../../lib/utils";
+import { useBalanceQuery } from "../../api/balance";
+import { useEndpointSpeedTest } from "../../api/diagnostics";
+import { useLatencyTest } from "../../api/diagnostics";
+import { endpointProbeLabel, endpointProbeTone } from "../../lib/endpointProbe";
 
 export interface ConnectionStatusPanelProps {
   providerId: string;

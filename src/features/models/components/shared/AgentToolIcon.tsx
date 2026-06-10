@@ -2,7 +2,7 @@ import ClaudeIcon from "@lobehub/icons/es/Claude/components/Color";
 import CodexIcon from "@lobehub/icons/es/Codex/components/Color";
 import GeminiIcon from "@lobehub/icons/es/Gemini/components/Color";
 import { memo, type ReactNode } from "react";
-import { cn } from "../../../lib/utils";
+import { cn } from "../../../../lib/utils";
 
 export type AgentToolIconId = "claude-code" | "codex" | "opencode" | "claude-desktop" | "gemini";
 

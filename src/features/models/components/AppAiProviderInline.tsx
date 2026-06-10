@@ -5,7 +5,7 @@ import { memo, useCallback, useEffect, useState } from "react";
 import { getAiConfigCached } from "../../../hooks/useAiConfig";
 import { cn } from "../../../lib/utils";
 import type { ProviderEntryFlat } from "../../../types";
-import { useAppAiProvider } from "../hooks/useAppAiProvider";
+import { useAppAiProvider } from "../api/appAi";
 import { providerCardClass } from "./providerForm/ProviderConfigPrimitives";
 
 export interface AppAiProviderInlineProps {

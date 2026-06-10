@@ -1,6 +1,6 @@
 import ClaudeIcon from "@lobehub/icons/es/Claude/components/Color";
 import { memo } from "react";
-import { AgentToolIcon } from "../AgentToolIcon";
+import { AgentToolIcon } from "../shared/AgentToolIcon";
 import { Input } from "../../../../components/ui/input";
 import { cn } from "../../../../lib/utils";
 import { fieldLabelClass } from "./ProviderConfigPrimitives";

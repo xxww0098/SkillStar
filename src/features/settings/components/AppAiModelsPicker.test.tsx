@@ -23,18 +23,18 @@ vi.mock("sonner", () => ({
   },
 }));
 
-vi.mock("../../models/components/ProviderBrandIcon", () => ({
+vi.mock("../../models/components/shared/ProviderBrandIcon", () => ({
   ProviderBrandIcon: () => <span data-testid="provider-icon" />,
 }));
 
-vi.mock("../../models/hooks/useAppAiProvider", () => ({
+vi.mock("../../models/api/appAi", () => ({
   useAppAiProvider: () => ({
     setAppAiProvider: mocks.setAppAiProvider,
     isSetting: false,
   }),
 }));
 
-vi.mock("../../models/hooks/useModelFetch", () => ({
+vi.mock("../../models/api/modelCatalog", () => ({
   useModelFetch: () => ({
     fetchModels: mocks.fetchModels,
     isLoading: false,

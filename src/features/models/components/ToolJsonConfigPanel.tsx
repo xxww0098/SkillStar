@@ -3,8 +3,8 @@ import { memo, useCallback, useState } from "react";
 import { Button } from "../../../components/ui/button";
 import { tauriInvoke } from "../../../lib/ipc";
 import { cn } from "../../../lib/utils";
-import { AGENT_TOOLS, type AgentToolId, useToolConfigFiles } from "../hooks/useToolConfigFiles";
-import { AgentToolIcon } from "./AgentToolIcon";
+import { AGENT_TOOLS, type AgentToolId, useToolConfigFiles } from "../api/configFiles";
+import { AgentToolIcon } from "./shared/AgentToolIcon";
 import { providerCardClass } from "./providerForm/ProviderConfigPrimitives";
 
 export interface ToolJsonConfigPanelProps {

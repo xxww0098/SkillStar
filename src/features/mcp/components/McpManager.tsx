@@ -14,7 +14,7 @@ import { useMcpPresets } from "../hooks/useMcpPresets";
 import { useMcpServers } from "../hooks/useMcpServers";
 import { McpServerCard } from "./McpServerCard";
 import { McpServerForm, type McpServerFormValue } from "./McpServerForm";
-import { ProviderDrawer } from "../../models/components/hub/ProviderDrawer";
+import { DrawerShell } from "../../models";
 
 type DrawerMode =
   | { type: "closed" }
@@ -385,7 +385,7 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
         </div>
       </main>
 
-      <ProviderDrawer
+      <DrawerShell
         open={drawer.type !== "closed"}
         onOpenChange={(open) => {
           if (!open) setDrawer({ type: "closed" });
@@ -423,7 +423,7 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
         ) : drawer.type === "edit" ? (
           <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">{t("mcp.notFound")}</div>
         ) : null}
-      </ProviderDrawer>
+      </DrawerShell>
     </div>
   );
 }

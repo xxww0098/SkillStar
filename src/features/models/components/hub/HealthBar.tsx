@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { tauriInvoke } from "../../../../lib/ipc";
 import { cn } from "../../../../lib/utils";
 import type { ConnectionTestResult, ProviderEntryFlat, ToolActivation, ToolActivationsMap } from "../../../../types";
-import { AgentToolIcon, type AgentToolIconId } from "../AgentToolIcon";
-import { ProviderBrandIcon } from "../ProviderBrandIcon";
+import { AgentToolIcon, type AgentToolIconId } from "../shared/AgentToolIcon";
+import { ProviderBrandIcon } from "../shared/ProviderBrandIcon";
 
 interface AgentDef {
   toolId: string;
