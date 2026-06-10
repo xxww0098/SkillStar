@@ -323,9 +323,7 @@ function useSkillsState() {
           // The update succeeded but one or more agent deployments could not
           // be refreshed (e.g. symlink privileges revoked) — surface it so
           // the user knows which agent may be stale instead of failing silently.
-          toast.warning(
-            `${i18n.t("mySkills.agentRelinkFailed")}\n${result.agent_link_failures.join("\n")}`,
-          );
+          toast.warning(`${i18n.t("mySkills.agentRelinkFailed")}\n${result.agent_link_failures.join("\n")}`);
         }
         void refetchUpdates();
         return result.skill;
