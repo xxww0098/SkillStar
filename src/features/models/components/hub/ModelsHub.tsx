@@ -11,7 +11,8 @@ import type { ProviderEntryFlat, ProviderPatchFlat } from "../../../../types";
 import { useProvidersFlat } from "../../hooks/useProvidersFlat";
 import { ProviderBrandIcon } from "../shared/ProviderBrandIcon";
 import type { ProviderSaveState } from "../providerForm/useProviderFormState";
-import { AgentHeroCard, type AgentHeroAgent } from "./AgentHeroCard";
+import { CLAUDE_DESKTOP_TOOL_ID, PROVIDER_AGENTS } from "../../lib/agentRegistry";
+import { AgentHeroCard } from "./AgentHeroCard";
 import { ClaudeDesktopDrawerContent } from "./ClaudeDesktopDrawerContent";
 import { ClaudeDesktopHeroCard } from "./ClaudeDesktopHeroCard";
 import { HealthBar } from "./HealthBar";
@@ -26,48 +27,11 @@ interface InstallStatus {
   config_dir_found: boolean;
 }
 
-const AGENTS: AgentHeroAgent[] = [
-  {
-    toolId: "claude-code",
-    displayName: "Claude",
-    iconId: "claude-code",
-    requiredUrlField: "anthropic",
-    installDocsUrl: "https://docs.anthropic.com/en/docs/claude-code/overview",
-    tagline: "Anthropic 兼容 · 写入 ~/.claude/settings.json",
-  },
-  {
-    toolId: "codex",
-    displayName: "Codex",
-    iconId: "codex",
-    requiredUrlField: "openai",
-    installDocsUrl: "https://github.com/openai/codex",
-    tagline: "CLI · Desktop App · IDE 扩展 共用 ~/.codex/ 配置",
-  },
-  {
-    toolId: "opencode",
-    displayName: "OpenCode",
-    iconId: "opencode",
-    requiredUrlField: "openai",
-    installDocsUrl: "https://opencode.ai/docs",
-    tagline: "OpenAI 兼容 · 开源 IDE 代理",
-  },
-  {
-    toolId: "gemini",
-    displayName: "Gemini CLI",
-    iconId: "gemini",
-    requiredUrlField: "openai",
-    installDocsUrl: "https://github.com/google-gemini/gemini-cli",
-    tagline: "OpenAI 兼容 · 写入 ~/.gemini/.env",
-  },
-];
-
 type DrawerMode =
   | { type: "closed" }
   | { type: "create"; autoBindToolId?: string }
   | { type: "edit"; providerId: string; autoBindToolId?: string }
   | { type: "claude-desktop" };
-
-const CLAUDE_DESKTOP_TOOL_ID = "claude-desktop";
 
 function ModelsTopDragStrip() {
   return <div data-tauri-drag-region className="h-4 w-full shrink-0" aria-hidden />;
@@ -144,7 +108,7 @@ export function ModelsHub() {
     async function detect() {
       setInstallLoading(true);
       const results: Record<string, InstallStatus> = {};
-      const toolIds = [...AGENTS.map((a) => a.toolId), CLAUDE_DESKTOP_TOOL_ID];
+      const toolIds = [...PROVIDER_AGENTS.map((a) => a.toolId), CLAUDE_DESKTOP_TOOL_ID];
       for (const toolId of toolIds) {
         try {
           const result = await tauriInvoke("detect_tool_installation", { toolId });
@@ -192,7 +156,7 @@ export function ModelsHub() {
     async (provider: ProviderEntryFlat) => {
       const autoBind = drawer.type === "create" ? drawer.autoBindToolId : undefined;
       if (autoBind) {
-        const agent = AGENTS.find((a) => a.toolId === autoBind);
+        const agent = PROVIDER_AGENTS.find((a) => a.toolId === autoBind);
         const compatible = agent
           ? agent.requiredUrlField === "anthropic"
             ? !!provider.base_url_anthropic
@@ -340,7 +304,7 @@ export function ModelsHub() {
               <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Agent 绑定</h2>
             </div>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {AGENTS.map((agent) => {
+              {PROVIDER_AGENTS.map((agent) => {
                 const status = installStatus[agent.toolId];
                 return (
                   <AgentHeroCard

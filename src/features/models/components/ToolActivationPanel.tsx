@@ -8,6 +8,9 @@ import { cn } from "../../../lib/utils";
 import type { ModelCatalogEntry, ToolSyncResult } from "../../../types";
 import { useToolActivations } from "../hooks/useToolActivations";
 import { AgentToolIcon, type AgentToolIconId } from "./shared/AgentToolIcon";
+import { PROVIDER_AGENTS } from "../lib/agentRegistry";
+import { buildClaudeLaunchCommand, type ClaudeCommandShell } from "../lib/launchCommand";
+import { formatModelMetadata, formatModelOptionLabel, formatSyncTime } from "../lib/modelFormat";
 
 export interface ToolActivationPanelProps {
   providerId: string;
@@ -22,46 +25,9 @@ export interface ToolActivationPanelProps {
   variant?: "default" | "compact";
 }
 
-/** Known agent tools that can be activated. */
-const KNOWN_TOOLS = [
-  {
-    toolId: "claude-code",
-    displayName: "Claude",
-    icon: "C",
-    requiredUrlField: "anthropic" as const,
-    disabledTooltip: "此供应商未提供 Anthropic 兼容端点",
-    installDocsUrl: "https://docs.anthropic.com/en/docs/claude-code/overview",
-  },
-  {
-    toolId: "codex",
-    displayName: "Codex",
-    icon: "X",
-    requiredUrlField: "openai" as const,
-    disabledTooltip: "此供应商未提供 OpenAI 兼容端点",
-    installDocsUrl: "https://github.com/openai/codex",
-  },
-  {
-    toolId: "opencode",
-    displayName: "OpenCode",
-    icon: "O",
-    requiredUrlField: "openai" as const,
-    disabledTooltip: "此供应商未提供 OpenAI 兼容端点",
-    installDocsUrl: "https://opencode.ai/docs",
-  },
-  {
-    toolId: "gemini",
-    displayName: "Gemini CLI",
-    icon: "G",
-    requiredUrlField: "openai" as const,
-    disabledTooltip: "此供应商未提供 OpenAI 兼容端点",
-    installDocsUrl: "https://github.com/google-gemini/gemini-cli",
-  },
-] as const;
-
 interface ToolItemProps {
   toolId: string;
   displayName: string;
-  icon: string;
   isActive: boolean;
   selectedModel: string | null;
   lastSyncAt: string | null;
@@ -84,12 +50,9 @@ interface ToolItemProps {
   compact?: boolean;
 }
 
-type ClaudeCommandShell = "unix" | "powershell";
-
 function ToolItem({
   toolId,
   displayName,
-  icon: _icon,
   isActive,
   selectedModel,
   lastSyncAt,
@@ -364,115 +327,6 @@ function ToolItem({
   );
 }
 
-function formatModelOptionLabel(modelId: string, metadata?: ModelCatalogEntry): string {
-  if (!metadata) return modelId;
-  const name = metadata.display_name || modelId;
-  const details = [
-    metadata.context_length ? `${Math.round(metadata.context_length / 1000)}K ctx` : null,
-    metadata.max_completion_tokens ? `${Math.round(metadata.max_completion_tokens / 1000)}K out` : null,
-    formatCost(metadata.cost),
-  ].filter(Boolean);
-  return details.length > 0 ? `${name} (${modelId}) · ${details.join(" · ")}` : `${name} (${modelId})`;
-}
-
-function formatModelMetadata(metadata: ModelCatalogEntry): string {
-  const details = [
-    metadata.context_length ? `上下文 ${metadata.context_length.toLocaleString()}` : null,
-    metadata.max_completion_tokens ? `输出 ${metadata.max_completion_tokens.toLocaleString()}` : null,
-    formatCost(metadata.cost),
-  ].filter(Boolean);
-  return details.length > 0 ? details.join(" · ") : metadata.id;
-}
-
-function formatCost(cost: ModelCatalogEntry["cost"]): string | null {
-  if (!cost || typeof cost !== "object") return null;
-  const input = typeof cost.input === "number" ? cost.input : null;
-  const output = typeof cost.output === "number" ? cost.output : null;
-  if (input == null && output == null) return null;
-  return `$${input ?? "?"}/$${output ?? "?"} / 1M`;
-}
-
-function buildClaudeLaunchCommand(model: string, shell: ClaudeCommandShell): string {
-  const commandName = `cc-${slugifyCommandName(model) || "model"}`;
-  if (shell === "powershell") {
-    return [
-      `function ${commandName} {`,
-      `  $env:ANTHROPIC_MODEL = "${escapePowerShell(model)}"`,
-      `  $env:CLAUDE_CODE_SUBAGENT_MODEL = "${escapePowerShell(model)}"`,
-      `  $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"`,
-      `  $env:CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK = "1"`,
-      `  $env:CLAUDE_CODE_EFFORT_LEVEL = "max"`,
-      `  try { claude --dangerously-skip-permissions @args }`,
-      `  finally {`,
-      `    Remove-Item Env:\\ANTHROPIC_MODEL -ErrorAction SilentlyContinue`,
-      `    Remove-Item Env:\\CLAUDE_CODE_SUBAGENT_MODEL -ErrorAction SilentlyContinue`,
-      `    Remove-Item Env:\\CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -ErrorAction SilentlyContinue`,
-      `    Remove-Item Env:\\CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK -ErrorAction SilentlyContinue`,
-      `    Remove-Item Env:\\CLAUDE_CODE_EFFORT_LEVEL -ErrorAction SilentlyContinue`,
-      `  }`,
-      `}`,
-    ].join("\n");
-  }
-
-  return [
-    `${commandName}() {`,
-    `  ANTHROPIC_MODEL="${escapeShell(model)}" \\`,
-    `  CLAUDE_CODE_SUBAGENT_MODEL="${escapeShell(model)}" \\`,
-    `  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \\`,
-    `  CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK=1 \\`,
-    `  CLAUDE_CODE_EFFORT_LEVEL="max" \\`,
-    `  claude --dangerously-skip-permissions "$@"`,
-    `}`,
-  ].join("\n");
-}
-
-function slugifyCommandName(model: string): string {
-  return model
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 32);
-}
-
-function escapeShell(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\$/g, "\\$").replace(/`/g, "\\`");
-}
-
-function escapePowerShell(value: string): string {
-  return value.replace(/`/g, "``").replace(/"/g, '`"').replace(/\$/g, "`$");
-}
-
-function formatSyncTime(timestamp: string): string {
-  try {
-    const date = new Date(timestamp);
-    if (Number.isNaN(date.getTime())) return timestamp;
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMin = Math.floor(diffMs / 60000);
-    if (diffMin < 1) return "刚刚";
-    if (diffMin < 60) return `${diffMin} 分钟前`;
-    const diffHour = Math.floor(diffMin / 60);
-    if (diffHour < 24) return `${diffHour} 小时前`;
-    return date.toLocaleDateString("zh-CN", {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return timestamp;
-  }
-}
-
-/** Config paths for known tools (display only). */
-const TOOL_CONFIG_PATHS: Record<string, string> = {
-  "claude-code": "~/.claude/settings.json",
-  codex: "~/.codex/config.toml · ~/.codex/auth.json",
-  opencode: "~/.config/opencode/opencode.json",
-  gemini: "~/.gemini/.env",
-};
-
 /** Tool installation status per tool_id. */
 interface ToolInstallStatus {
   installed: boolean;
@@ -504,7 +358,7 @@ function ToolActivationPanelInner({
       setInstallLoading(true);
       const results: Record<string, ToolInstallStatus> = {};
 
-      for (const tool of KNOWN_TOOLS) {
+      for (const tool of PROVIDER_AGENTS) {
         try {
           const result = await tauriInvoke("detect_tool_installation", {
             toolId: tool.toolId,
@@ -556,7 +410,7 @@ function ToolActivationPanelInner({
       )}
 
       <div className="space-y-2">
-        {KNOWN_TOOLS.map((tool) => {
+        {PROVIDER_AGENTS.map((tool) => {
           const activation = activations[tool.toolId];
           const toolIsActive = isActive(tool.toolId);
           const selectedModel = toolIsActive ? activation?.model || null : null;
@@ -577,11 +431,10 @@ function ToolActivationPanelInner({
               key={tool.toolId}
               toolId={tool.toolId}
               displayName={tool.displayName}
-              icon={tool.icon}
               isActive={toolIsActive}
               selectedModel={selectedModel}
               lastSyncAt={lastSyncAt}
-              configPath={TOOL_CONFIG_PATHS[tool.toolId] ?? null}
+              configPath={tool.configPathDisplay}
               providerModels={providerModels}
               modelCatalog={modelCatalog}
               defaultModel={defaultModel}

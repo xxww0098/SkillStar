@@ -3,15 +3,10 @@ import { toast } from "sonner";
 import { tauriInvoke } from "../../../lib/ipc";
 import type { ToolConfigFileInfo, WriteToolConfigFileResult } from "../../../types";
 
-export type AgentToolId = "claude-code" | "codex" | "opencode" | "claude-desktop" | "gemini";
+import { type AgentToolId, CONFIG_FILE_TOOLS } from "../lib/agentRegistry";
 
-export const AGENT_TOOLS: { toolId: AgentToolId; label: string }[] = [
-  { toolId: "claude-code", label: "Claude" },
-  { toolId: "codex", label: "Codex" },
-  { toolId: "opencode", label: "OpenCode" },
-  { toolId: "claude-desktop", label: "Claude Desktop" },
-  { toolId: "gemini", label: "Gemini CLI" },
-];
+export type { AgentToolId } from "../lib/agentRegistry";
+export const AGENT_TOOLS = CONFIG_FILE_TOOLS;
 
 export function useToolConfigFiles(toolId: AgentToolId) {
   const [files, setFiles] = useState<ToolConfigFileInfo[]>([]);

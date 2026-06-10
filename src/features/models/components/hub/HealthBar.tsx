@@ -4,22 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { tauriInvoke } from "../../../../lib/ipc";
 import { cn } from "../../../../lib/utils";
 import type { ConnectionTestResult, ProviderEntryFlat, ToolActivation, ToolActivationsMap } from "../../../../types";
-import { AgentToolIcon, type AgentToolIconId } from "../shared/AgentToolIcon";
+import { type AgentDescriptor, PROVIDER_AGENTS } from "../../lib/agentRegistry";
+import { AgentToolIcon } from "../shared/AgentToolIcon";
 import { ProviderBrandIcon } from "../shared/ProviderBrandIcon";
-
-interface AgentDef {
-  toolId: string;
-  displayName: string;
-  iconId: AgentToolIconId;
-  requiredUrlField: "openai" | "anthropic";
-}
-
-const AGENTS: AgentDef[] = [
-  { toolId: "claude-code", displayName: "Claude", iconId: "claude-code", requiredUrlField: "anthropic" },
-  { toolId: "codex", displayName: "Codex", iconId: "codex", requiredUrlField: "openai" },
-  { toolId: "opencode", displayName: "OpenCode", iconId: "opencode", requiredUrlField: "openai" },
-  { toolId: "gemini", displayName: "Gemini CLI", iconId: "gemini", requiredUrlField: "openai" },
-];
 
 export interface HealthBarProps {
   providers: ProviderEntryFlat[];
@@ -37,7 +24,7 @@ export interface HealthBarProps {
 type Health = "ok" | "warn" | "off" | "testing" | "fail";
 
 interface AgentHealth {
-  agent: AgentDef;
+  agent: AgentDescriptor;
   activation: ToolActivation | null;
   provider: ProviderEntryFlat | null;
   status: Health;
@@ -94,7 +81,7 @@ export function HealthBar({
   const probedKeys = useRef<Set<string>>(new Set());
 
   const healths: AgentHealth[] = useMemo(() => {
-    return AGENTS.map<AgentHealth>((agent) => {
+    return PROVIDER_AGENTS.map<AgentHealth>((agent) => {
       const activation = toolActivations[agent.toolId] ?? null;
       const provider = activation?.provider_id
         ? (providers.find((p) => p.id === activation.provider_id) ?? null)
