@@ -28,6 +28,21 @@ src/
 │   ├── marketplace/              # marketplace browsing
 │   │   ├── components/           # OfficialPublishers
 │   │   └── hooks/                # useMarketplace
+│   ├── models/                   # provider config + agent activation hub
+│   │   ├── index.ts              # public API — cross-feature imports go through here only
+│   │   ├── types.ts              # domain types (form values, agent status, drawer mode)
+│   │   ├── api/                  # the ONLY IPC surface (TanStack Query wrappers + modelsKeys factory)
+│   │   ├── lib/                  # pure functions (agentRegistry, agentStatus, providerPatch, launchCommand, …)
+│   │   ├── hooks/                # React composition (useProviderForm, useAutosave, useAgentActivation, useAgentHealth)
+│   │   └── components/
+│   │       ├── hub/              # ModelsHub (thin container), ProviderGallery, gallery cards
+│   │       ├── agents/           # agent cards + AgentSettingsDialog + per-agent forms
+│   │       ├── provider/         # ProviderEditorDrawer + tabs/ + PresetPicker
+│   │       ├── diagnostics/      # ConnectionStatusPanel, EndpointSpeedPanel, ConflictWarnings
+│   │       └── shared/           # DrawerShell, brand icons, SaveBadge, Provider/Model select popovers
+│   ├── mcp/                      # MCP server management + marketplace browsing
+│   │   ├── components/           # McpManager, McpServerCard, McpServerForm, McpMarketBrowser
+│   │   └── hooks/                # useMcpServers, useMcpPresets, useMcpMarketplace
 │   ├── projects/                 # project registration + agent config
 │   │   ├── components/           # AgentAccordion, ProjectDetailPanel, …
 │   │   └── hooks/                # useProjectManifest, useProjectSkills, …
