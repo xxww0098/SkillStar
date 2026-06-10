@@ -160,6 +160,7 @@ SkillStar/
 
 ### Project Registration and Detection
 
+- Adding a new Agent CLI: see the dedicated guide [ADDING-AN-AGENT.md](./ADDING-AN-AGENT.md) (builtin data table + icon is the whole core path; tool-sync and usage are independent optional axes).
 - Project registration is explicit before scan/import/sync.
 - `detect_project_agents` is data-driven by `builtin_profiles()`.
 - Each agent has a unique `project_skills_rel`; disambiguation is sealed (always returns empty).

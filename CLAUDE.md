@@ -10,6 +10,7 @@ Respond to the user in Chinese (per AGENTS.md). Commit messages must be English,
 
 - **AGENTS.md** — backend architecture + behavior rules (skills sync, marketplace, usage/OAuth, AI, CLI, patrol, storage). Document-first: backend/architecture changes must update AGENTS.md first.
 - **AGENTS-UI.md** — frontend structure, Models hub UI, streaming UX rules, visual system. Frontend convention changes must update AGENTS-UI.md first.
+- **ADDING-AN-AGENT.md** — step-by-step guide for adding a new Agent CLI (builtin data table, optional tool-sync axis, optional usage axis).
 - Significant bug investigations get logged in `docs/Error.md`.
 
 ## Commands
