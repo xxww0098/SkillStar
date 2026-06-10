@@ -1,19 +1,26 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowUp, Loader2, Sparkles, X } from "lucide-react";
+import { ArrowUp, Boxes, Loader2, Sparkles, X } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Toolbar } from "../components/layout/Toolbar";
 import { Button } from "../components/ui/button";
 import { EmptyState } from "../components/ui/EmptyState";
+import { Github } from "../components/ui/icons/Github";
 import { LoadingLogo } from "../components/ui/LoadingLogo";
+import { McpMarketBrowser } from "../features/mcp/components/McpMarketBrowser";
+import { useMcpMarketplace } from "../features/mcp/hooks/useMcpMarketplace";
 import { OfficialPublishers } from "../features/marketplace/components/OfficialPublishers";
 import { useMarketplace } from "../features/marketplace/hooks/useMarketplace";
+import { McpServerForm, type McpServerFormValue } from "../features/models/components/hub/McpServerForm";
+import { ProviderDrawer } from "../features/models/components/hub/ProviderDrawer";
+import { useMcpServers } from "../features/models/hooks/useMcpServers";
 import { SkillGrid } from "../features/my-skills/components/SkillGrid";
 import { useSkills } from "../features/my-skills/hooks/useSkills";
 import { useViewMode } from "../hooks/useViewMode";
+import { tauriInvoke } from "../lib/ipc";
 import { toast } from "../lib/toast";
 import { cn } from "../lib/utils";
-import type { OfficialPublisher, Skill, SortOption } from "../types";
+import type { McpServerEntry, OfficialPublisher, Skill, SortOption } from "../types";
 
 const DetailPanel = lazy(() =>
   import("../components/layout/DetailPanel").then((mod) => ({
@@ -21,16 +28,33 @@ const DetailPanel = lazy(() =>
   })),
 );
 
-export type TabId = "all" | "trending" | "hot" | "official";
+export type TabId = "all" | "trending" | "hot" | "official" | "mcp";
 
-const tabIds: TabId[] = ["all", "trending", "hot", "official"];
+const skillTabIds: TabId[] = ["all", "trending", "hot", "official"];
+const tabIds: TabId[] = [...skillTabIds, "mcp"];
 
 const tabLabelKeys: Record<TabId, string> = {
   all: "marketplace.allTime",
   trending: "marketplace.trending",
   hot: "marketplace.hot",
   official: "marketplace.official",
+  mcp: "marketplace.mcp",
 };
+
+function draftToDefaults(draft: McpServerEntry): Partial<McpServerFormValue> {
+  return {
+    name: draft.name,
+    transport: draft.transport,
+    command: draft.command,
+    args: draft.args,
+    env: draft.env,
+    url: draft.url,
+    headers: draft.headers,
+    description: draft.description,
+    homepage: draft.homepage,
+    enabled: {},
+  };
+}
 
 interface MarketplaceProps {
   onNavigateToPublisher?: (publisher: OfficialPublisher) => void;
@@ -64,17 +88,35 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
     patchSkill,
   } = useMarketplace();
   const { installSkill, updateSkill, uninstallSkill, pendingUpdateNames } = useSkills();
+  const { servers: mcpServers, createServer: createMcpServer } = useMcpServers();
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("stars-desc");
   const [viewMode, setViewMode] = useViewMode("grid");
   const [internalTab, setInternalTab] = useState<TabId>("all");
   const activeTab = controlledTab ?? internalTab;
+  const mcpMarket = useMcpMarketplace(activeTab === "mcp");
+  const mcpInstalledNames = useMemo(() => new Set(mcpServers.map((server) => server.name)), [mcpServers]);
   const setActiveTab = (tab: TabId) => {
     onTabChange?.(tab);
     setInternalTab(tab);
   };
+  const handleTabChange = useCallback(
+    (tab: TabId) => {
+      setActiveTab(tab);
+      setSearchQuery("");
+      mcpMarket.setQuery("");
+      setSelectedSkill(null);
+      clearAiSearch();
+    },
+    [clearAiSearch, mcpMarket, onTabChange],
+  );
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [installStatus, setInstallStatus] = useState<string | null>(null);
+  const [mcpInstallDrawer, setMcpInstallDrawer] = useState<{
+    sourceName: string;
+    defaults: Partial<McpServerFormValue>;
+  } | null>(null);
+  const [mcpSaving, setMcpSaving] = useState(false);
   const [showBackToTop, setShowBackToTop] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   /** Skills currently being installed (for per-card loading state) */
@@ -84,6 +126,8 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
   useEffect(() => {
     if (activeTab === "official") {
       fetchOfficialPublishers();
+    } else if (activeTab === "mcp") {
+      return;
     } else {
       fetchLeaderboard(activeTab === "all" ? "all" : activeTab);
     }
@@ -100,6 +144,8 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
   }, [searchQuery, search, aiSearching, aiKeywords]);
 
   const displaySkills = useMemo(() => {
+    if (activeTab === "mcp") return [];
+
     let skills: Skill[] = [];
     const isAiMode = Boolean(aiKeywords && results);
     const isSearchMode = Boolean(searchQuery.trim() && results) || isAiMode;
@@ -284,109 +330,216 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
     setSearchQuery("");
   }, [clearAiSearch]);
 
-  const totalCount = displaySkills.length;
+  const handleMcpInstall = useCallback(async (id: string) => {
+    try {
+      const draft = await tauriInvoke("mcp_market_entry_to_draft", { id });
+      setMcpInstallDrawer({ sourceName: draft.name, defaults: draftToDefaults(draft) });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  const handleMcpInstallSubmit = useCallback(
+    async (value: McpServerFormValue) => {
+      setMcpSaving(true);
+      try {
+        const entry: Partial<McpServerEntry> = { ...value };
+        await createMcpServer(entry);
+        toast.success(t("mcp.added"));
+        setMcpInstallDrawer(null);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : String(err));
+      } finally {
+        setMcpSaving(false);
+      }
+    },
+    [createMcpServer, t],
+  );
+
+  const toolbarSearchQuery = activeTab === "mcp" ? mcpMarket.query : searchQuery;
+  const handleToolbarSearchChange = useCallback(
+    (value: string) => {
+      if (activeTab === "mcp") {
+        mcpMarket.setQuery(value);
+        return;
+      }
+      setSearchQuery(value);
+      if (!value.trim()) clearAiSearch();
+    },
+    [activeTab, clearAiSearch, mcpMarket],
+  );
+
+  const totalCount = activeTab === "mcp" ? mcpMarket.entries.length : displaySkills.length;
+  const snapshotLabel =
+    activeTab === "mcp"
+      ? mcpMarket.refreshing
+        ? t("marketplace.refreshingSnapshot", {
+            defaultValue: "Refreshing snapshot...",
+          })
+        : mcpMarket.status === "seeding"
+          ? t("marketplace.seedingSnapshot", {
+              defaultValue: "Seeding local snapshot...",
+            })
+          : mcpMarket.status === "stale"
+            ? t("marketplace.snapshotStale", {
+                defaultValue: "Snapshot is stale",
+              })
+            : mcpMarket.status === "remote_error"
+              ? t("mcp.marketStatusRemoteError")
+              : mcpMarket.status === "miss"
+                ? t("mcp.marketStatusMiss")
+                : mcpMarket.updatedAt
+                  ? t("mcp.marketStatusUpdated", { time: new Date(mcpMarket.updatedAt).toLocaleString() })
+                  : t("mcp.marketStatusLocalFirst")
+      : refreshing
+        ? t("marketplace.refreshingSnapshot", {
+            defaultValue: "Refreshing snapshot...",
+          })
+        : snapshotStatus === "seeding"
+          ? t("marketplace.seedingSnapshot", {
+              defaultValue: "Seeding local snapshot...",
+            })
+          : snapshotStatus === "stale"
+            ? t("marketplace.snapshotStale", {
+                defaultValue: "Snapshot is stale",
+              })
+            : null;
+  const snapshotTitle = activeTab === "mcp" ? (mcpMarket.updatedAt ?? undefined) : (snapshotUpdatedAt ?? undefined);
   const showOnlineSupplement =
     Boolean(searchQuery.trim()) &&
+    activeTab !== "mcp" &&
     !aiKeywords &&
     !loading &&
     !aiSearching &&
     displaySkills.length === 0 &&
     snapshotStatus === "miss";
 
+  const renderTabButton = (id: TabId) => {
+    const index = tabIds.indexOf(id);
+    const isActive = activeTab === id;
+    const isMcp = id === "mcp";
+
+    return (
+      <button
+        key={id}
+        type="button"
+        role="tab"
+        aria-selected={isActive}
+        tabIndex={isActive ? 0 : -1}
+        id={`tab-${id}`}
+        aria-controls={`tabpanel-${id}`}
+        onClick={() => handleTabChange(id)}
+        onKeyDown={(e) => {
+          let next = index;
+          if (e.key === "ArrowRight") next = (index + 1) % tabIds.length;
+          else if (e.key === "ArrowLeft") next = (index - 1 + tabIds.length) % tabIds.length;
+          else if (e.key === "Home") next = 0;
+          else if (e.key === "End") next = tabIds.length - 1;
+          else return;
+          e.preventDefault();
+          const nextId = tabIds[next];
+          handleTabChange(nextId);
+          document.getElementById(`tab-${nextId}`)?.focus();
+        }}
+        className={cn(
+          "inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors duration-150 cursor-pointer focus-ring",
+          isActive
+            ? "bg-primary/15 text-primary shadow-[0_1px_2px_rgba(15,23,42,0.08),0_1px_1px_rgba(15,23,42,0.04)] ring-1 ring-inset ring-primary/25 dark:bg-primary/18 dark:shadow-[0_1px_2px_rgba(0,0,0,0.45)]"
+            : "text-muted-foreground hover:text-foreground hover:bg-sidebar-hover/60",
+          isMcp && !isActive && "ring-1 ring-inset ring-border/50 hover:ring-primary/25",
+        )}
+      >
+        {isMcp ? (
+          <>
+            <Github className="h-3.5 w-3.5" />
+            <span>{t("marketplace.mcpGithub")}</span>
+          </>
+        ) : (
+          <span>{t(tabLabelKeys[id])}</span>
+        )}
+      </button>
+    );
+  };
+
   return (
     <div className="flex-1 min-w-0 flex overflow-hidden relative">
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         <Toolbar
           titleNode={<h1>{t("sidebar.market")}</h1>}
-          searchQuery={searchQuery}
-          onSearchChange={(q) => {
-            setSearchQuery(q);
-            if (!q.trim()) {
-              clearAiSearch();
-            }
-          }}
+          searchQuery={toolbarSearchQuery}
+          onSearchChange={handleToolbarSearchChange}
+          searchPlaceholder={
+            activeTab === "mcp"
+              ? t("marketplace.mcpSearchPlaceholder", { defaultValue: "Search MCP servers..." })
+              : undefined
+          }
           sortBy={sortBy}
           onSortChange={setSortBy}
           viewMode={viewMode}
           onViewModeChange={setViewMode}
-          onAiSearch={handleAiSearch}
-          aiSearching={aiSearching}
+          onAiSearch={activeTab === "mcp" ? undefined : handleAiSearch}
+          aiSearching={activeTab === "mcp" ? false : aiSearching}
+          onRefresh={activeTab === "mcp" ? () => mcpMarket.refresh() : undefined}
+          isRefreshing={activeTab === "mcp" ? mcpMarket.refreshing : undefined}
+          hideSortControls={activeTab === "mcp"}
         />
 
         {/* Category tabs */}
-        <div className="flex items-center gap-1 px-6 py-2 border-b border-border bg-sidebar" role="tablist">
-          {tabIds.map((id, index) => (
-            <button
-              key={id}
-              role="tab"
-              aria-selected={activeTab === id}
-              tabIndex={activeTab === id ? 0 : -1}
-              id={`tab-${id}`}
-              aria-controls={`tabpanel-${id}`}
-              onClick={() => {
-                setActiveTab(id);
-                setSearchQuery("");
-                clearAiSearch();
-              }}
-              onKeyDown={(e) => {
-                let next = index;
-                if (e.key === "ArrowRight") next = (index + 1) % tabIds.length;
-                else if (e.key === "ArrowLeft") next = (index - 1 + tabIds.length) % tabIds.length;
-                else if (e.key === "Home") next = 0;
-                else if (e.key === "End") next = tabIds.length - 1;
-                else return;
-                e.preventDefault();
-                const nextId = tabIds[next];
-                setActiveTab(nextId);
-                setSearchQuery("");
-                clearAiSearch();
-                document.getElementById(`tab-${nextId}`)?.focus();
-              }}
-              className={cn(
-                "px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer",
-                activeTab === id
-                  ? "bg-primary/20 text-primary shadow-sm"
-                  : "text-muted-foreground hover:text-foreground hover:bg-sidebar-hover",
-              )}
+        <div className="border-b border-border bg-sidebar px-6 py-2">
+          <div className="flex min-w-0 items-center justify-between gap-3">
+            <div
+              className="flex min-w-0 flex-1 items-center gap-3 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              role="tablist"
+              aria-label={t("sidebar.market")}
             >
-              {t(tabLabelKeys[id])}
-            </button>
-          ))}
-
-          <div className="ml-auto flex items-center gap-2">
-            {/* Install toast */}
-            {installStatus && (
-              <motion.span
-                initial={{ opacity: 0, x: 10 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0 }}
-                className="text-xs text-success font-medium"
+              <div
+                className="flex min-w-max items-center gap-2 rounded-full border border-border/60 bg-background/20 p-1"
+                role="presentation"
               >
-                {installStatus}
-              </motion.span>
-            )}
-            {(refreshing || snapshotStatus === "stale" || snapshotStatus === "seeding") && (
-              <span className="text-[11px] text-muted-foreground" title={snapshotUpdatedAt ?? undefined}>
-                {refreshing
-                  ? t("marketplace.refreshingSnapshot", {
-                      defaultValue: "Refreshing snapshot...",
-                    })
-                  : snapshotStatus === "seeding"
-                    ? t("marketplace.seedingSnapshot", {
-                        defaultValue: "Seeding local snapshot...",
-                      })
-                    : t("marketplace.snapshotStale", {
-                        defaultValue: "Snapshot is stale",
-                      })}
-              </span>
-            )}
-            {activeTab !== "official" && (
-              <span className="text-caption">{t("marketplace.skillsCount", { count: totalCount })}</span>
-            )}
+                <span className="shrink-0 px-2 text-[11px] font-medium text-muted-foreground/70">
+                  {t("marketplace.skillGroup")}
+                </span>
+                <div className="flex items-center gap-1">{skillTabIds.map((id) => renderTabButton(id))}</div>
+              </div>
+
+              <div
+                className="flex min-w-max items-center gap-2 rounded-full border border-border/60 bg-background/35 p-1"
+                role="presentation"
+              >
+                <span className="px-2 text-[11px] font-medium text-muted-foreground/70">
+                  {t("marketplace.mcpSourceGithub")}
+                </span>
+                {renderTabButton("mcp")}
+              </div>
+            </div>
+
+            <div className="ml-auto flex shrink-0 items-center gap-3 px-2 text-right" aria-live="polite">
+              {/* Install toast */}
+              {installStatus && (
+                <motion.span
+                  initial={{ opacity: 0, x: 10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="text-xs text-success font-medium"
+                >
+                  {installStatus}
+                </motion.span>
+              )}
+              {snapshotLabel && (
+                <span className="hidden text-[11px] text-muted-foreground sm:inline" title={snapshotTitle}>
+                  {snapshotLabel}
+                </span>
+              )}
+              {activeTab === "mcp" ? (
+                <span className="text-caption">{t("marketplace.mcpServersCount", { count: totalCount })}</span>
+              ) : activeTab !== "official" ? (
+                <span className="text-caption">{t("marketplace.skillsCount", { count: totalCount })}</span>
+              ) : null}
+            </div>
           </div>
         </div>
 
-        {error && (
+        {activeTab !== "mcp" && error && (
           <div className="px-6 py-2 border-b border-destructive/20 bg-destructive/5 text-xs text-destructive">
             {error}
           </div>
@@ -454,7 +607,19 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
             setShowBackToTop(target.scrollTop > 300);
           }}
         >
-          {activeTab === "official" ? (
+          {activeTab === "mcp" ? (
+            <McpMarketBrowser
+              installedNames={mcpInstalledNames}
+              entries={mcpMarket.entries}
+              status={mcpMarket.status}
+              isLoading={mcpMarket.isLoading}
+              query={mcpMarket.query}
+              refreshing={mcpMarket.refreshing}
+              viewMode={viewMode}
+              onRefresh={() => mcpMarket.refresh()}
+              onInstall={(id) => void handleMcpInstall(id)}
+            />
+          ) : activeTab === "official" ? (
             <OfficialPublishers publishers={publishers} viewMode={viewMode} onPublisherClick={onNavigateToPublisher} />
           ) : loading || aiSearching ? (
             <div className="flex flex-col items-center justify-center py-20 gap-4">
@@ -604,6 +769,30 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
           />
         </Suspense>
       )}
+
+      <ProviderDrawer
+        open={mcpInstallDrawer != null}
+        onOpenChange={(open) => {
+          if (!open) setMcpInstallDrawer(null);
+        }}
+        title={
+          <span className="flex items-center gap-2 text-foreground">
+            <Boxes className="h-4 w-4 text-primary" />
+            {mcpInstallDrawer?.sourceName ?? t("mcp.addServer")}
+          </span>
+        }
+        subtitle={t("mcp.drawerPresetSubtitle")}
+      >
+        {mcpInstallDrawer ? (
+          <McpServerForm
+            key={mcpInstallDrawer.sourceName}
+            defaults={mcpInstallDrawer.defaults}
+            submitLabel={t("common.add")}
+            onSubmit={handleMcpInstallSubmit}
+            submitting={mcpSaving}
+          />
+        ) : null}
+      </ProviderDrawer>
     </div>
   );
 }

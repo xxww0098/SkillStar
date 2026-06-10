@@ -81,8 +81,12 @@ const config: AiConfig = {
 
 describe("AppAiModelsPicker", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     mocks.providers = [provider];
-    mocks.updateProvider.mockResolvedValue(provider);
+    mocks.updateProvider.mockImplementation(async (_id: string, patch: Partial<ProviderEntryFlat>) => ({
+      ...provider,
+      ...patch,
+    }));
     mocks.setAppAiProvider.mockResolvedValue(undefined);
     mocks.fetchModels.mockResolvedValue(["deepseek-chat", "deepseek-coder"]);
   });
@@ -115,6 +119,7 @@ describe("AppAiModelsPicker", () => {
     render(<AppAiModelsPicker config={config} onConfigChange={onConfigChange} />);
 
     fireEvent.change(screen.getByLabelText("模型"), { target: { value: "deepseek-coder" } });
+    fireEvent.click(screen.getByRole("button", { name: /保存连接配置/ }));
 
     await waitFor(() => {
       expect(mocks.updateProvider).toHaveBeenCalledWith(
@@ -126,5 +131,60 @@ describe("AppAiModelsPicker", () => {
       );
     });
     expect(onConfigChange).toHaveBeenCalledWith(expect.objectContaining({ model: "deepseek-coder" }));
+  });
+
+  it("lets an incomplete provider be completed inline and bound", async () => {
+    const incompleteProvider = {
+      ...provider,
+      id: "custom",
+      name: "Custom Gateway",
+      base_url_openai: "",
+      base_url_anthropic: "",
+      models_url: "",
+      api_key: "",
+      default_model: "",
+      models: [],
+      meta: {},
+    };
+    mocks.providers = [incompleteProvider];
+    mocks.updateProvider.mockImplementation(async (_id: string, patch: Partial<ProviderEntryFlat>) => ({
+      ...incompleteProvider,
+      ...patch,
+    }));
+    const onConfigChange = vi.fn();
+
+    render(
+      <AppAiModelsPicker
+        config={{ ...config, provider_ref: null, api_format: "openai", model: "" }}
+        onConfigChange={onConfigChange}
+      />,
+    );
+
+    expect(screen.getByText("缺 Key")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Custom Gateway/ }));
+    fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "sk-custom" } });
+    fireEvent.change(screen.getByLabelText("OpenAI Base URL"), { target: { value: "https://api.example.com/v1" } });
+    fireEvent.change(screen.getByLabelText("模型"), { target: { value: "gpt-test" } });
+    fireEvent.click(screen.getByRole("button", { name: /保存连接配置/ }));
+
+    await waitFor(() => {
+      expect(mocks.updateProvider).toHaveBeenCalledWith(
+        "custom",
+        expect.objectContaining({
+          api_key: "sk-custom",
+          base_url_openai: "https://api.example.com/v1",
+          default_model: "gpt-test",
+        }),
+      );
+    });
+    expect(mocks.setAppAiProvider).toHaveBeenCalledWith("codex", "custom", "Custom Gateway");
+    expect(onConfigChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        api_format: "openai",
+        model: "gpt-test",
+        provider_ref: { app_id: "codex", provider_id: "custom" },
+      }),
+    );
   });
 });

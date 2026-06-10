@@ -80,7 +80,7 @@ describe("ConnectionStatusPanel", () => {
   });
 
   it("does not render balance UI for presets without a balance endpoint", () => {
-    renderPanel("qwen");
+    renderPanel("mimo");
 
     expect(vi.mocked(useBalanceQuery)).toHaveBeenCalledWith(null, "sk-test", "https://api.example.com/v1");
     expect(screen.queryByRole("heading", { name: "余额" })).not.toBeInTheDocument();

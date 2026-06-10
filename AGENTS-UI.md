@@ -125,7 +125,8 @@ src/
 - External navigation must use `components/ui/ExternalAnchor` for link elements and `openExternalUrl` for buttons/programmatic flows; avoid raw `<a target="_blank">` in app views.
 
 ## Desktop UX Conventions
-- Pages include `MySkills`, `Marketplace`, `PublisherDetail`, `SkillCards`, `Projects`, `Settings`.
+- Pages include `MySkills`, `Marketplace`, `PublisherDetail`, `SkillCards`, `Projects`, `Mcp`, `Settings`.
+- Marketplace is the unified discovery surface, but skill discovery and MCP discovery stay visually separated inside the same left-aligned category rail: skill tabs (`all` / `trending` / `hot` / `official`) stay grouped under `Skill`, and the GitHub MCP registry entry stays grouped under `MCP`. MCP marketplace cards should follow the same card template, 320px grid column baseline, grid/list layout toggle, and toolbar layout controls as skill cards. The `Mcp` page is for installed MCP server management, recommended presets, and tool sync only; do not embed a separate MCP marketplace inside it.
 - `Projects` is master-detail and must reconcile removals as well as additions.
 - Only globally enabled agents should appear in project deploy target pickers.
 - Shared project-path conflicts must be single-owner at selection time.

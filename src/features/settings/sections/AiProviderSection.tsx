@@ -49,6 +49,7 @@ export const AiProviderSection = memo(function AiProviderSection({
 }: AiProviderSectionProps) {
   const { t } = useTranslation();
   const aiSource = resolveAiSource(localAiConfig);
+  const canTestConnection = localAiConfig.enabled && (aiSource === "local" || Boolean(localAiConfig.provider_ref));
 
   const clampConcurrency = (value: number) => Math.min(20, Math.max(1, value || 1));
 
@@ -271,43 +272,41 @@ export const AiProviderSection = memo(function AiProviderSection({
               </div>
             </div>
 
-            {aiSource === "local" && (
-              <div className="flex items-center justify-end gap-3 pt-1">
-                <div className="flex min-h-5 items-center">
-                  {aiSaving ? (
-                    <span className="text-xs text-muted-foreground">{t("common.saving")}</span>
-                  ) : aiSaved ? (
-                    <span className="text-xs text-success">{t("common.saved")}</span>
-                  ) : null}
-                </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={onTestConnection}
-                  disabled={aiSaving || aiTesting || !localAiConfig.enabled}
-                  className="relative h-10 min-w-[132px] rounded-xl px-4 text-sm"
-                >
-                  <div className="flex min-w-max items-center justify-center gap-1.5">
-                    {aiTesting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                    {!aiTesting && aiTestResult === "success" && <CheckCircle className="h-3.5 w-3.5 text-success" />}
-                    {!aiTesting && aiTestResult === "error" && <XCircle className="h-3.5 w-3.5 text-destructive" />}
-                    {!aiTesting && !aiTestResult && <Zap className="h-3.5 w-3.5" />}
-
-                    <span>
-                      {aiTesting
-                        ? t("common.testing")
-                        : aiTestResult === "success" && typeof aiTestLatency === "number"
-                          ? `${t("common.connected")} (${aiTestLatency}ms)`
-                          : aiTestResult === "success"
-                            ? t("common.connected")
-                            : aiTestResult === "error"
-                              ? t("common.failed")
-                              : t("settings.testConnection")}
-                    </span>
-                  </div>
-                </Button>
+            <div className="flex items-center justify-end gap-3 pt-1">
+              <div className="flex min-h-5 items-center">
+                {aiSaving ? (
+                  <span className="text-xs text-muted-foreground">{t("common.saving")}</span>
+                ) : aiSaved ? (
+                  <span className="text-xs text-success">{t("common.saved")}</span>
+                ) : null}
               </div>
-            )}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onTestConnection}
+                disabled={aiSaving || aiTesting || !canTestConnection}
+                className="relative h-10 min-w-[132px] rounded-xl px-4 text-sm"
+              >
+                <div className="flex min-w-max items-center justify-center gap-1.5">
+                  {aiTesting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  {!aiTesting && aiTestResult === "success" && <CheckCircle className="h-3.5 w-3.5 text-success" />}
+                  {!aiTesting && aiTestResult === "error" && <XCircle className="h-3.5 w-3.5 text-destructive" />}
+                  {!aiTesting && !aiTestResult && <Zap className="h-3.5 w-3.5" />}
+
+                  <span>
+                    {aiTesting
+                      ? t("common.testing")
+                      : aiTestResult === "success" && typeof aiTestLatency === "number"
+                        ? `${t("common.connected")} (${aiTestLatency}ms)`
+                        : aiTestResult === "success"
+                          ? t("common.connected")
+                          : aiTestResult === "error"
+                            ? t("common.failed")
+                            : t("settings.testConnection")}
+                  </span>
+                </div>
+              </Button>
+            </div>
           </div>
         )}
       </div>

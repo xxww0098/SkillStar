@@ -55,6 +55,12 @@ interface ToolbarProps {
   aiSearching?: boolean;
   /** Optional title node to render at the start of the toolbar */
   titleNode?: React.ReactNode;
+  /** Optional search placeholder override */
+  searchPlaceholder?: string;
+  /** Hide sort segmented controls */
+  hideSortControls?: boolean;
+  /** Hide grid/list view toggle */
+  hideViewToggle?: boolean;
   /** Source type filter: "all" | "hub" | "local" */
   sourceFilter?: "all" | "hub" | "local";
   /** Callback when source filter changes */
@@ -91,6 +97,9 @@ export function Toolbar({
   onAiSearch,
   aiSearching,
   titleNode,
+  searchPlaceholder,
+  hideSortControls,
+  hideViewToggle,
   sourceFilter,
   onSourceFilterChange,
   localCount,
@@ -143,8 +152,8 @@ export function Toolbar({
   }, [isRefreshing, refreshState, t]);
 
   const sortOptions: { value: SortOption; label: string }[] = [
-    ...(hideStarsSort ? [] : [{ value: "stars-desc" as SortOption, label: t("toolbar.stars") }]),
-    ...(hideStarsSort ? [] : [{ value: "updated" as SortOption, label: t("toolbar.updated") }]),
+    ...(hideSortControls || hideStarsSort ? [] : [{ value: "stars-desc" as SortOption, label: t("toolbar.stars") }]),
+    ...(hideSortControls || hideStarsSort ? [] : [{ value: "updated" as SortOption, label: t("toolbar.updated") }]),
   ];
 
   const [repoPopoverOpen, setRepoPopoverOpen] = useState(false);
@@ -157,7 +166,7 @@ export function Toolbar({
       containerClassName="w-56"
       value={searchQuery}
       onChange={(e) => onSearchChange(e.target.value)}
-      placeholder={t("toolbar.searchPlaceholder")}
+      placeholder={searchPlaceholder ?? t("toolbar.searchPlaceholder")}
       className="pl-8 h-8 text-xs bg-sidebar/50 focus-visible:bg-background"
       iconClassName="left-2.5"
       suffix={
@@ -524,7 +533,7 @@ export function Toolbar({
       )}
 
       {/* View toggle */}
-      <ViewToggle viewMode={viewMode} onViewModeChange={onViewModeChange} />
+      {!hideViewToggle && <ViewToggle viewMode={viewMode} onViewModeChange={onViewModeChange} />}
     </>
   );
 

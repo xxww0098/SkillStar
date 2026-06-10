@@ -179,7 +179,13 @@ function AppContent() {
 
   const renderPage = () => {
     if (nav.appMode === "usage") {
-      return <UsagePage />;
+      return (
+        <UsagePage
+          filter={nav.usageCatalogFilter}
+          usageCreateRequest={nav.usageCreateRequest}
+          clearUsageCreateRequest={nav.clearUsageCreateRequest}
+        />
+      );
     }
 
     // Models mode (single hub page)
@@ -238,7 +244,14 @@ function AppContent() {
           />
         );
       case "mcp":
-        return <McpPage />;
+        return (
+          <McpPage
+            onOpenMarket={() => {
+              nav.setMarketplaceTab("mcp");
+              nav.navigate("marketplace");
+            }}
+          />
+        );
       case "settings":
         return <SettingsPage onCheckUpdate={updater.check} isCheckingUpdate={updater.state.status === "checking"} />;
       default:

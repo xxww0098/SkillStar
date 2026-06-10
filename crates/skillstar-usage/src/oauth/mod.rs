@@ -5,6 +5,7 @@
 
 pub mod device_flow;
 pub mod local_server;
+pub mod manual_callback;
 pub mod pending_state;
 pub mod pkce;
 pub mod poll_flow;

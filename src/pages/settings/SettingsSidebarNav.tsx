@@ -1,6 +1,5 @@
 import {
   Bot,
-  Cookie,
   EyeOff,
   Globe,
   HardDrive,
@@ -22,7 +21,6 @@ export const SETTINGS_SECTIONS: { id: string; labelKey: string; icon: LucideIcon
   { id: "settings-mirror", labelKey: "settings.githubMirror", icon: Zap },
   { id: "settings-ai", labelKey: "settings.aiProvider", icon: Sparkles },
   { id: "settings-acp", labelKey: "settings.acpTitle", icon: Bot },
-  { id: "settings-cookie-bridge", labelKey: "Cookie Bridge", icon: Cookie },
   { id: "settings-background", labelKey: "settings.backgroundRun", icon: EyeOff },
   { id: "settings-appearance", labelKey: "settings.backgroundStyle", icon: Paintbrush },
   { id: "settings-language", labelKey: "settings.language", icon: LanguagesIcon },
@@ -32,7 +30,6 @@ export const SETTINGS_SECTIONS: { id: string; labelKey: string; icon: LucideIcon
 
 export const SETTINGS_FOCUS_TO_SECTION_ID: Record<SettingsFocusTarget, string> = {
   "ai-provider": "settings-ai",
-  "cookie-bridge": "settings-cookie-bridge",
   storage: "settings-storage",
 };
 

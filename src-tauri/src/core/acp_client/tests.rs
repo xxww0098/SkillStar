@@ -1,7 +1,6 @@
     use super::*;
     use agent_client_protocol::{self as acp, Agent as _, Client as _};
     use skillstar_core::config::acp::AcpConfig;
-    use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
 
     // ── Script extraction ───────────────────────────────────────────
@@ -143,7 +142,7 @@ echo second
                 let client = SkillStarClient {
                     collected: Arc::new(Mutex::new(String::new())),
                     on_chunk: Box::new(|_| {}),
-                    terminals: Arc::new(TerminalManager::new(PathBuf::from("/tmp"))),
+                    terminals: Arc::new(TerminalManager::new(std::env::temp_dir())),
                 };
 
                 let req = acp::RequestPermissionRequest::new(
@@ -324,7 +323,7 @@ echo second
                         tokio::task::spawn_local(agent_io);
 
                         // ── Client side ─────────────────────────────
-                        let terminal_mgr = Arc::new(TerminalManager::new(PathBuf::from("/tmp")));
+                        let terminal_mgr = Arc::new(TerminalManager::new(std::env::temp_dir()));
                         let client = SkillStarClient {
                             collected: collected_for_client,
                             on_chunk: Box::new(|_| {}),
@@ -359,9 +358,7 @@ echo second
 
                         // New session
                         let session = conn
-                            .new_session(acp::NewSessionRequest::new(std::path::PathBuf::from(
-                                "/tmp",
-                            )))
+                            .new_session(acp::NewSessionRequest::new(std::env::temp_dir()))
                             .await
                             .expect("new_session should succeed");
                         assert_eq!(session.session_id, "0".into());

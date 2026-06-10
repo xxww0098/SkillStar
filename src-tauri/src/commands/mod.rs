@@ -1,6 +1,5 @@
 pub mod agents;
 pub mod ai;
-pub mod cookie_import;
 pub mod fingerprints;
 pub mod github;
 pub mod mcp_commands;

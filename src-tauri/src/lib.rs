@@ -433,6 +433,7 @@ pub fn run() {
             commands::usage_commands::get_usage_summary,
             commands::usage_commands::start_oauth_login,
             commands::usage_commands::await_oauth_completion,
+            commands::usage_commands::submit_oauth_callback,
             commands::usage_commands::cancel_oauth_login,
             // Multi-account (Phase 7)
             commands::usage_commands::get_active_subscriptions,
@@ -440,12 +441,6 @@ pub fn run() {
             commands::usage_commands::clear_active_subscription,
             commands::usage_commands::import_subscription_from_local,
             commands::usage_commands::get_subscription_api_key,
-            commands::cookie_import::start_cookie_import_session,
-            commands::cookie_import::get_cookie_import_status,
-            commands::cookie_import::cancel_cookie_import_session,
-            commands::cookie_import::get_cookie_import_subscription,
-            commands::cookie_import::get_cookie_bridge_binding_status,
-            commands::cookie_import::reset_cookie_bridge_binding,
             // Fingerprint management (Phase 4)
             commands::fingerprints::list_fingerprints,
             commands::fingerprints::get_fingerprint,

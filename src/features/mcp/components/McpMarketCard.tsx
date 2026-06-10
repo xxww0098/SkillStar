@@ -1,16 +1,20 @@
 import { Boxes, Check, Download, ExternalLink, Globe, Info, Star, Terminal } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
+import { CardDescription, CardTitle } from "../../../components/ui/card";
+import { CardTemplate } from "../../../components/ui/card-template";
 import { ExternalAnchor } from "../../../components/ui/ExternalAnchor";
+import { cn, formatInstalls } from "../../../lib/utils";
 import type { McpMarketEntry, McpServerKind } from "../../../types";
 
-function kindBadge(kind: McpServerKind): { icon: typeof Terminal; label: string } | null {
+function kindBadge(kind: McpServerKind): { icon: typeof Terminal; labelKey: string } | null {
   switch (kind) {
     case "stdio":
-      return { icon: Terminal, label: "本地" };
+      return { icon: Terminal, labelKey: "mcp.kindLocal" };
     case "remote":
-      return { icon: Globe, label: "远程" };
+      return { icon: Globe, labelKey: "mcp.kindRemote" };
     case "both":
-      return { icon: Boxes, label: "本地 / 远程" };
+      return { icon: Boxes, labelKey: "mcp.kindBoth" };
     default:
       return null;
   }
@@ -21,94 +25,112 @@ interface McpMarketCardProps {
   installed: boolean;
   onInstall: () => void;
   onOpenDetail: () => void;
+  compact?: boolean;
 }
 
-export function McpMarketCard({ entry, installed, onInstall, onOpenDetail }: McpMarketCardProps) {
+export function McpMarketCard({ entry, installed, onInstall, onOpenDetail, compact }: McpMarketCardProps) {
+  const { t } = useTranslation();
   const badge = kindBadge(entry.kind);
 
+  const statusAction = (
+    <Button
+      size="sm"
+      variant={installed ? "outline" : "default"}
+      disabled={installed}
+      onClick={(e) => {
+        e.stopPropagation();
+        onInstall();
+      }}
+      className="h-7 px-2.5 text-xs font-medium"
+    >
+      {installed ? (
+        <>
+          <Check className="h-3.5 w-3.5" />
+          {t("mcp.presetAdded")}
+        </>
+      ) : (
+        <>
+          <Download className="h-3.5 w-3.5" />
+          {t("mcp.install")}
+        </>
+      )}
+    </Button>
+  );
+
   return (
-    <div className="group flex flex-col gap-2 rounded-xl border border-border/60 bg-card/40 p-4 transition hover:border-primary/30">
-      <div className="flex items-center gap-2">
-        <Boxes className="h-4 w-4 shrink-0 text-primary" />
-        <button
-          type="button"
-          onClick={onOpenDetail}
-          className="truncate text-left text-sm font-semibold text-foreground hover:text-primary"
-          title={entry.namespace}
-        >
-          {entry.name}
-        </button>
-        {badge ? (
-          <span className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-            <badge.icon className="h-3 w-3" />
-            {badge.label}
-          </span>
-        ) : null}
-      </div>
+    <CardTemplate
+      className={cn("group cursor-pointer", compact && "p-2")}
+      onClick={onOpenDetail}
+      topRightSlot={statusAction}
+      headerClassName="pr-24"
+      header={
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10">
+            <Boxes className="h-4 w-4 text-primary" />
+          </div>
+          <div className="min-w-0">
+            <CardTitle className="truncate ss-card-title">{entry.name}</CardTitle>
+            <span className="block truncate ss-card-meta" title={entry.namespace}>
+              {entry.namespace}
+            </span>
+          </div>
+        </div>
+      }
+      bodyClassName="flex-1"
+      body={
+        <CardDescription className="ss-card-desc">
+          {entry.description || t("detailPanel.noDescription")}
+        </CardDescription>
+      }
+      footerClassName="ss-card-footer flex items-center justify-between mt-auto rounded-b-xl"
+      footer={
+        <>
+          <div className="flex min-w-0 items-center gap-2">
+            {entry.stars > 0 ? (
+              <span className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground tabular-nums">
+                <Star className="h-3.5 w-3.5 text-primary/60" />
+                {formatInstalls(entry.stars)}
+              </span>
+            ) : null}
+            {badge ? (
+              <span className="inline-flex h-4 items-center gap-1 rounded bg-muted/70 px-1.5 text-micro text-muted-foreground">
+                <badge.icon className="h-3 w-3" />
+                {t(badge.labelKey)}
+              </span>
+            ) : null}
+            {entry.runtimes.slice(0, 2).map((rt) => (
+              <span key={rt} className="rounded bg-muted/70 px-1.5 py-0.5 font-mono text-micro text-muted-foreground">
+                {rt}
+              </span>
+            ))}
+            {entry.version ? <span className="text-micro text-muted-foreground/70">v{entry.version}</span> : null}
+          </div>
 
-      <p className="truncate text-[11px] text-muted-foreground/70" title={entry.namespace}>
-        {entry.namespace}
-      </p>
-
-      {entry.description ? (
-        <p className="line-clamp-2 text-[11px] text-muted-foreground/80">{entry.description}</p>
-      ) : null}
-
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground/70">
-        {entry.stars > 0 ? (
-          <span className="inline-flex items-center gap-1">
-            <Star className="h-3 w-3" />
-            {entry.stars.toLocaleString()}
-          </span>
-        ) : null}
-        {entry.runtimes.map((rt) => (
-          <span key={rt} className="rounded bg-muted/70 px-1.5 py-0.5 font-mono">
-            {rt}
-          </span>
-        ))}
-        {entry.version ? <span>v{entry.version}</span> : null}
-      </div>
-
-      <div className="mt-auto flex items-center justify-between gap-2 pt-1">
-        <div className="flex items-center gap-2">
-          {entry.repoUrl ? (
-            <ExternalAnchor
-              href={entry.repoUrl}
+          <div className="relative z-10 flex shrink-0 items-center gap-2">
+            {entry.repoUrl ? (
+              <ExternalAnchor
+                href={entry.repoUrl}
+                onClick={(e) => e.stopPropagation()}
+                className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+              >
+                <ExternalLink className="h-3 w-3" />
+                {t("mcp.repo")}
+              </ExternalAnchor>
+            ) : null}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenDetail();
+              }}
               className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
             >
-              <ExternalLink className="h-3 w-3" />
-              仓库
-            </ExternalAnchor>
-          ) : null}
-          <button
-            type="button"
-            onClick={onOpenDetail}
-            className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
-          >
-            <Info className="h-3 w-3" />
-            详情
-          </button>
-        </div>
-        <Button
-          size="sm"
-          variant={installed ? "outline" : "default"}
-          disabled={installed}
-          onClick={onInstall}
-          className="gap-1.5"
-        >
-          {installed ? (
-            <>
-              <Check className="h-3.5 w-3.5" />
-              已安装
-            </>
-          ) : (
-            <>
-              <Download className="h-3.5 w-3.5" />
-              安装
-            </>
-          )}
-        </Button>
-      </div>
-    </div>
+              <Info className="h-3 w-3" />
+              {t("common.details")}
+            </button>
+          </div>
+        </>
+      }
+    />
   );
 }

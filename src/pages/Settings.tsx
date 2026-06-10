@@ -13,7 +13,6 @@ import {
   readBackgroundRun,
   writeBackgroundRun,
 } from "../features/settings/sections/BackgroundRunSection";
-import { CookieBridgeSection } from "../features/settings/sections/CookieBridgeSection";
 import { FingerprintsSection } from "../features/settings/sections/FingerprintsSection";
 import { GitHubMirrorSection } from "../features/settings/sections/GitHubMirrorSection";
 import { LanguageSection } from "../features/settings/sections/LanguageSection";
@@ -679,10 +678,6 @@ export function Settings({
 
               <section id="settings-acp" className="scroll-mt-3">
                 <AcpSection />
-              </section>
-
-              <section id="settings-cookie-bridge" className="scroll-mt-3">
-                <CookieBridgeSection />
               </section>
 
               <section id="settings-fingerprints" className="scroll-mt-3">

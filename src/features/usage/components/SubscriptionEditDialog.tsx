@@ -1,18 +1,19 @@
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { ChevronDown, Copy, ExternalLink, Eye, EyeOff, FolderInput, Loader2, Trash2, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { openExternalUrl } from "@/lib/externalOpen";
-import { cn, navigateToSettingsSection } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { usageApi } from "../api";
 import {
   LOCAL_IMPORT_CATALOG_IDS,
   type AuthMode,
   type BillingCycle,
   type CatalogEntry,
+  type OAuthStart,
   selectableAuthModes,
   type Subscription,
 } from "../types";
@@ -66,10 +67,13 @@ export function SubscriptionEditDialog({
   const [note, setNote] = useState("");
   const [fingerprintId, setFingerprintId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [oauthStart, setOauthStart] = useState<OAuthStart | null>(null);
   const [oauthPendingId, setOauthPendingId] = useState<string | null>(null);
   const [oauthStatus, setOauthStatus] = useState<string | null>(null);
-  const [oauthUserCode, setOauthUserCode] = useState<string | null>(null);
+  const [oauthCallbackInput, setOauthCallbackInput] = useState("");
+  const [oauthSubmittingCallback, setOauthSubmittingCallback] = useState(false);
   const [deleteConfirming, setDeleteConfirming] = useState(false);
+  const oauthCancelledRef = useRef<string | null>(null);
 
   // 折叠与自动化控制
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -128,9 +132,12 @@ export function SubscriptionEditDialog({
       setFingerprintId(null);
     }
     setShowKey(false);
+    setOauthStart(null);
     setOauthPendingId(null);
     setOauthStatus(null);
-    setOauthUserCode(null);
+    setOauthCallbackInput("");
+    setOauthSubmittingCallback(false);
+    oauthCancelledRef.current = null;
   }, [open, editing, preselectCatalogId, t]);
 
   useEffect(() => {
@@ -321,52 +328,42 @@ export function SubscriptionEditDialog({
     }
   };
 
-  const startOAuthFlow = async () => {
-    if (!catalogId) {
-      toast.error(t("usage.toastSelectProvider"));
-      return;
-    }
-    setSubmitting(true);
-    setOauthStatus(t("usage.oauthGenerating"));
-    try {
-      const start = await usageApi.startOAuthLogin(
-        catalogId,
-        selectedEntry?.regions.length ? region : undefined,
-        isCreate ? undefined : editing.id,
-      );
-      setOauthPendingId(start.pending_id);
-      setOauthUserCode(start.user_code ?? null);
-      setOauthStatus(t("usage.oauthWaiting"));
-      await openExternalUrl(start.auth_url);
-
-      const created = await usageApi.awaitOAuthCompletion(start.pending_id);
-      const meta = buildPayload();
-      if (meta.monthly_price || meta.renew_date || meta.start_date || meta.plan_tier || meta.note) {
-        try {
-          const updated = await usageApi.updateSubscription(created.id, meta);
-          if (isCreate) {
-            onCreated(updated);
-          } else {
-            onUpdated(updated);
-          }
-        } catch (e) {
-          if (import.meta.env.DEV) console.warn("[usage] post-OAuth metadata update failed", e);
-          if (isCreate) {
-            onCreated(created);
-          } else {
-            onUpdated(created);
-          }
+  const finishOAuthSubscription = async (created: Subscription) => {
+    const meta = buildPayload();
+    if (meta.monthly_price || meta.renew_date || meta.start_date || meta.plan_tier || meta.note) {
+      try {
+        const updated = await usageApi.updateSubscription(created.id, meta);
+        if (isCreate) {
+          onCreated(updated);
+        } else {
+          onUpdated(updated);
         }
-      } else {
+      } catch (e) {
+        if (import.meta.env.DEV) console.warn("[usage] post-OAuth metadata update failed", e);
         if (isCreate) {
           onCreated(created);
         } else {
           onUpdated(created);
         }
       }
+      return;
+    }
+
+    if (isCreate) {
+      onCreated(created);
+    } else {
+      onUpdated(created);
+    }
+  };
+
+  const waitForOAuthCompletion = async (pendingId: string) => {
+    try {
+      const created = await usageApi.awaitOAuthCompletion(pendingId);
+      await finishOAuthSubscription(created);
       toast.success(isCreate ? t("usage.toastAdded") : t("usage.toastUpdated"));
       onClose();
     } catch (err) {
+      if (oauthCancelledRef.current === pendingId) return;
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[usage] OAuth login failed", {
         catalogId,
@@ -377,9 +374,51 @@ export function SubscriptionEditDialog({
       });
       toast.error(t("usage.toastLoginFailed", { error: msg }));
     } finally {
+      if (oauthCancelledRef.current === pendingId) {
+        oauthCancelledRef.current = null;
+      }
+      setOauthStart(null);
       setOauthPendingId(null);
       setOauthStatus(null);
-      setOauthUserCode(null);
+      setOauthCallbackInput("");
+      setOauthSubmittingCallback(false);
+    }
+  };
+
+  const startOAuthFlow = async () => {
+    if (!catalogId) {
+      toast.error(t("usage.toastSelectProvider"));
+      return;
+    }
+    setSubmitting(true);
+    setOauthStart(null);
+    setOauthCallbackInput("");
+    setOauthStatus(t("usage.oauthGenerating"));
+    try {
+      const start = await usageApi.startOAuthLogin(
+        catalogId,
+        selectedEntry?.regions.length ? region : undefined,
+        isCreate ? undefined : editing.id,
+      );
+      oauthCancelledRef.current = null;
+      setOauthStart(start);
+      setOauthPendingId(start.pending_id);
+      setOauthStatus(t("usage.oauthWaiting"));
+      void waitForOAuthCompletion(start.pending_id);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[usage] OAuth login failed", {
+        catalogId,
+        region,
+        authMode,
+        subscriptionId: editing?.id,
+        error: err,
+      });
+      toast.error(t("usage.toastLoginFailed", { error: msg }));
+      setOauthStart(null);
+      setOauthPendingId(null);
+      setOauthStatus(null);
+    } finally {
       setSubmitting(false);
     }
   };
@@ -404,32 +443,72 @@ export function SubscriptionEditDialog({
     }
   };
 
-  const openCookieBridgeSettings = async () => {
-    navigateToSettingsSection("cookie-bridge");
-    await openExternalUrl("https://opencode.ai/workspace/default/go");
+  const copyAuthLink = async () => {
+    if (!oauthStart?.auth_url) return;
+    try {
+      await navigator.clipboard.writeText(oauthStart.auth_url);
+      toast.success(t("usage.oauthLinkCopied"));
+    } catch {
+      toast.error(t("common.copyFailed", { defaultValue: "Copy failed" }));
+    }
+  };
+
+  const openOAuthLink = async () => {
+    if (!oauthStart?.auth_url) return;
+    await openExternalUrl(oauthStart.auth_url);
   };
 
   const copyDeviceCode = async () => {
-    if (!oauthUserCode) return;
+    if (!oauthStart?.user_code) return;
     try {
-      await navigator.clipboard.writeText(oauthUserCode);
+      await navigator.clipboard.writeText(oauthStart.user_code);
       toast.success(t("usage.oauthCodeCopied"));
     } catch {
       toast.error(t("common.copyFailed", { defaultValue: "Copy failed" }));
     }
   };
 
+  const submitOAuthCallback = async () => {
+    if (!oauthPendingId) return;
+    if (!oauthCallbackInput.trim()) {
+      toast.error(t("usage.oauthCallbackRequired"));
+      return;
+    }
+    setOauthSubmittingCallback(true);
+    try {
+      await usageApi.submitOAuthCallback(oauthPendingId, oauthCallbackInput);
+      setOauthStatus(t("usage.oauthCompleting"));
+      toast.success(t("usage.oauthCallbackSubmitted"));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(t("usage.oauthCallbackFailed", { error: msg }));
+    } finally {
+      setOauthSubmittingCallback(false);
+    }
+  };
+
   const cancelOAuth = async () => {
     if (!oauthPendingId) return;
+    const pendingId = oauthPendingId;
+    oauthCancelledRef.current = pendingId;
     try {
-      await usageApi.cancelOAuthLogin(oauthPendingId);
+      await usageApi.cancelOAuthLogin(pendingId);
     } catch {
       /* ignore */
     }
+    setOauthStart(null);
     setOauthPendingId(null);
     setOauthStatus(null);
-    setOauthUserCode(null);
+    setOauthCallbackInput("");
+    setOauthSubmittingCallback(false);
     setSubmitting(false);
+  };
+
+  const requestClose = () => {
+    if (oauthPendingId) {
+      void cancelOAuth();
+    }
+    onClose();
   };
 
   return (
@@ -440,7 +519,7 @@ export function SubscriptionEditDialog({
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         className="fixed inset-0 z-[80] flex items-center justify-center bg-overlay p-4 backdrop-blur-sm"
-        onClick={onClose}
+        onClick={requestClose}
       >
         <motion.div
           key="dialog"
@@ -459,7 +538,7 @@ export function SubscriptionEditDialog({
             <button
               type="button"
               className="text-muted-foreground hover:text-foreground transition-colors"
-              onClick={onClose}
+              onClick={requestClose}
               aria-label={t("common.close")}
             >
               <X className="h-4 w-4" />
@@ -562,6 +641,121 @@ export function SubscriptionEditDialog({
               </Field>
             ) : null}
 
+            {authMode === "o-auth" && selectedEntry && (
+              <div className="space-y-3 rounded-2xl border border-border bg-muted/30 p-3.5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-foreground">{t("usage.oauthPanelTitle")}</p>
+                    <p className="mt-1 max-w-[62ch] text-[10px] leading-relaxed text-muted-foreground">
+                      {t("usage.oauthPanelDesc", { provider: selectedEntry.display_name })}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={startOAuthFlow}
+                    disabled={submitting || !!oauthPendingId || !catalogId}
+                    className="shrink-0"
+                  >
+                    {submitting && authMode === "o-auth" ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    )}
+                    {oauthPendingId ? t("usage.btnWaitingLogin") : t("usage.oauthStartLogin")}
+                  </Button>
+                </div>
+
+                {oauthStart ? (
+                  <div className="rounded-xl border border-dashed border-border bg-background/60 p-3">
+                    <p className="text-[10px] font-semibold text-muted-foreground">{t("usage.oauthAuthLink")}</p>
+                    <p className="mt-1 max-h-24 overflow-y-auto break-all rounded-lg bg-muted/50 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-foreground">
+                      {oauthStart.auth_url}
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <Button type="button" size="xs" variant="outline" onClick={copyAuthLink}>
+                        <Copy className="h-3 w-3" />
+                        {t("usage.oauthCopyLink")}
+                      </Button>
+                      <Button type="button" size="xs" variant="outline" onClick={openOAuthLink}>
+                        <ExternalLink className="h-3 w-3" />
+                        {t("usage.oauthOpenLink")}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="rounded-xl border border-dashed border-border bg-background/40 px-3 py-2 text-[10px] text-muted-foreground">
+                    {t("usage.oauthLinkPlaceholder")}
+                  </p>
+                )}
+
+                {oauthStart?.user_code && (
+                  <div className="space-y-1.5 rounded-xl border border-primary/20 bg-primary/5 p-3">
+                    <p className="text-[10px] font-semibold text-foreground">{t("usage.oauthDeviceCodeTitle")}</p>
+                    <p className="text-[9px] text-muted-foreground">{t("usage.oauthDeviceCodeHint")}</p>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 rounded-lg border border-border bg-background px-2.5 py-1.5 text-center text-base font-bold tracking-[0.18em] text-foreground tabular-nums">
+                        {oauthStart.user_code}
+                      </code>
+                      <Button type="button" size="xs" variant="outline" onClick={copyDeviceCode}>
+                        <Copy className="h-3 w-3" />
+                        {t("usage.oauthCopyCode")}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-1.5">
+                  <p className="text-[10px] font-semibold text-foreground">{t("usage.oauthCallbackLabel")}</p>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Input
+                      value={oauthCallbackInput}
+                      onChange={(e) => setOauthCallbackInput(e.target.value)}
+                      placeholder={t("usage.oauthCallbackPlaceholder")}
+                      disabled={!oauthPendingId || oauthSubmittingCallback}
+                      className="h-9 rounded-xl border-input-border bg-input text-xs text-foreground"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={submitOAuthCallback}
+                      disabled={!oauthPendingId || oauthSubmittingCallback || !oauthCallbackInput.trim()}
+                      className="shrink-0"
+                    >
+                      {oauthSubmittingCallback && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                      {t("usage.oauthSubmitCallback")}
+                    </Button>
+                  </div>
+                  <p className="text-[9px] leading-relaxed text-muted-foreground">{t("usage.oauthCallbackHint")}</p>
+                </div>
+
+                {oauthStatus && (
+                  <div className="relative flex items-center gap-2 overflow-hidden rounded-xl border border-primary/20 bg-primary/10 px-3 py-2 text-[10px] text-primary">
+                    <motion.span
+                      className="pointer-events-none absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-transparent via-primary/15 to-transparent"
+                      animate={reduceMotion ? undefined : { x: ["-120%", "320%"] }}
+                      transition={reduceMotion ? undefined : { duration: 1.7, repeat: Infinity, ease: "linear" }}
+                    />
+                    <Loader2 className="relative h-3.5 w-3.5 animate-spin" />
+                    <div className="relative min-w-0 flex-1">
+                      <p className="font-semibold">{oauthStatus}</p>
+                      <p className="mt-0.5 text-[9px] text-primary/75">{t("usage.oauthWaitingHint")}</p>
+                    </div>
+                    {oauthPendingId && (
+                      <button
+                        type="button"
+                        className="relative shrink-0 rounded-full px-2 py-1 underline hover:bg-primary/10"
+                        onClick={cancelOAuth}
+                      >
+                        {t("usage.cancelOAuth")}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* ── 极其简化的核心字段 (Collapsible Minimal Form Fields) ── */}
             {selectedEntry && (
               <div className="space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
@@ -626,29 +820,6 @@ export function SubscriptionEditDialog({
                               ? "按量付费 AI 网关"
                               : "请选择 Go 或 Zen"}
                         </p>
-                      </div>
-                    )}
-
-                    {catalogId === "opencode" && (
-                      <div className="rounded-xl border border-primary/20 bg-primary/5 p-2.5">
-                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                          <div>
-                            <p className="text-[10px] font-bold text-primary">浏览器插件导入</p>
-                            <p className="mt-1 text-[9px] leading-snug text-muted-foreground">
-                              首次用绑定码连接 SkillStar；绑定后，插件会记住本机连接，后续点击即可推送 Cookie。
-                            </p>
-                          </div>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={openCookieBridgeSettings}
-                            disabled={submitting}
-                            className="shrink-0 rounded-lg"
-                          >
-                            去设置中绑定
-                          </Button>
-                        </div>
                       </div>
                     )}
 
@@ -752,53 +923,6 @@ export function SubscriptionEditDialog({
             )}
           </div>
 
-          {oauthUserCode && (
-            <div className="shrink-0 space-y-1.5 border-t border-border bg-muted/30 px-5 py-3">
-              <p className="text-[10px] font-semibold text-foreground">{t("usage.oauthDeviceCodeTitle")}</p>
-              <p className="text-[9px] text-muted-foreground">{t("usage.oauthDeviceCodeHint")}</p>
-              <div className="mt-1 flex items-center gap-2">
-                <code className="flex-1 rounded-lg border border-border bg-background px-2.5 py-1.5 text-center text-lg font-bold tracking-[0.2em] text-foreground tabular-nums">
-                  {oauthUserCode}
-                </code>
-                <Button type="button" size="sm" variant="outline" onClick={copyDeviceCode} className="rounded-lg h-9">
-                  <Copy className="h-3.5 w-3.5 mr-1" />
-                  {t("usage.oauthCopyCode")}
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {oauthStatus && (
-            <div className="relative flex shrink-0 items-center gap-3 overflow-hidden border-t border-border bg-primary/10 px-5 py-3 text-[10px] text-primary">
-              <motion.div
-                className="pointer-events-none absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-transparent via-primary/15 to-transparent"
-                animate={reduceMotion ? undefined : { x: ["-120%", "320%"] }}
-                transition={reduceMotion ? undefined : { duration: 1.7, repeat: Infinity, ease: "linear" }}
-              />
-              <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/20">
-                <motion.span
-                  className="absolute inset-0 rounded-full border border-primary/30"
-                  animate={reduceMotion ? undefined : { scale: [0.75, 1.35], opacity: [0.6, 0] }}
-                  transition={reduceMotion ? undefined : { duration: 1.2, repeat: Infinity, ease: "easeOut" }}
-                />
-                <Loader2 className="relative h-4 w-4 animate-spin" />
-              </div>
-              <div className="relative flex-1">
-                <p className="font-semibold">{oauthStatus}</p>
-                <p className="mt-0.5 text-[9px] text-primary/70">{t("usage.oauthWaitingHint")}</p>
-              </div>
-              {oauthPendingId && (
-                <button
-                  type="button"
-                  className="relative rounded-full px-2 py-1 text-primary underline hover:bg-primary/10 hover:text-primary-hover"
-                  onClick={cancelOAuth}
-                >
-                  {t("usage.cancelOAuth")}
-                </button>
-              )}
-            </div>
-          )}
-
           <footer className="flex shrink-0 justify-between border-t border-border bg-muted/30 px-5 py-3">
             <div>
               {!isCreate && (
@@ -809,7 +933,7 @@ export function SubscriptionEditDialog({
               )}
             </div>
             <div className="flex gap-2">
-              <Button variant="ghost" size="sm" onClick={onClose} disabled={submitting}>
+              <Button variant="ghost" size="sm" onClick={requestClose} disabled={submitting}>
                 {t("common.cancel")}
               </Button>
               {authMode === "o-auth" ? (
@@ -819,24 +943,15 @@ export function SubscriptionEditDialog({
                       size="sm"
                       variant="outline"
                       onClick={importFromLocal}
-                      disabled={submitting || !catalogId}
+                      disabled={submitting || !!oauthPendingId || !catalogId}
                       title={t("usage.importFromLocalHint")}
                     >
                       <FolderInput className="mr-1 h-3.5 w-3.5" />
                       {t("usage.importFromLocal")}
                     </Button>
                   )}
-                  <Button
-                    size="sm"
-                    variant={isCreate ? "default" : "outline"}
-                    onClick={startOAuthFlow}
-                    disabled={submitting || !catalogId}
-                  >
-                    <ExternalLink className="h-3.5 w-3.5 mr-1" />
-                    {submitting ? t("usage.btnWaitingLogin") : t("usage.btnLoginBrowser")}
-                  </Button>
                   {!isCreate && (
-                    <Button size="sm" onClick={submit} disabled={submitting} className="px-5">
+                    <Button size="sm" onClick={submit} disabled={submitting || !!oauthPendingId} className="px-5">
                       {submitting ? t("common.saving") : t("common.save")}
                     </Button>
                   )}

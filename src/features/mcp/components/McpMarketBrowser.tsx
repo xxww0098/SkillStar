@@ -1,40 +1,85 @@
 import { useQuery } from "@tanstack/react-query";
-import { Download, ExternalLink, Globe, RefreshCw, Search, Star, Terminal } from "lucide-react";
-import { useState } from "react";
+import { Download, ExternalLink, Globe, RefreshCw, Star, Terminal } from "lucide-react";
+import { type CSSProperties, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
+import { EmptyState } from "../../../components/ui/EmptyState";
 import { ExternalAnchor } from "../../../components/ui/ExternalAnchor";
+import { LoadingLogo } from "../../../components/ui/LoadingLogo";
 import { Markdown } from "../../../components/ui/Markdown";
 import { tauriInvoke } from "../../../lib/ipc";
-import type { LocalFirstResult, McpMarketServerDetail } from "../../../types";
+import { cn } from "../../../lib/utils";
+import type { LocalFirstResult, McpMarketEntry, McpMarketServerDetail, SnapshotStatus, ViewMode } from "../../../types";
 import { ProviderDrawer } from "../../models/components/hub/ProviderDrawer";
-import { useMcpMarketplace } from "../hooks/useMcpMarketplace";
 import { McpMarketCard } from "./McpMarketCard";
 
-function statusHint(status: string | undefined, updatedAt: string | null): string {
-  switch (status) {
-    case "seeding":
-      return "首次从 GitHub MCP Registry 加载…";
-    case "stale":
-      return "正在后台更新…";
-    case "remote_error":
-      return "加载失败，请检查网络后重试";
-    case "miss":
-      return "暂无数据";
-    default:
-      return updatedAt ? `已更新 · ${new Date(updatedAt).toLocaleString()}` : "本地优先 · GitHub MCP Registry";
-  }
-}
+const GRID_GAP_PX = 16;
+const MCP_MIN_COLUMN_WIDTH = 320;
 
 interface McpMarketBrowserProps {
   /** Names of already-installed MCP servers, for the "已安装" badge. */
   installedNames: Set<string>;
   /** Open the create form prefilled from this marketplace entry id. */
   onInstall: (id: string) => void;
+  entries: McpMarketEntry[];
+  status?: SnapshotStatus;
+  isLoading: boolean;
+  query: string;
+  refreshing: boolean;
+  onRefresh: () => void;
+  viewMode: ViewMode;
 }
 
-export function McpMarketBrowser({ installedNames, onInstall }: McpMarketBrowserProps) {
-  const { entries, status, updatedAt, isLoading, query, setQuery, refresh, refreshing } = useMcpMarketplace();
+export function McpMarketBrowser({
+  installedNames,
+  onInstall,
+  entries,
+  status,
+  isLoading,
+  query,
+  refreshing,
+  onRefresh,
+  viewMode,
+}: McpMarketBrowserProps) {
+  const { t } = useTranslation();
   const [detailId, setDetailId] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const prevColCountRef = useRef(0);
+
+  const gridColumnCount = useMemo(() => {
+    if (viewMode !== "grid") return 1;
+    if (containerWidth === 0) return prevColCountRef.current || 1;
+
+    const safeMinWidth = Math.max(220, MCP_MIN_COLUMN_WIDTH);
+    let cols = Math.max(1, Math.floor((containerWidth + GRID_GAP_PX) / (safeMinWidth + GRID_GAP_PX)));
+    if (prevColCountRef.current > 0 && cols < prevColCountRef.current) {
+      const thresholdForPrev = prevColCountRef.current * (safeMinWidth + GRID_GAP_PX) - GRID_GAP_PX;
+      if (containerWidth >= thresholdForPrev - 8) {
+        cols = prevColCountRef.current;
+      }
+    }
+    prevColCountRef.current = cols;
+    return cols;
+  }, [containerWidth, viewMode]);
+
+  const hasEntries = entries.length > 0;
+  useLayoutEffect(() => {
+    const element = containerRef.current;
+    if (!element) return;
+
+    const updateWidth = () => setContainerWidth(element.clientWidth);
+    updateWidth();
+
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [hasEntries]);
+
+  const gridStyle: CSSProperties | undefined =
+    viewMode === "grid" && gridColumnCount > 0
+      ? { gridTemplateColumns: `repeat(${gridColumnCount}, minmax(0, 1fr))` }
+      : undefined;
 
   const detailQuery = useQuery<LocalFirstResult<McpMarketServerDetail | null>>({
     queryKey: ["mcp-market", "detail", detailId],
@@ -44,49 +89,47 @@ export function McpMarketBrowser({ installedNames, onInstall }: McpMarketBrowser
   const detail = detailQuery.data?.data ?? null;
 
   return (
-    <section>
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <div className="relative min-w-[220px] flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/60" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索 MCP 服务器（名称 / 描述）"
-            className="h-9 w-full rounded-lg border border-border/60 bg-card/50 pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground/60 focus:border-primary/40 focus:outline-none"
-          />
-        </div>
-        <Button variant="outline" size="sm" onClick={() => refresh()} disabled={refreshing} className="gap-1.5">
-          <RefreshCw className={refreshing ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
-          刷新
-        </Button>
-      </div>
-
-      <p className="mb-3 text-[11px] text-muted-foreground/70">{statusHint(status, updatedAt)}</p>
-
+    <section className="ss-page-stack">
       {isLoading || status === "seeding" ? (
-        <div className="rounded-xl border border-border/55 bg-card/40 px-6 py-10 text-center text-sm text-muted-foreground">
-          加载中…
+        <div className="flex items-center justify-center py-20">
+          <LoadingLogo size="lg" label={t("mcp.marketLoading")} />
         </div>
       ) : entries.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border/60 bg-card/50 px-8 py-12 text-center">
-          <p className="text-sm text-muted-foreground">{query ? "没有匹配的 MCP 服务器" : "暂无可浏览的 MCP 服务器"}</p>
-          {status === "remote_error" ? (
-            <Button variant="outline" onClick={() => refresh()} className="mt-4 gap-1.5">
-              <RefreshCw className="h-4 w-4" />
-              重试
-            </Button>
-          ) : null}
-        </div>
+        <EmptyState
+          title={query ? t("mcp.marketNoMatches") : t("mcp.marketEmptyTitle")}
+          description={
+            status === "remote_error"
+              ? t("mcp.marketRemoteErrorDescription")
+              : query
+                ? t("mcp.marketNoMatchesDescription")
+                : t("mcp.marketEmptyDescription")
+          }
+          action={
+            status === "remote_error" ? (
+              <Button variant="outline" onClick={onRefresh} disabled={refreshing} className="gap-1.5">
+                <RefreshCw className={refreshing ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+                {t("common.retry")}
+              </Button>
+            ) : null
+          }
+          size="lg"
+        />
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div
+          ref={containerRef}
+          className={cn(viewMode === "grid" ? "ss-cards-grid" : "ss-cards-list")}
+          style={gridStyle}
+        >
           {entries.map((entry) => (
-            <McpMarketCard
-              key={entry.id}
-              entry={entry}
-              installed={installedNames.has(entry.name)}
-              onInstall={() => onInstall(entry.id)}
-              onOpenDetail={() => setDetailId(entry.id)}
-            />
+            <div key={entry.id} className="h-full">
+              <McpMarketCard
+                entry={entry}
+                installed={installedNames.has(entry.name)}
+                compact={viewMode === "list"}
+                onInstall={() => onInstall(entry.id)}
+                onOpenDetail={() => setDetailId(entry.id)}
+              />
+            </div>
           ))}
         </div>
       )}
@@ -96,11 +139,13 @@ export function McpMarketBrowser({ installedNames, onInstall }: McpMarketBrowser
         onOpenChange={(open) => {
           if (!open) setDetailId(null);
         }}
-        title={<span className="text-foreground">{detail?.name ?? "MCP 服务器"}</span>}
+        title={<span className="text-foreground">{detail?.name ?? t("mcp.title")}</span>}
         subtitle={detail?.namespace}
       >
         {detailQuery.isLoading ? (
-          <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">加载中…</div>
+          <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+            {t("common.loading")}
+          </div>
         ) : detail ? (
           <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
@@ -115,7 +160,7 @@ export function McpMarketBrowser({ installedNames, onInstall }: McpMarketBrowser
               {detail.repoUrl ? (
                 <ExternalAnchor href={detail.repoUrl} className="inline-flex items-center gap-1 hover:text-foreground">
                   <ExternalLink className="h-3.5 w-3.5" />
-                  仓库
+                  {t("mcp.repo")}
                 </ExternalAnchor>
               ) : null}
             </div>
@@ -132,14 +177,14 @@ export function McpMarketBrowser({ installedNames, onInstall }: McpMarketBrowser
               className="w-full gap-1.5"
             >
               <Download className="h-4 w-4" />
-              {installedNames.has(detail.name) ? "已安装" : "安装到工具…"}
+              {installedNames.has(detail.name) ? t("mcp.presetAdded") : t("mcp.installToTools")}
             </Button>
 
             {detail.packages.length > 0 ? (
               <div className="space-y-2">
                 <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   <Terminal className="h-3.5 w-3.5" />
-                  本地运行 (stdio)
+                  {t("mcp.localRun")}
                 </h4>
                 {detail.packages.map((pkg) => (
                   <div
@@ -152,7 +197,7 @@ export function McpMarketBrowser({ installedNames, onInstall }: McpMarketBrowser
                     </code>
                     {pkg.requiredEnv.length > 0 ? (
                       <p className="mt-1.5 text-[11px] text-amber-600 dark:text-amber-400">
-                        需填写：{pkg.requiredEnv.join(", ")}
+                        {t("mcp.requiredEnv", { keys: pkg.requiredEnv.join(", ") })}
                       </p>
                     ) : null}
                   </div>
@@ -164,7 +209,7 @@ export function McpMarketBrowser({ installedNames, onInstall }: McpMarketBrowser
               <div className="space-y-2">
                 <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   <Globe className="h-3.5 w-3.5" />
-                  远程端点 (http / sse)
+                  {t("mcp.remoteEndpoints")}
                 </h4>
                 {detail.remotes.map((remote) => (
                   <div key={remote.url} className="rounded-lg border border-border/50 bg-card/40 p-3 text-xs">
@@ -173,7 +218,7 @@ export function McpMarketBrowser({ installedNames, onInstall }: McpMarketBrowser
                     </code>
                     {remote.requiredHeaders.length > 0 ? (
                       <p className="mt-1.5 text-[11px] text-amber-600 dark:text-amber-400">
-                        需填写请求头：{remote.requiredHeaders.join(", ")}
+                        {t("mcp.requiredHeaders", { keys: remote.requiredHeaders.join(", ") })}
                       </p>
                     ) : null}
                   </div>
@@ -191,7 +236,7 @@ export function McpMarketBrowser({ installedNames, onInstall }: McpMarketBrowser
             ) : null}
           </div>
         ) : (
-          <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">未找到该服务器</div>
+          <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">{t("mcp.notFound")}</div>
         )}
       </ProviderDrawer>
     </section>

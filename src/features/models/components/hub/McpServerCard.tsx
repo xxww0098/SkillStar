@@ -1,5 +1,8 @@
 import { Globe, Terminal } from "lucide-react";
 import { AgentIcon } from "../../../../components/ui/AgentIcon";
+import { CardDescription, CardTitle } from "../../../../components/ui/card";
+import { CardTemplate } from "../../../../components/ui/card-template";
+import { HScrollRow } from "../../../../components/ui/HScrollRow";
 import { agentIconCls, cn } from "../../../../lib/utils";
 import { MCP_TOOL_IDS, type McpServerEntry, type McpToolId, type McpToolStatus } from "../../../../types";
 
@@ -27,63 +30,78 @@ export function McpServerCard({ server, toolStatuses, onOpen, onToggleTool }: Mc
   const isRemote = server.transport === "http" || server.transport === "sse";
   const summary = isRemote ? server.url : [server.command, ...(server.args ?? [])].filter(Boolean).join(" ");
   const enabledCount = MCP_TOOL_IDS.filter((t) => server.enabled[t]).length;
+  const TransportIcon = isRemote ? Globe : Terminal;
 
   return (
-    <div className="group flex flex-col gap-3 rounded-xl border border-border/55 bg-card/55 p-4 transition hover:border-primary/30 hover:bg-card/80">
-      <button type="button" onClick={onOpen} className="min-w-0 text-left">
-        <div className="flex items-center gap-2">
-          {isRemote ? (
-            <Globe className="h-4 w-4 shrink-0 text-sky-500" />
-          ) : (
-            <Terminal className="h-4 w-4 shrink-0 text-emerald-500" />
-          )}
-          <span className="truncate text-sm font-semibold text-foreground">{server.name}</span>
-          <span className="ml-auto shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-            {server.transport}
-          </span>
-        </div>
-        <p className="mt-1.5 truncate font-mono text-[11px] text-muted-foreground">{summary || "—"}</p>
-        {server.description ? (
-          <p className="mt-1 line-clamp-1 text-[11px] text-muted-foreground/80">{server.description}</p>
-        ) : null}
-      </button>
-
-      <div className="flex items-center gap-1.5">
-        {MCP_TOOL_IDS.map((toolId) => {
-          const on = server.enabled[toolId] ?? false;
-          const installed = toolStatuses.find((s) => s.toolId === toolId)?.installed ?? true;
-          const meta = MCP_TOOL_ICON[toolId];
-          return (
-            <button
-              key={toolId}
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleTool(toolId, !on);
-              }}
-              title={`${meta.label} ${on ? "(取消)" : "(激活)"}${installed ? "" : " · 未检测到安装"}`}
-              className={cn(
-                "w-7 h-7 shrink-0 rounded-lg flex items-center justify-center border transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-1 focus-visible:ring-offset-background",
-                on
-                  ? "border-primary/40 bg-primary/10 shadow-[0_0_0_1px_rgba(var(--color-primary-rgb),0.15)] hover:shadow-[0_0_0_1px_rgba(var(--color-primary-rgb),0.3)] hover:bg-primary/20"
-                  : "border-transparent bg-transparent hover:bg-muted",
-              )}
-            >
-              <AgentIcon
-                profile={{ id: meta.profileId, icon: meta.icon, display_name: meta.label }}
-                className={cn(
-                  agentIconCls(meta.icon, "w-4 h-4"),
-                  "transition-[filter,opacity] drop-shadow-sm",
-                  !on && "grayscale opacity-40 hover:opacity-70 hover:grayscale-0",
-                )}
-              />
-            </button>
-          );
-        })}
-        <span className="ml-auto self-center text-[10px] text-muted-foreground/70">
-          {enabledCount} / {MCP_TOOL_IDS.length}
+    <CardTemplate
+      className="group cursor-pointer"
+      onClick={onOpen}
+      topRightSlot={
+        <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+          {server.transport}
         </span>
-      </div>
-    </div>
+      }
+      headerClassName="pr-20"
+      header={
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10">
+            <TransportIcon className={cn("h-4 w-4", isRemote ? "text-sky-500" : "text-emerald-500")} />
+          </div>
+          <div className="min-w-0">
+            <CardTitle className="truncate ss-card-title">{server.name}</CardTitle>
+            <span className="block truncate font-mono ss-card-meta">{summary || "—"}</span>
+          </div>
+        </div>
+      }
+      bodyClassName="flex-1"
+      body={
+        <CardDescription className="ss-card-desc">
+          {server.description || (isRemote ? server.url : summary) || "—"}
+        </CardDescription>
+      }
+      footerClassName="ss-card-footer flex items-center justify-between mt-auto rounded-b-xl"
+      footer={
+        <>
+          <span className="text-micro text-muted-foreground/70 tabular-nums">
+            {enabledCount} / {MCP_TOOL_IDS.length}
+          </span>
+          <div className="relative z-10 flex min-w-0 flex-1 items-center justify-end gap-1.5">
+            <HScrollRow count={MCP_TOOL_IDS.length} itemWidth={28} gap={6} className="min-w-0 gap-1.5">
+              {MCP_TOOL_IDS.map((toolId) => {
+                const on = server.enabled[toolId] ?? false;
+                const installed = toolStatuses.find((s) => s.toolId === toolId)?.installed ?? true;
+                const meta = MCP_TOOL_ICON[toolId];
+                return (
+                  <button
+                    key={toolId}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggleTool(toolId, !on);
+                    }}
+                    title={`${meta.label} ${on ? "(取消)" : "(激活)"}${installed ? "" : " · 未检测到安装"}`}
+                    className={cn(
+                      "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-lg border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+                      on
+                        ? "border-primary/40 bg-primary/10 shadow-[0_0_0_1px_rgba(var(--color-primary-rgb),0.15)] hover:bg-primary/20 hover:shadow-[0_0_0_1px_rgba(var(--color-primary-rgb),0.3)]"
+                        : "border-transparent bg-transparent hover:bg-muted",
+                    )}
+                  >
+                    <AgentIcon
+                      profile={{ id: meta.profileId, icon: meta.icon, display_name: meta.label }}
+                      className={cn(
+                        agentIconCls(meta.icon, "w-4 h-4"),
+                        "drop-shadow-sm transition-[filter,opacity]",
+                        !on && "grayscale opacity-40 hover:opacity-70 hover:grayscale-0",
+                      )}
+                    />
+                  </button>
+                );
+              })}
+            </HScrollRow>
+          </div>
+        </>
+      }
+    />
   );
 }

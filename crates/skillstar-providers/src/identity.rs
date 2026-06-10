@@ -9,7 +9,7 @@
 //! - the catalog id `xiaomi-mimo` corresponds to the preset id `mimo`;
 //! - the catalog id `kimi` corresponds to presets `kimi` + `kimi-coding`;
 //! - many catalog ids (OAuth IDEs) have no preset, and many presets
-//!   (`qwen`, `openrouter`, …) have no subscription catalog entry.
+//!   (`openrouter`, `siliconflow`, …) have no subscription catalog entry.
 //!
 //! Rather than merge the two lists into one sparse mega-table — which would pull
 //! both domains' concerns into this leaf crate — we record the correspondence
@@ -67,18 +67,6 @@ pub const PROVIDER_IDENTITIES: &[ProviderIdentity] = &[
         preset_ids: &["mimo"],
     },
     // ── Models-only providers (routing presets with no subscription account) ──
-    ProviderIdentity {
-        canonical_id: "qwen",
-        display_name: "通义千问",
-        catalog_id: None,
-        preset_ids: &["qwen", "qwen-coding"],
-    },
-    ProviderIdentity {
-        canonical_id: "volcengine",
-        display_name: "火山方舟",
-        catalog_id: None,
-        preset_ids: &["volcengine"],
-    },
     ProviderIdentity {
         canonical_id: "openrouter",
         display_name: "OpenRouter",

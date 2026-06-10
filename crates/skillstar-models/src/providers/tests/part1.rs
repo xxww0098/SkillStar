@@ -557,7 +557,7 @@ use tempfile::TempDir;
     #[test]
     fn test_get_all_presets_flat_count() {
         let presets = get_all_presets_flat();
-        assert_eq!(presets.len(), 13);
+        assert_eq!(presets.len(), 10);
     }
     #[test]
     fn test_get_all_presets_flat_unique_ids() {
@@ -573,7 +573,7 @@ use tempfile::TempDir;
         let presets = get_all_presets_flat();
         let domestic: Vec<_> = presets.iter().filter(|p| p.category == "domestic").collect();
         let relay: Vec<_> = presets.iter().filter(|p| p.category == "relay").collect();
-        assert_eq!(domestic.len(), 10);
+        assert_eq!(domestic.len(), 7);
         assert_eq!(relay.len(), 2);
     }
     #[test]

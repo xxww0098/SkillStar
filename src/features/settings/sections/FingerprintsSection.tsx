@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronRight, Fingerprint } from "lucide-react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { FingerprintsPanel } from "@/features/fingerprints";
 
 /**
@@ -7,35 +8,47 @@ import { FingerprintsPanel } from "@/features/fingerprints";
  * Settings page; defaults to closed since most users won't touch this.
  */
 export function FingerprintsSection() {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
+
   return (
-    <div className="rounded-2xl border border-zinc-200/60 bg-white/70 backdrop-blur-sm">
-      <button
-        type="button"
-        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
-        onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
-      >
-        <div className="flex items-center gap-2">
-          <Fingerprint className="h-4 w-4 text-violet-500" />
+    <section>
+      <div className="flex items-center gap-2 mb-3 px-1">
+        <div className="w-7 h-7 rounded-lg bg-violet-500/10 flex items-center justify-center shrink-0 border border-violet-500/20">
+          <Fingerprint className="w-4 h-4 text-violet-400" />
+        </div>
+        <h2 className="text-sm font-semibold text-foreground tracking-tight">
+          {t("settings.fingerprintsTitle", { defaultValue: "设备指纹" })}
+        </h2>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card">
+        <button
+          type="button"
+          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left cursor-pointer select-none"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+        >
           <div>
-            <div className="text-sm font-semibold">设备指纹</div>
-            <div className="text-[11px] text-muted-foreground">
-              管理浏览器画像，绑定到 Usage 订阅以伪装 TLS / HTTP 头
-            </div>
+            <p className="text-xs font-medium text-foreground">
+              {t("settings.fingerprintsProfile", { defaultValue: "管理浏览器画像" })}
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              {t("settings.fingerprintsHint", { defaultValue: "绑定到 Usage 订阅以伪装 TLS / HTTP 头" })}
+            </p>
           </div>
-        </div>
-        {expanded ? (
-          <ChevronDown className="h-4 w-4 text-zinc-400" />
-        ) : (
-          <ChevronRight className="h-4 w-4 text-zinc-400" />
+          {expanded ? (
+            <ChevronDown className="w-4 h-4 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="w-4 h-4 text-muted-foreground" />
+          )}
+        </button>
+        {expanded && (
+          <div className="border-t border-border/50 px-4 py-4">
+            <FingerprintsPanel showHeader={false} />
+          </div>
         )}
-      </button>
-      {expanded && (
-        <div className="border-t border-zinc-200/60 px-4 py-4">
-          <FingerprintsPanel />
-        </div>
-      )}
-    </div>
+      </div>
+    </section>
   );
 }

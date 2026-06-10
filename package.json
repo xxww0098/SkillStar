@@ -13,7 +13,7 @@
     "format": "biome format --write .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "icon:sync": "bash .agents/skills/svg2icon/scripts/generate_tauri_icons.sh public/skillstar-icon.svg",
+    "icon:sync": "tauri icon public/skillstar-icon.svg",
     "avatars:sync": "node scripts/download_avatars.cjs"
   },
   "dependencies": {

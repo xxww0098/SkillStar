@@ -422,6 +422,16 @@ pub async fn await_oauth_completion(pending_id: String) -> Result<SubscriptionDt
 }
 
 #[tauri::command]
+pub async fn submit_oauth_callback(
+    pending_id: String,
+    callback_input: String,
+) -> Result<(), AppError> {
+    skillstar_usage::oauth::manual_callback::submit(&pending_id, &callback_input)
+        .await
+        .map_err(map_err)
+}
+
+#[tauri::command]
 pub fn cancel_oauth_login(pending_id: String) -> Result<(), AppError> {
     use skillstar_usage::oauth::pending_state;
     pending_state::cancel(&pending_id).map_err(map_err)

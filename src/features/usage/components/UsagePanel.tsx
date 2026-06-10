@@ -3,19 +3,23 @@ import { Wallet } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { useNavigation } from "@/hooks/useNavigation";
 import { useUsageDataContext } from "../context/UsageDataContext";
-import { FILTER_ALL, type Subscription } from "../types";
+import { FILTER_ALL, type CatalogFilter, type Subscription } from "../types";
 import { SubscriptionEditDialog } from "./SubscriptionEditDialog";
 import { UsageActionBar } from "./UsageActionBar";
 import { UsageAlertBanner } from "./UsageAlertBanner";
 import { UsageGrid } from "./UsageGrid";
 import { UsageRefreshControl } from "./UsageRefreshControl";
 
-export function UsagePanel() {
+interface UsagePanelProps {
+  filter: CatalogFilter;
+  usageCreateRequest: { nonce: number; preselectCatalogId: string | null } | null;
+  clearUsageCreateRequest: () => void;
+}
+
+export function UsagePanel({ filter, usageCreateRequest, clearUsageCreateRequest }: UsagePanelProps) {
   const { t } = useTranslation();
   const data = useUsageDataContext();
-  const { usageCatalogFilter: filter, usageCreateRequest, clearUsageCreateRequest } = useNavigation();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingSub, setEditingSub] = useState<Subscription | null>(null);
   const [preselectId, setPreselectId] = useState<string | null>(null);

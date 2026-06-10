@@ -128,7 +128,7 @@ export function formatInstalls(count: number): string {
   return count.toLocaleString();
 }
 
-export type SettingsFocusTarget = "ai-provider" | "storage" | "cookie-bridge";
+export type SettingsFocusTarget = "ai-provider" | "storage";
 
 /** Navigate to Settings and request focus on a specific section. */
 export function navigateToSettingsSection(target: SettingsFocusTarget) {

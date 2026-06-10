@@ -14,7 +14,7 @@ const SEARCH_DEBOUNCE_MS = 400;
  * the backend FTS, and triggers a background refresh once when the snapshot is
  * stale — without blocking the UI.
  */
-export function useMcpMarketplace() {
+export function useMcpMarketplace(enabled = true) {
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
@@ -28,13 +28,14 @@ export function useMcpMarketplace() {
   const listQuery = useQuery<LocalFirstResult<McpMarketEntry[]>>({
     queryKey: [...MARKET_KEY, "list"],
     queryFn: () => tauriInvoke("list_mcp_market_servers_local"),
+    enabled,
     staleTime: STALE_TIME_MS,
   });
 
   const searchQuery = useQuery<LocalFirstResult<McpMarketEntry[]>>({
     queryKey: [...MARKET_KEY, "search", debounced],
     queryFn: () => tauriInvoke("search_mcp_market_local", { query: debounced, limit: 100 }),
-    enabled: debounced.length > 0,
+    enabled: enabled && debounced.length > 0,
     staleTime: STALE_TIME_MS,
   });
 
@@ -49,11 +50,11 @@ export function useMcpMarketplace() {
 
   // One background refresh per session when the cache is stale.
   useEffect(() => {
-    if (status === "stale" && !staleRefreshTriggered.current && !syncMutation.isPending) {
+    if (enabled && status === "stale" && !staleRefreshTriggered.current && !syncMutation.isPending) {
       staleRefreshTriggered.current = true;
       syncMutation.mutate();
     }
-  }, [status, syncMutation]);
+  }, [enabled, status, syncMutation]);
 
   return {
     entries: result?.data ?? [],

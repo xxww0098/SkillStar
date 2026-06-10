@@ -198,7 +198,7 @@ export function ClaudeDesktopDrawerContent() {
               variant="ghost"
               className="ml-auto h-7 text-[11px]"
               onClick={() => {
-                const dir = activeFile.path.replace(/\/[^/]+$/, "");
+                const dir = activeFile.path.replace(/[/\\][^/\\]+$/, "");
                 void tauriInvoke("open_folder", { path: dir });
               }}
             >

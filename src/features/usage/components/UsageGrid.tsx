@@ -1,7 +1,11 @@
 import { Reorder, useDragControls } from "framer-motion";
+import { Plus } from "lucide-react";
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
+import { Button } from "@/components/ui/button";
 import { mergeSubscriptionOrder } from "../lib/pricing";
 import { FILTER_ALL, type CatalogEntry, type CatalogFilter, type Subscription } from "../types";
+import { ProviderLogo } from "./ProviderLogo";
 import { SubscriptionCard } from "./SubscriptionCard";
 import { UsageHomeEmpty } from "./UsageHomeEmpty";
 import { VendorPlaceholderCard } from "./VendorPlaceholderCard";
@@ -42,6 +46,7 @@ export function UsageGrid({
   onAddNew,
   onBrowseProviders,
 }: UsageGridProps) {
+  const { t } = useTranslation();
   const catalogById = useMemo(() => new Map(catalog.map((c) => [c.id, c])), [catalog]);
   const isHomeView = filter === FILTER_ALL;
 
@@ -96,7 +101,37 @@ export function UsageGrid({
           {subscriptions.length === 0 ? (
             <VendorPlaceholderCard entry={providerEntry} onClick={() => onAddNew(providerEntry.id)} />
           ) : (
-            <div className="w-full">{renderReorderGrid()}</div>
+            <div className="flex w-full min-w-0 flex-col gap-3">
+              <div className="flex w-full items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <ProviderLogo
+                    catalogId={providerEntry.id}
+                    displayName={providerEntry.display_name}
+                    brandColor={providerEntry.brand_color}
+                    size="sm"
+                  />
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-foreground">{providerEntry.display_name}</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {t("usage.providerSubscriptionCount", { count: subscriptions.length })}
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onAddNew(providerEntry.id)}
+                  className="max-w-[min(240px,55%)] shrink-0 overflow-hidden"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span className="truncate">
+                    {t("usage.addProviderSubscription", { provider: providerEntry.display_name })}
+                  </span>
+                </Button>
+              </div>
+              {renderReorderGrid()}
+            </div>
           )}
         </div>
       ) : null}

@@ -228,12 +228,6 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   }),
   get_subscription_alerts: () => USAGE_ALERTS,
   get_usage_summary: () => USAGE_SUMMARY,
-  get_cookie_bridge_binding_status: (args) => ({
-    provider: String((args?.provider as string) ?? ""),
-    bound: false,
-    subscription_id: null,
-    updated_at: null,
-  }),
   refresh_all_subscriptions: () => USAGE_SUBSCRIPTIONS.map((s) => s.usage).filter(Boolean),
   refresh_subscription_usage: (args) => USAGE_SUBSCRIPTIONS.find((s) => s.id === args?.id)?.usage ?? null,
   get_subscription_api_key: () => "sk-demo-********",

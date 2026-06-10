@@ -9,6 +9,10 @@ import { EditFingerprintDialog } from "./EditFingerprintDialog";
 import { FingerprintCard } from "./FingerprintCard";
 import { IdeProjectorsPanel } from "./IdeProjectorsPanel";
 
+interface FingerprintsPanelProps {
+  showHeader?: boolean;
+}
+
 /**
  * Top-level panel mounted under Settings → 设备指纹.
  *
@@ -17,7 +21,7 @@ import { IdeProjectorsPanel } from "./IdeProjectorsPanel";
  * - Activate / edit / delete actions live on each [`FingerprintCard`].
  * - [`EditFingerprintDialog`] mounts lazily when a row is selected for editing.
  */
-export function FingerprintsPanel() {
+export function FingerprintsPanel({ showHeader = true }: FingerprintsPanelProps = {}) {
   const { items, activeId, presets, loading, error, createFromPreset, update, remove, setActive } = useFingerprints();
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<FingerprintRow | null>(null);
@@ -45,12 +49,14 @@ export function FingerprintsPanel() {
     <div className="space-y-4">
       <header className="flex items-start justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            <Fingerprint className="h-4 w-4 text-violet-500" />
-            设备指纹
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            为每个 AI 订阅绑定一个浏览器画像，让额度查询的 TLS / HTTP 头看起来像真实 Chrome / Safari / Edge —— 而不是
+          {showHeader && (
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Fingerprint className="h-4 w-4 text-violet-500" />
+              设备指纹
+            </div>
+          )}
+          <p className={`${showHeader ? "mt-1" : ""} text-xs text-muted-foreground`}>
+            为每个 AI 订阅绑定一个浏览器画像，让额度查询的 TLS / HTTP 头看起来像真实 Chrome / Safari / Edge，而不是
             reqwest 默认的 ClientHello。
           </p>
         </div>

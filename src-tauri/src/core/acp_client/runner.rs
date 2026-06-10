@@ -16,28 +16,44 @@ use super::client::{AcpSetupResult, SkillStarClient, TerminalManager};
 
 // ── Core Function ───────────────────────────────────────────────────
 
-/// The prompt template sent to the Agent.
-const SETUP_PROMPT: &str = r#"This repository needs a setup script to work properly.  Please:
+// Platform-specific scripting guidance. The agent both *runs* the script
+// during the session and emits it for later re-use, so on Windows we must
+// ask for a PowerShell script (no /bin/bash there) rather than a bash one.
+
+#[cfg(windows)]
+const SCRIPT_KIND: &str = "a PowerShell script for Windows";
+#[cfg(windows)]
+const SCRIPT_EXAMPLE: &str = "```setup-script\n#Requires -Version 5.1\n$ErrorActionPreference = 'Stop'\n# your working script here\n```";
+
+#[cfg(not(windows))]
+const SCRIPT_KIND: &str = "a bash script";
+#[cfg(not(windows))]
+const SCRIPT_EXAMPLE: &str = "```setup-script\n#!/bin/bash\nset -euo pipefail\n# your working script here\n```";
+
+/// The prompt template sent to the Agent (platform-aware scripting).
+fn setup_prompt() -> String {
+    format!(
+        r#"This repository needs a setup script to work properly.  Please:
 
 1. Read the README.md and analyze the directory structure.
 2. Identify what setup steps are needed (e.g. running `./setup`, `npm install`, `make`, etc.).
-3. Write a bash script that performs the setup.  The script should be idempotent.
+3. Write {SCRIPT_KIND} that performs the setup.  The script should be idempotent and use commands available on the current operating system.
 4. Execute the script to verify it works.
 5. At the very end of your response, output the **final working script** wrapped in a fenced code block with the language tag `setup-script`, like this:
 
-```setup-script
-#!/bin/bash
-set -euo pipefail
-# your working script here
-```
+{SCRIPT_EXAMPLE}
 
-IMPORTANT: Only output the `setup-script` block AFTER you have successfully run the script and verified it works."#;
+IMPORTANT: Only output the `setup-script` block AFTER you have successfully run the script and verified it works."#
+    )
+}
 
-/// Prompt template for multi-skill repos that need rebuild.
+/// Prompt template for multi-skill repos that need rebuild (platform-aware).
 ///
 /// Instructs the agent to build the repo AND produce a `skills-rebuild/`
 /// directory containing one subdirectory per skill, each with a `SKILL.md`.
-const REBUILD_PROMPT: &str = r#"This repository contains multiple skills that need a build step before they can be used individually.
+fn rebuild_prompt() -> String {
+    format!(
+        r#"This repository contains multiple skills that need a build step before they can be used individually.
 
 Please:
 
@@ -50,18 +66,16 @@ Please:
    - A `SKILL.md` file (copy from the original location, or use any generated/adapted version if one exists)
    - Any supporting files the skill references (scripts, binaries, etc.) — use symlinks to the originals when possible
 7. If the repo has pre-generated skill directories (e.g. `.agents/skills/`, `.claude/skills/`) that already contain adapted SKILL.md files, prefer those.
-8. The script should be idempotent — safe to re-run.
+8. The script should be idempotent — safe to re-run — and use commands available on the current operating system.
 9. Do NOT include the root-level SKILL.md as a separate skill (it's a meta-skill for the whole repo).
 
-At the very end output the **final working script** wrapped in a fenced code block with the language tag `setup-script`:
+At the very end output the **final working script** ({SCRIPT_KIND}) wrapped in a fenced code block with the language tag `setup-script`:
 
-```setup-script
-#!/bin/bash
-set -euo pipefail
-# your working script here
-```
+{SCRIPT_EXAMPLE}
 
-CRITICAL: Only output the `setup-script` block AFTER you have successfully run the script and verified that `skills-rebuild/` exists and has at least one subdirectory with a SKILL.md."#;
+CRITICAL: Only output the `setup-script` block AFTER you have successfully run the script and verified that `skills-rebuild/` exists and has at least one subdirectory with a SKILL.md."#
+    )
+}
 
 /// Parse the agent's response to extract the setup-script block.
 pub(crate) fn extract_script(response: &str) -> Option<String> {
@@ -96,19 +110,19 @@ pub async fn run_setup_via_acp(
     skill_name: &str,
     on_chunk: impl Fn(&str) + Send + Sync + 'static,
 ) -> Result<AcpSetupResult> {
-    run_acp_with_prompt(agent_command, skill_name, SETUP_PROMPT, on_chunk).await
+    run_acp_with_prompt(agent_command, skill_name, &setup_prompt(), on_chunk).await
 }
 
 /// Run the ACP rebuild flow for a multi-skill repo.
 ///
-/// Uses the REBUILD_PROMPT which instructs the agent to build the repo and
+/// Uses the rebuild prompt which instructs the agent to build the repo and
 /// create a `skills-rebuild/` directory containing one subdirectory per skill.
 pub async fn run_rebuild_via_acp(
     agent_command: &str,
     skill_name: &str,
     on_chunk: impl Fn(&str) + Send + Sync + 'static,
 ) -> Result<AcpSetupResult> {
-    run_acp_with_prompt(agent_command, skill_name, REBUILD_PROMPT, on_chunk).await
+    run_acp_with_prompt(agent_command, skill_name, &rebuild_prompt(), on_chunk).await
 }
 
 /// Internal: run an ACP session with the given prompt text.

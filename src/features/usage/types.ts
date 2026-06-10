@@ -175,28 +175,6 @@ export interface OAuthStart {
   verification_uri?: string | null;
 }
 
-export interface CookieImportSession {
-  session_id: string;
-  token: string;
-  bind_url: string;
-  provider: string;
-  url: string;
-  expires_in_secs: number;
-}
-
-export interface CookieImportStatus {
-  status: "pending" | "completed" | "error" | "expired";
-  subscription_id: string | null;
-  error: string | null;
-}
-
-export interface CookieBridgeBindingStatus {
-  provider: string;
-  bound: boolean;
-  subscription_id: string | null;
-  updated_at: number | null;
-}
-
 /** Catalog ids that support `import_subscription_from_local`. */
 export const LOCAL_IMPORT_CATALOG_IDS = ["codex", "antigravity", "qoder"] as const;
 
