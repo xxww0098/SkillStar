@@ -1,24 +1,22 @@
 import { motion } from "framer-motion";
-import { AlertCircle, CheckCircle2, FileCog, Loader2, Plug, Search, Server, Sparkles } from "lucide-react";
+import { FileCog, Loader2, Plug, Search, Server, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "../../../../components/ui/button";
 import { Input } from "../../../../components/ui/input";
 import { useNavigation } from "../../../../hooks/useNavigation";
 import { cn } from "../../../../lib/utils";
-import type { ProviderEntryFlat, ProviderPatchFlat } from "../../../../types";
+import type { ProviderEntryFlat } from "../../../../types";
 import { useProvidersFlat } from "../../hooks/useProvidersFlat";
-import { ProviderBrandIcon } from "../shared/ProviderBrandIcon";
-import type { ProviderSaveState } from "../providerForm/useProviderFormState";
 import { useToolInstallStatuses } from "../../api/install";
 import { CLAUDE_DESKTOP_TOOL_ID, PROVIDER_AGENTS } from "../../lib/agentRegistry";
 import { AgentHeroCard } from "./AgentHeroCard";
 import { ClaudeDesktopDrawerContent } from "./ClaudeDesktopDrawerContent";
 import { ClaudeDesktopHeroCard } from "./ClaudeDesktopHeroCard";
 import { HealthBar } from "./HealthBar";
-import { PresetPicker } from "./PresetPicker";
+import { PresetPicker } from "../provider/PresetPicker";
 import { DrawerShell } from "../shared/DrawerShell";
-import { ProviderDrawerForm } from "./ProviderDrawerForm";
+import { ProviderEditorDrawer } from "../provider/ProviderEditorDrawer";
 import { ProviderGalleryCard } from "./ProviderGalleryCard";
 
 const HUB_TOOL_IDS = [...PROVIDER_AGENTS.map((a) => a.toolId), CLAUDE_DESKTOP_TOOL_ID];
@@ -33,57 +31,13 @@ function ModelsTopDragStrip() {
   return <div data-tauri-drag-region className="h-4 w-full shrink-0" aria-hidden />;
 }
 
-function SaveBadge({ state }: { state: ProviderSaveState }) {
-  if (state === "saving") {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
-        <Loader2 className="h-3 w-3 animate-spin" />
-        保存中
-      </span>
-    );
-  }
-  if (state === "dirty") {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-500">
-        未保存
-      </span>
-    );
-  }
-  if (state === "error") {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-destructive/25 bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive">
-        <AlertCircle className="h-3 w-3" />
-        保存失败
-      </span>
-    );
-  }
-  if (state === "saved") {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-success/20 bg-success/10 px-2 py-0.5 text-[11px] font-medium text-success">
-        <CheckCircle2 className="h-3 w-3" />
-        已保存
-      </span>
-    );
-  }
-  return null;
-}
-
 export function ModelsHub() {
-  const {
-    providers,
-    toolActivations,
-    isLoading,
-    activateTool,
-    deactivateTool,
-    updateProvider,
-    createProvider,
-    deleteProvider,
-  } = useProvidersFlat();
+  const { providers, toolActivations, isLoading, activateTool, deactivateTool, createProvider, deleteProvider } =
+    useProvidersFlat();
   const { selectedProviderId, setSelectedProviderId, showPresetSelector, setShowPresetSelector } = useNavigation();
 
   const [drawer, setDrawer] = useState<DrawerMode>({ type: "closed" });
   const { byTool: installStatus, isLoading: installLoading } = useToolInstallStatuses(HUB_TOOL_IDS);
-  const [saveState, setSaveState] = useState<ProviderSaveState>("idle");
   const [galleryQuery, setGalleryQuery] = useState("");
 
   // Bridge: rehydrate drawer from URL/persisted state on first mount.
@@ -110,7 +64,6 @@ export function ModelsHub() {
     (providerId: string) => {
       setSelectedProviderId(providerId);
       setShowPresetSelector(false);
-      setSaveState("idle");
       setDrawer({ type: "edit", providerId });
     },
     [setSelectedProviderId, setShowPresetSelector],
@@ -139,18 +92,9 @@ export function ModelsHub() {
       }
       setSelectedProviderId(provider.id);
       setShowPresetSelector(false);
-      setSaveState("idle");
       setDrawer({ type: "edit", providerId: provider.id });
     },
     [drawer, activateTool, setSelectedProviderId, setShowPresetSelector],
-  );
-
-  const handleSave = useCallback(
-    async (patch: ProviderPatchFlat) => {
-      if (drawer.type !== "edit") return;
-      await updateProvider(drawer.providerId, patch);
-    },
-    [drawer, updateProvider],
   );
 
   // Error toasts live in the api layer mutations; swallow to avoid unhandled rejections.
@@ -340,9 +284,11 @@ export function ModelsHub() {
         </div>
       </main>
 
-      {/* ── Drawer ────────────────────────────────────────────── */}
+      {/* ── Create / Claude Desktop drawer ───────────────────── */}
       <DrawerShell
-        open={drawer.type !== "closed"}
+        open={
+          drawer.type === "create" || drawer.type === "claude-desktop" || (drawer.type === "edit" && !drawerProvider)
+        }
         onOpenChange={(open) => {
           if (!open) closeDrawer();
         }}
@@ -357,71 +303,40 @@ export function ModelsHub() {
               <FileCog className="h-4 w-4 text-primary" />
               Claude Desktop · MCP 配置
             </span>
-          ) : drawerProvider ? (
-            <span className="flex min-w-0 items-center gap-2 text-foreground">
-              <ProviderBrandIcon
-                presetId={drawerProvider.preset_id}
-                providerName={drawerProvider.name}
-                iconColor={drawerProvider.icon_color}
-                size="sm"
-              />
-              <span className="truncate">{drawerProvider.name}</span>
-            </span>
           ) : (
             <span className="text-foreground">供应商</span>
           )
         }
         subtitle={
-          drawer.type === "create" ? (
-            "选择预设 → 填写 Key → 自动进入详细配置"
-          ) : drawer.type === "claude-desktop" ? (
-            "直接编辑 claude_desktop_config.json — 仅支持 mcpServers 节点"
-          ) : drawer.type === "edit" ? (
-            <span className="flex items-center gap-2">
-              <span>连接 · Agent 同步 · 高级</span>
-              <SaveBadge state={saveState} />
-            </span>
-          ) : null
-        }
-        footer={
-          drawer.type === "edit" ? (
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-[11px] text-muted-foreground">
-                {saveState === "saving" ? (
-                  <span className="inline-flex items-center gap-1.5">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    保存中…
-                  </span>
-                ) : saveState === "dirty" ? (
-                  "改动将自动保存"
-                ) : saveState === "error" ? (
-                  <span className="text-destructive">保存失败,请检查表单</span>
-                ) : (
-                  "所有改动自动保存到本机"
-                )}
-              </span>
-              <Button variant="outline" size="sm" onClick={closeDrawer}>
-                完成
-              </Button>
-            </div>
-          ) : null
+          drawer.type === "create"
+            ? "选择预设 → 填写 Key → 自动进入详细配置"
+            : drawer.type === "claude-desktop"
+              ? "直接编辑 claude_desktop_config.json — 仅支持 mcpServers 节点"
+              : null
         }
       >
         {drawer.type === "create" ? (
           <PresetPicker onProviderCreated={(p) => void handleProviderCreated(p)} />
         ) : drawer.type === "claude-desktop" ? (
           <ClaudeDesktopDrawerContent />
-        ) : drawer.type === "edit" && drawerProvider ? (
-          <ProviderDrawerForm
-            key={drawerProvider.id}
-            provider={drawerProvider}
-            onSave={handleSave}
-            onSaveStateChange={setSaveState}
-          />
-        ) : drawer.type === "edit" && !drawerProvider ? (
+        ) : (
           <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">供应商不存在</div>
-        ) : null}
+        )}
       </DrawerShell>
+
+      {/* ── Provider editor drawer (tabbed, owns its save state) ── */}
+      {drawerProvider ? (
+        <ProviderEditorDrawer
+          provider={drawerProvider}
+          open={drawer.type === "edit"}
+          onClose={closeDrawer}
+          onDuplicate={(p) => void handleDuplicateProvider(p)}
+          onDelete={(p) => {
+            void handleDeleteProvider(p);
+            closeDrawer();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

@@ -61,30 +61,29 @@ src/
 ```
 
 ## Models Provider UI
-- The Models mode is a **single hub page** (`pages/Models.tsx` → `features/models/components/hub/ModelsHub.tsx`). The old four-subpage split (agent-connections / providers / health / tool-configs) has been removed; the `#models/<sub>` hashes redirect to `#models` and `ModelsNavPage` is a single literal `"hub"` kept for back-compat.
+
+The Models mode follows a strict "职责分离" IA: **agent activation has exactly one entry point (the agent cards row)**; the provider drawer manages ONLY provider data. Tool-specific settings shown on the agent side (Claude tier mapping, Codex wire_api/auth_mode) still persist on the provider record via `update_provider_flat` — only their presentation moved.
+
+- The Models mode is a **single hub page** (`pages/Models.tsx` → `features/models/components/hub/ModelsHub.tsx`). The old four-subpage split has been removed; `#models/<sub>` hashes redirect to `#models`.
 - Hub layout (top-down):
   1. **Hero header**: "模型工作台" title + `新增供应商` CTA.
-  2. **`HealthBar`**: a sticky status strip with one chip per agent (`claude-code` / `codex` / `opencode`); each chip auto-probes via `tauriInvoke("test_provider_connection")` on mount and supports click-to-retest.
-  3. **`AgentHeroCard` row** (3 cards): brand status pill, accent strip, Radix `Popover` provider picker + model picker, footer actions (resync / open drawer / disconnect).
-  4. **Provider gallery**: search input + responsive `ProviderGalleryCard` grid (`sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4`) with hover-revealed `MoreHorizontal` menu (duplicate / delete) — replaces the old left-side `ModelsNav` list.
-- **`ProviderDrawer`**: Radix `Dialog` slide-in from the right (`max-w-[560px]`, Framer Motion `[0.22,1,0.36,1]`). Single component handles both **create** and **edit** flows.
-  - Create mode renders `PresetPicker` (category-tiled preset grid → fill API Key + Base URL → 创建并继续). After creation the drawer pivots into edit mode without unmounting.
-  - Edit mode renders `ProviderDrawerForm` — an `Accordion` of `ConfigCollapseSection`s: 连接 / Agent 同步 / Codex 默认参数 / Claude 模型映射 / 运行参数 / 连接诊断与余额 / 磁盘配置文件 / 附加信息. Only one section is expanded at a time.
-  - `ProviderSaveState` now lives in `providerForm/useProviderFormState.ts` (used to live in `ProviderConfigForm`). The drawer header shows a save badge and the footer shows the live status.
-- Built-in provider presets are loaded via `get_provider_presets_flat` (Rust `get_all_presets_flat()`); do not duplicate preset lists in TypeScript.
-- `AppAiProviderInline` + `set_app_ai_provider_ref` bind flat-store providers to `ai.json` for in-app AI (summarize / translate / skill pick).
-- Settings `AiProviderSection` toggles **Models 供应商** vs **本地 Ollama** via `AppAiModelsPicker`.
+  2. **Agent cards section** ("AGENT 接入") — the ONLY place to activate/deactivate/re-sync agents. One `AgentHeroCard` per provider agent from `lib/agentRegistry.ts` (`claude-code` / `codex` / `opencode` / `gemini`), plus `ClaudeDesktopCard` (MCP config, no provider binding) and `AppAiCard` (in-app AI binding, replaces the old `AppAiProviderInline` inside the drawer). The section header shows the aggregate "x/y 已接入" summary — there is no separate HealthBar strip; connection probes live in `hooks/useAgentHealth.ts` (probe once per `(toolId, providerId)` pair, click the status pill to retest) and statuses come from `lib/agentStatus.ts` (the canonical status model; latency colors via `lib/latencyColor.ts`).
+  3. **Provider gallery**: search input + responsive `ProviderGalleryCard` grid with hover menu (duplicate / delete-with-confirmation).
+- **Agent settings dialog** (`agents/AgentSettingsDialog.tsx`, ModalShell 640px): per-agent deep configuration — provider/model binding, agent-conditional params (`ClaudeModelMapping` for claude-code; `CodexSettingsForm` for codex), Claude launch command (`lib/launchCommand.ts`), on-disk config file editor (`AgentConfigFiles`, single-tool mode), conflict warnings (tool-filtered), last-sync time + re-sync, deactivate. Activation flows through `hooks/useAgentActivation.ts` — the single activation path shared with the cards.
+- **`ProviderEditorDrawer`** (`provider/ProviderEditorDrawer.tsx`, DrawerShell `max-w-[640px]`): edit mode is a TABBED form — 连接 (name / API key / dual base URLs / models_url) · 模型 (fetch + model list management + default model) · 高级 (runtime params / notes) · 诊断 (`ConnectionStatusPanel` + `EndpointSpeedPanel` + disk config). The drawer owns the autosave state machine: `hooks/useProviderForm.ts` (one reducer-managed values object; pure conversions in `lib/providerPatch.ts`) + `hooks/useAutosave.ts` (600ms debounce, validation-aware re-arm, **flush-on-close** so pending edits are never silently dropped). The save badge (`shared/SaveBadge`) renders ONLY here — the hub no longer mirrors save state.
+- Create mode renders `PresetPicker` (category-tiled preset grid → API key + base URL → 创建并继续) inside a plain `DrawerShell`, then pivots to the editor drawer with the created provider.
+- **Models state management**: all IPC goes through `api/` — `modelsKeys` factory (`api/keys.ts`), providers query + CRUD mutations (`api/providers.ts`), activation map + mutations (`api/activations.ts`, selected from the providers-flat cache — `tool_activations` is NEVER fetched separately), install detection query (`api/install.ts`, 5min stale). Mutations follow one convention: optimistic onMutate → rollback + toast onError → invalidate onSettled; `create` seeds the cache from the returned entity. devMock covers all models write commands (stateful `FLAT_PROVIDERS`), so the full create → edit → activate → delete flow works in plain-Vite browser dev.
+- Built-in provider presets are loaded via `get_provider_presets_flat`; do not duplicate preset lists in TypeScript.
+- Settings `AiProviderSection` toggles **Models 供应商** vs **本地 Ollama** via `AppAiModelsPicker`; the hub's `AppAiCard` is a shortcut for the Models-provider source only and defers to Settings when Ollama is active.
 - Provider `meta.timeout` is applied to AI HTTP clients at resolve time (not stored in `ai.json`).
-- `update_provider_flat` returns `tool_sync_results`; the UI toasts when re-sync fails.
+- `update_provider_flat` returns `tool_sync_results`; the api layer toasts when re-sync fails.
 - Endpoint probe: OpenAI bases use `GET /models`; URLs containing `/anthropic` use `POST /messages` (avoids false 404 on DeepSeek Anthropic gateway). Same logic for **端点测速** and **深度连接测试** (empty model).
-- Endpoint probe lives under the drawer's **附加信息** section (`EndpointSpeedPanel`); connection test/balance lives in the **连接诊断与余额** section (`ConnectionStatusPanel`).
-- `ToolActivationPanel` supports `claude-code`, `codex`, and `opencode`.
-  - `claude-code` writes `~/.claude/settings.json` (Claude Code CLI only — Anthropic's standalone Mac/Windows app stores config elsewhere and is not synced).
-  - `codex` writes `~/.codex/config.toml` + `~/.codex/auth.json`. Per the [OpenAI Codex repo](https://github.com/openai/codex), **the same `~/.codex/` directory is read by the Codex CLI, the `codex app` desktop experience, and the official VS Code / Cursor / Windsurf IDE extensions** — so a single Codex binding here covers every Codex form-factor. The historical "cli" badge on `AgentToolIcon` has been removed to stop falsely implying CLI-only support.
-  - `opencode` writes `~/.opencode/opencode.json`.
-- In-app AI binding (`AppAiProviderInline` **OpenAI** button) is separate from Codex tool sync.
-- **Sidebar in Models mode** renders the minimal `ModelsSidebar` (NOT the old `ModelsNav`): a "MODELS 工作台" intro card with `新增供应商` button + a "最近" rail of up to 6 recently sorted providers. Clicking a recent provider opens the drawer in edit mode via `selectedProviderId`.
-- **CommandPalette** in Models mode exposes a single `Models 工作台` action (jumps into the hub) — the old `Providers / Health / Tool Configs / Models Settings` palette entries are removed.
+- Agent registry facts (`lib/agentRegistry.ts` — extend THERE when adding an agent, see ADDING-AN-AGENT.md):
+  - `claude-code` writes `~/.claude/settings.json` (Claude Code CLI only — Anthropic's standalone desktop app stores config elsewhere and is not synced).
+  - `codex` writes `~/.codex/config.toml` + `~/.codex/auth.json` — the same `~/.codex/` directory is read by the Codex CLI, the `codex app` desktop experience, and the official VS Code / Cursor / Windsurf IDE extensions, so a single Codex binding covers every form-factor.
+  - `opencode` writes `~/.config/opencode/opencode.json`; `gemini` writes `~/.gemini/.env`.
+- **Sidebar in Models mode** renders the minimal `ModelsSidebar`: intro card with `新增供应商` + a "最近" rail of up to 6 providers. Clicking a recent provider requests the edit drawer via the `modelsDrawerRequest` navigation event (request-nonce pattern, like `usageCreateRequest`).
+- **CommandPalette** in Models mode exposes a single `Models 工作台` action.
 
 ## Architecture Rules
 - Frontend data must flow through Tauri `invoke()` commands and Tauri events.

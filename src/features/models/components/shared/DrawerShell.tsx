@@ -11,12 +11,16 @@ export interface DrawerShellProps {
   title: ReactNode;
   /** Secondary line under the title — provider status, save state, etc. */
   subtitle?: ReactNode;
+  /** Renders on the right of the header, before the close button. */
+  headerAction?: ReactNode;
   /** Sticky footer for actions/status. Hidden when omitted. */
   footer?: ReactNode;
   /** Drawer body content. Scrolls vertically. */
   children: ReactNode;
   /** Optional CSS class for the drawer panel. */
   className?: string;
+  /** Max panel width utility (default 560px). */
+  maxWidthClassName?: string;
 }
 
 /**
@@ -24,7 +28,17 @@ export interface DrawerShellProps {
  * providers. Built on Radix `Dialog` for focus management + accessibility, and
  * Framer Motion for the slide animation.
  */
-export function DrawerShell({ open, onOpenChange, title, subtitle, footer, children, className }: DrawerShellProps) {
+export function DrawerShell({
+  open,
+  onOpenChange,
+  title,
+  subtitle,
+  headerAction,
+  footer,
+  children,
+  className,
+  maxWidthClassName = "max-w-[560px]",
+}: DrawerShellProps) {
   const prefersReducedMotion = useReducedMotion();
 
   return (
@@ -54,7 +68,8 @@ export function DrawerShell({ open, onOpenChange, title, subtitle, footer, child
                 exit={{ x: prefersReducedMotion ? 0 : "100%", opacity: prefersReducedMotion ? 0 : 1 }}
                 transition={{ duration: prefersReducedMotion ? 0.01 : 0.28, ease: [0.22, 1, 0.36, 1] }}
                 className={cn(
-                  "fixed right-0 top-0 bottom-0 z-[81] flex w-full max-w-[560px] flex-col",
+                  "fixed right-0 top-0 bottom-0 z-[81] flex w-full flex-col",
+                  maxWidthClassName,
                   "border-l border-border/60 bg-card/95 backdrop-blur-2xl",
                   "shadow-[-32px_0_80px_-32px_var(--color-shadow)]",
                   className,
@@ -73,6 +88,7 @@ export function DrawerShell({ open, onOpenChange, title, subtitle, footer, child
                       </Dialog.Description>
                     ) : null}
                   </div>
+                  {headerAction}
                   <Dialog.Close asChild>
                     <button
                       type="button"

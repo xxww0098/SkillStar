@@ -7,6 +7,7 @@
  * its own lazy-loaded chunk.
  */
 export { useAppAiProvider, type AppAiAppId } from "./api/appAi";
+export { buildModelCatalog, CLAUDE_MODEL_META_KEYS, getMetaString } from "./lib/providerPatch";
 export { useModelFetch } from "./api/modelCatalog";
 export { AgentToolIcon } from "./components/shared/AgentToolIcon";
 export { DrawerShell, type DrawerShellProps } from "./components/shared/DrawerShell";
