@@ -7,7 +7,7 @@ import { cn } from "../../../../lib/utils";
 import { useToolConfigFiles } from "../../api/configFiles";
 import { AgentToolIcon } from "../shared/AgentToolIcon";
 
-export interface ClaudeDesktopHeroCardProps {
+export interface ClaudeDesktopCardProps {
   installed: boolean;
   installLoading: boolean;
   /** Opens the right-side drawer scoped to claude-desktop config editing. */
@@ -55,7 +55,7 @@ const STATUS_STYLE: Record<
  * card surfaces install state + MCP server count and links into the drawer's
  * JSON editor instead of the provider-binding flow.
  */
-export function ClaudeDesktopHeroCard({ installed, installLoading, onOpenConfig }: ClaudeDesktopHeroCardProps) {
+export function ClaudeDesktopCard({ installed, installLoading, onOpenConfig }: ClaudeDesktopCardProps) {
   const editor = useToolConfigFiles("claude-desktop");
 
   const mcpCount = useMemo(() => {

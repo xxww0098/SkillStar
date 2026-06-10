@@ -4,20 +4,39 @@ import { Button } from "../../../../components/ui/button";
 import { ExternalAnchor } from "../../../../components/ui/ExternalAnchor";
 import { tauriInvoke } from "../../../../lib/ipc";
 import { cn } from "../../../../lib/utils";
+import { ModalHeader, ModalShell } from "../../../../components/ui/ModalShell";
 import { useToolConfigFiles } from "../../api/configFiles";
+import { AgentToolIcon } from "../shared/AgentToolIcon";
 
 /**
- * Drawer body for the Claude Desktop App agent.
+ * Claude Desktop MCP config dialog (formerly a drawer mode).
  *
  * Claude Desktop only exposes `mcpServers` in its config file — there is no
- * provider/key/base-URL to bind. So instead of the provider form we render:
- *
- * 1. A short orientation card explaining what is and isn't configurable.
- * 2. The on-disk JSON editor for `claude_desktop_config.json`, parsed live
- *    to surface the current MCP server count.
- * 3. Convenience links to the official MCP docs and to a quickstart snippet.
+ * provider/key/base-URL to bind, so this is an on-disk JSON editor with an
+ * orientation card, not a provider form.
  */
-export function ClaudeDesktopDrawerContent() {
+export function ClaudeDesktopConfigDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  return (
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      ariaLabel="Claude Desktop MCP 配置"
+      panelClassName="max-w-[640px]"
+      surfaceClassName="flex max-h-[85vh] flex-col"
+    >
+      <ModalHeader
+        icon={<AgentToolIcon toolId="claude-desktop" size="sm" />}
+        title="Claude Desktop · MCP 配置"
+        onClose={onClose}
+      />
+      <div className="ss-page-scroll min-h-0 flex-1 overflow-y-auto px-6 py-4">
+        <ClaudeDesktopConfigBody />
+      </div>
+    </ModalShell>
+  );
+}
+
+function ClaudeDesktopConfigBody() {
   const editor = useToolConfigFiles("claude-desktop");
   const activeFile = editor.files.find((f) => f.file_id === editor.activeFileId);
 

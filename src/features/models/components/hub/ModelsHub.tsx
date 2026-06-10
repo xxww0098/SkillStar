@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { FileCog, Loader2, Plug, Search, Server, Sparkles } from "lucide-react";
+import { Loader2, Plug, Search, Server, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "../../../../components/ui/button";
@@ -14,8 +14,9 @@ import { CLAUDE_DESKTOP_TOOL_ID, PROVIDER_AGENTS, type ProviderToolId } from "..
 import { computeAgentStatus, summarizeAgentStatuses } from "../../lib/agentStatus";
 import { AgentHeroCard } from "../agents/AgentHeroCard";
 import { AgentSettingsDialog } from "../agents/AgentSettingsDialog";
-import { ClaudeDesktopDrawerContent } from "./ClaudeDesktopDrawerContent";
-import { ClaudeDesktopHeroCard } from "./ClaudeDesktopHeroCard";
+import { AppAiCard } from "../agents/AppAiCard";
+import { ClaudeDesktopCard } from "../agents/ClaudeDesktopCard";
+import { ClaudeDesktopConfigDialog } from "../agents/ClaudeDesktopConfigDialog";
 import { PresetPicker } from "../provider/PresetPicker";
 import { DrawerShell } from "../shared/DrawerShell";
 import { ProviderEditorDrawer } from "../provider/ProviderEditorDrawer";
@@ -26,8 +27,7 @@ const HUB_TOOL_IDS = [...PROVIDER_AGENTS.map((a) => a.toolId), CLAUDE_DESKTOP_TO
 type DrawerMode =
   | { type: "closed" }
   | { type: "create"; autoBindToolId?: string }
-  | { type: "edit"; providerId: string; autoBindToolId?: string }
-  | { type: "claude-desktop" };
+  | { type: "edit"; providerId: string; autoBindToolId?: string };
 
 function ModelsTopDragStrip() {
   return <div data-tauri-drag-region className="h-4 w-full shrink-0" aria-hidden />;
@@ -35,10 +35,12 @@ function ModelsTopDragStrip() {
 
 export function ModelsHub() {
   const { providers, toolActivations, isLoading, activateTool, createProvider, deleteProvider } = useProvidersFlat();
-  const { selectedProviderId, setSelectedProviderId, showPresetSelector, setShowPresetSelector } = useNavigation();
+  const { selectedProviderId, setSelectedProviderId, showPresetSelector, setShowPresetSelector, navigate } =
+    useNavigation();
 
   const [drawer, setDrawer] = useState<DrawerMode>({ type: "closed" });
   const [settingsTool, setSettingsTool] = useState<ProviderToolId | null>(null);
+  const [desktopConfigOpen, setDesktopConfigOpen] = useState(false);
   const { byTool: installStatus, isLoading: installLoading } = useToolInstallStatuses(HUB_TOOL_IDS);
   const health = useAgentHealth(providers, toolActivations);
   const [galleryQuery, setGalleryQuery] = useState("");
@@ -219,11 +221,12 @@ export function ModelsHub() {
                   onOpenProviderDrawer={openEditDrawer}
                 />
               ))}
-              <ClaudeDesktopHeroCard
+              <ClaudeDesktopCard
                 installed={installLoading ? false : (installStatus[CLAUDE_DESKTOP_TOOL_ID]?.installed ?? false)}
                 installLoading={installLoading}
-                onOpenConfig={() => setDrawer({ type: "claude-desktop" })}
+                onOpenConfig={() => setDesktopConfigOpen(true)}
               />
+              <AppAiCard onOpenSettings={() => navigate("settings")} />
             </div>
           </section>
 
@@ -279,11 +282,9 @@ export function ModelsHub() {
         </div>
       </main>
 
-      {/* ── Create / Claude Desktop drawer ───────────────────── */}
+      {/* ── Create drawer ─────────────────────────────────────── */}
       <DrawerShell
-        open={
-          drawer.type === "create" || drawer.type === "claude-desktop" || (drawer.type === "edit" && !drawerProvider)
-        }
+        open={drawer.type === "create" || (drawer.type === "edit" && !drawerProvider)}
         onOpenChange={(open) => {
           if (!open) closeDrawer();
         }}
@@ -293,31 +294,21 @@ export function ModelsHub() {
               <Plug className="h-4 w-4 text-primary" />
               新增供应商
             </span>
-          ) : drawer.type === "claude-desktop" ? (
-            <span className="flex items-center gap-2 text-foreground">
-              <FileCog className="h-4 w-4 text-primary" />
-              Claude Desktop · MCP 配置
-            </span>
           ) : (
             <span className="text-foreground">供应商</span>
           )
         }
-        subtitle={
-          drawer.type === "create"
-            ? "选择预设 → 填写 Key → 自动进入详细配置"
-            : drawer.type === "claude-desktop"
-              ? "直接编辑 claude_desktop_config.json — 仅支持 mcpServers 节点"
-              : null
-        }
+        subtitle={drawer.type === "create" ? "选择预设 → 填写 Key → 自动进入详细配置" : null}
       >
         {drawer.type === "create" ? (
           <PresetPicker onProviderCreated={(p) => void handleProviderCreated(p)} />
-        ) : drawer.type === "claude-desktop" ? (
-          <ClaudeDesktopDrawerContent />
         ) : (
           <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">供应商不存在</div>
         )}
       </DrawerShell>
+
+      {/* ── Claude Desktop MCP config dialog ──────────────────── */}
+      <ClaudeDesktopConfigDialog open={desktopConfigOpen} onClose={() => setDesktopConfigOpen(false)} />
 
       {/* ── Agent settings dialog ─────────────────────────────── */}
       {settingsTool ? (
