@@ -7,6 +7,8 @@ import { cn } from "../../../../lib/utils";
 
 export interface ConflictWarningsProps {
   providerId: string;
+  /** Only show conflicts for this tool (agent settings dialog scope). */
+  toolId?: string;
 }
 
 /** Conflict types matching the Rust backend `ConflictType` enum. */
@@ -126,7 +128,7 @@ function extractVarName(details?: string | null): string {
  *
  * Auto-detects conflicts on mount and when providerId changes.
  */
-export function ConflictWarnings({ providerId }: ConflictWarningsProps) {
+export function ConflictWarnings({ providerId, toolId }: ConflictWarningsProps) {
   const [conflicts, setConflicts] = useState<ConfigConflict[]>([]);
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
   const [externalConflict, setExternalConflict] = useState<ConfigConflict | null>(null);
@@ -137,7 +139,8 @@ export function ConflictWarnings({ providerId }: ConflictWarningsProps) {
 
     async function detect() {
       try {
-        const result = await tauriInvoke("detect_provider_conflicts", { providerId });
+        const all = await tauriInvoke("detect_provider_conflicts", { providerId });
+        const result = toolId ? all.filter((c) => !c.tool_id || c.tool_id === toolId) : all;
         if (!cancelled) {
           setConflicts(result);
           setDismissedIds(new Set());
@@ -157,7 +160,7 @@ export function ConflictWarnings({ providerId }: ConflictWarningsProps) {
     return () => {
       cancelled = true;
     };
-  }, [providerId]);
+  }, [providerId, toolId]);
 
   const handleDismiss = useCallback((conflict: ConfigConflict) => {
     const key = `${conflict.conflict_type}:${conflict.details || conflict.file_path || ""}`;

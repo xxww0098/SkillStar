@@ -9,11 +9,13 @@ import { cn } from "../../../../lib/utils";
 import type { ProviderEntryFlat } from "../../../../types";
 import { useProvidersFlat } from "../../hooks/useProvidersFlat";
 import { useToolInstallStatuses } from "../../api/install";
-import { CLAUDE_DESKTOP_TOOL_ID, PROVIDER_AGENTS } from "../../lib/agentRegistry";
-import { AgentHeroCard } from "./AgentHeroCard";
+import { useAgentHealth } from "../../hooks/useAgentHealth";
+import { CLAUDE_DESKTOP_TOOL_ID, PROVIDER_AGENTS, type ProviderToolId } from "../../lib/agentRegistry";
+import { computeAgentStatus, summarizeAgentStatuses } from "../../lib/agentStatus";
+import { AgentHeroCard } from "../agents/AgentHeroCard";
+import { AgentSettingsDialog } from "../agents/AgentSettingsDialog";
 import { ClaudeDesktopDrawerContent } from "./ClaudeDesktopDrawerContent";
 import { ClaudeDesktopHeroCard } from "./ClaudeDesktopHeroCard";
-import { HealthBar } from "./HealthBar";
 import { PresetPicker } from "../provider/PresetPicker";
 import { DrawerShell } from "../shared/DrawerShell";
 import { ProviderEditorDrawer } from "../provider/ProviderEditorDrawer";
@@ -32,12 +34,13 @@ function ModelsTopDragStrip() {
 }
 
 export function ModelsHub() {
-  const { providers, toolActivations, isLoading, activateTool, deactivateTool, createProvider, deleteProvider } =
-    useProvidersFlat();
+  const { providers, toolActivations, isLoading, activateTool, createProvider, deleteProvider } = useProvidersFlat();
   const { selectedProviderId, setSelectedProviderId, showPresetSelector, setShowPresetSelector } = useNavigation();
 
   const [drawer, setDrawer] = useState<DrawerMode>({ type: "closed" });
+  const [settingsTool, setSettingsTool] = useState<ProviderToolId | null>(null);
   const { byTool: installStatus, isLoading: installLoading } = useToolInstallStatuses(HUB_TOOL_IDS);
+  const health = useAgentHealth(providers, toolActivations);
   const [galleryQuery, setGalleryQuery] = useState("");
 
   // Bridge: rehydrate drawer from URL/persisted state on first mount.
@@ -97,21 +100,6 @@ export function ModelsHub() {
     [drawer, activateTool, setSelectedProviderId, setShowPresetSelector],
   );
 
-  // Error toasts live in the api layer mutations; swallow to avoid unhandled rejections.
-  const handleAgentActivate = useCallback(
-    async (toolId: string, providerId: string, model?: string) => {
-      await activateTool(providerId, toolId, model).catch(() => {});
-    },
-    [activateTool],
-  );
-
-  const handleAgentDeactivate = useCallback(
-    async (toolId: string) => {
-      await deactivateTool(toolId).catch(() => {});
-    },
-    [deactivateTool],
-  );
-
   const handleDuplicateProvider = useCallback(
     async (p: ProviderEntryFlat) => {
       try {
@@ -148,6 +136,27 @@ export function ModelsHub() {
         p.default_model.toLowerCase().includes(q),
     );
   }, [providers, galleryQuery]);
+
+  const agentStatuses = useMemo(
+    () =>
+      PROVIDER_AGENTS.map((agent) => {
+        const activation = toolActivations[agent.toolId] ?? null;
+        const boundProvider = activation?.provider_id
+          ? (providers.find((p) => p.id === activation.provider_id) ?? null)
+          : null;
+        return computeAgentStatus({
+          agent,
+          activation,
+          boundProvider,
+          installed: installStatus[agent.toolId]?.installed ?? true,
+          installLoading,
+          probe: health.results[agent.toolId] ?? null,
+          probing: health.testing[agent.toolId] ?? false,
+        });
+      }),
+    [toolActivations, providers, installStatus, installLoading, health.results, health.testing],
+  );
+  const agentSummary = useMemo(() => summarizeAgentStatuses(agentStatuses), [agentStatuses]);
 
   const drawerProvider = useMemo(() => {
     if (drawer.type !== "edit") return null;
@@ -190,40 +199,26 @@ export function ModelsHub() {
             </Button>
           </header>
 
-          {/* Health bar */}
-          <HealthBar
-            providers={providers}
-            toolActivations={toolActivations}
-            claudeDesktopInstalled={
-              installLoading ? false : (installStatus[CLAUDE_DESKTOP_TOOL_ID]?.installed ?? false)
-            }
-            claudeDesktopInstallLoading={installLoading}
-            onOpenClaudeDesktopConfig={() => setDrawer({ type: "claude-desktop" })}
-          />
-
           {/* Agent hero row */}
           <section>
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Agent 绑定</h2>
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Agent 接入</h2>
+              <span className="text-[11px] text-muted-foreground/75">
+                {agentSummary.connected}/{agentSummary.total} 已接入
+                {agentSummary.problems > 0 ? ` · ${agentSummary.problems} 异常` : ""}
+              </span>
             </div>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {PROVIDER_AGENTS.map((agent) => {
-                const status = installStatus[agent.toolId];
-                return (
-                  <AgentHeroCard
-                    key={agent.toolId}
-                    agent={agent}
-                    providers={providers}
-                    activation={toolActivations[agent.toolId] ?? null}
-                    installed={installLoading ? true : (status?.installed ?? true)}
-                    installLoading={installLoading}
-                    onActivate={(providerId, model) => handleAgentActivate(agent.toolId, providerId, model)}
-                    onDeactivate={() => handleAgentDeactivate(agent.toolId)}
-                    onAddProvider={() => openCreateDrawer(agent.toolId)}
-                    onOpenDrawer={openEditDrawer}
-                  />
-                );
-              })}
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {PROVIDER_AGENTS.map((agent) => (
+                <AgentHeroCard
+                  key={agent.toolId}
+                  agent={agent}
+                  health={health}
+                  onAddProvider={() => openCreateDrawer(agent.toolId)}
+                  onOpenSettings={() => setSettingsTool(agent.toolId)}
+                  onOpenProviderDrawer={openEditDrawer}
+                />
+              ))}
               <ClaudeDesktopHeroCard
                 installed={installLoading ? false : (installStatus[CLAUDE_DESKTOP_TOOL_ID]?.installed ?? false)}
                 installLoading={installLoading}
@@ -323,6 +318,23 @@ export function ModelsHub() {
           <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">供应商不存在</div>
         )}
       </DrawerShell>
+
+      {/* ── Agent settings dialog ─────────────────────────────── */}
+      {settingsTool ? (
+        <AgentSettingsDialog
+          toolId={settingsTool}
+          open
+          onClose={() => setSettingsTool(null)}
+          onAddProvider={() => {
+            setSettingsTool(null);
+            openCreateDrawer(settingsTool);
+          }}
+          onOpenProviderDrawer={(providerId) => {
+            setSettingsTool(null);
+            openEditDrawer(providerId);
+          }}
+        />
+      ) : null}
 
       {/* ── Provider editor drawer (tabbed, owns its save state) ── */}
       {drawerProvider ? (

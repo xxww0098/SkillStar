@@ -4,7 +4,6 @@ import { useCallback, useState } from "react";
 import { Button } from "../../../../components/ui/button";
 import { cn } from "../../../../lib/utils";
 import type { ProviderEntryFlat } from "../../../../types";
-import { useToolActivationsMap } from "../../api/activations";
 import { useAutosave } from "../../hooks/useAutosave";
 import { useProviderForm } from "../../hooks/useProviderForm";
 import type { ProviderEditorTab } from "../../types";
@@ -50,12 +49,6 @@ function ProviderEditorDrawerInner({
   const [tab, setTab] = useState<ProviderEditorTab>(initialTab);
   const form = useProviderForm(provider);
   const { state: saveState, flush } = useAutosave({ dirty: form.dirty, save: form.save });
-  const { data: activationsMap } = useToolActivationsMap();
-
-  const isToolActive = useCallback(
-    (toolId: string) => activationsMap?.[toolId]?.provider_id === provider.id,
-    [activationsMap, provider.id],
-  );
 
   const requestClose = useCallback(() => {
     // Kick the pending save off synchronously before unmount; the mutation
@@ -180,7 +173,7 @@ function ProviderEditorDrawerInner({
         {tab === "connection" && <ConnectionTab form={form} />}
         {tab === "models" && <ModelsTab form={form} />}
         {tab === "advanced" && <AdvancedTab form={form} />}
-        {tab === "diagnostics" && <DiagnosticsTab form={form} provider={provider} isToolActive={isToolActive} />}
+        {tab === "diagnostics" && <DiagnosticsTab form={form} provider={provider} />}
       </div>
     </DrawerShell>
   );
