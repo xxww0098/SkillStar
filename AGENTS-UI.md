@@ -119,6 +119,9 @@ src/
 ## Conventions
 - Styling: TailwindCSS utilities only.
 - Components: prefer `components/ui/*` primitives; use Radix for accessibility-heavy patterns.
+- Centered glassmorphism modals must use `components/ui/ModalShell` (`ModalShell` + `ModalHeader` + `ModalCloseButton`) instead of hand-rolling AnimatePresence/backdrop/`modal-surface` scaffolding. Exceptions: Radix `AlertDialog`-based dialogs (keep Radix focus/Escape semantics) and dialogs with intentionally custom surfaces.
+- Tauri event subscriptions tied to component lifetime must use `hooks/useTauriEvent` (handles the `listen()` promise/cleanup race); only imperative per-request streams (`useAiStream`, `useAiTranslate`) manage listeners manually.
+- "Global-only agent" checks must be data-driven via `lib/agentProfiles.supportsProjectDeploy` (empty `project_skills_rel`), never hard-coded agent ids.
 - Types: shared types in `src/types/index.ts`.
 - Icons: Lucide React.
 - Avoid inline style unless dynamic value cannot be expressed with utility classes.

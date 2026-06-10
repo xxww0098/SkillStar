@@ -1,8 +1,8 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { Download, X } from "lucide-react";
+import { Download } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ModalHeader, ModalShell } from "../../../components/ui/ModalShell";
 import { tauriInvoke } from "../../../lib/ipc";
 import {
   extractShareCode,
@@ -82,7 +82,6 @@ export function ImportModal({
   onClearShareCode,
 }: ImportModalProps) {
   const { t } = useTranslation();
-  const prefersReducedMotion = useReducedMotion();
 
   // Keep a ref so handleScan always reads the latest value
   // (avoids stale closure when called from setTimeout)
@@ -457,120 +456,76 @@ export function ImportModal({
     }
   };
 
-  if (!isOpen) return null;
-
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <>
-          {/* Backdrop */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: prefersReducedMotion ? 0.01 : 0.15 }}
-            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm"
-            onClick={onClose}
+    <ModalShell
+      open={isOpen}
+      onClose={onClose}
+      ariaLabel={t("common.import", { defaultValue: "Import" })}
+      panelClassName="max-w-lg"
+    >
+      {/* Header */}
+      <ModalHeader
+        icon={<Download className="w-4 h-4 text-primary" />}
+        title={t("common.import", { defaultValue: "Import" })}
+        onClose={onClose}
+      />
+
+      {/* Body — phase content */}
+      <div className="flex-1 overflow-y-auto">
+        {phase === "inputURL" && (
+          <InputURLPhase
+            urlInput={urlInput}
+            setUrlInput={handleUrlInputChange}
+            onScan={() => handleScan()}
+            history={history}
+            onSelectHistory={(entry) => {
+              setUrlInput(entry.source);
+              handleScan(entry.source);
+            }}
+            onPickLocalFile={onPickLocalFile}
+            onPickLocalFolder={handlePickLocalFolder}
+            shareCodeDetected={shareCodeDetected}
           />
+        )}
 
-          {/* Modal */}
-          <motion.div
-            initial={{ opacity: 0, scale: 0.96, y: 12 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 12 }}
-            transition={{ duration: prefersReducedMotion ? 0.01 : 0.3, ease: [0.16, 1, 0.3, 1] }}
-            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg z-50"
-          >
-            <div
-              role="dialog"
-              aria-modal="true"
-              aria-label={t("common.import", { defaultValue: "Import" })}
-              className="modal-surface"
-            >
-              {/* Top ambient glow */}
-              <div className="pointer-events-none absolute -left-20 -top-20 h-48 w-48 rounded-full bg-primary/20 blur-[60px] opacity-70" />
-              <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-accent/10 blur-[60px] opacity-70" />
-              <div className="relative z-10">
-                {/* Header */}
-                <div className="flex items-center justify-between px-6 pt-4 pb-3 shrink-0 border-b border-border/60">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center">
-                      <Download className="w-4 h-4 text-primary" />
-                    </div>
-                    <h2 className="text-heading-sm">{t("common.import", { defaultValue: "Import" })}</h2>
-                  </div>
-                  <button
-                    onClick={onClose}
-                    aria-label={t("common.close")}
-                    className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors cursor-pointer"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
+        {phase === "scanning" && <LoadingPhase message={progressMsg} />}
 
-                {/* Body — phase content */}
-                <div className="flex-1 overflow-y-auto">
-                  {phase === "inputURL" && (
-                    <InputURLPhase
-                      urlInput={urlInput}
-                      setUrlInput={handleUrlInputChange}
-                      onScan={() => handleScan()}
-                      history={history}
-                      onSelectHistory={(entry) => {
-                        setUrlInput(entry.source);
-                        handleScan(entry.source);
-                      }}
-                      onPickLocalFile={onPickLocalFile}
-                      onPickLocalFolder={handlePickLocalFolder}
-                      shareCodeDetected={shareCodeDetected}
-                    />
-                  )}
+        {phase === "selectSkills" && scanResult && (
+          <SelectSkillsPhase
+            skills={scanResult.skills}
+            source={scanResult.source}
+            selectedSkills={selectedSkills}
+            onToggle={toggleSkill}
+            onSelectAll={selectAll}
+            onDeselectAll={deselectAll}
+            onInstall={handleInstall}
+            fullDepthEnabled={fullDepthScan}
+            onDeepScan={handleDeepScan}
+            hasPackGroup={!!onPackGroup}
+          />
+        )}
 
-                  {phase === "scanning" && <LoadingPhase message={progressMsg} />}
+        {phase === "installing" && <LoadingPhase message={progressMsg} />}
 
-                  {phase === "selectSkills" && scanResult && (
-                    <SelectSkillsPhase
-                      skills={scanResult.skills}
-                      source={scanResult.source}
-                      selectedSkills={selectedSkills}
-                      onToggle={toggleSkill}
-                      onSelectAll={selectAll}
-                      onDeselectAll={deselectAll}
-                      onInstall={handleInstall}
-                      fullDepthEnabled={fullDepthScan}
-                      onDeepScan={handleDeepScan}
-                      hasPackGroup={!!onPackGroup}
-                    />
-                  )}
+        {phase === "completed" && <CompletedPhase count={installedCount} summary={shareCodeSummary} onDone={onClose} />}
 
-                  {phase === "installing" && <LoadingPhase message={progressMsg} />}
+        {phase === "error" && <ErrorPhase message={errorMsg} onRetry={reset} />}
 
-                  {phase === "completed" && (
-                    <CompletedPhase count={installedCount} summary={shareCodeSummary} onDone={onClose} />
-                  )}
+        {phase === "shareCodePreview" && (
+          <ShareCodePreviewPhase
+            data={shareCodeData}
+            error={shareCodeError}
+            password={shareCodePassword}
+            existingNames={shareCodeExistingNames}
+            onPasswordChange={setShareCodePassword}
+            onRetryWithPassword={() => handleParseShareCode(urlInput.trim())}
+            onInstall={handleShareCodeInstall}
+            onBack={reset}
+          />
+        )}
 
-                  {phase === "error" && <ErrorPhase message={errorMsg} onRetry={reset} />}
-
-                  {phase === "shareCodePreview" && (
-                    <ShareCodePreviewPhase
-                      data={shareCodeData}
-                      error={shareCodeError}
-                      password={shareCodePassword}
-                      existingNames={shareCodeExistingNames}
-                      onPasswordChange={setShareCodePassword}
-                      onRetryWithPassword={() => handleParseShareCode(urlInput.trim())}
-                      onInstall={handleShareCodeInstall}
-                      onBack={reset}
-                    />
-                  )}
-
-                  {phase === "shareCodeInstalling" && <LoadingPhase message={progressMsg} />}
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+        {phase === "shareCodeInstalling" && <LoadingPhase message={progressMsg} />}
+      </div>
+    </ModalShell>
   );
 }

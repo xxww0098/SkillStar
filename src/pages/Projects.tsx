@@ -17,6 +17,7 @@ import { useProjectAgentDetection } from "../features/projects/hooks/useProjectA
 import { useProjectManifest } from "../features/projects/hooks/useProjectManifest";
 import { useProjectSkills } from "../features/projects/hooks/useProjectSkills";
 import { useAgentProfiles } from "../hooks/useAgentProfiles";
+import { supportsProjectDeploy } from "../lib/agentProfiles";
 import { toast } from "../lib/toast";
 import type { ProjectEntry, ScannedSkill, Skill } from "../types";
 
@@ -57,7 +58,7 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
   } = useSkills();
   const { profiles } = useAgentProfiles();
   const enabledProfiles = useMemo(
-    () => profiles.filter((profile) => profile.enabled && profile.project_skills_rel && profile.id !== "openclaw"),
+    () => profiles.filter((profile) => profile.enabled && supportsProjectDeploy(profile)),
     [profiles],
   );
   const enabledProfileIdSet = useMemo(() => new Set(enabledProfiles.map((profile) => profile.id)), [enabledProfiles]);
