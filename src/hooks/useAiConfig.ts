@@ -67,7 +67,10 @@ export function useAiConfig() {
   useEffect(() => {
     getAiConfigCached()
       .then((cfg) => setConfig({ ...DEFAULT_CONFIG, ...cfg }))
-      .catch(() => {})
+      .catch((err) => {
+        // Fall back to DEFAULT_CONFIG, but leave a trace for diagnosis.
+        console.warn("[useAiConfig] get_ai_config failed, using defaults:", err);
+      })
       .finally(() => setLoading(false));
   }, []);
 

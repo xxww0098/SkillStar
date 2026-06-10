@@ -165,6 +165,11 @@ export function useAiTranslate() {
       completionMetricsRef.current = null;
       startTicker();
 
+      // This request's own subscription. The shared unlistenRef can be
+      // overwritten by a newer request while our invoke is still in flight,
+      // so cleanup below must only ever detach THIS listener.
+      let myUnlisten: (() => void) | null = null;
+
       try {
         const unlisten = await listen<AiTranslateStreamPayload>("ai://translate-stream", (event) => {
           if (activeIdRef.current !== requestId) return;
@@ -183,12 +188,14 @@ export function useAiTranslate() {
             setState((p) => ({ ...p, metrics: payload.metrics ?? null }));
           }
         });
-        unlistenRef.current = unlisten;
         if (activeIdRef.current !== requestId) {
+          // Cancelled while the subscription was being created — don't touch
+          // unlistenRef, a newer request may already own it.
           unlisten();
-          unlistenRef.current = null;
           return null;
         }
+        myUnlisten = unlisten;
+        unlistenRef.current = unlisten;
 
         armSafety();
 
@@ -221,10 +228,14 @@ export function useAiTranslate() {
         return null;
       } finally {
         if (safetyTimer !== undefined) clearTimeout(safetyTimer);
-        if (unlistenRef.current) unlistenRef.current();
-        unlistenRef.current = null;
-        if (activeIdRef.current === requestId) activeIdRef.current = null;
-        stopTicker();
+        myUnlisten?.();
+        if (unlistenRef.current === myUnlisten) unlistenRef.current = null;
+        if (activeIdRef.current === requestId) {
+          // Only tear down shared state while we are still the active
+          // request — a newer request owns the ticker otherwise.
+          activeIdRef.current = null;
+          stopTicker();
+        }
       }
     },
     [aiConfigured, cancel, state.loading, state.source, state.translated],

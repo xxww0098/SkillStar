@@ -1,5 +1,4 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   createContext,
   createElement,
@@ -11,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTauriEvent } from "../../../hooks/useTauriEvent";
 import { tauriInvoke } from "../../../lib/ipc";
 import type { RepoNewSkill, Skill, SkillUpdateState } from "../../../types";
 
@@ -133,42 +133,27 @@ function useSkillsState() {
   }, [refresh]);
 
   useEffect(() => {
-    let unlistenTauri: UnlistenFn | null = null;
     const handleExternalRefresh = () => {
       void refresh(true, true);
     };
-
     window.addEventListener("skillstar:refresh-skills", handleExternalRefresh);
-
-    listen("ai://translations-updated", handleExternalRefresh).then((unlistenFn) => {
-      unlistenTauri = unlistenFn;
-    });
-
     return () => {
       window.removeEventListener("skillstar:refresh-skills", handleExternalRefresh);
-      unlistenTauri?.();
     };
   }, [refresh]);
 
+  useTauriEvent("ai://translations-updated", () => {
+    void refresh(true, true);
+  });
+
   // Rust backend emits "patrol://skill-checked"; merge into query cache.
-  useEffect(() => {
-    let unlisten: UnlistenFn | null = null;
-
-    listen<{ name: string; update_available: boolean }>("patrol://skill-checked", (event) => {
-      const { name, update_available } = event.payload;
-      queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) => {
-        const skill = prev.find((item) => item.name === name);
-        if (!skill || skill.update_available === update_available) return prev;
-        return prev.map((item) => (item.name === name ? { ...item, update_available } : item));
-      });
-    }).then((fn_) => {
-      unlisten = fn_;
+  useTauriEvent<{ name: string; update_available: boolean }>("patrol://skill-checked", ({ name, update_available }) => {
+    queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) => {
+      const skill = prev.find((item) => item.name === name);
+      if (!skill || skill.update_available === update_available) return prev;
+      return prev.map((item) => (item.name === name ? { ...item, update_available } : item));
     });
-
-    return () => {
-      unlisten?.();
-    };
-  }, [queryClient]);
+  });
 
   // ── Ghost Skills (new repo skills) ────────────────────────────────
 
@@ -183,31 +168,20 @@ function useSkillsState() {
   const ghostSkills = ghostQuery.data ?? [];
 
   // Listen for patrol event to update ghost skills
-  useEffect(() => {
-    let unlisten: UnlistenFn | null = null;
-
-    listen<RepoNewSkill[]>("patrol://new-skills-detected", (event) => {
-      if (event.payload.length > 0) {
-        // Merge with dismissed filter: fetch dismissed list and filter
-        tauriInvoke("get_dismissed_new_skills")
-          .then((dismissed) => {
-            const dismissedSet = new Set(dismissed);
-            const filtered = event.payload.filter((s) => !dismissedSet.has(`${s.repo_source}/${s.skill_id}`));
-            queryClient.setQueryData<RepoNewSkill[]>(GHOST_SKILLS_QUERY_KEY, filtered);
-          })
-          .catch(() => {
-            // Fallback: set all (dismissed filter will apply on next full fetch)
-            queryClient.setQueryData<RepoNewSkill[]>(GHOST_SKILLS_QUERY_KEY, event.payload);
-          });
-      }
-    }).then((fn_) => {
-      unlisten = fn_;
-    });
-
-    return () => {
-      unlisten?.();
-    };
-  }, [queryClient]);
+  useTauriEvent<RepoNewSkill[]>("patrol://new-skills-detected", (payload) => {
+    if (payload.length === 0) return;
+    // Merge with dismissed filter: fetch dismissed list and filter
+    tauriInvoke("get_dismissed_new_skills")
+      .then((dismissed) => {
+        const dismissedSet = new Set(dismissed);
+        const filtered = payload.filter((s) => !dismissedSet.has(`${s.repo_source}/${s.skill_id}`));
+        queryClient.setQueryData<RepoNewSkill[]>(GHOST_SKILLS_QUERY_KEY, filtered);
+      })
+      .catch(() => {
+        // Fallback: set all (dismissed filter will apply on next full fetch)
+        queryClient.setQueryData<RepoNewSkill[]>(GHOST_SKILLS_QUERY_KEY, payload);
+      });
+  });
 
   const dismissGhostSkill = useCallback(
     async (repoSource: string, skillId: string) => {

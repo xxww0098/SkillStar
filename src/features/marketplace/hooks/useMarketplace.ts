@@ -65,6 +65,9 @@ export function useMarketplace() {
   const [aiActiveKeywords, setAiActiveKeywords] = useState<Set<string>>(new Set());
   const staleRefreshAttemptedRef = useRef<Set<string>>(new Set());
   const inFlightRefreshesRef = useRef(0);
+  const aiSearchSeqRef = useRef(0);
+  const requestedLeaderboardCategoryRef = useRef(requestedLeaderboardCategory);
+  requestedLeaderboardCategoryRef.current = requestedLeaderboardCategory;
 
   const applySnapshotMeta = useCallback(<T>(result: LocalFirstResult<T>) => {
     setSnapshotStatus(result.snapshot_status);
@@ -154,7 +157,8 @@ export function useMarketplace() {
     const result = leaderboardQuery.data;
     if (!result || result.snapshot_status !== "stale") return;
 
-    const attemptKey = `leaderboard:${requestedLeaderboardCategory}`;
+    const category = requestedLeaderboardCategory;
+    const attemptKey = `leaderboard:${category}`;
     if (staleRefreshAttemptedRef.current.has(attemptKey)) return;
     staleRefreshAttemptedRef.current.add(attemptKey);
     beginBackgroundRefresh();
@@ -162,17 +166,20 @@ export function useMarketplace() {
     void (async () => {
       try {
         await tauriInvoke("sync_marketplace_scope", {
-          scope: `leaderboard_${requestedLeaderboardCategory}`,
+          scope: `leaderboard_${category}`,
         });
         await queryClient.invalidateQueries({
-          queryKey: leaderboardQueryKey(requestedLeaderboardCategory),
+          queryKey: leaderboardQueryKey(category),
           exact: true,
         });
         const fresh = await queryClient.fetchQuery({
-          queryKey: leaderboardQueryKey(requestedLeaderboardCategory),
-          queryFn: () => fetchLocalLeaderboard(requestedLeaderboardCategory),
+          queryKey: leaderboardQueryKey(category),
+          queryFn: () => fetchLocalLeaderboard(category),
           staleTime: MARKETPLACE_STALE_TIME_MS,
         });
+        // Stale-response guard: the user may have switched category while
+        // this background refresh was in flight.
+        if (requestedLeaderboardCategoryRef.current !== category) return;
         setLeaderboard(fresh.data);
         applySnapshotMeta(fresh);
       } catch (e) {
@@ -321,6 +328,11 @@ export function useMarketplace() {
     async (query: string, limit = 50) => {
       if (!query.trim()) return;
 
+      // Stale-response guard: only the most recent invocation may touch state
+      // (overlapping searches would otherwise let the slower, older response
+      // overwrite the newer results and flip aiSearching off prematurely).
+      const seq = ++aiSearchSeqRef.current;
+
       setAiSearching(true);
       setError(null);
       setAiKeywords(null);
@@ -334,6 +346,7 @@ export function useMarketplace() {
           query,
           limit,
         });
+        if (aiSearchSeqRef.current !== seq) return;
         setAiKeywords(keywords);
         setAiPhase("searching");
         setAiAllSkills(result.data.skills);
@@ -342,10 +355,12 @@ export function useMarketplace() {
         setResults(toMarketplaceResult(result.data.skills));
         applySnapshotMeta(result);
       } catch (e) {
-        setError(String(e));
+        if (aiSearchSeqRef.current === seq) setError(String(e));
       } finally {
-        setAiSearching(false);
-        setAiPhase(null);
+        if (aiSearchSeqRef.current === seq) {
+          setAiSearching(false);
+          setAiPhase(null);
+        }
       }
     },
     [aiSearchMutation, applySnapshotMeta],
@@ -364,6 +379,10 @@ export function useMarketplace() {
   }, []);
 
   const clearAiSearch = useCallback(() => {
+    // Invalidate any in-flight aiSearch so its late response can't resurrect
+    // the cleared state.
+    aiSearchSeqRef.current += 1;
+    setAiSearching(false);
     setAiKeywords(null);
     setAiPhase(null);
     setAiAllSkills([]);
