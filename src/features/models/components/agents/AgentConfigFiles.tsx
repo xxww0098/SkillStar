@@ -1,5 +1,6 @@
 import { FolderOpen, Loader2, RefreshCw, Save, Wand2, Zap } from "lucide-react";
 import { useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../../components/ui/button";
 import { tauriInvoke } from "../../../../lib/ipc";
 import { cn } from "../../../../lib/utils";
@@ -7,7 +8,7 @@ import { type AgentToolId, useToolConfigFiles } from "../../api/configFiles";
 
 export interface AgentConfigFilesProps {
   toolId: AgentToolId;
-  /** Provider currently bound to this tool — enables 同步 (push managed fields). */
+  /** Provider currently bound to this tool — enables sync (push managed fields). */
   activeProviderId?: string | null;
 }
 
@@ -16,6 +17,7 @@ export interface AgentConfigFilesProps {
  * the tool tab row — each agent settings dialog edits its own files only).
  */
 export function AgentConfigFiles({ toolId, activeProviderId }: AgentConfigFilesProps) {
+  const { t } = useTranslation();
   const editor = useToolConfigFiles(toolId);
   const activeFile = editor.files.find((f) => f.file_id === editor.activeFileId);
 
@@ -65,7 +67,7 @@ export function AgentConfigFiles({ toolId, activeProviderId }: AgentConfigFilesP
             "font-mono text-[11px] leading-5 text-foreground",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35",
           )}
-          aria-label={`${toolId} 配置编辑器`}
+          aria-label={t("models.configFiles.editorAria", { toolId })}
         />
       )}
 
@@ -78,7 +80,7 @@ export function AgentConfigFiles({ toolId, activeProviderId }: AgentConfigFilesP
           disabled={editor.saving || editor.loading}
         >
           {editor.saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
-          保存
+          {t("models.configFiles.save")}
         </Button>
         <Button
           type="button"
@@ -86,7 +88,7 @@ export function AgentConfigFiles({ toolId, activeProviderId }: AgentConfigFilesP
           variant="outline"
           onClick={() => void editor.formatContent()}
           disabled={editor.loading}
-          title="格式化"
+          title={t("models.configFiles.format")}
         >
           <Wand2 className="h-3 w-3" />
         </Button>
@@ -96,7 +98,7 @@ export function AgentConfigFiles({ toolId, activeProviderId }: AgentConfigFilesP
           variant="outline"
           onClick={() => void editor.reload()}
           disabled={editor.loading}
-          title="重载"
+          title={t("models.configFiles.reload")}
         >
           <RefreshCw className="h-3 w-3" />
         </Button>
@@ -106,10 +108,10 @@ export function AgentConfigFiles({ toolId, activeProviderId }: AgentConfigFilesP
           variant="outline"
           onClick={handlePush}
           disabled={!activeProviderId || editor.loading}
-          title={activeProviderId ? "用当前绑定覆盖托管字段" : "请先接入该 Agent"}
+          title={activeProviderId ? t("models.configFiles.pushTitle") : t("models.configFiles.pushDisabledTitle")}
         >
           <Zap className="h-3 w-3" />
-          同步
+          {t("models.configFiles.sync")}
         </Button>
         {activeFile && (
           <Button
@@ -123,12 +125,12 @@ export function AgentConfigFiles({ toolId, activeProviderId }: AgentConfigFilesP
             }}
           >
             <FolderOpen className="h-3 w-3" />
-            打开目录
+            {t("models.configFiles.openFolder")}
           </Button>
         )}
       </div>
 
-      {editor.dirty && <p className="text-[10px] text-amber-500">未保存</p>}
+      {editor.dirty && <p className="text-[10px] text-amber-500">{t("models.configFiles.unsaved")}</p>}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { tauriInvoke } from "../../../lib/ipc";
+import i18n from "../../../i18n";
 import type { BalanceInfo } from "../../../types";
 
 const BALANCE_TIMEOUT_MS = 10_000;
@@ -130,7 +131,9 @@ export function useBalanceQuery(presetId: string | null, apiKey: string, baseUrl
           apiKey,
           baseUrl,
         }),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("查询超时")), BALANCE_TIMEOUT_MS)),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(i18n.t("models.toasts.queryTimeout"))), BALANCE_TIMEOUT_MS),
+        ),
       ]);
 
       // Only update state if this is still the latest request
@@ -139,7 +142,7 @@ export function useBalanceQuery(presetId: string | null, apiKey: string, baseUrl
         if (parsed) {
           setBalance(parsed);
         } else {
-          setError(new Error("无法解析余额数据"));
+          setError(new Error(i18n.t("models.toasts.parseBalanceFailed")));
           setBalance(null);
         }
       }

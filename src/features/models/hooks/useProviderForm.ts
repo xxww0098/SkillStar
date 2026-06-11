@@ -12,6 +12,7 @@
  */
 import { useCallback, useMemo, useReducer, useState } from "react";
 import { toast } from "sonner";
+import i18n from "../../../i18n";
 import type { ProviderEntryFlat } from "../../../types";
 import { useModelFetch } from "../api/modelCatalog";
 import { useProviderPresets } from "../api/presets";
@@ -67,7 +68,9 @@ export function useProviderForm(provider: ProviderEntryFlat) {
       await updateProvider(provider.id, patch);
       return "saved";
     } catch (error) {
-      toast.error(`保存失败：${error instanceof Error ? error.message : String(error)}`);
+      toast.error(
+        i18n.t("models.toasts.saveFailed", { message: error instanceof Error ? error.message : String(error) }),
+      );
       return "error";
     }
   }, [values, provider.id, provider.meta, updateProvider]);
@@ -87,12 +90,14 @@ export function useProviderForm(provider: ProviderEntryFlat) {
         },
       });
       setModelFetchCount(fetched.length);
-      toast.success(`已拉取 ${fetched.length} 个模型`);
+      toast.success(i18n.t("models.toasts.fetchedModels", { count: fetched.length }));
       if (result.missing_cost_count > 0) {
-        toast.message(`${result.missing_cost_count} 个模型缺少价格信息`);
+        toast.message(i18n.t("models.toasts.missingCost", { count: result.missing_cost_count }));
       }
     } catch (error) {
-      toast.error(`拉取模型失败：${error instanceof Error ? error.message : String(error)}`);
+      toast.error(
+        i18n.t("models.toasts.fetchModelsFailed", { message: error instanceof Error ? error.message : String(error) }),
+      );
       setModelFetchCount(null);
     }
   }, [fetchModelCatalog, values.modelsUrl, values.apiKey, values.models]);
@@ -136,7 +141,7 @@ export function useProviderForm(provider: ProviderEntryFlat) {
       if (field === "openai") setField("baseUrlOpenai", normalized);
       else if (field === "anthropic") setField("baseUrlAnthropic", normalized);
       else setField("modelsUrl", normalized);
-      toast.success("已应用最快端点");
+      toast.success(i18n.t("models.toasts.fastestApplied"));
     },
     [setField],
   );

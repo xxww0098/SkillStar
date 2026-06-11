@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import { ArrowRight, ExternalLink, Plug, RefreshCw, Settings2, Unplug } from "lucide-react";
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../../components/ui/button";
 import { ExternalAnchor } from "../../../../components/ui/ExternalAnchor";
 import { cn } from "../../../../lib/utils";
@@ -64,15 +65,16 @@ function StatusBanner({
   onOpenProviderDrawer: (providerId: string) => void;
   onRetest: () => void;
 }) {
+  const { t } = useTranslation();
   if (status.kind === "not_installed") {
     return (
       <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2.5 text-[11px] text-amber-400">
-        <p>未检测到本机安装。</p>
+        <p>{t("models.card.notInstalled")}</p>
         <ExternalAnchor
           href={agent.installDocsUrl}
           className="mt-1 inline-flex items-center gap-1 font-medium text-primary hover:underline"
         >
-          查看安装文档 <ExternalLink className="h-3 w-3" />
+          {t("models.card.installDocs")} <ExternalLink className="h-3 w-3" />
         </ExternalAnchor>
       </div>
     );
@@ -80,13 +82,15 @@ function StatusBanner({
   if (status.kind === "misconfigured" && boundProviderId) {
     return (
       <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2.5 text-[11px] text-amber-400">
-        此供应商缺少 {status.requiredUrlField === "anthropic" ? "Anthropic" : "OpenAI"} 兼容端点。
+        {t("models.card.missingEndpoint", {
+          endpoint: status.requiredUrlField === "anthropic" ? "Anthropic" : "OpenAI",
+        })}
         <button
           type="button"
           onClick={() => onOpenProviderDrawer(boundProviderId)}
           className="mt-1 inline-flex items-center gap-1 font-medium text-primary hover:underline"
         >
-          去配置 <ArrowRight className="h-3 w-3" />
+          {t("models.card.goConfigure")} <ArrowRight className="h-3 w-3" />
         </button>
       </div>
     );
@@ -95,16 +99,16 @@ function StatusBanner({
     return (
       <div className="rounded-xl border border-red-500/20 bg-red-500/[0.06] px-3 py-2.5 text-[11px] text-red-400">
         {status.kind === "auth_failed"
-          ? "鉴权失败，请检查 API Key。"
+          ? t("models.card.authFailed")
           : status.kind === "timeout"
-            ? "连接超时。"
-            : "连接失败。"}
+            ? t("models.card.timeout")
+            : t("models.card.connectFailed")}
         <button
           type="button"
           onClick={onRetest}
           className="ml-2 inline-flex items-center gap-1 font-medium text-primary hover:underline"
         >
-          重试 <RefreshCw className="h-3 w-3" />
+          {t("models.card.retry")} <RefreshCw className="h-3 w-3" />
         </button>
       </div>
     );
@@ -119,6 +123,7 @@ export function AgentHeroCard({
   onOpenSettings,
   onOpenProviderDrawer,
 }: AgentHeroCardProps) {
+  const { t } = useTranslation();
   const act = useAgentActivation(agent.toolId);
   const probe = health.results[agent.toolId] ?? null;
   const probing = health.testing[agent.toolId] ?? false;
@@ -183,7 +188,9 @@ export function AgentHeroCard({
         />
 
         <div className="space-y-1.5">
-          <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">供应商</label>
+          <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {t("models.card.providerLabel")}
+          </label>
           <ProviderSelectPopover
             providers={act.compatibleProviders}
             currentId={act.activation?.provider_id}
@@ -200,7 +207,9 @@ export function AgentHeroCard({
 
         {connected && availableModels.length > 0 ? (
           <div className="space-y-1.5">
-            <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">模型</label>
+            <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {t("models.card.modelLabel")}
+            </label>
             <ModelSelectPopover
               models={availableModels}
               catalog={modelCatalog}
@@ -209,7 +218,10 @@ export function AgentHeroCard({
               disabled={act.busy}
               footerAction={
                 act.boundProvider
-                  ? { label: "管理模型列表 →", onClick: () => onOpenProviderDrawer(act.boundProvider?.id ?? "") }
+                  ? {
+                      label: t("models.picker.manageModels"),
+                      onClick: () => onOpenProviderDrawer(act.boundProvider?.id ?? ""),
+                    }
                   : undefined
               }
             />
@@ -218,13 +230,13 @@ export function AgentHeroCard({
 
         {connected && availableModels.length === 0 && act.boundProvider ? (
           <p className="text-[11px] text-amber-500">
-            未拉取模型列表。
+            {t("models.card.noModelsFetched")}
             <button
               type="button"
               onClick={() => onOpenProviderDrawer(act.boundProvider?.id ?? "")}
               className="ml-1 font-medium text-primary hover:underline"
             >
-              去拉取
+              {t("models.card.goFetch")}
             </button>
           </p>
         ) : null}
@@ -238,7 +250,7 @@ export function AgentHeroCard({
               size="icon-sm"
               onClick={() => void act.resync()}
               disabled={act.busy}
-              title="重新同步"
+              title={t("models.card.resync")}
               className="text-muted-foreground hover:text-foreground"
             >
               <RefreshCw className={cn("h-3.5 w-3.5", act.busy && "animate-spin")} />
@@ -247,7 +259,7 @@ export function AgentHeroCard({
               variant="ghost"
               size="icon-sm"
               onClick={onOpenSettings}
-              title="接入设置"
+              title={t("models.card.settings")}
               className="text-muted-foreground hover:text-foreground"
             >
               <Settings2 className="h-3.5 w-3.5" />
@@ -257,7 +269,7 @@ export function AgentHeroCard({
               size="icon-sm"
               onClick={() => void act.deactivate()}
               disabled={act.busy}
-              title="断开接入"
+              title={t("models.card.disconnect")}
               className="ml-auto text-muted-foreground hover:text-destructive"
             >
               <Unplug className="h-3.5 w-3.5" />
@@ -269,14 +281,14 @@ export function AgentHeroCard({
               variant="ghost"
               size="icon-sm"
               onClick={onOpenSettings}
-              title="接入设置"
+              title={t("models.card.settings")}
               className="text-muted-foreground hover:text-foreground"
             >
               <Settings2 className="h-3.5 w-3.5" />
             </Button>
             <Button variant="outline" size="sm" onClick={onAddProvider} className="ml-auto h-7 text-[11px]">
               <Plug className="mr-1.5 h-3 w-3" />
-              新增并接入
+              {t("models.card.addAndConnect")}
             </Button>
           </>
         )}

@@ -1,5 +1,6 @@
 import { ExternalLink, RefreshCw, Terminal, Unplug } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../../components/ui/button";
 import { ExternalAnchor } from "../../../../components/ui/ExternalAnchor";
 import { ModalHeader, ModalShell } from "../../../../components/ui/ModalShell";
@@ -63,6 +64,7 @@ export function AgentSettingsDialog({
   onAddProvider,
   onOpenProviderDrawer,
 }: AgentSettingsDialogProps) {
+  const { t } = useTranslation();
   const act = useAgentActivation(toolId);
   const metaPatch = useProviderMetaPatch();
   const provider = act.boundProvider;
@@ -162,7 +164,7 @@ export function AgentSettingsDialog({
     <ModalShell
       open={open}
       onClose={requestClose}
-      ariaLabel={`${act.agent.displayName} 接入设置`}
+      ariaLabel={t("models.dialog.title", { name: act.agent.displayName })}
       panelClassName="max-w-[640px]"
       surfaceClassName="flex max-h-[85vh] flex-col"
     >
@@ -170,7 +172,7 @@ export function AgentSettingsDialog({
         icon={<AgentToolIcon toolId={act.agent.iconId} size="sm" />}
         title={
           <span className="flex items-center gap-2">
-            {act.agent.displayName} 接入设置
+            {t("models.dialog.title", { name: act.agent.displayName })}
             <AgentStatusPill status={status} />
             {dirty || saveState !== "idle" ? <SaveBadge state={saveState} /> : null}
           </span>
@@ -183,21 +185,21 @@ export function AgentSettingsDialog({
 
         {!act.install.installed && !act.install.loading ? (
           <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2.5 text-[11px] text-amber-400">
-            <p>未检测到本机安装。</p>
+            <p>{t("models.card.notInstalled")}</p>
             <ExternalAnchor
               href={act.agent.installDocsUrl}
               className="mt-1 inline-flex items-center gap-1 font-medium text-primary hover:underline"
             >
-              查看安装文档 <ExternalLink className="h-3 w-3" />
+              {t("models.card.installDocs")} <ExternalLink className="h-3 w-3" />
             </ExternalAnchor>
           </div>
         ) : null}
 
-        {/* ── 接入 ─────────────────────────────────────────────── */}
+        {/* ── Binding ──────────────────────────────────────────── */}
         <section className="space-y-2.5">
-          <SectionTitle>接入</SectionTitle>
+          <SectionTitle>{t("models.dialog.connectSection")}</SectionTitle>
           <div className="space-y-1.5">
-            <span className="text-[11px] font-medium text-muted-foreground">供应商</span>
+            <span className="text-[11px] font-medium text-muted-foreground">{t("models.card.providerLabel")}</span>
             <ProviderSelectPopover
               providers={act.compatibleProviders}
               currentId={act.activation?.provider_id}
@@ -209,23 +211,26 @@ export function AgentSettingsDialog({
           </div>
           {provider ? (
             <div className="space-y-1.5">
-              <span className="text-[11px] font-medium text-muted-foreground">模型</span>
+              <span className="text-[11px] font-medium text-muted-foreground">{t("models.card.modelLabel")}</span>
               <ModelSelectPopover
                 models={availableModels}
                 catalog={modelCatalog}
                 current={act.currentModel}
                 onPick={(m) => void act.pickModel(m)}
                 disabled={act.busy}
-                footerAction={{ label: "管理模型列表 →", onClick: () => onOpenProviderDrawer(provider.id) }}
+                footerAction={{
+                  label: t("models.picker.manageModels"),
+                  onClick: () => onOpenProviderDrawer(provider.id),
+                }}
               />
             </div>
           ) : null}
         </section>
 
-        {/* ── 模型参数（按 agent 条件渲染）────────────────────── */}
+        {/* ── Model params (rendered per agent) ───────────────── */}
         {provider && values && toolId === "claude-code" ? (
           <section className="space-y-2.5 border-t border-border/40 pt-4">
-            <SectionTitle>模型参数</SectionTitle>
+            <SectionTitle>{t("models.dialog.modelParams")}</SectionTitle>
             <ClaudeModelMapping
               values={values}
               options={claudeMappingOptions}
@@ -235,7 +240,7 @@ export function AgentSettingsDialog({
         ) : null}
         {provider && values && toolId === "codex" ? (
           <section className="space-y-2.5 border-t border-border/40 pt-4">
-            <SectionTitle>模型参数</SectionTitle>
+            <SectionTitle>{t("models.dialog.modelParams")}</SectionTitle>
             <CodexSettingsForm
               wireApi={values.codexWireApi}
               authMode={values.codexAuthMode}
@@ -245,28 +250,28 @@ export function AgentSettingsDialog({
           </section>
         ) : null}
 
-        {/* ── 启动命令（仅 Claude）──────────────────────────── */}
+        {/* ── Launch command (Claude only) ─────────────────────── */}
         {toolId === "claude-code" && act.currentModel ? (
           <section className="space-y-2.5 border-t border-border/40 pt-4">
             <SectionTitle>
               <span className="inline-flex items-center gap-1.5">
                 <Terminal className="h-3 w-3" />
-                启动命令
+                {t("models.dialog.launchCommand")}
               </span>
             </SectionTitle>
             <AgentLaunchCommand model={act.currentModel} />
           </section>
         ) : null}
 
-        {/* ── 磁盘配置 ─────────────────────────────────────────── */}
+        {/* ── Disk config ──────────────────────────────────────── */}
         <section className="space-y-2.5 border-t border-border/40 pt-4">
-          <SectionTitle>磁盘配置</SectionTitle>
+          <SectionTitle>{t("models.dialog.diskConfig")}</SectionTitle>
           <p className="rounded-lg border border-border/40 bg-background/35 px-2.5 py-2 font-mono text-[11px] text-muted-foreground">
             {act.agent.configPathDisplay}
           </p>
           <AgentConfigFiles toolId={toolId} activeProviderId={act.activation?.provider_id ?? null} />
           <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-            <span>上次同步：{lastSync ?? "从未同步"}</span>
+            <span>{t("models.dialog.lastSync", { time: lastSync ?? t("models.dialog.neverSynced") })}</span>
             <Button
               type="button"
               variant="outline"
@@ -276,7 +281,7 @@ export function AgentSettingsDialog({
               disabled={!act.activation || act.busy}
             >
               <RefreshCw className={act.busy ? "h-3 w-3 animate-spin" : "h-3 w-3"} />
-              重新写入
+              {t("models.dialog.rewrite")}
             </Button>
           </div>
         </section>
@@ -294,10 +299,10 @@ export function AgentSettingsDialog({
           disabled={!act.activation || act.busy}
         >
           <Unplug className="h-3.5 w-3.5" />
-          断开接入
+          {t("models.card.disconnect")}
         </Button>
         <Button variant="outline" size="sm" onClick={requestClose}>
-          完成
+          {t("models.save.done")}
         </Button>
       </footer>
     </ModalShell>

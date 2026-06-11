@@ -44,7 +44,6 @@ vi.mock("../../../hooks/useNavigation", () => ({
     navigate: vi.fn(),
     selectedProviderId: null,
     setSelectedProviderId: vi.fn(),
-    setShowPresetSelector: vi.fn(),
     usageCatalogFilter: "__all__",
     setUsageCatalogFilter: vi.fn(),
     openUsageCreate: vi.fn(),

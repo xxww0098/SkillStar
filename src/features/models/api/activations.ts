@@ -8,6 +8,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { toast } from "sonner";
+import i18n from "../../../i18n";
 import { tauriInvoke } from "../../../lib/ipc";
 import type { FlatProvidersResponse, ToolActivationsMap, ToolSyncResult } from "../../../types";
 import { getAgent } from "../lib/agentRegistry";
@@ -72,16 +73,18 @@ export function useActivationMutations() {
     },
     onSuccess: (result, { toolId }) => {
       if (result?.success) {
-        toast.success(`${toolDisplayName(toolId)} 已同步到配置文件`);
+        toast.success(i18n.t("models.toasts.syncedToConfig", { name: toolDisplayName(toolId) }));
       } else if (result) {
-        toast.error(result.error ?? `${toolDisplayName(toolId)} 同步失败`);
+        toast.error(result.error ?? i18n.t("models.toasts.syncFailed", { name: toolDisplayName(toolId) }));
       }
     },
     onError: (err, { toolId }, context) => {
       if (context?.previous) {
         queryClient.setQueryData(queryKey, context.previous);
       }
-      toast.error(err instanceof Error ? err.message : `${toolDisplayName(toolId)} 同步失败`);
+      toast.error(
+        err instanceof Error ? err.message : i18n.t("models.toasts.syncFailed", { name: toolDisplayName(toolId) }),
+      );
     },
     onSettled: invalidate,
   });
@@ -100,13 +103,17 @@ export function useActivationMutations() {
       return { previous };
     },
     onSuccess: (_result, toolId) => {
-      toast.success(`${toolDisplayName(toolId)} 已停用`);
+      toast.success(i18n.t("models.toasts.deactivated", { name: toolDisplayName(toolId) }));
     },
     onError: (err, toolId, context) => {
       if (context?.previous) {
         queryClient.setQueryData(queryKey, context.previous);
       }
-      toast.error(err instanceof Error ? err.message : `${toolDisplayName(toolId)} 停用失败`);
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : i18n.t("models.toasts.deactivateFailed", { name: toolDisplayName(toolId) }),
+      );
     },
     onSettled: invalidate,
   });
@@ -116,13 +123,17 @@ export function useActivationMutations() {
       tauriInvoke("update_tool_settings", { toolId, settings }),
     onSuccess: (result, { toolId }) => {
       if (result?.success) {
-        toast.success(`${toolDisplayName(toolId)} 配置已更新`);
+        toast.success(i18n.t("models.toasts.settingsUpdated", { name: toolDisplayName(toolId) }));
       } else if (result) {
-        toast.error(result.error ?? `${toolDisplayName(toolId)} 配置更新失败`);
+        toast.error(result.error ?? i18n.t("models.toasts.settingsUpdateFailed", { name: toolDisplayName(toolId) }));
       }
     },
     onError: (err, { toolId }) => {
-      toast.error(err instanceof Error ? err.message : `${toolDisplayName(toolId)} 配置更新失败`);
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : i18n.t("models.toasts.settingsUpdateFailed", { name: toolDisplayName(toolId) }),
+      );
     },
     onSettled: invalidate,
   });

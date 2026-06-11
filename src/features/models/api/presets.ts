@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
+import { modelsKeys } from "./keys";
 import { tauriInvoke } from "../../../lib/ipc";
 import type { ProviderPresetFlat } from "../../../types";
 
 const PRESETS_STALE_TIME_MS = 60_000 * 60;
-const QUERY_KEY = ["provider-presets-flat"] as const;
+const QUERY_KEY = modelsKeys.presets();
 
 /** OpenAI-compatible virtual preset (not in the Rust registry). */
 export const OPENAI_COMPATIBLE_PRESET: ProviderPresetFlat = {

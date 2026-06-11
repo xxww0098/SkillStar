@@ -1,4 +1,5 @@
 import { Check, ChevronDown, Loader2, Plug } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Popover } from "radix-ui";
 import { useState } from "react";
 import { cn } from "../../../../lib/utils";
@@ -26,6 +27,7 @@ export function ProviderSelectPopover({
   busy,
   triggerClassName,
 }: ProviderSelectPopoverProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const current = providers.find((p) => p.id === currentId) ?? null;
 
@@ -57,7 +59,7 @@ export function ProviderSelectPopover({
               <span className="flex h-5 w-5 items-center justify-center rounded-md bg-muted text-muted-foreground">
                 <Plug className="h-3 w-3" />
               </span>
-              <span className="min-w-0 flex-1 truncate text-muted-foreground">选择供应商…</span>
+              <span className="min-w-0 flex-1 truncate text-muted-foreground">{t("models.picker.pickProvider")}</span>
             </>
           )}
           {busy ? (
@@ -75,7 +77,9 @@ export function ProviderSelectPopover({
         >
           <div className="max-h-72 overflow-y-auto">
             {providers.length === 0 ? (
-              <div className="px-3 py-3 text-center text-[11px] text-muted-foreground">暂无兼容供应商</div>
+              <div className="px-3 py-3 text-center text-[11px] text-muted-foreground">
+                {t("models.picker.noCompatible")}
+              </div>
             ) : (
               providers.map((p) => (
                 <button
@@ -109,7 +113,7 @@ export function ProviderSelectPopover({
                 className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-primary transition hover:bg-primary/10"
               >
                 <Plug className="h-3.5 w-3.5" />
-                新增供应商…
+                {t("models.picker.addProvider")}
               </button>
             </div>
           ) : null}

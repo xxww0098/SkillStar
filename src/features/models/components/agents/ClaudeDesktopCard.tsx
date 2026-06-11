@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import { ExternalLink, FileCog, Loader2, Plug, ShieldCheck } from "lucide-react";
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../../components/ui/button";
 import { ExternalAnchor } from "../../../../components/ui/ExternalAnchor";
 import { cn } from "../../../../lib/utils";
@@ -20,26 +21,26 @@ const STATUS_STYLE: Record<
   Status,
   {
     chip: string;
-    label: string;
+    labelKey: string;
     border: string;
     glow: string;
   }
 > = {
   "not-installed": {
     chip: "bg-amber-500/15 text-amber-400 ring-amber-500/20",
-    label: "未安装",
+    labelKey: "models.desktop.statusNotInstalled",
     border: "border-amber-500/20",
     glow: "shadow-none",
   },
   "no-mcp-yet": {
     chip: "bg-muted text-muted-foreground ring-border",
-    label: "未配置 MCP",
+    labelKey: "models.desktop.statusNoMcp",
     border: "border-border/55",
     glow: "shadow-[0_24px_60px_-40px_var(--color-shadow)]",
   },
   configured: {
     chip: "bg-emerald-500/15 text-emerald-400 ring-emerald-500/20",
-    label: "已配置",
+    labelKey: "models.desktop.statusConfigured",
     border: "border-emerald-500/25",
     glow: "shadow-[0_30px_60px_-32px_rgba(16,185,129,0.35)]",
   },
@@ -56,6 +57,7 @@ const STATUS_STYLE: Record<
  * JSON editor instead of the provider-binding flow.
  */
 export function ClaudeDesktopCard({ installed, installLoading, onOpenConfig }: ClaudeDesktopCardProps) {
+  const { t } = useTranslation();
   const editor = useToolConfigFiles("claude-desktop");
 
   const mcpCount = useMemo(() => {
@@ -104,22 +106,22 @@ export function ClaudeDesktopCard({ installed, installLoading, onOpenConfig }: C
                 style.chip,
               )}
             >
-              {style.label}
+              {t(style.labelKey)}
             </span>
           </div>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">Anthropic 官方桌面端 · 仅可配置 MCP 服务器</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">{t("models.desktop.tagline")}</p>
         </div>
       </header>
 
       <div className="flex-1 space-y-3 px-5 pt-4 pb-3">
         {status === "not-installed" ? (
           <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2.5 text-[11px] text-amber-400">
-            <p>未检测到 Claude Desktop 安装。</p>
+            <p>{t("models.desktop.notDetected")}</p>
             <ExternalAnchor
               href="https://claude.ai/download"
               className="mt-1 inline-flex items-center gap-1 font-medium text-primary hover:underline"
             >
-              下载 Claude Desktop <ExternalLink className="h-3 w-3" />
+              {t("models.desktop.download")} <ExternalLink className="h-3 w-3" />
             </ExternalAnchor>
           </div>
         ) : (
@@ -128,18 +130,18 @@ export function ClaudeDesktopCard({ installed, installLoading, onOpenConfig }: C
             <div className="rounded-xl border border-border/55 bg-input px-3 py-2.5">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  MCP 服务器
+                  {t("models.desktop.mcpServers")}
                 </span>
                 {editor.loading ? (
                   <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
                 ) : (
-                  <span className="text-[11px] font-semibold text-foreground">{mcpCount} 个</span>
+                  <span className="text-[11px] font-semibold text-foreground">
+                    {t("models.desktop.serverCount", { count: mcpCount })}
+                  </span>
                 )}
               </div>
               <p className="mt-1 text-[11px] text-muted-foreground/90">
-                {mcpCount > 0
-                  ? "通过 MCP 协议接入文件系统、Git、自建工具等。"
-                  : "尚未添加任何 MCP 服务器,点击下方编辑配置。"}
+                {mcpCount > 0 ? t("models.desktop.mcpUsage") : t("models.desktop.mcpEmpty")}
               </p>
             </div>
 
@@ -147,8 +149,8 @@ export function ClaudeDesktopCard({ installed, installLoading, onOpenConfig }: C
             <div className="flex items-start gap-2 rounded-xl border border-primary/15 bg-primary/[0.04] px-3 py-2.5">
               <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary/80" />
               <p className="text-[11px] leading-relaxed text-muted-foreground/95">
-                <strong className="text-foreground/90">无需供应商绑定。</strong> Claude Desktop 通过 Claude.ai
-                账户登录访问 Anthropic 官方端点,不接受第三方 API Key 或自定义 base URL。
+                <strong className="text-foreground/90">{t("models.desktop.noBindingStrong")}</strong>{" "}
+                {t("models.desktop.noBindingBody")}
               </p>
             </div>
           </>
@@ -162,12 +164,12 @@ export function ClaudeDesktopCard({ installed, installLoading, onOpenConfig }: C
             className="ml-auto inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/60 px-2.5 text-[11px] font-medium text-foreground/80 hover:border-primary/40 hover:bg-card-hover"
           >
             <Plug className="h-3 w-3" />
-            前往下载
+            {t("models.desktop.goDownload")}
           </ExternalAnchor>
         ) : (
           <Button variant="outline" size="sm" onClick={onOpenConfig} className="ml-auto h-7 text-[11px]">
             <FileCog className="mr-1.5 h-3 w-3" />
-            编辑 MCP 配置
+            {t("models.desktop.editMcpConfig")}
           </Button>
         )}
       </footer>

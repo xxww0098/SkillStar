@@ -1,4 +1,5 @@
 import ClaudeIcon from "@lobehub/icons/es/Claude/components/Color";
+import { useTranslation } from "react-i18next";
 import { Input } from "../../../../components/ui/input";
 import { LATEST_CLAUDE_MODELS } from "../../lib/providerPatch";
 import { fieldLabelClass } from "../providerForm/ProviderConfigPrimitives";
@@ -18,8 +19,8 @@ export interface ClaudeModelMappingProps {
   disabled?: boolean;
 }
 
-const FIELDS: { key: keyof ClaudeModelMappingValues; label: string; placeholder: string }[] = [
-  { key: "claudeMainModel", label: "主模型", placeholder: LATEST_CLAUDE_MODELS.main },
+const FIELDS: { key: keyof ClaudeModelMappingValues; label?: string; labelKey?: string; placeholder: string }[] = [
+  { key: "claudeMainModel", labelKey: "models.dialog.mainModel", placeholder: LATEST_CLAUDE_MODELS.main },
   { key: "claudeHaikuModel", label: "Haiku", placeholder: LATEST_CLAUDE_MODELS.haiku },
   { key: "claudeSonnetModel", label: "Sonnet", placeholder: LATEST_CLAUDE_MODELS.sonnet },
   { key: "claudeOpusModel", label: "Opus", placeholder: LATEST_CLAUDE_MODELS.opus },
@@ -31,6 +32,7 @@ const FIELDS: { key: keyof ClaudeModelMappingValues; label: string; placeholder:
  * caller's concern.
  */
 export function ClaudeModelMapping({ values, options, onChange, disabled }: ClaudeModelMappingProps) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
@@ -38,14 +40,14 @@ export function ClaudeModelMapping({ values, options, onChange, disabled }: Clau
           <ClaudeIcon size={18} />
         </span>
         <div>
-          <p className="text-xs font-semibold text-foreground">Claude 模型映射</p>
-          <p className="text-[11px] text-muted-foreground">写入 ~/.claude/settings.json 时使用</p>
+          <p className="text-xs font-semibold text-foreground">{t("models.dialog.claudeMappingTitle")}</p>
+          <p className="text-[11px] text-muted-foreground">{t("models.dialog.claudeMappingSubtitle")}</p>
         </div>
       </div>
       <div className="grid gap-2.5 sm:grid-cols-2">
         {FIELDS.map((field) => (
           <label key={field.key} className="space-y-1">
-            <span className={fieldLabelClass}>{field.label}</span>
+            <span className={fieldLabelClass}>{field.labelKey ? t(field.labelKey) : field.label}</span>
             <Input
               value={values[field.key]}
               onChange={(e) => onChange(field.key, e.target.value)}

@@ -134,7 +134,6 @@ interface NavigationState {
   appMode: AppMode;
   modelsActivePage: ModelsNavPage;
   selectedProviderId: string | null;
-  showPresetSelector: boolean;
   projectsPreSelectedSkills: string[] | null;
   skillCardsPreSelectedSkills: string[] | null;
   mySkillsFocusSkill: string | null;
@@ -152,7 +151,6 @@ interface NavigationActions {
   setAppMode: (mode: AppMode) => void;
   navigateModels: (page: ModelsNavPage) => void;
   setSelectedProviderId: (id: string | null) => void;
-  setShowPresetSelector: (show: boolean) => void;
   setProjectsPreSelectedSkills: (skills: string[] | null) => void;
   setSkillCardsPreSelectedSkills: (skills: string[] | null) => void;
   setMySkillsFocusSkill: (skill: string | null) => void;
@@ -206,7 +204,6 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
     setSelectedProviderIdState(id);
     persistLastProviderId(id);
   }, []);
-  const [showPresetSelector, setShowPresetSelector] = useState(false);
   const [projectsPreSelectedSkills, setProjectsPreSelectedSkills] = useState<string[] | null>(null);
   const [skillCardsPreSelectedSkills, setSkillCardsPreSelectedSkills] = useState<string[] | null>(null);
   const [mySkillsFocusSkill, setMySkillsFocusSkill] = useState<string | null>(null);
@@ -238,11 +235,8 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
     (mode: AppMode) => {
       setAppModeState(mode);
       if (mode === "models") {
-        // Drawer is closed by default — the user re-opens it explicitly.
-        setShowPresetSelector(false);
         window.location.hash = MODELS_HASH;
       } else if (mode === "usage") {
-        setShowPresetSelector(false);
         window.location.hash = USAGE_HASH;
         void importUsagePage();
       } else {
@@ -383,7 +377,6 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
       appMode,
       modelsActivePage,
       selectedProviderId,
-      showPresetSelector,
       projectsPreSelectedSkills,
       skillCardsPreSelectedSkills,
       mySkillsFocusSkill,
@@ -397,7 +390,6 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
       setAppMode,
       navigateModels,
       setSelectedProviderId,
-      setShowPresetSelector,
       setProjectsPreSelectedSkills,
       setSkillCardsPreSelectedSkills,
       setMySkillsFocusSkill,
@@ -418,7 +410,6 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
       appMode,
       modelsActivePage,
       selectedProviderId,
-      showPresetSelector,
       projectsPreSelectedSkills,
       skillCardsPreSelectedSkills,
       mySkillsFocusSkill,

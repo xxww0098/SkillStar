@@ -1,6 +1,7 @@
 import { Copy, Loader2, MoreHorizontal, Trash2 } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../../components/ui/button";
 import { cn } from "../../../../lib/utils";
 import type { ProviderEntryFlat } from "../../../../types";
@@ -17,11 +18,11 @@ import { ConnectionTab } from "./tabs/ConnectionTab";
 import { DiagnosticsTab } from "./tabs/DiagnosticsTab";
 import { ModelsTab } from "./tabs/ModelsTab";
 
-const TABS: { id: ProviderEditorTab; label: string }[] = [
-  { id: "connection", label: "连接" },
-  { id: "models", label: "模型" },
-  { id: "advanced", label: "高级" },
-  { id: "diagnostics", label: "诊断" },
+const TABS: { id: ProviderEditorTab; labelKey: string }[] = [
+  { id: "connection", labelKey: "models.tabs.connection" },
+  { id: "models", labelKey: "models.tabs.models" },
+  { id: "advanced", labelKey: "models.tabs.advanced" },
+  { id: "diagnostics", labelKey: "models.tabs.diagnostics" },
 ];
 
 export interface ProviderEditorDrawerProps {
@@ -54,6 +55,7 @@ function ProviderEditorDrawerInner({
   agentBoundOnCreate = false,
 }: ProviderEditorDrawerProps) {
   const [tab, setTab] = useState<ProviderEditorTab>(initialTab);
+  const { t } = useTranslation();
   const [guideDismissed, setGuideDismissed] = useState(false);
   const form = useProviderForm(provider);
   const { state: saveState, flush } = useAutosave({ dirty: form.dirty, save: form.save });
@@ -99,7 +101,7 @@ function ProviderEditorDrawerInner({
       }
       subtitle={
         <span className="flex items-center gap-2">
-          <span>连接 · 模型 · 高级 · 诊断</span>
+          <span>{t("models.drawer.subtitle")}</span>
           <SaveBadge state={saveState} />
         </span>
       }
@@ -109,7 +111,7 @@ function ProviderEditorDrawerInner({
             <DropdownMenu.Trigger asChild>
               <button
                 type="button"
-                aria-label="更多操作"
+                aria-label={t("models.drawer.moreActions")}
                 className="shrink-0 cursor-pointer rounded-lg p-1.5 text-muted-foreground transition hover:bg-muted/50 hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
               >
                 <MoreHorizontal className="h-4 w-4" />
@@ -127,7 +129,7 @@ function ProviderEditorDrawerInner({
                     className="flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-foreground outline-none hover:bg-muted/40"
                   >
                     <Copy className="h-3.5 w-3.5" />
-                    复制供应商
+                    {t("models.drawer.duplicate")}
                   </DropdownMenu.Item>
                 ) : null}
                 {onDelete ? (
@@ -136,7 +138,7 @@ function ProviderEditorDrawerInner({
                     className="flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-destructive outline-none hover:bg-destructive/10"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
-                    删除供应商…
+                    {t("models.drawer.delete")}
                   </DropdownMenu.Item>
                 ) : null}
               </DropdownMenu.Content>
@@ -150,18 +152,18 @@ function ProviderEditorDrawerInner({
             {saveState === "saving" ? (
               <span className="inline-flex items-center gap-1.5">
                 <Loader2 className="h-3 w-3 animate-spin" />
-                保存中…
+                {t("models.save.footerSaving")}
               </span>
             ) : saveState === "dirty" ? (
-              "改动将自动保存"
+              t("models.save.footerDirty")
             ) : saveState === "error" ? (
-              <span className="text-destructive">保存失败，请检查表单</span>
+              <span className="text-destructive">{t("models.save.footerError")}</span>
             ) : (
-              "所有改动自动保存到本机"
+              t("models.save.footerIdle")
             )}
           </span>
           <Button variant="outline" size="sm" onClick={requestClose}>
-            完成
+            {t("models.save.done")}
           </Button>
         </div>
       }
@@ -179,22 +181,22 @@ function ProviderEditorDrawerInner({
 
         {/* Tab bar — sticky inside the drawer scroll container */}
         <div className="sticky -top-5 z-10 -mx-1 rounded-xl border border-border/50 bg-card/90 p-1 backdrop-blur-xl">
-          <div className="grid grid-cols-4 gap-1" role="tablist" aria-label="供应商配置页签">
-            {TABS.map((t) => (
+          <div className="grid grid-cols-4 gap-1" role="tablist" aria-label={t("models.drawer.tablistAria")}>
+            {TABS.map((tabDef) => (
               <button
-                key={t.id}
+                key={tabDef.id}
                 type="button"
                 role="tab"
-                aria-selected={tab === t.id}
-                onClick={() => setTab(t.id)}
+                aria-selected={tab === tabDef.id}
+                onClick={() => setTab(tabDef.id)}
                 className={cn(
                   "rounded-lg px-2 py-1.5 text-xs font-medium transition-colors",
-                  tab === t.id
+                  tab === tabDef.id
                     ? "bg-primary/15 text-primary"
                     : "text-muted-foreground hover:bg-muted/30 hover:text-foreground",
                 )}
               >
-                {t.label}
+                {t(tabDef.labelKey)}
               </button>
             ))}
           </div>

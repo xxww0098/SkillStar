@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { toast } from "sonner";
+import i18n from "../../../i18n";
 import { invalidateAiConfigCache } from "../../../hooks/useAiConfig";
 import { tauriInvoke } from "../../../lib/ipc";
 import type { AiConfig, AiProviderRef } from "../../../types";
@@ -35,10 +36,14 @@ export function useAppAiProvider() {
       try {
         await setMutation.mutateAsync({ appId, providerId });
         const label = appId === "claude" ? "Claude" : "Codex";
-        toast.success(`已设为应用内 AI（${label}）${providerName ? `：${providerName}` : ""}`);
+        toast.success(
+          providerName
+            ? i18n.t("models.toasts.appAiSetNamed", { label, name: providerName })
+            : i18n.t("models.toasts.appAiSet", { label }),
+        );
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        toast.error(`设置失败：${message}`);
+        toast.error(i18n.t("models.toasts.appAiSetFailed", { message }));
         throw err;
       }
     },
@@ -47,7 +52,7 @@ export function useAppAiProvider() {
 
   const clearAppAiProvider = useCallback(async () => {
     await clearMutation.mutateAsync();
-    toast.success("已清除应用内 AI 供应商绑定");
+    toast.success(i18n.t("models.toasts.appAiCleared"));
   }, [clearMutation]);
 
   const matchesProviderRef = useCallback(

@@ -230,40 +230,6 @@ describe("useNavigation - last edited provider persistence", () => {
     // Selection survives the mode switch — providers page will auto-open it.
     expect(result.current.selectedProviderId).toBe("provider-deepseek");
   });
-
-  it("closes the preset selector when entering Models mode", () => {
-    const { result } = renderHook(() => useNavigation(), { wrapper });
-
-    act(() => {
-      result.current.setShowPresetSelector(true);
-    });
-    expect(result.current.showPresetSelector).toBe(true);
-
-    act(() => {
-      result.current.setAppMode("models");
-    });
-
-    expect(result.current.appMode).toBe("models");
-    expect(result.current.showPresetSelector).toBe(false);
-  });
-
-  it("does not touch the preset selector when leaving Models mode", () => {
-    const { result } = renderHook(() => useNavigation(), { wrapper });
-
-    act(() => {
-      result.current.setAppMode("models");
-      result.current.setShowPresetSelector(true);
-    });
-    expect(result.current.showPresetSelector).toBe(true);
-
-    act(() => {
-      result.current.setAppMode("skills");
-    });
-
-    expect(result.current.appMode).toBe("skills");
-    // Going back to skills shouldn't silently flip the preset selector.
-    expect(result.current.showPresetSelector).toBe(true);
-  });
 });
 
 describe("Property: Mode Switch Page Preservation (Round-Trip)", () => {

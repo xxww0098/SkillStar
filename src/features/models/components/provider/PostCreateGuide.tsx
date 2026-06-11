@@ -1,4 +1,5 @@
 import { ArrowRight, Check, Plug, X, Zap } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../../components/ui/button";
 import { cn } from "../../../../lib/utils";
 
@@ -10,10 +11,11 @@ export interface PostCreateGuideProps {
   onDismiss: () => void;
 }
 
-const STEPS = ["添加供应商", "测试连接", "接入 Agent"] as const;
+const STEP_KEYS = ["models.guide.stepAdd", "models.guide.stepTest", "models.guide.stepConnect"] as const;
 
 /** One-time banner shown in the editor drawer right after a provider is created. */
 export function PostCreateGuide({ agentBound, onTestConnection, onGoConnect, onDismiss }: PostCreateGuideProps) {
+  const { t } = useTranslation();
   const doneIndex = agentBound ? 2 : 0;
   return (
     <div className="rounded-xl border border-primary/25 bg-primary/[0.06] px-3.5 py-3" role="status">
@@ -22,10 +24,10 @@ export function PostCreateGuide({ agentBound, onTestConnection, onGoConnect, onD
           <Check className="h-3 w-3 text-primary" />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-semibold text-foreground">供应商已创建</p>
+          <p className="text-xs font-semibold text-foreground">{t("models.guide.created")}</p>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-            {STEPS.map((label, i) => (
-              <span key={label} className="flex items-center gap-1.5">
+            {STEP_KEYS.map((key, i) => (
+              <span key={key} className="flex items-center gap-1.5">
                 <span
                   className={cn(
                     "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium",
@@ -35,9 +37,9 @@ export function PostCreateGuide({ agentBound, onTestConnection, onGoConnect, onD
                   )}
                 >
                   {i <= doneIndex ? <Check className="h-2.5 w-2.5" /> : <span className="font-mono">{i + 1}</span>}
-                  {label}
+                  {t(key)}
                 </span>
-                {i < STEPS.length - 1 ? <ArrowRight className="h-3 w-3 text-muted-foreground/50" /> : null}
+                {i < STEP_KEYS.length - 1 ? <ArrowRight className="h-3 w-3 text-muted-foreground/50" /> : null}
               </span>
             ))}
           </div>
@@ -50,12 +52,12 @@ export function PostCreateGuide({ agentBound, onTestConnection, onGoConnect, onD
               onClick={onTestConnection}
             >
               <Zap className="h-3 w-3" />
-              测试连接
+              {t("models.guide.testConnection")}
             </Button>
             {!agentBound ? (
               <Button type="button" size="sm" variant="outline" className="h-7 gap-1 text-[11px]" onClick={onGoConnect}>
                 <Plug className="h-3 w-3" />
-                去接入 Agent
+                {t("models.guide.goConnect")}
               </Button>
             ) : null}
           </div>
@@ -63,7 +65,7 @@ export function PostCreateGuide({ agentBound, onTestConnection, onGoConnect, onD
         <button
           type="button"
           onClick={onDismiss}
-          aria-label="关闭引导"
+          aria-label={t("models.guide.dismiss")}
           className="shrink-0 rounded p-0.5 text-muted-foreground/70 transition hover:text-foreground"
         >
           <X className="h-3.5 w-3.5" />

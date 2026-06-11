@@ -6,6 +6,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { toast } from "sonner";
+import i18n from "../../../i18n";
 import { tauriInvoke } from "../../../lib/ipc";
 import type { FlatProvidersResponse, ProviderEntryFlat, ProviderPatchFlat } from "../../../types";
 import { modelsKeys } from "./keys";
@@ -53,7 +54,7 @@ export function useProviderMutations() {
       const failed = (result?.tool_sync_results ?? []).filter((r) => !r.success);
       if (failed.length > 0) {
         const names = failed.map((r) => r.tool_id).join("、");
-        toast.warning(`供应商已保存，但工具同步失败：${names}`);
+        toast.warning(i18n.t("models.toasts.savedButSyncFailed", { names }));
       }
     },
     onMutate: async ({ id, patch }) => {
@@ -177,7 +178,7 @@ export function useProviderMetaPatch() {
     async (providerId: string, metaPatch: Record<string, unknown>, patch: ProviderPatchFlat = {}) => {
       const data = queryClient.getQueryData<FlatProvidersResponse>(modelsKeys.providersFlat());
       const provider = data?.providers.find((p) => p.id === providerId);
-      if (!provider) throw new Error("供应商不存在");
+      if (!provider) throw new Error(i18n.t("models.toasts.providerMissing"));
       return updateProvider(providerId, {
         ...patch,
         meta: { ...(provider.meta ?? {}), ...metaPatch },

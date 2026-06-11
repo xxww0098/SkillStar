@@ -1,5 +1,6 @@
 import { Loader2, Zap } from "lucide-react";
 import { memo, useCallback, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../../components/ui/button";
 import { cn } from "../../../../lib/utils";
 import { useEndpointSpeedTest } from "../../api/diagnostics";
@@ -13,6 +14,7 @@ export interface EndpointSpeedPanelProps {
 }
 
 function EndpointSpeedPanelInner({ urls, apiKey, onApplyFastest, className }: EndpointSpeedPanelProps) {
+  const { t } = useTranslation();
   const { testEndpoints, results, isLoading, clearResults } = useEndpointSpeedTest();
 
   const handleTest = useCallback(() => {
@@ -32,7 +34,7 @@ function EndpointSpeedPanelInner({ urls, apiKey, onApplyFastest, className }: En
   return (
     <div className={cn("space-y-2.5 rounded-xl border border-border/50 bg-muted/15 px-3 py-2.5", className)}>
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-medium text-muted-foreground">端点测速</p>
+        <p className="text-xs font-medium text-muted-foreground">{t("models.diagnosticsPanel.speedTitle")}</p>
         <Button
           type="button"
           variant="outline"
@@ -40,19 +42,17 @@ function EndpointSpeedPanelInner({ urls, apiKey, onApplyFastest, className }: En
           onClick={handleTest}
           disabled={isLoading || !canTest}
           className="h-7 gap-1.5 text-xs"
-          aria-label="测速所有端点"
+          aria-label={t("models.diagnosticsPanel.testAllAria")}
         >
           {isLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}
-          {isLoading ? "测速中…" : "测速端点"}
+          {isLoading ? t("models.diagnosticsPanel.testingShort") : t("models.diagnosticsPanel.testEndpoints")}
         </Button>
       </div>
 
       {!canTest && (
-        <p className="text-[11px] leading-4 text-muted-foreground">填写 API Key 与至少一个端点 URL 后可测速</p>
+        <p className="text-[11px] leading-4 text-muted-foreground">{t("models.diagnosticsPanel.needCredentials")}</p>
       )}
-      <p className="text-[10px] leading-4 text-muted-foreground/80">
-        测速走设置里的系统代理。若超时或连接失败，请先在「设置 → 代理」启用本地代理（如 Clash）。
-      </p>
+      <p className="text-[10px] leading-4 text-muted-foreground/80">{t("models.diagnosticsPanel.proxyHint")}</p>
 
       {results.length > 0 && (
         <ul className="space-y-1.5">
@@ -91,7 +91,7 @@ function EndpointSpeedPanelInner({ urls, apiKey, onApplyFastest, className }: En
             clearResults();
           }}
         >
-          应用最快端点 ({fastest.latency_ms}ms)
+          {t("models.diagnosticsPanel.applyFastest", { ms: fastest.latency_ms })}
         </Button>
       )}
     </div>

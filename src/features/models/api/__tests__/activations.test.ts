@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import * as fc from "fast-check";
-import { getProviderToolBadges } from "../useProvidersFlat";
+import { getProviderToolBadges } from "../activations";
 import type { ToolActivationsMap } from "../../../../types";
 
 /**

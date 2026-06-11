@@ -1,4 +1,5 @@
 import { Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { AlertDialog } from "radix-ui";
 import { Button } from "../../../../components/ui/button";
 import type { ProviderEntryFlat } from "../../../../types";
@@ -14,6 +15,7 @@ export interface DeleteProviderDialogProps {
 
 /** Confirmation before deleting a provider — lists the agents that would disconnect. */
 export function DeleteProviderDialog({ provider, affectedToolIds, onCancel, onConfirm }: DeleteProviderDialogProps) {
+  const { t } = useTranslation();
   const affectedNames = affectedToolIds.map((id) => getAgent(id)?.displayName ?? id);
   return (
     <AlertDialog.Root open={!!provider} onOpenChange={(open) => !open && onCancel()}>
@@ -26,19 +28,19 @@ export function DeleteProviderDialog({ provider, affectedToolIds, onCancel, onCo
             </div>
             <div className="space-y-1">
               <AlertDialog.Title className="text-sm font-semibold text-foreground">
-                删除供应商「{provider?.name}」？
+                {t("models.deleteDialog.title", { name: provider?.name ?? "" })}
               </AlertDialog.Title>
               <AlertDialog.Description className="text-xs leading-relaxed text-muted-foreground">
                 {affectedNames.length > 0
-                  ? `删除后 ${affectedNames.join("、")} 将断开接入。此操作不可撤销。`
-                  : "该供应商当前没有 Agent 在使用。此操作不可撤销。"}
+                  ? t("models.deleteDialog.withAgents", { agents: affectedNames.join("、") })
+                  : t("models.deleteDialog.noAgents")}
               </AlertDialog.Description>
             </div>
           </div>
           <div className="flex items-center justify-end gap-2 border-t border-border/40 pt-3">
             <AlertDialog.Cancel asChild>
               <Button variant="ghost" size="sm">
-                取消
+                {t("models.deleteDialog.cancel")}
               </Button>
             </AlertDialog.Cancel>
             <AlertDialog.Action asChild>
@@ -49,7 +51,7 @@ export function DeleteProviderDialog({ provider, affectedToolIds, onCancel, onCo
                   if (provider) onConfirm(provider);
                 }}
               >
-                删除
+                {t("models.deleteDialog.confirm")}
               </Button>
             </AlertDialog.Action>
           </div>

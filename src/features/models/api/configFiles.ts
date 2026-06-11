@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import i18n from "../../../i18n";
 import { tauriInvoke } from "../../../lib/ipc";
 import type { ToolConfigFileInfo, WriteToolConfigFileResult } from "../../../types";
 
@@ -52,7 +53,7 @@ export function useToolConfigFiles(toolId: AgentToolId) {
 
   const save = useCallback(async (): Promise<WriteToolConfigFileResult> => {
     if (!activeFileId) {
-      return { success: false, error: "未选择配置文件" };
+      return { success: false, error: i18n.t("models.toasts.noConfigFile") };
     }
     setSaving(true);
     try {
@@ -63,10 +64,10 @@ export function useToolConfigFiles(toolId: AgentToolId) {
       });
       if (result.success) {
         setDirty(false);
-        toast.success("配置已保存");
+        toast.success(i18n.t("models.toasts.configSaved"));
         await loadFiles();
       } else {
-        toast.error(result.error ?? "保存失败");
+        toast.error(result.error ?? i18n.t("models.toasts.configSaveFailed"));
       }
       return result;
     } finally {
@@ -85,7 +86,7 @@ export function useToolConfigFiles(toolId: AgentToolId) {
       setDirty(true);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      toast.error(`格式化失败：${message}`);
+      toast.error(i18n.t("models.toasts.formatFailed", { message }));
     }
   }, [toolId, activeFileId]);
 
@@ -102,10 +103,10 @@ export function useToolConfigFiles(toolId: AgentToolId) {
           toolId,
         });
         if (result.success) {
-          toast.success("已从供应商同步到配置文件");
+          toast.success(i18n.t("models.toasts.syncedFromProvider"));
           await reload();
         } else {
-          toast.error(result.error ?? "同步失败");
+          toast.error(result.error ?? i18n.t("models.toasts.pushFailed"));
         }
         return result;
       } catch (err) {

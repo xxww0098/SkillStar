@@ -1,4 +1,5 @@
 import { Loader2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { cn } from "../../../../lib/utils";
 import type { AgentStatus } from "../../lib/agentStatus";
 import { getLatencyColor } from "../../lib/latencyColor";
@@ -25,26 +26,27 @@ export function statusTone(status: AgentStatus): StatusTone {
   }
 }
 
-export function statusLabel(status: AgentStatus): string {
+/** i18n key (under `models.status.*`) for a status — `null` means a raw latency label. */
+export function statusLabelKey(status: AgentStatus): string | null {
   switch (status.kind) {
     case "not_installed":
-      return "未安装";
+      return "models.status.notInstalled";
     case "inactive":
-      return "未接入";
+      return "models.status.inactive";
     case "misconfigured":
-      return "缺端点";
+      return "models.status.missingEndpoint";
     case "syncing":
-      return "同步中";
+      return "models.status.syncing";
     case "unverified":
-      return "已接入";
+      return "models.status.connected";
     case "healthy":
-      return status.latencyMs != null ? `${status.latencyMs}ms` : "已接入";
+      return status.latencyMs != null ? null : "models.status.connected";
     case "auth_failed":
-      return "鉴权失败";
+      return "models.status.authFailed";
     case "timeout":
-      return "超时";
+      return "models.status.timeout";
     case "error":
-      return status.detail === "model_unavailable" ? "模型不可用" : "连接失败";
+      return status.detail === "model_unavailable" ? "models.status.modelUnavailable" : "models.status.error";
   }
 }
 
@@ -72,14 +74,22 @@ export interface AgentStatusPillProps {
 }
 
 export function AgentStatusPill({ status, onRetest, testing }: AgentStatusPillProps) {
+  const { t } = useTranslation();
   const tone = statusTone(status);
   const clickable = Boolean(onRetest) && (tone === "ok" || tone === "bad" || status.kind === "timeout");
   const chip = status.kind === "healthy" ? LATENCY_CHIP[getLatencyColor(status.latencyMs)] : TONE_CHIP[tone];
 
+  const labelKey = statusLabelKey(status);
+  const label = labelKey
+    ? t(labelKey)
+    : status.kind === "healthy" && status.latencyMs != null
+      ? `${status.latencyMs}ms`
+      : "";
+
   const content = (
     <>
       {(status.kind === "syncing" || testing) && <Loader2 className="h-2.5 w-2.5 animate-spin" />}
-      {testing ? "测速中…" : statusLabel(status)}
+      {testing ? t("models.status.testing") : label}
     </>
   );
 
@@ -91,7 +101,7 @@ export function AgentStatusPill({ status, onRetest, testing }: AgentStatusPillPr
 
   if (clickable) {
     return (
-      <button type="button" onClick={onRetest} title="点击重新测速" className={className}>
+      <button type="button" onClick={onRetest} title={t("models.status.retestTitle")} className={className}>
         {content}
       </button>
     );

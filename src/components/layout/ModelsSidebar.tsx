@@ -1,4 +1,5 @@
 import { Plug, Server, Sparkles } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { ProviderBrandIcon, useProvidersFlat } from "@/features/models";
 import { cn } from "@/lib/utils";
 
@@ -17,6 +18,7 @@ export interface ModelsSidebarProps {
  */
 export function ModelsSidebar({ collapsed, selectedProviderId, onSelectProvider, onAddProvider }: ModelsSidebarProps) {
   const { providers } = useProvidersFlat();
+  const { t } = useTranslation();
   const recent = providers.slice(0, 6);
 
   if (collapsed) {
@@ -25,7 +27,7 @@ export function ModelsSidebar({ collapsed, selectedProviderId, onSelectProvider,
         <button
           type="button"
           onClick={onAddProvider}
-          title="新增供应商"
+          title={t("models.sidebar.addProvider")}
           className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl border border-primary/25 bg-primary/10 text-primary transition hover:bg-primary/20"
         >
           <Plug className="h-4 w-4" />
@@ -59,18 +61,16 @@ export function ModelsSidebar({ collapsed, selectedProviderId, onSelectProvider,
       <div className="rounded-xl border border-primary/15 bg-primary/[0.04] px-3 py-3">
         <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-primary/90">
           <Sparkles className="h-3 w-3" />
-          Models 工作台
+          {t("models.sidebar.workbench")}
         </div>
-        <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground">
-          Agent 绑定、供应商管理与连接诊断现已统一到主面板。
-        </p>
+        <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground">{t("models.sidebar.intro")}</p>
         <button
           type="button"
           onClick={onAddProvider}
           className="mt-2.5 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-primary px-2.5 py-1.5 text-[11px] font-semibold text-primary-foreground transition hover:bg-primary/90"
         >
           <Plug className="h-3 w-3" />
-          新增供应商
+          {t("models.sidebar.addProvider")}
         </button>
       </div>
 
@@ -78,7 +78,7 @@ export function ModelsSidebar({ collapsed, selectedProviderId, onSelectProvider,
         <div className="space-y-1">
           <div className="flex items-center gap-1 px-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
             <Server className="h-3 w-3" />
-            最近
+            {t("models.sidebar.recent")}
           </div>
           <div className="space-y-0.5">
             {recent.map((p) => {

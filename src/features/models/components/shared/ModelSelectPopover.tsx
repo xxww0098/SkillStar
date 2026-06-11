@@ -1,4 +1,5 @@
 import { Check, ChevronDown, Search, Sparkles } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Popover } from "radix-ui";
 import { useMemo, useState } from "react";
 import { Input } from "../../../../components/ui/input";
@@ -25,6 +26,7 @@ export function ModelSelectPopover({
   disabled,
   footerAction,
 }: ModelSelectPopoverProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
@@ -57,7 +59,7 @@ export function ModelSelectPopover({
         >
           <Sparkles className="h-3.5 w-3.5 text-primary/80" />
           <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground">
-            {current || "未选择模型"}
+            {current || t("models.picker.noModel")}
           </span>
           <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
         </button>
@@ -74,14 +76,16 @@ export function ModelSelectPopover({
               <Input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="搜索模型..."
+                placeholder={t("models.picker.searchModels")}
                 className="h-7 pl-7 text-[11px]"
               />
             </div>
           ) : null}
           <div className="max-h-72 overflow-y-auto">
             {filtered.length === 0 ? (
-              <div className="px-3 py-3 text-center text-[11px] text-muted-foreground">没有匹配的模型</div>
+              <div className="px-3 py-3 text-center text-[11px] text-muted-foreground">
+                {t("models.picker.noModelMatch")}
+              </div>
             ) : (
               filtered.map((m) => {
                 const meta = catalog.find((entry) => entry.id === m);

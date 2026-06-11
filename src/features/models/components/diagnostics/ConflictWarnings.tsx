@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, FileWarning, X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { AlertDialog } from "radix-ui";
 import { Button } from "../../../../components/ui/button";
 import { tauriInvoke } from "../../../../lib/ipc";
@@ -36,6 +37,7 @@ interface ExternalModificationDialogProps {
  * Offers three options: overwrite, cancel, or view diff.
  */
 function ExternalModificationDialog({ open, conflict, onAction }: ExternalModificationDialogProps) {
+  const { t } = useTranslation();
   return (
     <AlertDialog.Root open={open} onOpenChange={(isOpen) => !isOpen && onAction("cancel")}>
       <AlertDialog.Portal>
@@ -46,9 +48,11 @@ function ExternalModificationDialog({ open, conflict, onAction }: ExternalModifi
               <FileWarning className="h-5 w-5" />
             </div>
             <div className="space-y-1">
-              <AlertDialog.Title className="text-sm font-semibold text-foreground">配置文件冲突</AlertDialog.Title>
+              <AlertDialog.Title className="text-sm font-semibold text-foreground">
+                {t("models.conflicts.dialogTitle")}
+              </AlertDialog.Title>
               <AlertDialog.Description className="text-xs text-muted-foreground leading-relaxed">
-                {conflict?.description || "配置文件在上次同步后被外部修改。"}
+                {conflict?.description || t("models.conflicts.externalModified")}
               </AlertDialog.Description>
               {conflict?.file_path && (
                 <p className="text-[11px] text-muted-foreground/70 font-mono mt-1 truncate">{conflict.file_path}</p>
@@ -59,15 +63,15 @@ function ExternalModificationDialog({ open, conflict, onAction }: ExternalModifi
           <div className="flex items-center justify-end gap-2 pt-2 border-t border-border/40">
             <AlertDialog.Cancel asChild>
               <Button variant="ghost" size="sm" onClick={() => onAction("cancel")}>
-                取消
+                {t("models.conflicts.cancel")}
               </Button>
             </AlertDialog.Cancel>
             <Button variant="outline" size="sm" onClick={() => onAction("diff")}>
-              打开目录
+              {t("models.conflicts.openFolder")}
             </Button>
             <AlertDialog.Action asChild>
               <Button size="sm" onClick={() => onAction("overwrite")}>
-                覆盖
+                {t("models.conflicts.overwrite")}
               </Button>
             </AlertDialog.Action>
           </div>
@@ -82,10 +86,11 @@ function ExternalModificationDialog({ open, conflict, onAction }: ExternalModifi
  * Displays amber/yellow banners with alert icons.
  */
 function WarningBanner({ conflict, onDismiss }: { conflict: ConfigConflict; onDismiss?: () => void }) {
+  const { t } = useTranslation();
   const message =
     conflict.conflict_type === "LegacyConfig"
-      ? "⚠️ 检测到旧版 ~/.claude.json 配置文件可能产生冲突"
-      : `⚠️ 检测到环境变量 ${extractVarName(conflict.details)} 可能覆盖配置文件设置`;
+      ? t("models.conflicts.legacyWarning")
+      : t("models.conflicts.envVarWarning", { name: extractVarName(conflict.details) });
 
   return (
     <div
@@ -102,7 +107,7 @@ function WarningBanner({ conflict, onDismiss }: { conflict: ConfigConflict; onDi
           type="button"
           onClick={onDismiss}
           className="shrink-0 rounded p-0.5 text-amber-500/70 hover:text-amber-500 transition-colors cursor-pointer"
-          aria-label="关闭警告"
+          aria-label={t("models.conflicts.dismiss")}
         >
           <X className="h-3.5 w-3.5" />
         </button>
@@ -124,7 +129,7 @@ function extractVarName(details?: string | null): string {
  *
  * - EnvVarOverride: Shows warning banners for each detected env var override
  * - LegacyConfig: Shows warning banner for legacy ~/.claude.json conflicts
- * - ExternalModification: Shows a dialog with "覆盖" / "取消" / "查看差异" options
+ * - ExternalModification: Shows a dialog with overwrite / cancel / view-diff options
  *
  * Auto-detects conflicts on mount and when providerId changes.
  */

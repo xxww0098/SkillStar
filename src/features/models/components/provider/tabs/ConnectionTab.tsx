@@ -1,5 +1,6 @@
 import { Copy, Eye, EyeOff, Globe2, KeyRound, Plus, ShieldCheck } from "lucide-react";
 import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../../../components/ui/button";
 import { Input } from "../../../../../components/ui/input";
 import type { ProviderForm } from "../../../hooks/useProviderForm";
@@ -8,6 +9,7 @@ import { fieldLabelClass } from "../../providerForm/ProviderConfigPrimitives";
 /** 连接页签：名称、API Key、双端点、模型列表 URL。 */
 export function ConnectionTab({ form }: { form: ProviderForm }) {
   const { values, setField } = form;
+  const { t } = useTranslation();
   const [showApiKey, setShowApiKey] = useState(false);
   const [showAnthropicUrl, setShowAnthropicUrl] = useState(Boolean(values.baseUrlAnthropic.trim()));
 
@@ -23,7 +25,7 @@ export function ConnectionTab({ form }: { form: ProviderForm }) {
   return (
     <div className="grid gap-4">
       <label className="space-y-1">
-        <span className={fieldLabelClass}>名称</span>
+        <span className={fieldLabelClass}>{t("models.connectionTab.name")}</span>
         <Input value={values.name} onChange={(e) => setField("name", e.target.value)} placeholder="DeepSeek" />
       </label>
 
@@ -39,7 +41,7 @@ export function ConnectionTab({ form }: { form: ProviderForm }) {
             className="h-6 px-2 text-[11px] text-muted-foreground"
           >
             <Copy className="mr-1 h-3 w-3" />
-            复制
+            {t("models.connectionTab.copy")}
           </Button>
         </div>
         <div className="relative">
@@ -55,7 +57,7 @@ export function ConnectionTab({ form }: { form: ProviderForm }) {
             type="button"
             onClick={() => setShowApiKey((v) => !v)}
             className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground hover:text-foreground"
-            aria-label={showApiKey ? "隐藏" : "显示"}
+            aria-label={showApiKey ? t("models.connectionTab.hide") : t("models.connectionTab.show")}
           >
             {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
           </button>
@@ -63,7 +65,7 @@ export function ConnectionTab({ form }: { form: ProviderForm }) {
       </div>
 
       <div className="space-y-1">
-        <span className={fieldLabelClass}>OpenAI 兼容端点</span>
+        <span className={fieldLabelClass}>{t("models.connectionTab.openaiEndpoint")}</span>
         <div className="relative">
           <Globe2 className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/70" />
           <Input
@@ -73,12 +75,12 @@ export function ConnectionTab({ form }: { form: ProviderForm }) {
             className="pl-9"
           />
         </div>
-        <p className="text-[11px] text-muted-foreground/75">Codex / OpenCode / Gemini CLI 使用</p>
+        <p className="text-[11px] text-muted-foreground/75">{t("models.connectionTab.openaiEndpointHint")}</p>
       </div>
 
       {showAnthropicUrl || values.baseUrlAnthropic ? (
         <div className="space-y-1">
-          <span className={fieldLabelClass}>Anthropic 兼容端点</span>
+          <span className={fieldLabelClass}>{t("models.connectionTab.anthropicEndpoint")}</span>
           <div className="relative">
             <Globe2 className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/70" />
             <Input
@@ -88,7 +90,7 @@ export function ConnectionTab({ form }: { form: ProviderForm }) {
               className="pl-9"
             />
           </div>
-          <p className="text-[11px] text-muted-foreground/75">Claude Code 使用</p>
+          <p className="text-[11px] text-muted-foreground/75">{t("models.connectionTab.anthropicEndpointHint")}</p>
         </div>
       ) : (
         <Button
@@ -99,23 +101,23 @@ export function ConnectionTab({ form }: { form: ProviderForm }) {
           onClick={() => setShowAnthropicUrl(true)}
         >
           <Plus className="h-3.5 w-3.5" />
-          添加 Anthropic 端点（Claude Code）
+          {t("models.connectionTab.addAnthropicEndpoint")}
         </Button>
       )}
 
       <label className="space-y-1">
-        <span className={fieldLabelClass}>模型列表 URL</span>
+        <span className={fieldLabelClass}>{t("models.connectionTab.modelsUrl")}</span>
         <Input
           value={values.modelsUrl}
           onChange={(e) => setField("modelsUrl", e.target.value)}
           placeholder="https://api.example.com/v1/models"
         />
-        <p className="text-[11px] text-muted-foreground/75">「模型」页签的拉取入口使用此地址</p>
+        <p className="text-[11px] text-muted-foreground/75">{t("models.connectionTab.modelsUrlHint")}</p>
       </label>
 
       <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
         <ShieldCheck className="h-3.5 w-3.5 text-primary/80" />
-        凭据仅保存在本机
+        {t("models.connectionTab.localCredentials")}
       </p>
     </div>
   );

@@ -1,5 +1,6 @@
 import { Download, Loader2, Plus, Star, X } from "lucide-react";
 import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../../../components/ui/button";
 import { Input } from "../../../../../components/ui/input";
 import { cn } from "../../../../../lib/utils";
@@ -10,6 +11,7 @@ import { fieldLabelClass } from "../../providerForm/ProviderConfigPrimitives";
 /** 模型页签：拉取模型、默认模型、模型列表管理。 */
 export function ModelsTab({ form }: { form: ProviderForm }) {
   const { values, setField } = form;
+  const { t } = useTranslation();
   const [newModel, setNewModel] = useState("");
 
   const canFetch = Boolean(values.modelsUrl.trim() && values.apiKey.trim());
@@ -38,12 +40,14 @@ export function ModelsTab({ form }: { form: ProviderForm }) {
     <div className="grid gap-4">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <h3 className="text-sm font-semibold text-foreground">模型列表</h3>
+          <h3 className="text-sm font-semibold text-foreground">{t("models.modelsTab.title")}</h3>
           <p className="text-[11px] text-muted-foreground">
-            {values.models.length > 0 ? `${values.models.length} 个模型` : "尚未拉取或添加模型"}
+            {values.models.length > 0
+              ? t("models.modelsTab.modelCount", { count: values.models.length })
+              : t("models.modelsTab.empty")}
           </p>
         </div>
-        <span title={canFetch ? undefined : "需要先填写模型列表 URL 和 API Key（连接页签）"}>
+        <span title={canFetch ? undefined : t("models.modelsTab.fetchRequirement")}>
           <Button
             type="button"
             variant="outline"
@@ -57,13 +61,13 @@ export function ModelsTab({ form }: { form: ProviderForm }) {
             ) : (
               <Download className="h-3.5 w-3.5" />
             )}
-            拉取模型
+            {t("models.modelsTab.fetchModels")}
           </Button>
         </span>
       </div>
 
       <div className="space-y-1">
-        <span className={fieldLabelClass}>默认模型（Codex / OpenCode 默认使用）</span>
+        <span className={fieldLabelClass}>{t("models.modelsTab.defaultModelLabel")}</span>
         <Input
           value={values.defaultModel}
           onChange={(e) => setField("defaultModel", e.target.value)}
@@ -97,7 +101,7 @@ export function ModelsTab({ form }: { form: ProviderForm }) {
                 <button
                   type="button"
                   onClick={() => setField("defaultModel", id)}
-                  title={isDefault ? "当前默认模型" : "设为默认"}
+                  title={isDefault ? t("models.modelsTab.currentDefault") : t("models.modelsTab.setDefault")}
                   className={cn(
                     "rounded-md p-1 transition",
                     isDefault ? "text-primary" : "text-muted-foreground/50 hover:text-foreground",
@@ -108,7 +112,7 @@ export function ModelsTab({ form }: { form: ProviderForm }) {
                 <button
                   type="button"
                   onClick={() => removeModel(id)}
-                  title="移除"
+                  title={t("models.modelsTab.remove")}
                   className="rounded-md p-1 text-muted-foreground/50 transition hover:text-destructive"
                 >
                   <X className="h-3.5 w-3.5" />
@@ -129,12 +133,12 @@ export function ModelsTab({ form }: { form: ProviderForm }) {
               addModel();
             }
           }}
-          placeholder="手动添加模型 id，回车确认"
+          placeholder={t("models.modelsTab.addPlaceholder")}
           className="h-8 text-xs"
         />
         <Button type="button" variant="ghost" size="sm" className="h-8 gap-1 text-xs" onClick={addModel}>
           <Plus className="h-3.5 w-3.5" />
-          添加
+          {t("models.modelsTab.add")}
         </Button>
       </div>
     </div>

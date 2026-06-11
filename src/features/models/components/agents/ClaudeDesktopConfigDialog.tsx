@@ -1,5 +1,6 @@
 import { ExternalLink, FolderOpen, Loader2, RefreshCw, Save, ShieldCheck, Wand2 } from "lucide-react";
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../../components/ui/button";
 import { ExternalAnchor } from "../../../../components/ui/ExternalAnchor";
 import { tauriInvoke } from "../../../../lib/ipc";
@@ -16,17 +17,18 @@ import { AgentToolIcon } from "../shared/AgentToolIcon";
  * orientation card, not a provider form.
  */
 export function ClaudeDesktopConfigDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { t } = useTranslation();
   return (
     <ModalShell
       open={open}
       onClose={onClose}
-      ariaLabel="Claude Desktop MCP 配置"
+      ariaLabel={t("models.desktop.dialogAriaLabel")}
       panelClassName="max-w-[640px]"
       surfaceClassName="flex max-h-[85vh] flex-col"
     >
       <ModalHeader
         icon={<AgentToolIcon toolId="claude-desktop" size="sm" />}
-        title="Claude Desktop · MCP 配置"
+        title={t("models.desktop.dialogTitle")}
         onClose={onClose}
       />
       <div className="ss-page-scroll min-h-0 flex-1 overflow-y-auto px-6 py-4">
@@ -37,6 +39,7 @@ export function ClaudeDesktopConfigDialog({ open, onClose }: { open: boolean; on
 }
 
 function ClaudeDesktopConfigBody() {
+  const { t } = useTranslation();
   const editor = useToolConfigFiles("claude-desktop");
   const activeFile = editor.files.find((f) => f.file_id === editor.activeFileId);
 
@@ -77,22 +80,22 @@ function ClaudeDesktopConfigBody() {
       <section className="rounded-xl border border-primary/15 bg-primary/[0.04] p-4">
         <h4 className="flex items-center gap-2 text-sm font-semibold text-foreground">
           <ShieldCheck className="h-4 w-4 text-primary" />
-          关于 Claude Desktop 配置
+          {t("models.desktop.aboutTitle")}
         </h4>
         <ul className="mt-2 space-y-1.5 text-[11px] leading-relaxed text-muted-foreground/95">
           <li>
-            <strong className="text-foreground/90">✅ 可配置:</strong>
+            <strong className="text-foreground/90">{t("models.desktop.aboutConfigurable")}</strong>
             <code className="mx-1 rounded bg-muted/50 px-1 py-0.5 font-mono text-[10px]">mcpServers</code>
-            —— 让 Claude Desktop 调用文件系统、Git、Notion、自建 MCP 工具等。
+            {t("models.desktop.aboutMcpDesc")}
           </li>
           <li>
-            <strong className="text-foreground/90">❌ 不可配置:</strong> base URL / API Key / 模型 —— Claude Desktop
-            强制通过 Claude.ai 账户登录连接 Anthropic 官方端点。
+            <strong className="text-foreground/90">{t("models.desktop.aboutNotConfigurable")}</strong>{" "}
+            {t("models.desktop.aboutNotDesc")}
           </li>
           <li>
-            想要自定义供应商、自定义模型?用「Claude」(Claude Code CLI)Agent,它支持
+            {t("models.desktop.aboutCustomBefore")}
             <code className="mx-1 rounded bg-muted/50 px-1 py-0.5 font-mono text-[10px]">ANTHROPIC_BASE_URL</code>
-            等环境变量。
+            {t("models.desktop.aboutCustomAfter")}
           </li>
         </ul>
         <div className="mt-3 flex flex-wrap gap-1.5">
@@ -100,13 +103,13 @@ function ClaudeDesktopConfigBody() {
             href="https://modelcontextprotocol.io/quickstart/user"
             className="inline-flex items-center gap-1 rounded-md border border-border/60 px-2 py-1 text-[11px] font-medium text-foreground/80 hover:border-primary/40 hover:bg-card-hover"
           >
-            MCP 快速开始 <ExternalLink className="h-3 w-3" />
+            {t("models.desktop.mcpQuickstart")} <ExternalLink className="h-3 w-3" />
           </ExternalAnchor>
           <ExternalAnchor
             href="https://github.com/modelcontextprotocol/servers"
             className="inline-flex items-center gap-1 rounded-md border border-border/60 px-2 py-1 text-[11px] font-medium text-foreground/80 hover:border-primary/40 hover:bg-card-hover"
           >
-            官方 MCP 服务器目录 <ExternalLink className="h-3 w-3" />
+            {t("models.desktop.mcpDirectory")} <ExternalLink className="h-3 w-3" />
           </ExternalAnchor>
         </div>
       </section>
@@ -114,9 +117,13 @@ function ClaudeDesktopConfigBody() {
       {/* MCP servers summary */}
       <section className="rounded-xl border border-border/55 bg-card/55 p-4">
         <div className="flex items-center justify-between gap-2">
-          <h4 className="text-sm font-semibold text-foreground">MCP 服务器</h4>
+          <h4 className="text-sm font-semibold text-foreground">{t("models.desktop.mcpServers")}</h4>
           <span className="rounded-full bg-muted/50 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-            {editor.loading ? <Loader2 className="inline h-3 w-3 animate-spin" /> : `${serverCount} 个已配置`}
+            {editor.loading ? (
+              <Loader2 className="inline h-3 w-3 animate-spin" />
+            ) : (
+              t("models.desktop.serversConfigured", { count: serverCount })
+            )}
           </span>
         </div>
 
@@ -136,14 +143,12 @@ function ClaudeDesktopConfigBody() {
             })}
           </ul>
         ) : (
-          <p className="mt-3 text-[11px] text-muted-foreground/90">
-            尚未添加任何 MCP 服务器。可点击下方「插入示例」获得一个文件系统 server 模板。
-          </p>
+          <p className="mt-3 text-[11px] text-muted-foreground/90">{t("models.desktop.noServersHint")}</p>
         )}
 
         <div className="mt-3 flex flex-wrap gap-1.5">
           <Button type="button" size="sm" variant="outline" onClick={handleAddTemplate} disabled={editor.loading}>
-            插入示例(filesystem)
+            {t("models.desktop.insertExample")}
           </Button>
         </div>
       </section>
@@ -173,11 +178,11 @@ function ClaudeDesktopConfigBody() {
               "font-mono text-[11px] leading-5 text-foreground",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35",
             )}
-            aria-label="Claude Desktop MCP 配置编辑器"
+            aria-label={t("models.desktop.editorAria")}
           />
         )}
 
-        {parseError ? <p className="mt-1 text-[11px] text-destructive">JSON 解析失败,请修正语法。</p> : null}
+        {parseError ? <p className="mt-1 text-[11px] text-destructive">{t("models.desktop.parseError")}</p> : null}
 
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
           <Button
@@ -188,7 +193,7 @@ function ClaudeDesktopConfigBody() {
             disabled={editor.saving || editor.loading}
           >
             {editor.saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
-            保存
+            {t("models.desktop.save")}
           </Button>
           <Button
             type="button"
@@ -198,7 +203,7 @@ function ClaudeDesktopConfigBody() {
             disabled={editor.loading}
           >
             <Wand2 className="mr-1 h-3 w-3" />
-            格式化
+            {t("models.desktop.format")}
           </Button>
           <Button
             type="button"
@@ -208,7 +213,7 @@ function ClaudeDesktopConfigBody() {
             disabled={editor.loading}
           >
             <RefreshCw className="mr-1 h-3 w-3" />
-            重新加载
+            {t("models.desktop.reload")}
           </Button>
           {activeFile ? (
             <Button
@@ -222,12 +227,12 @@ function ClaudeDesktopConfigBody() {
               }}
             >
               <FolderOpen className="mr-1 h-3 w-3" />
-              文件夹
+              {t("models.desktop.openFolder")}
             </Button>
           ) : null}
         </div>
 
-        {editor.dirty ? <p className="mt-1 text-[10px] text-amber-500">未保存</p> : null}
+        {editor.dirty ? <p className="mt-1 text-[10px] text-amber-500">{t("models.desktop.unsaved")}</p> : null}
       </section>
     </div>
   );

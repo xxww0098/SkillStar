@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { cn } from "../../../../lib/utils";
 import { AgentToolIcon } from "../shared/AgentToolIcon";
 import type { CodexAuthMode, CodexWireApi } from "../../lib/providerPatch";
@@ -56,20 +57,19 @@ export function CodexSettingsForm({
   onChangeAuthMode,
   disabled,
 }: CodexSettingsFormProps) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
         <AgentToolIcon toolId="codex" size="md" />
         <div>
-          <p className="text-xs font-semibold text-foreground">Codex 参数</p>
-          <p className="text-[11px] text-muted-foreground">
-            写入 ~/.codex/（config.toml、auth.json）— CLI、桌面端与 IDE 扩展共用此配置
-          </p>
+          <p className="text-xs font-semibold text-foreground">{t("models.dialog.codexTitle")}</p>
+          <p className="text-[11px] text-muted-foreground">{t("models.dialog.codexSubtitle")}</p>
         </div>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1">
-          <span className={fieldLabelClass}>API 格式</span>
+          <span className={fieldLabelClass}>{t("models.dialog.wireApi")}</span>
           <Segmented
             value={wireApi}
             onChange={onChangeWireApi}
@@ -81,7 +81,7 @@ export function CodexSettingsForm({
           />
         </div>
         <div className="space-y-1">
-          <span className={fieldLabelClass}>认证模式</span>
+          <span className={fieldLabelClass}>{t("models.dialog.authMode")}</span>
           <Segmented
             value={authMode}
             onChange={onChangeAuthMode}

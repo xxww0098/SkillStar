@@ -2,6 +2,7 @@ import { motion } from "framer-motion";
 import { Copy, MoreHorizontal, Trash2 } from "lucide-react";
 import { Popover } from "radix-ui";
 import { useState, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { cn } from "../../../../lib/utils";
 import type { ProviderEntryFlat, ToolActivationsMap } from "../../../../types";
 import { getProviderToolBadges } from "../../hooks/useProvidersFlat";
@@ -41,6 +42,7 @@ export function ProviderGalleryCard({
   onDuplicate,
   onDelete,
 }: ProviderGalleryCardProps) {
+  const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
 
   const activeBadges = useMemo(
@@ -82,12 +84,12 @@ export function ProviderGalleryCard({
               {latencyMs !== undefined ? (
                 <span
                   className={cn("h-1.5 w-1.5 shrink-0 rounded-full", LATENCY_DOT[getLatencyColor(latencyMs)])}
-                  title={latencyMs != null ? `${latencyMs}ms` : "未测试"}
+                  title={latencyMs != null ? `${latencyMs}ms` : t("models.gallery.notTested")}
                 />
               ) : null}
             </h3>
             <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-              {provider.default_model || provider.models?.[0] || "未选择默认模型"}
+              {provider.default_model || provider.models?.[0] || t("models.gallery.noDefaultModel")}
             </p>
           </div>
         </div>
@@ -99,7 +101,7 @@ export function ProviderGalleryCard({
             </span>
           ) : (
             <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive">
-              缺 Key
+              {t("models.gallery.missingKey")}
             </span>
           )}
           {hasOpenai ? (
@@ -112,17 +114,19 @@ export function ProviderGalleryCard({
           ) : null}
           {provider.models?.length ? (
             <span className="rounded-full bg-muted/60 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-              {provider.models.length} 模型
+              {t("models.gallery.modelCount", { count: provider.models.length })}
             </span>
           ) : null}
         </div>
 
         <div className="mt-3 flex items-center gap-1.5 border-t border-border/40 pt-3">
           {activeBadges.length === 0 ? (
-            <span className="text-[11px] text-muted-foreground/85">未绑定 Agent</span>
+            <span className="text-[11px] text-muted-foreground/85">{t("models.gallery.noAgents")}</span>
           ) : (
             <>
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground/85">绑定</span>
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground/85">
+                {t("models.gallery.boundLabel")}
+              </span>
               <span className="flex items-center gap-1">
                 {activeBadges.map((toolId) => {
                   const iconId = TOOL_ID_TO_ICON[toolId];
@@ -151,7 +155,7 @@ export function ProviderGalleryCard({
             <button
               type="button"
               onClick={(e) => e.stopPropagation()}
-              aria-label="更多操作"
+              aria-label={t("models.gallery.moreActions")}
               className="rounded-lg border border-border/50 bg-background/70 p-1.5 text-muted-foreground transition hover:border-primary/30 hover:text-foreground"
             >
               <MoreHorizontal className="h-3.5 w-3.5" />
@@ -173,7 +177,7 @@ export function ProviderGalleryCard({
                 className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition hover:bg-primary/10"
               >
                 <Copy className="h-3.5 w-3.5 text-muted-foreground" />
-                复制
+                {t("models.gallery.duplicate")}
               </button>
               <button
                 type="button"
@@ -184,7 +188,7 @@ export function ProviderGalleryCard({
                 className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-destructive transition hover:bg-destructive/10"
               >
                 <Trash2 className="h-3.5 w-3.5" />
-                删除
+                {t("models.gallery.delete")}
               </button>
             </Popover.Content>
           </Popover.Portal>

@@ -3,6 +3,7 @@ import CodexIcon from "@lobehub/icons/es/Codex/components/Color";
 import { motion } from "framer-motion";
 import { ArrowRight, Eraser, Loader2, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../../components/ui/button";
 import { getAiConfigCached } from "../../../../hooks/useAiConfig";
 import { cn } from "../../../../lib/utils";
@@ -11,17 +12,18 @@ import { type AppAiAppId, useAppAiProvider } from "../../api/appAi";
 import { useProvidersQuery } from "../../api/providers";
 
 export interface AppAiCardProps {
-  /** Jump to Settings → AI provider (manages 本地 Ollama etc.). */
+  /** Jump to Settings → AI provider (manages local Ollama etc.). */
   onOpenSettings: () => void;
 }
 
 /**
- * Compact "应用内 AI" consumer card — the in-app AI (summarize / translate /
+ * Compact in-app AI consumer card — the in-app AI (summarize / translate /
  * skill pick) is just another consumer of a provider, so it lives in the
  * agent grid. Replaces the old AppAiProviderInline that sat inside a single
- * provider's drawer. When Settings has 本地 Ollama active this card defers.
+ * provider's drawer. When Settings has local Ollama active this card defers.
  */
 export function AppAiCard({ onOpenSettings }: AppAiCardProps) {
+  const { t } = useTranslation();
   const { data } = useProvidersQuery();
   const { setAppAiProvider, clearAppAiProvider, isSetting, isClearing } = useAppAiProvider();
   const [config, setConfig] = useState<AiConfig | null>(null);
@@ -87,7 +89,7 @@ export function AppAiCard({ onOpenSettings }: AppAiCardProps) {
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <h3 className="truncate text-base font-bold text-foreground">应用内 AI</h3>
+            <h3 className="truncate text-base font-bold text-foreground">{t("models.appAi.title")}</h3>
             <span
               className={cn(
                 "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ring-1",
@@ -96,23 +98,23 @@ export function AppAiCard({ onOpenSettings }: AppAiCardProps) {
                   : "bg-muted text-muted-foreground ring-border",
               )}
             >
-              {isOllama ? "本地 Ollama" : bound ? "已绑定" : "未绑定"}
+              {isOllama ? t("models.appAi.localOllama") : bound ? t("models.appAi.bound") : t("models.appAi.unbound")}
             </span>
           </div>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">摘要 · 翻译 · 技能推荐（与 CLI Agent 独立）</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">{t("models.appAi.tagline")}</p>
         </div>
       </header>
 
       <div className="flex-1 space-y-3 px-5 pt-4 pb-3">
         {isOllama ? (
           <div className="rounded-xl border border-border/50 bg-background/35 px-3 py-2.5 text-[11px] text-muted-foreground">
-            当前由本地 Ollama 提供。
+            {t("models.appAi.ollamaActive")}
             <button
               type="button"
               onClick={onOpenSettings}
               className="ml-1 inline-flex items-center gap-1 font-medium text-primary hover:underline"
             >
-              在设置中切换 <ArrowRight className="h-3 w-3" />
+              {t("models.appAi.switchInSettings")} <ArrowRight className="h-3 w-3" />
             </button>
           </div>
         ) : (
@@ -121,16 +123,16 @@ export function AppAiCard({ onOpenSettings }: AppAiCardProps) {
               <p className="truncate text-xs text-foreground">
                 <span className="font-medium">{boundProvider.name}</span>
                 <span className="ml-1.5 text-[11px] text-muted-foreground">
-                  · {protocol === "claude" ? "Claude 协议" : "OpenAI 协议"}
+                  · {protocol === "claude" ? t("models.appAi.claudeProtocol") : t("models.appAi.openaiProtocol")}
                 </span>
               </p>
             ) : (
-              <p className="text-[11px] text-muted-foreground">从下方供应商中选择，按协议绑定：</p>
+              <p className="text-[11px] text-muted-foreground">{t("models.appAi.pickHint")}</p>
             )}
             <div className="ss-page-scroll max-h-40 space-y-1 overflow-y-auto pr-0.5">
               {providers.length === 0 ? (
                 <p className="rounded-lg border border-dashed border-border/55 px-2.5 py-2 text-center text-[11px] text-muted-foreground">
-                  暂无供应商
+                  {t("models.appAi.noProviders")}
                 </p>
               ) : (
                 providers.map((p) => {
@@ -148,7 +150,7 @@ export function AppAiCard({ onOpenSettings }: AppAiCardProps) {
                         type="button"
                         disabled={!canClaude(p) || isSetting}
                         onClick={() => void handleBind("claude", p.id, p.name)}
-                        title="以 Claude 协议绑定"
+                        title={t("models.appAi.bindClaudeTitle")}
                         className={cn(
                           "inline-flex h-6 items-center gap-1 rounded-md border px-1.5 text-[10px] font-medium transition-colors",
                           isBound && protocol === "claude"
@@ -164,7 +166,7 @@ export function AppAiCard({ onOpenSettings }: AppAiCardProps) {
                         type="button"
                         disabled={!canCodex(p) || isSetting}
                         onClick={() => void handleBind("codex", p.id, p.name)}
-                        title="以 OpenAI 协议绑定"
+                        title={t("models.appAi.bindOpenaiTitle")}
                         className={cn(
                           "inline-flex h-6 items-center gap-1 rounded-md border px-1.5 text-[10px] font-medium transition-colors",
                           isBound && protocol === "codex"
@@ -195,7 +197,7 @@ export function AppAiCard({ onOpenSettings }: AppAiCardProps) {
             onClick={() => void clearAppAiProvider().then(refresh)}
           >
             <Eraser className="h-3 w-3" />
-            清除绑定
+            {t("models.appAi.clearBinding")}
           </Button>
         ) : null}
         <Button
@@ -204,7 +206,7 @@ export function AppAiCard({ onOpenSettings }: AppAiCardProps) {
           className="ml-auto h-7 gap-1.5 text-[11px] text-muted-foreground"
           onClick={onOpenSettings}
         >
-          设置中打开 <ArrowRight className="h-3 w-3" />
+          {t("models.appAi.openSettings")} <ArrowRight className="h-3 w-3" />
         </Button>
       </footer>
     </motion.section>

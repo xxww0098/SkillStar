@@ -107,10 +107,14 @@ Provider（Base URL / API Key / 模型）时才做。现有目标：`claude-code
 3. **沙箱安全**：所有路径必须经 `tool_sync` 的 home 解析（受
    `SKILLSTAR_TOOL_SYNC_HOME` 重定向）。**测试绝不能写真实 `$HOME`**
    —— 集成测试必须设置该环境变量（历史事故见 mod.rs 顶部注释）。
-4. **前端**：
-   - `src/features/models/components/AgentToolIcon.tsx` 的 `AgentToolIconId`
-     联合类型 + 图标分支；
-   - `src/features/models/components/ToolActivationPanel.tsx` 的工具卡片清单；
+4. **前端**（注册表驱动，只需两处）：
+   - `src/features/models/lib/agentRegistry.ts`：在 `PROVIDER_AGENTS` 加一条
+     `AgentDescriptor`（toolId / displayName / requiredUrlField / installDocsUrl /
+     tagline / disabledTooltip / configPathDisplay），并视情况扩展
+     `CONFIG_FILE_TOOLS`。Agent 卡片、接入设置对话框、状态汇总、安装检测
+     全部由该注册表驱动，无需新组件；
+   - `src/features/models/components/shared/AgentToolIcon.tsx` 的
+     `AgentToolIconId` 联合类型 + 图标分支；
    - 如支持 MCP 配置同步，另见 `src/types/index.ts` 的 `MCP_TOOL_IDS`。
 5. 跑 `cargo test -p skillstar-models`（含属性测试 `tool_sync_prop_tests`）。
 
@@ -150,7 +154,7 @@ Provider（Base URL / API Key / 模型）时才做。现有目标：`claude-code
 轴②（可选）
   [ ] paths_files.rs 三处 match 分支
   [ ] sync.rs 的 sync_to_* / unsync_*（含备份 + managed-keys 语义）
-  [ ] AgentToolIcon.tsx + ToolActivationPanel.tsx
+  [ ] lib/agentRegistry.ts +1 AgentDescriptor + shared/AgentToolIcon.tsx 图标分支
   [ ] cargo test -p skillstar-models 全绿（测试必须走 SKILLSTAR_TOOL_SYNC_HOME）
 
 轴③（可选）

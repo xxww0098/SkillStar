@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import { Loader2, Plug, Search, Server, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Button } from "../../../../components/ui/button";
 import { Input } from "../../../../components/ui/input";
@@ -35,16 +36,10 @@ function ModelsTopDragStrip() {
 }
 
 export function ModelsHub() {
+  const { t } = useTranslation();
   const { providers, toolActivations, isLoading, activateTool, createProvider, deleteProvider } = useProvidersFlat();
-  const {
-    selectedProviderId,
-    setSelectedProviderId,
-    showPresetSelector,
-    setShowPresetSelector,
-    navigate,
-    modelsDrawerRequest,
-    clearModelsDrawerRequest,
-  } = useNavigation();
+  const { selectedProviderId, setSelectedProviderId, navigate, modelsDrawerRequest, clearModelsDrawerRequest } =
+    useNavigation();
 
   const [drawer, setDrawer] = useState<DrawerMode>({ type: "closed" });
   const [settingsTool, setSettingsTool] = useState<ProviderToolId | null>(null);
@@ -68,36 +63,22 @@ export function ModelsHub() {
     }
   }, [modelsDrawerRequest, clearModelsDrawerRequest, setSelectedProviderId]);
 
-  // Back-compat shim: showPresetSelector still opens the create drawer.
-  useEffect(() => {
-    if (showPresetSelector) {
-      setDrawer({ type: "create" });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showPresetSelector]);
-
   // ── Drawer handlers ────────────────────────────────────────────
-  const openCreateDrawer = useCallback(
-    (autoBindToolId?: string) => {
-      setShowPresetSelector(true);
-      setDrawer({ type: "create", autoBindToolId });
-    },
-    [setShowPresetSelector],
-  );
+  const openCreateDrawer = useCallback((autoBindToolId?: string) => {
+    setDrawer({ type: "create", autoBindToolId });
+  }, []);
 
   const openEditDrawer = useCallback(
     (providerId: string) => {
       setSelectedProviderId(providerId);
-      setShowPresetSelector(false);
       setDrawer({ type: "edit", providerId });
     },
-    [setSelectedProviderId, setShowPresetSelector],
+    [setSelectedProviderId],
   );
 
   const closeDrawer = useCallback(() => {
-    setShowPresetSelector(false);
     setDrawer({ type: "closed" });
-  }, [setShowPresetSelector]);
+  }, []);
 
   const handleProviderCreated = useCallback(
     async (provider: ProviderEntryFlat) => {
@@ -111,22 +92,25 @@ export function ModelsHub() {
           : false;
         if (compatible) {
           await activateTool(provider.id, autoBind, provider.default_model || undefined)
-            .then(() => toast.success(`已为 ${agent?.displayName ?? autoBind} 绑定 ${provider.name}`))
+            .then(() =>
+              toast.success(
+                t("models.toasts.boundAgent", { agent: agent?.displayName ?? autoBind, provider: provider.name }),
+              ),
+            )
             .catch(() => {});
         }
       }
       setSelectedProviderId(provider.id);
-      setShowPresetSelector(false);
       setDrawer({ type: "edit", providerId: provider.id, postCreate: true });
     },
-    [drawer, activateTool, setSelectedProviderId, setShowPresetSelector],
+    [drawer, activateTool, setSelectedProviderId],
   );
 
   const handleDuplicateProvider = useCallback(
     async (p: ProviderEntryFlat) => {
       try {
-        await createProvider({ ...p, id: "", name: `${p.name} (副本)` });
-        toast.success("已复制供应商");
+        await createProvider({ ...p, id: "", name: t("models.hub.duplicateSuffix", { name: p.name }) });
+        toast.success(t("models.toasts.duplicated"));
       } catch (err) {
         toast.error(err instanceof Error ? err.message : String(err));
       }
@@ -141,7 +125,7 @@ export function ModelsHub() {
         await deleteProvider(p.id);
         if (selectedProviderId === p.id) setSelectedProviderId(null);
         setDrawer((prev) => (prev.type === "edit" && prev.providerId === p.id ? { type: "closed" } : prev));
-        toast.success(`已删除 ${p.name}`);
+        toast.success(t("models.toasts.deleted", { name: p.name }));
       } catch (err) {
         toast.error(err instanceof Error ? err.message : String(err));
       }
@@ -227,36 +211,36 @@ export function ModelsHub() {
             <div>
               <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-foreground">
                 <Sparkles className="h-5 w-5 text-primary" />
-                模型工作台
+                {t("models.hub.title")}
               </h1>
-              <p className="mt-1 text-sm text-muted-foreground">
-                一处管理 Agent 的供应商绑定 与 Claude Desktop MCP 配置,所有改动自动保存。
-              </p>
+              <p className="mt-1 text-sm text-muted-foreground">{t("models.hub.subtitle")}</p>
             </div>
             <Button onClick={() => openCreateDrawer()} className="gap-1.5">
               <Plug className="h-4 w-4" />
-              新增供应商
+              {t("models.hub.addProvider")}
             </Button>
           </header>
 
           {/* Agent hero row */}
           <section>
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Agent 接入</h2>
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                {t("models.hub.agentsSection")}
+              </h2>
               <span className="text-[11px] text-muted-foreground/75">
-                {agentSummary.connected}/{agentSummary.total} 已接入
-                {agentSummary.problems > 0 ? ` · ${agentSummary.problems} 异常` : ""}
+                {t("models.hub.connectedSummary", { connected: agentSummary.connected, total: agentSummary.total })}
+                {agentSummary.problems > 0 ? ` · ${t("models.hub.problems", { count: agentSummary.problems })}` : ""}
               </span>
             </div>
             {noAgentConnected && !connectHintDismissed ? (
               <div className="mb-3 flex items-center justify-between gap-2 rounded-xl border border-primary/20 bg-primary/[0.05] px-3 py-2 text-[11px] text-muted-foreground">
-                <span>已有 {providers.length} 个供应商，还没有 Agent 在使用 — 在下方卡片中选择供应商即可接入。</span>
+                <span>{t("models.hub.connectHint", { count: providers.length })}</span>
                 <button
                   type="button"
                   onClick={() => setConnectHintDismissed(true)}
                   className="shrink-0 font-medium text-primary hover:underline"
                 >
-                  知道了
+                  {t("models.hub.gotIt")}
                 </button>
               </div>
             ) : null}
@@ -285,14 +269,15 @@ export function ModelsHub() {
             <div className="mb-3 flex items-center justify-between gap-3">
               <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
                 <Server className="h-3.5 w-3.5" />
-                供应商 <span className="text-muted-foreground/70">({providers.length})</span>
+                {t("models.hub.providersSection")}{" "}
+                <span className="text-muted-foreground/70">({providers.length})</span>
               </h2>
               <div className="relative w-64">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/60" />
                 <Input
                   value={galleryQuery}
                   onChange={(e) => setGalleryQuery(e.target.value)}
-                  placeholder="搜索供应商..."
+                  placeholder={t("models.gallery.searchPlaceholder")}
                   className="h-9 pl-9 text-xs"
                 />
               </div>
@@ -304,22 +289,22 @@ export function ModelsHub() {
                 animate={{ opacity: 1, y: 0 }}
                 className="rounded-xl border border-dashed border-border/60 bg-card/50 px-8 py-10 text-center"
               >
-                <h3 className="text-sm font-semibold text-foreground">三步接入你的第一个 Agent</h3>
+                <h3 className="text-sm font-semibold text-foreground">{t("models.gallery.emptyTitle")}</h3>
                 <div className="mx-auto mt-3 flex max-w-md flex-wrap items-center justify-center gap-2 text-[11px] text-muted-foreground">
-                  <span className="rounded-full border border-border/55 px-2.5 py-1">1 添加供应商</span>
+                  <span className="rounded-full border border-border/55 px-2.5 py-1">{t("models.gallery.step1")}</span>
                   <span aria-hidden>→</span>
-                  <span className="rounded-full border border-border/55 px-2.5 py-1">2 测试连接</span>
+                  <span className="rounded-full border border-border/55 px-2.5 py-1">{t("models.gallery.step2")}</span>
                   <span aria-hidden>→</span>
-                  <span className="rounded-full border border-border/55 px-2.5 py-1">3 接入 Agent</span>
+                  <span className="rounded-full border border-border/55 px-2.5 py-1">{t("models.gallery.step3")}</span>
                 </div>
                 <Button onClick={() => openCreateDrawer()} className="mt-5 gap-1.5">
                   <Plug className="h-4 w-4" />
-                  新增第一个供应商
+                  {t("models.gallery.addFirst")}
                 </Button>
               </motion.div>
             ) : filteredProviders.length === 0 ? (
               <div className="rounded-xl border border-border/55 bg-card/55 px-6 py-10 text-center text-sm text-muted-foreground">
-                没有匹配的供应商
+                {t("models.gallery.noMatch")}
               </div>
             ) : (
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -350,18 +335,20 @@ export function ModelsHub() {
           drawer.type === "create" ? (
             <span className="flex items-center gap-2 text-foreground">
               <Plug className="h-4 w-4 text-primary" />
-              新增供应商
+              {t("models.hub.addProvider")}
             </span>
           ) : (
-            <span className="text-foreground">供应商</span>
+            <span className="text-foreground">{t("models.drawer.titleFallback")}</span>
           )
         }
-        subtitle={drawer.type === "create" ? "选择预设 → 填写 Key → 自动进入详细配置" : null}
+        subtitle={drawer.type === "create" ? t("models.drawer.createSubtitle") : null}
       >
         {drawer.type === "create" ? (
           <PresetPicker onProviderCreated={(p) => void handleProviderCreated(p)} />
         ) : (
-          <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">供应商不存在</div>
+          <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+            {t("models.drawer.providerMissing")}
+          </div>
         )}
       </DrawerShell>
 

@@ -1,5 +1,7 @@
+import type { TFunction } from "i18next";
 import { ExternalLink, Loader2, Play, RefreshCw, WalletCards } from "lucide-react";
 import { memo, useCallback, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../../components/ui/button";
 import { openExternalUrl } from "../../../../lib/externalOpen";
 import { cn } from "../../../../lib/utils";
@@ -47,24 +49,35 @@ function formatBalanceAmount(available: number, currency: string) {
   return `${normalizedCurrency} ${value}`;
 }
 
-function getConnectionStatus(result: ReturnType<typeof useLatencyTest>["result"]) {
+function getConnectionStatus(result: ReturnType<typeof useLatencyTest>["result"], t: TFunction) {
   if (!result) {
-    return { label: "未测试", dotClass: "bg-muted-foreground/40", textClass: "text-muted-foreground" };
+    return {
+      label: t("models.diagnosticsPanel.notTested"),
+      dotClass: "bg-muted-foreground/40",
+      textClass: "text-muted-foreground",
+    };
   }
   if (result.status === "ok") {
     return {
-      label: result.latency_ms == null ? "连接正常" : `连接正常 · ${result.latency_ms}ms`,
+      label:
+        result.latency_ms == null
+          ? t("models.diagnosticsPanel.ok")
+          : t("models.diagnosticsPanel.okLatency", { ms: result.latency_ms }),
       dotClass: "bg-success",
       textClass: "text-success",
     };
   }
   if (result.status === "timeout") {
-    return { label: "连接超时", dotClass: "bg-amber-400", textClass: "text-amber-500" };
+    return { label: t("models.diagnosticsPanel.timeout"), dotClass: "bg-amber-400", textClass: "text-amber-500" };
   }
   if (result.status === "auth_failed") {
-    return { label: "鉴权失败", dotClass: "bg-destructive", textClass: "text-destructive" };
+    return {
+      label: t("models.diagnosticsPanel.authFailed"),
+      dotClass: "bg-destructive",
+      textClass: "text-destructive",
+    };
   }
-  return { label: "连接失败", dotClass: "bg-destructive", textClass: "text-destructive" };
+  return { label: t("models.diagnosticsPanel.failed"), dotClass: "bg-destructive", textClass: "text-destructive" };
 }
 
 function ConnectionStatusPanelInner({
@@ -74,6 +87,7 @@ function ConnectionStatusPanelInner({
   baseUrlOpenai,
   baseUrlAnthropic,
 }: ConnectionStatusPanelProps) {
+  const { t } = useTranslation();
   const openaiUrl = (baseUrlOpenai ?? baseUrl ?? "").trim();
   const anthropicUrl = (baseUrlAnthropic ?? "").trim();
   const primaryUrl = openaiUrl || anthropicUrl;
@@ -110,14 +124,14 @@ function ConnectionStatusPanelInner({
     void openExternalUrl(BALANCE_CONSOLE_URLS[balancePresetId]);
   }, [balancePresetId]);
 
-  const status = getConnectionStatus(latencyResult);
+  const status = getConnectionStatus(latencyResult, t);
   const balanceAmount = balance ? formatBalanceAmount(balance.available, balance.currency) : "--";
 
-  let balanceHint = "账户余额";
+  let balanceHint = t("models.diagnosticsPanel.accountBalance");
   if (!apiKey) {
-    balanceHint = "未配置 API Key";
+    balanceHint = t("models.diagnosticsPanel.noApiKey");
   } else if (balanceError) {
-    balanceHint = "余额获取失败";
+    balanceHint = t("models.diagnosticsPanel.balanceFailed");
   }
 
   const isBusy = isTesting || isEndpointTesting;
@@ -127,14 +141,14 @@ function ConnectionStatusPanelInner({
       <section className="space-y-3 rounded-xl border border-border/55 bg-card/55 p-4 shadow-sm backdrop-blur-sm transition duration-200 hover:-translate-y-0.5 hover:border-primary/25 hover:bg-card/75 hover:shadow-[0_16px_36px_-28px_var(--color-shadow)]">
         <h4 className="flex items-center gap-2 text-sm font-semibold text-foreground">
           <span className="h-2.5 w-2.5 rounded-full bg-success shadow-[0_0_0_3px_rgba(var(--color-success-rgb),0.12)]" />
-          连接状态
+          {t("models.diagnosticsPanel.connectionStatus")}
         </h4>
 
         <div className="flex items-center gap-2 text-xs font-medium">
           {isBusy ? (
             <>
               <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-              <span className="text-muted-foreground">测试中...</span>
+              <span className="text-muted-foreground">{t("models.diagnosticsPanel.testing")}</span>
             </>
           ) : (
             <>
@@ -158,7 +172,7 @@ function ConnectionStatusPanelInner({
             ) : (
               <Play className="h-3.5 w-3.5 text-primary" />
             )}
-            深度连接测试
+            {t("models.diagnosticsPanel.deepTest")}
           </Button>
           {probeUrls.length > 0 && (
             <Button
@@ -174,7 +188,7 @@ function ConnectionStatusPanelInner({
               ) : (
                 <Play className="h-3.5 w-3.5 text-primary" />
               )}
-              端点测速 ({probeUrls.length})
+              {t("models.diagnosticsPanel.endpointSpeedCount", { count: probeUrls.length })}
             </Button>
           )}
         </div>
@@ -207,7 +221,7 @@ function ConnectionStatusPanelInner({
               <span className="flex h-7 w-7 items-center justify-center rounded-full border border-primary/15 bg-primary/10 text-primary">
                 <WalletCards className="h-3.5 w-3.5" />
               </span>
-              余额
+              {t("models.diagnosticsPanel.balance")}
             </h4>
             {isBalanceLoading ? <Loader2 className="h-4 w-4 animate-spin text-primary" /> : null}
           </div>
@@ -235,7 +249,7 @@ function ConnectionStatusPanelInner({
               ) : (
                 <RefreshCw className="h-3.5 w-3.5 text-primary" />
               )}
-              刷新
+              {t("models.diagnosticsPanel.refresh")}
             </Button>
             <Button
               type="button"
@@ -245,7 +259,7 @@ function ConnectionStatusPanelInner({
               className="h-8 justify-center border-border/60 bg-background/50 text-xs font-semibold text-foreground/80 hover:border-primary/40 hover:bg-background/70 hover:text-foreground"
             >
               <ExternalLink className="h-3.5 w-3.5 text-primary" />
-              控制台
+              {t("models.diagnosticsPanel.console")}
             </Button>
           </div>
         </section>

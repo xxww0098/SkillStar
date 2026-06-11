@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import { ArrowLeft, Eye, EyeOff, ExternalLink, KeyRound, Loader2, Search, Sparkles } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../../components/ui/button";
 import { Input } from "../../../../components/ui/input";
 import { openExternalUrl } from "../../../../lib/externalOpen";
@@ -19,39 +20,40 @@ export interface PresetPickerProps {
 
 interface CategoryDef {
   key: string;
-  label: string;
-  hint: string;
+  labelKey: string;
+  hintKey: string;
   emoji: string;
 }
 
 const CATEGORIES: CategoryDef[] = [
   {
     key: "official",
-    label: "国际大厂",
-    hint: "官方端点已预设，填 API Key 即可开始",
+    labelKey: "models.preset.categoryOfficial",
+    hintKey: "models.preset.categoryOfficialHint",
     emoji: "🌍",
   },
   {
     key: "domestic",
-    label: "国内模型",
-    hint: "官方端点已预设，填 API Key 即可开始",
+    labelKey: "models.preset.categoryDomestic",
+    hintKey: "models.preset.categoryDomesticHint",
     emoji: "🇨🇳",
   },
   {
     key: "relay",
-    label: "中转 / 聚合",
-    hint: "中转服务，多家模型统一访问",
+    labelKey: "models.preset.categoryRelay",
+    hintKey: "models.preset.categoryRelayHint",
     emoji: "🌐",
   },
   {
     key: "openai_compatible",
-    label: "OpenAI 兼容",
-    hint: "自定义 OpenAI 兼容端点，需手填 Base URL",
+    labelKey: "models.preset.categoryCompatible",
+    hintKey: "models.preset.categoryCompatibleHint",
     emoji: "🧪",
   },
 ];
 
 export function PresetPicker({ onProviderCreated, initialPreset = null }: PresetPickerProps) {
+  const { t } = useTranslation();
   const { createProvider } = useProvidersFlat();
   const { grouped, isLoading } = useProviderPresets();
 
@@ -99,7 +101,7 @@ export function PresetPicker({ onProviderCreated, initialPreset = null }: Preset
   const handleSubmit = useCallback(async () => {
     if (!selected) return;
     if (!apiKey.trim()) {
-      setError("请输入 API Key");
+      setError(t("models.preset.keyRequired"));
       return;
     }
     setSubmitting(true);
@@ -146,7 +148,7 @@ export function PresetPicker({ onProviderCreated, initialPreset = null }: Preset
           className="inline-flex items-center gap-1 text-xs text-muted-foreground transition hover:text-foreground"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
-          换一个预设
+          {t("models.preset.changePreset")}
         </button>
 
         <div className="rounded-xl border border-border/55 bg-card/60 px-4 py-4 shadow-sm backdrop-blur-sm">
@@ -160,7 +162,10 @@ export function PresetPicker({ onProviderCreated, initialPreset = null }: Preset
             <div className="min-w-0 flex-1">
               <h4 className="truncate text-sm font-semibold text-foreground">{selected.name}</h4>
               <p className="mt-0.5 text-[11px] text-muted-foreground">
-                {CATEGORIES.find((c) => c.key === selected.category)?.hint ?? "填写 API Key 创建供应商"}
+                {(() => {
+                  const hk = CATEGORIES.find((c) => c.key === selected.category)?.hintKey;
+                  return hk ? t(hk) : t("models.preset.fillKeyHint");
+                })()}
               </p>
             </div>
           </div>
@@ -175,7 +180,7 @@ export function PresetPicker({ onProviderCreated, initialPreset = null }: Preset
                 onClick={() => void openExternalUrl(selected.api_key_url!)}
                 className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
               >
-                获取 Key
+                {t("models.preset.getKey")}
                 <ExternalLink className="h-3 w-3" />
               </button>
             ) : null}
@@ -195,7 +200,7 @@ export function PresetPicker({ onProviderCreated, initialPreset = null }: Preset
               type="button"
               onClick={() => setShowApiKey((v) => !v)}
               className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground transition hover:text-foreground"
-              aria-label={showApiKey ? "隐藏" : "显示"}
+              aria-label={showApiKey ? t("models.preset.hide") : t("models.preset.show")}
             >
               {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </button>
@@ -204,7 +209,7 @@ export function PresetPicker({ onProviderCreated, initialPreset = null }: Preset
 
         {showOpenaiUrl ? (
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Base URL (OpenAI 兼容)</label>
+            <label className="text-xs font-medium text-muted-foreground">{t("models.preset.baseUrlOpenai")}</label>
             <Input
               value={baseUrlOpenai}
               onChange={(e) => setBaseUrlOpenai(e.target.value)}
@@ -216,7 +221,7 @@ export function PresetPicker({ onProviderCreated, initialPreset = null }: Preset
 
         {showAnthropicUrl ? (
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Base URL (Anthropic 兼容)</label>
+            <label className="text-xs font-medium text-muted-foreground">{t("models.preset.baseUrlAnthropic")}</label>
             <Input
               value={baseUrlAnthropic}
               onChange={(e) => setBaseUrlAnthropic(e.target.value)}
@@ -239,14 +244,14 @@ export function PresetPicker({ onProviderCreated, initialPreset = null }: Preset
             ) : (
               <Sparkles className="mr-1.5 h-3.5 w-3.5" />
             )}
-            {submitting ? "创建中…" : "创建并继续"}
+            {submitting ? t("models.preset.creating") : t("models.preset.createAndContinue")}
           </Button>
           <Button variant="ghost" onClick={handleBack} disabled={submitting}>
-            返回
+            {t("models.preset.back")}
           </Button>
         </div>
 
-        <p className="text-[11px] text-muted-foreground/80">创建后会自动停留在此抽屉,可继续配置模型与 Agent 绑定。</p>
+        <p className="text-[11px] text-muted-foreground/80">{t("models.preset.afterCreateHint")}</p>
       </motion.div>
     );
   }
@@ -258,7 +263,7 @@ export function PresetPicker({ onProviderCreated, initialPreset = null }: Preset
         <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="搜索供应商..."
+          placeholder={t("models.preset.searchPlaceholder")}
           className="pl-9"
         />
       </div>
@@ -268,7 +273,7 @@ export function PresetPicker({ onProviderCreated, initialPreset = null }: Preset
           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
         </div>
       ) : !anyMatch ? (
-        <div className="py-10 text-center text-sm text-muted-foreground">无匹配结果</div>
+        <div className="py-10 text-center text-sm text-muted-foreground">{t("models.preset.noMatch")}</div>
       ) : (
         CATEGORIES.map((cat) => {
           const list = filtered[cat.key as keyof typeof filtered] ?? [];
@@ -278,8 +283,10 @@ export function PresetPicker({ onProviderCreated, initialPreset = null }: Preset
               <header className="flex items-center gap-2">
                 <span className="text-base leading-none">{cat.emoji}</span>
                 <div>
-                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{cat.label}</h4>
-                  <p className="text-[11px] text-muted-foreground/80">{cat.hint}</p>
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    {t(cat.labelKey)}
+                  </h4>
+                  <p className="text-[11px] text-muted-foreground/80">{t(cat.hintKey)}</p>
                 </div>
               </header>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
