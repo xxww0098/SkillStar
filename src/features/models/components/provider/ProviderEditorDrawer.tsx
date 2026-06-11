@@ -1,6 +1,6 @@
 import { Copy, Loader2, MoreHorizontal, Trash2 } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "../../../../components/ui/button";
 import { cn } from "../../../../lib/utils";
 import type { ProviderEntryFlat } from "../../../../types";
@@ -8,6 +8,7 @@ import { useAutosave } from "../../hooks/useAutosave";
 import { useProviderForm } from "../../hooks/useProviderForm";
 import type { ProviderEditorTab } from "../../types";
 import { ConflictWarnings } from "../diagnostics/ConflictWarnings";
+import { PostCreateGuide } from "./PostCreateGuide";
 import { DrawerShell } from "../shared/DrawerShell";
 import { ProviderBrandIcon } from "../shared/ProviderBrandIcon";
 import { SaveBadge } from "../shared/SaveBadge";
@@ -31,6 +32,10 @@ export interface ProviderEditorDrawerProps {
   onDelete?: (provider: ProviderEntryFlat) => void;
   /** Tab to show when the drawer opens (deep links: 缺端点 → connection 等). */
   initialTab?: ProviderEditorTab;
+  /** Show the one-time post-create guide banner. */
+  showPostCreateGuide?: boolean;
+  /** Step 3 (接入 Agent) already done via autoBind. */
+  agentBoundOnCreate?: boolean;
 }
 
 /**
@@ -45,10 +50,27 @@ function ProviderEditorDrawerInner({
   onDuplicate,
   onDelete,
   initialTab = "connection",
+  showPostCreateGuide = false,
+  agentBoundOnCreate = false,
 }: ProviderEditorDrawerProps) {
   const [tab, setTab] = useState<ProviderEditorTab>(initialTab);
+  const [guideDismissed, setGuideDismissed] = useState(false);
   const form = useProviderForm(provider);
   const { state: saveState, flush } = useAutosave({ dirty: form.dirty, save: form.save });
+
+  // Post-create convenience: fetch the model catalog once if credentials allow.
+  const autoFetched = useRef(false);
+  const { values: formValues, modelCatalogEmpty } = {
+    values: form.values,
+    modelCatalogEmpty: form.values.modelCatalog.length === 0,
+  };
+  useEffect(() => {
+    if (!showPostCreateGuide || autoFetched.current) return;
+    if (!formValues.modelsUrl.trim() || !formValues.apiKey.trim() || !modelCatalogEmpty) return;
+    autoFetched.current = true;
+    void form.handleFetchModels();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showPostCreateGuide]);
 
   const requestClose = useCallback(() => {
     // Kick the pending save off synchronously before unmount; the mutation
@@ -145,6 +167,14 @@ function ProviderEditorDrawerInner({
       }
     >
       <div className="space-y-4">
+        {showPostCreateGuide && !guideDismissed ? (
+          <PostCreateGuide
+            agentBound={agentBoundOnCreate}
+            onTestConnection={() => setTab("diagnostics")}
+            onGoConnect={requestClose}
+            onDismiss={() => setGuideDismissed(true)}
+          />
+        ) : null}
         <ConflictWarnings providerId={provider.id} />
 
         {/* Tab bar — sticky inside the drawer scroll container */}

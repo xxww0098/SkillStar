@@ -318,7 +318,7 @@ export function Sidebar({
     navigate,
     selectedProviderId,
     setSelectedProviderId,
-    setShowPresetSelector,
+    openModelsDrawer,
     usageCatalogFilter,
     setUsageCatalogFilter,
     openUsageCreate,
@@ -341,16 +341,15 @@ export function Sidebar({
   };
 
   const handleAddProvider = useCallback(() => {
-    setShowPresetSelector(true);
     setSelectedProviderId(null);
-  }, [setShowPresetSelector, setSelectedProviderId]);
+    openModelsDrawer({ kind: "create" });
+  }, [setSelectedProviderId, openModelsDrawer]);
 
   const handleSelectProvider = useCallback(
     (id: string) => {
-      setSelectedProviderId(id);
-      setShowPresetSelector(false);
+      openModelsDrawer({ kind: "edit", providerId: id });
     },
-    [setSelectedProviderId, setShowPresetSelector],
+    [openModelsDrawer],
   );
 
   const handleUsageAddNew = useCallback(() => {

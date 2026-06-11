@@ -15,6 +15,14 @@ const importUsagePage = () => import("../pages/Usage");
 
 const ALL_PAGES: NavPage[] = ["my-skills", "marketplace", "skill-cards", "projects", "mcp", "settings"];
 
+/** Models hub drawer deep-link request (request-nonce pattern, like usageCreateRequest). */
+export interface ModelsDrawerRequest {
+  nonce: number;
+  kind: "create" | "edit";
+  providerId?: string;
+  autoBindToolId?: string;
+}
+
 const DEFAULT_NEXT_PAGES: Record<NavPage, NavPage[]> = {
   "my-skills": ["marketplace", "projects"],
   marketplace: ["my-skills", "skill-cards"],
@@ -134,6 +142,8 @@ interface NavigationState {
   clipboardShareCode: string | null;
   usageCatalogFilter: CatalogFilter;
   usageCreateRequest: { nonce: number; preselectCatalogId: string | null } | null;
+  /** Request-nonce event asking the Models hub to open its drawer. */
+  modelsDrawerRequest: ModelsDrawerRequest | null;
 }
 
 interface NavigationActions {
@@ -157,6 +167,8 @@ interface NavigationActions {
   setUsageCatalogFilter: (filter: CatalogFilter) => void;
   openUsageCreate: (preselectCatalogId?: string | null) => void;
   clearUsageCreateRequest: () => void;
+  openModelsDrawer: (req: Omit<ModelsDrawerRequest, "nonce">) => void;
+  clearModelsDrawerRequest: () => void;
 }
 
 type NavigationContext = NavigationState & NavigationActions;
@@ -205,6 +217,7 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
     nonce: number;
     preselectCatalogId: string | null;
   } | null>(null);
+  const [modelsDrawerRequest, setModelsDrawerRequest] = useState<ModelsDrawerRequest | null>(null);
 
   const prefetchedPages = useRef<Set<NavPage>>(new Set([activePage]));
   const previousPage = useRef<NavPage>(activePage);
@@ -282,6 +295,16 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
 
   const clearUsageCreateRequest = useCallback(() => {
     setUsageCreateRequest(null);
+  }, []);
+
+  const openModelsDrawer = useCallback((req: Omit<ModelsDrawerRequest, "nonce">) => {
+    setAppModeState("models");
+    window.location.hash = MODELS_HASH;
+    setModelsDrawerRequest((prev) => ({ ...req, nonce: (prev?.nonce ?? 0) + 1 }));
+  }, []);
+
+  const clearModelsDrawerRequest = useCallback(() => {
+    setModelsDrawerRequest(null);
   }, []);
 
   // ── Prefetching ─────────────────────────────────────────────────
@@ -368,6 +391,7 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
       clipboardShareCode,
       usageCatalogFilter,
       usageCreateRequest,
+      modelsDrawerRequest,
       navigate,
       setSubPage,
       setAppMode,
@@ -385,6 +409,8 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
       setUsageCatalogFilter,
       openUsageCreate,
       clearUsageCreateRequest,
+      openModelsDrawer,
+      clearModelsDrawerRequest,
     }),
     [
       activePage,
@@ -400,6 +426,7 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
       clipboardShareCode,
       usageCatalogFilter,
       usageCreateRequest,
+      modelsDrawerRequest,
       navigate,
       setAppMode,
       navigateModels,
@@ -408,6 +435,8 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
       goToMySkillsFocus,
       openUsageCreate,
       clearUsageCreateRequest,
+      openModelsDrawer,
+      clearModelsDrawerRequest,
     ],
   );
 

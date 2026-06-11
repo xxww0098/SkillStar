@@ -5,6 +5,7 @@ import { useState, useMemo } from "react";
 import { cn } from "../../../../lib/utils";
 import type { ProviderEntryFlat, ToolActivationsMap } from "../../../../types";
 import { getProviderToolBadges } from "../../hooks/useProvidersFlat";
+import { getLatencyColor } from "../../lib/latencyColor";
 import { AgentToolIcon, type AgentToolIconId } from "../shared/AgentToolIcon";
 import { ProviderBrandIcon } from "../shared/ProviderBrandIcon";
 
@@ -18,14 +19,24 @@ const TOOL_ID_TO_ICON: Record<string, AgentToolIconId> = {
 export interface ProviderGalleryCardProps {
   provider: ProviderEntryFlat;
   toolActivations: ToolActivationsMap;
+  /** Latest probe latency for this provider (from the shared health cache). */
+  latencyMs?: number | null;
   onOpen: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
 }
 
+const LATENCY_DOT: Record<string, string> = {
+  green: "bg-emerald-400",
+  yellow: "bg-amber-400",
+  red: "bg-red-400",
+  gray: "bg-muted-foreground/30",
+};
+
 export function ProviderGalleryCard({
   provider,
   toolActivations,
+  latencyMs,
   onOpen,
   onDuplicate,
   onDelete,
@@ -66,7 +77,15 @@ export function ProviderGalleryCard({
             size="md"
           />
           <div className="min-w-0 flex-1">
-            <h3 className="truncate text-sm font-semibold text-foreground">{provider.name}</h3>
+            <h3 className="flex items-center gap-1.5 truncate text-sm font-semibold text-foreground">
+              <span className="truncate">{provider.name}</span>
+              {latencyMs !== undefined ? (
+                <span
+                  className={cn("h-1.5 w-1.5 shrink-0 rounded-full", LATENCY_DOT[getLatencyColor(latencyMs)])}
+                  title={latencyMs != null ? `${latencyMs}ms` : "未测试"}
+                />
+              ) : null}
+            </h3>
             <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
               {provider.default_model || provider.models?.[0] || "未选择默认模型"}
             </p>
@@ -89,6 +108,11 @@ export function ProviderGalleryCard({
           {hasAnthropic ? (
             <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
               Anthropic
+            </span>
+          ) : null}
+          {provider.models?.length ? (
+            <span className="rounded-full bg-muted/60 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+              {provider.models.length} 模型
             </span>
           ) : null}
         </div>

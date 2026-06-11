@@ -7,7 +7,7 @@ import { Input } from "../../../../components/ui/input";
 import { useNavigation } from "../../../../hooks/useNavigation";
 import { cn } from "../../../../lib/utils";
 import type { ProviderEntryFlat } from "../../../../types";
-import { useProvidersFlat } from "../../hooks/useProvidersFlat";
+import { getProviderToolBadges, useProvidersFlat } from "../../hooks/useProvidersFlat";
 import { useToolInstallStatuses } from "../../api/install";
 import { useAgentHealth } from "../../hooks/useAgentHealth";
 import { CLAUDE_DESKTOP_TOOL_ID, PROVIDER_AGENTS, type ProviderToolId } from "../../lib/agentRegistry";
@@ -20,6 +20,7 @@ import { ClaudeDesktopConfigDialog } from "../agents/ClaudeDesktopConfigDialog";
 import { PresetPicker } from "../provider/PresetPicker";
 import { DrawerShell } from "../shared/DrawerShell";
 import { ProviderEditorDrawer } from "../provider/ProviderEditorDrawer";
+import { DeleteProviderDialog } from "./DeleteProviderDialog";
 import { ProviderGalleryCard } from "./ProviderGalleryCard";
 
 const HUB_TOOL_IDS = [...PROVIDER_AGENTS.map((a) => a.toolId), CLAUDE_DESKTOP_TOOL_ID];
@@ -27,7 +28,7 @@ const HUB_TOOL_IDS = [...PROVIDER_AGENTS.map((a) => a.toolId), CLAUDE_DESKTOP_TO
 type DrawerMode =
   | { type: "closed" }
   | { type: "create"; autoBindToolId?: string }
-  | { type: "edit"; providerId: string; autoBindToolId?: string };
+  | { type: "edit"; providerId: string; autoBindToolId?: string; postCreate?: boolean };
 
 function ModelsTopDragStrip() {
   return <div data-tauri-drag-region className="h-4 w-full shrink-0" aria-hidden />;
@@ -35,23 +36,42 @@ function ModelsTopDragStrip() {
 
 export function ModelsHub() {
   const { providers, toolActivations, isLoading, activateTool, createProvider, deleteProvider } = useProvidersFlat();
-  const { selectedProviderId, setSelectedProviderId, showPresetSelector, setShowPresetSelector, navigate } =
-    useNavigation();
+  const {
+    selectedProviderId,
+    setSelectedProviderId,
+    showPresetSelector,
+    setShowPresetSelector,
+    navigate,
+    modelsDrawerRequest,
+    clearModelsDrawerRequest,
+  } = useNavigation();
 
   const [drawer, setDrawer] = useState<DrawerMode>({ type: "closed" });
   const [settingsTool, setSettingsTool] = useState<ProviderToolId | null>(null);
   const [desktopConfigOpen, setDesktopConfigOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<ProviderEntryFlat | null>(null);
+  const [connectHintDismissed, setConnectHintDismissed] = useState(false);
   const { byTool: installStatus, isLoading: installLoading } = useToolInstallStatuses(HUB_TOOL_IDS);
   const health = useAgentHealth(providers, toolActivations);
   const [galleryQuery, setGalleryQuery] = useState("");
 
-  // Bridge: rehydrate drawer from URL/persisted state on first mount.
+  // Deep-link requests from the sidebar / other surfaces (request-nonce pattern).
+  useEffect(() => {
+    if (!modelsDrawerRequest) return;
+    const req = modelsDrawerRequest;
+    clearModelsDrawerRequest();
+    if (req.kind === "create") {
+      setDrawer({ type: "create", autoBindToolId: req.autoBindToolId });
+    } else if (req.providerId) {
+      setSelectedProviderId(req.providerId);
+      setDrawer({ type: "edit", providerId: req.providerId });
+    }
+  }, [modelsDrawerRequest, clearModelsDrawerRequest, setSelectedProviderId]);
+
+  // Back-compat shim: showPresetSelector still opens the create drawer.
   useEffect(() => {
     if (showPresetSelector) {
       setDrawer({ type: "create" });
-    } else if (selectedProviderId && drawer.type === "closed") {
-      // Only auto-open if the user previously had a provider selected from a deep-link.
-      // We don't auto-open by default — too aggressive.
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showPresetSelector]);
@@ -97,7 +117,7 @@ export function ModelsHub() {
       }
       setSelectedProviderId(provider.id);
       setShowPresetSelector(false);
-      setDrawer({ type: "edit", providerId: provider.id });
+      setDrawer({ type: "edit", providerId: provider.id, postCreate: true });
     },
     [drawer, activateTool, setSelectedProviderId, setShowPresetSelector],
   );
@@ -114,11 +134,13 @@ export function ModelsHub() {
     [createProvider],
   );
 
-  const handleDeleteProvider = useCallback(
+  const confirmDeleteProvider = useCallback(
     async (p: ProviderEntryFlat) => {
+      setDeleteTarget(null);
       try {
         await deleteProvider(p.id);
         if (selectedProviderId === p.id) setSelectedProviderId(null);
+        setDrawer((prev) => (prev.type === "edit" && prev.providerId === p.id ? { type: "closed" } : prev));
         toast.success(`已删除 ${p.name}`);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : String(err));
@@ -159,6 +181,22 @@ export function ModelsHub() {
     [toolActivations, providers, installStatus, installLoading, health.results, health.testing],
   );
   const agentSummary = useMemo(() => summarizeAgentStatuses(agentStatuses), [agentStatuses]);
+
+  const providerLatency = useMemo(() => {
+    const map: Record<string, number | null> = {};
+    for (const [toolId, activation] of Object.entries(toolActivations)) {
+      const result = health.results[toolId];
+      if (activation?.provider_id && result?.status === "ok") {
+        map[activation.provider_id] = result.latency_ms ?? null;
+      }
+    }
+    return map;
+  }, [toolActivations, health.results]);
+
+  const noAgentConnected = useMemo(
+    () => providers.length > 0 && Object.values(toolActivations).every((a) => !a),
+    [providers.length, toolActivations],
+  );
 
   const drawerProvider = useMemo(() => {
     if (drawer.type !== "edit") return null;
@@ -210,6 +248,18 @@ export function ModelsHub() {
                 {agentSummary.problems > 0 ? ` · ${agentSummary.problems} 异常` : ""}
               </span>
             </div>
+            {noAgentConnected && !connectHintDismissed ? (
+              <div className="mb-3 flex items-center justify-between gap-2 rounded-xl border border-primary/20 bg-primary/[0.05] px-3 py-2 text-[11px] text-muted-foreground">
+                <span>已有 {providers.length} 个供应商，还没有 Agent 在使用 — 在下方卡片中选择供应商即可接入。</span>
+                <button
+                  type="button"
+                  onClick={() => setConnectHintDismissed(true)}
+                  className="shrink-0 font-medium text-primary hover:underline"
+                >
+                  知道了
+                </button>
+              </div>
+            ) : null}
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {PROVIDER_AGENTS.map((agent) => (
                 <AgentHeroCard
@@ -252,10 +302,17 @@ export function ModelsHub() {
               <motion.div
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="rounded-xl border border-dashed border-border/60 bg-card/50 px-8 py-12 text-center"
+                className="rounded-xl border border-dashed border-border/60 bg-card/50 px-8 py-10 text-center"
               >
-                <p className="text-sm text-muted-foreground">尚未配置任何供应商</p>
-                <Button onClick={() => openCreateDrawer()} className="mt-4 gap-1.5">
+                <h3 className="text-sm font-semibold text-foreground">三步接入你的第一个 Agent</h3>
+                <div className="mx-auto mt-3 flex max-w-md flex-wrap items-center justify-center gap-2 text-[11px] text-muted-foreground">
+                  <span className="rounded-full border border-border/55 px-2.5 py-1">1 添加供应商</span>
+                  <span aria-hidden>→</span>
+                  <span className="rounded-full border border-border/55 px-2.5 py-1">2 测试连接</span>
+                  <span aria-hidden>→</span>
+                  <span className="rounded-full border border-border/55 px-2.5 py-1">3 接入 Agent</span>
+                </div>
+                <Button onClick={() => openCreateDrawer()} className="mt-5 gap-1.5">
                   <Plug className="h-4 w-4" />
                   新增第一个供应商
                 </Button>
@@ -271,9 +328,10 @@ export function ModelsHub() {
                     key={p.id}
                     provider={p}
                     toolActivations={toolActivations}
+                    latencyMs={providerLatency[p.id]}
                     onOpen={() => openEditDrawer(p.id)}
                     onDuplicate={() => void handleDuplicateProvider(p)}
-                    onDelete={() => void handleDeleteProvider(p)}
+                    onDelete={() => setDeleteTarget(p)}
                   />
                 ))}
               </div>
@@ -332,14 +390,21 @@ export function ModelsHub() {
         <ProviderEditorDrawer
           provider={drawerProvider}
           open={drawer.type === "edit"}
+          showPostCreateGuide={drawer.type === "edit" && !!drawer.postCreate}
+          agentBoundOnCreate={getProviderToolBadges(drawerProvider.id, toolActivations).length > 0}
           onClose={closeDrawer}
           onDuplicate={(p) => void handleDuplicateProvider(p)}
-          onDelete={(p) => {
-            void handleDeleteProvider(p);
-            closeDrawer();
-          }}
+          onDelete={(p) => setDeleteTarget(p)}
         />
       ) : null}
+
+      {/* ── Delete confirmation ───────────────────────────────── */}
+      <DeleteProviderDialog
+        provider={deleteTarget}
+        affectedToolIds={deleteTarget ? getProviderToolBadges(deleteTarget.id, toolActivations) : []}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={(p) => void confirmDeleteProvider(p)}
+      />
     </div>
   );
 }
