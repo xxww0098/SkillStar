@@ -192,12 +192,16 @@ export function RemoteSkillsContent({
     (skill: Skill) => {
       const remote = remoteByPath.get(skill.git_url);
       if (!remote) return undefined;
+      const profile = remoteAgentProfile(remote.agent, profiles);
       return {
-        agentProfile: remoteAgentProfile(remote.agent, profiles),
+        agentProfile: profile,
         sizeLabel: formatRemoteSize(remote.size),
+        agentActive: agentFilter === profile.id,
+        // Toggle the agent filter without opening the detail drawer (SkillCard stops propagation).
+        onAgentClick: () => setAgentFilter((prev) => (prev === profile.id ? null : profile.id)),
       };
     },
-    [remoteByPath, profiles],
+    [remoteByPath, profiles, agentFilter],
   );
 
   return (

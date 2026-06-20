@@ -35,6 +35,10 @@ interface SkillCardProps {
 export type SkillCardRemoteContext = {
   agentProfile: AgentProfile;
   sizeLabel?: string;
+  /** Click the agent badge to filter the grid by this agent (stops the card from opening). */
+  onAgentClick?: () => void;
+  /** Whether this agent is the active filter — highlights the badge. */
+  agentActive?: boolean;
 };
 
 function rankStyle(rank: number): string {
@@ -274,15 +278,28 @@ function SkillCardInner({
 
             <div className="flex items-center gap-1.5 relative z-10 flex-1 min-w-0 justify-end">
               {remoteContext ? (
-                <div
-                  className="w-7 h-7 shrink-0 rounded-lg flex items-center justify-center border border-primary/40 bg-primary/10"
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    remoteContext.onAgentClick?.();
+                  }}
+                  disabled={!remoteContext.onAgentClick}
+                  aria-pressed={remoteContext.agentActive}
                   title={remoteContext.agentProfile.display_name}
+                  className={cn(
+                    "w-7 h-7 shrink-0 rounded-lg flex items-center justify-center border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+                    remoteContext.onAgentClick && "cursor-pointer",
+                    remoteContext.agentActive
+                      ? "border-primary/60 bg-primary/25 shadow-[0_0_0_1px_rgba(var(--color-primary-rgb),0.3)]"
+                      : "border-primary/40 bg-primary/10 hover:bg-primary/20",
+                  )}
                 >
                   <AgentIcon
                     profile={remoteContext.agentProfile}
                     className={cn(agentIconCls(remoteContext.agentProfile.icon, "w-4 h-4"), "drop-shadow-sm")}
                   />
-                </div>
+                </button>
               ) : profiles && onToggleAgent ? (
                 <HScrollRow count={profiles.length} itemWidth={28} gap={6} className="gap-1.5 min-w-0">
                   {profiles.map((profile) => {
