@@ -5,7 +5,7 @@
 //! `src/features/settings/components/AddCustomAgentDialog.tsx` — keep the two in
 //! sync (the frontend regex is a UX pre-check; this function is authoritative).
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 /// Validate and normalize a custom agent's `project_skills_rel`.
 ///

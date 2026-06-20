@@ -84,10 +84,9 @@ pub fn clean_unused_cache() -> anyhow::Result<usize> {
             if !meta.is_dir() {
                 continue;
             }
-            if !referenced.contains(&path)
-                && std::fs::remove_dir_all(&path).is_ok() {
-                    removed += 1;
-                }
+            if !referenced.contains(&path) && std::fs::remove_dir_all(&path).is_ok() {
+                removed += 1;
+            }
         }
     }
 
@@ -116,9 +115,10 @@ fn collect_referenced_cache_dirs(
 
         if let Some(repo_root) = find_repo_root(&target)
             && let Some(parent) = repo_root.parent()
-                && parent == cache_dir {
-                    referenced.insert(repo_root);
-                }
+            && parent == cache_dir
+        {
+            referenced.insert(repo_root);
+        }
     }
 
     referenced

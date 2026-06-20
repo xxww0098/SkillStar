@@ -150,6 +150,7 @@ async fn finalize_subscription(
         renew_date: 0,
         auto_renew: false,
         api_key_encrypted: None,
+        platform_token_encrypted: None,
         access_token_encrypted: Some(crypto::encrypt(&access_token)),
         refresh_token_encrypted: Some(crypto::encrypt(&refresh_token)),
         access_token_expires_at: token_refresh::jwt_exp(&access_token),
@@ -209,21 +210,24 @@ async fn fetch_with_tokens(
 ) -> UsageResult<SubscriptionUsage> {
     let client = http_client()?;
 
-    // Stripe profile — for plan tier. AuthRequired propagates so the UI can
-    // flag re-auth; other errors are surfaced on the snapshot so the user can
-    // see why the plan/usage didn't resolve instead of silently falling back
-    // to "FREE".
-    let (profile, profile_err) = match fetch_stripe_profile(&client, access_token).await {
+    // Stripe profile + usage summary are independent — fetch in parallel.
+    let (profile_res, usage_res) = tokio::join!(
+        fetch_stripe_profile(&client, access_token),
+        fetch_usage_summary(&client, access_token),
+    );
+    if matches!(&profile_res, Err(UsageError::AuthRequired))
+        || matches!(&usage_res, Err(UsageError::AuthRequired))
+    {
+        return Err(UsageError::AuthRequired);
+    }
+    let (profile, profile_err) = match profile_res {
         Ok(p) => (Some(p), None),
-        Err(UsageError::AuthRequired) => return Err(UsageError::AuthRequired),
         Err(e) => (None, Some(format!("stripe_profile: {}", e))),
     };
     let plan_name = resolve_plan_name(profile.as_ref());
 
-    // Usage summary — needs WorkOS cookie + browser UA.
-    let (usage_json, usage_err) = match fetch_usage_summary(&client, access_token).await {
+    let (usage_json, usage_err) = match usage_res {
         Ok(v) => (Some(v), None),
-        Err(UsageError::AuthRequired) => return Err(UsageError::AuthRequired),
         Err(e) => (None, Some(format!("usage-summary: {}", e))),
     };
     let total_window = usage_json.as_ref().and_then(parse_total_with_breakdown);
@@ -255,6 +259,7 @@ async fn fetch_with_tokens(
         credits: Vec::new(),
         error,
         api_keys: Vec::new(),
+        deepseek_analytics: None,
     })
 }
 

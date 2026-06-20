@@ -35,7 +35,9 @@ pub struct AgentDeployStatus {
 
 /// Return the deploy status for `skill_name` under every enabled agent profile.
 #[tauri::command]
-pub async fn get_skill_deploy_status(skill_name: String) -> Result<Vec<AgentDeployStatus>, AppError> {
+pub async fn get_skill_deploy_status(
+    skill_name: String,
+) -> Result<Vec<AgentDeployStatus>, AppError> {
     tokio::task::spawn_blocking(move || compute_status(&skill_name))
         .await
         .map_err(|e| AppError::Other(format!("deploy-status task panicked: {e}")))?

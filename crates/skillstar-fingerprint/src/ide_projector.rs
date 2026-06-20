@@ -65,9 +65,7 @@ pub trait IdeProjector: Send + Sync {
     fn storage_path(&self) -> Option<PathBuf>;
 
     fn is_installed(&self) -> bool {
-        self.storage_path()
-            .map(|p| p.exists())
-            .unwrap_or(false)
+        self.storage_path().map(|p| p.exists()).unwrap_or(false)
     }
 
     /// Path under SkillStar's data dir where the original telemetry slice
@@ -83,9 +81,7 @@ pub trait IdeProjector: Send + Sync {
 
     /// `true` when [`baseline_path`] exists.
     fn has_baseline(&self) -> bool {
-        self.baseline_path()
-            .map(|p| p.exists())
-            .unwrap_or(false)
+        self.baseline_path().map(|p| p.exists()).unwrap_or(false)
     }
 
     /// Read the IDE's current `telemetry.*` fields. Returns an empty
@@ -234,11 +230,13 @@ impl VsCodeForkProjector {
     fn user_data_dir(&self) -> Option<PathBuf> {
         let home = home_dir().ok()?;
         #[cfg(target_os = "macos")]
-        return Some(home.join("Library/Application Support").join(self.macos_dir));
+        return Some(
+            home.join("Library/Application Support")
+                .join(self.macos_dir),
+        );
         #[cfg(target_os = "windows")]
-        return std::env::var_os("APPDATA").map(|appdata| {
-            PathBuf::from(appdata).join(self.windows_dir)
-        });
+        return std::env::var_os("APPDATA")
+            .map(|appdata| PathBuf::from(appdata).join(self.windows_dir));
         #[cfg(target_os = "linux")]
         return Some(home.join(".config").join(self.linux_dir));
         #[allow(unreachable_code)]
@@ -270,17 +268,20 @@ impl IdeProjector for VsCodeForkProjector {
 
 fn home_dir() -> Result<PathBuf, ProjectorError> {
     if let Ok(v) = std::env::var("SKILLSTAR_HOME")
-        && !v.is_empty() {
-            return Ok(PathBuf::from(v));
-        }
+        && !v.is_empty()
+    {
+        return Ok(PathBuf::from(v));
+    }
     if let Ok(v) = std::env::var("HOME")
-        && !v.is_empty() {
-            return Ok(PathBuf::from(v));
-        }
+        && !v.is_empty()
+    {
+        return Ok(PathBuf::from(v));
+    }
     if let Ok(v) = std::env::var("USERPROFILE")
-        && !v.is_empty() {
-            return Ok(PathBuf::from(v));
-        }
+        && !v.is_empty()
+    {
+        return Ok(PathBuf::from(v));
+    }
     Err(ProjectorError::ConfigHome(
         "neither $HOME nor %USERPROFILE% is set".to_string(),
     ))
@@ -294,9 +295,10 @@ fn home_dir() -> Result<PathBuf, ProjectorError> {
 fn extract_telemetry(value: &Value) -> IdeTelemetry {
     let pick = |key: &str| -> Option<String> {
         if let Some(obj) = value.get("telemetry").and_then(|v| v.as_object())
-            && let Some(v) = obj.get(key).and_then(|v| v.as_str()) {
-                return Some(v.to_string());
-            }
+            && let Some(v) = obj.get(key).and_then(|v| v.as_str())
+        {
+            return Some(v.to_string());
+        }
         value
             .get(format!("telemetry.{key}"))
             .and_then(|v| v.as_str())
@@ -326,11 +328,7 @@ fn inject_telemetry(value: &mut Value, t: &IdeTelemetry) {
     let obj = value.as_object_mut().unwrap();
 
     // Ensure nested `telemetry` exists.
-    if !obj
-        .get("telemetry")
-        .map(|v| v.is_object())
-        .unwrap_or(false)
-    {
+    if !obj.get("telemetry").map(|v| v.is_object()).unwrap_or(false) {
         obj.insert("telemetry".to_string(), Value::Object(Default::default()));
     }
     let nested = obj
@@ -363,10 +361,7 @@ fn inject_telemetry(value: &mut Value, t: &IdeTelemetry) {
     flat_set(obj, "sqmId", &t.sqm_id);
 
     if let Some(v) = &t.service_machine_id {
-        obj.insert(
-            "storage.serviceMachineId".into(),
-            Value::String(v.clone()),
-        );
+        obj.insert("storage.serviceMachineId".into(), Value::String(v.clone()));
     }
 }
 
@@ -418,7 +413,9 @@ mod tests {
         )
         .unwrap();
 
-        let p = FakeProjector { path: storage.clone() };
+        let p = FakeProjector {
+            path: storage.clone(),
+        };
 
         // Apply new identity.
         let wanted = IdeTelemetry::generate();

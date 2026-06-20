@@ -42,8 +42,7 @@ impl FingerprintStore {
         let base = if let Ok(custom) = std::env::var("SKILLSTAR_HOME") {
             PathBuf::from(custom)
         } else {
-            dirs_home()?
-                .join(".skillstar")
+            dirs_home()?.join(".skillstar")
         };
         Ok(base.join("config").join(Self::FILE_NAME))
     }
@@ -159,13 +158,15 @@ fn dirs_home() -> Result<PathBuf, StoreError> {
     // Avoid the `dirs` crate to keep this crate dep-light; `HOME` is fine on
     // unix and `USERPROFILE` on windows.
     if let Ok(home) = std::env::var("HOME")
-        && !home.is_empty() {
-            return Ok(PathBuf::from(home));
-        }
+        && !home.is_empty()
+    {
+        return Ok(PathBuf::from(home));
+    }
     if let Ok(profile) = std::env::var("USERPROFILE")
-        && !profile.is_empty() {
-            return Ok(PathBuf::from(profile));
-        }
+        && !profile.is_empty()
+    {
+        return Ok(PathBuf::from(profile));
+    }
     Err(StoreError::ConfigRoot(
         "neither $HOME nor %USERPROFILE% is set".to_string(),
     ))

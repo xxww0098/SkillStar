@@ -5,12 +5,9 @@ use skillstar_app::cli::{
     resolve_rel_dirs_for_agents, validate_agent_ids,
 };
 
-use crate::core::{
-    local_skill, lockfile,
-    repo_scanner, skill_bundle, skill_install, skill_pack,
-};
-use skillstar_skills::git::{gh_manager, ops as git_ops};
+use crate::core::{local_skill, lockfile, marketplace, repo_scanner, skill_bundle, skill_install, skill_pack};
 use skillstar_projects::projects::sync;
+use skillstar_skills::git::{gh_manager, ops as git_ops};
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
@@ -65,13 +62,15 @@ fn classify_add_input(input: &str) -> AddKind {
 
 fn expand_tilde(input: &str) -> String {
     if let Some(rest) = input.strip_prefix("~/")
-        && let Some(home) = dirs::home_dir() {
-            return home.join(rest).to_string_lossy().to_string();
-        }
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.join(rest).to_string_lossy().to_string();
+    }
     if input == "~"
-        && let Some(home) = dirs::home_dir() {
-            return home.to_string_lossy().to_string();
-        }
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.to_string_lossy().to_string();
+    }
     input.to_string()
 }
 
@@ -146,7 +145,11 @@ fn install_bundle_file(path: &Path, opts: &InstallOpts<'_>) {
     match ext {
         "ags" => match skill_bundle::import_bundle(&path_str, force) {
             Ok(result) => {
-                let verb = if result.replaced { "Replaced" } else { "Imported" };
+                let verb = if result.replaced {
+                    "Replaced"
+                } else {
+                    "Imported"
+                };
                 println!(
                     "✓ {} '{}' from bundle ({} files).",
                     verb, result.name, result.file_count
@@ -401,8 +404,7 @@ fn install_or_reuse_skill(
         if !skill_filter.is_empty() {
             return Err("--all cannot be combined with --skill".to_string());
         }
-        let (_repo_url, _source, _, skills_found) =
-            skill_install::fetch_repo_scanned(url, false)?;
+        let (_repo_url, _source, _, skills_found) = skill_install::fetch_repo_scanned(url, false)?;
         if skills_found.is_empty() {
             return Err("No skills discovered in repository".to_string());
         }
@@ -432,9 +434,10 @@ fn install_or_reuse_skill(
             Ok(skill) => Ok((vec![skill.name], true)),
             Err(err) => {
                 if err.contains("already installed")
-                    && let Some(name) = resolve_installed_name(url, explicit_name, &name_hint)? {
-                        return Ok((vec![name], false));
-                    }
+                    && let Some(name) = resolve_installed_name(url, explicit_name, &name_hint)?
+                {
+                    return Ok((vec![name], false));
+                }
                 Err(err)
             }
         }
@@ -455,10 +458,7 @@ fn list_skills_in_source(url: &str) {
                 return;
             }
             let skills_dir = skillstar_core::infra::paths::hub_skills_dir();
-            println!(
-                "{:<32} {:<10} DESCRIPTION",
-                "SKILL", "STATUS"
-            );
+            println!("{:<32} {:<10} DESCRIPTION", "SKILL", "STATUS");
             println!("{}", "-".repeat(80));
             for skill in &skills_found {
                 let status = if skills_dir.join(&skill.id).exists() {
@@ -471,7 +471,12 @@ fn list_skills_in_source(url: &str) {
                 } else {
                     skill.description.as_str()
                 };
-                println!("{:<32} {:<10} {}", truncate(&skill.id, 32), status, truncate(desc, 60));
+                println!(
+                    "{:<32} {:<10} {}",
+                    truncate(&skill.id, 32),
+                    status,
+                    truncate(desc, 60)
+                );
             }
             println!(
                 "\n{} skill(s) in {} ({}).",
@@ -479,8 +484,14 @@ fn list_skills_in_source(url: &str) {
                 source,
                 repo_url
             );
-            println!("Install a specific skill: skillstar install {} --skill <name>", url);
-            println!("Install everything:      skillstar install {} --all -y", url);
+            println!(
+                "Install a specific skill: skillstar install {} --skill <name>",
+                url
+            );
+            println!(
+                "Install everything:      skillstar install {} --all -y",
+                url
+            );
         }
         Err(e) => {
             eprintln!("✗ Scan failed: {}", e);
@@ -638,13 +649,14 @@ fn cmd_install(opts: InstallOpts<'_>) {
 
     println!("Installing from {}...", opts.url);
 
-    let (skill_names, newly_installed) = match install_or_reuse_skill(opts.url, opts.name, opts.skill, opts.all) {
-        Ok(result) => result,
-        Err(err) => {
-            eprintln!("✗ Failed to install into hub: {}", err);
-            std::process::exit(1);
-        }
-    };
+    let (skill_names, newly_installed) =
+        match install_or_reuse_skill(opts.url, opts.name, opts.skill, opts.all) {
+            Ok(result) => result,
+            Err(err) => {
+                eprintln!("✗ Failed to install into hub: {}", err);
+                std::process::exit(1);
+            }
+        };
 
     if newly_installed {
         println!("✓ Installed '{}' into hub.", skill_names.join(", "));
@@ -683,7 +695,7 @@ fn cmd_install(opts: InstallOpts<'_>) {
     let mut chosen_agents = normalize_agent_ids(opts.agent);
     if chosen_agents.is_empty() {
         if opts.yes {
-            // Non-interactive: fall back to auto-detected agents (may be empty → .agents/skills)
+            // Non-interactive: fall back to auto-detected agents (may be empty → .agent/skills)
             chosen_agents = auto_agent_ids.clone();
         } else {
             chosen_agents = prompt_for_agent_selection(&auto_agent_ids);
@@ -708,7 +720,7 @@ fn cmd_install(opts: InstallOpts<'_>) {
                 linked_count
             );
             if agent_ids.is_empty() {
-                println!("  Target mode: fallback path (.agents/skills)");
+                println!("  Target mode: fallback path (.agent/skills)");
             } else {
                 println!("  Target agents: {}", agent_ids.join(", "));
             }
@@ -731,8 +743,8 @@ fn cmd_update(name: Option<&str>) {
     let lockfile = match lockfile::Lockfile::load(&lock_path) {
         Ok(lf) => lf,
         Err(e) => {
-            eprintln!("Error reading lockfile: {}", e);
-            return;
+            eprintln!("✗ Error reading lockfile: {}", e);
+            std::process::exit(1);
         }
     };
 
@@ -817,7 +829,20 @@ fn cmd_remove(opts: RemoveOpts<'_>) {
 
     let mut failed: Vec<(String, String)> = Vec::new();
     let mut removed: Vec<String> = Vec::new();
+    let mut not_found: Vec<String> = Vec::new();
+    let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
     for name in &targets {
+        // Distinguish "nothing to remove" from a real uninstall so typos and
+        // stale names surface as feedback instead of a misleading "Removed".
+        let exists = local_skill::is_local_skill(name)
+            || hub_dir.join(name).exists()
+            || lockfile::Lockfile::load(&lockfile::lockfile_path())
+                .map(|lf| lf.skills.iter().any(|s| s.name == *name))
+                .unwrap_or(false);
+        if !exists {
+            not_found.push(name.clone());
+            continue;
+        }
         match skill_install::uninstall_skill(name) {
             Ok(_) => removed.push(name.clone()),
             Err(err) => failed.push((name.clone(), err)),
@@ -825,7 +850,14 @@ fn cmd_remove(opts: RemoveOpts<'_>) {
     }
 
     if !removed.is_empty() {
-        println!("✓ Removed {} skill(s): {}", removed.len(), removed.join(", "));
+        println!(
+            "✓ Removed {} skill(s): {}",
+            removed.len(),
+            removed.join(", ")
+        );
+    }
+    for name in &not_found {
+        eprintln!("• '{}' is not installed; nothing to remove.", name);
     }
     for (name, err) in &failed {
         eprintln!("✗ Failed to remove '{}': {}", name, err);
@@ -840,11 +872,11 @@ fn cmd_publish() {
     match status {
         gh_manager::GhStatus::NotInstalled => {
             eprintln!("✗ GitHub CLI (gh) is required. Install from: https://cli.github.com/");
-            return;
+            std::process::exit(1);
         }
         gh_manager::GhStatus::NotAuthenticated => {
             eprintln!("✗ GitHub CLI is not authenticated. Run: gh auth login");
-            return;
+            std::process::exit(1);
         }
         gh_manager::GhStatus::Ready { .. } => {}
     }
@@ -867,7 +899,10 @@ fn cmd_publish() {
         &lockfile::lockfile_path(),
     ) {
         Ok(result) => println!("✓ Published to: {}", result.url),
-        Err(e) => eprintln!("✗ {}", e),
+        Err(e) => {
+            eprintln!("✗ {}", e);
+            std::process::exit(1);
+        }
     }
 }
 
@@ -962,6 +997,13 @@ fn cmd_pack_remove(name: &str) {
 
 fn migrate_and_run() {
     skillstar_core::infra::migration::migrate_legacy_paths();
+    // Point the marketplace snapshot runtime at the real data dir + DB before
+    // any CLI command (notably `find`) touches the snapshot. Without this the
+    // snapshot falls back to a throwaway `/tmp` DB, which always looks empty
+    // and triggers a blocking remote seed on every search.
+    if let Err(err) = marketplace::initialize_local_snapshot() {
+        eprintln!("⚠ Marketplace snapshot init failed: {err}");
+    }
 }
 
 pub fn cli_handlers() -> CliHandlers {

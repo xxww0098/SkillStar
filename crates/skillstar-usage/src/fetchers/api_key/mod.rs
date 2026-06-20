@@ -12,9 +12,11 @@
 //! response *parsing* differs per provider and stays in each module.
 
 pub mod deepseek;
+pub mod deepseek_platform;
 pub mod glm;
 pub mod kimi;
 pub mod minimax;
+pub mod zcode;
 
 use serde::de::DeserializeOwned;
 use skillstar_fingerprint::{DeviceFingerprint, Req, RequestError};
@@ -45,10 +47,11 @@ pub async fn dispatch(subscription: &mut Subscription) -> UsageResult<Subscripti
     let fp = fingerprint.as_ref();
 
     match subscription.catalog_id.as_str() {
-        "deepseek" => deepseek::fetch(&subscription.id, &api_key, fp).await,
+        "deepseek" => deepseek::fetch(subscription, &api_key, fp).await,
         "glm" => glm::fetch(&subscription.id, &api_key, fp).await,
         "minimax" => minimax::fetch(&subscription.id, &api_key, fp).await,
         "kimi" => kimi::fetch(&subscription.id, &api_key, fp).await,
+        "zcode" => zcode::fetch(&subscription.id, &api_key, fp).await,
         other => Err(super::unsupported(other)),
     }
 }

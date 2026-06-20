@@ -23,8 +23,8 @@ use tokio::sync::Mutex;
 
 use skillstar_ai::ai_provider;
 use skillstar_models::latency::{self, EndpointLatencyResult, LatencyResult};
-use skillstar_models::providers::ProviderPresetFlat;
 use skillstar_models::provider_ref::AiProviderRef;
+use skillstar_models::providers::ProviderPresetFlat;
 use skillstar_models::providers::{
     self, AppProviders, ModelCatalogFetchResult, ProviderEntry, ProviderEntryFlat, ProviderPatch,
     ProviderPatchFlat, ProviderPreset, ProviderSettings, ProvidersStore, ToolActivation,

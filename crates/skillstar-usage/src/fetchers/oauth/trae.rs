@@ -152,6 +152,7 @@ async fn finalize(
         renew_date: 0,
         auto_renew: false,
         api_key_encrypted: None,
+        platform_token_encrypted: None,
         access_token_encrypted: Some(crypto::encrypt(&access_token)),
         refresh_token_encrypted: refresh_token.as_deref().map(crypto::encrypt),
         access_token_expires_at: expires_at,
@@ -190,11 +191,13 @@ async fn fetch_inner(subscription: &mut Subscription) -> UsageResult<Subscriptio
         refresh_tokens(subscription, &region).await?;
     }
 
-    let access_token = decrypt_required(&subscription.access_token_encrypted)?;
+    let access_token =
+        crate::fetchers::decrypt_required(&subscription.access_token_encrypted, "access_token")?;
     match fetch_usage_for_subscription(subscription, &access_token, &region).await {
         Err(UsageError::AuthRequired) => {
             refresh_tokens(subscription, &region).await?;
-            let access_token = decrypt_required(&subscription.access_token_encrypted)?;
+            let access_token =
+                crate::fetchers::decrypt_required(&subscription.access_token_encrypted, "access_token")?;
             fetch_usage_for_subscription(subscription, &access_token, &region).await
         }
         other => other,
@@ -275,6 +278,7 @@ async fn fetch_with_token(
         credits: Vec::new(),
         error: None,
         api_keys: Vec::new(),
+        deepseek_analytics: None,
     })
 }
 
@@ -448,17 +452,6 @@ fn pick_f64(value: &Value, path: &[&str]) -> Option<f64> {
     }
     cur.as_f64()
         .or_else(|| cur.as_str().and_then(|s| s.parse().ok()))
-}
-
-fn decrypt_required(cipher: &Option<String>) -> UsageResult<String> {
-    let cipher = cipher
-        .as_deref()
-        .ok_or_else(|| UsageError::Other("缺少 access_token".into()))?;
-    let pt = crypto::decrypt(cipher);
-    if pt.is_empty() {
-        return Err(UsageError::AuthRequired);
-    }
-    Ok(pt)
 }
 
 fn urlencoding(s: &str) -> String {

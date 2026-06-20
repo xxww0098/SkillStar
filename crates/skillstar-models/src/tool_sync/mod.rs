@@ -12,15 +12,15 @@
 //!
 //! All writes use rolling backups (keep last 5) and merge semantics (preserve non-managed fields).
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::providers::{
-    catalog_from_meta, FlatProvidersStore, ModelCatalogEntry, ProviderEntry, ProviderEntryFlat,
-    ProviderSettings, ToolActivation,
+    FlatProvidersStore, ModelCatalogEntry, ProviderEntry, ProviderEntryFlat, ProviderSettings,
+    ToolActivation, catalog_from_meta,
 };
 
 mod types;
@@ -77,7 +77,8 @@ fn sandbox_home() -> Option<PathBuf> {
 fn test_sandbox_home() -> PathBuf {
     use std::sync::LazyLock;
     static DIR: LazyLock<PathBuf> = LazyLock::new(|| {
-        let dir = std::env::temp_dir().join(format!("skillstar-toolsync-test-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("skillstar-toolsync-test-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         dir
     });

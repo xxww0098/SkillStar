@@ -25,4 +25,16 @@ pub(crate) trait AgentSpec {
     /// `".claude/skills"`. `None` means the agent is global-only (OpenClaw) —
     /// it is excluded from all project-level operations.
     fn project_skills_rel(&self) -> Option<&str>;
+
+    /// CLI executable name for install detection, e.g. `"claude"`, `"gemini"`.
+    ///
+    /// When set, [`super::detect::detect_installed`] probes PATH (via `which`)
+    /// instead of relying on directory presence — this is what lets agents that
+    /// share a home root (Antigravity + Gemini both under `~/.gemini`) be told
+    /// apart. `None` marks IDE/GUI agents (detected by directory presence) or
+    /// global-only agents with no CLI; the default is `None` so custom agents
+    /// and any new spec that doesn't override it fall back to directory detection.
+    fn binary_name(&self) -> Option<&str> {
+        None
+    }
 }

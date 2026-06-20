@@ -1,3 +1,3 @@
-pub mod types;
-pub mod infra;
 pub mod config;
+pub mod infra;
+pub mod types;

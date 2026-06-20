@@ -1,4 +1,5 @@
 import type React from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "../../lib/utils";
 
 export interface PageToolbarProps {
@@ -25,8 +26,34 @@ export interface PageToolbarProps {
  *
  * The flexible gap between search and filters/actions serves as the
  * window drag region on macOS (titleBarStyle: Overlay).
+ *
+ * The filters zone scrolls horizontally when overflowing; fade masks on
+ * either edge make the overflow discoverable instead of silently clipping.
  */
 export function PageToolbar({ title, search, filters, actions, className, children }: PageToolbarProps) {
+  const filtersRef = useRef<HTMLDivElement>(null);
+  const [canLeft, setCanLeft] = useState(false);
+  const [canRight, setCanRight] = useState(false);
+
+  const updateOverflow = () => {
+    const el = filtersRef.current;
+    if (!el) return;
+    setCanLeft(el.scrollLeft > 1);
+    setCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+  };
+
+  useEffect(() => {
+    const el = filtersRef.current;
+    if (!el) return;
+    const frame = requestAnimationFrame(updateOverflow);
+    const ro = new ResizeObserver(updateOverflow);
+    ro.observe(el);
+    return () => {
+      cancelAnimationFrame(frame);
+      ro.disconnect();
+    };
+  }, [filters]);
+
   return (
     <div
       data-tauri-drag-region
@@ -42,9 +69,33 @@ export function PageToolbar({ title, search, filters, actions, className, childr
 
       {search && <div className="shrink-0">{search}</div>}
 
-      {/* ── Center zone: Filters (scrollable when overflowing) ── */}
+      {/* ── Center zone: Filters (scrollable when overflowing, with fade masks) ── */}
       {filters && (
-        <div className="flex items-center gap-2 min-w-0 overflow-x-auto [&::-webkit-scrollbar]:hidden">{filters}</div>
+        <div className="relative min-w-0 flex items-center">
+          {/* Left fade mask */}
+          {canLeft && (
+            <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-4 z-10 bg-gradient-to-r from-sidebar to-transparent" />
+          )}
+          <div
+            ref={filtersRef}
+            onWheel={(e) => {
+              const el = filtersRef.current;
+              if (!el) return;
+              if (el.scrollWidth <= el.clientWidth) return;
+              e.stopPropagation();
+              e.preventDefault();
+              el.scrollLeft += e.deltaY || e.deltaX;
+            }}
+            onScroll={updateOverflow}
+            className="flex items-center gap-2 min-w-0 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+          >
+            {filters}
+          </div>
+          {/* Right fade mask */}
+          {canRight && (
+            <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-4 z-10 bg-gradient-to-l from-sidebar to-transparent" />
+          )}
+        </div>
       )}
 
       {/* ── Drag spacer: fills remaining space ── */}

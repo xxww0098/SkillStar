@@ -169,14 +169,15 @@ fn try_install_from_repo_cache(
 
     // Guard against overwriting a local skill whose name matches the repo skill
     if let Some(skill) = &target
-        && local_skill_blocks_repo_install(&skill.id) {
-            warn!(
-                target: "install_skill",
-                skill_id = %skill.id,
-                "repo-cache skill would collide with existing local skill, skipping"
-            );
-            return Ok(None);
-        }
+        && local_skill_blocks_repo_install(&skill.id)
+    {
+        warn!(
+            target: "install_skill",
+            skill_id = %skill.id,
+            "repo-cache skill would collide with existing local skill, skipping"
+        );
+        return Ok(None);
+    }
 
     let Some(skill) = target else {
         warn!(

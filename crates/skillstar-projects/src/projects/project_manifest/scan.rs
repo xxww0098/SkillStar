@@ -135,3 +135,103 @@ pub fn scan_project_skills(project_path: &str) -> Result<ProjectScanResult> {
         agents_found,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `detect_project_agents` is the read-only data-driven detector behind the
+    /// Tauri command of the same name. AGENTS.md mandates:
+    ///  - unique `project_skills_rel` per agent (disambiguation sealed)
+    ///  - OpenClaw is global-only (`project_skills_rel` empty → never detected)
+    ///  - only the `skills` dir itself counts, never its parent
+    #[test]
+    fn detects_codex_when_skills_dir_exists() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path();
+        std::fs::create_dir_all(project.join(".codex/skills")).unwrap();
+
+        let detection = detect_project_agents(&project.to_string_lossy());
+        let codex = detection
+            .detected
+            .iter()
+            .find(|d| d.agent_id == "codex")
+            .expect("codex should be in the detection list");
+        assert!(codex.exists, ".codex/skills exists → codex.exists must be true");
+        assert_eq!(codex.project_skills_rel, ".codex/skills");
+        // Unique path → auto-enabled, no ambiguous group.
+        assert!(
+            detection.auto_enable.contains(&"codex".to_string()),
+            "codex should be auto-enabled"
+        );
+        assert!(
+            detection.ambiguous_groups.is_empty(),
+            "sealed disambiguation must yield no ambiguous groups"
+        );
+    }
+
+    #[test]
+    fn does_not_detect_agent_when_only_parent_dir_exists() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path();
+        // Only `.codex` exists, NOT `.codex/skills` — must not be detected,
+        // matching AGENTS.md ("strictly on the skills dir itself, never its parent").
+        std::fs::create_dir_all(project.join(".codex")).unwrap();
+
+        let detection = detect_project_agents(&project.to_string_lossy());
+        let codex = detection
+            .detected
+            .iter()
+            .find(|d| d.agent_id == "codex")
+            .expect("codex should still be listed (with exists=false)");
+        assert!(
+            !codex.exists,
+            ".codex without skills/ must NOT count as detected"
+        );
+        assert!(
+            !detection.auto_enable.contains(&"codex".to_string()),
+            "codex must not be auto-enabled without its skills dir"
+        );
+    }
+
+    #[test]
+    fn detects_multiple_distinct_agents_simultaneously() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path();
+        std::fs::create_dir_all(project.join(".codex/skills")).unwrap();
+        std::fs::create_dir_all(project.join(".claude/skills")).unwrap();
+        std::fs::create_dir_all(project.join(".gemini/skills")).unwrap();
+
+        let detection = detect_project_agents(&project.to_string_lossy());
+        // Three distinct, unique rels → all auto-enabled, zero ambiguity.
+        assert_eq!(detection.auto_enable.len(), 3);
+        assert!(detection.ambiguous_groups.is_empty());
+        for id in &["codex", "claude", "gemini"] {
+            assert!(
+                detection.auto_enable.contains(&id.to_string()),
+                "{id} should be auto-enabled"
+            );
+        }
+    }
+
+    /// OpenClaw has an empty `project_skills_rel` (global-only), so it must
+    /// never appear in the detected list regardless of directory state.
+    #[test]
+    fn openclaw_is_never_detected_at_project_level() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path();
+        // Even if ~/.openclaw/skills exists globally, the project detector
+        // only looks at project-relative dirs, and openclaw has no rel.
+        std::fs::create_dir_all(project.join(".openclaw/skills")).unwrap();
+
+        let detection = detect_project_agents(&project.to_string_lossy());
+        assert!(
+            !detection.detected.iter().any(|d| d.agent_id == "openclaw"),
+            "openclaw must not appear in project-level detection (global-only)"
+        );
+        assert!(
+            !detection.auto_enable.contains(&"openclaw".to_string()),
+            "openclaw must not be auto-enabled"
+        );
+    }
+}

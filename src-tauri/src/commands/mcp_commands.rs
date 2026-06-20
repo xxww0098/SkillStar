@@ -9,9 +9,12 @@
 //! All write operations are serialized through a tokio Mutex ([`McpWriteLock`])
 //! to prevent concurrent corruption of the store and the live config files.
 
+use std::collections::BTreeSet;
+
 use serde::Serialize;
 use tauri::State;
 use tokio::sync::Mutex;
+use tracing::warn;
 
 use skillstar_models::mcp::{
     self, McpPreset, McpServerEntry, McpServerPatch, McpStore, McpSyncResult, McpToolStatus,
@@ -117,11 +120,12 @@ pub async fn update_mcp_server(
 
     // If the server was renamed, purge the stale key from every tool first.
     if let Some(old) = old_name
-        && old != updated.name {
-            for &tool_id in mcp::MCP_TOOL_IDS {
-                let _ = mcp::remove_server_from_tool(&old, tool_id);
-            }
+        && old != updated.name
+    {
+        for &tool_id in mcp::MCP_TOOL_IDS {
+            let _ = mcp::remove_server_from_tool(&old, tool_id);
         }
+    }
 
     let sync_results = mcp::sync_server_all_tools(&updated, false);
     Ok(McpServerWithSync {
@@ -249,5 +253,55 @@ pub async fn reorder_mcp_servers(
 /// Returns the built-in / recommended MCP presets (read-only, no lock needed).
 #[tauri::command]
 pub async fn get_mcp_presets() -> Result<Vec<McpPreset>, String> {
-    Ok(mcp::get_mcp_presets())
+    if let Err(err) = crate::core::marketplace::initialize_local_snapshot() {
+        warn!(target: "mcp", error = %err, "failed to initialize marketplace snapshot for MCP presets");
+        return Ok(mcp::get_mcp_presets());
+    }
+
+    match skillstar_marketplace::mcp_snapshot::list_curated_mcp_servers() {
+        Ok(servers) if !servers.is_empty() => Ok(servers
+            .iter()
+            .filter(|server| server.recommended)
+            .map(curated_server_to_preset)
+            .collect()),
+        Ok(_) => Ok(mcp::get_mcp_presets()),
+        Err(err) => {
+            warn!(target: "mcp", error = %err, "failed to load curated MCP presets from marketplace DB");
+            Ok(mcp::get_mcp_presets())
+        }
+    }
+}
+
+fn curated_server_to_preset(server: &skillstar_marketplace::McpRegistryServer) -> McpPreset {
+    let draft = skillstar_app::commands::mcp_marketplace::registry_to_entry(server);
+    let mut required_env = BTreeSet::new();
+    for package in &server.packages {
+        for key in &package.required_env {
+            required_env.insert(key.clone());
+        }
+    }
+    let mut tags = draft.tags;
+    if server.recommended && !tags.iter().any(|tag| tag == "recommended") {
+        tags.push("recommended".to_string());
+    }
+    if let Some(source) = &server.source {
+        if !tags.iter().any(|tag| tag == source) {
+            tags.push(source.clone());
+        }
+    }
+
+    McpPreset {
+        id: server.id.clone(),
+        name: draft.name,
+        description: server.description.clone(),
+        homepage: server.repo_url.clone(),
+        transport: draft.transport,
+        command: draft.command,
+        args: draft.args,
+        env: draft.env,
+        url: draft.url,
+        headers: draft.headers,
+        tags,
+        required_env: required_env.into_iter().collect(),
+    }
 }

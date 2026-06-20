@@ -389,13 +389,15 @@ mod tests {
             proptest::option::of(1u64..=30_000u64),
             proptest::option::of("[a-zA-Z0-9 ]{1,64}"),
         )
-            .prop_map(|(provider_id, app_id, status, latency_ms, error_message)| LatencyResult {
-                provider_id,
-                app_id,
-                latency_ms,
-                status,
-                error_message,
-                tested_at: "2025-01-01T00:00:00+00:00".to_string(),
+            .prop_map(|(provider_id, app_id, status, latency_ms, error_message)| {
+                LatencyResult {
+                    provider_id,
+                    app_id,
+                    latency_ms,
+                    status,
+                    error_message,
+                    tested_at: "2025-01-01T00:00:00+00:00".to_string(),
+                }
             })
     }
 
@@ -455,7 +457,9 @@ mod tests {
 
     #[test]
     fn detects_anthropic_compatible_urls() {
-        assert!(is_anthropic_compatible_url("https://api.deepseek.com/anthropic"));
+        assert!(is_anthropic_compatible_url(
+            "https://api.deepseek.com/anthropic"
+        ));
         assert!(!is_anthropic_compatible_url("https://api.deepseek.com/v1"));
     }
 

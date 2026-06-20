@@ -1,0 +1,30 @@
+[package]
+name = "skillstar-ssh"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94.1"
+
+[dependencies]
+skillstar-core = { version = "0.1.0", path = "../skillstar-core" }
+dirs = "5"
+anyhow = "1.0.102"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+tokio = { version = "1.52.1", features = ["sync", "rt", "macros", "fs", "io-util"] }
+tracing = "0.1.44"
+toml = "1.1"
+thiserror = "2"
+# russh: use the `ring` crypto backend instead of the default `aws-lc-rs`
+# (ring ships prebuilt for more targets and avoids a C-toolchain build step
+# on every CI platform). rsa support stays on for older SSH key types.
+russh = { version = "0.61", default-features = false, features = ["ring", "rsa"] }
+russh-sftp = "2.3"
+# ssh-key must exactly match russh 0.61's pinned dependency to avoid a
+# duplicate-version build error (russh uses `=0.7.0-rc.10`).
+ssh-key = { version = "=0.7.0-rc.10", features = ["alloc"] }
+# keyring v4 default (`v1`) bundles the native store for each desktop OS
+# (macOS Keychain / Windows Credential Manager / Linux Secret Service via zbus).
+keyring = { version = "4", default-features = false, features = ["v1"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"

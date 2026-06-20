@@ -17,7 +17,6 @@ pub mod update_checker;
 
 // ── Re-exports for `use super::{…}` inside skill submodules ───────────
 
-
 use crate::core::skill::Skill;
 
 /// Unified lifecycle boundary for skill install / update / uninstall.

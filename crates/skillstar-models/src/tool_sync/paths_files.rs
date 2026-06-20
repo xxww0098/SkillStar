@@ -8,7 +8,8 @@ use super::*;
 
 /// Resolve the config file path for a given tool_id.
 ///
-/// Only accepts "claude-code", "codex", "opencode", and "claude-desktop" as valid tool IDs.
+/// Only accepts "claude-code", "codex", "opencode", "claude-desktop", "gemini", and "zcode"
+/// as valid tool IDs.
 /// Returns an error for any other tool_id to prevent arbitrary file writes.
 pub fn resolve_tool_config_path(tool_id: &str) -> Result<PathBuf> {
     let home = sync_home_dir()?;
@@ -18,8 +19,9 @@ pub fn resolve_tool_config_path(tool_id: &str) -> Result<PathBuf> {
         "opencode" => Ok(resolve_opencode_config_path()?),
         "claude-desktop" => Ok(resolve_claude_desktop_config_path()?),
         "gemini" => Ok(resolve_gemini_env_path()?),
+        "zcode" => Ok(resolve_zcode_config_path()?),
         _ => bail!(
-            "Unknown tool_id: '{}'. Supported: claude-code, codex, opencode, claude-desktop, gemini.",
+            "Unknown tool_id: '{}'. Supported: claude-code, codex, opencode, claude-desktop, gemini, zcode.",
             tool_id
         ),
     }
@@ -29,6 +31,13 @@ pub fn resolve_tool_config_path(tool_id: &str) -> Result<PathBuf> {
 pub fn resolve_opencode_config_path() -> Result<PathBuf> {
     let home = sync_home_dir()?;
     Ok(home.join(".config").join("opencode").join("opencode.json"))
+}
+
+/// `~/.zcode/v2/config.json` — model providers (`provider.*`) use the OpenCode schema.
+/// MCP for the ZCode desktop app is **not** read from here; see `mcp::resolve_zcode_cli_mcp_config_path`.
+pub fn resolve_zcode_config_path() -> Result<PathBuf> {
+    let home = sync_home_dir()?;
+    Ok(home.join(".zcode").join("v2").join("config.json"))
 }
 
 /// `~/.gemini/.env` — Gemini CLI reads provider credentials from this dotenv file.
@@ -60,6 +69,7 @@ pub fn resolve_tool_config_file_path(tool_id: &str, file_id: &str) -> Result<Pat
         ("opencode", "opencode") => resolve_opencode_config_path(),
         ("claude-desktop", "config") => resolve_claude_desktop_config_path(),
         ("gemini", "env") => resolve_gemini_env_path(),
+        ("zcode", "config") => resolve_zcode_config_path(),
         _ => bail!("Unknown tool config file: {tool_id}/{file_id}"),
     }
 }
@@ -111,6 +121,17 @@ pub fn list_tool_config_files(tool_id: &str) -> Result<Vec<ToolConfigFileInfo>> 
                 managed_by_skillstar: true,
             }])
         }
+        "zcode" => {
+            let path = resolve_zcode_config_path()?;
+            Ok(vec![ToolConfigFileInfo {
+                file_id: "config".to_string(),
+                label: "config.json".to_string(),
+                path: path.to_string_lossy().to_string(),
+                format: "json".to_string(),
+                exists: path.exists(),
+                managed_by_skillstar: true,
+            }])
+        }
         "claude-desktop" => {
             let path = resolve_claude_desktop_config_path()?;
             Ok(vec![ToolConfigFileInfo {
@@ -145,8 +166,7 @@ pub fn read_tool_config_file(tool_id: &str, file_id: &str) -> Result<String> {
     if !path.exists() {
         return Ok(default_empty_config_content(tool_id, file_id));
     }
-    std::fs::read_to_string(&path)
-        .with_context(|| format!("Failed to read {}", path.display()))
+    std::fs::read_to_string(&path).with_context(|| format!("Failed to read {}", path.display()))
 }
 
 fn default_empty_config_content(tool_id: &str, file_id: &str) -> String {
@@ -159,18 +179,26 @@ fn default_empty_config_content(tool_id: &str, file_id: &str) -> String {
         ("opencode", "opencode") => {
             "{\n  \"$schema\": \"https://opencode.ai/config.json\",\n  \"provider\": {}\n}\n".to_string()
         }
+        // ZCode shares the OpenCode schema.
+        ("zcode", "config") => {
+            "{\n  \"$schema\": \"https://opencode.ai/config.json\",\n  \"provider\": {}\n}\n".to_string()
+        }
         // Claude Desktop only honours `mcpServers` — start with an empty list so the user
         // can drop entries in without first reading the schema.
         ("claude-desktop", "config") => "{\n  \"mcpServers\": {}\n}\n".to_string(),
         ("gemini", "env") => {
-            "GOOGLE_GEMINI_BASE_URL=\nGEMINI_API_KEY=\nGEMINI_MODEL=\n".to_string()
+            "GOOGLE_GEMINI_BASE_URL=\nGEMINI_API_KEY=[密钥]".to_string()
         }
         _ => "{}".to_string(),
     }
 }
 
 /// Validate and write config file contents (creates rolling backup when file exists).
-pub fn write_tool_config_file(tool_id: &str, file_id: &str, content: &str) -> WriteToolConfigFileResult {
+pub fn write_tool_config_file(
+    tool_id: &str,
+    file_id: &str,
+    content: &str,
+) -> WriteToolConfigFileResult {
     match write_tool_config_file_inner(tool_id, file_id, content) {
         Ok(backup) => WriteToolConfigFileResult {
             success: true,
@@ -185,7 +213,11 @@ pub fn write_tool_config_file(tool_id: &str, file_id: &str, content: &str) -> Wr
     }
 }
 
-fn write_tool_config_file_inner(tool_id: &str, file_id: &str, content: &str) -> Result<Option<PathBuf>> {
+fn write_tool_config_file_inner(
+    tool_id: &str,
+    file_id: &str,
+    content: &str,
+) -> Result<Option<PathBuf>> {
     let path = resolve_tool_config_file_path(tool_id, file_id)?;
     let info = list_tool_config_files(tool_id)?
         .into_iter()
@@ -193,10 +225,11 @@ fn write_tool_config_file_inner(tool_id: &str, file_id: &str, content: &str) -> 
         .context("Config file descriptor not found")?;
 
     if info.format == "json" {
-        let _: Value = serde_json::from_str(content)
-            .context("Invalid JSON — fix syntax before saving")?;
+        let _: Value =
+            serde_json::from_str(content).context("Invalid JSON — fix syntax before saving")?;
     } else if info.format == "toml" {
-        let _: toml::Table = toml::from_str(content).context("Invalid TOML — fix syntax before saving")?;
+        let _: toml::Table =
+            toml::from_str(content).context("Invalid TOML — fix syntax before saving")?;
     }
 
     if let Some(parent) = path.parent() {
@@ -223,7 +256,8 @@ fn write_tool_config_file_inner(tool_id: &str, file_id: &str, content: &str) -> 
         _ => content.to_string(),
     };
 
-    std::fs::write(&path, normalized).with_context(|| format!("Failed to write {}", path.display()))?;
+    std::fs::write(&path, normalized)
+        .with_context(|| format!("Failed to write {}", path.display()))?;
     Ok(backup)
 }
 
@@ -290,7 +324,10 @@ fn serialize_env_file(pairs: &[(String, String)]) -> String {
 ///
 /// A `None` value removes the key (used on deactivation). Existing keys keep
 /// their position; new keys are appended in the supplied order.
-pub(crate) fn merge_env_write(path: &Path, managed: &[(&str, Option<String>)]) -> Result<Option<PathBuf>> {
+pub(crate) fn merge_env_write(
+    path: &Path,
+    managed: &[(&str, Option<String>)],
+) -> Result<Option<PathBuf>> {
     let backup = if path.exists() {
         Some(create_rolling_backup(path)?)
     } else {
@@ -341,6 +378,7 @@ pub fn get_tool_config_targets() -> Result<Vec<ToolConfigTarget>> {
         ("codex", "Codex"),
         ("opencode", "OpenCode"),
         ("gemini", "Gemini CLI"),
+        ("zcode", "ZCode"),
     ];
     let mut targets = Vec::new();
 
@@ -348,7 +386,9 @@ pub fn get_tool_config_targets() -> Result<Vec<ToolConfigTarget>> {
         let config_path = resolve_tool_config_path(tool_id)?;
         let exists = config_path.exists();
         let current_provider = if exists {
-            detect_current_provider(tool_id, &config_path).ok().flatten()
+            detect_current_provider(tool_id, &config_path)
+                .ok()
+                .flatten()
         } else {
             None
         };
@@ -385,17 +425,21 @@ fn detect_current_provider(tool_id: &str, path: &Path) -> Result<Option<String>>
             let content = std::fs::read_to_string(path)?;
             let table: toml::Table = toml::from_str(&content)?;
             if let Some(mp) = table.get("model_providers").and_then(|v| v.as_table())
-                && let Some(ss) = mp.get(CODEX_MANAGED_PROVIDER_KEY).and_then(|v| v.as_table())
-                    && let Some(url) = ss.get("base_url").and_then(|v| v.as_str()) {
-                        return Ok(Some(url.to_string()));
-                    }
+                && let Some(ss) = mp
+                    .get(CODEX_MANAGED_PROVIDER_KEY)
+                    .and_then(|v| v.as_table())
+                && let Some(url) = ss.get("base_url").and_then(|v| v.as_str())
+            {
+                return Ok(Some(url.to_string()));
+            }
             if let Some(provider) = table.get("provider").and_then(|v| v.as_table())
-                && let Some(base_url) = provider.get("base_url").and_then(|v| v.as_str()) {
-                    return Ok(Some(base_url.to_string()));
-                }
+                && let Some(base_url) = provider.get("base_url").and_then(|v| v.as_str())
+            {
+                return Ok(Some(base_url.to_string()));
+            }
             Ok(None)
         }
-        "opencode" => {
+        "opencode" | "zcode" => {
             let content = std::fs::read_to_string(path)?;
             let json: Value = serde_json::from_str(&content)?;
             if let Some(name) = json
@@ -419,4 +463,3 @@ fn detect_current_provider(tool_id: &str, path: &Path) -> Result<Option<String>>
         _ => Ok(None),
     }
 }
-

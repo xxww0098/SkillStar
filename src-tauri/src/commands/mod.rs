@@ -29,6 +29,7 @@ mod skill_content;
 mod skill_groups;
 mod skill_paths;
 mod skills;
+mod ssh_hosts;
 
 pub use adopt_folder::*;
 pub use bundles::*;
@@ -37,4 +38,5 @@ pub use share_install::*;
 pub use skill_content::*;
 pub use skill_groups::*;
 pub use skills::*;
+pub use ssh_hosts::*;
 pub use skillstar_app::commands::shell::*;

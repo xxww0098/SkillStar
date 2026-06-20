@@ -50,6 +50,8 @@ export interface MonetaryBalance {
   total: number;
   granted: number;
   topped_up: number;
+  /** Provider-specific availability flag (e.g. DeepSeek `is_available`). */
+  is_available?: boolean | null;
 }
 
 export interface CreditInfo {
@@ -65,6 +67,38 @@ export interface OpenCodeApiKey {
   email: string | null;
 }
 
+export interface DeepSeekModelUsage {
+  key: string;
+  name: string;
+  total_tokens: number;
+  request_count: number;
+  cache_hit_tokens: number;
+  cache_miss_tokens: number;
+  response_tokens: number;
+  cost: number;
+}
+
+export interface DeepSeekDailyUsage {
+  date: string;
+  flash_tokens: number;
+  flash_cache_hit: number;
+  flash_cache_miss: number;
+  flash_response: number;
+  pro_tokens: number;
+  pro_cache_hit: number;
+  pro_cache_miss: number;
+  pro_response: number;
+  total_tokens: number;
+  total_cost: number;
+}
+
+export interface DeepSeekAnalytics {
+  month_cost: number;
+  today_cost: number;
+  models: DeepSeekModelUsage[];
+  daily: DeepSeekDailyUsage[];
+}
+
 export interface SubscriptionUsage {
   subscription_id: string;
   fetched_at: number;
@@ -76,6 +110,7 @@ export interface SubscriptionUsage {
   credits: CreditInfo[];
   error: string | null;
   api_keys: OpenCodeApiKey[];
+  deepseek_analytics?: DeepSeekAnalytics | null;
 }
 
 export interface Subscription {
@@ -91,6 +126,8 @@ export interface Subscription {
   renew_date: number;
   auto_renew: boolean;
   has_credential: boolean;
+  /** DeepSeek platform session token configured for usage charts. */
+  has_platform_token?: boolean;
   requires_reauth: boolean;
   /** Bound fingerprint id (see `features/fingerprints`). Absent → reqwest default. */
   fingerprint_id?: string;
@@ -118,6 +155,8 @@ export interface CreateSubscriptionInput {
   renew_date?: number;
   auto_renew?: boolean;
   api_key?: string;
+  /** DeepSeek platform session token (usage analytics). */
+  platform_token?: string;
   oauth_region?: string;
   manual_quota?: ManualQuota;
   note?: string;
@@ -137,6 +176,8 @@ export interface UpdateSubscriptionInput {
   renew_date?: number;
   auto_renew?: boolean;
   api_key?: string;
+  platform_token?: string;
+  clearPlatformToken?: boolean;
   manual_quota?: ManualQuota;
   note?: string;
   /** Raw `Cookie:` header to replace existing cookies (Cookie mode only). */

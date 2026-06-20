@@ -208,6 +208,7 @@ pub const PRIORITY_SKILL_DIRS: &[&str] = &[
     "skills/.curated",
     "skills/.experimental",
     "skills/.system",
+    ".agent/skills",
     ".agents/skills",
     ".augment/skills",
     ".bob/skills",
@@ -348,7 +349,9 @@ fn discovered_skill_priority(skill: &DiscoveredSkill) -> u8 {
 pub fn source_priority(folder_path: &str) -> u8 {
     if folder_path.starts_with("source/skills") || folder_path.starts_with("source\\skills") {
         3
-    } else if folder_path.starts_with(".agents/skills")
+    } else if folder_path.starts_with(".agent/skills")
+        || folder_path.starts_with(".agent\\skills")
+        || folder_path.starts_with(".agents/skills")
         || folder_path.starts_with(".agents\\skills")
     {
         2
@@ -573,6 +576,12 @@ mod tests {
     fn source_priority_ordering() {
         assert!(source_priority("source/skills/foo") > source_priority(".agents/skills/foo"));
         assert!(source_priority(".agents/skills/foo") > source_priority(".claude/skills/foo"));
+        // Singular `.agent/skills` (Antigravity CLI official path) ranks the
+        // same as the legacy plural form.
+        assert_eq!(
+            source_priority(".agent/skills/foo"),
+            source_priority(".agents/skills/foo")
+        );
     }
 
     #[test]

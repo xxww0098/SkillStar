@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
 /// Minimum gap between two refreshes for the same catalog id.
-const SAME_CATALOG_GAP: Duration = Duration::from_secs(3);
+const SAME_CATALOG_GAP: Duration = Duration::from_secs(1);
 
 static CATALOG_LOCKS: LazyLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));

@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use super::builtin::{builtin_agent_data, BuiltinSpec};
+use super::builtin::{BuiltinSpec, builtin_agent_data};
 use super::custom::CustomSpec;
 use super::detect;
 use super::profile_storage::{PrefsStore, ProfilePrefs};
@@ -50,10 +50,7 @@ impl AgentProfile {
 ///
 /// Returns `Err` if no profile matches. This is the canonical
 /// replacement for the `.find(...).ok_or_else(...)` pattern.
-pub fn find_profile<'a>(
-    profiles: &'a [AgentProfile],
-    agent_id: &str,
-) -> Result<&'a AgentProfile> {
+pub fn find_profile<'a>(profiles: &'a [AgentProfile], agent_id: &str) -> Result<&'a AgentProfile> {
     profiles
         .iter()
         .find(|p| p.id == agent_id)
@@ -105,26 +102,44 @@ impl AgentRegistry {
                 enabled: false,
                 synced_count: 0,
             };
-            p.installed = detect::detect_installed(&p.id, &p.global_skills_dir);
-            p.enabled = self.prefs.enabled.get(&p.id).copied().unwrap_or(p.installed);
+            p.installed = detect::detect_installed(spec.as_ref(), &p.global_skills_dir);
+            p.enabled = self
+                .prefs
+                .enabled
+                .get(&p.id)
+                .copied()
+                .unwrap_or(p.installed);
             p.synced_count = detect::count_symlinks(&p.global_skills_dir);
             out.push(p);
         }
         out
     }
+
+    fn default_enabled_for(&self, id: &str) -> Option<bool> {
+        let home = skillstar_core::infra::paths::home_dir();
+        self.specs().into_iter().find_map(|spec| {
+            if spec.id() != id {
+                return None;
+            }
+            let global_skills_dir = spec.resolve_global_dir(&home);
+            Some(detect::detect_installed(spec.as_ref(), &global_skills_dir))
+        })
+    }
 }
 
 /// Toggle an agent's enabled state, persisting the result.
 ///
-/// When no explicit state exists, a *known* profile (built-in or custom)
-/// defaults to enabled, so the first toggle flips it to disabled.
+/// When no explicit state exists, the current state mirrors the same read-only
+/// install detection used by [`AgentRegistry::into_profiles`].
 pub(crate) fn toggle(id: &str, store: &dyn PrefsStore) -> Result<bool> {
     let mut prefs = store.load();
-    let current = prefs.enabled.get(id).copied().unwrap_or_else(|| {
-        // If not explicitly set, known profiles default to enabled.
-        builtin_agent_data().iter().any(|d| d.id == id)
-            || prefs.custom_profiles.iter().any(|cp| cp.id == id)
-    });
+    let registry = AgentRegistry {
+        prefs: prefs.clone(),
+    };
+    let default_enabled = registry
+        .default_enabled_for(id)
+        .ok_or_else(|| anyhow::anyhow!("Agent profile '{}' not found", id))?;
+    let current = prefs.enabled.get(id).copied().unwrap_or(default_enabled);
     let new_state = !current;
     prefs.enabled.insert(id.to_string(), new_state);
     store.save(&prefs)?;

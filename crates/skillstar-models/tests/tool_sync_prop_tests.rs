@@ -11,8 +11,8 @@ use skillstar_models::providers::{
     FlatProvidersStore, ModelMapping, ProviderEntryFlat, ProviderSettings, ToolActivation,
 };
 use skillstar_models::tool_sync::{
-    generate_claude_code_config, generate_codex_config, merge_json_env_write,
-    resync_active_tools, write_codex_config_flat, CodexSettings, TOOL_SYNC_HOME_ENV,
+    CodexSettings, TOOL_SYNC_HOME_ENV, generate_claude_code_config, generate_codex_config,
+    merge_json_env_write, resync_active_tools, write_codex_config_flat,
 };
 use std::collections::HashMap;
 use tempfile::TempDir;
@@ -44,15 +44,19 @@ fn use_sandbox_home() {
 fn valid_url_strategy() -> impl Strategy<Value = String> {
     (
         prop_oneof![Just("https"), Just("http")],
-        "[a-z][a-z0-9]{2,15}",           // subdomain/host part
-        prop_oneof![Just("com"), Just("io"), Just("org"), Just("cn"), Just("net")],
+        "[a-z][a-z0-9]{2,15}", // subdomain/host part
+        prop_oneof![
+            Just("com"),
+            Just("io"),
+            Just("org"),
+            Just("cn"),
+            Just("net")
+        ],
         prop::option::of("[a-z0-9/]{1,20}"), // optional path
     )
-        .prop_map(|(scheme, host, tld, path)| {
-            match path {
-                Some(p) => format!("{}://{}.{}/{}", scheme, host, tld, p),
-                None => format!("{}://{}.{}", scheme, host, tld),
-            }
+        .prop_map(|(scheme, host, tld, path)| match path {
+            Some(p) => format!("{}://{}.{}/{}", scheme, host, tld, p),
+            None => format!("{}://{}.{}", scheme, host, tld),
         })
 }
 
@@ -72,9 +76,9 @@ fn api_key_strategy() -> impl Strategy<Value = String> {
 fn model_mappings_strategy() -> impl Strategy<Value = Vec<ModelMapping>> {
     prop::collection::vec(
         (
-            "[a-z][a-z0-9\\-]{2,30}",  // source_model
-            "[a-z][a-z0-9\\-]{2,30}",  // target_model
-            any::<bool>(),              // enabled
+            "[a-z][a-z0-9\\-]{2,30}", // source_model
+            "[a-z][a-z0-9\\-]{2,30}", // target_model
+            any::<bool>(),            // enabled
         )
             .prop_map(|(source, target, enabled)| ModelMapping {
                 source_model: source,
@@ -91,16 +95,18 @@ fn valid_provider_settings_strategy() -> impl Strategy<Value = ProviderSettings>
         valid_url_strategy(),
         api_key_strategy(),
         model_mappings_strategy(),
-        prop::option::of(1000u64..60000u64),  // timeout_ms
-        prop::option::of(1u32..5u32),         // max_retries
+        prop::option::of(1000u64..60000u64), // timeout_ms
+        prop::option::of(1u32..5u32),        // max_retries
     )
-        .prop_map(|(base_url, api_key, models, timeout_ms, max_retries)| ProviderSettings {
-            base_url,
-            api_key,
-            models,
-            timeout_ms,
-            max_retries,
-        })
+        .prop_map(
+            |(base_url, api_key, models, timeout_ms, max_retries)| ProviderSettings {
+                base_url,
+                api_key,
+                models,
+                timeout_ms,
+                max_retries,
+            },
+        )
 }
 
 // ---------------------------------------------------------------------------
@@ -110,22 +116,14 @@ fn valid_provider_settings_strategy() -> impl Strategy<Value = ProviderSettings>
 /// Strategy that generates a safe JSON key name (not one of the managed env keys).
 /// Avoids ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, ANTHROPIC_MODEL.
 fn non_managed_env_key_strategy() -> impl Strategy<Value = String> {
-    "[A-Z][A-Z0-9_]{2,20}".prop_filter(
-        "Must not be a managed env key",
-        |k| {
-            k != "ANTHROPIC_BASE_URL"
-                && k != "ANTHROPIC_AUTH_TOKEN"
-                && k != "ANTHROPIC_MODEL"
-        },
-    )
+    "[A-Z][A-Z0-9_]{2,20}".prop_filter("Must not be a managed env key", |k| {
+        k != "ANTHROPIC_BASE_URL" && k != "ANTHROPIC_AUTH_TOKEN" && k != "ANTHROPIC_MODEL"
+    })
 }
 
 /// Strategy that generates a safe top-level JSON key (not "env").
 fn non_env_top_level_key_strategy() -> impl Strategy<Value = String> {
-    "[a-z][a-zA-Z0-9_]{2,15}".prop_filter(
-        "Must not be 'env'",
-        |k| k != "env",
-    )
+    "[a-z][a-zA-Z0-9_]{2,15}".prop_filter("Must not be 'env'", |k| k != "env")
 }
 
 /// Strategy that generates a simple JSON value (string, number, or bool).
@@ -148,7 +146,10 @@ fn extra_env_fields_strategy() -> impl Strategy<Value = Vec<(String, Value)>> {
 /// Strategy that generates random extra top-level fields (not "env").
 fn extra_top_level_fields_strategy() -> impl Strategy<Value = Vec<(String, Value)>> {
     prop::collection::vec(
-        (non_env_top_level_key_strategy(), simple_json_value_strategy()),
+        (
+            non_env_top_level_key_strategy(),
+            simple_json_value_strategy(),
+        ),
         0..=5,
     )
 }
@@ -156,42 +157,39 @@ fn extra_top_level_fields_strategy() -> impl Strategy<Value = Vec<(String, Value
 /// Strategy that generates a valid ProviderEntryFlat for sync testing.
 fn provider_entry_flat_strategy() -> impl Strategy<Value = ProviderEntryFlat> {
     (
-        valid_url_strategy(),  // base_url_openai
-        valid_url_strategy(),  // base_url_anthropic
+        valid_url_strategy(), // base_url_openai
+        valid_url_strategy(), // base_url_anthropic
         api_key_strategy(),
         "[a-z][a-z0-9\\-]{2,20}", // model name
     )
-        .prop_map(|(url_openai, url_anthropic, api_key, model)| ProviderEntryFlat {
-            id: "test-uuid".to_string(),
-            name: "Test Provider".to_string(),
-            base_url_openai: url_openai,
-            base_url_anthropic: url_anthropic,
-            models_url: String::new(),
-            api_key,
-            models: vec![model.clone()],
-            default_model: model,
-            sort_index: 0,
-            preset_id: None,
-            icon_color: None,
-            notes: None,
-            created_at: Some(1719000000000),
-            meta: None,
-            codex_wire_api: "responses".to_string(),
-            codex_auth_mode: "api_key".to_string(),
-        })
+        .prop_map(
+            |(url_openai, url_anthropic, api_key, model)| ProviderEntryFlat {
+                id: "test-uuid".to_string(),
+                name: "Test Provider".to_string(),
+                base_url_openai: url_openai,
+                base_url_anthropic: url_anthropic,
+                models_url: String::new(),
+                api_key,
+                models: vec![model.clone()],
+                default_model: model,
+                sort_index: 0,
+                preset_id: None,
+                icon_color: None,
+                notes: None,
+                created_at: Some(1719000000000),
+                meta: None,
+                codex_wire_api: "responses".to_string(),
+                codex_auth_mode: "api_key".to_string(),
+            },
+        )
 }
 
 /// Strategy that generates a safe TOML section name (not managed by Codex sync).
 /// Avoids: "model_providers", and top-level keys "model_provider", "model".
 fn non_managed_toml_section_strategy() -> impl Strategy<Value = String> {
-    "[a-z][a-z_]{2,12}".prop_filter(
-        "Must not be a managed TOML key/section",
-        |k| {
-            k != "model_providers"
-                && k != "model_provider"
-                && k != "model"
-        },
-    )
+    "[a-z][a-z_]{2,12}".prop_filter("Must not be a managed TOML key/section", |k| {
+        k != "model_providers" && k != "model_provider" && k != "model"
+    })
 }
 
 /// Strategy that generates a simple TOML value (string, integer, or bool).
@@ -204,15 +202,12 @@ fn simple_toml_value_strategy() -> impl Strategy<Value = toml::Value> {
 }
 
 /// Strategy that generates random extra TOML sections with key-value pairs.
-fn extra_toml_sections_strategy(
-) -> impl Strategy<Value = Vec<(String, Vec<(String, toml::Value)>)>> {
+fn extra_toml_sections_strategy() -> impl Strategy<Value = Vec<(String, Vec<(String, toml::Value)>)>>
+{
     prop::collection::vec(
         (
             non_managed_toml_section_strategy(),
-            prop::collection::vec(
-                ("[a-z][a-z_]{1,10}", simple_toml_value_strategy()),
-                1..=3,
-            ),
+            prop::collection::vec(("[a-z][a-z_]{1,10}", simple_toml_value_strategy()), 1..=3),
         ),
         1..=4,
     )
@@ -516,7 +511,6 @@ proptest! {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // Feature: model-provider-management, Property 8: Save Re-Syncs Active Tools
 // ---------------------------------------------------------------------------
@@ -533,8 +527,8 @@ fn provider_id_strategy() -> impl Strategy<Value = String> {
 /// - One "target" provider (the one we'll resync)
 /// - Optionally other providers (to ensure we only resync the target)
 /// - tool_activations with varying numbers of tools pointing to the target provider
-fn store_with_active_tools_strategy(
-) -> impl Strategy<Value = (FlatProvidersStore, String, Vec<String>)> {
+fn store_with_active_tools_strategy()
+-> impl Strategy<Value = (FlatProvidersStore, String, Vec<String>)> {
     // Generate the target provider
     (
         provider_id_strategy(),
@@ -570,65 +564,74 @@ fn store_with_active_tools_strategy(
             let target_id_clone = target_id.clone();
             let target_provider_clone = target_provider.clone();
 
-            prop::collection::vec(
-                prop::sample::select(known_tools),
-                0..=2usize,
-            )
-            .prop_map(move |selected_tools| {
-                // Deduplicate selected tools
-                let mut active_tools: Vec<String> = Vec::new();
-                for t in &selected_tools {
-                    if !active_tools.contains(t) {
-                        active_tools.push(t.clone());
+            prop::collection::vec(prop::sample::select(known_tools), 0..=2usize).prop_map(
+                move |selected_tools| {
+                    // Deduplicate selected tools
+                    let mut active_tools: Vec<String> = Vec::new();
+                    for t in &selected_tools {
+                        if !active_tools.contains(t) {
+                            active_tools.push(t.clone());
+                        }
                     }
-                }
 
-                // Build tool_activations map
-                let mut tool_activations: HashMap<String, Option<ToolActivation>> = HashMap::new();
-                for tool_id in &active_tools {
-                    tool_activations.insert(
-                        tool_id.clone(),
-                        Some(ToolActivation {
-                            provider_id: target_id_clone.clone(),
-                            model: target_provider_clone.default_model.clone(),
-                            settings: None,
-                            last_sync_at: None,
-                        }),
-                    );
-                }
+                    // Build tool_activations map
+                    let mut tool_activations: HashMap<String, Option<ToolActivation>> =
+                        HashMap::new();
+                    for tool_id in &active_tools {
+                        tool_activations.insert(
+                            tool_id.clone(),
+                            Some(ToolActivation {
+                                provider_id: target_id_clone.clone(),
+                                model: target_provider_clone.default_model.clone(),
+                                settings: None,
+                                last_sync_at: None,
+                            }),
+                        );
+                    }
 
-                let store = FlatProvidersStore {
-                    version: 2,
-                    providers: vec![target_provider_clone.clone()],
-                    tool_activations,
-                };
+                    let store = FlatProvidersStore {
+                        version: 2,
+                        providers: vec![target_provider_clone.clone()],
+                        tool_activations,
+                    };
 
-                (store, target_id_clone.clone(), active_tools)
-            })
+                    (store, target_id_clone.clone(), active_tools)
+                },
+            )
         })
 }
 
 /// Strategy that generates a FlatProvidersStore with multiple providers and
 /// varying tool activations, some pointing to the target and some to others.
-fn store_with_mixed_activations_strategy(
-) -> impl Strategy<Value = (FlatProvidersStore, String, Vec<String>)> {
+fn store_with_mixed_activations_strategy()
+-> impl Strategy<Value = (FlatProvidersStore, String, Vec<String>)> {
     (
-        provider_id_strategy(),  // target provider id
-        provider_id_strategy(),  // other provider id
+        provider_id_strategy(), // target provider id
+        provider_id_strategy(), // other provider id
         valid_url_strategy(),
         valid_url_strategy(),
         api_key_strategy(),
-        "[a-z][a-z0-9\\-]{2,20}",  // model for target
-        "[a-z][a-z0-9\\-]{2,20}",  // model for other
-        any::<bool>(),  // whether claude-code points to target
-        any::<bool>(),  // whether codex points to target
+        "[a-z][a-z0-9\\-]{2,20}", // model for target
+        "[a-z][a-z0-9\\-]{2,20}", // model for other
+        any::<bool>(),            // whether claude-code points to target
+        any::<bool>(),            // whether codex points to target
     )
         .prop_filter(
             "Provider IDs must be different",
             |(target_id, other_id, _, _, _, _, _, _, _)| target_id != other_id,
         )
         .prop_map(
-            |(target_id, other_id, url_openai, url_anthropic, api_key, model_target, model_other, claude_to_target, codex_to_target)| {
+            |(
+                target_id,
+                other_id,
+                url_openai,
+                url_anthropic,
+                api_key,
+                model_target,
+                model_other,
+                claude_to_target,
+                codex_to_target,
+            )| {
                 let target_provider = ProviderEntryFlat {
                     id: target_id.clone(),
                     name: "Target Provider".to_string(),

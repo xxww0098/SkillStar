@@ -153,7 +153,10 @@ pub(crate) fn sync_to_claude_code_inner(
 ) -> Result<Option<PathBuf>> {
     // Validate that base_url_anthropic is non-empty
     if provider.base_url_anthropic.is_empty() {
-        bail!("Provider '{}' does not have an Anthropic-compatible endpoint (base_url_anthropic is empty)", provider.name);
+        bail!(
+            "Provider '{}' does not have an Anthropic-compatible endpoint (base_url_anthropic is empty)",
+            provider.name
+        );
     }
 
     // Create rolling backup if file exists
@@ -173,12 +176,27 @@ pub(crate) fn sync_to_claude_code_inner(
     // (Haiku/Sonnet/Opus) come from `provider.meta`; each is written when set,
     // or passed as Null (→ key removed) when the user left it blank.
     let managed_fields: Vec<(&str, Value)> = vec![
-        ("ANTHROPIC_BASE_URL", Value::String(provider.base_url_anthropic.clone())),
-        ("ANTHROPIC_AUTH_TOKEN", Value::String(provider.api_key.clone())),
+        (
+            "ANTHROPIC_BASE_URL",
+            Value::String(provider.base_url_anthropic.clone()),
+        ),
+        (
+            "ANTHROPIC_AUTH_TOKEN",
+            Value::String(provider.api_key.clone()),
+        ),
         ("ANTHROPIC_MODEL", Value::String(model.to_string())),
-        ("ANTHROPIC_DEFAULT_HAIKU_MODEL", meta_model_field(provider, "claude_haiku_model")),
-        ("ANTHROPIC_DEFAULT_SONNET_MODEL", meta_model_field(provider, "claude_sonnet_model")),
-        ("ANTHROPIC_DEFAULT_OPUS_MODEL", meta_model_field(provider, "claude_opus_model")),
+        (
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            meta_model_field(provider, "claude_haiku_model"),
+        ),
+        (
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            meta_model_field(provider, "claude_sonnet_model"),
+        ),
+        (
+            "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            meta_model_field(provider, "claude_opus_model"),
+        ),
     ];
 
     // Merge write into the env block
@@ -247,7 +265,10 @@ fn sync_to_codex_inner(
 ) -> Result<Option<PathBuf>> {
     // Validate that base_url_openai is non-empty
     if provider.base_url_openai.is_empty() {
-        bail!("Provider '{}' does not have an OpenAI-compatible endpoint (base_url_openai is empty)", provider.name);
+        bail!(
+            "Provider '{}' does not have an OpenAI-compatible endpoint (base_url_openai is empty)",
+            provider.name
+        );
     }
 
     // Resolve settings: activation overrides > provider-level defaults > hardcoded defaults
@@ -283,9 +304,8 @@ fn sync_to_codex_inner(
         }
 
         // Merge write auth.json — set OPENAI_API_KEY
-        let auth_fields: Vec<(&str, Value)> = vec![
-            ("OPENAI_API_KEY", Value::String(provider.api_key.clone())),
-        ];
+        let auth_fields: Vec<(&str, Value)> =
+            vec![("OPENAI_API_KEY", Value::String(provider.api_key.clone()))];
         merge_json_write(&auth_path, &auth_fields)?;
     } else {
         // OAuth mode: clear or skip OPENAI_API_KEY so Codex CLI handles auth itself
@@ -294,9 +314,8 @@ fn sync_to_codex_inner(
             if first_backup.is_none() {
                 first_backup = Some(backup);
             }
-            let auth_fields: Vec<(&str, Value)> = vec![
-                ("OPENAI_API_KEY", Value::String("".to_string())),
-            ];
+            let auth_fields: Vec<(&str, Value)> =
+                vec![("OPENAI_API_KEY", Value::String("".to_string()))];
             merge_json_write(&auth_path, &auth_fields)?;
         }
     }
@@ -323,10 +342,7 @@ fn sync_to_codex_inner(
 }
 
 /// Sync a provider to OpenCode's `opencode.json` under `provider.skillstar`.
-pub fn sync_to_opencode(
-    provider: &ProviderEntryFlat,
-    model: &str,
-) -> Result<ToolSyncResultFlat> {
+pub fn sync_to_opencode(provider: &ProviderEntryFlat, model: &str) -> Result<ToolSyncResultFlat> {
     let config_path = resolve_opencode_config_path()?;
     let config_path_str = config_path.to_string_lossy().to_string();
 
@@ -340,6 +356,32 @@ pub fn sync_to_opencode(
         }),
         Err(e) => Ok(ToolSyncResultFlat {
             tool_id: "opencode".to_string(),
+            success: false,
+            config_path: Some(config_path_str),
+            error: Some(e.to_string()),
+            backup_path: None,
+        }),
+    }
+}
+
+/// Sync a provider to ZCode's `~/.zcode/v2/config.json` under `provider.skillstar`.
+///
+/// ZCode uses the OpenCode config schema verbatim, so this reuses
+/// [`sync_to_opencode_inner`] and only differs in the resolved config path.
+pub fn sync_to_zcode(provider: &ProviderEntryFlat, model: &str) -> Result<ToolSyncResultFlat> {
+    let config_path = resolve_zcode_config_path()?;
+    let config_path_str = config_path.to_string_lossy().to_string();
+
+    match sync_to_opencode_inner(provider, model, &config_path) {
+        Ok(backup_path) => Ok(ToolSyncResultFlat {
+            tool_id: "zcode".to_string(),
+            success: true,
+            config_path: Some(config_path_str),
+            error: None,
+            backup_path: backup_path.map(|p| p.to_string_lossy().to_string()),
+        }),
+        Err(e) => Ok(ToolSyncResultFlat {
+            tool_id: "zcode".to_string(),
             success: false,
             config_path: Some(config_path_str),
             error: Some(e.to_string()),
@@ -478,26 +520,27 @@ fn sync_to_opencode_inner(
     };
 
     if root.get("$schema").is_none()
-        && let Some(obj) = root.as_object_mut() {
-            obj.insert(
-                "$schema".to_string(),
-                Value::String("https://opencode.ai/config.json".to_string()),
-            );
-        }
+        && let Some(obj) = root.as_object_mut()
+    {
+        obj.insert(
+            "$schema".to_string(),
+            Value::String("https://opencode.ai/config.json".to_string()),
+        );
+    }
 
     let provider_block = build_opencode_provider_block(provider, model);
-    let root_obj = root.as_object_mut().context("opencode.json root must be an object")?;
+    let root_obj = root
+        .as_object_mut()
+        .context("opencode.json root must be an object")?;
     let providers = root_obj
         .entry("provider")
         .or_insert_with(|| Value::Object(serde_json::Map::new()));
     if let Some(map) = providers.as_object_mut() {
-        map.insert(
-            OPENCODE_MANAGED_PROVIDER_KEY.to_string(),
-            provider_block,
-        );
+        map.insert(OPENCODE_MANAGED_PROVIDER_KEY.to_string(), provider_block);
     }
 
-    let output = serde_json::to_string_pretty(&root).context("Failed to serialize opencode.json")?;
+    let output =
+        serde_json::to_string_pretty(&root).context("Failed to serialize opencode.json")?;
     std::fs::write(config_path, output)
         .with_context(|| format!("Failed to write {}", config_path.display()))?;
 
@@ -507,13 +550,29 @@ fn sync_to_opencode_inner(
 /// Remove managed OpenCode provider block from `opencode.json`.
 pub fn unsync_opencode() -> Result<()> {
     let config_path = resolve_opencode_config_path()?;
+    unsync_opencode_at(&config_path)
+}
+
+/// Remove managed provider block from ZCode's `~/.zcode/v2/config.json`.
+/// ZCode uses the OpenCode schema, so the removal logic is identical — only the
+/// config path differs.
+pub fn unsync_zcode() -> Result<()> {
+    let config_path = resolve_zcode_config_path()?;
+    unsync_opencode_at(&config_path)
+}
+
+/// Shared core: remove the `provider.skillstar` block from an OpenCode-schema
+/// config file (used by both OpenCode and ZCode). Exposed `pub(crate)` so the
+/// unit tests can drive it against an isolated temp path instead of the shared
+/// sandbox HOME.
+pub(crate) fn unsync_opencode_at(config_path: &Path) -> Result<()> {
     if !config_path.exists() {
         return Ok(());
     }
 
-    create_rolling_backup(&config_path)?;
+    create_rolling_backup(config_path)?;
 
-    let content = std::fs::read_to_string(&config_path)
+    let content = std::fs::read_to_string(config_path)
         .with_context(|| format!("Failed to read {}", config_path.display()))?;
     let mut json: Value = serde_json::from_str(&content)
         .with_context(|| format!("Failed to parse JSON in {}", config_path.display()))?;
@@ -521,13 +580,15 @@ pub fn unsync_opencode() -> Result<()> {
     if let Some(providers) = json.get_mut("provider").and_then(|v| v.as_object_mut()) {
         providers.remove(OPENCODE_MANAGED_PROVIDER_KEY);
         if providers.is_empty()
-            && let Some(root) = json.as_object_mut() {
-                root.remove("provider");
-            }
+            && let Some(root) = json.as_object_mut()
+        {
+            root.remove("provider");
+        }
     }
 
-    let output = serde_json::to_string_pretty(&json).context("Failed to serialize opencode.json")?;
-    std::fs::write(&config_path, output)
+    let output =
+        serde_json::to_string_pretty(&json).context("Failed to serialize opencode.json")?;
+    std::fs::write(config_path, output)
         .with_context(|| format!("Failed to write {}", config_path.display()))?;
 
     Ok(())
@@ -595,7 +656,11 @@ pub(crate) fn sync_to_gemini_inner(
         ("GEMINI_API_KEY", Some(provider.api_key.clone())),
         (
             "GEMINI_MODEL",
-            if model_id.is_empty() { None } else { Some(model_id) },
+            if model_id.is_empty() {
+                None
+            } else {
+                Some(model_id)
+            },
         ),
     ];
 
@@ -643,14 +708,15 @@ pub fn unsync_claude_code() -> Result<()> {
         }
         // If env block is now empty, remove it entirely
         if env_obj.is_empty()
-            && let Some(root_obj) = json.as_object_mut() {
-                root_obj.remove("env");
-            }
+            && let Some(root_obj) = json.as_object_mut()
+        {
+            root_obj.remove("env");
+        }
     }
 
     // Write back
-    let output = serde_json::to_string_pretty(&json)
-        .context("Failed to serialize Claude Code config")?;
+    let output =
+        serde_json::to_string_pretty(&json).context("Failed to serialize Claude Code config")?;
     std::fs::write(&config_path, output)
         .with_context(|| format!("Failed to write {}", config_path.display()))?;
 
@@ -681,8 +747,8 @@ pub fn unsync_codex() -> Result<()> {
             obj.remove("OPENAI_API_KEY");
         }
 
-        let output = serde_json::to_string_pretty(&json)
-            .context("Failed to serialize auth.json")?;
+        let output =
+            serde_json::to_string_pretty(&json).context("Failed to serialize auth.json")?;
         std::fs::write(&auth_path, output)
             .with_context(|| format!("Failed to write {}", auth_path.display()))?;
     }
@@ -702,16 +768,17 @@ pub fn unsync_codex() -> Result<()> {
 
         // Remove [model_providers.skillstar] section
         if let Some(model_providers) = table.get_mut("model_providers")
-            && let Some(mp_table) = model_providers.as_table_mut() {
-                mp_table.remove(CODEX_MANAGED_PROVIDER_KEY);
-                // If model_providers is now empty, remove it entirely
-                if mp_table.is_empty() {
-                    table.remove("model_providers");
-                }
+            && let Some(mp_table) = model_providers.as_table_mut()
+        {
+            mp_table.remove(CODEX_MANAGED_PROVIDER_KEY);
+            // If model_providers is now empty, remove it entirely
+            if mp_table.is_empty() {
+                table.remove("model_providers");
             }
+        }
 
-        let output = toml::to_string_pretty(&table)
-            .context("Failed to serialize Codex config.toml")?;
+        let output =
+            toml::to_string_pretty(&table).context("Failed to serialize Codex config.toml")?;
         std::fs::write(&config_path, output)
             .with_context(|| format!("Failed to write {}", config_path.display()))?;
     }

@@ -14,13 +14,29 @@ use serde_json::Value;
 use skillstar_core::infra::error::AppError;
 use skillstar_marketplace::mcp_models::runtime_command_for;
 use skillstar_marketplace::{
-    LocalFirstResult, McpMarketEntry, McpMarketServerDetail, McpRegistryServer, SyncStateEntry,
-    mcp_snapshot,
+    LocalFirstResult, McpMarketEntry, McpMarketServerDetail, McpPublisherSummary,
+    McpRegistryServer, SyncStateEntry, mcp_snapshot,
 };
 use skillstar_models::mcp::McpServerEntry;
 use tracing::{debug, error};
 
 const MCP_REGISTRY_SCOPE: &str = "mcp_registry";
+
+#[tauri::command]
+pub async fn list_mcp_publishers_local() -> Result<Vec<McpPublisherSummary>, AppError> {
+    debug!(target: "mcp_marketplace", "list_mcp_publishers_local called");
+    mcp_snapshot::list_mcp_publishers().map_err(|e| AppError::Other(e.to_string()))
+}
+
+#[tauri::command]
+pub async fn list_mcp_servers_by_publisher_local(
+    publisher_id: String,
+) -> Result<LocalFirstResult<Vec<McpMarketEntry>>, AppError> {
+    debug!(target: "mcp_marketplace", publisher = %publisher_id, "list_mcp_servers_by_publisher_local called");
+    mcp_snapshot::list_mcp_servers_by_publisher(&publisher_id)
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))
+}
 
 #[tauri::command]
 pub async fn list_mcp_market_servers_local()
@@ -298,6 +314,8 @@ mod tests {
             packages: vec![],
             remotes: vec![],
             raw_server_json: raw.into(),
+            recommended: false,
+            source: None,
         }
     }
 
@@ -366,5 +384,54 @@ mod tests {
         assert_eq!(sanitize_key("mcp-server"), "mcp-server");
         assert_eq!(sanitize_key("foo.bar baz"), "foo-bar-baz");
         assert_eq!(sanitize_key("--"), "mcp-server");
+    }
+
+    /// BigModel curated servers use the GitHub registry wire shape with an npm
+    /// package carrying a required secret env var. Verify the real raw JSON
+    /// stored in marketplace.db converts to a runnable stdio entry.
+    #[test]
+    fn converts_bigmodel_vision_curated_raw() {
+        let raw = r#"{
+            "id": "bigmodel-vision",
+            "name": "bigmodel-vision",
+            "packages": [
+                { "registry_type": "npm", "identifier": "@z_ai/mcp-server", "runtime_hint": "npx",
+                  "environment_variables": [ { "name": "Z_AI_API_KEY", "is_secret": true, "is_required": true } ] }
+            ],
+            "remotes": []
+        }"#;
+        let entry = registry_to_entry(&server_with_raw("bigmodel-vision", raw));
+        assert_eq!(entry.transport, "stdio");
+        assert_eq!(entry.command.as_deref(), Some("npx"));
+        // npx gets -y + the scoped identifier
+        assert!(entry.args.iter().any(|a| a == "-y"));
+        assert!(entry.args.iter().any(|a| a == "@z_ai/mcp-server"));
+        // required secret env must be present and blanked for user fill-in
+        assert_eq!(entry.env.get("Z_AI_API_KEY").map(String::as_str), Some(""));
+    }
+
+    /// AdsPower curated server: npm package with a defaulted PORT and a
+    /// required API_KEY. Verify the real raw JSON converts correctly.
+    #[test]
+    fn converts_adspower_curated_raw() {
+        let raw = r#"{
+            "id": "adspower-local-api",
+            "name": "adspower-local-api",
+            "packages": [
+                { "registry_type": "npm", "identifier": "local-api-mcp-typescript", "runtime_hint": "npx",
+                  "environment_variables": [
+                    { "name": "PORT", "default": "50325" },
+                    { "name": "API_KEY", "is_secret": true, "is_required": true }
+                  ] }
+            ],
+            "remotes": []
+        }"#;
+        let entry = registry_to_entry(&server_with_raw("adspower-local-api", raw));
+        assert_eq!(entry.transport, "stdio");
+        assert_eq!(entry.command.as_deref(), Some("npx"));
+        assert!(entry.args.iter().any(|a| a == "local-api-mcp-typescript"));
+        // PORT keeps its default; API_KEY is blanked
+        assert_eq!(entry.env.get("PORT").map(String::as_str), Some("50325"));
+        assert_eq!(entry.env.get("API_KEY").map(String::as_str), Some(""));
     }
 }

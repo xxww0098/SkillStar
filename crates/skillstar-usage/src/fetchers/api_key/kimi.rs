@@ -57,6 +57,7 @@ pub async fn fetch(
             total: env.data.available_balance,
             granted: env.data.voucher_balance,
             topped_up: env.data.cash_balance,
+            is_available: None,
         }),
         hourly: None,
         weekly: None,
@@ -64,5 +65,6 @@ pub async fn fetch(
         credits: Vec::new(),
         error: None,
         api_keys: Vec::new(),
+        deepseek_analytics: None,
     })
 }

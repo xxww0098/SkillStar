@@ -220,6 +220,7 @@ async fn upsert_oauth_subscription(
         renew_date: 0,
         auto_renew: false,
         api_key_encrypted: None,
+        platform_token_encrypted: None,
         access_token_encrypted: Some(crypto::encrypt(&access_token)),
         refresh_token_encrypted: refresh_token.as_deref().map(crypto::encrypt),
         access_token_expires_at: expires_at,
@@ -275,4 +276,113 @@ fn pick_string(value: &Value, paths: &[&[&str]]) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    /// `import_subscription_from_local` reads `~/.codex/auth.json` via
+    /// `home_dir()`, which honours `$HOME` under `cfg(test)`. Serialize tests
+    /// with a mutex so they don't fight over the process-wide env var.
+    static HOME_LOCK: Mutex<()> = Mutex::new(());
+
+    struct HomeGuard {
+        _guard: std::sync::MutexGuard<'static, ()>,
+        prev: Option<std::ffi::OsString>,
+    }
+
+    impl HomeGuard {
+        fn new(tmp: &std::path::Path) -> Self {
+            let guard = HOME_LOCK.lock().unwrap();
+            let prev = std::env::var_os("HOME");
+            // SAFETY: tests are serialized by HOME_LOCK, so no other thread is
+            // reading HOME while we mutate it.
+            unsafe {
+                std::env::set_var("HOME", tmp);
+            }
+            Self {
+                _guard: guard,
+                prev,
+            }
+        }
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            // SAFETY: same single-thread serialization via HOME_LOCK.
+            unsafe {
+                match &self.prev {
+                    Some(v) => std::env::set_var("HOME", v),
+                    None => std::env::remove_var("HOME"),
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn codex_import_errors_when_auth_json_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _home = HomeGuard::new(tmp.path());
+        // No .codex/auth.json created → must report a clear "not found" error.
+        let err = import_subscription_from_local("codex")
+            .await
+            .expect_err("missing auth.json should error");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("auth.json"),
+            "error should mention auth.json, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn codex_import_errors_when_auth_json_empty_object() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _home = HomeGuard::new(tmp.path());
+        let codex_dir = tmp.path().join(".codex");
+        std::fs::create_dir_all(&codex_dir).unwrap();
+        std::fs::write(codex_dir.join("auth.json"), "{}").unwrap();
+
+        let err = import_subscription_from_local("codex")
+            .await
+            .expect_err("empty {} auth.json should error");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("tokens"),
+            "error should explain missing tokens, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn codex_import_errors_when_access_token_blank() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _home = HomeGuard::new(tmp.path());
+        let codex_dir = tmp.path().join(".codex");
+        std::fs::create_dir_all(&codex_dir).unwrap();
+        // tokens present but access_token empty → must reject, not silently
+        // create a subscription with a blank credential.
+        std::fs::write(
+            codex_dir.join("auth.json"),
+            r#"{"tokens":{"access_token":"","refresh_token":"rt"}}"#,
+        )
+        .unwrap();
+
+        let err = import_subscription_from_local("codex")
+            .await
+            .expect_err("blank access_token should error");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("access_token"),
+            "error should mention access_token, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn local_import_rejects_unsupported_catalog_id() {
+        let err = import_subscription_from_local("some-other-tool")
+            .await
+            .expect_err("unsupported catalog id should error");
+        assert!(err.to_string().contains("不支持"));
+    }
 }

@@ -63,7 +63,7 @@ struct CopilotUserResponse {
 }
 
 pub async fn start_login(_region: Option<&str>) -> UsageResult<super::OAuthStartInfo> {
-    let client = http_client()?;
+    let client = crate::fetchers::http_client()?;
     let device: DeviceCodeResponse = client
         .post(DEVICE_CODE_URL)
         .header(reqwest::header::USER_AGENT, USER_AGENT)
@@ -104,7 +104,7 @@ async fn poll_device_and_finalize(
     device_code: String,
     interval_secs: u64,
 ) -> UsageResult<Subscription> {
-    let client = http_client()?;
+    let client = crate::fetchers::http_client()?;
     let config = PollConfig::new(interval_secs * 1000, POLL_MAX_ATTEMPTS);
 
     let github_token = run(config, |_n| {
@@ -211,6 +211,7 @@ async fn finalize_subscription(
         renew_date: 0,
         auto_renew: false,
         api_key_encrypted: None,
+        platform_token_encrypted: None,
         access_token_encrypted: None,
         refresh_token_encrypted: Some(crypto::encrypt(&github_token)),
         access_token_expires_at: None,
@@ -242,7 +243,8 @@ pub async fn fetch(subscription: &mut Subscription) -> UsageResult<SubscriptionU
 }
 
 async fn fetch_inner(subscription: &mut Subscription) -> UsageResult<SubscriptionUsage> {
-    let github_token = decrypt_required(&subscription.refresh_token_encrypted)?;
+    let github_token =
+        crate::fetchers::decrypt_required(&subscription.refresh_token_encrypted, "GitHub token")?;
     fetch_with_github_token(&subscription.id, &github_token).await
 }
 
@@ -250,7 +252,7 @@ async fn fetch_with_github_token(
     subscription_id: &str,
     github_token: &str,
 ) -> UsageResult<SubscriptionUsage> {
-    let client = http_client()?;
+    let client = crate::fetchers::http_client()?;
 
     let copilot_resp = client
         .get(COPILOT_TOKEN_URL)
@@ -334,6 +336,7 @@ async fn fetch_with_github_token(
         credits: Vec::new(),
         error: None,
         api_keys: Vec::new(),
+        deepseek_analytics: None,
     })
 }
 
@@ -414,19 +417,4 @@ fn parse_copilot_token_map(token: Option<&str>) -> std::collections::HashMap<Str
 fn json_f64(v: &Value) -> Option<f64> {
     v.as_f64()
         .or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
-}
-
-fn http_client() -> UsageResult<reqwest::Client> {
-    crate::http_client::usage_reqwest_with_active_fingerprint()
-}
-
-fn decrypt_required(cipher: &Option<String>) -> UsageResult<String> {
-    let cipher = cipher
-        .as_deref()
-        .ok_or_else(|| UsageError::Other("缺少 GitHub token".into()))?;
-    let pt = crypto::decrypt(cipher);
-    if pt.is_empty() {
-        return Err(UsageError::AuthRequired);
-    }
-    Ok(pt)
 }

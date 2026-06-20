@@ -27,7 +27,14 @@ interface SkillCardProps {
   installing?: boolean;
   updating?: boolean;
   noAnimate?: boolean;
+  /** SSH remote page: same chrome as library cards, delete + single agent footer. */
+  remoteContext?: SkillCardRemoteContext;
 }
+
+export type SkillCardRemoteContext = {
+  agentProfile: AgentProfile;
+  sizeLabel?: string;
+};
 
 function rankStyle(rank: number): string {
   if (rank === 1) {
@@ -68,10 +75,12 @@ function SkillCardInner({
   installing,
   updating,
   noAnimate,
+  remoteContext,
 }: SkillCardProps) {
   const { t } = useTranslation();
-  const cat = categoryBadge(skill.category, t);
+  const cat = skill.category !== "None" ? categoryBadge(skill.category, t) : undefined;
   const isLocalSkill = skill.skill_type === "local";
+  const isRemoteCard = Boolean(remoteContext);
 
   const handleCheckboxClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -101,7 +110,25 @@ function SkillCardInner({
     ) : null;
 
   let statusAction: React.ReactNode;
-  if (skill.installed) {
+  if (remoteContext) {
+    statusAction = (
+      <motion.div
+        initial={{ scale: 0.8, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+      >
+        <Button
+          size="sm"
+          variant="secondary"
+          className="h-7 px-2.5 text-xs font-medium pointer-events-none bg-success/10 text-success hover:bg-success/10 border-success/20 disabled:opacity-100"
+          disabled
+        >
+          <SuccessCheckmark size={14} className="text-success mr-1" />
+          {t("skillCard.installed")}
+        </Button>
+      </motion.div>
+    );
+  } else if (skill.installed) {
     if (skill.update_available && !isLocalSkill) {
       statusAction = (
         <Button
@@ -202,9 +229,14 @@ function SkillCardInner({
             )}
             <div className="min-w-0">
               <CardTitle className="truncate ss-card-title">{skill.name}</CardTitle>
-              {isLocalSkill && <span className="ss-card-meta">local</span>}
-              {!isLocalSkill && skill.source && <span className="ss-card-meta">{skill.source}</span>}
-              {!isLocalSkill && !skill.source && skill.author && <span className="ss-card-meta">{skill.author}</span>}
+
+              {!isRemoteCard && isLocalSkill && <span className="ss-card-meta">local</span>}
+              {!isRemoteCard && !isLocalSkill && skill.source && skill.source !== "remote" && (
+                <span className="ss-card-meta">{skill.source}</span>
+              )}
+              {!isRemoteCard && !isLocalSkill && skill.source !== "remote" && !skill.source && skill.author && (
+                <span className="ss-card-meta">{skill.author}</span>
+              )}
             </div>
           </div>
         }
@@ -218,7 +250,12 @@ function SkillCardInner({
         footer={
           <>
             <div className="flex items-center gap-2">
-              {skill.stars > 0 && (
+              {remoteContext?.sizeLabel ? (
+                <span className="text-xs font-medium text-muted-foreground tabular-nums">
+                  {remoteContext.sizeLabel}
+                </span>
+              ) : null}
+              {!isRemoteCard && skill.stars > 0 && (
                 <div className="flex items-center gap-1">
                   <Download className="w-3.5 h-3.5 text-primary/60" />
                   <span className="text-xs font-medium text-muted-foreground tabular-nums">
@@ -227,7 +264,7 @@ function SkillCardInner({
                 </div>
               )}
 
-              {cat && (
+              {!isRemoteCard && cat && (
                 <Badge variant={cat.variant} className="text-micro px-1.5 py-0 h-4 font-medium opacity-90">
                   {cat.label}
                 </Badge>
@@ -235,7 +272,17 @@ function SkillCardInner({
             </div>
 
             <div className="flex items-center gap-1.5 relative z-10 flex-1 min-w-0 justify-end">
-              {profiles && onToggleAgent ? (
+              {remoteContext ? (
+                <div
+                  className="w-7 h-7 shrink-0 rounded-lg flex items-center justify-center border border-primary/40 bg-primary/10"
+                  title={remoteContext.agentProfile.display_name}
+                >
+                  <AgentIcon
+                    profile={remoteContext.agentProfile}
+                    className={cn(agentIconCls(remoteContext.agentProfile.icon, "w-4 h-4"), "drop-shadow-sm")}
+                  />
+                </div>
+              ) : profiles && onToggleAgent ? (
                 <HScrollRow count={profiles.length} itemWidth={28} gap={6} className="gap-1.5 min-w-0">
                   {profiles.map((profile) => {
                     const isUsed = skill.agent_links?.includes(profile.display_name) ?? false;

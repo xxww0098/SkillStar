@@ -1,10 +1,10 @@
 //! Grok (xAI) OAuth + billing fetcher.
 //!
 //! Mirrors the Grok CLI flow used by CLIProxyAPI:
-//! 1. Discover OAuth endpoints from `https://auth.x.ai/.well-known/openid-configuration`.
-//! 2. Open xAI authorize URL with PKCE and `redirect_uri=http://127.0.0.1:56121/callback`.
-//! 3. Exchange `code` for OAuth tokens.
-//! 4. GET `https://cli-chat-proxy.grok.com/v1/billing` for monthly credits.
+//! 1. Open `https://auth.x.ai/oauth2/authorize` with PKCE and
+//!    `redirect_uri=http://127.0.0.1:56121/callback`.
+//! 2. Exchange `code` at `https://auth.x.ai/oauth2/token`.
+//! 3. GET `https://cli-chat-proxy.grok.com/v1/billing` for monthly credits.
 
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
@@ -21,27 +21,14 @@ use crate::storage;
 use crate::subscription::{BillingCycle, CreditInfo, Subscription, SubscriptionUsage, UsageWindow};
 use crate::{UsageError, UsageResult};
 
-const DISCOVERY_URL: &str = "https://auth.x.ai/.well-known/openid-configuration";
+const AUTHORIZE_URL: &str = "https://auth.x.ai/oauth2/authorize";
+const TOKEN_URL: &str = "https://auth.x.ai/oauth2/token";
 const CLIENT_ID: &str = "b1a00492-073a-47ea-816f-4c329264a828";
 const SCOPES: &str = "openid profile email offline_access grok-cli:access api:access";
 const CALLBACK_PORT: u16 = 56121;
 const CALLBACK_PATH: &str = "/callback";
 const BILLING_URL: &str = "https://cli-chat-proxy.grok.com/v1/billing";
 const DEFAULT_PLAN_NAME: &str = "Grok";
-
-#[derive(Debug, Deserialize, Default)]
-struct DiscoveryResponse {
-    #[serde(default)]
-    authorization_endpoint: Option<String>,
-    #[serde(default)]
-    token_endpoint: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-struct Discovery {
-    authorization_endpoint: String,
-    token_endpoint: String,
-}
 
 #[derive(Debug, Deserialize, Default)]
 struct TokenResponse {
@@ -56,13 +43,12 @@ struct TokenResponse {
 }
 
 pub async fn start_login(_region: Option<&str>) -> UsageResult<super::OAuthStartInfo> {
-    let discovery = discover().await?;
     let pkce = PkcePair::generate();
     let state = crate::oauth::pkce::random_state();
     let nonce = crate::oauth::pkce::random_state();
     let redirect_uri = format!("http://127.0.0.1:{}{}", CALLBACK_PORT, CALLBACK_PATH);
     let auth_url = build_authorize_url(
-        &discovery.authorization_endpoint,
+        AUTHORIZE_URL,
         &redirect_uri,
         &pkce.challenge,
         &state,
@@ -73,9 +59,8 @@ pub async fn start_login(_region: Option<&str>) -> UsageResult<super::OAuthStart
     let pid = pending_id.clone();
     let verifier = pkce.verifier.clone();
     let state_for_task = state.clone();
-    let token_endpoint = discovery.token_endpoint.clone();
     tokio::spawn(async move {
-        let result = drive_login(state_for_task, verifier, redirect_uri, token_endpoint).await;
+        let result = drive_login(state_for_task, verifier, redirect_uri).await;
         if let Some(tx) = crate::oauth::pending_state::take_sender(&pid) {
             let _ = tx.send(result);
         }
@@ -88,78 +73,12 @@ async fn drive_login(
     state: String,
     verifier: String,
     redirect_uri: String,
-    token_endpoint: String,
 ) -> UsageResult<Subscription> {
     let code =
         local_server::wait_for_callback(CALLBACK_PORT, state, Some(Duration::from_secs(300)))
             .await?;
-    let tokens = exchange_code(&code, &verifier, &redirect_uri, &token_endpoint).await?;
+    let tokens = exchange_code(&code, &verifier, &redirect_uri).await?;
     finalize(tokens).await
-}
-
-async fn discover() -> UsageResult<Discovery> {
-    let client = http_client()?;
-    let resp = client
-        .get(DISCOVERY_URL)
-        .header(reqwest::header::ACCEPT, "application/json")
-        .send()
-        .await
-        .map_err(|e| UsageError::Fetcher(format!("Grok OAuth discovery 请求失败: {}", e)))?;
-
-    let status = resp.status();
-    let body = resp.text().await.unwrap_or_default();
-    if !status.is_success() {
-        return Err(UsageError::Fetcher(format!(
-            "Grok OAuth discovery 状态码 {}: {}",
-            status,
-            body.chars().take(200).collect::<String>()
-        )));
-    }
-
-    let payload: DiscoveryResponse = serde_json::from_str(&body)
-        .map_err(|e| UsageError::Fetcher(format!("Grok OAuth discovery 解析失败: {}", e)))?;
-    let authorization_endpoint = validate_oauth_endpoint(
-        payload
-            .authorization_endpoint
-            .as_deref()
-            .unwrap_or_default(),
-        "authorization_endpoint",
-    )?;
-    let token_endpoint = validate_oauth_endpoint(
-        payload.token_endpoint.as_deref().unwrap_or_default(),
-        "token_endpoint",
-    )?;
-
-    Ok(Discovery {
-        authorization_endpoint,
-        token_endpoint,
-    })
-}
-
-fn validate_oauth_endpoint(raw: &str, field: &str) -> UsageResult<String> {
-    let raw = raw.trim();
-    if raw.is_empty() {
-        return Err(UsageError::Fetcher(format!(
-            "Grok OAuth discovery {} 为空",
-            field
-        )));
-    }
-    let url = Url::parse(raw)
-        .map_err(|e| UsageError::Fetcher(format!("Grok OAuth discovery {} 无效: {}", field, e)))?;
-    if url.scheme() != "https" {
-        return Err(UsageError::Fetcher(format!(
-            "Grok OAuth discovery {} 必须使用 https",
-            field
-        )));
-    }
-    let host = url.host_str().unwrap_or_default().to_ascii_lowercase();
-    if host != "x.ai" && !host.ends_with(".x.ai") {
-        return Err(UsageError::Fetcher(format!(
-            "Grok OAuth discovery {} host 不属于 x.ai: {}",
-            field, host
-        )));
-    }
-    Ok(raw.to_string())
 }
 
 fn build_authorize_url(
@@ -192,11 +111,10 @@ async fn exchange_code(
     code: &str,
     verifier: &str,
     redirect_uri: &str,
-    token_endpoint: &str,
 ) -> UsageResult<TokenResponse> {
-    let client = http_client()?;
+    let client = crate::fetchers::http_client()?;
     let resp = client
-        .post(token_endpoint)
+        .post(TOKEN_URL)
         .form(&[
             ("grant_type", "authorization_code"),
             ("code", code),
@@ -263,6 +181,7 @@ async fn finalize(tokens: TokenResponse) -> UsageResult<Subscription> {
         renew_date: 0,
         auto_renew: false,
         api_key_encrypted: None,
+        platform_token_encrypted: None,
         access_token_encrypted: Some(crypto::encrypt(access_token)),
         refresh_token_encrypted: refresh_token.map(crypto::encrypt),
         access_token_expires_at: expires_at,
@@ -296,11 +215,13 @@ async fn fetch_inner(subscription: &mut Subscription) -> UsageResult<Subscriptio
         refresh_xai_tokens(subscription).await?;
     }
 
-    let access_token = decrypt_required(&subscription.access_token_encrypted)?;
+    let access_token =
+        crate::fetchers::decrypt_required(&subscription.access_token_encrypted, "access_token")?;
     match fetch_with_token(&subscription.id, &access_token).await {
         Err(UsageError::AuthRequired) => {
             refresh_xai_tokens(subscription).await?;
-            let access_token = decrypt_required(&subscription.access_token_encrypted)?;
+            let access_token =
+                crate::fetchers::decrypt_required(&subscription.access_token_encrypted, "access_token")?;
             fetch_with_token(&subscription.id, &access_token).await
         }
         other => other,
@@ -317,10 +238,9 @@ async fn refresh_xai_tokens(subscription: &mut Subscription) -> UsageResult<()> 
         return Err(UsageError::AuthRequired);
     }
 
-    let discovery = discover().await?;
-    let client = http_client()?;
+    let client = crate::fetchers::http_client()?;
     let resp = client
-        .post(discovery.token_endpoint)
+        .post(TOKEN_URL)
         .form(&[
             ("grant_type", "refresh_token"),
             ("client_id", CLIENT_ID),
@@ -357,7 +277,7 @@ async fn fetch_with_token(
     subscription_id: &str,
     access_token: &str,
 ) -> UsageResult<SubscriptionUsage> {
-    let client = http_client()?;
+    let client = crate::fetchers::http_client()?;
     let resp = client
         .get(BILLING_URL)
         .bearer_auth(access_token.trim())
@@ -449,6 +369,7 @@ fn build_subscription_usage(
         credits,
         error: None,
         api_keys: Vec::new(),
+        deepseek_analytics: None,
     })
 }
 
@@ -534,21 +455,6 @@ fn format_usd_cents(cents: f64) -> String {
 
 fn trim_opt(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|s| !s.is_empty())
-}
-
-fn decrypt_required(cipher: &Option<String>) -> UsageResult<String> {
-    let cipher = cipher
-        .as_deref()
-        .ok_or_else(|| UsageError::Other("缺少 access_token".into()))?;
-    let pt = crypto::decrypt(cipher);
-    if pt.is_empty() {
-        return Err(UsageError::AuthRequired);
-    }
-    Ok(pt)
-}
-
-fn http_client() -> UsageResult<reqwest::Client> {
-    crate::http_client::usage_reqwest_with_active_fingerprint()
 }
 
 #[cfg(test)]

@@ -24,7 +24,6 @@ pub enum CircuitState {
     HalfOpen,
 }
 
-
 /// A provider's circuit breaker record.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -65,9 +64,10 @@ impl CircuitBreakerRecord {
             CircuitState::Closed => true,
             CircuitState::Open => {
                 if let Some(opened_at) = self.opened_at
-                    && now >= opened_at + RECOVERY_TIMEOUT_SECS {
-                        return true;
-                    }
+                    && now >= opened_at + RECOVERY_TIMEOUT_SECS
+                {
+                    return true;
+                }
                 false
             }
             CircuitState::HalfOpen => true,
@@ -79,9 +79,10 @@ impl CircuitBreakerRecord {
         if self.state == CircuitState::Open {
             let now = chrono::Utc::now().timestamp();
             if let Some(opened_at) = self.opened_at
-                && now >= opened_at + RECOVERY_TIMEOUT_SECS {
-                    return CircuitState::HalfOpen;
-                }
+                && now >= opened_at + RECOVERY_TIMEOUT_SECS
+            {
+                return CircuitState::HalfOpen;
+            }
         }
         self.state
     }

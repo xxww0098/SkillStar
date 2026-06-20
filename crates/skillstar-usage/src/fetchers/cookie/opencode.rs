@@ -175,6 +175,7 @@ pub async fn fetch(
         credits: Vec::new(),
         error: None,
         api_keys,
+        deepseek_analytics: None,
     })
 }
 
@@ -415,6 +416,7 @@ fn parse_billing(body: &Value) -> Option<MonetaryBalance> {
         total: balance,
         granted: 0.0,
         topped_up: 0.0,
+        is_available: None,
     })
 }
 

@@ -1,12 +1,9 @@
-use crate::core::{
-    local_skill, lockfile,
-    repo_scanner, skill_pack,
-};
-use skillstar_skills::git::{dismissed_skills, gh_manager, repo_history};
+use crate::core::{local_skill, lockfile, repo_scanner, skill_pack};
 use skillstar_core::infra::error::AppError;
 use skillstar_core::infra::{fs_ops, paths};
 use skillstar_projects::projects::agents as agent_profile;
 use skillstar_projects::projects::sync;
+use skillstar_skills::git::{dismissed_skills, gh_manager, repo_history};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tracing::error;
@@ -388,28 +385,28 @@ pub async fn force_delete_app_config() -> Result<usize, AppError> {
         // Delete config dir contents
         let config_dir = paths::config_dir();
         if config_dir.exists()
-            && let Ok(entries) = std::fs::read_dir(&config_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_file()
-                        && std::fs::remove_file(&path).is_ok() {
-                            removed += 1;
-                        }
+            && let Ok(entries) = std::fs::read_dir(&config_dir)
+        {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() && std::fs::remove_file(&path).is_ok() {
+                    removed += 1;
                 }
             }
+        }
 
         // Also delete state dir contents (rebuildable)
         let state_dir = paths::state_dir();
         if state_dir.exists()
-            && let Ok(entries) = std::fs::read_dir(&state_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_file()
-                        && std::fs::remove_file(&path).is_ok() {
-                            removed += 1;
-                        }
+            && let Ok(entries) = std::fs::read_dir(&state_dir)
+        {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() && std::fs::remove_file(&path).is_ok() {
+                    removed += 1;
                 }
             }
+        }
 
         removed
     })
@@ -665,4 +662,77 @@ pub async fn dismiss_new_skills_batch(keys: Vec<String>) -> Result<(), AppError>
     tokio::task::spawn_blocking(move || dismissed_skills::dismiss_batch(&keys))
         .await?
         .map_err(|e| AppError::Other(e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `dir_size_recursive` must NOT follow symlink/junction targets.
+    /// AGENTS.md: "treat links as metadata-only entries to avoid recursive
+    /// loops and Windows UI hangs". A symlink to a large dir must contribute 0 bytes.
+    #[test]
+    fn dir_size_does_not_follow_symlinks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+
+        // Real file with known size inside the scanned root.
+        std::fs::write(root.join("real.txt"), b"hello").unwrap();
+
+        // A directory with a 1MB file, placed OUTSIDE root, then symlinked in.
+        // (If it were under root it would be counted as a normal subdir.)
+        let outside = std::env::temp_dir().join(format!(
+            "sst-storage-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&outside).unwrap();
+        let payload = vec![0u8; 1_000_000];
+        std::fs::write(outside.join("blob.bin"), &payload).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, root.join("link_to_big")).unwrap();
+
+        let bytes = dir_size_recursive(root);
+        // Only real.txt (5 bytes) counts; the 1MB via symlink must be excluded.
+        assert_eq!(bytes, 5, "symlink target content must not be counted");
+
+        // Cleanup the outside dir.
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    /// `count_hub_skills` distinguishes valid symlinks from broken ones and
+    /// skips regular files. This is the storage-overview health signal.
+    #[test]
+    fn count_hub_skills_separates_valid_and_broken_links() {
+        let tmp = tempfile::tempdir().unwrap();
+        let hub = tmp.path().join("skills");
+        std::fs::create_dir_all(&hub).unwrap();
+
+        // Real dir skill → valid.
+        std::fs::create_dir_all(hub.join("real-skill")).unwrap();
+
+        // Valid symlink → target exists.
+        let target = tmp.path().join("target-skill");
+        std::fs::create_dir_all(&target).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, hub.join("linked-skill")).unwrap();
+
+        // Broken symlink → target missing.
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(
+            tmp.path().join("does-not-exist"),
+            hub.join("broken-skill"),
+        )
+        .unwrap();
+
+        // Stray regular file → ignored entirely.
+        std::fs::write(hub.join(".DS_Store"), b"x").unwrap();
+
+        let (valid, _broken) = count_hub_skills(&hub);
+        // real-skill + linked-skill = 2 valid. broken-skill is counted but the
+        // lockfile lookup may also add orphans, so only assert the floor.
+        assert!(
+            valid >= 2,
+            "real dir + valid symlink should both count as valid, got {valid}"
+        );
+    }
 }

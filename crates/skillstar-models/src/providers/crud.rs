@@ -13,8 +13,8 @@ fn validate_url(url_str: &str) -> Result<()> {
     if url_str.is_empty() {
         return Ok(()); // Empty URLs are allowed (e.g., base_url_anthropic may be empty)
     }
-    let parsed = Url::parse(url_str)
-        .with_context(|| format!("Invalid URL format: '{}'", url_str))?;
+    let parsed =
+        Url::parse(url_str).with_context(|| format!("Invalid URL format: '{}'", url_str))?;
     match parsed.scheme() {
         "http" | "https" => Ok(()),
         scheme => bail!("URL must use http or https scheme, got: '{}'", scheme),
@@ -164,9 +164,10 @@ pub fn delete_provider_flat(store: &mut FlatProvidersStore, id: &str) -> Result<
     // Clean up tool_activations: set any activation referencing this provider to None
     for activation in store.tool_activations.values_mut() {
         if let Some(act) = activation
-            && act.provider_id == id {
-                *activation = None;
-            }
+            && act.provider_id == id
+        {
+            *activation = None;
+        }
     }
 
     Ok(())
@@ -253,7 +254,7 @@ pub fn activate_tool(
                 );
             }
         }
-        "codex" | "opencode" => {
+        "codex" | "opencode" | "zcode" => {
             if provider.base_url_openai.trim().is_empty() {
                 bail!(
                     "Provider '{}' has no OpenAI-compatible endpoint (base_url_openai is empty). \
@@ -641,10 +642,7 @@ pub fn get_provider_presets() -> Vec<ProviderPreset> {
             base_url: "https://api.deepseek.com/v1".to_string(),
             api_key_url: "https://platform.deepseek.com/api_keys".to_string(),
             icon_color: "#4D6BFE".to_string(),
-            models: vec![
-                "deepseek-chat".to_string(),
-                "deepseek-reasoner".to_string(),
-            ],
+            models: vec!["deepseek-chat".to_string(), "deepseek-reasoner".to_string()],
         },
         ProviderPreset {
             id: "kimi".to_string(),
@@ -663,10 +661,7 @@ pub fn get_provider_presets() -> Vec<ProviderPreset> {
             base_url: "https://open.bigmodel.cn/api/paas/v4".to_string(),
             api_key_url: "https://open.bigmodel.cn/usercenter/apikeys".to_string(),
             icon_color: "#3366FF".to_string(),
-            models: vec![
-                "glm-4-plus".to_string(),
-                "glm-4-flash".to_string(),
-            ],
+            models: vec!["glm-4-plus".to_string(), "glm-4-flash".to_string()],
         },
     ]
 }

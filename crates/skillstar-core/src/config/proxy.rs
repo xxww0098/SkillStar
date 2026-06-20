@@ -31,7 +31,6 @@ impl ProxyType {
     }
 }
 
-
 fn deserialize_proxy_type<'de, D>(deserializer: D) -> Result<ProxyType, D::Error>
 where
     D: Deserializer<'de>,

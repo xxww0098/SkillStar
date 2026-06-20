@@ -5,22 +5,17 @@ import { useTranslation } from "react-i18next";
 import { Toolbar } from "../components/layout/Toolbar";
 import { Button } from "../components/ui/button";
 import { EmptyState } from "../components/ui/EmptyState";
-import { Github } from "../components/ui/icons/Github";
 import { LoadingLogo } from "../components/ui/LoadingLogo";
-import { McpMarketBrowser } from "../features/mcp/components/McpMarketBrowser";
-import { useMcpMarketplace } from "../features/mcp/hooks/useMcpMarketplace";
+import { McpPublishers } from "../features/mcp/components/McpPublishers";
+import { useMcpPublishers } from "../features/mcp/hooks/useMcpPublishers";
 import { OfficialPublishers } from "../features/marketplace/components/OfficialPublishers";
 import { useMarketplace } from "../features/marketplace/hooks/useMarketplace";
-import { McpServerForm, type McpServerFormValue } from "../features/mcp/components/McpServerForm";
-import { DrawerShell } from "../features/models";
-import { useMcpServers } from "../features/mcp/hooks/useMcpServers";
 import { SkillGrid } from "../features/my-skills/components/SkillGrid";
 import { useSkills } from "../features/my-skills/hooks/useSkills";
 import { useViewMode } from "../hooks/useViewMode";
-import { tauriInvoke } from "../lib/ipc";
 import { toast } from "../lib/toast";
 import { cn } from "../lib/utils";
-import type { McpServerEntry, OfficialPublisher, Skill, SortOption } from "../types";
+import type { McpPublisherSummary, OfficialPublisher, Skill, SortOption } from "../types";
 
 const DetailPanel = lazy(() =>
   import("../components/layout/DetailPanel").then((mod) => ({
@@ -28,41 +23,33 @@ const DetailPanel = lazy(() =>
   })),
 );
 
-export type TabId = "all" | "trending" | "hot" | "official" | "mcp";
+export type TabId = "all" | "trending" | "hot" | "official" | "mcp-official";
 
 const skillTabIds: TabId[] = ["all", "trending", "hot", "official"];
-const tabIds: TabId[] = [...skillTabIds, "mcp"];
+const mcpTabIds: TabId[] = ["mcp-official"];
+const tabIds: TabId[] = [...skillTabIds, ...mcpTabIds];
 
 const tabLabelKeys: Record<TabId, string> = {
   all: "marketplace.allTime",
   trending: "marketplace.trending",
   hot: "marketplace.hot",
   official: "marketplace.official",
-  mcp: "marketplace.mcp",
+  "mcp-official": "marketplace.mcpOfficial",
 };
-
-function draftToDefaults(draft: McpServerEntry): Partial<McpServerFormValue> {
-  return {
-    name: draft.name,
-    transport: draft.transport,
-    command: draft.command,
-    args: draft.args,
-    env: draft.env,
-    url: draft.url,
-    headers: draft.headers,
-    description: draft.description,
-    homepage: draft.homepage,
-    enabled: {},
-  };
-}
 
 interface MarketplaceProps {
   onNavigateToPublisher?: (publisher: OfficialPublisher) => void;
+  onNavigateToMcpPublisher?: (publisher: McpPublisherSummary) => void;
   activeTab?: TabId;
   onTabChange?: (tab: TabId) => void;
 }
 
-export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, onTabChange }: MarketplaceProps) {
+export function Marketplace({
+  onNavigateToPublisher,
+  onNavigateToMcpPublisher,
+  activeTab: controlledTab,
+  onTabChange,
+}: MarketplaceProps) {
   const { t } = useTranslation();
   const {
     results,
@@ -88,14 +75,13 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
     patchSkill,
   } = useMarketplace();
   const { installSkill, updateSkill, uninstallSkill, pendingUpdateNames } = useSkills();
-  const { servers: mcpServers, createServer: createMcpServer } = useMcpServers();
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("stars-desc");
   const [viewMode, setViewMode] = useViewMode("grid");
   const [internalTab, setInternalTab] = useState<TabId>("all");
   const activeTab = controlledTab ?? internalTab;
-  const mcpMarket = useMcpMarketplace(activeTab === "mcp");
-  const mcpInstalledNames = useMemo(() => new Set(mcpServers.map((server) => server.name)), [mcpServers]);
+  const isMcpTab = activeTab === "mcp-official";
+  const mcpPublishers = useMcpPublishers(isMcpTab);
   const setActiveTab = (tab: TabId) => {
     onTabChange?.(tab);
     setInternalTab(tab);
@@ -104,19 +90,13 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
     (tab: TabId) => {
       setActiveTab(tab);
       setSearchQuery("");
-      mcpMarket.setQuery("");
       setSelectedSkill(null);
       clearAiSearch();
     },
-    [clearAiSearch, mcpMarket, onTabChange],
+    [clearAiSearch, onTabChange],
   );
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [installStatus, setInstallStatus] = useState<string | null>(null);
-  const [mcpInstallDrawer, setMcpInstallDrawer] = useState<{
-    sourceName: string;
-    defaults: Partial<McpServerFormValue>;
-  } | null>(null);
-  const [mcpSaving, setMcpSaving] = useState(false);
   const [showBackToTop, setShowBackToTop] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   /** Skills currently being installed (for per-card loading state) */
@@ -126,12 +106,12 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
   useEffect(() => {
     if (activeTab === "official") {
       fetchOfficialPublishers();
-    } else if (activeTab === "mcp") {
+    } else if (isMcpTab) {
       return;
     } else {
       fetchLeaderboard(activeTab === "all" ? "all" : activeTab);
     }
-  }, [activeTab, fetchOfficialPublishers, fetchLeaderboard]);
+  }, [activeTab, fetchOfficialPublishers, fetchLeaderboard, isMcpTab]);
 
   // Search (debounced) — skip when AI search is active
   useEffect(() => {
@@ -144,7 +124,7 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
   }, [searchQuery, search, aiSearching, aiKeywords]);
 
   const displaySkills = useMemo(() => {
-    if (activeTab === "mcp") return [];
+    if (isMcpTab) return [];
 
     let skills: Skill[] = [];
     const isAiMode = Boolean(aiKeywords && results);
@@ -187,7 +167,7 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
       if (rank === s.rank) return s;
       return { ...s, rank };
     });
-  }, [activeTab, results, leaderboard, sortBy, searchQuery, aiKeywords, aiActiveKeywords, aiKeywordSkillMap]);
+  }, [activeTab, results, leaderboard, sortBy, searchQuery, aiKeywords, aiActiveKeywords, aiKeywordSkillMap, isMcpTab]);
 
   const handleInstall = useCallback(
     async (url: string, name: string) => {
@@ -330,84 +310,35 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
     setSearchQuery("");
   }, [clearAiSearch]);
 
-  const handleMcpInstall = useCallback(async (id: string) => {
-    try {
-      const draft = await tauriInvoke("mcp_market_entry_to_draft", { id });
-      setMcpInstallDrawer({ sourceName: draft.name, defaults: draftToDefaults(draft) });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err));
-    }
-  }, []);
-
-  const handleMcpInstallSubmit = useCallback(
-    async (value: McpServerFormValue) => {
-      setMcpSaving(true);
-      try {
-        const entry: Partial<McpServerEntry> = { ...value };
-        await createMcpServer(entry);
-        toast.success(t("mcp.added"));
-        setMcpInstallDrawer(null);
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : String(err));
-      } finally {
-        setMcpSaving(false);
-      }
-    },
-    [createMcpServer, t],
-  );
-
-  const toolbarSearchQuery = activeTab === "mcp" ? mcpMarket.query : searchQuery;
+  const toolbarSearchQuery = searchQuery;
   const handleToolbarSearchChange = useCallback(
     (value: string) => {
-      if (activeTab === "mcp") {
-        mcpMarket.setQuery(value);
-        return;
-      }
       setSearchQuery(value);
       if (!value.trim()) clearAiSearch();
     },
-    [activeTab, clearAiSearch, mcpMarket],
+    [clearAiSearch],
   );
 
-  const totalCount = activeTab === "mcp" ? mcpMarket.entries.length : displaySkills.length;
-  const snapshotLabel =
-    activeTab === "mcp"
-      ? mcpMarket.refreshing
-        ? t("marketplace.refreshingSnapshot", {
-            defaultValue: "Refreshing snapshot...",
+  const totalCount = isMcpTab ? mcpPublishers.publishers.length : displaySkills.length;
+  const snapshotLabel = isMcpTab
+    ? null
+    : refreshing
+      ? t("marketplace.refreshingSnapshot", {
+          defaultValue: "Refreshing snapshot...",
+        })
+      : snapshotStatus === "seeding"
+        ? t("marketplace.seedingSnapshot", {
+            defaultValue: "Seeding local snapshot...",
           })
-        : mcpMarket.status === "seeding"
-          ? t("marketplace.seedingSnapshot", {
-              defaultValue: "Seeding local snapshot...",
+        : snapshotStatus === "stale"
+          ? t("marketplace.snapshotStale", {
+              defaultValue: "Snapshot is stale",
             })
-          : mcpMarket.status === "stale"
-            ? t("marketplace.snapshotStale", {
-                defaultValue: "Snapshot is stale",
-              })
-            : mcpMarket.status === "remote_error"
-              ? t("mcp.marketStatusRemoteError")
-              : mcpMarket.status === "miss"
-                ? t("mcp.marketStatusMiss")
-                : mcpMarket.updatedAt
-                  ? t("mcp.marketStatusUpdated", { time: new Date(mcpMarket.updatedAt).toLocaleString() })
-                  : t("mcp.marketStatusLocalFirst")
-      : refreshing
-        ? t("marketplace.refreshingSnapshot", {
-            defaultValue: "Refreshing snapshot...",
-          })
-        : snapshotStatus === "seeding"
-          ? t("marketplace.seedingSnapshot", {
-              defaultValue: "Seeding local snapshot...",
-            })
-          : snapshotStatus === "stale"
-            ? t("marketplace.snapshotStale", {
-                defaultValue: "Snapshot is stale",
-              })
-            : null;
-  const snapshotTitle = activeTab === "mcp" ? (mcpMarket.updatedAt ?? undefined) : (snapshotUpdatedAt ?? undefined);
+          : null;
+  const snapshotTitle = isMcpTab ? undefined : (snapshotUpdatedAt ?? undefined);
   const showOnlineSupplement =
     Boolean(searchQuery.trim()) &&
-    activeTab !== "mcp" &&
+    !isMcpTab &&
     !aiKeywords &&
     !loading &&
     !aiSearching &&
@@ -417,7 +348,7 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
   const renderTabButton = (id: TabId) => {
     const index = tabIds.indexOf(id);
     const isActive = activeTab === id;
-    const isMcp = id === "mcp";
+    const isMcp = mcpTabIds.includes(id);
 
     return (
       <button
@@ -449,10 +380,10 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
           isMcp && !isActive && "ring-1 ring-inset ring-border/50 hover:ring-primary/25",
         )}
       >
-        {isMcp ? (
+        {id === "mcp-official" ? (
           <>
-            <Github className="h-3.5 w-3.5" />
-            <span>{t("marketplace.mcpGithub")}</span>
+            <Boxes className="h-3.5 w-3.5" />
+            <span>{t(tabLabelKeys[id])}</span>
           </>
         ) : (
           <span>{t(tabLabelKeys[id])}</span>
@@ -468,20 +399,13 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
           titleNode={<h1>{t("sidebar.market")}</h1>}
           searchQuery={toolbarSearchQuery}
           onSearchChange={handleToolbarSearchChange}
-          searchPlaceholder={
-            activeTab === "mcp"
-              ? t("marketplace.mcpSearchPlaceholder", { defaultValue: "Search MCP servers..." })
-              : undefined
-          }
           sortBy={sortBy}
           onSortChange={setSortBy}
           viewMode={viewMode}
           onViewModeChange={setViewMode}
-          onAiSearch={activeTab === "mcp" ? undefined : handleAiSearch}
-          aiSearching={activeTab === "mcp" ? false : aiSearching}
-          onRefresh={activeTab === "mcp" ? () => mcpMarket.refresh() : undefined}
-          isRefreshing={activeTab === "mcp" ? mcpMarket.refreshing : undefined}
-          hideSortControls={activeTab === "mcp"}
+          onAiSearch={isMcpTab ? undefined : handleAiSearch}
+          aiSearching={isMcpTab ? false : aiSearching}
+          hideSortControls={isMcpTab}
         />
 
         {/* Category tabs */}
@@ -509,7 +433,7 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
                 <span className="px-2 text-[11px] font-medium text-muted-foreground/70">
                   {t("marketplace.mcpSourceGithub")}
                 </span>
-                {renderTabButton("mcp")}
+                <div className="flex items-center gap-1">{mcpTabIds.map((id) => renderTabButton(id))}</div>
               </div>
             </div>
 
@@ -530,8 +454,8 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
                   {snapshotLabel}
                 </span>
               )}
-              {activeTab === "mcp" ? (
-                <span className="text-caption">{t("marketplace.mcpServersCount", { count: totalCount })}</span>
+              {isMcpTab ? (
+                <span className="text-caption">{t("marketplace.mcpPublishersCount", { count: totalCount })}</span>
               ) : activeTab !== "official" ? (
                 <span className="text-caption">{t("marketplace.skillsCount", { count: totalCount })}</span>
               ) : null}
@@ -539,7 +463,7 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
           </div>
         </div>
 
-        {activeTab !== "mcp" && error && (
+        {!isMcpTab && error && (
           <div className="px-6 py-2 border-b border-destructive/20 bg-destructive/5 text-xs text-destructive">
             {error}
           </div>
@@ -607,18 +531,8 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
             setShowBackToTop(target.scrollTop > 300);
           }}
         >
-          {activeTab === "mcp" ? (
-            <McpMarketBrowser
-              installedNames={mcpInstalledNames}
-              entries={mcpMarket.entries}
-              status={mcpMarket.status}
-              isLoading={mcpMarket.isLoading}
-              query={mcpMarket.query}
-              refreshing={mcpMarket.refreshing}
-              viewMode={viewMode}
-              onRefresh={() => mcpMarket.refresh()}
-              onInstall={(id) => void handleMcpInstall(id)}
-            />
+          {isMcpTab ? (
+            <McpPublishers publishers={mcpPublishers.publishers} onPublisherClick={onNavigateToMcpPublisher} />
           ) : activeTab === "official" ? (
             <OfficialPublishers publishers={publishers} viewMode={viewMode} onPublisherClick={onNavigateToPublisher} />
           ) : loading || aiSearching ? (
@@ -769,30 +683,6 @@ export function Marketplace({ onNavigateToPublisher, activeTab: controlledTab, o
           />
         </Suspense>
       )}
-
-      <DrawerShell
-        open={mcpInstallDrawer != null}
-        onOpenChange={(open) => {
-          if (!open) setMcpInstallDrawer(null);
-        }}
-        title={
-          <span className="flex items-center gap-2 text-foreground">
-            <Boxes className="h-4 w-4 text-primary" />
-            {mcpInstallDrawer?.sourceName ?? t("mcp.addServer")}
-          </span>
-        }
-        subtitle={t("mcp.drawerPresetSubtitle")}
-      >
-        {mcpInstallDrawer ? (
-          <McpServerForm
-            key={mcpInstallDrawer.sourceName}
-            defaults={mcpInstallDrawer.defaults}
-            submitLabel={t("common.add")}
-            onSubmit={handleMcpInstallSubmit}
-            submitting={mcpSaving}
-          />
-        ) : null}
-      </DrawerShell>
     </div>
   );
 }

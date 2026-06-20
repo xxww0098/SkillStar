@@ -28,6 +28,8 @@ SkillStar is a Tauri v2 desktop app with a React SPA frontend and Rust backend.
 | Hub skills            | `~/.skillstar/hub/skills/` |
 | Local authored skills | `~/.skillstar/hub/local/`  |
 | Repo cache            | `~/.skillstar/hub/repos/`  |
+| SSH host config       | `~/.skillstar/config/ssh_hosts.toml` |
+| SSH accepted host keys| `~/.skillstar/config/ssh_known_hosts.json` |
 
 
 ## Project Structure (Condensed)
@@ -52,6 +54,7 @@ SkillStar/
 │   │   │   └── models_commands.rs # provider CRUD / health dashboard (split from models.rs)
 │   │   │   └── oauth_commands.rs  # Codex/Gemini OAuth + account management
 │   │   │   └── quota_commands.rs  # quota refresh / usage / speedtest
+│   │   │   └── ssh_hosts.rs       # SSH remote host CRUD + connection test + remote skill push/list/delete
 │   │   └── core/                  # Tauri-specific glue only (state handles, event emitters, window-bound wrappers)
 │   │       ├── skills/            # thin adapters over skillstar-skills (install, update, bundle, local, group, discover)
 │   │       ├── marketplace_snapshot/ # local-first marketplace DB (wraps Tauri State)
@@ -72,6 +75,7 @@ SkillStar/
 │   ├── skillstar-models/          # model provider configuration: providers store + tool sync (Claude Code / Codex / OpenCode) + on-disk config I/O + latency + circuit breaker
 │   ├── skillstar-ai/              # AI inference: chat completion (OpenAI / Anthropic / local), summarization, skill pick, scan params
 │   ├── skillstar-projects/        # project management + agent profiles + patrol + terminal (Launch Deck)
+│   ├── skillstar-ssh/             # SSH remote skill management: russh connect + SFTP push/list/delete + host config + keyring credentials
 │   └── skillstar-app/             # Tauri-agnostic command helpers (shell, network, marketplace, ACP) + CLI entry point
 ├── docs/
 │   ├── Error.md
@@ -151,7 +155,7 @@ SkillStar/
 - Repo scan/import may optionally use **full-depth** discovery to include nested `SKILL.md` skills in the same repository.
 - Imported skill identity should prefer frontmatter `name`; fall back to directory name (and for root-level fallback use repo name when needed).
 - CLI install mode is split: `skillstar install <url>` defaults to **project-level** linking for the current working directory, while `skillstar install --global <url>` performs **hub-only** installation.
-- Project-level CLI install should prefer linking into already-detected agent project folders and fall back to `.agents/skills` when no project-level agent path exists yet.
+- Project-level CLI install should prefer linking into already-detected agent project folders and fall back to `.agent/skills` when no project-level agent path exists yet.
 - CLI install should accept explicit project targets via `--agent <id>` (repeatable or comma-separated), and when omitted in an interactive terminal should allow user input before falling back to auto-detect.
 - CLI `install` / `add` accepts repo URL, `owner/repo` shorthand, local `.ags`/`.agd` bundle paths, and local directories containing `SKILL.md`; directory inputs are adopted as local-authored skills via `local_skill::create`.
 - CLI `install` flags mirror the `npx skills add` baseline: `--list` scans without mutating, `--all` installs every discovered skill, `--yes` skips interactive prompts, `--copy` signals a preference for copy deployment (project sync still auto-falls-back to copy when symlinks fail).
@@ -165,6 +169,7 @@ SkillStar/
 - Adding a new Agent CLI: see the dedicated guide [ADDING-AN-AGENT.md](./ADDING-AN-AGENT.md) (builtin data table + icon is the whole core path; tool-sync and usage are independent optional axes).
 - Project registration is explicit before scan/import/sync.
 - `detect_project_agents` is data-driven by `builtin_profiles()`.
+- Install detection strategy is driven by the builtin table's `binary` column: CLI agents (`claude`/`codex`/`gemini`/`zcode`/`opencode`) are installed iff their binary is reachable in the enriched PATH (Homebrew/cargo/snap dirs included so GUI-launched Tauri still finds user CLIs); when the binary is off PATH they fall back to directory presence but strictly on the skills dir itself (`global_skills_dir`), never its parent — this still lets ZCode (a GUI app with `~/.zcode/skills` but no `zcode` binary) and a broken Codex install (`~/.codex/skills` exists, npm global never symlinked into `bin`) be detected, while preserving the shared-home-root disambiguation (a stray `~/.gemini` from Antigravity has no `~/.gemini/skills`, so Gemini is not false-positived). IDE/global-only agents (`antigravity`/`cursor`/`qoder`/`trae`/`openclaw`/`hermes`, and all custom agents) fall back to directory presence (skills dir or its parent).
 - Each agent has a unique `project_skills_rel`; disambiguation is sealed (always returns empty).
 - OpenClaw is global-only: `project_skills_rel` stays empty.
 - Custom agent `project_skills_rel` may be entered with Windows backslashes in UI/commands, but backend storage and detection normalize it to forward slashes.
@@ -193,7 +198,7 @@ SkillStar/
 ### AI Integration
 
 - Model provider configuration (provider store + presets + external tool sync + latency + circuit breaker) lives in the `skillstar-models` crate; pure inference (chat completion, summarize, skill pick) lives in `skillstar-ai`. `skillstar-ai` depends on `skillstar-models` for provider resolution. Tauri commands in `commands/models_commands.rs` use `skillstar_models::*`; commands in `commands/ai/*` use `skillstar_ai::ai_provider`.
-- External tool sync targets `claude-code` (`~/.claude/settings.json`), `codex` (`~/.codex/config.toml` + `auth.json`), and `opencode` (`~/.config/opencode/opencode.json`, `provider.skillstar` block with `@ai-sdk/openai-compatible`). OpenCode model blocks should prefer the provider's `meta.model_catalog` so `name`, `limit.context`, `limit.output`, and `cost` metadata are preserved when available. Tauri also exposes read/write/format/list for those on-disk configs plus `push_provider_to_tool_config` to re-apply the active provider for a tool.
+- External tool sync targets `claude-code` (`~/.claude/settings.json`), `codex` (`~/.codex/config.toml` + `auth.json`), `opencode` (`~/.config/opencode/opencode.json`, `provider.skillstar` block with `@ai-sdk/openai-compatible`), `gemini` (`~/.gemini/.env`), and `zcode` (`~/.zcode/v2/config.json`, OpenCode schema). OpenCode model blocks should prefer the provider's `meta.model_catalog` so `name`, `limit.context`, `limit.output`, and `cost` metadata are preserved when available. Tauri also exposes read/write/format/list for those on-disk configs plus `push_provider_to_tool_config` to re-apply the active provider for a tool.
 - Provider endpoint probes (`test_endpoints_latency`, `fetch_provider_models`, `fetch_provider_model_catalog`, connection test) use `skillstar_core::infra::http_client::probe_http_client`, which honours `config/proxy.json`. Anthropic bases (`/anthropic` in URL) probe via `POST /messages`; OpenAI bases use `GET /models`. HTTP 401/403 are treated as reachable with auth failure, not hard errors. Model catalog enrichment belongs in `skillstar-models`; frontend code should consume normalized metadata instead of depending on a remote registry's raw JSON shape.
 - AI provider config is backend-owned (`config/ai.json`); frontend never stores API keys.
 - AI summary / quick read should prefer a Models provider reference (`provider_ref`) for Claude or Codex instead of duplicating URL/API key in `ai.json`; only `api_format=local` keeps manual base URL / model fields for Ollama-style local endpoints.
@@ -207,6 +212,9 @@ SkillStar/
 
 - Marketplace data is local-first via `~/.skillstar/db/marketplace.db`; UI reads snapshots first and only syncs remote scopes on-demand/background refresh.
 - `marketplace.db` owns marketplace list/search/publisher/repo/detail snapshots plus FTS; schema changes must be handled through `PRAGMA user_version` migrations.
+- MCP marketplace recommendations are maintained in `marketplace.db` (`mcp_curated_server` + FTS) and merged ahead of the GitHub MCP Registry snapshot; remote registry refreshes must not delete or overwrite curated MCP rows.
+- MCP marketplace is organised around **official publishers** (mirrors the skill official-publishers two-level structure): the Marketplace top MCP tab is a single "官方" entry that opens a publisher card grid; clicking a card drills into a publisher detail page (`McpPublisherDetail`) listing that publisher's servers.
+- MCP marketplace publishers: **AdsPower**, **BigModel**, **Anthropic**, **Microsoft**, **SaaS** (Notion/Figma/Stripe), **Dev Tools** (Context7/Firecrawl), **Cloudflare**, **Brave**, **Google**, and **Supabase** are curated rows partitioned by the `source` column (`"adspower"` / `"bigmodel"` / `"anthropic"` / `"microsoft"` / `"saas"` / `"cn-ai"` / `"cloudflare"` / `"brave"` / `"google"` / `"supabase"` — the value doubles as the publisher id); **GitHub** maps to the full `mcp_registry_server` table (`source` is NULL). `list_mcp_publishers_local` aggregates all eleven; `list_mcp_servers_by_publisher_local({ publisherId })` scopes cards to one publisher. Each curated publisher's `raw_server_json` follows the GitHub registry shape so the existing `registry_to_entry` install path works unchanged. Curated seeds live in `mcp_snapshot.rs` (`default_curated_mcp_servers` + per-publisher factory functions like `anthropic_curated_servers`); the grid order is fixed by the `CURATED_ORDER` constant in `load_publishers`.
 - Marketplace snapshot DB access should prefer short-lived WAL connections per operation so local read paths can run concurrently; avoid process-wide single-connection locking.
 - Marketplace remote HTTP calls must use `skillstar_core::infra::http_client::probe_http_client` so `config/proxy.json` is honoured.
 - Local marketplace search must prefer the snapshot/FTS corpus and only do explicit remote seeding when the user asks or the scope has never been synced.
@@ -252,6 +260,23 @@ SkillStar/
 - Tauri commands: `get_github_mirror_config`, `save_github_mirror_config`, `get_github_mirror_presets`, `test_github_mirror`.
 - `test_github_mirror` sends an HTTP HEAD request to verify reachability and returns latency in milliseconds.
 
+### SSH Remote Skill Management
+
+- SSH remote skill management lives in the `skillstar-ssh` crate (pure Rust, Tauri-agnostic): `russh` (`ring` + `rsa` crypto backends) for connection/auth, `russh-sftp` for file transfer, `ssh-key` for key parsing, and the `keyring` crate (OS keychain on macOS / Credential Manager on Windows / Secret Service on Linux) for credential storage. Tauri commands in `commands/ssh_hosts.rs` are a thin forwarder over the crate.
+- Host metadata persists in `~/.skillstar/config/ssh_hosts.toml` (non-sensitive fields only: display name, host, port, username, auth method, key *path*, default remote dir). Passphrases and passwords **never** touch the TOML — they live in the system keyring under service `skillstar-ssh`, keyed by host `id`. Deleting a host also clears its keyring entry (best-effort).
+- The My Skills **remote (SSH)** scope surfaces hosts discovered from the user's `~/.ssh/config` (`system_config::parse_system_hosts`). These are **read-only** (parsed live each call, never written to `ssh_hosts.toml`) and shown in a separate "system" section with an "import" button that copies one into the managed store. The parser is dependency-free (a ~120-line state machine handling `Host`/`HostName`/`User`/`Port`/`IdentityFile`, `Include` recursion with glob support, and wildcard-alias filtering). System hosts connect directly using their `~/.ssh/config` identity file — no keyring involved — via the `system:<alias>` synthetic host id handled in `with_session`.
+- Host-key verification is TOFU (trust-on-first-use): the first connection reports the server SHA-256 fingerprint to the UI (`test_ssh_connection` returns `unverified` + fingerprint); the user confirms via `accept_ssh_host_key`, which persists it to `ssh_known_hosts.json`. Subsequent mismatches hard-fail with `HOST_KEY_MISMATCH` (MITM protection). Verified hosts connect silently.
+- Authentication supports both private-key files (path + optional passphrase) and password login. The crate resolves hub skill content dirs the same way `skill_content` does (follows the `skills/<name>` symlink, falls back to nested `<name>/SKILL.md`).
+- **Push uses the remote `.skillstar` hub layout** (`hub::push_skill_via_hub`, invoked by `push_skill_to_remote`): upload the local hub skill tree to `~/.skillstar/hub/content/<name>` over SFTP (atomic `.skillstar.tmp` → `rename`, skipping `.git`), then run `ln -sfn` over SSH so `~/.<agent>/skills/<name>` symlinks to that content — mirroring local hub + agent link semantics on the VPS.
+- Direct copy into an agent folder (no hub symlink) remains available via `sftp::push_skill` for internal/tests; the UI path always goes through hub push.
+- **Discovery classifies hub layout**: each skill gets `layout` (`hub_managed` | `standalone`) via remote `readlink` + hub `SKILL.md` probe; `DiscoveryResult.needs_migration_count` counts standalone entries (self-downloaded / copy-only under agent dirs).
+- **`migrate_remote_skill_to_hub`** (`hub::migrate_remote_skill_to_hub`): `mv` standalone tree to `~/.skillstar/hub/content/<name>`, then `ln -sfn` into the agent `skills/` dir; UI shows a migration banner and per-card migrate action on standalone skills.
+- **Connection console**: every SSH command streams progress to the frontend via the `ssh://connect-stream` Tauri event. The crate emits structured `SshProgressEvent`s (phase = dial/handshake/host_key/auth/sftp/done/error, status = start/ok/warn/fail/pending) through a `ProgressSink` trait (`progress.rs`) — kept Tauri-agnostic. The command layer injects a `TauriProgressSink` that forwards to `app.emit`. Each invocation gets a unique `session_id` so the UI can filter events. The frontend `useConnectStream` hook subscribes and renders a terminal-style console in `RemoteSkillPanel`; when a host-key check is `pending` (first connection), the console pauses with a fingerprint + "trust" button instead of a throwaway toast. Errors also land in the console (phase=error, status=fail) so the user sees why a connection failed, not just a silent retry.
+- `list_remote_skills` walks a remote dir and only reports subdirectories that contain `SKILL.md` (genuine skills, not stray folders). `delete_remote_skill` is recursive and idempotent.
+- **Remote SSH UI** (embedded in My Skills via `MySkillsRemotePane` → `RemoteSkillPanel`): agent **SVG tabs** (`RemoteAgentTabs` + `remoteAgentProfile`, including `public/agents/grok.svg` for unknown agents), the same **`SkillGrid` + `SkillCard`** as My Skills (`remoteSkillToSkill` + `SkillCard.remoteContext` for delete/size/agent footer), lightweight **detail drawer** (`RemoteSkillDrawer`), push dialog from local `list_skills`, connection console unchanged.
+- **Remote skill discovery is scan-based, not table-based**: `discover_remote_skills` lists the remote `$HOME/.*` directories (skipping a blacklist of large/irrelevant ones like `.cache`/`.npm`/`.config`/`.ssh`), and for each looks for a `skills/` subdir whose entries contain `SKILL.md`. This finds **any** agent — known (claude/codex/gemini) or unknown (grok, `.agents`, future ones) — without a hardcoded path table. It returns `DiscoveryResult { agents, skills, needs_migration_count }` (each skill carries its `agent` and `layout` so the UI can group/filter and prompt migration). `KNOWN_AGENT_SKILL_DIRS` is kept only as a fallback seed when the scan finds nothing (fresh server). `$HOME` is resolved via SFTP `canonicalize(".")`. `list_remote_skills(remote_dir)` remains for targeted listing of one directory.
+- Phase 2 (not yet implemented): reading/editing remote agent config files (`~/.claude/settings.json` etc.) — the `exec_capture` / remote-file-read primitives are already in place.
+
 ### ACP Integration
 
 - ACP Client implementation is in `core/acp_client.rs`; it implements the `acp::Client` trait with auto-approved permissions and text collection via `session_notification`.
@@ -263,7 +288,7 @@ SkillStar/
 
 | Page        | Scope   | Responsibility                                               |
 | ----------- | ------- | ------------------------------------------------------------ |
-| `My Skills` | Global  | Manage installed skills + per-agent links                    |
+| `My Skills` | Global + remote (SSH) | Local: installed skills + per-agent links. Remote: VPS SSH hosts, discovery, push/migrate/delete (toolbar scope switch; legacy `#ssh` → remote scope). |
 | `Projects`  | Project | Register project, configure project-level agent skills, sync |
 | `Decks`     | Bundle  | Package/import/export skill sets and deploy to projects      |
 

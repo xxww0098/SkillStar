@@ -125,6 +125,7 @@ async fn drive_login(
         renew_date: existing.as_ref().map(|sub| sub.renew_date).unwrap_or(0),
         auto_renew: existing.as_ref().map(|sub| sub.auto_renew).unwrap_or(false),
         api_key_encrypted: None,
+        platform_token_encrypted: None,
         access_token_encrypted: Some(crypto::encrypt(&access_token)),
         refresh_token_encrypted: refresh_token.as_deref().map(crypto::encrypt),
         access_token_expires_at: expires_at,
@@ -164,6 +165,7 @@ fn authorized_snapshot_with_warning(subscription_id: &str, warning: String) -> S
             warning
         )),
         api_keys: Vec::new(),
+        deepseek_analytics: None,
     }
 }
 

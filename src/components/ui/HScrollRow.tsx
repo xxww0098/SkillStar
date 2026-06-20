@@ -73,7 +73,14 @@ export function HScrollRow({
     [updateArrows],
   );
 
-  const showArrows = hovered && (canScrollLeft || canScrollRight);
+  // Only mount the arrow buttons when the content actually overflows.
+  // When there is nothing to scroll (the common case: a handful of agent
+  // chips that fit comfortably), we avoid emitting "Scroll left/right"
+  // buttons into the DOM and accessibility tree entirely, instead of just
+  // hiding them with CSS. `needsScroll` is driven by the ResizeObserver
+  // above, so it stays correct when the row resizes or items change.
+  const needsScroll = canScrollLeft || canScrollRight;
+  const showArrows = hovered && needsScroll;
 
   return (
     <div
@@ -85,19 +92,21 @@ export function HScrollRow({
       onMouseLeave={() => setHovered(false)}
       onClick={(e) => e.stopPropagation()}
     >
-      {/* Left arrow */}
-      <button
-        type="button"
-        aria-label="Scroll left"
-        className={cn("hscroll-arrow hscroll-arrow-left", showArrows && canScrollLeft && "hscroll-arrow-visible")}
-        onClick={(e) => {
-          e.stopPropagation();
-          scrollByStep(-1);
-        }}
-        tabIndex={-1}
-      >
-        <ChevronLeft className="w-3 h-3" />
-      </button>
+      {/* Left arrow — only rendered when scrolling is possible */}
+      {needsScroll && (
+        <button
+          type="button"
+          aria-label="Scroll left"
+          className={cn("hscroll-arrow hscroll-arrow-left", showArrows && canScrollLeft && "hscroll-arrow-visible")}
+          onClick={(e) => {
+            e.stopPropagation();
+            scrollByStep(-1);
+          }}
+          tabIndex={-1}
+        >
+          <ChevronLeft className="w-3 h-3" />
+        </button>
+      )}
 
       <div
         ref={scrollRef}
@@ -121,19 +130,21 @@ export function HScrollRow({
         {children}
       </div>
 
-      {/* Right arrow */}
-      <button
-        type="button"
-        aria-label="Scroll right"
-        className={cn("hscroll-arrow hscroll-arrow-right", showArrows && canScrollRight && "hscroll-arrow-visible")}
-        onClick={(e) => {
-          e.stopPropagation();
-          scrollByStep(1);
-        }}
-        tabIndex={-1}
-      >
-        <ChevronRight className="w-3 h-3" />
-      </button>
+      {/* Right arrow — only rendered when scrolling is possible */}
+      {needsScroll && (
+        <button
+          type="button"
+          aria-label="Scroll right"
+          className={cn("hscroll-arrow hscroll-arrow-right", showArrows && canScrollRight && "hscroll-arrow-visible")}
+          onClick={(e) => {
+            e.stopPropagation();
+            scrollByStep(1);
+          }}
+          tabIndex={-1}
+        >
+          <ChevronRight className="w-3 h-3" />
+        </button>
+      )}
     </div>
   );
 }

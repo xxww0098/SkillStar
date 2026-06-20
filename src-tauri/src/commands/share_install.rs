@@ -8,9 +8,7 @@
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
-use crate::core::{
-    installed_skill, local_skill, repo_scanner, skill_install,
-};
+use crate::core::{installed_skill, local_skill, repo_scanner, skill_install};
 use skillstar_core::infra::error::AppError;
 
 /// A single skill entry in a share code payload. Keys match the TypeScript

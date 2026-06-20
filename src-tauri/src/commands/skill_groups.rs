@@ -6,8 +6,8 @@ use crate::core::{
     skill_group::{self, SkillGroup},
     skill_install,
 };
-use skillstar_projects::projects::project_manifest;
 use skillstar_core::infra::error::AppError;
+use skillstar_projects::projects::project_manifest;
 
 #[tauri::command]
 pub async fn list_skill_groups() -> Result<Vec<SkillGroup>, AppError> {
@@ -103,12 +103,13 @@ pub async fn deploy_skill_group(
         std::collections::HashMap::new();
     for skill_name in &group.skills {
         if !skills_dir.join(skill_name).exists()
-            && let Some(git_url) = sources.get(skill_name) {
-                batch_by_url
-                    .entry(git_url.clone())
-                    .or_default()
-                    .push(skill_name.clone());
-            }
+            && let Some(git_url) = sources.get(skill_name)
+        {
+            batch_by_url
+                .entry(git_url.clone())
+                .or_default()
+                .push(skill_name.clone());
+        }
     }
 
     let mut install_tasks = tokio::task::JoinSet::new();

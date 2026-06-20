@@ -10,4 +10,3 @@ pub(crate) const SKILL_PICK_ROUND_MAX_TOKENS: u32 = 2_048;
 pub(crate) const AI_CONFIG_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub(crate) const MARKETPLACE_SEARCH_MAX_TOKENS: u32 = 256;
-

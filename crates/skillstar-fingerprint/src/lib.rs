@@ -51,10 +51,12 @@ pub mod telemetry;
 pub mod tls_profile;
 pub mod types;
 
-pub use client::{build_client, build_client_with_timeout, FingerprintAwareClient};
+pub use client::{FingerprintAwareClient, build_client, build_client_with_timeout};
 pub use http_profile::HttpProfile;
-pub use ide_projector::{IdeProjector, IdeStatus, ProjectorError, SupportedIde, VsCodeForkProjector};
-pub use preset::{all_presets, instantiate, PresetId, PresetTemplate};
+pub use ide_projector::{
+    IdeProjector, IdeStatus, ProjectorError, SupportedIde, VsCodeForkProjector,
+};
+pub use preset::{PresetId, PresetTemplate, all_presets, instantiate};
 pub use request::{Method, Req, RequestError, Resp};
 pub use store::{FingerprintStore, StoreError};
 pub use telemetry::IdeTelemetry;

@@ -31,8 +31,8 @@
 //! ```
 
 use crate::client::FingerprintAwareClient;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::time::Duration;
 use thiserror::Error;
 

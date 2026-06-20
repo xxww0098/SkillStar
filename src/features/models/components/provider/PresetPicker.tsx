@@ -238,6 +238,9 @@ export function PresetPicker({ onProviderCreated, initialPreset = null }: Preset
         ) : null}
 
         <div className="flex items-center gap-2 pt-1">
+          <Button variant="ghost" onClick={handleBack} disabled={submitting}>
+            {t("models.preset.back")}
+          </Button>
           <Button onClick={handleSubmit} disabled={submitting || !apiKey.trim()} className="min-w-[120px]">
             {submitting ? (
               <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
@@ -245,9 +248,6 @@ export function PresetPicker({ onProviderCreated, initialPreset = null }: Preset
               <Sparkles className="mr-1.5 h-3.5 w-3.5" />
             )}
             {submitting ? t("models.preset.creating") : t("models.preset.createAndContinue")}
-          </Button>
-          <Button variant="ghost" onClick={handleBack} disabled={submitting}>
-            {t("models.preset.back")}
           </Button>
         </div>
 

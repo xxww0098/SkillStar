@@ -3,6 +3,8 @@ import { cn } from "@/lib/utils";
 interface PlanBadgeProps {
   /** Raw plan tier text from fetcher / manual entry. Empty/null → not rendered. */
   plan: string | null | undefined;
+  /** `onBrand` renders a frosted white chip for use over a colored brand band. */
+  variant?: "default" | "onBrand";
   className?: string;
 }
 
@@ -30,12 +32,18 @@ const TONE_MAP: Record<string, ToneSpec> = {
   PAYG: { bg: "bg-muted/60", text: "text-muted-foreground", ring: "ring-border" },
 };
 
-export function PlanBadge({ plan, className }: PlanBadgeProps) {
+const TONE_ON_BRAND: ToneSpec = {
+  bg: "bg-white/20 backdrop-blur-sm",
+  text: "text-white",
+  ring: "ring-white/40",
+};
+
+export function PlanBadge({ plan, variant = "default", className }: PlanBadgeProps) {
   if (!plan) return null;
   const normalized = plan.trim();
   if (normalized.length === 0) return null;
   const upper = normalized.toUpperCase();
-  const tone = TONE_MAP[upper] ?? TONE_DEFAULT;
+  const tone = variant === "onBrand" ? TONE_ON_BRAND : (TONE_MAP[upper] ?? TONE_DEFAULT);
   const display = upper.length > 6 ? `${upper.slice(0, 6)}…` : upper;
   return (
     <span

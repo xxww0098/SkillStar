@@ -481,7 +481,21 @@ pub async fn pick_skills(
     }
 
     if raw_success_count == 0 {
-        anyhow::bail!("All 3 AI skill-pick rounds failed. Please check your AI provider settings.");
+        // All AI rounds failed (e.g. provider unreachable). Per the design
+        // contract we must still return a deterministic local ranking instead
+        // of erroring out, so the UI can show recommendations and surface the
+        // fallback state. The error is logged, not bubbled up.
+        warn!(
+            target: "ai_pick_skills",
+            "all {} AI skill-pick rounds failed; returning deterministic local fallback",
+            seeds.len()
+        );
+        let recommendations = fallback_skill_pick(&ranked_candidates);
+        return Ok(SkillPickResponse {
+            recommendations,
+            fallback_used: true,
+            rounds_succeeded: 0,
+        });
     }
 
     let threshold = if parse_success_count >= 2 { 2 } else { 1 };
@@ -614,5 +628,64 @@ mod tests {
             normalize_skill_pick_reason("  too   many   spaces  "),
             "too many spaces"
         );
+    }
+
+    /// When the AI provider is unreachable, `pick_skills` must still return a
+    /// deterministic local ranking (fallback_used=true) instead of erroring.
+    /// This is the design contract in AGENTS.md: "fall back to deterministic
+    /// local ranking when AI output is partial or invalid".
+    #[tokio::test]
+    async fn pick_skills_falls_back_when_provider_unreachable() {
+        use crate::ai_provider::{ApiFormat, FormatPreset};
+        let config = AiConfig {
+            enabled: true,
+            api_format: ApiFormat::Openai,
+            provider_ref: None,
+            // Port 1 on loopback refuses connections immediately.
+            base_url: "http://127.0.0.1:1/v1".to_string(),
+            api_key: "test-key".to_string(),
+            model: "test-model".to_string(),
+            target_language: "zh-CN".to_string(),
+            context_window_k: 128,
+            max_concurrent_requests: 4,
+            openai_preset: FormatPreset::default(),
+            anthropic_preset: FormatPreset::default(),
+            local_preset: FormatPreset::default(),
+            claude_haiku_model: None,
+            claude_sonnet_model: None,
+            claude_opus_model: None,
+            request_timeout_secs: Some(2),
+            short_text_priority: None,
+        };
+
+        let skills = vec![
+            SkillPickCandidate {
+                name: "react-frontend".to_string(),
+                description: "Build React frontends".to_string(),
+            },
+            SkillPickCandidate {
+                name: "database-migrations".to_string(),
+                description: "Run DB migrations".to_string(),
+            },
+        ];
+
+        let result = pick_skills(&config, "build a react frontend", skills)
+            .await
+            .expect("pick_skills must not error when provider is unreachable");
+
+        assert!(
+            result.fallback_used,
+            "fallback_used must be true when all AI rounds fail"
+        );
+        assert_eq!(
+            result.rounds_succeeded, 0,
+            "no rounds should succeed with an unreachable provider"
+        );
+        assert!(
+            !result.recommendations.is_empty(),
+            "fallback must still return local-ranked recommendations"
+        );
+        // The name-matching skill should rank first in the local fallback.
+        assert_eq!(result.recommendations[0].name, "react-frontend");
     }
 }

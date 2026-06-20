@@ -132,8 +132,9 @@ fn run_git_clone(url: &str, dest: &Path, single_branch: bool) -> Result<()> {
     }
     match run_git_clone_attempt(url, dest, &args, true) {
         Ok(()) => Ok(()),
-        Err(e) if github_mirror::effective_mirror_url().is_some()
-            && github_mirror::is_mirror_transport_error(&e.to_string()) =>
+        Err(e)
+            if github_mirror::effective_mirror_url().is_some()
+                && github_mirror::is_mirror_transport_error(&e.to_string()) =>
         {
             warn!(
                 target: "git_ops",
@@ -183,8 +184,9 @@ pub fn clone_repo_sparse(url: &str, dest: &Path) -> Result<()> {
     ];
     match run_git_clone_attempt(url, dest, &args, true) {
         Ok(()) => Ok(()),
-        Err(e) if github_mirror::effective_mirror_url().is_some()
-            && github_mirror::is_mirror_transport_error(&e.to_string()) =>
+        Err(e)
+            if github_mirror::effective_mirror_url().is_some()
+                && github_mirror::is_mirror_transport_error(&e.to_string()) =>
         {
             warn!(
                 target: "git_ops",
@@ -412,8 +414,9 @@ fn shallow_fetch_lock(repo_path: &Path) -> Arc<Mutex<()>> {
 fn run_git(repo_path: &Path, args: &[&str]) -> Result<String> {
     match run_git_with_mirror(repo_path, args, true) {
         Ok(output) => Ok(output),
-        Err(e) if github_mirror::effective_mirror_url().is_some()
-            && github_mirror::is_mirror_transport_error(&e.to_string()) =>
+        Err(e)
+            if github_mirror::effective_mirror_url().is_some()
+                && github_mirror::is_mirror_transport_error(&e.to_string()) =>
         {
             warn!(
                 target: "git_ops",

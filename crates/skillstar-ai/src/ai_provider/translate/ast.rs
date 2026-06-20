@@ -146,10 +146,7 @@ fn update_html_depth(raw: &str, depth: &mut usize) {
     let trimmed = raw.trim();
     if trimmed.starts_with("</") {
         *depth = depth.saturating_sub(1);
-    } else if trimmed.starts_with('<')
-        && !trimmed.starts_with("<!--")
-        && !trimmed.ends_with("/>")
-    {
+    } else if trimmed.starts_with('<') && !trimmed.starts_with("<!--") && !trimmed.ends_with("/>") {
         *depth += 1;
     }
 }
@@ -373,6 +370,9 @@ mod tests {
         let mut translations = HashMap::new();
         translations.insert(nodes[0].id, "用来编译".to_string());
         let out = replace_and_render(md, &translations);
-        assert!(out.contains("`cargo build`"), "inline code must survive: {out}");
+        assert!(
+            out.contains("`cargo build`"),
+            "inline code must survive: {out}"
+        );
     }
 }

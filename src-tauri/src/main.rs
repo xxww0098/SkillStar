@@ -18,16 +18,27 @@ fn main() {
     // CLI mode: if there are arguments and the first arg is a known subcommand
     if args.len() > 1 {
         let first_arg = &args[1];
+        // Keep this list in sync with every variant + alias declared in
+        // `skillstar_app::cli::Commands`. Any CLI subcommand missing from
+        // here silently falls through to `run()` and launches the GUI,
+        // which hangs headless/CLI-only contexts until the process is killed.
         let cli_commands = [
             "list",
+            "find",
+            "search",
             "install",
+            "add",
             "update",
+            "remove",
+            "rm",
+            "uninstall",
+            "init",
             "create",
             "publish",
             "doctor",
             "pack",
-            "launch",
             "gui",
+            "help",
             "-h",
             "--help",
             "-V",

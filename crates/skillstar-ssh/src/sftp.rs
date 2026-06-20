@@ -1,0 +1,653 @@
+//! Remote skill operations over SFTP: push / list / delete.
+//!
+//! Pushing mirrors the local skill directory onto a remote agent folder:
+//!
+//! 1. Resolve the local skill's **real** content dir (following the hub
+//!    symlink, same idea as `commands/skill_content.rs::resolve_skill_dir`).
+//! 2. Walk it recursively (skipping `.git`), collecting relative paths — the
+//!    same rule `list_skill_files` uses.
+//! 3. For each file: `create_dir -p` its remote parent, write bytes to a
+//!    `.skillstar.tmp` sibling, then `rename` over the target — atomic, so a
+//!    crash mid-skill never leaves a half-written file.
+//!
+//! `list_remote_skills` walks the remote dir and reports each subdirectory
+//! that contains a `SKILL.md` (so only genuine skills appear, not stray dirs).
+
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result};
+use russh::client::Handle;
+use russh_sftp::client::SftpSession;
+use russh_sftp::protocol::OpenFlags;
+use serde::{Deserialize, Serialize};
+use tokio::io::AsyncWriteExt;
+
+use crate::client::{SshHandler, exec_capture};
+use crate::hub::{REMOTE_HUB_CONTENT, shell_quote};
+use crate::types::{RemoteSkill, RemoteSkillLayout};
+
+/// A known agent's skills directory on a remote host — the push targets the UI
+/// offers. Mirrors the agent `project_skills_rel` paths from the builtin agent
+/// table (kept here as a plain constant so the ssh crate doesn't depend on
+/// `skillstar-projects`).
+///
+/// `~` is expanded by the SFTP server; paths are relative to the login $HOME.
+pub const KNOWN_AGENT_SKILL_DIRS: &[(&str, &str)] = &[
+    ("claude", "~/.claude/skills"),
+    ("codex", "~/.codex/skills"),
+    ("gemini", "~/.gemini/skills"),
+    ("opencode", "~/.opencode/skills"),
+    ("cursor", "~/.cursor/skills"),
+    ("qoder", "~/.qoder/skills"),
+    ("trae", "~/.trae/skills"),
+    ("zcode", "~/.zcode/skills"),
+    // Generic fallbacks some agents share.
+    ("agent", "~/.agent/skills"),
+];
+
+/// One detected agent skills directory on the remote host.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RemoteAgentDir {
+    /// Agent id (`claude`, `codex`, …) from [`KNOWN_AGENT_SKILL_DIRS`].
+    pub agent: String,
+    /// Absolute or `~`-prefixed path that exists on the remote.
+    pub path: String,
+}
+
+/// An agent discovered by scanning the remote `$HOME`, with the skills found
+/// under its `skills/` directory aggregated.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RemoteAgentSkills {
+    /// Agent id derived from the parent dir name (`~/.grok/skills` → `grok`).
+    pub agent: String,
+    /// Absolute path of the agent's skills directory (`/root/.grok/skills`).
+    pub path: String,
+    /// Number of skills (dirs containing SKILL.md) under this agent.
+    pub count: u32,
+}
+
+/// Result of a remote skill discovery scan: the agents found plus every skill
+/// (carrying its `agent` so the UI can group/filter).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DiscoveryResult {
+    /// Agents with at least one skill, sorted by agent name.
+    pub agents: Vec<RemoteAgentSkills>,
+    /// All skills across every agent, sorted by agent then name.
+    pub skills: Vec<RemoteSkill>,
+    /// Count of skills with `layout = standalone` (candidates for hub migration).
+    #[serde(default)]
+    pub needs_migration_count: u32,
+}
+
+/// Top-level hidden directories under `$HOME` that never hold agent skills and
+/// can be slow/large to scan (cache stores, toolchains, secrets).
+const SKIP_HOME_DIRS: &[&str] = &[
+    ".cache",
+    ".npm",
+    ".config",
+    ".ssh",
+    ".local",
+    ".docker",
+    ".vscode-server",
+    ".dotnet",
+    ".bun",
+    ".cargo",
+    ".rustup",
+    ".gnupg",
+    ".pki",
+    ".mozilla",
+    ".nvm",
+    ".pyenv",
+    ".gradle",
+    ".m2",
+    ".mozilla",
+    ".electron-gyp",
+    ".node-gyp",
+];
+
+/// Resolve the remote `$HOME` via SFTP `canonicalize(".")` (the server expands
+/// the default root). Falls back to `"."` if the server rejects it.
+async fn resolve_remote_home(sftp: &SftpSession) -> String {
+    sftp.canonicalize(".").await.unwrap_or_else(|_| ".".to_string())
+}
+
+/// Classify whether an agent-dir skill entry is hub-managed or standalone.
+async fn classify_remote_skill_layout(
+    handle: &mut Handle<SshHandler>,
+    skill_path: &str,
+    skill_name: &str,
+) -> RemoteSkillLayout {
+    let hub_content = format!("{REMOTE_HUB_CONTENT}/{skill_name}");
+    let path_q = shell_quote(skill_path);
+    let hub_q = shell_quote(&hub_content);
+    let script = format!(
+        r#"if [ -L {path_q} ]; then
+  tgt=$(readlink {path_q} 2>/dev/null || true)
+  case "$tgt" in
+    *"/.skillstar/hub/content/{skill_name}"*|*".skillstar/hub/content/{skill_name}"*)
+      if [ -f {hub_q}/SKILL.md ]; then
+        echo hub_managed
+        exit 0
+      fi
+      ;;
+  esac
+fi
+echo standalone
+"#
+    );
+    match exec_capture(handle, &script).await {
+        Ok(out) if out.trim() == "hub_managed" => RemoteSkillLayout::HubManaged,
+        _ => RemoteSkillLayout::Standalone,
+    }
+}
+
+/// Discover all agent skills on the remote host by scanning `$HOME/.*` for
+/// `<dir>/skills/<name>/SKILL.md` layouts.
+///
+/// This is **discovery-based**, not a fixed-path lookup: any agent whose
+/// `~/.<agent>/skills/` holds `SKILL.md`-bearing subdirs is reported (grok,
+/// agents, claude, codex, … — known or not). [`KNOWN_AGENT_SKILL_DIRS`] is only
+/// used as a fallback seed when the scan finds nothing (fresh server).
+pub async fn discover_remote_skills(
+    handle: &mut Handle<SshHandler>,
+    sftp: &SftpSession,
+) -> Result<DiscoveryResult> {
+    let home = resolve_remote_home(sftp).await;
+    let top = match sftp.read_dir(&home).await {
+        Ok(rd) => rd,
+        Err(_) => return Ok(DiscoveryResult::default()),
+    };
+
+    let mut agents = Vec::new();
+    let mut skills = Vec::new();
+    let mut needs_migration_count = 0u32;
+
+    for entry in top {
+        let name = entry.file_name();
+        // Only hidden directories, skip the blacklist of large/irrelevant dirs.
+        if !name.starts_with('.') || SKIP_HOME_DIRS.contains(&name.as_str()) {
+            continue;
+        }
+        let attrs = entry.metadata();
+        if !attrs.is_dir() {
+            continue;
+        }
+        let skills_dir = format!("{home}/{name}/skills");
+        let sub = match sftp.read_dir(&skills_dir).await {
+            Ok(s) => s,
+            Err(_) => continue, // no skills subdir here
+        };
+        let agent_id = name.trim_start_matches('.').to_string();
+        let mut count = 0u32;
+        for skill_entry in sub {
+            let skill_attrs = skill_entry.metadata();
+            if !skill_attrs.is_dir() {
+                continue;
+            }
+            let skill_name = skill_entry.file_name();
+            let skill_path = format!("{skills_dir}/{skill_name}");
+            // Confirm it's a genuine skill by probing for SKILL.md.
+            if sftp.metadata(format!("{skill_path}/SKILL.md")).await.is_err() {
+                continue;
+            }
+            count += 1;
+            let layout = classify_remote_skill_layout(handle, &skill_path, &skill_name).await;
+            if layout == RemoteSkillLayout::Standalone {
+                needs_migration_count += 1;
+            }
+            skills.push(RemoteSkill {
+                name: skill_name,
+                path: skill_path,
+                agent: agent_id.clone(),
+                size: skill_attrs.size.unwrap_or(0),
+                modified: skill_attrs
+                    .mtime
+                    .and_then(|t| chrono_like_rfc3339(t as i64)),
+                layout,
+            });
+        }
+        if count > 0 {
+            agents.push(RemoteAgentSkills {
+                agent: agent_id,
+                path: skills_dir,
+                count,
+            });
+        }
+    }
+
+    // Fallback: scan found nothing — seed with known dirs that exist so the UI
+    // still offers plausible push targets on a fresh server.
+    if agents.is_empty() {
+        for (agent, path) in KNOWN_AGENT_SKILL_DIRS {
+            if sftp.metadata(*path).await.is_ok() {
+                agents.push(RemoteAgentSkills {
+                    agent: (*agent).to_string(),
+                    path: (*path).to_string(),
+                    count: 0,
+                });
+            }
+        }
+    }
+
+    agents.sort_by(|a, b| a.agent.cmp(&b.agent));
+    skills.sort_by(|a, b| a.agent.cmp(&b.agent).then(a.name.cmp(&b.name)));
+    Ok(DiscoveryResult {
+        agents,
+        skills,
+        needs_migration_count,
+    })
+}
+
+/// Aggregate result of a successful push.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PushResult {
+    /// Number of files written.
+    pub files_uploaded: u32,
+    /// Total bytes transferred.
+    pub bytes: u64,
+    /// Absolute remote path the skill now lives at.
+    pub remote_path: String,
+}
+
+/// Open an SFTP subsystem session on an authenticated SSH handle.
+pub async fn open_sftp(
+    handle: &mut Handle<SshHandler>,
+    session_id: &str,
+    sink: &impl crate::progress::ProgressSink,
+) -> Result<SftpSession> {
+    sink.emit(crate::progress::event(
+        session_id,
+        crate::progress::Phase::Sftp,
+        crate::progress::Status::Start,
+        "opening SFTP subsystem…",
+    ));
+    let channel = handle
+        .channel_open_session()
+        .await
+        .context("open SFTP session channel")?;
+    channel
+        .request_subsystem(true, "sftp")
+        .await
+        .context("request sftp subsystem")?;
+    let session = SftpSession::new(channel.into_stream())
+        .await
+        .context("initialise SFTP session")?;
+    sink.emit(crate::progress::event(
+        session_id,
+        crate::progress::Phase::Sftp,
+        crate::progress::Status::Ok,
+        "SFTP ready",
+    ));
+    Ok(session)
+}
+
+// ── local skill resolution (mirrors commands/skill_content resolve logic) ──
+
+/// Resolve a hub skill name to its real on-disk content directory.
+///
+/// Hub skills are symlinks (`skills/<name>` → `local/<name>` or a repo
+/// checkout). We follow the link, then accept the first of: the dir itself if
+/// it has `SKILL.md`, a nested `<name>/SKILL.md`, otherwise the resolved dir.
+fn resolve_local_skill_dir(skill_name: &str) -> Result<PathBuf> {
+    let skills_dir = skillstar_core::infra::paths::hub_skills_dir();
+    let skill_dir = skills_dir.join(skill_name);
+    if !skill_dir.exists() {
+        anyhow::bail!("skill '{}' is not installed in the hub", skill_name);
+    }
+    let effective = if skillstar_core::infra::fs_ops::is_link(&skill_dir) {
+        skillstar_core::infra::fs_ops::read_link_resolved(&skill_dir)
+            .unwrap_or_else(|_| skill_dir.clone())
+    } else {
+        skill_dir.clone()
+    };
+
+    if effective.join("SKILL.md").exists() {
+        return Ok(effective);
+    }
+    // Nested layout (repo with subfolders): look one level deep.
+    let nested = effective.join(skill_name);
+    if nested.join("SKILL.md").exists() {
+        return Ok(nested);
+    }
+    Ok(effective)
+}
+
+/// Recursively collect `(relative_path, absolute_path)` file pairs, skipping
+/// `.git` (same rule as `list_skill_files`).
+fn collect_local_files(root: &Path) -> Result<Vec<(String, PathBuf)>> {
+    let mut out = Vec::new();
+    walk(root, root, &mut out)?;
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(out)
+}
+
+fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) -> Result<()> {
+    for entry in std::fs::read_dir(dir).with_context(|| format!("read dir {}", dir.display()))? {
+        let entry = entry?;
+        let path = entry.path();
+        let name = entry.file_name();
+        if name == ".git" {
+            continue;
+        }
+        if path.is_dir() {
+            walk(root, &path, out)?;
+        } else if let Ok(rel) = path.strip_prefix(root) {
+            let rel_str = rel.to_string_lossy().replace('\\', "/");
+            out.push((rel_str, path));
+        }
+    }
+    Ok(())
+}
+
+// ── remote path helpers ─────────────────────────────────────────────
+
+/// Join a remote base dir (possibly containing `~`) with a skill name.
+/// SFTP servers expand `~` themselves, so we keep it as-is and just join.
+fn remote_skill_dir(remote_base: &str, skill_name: &str) -> String {
+    let trimmed = remote_base.trim_end_matches('/');
+    if trimmed.is_empty() {
+        skill_name.to_string()
+    } else {
+        format!("{trimmed}/{skill_name}")
+    }
+}
+
+/// Split a posix remote path into its parent components, so we can mkdir -p.
+///
+/// Handles three SFTP path shapes:
+/// - `~/.claude/skills`  → `["~", "~/.claude", "~/.claude/skills"]`
+/// - `/home/u/skills`    → `["/home", "/home/u", "/home/u/skills"]`
+/// - `relative/skills`   → `["relative", "relative/skills"]`
+fn remote_parent_dirs(remote_path: &str) -> Vec<String> {
+    let absolute = remote_path.starts_with('/');
+    let mut dirs = Vec::new();
+    let mut acc = String::new();
+    for part in remote_path.split('/') {
+        if part.is_empty() {
+            continue;
+        }
+        if acc.is_empty() {
+            acc = if absolute { format!("/{part}") } else { part.to_string() };
+        } else {
+            acc.push('/');
+            acc.push_str(part);
+        }
+        dirs.push(acc.clone());
+    }
+    dirs
+}
+
+/// `mkdir -p` over SFTP — ignore "already exists" failures.
+pub async fn ensure_remote_dir_pub(sftp: &SftpSession, remote_path: &str) -> Result<()> {
+    ensure_remote_dir(sftp, remote_path).await
+}
+
+async fn ensure_remote_dir(sftp: &SftpSession, remote_path: &str) -> Result<()> {
+    for dir in remote_parent_dirs(remote_path) {
+        match sftp.create_dir(&dir).await {
+            Ok(()) => {}
+            // SFTP returns Failure for existing dirs — treat as success.
+            Err(_) => {}
+        }
+    }
+    Ok(())
+}
+
+// ── public operations ───────────────────────────────────────────────
+
+/// Upload a local hub skill tree to `remote_content_dir` (no agent link).
+pub async fn upload_local_skill_tree(
+    sftp: &SftpSession,
+    skill_name: &str,
+    remote_content_dir: &str,
+) -> Result<(u32, u64)> {
+    let local_dir = resolve_local_skill_dir(skill_name)?;
+    let files = collect_local_files(&local_dir)?;
+    ensure_remote_dir(sftp, remote_content_dir).await?;
+
+    let mut files_uploaded = 0u32;
+    let mut bytes = 0u64;
+
+    for (rel, abs) in &files {
+        let remote_file = format!("{}/{rel}", remote_content_dir.trim_end_matches('/'));
+        if let Some((file_parent, _)) = remote_file.rsplit_once('/') {
+            ensure_remote_dir(sftp, file_parent).await?;
+        }
+
+        let local_bytes = std::fs::read(abs).with_context(|| format!("read {}", abs.display()))?;
+        bytes += local_bytes.len() as u64;
+
+        let tmp_path = format!("{remote_file}.skillstar.tmp");
+        let mut file = sftp
+            .open_with_flags(&tmp_path, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE)
+            .await
+            .with_context(|| format!("open remote {tmp_path}"))?;
+        file.write_all(&local_bytes)
+            .await
+            .with_context(|| format!("write remote {tmp_path}"))?;
+        file.flush().await.ok();
+        drop(file);
+
+        let _ = sftp.remove_file(&remote_file).await;
+        sftp.rename(&tmp_path, &remote_file)
+            .await
+            .with_context(|| format!("rename {tmp_path} -> {remote_file}"))?;
+
+        files_uploaded += 1;
+    }
+
+    Ok((files_uploaded, bytes))
+}
+
+/// Push one locally-installed skill to `remote_base` on the connected host.
+///
+/// Files are written to a `.skillstar.tmp` sibling first and then renamed, so
+/// an interrupted push never leaves partially-written files at the final path.
+pub async fn push_skill(
+    sftp: &SftpSession,
+    skill_name: &str,
+    remote_base: &str,
+) -> Result<PushResult> {
+    let remote_target = remote_skill_dir(remote_base, skill_name);
+    let parent = remote_target
+        .rsplit_once('/')
+        .map(|(p, _)| p)
+        .unwrap_or(".");
+    ensure_remote_dir(sftp, parent).await?;
+    ensure_remote_dir(sftp, &remote_target).await?;
+
+    let (files_uploaded, bytes) = upload_local_skill_tree(sftp, skill_name, &remote_target).await?;
+
+    tracing::info!(
+        target: "ssh",
+        skill = skill_name,
+        remote = %remote_target,
+        files = files_uploaded,
+        bytes,
+        "skill pushed to remote"
+    );
+
+    Ok(PushResult {
+        files_uploaded,
+        bytes,
+        remote_path: remote_target,
+    })
+}
+
+/// List skills under a remote directory. A subdirectory counts as a skill iff
+/// it contains a `SKILL.md`.
+pub async fn list_remote_skills(
+    sftp: &SftpSession,
+    remote_dir: &str,
+) -> Result<Vec<RemoteSkill>> {
+    let entries = match sftp.read_dir(remote_dir).await {
+        Ok(rd) => rd,
+        Err(_) => return Ok(Vec::new()), // missing dir → empty list
+    };
+
+    let mut skills = Vec::new();
+    for entry in entries {
+        let name = entry.file_name();
+        // Only directories, skip hidden.
+        if name.starts_with('.') {
+            continue;
+        }
+        let attrs = entry.metadata();
+        if !attrs.is_dir() {
+            continue;
+        }
+        let skill_path = format!("{}/{name}", remote_dir.trim_end_matches('/'));
+        // Probe for SKILL.md to confirm it's actually a skill.
+        if sftp.metadata(format!("{skill_path}/SKILL.md")).await.is_err() {
+            continue;
+        }
+        let size = attrs.size.unwrap_or(0);
+        let modified = attrs
+            .mtime
+            .and_then(|t| chrono_like_rfc3339(t as i64));
+        skills.push(RemoteSkill {
+            name,
+            path: skill_path,
+            agent: String::new(),
+            size,
+            modified,
+            layout: RemoteSkillLayout::default(),
+        });
+    }
+    skills.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(skills)
+}
+
+/// Best-effort RFC3339 formatting of a Unix timestamp.
+fn chrono_like_rfc3339(secs: i64) -> Option<String> {
+    // Avoid pulling chrono into this crate for one call; format manually.
+    // Sufficient for display; not used for ordering.
+    let days = secs.div_euclid(86_400);
+    let _rem = secs.rem_euclid(86_400);
+    // Civil-from-days (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if m <= 2 { y + 1 } else { y };
+    Some(format!("{year:04}-{m:02}-{d:02}"))
+}
+
+/// Delete a remote skill directory (recursive). Removes files first, then
+/// the (now empty) directory.
+pub async fn delete_remote_skill(sftp: &SftpSession, remote_path: &str) -> Result<()> {
+    // Recursively remove children.
+    remove_remote_tree(sftp, remote_path).await?;
+    match sftp.remove_dir(remote_path).await {
+        Ok(()) => Ok(()),
+        Err(_) => Ok(()), // already gone — idempotent
+    }
+}
+
+async fn remove_remote_tree(sftp: &SftpSession, remote_path: &str) -> Result<()> {
+    let entries = match sftp.read_dir(remote_path).await {
+        Ok(rd) => rd,
+        Err(_) => return Ok(()),
+    };
+    for entry in entries {
+        let name = entry.file_name();
+        let attrs = entry.metadata();
+        let child = format!("{}/{name}", remote_path.trim_end_matches('/'));
+        if attrs.is_dir() {
+            Box::pin(remove_remote_tree(sftp, &child)).await?;
+            let _ = sftp.remove_dir(&child).await;
+        } else {
+            let _ = sftp.remove_file(&child).await;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remote_skill_dir_joins_without_double_slash() {
+        assert_eq!(remote_skill_dir("~/.claude/skills", "foo"), "~/.claude/skills/foo");
+        assert_eq!(remote_skill_dir("~/.claude/skills/", "foo"), "~/.claude/skills/foo");
+        assert_eq!(remote_skill_dir("", "foo"), "foo");
+    }
+
+    #[test]
+    fn remote_parent_dirs_splits_components() {
+        // Tilde-prefixed: `~` is preserved so the SFTP server expands it.
+        let dirs = remote_parent_dirs("~/.claude/skills");
+        assert_eq!(dirs, vec!["~", "~/.claude", "~/.claude/skills"]);
+    }
+
+    #[test]
+    fn remote_parent_dirs_absolute_path() {
+        let dirs = remote_parent_dirs("/home/u/skills");
+        assert_eq!(dirs, vec!["/home", "/home/u", "/home/u/skills"]);
+    }
+
+    #[test]
+    fn collect_local_files_skips_git() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::write(root.join("SKILL.md"), "x").unwrap();
+        std::fs::create_dir_all(root.join(".git/refs")).unwrap();
+        std::fs::write(root.join(".git/refs/head"), "x").unwrap();
+        std::fs::create_dir_all(root.join("scripts")).unwrap();
+        std::fs::write(root.join("scripts/run.sh"), "x").unwrap();
+
+        let files = collect_local_files(root).unwrap();
+        let rels: Vec<_> = files.into_iter().map(|(r, _)| r).collect();
+        assert!(rels.contains(&"SKILL.md".to_string()));
+        assert!(rels.contains(&"scripts/run.sh".to_string()));
+        assert!(!rels.iter().any(|r| r.contains(".git")));
+    }
+
+    #[test]
+    fn resolve_local_skill_dir_errors_when_missing() {
+        let _guard = test_data_dir();
+        let err = resolve_local_skill_dir("definitely_not_installed").unwrap_err();
+        assert!(err.to_string().contains("not installed"));
+    }
+
+    fn chrono_like_rfc3339_format_has_date_shape() {
+        let s = chrono_like_rfc3339(1_700_000_000).unwrap();
+        assert_eq!(s.len(), 10); // YYYY-MM-DD
+        assert!(s.starts_with("20"));
+    }
+
+    struct DataDirGuard {
+        _temp: tempfile::TempDir,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+    impl Drop for DataDirGuard {
+        fn drop(&mut self) {
+            unsafe {
+                std::env::remove_var("SKILLSTAR_DATA_DIR");
+            }
+        }
+    }
+    fn test_data_dir() -> DataDirGuard {
+        let _lock = crate::test_support::env_lock().lock().unwrap();
+        let temp = tempfile::TempDir::new().unwrap();
+        // SAFETY: the env lock above serialises all such mutations.
+        unsafe {
+            std::env::set_var("SKILLSTAR_DATA_DIR", temp.path());
+        }
+        DataDirGuard {
+            _temp: temp,
+            _lock,
+        }
+    }
+
+    #[test]
+    fn rfc3339_helper_formats_date() {
+        chrono_like_rfc3339_format_has_date_shape();
+    }
+}

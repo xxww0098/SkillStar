@@ -389,4 +389,3 @@ fn categories_and_tags_migrate_v5_database_preserving_ratings() {
         assert_eq!(tag_count, 0);
     });
 }
-

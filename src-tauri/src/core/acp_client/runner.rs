@@ -4,13 +4,13 @@
 
 use agent_client_protocol::{self as acp, Agent as _};
 use anyhow::{Context, Result, anyhow};
-use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tracing::{error, info, warn};
 
-use skillstar_core::infra::paths;
 use crate::core::path_env;
+use skillstar_core::infra::paths;
 
 use super::client::{AcpSetupResult, SkillStarClient, TerminalManager};
 
@@ -28,7 +28,8 @@ const SCRIPT_EXAMPLE: &str = "```setup-script\n#Requires -Version 5.1\n$ErrorAct
 #[cfg(not(windows))]
 const SCRIPT_KIND: &str = "a bash script";
 #[cfg(not(windows))]
-const SCRIPT_EXAMPLE: &str = "```setup-script\n#!/bin/bash\nset -euo pipefail\n# your working script here\n```";
+const SCRIPT_EXAMPLE: &str =
+    "```setup-script\n#!/bin/bash\nset -euo pipefail\n# your working script here\n```";
 
 /// The prompt template sent to the Agent (platform-aware scripting).
 fn setup_prompt() -> String {
@@ -65,7 +66,7 @@ Please:
 6. Each `skills-rebuild/<skill-name>/` subdirectory must contain at minimum:
    - A `SKILL.md` file (copy from the original location, or use any generated/adapted version if one exists)
    - Any supporting files the skill references (scripts, binaries, etc.) — use symlinks to the originals when possible
-7. If the repo has pre-generated skill directories (e.g. `.agents/skills/`, `.claude/skills/`) that already contain adapted SKILL.md files, prefer those.
+7. If the repo has pre-generated skill directories (e.g. `.agent/skills/`, `.agents/skills/`, `.claude/skills/`) that already contain adapted SKILL.md files, prefer those.
 8. The script should be idempotent — safe to re-run — and use commands available on the current operating system.
 9. Do NOT include the root-level SKILL.md as a separate skill (it's a meta-skill for the whole repo).
 
@@ -359,8 +360,9 @@ fn resolve_repo_root(skill_path: &std::path::Path) -> PathBuf {
     }
 
     if let Ok(rel) = canonical.strip_prefix(&repos_cache)
-        && let Some(first) = rel.components().next() {
-            return repos_cache.join(first);
-        }
+        && let Some(first) = rel.components().next()
+    {
+        return repos_cache.join(first);
+    }
     canonical
 }

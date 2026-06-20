@@ -3,6 +3,7 @@ import { ChevronDown, Copy, ExternalLink, Eye, EyeOff, FolderInput, Loader2, Tra
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { ExternalAnchor } from "@/components/ui/ExternalAnchor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ModalShell } from "@/components/ui/ModalShell";
@@ -33,6 +34,37 @@ interface SubscriptionEditDialogProps {
   onDeleted: () => void;
 }
 
+interface CookieHelp {
+  title: string;
+  openLabel: string;
+  intro: string;
+  requestTargets: string[];
+  outro: string;
+  copyHint: string;
+}
+
+function cookieHelpForCatalog(catalogId: string, displayName?: string): CookieHelp {
+  if (catalogId === "opencode") {
+    return {
+      title: "登录 OpenCode 控制台后复制 workspace 请求 Cookie，用于读取 Go / Zen 用量。",
+      openLabel: "打开 OpenCode",
+      intro: "在浏览器打开 opencode.ai 的 workspace/default/go 页面后，打开 DevTools → Network → 找到 ",
+      requestTargets: ["/workspace/...", "/_server"],
+      outro: " 请求 → 右键 ",
+      copyHint: " → 粘贴到终端中提取 Cookie 字段，或直接从 Request Headers 中复制 ",
+    };
+  }
+
+  return {
+    title: `登录 ${displayName ?? "服务"} 控制台后复制浏览器 Cookie。`,
+    openLabel: "打开控制台",
+    intro: "在浏览器打开对应控制台后，打开 DevTools → Network → 刷新页面，找到任意同域接口请求 → 右键 ",
+    requestTargets: [],
+    outro: "",
+    copyHint: " → 粘贴到终端中提取 Cookie 字段，或直接从 Request Headers 中复制 ",
+  };
+}
+
 export function SubscriptionEditDialog({
   open,
   catalog,
@@ -59,7 +91,9 @@ export function SubscriptionEditDialog({
   const [endDate, setEndDate] = useState("");
   const [autoRenew, setAutoRenew] = useState(false);
   const [apiKey, setApiKey] = useState("");
+  const [platformToken, setPlatformToken] = useState("");
   const [showKey, setShowKey] = useState(false);
+  const [showPlatformToken, setShowPlatformToken] = useState(false);
   const [cookieHeader, setCookieHeader] = useState("");
   const [region, setRegion] = useState("cn");
   const [totalTokens, setTotalTokens] = useState("");
@@ -103,6 +137,7 @@ export function SubscriptionEditDialog({
       setEndDate(toDateInput(editing.renew_date));
       setAutoRenew(editing.auto_renew);
       setApiKey("");
+      setPlatformToken("");
       setRegion(editing.oauth_region ?? "cn");
       setCookieHeader("");
       setTotalTokens(editing.manual_quota?.total_tokens?.toString() ?? "");
@@ -124,6 +159,7 @@ export function SubscriptionEditDialog({
       setEndDate("");
       setAutoRenew(false);
       setApiKey("");
+      setPlatformToken("");
       setRegion(preselectedEntry?.regions[0] ?? "cn");
       setCookieHeader("");
       setTotalTokens("");
@@ -133,6 +169,7 @@ export function SubscriptionEditDialog({
       setFingerprintId(null);
     }
     setShowKey(false);
+    setShowPlatformToken(false);
     setOauthStart(null);
     setOauthPendingId(null);
     setOauthStatus(null);
@@ -166,6 +203,10 @@ export function SubscriptionEditDialog({
   }, [catalogId, catalog, editing, authMode, planTier, region, open]);
 
   const selectedEntry = useMemo(() => catalog.find((c) => c.id === catalogId) ?? null, [catalog, catalogId]);
+  const cookieHelp = useMemo(
+    () => cookieHelpForCatalog(catalogId, selectedEntry?.display_name),
+    [catalogId, selectedEntry?.display_name],
+  );
   const visibleAuthModes = useMemo(
     () => (selectedEntry ? selectableAuthModes(selectedEntry.auth_modes) : []),
     [selectedEntry],
@@ -294,30 +335,49 @@ export function SubscriptionEditDialog({
     setSubmitting(true);
     try {
       const payload = buildPayload();
+      const cookiePayload = authMode === "cookie" && cookieHeader.trim() ? cookieHeader.trim() : undefined;
+      const apiKeyPayload = authMode === "api-key" && apiKey.trim() ? apiKey.trim() : undefined;
+      const platformTokenPayload =
+        catalogId === "deepseek" && authMode === "api-key" && platformToken.trim() ? platformToken.trim() : undefined;
+      const shouldRefreshAfterSave = Boolean(cookiePayload || apiKeyPayload || platformTokenPayload);
+
+      const refreshAfterCredentialSave = async (sub: Subscription) => {
+        if (!shouldRefreshAfterSave) return sub;
+        try {
+          return await usageApi.refreshSubscriptionUsage(sub.id);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          toast.warning(t("usage.refreshOneFailed", { name: sub.display_name, error: msg }));
+          return sub;
+        }
+      };
+
       if (isCreate) {
         const created = await usageApi.createSubscription({
           catalog_id: catalogId,
           auth_mode: authMode,
-          api_key: authMode === "api-key" && apiKey ? apiKey : undefined,
+          api_key: apiKeyPayload,
+          platform_token: platformTokenPayload,
           oauth_region: authMode === "o-auth" ? region : undefined,
-          cookie_header: authMode === "cookie" && cookieHeader ? cookieHeader : undefined,
+          cookie_header: cookiePayload,
           fingerprint_id: fingerprintId ?? undefined,
           ...payload,
         });
-        onCreated(created);
+        onCreated(await refreshAfterCredentialSave(created));
         toast.success(t("usage.toastAdded"));
       } else {
         const updated = await usageApi.updateSubscription(editing.id, {
           ...payload,
-          api_key: apiKey || undefined,
-          cookie_header: cookieHeader || undefined,
+          api_key: apiKeyPayload,
+          platform_token: platformTokenPayload,
+          cookie_header: cookiePayload,
           fingerprint_id: fingerprintId ?? undefined,
           // When the user explicitly switched back to "默认" on an
           // editing row that previously had a binding, we need to
           // tell the backend to drop it.
           clearFingerprint: !!editing.fingerprint_id && fingerprintId === null,
         });
-        onUpdated(updated);
+        onUpdated(await refreshAfterCredentialSave(updated));
         toast.success(t("usage.toastUpdated"));
       }
       onClose();
@@ -327,6 +387,14 @@ export function SubscriptionEditDialog({
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const resetOAuthState = () => {
+    setOauthStart(null);
+    setOauthPendingId(null);
+    setOauthStatus(null);
+    setOauthCallbackInput("");
+    setOauthSubmittingCallback(false);
   };
 
   const finishOAuthSubscription = async (created: Subscription) => {
@@ -378,11 +446,7 @@ export function SubscriptionEditDialog({
       if (oauthCancelledRef.current === pendingId) {
         oauthCancelledRef.current = null;
       }
-      setOauthStart(null);
-      setOauthPendingId(null);
-      setOauthStatus(null);
-      setOauthCallbackInput("");
-      setOauthSubmittingCallback(false);
+      resetOAuthState();
     }
   };
 
@@ -497,11 +561,7 @@ export function SubscriptionEditDialog({
     } catch {
       /* ignore */
     }
-    setOauthStart(null);
-    setOauthPendingId(null);
-    setOauthStatus(null);
-    setOauthCallbackInput("");
-    setOauthSubmittingCallback(false);
+    resetOAuthState();
     setSubmitting(false);
   };
 
@@ -749,36 +809,92 @@ export function SubscriptionEditDialog({
           <div className="space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
             {/* 1. API Key 认证仅需填 Key */}
             {authMode === "api-key" && (
-              <Field
-                label={editing ? t("usage.fieldApiKeyOptional") : "API Key"}
-                hint={selectedEntry?.id === "glm" ? t("usage.glmApiKeyHint") : undefined}
-              >
-                <div className="relative">
-                  <Input
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder="sk-..."
-                    type={showKey ? "text" : "password"}
-                    autoComplete="off"
-                    className="h-9 rounded-xl border-input-border bg-input pr-9 text-xs text-foreground"
-                  />
-                  <button
-                    type="button"
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                    onClick={() => setShowKey((v) => !v)}
+              <>
+                <Field
+                  label={editing ? t("usage.fieldApiKeyOptional") : "API Key"}
+                  hint={selectedEntry?.id === "glm" ? t("usage.glmApiKeyHint") : undefined}
+                >
+                  <div className="relative">
+                    <Input
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      placeholder="sk-..."
+                      type={showKey ? "text" : "password"}
+                      autoComplete="off"
+                      className="h-9 rounded-xl border-input-border bg-input pr-9 text-xs text-foreground"
+                    />
+                    <button
+                      type="button"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                      onClick={() => setShowKey((v) => !v)}
+                    >
+                      {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </Field>
+
+                {catalogId === "deepseek" && (
+                  <Field
+                    label={
+                      editing?.has_platform_token
+                        ? t("usage.deepseekPlatformTokenOptional")
+                        : t("usage.deepseekPlatformToken")
+                    }
+                    hint={t("usage.deepseekPlatformTokenHint")}
                   >
-                    {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-              </Field>
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <Input
+                          value={platformToken}
+                          onChange={(e) => setPlatformToken(e.target.value)}
+                          placeholder={t("usage.deepseekPlatformTokenPlaceholder")}
+                          type={showPlatformToken ? "text" : "password"}
+                          autoComplete="off"
+                          className="h-9 rounded-xl border-input-border bg-input pr-9 text-xs text-foreground"
+                        />
+                        <button
+                          type="button"
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                          onClick={() => setShowPlatformToken((v) => !v)}
+                        >
+                          {showPlatformToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                      {editing?.has_platform_token && (
+                        <p className="text-[9px] text-muted-foreground">{t("usage.deepseekPlatformTokenConfigured")}</p>
+                      )}
+                      <p className="text-[9px] leading-relaxed text-muted-foreground">
+                        <code className="rounded bg-muted px-1 py-0.5 text-[9px]">
+                          JSON.parse(localStorage.userToken).value
+                        </code>
+                      </p>
+                    </div>
+                  </Field>
+                )}
+              </>
             )}
 
             {/* Cookie 模式：粘贴浏览器的 Cookie Header */}
             {authMode === "cookie" && (
               <div className="space-y-2.5 rounded-2xl border border-border bg-muted/30 p-3.5">
-                <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                  🍪 浏览器 Cookie
-                </h4>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                      🍪 浏览器 Cookie
+                    </h4>
+                    <p className="mt-1 text-[10px] leading-snug text-muted-foreground/75">{cookieHelp.title}</p>
+                  </div>
+                  {selectedEntry?.subscription_url && (
+                    <ExternalAnchor
+                      href={selectedEntry.subscription_url}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-border bg-background/70 px-2 py-1.5 text-[10px] font-semibold text-foreground transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
+                      title={cookieHelp.openLabel}
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      {cookieHelp.openLabel}
+                    </ExternalAnchor>
+                  )}
+                </div>
 
                 {/* OpenCode: Go / Zen 选择器 */}
                 {catalogId === "opencode" && (
@@ -812,12 +928,18 @@ export function SubscriptionEditDialog({
                 )}
 
                 <p className="text-[10px] leading-relaxed text-muted-foreground">
-                  在浏览器打开 opencode.ai 的 workspace/default/go 页面后，打开 DevTools → Network → 找到
-                  <code className="mx-0.5 rounded bg-muted px-1 text-[10px]">/workspace/...</code> 或
-                  <code className="mx-0.5 rounded bg-muted px-1 text-[10px]">/_server</code> 请求 → 右键
-                  <code className="mx-0.5 rounded bg-muted px-1 text-[10px]">Copy as cURL</code>→ 粘贴到终端中提取
-                  Cookie 字段，或直接从 Request Headers 中复制
-                  <code className="mx-0.5 rounded bg-muted px-1 text-[10px]">Cookie:</code> 后面的完整内容。
+                  {cookieHelp.intro}
+                  {cookieHelp.requestTargets.map((target, index) => (
+                    <span key={target}>
+                      {index > 0 ? " 或 " : ""}
+                      <code className="mx-0.5 rounded bg-muted px-1 text-[10px]">{target}</code>
+                    </span>
+                  ))}
+                  {cookieHelp.outro}
+                  <code className="mx-0.5 rounded bg-muted px-1 text-[10px]">Copy as cURL</code>
+                  {cookieHelp.copyHint}
+                  <code className="mx-0.5 rounded bg-muted px-1 text-[10px]">Cookie:</code>
+                  后面的完整内容。
                 </p>
                 <textarea
                   value={cookieHeader}

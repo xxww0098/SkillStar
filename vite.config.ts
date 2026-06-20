@@ -14,6 +14,12 @@ export default defineConfig(async () => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  optimizeDeps: {
+    // Explicitly pre-bundle these so that deep subpath imports (icons) and the
+    // unified "radix-ui" barrel (Dialog/Popover/AlertDialog/DropdownMenu + Slot/Switch)
+    // resolve reliably in Vite dev when lazy-loaded chunks (Models hub etc.) are first requested.
+    include: ["radix-ui", "@lobehub/icons"],
+  },
   clearScreen: false,
   build: {
     rollupOptions: {
@@ -28,7 +34,7 @@ export default defineConfig(async () => ({
           if (id.includes("node_modules/framer-motion/")) return "motion-vendor";
           if (id.includes("node_modules/i18next/") || id.includes("node_modules/react-i18next/")) return "i18n-vendor";
           if (id.includes("node_modules/@tauri-apps/")) return "tauri-vendor";
-          if (id.includes("node_modules/@radix-ui/")) return "radix-vendor";
+          if (id.includes("node_modules/@radix-ui/") || id.includes("node_modules/radix-ui/")) return "radix-vendor";
           if (
             id.includes("node_modules/class-variance-authority/") ||
             id.includes("node_modules/clsx/") ||
@@ -37,6 +43,7 @@ export default defineConfig(async () => ({
             id.includes("node_modules/tailwind-merge/")
           )
             return "ui-vendor";
+          if (id.includes("node_modules/@lobehub/icons/")) return "icons-vendor";
         },
       },
     },

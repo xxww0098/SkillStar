@@ -1,6 +1,6 @@
 //! Import servers from a tool's live config into the unified store.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -10,7 +10,11 @@ use super::*;
 /// Parse a community `mcpServers` JSON spec into store fields.
 pub(crate) fn entry_from_json_spec(name: &str, spec: &Value) -> Option<McpServerEntry> {
     let obj = spec.as_object()?;
-    let transport = obj.get("type").and_then(|v| v.as_str()).unwrap_or("stdio").to_string();
+    let transport = obj
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("stdio")
+        .to_string();
     let mut entry = blank_entry(name, &transport);
     match transport.as_str() {
         "http" | "sse" => {
@@ -23,11 +27,18 @@ pub(crate) fn entry_from_json_spec(name: &str, spec: &Value) -> Option<McpServer
             entry.url.as_ref()?; // require url
         }
         _ => {
-            entry.command = obj.get("command").and_then(|v| v.as_str()).map(String::from);
+            entry.command = obj
+                .get("command")
+                .and_then(|v| v.as_str())
+                .map(String::from);
             entry.args = obj
                 .get("args")
                 .and_then(|v| v.as_array())
-                .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
             entry.env = obj
                 .get("env")
@@ -84,9 +95,10 @@ pub fn read_servers_from_tool(tool_id: &str) -> Result<Vec<McpServerEntry>> {
             if let Some(servers) = root.get("mcp_servers").and_then(|v| v.as_table()) {
                 for (name, val) in servers {
                     if let Some(tbl) = val.as_table()
-                        && let Some(e) = entry_from_codex_table(name, tbl) {
-                            out.push(e);
-                        }
+                        && let Some(e) = entry_from_codex_table(name, tbl)
+                    {
+                        out.push(e);
+                    }
                 }
             }
         }
@@ -96,6 +108,21 @@ pub fn read_servers_from_tool(tool_id: &str) -> Result<Vec<McpServerEntry>> {
             if let Some(map) = root.get("mcp").and_then(|v| v.as_object()) {
                 for (name, val) in map {
                     if let Some(e) = entry_from_opencode_spec(name, val) {
+                        out.push(e);
+                    }
+                }
+            }
+        }
+        "zcode" => {
+            let root: Value = serde_json::from_str(&content)
+                .with_context(|| format!("Failed to parse {}", path.display()))?;
+            if let Some(map) = root
+                .get("mcp")
+                .and_then(|m| m.get("servers"))
+                .and_then(|v| v.as_object())
+            {
+                for (name, val) in map {
+                    if let Some(e) = entry_from_json_spec(name, val) {
                         out.push(e);
                     }
                 }
@@ -117,7 +144,11 @@ pub fn read_servers_from_tool(tool_id: &str) -> Result<Vec<McpServerEntry>> {
 }
 
 fn entry_from_codex_table(name: &str, tbl: &toml::Table) -> Option<McpServerEntry> {
-    let transport = tbl.get("type").and_then(|v| v.as_str()).unwrap_or("stdio").to_string();
+    let transport = tbl
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("stdio")
+        .to_string();
     let mut entry = blank_entry(name, &transport);
     match transport.as_str() {
         "http" | "sse" => {
@@ -135,11 +166,18 @@ fn entry_from_codex_table(name: &str, tbl: &toml::Table) -> Option<McpServerEntr
             entry.url.as_ref()?;
         }
         _ => {
-            entry.command = tbl.get("command").and_then(|v| v.as_str()).map(String::from);
+            entry.command = tbl
+                .get("command")
+                .and_then(|v| v.as_str())
+                .map(String::from);
             entry.args = tbl
                 .get("args")
                 .and_then(|v| v.as_array())
-                .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
             entry.cwd = tbl.get("cwd").and_then(|v| v.as_str()).map(String::from);
             if let Some(env) = tbl.get("env").and_then(|v| v.as_table()) {
@@ -172,8 +210,10 @@ pub(crate) fn entry_from_opencode_spec(name: &str, spec: &Value) -> Option<McpSe
         _ => {
             let mut entry = blank_entry(name, "stdio");
             if let Some(arr) = obj.get("command").and_then(|v| v.as_array()) {
-                let parts: Vec<String> =
-                    arr.iter().filter_map(|x| x.as_str().map(String::from)).collect();
+                let parts: Vec<String> = arr
+                    .iter()
+                    .filter_map(|x| x.as_str().map(String::from))
+                    .collect();
                 if let Some((first, rest)) = parts.split_first() {
                     entry.command = Some(first.clone());
                     entry.args = rest.to_vec();
@@ -211,8 +251,12 @@ pub fn import_from_tool(store: &mut McpStore, tool_id: &str) -> Result<usize> {
             let now = now_ms();
             found.created_at = Some(now);
             found.updated_at = Some(now);
-            found.sort_index =
-                store.servers.iter().map(|s| s.sort_index).max().map_or(0, |m| m + 1);
+            found.sort_index = store
+                .servers
+                .iter()
+                .map(|s| s.sort_index)
+                .max()
+                .map_or(0, |m| m + 1);
             found.enabled.insert(tool_id.to_string(), true);
             store.servers.push(found);
             changed += 1;

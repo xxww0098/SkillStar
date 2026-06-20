@@ -7,6 +7,7 @@ import type { AppMode, ModelsNavPage, NavPage, SubPage } from "../types";
 const importMySkillsPage = () => import("../pages/MySkills");
 const importMarketplacePage = () => import("../pages/Marketplace");
 const importPublisherDetailPage = () => import("../pages/PublisherDetail");
+const importMcpPublisherDetailPage = () => import("../pages/McpPublisherDetail");
 const importSkillCardsPage = () => import("../pages/SkillCards");
 const importProjectsPage = () => import("../pages/Projects");
 const importMcpPage = () => import("../pages/Mcp");
@@ -36,6 +37,7 @@ const PAGE_IMPORTERS: Record<NavPage, () => Promise<unknown>> = {
   "my-skills": importMySkillsPage,
   marketplace: () => {
     void importPublisherDetailPage();
+    void importMcpPublisherDetailPage();
     return importMarketplacePage();
   },
   "skill-cards": importSkillCardsPage,
@@ -111,6 +113,7 @@ function modelsPageFromHash(_hash: string): ModelsNavPage {
 function pageFromHash(): NavPage {
   const hash = window.location.hash.slice(1);
   if (isModelsHash(hash) || isUsageHash(hash)) return "my-skills";
+  if (hash === "ssh") return "my-skills";
   return HASH_TO_PAGE[hash] ?? "my-skills";
 }
 

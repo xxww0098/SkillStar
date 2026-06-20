@@ -5,7 +5,7 @@ use std::path::Path;
 
 use super::store::load_skills_list;
 use super::sync::full_sync;
-use super::types::{ensure_project_root_exists, ProjectEntry, ProjectIndex};
+use super::types::{ProjectEntry, ProjectIndex, ensure_project_root_exists};
 use skillstar_core::infra::paths as fs_paths;
 
 pub(super) fn load_index() -> ProjectIndex {

@@ -21,8 +21,8 @@ use super::setup_temp_store;
 use proptest::prelude::*;
 use serde_json::Value;
 use skillstar_models::providers::{
-    create_from_preset_at, create_provider_at, get_provider_presets, read_store_from,
-    ModelMapping, ProviderEntry, ProviderSettings,
+    ModelMapping, ProviderEntry, ProviderSettings, create_from_preset_at, create_provider_at,
+    get_provider_presets, read_store_from,
 };
 
 // ---------------------------------------------------------------------------
@@ -138,10 +138,8 @@ fn long_name_strategy() -> impl Strategy<Value = String> {
 fn invalid_url_strategy() -> impl Strategy<Value = String> {
     prop_oneof![
         // Arbitrary strings filtered to ensure they are truly invalid URLs
-        "[a-zA-Z0-9 _\\-\\./!@#$%^&*()]{0,50}".prop_filter(
-            "must not be a valid URL",
-            |s| url::Url::parse(s).is_err()
-        ),
+        "[a-zA-Z0-9 _\\-\\./!@#$%^&*()]{0,50}"
+            .prop_filter("must not be a valid URL", |s| url::Url::parse(s).is_err()),
         // Strings with spaces (never valid URLs)
         " [a-z ]{2,20}",
         // Empty string
@@ -231,7 +229,6 @@ proptest! {
     }
 }
 
-
 // ===========================================================================
 // Property 15: Malformed Store Recovery
 //
@@ -244,10 +241,22 @@ proptest! {
 
 /// Helper: assert that a ProvidersStore is a valid empty default store.
 fn assert_empty_store(store: &skillstar_models::providers::ProvidersStore) {
-    assert!(store.claude.providers.is_empty(), "claude providers should be empty");
-    assert!(store.claude.current.is_none(), "claude current should be None");
-    assert!(store.codex.providers.is_empty(), "codex providers should be empty");
-    assert!(store.codex.current.is_none(), "codex current should be None");
+    assert!(
+        store.claude.providers.is_empty(),
+        "claude providers should be empty"
+    );
+    assert!(
+        store.claude.current.is_none(),
+        "claude current should be None"
+    );
+    assert!(
+        store.codex.providers.is_empty(),
+        "codex providers should be empty"
+    );
+    assert!(
+        store.codex.current.is_none(),
+        "codex current should be None"
+    );
 }
 
 proptest! {
@@ -317,7 +326,6 @@ proptest! {
     }
 }
 
-
 // ===========================================================================
 // Property 8: Preset Creation Fills Expected Fields
 //
@@ -340,10 +348,7 @@ fn arb_preset_id() -> impl Strategy<Value = String> {
 
 /// Strategy: generate a valid AppId for preset creation (claude or codex).
 fn arb_preset_app_id() -> impl Strategy<Value = String> {
-    prop_oneof![
-        Just("claude".to_string()),
-        Just("codex".to_string()),
-    ]
+    prop_oneof![Just("claude".to_string()), Just("codex".to_string()),]
 }
 
 /// Strategy: generate an arbitrary API key string (non-empty, printable ASCII).

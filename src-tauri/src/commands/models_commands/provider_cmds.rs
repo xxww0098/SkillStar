@@ -45,10 +45,7 @@ pub async fn get_provider_presets_flat() -> Result<Vec<ProviderPresetFlat>, Stri
 /// `app_id` must be `claude` (Anthropic) or `codex` (OpenAI). Validates that the
 /// provider exists and can be resolved before persisting.
 #[tauri::command]
-pub async fn set_app_ai_provider_ref(
-    app_id: String,
-    provider_id: String,
-) -> Result<(), String> {
+pub async fn set_app_ai_provider_ref(app_id: String, provider_id: String) -> Result<(), String> {
     let app_id = app_id.trim();
     let provider_id = provider_id.trim();
     if !matches!(app_id, "claude" | "codex") {
@@ -231,7 +228,8 @@ pub async fn get_providers_flat() -> Result<FlatProvidersResponse, String> {
 /// This is a lightweight read that only returns which provider + model each
 /// tool is currently using, without the full provider list.
 #[tauri::command]
-pub async fn get_tool_activations() -> Result<std::collections::HashMap<String, Option<ToolActivation>>, String> {
+pub async fn get_tool_activations()
+-> Result<std::collections::HashMap<String, Option<ToolActivation>>, String> {
     let path = providers::flat_store_path();
     let store = providers::read_flat_store(&path).map_err(|e| e.to_string())?;
     Ok(store.tool_activations)

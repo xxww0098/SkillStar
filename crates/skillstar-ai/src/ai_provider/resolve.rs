@@ -37,8 +37,7 @@ pub(crate) fn resolve_from_flat_store(
     provider_id: &str,
 ) -> Result<String> {
     let path = providers::flat_store_path();
-    let store = providers::read_flat_store(&path)
-        .context("Failed to read flat provider store")?;
+    let store = providers::read_flat_store(&path).context("Failed to read flat provider store")?;
 
     let entry = store
         .providers
@@ -55,18 +54,25 @@ pub(crate) fn resolve_from_flat_store(
             }
 
             // Prefer dedicated Anthropic endpoint; fall back to OpenAI-compatible.
-            let base_url = [entry.base_url_anthropic.trim(), entry.base_url_openai.trim()]
-                .iter()
-                .copied()
-                .find(|s| !s.is_empty())
-                .unwrap_or("https://api.anthropic.com")
-                .to_string();
+            let base_url = [
+                entry.base_url_anthropic.trim(),
+                entry.base_url_openai.trim(),
+            ]
+            .iter()
+            .copied()
+            .find(|s| !s.is_empty())
+            .unwrap_or("https://api.anthropic.com")
+            .to_string();
 
             // Main model: claude_main_model meta > default_model > hard default
             let model = get_meta_str(&entry.meta, "claude_main_model")
                 .or_else(|| {
                     let dm = entry.default_model.trim();
-                    if dm.is_empty() { None } else { Some(dm.to_string()) }
+                    if dm.is_empty() {
+                        None
+                    } else {
+                        Some(dm.to_string())
+                    }
                 })
                 .unwrap_or_else(|| "claude-sonnet-4-20250514".to_string());
 
@@ -74,9 +80,9 @@ pub(crate) fn resolve_from_flat_store(
             config.api_key = entry.api_key.trim().to_string();
             config.base_url = base_url;
             config.model = model;
-            config.claude_haiku_model  = get_meta_str(&entry.meta, "claude_haiku_model");
+            config.claude_haiku_model = get_meta_str(&entry.meta, "claude_haiku_model");
             config.claude_sonnet_model = get_meta_str(&entry.meta, "claude_sonnet_model");
-            config.claude_opus_model   = get_meta_str(&entry.meta, "claude_opus_model");
+            config.claude_opus_model = get_meta_str(&entry.meta, "claude_opus_model");
             apply_provider_request_meta(config, &entry.meta);
         }
         "codex" => {
@@ -86,12 +92,20 @@ pub(crate) fn resolve_from_flat_store(
 
             let base_url = {
                 let url = entry.base_url_openai.trim();
-                if url.is_empty() { "https://api.openai.com/v1".to_string() } else { url.to_string() }
+                if url.is_empty() {
+                    "https://api.openai.com/v1".to_string()
+                } else {
+                    url.to_string()
+                }
             };
 
             let model = {
                 let dm = entry.default_model.trim();
-                if dm.is_empty() { "gpt-5.4".to_string() } else { dm.to_string() }
+                if dm.is_empty() {
+                    "gpt-5.4".to_string()
+                } else {
+                    dm.to_string()
+                }
             };
 
             config.api_format = ApiFormat::Openai;
@@ -239,10 +253,13 @@ pub(crate) fn resolve_from_legacy_store(
                 })
                 .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
 
-            let model = parse_toml_string_field(config_text, "model")
-                .unwrap_or_else(|| {
-                    if config.model.trim().is_empty() { "gpt-5.4".to_string() } else { config.model.clone() }
-                });
+            let model = parse_toml_string_field(config_text, "model").unwrap_or_else(|| {
+                if config.model.trim().is_empty() {
+                    "gpt-5.4".to_string()
+                } else {
+                    config.model.clone()
+                }
+            });
 
             config.api_format = ApiFormat::Openai;
             config.api_key = api_key.to_string();

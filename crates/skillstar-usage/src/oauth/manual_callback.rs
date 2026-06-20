@@ -76,7 +76,9 @@ fn build_callback_url(auth_url: &str, callback_input: &str) -> UsageResult<Url> 
             .then(|| value.into_owned())
         })
         .ok_or_else(|| {
-            UsageError::Other("当前 OAuth 流程没有 callback URL，可在浏览器授权后等待自动完成。".into())
+            UsageError::Other(
+                "当前 OAuth 流程没有 callback URL，可在浏览器授权后等待自动完成。".into(),
+            )
         })?;
     let mut callback = normalize_redirect_url(&redirect)?;
     let expected_state = auth
@@ -158,16 +160,17 @@ mod tests {
 
     #[test]
     fn code_only_uses_redirect_and_state() {
-        let auth =
-            "https://auth.x.ai/oauth2/authorize?redirect_uri=http%3A%2F%2F127.0.0.1%3A56121%2Fcallback&state=s1";
+        let auth = "https://auth.x.ai/oauth2/authorize?redirect_uri=http%3A%2F%2F127.0.0.1%3A56121%2Fcallback&state=s1";
         let callback = build_callback_url(auth, "abc123").unwrap();
-        assert_eq!(callback.as_str(), "http://127.0.0.1:56121/callback?code=abc123&state=s1");
+        assert_eq!(
+            callback.as_str(),
+            "http://127.0.0.1:56121/callback?code=abc123&state=s1"
+        );
     }
 
     #[test]
     fn query_input_keeps_fields_and_adds_state() {
-        let auth =
-            "https://auth.openai.com/oauth/authorize?redirect_uri=http%3A%2F%2F127.0.0.1%3A1455%2Fauth%2Fcallback&state=s2";
+        let auth = "https://auth.openai.com/oauth/authorize?redirect_uri=http%3A%2F%2F127.0.0.1%3A1455%2Fauth%2Fcallback&state=s2";
         let callback = build_callback_url(auth, "code=abc&scope=openid").unwrap();
         assert_eq!(
             callback.as_str(),

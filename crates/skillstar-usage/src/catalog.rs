@@ -83,6 +83,7 @@ const fn entry(
 const OAUTH_ONLY: &[AuthMode] = &[AuthMode::OAuth];
 const APIKEY_ONLY: &[AuthMode] = &[AuthMode::ApiKey];
 const MANUAL_ONLY: &[AuthMode] = &[AuthMode::Manual];
+const COOKIE_ONLY: &[AuthMode] = &[AuthMode::Cookie];
 const COOKIE_MANUAL: &[AuthMode] = &[AuthMode::Cookie, AuthMode::Manual];
 
 /// Returns the full fixed catalog.
@@ -219,6 +220,16 @@ pub fn catalog() -> Vec<CatalogEntry> {
             "https://bigmodel.cn/usercenter/order",
         ),
         entry(
+            "zcode",
+            "ZCode",
+            "Coding Plan",
+            CatalogTier::ApiKey,
+            APIKEY_ONLY,
+            "6366F1",
+            "CNY",
+            "https://chat.z.ai",
+        ),
+        entry(
             "kimi",
             "Kimi",
             "Moonshot",
@@ -238,17 +249,7 @@ pub fn catalog() -> Vec<CatalogEntry> {
             "CNY",
             "https://platform.minimaxi.com/user-center/basic-information/interface-key",
         ),
-        // ── Tier 3: Manual (2) + Cookie (1) ────────────────────────────
-        entry(
-            "xiaomi-mimo",
-            "小米 MiMo",
-            "Token Plan",
-            CatalogTier::Manual,
-            MANUAL_ONLY,
-            "FF6700",
-            "CNY",
-            "https://platform.xiaomimimo.com/console/plan-manage",
-        ),
+        // ── Tier 3: Cookie (1) + Manual (1) ────────────────────────────
         entry(
             "stepfun",
             "阶跃 Step",
@@ -308,9 +309,9 @@ mod tests {
         let cookie = c.iter().filter(|e| e.tier == CatalogTier::Cookie).count();
         let manual = c.iter().filter(|e| e.tier == CatalogTier::Manual).count();
         assert_eq!(oauth, 9);
-        assert_eq!(api_key, 4);
+        assert_eq!(api_key, 5);
         assert_eq!(cookie, 1);
-        assert_eq!(manual, 2);
+        assert_eq!(manual, 1);
     }
 
     #[test]

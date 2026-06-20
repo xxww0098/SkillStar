@@ -38,7 +38,6 @@ pub enum TlsProfile {
     OkHttp { major: u16 },
 }
 
-
 impl TlsProfile {
     /// Latest known-good Chrome profile. Updated as `wreq-util` ships new versions.
     pub fn chrome_latest() -> Self {

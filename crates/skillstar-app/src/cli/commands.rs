@@ -1,5 +1,5 @@
-use skillstar_core::types::lockfile::Lockfile;
 use skillstar_core::infra::paths::{hub_skills_dir, local_skills_dir, lockfile_path};
+use skillstar_core::types::lockfile::Lockfile;
 use skillstar_marketplace::snapshot;
 
 /// List scope filter for `skillstar list`.
@@ -153,24 +153,25 @@ pub fn cmd_list(filter: ListFilter) {
 
     // Local authored skills
     if matches!(filter, ListFilter::All | ListFilter::LocalOnly)
-        && let Ok(entries) = std::fs::read_dir(&local_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if !path.is_dir() {
-                    continue;
-                }
-                let Some(name) = entry.file_name().to_str().map(str::to_string) else {
-                    continue;
-                };
-                rows.push(ListRow {
-                    name,
-                    kind: RowKind::Local,
-                    git_url: String::new(),
-                    tree_hash: String::new(),
-                    deploy: DeployKind::Dir,
-                });
+        && let Ok(entries) = std::fs::read_dir(&local_dir)
+    {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
             }
+            let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            rows.push(ListRow {
+                name,
+                kind: RowKind::Local,
+                git_url: String::new(),
+                tree_hash: String::new(),
+                deploy: DeployKind::Dir,
+            });
         }
+    }
 
     if rows.is_empty() {
         match filter {
@@ -316,10 +317,7 @@ pub fn cmd_find(query: Option<&str>, limit: u32, json: bool) {
                 query,
                 result.snapshot_status
             );
-            println!(
-                "{:<6} {:<32} {:<8} INSTALL HINT",
-                "STARS", "NAME", "TYPE"
-            );
+            println!("{:<6} {:<32} {:<8} INSTALL HINT", "STARS", "NAME", "TYPE");
             println!("{}", "-".repeat(90));
             for skill in skills {
                 let install_hint = install_hint_for(skill);
@@ -349,8 +347,9 @@ fn install_hint_for(skill: &skillstar_marketplace::Skill) -> String {
         return skill.git_url.clone();
     }
     if let Some(source) = skill.source.as_deref()
-        && !source.trim().is_empty() {
-            return source.to_string();
-        }
+        && !source.trim().is_empty()
+    {
+        return source.to_string();
+    }
     skill.name.clone()
 }

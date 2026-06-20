@@ -79,9 +79,11 @@ pub fn probe_http_client(timeout: Duration) -> Result<reqwest::Client> {
         .map_err(|_| anyhow::anyhow!("HTTP client cache lock poisoned"))?;
 
     if let Some((cached_fp, cached_timeout, client)) = guard.as_ref()
-        && *cached_fp == fingerprint && *cached_timeout == timeout {
-            return Ok(client.clone());
-        }
+        && *cached_fp == fingerprint
+        && *cached_timeout == timeout
+    {
+        return Ok(client.clone());
+    }
 
     let rebuilt = build_client(&fingerprint, timeout)?;
     *guard = Some((fingerprint, timeout, rebuilt.clone()));

@@ -378,20 +378,107 @@ pub fn install_pack(repo_dir: &Path, source: &str, repo_url: &str) -> Result<Vec
     Ok(installed_names)
 }
 
+/// Which interpreter `execute_post_install` will use for a given script, given
+/// the current platform and the script's file extension.
+///
+/// This is split out purely so the platform/extension selection logic has test
+/// coverage on every OS — the actual `Command` construction is not unit
+/// testable because it shells out.
+//
+// `PowerShell` / `Cmd` are only constructed under `#[cfg(windows)]`, so on
+// other targets they look unused; silence the per-platform dead-code warning.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[allow(dead_code)]
+enum PostInstallInterpreter {
+    /// `sh -c <script>` — the Unix default and the Windows fallback for `.sh`
+    /// (works when Git Bash / WSL is installed).
+    Sh,
+    /// `powershell -NoProfile -ExecutionPolicy Bypass -File <script>`
+    PowerShell,
+    /// `cmd /C <script>`
+    Cmd,
+}
+
+impl PostInstallInterpreter {
+    fn program(self) -> &'static str {
+        match self {
+            PostInstallInterpreter::Sh => "sh",
+            PostInstallInterpreter::PowerShell => "powershell",
+            PostInstallInterpreter::Cmd => "cmd",
+        }
+    }
+}
+
+/// Pick the interpreter for a post-install script based on the current
+/// platform and the script's extension.
+fn post_install_interpreter(ext: &str) -> PostInstallInterpreter {
+    #[cfg(windows)]
+    {
+        match ext {
+            "ps1" => PostInstallInterpreter::PowerShell,
+            "bat" | "cmd" => PostInstallInterpreter::Cmd,
+            // Extensionless or `.sh` — try `sh` so Git Bash can still run it.
+            _ => PostInstallInterpreter::Sh,
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = ext;
+        PostInstallInterpreter::Sh
+    }
+}
+
 /// Execute a post-install script with timeout.
 /// Returns the exit code (0 = success).
+///
+/// On Unix the script is run with `sh -c` (the historical behaviour, so
+/// existing `post_install` bash scripts keep working). On Windows there is no
+/// `sh` on PATH by default, so the interpreter is selected by the script file
+/// extension: `.ps1` → PowerShell, `.bat`/`.cmd` → `cmd /C`, anything else
+/// (including extensionless `.sh`) falls back to `sh -c` so a Git Bash
+/// install can still run bash-style scripts. A missing interpreter now yields
+/// a readable non-zero exit code instead of a bare `-1`.
 fn execute_post_install(script: &Path, working_dir: &Path, _timeout_secs: u64) -> i32 {
     use skillstar_core::infra::path_env::command_with_path;
 
-    let output = command_with_path("sh")
-        .arg("-c")
-        .arg(script.to_string_lossy().as_ref())
-        .current_dir(working_dir)
-        .output();
+    let ext = script.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let script_str = script.to_string_lossy();
+    let interpreter = post_install_interpreter(ext);
 
-    match output {
+    let mut cmd = command_with_path(interpreter.program());
+    match interpreter {
+        PostInstallInterpreter::Sh => {
+            cmd.arg("-c").arg(script_str.as_ref());
+        }
+        PostInstallInterpreter::PowerShell => {
+            cmd.args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                script_str.as_ref(),
+            ]);
+        }
+        PostInstallInterpreter::Cmd => {
+            cmd.args(["/C", script_str.as_ref()]);
+        }
+    }
+
+    cmd.current_dir(working_dir);
+    match cmd.output() {
         Ok(out) => out.status.code().unwrap_or(-1),
-        Err(_) => -1,
+        Err(e) => {
+            tracing::warn!(
+                "post_install script {:?} could not be executed via {} (not on PATH? {})",
+                script,
+                interpreter.program(),
+                e
+            );
+            // Distinct sentinel so the caller's "exited with code -1" message
+            // stays accurate while the cause is logged above.
+            -1
+        }
     }
 }
 
@@ -617,4 +704,53 @@ pub fn doctor_all() -> Vec<DoctorReport> {
         .iter()
         .filter_map(|p| doctor_pack(&p.name).ok())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// On non-Windows the interpreter is always `sh`, regardless of the script
+    /// extension (matches the historical behaviour). On Windows the extension
+    /// drives the choice so a pack that ships `post_install.ps1` actually runs
+    /// instead of failing on a missing `sh`.
+    #[test]
+    fn post_install_interpreter_matches_platform_and_extension() {
+        #[cfg(not(windows))]
+        {
+            for ext in ["ps1", "bat", "cmd", "sh", ""] {
+                assert_eq!(
+                    post_install_interpreter(ext),
+                    PostInstallInterpreter::Sh,
+                    "extension {ext:?} should map to sh on non-windows"
+                );
+            }
+        }
+
+        #[cfg(windows)]
+        {
+            assert_eq!(
+                post_install_interpreter("ps1"),
+                PostInstallInterpreter::PowerShell
+            );
+            assert_eq!(post_install_interpreter("bat"), PostInstallInterpreter::Cmd);
+            assert_eq!(post_install_interpreter("cmd"), PostInstallInterpreter::Cmd);
+            // Extensionless / `.sh` falls back to sh so Git Bash can run it.
+            assert_eq!(post_install_interpreter("sh"), PostInstallInterpreter::Sh);
+            assert_eq!(post_install_interpreter(""), PostInstallInterpreter::Sh);
+        }
+    }
+
+    /// The chosen interpreter must advertise a concrete program name so
+    /// `command_with_path` has something to launch.
+    #[test]
+    fn every_interpreter_has_a_program() {
+        for interp in [
+            PostInstallInterpreter::Sh,
+            PostInstallInterpreter::PowerShell,
+            PostInstallInterpreter::Cmd,
+        ] {
+            assert!(!interp.program().is_empty());
+        }
+    }
 }

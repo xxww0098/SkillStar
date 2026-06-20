@@ -1,4 +1,4 @@
-import { LayoutGrid, Plus, Search } from "lucide-react";
+import { LayoutGrid, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ProviderLogo } from "@/features/usage/components/ProviderLogo";
@@ -9,7 +9,6 @@ import { cn } from "@/lib/utils";
 export interface UsageNavProps {
   selected: CatalogFilter;
   onSelect: (filter: CatalogFilter) => void;
-  onAddNew: () => void;
   collapsed: boolean;
 }
 
@@ -24,7 +23,7 @@ function filterCatalog(catalog: CatalogEntry[], query: string): CatalogEntry[] {
   );
 }
 
-export function UsageNav({ selected, onSelect, onAddNew, collapsed }: UsageNavProps) {
+export function UsageNav({ selected, onSelect, collapsed }: UsageNavProps) {
   const { t } = useTranslation();
   const { catalog, subscriptions } = useUsageDataContext();
   const [searchQuery, setSearchQuery] = useState("");
@@ -105,21 +104,6 @@ export function UsageNav({ selected, onSelect, onAddNew, collapsed }: UsageNavPr
             ))}
           </div>
         )}
-      </div>
-
-      <div className={cn("mt-1 shrink-0 border-t border-border/30 pt-2", collapsed ? "px-1.5" : "px-0")}>
-        <button
-          type="button"
-          onClick={onAddNew}
-          title={collapsed ? t("usage.addSubscription", "新增订阅") : undefined}
-          className={cn(
-            "flex w-full cursor-pointer items-center gap-1.5 rounded-lg text-[12px] font-medium text-primary transition duration-150 focus-ring",
-            collapsed ? "justify-center py-2" : "px-2.5 py-[7px]",
-          )}
-        >
-          <Plus className="h-3.5 w-3.5 shrink-0" />
-          {!collapsed && <span>{t("usage.addSubscription", "新增订阅")}</span>}
-        </button>
       </div>
     </div>
   );

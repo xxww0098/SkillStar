@@ -4,8 +4,8 @@ use crate::{
     lockfile::{self},
     repo_scanner,
 };
-use skillstar_core::types::lockfile::LockEntry;
 use anyhow::{Context, Result, anyhow};
+use skillstar_core::types::lockfile::LockEntry;
 use skillstar_core::types::{
     Skill, SkillCategory, extract_github_source_from_url, extract_skill_description,
 };
@@ -63,9 +63,10 @@ fn hydrate_update_state_cache() {
     }
 
     if let Ok(mut cache) = UPDATE_STATE_CACHE.write()
-        && cache.is_empty() {
-            *cache = snapshot;
-        }
+        && cache.is_empty()
+    {
+        *cache = snapshot;
+    }
 }
 
 fn persist_update_state_snapshot(states: &HashMap<String, bool>) {
@@ -132,9 +133,10 @@ pub fn installed_snapshot_markers() -> HashSet<String> {
         for entry in lockfile.skills {
             markers.insert(entry.name.to_ascii_lowercase());
             if let Some(source) = extract_github_source_from_url(&entry.git_url)
-                && let Some(skill_key) = build_snapshot_skill_key(&source, &entry.name) {
-                    markers.insert(skill_key);
-                }
+                && let Some(skill_key) = build_snapshot_skill_key(&source, &entry.name)
+            {
+                markers.insert(skill_key);
+            }
         }
     }
 
@@ -165,9 +167,10 @@ pub async fn list_installed_skills_fast() -> Result<Vec<Skill>> {
 pub async fn list_installed_skills() -> Result<Vec<Skill>> {
     hydrate_update_state_cache();
     if let Ok(cache) = SKILL_CACHE.read()
-        && let Some(skills) = &*cache {
-            return Ok(apply_cached_update_states(skills.clone()));
-        }
+        && let Some(skills) = &*cache
+    {
+        return Ok(apply_cached_update_states(skills.clone()));
+    }
 
     // Ensure every skill in skills-local/ has a hub symlink before scanning
     local_skill::reconcile_hub_symlinks();

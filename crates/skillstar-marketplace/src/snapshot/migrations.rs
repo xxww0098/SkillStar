@@ -122,6 +122,9 @@ pub(crate) fn migrate_schema(conn: &Connection) -> Result<()> {
         if version < 9 {
             migrate_v8_to_v9(conn)?;
         }
+        if version < 10 {
+            migrate_v9_to_v10(conn)?;
+        }
         conn.pragma_update(None, "user_version", SNAPSHOT_SCHEMA_VERSION)
             .context("Failed to update marketplace user_version")?;
     }
@@ -456,3 +459,10 @@ pub(crate) fn migrate_v8_to_v9(conn: &Connection) -> Result<()> {
     .context("Failed to realign marketplace FTS rowids (v9)")
 }
 
+/// v10: add SkillStar-maintained curated MCP marketplace entries. These live
+/// outside the remote GitHub MCP Registry table so registry refreshes cannot
+/// delete local recommendations.
+pub(crate) fn migrate_v9_to_v10(conn: &Connection) -> Result<()> {
+    crate::mcp_snapshot::create_mcp_registry_tables(conn)
+        .context("Failed to create curated MCP marketplace tables (v10)")
+}

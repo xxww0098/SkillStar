@@ -286,11 +286,12 @@ pub fn migrate_existing() -> Result<u32> {
     // Load lockfile to check for git URLs
     let lock_path = lockfile::lockfile_path();
     let lockfile = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
-    let lock_map: std::collections::HashMap<String, &skillstar_core::types::lockfile::LockEntry> = lockfile
-        .skills
-        .iter()
-        .map(|e| (e.name.clone(), e))
-        .collect();
+    let lock_map: std::collections::HashMap<String, &skillstar_core::types::lockfile::LockEntry> =
+        lockfile
+            .skills
+            .iter()
+            .map(|e| (e.name.clone(), e))
+            .collect();
 
     let entries = match std::fs::read_dir(&hub_dir) {
         Ok(entries) => entries,
@@ -324,9 +325,10 @@ pub fn migrate_existing() -> Result<u32> {
 
         // Skip if lockfile has a non-empty git_url for this skill
         if let Some(lock_entry) = lock_map.get(&name)
-            && !lock_entry.git_url.is_empty() {
-                continue;
-            }
+            && !lock_entry.git_url.is_empty()
+        {
+            continue;
+        }
 
         // Skip if destination already exists in skills-local
         let dest = local_dir.join(&name);

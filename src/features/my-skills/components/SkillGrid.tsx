@@ -7,7 +7,7 @@ import { EmptyState } from "../../../components/ui/EmptyState";
 import { cn } from "../../../lib/utils";
 import type { AgentProfile, RepoNewSkill, Skill, ViewMode } from "../../../types";
 import { GhostSkillCard } from "./GhostSkillCard";
-import { SkillCard } from "./SkillCard";
+import { SkillCard, type SkillCardRemoteContext } from "./SkillCard";
 
 /**
  * Above this count we use virtualized row rendering
@@ -71,6 +71,7 @@ interface SkillGridProps {
   onDismissGhost?: (repoSource: string, skillId: string) => void;
   onDismissGhostRepo?: (repoSource: string) => void;
   onGhostClick?: (skill: RepoNewSkill) => void;
+  getRemoteCardProps?: (skill: Skill) => SkillCardRemoteContext | undefined;
 }
 
 function useScrollParent(
@@ -165,6 +166,7 @@ export function SkillGrid({
   onDismissGhost,
   onDismissGhostRepo,
   onGhostClick,
+  getRemoteCardProps,
 }: SkillGridProps) {
   const { t } = useTranslation();
   const prefersReducedMotion = useReducedMotion();
@@ -266,6 +268,7 @@ export function SkillGrid({
       installing={installingNames?.has(skill.name)}
       updating={pendingUpdateNames?.has(skill.name)}
       noAnimate
+      remoteContext={getRemoteCardProps?.(skill)}
     />
   );
 

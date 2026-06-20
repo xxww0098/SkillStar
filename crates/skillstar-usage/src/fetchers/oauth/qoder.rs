@@ -70,7 +70,7 @@ pub async fn start_login(_region: Option<&str>) -> UsageResult<super::OAuthStart
 }
 
 async fn poll_for_tokens(nonce: String, verifier: String) -> UsageResult<Subscription> {
-    let client = http_client()?;
+    let client = crate::fetchers::http_client()?;
     let url = format!("{}{}", OPENAPI_BASE_URL, POLL_PATH);
 
     let config = PollConfig::new(POLL_INTERVAL_MS, POLL_MAX_ATTEMPTS);
@@ -146,6 +146,7 @@ async fn finalize_subscription(
         renew_date: 0,
         auto_renew: false,
         api_key_encrypted: None,
+        platform_token_encrypted: None,
         access_token_encrypted: Some(crypto::encrypt(&access_token)),
         refresh_token_encrypted: refresh_token.as_deref().map(crypto::encrypt),
         access_token_expires_at: expires_at,
@@ -176,7 +177,7 @@ pub async fn fetch(subscription: &mut Subscription) -> UsageResult<SubscriptionU
 }
 
 async fn fetch_inner(subscription: &mut Subscription) -> UsageResult<SubscriptionUsage> {
-    let access_token = decrypt_required(&subscription.access_token_encrypted)?;
+    let access_token = crate::fetchers::decrypt_required(&subscription.access_token_encrypted, "access_token")?;
     match fetch_with_token(&subscription.id, &access_token).await {
         Ok(usage) => {
             subscription.requires_reauth = false;
@@ -194,7 +195,7 @@ async fn fetch_with_token(
     subscription_id: &str,
     access_token: &str,
 ) -> UsageResult<SubscriptionUsage> {
-    let client = http_client()?;
+    let client = crate::fetchers::http_client()?;
     let machine = read_machine_info();
 
     let plan_json = fetch_json(
@@ -232,6 +233,7 @@ async fn fetch_with_token(
         credits: Vec::new(),
         error: None,
         api_keys: Vec::new(),
+        deepseek_analytics: None,
     })
 }
 
@@ -353,19 +355,4 @@ fn pick_i64(value: &Value, keys: &[&str]) -> Option<i64> {
         }
     }
     None
-}
-
-fn http_client() -> UsageResult<reqwest::Client> {
-    crate::http_client::usage_reqwest_with_active_fingerprint()
-}
-
-fn decrypt_required(cipher: &Option<String>) -> UsageResult<String> {
-    let cipher = cipher
-        .as_deref()
-        .ok_or_else(|| UsageError::Other("缺少 access_token".into()))?;
-    let pt = crypto::decrypt(cipher);
-    if pt.is_empty() {
-        return Err(UsageError::AuthRequired);
-    }
-    Ok(pt)
 }

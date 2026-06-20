@@ -6,7 +6,6 @@
 //! Their ids do not line up 1:1:
 //!
 //! - the catalog id `glm` corresponds to **two** preset variants `glm` + `glm-coding`;
-//! - the catalog id `xiaomi-mimo` corresponds to the preset id `mimo`;
 //! - the catalog id `kimi` corresponds to presets `kimi` + `kimi-coding`;
 //! - many catalog ids (OAuth IDEs) have no preset, and many presets
 //!   (`openrouter`, `siliconflow`, …) have no subscription catalog entry.
@@ -59,12 +58,6 @@ pub const PROVIDER_IDENTITIES: &[ProviderIdentity] = &[
         display_name: "MiniMax",
         catalog_id: Some("minimax"),
         preset_ids: &["minimax"],
-    },
-    ProviderIdentity {
-        canonical_id: "xiaomi-mimo",
-        display_name: "小米 MiMo",
-        catalog_id: Some("xiaomi-mimo"),
-        preset_ids: &["mimo"],
     },
     // ── Models-only providers (routing presets with no subscription account) ──
     ProviderIdentity {
@@ -141,6 +134,12 @@ pub const PROVIDER_IDENTITIES: &[ProviderIdentity] = &[
         preset_ids: &[],
     },
     ProviderIdentity {
+        canonical_id: "zcode",
+        display_name: "ZCode",
+        catalog_id: Some("zcode"),
+        preset_ids: &[],
+    },
+    ProviderIdentity {
         canonical_id: "opencode",
         display_name: "OpenCode",
         catalog_id: Some("opencode"),
@@ -208,11 +207,6 @@ mod tests {
         assert_eq!(
             identity_for_catalog("glm").unwrap().preset_ids,
             &["glm", "glm-coding"]
-        );
-        // catalog "xiaomi-mimo" maps to preset "mimo".
-        assert_eq!(
-            identity_for_preset("mimo").unwrap().canonical_id,
-            "xiaomi-mimo"
         );
         // catalog "kimi" spans "kimi" + "kimi-coding".
         assert_eq!(

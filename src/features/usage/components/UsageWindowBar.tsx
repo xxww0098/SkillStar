@@ -115,7 +115,7 @@ function UsageBreakdownQuotaPanel({ window }: { window: UsageWindow }) {
       ? "bg-gradient-to-r from-rose-500 to-rose-400 shadow-[0_0_10px_rgba(244,63,94,0.5)] animate-pulse"
       : percent >= 75
         ? "bg-gradient-to-r from-amber-500 to-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.5)]"
-        : "bg-gradient-to-r from-[var(--brand-color)] to-[var(--brand-color)]/80 shadow-[0_0_10px_rgba(var(--brand-rgb),0.4)]";
+        : "bg-gradient-to-r from-[var(--brand-color)] to-[var(--brand-color-2)] shadow-[0_0_10px_rgba(var(--brand-rgb),0.4)]";
 
   return (
     <div className="space-y-3">
@@ -193,7 +193,7 @@ function UsageStatsWindow({ window }: { window: UsageWindow }) {
       ? "bg-gradient-to-r from-rose-500 to-rose-400 shadow-[0_0_10px_rgba(244,63,94,0.5)] animate-pulse"
       : percent >= 75
         ? "bg-gradient-to-r from-amber-500 to-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.5)]"
-        : "bg-gradient-to-r from-[var(--brand-color)] to-[var(--brand-color)]/80 shadow-[0_0_10px_rgba(var(--brand-rgb),0.4)]";
+        : "bg-gradient-to-r from-[var(--brand-color)] to-[var(--brand-color-2)] shadow-[0_0_10px_rgba(var(--brand-rgb),0.4)]";
 
   return (
     <div className="space-y-2.5 rounded-2xl bg-zinc-50/40 border border-zinc-200/50 p-3 hover:bg-zinc-50/80 transition-colors relative overflow-hidden">
@@ -242,7 +242,7 @@ function UsageSimpleWindow({ window }: { window: UsageWindow }) {
       ? "bg-gradient-to-r from-rose-500 to-rose-400 shadow-[0_0_10px_rgba(244,63,94,0.5)] animate-pulse"
       : percent >= 75
         ? "bg-gradient-to-r from-amber-500 to-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.5)]"
-        : "bg-gradient-to-r from-[var(--brand-color)] to-[var(--brand-color)]/80 shadow-[0_0_10px_rgba(var(--brand-rgb),0.4)]";
+        : "bg-gradient-to-r from-[var(--brand-color)] to-[var(--brand-color-2)] shadow-[0_0_10px_rgba(var(--brand-rgb),0.4)]";
 
   return (
     <div className="space-y-2 rounded-2xl bg-zinc-50/40 border border-zinc-200/50 p-3 hover:bg-zinc-50/80 transition-colors relative overflow-hidden">

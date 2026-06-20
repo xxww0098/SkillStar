@@ -2,7 +2,7 @@
 //!
 //! Reads/writes `~/.skillstar/config/model_providers.json` to manage provider configurations.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -30,6 +30,6 @@ pub use store::*;
 pub use types::*;
 
 #[cfg(test)]
-mod tests;
-#[cfg(test)]
 mod proptests;
+#[cfg(test)]
+mod tests;

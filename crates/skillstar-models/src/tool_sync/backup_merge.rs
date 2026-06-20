@@ -48,9 +48,10 @@ pub(crate) fn cleanup_old_backups(path: &Path, keep: usize) -> Result<()> {
             let entry_name = entry.file_name();
             let entry_name_str = entry_name.to_string_lossy();
             if let Some(suffix) = entry_name_str.strip_prefix(&prefix)
-                && let Ok(ts) = suffix.parse::<u128>() {
-                    backups.push((ts, entry.path()));
-                }
+                && let Ok(ts) = suffix.parse::<u128>()
+            {
+                backups.push((ts, entry.path()));
+            }
         }
     }
 
@@ -94,10 +95,9 @@ pub fn merge_json_write(path: &Path, managed_fields: &[(&str, Value)]) -> Result
     }
 
     // Write back as pretty JSON
-    let output = serde_json::to_string_pretty(&Value::Object(json))
-        .context("Failed to serialize JSON")?;
-    std::fs::write(path, output)
-        .with_context(|| format!("Failed to write {}", path.display()))?;
+    let output =
+        serde_json::to_string_pretty(&Value::Object(json)).context("Failed to serialize JSON")?;
+    std::fs::write(path, output).with_context(|| format!("Failed to write {}", path.display()))?;
 
     Ok(())
 }
@@ -154,10 +154,9 @@ pub fn merge_json_env_write(path: &Path, managed_fields: &[(&str, Value)]) -> Re
     }
 
     // Write back as pretty JSON
-    let output = serde_json::to_string_pretty(&Value::Object(json))
-        .context("Failed to serialize JSON")?;
-    std::fs::write(path, output)
-        .with_context(|| format!("Failed to write {}", path.display()))?;
+    let output =
+        serde_json::to_string_pretty(&Value::Object(json)).context("Failed to serialize JSON")?;
+    std::fs::write(path, output).with_context(|| format!("Failed to write {}", path.display()))?;
 
     Ok(())
 }
@@ -235,10 +234,7 @@ pub fn write_codex_config_flat(
             CODEX_MANAGED_PROVIDER_KEY.to_string(),
             toml::Value::Table(skillstar_section),
         );
-        table.insert(
-            "model_providers".to_string(),
-            toml::Value::Table(mp_table),
-        );
+        table.insert("model_providers".to_string(), toml::Value::Table(mp_table));
     }
 
     // Ensure parent directory exists
@@ -248,10 +244,8 @@ pub fn write_codex_config_flat(
     }
 
     // Write back as TOML
-    let output = toml::to_string_pretty(&table)
-        .context("Failed to serialize Codex config.toml")?;
-    std::fs::write(path, output)
-        .with_context(|| format!("Failed to write {}", path.display()))?;
+    let output = toml::to_string_pretty(&table).context("Failed to serialize Codex config.toml")?;
+    std::fs::write(path, output).with_context(|| format!("Failed to write {}", path.display()))?;
 
     Ok(())
 }
@@ -308,60 +302,62 @@ pub fn resync_active_tools(
         // Call the appropriate sync function based on tool_id, preserving the
         // tool's individually selected model.
         let result = match tool_id.as_str() {
-            "claude-code" => {
-                match sync_to_claude_code(provider, &activation.model) {
-                    Ok(r) => r,
-                    Err(e) => ToolSyncResultFlat {
-                        tool_id: tool_id.clone(),
-                        success: false,
-                        config_path: None,
-                        error: Some(e.to_string()),
-                        backup_path: None,
-                    },
-                }
-            }
-            "codex" => {
-                match sync_to_codex(provider, activation) {
-                    Ok(r) => r,
-                    Err(e) => ToolSyncResultFlat {
-                        tool_id: tool_id.clone(),
-                        success: false,
-                        config_path: None,
-                        error: Some(e.to_string()),
-                        backup_path: None,
-                    },
-                }
-            }
-            "opencode" => {
-                match sync_to_opencode(provider, &activation.model) {
-                    Ok(r) => r,
-                    Err(e) => ToolSyncResultFlat {
-                        tool_id: tool_id.clone(),
-                        success: false,
-                        config_path: None,
-                        error: Some(e.to_string()),
-                        backup_path: None,
-                    },
-                }
-            }
-            "gemini" => {
-                match sync_to_gemini(provider, &activation.model) {
-                    Ok(r) => r,
-                    Err(e) => ToolSyncResultFlat {
-                        tool_id: tool_id.clone(),
-                        success: false,
-                        config_path: None,
-                        error: Some(e.to_string()),
-                        backup_path: None,
-                    },
-                }
-            }
+            "claude-code" => match sync_to_claude_code(provider, &activation.model) {
+                Ok(r) => r,
+                Err(e) => ToolSyncResultFlat {
+                    tool_id: tool_id.clone(),
+                    success: false,
+                    config_path: None,
+                    error: Some(e.to_string()),
+                    backup_path: None,
+                },
+            },
+            "codex" => match sync_to_codex(provider, activation) {
+                Ok(r) => r,
+                Err(e) => ToolSyncResultFlat {
+                    tool_id: tool_id.clone(),
+                    success: false,
+                    config_path: None,
+                    error: Some(e.to_string()),
+                    backup_path: None,
+                },
+            },
+            "opencode" => match sync_to_opencode(provider, &activation.model) {
+                Ok(r) => r,
+                Err(e) => ToolSyncResultFlat {
+                    tool_id: tool_id.clone(),
+                    success: false,
+                    config_path: None,
+                    error: Some(e.to_string()),
+                    backup_path: None,
+                },
+            },
+            "zcode" => match sync_to_zcode(provider, &activation.model) {
+                Ok(r) => r,
+                Err(e) => ToolSyncResultFlat {
+                    tool_id: tool_id.clone(),
+                    success: false,
+                    config_path: None,
+                    error: Some(e.to_string()),
+                    backup_path: None,
+                },
+            },
+            "gemini" => match sync_to_gemini(provider, &activation.model) {
+                Ok(r) => r,
+                Err(e) => ToolSyncResultFlat {
+                    tool_id: tool_id.clone(),
+                    success: false,
+                    config_path: None,
+                    error: Some(e.to_string()),
+                    backup_path: None,
+                },
+            },
             _ => ToolSyncResultFlat {
                 tool_id: tool_id.clone(),
                 success: false,
                 config_path: None,
                 error: Some(format!(
-                    "Unknown tool_id '{}'. Supported: claude-code, codex, opencode, gemini.",
+                    "Unknown tool_id '{}'. Supported: claude-code, codex, opencode, gemini, zcode.",
                     tool_id
                 )),
                 backup_path: None,
@@ -374,4 +370,3 @@ pub fn resync_active_tools(
     // 4. Return all collected results
     results
 }
-

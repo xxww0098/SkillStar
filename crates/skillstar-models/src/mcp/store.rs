@@ -1,6 +1,6 @@
 //! Unified MCP store: path, read/write IO, validation, and pure CRUD on `McpStore`.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -27,7 +27,10 @@ pub fn read_mcp_store(path: &Path) -> Result<McpStore> {
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) => {
-            tracing::warn!("Failed to read MCP store {}: {e}. Using default.", path.display());
+            tracing::warn!(
+                "Failed to read MCP store {}: {e}. Using default.",
+                path.display()
+            );
             return Ok(McpStore::default());
         }
     };
@@ -35,7 +38,10 @@ pub fn read_mcp_store(path: &Path) -> Result<McpStore> {
     match serde_json::from_str::<McpStore>(text) {
         Ok(store) => Ok(store),
         Err(e) => {
-            tracing::warn!("Malformed MCP store {}: {e}. Using default.", path.display());
+            tracing::warn!(
+                "Malformed MCP store {}: {e}. Using default.",
+                path.display()
+            );
             Ok(McpStore::default())
         }
     }
@@ -51,8 +57,13 @@ pub fn write_mcp_store(store: &McpStore, path: &Path) -> Result<()> {
     let temp_path = path.with_extension("json.tmp");
     std::fs::write(&temp_path, json.as_bytes())
         .with_context(|| format!("Failed to write temp file {}", temp_path.display()))?;
-    std::fs::rename(&temp_path, path)
-        .with_context(|| format!("Failed to rename {} to {}", temp_path.display(), path.display()))?;
+    std::fs::rename(&temp_path, path).with_context(|| {
+        format!(
+            "Failed to rename {} to {}",
+            temp_path.display(),
+            path.display()
+        )
+    })?;
     Ok(())
 }
 
@@ -67,13 +78,23 @@ pub fn validate_entry(entry: &McpServerEntry) -> Result<()> {
     }
     match entry.transport.as_str() {
         "stdio" => {
-            if entry.command.as_deref().map(str::trim).unwrap_or("").is_empty() {
+            if entry
+                .command
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or("")
+                .is_empty()
+            {
                 bail!("stdio MCP server '{}' requires a command", entry.name);
             }
         }
         "http" | "sse" => {
             if entry.url.as_deref().map(str::trim).unwrap_or("").is_empty() {
-                bail!("{} MCP server '{}' requires a url", entry.transport, entry.name);
+                bail!(
+                    "{} MCP server '{}' requires a url",
+                    entry.transport,
+                    entry.name
+                );
             }
         }
         other => bail!("Unknown MCP transport '{other}' (expected stdio|http|sse)"),
@@ -99,7 +120,12 @@ pub fn create_server(store: &mut McpStore, mut entry: McpServerEntry) -> Result<
     let now = now_ms();
     entry.created_at = Some(now);
     entry.updated_at = Some(now);
-    entry.sort_index = store.servers.iter().map(|s| s.sort_index).max().map_or(0, |m| m + 1);
+    entry.sort_index = store
+        .servers
+        .iter()
+        .map(|s| s.sort_index)
+        .max()
+        .map_or(0, |m| m + 1);
     // Drop enable flags for unknown tools.
     entry.enabled.retain(|k, _| is_supported_tool(k));
     store.servers.push(entry.clone());
@@ -114,9 +140,13 @@ pub fn update_server(
 ) -> Result<McpServerEntry> {
     // Guard against renaming onto another server's name.
     if let Some(new_name) = patch.name.as_ref()
-        && store.servers.iter().any(|s| s.id != id && &s.name == new_name) {
-            bail!("An MCP server named '{}' already exists", new_name);
-        }
+        && store
+            .servers
+            .iter()
+            .any(|s| s.id != id && &s.name == new_name)
+    {
+        bail!("An MCP server named '{}' already exists", new_name);
+    }
     let server = store
         .servers
         .iter_mut()

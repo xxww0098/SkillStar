@@ -10,8 +10,8 @@
 use serde::{Deserialize, Serialize};
 use skillstar_core::infra::error::AppError;
 use skillstar_fingerprint::{
-    all_presets, instantiate, DeviceFingerprint, FingerprintStore, HttpProfile, IdeProjector,
-    NetworkProfile, PresetId, PresetTemplate, SupportedIde, TlsProfile, VsCodeForkProjector,
+    DeviceFingerprint, FingerprintStore, HttpProfile, IdeProjector, NetworkProfile, PresetId,
+    PresetTemplate, SupportedIde, TlsProfile, VsCodeForkProjector, all_presets, instantiate,
 };
 
 // ── DTOs ──────────────────────────────────────────────────────────────

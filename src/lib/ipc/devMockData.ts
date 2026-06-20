@@ -147,12 +147,13 @@ export const AGENTS = [
   ["codex", "Codex CLI", "agents/codex.svg", ".codex/skills", true, true, 2],
   ["cursor", "Cursor", "agents/cursor.svg", ".cursor/skills", true, false, 1],
   ["gemini", "Gemini CLI", "agents/gemini.svg", ".gemini/skills", false, false, 0],
-  ["antigravity", "Antigravity", "agents/antigravity.svg", ".agents/skills", false, false, 0],
+  ["antigravity", "Antigravity", "agents/antigravity.svg", ".agent/skills", false, false, 0],
   ["opencode", "OpenCode", "agents/opencode.svg", ".opencode/skills", true, true, 3],
   ["qoder", "Qoder", "agents/qoder-color.svg", ".qoder/skills", false, false, 0],
   ["trae", "Trae", "agents/trae-color.svg", ".trae/skills", false, false, 0],
   ["openclaw", "OpenClaw", "agents/openclaw.svg", "", false, false, 0],
   ["hermes", "Hermes", "agents/hermes.svg", ".hermes/skills", false, false, 0],
+  ["zcode", "ZCode", "agents/zcode.svg", ".zcode/skills", false, false, 0],
 ].map(([id, display_name, icon, rel, installed, enabled, synced]) => ({
   id,
   display_name,
@@ -306,7 +307,14 @@ export const MCP_STORE = {
       args: ["-y", "@modelcontextprotocol/server-filesystem", "/Users/dev"],
       description: "Local filesystem access for the agent.",
       tags: ["files"],
-      enabled: { "claude-code": true, codex: true, "claude-desktop": false, gemini: false, opencode: false },
+      enabled: {
+        "claude-code": true,
+        codex: true,
+        "claude-desktop": false,
+        gemini: false,
+        opencode: false,
+        zcode: false,
+      },
       sortIndex: 0,
     },
     {
@@ -317,7 +325,14 @@ export const MCP_STORE = {
       headers: { Authorization: "Bearer ghp_demo" },
       description: "GitHub repos, issues and PRs.",
       tags: ["git", "github"],
-      enabled: { "claude-code": true, codex: false, "claude-desktop": false, gemini: false, opencode: false },
+      enabled: {
+        "claude-code": true,
+        codex: false,
+        "claude-desktop": false,
+        gemini: false,
+        opencode: false,
+        zcode: false,
+      },
       sortIndex: 1,
     },
   ],
@@ -339,6 +354,13 @@ export const MCP_TOOL_STATUSES = [
     label: "OpenCode",
     configPath: "~/.config/opencode/opencode.json",
     installed: false,
+    serverCount: 0,
+  },
+  {
+    toolId: "zcode",
+    label: "ZCode",
+    configPath: "~/.zcode/cli/config.json",
+    installed: true,
     serverCount: 0,
   },
 ];
@@ -381,6 +403,21 @@ export const MCP_PRESETS = [
 // MCP marketplace (GitHub MCP Registry) sample data for browser dev mode.
 export const MCP_MARKET = [
   {
+    id: "adspower-local-api",
+    name: "adspower-local-api",
+    namespace: "adspower-local-api",
+    description: "AdsPower 浏览器 Local API — 通过 MCP 控制指纹浏览器 / 自动化",
+    repoUrl: "https://github.com/AdsPower/adspower-browser",
+    stars: 0,
+    license: null,
+    version: null,
+    kind: "stdio",
+    runtimes: ["npx"],
+    updatedAt: iso(0),
+    recommended: true,
+    source: "skillstar-curated",
+  },
+  {
     id: "mkt-filesystem",
     name: "server-filesystem",
     namespace: "io.github.modelcontextprotocol/server-filesystem",
@@ -422,6 +459,11 @@ export const MCP_MARKET = [
 ];
 
 export const MCP_MARKET_DETAILS: Record<string, Record<string, unknown>> = {
+  "adspower-local-api": {
+    readme: "# adspower-local-api\n\nAdsPower 浏览器 Local API — 通过 MCP 控制指纹浏览器 / 自动化。",
+    packages: [{ runtime: "npx", identifier: "local-api-mcp-typescript", version: null, requiredEnv: ["API_KEY"] }],
+    remotes: [],
+  },
   "mkt-filesystem": {
     readme: "# server-filesystem\n\nGives the agent scoped read/write access to a local directory.",
     packages: [
@@ -467,10 +509,15 @@ export function mcpMarketDraft(id: string): Record<string, unknown> {
   const pkg = (detail?.packages as Array<Record<string, unknown>>)?.[0];
   const remote = (detail?.remotes as Array<Record<string, unknown>>)?.[0];
   if (pkg) {
+    const env =
+      id === "adspower-local-api"
+        ? { PORT: "50325", API_KEY: "" }
+        : Object.fromEntries(((pkg.requiredEnv as string[] | undefined) ?? []).map((key) => [key, ""]));
     return {
       ...base,
       transport: "stdio",
       command: pkg.runtime,
+      env,
       args: [pkg.runtime === "uvx" ? `${pkg.identifier}@${pkg.version}` : "-y", `${pkg.identifier}`].filter(Boolean),
     };
   }
@@ -722,12 +769,12 @@ export const USAGE_SUBSCRIPTIONS = [
     usage: {
       subscription_id: "sub-deepseek",
       fetched_at: nowSec() - 600,
-      plan_name: "PAYG",
+      plan_name: null,
       hourly: null,
       weekly: null,
       monthly: null,
-      balance: { currency: "CNY", total: 48.5, granted: 5, topped_up: 43.5 },
-      credits: [],
+      balance: { currency: "CNY", total: 48.5, granted: 5, topped_up: 43.5, is_available: true },
+      credits: [{ credit_type: "deepseek-balance:USD", credit_amount: "2.00" }],
       error: null,
       api_keys: [],
     },
@@ -744,12 +791,41 @@ export const USAGE_SUBSCRIPTIONS = [
     usage: {
       subscription_id: "sub-glm",
       fetched_at: nowSec() - 7200,
-      plan_name: "pro",
-      hourly: { label: "5h", used: 90, total: 100, percent: 90, reset_at: nowSec() + 7200, breakdown: [] },
-      weekly: { label: "7d", used: 620, total: 1000, percent: 62, reset_at: nowSec() + days(3), breakdown: [] },
-      monthly: null,
+      plan_name: "lite",
+      hourly: {
+        label: "5h",
+        used: 10_000_000,
+        total: 40_000_000,
+        percent: 25,
+        reset_at: nowSec() + 7200,
+        breakdown: [],
+      },
+      weekly: {
+        label: "7d",
+        used: 50_000_000,
+        total: 200_000_000,
+        percent: 25,
+        reset_at: nowSec() + days(3),
+        breakdown: [],
+      },
+      monthly: {
+        label: "MCP",
+        used: 100,
+        total: 4000,
+        percent: 2,
+        reset_at: null,
+        breakdown: [
+          { label: "glm-mcp-search", used: 60, total: null, percent: null, reset_at: null, breakdown: [] },
+          { label: "glm-mcp-web-read", used: 30, total: null, percent: null, reset_at: null, breakdown: [] },
+        ],
+      },
       balance: null,
-      credits: [],
+      credits: [
+        { credit_type: "glm-24h-tokens", credit_amount: "1250000" },
+        { credit_type: "glm-24h-calls", credit_amount: "42" },
+        { credit_type: "glm-model:glm-4.7", credit_amount: "600" },
+        { credit_type: "glm-24h-network-search", credit_amount: "5" },
+      ],
       error: "GLM 需要重新登录（凭证已过期）",
       api_keys: [],
     },
@@ -780,3 +856,42 @@ export const USAGE_SUMMARY = {
   alert_count: USAGE_ALERTS.length,
   reauth_count: 1,
 };
+
+// ── SSH remote hosts (browser dev only) ──────────────────────────────
+export const SSH_HOSTS = [
+  {
+    id: "ssh_demo_prod",
+    display_name: "Prod GPU Box",
+    host: "10.0.0.42",
+    port: 22,
+    username: "ubuntu",
+    auth_method: { kind: "key", key_path: "~/.ssh/id_ed25519" },
+    default_remote_dir: "~/.claude/skills",
+  },
+  {
+    id: "ssh_demo_dev",
+    display_name: "Dev Server",
+    host: "dev.internal",
+    port: 2222,
+    username: "root",
+    auth_method: { kind: "password" },
+    default_remote_dir: "~/.codex/skills",
+  },
+];
+
+export const REMOTE_SKILLS_SAMPLE = [
+  { name: "pdf-tools", path: "~/.claude/skills/pdf-tools", size: 12480, modified: "2026-06-10" },
+  { name: "git-flow", path: "~/.claude/skills/git-flow", size: 5120, modified: "2026-05-28" },
+];
+
+// Hosts discovered from ~/.ssh/config (browser dev only — real backend parses
+// the actual file at runtime).
+export const SYSTEM_SSH_HOSTS = [
+  {
+    alias: "vps-yy",
+    host: "64.83.38.21",
+    port: 22,
+    username: "root",
+    identity_file: "~/.ssh/id_ed25519_dstools",
+  },
+];

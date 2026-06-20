@@ -97,6 +97,13 @@ pub struct McpRegistryServer {
     pub remotes: Vec<McpRegistryRemoteSummary>,
     /// Serialized `server` object — input for the app's install mapping.
     pub raw_server_json: String,
+    /// Curated SkillStar recommendation, stored outside the remote registry so
+    /// refreshes never overwrite it.
+    #[serde(default)]
+    pub recommended: bool,
+    /// Source bucket for local curated rows, e.g. `skillstar-curated`.
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 /// Lightweight card model for list/search results.
@@ -114,6 +121,10 @@ pub struct McpMarketEntry {
     pub kind: McpServerKind,
     pub runtimes: Vec<String>,
     pub updated_at: Option<String>,
+    #[serde(default)]
+    pub recommended: bool,
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 /// Detail model: card fields + readme + package/remote display.
@@ -125,6 +136,24 @@ pub struct McpMarketServerDetail {
     pub readme: Option<String>,
     pub packages: Vec<McpRegistryPackageSummary>,
     pub remotes: Vec<McpRegistryRemoteSummary>,
+}
+
+/// One official MCP publisher shown on the marketplace grid.
+///
+/// The `id` doubles as the curated `source` bucket (`"adspower"` / `"bigmodel"`)
+/// or the special `"github"` publisher which maps to the full
+/// `mcp_registry_server` table.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct McpPublisherSummary {
+    /// Publisher id — also the curated `source` value, or `"github"`.
+    pub id: String,
+    /// Display name (e.g. "AdsPower", "BigModel", "GitHub").
+    pub name: String,
+    /// Number of MCP servers offered by this publisher.
+    pub server_count: u32,
+    /// External landing page (docs / repo).
+    pub url: String,
 }
 
 impl McpRegistryServer {
@@ -141,6 +170,8 @@ impl McpRegistryServer {
             kind: self.kind,
             runtimes: self.runtimes.clone(),
             updated_at: self.updated_at.clone(),
+            recommended: self.recommended,
+            source: self.source.clone(),
         }
     }
 
@@ -285,8 +316,11 @@ fn parse_stars_and_license(element: &Value, server: &Value) -> (u32, Option<Stri
         .and_then(Value::as_u64)
         .unwrap_or(0) as u32;
     let license = gh.and_then(|g| {
-        g.get("license")
-            .and_then(|l| l.as_str().map(str::to_string).or_else(|| str_field(l, "name")))
+        g.get("license").and_then(|l| {
+            l.as_str()
+                .map(str::to_string)
+                .or_else(|| str_field(l, "name"))
+        })
     });
     (stars, license)
 }
@@ -314,7 +348,9 @@ pub fn parse_registry_element(element: &Value) -> Option<McpRegistryServer> {
     let id = str_field(server, "id").unwrap_or_else(|| namespace.clone());
     let description = str_field(server, "description").unwrap_or_default();
     let repository = server.get("repository");
-    let repo_url = repository.and_then(|r| str_field(r, "url")).unwrap_or_default();
+    let repo_url = repository
+        .and_then(|r| str_field(r, "url"))
+        .unwrap_or_default();
     let readme = repository.and_then(|r| str_field(r, "readme"));
     let version = server
         .get("version_detail")
@@ -356,12 +392,16 @@ pub fn parse_registry_element(element: &Value) -> Option<McpRegistryServer> {
         packages,
         remotes,
         raw_server_json,
+        recommended: false,
+        source: None,
     })
 }
 
 /// Parse a full `/v0/servers` response body into normalized servers plus the
 /// pagination cursor (`metadata.next_cursor`, if any).
-pub fn parse_servers_response(body: &str) -> anyhow::Result<(Vec<McpRegistryServer>, Option<String>)> {
+pub fn parse_servers_response(
+    body: &str,
+) -> anyhow::Result<(Vec<McpRegistryServer>, Option<String>)> {
     let root: Value = serde_json::from_str(body)
         .map_err(|e| anyhow::anyhow!("Failed to parse MCP registry response: {e}"))?;
 
@@ -371,10 +411,8 @@ pub fn parse_servers_response(body: &str) -> anyhow::Result<(Vec<McpRegistryServ
         .cloned()
         .unwrap_or_default();
 
-    let servers: Vec<McpRegistryServer> = elements
-        .iter()
-        .filter_map(parse_registry_element)
-        .collect();
+    let servers: Vec<McpRegistryServer> =
+        elements.iter().filter_map(parse_registry_element).collect();
 
     let next_cursor = root
         .get("metadata")
@@ -460,7 +498,10 @@ mod tests {
         assert_eq!(s.remotes.len(), 1);
         assert_eq!(s.remotes[0].transport, "http");
         assert_eq!(s.remotes[0].url, "https://app.netdata.cloud/api/v1/mcp");
-        assert_eq!(s.remotes[0].required_headers, vec!["Authorization".to_string()]);
+        assert_eq!(
+            s.remotes[0].required_headers,
+            vec!["Authorization".to_string()]
+        );
     }
 
     #[test]

@@ -7,8 +7,8 @@ pub mod remote;
 pub mod snapshot;
 
 pub use mcp_models::{
-    McpMarketEntry, McpMarketServerDetail, McpRegistryPackageSummary, McpRegistryRemoteSummary,
-    McpRegistryServer, McpServerKind,
+    McpMarketEntry, McpMarketServerDetail, McpPublisherSummary, McpRegistryPackageSummary,
+    McpRegistryRemoteSummary, McpRegistryServer, McpServerKind,
 };
 
 pub use models::{

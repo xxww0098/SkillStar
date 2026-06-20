@@ -1,10 +1,11 @@
 import ClaudeIcon from "@lobehub/icons/es/Claude/components/Color";
 import CodexIcon from "@lobehub/icons/es/Codex/components/Color";
 import GeminiIcon from "@lobehub/icons/es/Gemini/components/Color";
+import ZAIIcon from "@lobehub/icons/es/ZAI/components/Mono";
 import { memo, type ReactNode } from "react";
 import { cn } from "../../../../lib/utils";
 
-export type AgentToolIconId = "claude-code" | "codex" | "opencode" | "claude-desktop" | "gemini";
+export type AgentToolIconId = "claude-code" | "codex" | "opencode" | "claude-desktop" | "gemini" | "zcode";
 
 export interface AgentToolIconProps {
   toolId: AgentToolIconId;
@@ -52,6 +53,13 @@ function AgentToolIconInner({ toolId, size = "sm", className }: AgentToolIconPro
       break;
     case "opencode":
       content = <LetterIcon letter="O" />;
+      break;
+    case "zcode":
+      content = (
+        <span className="flex h-full w-full items-center justify-center rounded-md border border-border/50 bg-background/70">
+          <ZAIIcon size={s.icon} />
+        </span>
+      );
       break;
     case "gemini":
       content = (

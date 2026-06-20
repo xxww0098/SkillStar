@@ -106,7 +106,8 @@ fn tag_upsert_list_assignment_and_usage_count_round_trip() {
             .expect("ai tag exists");
         assert_eq!(ai.usage_count, 1);
 
-        let skill_tags = crate::snapshot::list_tags_for_skill(&search_key).expect("list skill tags");
+        let skill_tags =
+            crate::snapshot::list_tags_for_skill(&search_key).expect("list skill tags");
         assert_eq!(skill_tags.len(), 2);
         assert_eq!(skill_tags[0].tag_slug, "ai-helper");
         assert_eq!(skill_tags[1].tag_slug, "rust-tools");
@@ -187,8 +188,8 @@ fn rating_summary_upsert_and_list_round_trip() {
         .expect("upsert source rating summary");
         assert_eq!(source_specific.source_id.as_deref(), Some("skills_sh"));
 
-        let summaries = list_rating_summaries_for_skill("openai/skills/search")
-            .expect("list rating summaries");
+        let summaries =
+            list_rating_summaries_for_skill("openai/skills/search").expect("list rating summaries");
         assert_eq!(summaries.len(), 2);
         assert_eq!(summaries[0].source_id, None);
         assert_eq!(summaries[1].source_id.as_deref(), Some("skills_sh"));
@@ -379,7 +380,6 @@ fn update_notification_rejects_empty_identity_fields() {
     });
 }
 
-
 #[test]
 fn fts_rowid_mirrors_skill_rowid_and_refresh_is_idempotent() {
     with_temp_data_root(|_| {
@@ -411,7 +411,10 @@ fn fts_rowid_mirrors_skill_rowid_and_refresh_is_idempotent() {
             .expect("fts stats");
 
         assert_eq!(fts_count, 1, "exactly one FTS row per skill");
-        assert_eq!(fts_rowid, base_rowid, "FTS rowid mirrors marketplace_skill.rowid");
+        assert_eq!(
+            fts_rowid, base_rowid,
+            "FTS rowid mirrors marketplace_skill.rowid"
+        );
 
         tx.commit().expect("commit");
     });

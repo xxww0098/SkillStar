@@ -1,7 +1,7 @@
 //! Per-tool wire-format spec generation (canonical JSON, Claude Desktop, OpenCode, Codex TOML).
 
-use anyhow::{bail, Result};
-use serde_json::{json, Map, Value};
+use anyhow::{Result, bail};
+use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 
 use super::*;
@@ -94,6 +94,14 @@ pub(crate) fn opencode_spec(entry: &McpServerEntry) -> Value {
     Value::Object(obj)
 }
 
+
+/// ZCode desktop agent MCP (`~/.zcode/cli/config.json` → `mcp.servers.<name>`).
+/// Uses the same community stdio / http shape as Claude Code (`command` + `args` + `env`),
+/// not the OpenCode `local`/`remote` form under `v2/config.json`.
+pub(crate) fn zcode_cli_spec(entry: &McpServerEntry) -> Value {
+    canonical_spec(entry)
+}
+
 /// Codex `[mcp_servers.<name>]` TOML table.
 pub(crate) fn codex_toml_table(entry: &McpServerEntry) -> toml::Table {
     let mut t = toml::Table::new();
@@ -104,7 +112,10 @@ pub(crate) fn codex_toml_table(entry: &McpServerEntry) -> toml::Table {
                 t.insert("url".into(), toml::Value::String(url.clone()));
             }
             if !entry.headers.is_empty() {
-                t.insert("http_headers".into(), toml::Value::Table(toml_string_table(&entry.headers)));
+                t.insert(
+                    "http_headers".into(),
+                    toml::Value::Table(toml_string_table(&entry.headers)),
+                );
             }
         }
         _ => {
@@ -113,15 +124,21 @@ pub(crate) fn codex_toml_table(entry: &McpServerEntry) -> toml::Table {
                 t.insert("command".into(), toml::Value::String(cmd.clone()));
             }
             if !entry.args.is_empty() {
-                let arr: Vec<toml::Value> =
-                    entry.args.iter().map(|a| toml::Value::String(a.clone())).collect();
+                let arr: Vec<toml::Value> = entry
+                    .args
+                    .iter()
+                    .map(|a| toml::Value::String(a.clone()))
+                    .collect();
                 t.insert("args".into(), toml::Value::Array(arr));
             }
             if let Some(cwd) = &entry.cwd {
                 t.insert("cwd".into(), toml::Value::String(cwd.clone()));
             }
             if !entry.env.is_empty() {
-                t.insert("env".into(), toml::Value::Table(toml_string_table(&entry.env)));
+                t.insert(
+                    "env".into(),
+                    toml::Value::Table(toml_string_table(&entry.env)),
+                );
             }
         }
     }

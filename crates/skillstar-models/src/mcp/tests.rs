@@ -5,7 +5,10 @@ use super::*;
 fn stdio(name: &str) -> McpServerEntry {
     let mut e = blank_entry(name, "stdio");
     e.command = Some("npx".into());
-    e.args = vec!["-y".into(), "@modelcontextprotocol/server-filesystem".into()];
+    e.args = vec![
+        "-y".into(),
+        "@modelcontextprotocol/server-filesystem".into(),
+    ];
     e.env.insert("HOME".into(), "/Users/test".into());
     e
 }
@@ -13,7 +16,8 @@ fn stdio(name: &str) -> McpServerEntry {
 fn http(name: &str) -> McpServerEntry {
     let mut e = blank_entry(name, "http");
     e.url = Some("https://example.com/mcp".into());
-    e.headers.insert("Authorization".into(), "Bearer xxx".into());
+    e.headers
+        .insert("Authorization".into(), "Bearer xxx".into());
     e
 }
 
@@ -59,7 +63,10 @@ fn codex_stdio_table_shape() {
     assert_eq!(t["type"].as_str(), Some("stdio"));
     assert_eq!(t["command"].as_str(), Some("npx"));
     assert_eq!(t["args"].as_array().unwrap().len(), 2);
-    assert_eq!(t["env"].as_table().unwrap()["HOME"].as_str(), Some("/Users/test"));
+    assert_eq!(
+        t["env"].as_table().unwrap()["HOME"].as_str(),
+        Some("/Users/test")
+    );
 }
 
 #[test]
@@ -113,7 +120,10 @@ fn store_roundtrip_and_import_parse() {
     let oc = opencode_spec(&e);
     let back = entry_from_opencode_spec("fs", &oc).unwrap();
     assert_eq!(back.command, Some("npx".to_string()));
-    assert_eq!(back.args, vec!["-y", "@modelcontextprotocol/server-filesystem"]);
+    assert_eq!(
+        back.args,
+        vec!["-y", "@modelcontextprotocol/server-filesystem"]
+    );
 }
 
 #[test]
@@ -128,4 +138,48 @@ fn write_then_read_store() {
     assert_eq!(loaded.servers.len(), 1);
     assert_eq!(loaded.servers[0].name, "fs");
     std::fs::remove_dir_all(&dir).ok();
+}
+
+
+#[test]
+fn zcode_cli_spec_matches_community_stdio() {
+    let v = zcode_cli_spec(&stdio("ads-mcp"));
+    assert_eq!(v.get("type").and_then(|x| x.as_str()), Some("stdio"));
+    assert_eq!(v.get("command").and_then(|x| x.as_str()), Some("npx"));
+}
+
+// ── sync projection tests ───────────────────────────────────────────────
+// `sync_server_to_tool` is the bridge from a stored MCP server entry to a
+// tool's live config file. These cover the two non-writing branches that are
+// easy to regress: unknown tool id, and force=false on an absent tool.
+
+#[test]
+fn sync_to_unknown_tool_errors_instead_of_silently_passing() {
+    // An unsupported tool_id must surface an error, not quietly succeed —
+    // otherwise a typo would look like the server was deployed.
+    let result = sync_server_to_tool(&stdio("fs"), "not-a-real-tool", true);
+    assert!(
+        !result.success || result.error.is_some(),
+        "unknown tool_id should not report clean success"
+    );
+}
+
+#[test]
+fn sync_all_returns_one_result_per_known_tool() {
+    // sync_server_all_tools iterates MCP_TOOL_IDS (6 tools), so the result
+    // vector length is a stable contract the UI depends on.
+    let results = sync_server_all_tools(&stdio("fs"), false);
+    assert_eq!(
+        results.len(),
+        MCP_TOOL_IDS.len(),
+        "one result per known tool id"
+    );
+    // Every result must carry its tool_id back for the UI to map.
+    for r in &results {
+        assert!(
+            MCP_TOOL_IDS.contains(&r.tool_id.as_str()),
+            "result tool_id '{}' must be a known id",
+            r.tool_id
+        );
+    }
 }

@@ -36,20 +36,21 @@ pub fn clone_or_fetch_repo(repo_url: &str, source: &str) -> Result<PathBuf> {
             .output();
 
         if is_sparse_checkout(&repo_dir)
-            && let Ok(dirs) = discover_skill_dirs_from_tree(&repo_dir) {
-                if dirs.is_empty() {
-                    let _ = command_with_path("git")
-                        .current_dir(&repo_dir)
-                        .args(["sparse-checkout", "disable"])
-                        .output();
-                    let mut co_cmd = command_with_path("git");
-                    github_mirror::apply_mirror_args(&mut co_cmd);
-                    let _ = co_cmd.current_dir(&repo_dir).arg("checkout").output();
-                } else {
-                    let dir_refs: Vec<&str> = dirs.iter().map(|s| s.as_str()).collect();
-                    let _ = git_ops::apply_sparse_checkout(&repo_dir, &dir_refs);
-                }
+            && let Ok(dirs) = discover_skill_dirs_from_tree(&repo_dir)
+        {
+            if dirs.is_empty() {
+                let _ = command_with_path("git")
+                    .current_dir(&repo_dir)
+                    .args(["sparse-checkout", "disable"])
+                    .output();
+                let mut co_cmd = command_with_path("git");
+                github_mirror::apply_mirror_args(&mut co_cmd);
+                let _ = co_cmd.current_dir(&repo_dir).arg("checkout").output();
+            } else {
+                let dir_refs: Vec<&str> = dirs.iter().map(|s| s.as_str()).collect();
+                let _ = git_ops::apply_sparse_checkout(&repo_dir, &dir_refs);
             }
+        }
 
         Ok(repo_dir)
     } else {

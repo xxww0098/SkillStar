@@ -63,6 +63,7 @@ pub async fn fetch(
         credits: Vec::new(),
         error: None,
         api_keys: Vec::new(),
+        deepseek_analytics: None,
     })
 }
 

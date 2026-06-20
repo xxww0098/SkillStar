@@ -173,7 +173,9 @@ pub(crate) fn curated_registry_kind_from_db(raw: &str) -> CuratedRegistryKind {
     raw.parse().unwrap_or(CuratedRegistryKind::Custom)
 }
 
-pub(crate) fn row_to_curated_registry(row: &rusqlite::Row<'_>) -> rusqlite::Result<CuratedRegistryEntry> {
+pub(crate) fn row_to_curated_registry(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<CuratedRegistryEntry> {
     let kind: String = row.get(2)?;
     Ok(CuratedRegistryEntry {
         id: row.get(0)?,
@@ -252,7 +254,9 @@ pub(crate) fn row_to_skill_tag_assignment(
     })
 }
 
-pub(crate) fn row_to_rating_summary(row: &rusqlite::Row<'_>) -> rusqlite::Result<MarketplaceRatingSummary> {
+pub(crate) fn row_to_rating_summary(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<MarketplaceRatingSummary> {
     let source_id: String = row.get(1)?;
     Ok(MarketplaceRatingSummary {
         skill_key: row.get(0)?,

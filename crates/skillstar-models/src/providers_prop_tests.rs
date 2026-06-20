@@ -134,7 +134,12 @@ mod tests {
     }
 
     /// Build a valid ProviderEntry with arbitrary generated data.
-    fn make_arb_entry(id: &str, name: &str, base_url: &str, models: Vec<ModelMapping>) -> ProviderEntry {
+    fn make_arb_entry(
+        id: &str,
+        name: &str,
+        base_url: &str,
+        models: Vec<ModelMapping>,
+    ) -> ProviderEntry {
         let settings = ProviderSettings {
             base_url: base_url.to_string(),
             api_key: "sk-test-key-12345".to_string(),
@@ -272,37 +277,36 @@ mod tests {
     /// Strategy: generate a sequence of CRUD operations.
     /// Creates 1-3 providers, then optionally updates the first and deletes the last.
     fn arb_crud_ops() -> impl Strategy<Value = Vec<CrudOp>> {
-        prop::collection::vec(
-            (arb_provider_id(), arb_provider_name()),
-            1..=3,
-        )
-        .prop_flat_map(|id_name_pairs| {
-            let ids: Vec<String> = id_name_pairs.iter().map(|(id, _)| id.clone()).collect();
-            let creates: Vec<CrudOp> = id_name_pairs
-                .into_iter()
-                .map(|(id, name)| CrudOp::Create { id, name })
-                .collect();
+        prop::collection::vec((arb_provider_id(), arb_provider_name()), 1..=3).prop_flat_map(
+            |id_name_pairs| {
+                let ids: Vec<String> = id_name_pairs.iter().map(|(id, _)| id.clone()).collect();
+                let creates: Vec<CrudOp> = id_name_pairs
+                    .into_iter()
+                    .map(|(id, name)| CrudOp::Create { id, name })
+                    .collect();
 
-            let ids_for_ops = ids.clone();
-            arb_provider_patch().prop_map(move |patch| {
-                let mut ops = creates.clone();
-                // Add an update on the first provider
-                if let Some(first_id) = ids_for_ops.first() {
-                    ops.push(CrudOp::Update {
-                        id: first_id.clone(),
-                        patch: patch.clone(),
-                    });
-                }
-                // Add a delete on the last provider (if more than 1)
-                if ids_for_ops.len() > 1
-                    && let Some(last_id) = ids_for_ops.last() {
+                let ids_for_ops = ids.clone();
+                arb_provider_patch().prop_map(move |patch| {
+                    let mut ops = creates.clone();
+                    // Add an update on the first provider
+                    if let Some(first_id) = ids_for_ops.first() {
+                        ops.push(CrudOp::Update {
+                            id: first_id.clone(),
+                            patch: patch.clone(),
+                        });
+                    }
+                    // Add a delete on the last provider (if more than 1)
+                    if ids_for_ops.len() > 1
+                        && let Some(last_id) = ids_for_ops.last()
+                    {
                         ops.push(CrudOp::Delete {
                             id: last_id.clone(),
                         });
                     }
-                ops
-            })
-        })
+                    ops
+                })
+            },
+        )
     }
 
     /// Helper: snapshot an AppProviders state for comparison.

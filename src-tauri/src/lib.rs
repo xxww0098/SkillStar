@@ -263,6 +263,8 @@ pub fn run() {
             commands::marketplace::search_marketplace_packs,
             commands::marketplace::list_marketplace_packs,
             commands::mcp_marketplace::list_mcp_market_servers_local,
+            commands::mcp_marketplace::list_mcp_publishers_local,
+            commands::mcp_marketplace::list_mcp_servers_by_publisher_local,
             commands::mcp_marketplace::search_mcp_market_local,
             commands::mcp_marketplace::get_mcp_market_server_detail_local,
             commands::mcp_marketplace::sync_mcp_market_scope,
@@ -453,6 +455,19 @@ pub fn run() {
             commands::fingerprints::list_supported_ides,
             commands::fingerprints::apply_fingerprint_to_ide,
             commands::fingerprints::restore_ide_baseline,
+            // SSH remote skill management
+            commands::list_ssh_hosts,
+            commands::add_ssh_host,
+            commands::update_ssh_host,
+            commands::delete_ssh_host,
+            commands::import_system_host,
+            commands::test_ssh_connection,
+            commands::accept_ssh_host_key,
+            commands::discover_remote_skills,
+            commands::list_remote_skills,
+            commands::push_skill_to_remote,
+            commands::migrate_remote_skill_to_hub,
+            commands::delete_remote_skill,
             update_tray_language,
         ])
         .build(tauri::generate_context!())

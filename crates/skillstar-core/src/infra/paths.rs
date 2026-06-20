@@ -115,6 +115,17 @@ pub fn profiles_config_path() -> PathBuf {
     config_dir().join("profiles.toml")
 }
 
+/// `config/ssh_hosts.toml` — SSH remote host definitions (non-sensitive metadata only;
+/// passphrases/passwords live in the system keyring, keyed by host id).
+pub fn ssh_hosts_config_path() -> PathBuf {
+    config_dir().join("ssh_hosts.toml")
+}
+
+/// `config/ssh_known_hosts.json` — accepted SSH host-key fingerprints (TOFU store).
+pub fn ssh_known_hosts_path() -> PathBuf {
+    config_dir().join("ssh_known_hosts.json")
+}
+
 /// `db/marketplace.db` — local-first marketplace snapshot DB.
 pub fn marketplace_db_path() -> PathBuf {
     db_dir().join("marketplace.db")

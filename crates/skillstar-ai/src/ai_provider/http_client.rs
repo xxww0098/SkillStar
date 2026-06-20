@@ -104,9 +104,10 @@ pub fn get_http_client() -> Result<reqwest::Client> {
         .map_err(|_| anyhow::anyhow!("HTTP client cache lock poisoned"))?;
 
     if let Some((cached_fp, client)) = guard.as_ref()
-        && *cached_fp == fingerprint {
-            return Ok(client.clone());
-        }
+        && *cached_fp == fingerprint
+    {
+        return Ok(client.clone());
+    }
 
     let rebuilt = build_http_client_inner(&fingerprint)
         .with_context(|| "Failed to build HTTP client with current proxy settings")?;

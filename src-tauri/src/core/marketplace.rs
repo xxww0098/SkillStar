@@ -1,7 +1,4 @@
-pub use skillstar_marketplace::{
-    AiKeywordSearchResult, MarketplaceSkillDetails, PublisherRepo,
-};
-
+pub use skillstar_marketplace::{AiKeywordSearchResult, MarketplaceSkillDetails, PublisherRepo};
 
 pub use super::marketplace_snapshot::{LocalFirstResult, MarketplacePack, SyncStateEntry};
 

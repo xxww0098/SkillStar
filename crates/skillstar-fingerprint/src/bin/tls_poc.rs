@@ -14,7 +14,7 @@
 
 use anyhow::{Context, Result};
 use serde_json::Value;
-use skillstar_fingerprint::{build_client, DeviceFingerprint, FingerprintAwareClient, TlsProfile};
+use skillstar_fingerprint::{DeviceFingerprint, FingerprintAwareClient, TlsProfile, build_client};
 use std::time::Duration;
 
 const DEFAULT_TARGET: &str = "https://tls.peet.ws/api/all";
@@ -43,7 +43,8 @@ async fn main() -> Result<()> {
         .without_time()
         .init();
 
-    let target = std::env::var("SKILLSTAR_FP_TARGET").unwrap_or_else(|_| DEFAULT_TARGET.to_string());
+    let target =
+        std::env::var("SKILLSTAR_FP_TARGET").unwrap_or_else(|_| DEFAULT_TARGET.to_string());
     let requested = std::env::var("SKILLSTAR_FP_PROFILES").ok();
 
     let profiles = build_profile_set(requested.as_deref());
@@ -122,7 +123,7 @@ async fn probe_one(fp: &DeviceFingerprint, target: &str) -> ProbeResult {
                 user_agent: None,
                 ip: None,
                 error: Some(format!("build_client: {e:#}")),
-            }
+            };
         }
     };
     let backend = client.backend();
@@ -140,7 +141,7 @@ async fn probe_one(fp: &DeviceFingerprint, target: &str) -> ProbeResult {
                 user_agent: None,
                 ip: None,
                 error: Some(format!("{e:#}")),
-            }
+            };
         }
     };
 
@@ -188,8 +189,11 @@ fn parse_peet_response(label: String, backend: &'static str, body: &str) -> Prob
                 h2_fingerprint: None,
                 user_agent: None,
                 ip: None,
-                error: Some(format!("not JSON: {e}; first 200 bytes: {}", &body[..body.len().min(200)])),
-            }
+                error: Some(format!(
+                    "not JSON: {e}; first 200 bytes: {}",
+                    &body[..body.len().min(200)]
+                )),
+            };
         }
     };
 
@@ -224,11 +228,7 @@ fn parse_peet_response(label: String, backend: &'static str, body: &str) -> Prob
             .and_then(|d| d.get("ip"))
             .and_then(|v| v.as_str())
             .map(String::from)
-            .or_else(|| {
-                json.get("ip")
-                    .and_then(|v| v.as_str())
-                    .map(String::from)
-            }),
+            .or_else(|| json.get("ip").and_then(|v| v.as_str()).map(String::from)),
         error: None,
     }
 }

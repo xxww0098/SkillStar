@@ -17,9 +17,7 @@
 //! 5.5, 6.4, 7.3, 8.1, 8.2, 8.7**
 
 use proptest::prelude::*;
-use skillstar_models::providers::{
-    FlatProvidersStore, ProviderEntryFlat, ToolActivation,
-};
+use skillstar_models::providers::{FlatProvidersStore, ProviderEntryFlat, ToolActivation};
 use std::path::PathBuf;
 use tempfile::TempDir;
 
@@ -48,59 +46,71 @@ fn setup_temp_store() -> (TempDir, PathBuf) {
 /// Strategy: generate an arbitrary ToolActivation.
 fn arb_tool_activation() -> impl Strategy<Value = ToolActivation> {
     (
-        "[a-zA-Z0-9\\-]{1,36}",  // provider_id (UUID-like)
+        "[a-zA-Z0-9\\-]{1,36}",    // provider_id (UUID-like)
         "[a-zA-Z0-9\\-\\.]{1,50}", // model name
     )
-        .prop_map(|(provider_id, model)| ToolActivation { provider_id, model, settings: None, last_sync_at: None })
+        .prop_map(|(provider_id, model)| ToolActivation {
+            provider_id,
+            model,
+            settings: None,
+            last_sync_at: None,
+        })
 }
 
 /// Strategy: generate an optional ToolActivation for the tool_activations map.
 fn arb_optional_tool_activation() -> impl Strategy<Value = Option<ToolActivation>> {
-    prop_oneof![
-        Just(None),
-        arb_tool_activation().prop_map(Some),
-    ]
+    prop_oneof![Just(None), arb_tool_activation().prop_map(Some),]
 }
 
 /// Strategy: generate an arbitrary ProviderEntryFlat.
 fn arb_provider_entry_flat() -> impl Strategy<Value = ProviderEntryFlat> {
     (
-        "[a-f0-9\\-]{36}",                          // id (UUID format)
-        "[a-zA-Z0-9 _\\-]{1,64}",                   // name
-        "https://[a-z]{3,12}\\.[a-z]{2,6}/v[0-9]",  // base_url_openai
+        "[a-f0-9\\-]{36}",                         // id (UUID format)
+        "[a-zA-Z0-9 _\\-]{1,64}",                  // name
+        "https://[a-z]{3,12}\\.[a-z]{2,6}/v[0-9]", // base_url_openai
         prop_oneof![
             Just(String::new()),
             "https://[a-z]{3,12}\\.[a-z]{2,6}/anthropic".prop_map(|s| s),
-        ],                                           // base_url_anthropic
-        "[a-zA-Z0-9\\-_]{0,64}",                     // api_key
+        ], // base_url_anthropic
+        "[a-zA-Z0-9\\-_]{0,64}",                   // api_key
         proptest::collection::vec("[a-zA-Z0-9\\-\\.]{1,30}", 0..5), // models
-        "[a-zA-Z0-9\\-\\.]{0,30}",                   // default_model
-        0u32..100u32,                                // sort_index
+        "[a-zA-Z0-9\\-\\.]{0,30}",                 // default_model
+        0u32..100u32,                              // sort_index
     )
-        .prop_flat_map(|(id, name, base_url_openai, base_url_anthropic, api_key, models, default_model, sort_index)| {
-            // Generate optional fields
-            (
-                Just(id),
-                Just(name),
-                Just(base_url_openai),
-                Just(base_url_anthropic),
-                Just(api_key),
-                Just(models),
-                Just(default_model),
-                Just(sort_index),
-                proptest::option::of("[a-z\\-]{3,20}"),       // preset_id
-                proptest::option::of("#[0-9A-Fa-f]{6}"),      // icon_color
-                proptest::option::of("[a-zA-Z0-9 ]{0,100}"),  // notes
-                proptest::option::of(1_700_000_000_000u64..1_800_000_000_000u64), // created_at
-            )
-        })
-        .prop_map(|(id, name, base_url_openai, base_url_anthropic, api_key, models, default_model, sort_index, preset_id, icon_color, notes, created_at)| {
-            ProviderEntryFlat {
+        .prop_flat_map(
+            |(
                 id,
                 name,
                 base_url_openai,
                 base_url_anthropic,
-                models_url: String::new(),
+                api_key,
+                models,
+                default_model,
+                sort_index,
+            )| {
+                // Generate optional fields
+                (
+                    Just(id),
+                    Just(name),
+                    Just(base_url_openai),
+                    Just(base_url_anthropic),
+                    Just(api_key),
+                    Just(models),
+                    Just(default_model),
+                    Just(sort_index),
+                    proptest::option::of("[a-z\\-]{3,20}"), // preset_id
+                    proptest::option::of("#[0-9A-Fa-f]{6}"), // icon_color
+                    proptest::option::of("[a-zA-Z0-9 ]{0,100}"), // notes
+                    proptest::option::of(1_700_000_000_000u64..1_800_000_000_000u64), // created_at
+                )
+            },
+        )
+        .prop_map(
+            |(
+                id,
+                name,
+                base_url_openai,
+                base_url_anthropic,
                 api_key,
                 models,
                 default_model,
@@ -109,11 +119,27 @@ fn arb_provider_entry_flat() -> impl Strategy<Value = ProviderEntryFlat> {
                 icon_color,
                 notes,
                 created_at,
-                meta: None, // Keep meta as None for simplicity (JSON Value is hard to generate arbitrarily)
-                codex_wire_api: "responses".to_string(),
-                codex_auth_mode: "api_key".to_string(),
-            }
-        })
+            )| {
+                ProviderEntryFlat {
+                    id,
+                    name,
+                    base_url_openai,
+                    base_url_anthropic,
+                    models_url: String::new(),
+                    api_key,
+                    models,
+                    default_model,
+                    sort_index,
+                    preset_id,
+                    icon_color,
+                    notes,
+                    created_at,
+                    meta: None, // Keep meta as None for simplicity (JSON Value is hard to generate arbitrarily)
+                    codex_wire_api: "responses".to_string(),
+                    codex_auth_mode: "api_key".to_string(),
+                }
+            },
+        )
 }
 
 /// Strategy: generate an arbitrary FlatProvidersStore.
@@ -121,7 +147,7 @@ fn arb_flat_providers_store() -> impl Strategy<Value = FlatProvidersStore> {
     (
         proptest::collection::vec(arb_provider_entry_flat(), 0..10), // providers
         proptest::collection::hash_map(
-            "[a-z\\-]{3,15}",  // tool_id keys (e.g., "claude-code", "codex")
+            "[a-z\\-]{3,15}", // tool_id keys (e.g., "claude-code", "codex")
             arb_optional_tool_activation(),
             0..5,
         ), // tool_activations

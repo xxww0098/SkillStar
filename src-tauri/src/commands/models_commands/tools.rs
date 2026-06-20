@@ -105,18 +105,22 @@ pub async fn activate_tool(
     let sync_result = match tool_id.as_str() {
         "claude-code" => tool_sync::sync_to_claude_code(provider, &activation.model)
             .map_err(|e| e.to_string())?,
-        "codex" => tool_sync::sync_to_codex(provider, &activation)
-            .map_err(|e| e.to_string())?,
-        "opencode" => tool_sync::sync_to_opencode(provider, &activation.model)
-            .map_err(|e| e.to_string())?,
-        "gemini" => tool_sync::sync_to_gemini(provider, &activation.model)
-            .map_err(|e| e.to_string())?,
+        "codex" => tool_sync::sync_to_codex(provider, &activation).map_err(|e| e.to_string())?,
+        "opencode" => {
+            tool_sync::sync_to_opencode(provider, &activation.model).map_err(|e| e.to_string())?
+        }
+        "zcode" => {
+            tool_sync::sync_to_zcode(provider, &activation.model).map_err(|e| e.to_string())?
+        }
+        "gemini" => {
+            tool_sync::sync_to_gemini(provider, &activation.model).map_err(|e| e.to_string())?
+        }
         _ => ToolSyncResultFlat {
             tool_id: tool_id.clone(),
             success: false,
             config_path: None,
             error: Some(format!(
-                "Unknown tool_id '{}'. Supported: claude-code, codex, opencode, gemini.",
+                "Unknown tool_id '{}'. Supported: claude-code, codex, opencode, gemini, zcode.",
                 tool_id
             )),
             backup_path: None,
@@ -165,6 +169,9 @@ pub async fn deactivate_tool(
         "opencode" => {
             tool_sync::unsync_opencode().map_err(|e| e.to_string())?;
         }
+        "zcode" => {
+            tool_sync::unsync_zcode().map_err(|e| e.to_string())?;
+        }
         "gemini" => {
             tool_sync::unsync_gemini().map_err(|e| e.to_string())?;
         }
@@ -205,18 +212,22 @@ pub async fn update_tool_settings(
     let sync_result = match tool_id.as_str() {
         "claude-code" => tool_sync::sync_to_claude_code(provider, &activation.model)
             .map_err(|e| e.to_string())?,
-        "codex" => tool_sync::sync_to_codex(provider, &activation)
-            .map_err(|e| e.to_string())?,
-        "opencode" => tool_sync::sync_to_opencode(provider, &activation.model)
-            .map_err(|e| e.to_string())?,
-        "gemini" => tool_sync::sync_to_gemini(provider, &activation.model)
-            .map_err(|e| e.to_string())?,
+        "codex" => tool_sync::sync_to_codex(provider, &activation).map_err(|e| e.to_string())?,
+        "opencode" => {
+            tool_sync::sync_to_opencode(provider, &activation.model).map_err(|e| e.to_string())?
+        }
+        "zcode" => {
+            tool_sync::sync_to_zcode(provider, &activation.model).map_err(|e| e.to_string())?
+        }
+        "gemini" => {
+            tool_sync::sync_to_gemini(provider, &activation.model).map_err(|e| e.to_string())?
+        }
         _ => ToolSyncResultFlat {
             tool_id: tool_id.clone(),
             success: false,
             config_path: None,
             error: Some(format!(
-                "Unknown tool_id '{}'. Supported: claude-code, codex, opencode, gemini.",
+                "Unknown tool_id '{}'. Supported: claude-code, codex, opencode, gemini, zcode.",
                 tool_id
             )),
             backup_path: None,
@@ -262,9 +273,10 @@ pub async fn detect_tool_installation(tool_id: String) -> Result<serde_json::Val
         "codex" => "codex",
         "opencode" => "opencode",
         "gemini" => "gemini",
+        "zcode" => "zcode",
         _ => {
             return Err(format!(
-                "Unknown tool_id: '{}'. Supported: claude-code, codex, opencode, claude-desktop, gemini.",
+                "Unknown tool_id: '{}'. Supported: claude-code, codex, opencode, claude-desktop, gemini, zcode.",
                 tool_id
             ));
         }
@@ -278,6 +290,7 @@ pub async fn detect_tool_installation(tool_id: String) -> Result<serde_json::Val
             "codex" => home.join(".codex").is_dir(),
             "opencode" => home.join(".config").join("opencode").is_dir(),
             "gemini" => home.join(".gemini").is_dir(),
+            "zcode" => home.join(".zcode").is_dir(),
             _ => false,
         })
         .unwrap_or(false);
@@ -305,20 +318,30 @@ fn detect_claude_desktop_app() -> bool {
             return true;
         }
         if let Some(home) = dirs::home_dir()
-            && home.join("Applications").join("Claude.app").exists() {
-                return true;
-            }
+            && home.join("Applications").join("Claude.app").exists()
+        {
+            return true;
+        }
         false
     }
     #[cfg(target_os = "windows")]
     {
         if let Some(local) = dirs::data_local_dir() {
-            if local.join("Programs").join("Claude").join("Claude.exe").exists() {
+            if local
+                .join("Programs")
+                .join("Claude")
+                .join("Claude.exe")
+                .exists()
+            {
                 return true;
             }
         }
         if let Ok(pf) = std::env::var("ProgramFiles") {
-            if std::path::Path::new(&pf).join("Claude").join("Claude.exe").exists() {
+            if std::path::Path::new(&pf)
+                .join("Claude")
+                .join("Claude.exe")
+                .exists()
+            {
                 return true;
             }
         }
@@ -336,7 +359,9 @@ fn detect_claude_desktop_app() -> bool {
 
 /// List on-disk config files for a tool (Claude / Codex / OpenCode).
 #[tauri::command]
-pub async fn list_tool_config_files(tool_id: String) -> Result<Vec<tool_sync::ToolConfigFileInfo>, String> {
+pub async fn list_tool_config_files(
+    tool_id: String,
+) -> Result<Vec<tool_sync::ToolConfigFileInfo>, String> {
     tool_sync::list_tool_config_files(&tool_id).map_err(|e| e.to_string())
 }
 
@@ -353,7 +378,9 @@ pub async fn write_tool_config_file(
     file_id: String,
     content: String,
 ) -> Result<tool_sync::WriteToolConfigFileResult, String> {
-    Ok(tool_sync::write_tool_config_file(&tool_id, &file_id, &content))
+    Ok(tool_sync::write_tool_config_file(
+        &tool_id, &file_id, &content,
+    ))
 }
 
 /// Pretty-format JSON/TOML without writing to disk.
@@ -378,7 +405,12 @@ pub async fn push_provider_to_tool_config(
         .get(&tool_id)
         .and_then(|a| a.as_ref())
         .filter(|a| a.provider_id == provider_id)
-        .ok_or_else(|| format!("Tool '{}' is not activated for provider '{}'", tool_id, provider_id))?;
+        .ok_or_else(|| {
+            format!(
+                "Tool '{}' is not activated for provider '{}'",
+                tool_id, provider_id
+            )
+        })?;
 
     let provider = store
         .providers
@@ -389,13 +421,16 @@ pub async fn push_provider_to_tool_config(
     let result = match tool_id.as_str() {
         "claude-code" => tool_sync::sync_to_claude_code(provider, &activation.model)
             .map_err(|e| e.to_string())?,
-        "codex" => tool_sync::sync_to_codex(provider, activation)
-            .map_err(|e| e.to_string())?,
-        "opencode" => tool_sync::sync_to_opencode(provider, &activation.model)
-            .map_err(|e| e.to_string())?,
+        "codex" => tool_sync::sync_to_codex(provider, activation).map_err(|e| e.to_string())?,
+        "opencode" => {
+            tool_sync::sync_to_opencode(provider, &activation.model).map_err(|e| e.to_string())?
+        }
+        "zcode" => {
+            tool_sync::sync_to_zcode(provider, &activation.model).map_err(|e| e.to_string())?
+        }
         _ => {
             return Err(format!(
-                "Unknown tool_id '{}'. Supported: claude-code, codex, opencode.",
+                "Unknown tool_id '{}'. Supported: claude-code, codex, opencode, zcode.",
                 tool_id
             ));
         }
@@ -446,14 +481,15 @@ pub async fn detect_provider_conflicts(
     let mut conflicts: Vec<tool_sync::ConfigConflict> = Vec::new();
     for (tool_id, activation) in &store.tool_activations {
         if let Some(act) = activation
-            && act.provider_id == provider_id {
-                for c in tool_sync::detect_conflicts(tool_id, act.last_sync_at) {
-                    // Env overrides are global — added once below to avoid dupes.
-                    if !matches!(c.conflict_type, tool_sync::ConflictType::EnvVarOverride) {
-                        conflicts.push(c);
-                    }
+            && act.provider_id == provider_id
+        {
+            for c in tool_sync::detect_conflicts(tool_id, act.last_sync_at) {
+                // Env overrides are global — added once below to avoid dupes.
+                if !matches!(c.conflict_type, tool_sync::ConflictType::EnvVarOverride) {
+                    conflicts.push(c);
                 }
             }
+        }
     }
     conflicts.extend(tool_sync::detect_env_conflicts());
 
@@ -488,12 +524,14 @@ pub async fn resync_tool(
         .ok_or_else(|| format!("Provider '{}' not found", activation.provider_id))?;
 
     let sync_result = match tool_id.as_str() {
-        "claude-code" => {
-            tool_sync::sync_to_claude_code(provider, &activation.model).map_err(|e| e.to_string())?
-        }
+        "claude-code" => tool_sync::sync_to_claude_code(provider, &activation.model)
+            .map_err(|e| e.to_string())?,
         "codex" => tool_sync::sync_to_codex(provider, &activation).map_err(|e| e.to_string())?,
         "opencode" => {
             tool_sync::sync_to_opencode(provider, &activation.model).map_err(|e| e.to_string())?
+        }
+        "zcode" => {
+            tool_sync::sync_to_zcode(provider, &activation.model).map_err(|e| e.to_string())?
         }
         other => return Err(format!("Unknown tool_id '{}'", other)),
     };

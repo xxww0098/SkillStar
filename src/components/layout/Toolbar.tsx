@@ -55,6 +55,10 @@ interface ToolbarProps {
   aiSearching?: boolean;
   /** Optional title node to render at the start of the toolbar */
   titleNode?: React.ReactNode;
+  /** Prepended inside the filters row (e.g. remote host picker) */
+  filtersLead?: React.ReactNode;
+  /** Prepended inside the actions row (e.g. push / console) */
+  actionsLead?: React.ReactNode;
   /** Optional search placeholder override */
   searchPlaceholder?: string;
   /** Hide sort segmented controls */
@@ -97,6 +101,8 @@ export function Toolbar({
   onAiSearch,
   aiSearching,
   titleNode,
+  filtersLead,
+  actionsLead,
   searchPlaceholder,
   hideSortControls,
   hideViewToggle,
@@ -194,6 +200,7 @@ export function Toolbar({
   // ── Filters slot ──
   const filtersSlot = (
     <>
+      {filtersLead}
       {/* AI Pick Skills */}
       {onAiPick && (
         <button
@@ -299,7 +306,7 @@ export function Toolbar({
               className={cn(
                 "flex items-center h-8 rounded-lg border text-xs font-medium cursor-pointer whitespace-nowrap shrink-0 transition-all duration-200 focus-ring gap-1.5",
                 hasRepoFilter
-                  ? "px-2.5 border-primary/40 bg-primary/8 text-primary hover:bg-primary/12"
+                  ? "pl-2.5 pr-1.5 border-primary/40 bg-primary/8 text-primary hover:bg-primary/12 max-w-[180px]"
                   : "w-8 justify-center border-border/80 bg-background/50 shadow-sm backdrop-blur-md text-muted-foreground hover:text-foreground hover:bg-accent/10 hover:border-accent/50",
               )}
               title={t("toolbar.repoFilter", { defaultValue: "Filter by repo" })}
@@ -307,10 +314,10 @@ export function Toolbar({
               <GitFork className="w-3.5 h-3.5 shrink-0" />
               {hasRepoFilter && (
                 <>
-                  <span className="max-w-[8rem] truncate">{repoFilter}</span>
+                  <span className="max-w-[5rem] truncate">{repoFilter}</span>
                   <span
                     role="button"
-                    className="ml-0.5 rounded-sm hover:bg-primary/20 p-0.5 -mr-1 transition-colors"
+                    className="ml-0.5 rounded-sm hover:bg-primary/20 p-0.5 transition-colors shrink-0"
                     onClick={(e) => {
                       e.stopPropagation();
                       onRepoFilterChange?.(null);
@@ -391,6 +398,7 @@ export function Toolbar({
   // ── Actions slot ──
   const actionsSlot = (
     <>
+      {actionsLead}
       {/* Import */}
       {onImport && (
         <button

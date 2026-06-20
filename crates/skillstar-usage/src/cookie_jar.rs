@@ -18,8 +18,34 @@ pub struct CookieEntry {
     pub source_url: Option<String>,
 }
 
+/// Normalize pasted browser cookie text before parsing.
+///
+/// Users often copy the full `Cookie:` request header line or include stray
+/// newlines from DevTools — strip those so we only persist real `name=value`
+/// pairs.
+pub fn normalize_cookie_header(raw: &str) -> String {
+    let mut text = raw.trim().to_string();
+    if text.is_empty() {
+        return text;
+    }
+
+    // Collapse line breaks that sometimes appear when copying from DevTools.
+    text = text.replace(['\r', '\n'], "; ");
+
+    // Strip a leading `Cookie:` label whether it is on its own line or inline.
+    if let Some(rest) = text.strip_prefix("Cookie:") {
+        text = rest.trim().to_string();
+    } else if let Some(rest) = text.strip_prefix("cookie:") {
+        text = rest.trim().to_string();
+    }
+
+    text
+}
+
 pub fn parse_cookie_header(raw: &str) -> Vec<CookieEntry> {
-    raw.split(';')
+    let normalized = normalize_cookie_header(raw);
+    normalized
+        .split(';')
         .filter_map(|pair| {
             let pair = pair.trim();
             if pair.is_empty() {
@@ -59,4 +85,28 @@ pub fn build_cookie_header(entries: &[CookieEntry]) -> String {
         .map(|e| format!("{}={}", e.name, e.value))
         .collect::<Vec<_>>()
         .join("; ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strips_cookie_label_prefix() {
+        let raw = "Cookie: session=abc; token=xyz";
+        let entries = parse_cookie_header(raw);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].name, "session");
+        assert_eq!(entries[0].value, "abc");
+        assert_eq!(entries[1].name, "token");
+        assert_eq!(entries[1].value, "xyz");
+    }
+
+    #[test]
+    fn collapses_newlines_before_parsing() {
+        let raw = "session=abc;\ntoken=xyz";
+        let entries = parse_cookie_header(raw);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(build_cookie_header(&entries), "session=abc; token=xyz");
+    }
 }

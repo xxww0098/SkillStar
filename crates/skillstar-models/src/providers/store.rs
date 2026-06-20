@@ -132,8 +132,8 @@ pub fn migrate_store_if_needed(path: &Path) -> Result<FlatProvidersStore> {
     // Check if already v2
     if value.get("version").and_then(|v| v.as_u64()) == Some(2) {
         // Already v2 — parse directly
-        let store: FlatProvidersStore = serde_json::from_value(value)
-            .context("Failed to parse v2 FlatProvidersStore")?;
+        let store: FlatProvidersStore =
+            serde_json::from_value(value).context("Failed to parse v2 FlatProvidersStore")?;
         return Ok(store);
     }
 
@@ -206,8 +206,7 @@ fn convert_v1_to_v2(old: &ProvidersStore) -> FlatProvidersStore {
         if let Some(&idx) = dedup_map.get(&key) {
             // Merge models into existing entry
             let existing = &mut deduped[idx];
-            let mut existing_models: HashSet<String> =
-                existing.models.iter().cloned().collect();
+            let mut existing_models: HashSet<String> = existing.models.iter().cloned().collect();
             for model in &cp.models {
                 if existing_models.insert(model.clone()) {
                     existing.models.push(model.clone());
@@ -257,10 +256,8 @@ fn convert_v1_to_v2(old: &ProvidersStore) -> FlatProvidersStore {
 
     // Map app_id to tool_id: claude.current → tool_activations["claude-code"]
     //                         codex.current → tool_activations["codex"]
-    let app_to_tool: &[(&str, &AppProviders)] = &[
-        ("claude-code", &old.claude),
-        ("codex", &old.codex),
-    ];
+    let app_to_tool: &[(&str, &AppProviders)] =
+        &[("claude-code", &old.claude), ("codex", &old.codex)];
 
     for &(tool_id, app) in app_to_tool {
         if let Some(ref current_id) = app.current {
@@ -348,7 +345,10 @@ pub fn read_store_from(path: &Path) -> Result<ProvidersStore> {
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) => {
-            warn!("Failed to read {}: {e}. Returning default store.", path.display());
+            warn!(
+                "Failed to read {}: {e}. Returning default store.",
+                path.display()
+            );
             return Ok(ProvidersStore::default());
         }
     };
@@ -380,15 +380,19 @@ pub fn write_store_to(store: &ProvidersStore, path: &Path) -> Result<()> {
     }
 
     // Serialize to pretty JSON
-    let json =
-        serde_json::to_string_pretty(store).context("Failed to serialize ProvidersStore")?;
+    let json = serde_json::to_string_pretty(store).context("Failed to serialize ProvidersStore")?;
 
     // Write to a temp file in the same directory, then rename for atomicity
     let temp_path = path.with_extension("json.tmp");
     std::fs::write(&temp_path, json.as_bytes())
         .with_context(|| format!("Failed to write temp file {}", temp_path.display()))?;
-    std::fs::rename(&temp_path, path)
-        .with_context(|| format!("Failed to rename {} to {}", temp_path.display(), path.display()))?;
+    std::fs::rename(&temp_path, path).with_context(|| {
+        format!(
+            "Failed to rename {} to {}",
+            temp_path.display(),
+            path.display()
+        )
+    })?;
 
     Ok(())
 }

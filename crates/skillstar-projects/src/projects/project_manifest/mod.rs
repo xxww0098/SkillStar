@@ -96,7 +96,10 @@ mod tests {
 
             let claude_link = project_path.join(".claude/skills/demo-skill");
             let codex_link = project_path.join(".codex/skills/demo-skill");
-            assert!(claude_link.is_symlink(), "expected initial symlink to exist");
+            assert!(
+                claude_link.is_symlink(),
+                "expected initial symlink to exist"
+            );
             assert!(
                 codex_link.is_symlink(),
                 "expected initial codex symlink to exist"
@@ -180,7 +183,10 @@ mod tests {
             save_and_sync(&project_path_str, initial_agents, HashMap::new())?;
 
             let claude_link = project_path.join(".claude/skills/demo-skill");
-            assert!(claude_link.is_symlink(), "expected initial skill deployment");
+            assert!(
+                claude_link.is_symlink(),
+                "expected initial skill deployment"
+            );
 
             let emptied_agents = HashMap::from([
                 ("claude".to_string(), Vec::new()),
@@ -332,6 +338,57 @@ mod tests {
                     .contains("No valid project-level agents selected"),
                 "unexpected error: {err}"
             );
+            Ok(())
+        })();
+
+        match previous_home {
+            Some(value) => set_env("HOME", value),
+            None => remove_env("HOME"),
+        }
+        #[cfg(windows)]
+        match previous_userprofile {
+            Some(value) => set_env("USERPROFILE", value),
+            None => remove_env("USERPROFILE"),
+        }
+        let _ = std::fs::remove_dir_all(&temp_root);
+
+        result
+    }
+
+    #[test]
+    fn add_skills_to_project_does_not_create_dirs_for_empty_or_missing_skills() -> Result<()> {
+        let _guard = env_lock();
+
+        let temp_root = make_temp_root("project-add-empty-skills")?;
+        let previous_home = std::env::var_os("HOME");
+        set_env("HOME", temp_root.join("home"));
+        #[cfg(windows)]
+        let previous_userprofile = std::env::var_os("USERPROFILE");
+        #[cfg(windows)]
+        set_env("USERPROFILE", temp_root.join("home"));
+
+        let result = (|| -> Result<()> {
+            let project_path = temp_root.join("workspace").join("demo-project");
+            std::fs::create_dir_all(&project_path)?;
+            let agents = vec!["claude".to_string(), "codex".to_string()];
+
+            let empty_count = add_skills_to_project(&project_path.to_string_lossy(), &[], &agents)?;
+            assert_eq!(empty_count, 0);
+
+            let missing = vec!["missing-skill".to_string()];
+            let missing_count =
+                add_skills_to_project(&project_path.to_string_lossy(), &missing, &agents)?;
+            assert_eq!(missing_count, 0);
+
+            assert!(
+                !project_path.join(".claude").exists(),
+                "empty deploy must not create Claude project folders"
+            );
+            assert!(
+                !project_path.join(".codex").exists(),
+                "missing skills must not create Codex project folders"
+            );
+
             Ok(())
         })();
 

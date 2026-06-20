@@ -1,46 +1,25 @@
-import { Boxes, Check, Download, ExternalLink, PackageSearch, Plug, RefreshCw, Search, Sparkles } from "lucide-react";
+import { Boxes, Download, PackageSearch, Plug, RefreshCw, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { PageToolbar } from "../../../components/layout/PageToolbar";
 import { Button } from "../../../components/ui/button";
 import { EmptyState } from "../../../components/ui/EmptyState";
-import { ExternalAnchor } from "../../../components/ui/ExternalAnchor";
 import { LoadingLogo } from "../../../components/ui/LoadingLogo";
 import { SearchInput } from "../../../components/ui/SearchInput";
+import { AgentIcon } from "../../../components/ui/AgentIcon";
 import { cn } from "../../../lib/utils";
-import type { McpPreset, McpServerEntry } from "../../../types";
-import { useMcpPresets } from "../hooks/useMcpPresets";
+import type { McpServerEntry, McpToolId } from "../../../types";
 import { useMcpServers } from "../hooks/useMcpServers";
-import { McpServerCard } from "./McpServerCard";
+import { McpServerCard, MCP_TOOL_ICON } from "./McpServerCard";
 import { McpServerForm, type McpServerFormValue } from "./McpServerForm";
 import { DrawerShell } from "../../models";
 
-type DrawerMode =
-  | { type: "closed" }
-  | { type: "create" }
-  | { type: "create-preset"; preset: McpPreset }
-  | { type: "edit"; id: string };
+type DrawerMode = { type: "closed" } | { type: "create" } | { type: "edit"; id: string };
 
 interface McpManagerProps {
   /** Navigate to the unified Marketplace MCP tab. */
   onOpenMarket?: () => void;
-}
-
-/** Seed the create form from a recommended preset (required-env keys left blank). */
-function presetToDefaults(preset: McpPreset): Partial<McpServerFormValue> {
-  return {
-    name: preset.name,
-    transport: preset.transport,
-    command: preset.command,
-    args: preset.args,
-    env: preset.env,
-    url: preset.url,
-    headers: preset.headers,
-    description: preset.description,
-    homepage: preset.homepage,
-    enabled: {},
-  };
 }
 
 function matchesQuery(query: string, values: Array<string | string[] | undefined | null>): boolean {
@@ -73,8 +52,6 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
     syncing,
     importing,
   } = useMcpServers();
-  const { presets } = useMcpPresets();
-
   const [drawer, setDrawer] = useState<DrawerMode>({ type: "closed" });
   const [saving, setSaving] = useState(false);
   const [query, setQuery] = useState("");
@@ -93,23 +70,6 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
         ]),
       ),
     [servers, normalizedQuery],
-  );
-
-  const filteredPresets = useMemo(
-    () =>
-      presets.filter((preset) =>
-        matchesQuery(normalizedQuery, [
-          preset.name,
-          preset.description,
-          preset.homepage,
-          preset.transport,
-          preset.tags,
-          preset.command,
-          preset.args,
-          preset.url,
-        ]),
-      ),
-    [presets, normalizedQuery],
   );
 
   const editing = drawer.type === "edit" ? (servers.find((s) => s.id === drawer.id) ?? null) : null;
@@ -199,24 +159,35 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
           <span className="text-muted-foreground/70">/ {servers.length}</span>
         ) : null}
       </div>
-      {toolStatuses.map((status) => (
-        <span
-          key={status.toolId}
-          title={status.configPath}
-          className={cn(
-            "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] transition-colors",
-            status.installed
-              ? "border-border/70 bg-background/40 text-muted-foreground"
-              : "border-border/40 bg-muted/20 text-muted-foreground/60",
-          )}
-        >
+      {toolStatuses.map((status) => {
+        const toolId = status.toolId as McpToolId;
+        const meta = MCP_TOOL_ICON[toolId];
+        return (
           <span
-            className={cn("h-1.5 w-1.5 rounded-full", status.installed ? "bg-success" : "bg-muted-foreground/35")}
-          />
-          <span>{status.label}</span>
-          <span className="text-muted-foreground/60">{status.serverCount}</span>
-        </span>
-      ))}
+            key={status.toolId}
+            title={status.configPath}
+            className={cn(
+              "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2 text-[11px] transition-colors",
+              status.installed
+                ? "border-border/70 bg-background/40 text-muted-foreground"
+                : "border-border/40 bg-muted/20 text-muted-foreground/60",
+            )}
+          >
+            <span
+              className={cn("h-1.5 w-1.5 rounded-full", status.installed ? "bg-success" : "bg-muted-foreground/35")}
+            />
+            {meta ? (
+              <AgentIcon
+                profile={{ id: meta.profileId, icon: meta.icon, display_name: meta.label }}
+                className="h-3.5 w-3.5"
+              />
+            ) : (
+              <span>{status.label}</span>
+            )}
+            <span className="text-muted-foreground/60">{status.serverCount}</span>
+          </span>
+        );
+      })}
     </>
   );
 
@@ -244,7 +215,6 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
   );
 
   const hasSearch = normalizedQuery.length > 0;
-  const showPresets = filteredPresets.length > 0;
   const showServers = filteredServers.length > 0;
 
   return (
@@ -271,69 +241,6 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
             <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-xs text-destructive">
               {String(error)}
             </div>
-          ) : null}
-
-          {showPresets ? (
-            <section className="space-y-3">
-              <div className="flex items-center gap-2 px-1">
-                <Sparkles className="h-3.5 w-3.5 text-primary" />
-                <h2 className="text-sm font-semibold text-foreground">{t("mcp.recommendedSection")}</h2>
-                <span className="text-xs text-muted-foreground">({filteredPresets.length})</span>
-              </div>
-              <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
-                {filteredPresets.map((preset) => {
-                  const added = servers.some((server) => server.name === preset.name);
-                  return (
-                    <div
-                      key={preset.id}
-                      className="group flex min-h-[144px] flex-col gap-2 rounded-xl border border-dashed border-border/60 bg-card/45 p-4 transition hover:border-primary/30 hover:bg-card/70"
-                    >
-                      <div className="flex min-w-0 items-center gap-2">
-                        <Boxes className="h-4 w-4 shrink-0 text-primary" />
-                        <span className="truncate text-sm font-semibold text-foreground">{preset.name}</span>
-                        <span className="ml-auto shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-                          {preset.transport}
-                        </span>
-                      </div>
-                      {preset.description ? (
-                        <p className="line-clamp-2 text-[11px] leading-5 text-muted-foreground">{preset.description}</p>
-                      ) : null}
-                      <div className="mt-auto flex items-center justify-between gap-2 pt-1">
-                        {preset.homepage ? (
-                          <ExternalAnchor
-                            href={preset.homepage}
-                            className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
-                          >
-                            <ExternalLink className="h-3 w-3" />
-                            {t("mcp.homepage")}
-                          </ExternalAnchor>
-                        ) : (
-                          <span />
-                        )}
-                        <Button
-                          size="sm"
-                          variant={added ? "outline" : "default"}
-                          disabled={added}
-                          onClick={() => setDrawer({ type: "create-preset", preset })}
-                        >
-                          {added ? (
-                            <>
-                              <Check className="h-3.5 w-3.5" />
-                              {t("mcp.presetAdded")}
-                            </>
-                          ) : (
-                            <>
-                              <Download className="h-3.5 w-3.5" />
-                              {t("mcp.install")}
-                            </>
-                          )}
-                        </Button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
           ) : null}
 
           <section className="space-y-3">
@@ -393,25 +300,13 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
         title={
           <span className="flex items-center gap-2 text-foreground">
             <Boxes className="h-4 w-4 text-primary" />
-            {drawer.type === "edit"
-              ? (editing?.name ?? t("mcp.title"))
-              : drawer.type === "create-preset"
-                ? drawer.preset.name
-                : t("mcp.addServer")}
+            {drawer.type === "edit" ? (editing?.name ?? t("mcp.title")) : t("mcp.addServer")}
           </span>
         }
-        subtitle={drawer.type === "create-preset" ? t("mcp.drawerPresetSubtitle") : t("mcp.drawerSubtitle")}
+        subtitle={t("mcp.drawerSubtitle")}
       >
         {drawer.type === "create" ? (
           <McpServerForm onSubmit={handleSubmit} submitting={saving} />
-        ) : drawer.type === "create-preset" ? (
-          <McpServerForm
-            key={drawer.preset.id}
-            defaults={presetToDefaults(drawer.preset)}
-            submitLabel={t("common.add")}
-            onSubmit={handleSubmit}
-            submitting={saving}
-          />
         ) : drawer.type === "edit" && editing ? (
           <McpServerForm
             key={editing.id}

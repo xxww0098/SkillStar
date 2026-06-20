@@ -14,7 +14,9 @@ pub(crate) fn normalize_resolve_requests(names: &[String]) -> Vec<ResolveSkillRe
         .collect()
 }
 
-pub(crate) fn existing_named_sources(existing_sources: &HashMap<String, String>) -> HashMap<String, String> {
+pub(crate) fn existing_named_sources(
+    existing_sources: &HashMap<String, String>,
+) -> HashMap<String, String> {
     existing_sources
         .iter()
         .filter_map(|(name, url)| {
@@ -29,7 +31,9 @@ pub(crate) fn existing_named_sources(existing_sources: &HashMap<String, String>)
         .collect()
 }
 
-pub(crate) fn preferred_source_repos(existing_sources: &HashMap<String, String>) -> HashSet<String> {
+pub(crate) fn preferred_source_repos(
+    existing_sources: &HashMap<String, String>,
+) -> HashSet<String> {
     existing_sources
         .values()
         .filter_map(|value| {

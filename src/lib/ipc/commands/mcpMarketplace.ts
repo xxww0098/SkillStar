@@ -2,6 +2,7 @@ import type {
   LocalFirstResult,
   McpMarketEntry,
   McpMarketServerDetail,
+  McpPublisherSummary,
   McpServerEntry,
   SyncStateEntry,
 } from "../../../types";
@@ -18,6 +19,14 @@ import type {
 export interface McpMarketplaceCommands {
   list_mcp_market_servers_local: {
     args: Record<string, never>;
+    result: LocalFirstResult<McpMarketEntry[]>;
+  };
+  list_mcp_publishers_local: {
+    args: Record<string, never>;
+    result: McpPublisherSummary[];
+  };
+  list_mcp_servers_by_publisher_local: {
+    args: { publisherId: string };
     result: LocalFirstResult<McpMarketEntry[]>;
   };
   search_mcp_market_local: {

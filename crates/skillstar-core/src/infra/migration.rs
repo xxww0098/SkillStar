@@ -93,9 +93,10 @@ fn migrate_dir(old: &Path, new: &Path) {
 
 fn remove_dir_if_empty(dir: &Path) -> std::io::Result<()> {
     if let Ok(mut entries) = std::fs::read_dir(dir)
-        && entries.next().is_none() {
-            std::fs::remove_dir(dir)?;
-            tracing::info!("Removed empty legacy dir {:?}", dir);
-        }
+        && entries.next().is_none()
+    {
+        std::fs::remove_dir(dir)?;
+        tracing::info!("Removed empty legacy dir {:?}", dir);
+    }
     Ok(())
 }

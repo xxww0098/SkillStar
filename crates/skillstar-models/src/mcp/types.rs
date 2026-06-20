@@ -9,7 +9,14 @@ use std::collections::BTreeMap;
 // ---------------------------------------------------------------------------
 
 /// Tool ids that can receive MCP servers, in display order.
-pub const MCP_TOOL_IDS: &[&str] = &["claude-code", "claude-desktop", "codex", "gemini", "opencode"];
+pub const MCP_TOOL_IDS: &[&str] = &[
+    "claude-code",
+    "claude-desktop",
+    "codex",
+    "gemini",
+    "opencode",
+    "zcode",
+];
 
 /// Human-readable label for a tool id.
 pub fn mcp_tool_label(tool_id: &str) -> &'static str {
@@ -19,6 +26,7 @@ pub fn mcp_tool_label(tool_id: &str) -> &'static str {
         "codex" => "Codex",
         "gemini" => "Gemini CLI",
         "opencode" => "OpenCode",
+        "zcode" => "ZCode",
         _ => "Unknown",
     }
 }

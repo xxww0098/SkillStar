@@ -40,6 +40,10 @@ pub struct Subscription {
     // -- ApiKey mode --
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key_encrypted: Option<String>,
+    /// DeepSeek platform session token for `platform.deepseek.com` usage APIs
+    /// (separate from the API Key balance endpoint).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform_token_encrypted: Option<String>,
 
     // -- OAuth mode --
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -144,6 +148,48 @@ pub struct SubscriptionUsage {
     /// OpenCode API keys discovered from the control panel (display only).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub api_keys: Vec<OpenCodeApiKey>,
+
+    /// DeepSeek platform usage analytics (model tokens + daily trend).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deepseek_analytics: Option<DeepSeekAnalytics>,
+}
+
+/// Per-model and daily usage from DeepSeek platform internal APIs.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DeepSeekAnalytics {
+    pub month_cost: f64,
+    pub today_cost: f64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<DeepSeekModelUsage>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub daily: Vec<DeepSeekDailyUsage>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DeepSeekModelUsage {
+    pub key: String,
+    pub name: String,
+    pub total_tokens: u64,
+    pub request_count: u64,
+    pub cache_hit_tokens: u64,
+    pub cache_miss_tokens: u64,
+    pub response_tokens: u64,
+    pub cost: f64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DeepSeekDailyUsage {
+    pub date: String,
+    pub flash_tokens: u64,
+    pub flash_cache_hit: u64,
+    pub flash_cache_miss: u64,
+    pub flash_response: u64,
+    pub pro_tokens: u64,
+    pub pro_cache_hit: u64,
+    pub pro_cache_miss: u64,
+    pub pro_response: u64,
+    pub total_tokens: u64,
+    pub total_cost: f64,
 }
 
 /// Display-only metadata for an OpenCode API key. The full key is **never**
@@ -194,6 +240,9 @@ pub struct MonetaryBalance {
     pub granted: f64,
     #[serde(default)]
     pub topped_up: f64,
+    /// Provider-specific availability flag (e.g. DeepSeek `is_available`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_available: Option<bool>,
 }
 
 /// Computed alert (banner / toast trigger) — never persisted, recomputed each refresh.

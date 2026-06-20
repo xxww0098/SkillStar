@@ -10,6 +10,7 @@ const TOOL_LABELS: Record<McpToolId, string> = {
   codex: "Codex",
   gemini: "Gemini CLI",
   opencode: "OpenCode",
+  zcode: "ZCode",
 };
 
 export interface McpServerFormValue {

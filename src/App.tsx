@@ -11,12 +11,15 @@ import { useNavigation } from "./hooks/useNavigation";
 import { useTauriSetup } from "./hooks/useTauriSetup";
 import { useUpdater } from "./hooks/useUpdater";
 import { looksLikeShareCode } from "./lib/shareCode";
-import type { NavPage, OfficialPublisher } from "./types";
+import type { McpPublisherSummary, NavPage, OfficialPublisher } from "./types";
 
 const MySkillsPage = lazy(() => import("./pages/MySkills").then((mod) => ({ default: mod.MySkills })));
 const MarketplacePage = lazy(() => import("./pages/Marketplace").then((mod) => ({ default: mod.Marketplace })));
 const PublisherDetailPage = lazy(() =>
   import("./pages/PublisherDetail").then((mod) => ({ default: mod.PublisherDetail })),
+);
+const McpPublisherDetailPage = lazy(() =>
+  import("./pages/McpPublisherDetail").then((mod) => ({ default: mod.McpPublisherDetail })),
 );
 const SkillCardsPage = lazy(() => import("./pages/SkillCards").then((mod) => ({ default: mod.SkillCards })));
 const ProjectsPage = lazy(() => import("./pages/Projects").then((mod) => ({ default: mod.Projects })));
@@ -168,6 +171,10 @@ function AppContent() {
     (pub_: OfficialPublisher) => nav.setSubPage({ type: "publisher-detail", publisher: pub_ }),
     [nav],
   );
+  const handleNavigateToMcpPublisher = useCallback(
+    (pub_: McpPublisherSummary) => nav.setSubPage({ type: "mcp-publisher-detail", publisher: pub_ }),
+    [nav],
+  );
   const handleClearPreSelectedCards = useCallback(() => nav.setSkillCardsPreSelectedSkills(null), [nav]);
   const handleNavigateToProjects = useCallback(
     (skills?: string[]) => {
@@ -208,6 +215,20 @@ function AppContent() {
         </motion.div>
       );
     }
+    if (nav.activePage === "marketplace" && nav.subPage?.type === "mcp-publisher-detail") {
+      return (
+        <motion.div
+          key="mcp-publisher-detail"
+          initial={{ opacity: 0, x: 30 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: -30 }}
+          transition={{ duration: 0.2, ease: "easeOut" }}
+          className="flex-1 min-w-0 flex overflow-hidden"
+        >
+          <McpPublisherDetailPage publisher={nav.subPage.publisher} onBack={handlePublisherBack} />
+        </motion.div>
+      );
+    }
 
     switch (nav.activePage) {
       case "my-skills":
@@ -226,6 +247,7 @@ function AppContent() {
             activeTab={nav.marketplaceTab}
             onTabChange={nav.setMarketplaceTab}
             onNavigateToPublisher={handleNavigateToPublisher}
+            onNavigateToMcpPublisher={handleNavigateToMcpPublisher}
           />
         );
       case "skill-cards":
@@ -247,7 +269,7 @@ function AppContent() {
         return (
           <McpPage
             onOpenMarket={() => {
-              nav.setMarketplaceTab("mcp");
+              nav.setMarketplaceTab("mcp-official");
               nav.navigate("marketplace");
             }}
           />

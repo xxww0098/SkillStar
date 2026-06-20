@@ -212,7 +212,7 @@ async fn exchange_code_for_token(
         .as_deref()
         .ok_or_else(|| UsageError::Other("Kiro 回调缺少 code".into()))?;
 
-    let client = http_client()?;
+    let client = crate::fetchers::http_client()?;
     let resp = client
         .post(KIRO_TOKEN_ENDPOINT)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
@@ -294,6 +294,7 @@ async fn finalize_subscription(auth_token: Value) -> UsageResult<Subscription> {
         renew_date: 0,
         auto_renew: false,
         api_key_encrypted: None,
+        platform_token_encrypted: None,
         access_token_encrypted: Some(crypto::encrypt(&access_token)),
         refresh_token_encrypted: refresh_token.as_deref().map(crypto::encrypt),
         access_token_expires_at: expires_at,
@@ -324,7 +325,8 @@ pub async fn fetch(subscription: &mut Subscription) -> UsageResult<SubscriptionU
 }
 
 async fn fetch_inner(subscription: &mut Subscription) -> UsageResult<SubscriptionUsage> {
-    let mut access_token = decrypt_required(&subscription.access_token_encrypted)?;
+    let mut access_token =
+        crate::fetchers::decrypt_required(&subscription.access_token_encrypted, "access_token")?;
 
     if token_refresh::needs_refresh(subscription.access_token_expires_at)
         && let Some(rt_cipher) = subscription.refresh_token_encrypted.as_deref()
@@ -350,7 +352,7 @@ async fn fetch_inner(subscription: &mut Subscription) -> UsageResult<Subscriptio
 }
 
 async fn fetch_usage_for_subscription(sub: &Subscription) -> UsageResult<SubscriptionUsage> {
-    let access_token = decrypt_required(&sub.access_token_encrypted)?;
+    let access_token = crate::fetchers::decrypt_required(&sub.access_token_encrypted, "access_token")?;
     fetch_usage_with_token(sub, &access_token).await
 }
 
@@ -371,7 +373,7 @@ async fn fetch_usage_with_token(
 async fn refresh_access_token(
     refresh_token: &str,
 ) -> UsageResult<(String, Option<String>, Option<String>, Option<i64>)> {
-    let client = http_client()?;
+    let client = crate::fetchers::http_client()?;
     let resp = client
         .post(KIRO_REFRESH_ENDPOINT)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
@@ -430,7 +432,7 @@ async fn fetch_usage_limits(access_token: &str, profile_arn: &str) -> UsageResul
         urlencoding(profile_arn),
     );
 
-    let client = http_client()?;
+    let client = crate::fetchers::http_client()?;
     let resp = client
         .get(&url)
         .header(
@@ -521,6 +523,7 @@ fn build_subscription_usage(subscription_id: &str, usage: &Value) -> Subscriptio
         credits: Vec::new(),
         error: None,
         api_keys: Vec::new(),
+        deepseek_analytics: None,
     }
 }
 
@@ -884,21 +887,6 @@ fn normalize_email(value: Option<String>) -> Option<String> {
             None
         }
     })
-}
-
-fn http_client() -> UsageResult<reqwest::Client> {
-    crate::http_client::usage_reqwest_with_active_fingerprint()
-}
-
-fn decrypt_required(cipher: &Option<String>) -> UsageResult<String> {
-    let cipher = cipher
-        .as_deref()
-        .ok_or_else(|| UsageError::Other("缺少 access_token".into()))?;
-    let pt = crypto::decrypt(cipher);
-    if pt.is_empty() {
-        return Err(UsageError::AuthRequired);
-    }
-    Ok(pt)
 }
 
 fn urlencoding(s: &str) -> String {

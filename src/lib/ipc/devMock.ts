@@ -30,8 +30,11 @@ import {
   MCP_TOOL_STATUSES,
   PRESETS_FLAT,
   PROJECTS,
+  REMOTE_SKILLS_SAMPLE,
   SAMPLE_SKILLS,
+  SSH_HOSTS,
   STORAGE_OVERVIEW,
+  SYSTEM_SSH_HOSTS,
   USAGE_ALERTS,
   USAGE_CATALOG,
   USAGE_SUBSCRIPTIONS,
@@ -39,6 +42,17 @@ import {
 } from "./devMockData";
 
 let devProviderSeq = 0;
+
+// SSH hosts are held in memory so browser-dev add/edit/delete persists across
+// queries within a session (mirrors the real Tauri TOML store). Seeded from
+// SSH_HOSTS once on first use.
+let sshHostsStore: Record<string, unknown>[] | null = null;
+function sshHosts(): Record<string, unknown>[] {
+  if (sshHostsStore === null) {
+    sshHostsStore = SSH_HOSTS.map((h) => ({ ...h }));
+  }
+  return sshHostsStore;
+}
 
 const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   // ── Global / app shell ──
@@ -98,6 +112,11 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   list_skill_groups: () => DECKS,
   list_projects: () => PROJECTS,
   get_project_skills: () => ({ agents: { claude: ["pdf-tools", "xlsx"] }, updated_at: iso(1) }),
+  // Disk scan of a project's agent skill folders. Returns an empty-but-well-
+  // typed result so the Projects selection flow (buildSymlinkSkillIndex etc.)
+  // runs end-to-end in browser dev instead of crashing on `undefined.skills`.
+  scan_project_skills: () => ({ skills: [], agents_found: [] }),
+  rebuild_project_skills_from_disk: () => ({ agents: { claude: ["pdf-tools", "xlsx"] }, updated_at: iso(1) }),
   detect_project_agents: () => ({
     detected: AGENTS.filter((a) => a.project_skills_rel).map((a) => ({
       agent_id: a.id,
@@ -342,6 +361,106 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   refresh_all_subscriptions: () => USAGE_SUBSCRIPTIONS.map((s) => s.usage).filter(Boolean),
   refresh_subscription_usage: (args) => USAGE_SUBSCRIPTIONS.find((s) => s.id === args?.id)?.usage ?? null,
   get_subscription_api_key: () => "sk-demo-********",
+
+  // ── SSH remote hosts (in-memory persisted for the dev session) ──
+  list_ssh_hosts: () => {
+    const managed = sshHosts().map((h) => ({ ...h, source: "managed" }));
+    // De-dup system hosts already present in the managed store (by host).
+    const managedHosts = new Set(sshHosts().map((h) => String(h.host)));
+    const system = SYSTEM_SSH_HOSTS.filter((s) => !managedHosts.has(s.host)).map((s) => ({
+      ...s,
+      source: "system",
+    }));
+    return [...managed, ...system];
+  },
+  add_ssh_host: (args) => {
+    const def = (args?.def ?? {}) as Record<string, unknown>;
+    const created = { ...def, id: def.id ? String(def.id) : `ssh_${Date.now()}` };
+    sshHosts().push(created);
+    return created;
+  },
+  update_ssh_host: (args) => {
+    const { id, def } = (args ?? {}) as { id?: string; def?: Record<string, unknown> };
+    const idx = sshHosts().findIndex((h) => h.id === id);
+    if (idx >= 0 && def) sshHosts()[idx] = { ...def, id };
+    return undefined;
+  },
+  delete_ssh_host: (args) => {
+    const { id } = (args ?? {}) as { id?: string };
+    const store = sshHosts();
+    const idx = store.findIndex((h) => h.id === id);
+    if (idx >= 0) store.splice(idx, 1);
+    return undefined;
+  },
+  import_system_host: (args) => {
+    const { alias } = (args ?? {}) as { alias?: string };
+    const sys = SYSTEM_SSH_HOSTS.find((s) => s.alias === alias);
+    if (!sys) throw new Error(`system host '${alias}' not found`);
+    const created = {
+      id: `ssh_${Date.now()}`,
+      display_name: sys.alias,
+      host: sys.host,
+      port: sys.port,
+      username: sys.username,
+      auth_method: sys.identity_file ? { kind: "key", key_path: sys.identity_file } : { kind: "password" },
+      default_remote_dir: "",
+    };
+    sshHosts().push(created);
+    return created;
+  },
+  test_ssh_connection: () => ({
+    result: { latency_ms: 42, remote_user: "ubuntu", system: "Linux 6.5 x86_64" },
+    host_key_state: "verified",
+  }),
+  accept_ssh_host_key: () => undefined,
+  discover_remote_skills: () => ({
+    agents: [
+      { agent: "grok", path: "/root/.grok/skills", count: 2 },
+      { agent: "agents", path: "/root/.agents/skills", count: 2 },
+    ],
+    skills: [
+      {
+        name: "code-review",
+        path: "/root/.grok/skills/code-review",
+        agent: "grok",
+        size: 8192,
+        layout: "hub_managed",
+      },
+      {
+        name: "imagine",
+        path: "/root/.grok/skills/imagine",
+        agent: "grok",
+        size: 4096,
+        layout: "standalone",
+      },
+      {
+        name: "brandkit",
+        path: "/root/.agents/skills/brandkit",
+        agent: "agents",
+        size: 6144,
+        layout: "standalone",
+      },
+      {
+        name: "find-skills",
+        path: "/root/.agents/skills/find-skills",
+        agent: "agents",
+        size: 3072,
+        layout: "standalone",
+      },
+    ],
+    needs_migration_count: 3,
+  }),
+  migrate_remote_skill_to_hub: () => ({
+    remote_path: "/root/.grok/skills/imagine",
+    hub_content_path: "~/.skillstar/hub/content/imagine",
+  }),
+  list_remote_skills: () => REMOTE_SKILLS_SAMPLE,
+  push_skill_to_remote: (args) => ({
+    files_uploaded: 3,
+    bytes: 8192,
+    remote_path: `~/.claude/skills/${args?.skillName ?? "skill"}`,
+  }),
+  delete_remote_skill: () => undefined,
 };
 
 /**

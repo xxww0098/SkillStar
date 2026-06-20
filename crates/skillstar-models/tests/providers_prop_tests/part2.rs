@@ -7,8 +7,8 @@ use super::{arb_flat_providers_store, setup_temp_store};
 use proptest::prelude::*;
 use serde_json::Value;
 use skillstar_models::providers::{
-    migrate_store_if_needed, read_flat_store, write_flat_store, AppProviders, FlatProvidersStore,
-    ModelMapping, ProviderEntry, ProviderSettings, ProvidersStore,
+    AppProviders, FlatProvidersStore, ModelMapping, ProviderEntry, ProviderSettings,
+    ProvidersStore, migrate_store_if_needed, read_flat_store, write_flat_store,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -137,7 +137,6 @@ proptest! {
     }
 }
 
-
 // ===========================================================================
 // Feature: model-provider-management, Property 11: Migration Preserves All Provider Data
 //
@@ -156,9 +155,9 @@ proptest! {
 /// Strategy: generate a random ModelMapping.
 fn arb_model_mapping() -> impl Strategy<Value = ModelMapping> {
     (
-        "[a-z][a-z0-9\\-]{2,20}",  // source_model
-        "[a-z][a-z0-9\\-]{2,20}",  // target_model
-        any::<bool>(),              // enabled
+        "[a-z][a-z0-9\\-]{2,20}", // source_model
+        "[a-z][a-z0-9\\-]{2,20}", // target_model
+        any::<bool>(),            // enabled
     )
         .prop_map(|(source, target, enabled)| ModelMapping {
             source_model: source,
@@ -199,31 +198,41 @@ fn arb_provider_settings() -> impl Strategy<Value = (Value, String, String, Vec<
 /// Strategy: generate a random ProviderEntry with extracted metadata.
 fn arb_provider_entry() -> impl Strategy<Value = (ProviderEntry, String, String, Vec<String>)> {
     (
-        "[a-zA-Z0-9]{4,16}",       // id
-        "[A-Za-z ]{1,32}",         // name
+        "[a-zA-Z0-9]{4,16}", // id
+        "[A-Za-z ]{1,32}",   // name
         arb_provider_settings(),
-        prop::option::of("[a-z\\-]{3,12}"),  // preset_id
-        prop::option::of("#[0-9A-Fa-f]{6}"), // icon_color
+        prop::option::of("[a-z\\-]{3,12}"),     // preset_id
+        prop::option::of("#[0-9A-Fa-f]{6}"),    // icon_color
         prop::option::of("[a-zA-Z0-9 ]{0,50}"), // notes
         prop::option::of(1_000_000_000u64..2_000_000_000u64), // created_at
     )
-        .prop_map(|(id, name, (settings_val, base_url, api_key, models), preset_id, icon_color, notes, created_at)| {
-            let entry = ProviderEntry {
+        .prop_map(
+            |(
                 id,
-                name: name.clone(),
-                category: "cloud".to_string(),
-                settings_config: settings_val,
-                preset_id: preset_id.clone(),
-                website_url: None,
-                api_key_url: None,
-                icon_color: icon_color.clone(),
-                notes: notes.clone(),
+                name,
+                (settings_val, base_url, api_key, models),
+                preset_id,
+                icon_color,
+                notes,
                 created_at,
-                sort_index: None,
-                meta: None,
-            };
-            (entry, base_url, api_key, models)
-        })
+            )| {
+                let entry = ProviderEntry {
+                    id,
+                    name: name.clone(),
+                    category: "cloud".to_string(),
+                    settings_config: settings_val,
+                    preset_id: preset_id.clone(),
+                    website_url: None,
+                    api_key_url: None,
+                    icon_color: icon_color.clone(),
+                    notes: notes.clone(),
+                    created_at,
+                    sort_index: None,
+                    meta: None,
+                };
+                (entry, base_url, api_key, models)
+            },
+        )
 }
 
 /// Per-provider expectations: `provider_id → (base_url, api_key, enabled_models)`.
@@ -250,12 +259,14 @@ fn arb_app_providers() -> impl Strategy<Value = (AppProviders, ProviderExpectati
 
             for (entry, base_url, api_key, models) in &entries {
                 providers.insert(entry.id.clone(), entry.clone());
-                meta_map.insert(entry.id.clone(), (base_url.clone(), api_key.clone(), models.clone()));
+                meta_map.insert(
+                    entry.id.clone(),
+                    (base_url.clone(), api_key.clone(), models.clone()),
+                );
             }
 
-            let current = current_idx.and_then(|idx| {
-                entries.get(idx).map(|(e, _, _, _)| e.id.clone())
-            });
+            let current =
+                current_idx.and_then(|idx| entries.get(idx).map(|(e, _, _, _)| e.id.clone()));
 
             (AppProviders { providers, current }, meta_map)
         })
@@ -269,14 +280,14 @@ fn arb_v1_store() -> impl Strategy<Value = ProvidersStore> {
         arb_app_providers(),
         arb_app_providers(),
     )
-        .prop_map(|((claude, _), (codex, _), (opencode, _), (gemini, _))| {
-            ProvidersStore {
+        .prop_map(
+            |((claude, _), (codex, _), (opencode, _), (gemini, _))| ProvidersStore {
                 claude,
                 codex,
                 opencode,
                 gemini,
-            }
-        })
+            },
+        )
 }
 
 // ---------------------------------------------------------------------------
@@ -538,9 +549,10 @@ fn verify_tool_activation(
                 let dedup_key = (base_url, api_key);
 
                 // Find the corresponding v2 provider
-                let v2_match = v2_store.providers.iter().find(|p| {
-                    (p.base_url_openai.clone(), p.api_key.clone()) == dedup_key
-                });
+                let v2_match = v2_store
+                    .providers
+                    .iter()
+                    .find(|p| (p.base_url_openai.clone(), p.api_key.clone()) == dedup_key);
 
                 if let Some(v2_provider) = v2_match {
                     // tool_activations should reference this provider

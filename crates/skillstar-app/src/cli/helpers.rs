@@ -7,8 +7,8 @@
 use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 
-use skillstar_core::types::lockfile::Lockfile;
 use skillstar_core::infra::paths::{hub_skills_dir, lockfile_path};
+use skillstar_core::types::lockfile::Lockfile;
 use skillstar_projects::projects::agents::list_profiles;
 use skillstar_projects::projects::project_manifest::detect_project_agents;
 use skillstar_skills::source_resolver::same_remote_url;
@@ -123,11 +123,11 @@ pub fn prompt_for_agent_selection(auto_agent_ids: &[String]) -> Vec<String> {
     }
 
     let supported_ids: Vec<String> = supported.into_iter().map(|(id, _)| id).collect();
-    let default_text = if auto_agent_ids.is_empty() {
-        "auto fallback (.agents/skills)".to_string()
-    } else {
-        format!("auto detected ({})", auto_agent_ids.join(", "))
-    };
+	    let default_text = if auto_agent_ids.is_empty() {
+	        "auto fallback (.agent/skills)".to_string()
+	    } else {
+	        format!("auto detected ({})", auto_agent_ids.join(", "))
+	    };
 
     println!("Select target agent(s) for project link:");
     println!("  Available: {}", supported_ids.join(", "));
@@ -186,7 +186,7 @@ pub fn validate_agent_ids(agent_ids: &[String]) -> Result<Vec<String>, String> {
 /// Resolve relative skill directories for the given agent IDs.
 pub fn resolve_rel_dirs_for_agents(agent_ids: &[String]) -> Vec<String> {
     if agent_ids.is_empty() {
-        return vec![".agents/skills".to_string()];
+        return vec![".agent/skills".to_string()];
     }
 
     let supported = supported_project_agents();
@@ -200,7 +200,7 @@ pub fn resolve_rel_dirs_for_agents(agent_ids: &[String]) -> Vec<String> {
     rel_dirs.sort();
     rel_dirs.dedup();
     if rel_dirs.is_empty() {
-        rel_dirs.push(".agents/skills".to_string());
+        rel_dirs.push(".agent/skills".to_string());
     }
     rel_dirs
 }

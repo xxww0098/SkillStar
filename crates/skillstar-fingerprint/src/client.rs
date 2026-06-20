@@ -146,11 +146,7 @@ fn build_reqwest(
     Ok(FingerprintAwareClient::Reqwest(client))
 }
 
-fn push_header(
-    map: &mut reqwest::header::HeaderMap,
-    name: &str,
-    value: &str,
-) -> Result<()> {
+fn push_header(map: &mut reqwest::header::HeaderMap, name: &str, value: &str) -> Result<()> {
     use reqwest::header::{HeaderName, HeaderValue};
     let n = HeaderName::from_bytes(name.as_bytes())
         .with_context(|| format!("invalid header name `{name}`"))?;
@@ -218,11 +214,7 @@ fn build_wreq(
 }
 
 #[cfg(feature = "impersonate")]
-fn push_wreq_header(
-    map: &mut wreq::header::HeaderMap,
-    name: &str,
-    value: &str,
-) -> Result<()> {
+fn push_wreq_header(map: &mut wreq::header::HeaderMap, name: &str, value: &str) -> Result<()> {
     use wreq::header::{HeaderName, HeaderValue};
     let n = HeaderName::from_bytes(name.as_bytes())
         .with_context(|| format!("invalid header name `{name}`"))?;

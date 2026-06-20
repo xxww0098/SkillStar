@@ -11,7 +11,7 @@ import QoderIcon from "@lobehub/icons/es/Qoder/components/Color";
 import StepfunIcon from "@lobehub/icons/es/Stepfun/components/Color";
 import TraeIcon from "@lobehub/icons/es/Trae/components/Color";
 import WindsurfIcon from "@lobehub/icons/es/Windsurf/components/Mono";
-import XiaomiMiMoIcon from "@lobehub/icons/es/XiaomiMiMo/components/Mono";
+import ZAIIcon from "@lobehub/icons/es/ZAI/components/Mono";
 import ZhipuIcon from "@lobehub/icons/es/Zhipu/components/Color";
 import { type ComponentType, type CSSProperties, useLayoutEffect, useRef } from "react";
 import KiroIcon from "@/features/usage/icons/KiroIcon";
@@ -41,10 +41,15 @@ const ICON_BY_CATALOG_ID: Record<string, IconComponent> = {
   glm: ZhipuIcon,
   kimi: KimiIcon,
   minimax: MiniMaxIcon,
-  "xiaomi-mimo": XiaomiMiMoIcon,
   stepfun: StepfunIcon,
+  zcode: ZAIIcon,
   opencode: OpenCodeIcon,
 };
+
+/** Whether a brand-authentic icon (not the letter fallback) exists for this id. */
+export function hasBrandIcon(catalogId: string): boolean {
+  return catalogId in ICON_BY_CATALOG_ID;
+}
 
 const SIZE_CLASS = {
   sm: "h-5 w-5",

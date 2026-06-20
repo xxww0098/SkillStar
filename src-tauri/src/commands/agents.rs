@@ -1,6 +1,6 @@
-use skillstar_core::infra::error::AppError;
 use crate::core::installed_skill;
 use skillstar_app::commands::agents as core_agents;
+use skillstar_core::infra::error::AppError;
 
 #[tauri::command]
 pub async fn list_agent_profiles() -> Result<Vec<core_agents::AgentProfile>, AppError> {

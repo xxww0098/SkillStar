@@ -115,13 +115,19 @@ mod tests {
     #[ignore = "hits the network; run with --ignored"]
     async fn fetch_real_registry_returns_many_servers() {
         let servers = fetch_mcp_registry().await.expect("fetch live MCP registry");
-        assert!(servers.len() > 20, "expected >20 servers, got {}", servers.len());
+        assert!(
+            servers.len() > 20,
+            "expected >20 servers, got {}",
+            servers.len()
+        );
         assert!(
             servers.iter().any(|s| !s.packages.is_empty()),
             "expected at least one stdio-package server"
         );
         assert!(
-            servers.iter().all(|s| !s.name.is_empty() && !s.raw_server_json.is_empty()),
+            servers
+                .iter()
+                .all(|s| !s.name.is_empty() && !s.raw_server_json.is_empty()),
             "every server should have a name and raw json for install mapping"
         );
     }

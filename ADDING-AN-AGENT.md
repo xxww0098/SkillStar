@@ -34,13 +34,14 @@ SkillStar 里"支持一个 Agent"其实是 **三条互相独立的轴**，按需
 `crates/skillstar-projects/src/projects/agents/builtin.rs` 的 `BUILTIN_AGENT_DEFS`：
 
 ```rust
-// (id, display_name, icon, home_subdirs, project_skills_rel)
+// (id, display_name, icon, home_subdirs, project_skills_rel, binary)
 (
     "myagent",                    // 唯一 id，全小写
     "My Agent",                   // UI 显示名
     "agents/myagent.svg",         // 相对 public/ 的图标路径
     &[".myagent", "skills"],      // 展开为 ~/.myagent/skills（全局技能目录）
     ".myagent/skills",            // 项目级相对路径；"" = 仅全局（如 OpenClaw）
+    Some("myagent"),              // CLI 二进制名；None = IDE 型/仅全局（按目录探测）
 ),
 ```
 
@@ -51,10 +52,15 @@ SkillStar 里"支持一个 Agent"其实是 **三条互相独立的轴**，按需
 - 两个 Agent 可以共享 home 根目录（如 Antigravity 与 Gemini 共用 `~/.gemini/`），
   只要项目级路径不同即可；这种关系**纯数据表达**，不允许代码特例。
 - 路径一律正斜杠；Windows 反斜杠输入由后端归一化。
+- `binary` 决定安装检测策略：填了名字的 Agent（`claude`/`codex`/`gemini`/`zcode` 等）
+  按二进制是否在增强 PATH 里判定（这能区分共享 home 根的 Agent——比如只装了 Antigravity
+  时，`gemini` 不会因为 `~/.gemini` 存在就被误判）；`None` 则回落到目录存在判定，适用于
+  IDE/GUI 型 Agent（Antigravity/Cursor/Qoder/Trae）和仅全局 Agent（OpenClaw）。
 
-其余全部自动生效：安装检测（`detect.rs` 会自动建目录并判断 `installed`）、
-启用/禁用持久化（`profile_storage.rs`）、项目检测（`detect_project_agents`）、
-同步与软链（`sync.rs`）、CLI `--agent myagent`、前端列表渲染。
+其余全部自动生效：安装检测（`detect.rs` 只读判断 `installed`，**不**改动文件系统——
+创建 skills 目录是 deploy 操作才做的）、启用/禁用持久化（`profile_storage.rs`）、
+项目检测（`detect_project_agents`）、同步与软链（`sync.rs`）、CLI `--agent myagent`、
+前端列表渲染。
 
 ### 2. 放一个图标
 
@@ -90,7 +96,8 @@ SkillStar 里"支持一个 Agent"其实是 **三条互相独立的轴**，按需
 
 仅当该 Agent 有自己的磁盘配置文件、且希望在 Models 工作台一键写入
 Provider（Base URL / API Key / 模型）时才做。现有目标：`claude-code`、`codex`、
-`opencode`、`gemini`、`claude-desktop`。
+`opencode`、`gemini`、`claude-desktop`、`zcode`（ZCode 复用 OpenCode 配置格式，
+只是路径不同，sync/unsync 逻辑完全复用 `sync_to_opencode_inner`）。
 
 全部改动在 `crates/skillstar-models/src/tool_sync/` + 少量前端：
 

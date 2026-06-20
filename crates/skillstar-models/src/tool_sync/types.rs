@@ -15,8 +15,12 @@ pub struct CodexSettings {
     pub auth_mode: String,
 }
 
-fn default_wire_api() -> String { "responses".to_string() }
-fn default_auth_mode() -> String { "api_key".to_string() }
+fn default_wire_api() -> String {
+    "responses".to_string()
+}
+fn default_auth_mode() -> String {
+    "api_key".to_string()
+}
 
 impl CodexSettings {
     /// Parse from a generic `Value`, filling in defaults for missing fields.
@@ -142,11 +146,11 @@ pub(crate) const CLAUDE_MANAGED_ENV_KEYS: &[&str] = &[
 pub(crate) const CODEX_MANAGED_PROVIDER_KEY: &str = "skillstar";
 
 /// Provider block key under `opencode.json` → `provider`.
+///
+/// ZCode uses the OpenCode config schema verbatim and lives under
+/// `provider.skillstar` in `~/.zcode/v2/config.json`, so it shares this key.
 pub(crate) const OPENCODE_MANAGED_PROVIDER_KEY: &str = "skillstar";
 
 /// Fields managed by SkillStar in Gemini CLI's `~/.gemini/.env` file.
-pub(crate) const GEMINI_MANAGED_ENV_KEYS: &[&str] = &[
-    "GOOGLE_GEMINI_BASE_URL",
-    "GEMINI_API_KEY",
-    "GEMINI_MODEL",
-];
+pub(crate) const GEMINI_MANAGED_ENV_KEYS: &[&str] =
+    &["GOOGLE_GEMINI_BASE_URL", "GEMINI_API_KEY", "GEMINI_MODEL"];

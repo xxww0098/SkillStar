@@ -128,6 +128,7 @@ async fn finalize_from_firebase(firebase_token: &str) -> UsageResult<Subscriptio
         renew_date: 0,
         auto_renew: false,
         api_key_encrypted: None,
+        platform_token_encrypted: None,
         access_token_encrypted: Some(crypto::encrypt(&registered.api_key)),
         refresh_token_encrypted: Some(crypto::encrypt(firebase_token)),
         access_token_expires_at: None,
@@ -208,7 +209,7 @@ pub async fn fetch(subscription: &mut Subscription) -> UsageResult<SubscriptionU
 }
 
 async fn fetch_inner(subscription: &mut Subscription) -> UsageResult<SubscriptionUsage> {
-    let _api_key = decrypt_required(&subscription.access_token_encrypted)?;
+    let _api_key = crate::fetchers::decrypt_required(&subscription.access_token_encrypted, "api_key")?;
     let firebase = subscription
         .refresh_token_encrypted
         .as_deref()
@@ -318,11 +319,12 @@ fn usage_from_plan(subscription_id: &str, plan_status: &Value) -> UsageResult<Su
         credits: Vec::new(),
         error: None,
         api_keys: Vec::new(),
+        deepseek_analytics: None,
     })
 }
 
 async fn post_json(base: &str, method: &str, body: Value) -> UsageResult<Value> {
-    let client = http_client()?;
+    let client = crate::fetchers::http_client()?;
     let url = format!(
         "{}/exa.seat_management_pb.SeatManagementService/{}",
         base.trim_end_matches('/'),
@@ -376,21 +378,6 @@ fn find_port() -> UsageResult<u16> {
         .local_addr()
         .map_err(|e| UsageError::Other(e.to_string()))?
         .port())
-}
-
-fn http_client() -> UsageResult<reqwest::Client> {
-    crate::http_client::usage_reqwest_with_active_fingerprint()
-}
-
-fn decrypt_required(cipher: &Option<String>) -> UsageResult<String> {
-    let cipher = cipher
-        .as_deref()
-        .ok_or_else(|| UsageError::Other("缺少 api_key".into()))?;
-    let pt = crypto::decrypt(cipher);
-    if pt.is_empty() {
-        return Err(UsageError::AuthRequired);
-    }
-    Ok(pt)
 }
 
 fn urlencoding(s: &str) -> String {

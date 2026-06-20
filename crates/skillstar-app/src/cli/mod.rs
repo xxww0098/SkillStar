@@ -87,8 +87,8 @@ pub enum Commands {
     /// Remove one or more installed skills
     #[command(alias = "rm", alias = "uninstall")]
     Remove {
-        /// Skill name(s) to remove
-        #[arg(required_unless_present = "all")]
+        /// Skill name(s) to remove — space- or comma-separated (e.g. `rm a b` or `rm a,b`)
+        #[arg(required_unless_present = "all", value_delimiter = ',')]
         names: Vec<String>,
         /// Remove every installed skill
         #[arg(long)]

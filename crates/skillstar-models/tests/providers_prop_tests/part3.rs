@@ -7,9 +7,9 @@
 use super::arb_flat_providers_store;
 use proptest::prelude::*;
 use skillstar_models::providers::{
-    activate_tool, create_from_preset_flat, create_provider_flat, delete_provider_flat,
-    get_all_presets_flat, reorder_providers, update_provider_flat, FlatProvidersStore,
-    ProviderEntryFlat, ProviderPatchFlat,
+    FlatProvidersStore, ProviderEntryFlat, ProviderPatchFlat, activate_tool,
+    create_from_preset_flat, create_provider_flat, delete_provider_flat, get_all_presets_flat,
+    reorder_providers, update_provider_flat,
 };
 use std::collections::HashMap;
 
@@ -25,50 +25,51 @@ use std::collections::HashMap;
 // **Validates: Requirements 2.1, 5.4**
 // ===========================================================================
 
-
 /// Strategy: generate a FlatProvidersStore with N providers that have unique IDs.
 /// Each provider gets a random sort_index (simulating an arbitrary initial state).
 fn arb_flat_store_with_unique_ids() -> impl Strategy<Value = FlatProvidersStore> {
     // Generate 1..=10 providers with unique IDs
     (1usize..=10usize).prop_flat_map(|n| {
         // Generate n unique IDs
-        proptest::collection::vec("[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}", n)
-            .prop_flat_map(move |ids| {
-                // Generate random sort_index values for each provider
-                proptest::collection::vec(0u32..1000u32, n)
-                    .prop_map(move |sort_indices| {
-                        let providers: Vec<ProviderEntryFlat> = ids.iter().zip(sort_indices.iter())
-                            .map(|(id, &sort_idx)| ProviderEntryFlat {
-                                id: id.clone(),
-                                name: format!("Provider-{}", &id[..8]),
-                                base_url_openai: format!("https://{}.example.com/v1", &id[..8]),
-                                base_url_anthropic: String::new(),
-                                models_url: String::new(),
-                                api_key: "sk-test".to_string(),
-                                models: vec!["model-a".to_string()],
-                                default_model: "model-a".to_string(),
-                                sort_index: sort_idx,
-                                preset_id: None,
-                                icon_color: None,
-                                notes: None,
-                                created_at: None,
-                                meta: None,
-                                codex_wire_api: "responses".to_string(),
-                                codex_auth_mode: "api_key".to_string(),
-                            })
-                            .collect();
-
-                        FlatProvidersStore {
-                            version: 2,
-                            providers,
-                            tool_activations: HashMap::new(),
-                        }
+        proptest::collection::vec(
+            "[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}",
+            n,
+        )
+        .prop_flat_map(move |ids| {
+            // Generate random sort_index values for each provider
+            proptest::collection::vec(0u32..1000u32, n).prop_map(move |sort_indices| {
+                let providers: Vec<ProviderEntryFlat> = ids
+                    .iter()
+                    .zip(sort_indices.iter())
+                    .map(|(id, &sort_idx)| ProviderEntryFlat {
+                        id: id.clone(),
+                        name: format!("Provider-{}", &id[..8]),
+                        base_url_openai: format!("https://{}.example.com/v1", &id[..8]),
+                        base_url_anthropic: String::new(),
+                        models_url: String::new(),
+                        api_key: "sk-test".to_string(),
+                        models: vec!["model-a".to_string()],
+                        default_model: "model-a".to_string(),
+                        sort_index: sort_idx,
+                        preset_id: None,
+                        icon_color: None,
+                        notes: None,
+                        created_at: None,
+                        meta: None,
+                        codex_wire_api: "responses".to_string(),
+                        codex_auth_mode: "api_key".to_string(),
                     })
+                    .collect();
+
+                FlatProvidersStore {
+                    version: 2,
+                    providers,
+                    tool_activations: HashMap::new(),
+                }
             })
+        })
     })
 }
-
-
 
 // ---------------------------------------------------------------------------
 // Property 2 Tests
@@ -161,7 +162,6 @@ proptest! {
         }
     }
 }
-
 
 // ===========================================================================
 // Feature: model-provider-management, Property 12: Preset Creation Produces Valid Provider
@@ -314,7 +314,6 @@ proptest! {
         );
     }
 }
-
 
 // ===========================================================================
 // Feature: model-provider-management, Property 9: Failed Operations Leave State Unchanged
@@ -575,7 +574,6 @@ proptest! {
     }
 }
 
-
 // ===========================================================================
 // Feature: model-provider-management, Property 5: Single Active Provider Per Tool
 //
@@ -598,8 +596,8 @@ fn arb_store_with_valid_providers() -> impl Strategy<Value = FlatProvidersStore>
     proptest::collection::vec(
         (
             "[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}", // id
-            "[A-Za-z]{3,16}",                                                  // name
-            proptest::collection::vec("[a-z]{3,12}".prop_map(|s| s), 1..=3),   // models
+            "[A-Za-z]{3,16}",                                               // name
+            proptest::collection::vec("[a-z]{3,12}".prop_map(|s| s), 1..=3), // models
         ),
         2..=5,
     )
@@ -651,9 +649,9 @@ const TOOL_IDS: &[&str] = &["claude-code", "codex", "custom-tool"];
 fn arb_activate_ops(max_providers: usize) -> impl Strategy<Value = Vec<ActivateOp>> {
     proptest::collection::vec(
         (
-            0..max_providers,                          // provider_idx
-            0..TOOL_IDS.len(),                         // tool_id_idx
-            proptest::option::of("[a-z]{3,12}"),       // optional model override
+            0..max_providers,                    // provider_idx
+            0..TOOL_IDS.len(),                   // tool_id_idx
+            proptest::option::of("[a-z]{3,12}"), // optional model override
         )
             .prop_map(|(provider_idx, tool_id_idx, model)| ActivateOp {
                 provider_idx,

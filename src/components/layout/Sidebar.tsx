@@ -23,7 +23,6 @@ import { useNavigation } from "../../hooks/useNavigation";
 import type { UpdateStatus } from "../../hooks/useUpdater";
 import { cn, detectPlatform } from "../../lib/utils";
 import type { NavPage } from "../../types";
-import { FILTER_ALL } from "@/features/usage/types";
 import { ModeSwitcher } from "./ModeSwitcher";
 import { SkillsNav } from "./SkillsNav";
 import { ModelsSidebar } from "./ModelsSidebar";
@@ -321,7 +320,6 @@ export function Sidebar({
     openModelsDrawer,
     usageCatalogFilter,
     setUsageCatalogFilter,
-    openUsageCreate,
   } = useNavigation();
 
   const isSettingsActive = appMode === "skills" && activePage === "settings";
@@ -351,11 +349,6 @@ export function Sidebar({
     },
     [openModelsDrawer],
   );
-
-  const handleUsageAddNew = useCallback(() => {
-    const preselect = usageCatalogFilter === FILTER_ALL ? null : usageCatalogFilter;
-    openUsageCreate(preselect);
-  }, [openUsageCreate, usageCatalogFilter]);
 
   const isMacDesktop = detectPlatform() === "macos";
 
@@ -470,12 +463,7 @@ export function Sidebar({
             collapsed={collapsed}
           />
         ) : appMode === "usage" ? (
-          <UsageNav
-            selected={usageCatalogFilter}
-            onSelect={setUsageCatalogFilter}
-            onAddNew={handleUsageAddNew}
-            collapsed={collapsed}
-          />
+          <UsageNav selected={usageCatalogFilter} onSelect={setUsageCatalogFilter} collapsed={collapsed} />
         ) : (
           <SkillsNav
             activePage={activePage}

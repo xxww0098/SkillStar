@@ -9,10 +9,9 @@ fn phase3_metadata_coexists_with_canonical_search_and_listing() {
         let tx = conn.unchecked_transaction().expect("start tx");
         let synced_at = now_rfc3339();
         let scope = leaderboard_scope("all");
-        let skill_key =
-            upsert_skill_identity_in_tx(&tx, "openai/skills", "search", 77, &synced_at)
-                .expect("upsert canonical skill")
-                .expect("skill key");
+        let skill_key = upsert_skill_identity_in_tx(&tx, "openai/skills", "search", 77, &synced_at)
+            .expect("upsert canonical skill")
+            .expect("skill key");
         tx.execute(
             "UPDATE marketplace_skill SET description = 'Search helper for AI agents' WHERE skill_key = ?1",
             [skill_key.as_str()],
@@ -129,8 +128,9 @@ fn phase3_metadata_coexists_with_canonical_search_and_listing() {
             "phase3-review-1"
         );
         assert_eq!(
-            crate::snapshot::list_categories_for_skill(&skill_key).expect("list skill categories")[0]
-                .category_id,
+            crate::snapshot::list_categories_for_skill(&skill_key).expect("list skill categories")
+                [0]
+            .category_id,
             "ai-agents"
         );
         assert_eq!(
@@ -338,10 +338,9 @@ fn search_prefers_exact_name_match_before_description_only_match() {
         let tx = conn.unchecked_transaction().expect("start tx");
         let synced_at = now_rfc3339();
 
-        let exact_key =
-            upsert_skill_identity_in_tx(&tx, "openai/skills", "search", 10, &synced_at)
-                .expect("upsert exact")
-                .expect("exact key");
+        let exact_key = upsert_skill_identity_in_tx(&tx, "openai/skills", "search", 10, &synced_at)
+            .expect("upsert exact")
+            .expect("exact key");
         tx.execute(
             "UPDATE marketplace_skill SET description = 'Exact skill' WHERE skill_key = ?1",
             [exact_key.as_str()],
@@ -376,15 +375,10 @@ fn search_handles_hyphenated_query_tokens() {
         let tx = conn.unchecked_transaction().expect("start tx");
         let synced_at = now_rfc3339();
 
-        let skill_key = upsert_skill_identity_in_tx(
-            &tx,
-            "openai/skills",
-            "ui-design-system",
-            12,
-            &synced_at,
-        )
-        .expect("upsert hyphenated skill")
-        .expect("hyphenated skill key");
+        let skill_key =
+            upsert_skill_identity_in_tx(&tx, "openai/skills", "ui-design-system", 12, &synced_at)
+                .expect("upsert hyphenated skill")
+                .expect("hyphenated skill key");
         tx.execute(
             "UPDATE marketplace_skill SET description = 'Design polished UI systems' WHERE skill_key = ?1",
             [skill_key.as_str()],
@@ -413,18 +407,19 @@ fn multi_source_upsert_and_list_observations_for_one_skill() {
                 .expect("skill key");
         tx.commit().expect("commit canonical skill");
 
-        let custom = crate::snapshot::upsert_source_observation(MarketplaceSourceObservationUpsert {
-            source_id: "Team.Registry".to_string(),
-            source_skill_id: "Screenshot".to_string(),
-            skill_key: skill_key.clone(),
-            source_url: " file:///tmp/team.json ".to_string(),
-            repo_url: " https://github.com/openai/skills ".to_string(),
-            version: Some("1.2.3".to_string()),
-            sha: Some("abc123".to_string()),
-            metadata_json: Some("{\"trust\":\"team\"}".to_string()),
-            fetched_at: Some("2026-04-01T00:00:00Z".to_string()),
-        })
-        .expect("upsert custom observation");
+        let custom =
+            crate::snapshot::upsert_source_observation(MarketplaceSourceObservationUpsert {
+                source_id: "Team.Registry".to_string(),
+                source_skill_id: "Screenshot".to_string(),
+                skill_key: skill_key.clone(),
+                source_url: " file:///tmp/team.json ".to_string(),
+                repo_url: " https://github.com/openai/skills ".to_string(),
+                version: Some("1.2.3".to_string()),
+                sha: Some("abc123".to_string()),
+                metadata_json: Some("{\"trust\":\"team\"}".to_string()),
+                fetched_at: Some("2026-04-01T00:00:00Z".to_string()),
+            })
+            .expect("upsert custom observation");
         assert_eq!(custom.source_id, "team_registry");
         assert_eq!(custom.source_skill_id, "screenshot");
         assert_eq!(custom.skill_key, skill_key);
@@ -436,7 +431,8 @@ fn multi_source_upsert_and_list_observations_for_one_skill() {
         assert_eq!(observations[0].source_id, "skills_sh");
         assert_eq!(observations[1].source_id, "team_registry");
 
-        let sources = crate::snapshot::list_known_marketplace_sources().expect("list known sources");
+        let sources =
+            crate::snapshot::list_known_marketplace_sources().expect("list known sources");
         assert_eq!(sources.len(), 2);
         assert_eq!(sources[0].source_id, "skills_sh");
         assert_eq!(sources[0].observation_count, 1);
@@ -451,10 +447,9 @@ fn multi_source_canonical_search_compatibility_stays_intact() {
         let tx = conn.unchecked_transaction().expect("start tx");
         let synced_at = now_rfc3339();
 
-        let skill_key =
-            upsert_skill_identity_in_tx(&tx, "openai/skills", "search", 10, &synced_at)
-                .expect("upsert canonical skill")
-                .expect("skill key");
+        let skill_key = upsert_skill_identity_in_tx(&tx, "openai/skills", "search", 10, &synced_at)
+            .expect("upsert canonical skill")
+            .expect("skill key");
         crate::snapshot::upsert_source_observation_in_tx(
             &tx,
             MarketplaceSourceObservationUpsert {
@@ -501,13 +496,9 @@ fn source_resolution_prefers_repo_affinity_before_popularity() {
         let named_sources = HashMap::new();
         let preferred_repos = HashSet::from(["openai/skills".to_string()]);
 
-        let resolved = resolve_skill_sources_from_snapshot(
-            &conn,
-            &requests,
-            &named_sources,
-            &preferred_repos,
-        )
-        .expect("resolve from snapshot");
+        let resolved =
+            resolve_skill_sources_from_snapshot(&conn, &requests, &named_sources, &preferred_repos)
+                .expect("resolve from snapshot");
 
         assert_eq!(
             resolved.get("search"),
@@ -534,13 +525,9 @@ fn source_resolution_requires_unique_top_candidate_when_ambiguous() {
             normalized_name: "search".to_string(),
         }];
 
-        let resolved = resolve_skill_sources_from_snapshot(
-            &conn,
-            &requests,
-            &HashMap::new(),
-            &HashSet::new(),
-        )
-        .expect("resolve ambiguous snapshot");
+        let resolved =
+            resolve_skill_sources_from_snapshot(&conn, &requests, &HashMap::new(), &HashSet::new())
+                .expect("resolve ambiguous snapshot");
 
         assert!(resolved.get("search").is_none());
     });

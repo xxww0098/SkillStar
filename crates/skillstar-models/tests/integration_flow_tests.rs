@@ -17,8 +17,8 @@
 
 use serde_json::Value;
 use skillstar_models::providers::{
-    create_from_preset_at, create_provider_at, read_store_from, switch_active_provider_at,
-    ModelMapping, ProviderEntry, ProviderSettings,
+    ModelMapping, ProviderEntry, ProviderSettings, create_from_preset_at, create_provider_at,
+    read_store_from, switch_active_provider_at,
 };
 use skillstar_models::tool_sync::{generate_claude_code_config, generate_codex_config};
 use std::collections::HashMap;
@@ -197,10 +197,7 @@ fn test_switch_to_nonexistent_provider_fails() {
     // Attempt to switch to a non-existent provider
     let result = switch_active_provider_at("claude", "nonexistent-id", &path);
     assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("not found"));
+    assert!(result.unwrap_err().to_string().contains("not found"));
 
     // Verify original provider is still active
     let store = read_store_from(&path).unwrap();
@@ -235,8 +232,7 @@ fn test_preset_creation_activation_claude_code_config() {
     assert!(entry.created_at.is_some(), "created_at should be set");
 
     // Step 2: Parse settings_config and verify base_url and models
-    let settings: ProviderSettings =
-        serde_json::from_value(entry.settings_config.clone()).unwrap();
+    let settings: ProviderSettings = serde_json::from_value(entry.settings_config.clone()).unwrap();
     assert_eq!(settings.base_url, "https://api.deepseek.com/v1");
     assert_eq!(settings.api_key, api_key);
     assert_eq!(settings.models.len(), 2);
@@ -277,8 +273,7 @@ fn test_preset_creation_activation_codex_config() {
     assert_eq!(entry.name, "Official (OpenAI)");
 
     // Step 2: Parse settings_config and verify
-    let settings: ProviderSettings =
-        serde_json::from_value(entry.settings_config.clone()).unwrap();
+    let settings: ProviderSettings = serde_json::from_value(entry.settings_config.clone()).unwrap();
     assert_eq!(settings.base_url, "https://api.openai.com/v1");
     assert_eq!(settings.api_key, api_key);
     assert!(settings.models.len() >= 2, "Should have at least 2 models");
@@ -313,8 +308,7 @@ fn test_preset_creation_anthropic_for_claude() {
     assert_eq!(entry.preset_id.as_deref(), Some("official"));
     assert_eq!(entry.icon_color.as_deref(), Some("#D97757"));
 
-    let settings: ProviderSettings =
-        serde_json::from_value(entry.settings_config.clone()).unwrap();
+    let settings: ProviderSettings = serde_json::from_value(entry.settings_config.clone()).unwrap();
     assert_eq!(settings.base_url, "https://api.anthropic.com");
     assert_eq!(settings.api_key, api_key);
 
@@ -325,10 +319,7 @@ fn test_preset_creation_anthropic_for_claude() {
         parsed.get("apiUrl").unwrap().as_str().unwrap(),
         "https://api.anthropic.com"
     );
-    assert_eq!(
-        parsed.get("apiKey").unwrap().as_str().unwrap(),
-        api_key
-    );
+    assert_eq!(parsed.get("apiKey").unwrap().as_str().unwrap(), api_key);
 }
 
 #[test]
@@ -342,8 +333,7 @@ fn test_preset_creation_kimi_with_both_configs() {
     assert_eq!(entry.preset_id.as_deref(), Some("kimi"));
     assert_eq!(entry.icon_color.as_deref(), Some("#5B45E0"));
 
-    let settings: ProviderSettings =
-        serde_json::from_value(entry.settings_config.clone()).unwrap();
+    let settings: ProviderSettings = serde_json::from_value(entry.settings_config.clone()).unwrap();
     assert_eq!(settings.base_url, "https://api.moonshot.cn/v1");
     assert_eq!(settings.api_key, api_key);
     assert_eq!(settings.models.len(), 2);
@@ -357,10 +347,7 @@ fn test_preset_creation_kimi_with_both_configs() {
         parsed.get("apiUrl").unwrap().as_str().unwrap(),
         "https://api.moonshot.cn/v1"
     );
-    assert_eq!(
-        parsed.get("apiKey").unwrap().as_str().unwrap(),
-        api_key
-    );
+    assert_eq!(parsed.get("apiKey").unwrap().as_str().unwrap(), api_key);
 
     // Verify Codex config generation (kimi can be used with any AppId)
     let toml_str = generate_codex_config(&settings).unwrap();
@@ -412,10 +399,7 @@ fn test_full_flow_create_switch_verify_config_generation() {
         parsed.get("apiUrl").unwrap().as_str().unwrap(),
         "https://open.bigmodel.cn/api/paas/v4"
     );
-    assert_eq!(
-        parsed.get("apiKey").unwrap().as_str().unwrap(),
-        key2
-    );
+    assert_eq!(parsed.get("apiKey").unwrap().as_str().unwrap(), key2);
 
     // Generate Codex config for the active provider
     let toml_str = generate_codex_config(&settings).unwrap();

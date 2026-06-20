@@ -13,7 +13,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AgentIcon } from "../../../components/ui/AgentIcon";
 import { agentIconCls, cn } from "../../../lib/utils";
@@ -39,6 +39,9 @@ interface SkillSelectionBarProps {
   onBatchUnlinkAll?: () => void;
   /** Batch AI Translation & Summary */
   onBatchAiProcess?: () => Promise<void>;
+  /** Controlled "Link to Agent" menu open state (enables the L shortcut). */
+  linkMenuOpen?: boolean;
+  onLinkMenuOpenChange?: (open: boolean) => void;
 }
 
 export function SkillSelectionBar({
@@ -57,9 +60,19 @@ export function SkillSelectionBar({
   onBatchLink,
   onBatchUnlinkAll,
   onBatchAiProcess,
+  linkMenuOpen: linkMenuOpenProp,
+  onLinkMenuOpenChange,
 }: SkillSelectionBarProps) {
   const { t } = useTranslation();
-  const [linkMenuOpen, setLinkMenuOpen] = useState(false);
+  const [linkMenuOpenInternal, setLinkMenuOpenInternal] = useState(false);
+  const linkMenuOpen = linkMenuOpenProp ?? linkMenuOpenInternal;
+  const setLinkMenuOpen = useCallback(
+    (open: boolean) => {
+      if (onLinkMenuOpenChange) onLinkMenuOpenChange(open);
+      setLinkMenuOpenInternal(open);
+    },
+    [onLinkMenuOpenChange],
+  );
   const [isUpdating, setIsUpdating] = useState(false);
   const [updateSuccess, setUpdateSuccess] = useState(false);
   const enabledProfiles = agentProfiles?.filter((p) => p.enabled) ?? [];
@@ -83,6 +96,10 @@ export function SkillSelectionBar({
     "group inline-flex items-center gap-1.5 px-3 h-7 rounded-lg text-[12px] font-medium text-muted-foreground hover:text-foreground bg-muted/30 hover:bg-muted/60 active:bg-muted border border-border/40 hover:border-border/60 hover:shadow-sm shadow-sm shadow-black/5 ring-1 ring-white/5 transition-all duration-200 cursor-pointer select-none disabled:opacity-40 disabled:pointer-events-none whitespace-nowrap";
 
   const ghostBtnPaper = "";
+
+  /* ── Inline kbd hint (revealed on hover) ──────────────────── */
+  const kbdHint =
+    "hidden sm:inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded border border-current/20 bg-current/5 font-mono text-[9px] leading-none opacity-0 group-hover:opacity-60 transition-opacity duration-150";
 
   return (
     <motion.div
@@ -119,6 +136,7 @@ export function SkillSelectionBar({
                 />
               </div>
               <span className="relative">{allSelected ? t("common.deselectAll") : t("common.selectAll")}</span>
+              <kbd className={kbdHint}>A</kbd>
             </button>
           )}
         </div>
@@ -145,6 +163,7 @@ export function SkillSelectionBar({
               >
                 <Link2 className="w-3.5 h-3.5 shrink-0" />
                 {t("selectionBar.linkToAgent")}
+                <kbd className={kbdHint}>L</kbd>
               </button>
               {linkMenuOpen && (
                 <>
@@ -206,7 +225,7 @@ export function SkillSelectionBar({
                               <line x1="4" y1="20" x2="20" y2="4" />
                             </svg>
                           </Link2>
-                          {t("selectionBar.unlinkAll", { defaultValue: "Unlink all agents" })}
+                          {t("selectionBar.unlinkAll")}
                         </button>
                       </div>
                     )}
@@ -228,6 +247,9 @@ export function SkillSelectionBar({
           >
             <Rocket className="w-3.5 h-3.5 shrink-0 group-hover:-translate-y-px transition-transform duration-200" />
             {t("selectionBar.deployToProject")}
+            <kbd className="hidden sm:inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded border border-white/25 bg-white/10 font-mono text-[9px] leading-none text-white/70 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+              ↵
+            </kbd>
           </button>
 
           {/* Save as group */}
@@ -290,6 +312,31 @@ export function SkillSelectionBar({
 
         {/* ─── Zone 3: Danger + dismiss ────────────────────────── */}
         <div className="flex items-center gap-1 shrink-0">
+          {/* Unlink all — warning ghost (primary entry; also in Link menu) */}
+          {onBatchUnlinkAll && (
+            <button
+              onClick={onBatchUnlinkAll}
+              disabled={disabled || isUpdating}
+              title={t("selectionBar.unlinkAll")}
+              className="group inline-flex items-center gap-1.5 px-3 h-7 rounded-lg text-[12px] font-medium text-warning/90 hover:text-warning bg-warning/5 hover:bg-warning/10 active:bg-warning/20 border border-warning/20 hover:border-warning/30 shadow-sm shadow-black/5 ring-1 ring-white/5 transition-all duration-200 cursor-pointer select-none disabled:opacity-40 disabled:pointer-events-none whitespace-nowrap"
+            >
+              <Link2 className="w-3.5 h-3.5 shrink-0 group-hover:scale-110 transition-transform duration-200">
+                <svg
+                  className="absolute inset-0 text-current"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                >
+                  <line x1="4" y1="20" x2="20" y2="4" />
+                </svg>
+              </Link2>
+              {t("selectionBar.unlinkAll")}
+              <kbd className={kbdHint}>U</kbd>
+            </button>
+          )}
+
           {/* Uninstall — danger ghost */}
           <button
             onClick={onUninstall}
@@ -303,6 +350,7 @@ export function SkillSelectionBar({
           {/* Dismiss selection */}
           <button
             onClick={onClear}
+            title={`${t("selectionBar.clear")} (Esc)`}
             className="group flex-shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full text-muted-foreground/60 hover:text-foreground hover:bg-muted/40 active:bg-muted/60 transition-all duration-200 cursor-pointer bg-transparent border border-transparent hover:border-border/50 hover:shadow-sm"
             aria-label={t("selectionBar.clear")}
           >

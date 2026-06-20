@@ -1,8 +1,6 @@
 use skillstar_core::infra::error::AppError;
-use skillstar_projects::projects::project_manifest::{
-    ImportResult, ImportTarget,
-};
 use skillstar_projects::projects::project_manifest as pm;
+use skillstar_projects::projects::project_manifest::{ImportResult, ImportTarget};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -154,9 +152,9 @@ pub(crate) fn import_scanned_skills(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Result;
     use pm::{list_projects, load_skills_list, register_project, save_skills_list};
     use skillstar_projects::projects::project_manifest::SkillsList;
-    use anyhow::Result;
     use std::ffi::OsStr;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -223,7 +221,8 @@ mod tests {
                 claude_skills.iter().any(|skill| skill == "legacy-skill"),
                 "expected imported skill to be present in project's skills list"
             );
-            let local_skill_dir = skillstar_core::infra::paths::local_skills_dir().join("legacy-skill");
+            let local_skill_dir =
+                skillstar_core::infra::paths::local_skills_dir().join("legacy-skill");
             let hub_skill_dir = fs_paths::hub_skills_dir().join("legacy-skill");
             assert!(
                 local_skill_dir.is_dir(),

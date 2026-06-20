@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, Mutex};
 use tracing::{error, warn};
 
-use super::*;
 use super::constants::AI_CONFIG_CACHE_TTL;
+use super::*;
 
 /// Cached concurrency limiter: `(budget, semaphore)` rebuilt when the budget changes.
 type SemaphoreCache = Mutex<Option<(u32, Arc<tokio::sync::Semaphore>)>>;
@@ -44,9 +44,10 @@ fn get_ai_request_semaphore(config: &AiConfig) -> Result<Arc<tokio::sync::Semaph
         .map_err(|_| anyhow::anyhow!("AI request semaphore lock poisoned"))?;
 
     if let Some((cached_budget, semaphore)) = guard.as_ref()
-        && *cached_budget == budget {
-            return Ok(semaphore.clone());
-        }
+        && *cached_budget == budget
+    {
+        return Ok(semaphore.clone());
+    }
 
     let semaphore = Arc::new(tokio::sync::Semaphore::new(budget as usize));
     *guard = Some((budget, semaphore.clone()));
@@ -128,9 +129,10 @@ pub fn load_config() -> AiConfig {
     // Try in-memory cache first (avoids disk read + AES decrypt).
     if let Ok(guard) = AI_CONFIG_CACHE.lock()
         && let Some((ts, cached)) = guard.as_ref()
-            && ts.elapsed() < AI_CONFIG_CACHE_TTL {
-                return cached.clone();
-            }
+        && ts.elapsed() < AI_CONFIG_CACHE_TTL
+    {
+        return cached.clone();
+    }
 
     let fresh = load_config_from_disk();
 
@@ -273,11 +275,7 @@ pub(crate) fn parse_codex_active_provider_base_url(config_text: &str) -> Option<
         if trimmed.starts_with(prefix) {
             let rhs = trimmed.split_once('=')?.1.trim();
             if rhs.starts_with('"') {
-                let inner: String = rhs
-                    .chars()
-                    .skip(1)
-                    .take_while(|&c| c != '"')
-                    .collect();
+                let inner: String = rhs.chars().skip(1).take_while(|&c| c != '"').collect();
                 let inner = inner.trim();
                 if !inner.is_empty() {
                     return Some(inner.to_string());

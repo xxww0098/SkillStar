@@ -1,21 +1,14 @@
 //! Codex (ChatGPT/OpenAI) OAuth fetcher.
 //!
-//! Implements the PKCE + local-callback flow described in cockpit-tools
-//! `codex_oauth.rs`:
+//! Mirrors the official Codex CLI PKCE + localhost callback flow:
 //! 1. Generate PKCE pair + state.
-//! 2. Open `https://auth.openai.com/oauth/authorize` with `redirect_uri =
-//!    http://127.0.0.1:1455/auth/callback`.
-//! 3. Local server catches `?code=...&state=...`.
-//! 4. POST `https://auth.openai.com/oauth/token` (form-encoded) to swap.
-//! 5. `id_token` JWT carries `chatgpt_plan_type`. `access_token` is used to
+//! 2. Bind `http://localhost:{port}/auth/callback` (1455, fallback 1457).
+//! 3. Open `https://auth.openai.com/oauth/authorize` with Codex-specific params.
+//! 4. Local server catches `?code=...&state=...`.
+//! 5. POST `https://auth.openai.com/oauth/token` (form-encoded) to swap.
+//! 6. `id_token` JWT carries `chatgpt_plan_type`. `access_token` is used to
 //!    call `https://chatgpt.com/backend-api/wham/usage` (with header
 //!    `ChatGPT-Account-Id` extracted from JWT).
-//!
-//! NOTE: The repo already has a Codex account manager in
-//! `crates/skillstar-model-config/src/codex_accounts.rs` — long term that
-//! state store should be the single source of truth. v1 keeps a separate
-//! Subscription record so the usage page is self-contained; v1.1 will
-//! reconcile via a shared id.
 
 use chrono::Utc;
 use serde::Deserialize;
@@ -24,7 +17,7 @@ use std::time::Duration;
 
 use crate::catalog::AuthMode;
 use crate::crypto;
-use crate::oauth::local_server;
+use crate::oauth::local_server::{self, CallbackSession};
 use crate::oauth::pkce::PkcePair;
 use crate::oauth::token_refresh;
 use crate::storage;
@@ -35,8 +28,11 @@ const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const AUTHORIZE_URL: &str = "https://auth.openai.com/oauth/authorize";
 const TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
 const USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
-const CALLBACK_PORT: u16 = 1455;
-const SCOPES: &str = "openid profile email offline_access";
+const DEFAULT_CALLBACK_PORT: u16 = 1455;
+const FALLBACK_CALLBACK_PORT: u16 = 1457;
+const SCOPES: &str =
+    "openid profile email offline_access api.connectors.read api.connectors.invoke";
+const ORIGINATOR: &str = "codex_cli_rs";
 
 #[derive(Debug, Deserialize, Default)]
 struct TokenResponse {
@@ -77,25 +73,24 @@ struct Window {
 pub async fn start_login(_region: Option<&str>) -> UsageResult<super::OAuthStartInfo> {
     let pkce = PkcePair::generate();
     let state = crate::oauth::pkce::random_state();
-    let redirect_uri = format!("http://127.0.0.1:{}/auth/callback", CALLBACK_PORT);
-    let auth_url = format!(
-        "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&code_challenge={}&code_challenge_method=S256&state={}",
-        AUTHORIZE_URL,
-        CLIENT_ID,
-        urlencoding(&redirect_uri),
-        urlencoding(SCOPES),
-        pkce.challenge,
-        state,
-    );
+    let session = local_server::start_session(DEFAULT_CALLBACK_PORT, Some(FALLBACK_CALLBACK_PORT))?;
+    let port = session.port;
+    let redirect_uri = format!("http://localhost:{port}/auth/callback");
+    let auth_url = build_authorize_url(&redirect_uri, &pkce, &state);
 
-    let pending_id = crate::oauth::pending_state::register("codex", None, auth_url.clone());
+    let pending_id = crate::oauth::pending_state::register_with_callback_port(
+        "codex",
+        None,
+        auth_url.clone(),
+        Some(port),
+    );
 
     let pid = pending_id.clone();
     let verifier = pkce.verifier.clone();
     let redirect = redirect_uri.clone();
     let state_for_task = state.clone();
     tokio::spawn(async move {
-        let result = drive_login(state_for_task, verifier, redirect).await;
+        let result = drive_login(session, state_for_task, verifier, redirect).await;
         if let Some(tx) = crate::oauth::pending_state::take_sender(&pid) {
             let _ = tx.send(result);
         }
@@ -104,14 +99,34 @@ pub async fn start_login(_region: Option<&str>) -> UsageResult<super::OAuthStart
     Ok(super::OAuthStartInfo::browser(auth_url, pending_id))
 }
 
+fn build_authorize_url(redirect_uri: &str, pkce: &PkcePair, state: &str) -> String {
+    let params = [
+        ("response_type", "code"),
+        ("client_id", CLIENT_ID),
+        ("redirect_uri", redirect_uri),
+        ("scope", SCOPES),
+        ("code_challenge", pkce.challenge.as_str()),
+        ("code_challenge_method", "S256"),
+        ("id_token_add_organizations", "true"),
+        ("codex_cli_simplified_flow", "true"),
+        ("state", state),
+        ("originator", ORIGINATOR),
+    ];
+    let qs = params
+        .into_iter()
+        .map(|(k, v)| format!("{k}={}", urlencoding(v)))
+        .collect::<Vec<_>>()
+        .join("&");
+    format!("{AUTHORIZE_URL}?{qs}")
+}
+
 async fn drive_login(
+    session: CallbackSession,
     state: String,
     verifier: String,
     redirect_uri: String,
 ) -> UsageResult<Subscription> {
-    let code =
-        local_server::wait_for_callback(CALLBACK_PORT, state, Some(Duration::from_secs(300)))
-            .await?;
+    let code = local_server::wait(session, state, Some(Duration::from_secs(300))).await?;
     let tokens = exchange_code(&code, &verifier, &redirect_uri).await?;
     let access_token = tokens
         .access_token
@@ -139,7 +154,7 @@ async fn exchange_code(
     verifier: &str,
     redirect_uri: &str,
 ) -> UsageResult<TokenResponse> {
-    let client = http_client()?;
+    let client = crate::fetchers::http_client()?;
     let resp = client
         .post(TOKEN_URL)
         .form(&[
@@ -186,6 +201,7 @@ async fn finalize(
         renew_date: 0,
         auto_renew: false,
         api_key_encrypted: None,
+        platform_token_encrypted: None,
         access_token_encrypted: Some(crypto::encrypt(&access_token)),
         refresh_token_encrypted: refresh_token.as_deref().map(crypto::encrypt),
         access_token_expires_at: expires_at,
@@ -219,12 +235,14 @@ async fn fetch_inner(subscription: &mut Subscription) -> UsageResult<Subscriptio
     if token_refresh::needs_refresh(subscription.access_token_expires_at) {
         refresh_codex_tokens(subscription).await?;
     }
-    let access_token = decrypt_required(&subscription.access_token_encrypted)?;
+    let access_token =
+        crate::fetchers::decrypt_required(&subscription.access_token_encrypted, "access_token")?;
     let account_id = subscription.oauth_account_id.clone();
     match fetch_with_token(&subscription.id, &access_token, account_id.as_deref()).await {
         Err(UsageError::AuthRequired) => {
             refresh_codex_tokens(subscription).await?;
-            let access_token = decrypt_required(&subscription.access_token_encrypted)?;
+            let access_token =
+                crate::fetchers::decrypt_required(&subscription.access_token_encrypted, "access_token")?;
             fetch_with_token(
                 &subscription.id,
                 &access_token,
@@ -287,7 +305,7 @@ async fn fetch_with_token(
     access_token: &str,
     account_id: Option<&str>,
 ) -> UsageResult<SubscriptionUsage> {
-    let client = http_client()?;
+    let client = crate::fetchers::http_client()?;
     let mut req = client.get(USAGE_URL).bearer_auth(access_token);
     if let Some(account) = account_id {
         req = req.header("ChatGPT-Account-Id", account);
@@ -332,6 +350,7 @@ async fn fetch_with_token(
         credits: Vec::new(),
         error: None,
         api_keys: Vec::new(),
+        deepseek_analytics: None,
     })
 }
 
@@ -346,21 +365,6 @@ fn window(w: Option<&Window>, label: &str) -> Option<UsageWindow> {
         reset_at: w.reset_at,
         breakdown: Vec::new(),
     })
-}
-
-fn http_client() -> UsageResult<reqwest::Client> {
-    crate::http_client::usage_reqwest_with_active_fingerprint()
-}
-
-fn decrypt_required(cipher: &Option<String>) -> UsageResult<String> {
-    let cipher = cipher
-        .as_deref()
-        .ok_or_else(|| UsageError::Other("缺少 access_token".into()))?;
-    let pt = crypto::decrypt(cipher);
-    if pt.is_empty() {
-        return Err(UsageError::AuthRequired);
-    }
-    Ok(pt)
 }
 
 fn urlencoding(s: &str) -> String {
@@ -378,3 +382,27 @@ fn urlencoding(s: &str) -> String {
 
 #[allow(dead_code)]
 fn _unused(_: Value) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::oauth::pkce::PkcePair;
+
+    #[test]
+    fn authorize_url_matches_codex_cli_params() {
+        let pkce = PkcePair::generate();
+        let url = build_authorize_url(
+            "http://localhost:1455/auth/callback",
+            &pkce,
+            "state-abc",
+        );
+        assert!(url.contains("client_id=app_EMoamEEZ73f0CkXaXp7hrann"));
+        assert!(url.contains("redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback"));
+        assert!(url.contains("codex_cli_simplified_flow=true"));
+        assert!(url.contains("id_token_add_organizations=true"));
+        assert!(url.contains("originator=codex_cli_rs"));
+        assert!(url.contains("api.connectors.read"));
+        assert!(url.contains("code_challenge="));
+        assert!(url.contains("state=state-abc"));
+    }
+}

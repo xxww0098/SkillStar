@@ -27,7 +27,6 @@ impl ApiFormat {
     }
 }
 
-
 fn deserialize_api_format<'de, D>(deserializer: D) -> Result<ApiFormat, D::Error>
 where
     D: Deserializer<'de>,

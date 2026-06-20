@@ -6,7 +6,6 @@ import MiniMaxIcon from "@lobehub/icons/es/Minimax/components/Color";
 import OpenAIIcon from "@lobehub/icons/es/OpenAI/components/Mono";
 import OpenRouterIcon from "@lobehub/icons/es/OpenRouter/components/Mono";
 import SiliconCloudIcon from "@lobehub/icons/es/SiliconCloud/components/Color";
-import XiaomiMiMoIcon from "@lobehub/icons/es/XiaomiMiMo/components/Mono";
 import ZhipuIcon from "@lobehub/icons/es/Zhipu/components/Color";
 import { type ComponentType, type CSSProperties, useLayoutEffect, useRef } from "react";
 import { cn } from "../../../../lib/utils";
@@ -28,7 +27,6 @@ const ICON_BY_PRESET_ID: Record<string, IconComponent> = {
   minimax: MiniMaxIcon,
   glm: ZhipuIcon,
   "glm-coding": ZhipuIcon,
-  mimo: XiaomiMiMoIcon,
   openrouter: OpenRouterIcon,
   siliconflow: SiliconCloudIcon,
   grok: GrokIcon,
@@ -68,7 +66,6 @@ function resolvePresetId(presetId?: string | null, providerName?: string | null)
   if (name.includes("kimi") || name.includes("moonshot")) return "kimi";
   if (name.includes("minimax")) return "minimax";
   if (name.includes("glm") || providerName.includes("智谱")) return "glm";
-  if (name.includes("mimo") || providerName.includes("小米")) return "mimo";
   if (name.includes("openrouter")) return "openrouter";
   if (name.includes("siliconflow") || providerName.includes("硅基")) return "siliconflow";
   if (name.includes("anthropic") || name.includes("claude")) return "anthropic";

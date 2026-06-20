@@ -34,9 +34,10 @@ pub fn invalidate_profile_cache() {
 fn cached_profiles() -> Vec<agent_profile::AgentProfile> {
     if let Ok(cache) = profile_cache().read()
         && let Some(loaded_at) = cache.loaded_at
-            && loaded_at.elapsed() < PROFILE_CACHE_TTL {
-                return cache.profiles.clone();
-            }
+        && loaded_at.elapsed() < PROFILE_CACHE_TTL
+    {
+        return cache.profiles.clone();
+    }
 
     let profiles = agent_profile::list_profiles();
 
@@ -105,19 +106,30 @@ pub fn toggle_skill_for_agent(skill_name: &str, agent_id: &str, enable: bool) ->
 
     if enable {
         // Ensure parent dir exists
+        let created_skills_dir = !profile.global_skills_dir.exists();
         std::fs::create_dir_all(&profile.global_skills_dir)?;
 
         // Remove existing symlink/junction/copy if present
         if (target.symlink_metadata().is_ok()
             || skillstar_core::infra::fs_ops::is_link(&target)
             || target.exists())
-            && !remove_managed_entry_for_overwrite(&target)? {
-                tracing::error!(target: "sync", target = %target.display(), "Cannot overwrite real directory");
-                anyhow::bail!("Target cannot be overwritten because it is a real directory");
-            }
+            && !remove_managed_entry_for_overwrite(&target)?
+        {
+            tracing::error!(target: "sync", target = %target.display(), "Cannot overwrite real directory");
+            anyhow::bail!("Target cannot be overwritten because it is a real directory");
+        }
         // Symlink → junction → directory-copy ladder, same semantics as
         // project-level deploys (Windows without Developer Mode must not fail).
-        let was_copy = skillstar_core::infra::fs_ops::create_symlink_or_copy(&skill_path, &target)?;
+        let was_copy =
+            match skillstar_core::infra::fs_ops::create_symlink_or_copy(&skill_path, &target) {
+                Ok(was_copy) => was_copy,
+                Err(err) => {
+                    if created_skills_dir {
+                        let _ = std::fs::remove_dir(&profile.global_skills_dir);
+                    }
+                    return Err(err);
+                }
+            };
         if was_copy {
             tracing::warn!(
                 target: "sync",
@@ -227,10 +239,9 @@ pub fn list_linked_skills(agent_id: &str) -> Result<Vec<String>> {
         // Include symlinks/junctions AND copy-based deployments
         let is_managed = skillstar_core::infra::fs_ops::is_link(&path)
             || (path.is_dir() && path.join("SKILL.md").exists());
-        if is_managed
-            && let Some(name) = entry.file_name().to_str() {
-                names.push(name.to_string());
-            }
+        if is_managed && let Some(name) = entry.file_name().to_str() {
+            names.push(name.to_string());
+        }
     }
     names.sort();
     Ok(names)
@@ -286,11 +297,10 @@ pub fn batch_link_skills_to_agent(skill_names: &[String], agent_id: &str) -> Res
     let profile = agent_profile::find_profile(&profiles, agent_id)?;
     let target_dir = &profile.global_skills_dir;
 
-    std::fs::create_dir_all(target_dir)?;
-
     let mut linked = 0u32;
     let mut skipped = 0u32;
     let mut failures: Vec<String> = Vec::new();
+    let mut created_target_dir = false;
     for name in skill_names {
         let skill_path = hub_dir.join(name);
         let target = target_dir.join(name);
@@ -334,6 +344,11 @@ pub fn batch_link_skills_to_agent(skill_names: &[String], agent_id: &str) -> Res
             continue;
         }
 
+        if !target_dir.exists() {
+            std::fs::create_dir_all(target_dir)?;
+            created_target_dir = true;
+        }
+
         match skillstar_core::infra::fs_ops::create_symlink_or_copy(&skill_path, &target) {
             Ok(was_copy) => {
                 if was_copy {
@@ -368,6 +383,9 @@ pub fn batch_link_skills_to_agent(skill_names: &[String], agent_id: &str) -> Res
     }
 
     if !failures.is_empty() {
+        if linked == 0 && created_target_dir {
+            let _ = std::fs::remove_dir(target_dir);
+        }
         // Links created before a failure stay in place — re-running is
         // idempotent (already-linked skills are skipped above).
         anyhow::bail!(
@@ -519,7 +537,9 @@ pub fn resync_existing_links(skill_name: &str) -> Result<ResyncReport> {
                     error = %err,
                     "Failed to resync skill deployment for agent"
                 );
-                report.failures.push(format!("{}: {err:#}", profile.display_name));
+                report
+                    .failures
+                    .push(format!("{}: {err:#}", profile.display_name));
             }
         }
     }
@@ -530,13 +550,69 @@ pub fn resync_existing_links(skill_name: &str) -> Result<ResyncReport> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsStr;
     use std::fs;
+
+    fn set_env<K: AsRef<OsStr>, V: AsRef<OsStr>>(key: K, value: V) {
+        unsafe { std::env::set_var(key, value) }
+    }
+
+    fn remove_env<K: AsRef<OsStr>>(key: K) {
+        unsafe { std::env::remove_var(key) }
+    }
 
     fn make_skill_dir(root: &Path, name: &str) -> std::path::PathBuf {
         let dir = root.join(name);
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("SKILL.md"), "# test skill\n").unwrap();
         dir
+    }
+
+    #[test]
+    fn batch_link_skips_missing_skills_without_creating_agent_dir() -> Result<()> {
+        let _guard = crate::projects::lock_test_env();
+        invalidate_profile_cache();
+
+        let tmp = tempfile::tempdir()?;
+        let home = tmp.path().join("home");
+        fs::create_dir_all(&home)?;
+
+        let previous_home = std::env::var_os("HOME");
+        let previous_data_dir = std::env::var_os("SKILLSTAR_DATA_DIR");
+        set_env("HOME", &home);
+        set_env("SKILLSTAR_DATA_DIR", home.join(".skillstar"));
+        #[cfg(windows)]
+        let previous_userprofile = std::env::var_os("USERPROFILE");
+        #[cfg(windows)]
+        set_env("USERPROFILE", &home);
+
+        let result = (|| -> Result<()> {
+            let missing = vec!["missing-skill".to_string()];
+            let linked = batch_link_skills_to_agent(&missing, "claude")?;
+            assert_eq!(linked, 0);
+            assert!(
+                !home.join(".claude").exists(),
+                "skipping missing skills must not create the agent config root"
+            );
+            Ok(())
+        })();
+
+        match previous_home {
+            Some(value) => set_env("HOME", value),
+            None => remove_env("HOME"),
+        }
+        match previous_data_dir {
+            Some(value) => set_env("SKILLSTAR_DATA_DIR", value),
+            None => remove_env("SKILLSTAR_DATA_DIR"),
+        }
+        #[cfg(windows)]
+        match previous_userprofile {
+            Some(value) => set_env("USERPROFILE", value),
+            None => remove_env("USERPROFILE"),
+        }
+        invalidate_profile_cache();
+
+        result
     }
 
     #[test]

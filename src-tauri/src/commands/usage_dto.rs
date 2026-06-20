@@ -7,8 +7,8 @@
 use serde::{Deserialize, Serialize};
 use skillstar_usage::catalog::{AuthMode, CatalogEntry, CatalogTier};
 use skillstar_usage::subscription::{
-    AlertKind, AlertSeverity, BillingCycle, ManualQuota, Subscription,
-    SubscriptionAlert, SubscriptionUsage,
+    AlertKind, AlertSeverity, BillingCycle, ManualQuota, Subscription, SubscriptionAlert,
+    SubscriptionUsage,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -57,6 +57,9 @@ pub struct SubscriptionDto {
     pub auto_renew: bool,
     /// `true` when ApiKey/OAuth credentials are present (without revealing them).
     pub has_credential: bool,
+    /// DeepSeek platform session token configured (usage charts).
+    #[serde(default)]
+    pub has_platform_token: bool,
     pub requires_reauth: bool,
     /// Fingerprint bound to this subscription (id in the fingerprint store).
     /// `None` → behaves identically to pre-fingerprint SkillStar.
@@ -77,7 +80,10 @@ pub struct SubscriptionDto {
 
 impl SubscriptionDto {
     pub fn from_parts(sub: Subscription, usage: Option<SubscriptionUsage>) -> Self {
-        let has_credential = sub.api_key_encrypted.as_ref().is_some_and(|s| !s.is_empty())
+        let has_credential = sub
+            .api_key_encrypted
+            .as_ref()
+            .is_some_and(|s| !s.is_empty())
             || sub
                 .access_token_encrypted
                 .as_ref()
@@ -86,6 +92,10 @@ impl SubscriptionDto {
                 .cookie_jar_encrypted
                 .as_ref()
                 .is_some_and(|s| !s.is_empty());
+        let has_platform_token = sub
+            .platform_token_encrypted
+            .as_ref()
+            .is_some_and(|s| !s.is_empty());
         Self {
             id: sub.id,
             catalog_id: sub.catalog_id,
@@ -99,6 +109,7 @@ impl SubscriptionDto {
             renew_date: sub.renew_date,
             auto_renew: sub.auto_renew,
             has_credential,
+            has_platform_token,
             requires_reauth: sub.requires_reauth,
             fingerprint_id: sub.fingerprint_id,
             // Will be filled by the command layer (which consults the
@@ -128,6 +139,8 @@ pub struct CreateSubscriptionInput {
     pub auto_renew: Option<bool>,
     /// Plaintext API key (encrypted server-side before storage).
     pub api_key: Option<String>,
+    /// DeepSeek platform session token for usage analytics (encrypted server-side).
+    pub platform_token: Option<String>,
     pub oauth_region: Option<String>,
     pub manual_quota: Option<ManualQuota>,
     pub note: Option<String>,
@@ -150,6 +163,11 @@ pub struct UpdateSubscriptionInput {
     pub auto_renew: Option<bool>,
     /// Send only when rotating; absent => keep existing.
     pub api_key: Option<String>,
+    /// DeepSeek platform session token (send when rotating).
+    pub platform_token: Option<String>,
+    /// When `true`, clear any stored DeepSeek platform token.
+    #[serde(default, rename = "clearPlatformToken")]
+    pub clear_platform_token: bool,
     pub manual_quota: Option<ManualQuota>,
     pub note: Option<String>,
     /// Raw `Cookie:` header string to replace existing cookies (Cookie mode only).

@@ -8,8 +8,8 @@ use super::helpers::{clear_project_symlinks, prune_empty_dirs_upward};
 use super::index::{list_projects, register_project};
 use super::store::{load_skills_list, save_skills_list};
 use super::types::{
-    deploy_skill_auto, ensure_project_root_exists, prune_deploy_modes_for_agents, ProjectDeployMode,
-    SkillsList,
+    ProjectDeployMode, SkillsList, deploy_skill_auto, ensure_project_root_exists,
+    prune_deploy_modes_for_agents,
 };
 use crate::projects::agents as agent_profile;
 use skillstar_core::infra::{fs_ops, paths as fs_paths};
@@ -270,7 +270,11 @@ pub fn save_skills_list_only(
     let mut skills_list = load_skills_list(&entry.name).unwrap_or_default();
     skills_list.agents = normalize_project_agents(agents);
     skills_list.updated_at = chrono::Utc::now().to_rfc3339();
-    prune_deploy_modes_for_agents(&mut skills_list.deploy_modes, &skills_list.agents, &profiles);
+    prune_deploy_modes_for_agents(
+        &mut skills_list.deploy_modes,
+        &skills_list.agents,
+        &profiles,
+    );
 
     save_skills_list(&entry.name, &skills_list)?;
 
@@ -288,15 +292,34 @@ pub fn save_skills_list_only(
 /// operations that should be additive, not destructive.
 ///
 /// If `agent_ids` is empty, falls back to the first profile whose
-/// `project_skills_rel` is `".agents/skills"` (i.e. Antigravity), or the
+/// `project_skills_rel` is `".agent/skills"` (i.e. Antigravity), or the
 /// first available profile with project-level support.
 pub fn add_skills_to_project(
     project_path: &str,
     skill_names: &[String],
     agent_ids: &[String],
 ) -> Result<u32> {
-    let entry = register_project(project_path)?;
     let hub_dir = fs_paths::hub_skills_dir();
+    let mut seen_skill_names = HashSet::new();
+    let deployable_skill_names = skill_names
+        .iter()
+        .filter_map(|name| {
+            let trimmed = name.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            if !seen_skill_names.insert(trimmed.to_string()) {
+                return None;
+            }
+            hub_dir.join(trimmed).exists().then(|| trimmed.to_string())
+        })
+        .collect::<Vec<_>>();
+
+    if deployable_skill_names.is_empty() {
+        return Ok(0);
+    }
+
+    let entry = register_project(project_path)?;
     let profiles = agent_profile::list_profiles();
     let project = ensure_project_root_exists(project_path)?;
 
@@ -318,10 +341,10 @@ pub fn add_skills_to_project(
                 agent_ids.join(", ")
             ));
         }
-        // Fallback: prefer the profile using .agents/skills, then first available
+        // Fallback: prefer the profile using .agent/skills, then first available
         if let Some(fallback) = profiles
             .iter()
-            .find(|p| p.project_skills_rel == ".agents/skills" && p.has_project_skills())
+            .find(|p| p.project_skills_rel == ".agent/skills" && p.has_project_skills())
             .or_else(|| profiles.iter().find(|p| p.has_project_skills()))
         {
             target_agent_ids.push(fallback.id.clone());
@@ -333,7 +356,7 @@ pub fn add_skills_to_project(
 
     for agent_id in &target_agent_ids {
         let agent_skills = skills_list.agents.entry(agent_id.clone()).or_default();
-        for name in skill_names {
+        for name in &deployable_skill_names {
             if !agent_skills.contains(name) {
                 agent_skills.push(name.clone());
             }
@@ -355,14 +378,11 @@ pub fn add_skills_to_project(
         }
 
         let target_dir = project.join(&profile.project_skills_rel);
-        std::fs::create_dir_all(&target_dir)
-            .with_context(|| format!("failed to create skill dir: {}", target_dir.display()))?;
+        let mut prepared_target_dir = false;
+        let mut created_for_agent = 0u32;
 
-        for name in skill_names {
+        for name in &deployable_skill_names {
             let source = hub_dir.join(name);
-            if !source.exists() {
-                continue;
-            }
             let target = target_dir.join(name);
 
             // If already a symlink, remove and recreate (refresh)
@@ -373,8 +393,18 @@ pub fn add_skills_to_project(
                 continue;
             }
 
+            if !prepared_target_dir {
+                std::fs::create_dir_all(&target_dir).with_context(|| {
+                    format!("failed to create skill dir: {}", target_dir.display())
+                })?;
+                prepared_target_dir = true;
+            }
+
             match deploy_skill_auto(&source, &target) {
-                Ok(()) => total += 1,
+                Ok(()) => {
+                    total += 1;
+                    created_for_agent += 1;
+                }
                 Err(err) => failures.push(format!(
                     "Failed to link '{}' for agent '{}' at {}: {}",
                     name,
@@ -383,6 +413,10 @@ pub fn add_skills_to_project(
                     err
                 )),
             }
+        }
+
+        if created_for_agent == 0 && prepared_target_dir && target_dir.exists() {
+            prune_empty_dirs_upward(&target_dir, project.as_path())?;
         }
     }
 

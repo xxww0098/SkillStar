@@ -25,7 +25,7 @@ use crate::remote::{
 };
 use crate::{OfficialPublisher, Skill, SkillType, extract_github_source_from_url};
 
-const SNAPSHOT_SCHEMA_VERSION: i64 = 9;
+const SNAPSHOT_SCHEMA_VERSION: i64 = 10;
 const LEADERBOARD_TTL_HOURS: i64 = 6;
 const PUBLISHER_TTL_HOURS: i64 = 24;
 const DETAIL_TTL_HOURS: i64 = 48;

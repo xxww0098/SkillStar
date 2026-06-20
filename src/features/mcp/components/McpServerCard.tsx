@@ -9,14 +9,16 @@ import { MCP_TOOL_IDS, type McpServerEntry, type McpToolId, type McpToolStatus }
 /**
  * Map each MCP tool id to its agent SVG logo (under `public/agents/`) so the
  * per-tool enable/disable toggle uses the same icon affordance as skill cards.
- * `claude-desktop` reuses the Claude logo (no dedicated asset).
+ * `claude-code` carries an in-svg terminal badge to distinguish it from
+ * `claude-desktop` (which uses the plain Claude logo).
  */
-const MCP_TOOL_ICON: Record<McpToolId, { profileId: string; icon: string; label: string }> = {
+export const MCP_TOOL_ICON: Record<McpToolId, { profileId: string; icon: string; label: string }> = {
   "claude-code": { profileId: "claude", icon: "agents/claude.svg", label: "Claude Code" },
-  "claude-desktop": { profileId: "claude", icon: "agents/claude.svg", label: "Claude Desktop" },
+  "claude-desktop": { profileId: "claude", icon: "agents/claude-desktop.svg", label: "Claude Desktop" },
   codex: { profileId: "codex", icon: "agents/codex.svg", label: "Codex" },
   gemini: { profileId: "gemini", icon: "agents/gemini.svg", label: "Gemini CLI" },
   opencode: { profileId: "opencode", icon: "agents/opencode.svg", label: "OpenCode" },
+  zcode: { profileId: "zcode", icon: "agents/zcode.svg", label: "ZCode" },
 };
 
 interface McpServerCardProps {

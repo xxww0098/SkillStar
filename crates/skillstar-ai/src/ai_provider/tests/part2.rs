@@ -10,7 +10,9 @@ use super::*;
 #[test]
 fn resolve_from_flat_store_claude_uses_anthropic_endpoint() {
     with_temp_data_root(|_dir| {
-        use skillstar_models::providers::{FlatProvidersStore, ProviderEntryFlat, write_flat_store, flat_store_path};
+        use skillstar_models::providers::{
+            FlatProvidersStore, ProviderEntryFlat, flat_store_path, write_flat_store,
+        };
 
         let entry = ProviderEntryFlat {
             id: "test-uuid-claude".to_string(),
@@ -52,8 +54,14 @@ fn resolve_from_flat_store_claude_uses_anthropic_endpoint() {
         assert_eq!(cfg.api_key, "sk-ant-test");
         assert_eq!(cfg.base_url, "https://anthropic.example.com");
         assert_eq!(cfg.model, "claude-sonnet-4-6");
-        assert_eq!(cfg.claude_haiku_model, Some("claude-haiku-4-5-20251001".to_string()));
-        assert_eq!(cfg.claude_sonnet_model, Some("claude-sonnet-4-6".to_string()));
+        assert_eq!(
+            cfg.claude_haiku_model,
+            Some("claude-haiku-4-5-20251001".to_string())
+        );
+        assert_eq!(
+            cfg.claude_sonnet_model,
+            Some("claude-sonnet-4-6".to_string())
+        );
         assert_eq!(cfg.claude_opus_model, Some("claude-opus-4-7".to_string()));
     });
 }
@@ -61,7 +69,9 @@ fn resolve_from_flat_store_claude_uses_anthropic_endpoint() {
 #[test]
 fn resolve_from_flat_store_claude_falls_back_to_openai_url_when_anthropic_empty() {
     with_temp_data_root(|_dir| {
-        use skillstar_models::providers::{FlatProvidersStore, ProviderEntryFlat, write_flat_store, flat_store_path};
+        use skillstar_models::providers::{
+            FlatProvidersStore, ProviderEntryFlat, flat_store_path, write_flat_store,
+        };
 
         let entry = ProviderEntryFlat {
             id: "test-uuid-relay".to_string(),
@@ -101,7 +111,9 @@ fn resolve_from_flat_store_claude_falls_back_to_openai_url_when_anthropic_empty(
 #[test]
 fn resolve_from_flat_store_codex_uses_openai_endpoint() {
     with_temp_data_root(|_dir| {
-        use skillstar_models::providers::{FlatProvidersStore, ProviderEntryFlat, write_flat_store, flat_store_path};
+        use skillstar_models::providers::{
+            FlatProvidersStore, ProviderEntryFlat, flat_store_path, write_flat_store,
+        };
 
         let entry = ProviderEntryFlat {
             id: "test-uuid-codex".to_string(),
@@ -144,7 +156,9 @@ fn resolve_from_flat_store_codex_uses_openai_endpoint() {
 #[test]
 fn resolve_from_flat_store_fails_when_api_key_missing() {
     with_temp_data_root(|_dir| {
-        use skillstar_models::providers::{FlatProvidersStore, ProviderEntryFlat, write_flat_store, flat_store_path};
+        use skillstar_models::providers::{
+            FlatProvidersStore, ProviderEntryFlat, flat_store_path, write_flat_store,
+        };
 
         let entry = ProviderEntryFlat {
             id: "test-no-key".to_string(),
@@ -175,7 +189,12 @@ fn resolve_from_flat_store_fails_when_api_key_missing() {
         let mut cfg = AiConfig::default();
         let result = super::resolve_from_flat_store(&mut cfg, "codex", "test-no-key");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("missing an API key"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("missing an API key")
+        );
     });
 }
 
@@ -184,7 +203,9 @@ fn resolve_from_flat_store_fails_when_api_key_missing() {
 #[test]
 fn resolve_from_legacy_store_reads_claude_model_variants() {
     with_temp_data_root(|_dir| {
-        use skillstar_models::providers::{ProvidersStore, AppProviders, ProviderEntry, write_store};
+        use skillstar_models::providers::{
+            AppProviders, ProviderEntry, ProvidersStore, write_store,
+        };
         use std::collections::HashMap;
 
         let settings_config = serde_json::json!({
@@ -217,7 +238,10 @@ fn resolve_from_legacy_store_reads_claude_model_variants() {
         providers_map.insert("legacy-claude".to_string(), entry);
 
         let store = ProvidersStore {
-            claude: AppProviders { providers: providers_map, current: None },
+            claude: AppProviders {
+                providers: providers_map,
+                current: None,
+            },
             codex: AppProviders::default(),
             opencode: AppProviders::default(),
             gemini: AppProviders::default(),
@@ -232,8 +256,14 @@ fn resolve_from_legacy_store_reads_claude_model_variants() {
         assert_eq!(cfg.api_format, ApiFormat::Anthropic);
         assert_eq!(cfg.api_key, "sk-ant-legacy");
         assert_eq!(cfg.model, "claude-sonnet-4-6");
-        assert_eq!(cfg.claude_haiku_model, Some("claude-haiku-4-5-20251001".to_string()));
-        assert_eq!(cfg.claude_sonnet_model, Some("claude-sonnet-4-6".to_string()));
+        assert_eq!(
+            cfg.claude_haiku_model,
+            Some("claude-haiku-4-5-20251001".to_string())
+        );
+        assert_eq!(
+            cfg.claude_sonnet_model,
+            Some("claude-sonnet-4-6".to_string())
+        );
         assert_eq!(cfg.claude_opus_model, Some("claude-opus-4-7".to_string()));
     });
 }

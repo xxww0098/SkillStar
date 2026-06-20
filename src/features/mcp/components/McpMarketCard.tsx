@@ -1,4 +1,5 @@
-import { Boxes, Check, Download, ExternalLink, Globe, Info, Star, Terminal } from "lucide-react";
+import ZhipuColor from "@lobehub/icons/es/Zhipu/components/Color";
+import { Boxes, Check, Download, ExternalLink, Globe, Info, Sparkles, Star, Terminal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { CardDescription, CardTitle } from "../../../components/ui/card";
@@ -7,14 +8,14 @@ import { ExternalAnchor } from "../../../components/ui/ExternalAnchor";
 import { cn, formatInstalls } from "../../../lib/utils";
 import type { McpMarketEntry, McpServerKind } from "../../../types";
 
-function kindBadge(kind: McpServerKind): { icon: typeof Terminal; labelKey: string } | null {
+function kindBadge(kind: McpServerKind): { icon: typeof Terminal; label: string } | null {
   switch (kind) {
     case "stdio":
-      return { icon: Terminal, labelKey: "mcp.kindLocal" };
+      return { icon: Terminal, label: "STDIO" };
     case "remote":
-      return { icon: Globe, labelKey: "mcp.kindRemote" };
+      return { icon: Globe, label: "REMOTE" };
     case "both":
-      return { icon: Boxes, labelKey: "mcp.kindBoth" };
+      return { icon: Boxes, label: "STDIO / REMOTE" };
     default:
       return null;
   }
@@ -65,8 +66,13 @@ export function McpMarketCard({ entry, installed, onInstall, onOpenDetail, compa
       headerClassName="pr-24"
       header={
         <div className="flex items-center gap-2.5">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10">
-            <Boxes className="h-4 w-4 text-primary" />
+          <div
+            className={cn(
+              "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10",
+              entry.recommended && "ring-1 ring-primary/25",
+            )}
+          >
+            {entry.source === "bigmodel" ? <ZhipuColor size={18} /> : <Boxes className="h-4 w-4 text-primary" />}
           </div>
           <div className="min-w-0">
             <CardTitle className="truncate ss-card-title">{entry.name}</CardTitle>
@@ -86,6 +92,12 @@ export function McpMarketCard({ entry, installed, onInstall, onOpenDetail, compa
       footer={
         <>
           <div className="flex min-w-0 items-center gap-2">
+            {entry.recommended ? (
+              <span className="inline-flex h-4 items-center gap-1 rounded bg-primary/12 px-1.5 text-micro font-medium text-primary ring-1 ring-inset ring-primary/20">
+                <Sparkles className="h-3 w-3" />
+                {t("mcp.recommendedBadge")}
+              </span>
+            ) : null}
             {entry.stars > 0 ? (
               <span className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground tabular-nums">
                 <Star className="h-3.5 w-3.5 text-primary/60" />
@@ -95,7 +107,7 @@ export function McpMarketCard({ entry, installed, onInstall, onOpenDetail, compa
             {badge ? (
               <span className="inline-flex h-4 items-center gap-1 rounded bg-muted/70 px-1.5 text-micro text-muted-foreground">
                 <badge.icon className="h-3 w-3" />
-                {t(badge.labelKey)}
+                {badge.label}
               </span>
             ) : null}
             {entry.runtimes.slice(0, 2).map((rt) => (

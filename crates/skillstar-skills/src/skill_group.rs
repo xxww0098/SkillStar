@@ -97,9 +97,9 @@ pub fn update_group(
             .groups
             .iter()
             .any(|g| g.id != id && &g.name == new_name)
-        {
-            anyhow::bail!("A group with the name '{}' already exists", new_name);
-        }
+    {
+        anyhow::bail!("A group with the name '{}' already exists", new_name);
+    }
 
     let group = store
         .groups

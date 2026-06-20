@@ -20,7 +20,7 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::Value;
-use skillstar_fingerprint::{build_client, DeviceFingerprint, FingerprintAwareClient};
+use skillstar_fingerprint::{DeviceFingerprint, FingerprintAwareClient, build_client};
 
 const ENDPOINT: &str = "https://api.deepseek.com/user/balance";
 
@@ -111,7 +111,10 @@ async fn probe(fp: &DeviceFingerprint, api_key: &str) {
             for entry in &body.balance_infos {
                 println!(
                     "     · {:<5} total={:>10} granted={:>10} topped_up={:>10}",
-                    entry.currency, entry.total_balance, entry.granted_balance, entry.topped_up_balance,
+                    entry.currency,
+                    entry.total_balance,
+                    entry.granted_balance,
+                    entry.topped_up_balance,
                 );
             }
         }

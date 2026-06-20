@@ -31,10 +31,9 @@ pub(crate) fn write_claude_code_config(path: &Path, settings: &ProviderSettings)
     );
 
     // Write back as pretty JSON
-    let output = serde_json::to_string_pretty(&json)
-        .context("Failed to serialize Claude Code config")?;
-    std::fs::write(path, output)
-        .with_context(|| format!("Failed to write {}", path.display()))?;
+    let output =
+        serde_json::to_string_pretty(&json).context("Failed to serialize Claude Code config")?;
+    std::fs::write(path, output).with_context(|| format!("Failed to write {}", path.display()))?;
 
     Ok(())
 }
@@ -70,16 +69,11 @@ pub(crate) fn write_codex_config(path: &Path, settings: &ProviderSettings) -> Re
     );
 
     // Merge into existing table
-    table.insert(
-        "provider".to_string(),
-        toml::Value::Table(provider_section),
-    );
+    table.insert("provider".to_string(), toml::Value::Table(provider_section));
 
     // Write back as TOML
-    let output = toml::to_string_pretty(&table)
-        .context("Failed to serialize Codex config")?;
-    std::fs::write(path, output)
-        .with_context(|| format!("Failed to write {}", path.display()))?;
+    let output = toml::to_string_pretty(&table).context("Failed to serialize Codex config")?;
+    std::fs::write(path, output).with_context(|| format!("Failed to write {}", path.display()))?;
 
     Ok(())
 }
@@ -111,16 +105,18 @@ pub fn detect_conflicts(tool_id: &str, last_sync_timestamp: Option<u64>) -> Vec<
 
     // Check external modification of the tool's config file
     if let Ok(config_path) = resolve_tool_config_path(tool_id)
-        && let Some(mut conflict) = check_external_modification(&config_path, last_sync_timestamp) {
-            conflict.tool_id = Some(tool_id.to_string());
-            conflicts.push(conflict);
-        }
+        && let Some(mut conflict) = check_external_modification(&config_path, last_sync_timestamp)
+    {
+        conflict.tool_id = Some(tool_id.to_string());
+        conflicts.push(conflict);
+    }
 
     // Check legacy ~/.claude.json for claude-code tool
     if tool_id == "claude-code"
-        && let Some(conflict) = check_legacy_claude_config() {
-            conflicts.push(conflict);
-        }
+        && let Some(conflict) = check_legacy_claude_config()
+    {
+        conflicts.push(conflict);
+    }
 
     // Check environment variable overrides
     conflicts.extend(detect_env_conflicts());
@@ -140,35 +136,37 @@ pub fn detect_env_conflicts() -> Vec<ConfigConflict> {
     // Check Anthropic/Claude-related env vars
     for &var_name in CLAUDE_ENV_VARS {
         if let Ok(value) = std::env::var(var_name)
-            && !value.is_empty() {
-                conflicts.push(ConfigConflict {
-                    conflict_type: ConflictType::EnvVarOverride,
-                    description: format!(
-                        "环境变量 {} 已设置，将覆盖 Claude Code 配置文件中的对应设置",
-                        var_name
-                    ),
-                    file_path: None,
-                    details: Some(format!("{}={}***", var_name, &value[..value.len().min(4)])),
-                    tool_id: None,
-                });
-            }
+            && !value.is_empty()
+        {
+            conflicts.push(ConfigConflict {
+                conflict_type: ConflictType::EnvVarOverride,
+                description: format!(
+                    "环境变量 {} 已设置，将覆盖 Claude Code 配置文件中的对应设置",
+                    var_name
+                ),
+                file_path: None,
+                details: Some(format!("{}={}***", var_name, &value[..value.len().min(4)])),
+                tool_id: None,
+            });
+        }
     }
 
     // Check OpenAI/Codex-related env vars
     for &var_name in CODEX_ENV_VARS {
         if let Ok(value) = std::env::var(var_name)
-            && !value.is_empty() {
-                conflicts.push(ConfigConflict {
-                    conflict_type: ConflictType::EnvVarOverride,
-                    description: format!(
-                        "环境变量 {} 已设置，将覆盖 Codex 配置文件中的对应设置",
-                        var_name
-                    ),
-                    file_path: None,
-                    details: Some(format!("{}={}***", var_name, &value[..value.len().min(4)])),
-                    tool_id: None,
-                });
-            }
+            && !value.is_empty()
+        {
+            conflicts.push(ConfigConflict {
+                conflict_type: ConflictType::EnvVarOverride,
+                description: format!(
+                    "环境变量 {} 已设置，将覆盖 Codex 配置文件中的对应设置",
+                    var_name
+                ),
+                file_path: None,
+                details: Some(format!("{}={}***", var_name, &value[..value.len().min(4)])),
+                tool_id: None,
+            });
+        }
     }
 
     conflicts
@@ -185,7 +183,10 @@ pub fn detect_env_conflicts() -> Vec<ConfigConflict> {
 /// - The file does not exist
 /// - The file's mtime cannot be read
 /// - The file was not modified since last sync
-pub(crate) fn check_external_modification(path: &Path, last_sync_ts: Option<u64>) -> Option<ConfigConflict> {
+pub(crate) fn check_external_modification(
+    path: &Path,
+    last_sync_ts: Option<u64>,
+) -> Option<ConfigConflict> {
     let last_sync_ts = last_sync_ts?;
 
     if !path.exists() {
@@ -296,10 +297,6 @@ pub fn generate_codex_config(settings: &ProviderSettings) -> Result<String> {
         "api_key".to_string(),
         toml::Value::String(settings.api_key.clone()),
     );
-    table.insert(
-        "provider".to_string(),
-        toml::Value::Table(provider_section),
-    );
+    table.insert("provider".to_string(), toml::Value::Table(provider_section));
     toml::to_string_pretty(&table).context("Failed to serialize Codex config")
 }
-

@@ -86,6 +86,7 @@ const WINDOW_KEYS: Record<string, string> = {
   "30d": "usage.window30d",
   Total: "usage.windowTotal",
   "Monthly credits": "usage.defaultPeriod",
+  "Token Plan Credits": "usage.windowTokenPlanCredits",
   模型额度: "usage.windowModelQuota",
   "Model quota": "usage.windowModelQuota",
   本月: "usage.defaultPeriod",

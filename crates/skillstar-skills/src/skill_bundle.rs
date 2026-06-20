@@ -13,6 +13,28 @@ use tar::{Archive, Builder};
 const FORMAT_VERSION: u32 = 1;
 const MANIFEST_NAME: &str = "manifest.json";
 
+/// Reject archive entry paths that could escape the extraction root.
+///
+/// Tar entries are spec-mandated to use forward slashes, so a backslash (or a
+/// Windows drive prefix like `C:\`) only appears in a maliciously crafted or
+/// non-standard archive. Rejecting them is pure defense-in-depth — legitimate
+/// `.ags`/`.agd` bundles written by this module always use `/`-delimited
+/// entries — but it prevents a path-traversal entry that targets Windows-style
+/// `..\` traversal or an absolute `C:\` path from being joined onto the temp
+/// extraction dir.
+fn is_unsafe_archive_path(path: &str) -> bool {
+    path.starts_with('/')
+        || path.contains('\\')
+        || path.contains("..")
+        // Windows drive letter prefix, e.g. `C:` / `c:`.
+        || {
+            let bytes = path.as_bytes();
+            bytes.len() >= 2
+                && bytes[1] == b':'
+                && bytes[0].is_ascii_alphabetic()
+        }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BundleManifest {
     pub format_version: u32,
@@ -195,8 +217,9 @@ pub fn import_bundle(file_path: &str, force: bool) -> Result<ImportBundleResult>
             continue;
         }
 
-        // Security: reject absolute paths and path traversal
-        if path.starts_with('/') || path.contains("..") {
+        // Security: reject absolute paths, Windows drive prefixes, backslash
+        // separators, and path traversal before joining onto the temp dir.
+        if is_unsafe_archive_path(&path) {
             continue;
         }
 
@@ -421,8 +444,9 @@ pub fn import_multi_bundle(file_path: &str, force: bool) -> Result<ImportMultiBu
     let mut skill_files: std::collections::HashMap<String, Vec<(String, Vec<u8>)>> =
         std::collections::HashMap::new();
     for (path, content) in entries_data {
-        // Security: reject absolute paths and path traversal
-        if path.starts_with('/') || path.contains("..") {
+        // Security: reject absolute paths, Windows drive prefixes, backslash
+        // separators, and path traversal before grouping by skill name.
+        if is_unsafe_archive_path(&path) {
             continue;
         }
         // First component is the skill name
@@ -556,4 +580,37 @@ fn compute_content_checksum(root: &Path, sorted_files: &[String]) -> Result<Stri
     let hash = hasher.finalize();
     let hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
     Ok(format!("sha256:{}", hex))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_unsafe_archive_path;
+
+    #[test]
+    fn safe_relative_paths_are_accepted() {
+        // Legitimate bundle entries — forward slashes, no traversal.
+        assert!(!is_unsafe_archive_path("skills/pdf-tools/SKILL.md"));
+        assert!(!is_unsafe_archive_path("pdf-tools/scripts/setup.sh"));
+        assert!(!is_unsafe_archive_path("a/b/c/d/e.txt"));
+        assert!(!is_unsafe_archive_path("manifest.json"));
+    }
+
+    #[test]
+    fn unix_absolute_and_traversal_are_rejected() {
+        assert!(is_unsafe_archive_path("/etc/passwd"));
+        assert!(is_unsafe_archive_path("../escape"));
+        assert!(is_unsafe_archive_path("skills/../../escape"));
+        assert!(is_unsafe_archive_path("foo/../bar/../../etc"));
+    }
+
+    #[test]
+    fn windows_style_paths_are_rejected() {
+        // Backslash separators (only present in malicious/non-standard tar).
+        assert!(is_unsafe_archive_path("skills\\pdf-tools\\SKILL.md"));
+        assert!(is_unsafe_archive_path("..\\escape"));
+        // Windows drive-letter absolute paths.
+        assert!(is_unsafe_archive_path("C:\\Users\\evil"));
+        assert!(is_unsafe_archive_path("c:evil"));
+        assert!(is_unsafe_archive_path("D:/abs/path"));
+    }
 }

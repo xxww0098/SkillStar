@@ -46,6 +46,9 @@ src/
 │   ├── projects/                 # project registration + agent config
 │   │   ├── components/           # AgentAccordion, ProjectDetailPanel, …
 │   │   └── hooks/                # useProjectManifest, useProjectSkills, …
+│   ├── ssh/                      # SSH remote skill management (connect / push / list / delete)
+│   │   ├── api/                  # keys.ts, hosts.ts, remote.ts (query + mutations)
+│   │   └── components/           # SshHostsList, SshHostForm, RemoteSkillPanel (+ PushSkillDialog)
 │   └── settings/                 # app settings
 │       └── sections/             # AboutSection, AiProviderSection, …
 ├── pages/                        # thin route-level shells (lazy-loaded)
@@ -143,15 +146,17 @@ The Models mode follows a strict "职责分离" IA: **agent activation has exact
 
 ## Desktop UX Conventions
 - Pages include `MySkills`, `Marketplace`, `PublisherDetail`, `SkillCards`, `Projects`, `Mcp`, `Settings`.
-- Marketplace is the unified discovery surface, but skill discovery and MCP discovery stay visually separated inside the same left-aligned category rail: skill tabs (`all` / `trending` / `hot` / `official`) stay grouped under `Skill`, and the GitHub MCP registry entry stays grouped under `MCP`. MCP marketplace cards should follow the same card template, 320px grid column baseline, grid/list layout toggle, and toolbar layout controls as skill cards. The `Mcp` page is for installed MCP server management, recommended presets, and tool sync only; do not embed a separate MCP marketplace inside it.
+- Marketplace is the unified discovery surface. Skill and MCP stay visually separated inside the same left-aligned category rail: skill tabs (`all` / `trending` / `hot` / `official`) stay grouped under `Skill`, and a single `mcp-official` ("官方") tab stays grouped under `MCP`. The MCP tab renders a **publisher card grid** (`McpPublishers`, mirrors `OfficialPublishers`) with one card per official publisher (AdsPower / BigModel / GitHub); clicking a card drills into `McpPublisherDetail` (mirrors `PublisherDetail` — hero banner + server grid), where servers are installed via the existing `McpServerForm` drawer. There is no longer a top-level "推荐" / "GitHub MCP" split; those two former tabs collapse into the publisher drill-down. MCP marketplace cards should follow the same card template, 320px grid column baseline, grid/list layout toggle, and toolbar layout controls as skill cards. The `Mcp` page is for installed MCP server management, recommended presets, and tool sync only; do not embed a separate MCP marketplace inside it.
 - `Projects` is master-detail and must reconcile removals as well as additions.
 - Only globally enabled agents should appear in project deploy target pickers.
 - Shared project-path conflicts must be single-owner at selection time.
 - Destructive skill actions use explicit confirmation components, not browser `confirm()`.
+- **My Skills — remote (SSH) scope**: toolbar `MySkillsScopeSwitch` toggles local hub vs remote VPS (`skillstar.mySkills.scope` + `skillstar.mySkills.remoteHostKey` in `localStorage`). Remote mode embeds `MySkillsRemotePane` (same master-detail as the former `Ssh` page: `SshHostsList` + `RemoteSkillPanel` with `embedded`, shared push/migrate/delete/console). Legacy `#ssh` hash opens My Skills in remote scope then rewrites to `#skills`. Host-key trust (TOFU) unchanged: `test_ssh_connection` → inline console + trust action; credentials are write-only to the keyring.
 - New skills default to not linked to any agent until user toggles.
 - Background-run preference must flow through shared helpers/events so tray actions and Settings switches render the same patrol state.
 - Tray background actions should use stateful labels (`Start` / `Stop`) instead of a static one-way action label.
 - Agent path fields in Settings should display platform-native separators for editing, while `project_skills_rel` remains backend-canonicalized with forward slashes.
+- **Usage cards are brand-themed.** Each `SubscriptionCard` opens with a per-brand "signature header" — a two-stop gradient band carrying the logo (in a white chip), name, description, and a frosted plan badge — while the white card body keeps a uniform data layout for legibility. The per-brand visuals (header gradient, progress-bar duotone, glow, on-band foreground) come from a single registry, `features/usage/lib/brandThemes.ts`, keyed by `catalog_id`; unknown ids derive a gradient from the catalog `brand_color`. To restyle or add a brand, edit `brandThemes.ts` — never hard-code colors in the card. Mono brand logos (`@lobehub` `Mono` variants render in `currentColor`) require the logo chip to set a dark `currentColor`, or they vanish on the white chip.
 
 ## Maintenance Rules
 - Frontend structure/convention changes must update this file first.

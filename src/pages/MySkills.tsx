@@ -1,6 +1,6 @@
 import { tauriInvoke } from "../lib/ipc";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, Globe, Layers } from "lucide-react";
+import { AlertTriangle, Globe, Layers, Server, Upload } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
 import { useTranslation } from "react-i18next";
@@ -14,16 +14,26 @@ import { ExportShareCodeModal } from "../features/my-skills/components/ExportSha
 import { ImportBundleModal } from "../features/my-skills/components/ImportBundleModal";
 import { ImportModal } from "../features/my-skills/components/ImportModal";
 import { PublishSkillModal } from "../features/my-skills/components/PublishSkillModal";
+import { MySkillsRemoteHostPicker } from "../features/my-skills/components/MySkillsRemoteHostPicker";
+import { useMySkillsRemoteHosts } from "../features/my-skills/hooks/useMySkillsRemoteHosts";
+import { MySkillsScopeSwitch, type MySkillsScope } from "../features/my-skills/components/MySkillsScopeSwitch";
 import { SkillGrid } from "../features/my-skills/components/SkillGrid";
 import { SkillSelectionBar } from "../features/my-skills/components/SkillSelectionBar";
 import { UninstallConfirmDialog } from "../features/my-skills/components/UninstallConfirmDialog";
 import { useSkillCards } from "../features/my-skills/hooks/useSkillCards";
 import { useSkills } from "../features/my-skills/hooks/useSkills";
 import { useAgentProfiles } from "../hooks/useAgentProfiles";
+import { useSkillsSelectionShortcuts } from "../hooks/useSkillsSelectionShortcuts";
 import { useViewMode } from "../hooks/useViewMode";
 import { toast } from "../lib/toast";
 import { navigateToSettingsSection } from "../lib/utils";
 import type { RepoNewSkill, Skill, SortOption } from "../types";
+import { EmptyState } from "../components/ui/EmptyState";
+import { SshHostForm } from "../features/ssh";
+import { RemoteSkillsContent, type RemoteDiscoveryUiState } from "../features/ssh/components/RemoteSkillPanel";
+import { RemoteConnectionLogPopover } from "../features/ssh/components/RemoteConnectionLogPopover";
+import { useDiscoverRemoteSkillsQuery } from "../features/ssh/api/remote";
+import { remoteAgentProfile } from "../features/ssh/lib/remoteAgentProfile";
 
 const DetailPanel = lazy(() =>
   import("../components/layout/DetailPanel").then((mod) => ({
@@ -70,11 +80,36 @@ export function MySkills({
   } = useSkills();
   const { profiles, deploySkillsToProject } = useAgentProfiles();
   const { createGroup, groups } = useSkillCards();
+  const remoteHosts = useMySkillsRemoteHosts();
+  const SCOPE_STORAGE_KEY = "skillstar.mySkills.scope";
+  const [skillsScope, setSkillsScope] = useState<MySkillsScope>(() => {
+    if (typeof localStorage === "undefined") return "local";
+    return localStorage.getItem(SCOPE_STORAGE_KEY) === "remote" ? "remote" : "local";
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const hash = window.location.hash.slice(1);
+    if (hash === "ssh") {
+      setSkillsScope("remote");
+      localStorage.setItem(SCOPE_STORAGE_KEY, "remote");
+      window.location.hash = "skills";
+    }
+  }, []);
+
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("updated");
   const [showUpdateOnly, setShowUpdateOnly] = useState(false);
   const [viewMode, setViewMode] = useViewMode("grid");
   const [agentFilter, setAgentFilter] = useState<string | null>(null);
+  const [remotePushOpen, setRemotePushOpen] = useState(false);
+  const [remoteConsoleOpen, setRemoteConsoleOpen] = useState(false);
+  const [remoteUi, setRemoteUi] = useState<RemoteDiscoveryUiState | null>(null);
+
+  useEffect(() => {
+    if (skillsScope === "remote" && remoteUi?.connectAttention) {
+      setRemoteConsoleOpen(true);
+    }
+  }, [skillsScope, remoteUi?.connectAttention]);
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [selectedSkillNames, setSelectedSkillNames] = useState<Set<string>>(new Set());
   const [quickPackSkills, setQuickPackSkills] = useState<string[]>([]);
@@ -157,6 +192,22 @@ export function MySkills({
       setImportModalOpen(true);
     }
   }, [initialShareCode]);
+
+  const remoteConnId = useMemo(() => {
+    const h = remoteHosts.selectedHost;
+    if (!h) return null;
+    return h.source === "managed" ? h.id : `system:${h.alias}`;
+  }, [remoteHosts.selectedHost]);
+
+  const remoteDiscovery = useDiscoverRemoteSkillsQuery(
+    remoteConnId ?? "",
+    skillsScope === "remote" && remoteConnId != null,
+  );
+
+  const remoteAgentProfiles = useMemo(() => {
+    const agents = remoteDiscovery.data?.agents ?? [];
+    return agents.map((a) => remoteAgentProfile(a.agent, profiles));
+  }, [remoteDiscovery.data?.agents, profiles]);
 
   const filteredSkills = useMemo(() => {
     let visibleSkills = [...skills];
@@ -256,8 +307,13 @@ export function MySkills({
 
   const clearSelection = () => setSelectedSkillNames(new Set());
 
+  const handleSelectAll = useCallback(() => {
+    setSelectedSkillNames(new Set(filteredSkills.map((skill) => skill.name)));
+  }, [filteredSkills]);
+
   const hasSelection = selectedSkillNames.size > 0;
   const [batchLoading, setBatchLoading] = useState(false);
+  const [linkMenuOpen, setLinkMenuOpen] = useState(false);
 
   const removeSkillFromUi = useCallback((name: string) => {
     setSelectedSkill((current) => (current?.name === name ? null : current));
@@ -489,6 +545,33 @@ export function MySkills({
     }
   }, [selectedSkillNames, batchRemoveSkillsFromAllAgents, clearSelection, t]);
 
+  // Contextual single-letter shortcuts active only while skills are selected.
+  useSkillsSelectionShortcuts({
+    hasSelection,
+    disabled: batchLoading || uninstalling,
+    linkMenuOpen,
+    onClear: clearSelection,
+    onSelectAll: handleSelectAll,
+    onToggleLinkMenu: () => setLinkMenuOpen((v) => !v),
+    onCloseLinkMenu: () => setLinkMenuOpen(false),
+    onUnlinkAll: handleBatchUnlinkAll,
+    onDeploy: () => setDeployModalOpen(true),
+    onUninstall: handleBatchUninstall,
+  });
+
+  // One-time hint when the user first enters selection mode.
+  useEffect(() => {
+    if (!hasSelection) return;
+    if (typeof localStorage === "undefined") return;
+    if (localStorage.getItem("skillstar.selectionShortcutsHinted")) return;
+    localStorage.setItem("skillstar.selectionShortcutsHinted", "1");
+    toast.info(
+      t("mySkills.selectionShortcutsHint", {
+        defaultValue: "Selection mode: A select all · L link · U unlink · Enter deploy · Esc clear",
+      }),
+    );
+  }, [hasSelection, t]);
+
   const getEmptyMessage = () => {
     if (skills.length === 0) return t("emptyState.mySkillsDesc");
     if (showUpdateOnly) return t("mySkills.noUpdates");
@@ -516,7 +599,26 @@ export function MySkills({
     <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <Toolbar
-          titleNode={<h1>{t("sidebar.skills")}</h1>}
+          titleNode={
+            <div className="flex flex-wrap items-center gap-3">
+              <h1>{t("sidebar.skills")}</h1>
+              <MySkillsScopeSwitch
+                scope={skillsScope}
+                onScopeChange={(next) => {
+                  setSkillsScope(next);
+                  localStorage.setItem(SCOPE_STORAGE_KEY, next);
+                  if (next === "remote") {
+                    setSelectedSkill(null);
+                    setSelectedSkillNames(new Set());
+                    setAgentFilter(null);
+                  } else {
+                    setAgentFilter(null);
+                    setRemoteUi(null);
+                  }
+                }}
+              />
+            </div>
+          }
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           sortBy={sortBy}
@@ -524,38 +626,91 @@ export function MySkills({
           viewMode={viewMode}
           onViewModeChange={setViewMode}
           countText={
-            <div className="flex items-center gap-1.5 font-medium">
-              <Layers className="w-3 h-3 hover:text-muted-foreground/90 transition-colors" />
-              <span>{filteredSkills.length}</span>
-            </div>
+            skillsScope === "local" ? (
+              <div className="flex items-center gap-1.5 font-medium">
+                <Layers className="w-3 h-3 hover:text-muted-foreground/90 transition-colors" />
+                <span>{filteredSkills.length}</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 font-medium">
+                <Layers className="w-3 h-3 text-muted-foreground" />
+                <span>{remoteUi?.visibleCount ?? 0}</span>
+              </div>
+            )
           }
-          showUpdateOnly={showUpdateOnly}
-          onToggleUpdateOnly={() => setShowUpdateOnly((prev) => !prev)}
-          pendingUpdateCount={pendingUpdateCount}
           hideStarsSort={true}
-          agentProfiles={profiles}
+          onRepoFilterChange={skillsScope === "local" ? setRepoFilter : undefined}
+          hideSortControls={skillsScope === "remote"}
+          hideViewToggle={false}
+          filtersLead={
+            skillsScope === "remote" ? (
+              <MySkillsRemoteHostPicker
+                hosts={remoteHosts.hosts}
+                isLoading={remoteHosts.isLoadingHosts}
+                selectedKey={remoteHosts.selectedKey}
+                onSelect={remoteHosts.selectHost}
+                onAdd={remoteHosts.openAddHost}
+                onEdit={remoteHosts.openEditHost}
+                onDelete={remoteHosts.deleteHost}
+                onImport={remoteHosts.handleImportSystemHost}
+              />
+            ) : undefined
+          }
+          actionsLead={
+            skillsScope === "remote" ? (
+              <>
+                <RemoteConnectionLogPopover
+                  open={remoteConsoleOpen}
+                  onOpenChange={setRemoteConsoleOpen}
+                  lines={remoteUi?.connectLines ?? []}
+                  pendingHostKey={remoteUi?.pendingHostKey ?? null}
+                  active={Boolean(remoteUi?.connectActive)}
+                  attention={Boolean(remoteUi?.connectAttention)}
+                  onAcceptHostKey={async (fp) => {
+                    await remoteUi?.acceptHostKey?.(fp);
+                  }}
+                  onRejectHostKey={() => remoteUi?.rejectHostKey?.()}
+                />
+                <button
+                  type="button"
+                  onClick={() => setRemotePushOpen(true)}
+                  className="flex h-8 items-center gap-1.5 rounded-lg border border-border/80 bg-background/50 px-3 text-xs font-medium text-foreground/80 hover:bg-accent/10 shrink-0 focus-ring"
+                >
+                  <Upload className="size-3.5" />
+                  {t("ssh.push")}
+                </button>
+              </>
+            ) : undefined
+          }
+          agentProfiles={skillsScope === "remote" ? remoteAgentProfiles : profiles}
           agentFilter={agentFilter}
           onAgentFilterChange={setAgentFilter}
-          onImport={() => setImportModalOpen(true)}
-          onRefresh={() => refresh(false, true)}
-          isRefreshing={loading}
-          onAiPick={() => setAiPickModalOpen(true)}
-          sourceFilter={sourceFilter}
-          onSourceFilterChange={(f) => {
-            setSourceFilter(f);
-            if (f === "local") setRepoFilter(null);
-          }}
-          localCount={localCount}
-          onUpdateAll={handleUpdateAll}
-          isUpdatingAll={isUpdatingAll}
-          repoSources={repoSources}
-          repoFilter={repoFilter}
-          onRepoFilterChange={setRepoFilter}
+          onImport={skillsScope === "local" ? () => setImportModalOpen(true) : undefined}
+          onRefresh={skillsScope === "remote" ? () => remoteUi?.refetch() : () => refresh(false, true)}
+          isRefreshing={skillsScope === "remote" ? Boolean(remoteUi?.isFetching) : loading}
+          onAiPick={skillsScope === "local" ? () => setAiPickModalOpen(true) : undefined}
+          sourceFilter={skillsScope === "local" ? sourceFilter : undefined}
+          onSourceFilterChange={
+            skillsScope === "local"
+              ? (f) => {
+                  setSourceFilter(f);
+                  if (f === "local") setRepoFilter(null);
+                }
+              : undefined
+          }
+          localCount={skillsScope === "local" ? localCount : undefined}
+          onUpdateAll={skillsScope === "local" ? handleUpdateAll : undefined}
+          isUpdatingAll={skillsScope === "local" ? isUpdatingAll : undefined}
+          repoSources={skillsScope === "local" ? repoSources : undefined}
+          repoFilter={skillsScope === "local" ? repoFilter : undefined}
+          showUpdateOnly={skillsScope === "local" ? showUpdateOnly : undefined}
+          onToggleUpdateOnly={skillsScope === "local" ? () => setShowUpdateOnly((prev) => !prev) : undefined}
+          pendingUpdateCount={skillsScope === "local" ? pendingUpdateCount : undefined}
         />
 
         {/* Selection bar */}
         <AnimatePresence>
-          {hasSelection && (
+          {skillsScope === "local" && hasSelection && (
             <SkillSelectionBar
               selectedCount={selectedSkillNames.size}
               totalCount={filteredSkills.length}
@@ -566,8 +721,10 @@ export function MySkills({
               onShare={() => setShareCardSkills(Array.from(selectedSkillNames))}
               onUpdate={handleBatchUpdate}
               onUninstall={handleBatchUninstall}
-              onSelectAll={() => setSelectedSkillNames(new Set(filteredSkills.map((skill) => skill.name)))}
+              onSelectAll={handleSelectAll}
               onClear={clearSelection}
+              linkMenuOpen={linkMenuOpen}
+              onLinkMenuOpenChange={setLinkMenuOpen}
               agentProfiles={compatibleSelectionProfiles}
               onBatchLink={handleBatchLink}
               onBatchUnlinkAll={handleBatchUnlinkAll}
@@ -596,7 +753,7 @@ export function MySkills({
 
         {/* Broken skills banner */}
         <AnimatePresence>
-          {brokenCount > 0 && (
+          {skillsScope === "local" && brokenCount > 0 && (
             <motion.div
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: "auto", opacity: 1 }}
@@ -623,49 +780,90 @@ export function MySkills({
           )}
         </AnimatePresence>
 
-        <motion.main
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.2 }}
-          className="ss-page-scroll"
-        >
-          {loading ? (
-            <div className="flex items-center justify-center py-20">
+        {skillsScope === "remote" ? (
+          remoteHosts.isLoadingHosts ? (
+            <div className="flex flex-1 items-center justify-center py-20">
               <LoadingLogo size="lg" label={t("mySkills.loading")} />
             </div>
-          ) : (
-            <SkillGrid
-              skills={filteredSkills}
+          ) : !remoteHosts.hosts?.length ? (
+            <div className="flex flex-1 flex-col items-center justify-center px-6 py-16">
+              <EmptyState
+                icon={<Server className="size-6 text-muted-foreground" />}
+                title={t("ssh.noHosts")}
+                description={t("ssh.noHostsHint")}
+                action={
+                  <Button type="button" onClick={remoteHosts.openAddHost}>
+                    {t("ssh.addHost")}
+                  </Button>
+                }
+              />
+              <SshHostForm
+                open={remoteHosts.formOpen}
+                onOpenChange={remoteHosts.setFormOpen}
+                initial={remoteHosts.editing}
+                onSubmit={remoteHosts.handleHostFormSubmit}
+              />
+            </div>
+          ) : remoteHosts.selectedHost ? (
+            <RemoteSkillsContent
+              host={remoteHosts.selectedHost}
+              searchQuery={searchQuery}
               viewMode={viewMode}
-              columnStrategy="auto-fill"
-              minColumnWidth={320}
-              onSkillClick={(skill) => setSelectedSkill((prev) => (prev?.name === skill.name ? null : skill))}
-              onInstall={handleInstall}
-              onUpdate={handleUpdate}
-              emptyMessage={getEmptyMessage()}
-              emptyAction={getEmptyAction()}
-              selectable
-              selectedSkills={selectedSkillNames}
-              onSelectSkill={handleSelectSkill}
-              profiles={enabledProfiles}
-              onToggleAgent={toggleSkillForAgent}
-              pendingUpdateNames={pendingUpdateNames}
-              pendingAgentToggleKeys={pendingAgentToggleKeys}
-              ghostSkills={
-                !showUpdateOnly && !searchQuery && !agentFilter && sourceFilter === "all" && !repoFilter
-                  ? ghostSkills
-                  : undefined
-              }
-              onInstallGhost={installGhostSkill}
-              onDismissGhost={dismissGhostSkill}
-              onDismissGhostRepo={dismissGhostRepo}
-              onGhostClick={handleGhostClick}
+              agentFilter={agentFilter}
+              pushOpen={remotePushOpen}
+              onPushOpenChange={setRemotePushOpen}
+              onDiscoveryUiChange={setRemoteUi}
             />
-          )}
-        </motion.main>
+          ) : (
+            <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+              {t("ssh.selectHost")}
+            </div>
+          )
+        ) : (
+          <motion.main
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.2 }}
+            className="ss-page-scroll"
+          >
+            {loading ? (
+              <div className="flex items-center justify-center py-20">
+                <LoadingLogo size="lg" label={t("mySkills.loading")} />
+              </div>
+            ) : (
+              <SkillGrid
+                skills={filteredSkills}
+                viewMode={viewMode}
+                columnStrategy="auto-fill"
+                minColumnWidth={320}
+                onSkillClick={(skill) => setSelectedSkill((prev) => (prev?.name === skill.name ? null : skill))}
+                onInstall={handleInstall}
+                onUpdate={handleUpdate}
+                emptyMessage={getEmptyMessage()}
+                emptyAction={getEmptyAction()}
+                selectable
+                selectedSkills={selectedSkillNames}
+                onSelectSkill={handleSelectSkill}
+                profiles={enabledProfiles}
+                onToggleAgent={toggleSkillForAgent}
+                pendingUpdateNames={pendingUpdateNames}
+                pendingAgentToggleKeys={pendingAgentToggleKeys}
+                ghostSkills={
+                  !showUpdateOnly && !searchQuery && !agentFilter && sourceFilter === "all" && !repoFilter
+                    ? ghostSkills
+                    : undefined
+                }
+                onInstallGhost={installGhostSkill}
+                onDismissGhost={dismissGhostSkill}
+                onDismissGhostRepo={dismissGhostRepo}
+                onGhostClick={handleGhostClick}
+              />
+            )}
+          </motion.main>
+        )}
       </div>
 
-      {selectedSkill && (
+      {skillsScope === "local" && selectedSkill && (
         <Suspense
           fallback={
             <div className="absolute right-0 top-0 bottom-0 z-50 flex h-full w-full max-w-md items-center justify-center overflow-y-auto border-l border-border/45 bg-background/30 shadow-[0_24px_80px_-52px_var(--color-shadow)] backdrop-blur-xl">
@@ -757,6 +955,15 @@ export function MySkills({
           refresh(false, true);
         }}
       />
+
+      {skillsScope === "remote" && (remoteHosts.hosts?.length ?? 0) > 0 ? (
+        <SshHostForm
+          open={remoteHosts.formOpen}
+          onOpenChange={remoteHosts.setFormOpen}
+          initial={remoteHosts.editing}
+          onSubmit={remoteHosts.handleHostFormSubmit}
+        />
+      ) : null}
 
       <AiPickSkillsModal
         open={aiPickModalOpen}
