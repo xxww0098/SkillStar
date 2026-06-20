@@ -75,3 +75,19 @@ export function useHostMutations() {
 
   return { addMutation, updateMutation, deleteMutation };
 }
+
+/** Import a host from the system `~/.ssh/config` into the managed store. */
+export function useImportSystemHost() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (alias: string) => tauriInvoke("import_system_host", { alias }),
+    onSuccess: (created) => {
+      if (created?.id) {
+        queryClient.setQueryData<SshHost[]>(sshKeys.hosts(), (prev) => (prev ? [...prev, created] : [created]));
+      }
+      toast.success(i18n.t("ssh.toast.hostAdded"));
+      queryClient.invalidateQueries({ queryKey: sshKeys.all });
+    },
+    onError: (e: unknown) => toast.error(String(e)),
+  });
+}

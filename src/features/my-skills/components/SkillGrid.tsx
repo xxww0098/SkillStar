@@ -52,8 +52,10 @@ interface SkillGridProps {
   columnStrategy?: "breakpoint" | "auto-fit" | "auto-fill";
   minColumnWidth?: number;
   onSkillClick: (skill: Skill) => void;
-  onInstall: (url: string, name: string) => void;
-  onUpdate: (name: string) => void;
+  /** Optional: omitted in read-only scopes (e.g. remote) where SkillCard suppresses install. */
+  onInstall?: (url: string, name: string) => void;
+  /** Optional: omitted in read-only scopes (e.g. remote) where SkillCard suppresses update. */
+  onUpdate?: (name: string) => void;
   onVisibleCountChange?: (visible: number, total: number) => void;
   scrollParentRef?: RefObject<HTMLElement | null>;
   emptyMessage?: string;

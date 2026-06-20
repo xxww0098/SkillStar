@@ -27,8 +27,6 @@ interface ToolbarProps {
   onAgentFilterChange?: (agentId: string | null) => void;
   /** Optional callback for Import from GitHub button */
   onImport?: () => void;
-  /** Optional callback for Import from File (.ags) button */
-  onImportBundle?: () => void;
   /** Optional callback to refresh the data */
   onRefresh?: () => void;
   /** Whether the data is currently refreshing */

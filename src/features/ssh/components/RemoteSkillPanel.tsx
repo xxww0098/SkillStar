@@ -1,16 +1,24 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { Plus, Upload } from "lucide-react";
+import { Layers, Plus, Server, Upload } from "lucide-react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { Toolbar } from "../../../components/layout/Toolbar";
 import { Button } from "../../../components/ui/button";
-import { ModalHeader, ModalShell } from "../../../components/ui/ModalShell";
+import { EmptyState } from "../../../components/ui/EmptyState";
 import { LoadingLogo } from "../../../components/ui/LoadingLogo";
-import { SkillGrid } from "../../my-skills/components/SkillGrid";
+import { ModalHeader, ModalShell } from "../../../components/ui/ModalShell";
 import { useAgentProfiles } from "../../../hooks/useAgentProfiles";
+import { useViewMode } from "../../../hooks/useViewMode";
 import { tauriInvoke } from "../../../lib/ipc";
-import type { Skill, ViewMode } from "../../../types";
 import type { RemoteSkill, SshHostListItem } from "../../../lib/ipc/commands/ssh";
+import type { Skill } from "../../../types";
+// Deep imports (not the my-skills barrel) to avoid a my-skills <-> ssh barrel cycle.
+import { ScopeDetailDrawer } from "../../my-skills/components/ScopeDetailDrawer";
+import { SkillGrid } from "../../my-skills/components/SkillGrid";
+import { UninstallConfirmDialog } from "../../my-skills/components/UninstallConfirmDialog";
+import { remoteHostItemKey } from "../../my-skills/lib/remoteHostKey";
 import {
   useAcceptHostKey,
   useDeleteRemoteSkill,
@@ -19,70 +27,60 @@ import {
   usePushSkill,
 } from "../api/remote";
 import { useConnectStream } from "../hooks/useConnectStream";
-import { formatRemoteSize, remoteSkillToSkill } from "../lib/remoteSkillAsSkill";
 import { remoteAgentProfile } from "../lib/remoteAgentProfile";
-
-import { RemoteSkillDrawer } from "./RemoteSkillDrawer";
+import { formatRemoteSize, remoteSkillToSkill } from "../lib/remoteSkillAsSkill";
 import { RemoteBulkMigrateDialog } from "./RemoteBulkMigrateDialog";
-import { UninstallConfirmDialog } from "../../my-skills/components/UninstallConfirmDialog";
-
-export interface RemoteDiscoveryUiState {
-  visibleCount: number;
-  loading: boolean;
-  isFetching: boolean;
-  refetch: () => void;
-  connectAttention?: boolean;
-  connectLines?: import("../hooks/useConnectStream").SshProgressLine[];
-  pendingHostKey?: import("../hooks/useConnectStream").PendingHostKey | null;
-  connectActive?: boolean;
-  acceptHostKey?: (fingerprint: string) => Promise<void>;
-  rejectHostKey?: () => void;
-}
+import { RemoteConnectionLogPopover } from "./RemoteConnectionLogPopover";
 
 interface ContentProps {
-  host: SshHostListItem;
-  searchQuery?: string;
-  viewMode?: ViewMode;
-  agentFilter?: string | null;
-  pushOpen?: boolean;
-  onPushOpenChange?: (open: boolean) => void;
-  onDiscoveryUiChange?: (state: RemoteDiscoveryUiState) => void;
+  /** Selected host, or null while hosts load / none exist / none selected. */
+  host: SshHostListItem | null;
+  hostsLoading: boolean;
+  hasHosts: boolean;
+  onAddHost: () => void;
+  /** Scope switch element built by the page; rendered inside the toolbar title. */
+  scopeSwitch: ReactNode;
+  /** Remote host picker element built by the page; rendered in the filters row. */
+  hostPicker: ReactNode;
 }
 
-function hostConn(host: SshHostListItem): { id: string; defaultRemoteDir: string } {
-  if (host.source === "managed") {
-    return { id: host.id, defaultRemoteDir: host.default_remote_dir };
-  }
-  return { id: `system:${host.alias}`, defaultRemoteDir: "" };
-}
-
-/** Remote skill grid aligned with local My Skills (`ss-page-scroll` + `SkillGrid`). */
+/**
+ * Remote (SSH host) skill workspace. Self-contained twin of
+ * {@link import("../../my-skills").LocalSkillsContent}: owns its own toolbar
+ * (host picker + connection console + push, all wired to its internal discovery
+ * state — no upward `onDiscoveryUiChange` relay), the host gate, the detail
+ * drawer, and the push/migrate/delete dialogs.
+ */
 export function RemoteSkillsContent({
   host,
-  searchQuery = "",
-  viewMode = "grid",
-  agentFilter = null,
-  pushOpen: pushOpenProp,
-  onPushOpenChange,
-  onDiscoveryUiChange,
+  hostsLoading,
+  hasHosts,
+  onAddHost,
+  scopeSwitch,
+  hostPicker,
 }: ContentProps) {
   const { t } = useTranslation();
   const { profiles } = useAgentProfiles();
-  const conn = hostConn(host);
-  const [pushOpenInternal, setPushOpenInternal] = useState(false);
-  const pushOpen = pushOpenProp ?? pushOpenInternal;
-  const setPushOpen = onPushOpenChange ?? setPushOpenInternal;
+
+  const connId = host ? remoteHostItemKey(host) : "";
+  const defaultRemoteDir = host && host.source === "managed" ? host.default_remote_dir : "";
+
+  const [searchQuery, setSearchQuery] = useState("");
+  const [viewMode, setViewMode] = useViewMode("grid");
+  const [agentFilter, setAgentFilter] = useState<string | null>(null);
+  const [pushOpen, setPushOpen] = useState(false);
+  const [consoleOpen, setConsoleOpen] = useState(false);
   const [drawerSkill, setDrawerSkill] = useState<RemoteSkill | null>(null);
   const [bulkMigrateOpen, setBulkMigrateOpen] = useState(false);
   const [pendingRemoteDelete, setPendingRemoteDelete] = useState<RemoteSkill | null>(null);
   const [remoteDeleting, setRemoteDeleting] = useState(false);
 
-  const discovery = useDiscoverRemoteSkillsQuery(conn.id, true);
+  const discovery = useDiscoverRemoteSkillsQuery(connId, host != null);
   const push = usePushSkill();
   const del = useDeleteRemoteSkill();
   const migrate = useMigrateRemoteSkill();
   const acceptKey = useAcceptHostKey();
-  const { lines, pendingHostKey } = useConnectStream(conn.id);
+  const { lines, pendingHostKey } = useConnectStream(connId || null);
 
   const agents = discovery.data?.agents ?? [];
   const allSkills = discovery.data?.skills ?? [];
@@ -91,8 +89,8 @@ export function RemoteSkillsContent({
       const hit = agents.find((a) => a.agent === agentFilter);
       if (hit?.path) return hit.path;
     }
-    return agents[0]?.path || conn.defaultRemoteDir || "~/.claude/skills";
-  }, [agentFilter, agents, conn.defaultRemoteDir]);
+    return agents[0]?.path || defaultRemoteDir || "~/.claude/skills";
+  }, [agentFilter, agents, defaultRemoteDir]);
 
   const visibleRemote = useMemo(() => {
     let list = agentFilter ? allSkills.filter((s) => s.agent === agentFilter) : allSkills;
@@ -117,66 +115,40 @@ export function RemoteSkillsContent({
     [visibleRemote, profiles],
   );
 
-  const discoveryRefetchRef = useRef(discovery.refetch);
-  discoveryRefetchRef.current = discovery.refetch;
-
-  const stableDiscoveryRefetch = useCallback(() => {
-    void discoveryRefetchRef.current();
-  }, []);
+  const remoteAgentProfiles = useMemo(
+    () => agents.map((a) => remoteAgentProfile(a.agent, profiles)),
+    [agents, profiles],
+  );
 
   const active = discovery.isFetching || push.isPending || del.isPending || migrate.isPending;
 
   const handleAcceptHostKey = useCallback(
     async (fingerprint: string) => {
-      await acceptKey.mutateAsync({
-        id: conn.id,
-        host: host.host,
-        fingerprint,
-      });
-      void discoveryRefetchRef.current();
+      if (!host) return;
+      await acceptKey.mutateAsync({ id: connId, host: host.host, fingerprint });
+      void discovery.refetch();
     },
-    [acceptKey, conn.id, host.host],
+    [acceptKey, connId, host, discovery.refetch],
   );
 
   const handleRejectHostKey = useCallback(() => {
-    void discoveryRefetchRef.current();
-  }, []);
+    void discovery.refetch();
+  }, [discovery.refetch]);
 
+  // Surface the connection console automatically when a host-key prompt arrives.
   useEffect(() => {
-    onDiscoveryUiChange?.({
-      visibleCount: visibleRemote.length,
-      loading: discovery.isLoading,
-      isFetching: discovery.isFetching,
-      refetch: stableDiscoveryRefetch,
-      connectAttention: pendingHostKey != null,
-      connectLines: lines,
-      pendingHostKey,
-      connectActive: active,
-      acceptHostKey: handleAcceptHostKey,
-      rejectHostKey: handleRejectHostKey,
-    });
-  }, [
-    onDiscoveryUiChange,
-    visibleRemote.length,
-    discovery.isLoading,
-    discovery.isFetching,
-    stableDiscoveryRefetch,
-    pendingHostKey,
-    lines,
-    active,
-    handleAcceptHostKey,
-    handleRejectHostKey,
-  ]);
+    if (pendingHostKey != null) setConsoleOpen(true);
+  }, [pendingHostKey]);
 
   const standaloneSkills = useMemo(
     () => allSkills.filter((s) => (s.layout ?? "standalone") === "standalone"),
     [allSkills],
   );
 
-  const bulkDismissKey = `skillstar.ssh.bulkMigrateDismissed.${conn.id}`;
+  const bulkDismissKey = `skillstar.ssh.bulkMigrateDismissed.${connId}`;
 
   useEffect(() => {
-    if (discovery.isLoading || discovery.isFetching) return;
+    if (!host || discovery.isLoading || discovery.isFetching) return;
     if (standaloneSkills.length === 0) return;
     try {
       if (localStorage.getItem(bulkDismissKey) === "1") return;
@@ -184,18 +156,18 @@ export function RemoteSkillsContent({
       /* storage unavailable */
     }
     setBulkMigrateOpen(true);
-  }, [discovery.isLoading, discovery.isFetching, standaloneSkills.length, bulkDismissKey]);
+  }, [host, discovery.isLoading, discovery.isFetching, standaloneSkills.length, bulkDismissKey]);
 
   const handleMigrateOne = useCallback(
     async (skill: RemoteSkill, agentSkillsDir: string) => {
       await migrate.mutateAsync({
-        hostId: conn.id,
+        hostId: connId,
         skillName: skill.name,
         agentSkillsDir,
         standalonePath: skill.path,
       });
     },
-    [conn.id, migrate],
+    [connId, migrate],
   );
 
   const requestDelete = useCallback((skill: RemoteSkill) => {
@@ -207,14 +179,14 @@ export function RemoteSkillsContent({
     if (!skill) return;
     setRemoteDeleting(true);
     try {
-      await del.mutateAsync({ hostId: conn.id, remotePath: skill.path });
+      await del.mutateAsync({ hostId: connId, remotePath: skill.path });
       setDrawerSkill((prev) => (prev?.path === skill.path ? null : prev));
       setPendingRemoteDelete(null);
       discovery.refetch();
     } finally {
       setRemoteDeleting(false);
     }
-  }, [conn.id, del, discovery, pendingRemoteDelete]);
+  }, [connId, del, discovery, pendingRemoteDelete]);
 
   const getRemoteCardProps = useCallback(
     (skill: Skill) => {
@@ -230,41 +202,116 @@ export function RemoteSkillsContent({
 
   return (
     <>
-      <motion.main
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.2 }}
-        className="ss-page-scroll"
-      >
-        {discovery.isLoading ? (
-          <div className="flex items-center justify-center py-20">
-            <LoadingLogo size="lg" label={t("mySkills.loading")} />
-          </div>
-        ) : (
-          <SkillGrid
-            skills={gridSkills}
-            viewMode={viewMode}
-            columnStrategy="auto-fill"
-            minColumnWidth={320}
-            onSkillClick={(skill) => {
-              const remote = remoteByPath.get(skill.git_url);
-              if (remote) setDrawerSkill(remote);
-            }}
-            onInstall={() => {}}
-            onUpdate={() => {}}
-            emptyMessage={t("ssh.noRemoteSkills")}
-            emptyAction={
-              <Button size="sm" variant="outline" onClick={() => setPushOpen(true)}>
-                <Plus className="size-4" />
-                {t("ssh.push")}
-              </Button>
-            }
-            getRemoteCardProps={getRemoteCardProps}
-          />
-        )}
-      </motion.main>
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <Toolbar
+          titleNode={
+            <div className="flex flex-wrap items-center gap-3">
+              <h1>{t("sidebar.skills")}</h1>
+              {scopeSwitch}
+            </div>
+          }
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          sortBy="updated"
+          onSortChange={() => {}}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+          filtersLead={hostPicker}
+          countText={
+            <div className="flex items-center gap-1.5 font-medium">
+              <Layers className="w-3 h-3 text-muted-foreground" />
+              <span>{visibleRemote.length}</span>
+            </div>
+          }
+          hideStarsSort
+          hideSortControls
+          agentProfiles={remoteAgentProfiles}
+          agentFilter={agentFilter}
+          onAgentFilterChange={setAgentFilter}
+          onRefresh={() => discovery.refetch()}
+          isRefreshing={discovery.isFetching}
+          actionsLead={
+            host ? (
+              <>
+                <RemoteConnectionLogPopover
+                  open={consoleOpen}
+                  onOpenChange={setConsoleOpen}
+                  lines={lines}
+                  pendingHostKey={pendingHostKey}
+                  active={active}
+                  attention={pendingHostKey != null}
+                  onAcceptHostKey={handleAcceptHostKey}
+                  onRejectHostKey={handleRejectHostKey}
+                />
+                <button
+                  type="button"
+                  onClick={() => setPushOpen(true)}
+                  className="flex h-8 items-center gap-1.5 rounded-lg border border-border/80 bg-background/50 px-3 text-xs font-medium text-foreground/80 hover:bg-accent/10 shrink-0 focus-ring"
+                >
+                  <Upload className="size-3.5" />
+                  {t("ssh.push")}
+                </button>
+              </>
+            ) : undefined
+          }
+        />
 
-      <RemoteSkillDrawer
+        <motion.main
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.2 }}
+          className="ss-page-scroll"
+        >
+          {hostsLoading ? (
+            <div className="flex items-center justify-center py-20">
+              <LoadingLogo size="lg" label={t("mySkills.loading")} />
+            </div>
+          ) : !hasHosts ? (
+            <div className="flex flex-1 flex-col items-center justify-center px-6 py-16">
+              <EmptyState
+                icon={<Server className="size-6 text-muted-foreground" />}
+                title={t("ssh.noHosts")}
+                description={t("ssh.noHostsHint")}
+                action={
+                  <Button type="button" onClick={onAddHost}>
+                    {t("ssh.addHost")}
+                  </Button>
+                }
+              />
+            </div>
+          ) : !host ? (
+            <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+              {t("ssh.selectHost")}
+            </div>
+          ) : discovery.isLoading ? (
+            <div className="flex items-center justify-center py-20">
+              <LoadingLogo size="lg" label={t("mySkills.loading")} />
+            </div>
+          ) : (
+            <SkillGrid
+              skills={gridSkills}
+              viewMode={viewMode}
+              columnStrategy="auto-fill"
+              minColumnWidth={320}
+              onSkillClick={(skill) => {
+                const remote = remoteByPath.get(skill.git_url);
+                if (remote) setDrawerSkill(remote);
+              }}
+              emptyMessage={t("ssh.noRemoteSkills")}
+              emptyAction={
+                <Button size="sm" variant="outline" onClick={() => setPushOpen(true)}>
+                  <Plus className="size-4" />
+                  {t("ssh.push")}
+                </Button>
+              }
+              getRemoteCardProps={getRemoteCardProps}
+            />
+          )}
+        </motion.main>
+      </div>
+
+      <ScopeDetailDrawer
+        kind="remote"
         skill={drawerSkill}
         onClose={() => setDrawerSkill(null)}
         onDelete={(s) => requestDelete(s)}
@@ -305,7 +352,7 @@ export function RemoteSkillsContent({
         pending={push.isPending}
         onPush={async (names) => {
           try {
-            await Promise.all(names.map((name) => push.mutateAsync({ hostId: conn.id, skillName: name, remoteDir })));
+            await Promise.all(names.map((name) => push.mutateAsync({ hostId: connId, skillName: name, remoteDir })));
             setPushOpen(false);
             discovery.refetch();
           } catch (e) {
@@ -315,11 +362,6 @@ export function RemoteSkillsContent({
       />
     </>
   );
-}
-
-/** @deprecated Use {@link RemoteSkillsContent} inside My Skills remote scope. */
-export function RemoteSkillPanel(props: ContentProps) {
-  return <RemoteSkillsContent {...props} />;
 }
 
 function PushSkillDialog({
@@ -336,23 +378,13 @@ function PushSkillDialog({
   onPush: (names: string[]) => Promise<void>;
 }) {
   const { t } = useTranslation();
-  const [skills, setSkills] = useState<Skill[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    tauriInvoke("list_skills")
-      .then((list) => {
-        if (!cancelled) setSkills(list);
-      })
-      .catch(() => {
-        if (!cancelled) setSkills([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open]);
+  const { data: skills = [], isLoading } = useQuery<Skill[]>({
+    queryKey: ["ssh", "push-local-skills"],
+    queryFn: () => tauriInvoke("list_skills"),
+    enabled: open,
+    staleTime: 30_000,
+  });
 
   const sorted = useMemo(() => [...skills].sort((a, b) => a.name.localeCompare(b.name)), [skills]);
 
@@ -377,7 +409,11 @@ function PushSkillDialog({
           {t("ssh.hubPushNote")} → <span className="font-mono">{remoteDir}</span>
         </p>
         <div className="flex-1 overflow-y-auto rounded-lg border border-border/40">
-          {sorted.length === 0 ? (
+          {isLoading ? (
+            <div className="flex items-center justify-center py-10">
+              <LoadingLogo size="sm" />
+            </div>
+          ) : sorted.length === 0 ? (
             <div className="p-4 text-center text-sm text-muted-foreground">{t("ssh.noLocalSkills")}</div>
           ) : (
             <ul className="divide-y divide-border/30">

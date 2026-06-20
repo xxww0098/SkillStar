@@ -1,16 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
-import { tauriInvoke } from "../../../lib/ipc";
 import type { SshHost, SshHostListItem } from "../../../lib/ipc/commands/ssh";
 import type { SshHostFormValues } from "../../ssh";
-import { useHostMutations, useSshHostsQuery } from "../../ssh";
+import { useHostMutations, useImportSystemHost, useSshHostsQuery } from "../../ssh";
 import { REMOTE_HOST_STORAGE_KEY, remoteHostItemKey } from "../lib/remoteHostKey";
 
 export function useMySkillsRemoteHosts() {
-  const { t } = useTranslation();
   const { data: hosts, isLoading } = useSshHostsQuery();
   const { addMutation, updateMutation, deleteMutation } = useHostMutations();
+  const importSystemHost = useImportSystemHost();
 
   const [selectedKey, setSelectedKey] = useState<string | null>(() => {
     if (typeof localStorage === "undefined") return null;
@@ -51,12 +48,11 @@ export function useMySkillsRemoteHosts() {
 
   const handleImportSystemHost = async (alias: string) => {
     try {
-      const created = await tauriInvoke("import_system_host", { alias });
+      const created = await importSystemHost.mutateAsync(alias);
       setSelectedKey(created.id);
       localStorage.setItem(REMOTE_HOST_STORAGE_KEY, created.id);
-      toast.success(t("ssh.toast.hostAdded"));
-    } catch (e) {
-      toast.error(String(e));
+    } catch {
+      /* error toast handled by the mutation */
     }
   };
 

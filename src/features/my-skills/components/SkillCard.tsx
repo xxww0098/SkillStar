@@ -15,8 +15,9 @@ import type { AgentProfile, Skill } from "../../../types";
 interface SkillCardProps {
   skill: Skill;
   onClick: (skill: Skill) => void;
-  onInstall: (url: string, name: string) => void;
-  onUpdate: (name: string) => void;
+  /** Optional: remote cards render an "installed" badge and never call these. */
+  onInstall?: (url: string, name: string) => void;
+  onUpdate?: (name: string) => void;
   compact?: boolean;
   selectable?: boolean;
   selected?: boolean;
