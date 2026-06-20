@@ -25,21 +25,24 @@ export function MySkillsScopeSwitch({ scope, onScopeChange, className }: Props) 
         type="button"
         role="tab"
         aria-selected={scope === "local"}
+        title={t("mySkills.scopeLocal")}
+        aria-label={t("mySkills.scopeLocal")}
         className={cn(
-          "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 transition-colors",
+          "inline-flex items-center justify-center rounded-md px-2 py-1 transition-colors",
           scope === "local" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
         )}
         onClick={() => onScopeChange("local")}
       >
         <Laptop className="size-3.5" />
-        {t("mySkills.scopeLocal")}
       </button>
       <button
         type="button"
         role="tab"
         aria-selected={scope === "remote"}
+        title={t("mySkills.scopeRemote")}
+        aria-label={t("mySkills.scopeRemote")}
         className={cn(
-          "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 transition-colors",
+          "inline-flex items-center justify-center rounded-md px-2 py-1 transition-colors",
           scope === "remote"
             ? "bg-background text-foreground shadow-sm"
             : "text-muted-foreground hover:text-foreground",
@@ -47,7 +50,6 @@ export function MySkillsScopeSwitch({ scope, onScopeChange, className }: Props) 
         onClick={() => onScopeChange("remote")}
       >
         <Server className="size-3.5" />
-        {t("mySkills.scopeRemote")}
       </button>
     </div>
   );
