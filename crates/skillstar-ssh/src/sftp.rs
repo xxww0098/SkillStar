@@ -22,8 +22,9 @@ use russh_sftp::protocol::OpenFlags;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::client::{SshHandler, exec_capture};
+use crate::client::{RemoteExec, SshHandler};
 use crate::hub::{REMOTE_HUB_CONTENT, shell_quote};
+use crate::remote_fs::{RemoteDiscoveryFs, is_skill_entry};
 use crate::types::{RemoteSkill, RemoteSkillLayout};
 
 /// A known agent's skills directory on a remote host — the push targets the UI
@@ -151,11 +152,11 @@ echo standalone
     )
 }
 
-/// One skill subdirectory collected from an agent's `skills/` dir.
+/// One skill entry (directory or hub symlink) under an agent's `skills/` dir.
 #[derive(Debug, Clone)]
 pub(crate) struct ScannedSkillEntry {
     pub name: String,
-    pub is_dir: bool,
+    pub is_skill_entry: bool,
     pub has_skill_md: bool,
     pub size: u64,
     pub modified: Option<String>,
@@ -190,7 +191,7 @@ pub(crate) fn build_discovery_result(
         let skills_dir = format!("{home}/{}/skills", entry.dir_name);
         let mut count = 0u32;
         for skill in &entry.skills {
-            if !skill.is_dir || !skill.has_skill_md {
+            if !skill.is_skill_entry || !skill.has_skill_md {
                 continue;
             }
             count += 1;
@@ -232,13 +233,13 @@ pub(crate) fn build_discovery_result(
 #[derive(Debug, Clone)]
 pub(crate) struct ListDirEntry {
     pub name: String,
-    pub is_dir: bool,
+    pub is_skill_entry: bool,
     pub has_skill_md: bool,
     pub size: u64,
     pub modified: Option<String>,
 }
 
-/// Filter a remote `skills/` listing to genuine skills (dirs with `SKILL.md`).
+/// Filter a remote `skills/` listing to genuine skills (dirs/symlinks with `SKILL.md`).
 pub(crate) fn filter_remote_skill_list(
     remote_dir: &str,
     entries: &[ListDirEntry],
@@ -246,7 +247,7 @@ pub(crate) fn filter_remote_skill_list(
     let base = remote_dir.trim_end_matches('/');
     let mut skills = Vec::new();
     for entry in entries {
-        if entry.name.starts_with('.') || !entry.is_dir || !entry.has_skill_md {
+        if entry.name.starts_with('.') || !entry.is_skill_entry || !entry.has_skill_md {
             continue;
         }
         skills.push(RemoteSkill {
@@ -262,20 +263,48 @@ pub(crate) fn filter_remote_skill_list(
     skills
 }
 
-/// Resolve the remote `$HOME` via SFTP `canonicalize(".")` (the server expands
-/// the default root). Falls back to `"."` if the server rejects it.
-async fn resolve_remote_home(sftp: &SftpSession) -> String {
-    sftp.canonicalize(".").await.unwrap_or_else(|_| ".".to_string())
-}
-
-/// Classify whether an agent-dir skill entry is hub-managed or standalone.
-async fn classify_remote_skill_layout(
-    handle: &mut Handle<SshHandler>,
+/// Probe whether a skill entry has a readable `SKILL.md` (direct path or hub content for symlinks).
+async fn probe_has_skill_md<F: RemoteDiscoveryFs>(
+    fs: &F,
     skill_path: &str,
     skill_name: &str,
+    attrs: &russh_sftp::protocol::FileAttributes,
+) -> bool {
+    if fs
+        .path_exists(&format!("{skill_path}/SKILL.md"))
+        .await
+    {
+        return true;
+    }
+    if attrs.is_symlink() {
+        return fs
+            .path_exists(&format!("{REMOTE_HUB_CONTENT}/{skill_name}/SKILL.md"))
+            .await;
+    }
+    false
+}
+
+/// Resolve layout: hub symlinks are inferred locally; standalone dirs use remote exec.
+async fn resolve_skill_layout<E: RemoteExec, F: RemoteDiscoveryFs>(
+    exec: &mut E,
+    fs: &F,
+    skill_path: &str,
+    skill_name: &str,
+    attrs: &russh_sftp::protocol::FileAttributes,
+    has_skill_md: bool,
 ) -> RemoteSkillLayout {
+    if !has_skill_md {
+        return RemoteSkillLayout::Standalone;
+    }
+    if attrs.is_symlink()
+        && fs
+            .path_exists(&format!("{REMOTE_HUB_CONTENT}/{skill_name}/SKILL.md"))
+            .await
+    {
+        return RemoteSkillLayout::HubManaged;
+    }
     let script = layout_classify_shell_script(skill_path, skill_name);
-    match exec_capture(handle, &script).await {
+    match exec.exec_script(&script).await {
         Ok(out) if out.trim() == "hub_managed" => RemoteSkillLayout::HubManaged,
         _ => RemoteSkillLayout::Standalone,
     }
@@ -288,51 +317,41 @@ async fn classify_remote_skill_layout(
 /// `~/.<agent>/skills/` holds `SKILL.md`-bearing subdirs is reported (grok,
 /// agents, claude, codex, … — known or not). [`KNOWN_AGENT_SKILL_DIRS`] is only
 /// used as a fallback seed when the scan finds nothing (fresh server).
-pub async fn discover_remote_skills(
-    handle: &mut Handle<SshHandler>,
-    sftp: &SftpSession,
-) -> Result<DiscoveryResult> {
-    let home = resolve_remote_home(sftp).await;
-    let top = match sftp.read_dir(&home).await {
-        Ok(rd) => rd,
-        Err(_) => return Ok(DiscoveryResult::default()),
-    };
+pub async fn discover_remote_skills<E, F>(exec: &mut E, fs: &F) -> Result<DiscoveryResult>
+where
+    E: RemoteExec,
+    F: RemoteDiscoveryFs,
+{
+    let home = fs.canonicalize_home().await;
+    let top = fs.read_dir(&home).await;
 
     let mut scan = Vec::new();
-    for entry in top {
-        let name = entry.file_name();
-        if should_skip_home_dir(&name) {
-            continue;
-        }
-        let attrs = entry.metadata();
-        if !attrs.is_dir() {
+    for (name, attrs) in top {
+        if should_skip_home_dir(&name) || !attrs.is_dir() {
             continue;
         }
         let skills_dir = format!("{home}/{name}/skills");
-        let sub = match sftp.read_dir(&skills_dir).await {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
+        let sub = fs.read_dir(&skills_dir).await;
         let mut skills = Vec::new();
-        for skill_entry in sub {
-            let skill_attrs = skill_entry.metadata();
-            let skill_name = skill_entry.file_name();
-            if !skill_attrs.is_dir() || skill_name.is_empty() {
+        for (skill_name, skill_attrs) in sub {
+            if skill_name.is_empty() || !is_skill_entry(&skill_attrs) {
                 continue;
             }
             let skill_path = format!("{skills_dir}/{skill_name}");
-            let has_skill_md = sftp
-                .metadata(format!("{skill_path}/SKILL.md"))
-                .await
-                .is_ok();
-            let layout = if has_skill_md {
-                classify_remote_skill_layout(handle, &skill_path, &skill_name).await
-            } else {
-                RemoteSkillLayout::Standalone
-            };
+            let has_skill_md =
+                probe_has_skill_md(fs, &skill_path, &skill_name, &skill_attrs).await;
+            let layout = resolve_skill_layout(
+                exec,
+                fs,
+                &skill_path,
+                &skill_name,
+                &skill_attrs,
+                has_skill_md,
+            )
+            .await;
             skills.push(ScannedSkillEntry {
                 name: skill_name,
-                is_dir: true,
+                is_skill_entry: true,
                 has_skill_md,
                 size: skill_attrs.size.unwrap_or(0),
                 modified: skill_attrs
@@ -350,7 +369,7 @@ pub async fn discover_remote_skills(
 
     let mut known_fallback = Vec::new();
     for (agent, path) in KNOWN_AGENT_SKILL_DIRS {
-        if sftp.metadata(*path).await.is_ok() {
+        if fs.path_exists(path).await {
             known_fallback.push(RemoteAgentSkills {
                 agent: (*agent).to_string(),
                 path: (*path).to_string(),
@@ -648,29 +667,25 @@ pub async fn push_skill(
 
 /// List skills under a remote directory. A subdirectory counts as a skill iff
 /// it contains a `SKILL.md`.
-pub async fn list_remote_skills(
-    sftp: &SftpSession,
+pub async fn list_remote_skills<F: RemoteDiscoveryFs>(
+    fs: &F,
     remote_dir: &str,
 ) -> Result<Vec<RemoteSkill>> {
-    let entries = match sftp.read_dir(remote_dir).await {
-        Ok(rd) => rd,
-        Err(_) => return Ok(Vec::new()), // missing dir → empty list
-    };
+    let entries = fs.read_dir(remote_dir).await;
+    let base = remote_dir.trim_end_matches('/');
 
     let mut list_entries = Vec::new();
-    for entry in entries {
-        let name = entry.file_name();
-        let attrs = entry.metadata();
-        let is_dir = attrs.is_dir();
-        let has_skill_md = if is_dir && !name.starts_with('.') {
-            let skill_path = format!("{}/{name}", remote_dir.trim_end_matches('/'));
-            sftp.metadata(format!("{skill_path}/SKILL.md")).await.is_ok()
+    for (name, attrs) in entries {
+        let is_skill_entry = is_skill_entry(&attrs);
+        let has_skill_md = if is_skill_entry && !name.starts_with('.') {
+            let skill_path = format!("{base}/{name}");
+            probe_has_skill_md(fs, &skill_path, &name, &attrs).await
         } else {
             false
         };
         list_entries.push(ListDirEntry {
             name,
-            is_dir,
+            is_skill_entry,
             has_skill_md,
             size: attrs.size.unwrap_or(0),
             modified: attrs.mtime.and_then(|t| chrono_like_rfc3339(t as i64)),
@@ -852,7 +867,7 @@ mod tests {
                 is_dir: true,
                 skills: vec![ScannedSkillEntry {
                     name: "junk".into(),
-                    is_dir: true,
+                    is_skill_entry: true,
                     has_skill_md: true,
                     size: 0,
                     modified: None,
@@ -865,7 +880,7 @@ mod tests {
                 skills: vec![
                     ScannedSkillEntry {
                         name: "real-skill".into(),
-                        is_dir: true,
+                        is_skill_entry: true,
                         has_skill_md: true,
                         size: 1024,
                         modified: None,
@@ -873,7 +888,7 @@ mod tests {
                     },
                     ScannedSkillEntry {
                         name: "not-a-skill".into(),
-                        is_dir: true,
+                        is_skill_entry: true,
                         has_skill_md: false,
                         size: 0,
                         modified: None,
@@ -886,7 +901,7 @@ mod tests {
                 is_dir: true,
                 skills: vec![ScannedSkillEntry {
                     name: "standalone-one".into(),
-                    is_dir: true,
+                    is_skill_entry: true,
                     has_skill_md: true,
                     size: 512,
                     modified: None,
@@ -948,36 +963,80 @@ mod tests {
         let entries = vec![
             ListDirEntry {
                 name: "good-skill".into(),
-                is_dir: true,
+                is_skill_entry: true,
                 has_skill_md: true,
                 size: 100,
                 modified: None,
             },
             ListDirEntry {
+                name: "hub-link".into(),
+                is_skill_entry: true,
+                has_skill_md: true,
+                size: 0,
+                modified: None,
+            },
+            ListDirEntry {
                 name: "empty-dir".into(),
-                is_dir: true,
+                is_skill_entry: true,
                 has_skill_md: false,
                 size: 0,
                 modified: None,
             },
             ListDirEntry {
                 name: ".hidden".into(),
-                is_dir: true,
+                is_skill_entry: true,
                 has_skill_md: true,
                 size: 0,
                 modified: None,
             },
             ListDirEntry {
                 name: "readme.md".into(),
-                is_dir: false,
+                is_skill_entry: false,
                 has_skill_md: false,
                 size: 10,
                 modified: None,
             },
         ];
         let skills = filter_remote_skill_list("~/.codex/skills", &entries);
-        assert_eq!(skills.len(), 1);
+        assert_eq!(skills.len(), 2);
         assert_eq!(skills[0].name, "good-skill");
-        assert_eq!(skills[0].path, "~/.codex/skills/good-skill");
+        assert_eq!(skills[1].name, "hub-link");
+    }
+
+    use crate::remote_fs::{MockRemoteExec, MockRemoteFs};
+
+    /// Drives the real `discover_remote_skills` entry point on a vps-yy mock tree.
+    #[tokio::test]
+    async fn discover_remote_skills_vps_yy_mock_fs() {
+        let mut exec = MockRemoteExec::default();
+        let fs = MockRemoteFs::vps_yy_layout();
+        let result = discover_remote_skills(&mut exec, &fs).await.unwrap();
+
+        assert_eq!(result.agents.len(), 2);
+        assert_eq!(result.skills.len(), 2);
+        assert_eq!(result.needs_migration_count, 1);
+
+        let hub = result.skills.iter().find(|s| s.name == "hub-skill").unwrap();
+        assert_eq!(hub.agent, "codex");
+        assert_eq!(hub.layout, RemoteSkillLayout::HubManaged);
+
+        let standalone = result
+            .skills
+            .iter()
+            .find(|s| s.name == "standalone-one")
+            .unwrap();
+        assert_eq!(standalone.agent, "grok");
+        assert_eq!(standalone.layout, RemoteSkillLayout::Standalone);
+    }
+
+    /// Drives the real `list_remote_skills` entry point including hub symlinks.
+    #[tokio::test]
+    async fn list_remote_skills_includes_hub_symlinks() {
+        let fs = MockRemoteFs::vps_yy_layout();
+        let skills = list_remote_skills(&fs, "/root/.codex/skills")
+            .await
+            .unwrap();
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "hub-skill");
     }
 }

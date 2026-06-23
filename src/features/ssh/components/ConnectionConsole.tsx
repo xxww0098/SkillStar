@@ -14,7 +14,7 @@ interface Props {
 }
 
 const STATUS_COLOR: Record<string, string> = {
-  start: "text-muted-foreground",
+  start: "text-zinc-300",
   ok: "text-emerald-400",
   warn: "text-amber-400",
   fail: "text-red-400",
@@ -27,6 +27,7 @@ const PHASE_LABEL: Record<string, string> = {
   host_key: "key",
   auth: "auth",
   sftp: "sftp",
+  scan: "scan",
   done: "done",
   error: "err",
 };
@@ -43,17 +44,17 @@ export function ConnectionConsole({ lines, pendingHostKey, active, onAcceptHostK
   const hasContent = lines.length > 0 || active || pendingHostKey;
 
   return (
-    <div className="flex flex-col rounded-lg border border-border/40 bg-black/40 overflow-hidden">
-      <div className="flex items-center gap-2 border-b border-border/30 px-3 py-1.5">
-        <Terminal className="size-3.5 text-muted-foreground" />
-        <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+    <div className="flex flex-col rounded-lg border border-zinc-700/60 bg-zinc-950 overflow-hidden">
+      <div className="flex items-center gap-2 border-b border-zinc-700/60 px-3 py-1.5">
+        <Terminal className="size-3.5 text-zinc-400" />
+        <span className="text-[11px] font-medium uppercase tracking-wider text-zinc-400">
           {t("ssh.console.title")}
         </span>
         {active ? <Loader2 className="ml-auto size-3.5 animate-spin text-primary" /> : null}
       </div>
 
       {hasContent ? (
-        <div className="max-h-[180px] min-h-[80px] overflow-y-auto px-3 py-2 font-mono text-[11px] leading-relaxed">
+        <div className="max-h-[180px] min-h-[80px] overflow-y-auto px-3 py-2 font-mono text-[11px] leading-relaxed text-zinc-200">
           {lines.map((line, i) => (
             <ConsoleLine key={`${line.tsMs}-${i}`} line={line} />
           ))}
@@ -67,7 +68,7 @@ export function ConnectionConsole({ lines, pendingHostKey, active, onAcceptHostK
           <div ref={bottomRef} />
         </div>
       ) : (
-        <div className="px-3 py-3 text-[11px] text-muted-foreground">{t("ssh.console.empty")}</div>
+        <div className="px-3 py-3 text-[11px] text-zinc-500">{t("ssh.console.empty")}</div>
       )}
     </div>
   );
@@ -75,7 +76,7 @@ export function ConnectionConsole({ lines, pendingHostKey, active, onAcceptHostK
 
 function ConsoleLine({ line }: { line: SshProgressLine }) {
   const label = PHASE_LABEL[line.phase] ?? line.phase;
-  const color = STATUS_COLOR[line.status] ?? "text-muted-foreground";
+  const color = STATUS_COLOR[line.status] ?? "text-zinc-300";
   const time = new Date(line.tsMs).toLocaleTimeString(undefined, {
     hour12: false,
     hour: "2-digit",
@@ -84,8 +85,8 @@ function ConsoleLine({ line }: { line: SshProgressLine }) {
   });
   return (
     <div className="flex gap-2">
-      <span className="shrink-0 text-muted-foreground/60">{time}</span>
-      <span className="shrink-0 w-9 text-muted-foreground/80">[{label}]</span>
+      <span className="shrink-0 text-zinc-500">{time}</span>
+      <span className="shrink-0 w-9 text-zinc-400">[{label}]</span>
       <span className={color}>{line.message}</span>
     </div>
   );

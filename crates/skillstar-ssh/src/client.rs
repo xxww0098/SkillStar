@@ -364,6 +364,20 @@ pub async fn test_connection<S: SecretStore>(
     ))
 }
 
+/// Execute a shell script on the remote host (used by layout classification).
+pub trait RemoteExec: Send {
+    fn exec_script(
+        &mut self,
+        script: &str,
+    ) -> impl std::future::Future<Output = Result<String>> + Send;
+}
+
+impl RemoteExec for Handle<SshHandler> {
+    async fn exec_script(&mut self, script: &str) -> Result<String> {
+        exec_capture(self, script).await
+    }
+}
+
 /// Run a command on the session and return its combined stdout/stderr as text.
 ///
 /// Used internally by `test_connection`; exported for Phase-2 remote-config reads.

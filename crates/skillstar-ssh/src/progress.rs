@@ -15,7 +15,7 @@ use serde::Serialize;
 pub struct SshProgressEvent {
     /// Unique id for this connection attempt — the frontend filters by it.
     pub session_id: String,
-    /// `dial` | `handshake` | `host_key` | `auth` | `sftp` | `done` | `error`
+    /// `dial` | `handshake` | `host_key` | `auth` | `sftp` | `scan` | `done` | `error`
     pub phase: Phase,
     /// `start` | `ok` | `warn` | `fail` | `pending`
     pub status: Status,
@@ -36,6 +36,8 @@ pub enum Phase {
     HostKey,
     Auth,
     Sftp,
+    /// Remote skill discovery / listing over an open SFTP session.
+    Scan,
     Done,
     Error,
 }
@@ -135,6 +137,14 @@ mod tests {
         assert_eq!(evts.len(), 2);
         assert_eq!(evts[0].status, Status::Start);
         assert_eq!(evts[1].status, Status::Ok);
+    }
+
+    #[test]
+    fn scan_phase_serializes_as_snake_case() {
+        let e = event("s1", Phase::Scan, Status::Start, "scanning remote for skills…");
+        assert_eq!(e.phase, Phase::Scan);
+        let json = serde_json::to_string(&e).unwrap();
+        assert!(json.contains("\"phase\":\"scan\""));
     }
 
     #[test]

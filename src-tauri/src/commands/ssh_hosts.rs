@@ -235,6 +235,37 @@ fn encode_host_key_state(
 /// and reports every `<dir>/skills/<name>` that contains a `SKILL.md`, grouped
 /// by agent. Replaces the old fixed-path probe so unknown agents (grok,
 /// .agents, …) are found without a hardcoded table.
+/// Run discovery on an authenticated session (shared by the Tauri command and tests).
+pub(crate) async fn discover_skills_on_session(
+    handle: &mut Session,
+    session_id: &str,
+    sink: &TauriProgressSink,
+) -> Result<DiscoveryResult, AppError> {
+    let sftp = sftp::open_sftp(handle, session_id, sink)
+        .await
+        .map_err(to_ssh_err)?;
+    sink.emit(skillstar_ssh::progress::event(
+        session_id,
+        skillstar_ssh::progress::Phase::Scan,
+        skillstar_ssh::progress::Status::Start,
+        "scanning remote for skills…",
+    ));
+    let res = sftp::discover_remote_skills(handle, &sftp)
+        .await
+        .map_err(to_ssh_err);
+    sink.emit(skillstar_ssh::progress::event(
+        session_id,
+        skillstar_ssh::progress::Phase::Scan,
+        skillstar_ssh::progress::Status::Ok,
+        format!(
+            "found {} skill(s) across {} agent(s)",
+            res.as_ref().map(|r| r.skills.len()).unwrap_or(0),
+            res.as_ref().map(|r| r.agents.len()).unwrap_or(0),
+        ),
+    ));
+    res
+}
+
 #[tauri::command]
 pub async fn discover_remote_skills(
     host_id: String,
@@ -246,29 +277,7 @@ pub async fn discover_remote_skills(
         let session_id = session_id.clone();
         let sink = sink.clone();
         move |mut handle| async move {
-            let sftp = sftp::open_sftp(&mut handle, &session_id, &sink)
-                .await
-                .map_err(to_ssh_err)?;
-            sink.emit(skillstar_ssh::progress::event(
-                &session_id,
-                skillstar_ssh::progress::Phase::Done,
-                skillstar_ssh::progress::Status::Start,
-                "scanning remote for skills…",
-            ));
-            let res = sftp::discover_remote_skills(&mut handle, &sftp)
-                .await
-                .map_err(to_ssh_err);
-            sink.emit(skillstar_ssh::progress::event(
-                &session_id,
-                skillstar_ssh::progress::Phase::Done,
-                skillstar_ssh::progress::Status::Ok,
-                format!(
-                    "found {} skill(s) across {} agent(s)",
-                    res.as_ref().map(|r| r.skills.len()).unwrap_or(0),
-                    res.as_ref().map(|r| r.agents.len()).unwrap_or(0),
-                ),
-            ));
-            res
+            discover_skills_on_session(&mut handle, &session_id, &sink).await
         }
     })
     .await
@@ -755,5 +764,36 @@ Host vps-yy
                 Ok(_) => panic!("expected system:vps-yy to fail when alias is absent"),
             }
         });
+    }
+
+    /// system:vps-yy resolve → real `discover_remote_skills` on vps-yy mock tree.
+    #[tokio::test]
+    async fn vps_yy_resolve_then_discover_remote_skills() {
+        with_ssh_home(
+            r#"
+Host vps-yy
+    HostName 64.83.38.21
+    User root
+    Port 2222
+    IdentityFile ~/.ssh/id_ed25519_dstools
+"#,
+            || {
+                let (def, _) = resolve_host("system:vps-yy").expect("system:vps-yy");
+                assert_eq!(def.host, "64.83.38.21");
+            },
+        );
+        let mut exec = skillstar_ssh::remote_fs::MockRemoteExec::default();
+        let fs = skillstar_ssh::remote_fs::MockRemoteFs::vps_yy_layout();
+        let result = sftp::discover_remote_skills(&mut exec, &fs)
+            .await
+            .expect("discover on mock vps-yy layout");
+        assert_eq!(result.skills.len(), 2);
+        assert_eq!(result.needs_migration_count, 1);
+        assert!(
+            result
+                .skills
+                .iter()
+                .any(|s| s.name == "hub-skill" && s.layout == skillstar_ssh::RemoteSkillLayout::HubManaged)
+        );
     }
 }
