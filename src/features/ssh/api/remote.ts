@@ -16,13 +16,19 @@ import type {
 import { sshKeys } from "./keys";
 
 /** Scan the remote $HOME for all agent skills directories and their skills
- * (discovery-based — finds grok/.agents/claude/… without a fixed table). */
+ * (discovery-based — finds grok/.agents/claude/… without a fixed table).
+ *
+ * `retry: false` is mandatory here: each attempt is a full SSH dial that can
+ * stall for ~15s on an unreachable host. The global default (`retry: 1`)
+ * would force the user to wait ~30s before seeing a failure for no benefit —
+ * an unreachable host stays unreachable on the immediate retry. */
 export function useDiscoverRemoteSkillsQuery(hostId: string | null, enabled = true) {
   return useQuery<DiscoveryResult>({
     queryKey: [...sshKeys.all, "discover", hostId ?? ""],
     queryFn: () => tauriInvoke("discover_remote_skills", { hostId: hostId! }),
     enabled: !!hostId && enabled,
     staleTime: 30_000,
+    retry: false,
   });
 }
 
@@ -32,6 +38,7 @@ export function useRemoteSkillsQuery(hostId: string | null, remoteDir: string, e
     queryFn: () => tauriInvoke("list_remote_skills", { hostId: hostId!, remoteDir }),
     enabled: !!hostId && enabled,
     staleTime: 10_000,
+    retry: false,
   });
 }
 

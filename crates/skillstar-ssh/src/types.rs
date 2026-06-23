@@ -171,3 +171,24 @@ username = "root"
         assert_eq!(s.layout, RemoteSkillLayout::Standalone);
     }
 }
+
+/// Content of a remote skill's SKILL.md read from the remote hub layout.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RemoteSkillContent {
+    /// Skill name (basename).
+    pub name: String,
+    /// Raw file content (UTF-8 text of SKILL.md).
+    pub content: String,
+    /// RFC3339-ish mtime of the file if available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified: Option<String>,
+}
+
+/// Update availability state for a remote skill (hub-managed git repo).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RemoteSkillUpdateState {
+    /// Skill name.
+    pub name: String,
+    /// Whether `git rev-list HEAD..@{u}` reports > 0 commits.
+    pub update_available: bool,
+}

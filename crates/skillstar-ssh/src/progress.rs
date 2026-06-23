@@ -7,10 +7,10 @@
 //! `NoopSink` is the test/default sink (no-ops). The frontend filters events by
 //! `session_id` so concurrent host operations don't interleave.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// A single connection-progress event for the UI console.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SshProgressEvent {
     /// Unique id for this connection attempt — the frontend filters by it.
@@ -28,7 +28,7 @@ pub struct SshProgressEvent {
     pub detail: Option<serde_json::Value>,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Phase {
     Dial,
@@ -42,7 +42,7 @@ pub enum Phase {
     Error,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
     Start,

@@ -16,10 +16,10 @@ use skillstar_ssh::progress::{ProgressSink, SshProgressEvent};
 use skillstar_ssh::store::{KeyringSecretStore, accept_host_key, load_hosts};
 use skillstar_ssh::sftp;
 use skillstar_ssh::{HostsStore, Session, SshHostDef, SystemHost, parse_system_hosts};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Runtime};
 
 /// Re-exported DTOs so the command signatures stay terse.
-pub use skillstar_ssh::{ConnectionTestResult, DiscoveryResult, MigrateResult, PushResult, RemoteSkill, RemoteSkillContent, RemoteSkillUpdateState};
+pub use skillstar_ssh::{ConnectionTestResult, DiscoveryResult, MigrateResult, PushResult, RemoteSkill};
 
 /// The Tauri event channel the frontend listens on for connection progress.
 const CONNECT_STREAM_CHANNEL: &str = "ssh://connect-stream";
@@ -287,45 +287,61 @@ fn resolve_host_for_session(host_id: &str) -> Result<(SshHostDef, KeyringSecretS
     resolve_host(host_id)
 }
 
-/// Body of [`discover_remote_skills`] — resolve host, connect (or test bypass), scan.
-pub(crate) async fn discover_remote_skills_impl<S>(
-    host_id: String,
-    sink: S,
-) -> Result<DiscoveryResult, AppError>
-where
-    S: ProgressSink + Clone,
-{
-    let session_id = new_session_id();
-
+/// Discover-only connection: live SSH session or (tests) mock FS via [`mock_connector_slot`].
+enum DiscoverConnection {
+    Live(Session),
     #[cfg(test)]
-    if let Some(mut bypass) = test_take_discover_bypass() {
-        // Same resolve step `with_session` performs before connect.
-        resolve_host_for_session(&host_id)?;
-        return discover_skills_with_progress(
-            &mut bypass.exec,
-            &bypass.fs,
-            &session_id,
-            &sink,
-        )
-        .await;
-    }
+    Mock {
+        exec: skillstar_ssh::remote_fs::MockRemoteExec,
+        fs: skillstar_ssh::remote_fs::MockRemoteFs,
+    },
+}
 
-    with_session(&host_id, &session_id, &sink, {
-        let session_id = session_id.clone();
-        let sink = sink.clone();
-        move |mut handle| async move {
-            discover_skills_on_session(&mut handle, &session_id, &sink).await
+/// Resolve → connect (or mock) → scan → terminal `done`. Mirrors [`with_session`] for discovery.
+async fn with_discover_session<S: ProgressSink>(
+    host_id: &str,
+    session_id: &str,
+    sink: &S,
+) -> Result<DiscoveryResult, AppError> {
+    let (host, secrets) = resolve_host_for_session(host_id)?;
+    let mut conn = open_discover_connection(&host, &secrets, session_id, sink).await?;
+    let result = match &mut conn {
+        DiscoverConnection::Live(handle) => {
+            discover_skills_on_session(handle, session_id, sink).await?
         }
-    })
-    .await
+        #[cfg(test)]
+        DiscoverConnection::Mock { exec, fs } => {
+            discover_skills_with_progress(exec, fs, session_id, sink).await?
+        }
+    };
+    sink.emit(skillstar_ssh::progress::event(
+        session_id,
+        skillstar_ssh::progress::Phase::Done,
+        skillstar_ssh::progress::Status::Ok,
+        "session ready",
+    ));
+    Ok(result)
+}
+
+/// Progress sink for [`discover_remote_skills`] (generic over runtime for mock-app tests).
+struct DiscoverProgressSink<R: Runtime> {
+    app: AppHandle<R>,
+}
+
+impl<R: Runtime> ProgressSink for DiscoverProgressSink<R> {
+    fn emit(&self, event: SshProgressEvent) {
+        let _ = self.app.emit(CONNECT_STREAM_CHANNEL, event);
+    }
 }
 
 #[tauri::command]
-pub async fn discover_remote_skills(
+pub async fn discover_remote_skills<R: Runtime>(
     host_id: String,
-    app: AppHandle,
+    app: AppHandle<R>,
 ) -> Result<DiscoveryResult, AppError> {
-    discover_remote_skills_impl(host_id, TauriProgressSink { app }).await
+    let session_id = new_session_id();
+    let sink = DiscoverProgressSink { app };
+    with_discover_session(&host_id, &session_id, &sink).await
 }
 
 #[tauri::command]
@@ -336,17 +352,13 @@ pub async fn list_remote_skills(
 ) -> Result<Vec<RemoteSkill>, AppError> {
     let session_id = new_session_id();
     let sink = TauriProgressSink { app };
-    with_session(&host_id, &session_id, &sink, {
-        let session_id = session_id.clone();
-        let sink = sink.clone();
-        move |mut handle| async move {
-            let sftp = sftp::open_sftp(&mut handle, &session_id, &sink)
-                .await
-                .map_err(to_ssh_err)?;
-            sftp::list_remote_skills(&sftp, &remote_dir)
-                .await
-                .map_err(to_ssh_err)
-        }
+    with_session(&host_id, session_id, sink, |session_id, sink, mut handle| async move {
+        let sftp = sftp::open_sftp(&mut handle, &session_id, &sink)
+            .await
+            .map_err(to_ssh_err)?;
+        sftp::list_remote_skills(&sftp, &remote_dir)
+            .await
+            .map_err(to_ssh_err)
     })
     .await
 }
@@ -360,33 +372,29 @@ pub async fn push_skill_to_remote(
 ) -> Result<PushResult, AppError> {
     let session_id = new_session_id();
     let sink = TauriProgressSink { app };
-    with_session(&host_id, &session_id, &sink, {
-        let session_id = session_id.clone();
-        let sink = sink.clone();
-        move |mut handle| async move {
-            sink.emit(skillstar_ssh::progress::event(
-                &session_id,
-                skillstar_ssh::progress::Phase::Done,
-                skillstar_ssh::progress::Status::Start,
-                format!("pushing {skill_name} via ~/.skillstar/hub…"),
-            ));
-            let res = skillstar_ssh::hub::push_skill_via_hub(
-                &mut handle,
-                &session_id,
-                &sink,
-                &skill_name,
-                &remote_dir,
-            )
-            .await
-            .map_err(to_ssh_err);
-            sink.emit(skillstar_ssh::progress::event(
-                &session_id,
-                skillstar_ssh::progress::Phase::Done,
-                skillstar_ssh::progress::Status::Ok,
-                format!("pushed {skill_name} (done)"),
-            ));
-            res
-        }
+    with_session(&host_id, session_id, sink, |session_id, sink, mut handle| async move {
+        sink.emit(skillstar_ssh::progress::event(
+            &session_id,
+            skillstar_ssh::progress::Phase::Done,
+            skillstar_ssh::progress::Status::Start,
+            format!("pushing {skill_name} via ~/.skillstar/hub…"),
+        ));
+        let res = skillstar_ssh::hub::push_skill_via_hub(
+            &mut handle,
+            &session_id,
+            &sink,
+            &skill_name,
+            &remote_dir,
+        )
+        .await
+        .map_err(to_ssh_err);
+        sink.emit(skillstar_ssh::progress::event(
+            &session_id,
+            skillstar_ssh::progress::Phase::Done,
+            skillstar_ssh::progress::Status::Ok,
+            format!("pushed {skill_name} (done)"),
+        ));
+        res
     })
     .await
 }
@@ -401,32 +409,28 @@ pub async fn migrate_remote_skill_to_hub(
 ) -> Result<MigrateResult, AppError> {
     let session_id = new_session_id();
     let sink = TauriProgressSink { app };
-    with_session(&host_id, &session_id, &sink, {
-        let session_id = session_id.clone();
-        let sink = sink.clone();
-        move |mut handle| async move {
-            sink.emit(skillstar_ssh::progress::event(
-                &session_id,
-                skillstar_ssh::progress::Phase::Done,
-                skillstar_ssh::progress::Status::Start,
-                format!("migrating {skill_name} to ~/.skillstar/hub…"),
-            ));
-            let res = skillstar_ssh::hub::migrate_remote_skill_to_hub(
-                &mut handle,
-                &skill_name,
-                &agent_skills_dir,
-                &standalone_path,
-            )
-            .await
-            .map_err(to_ssh_err);
-            sink.emit(skillstar_ssh::progress::event(
-                &session_id,
-                skillstar_ssh::progress::Phase::Done,
-                skillstar_ssh::progress::Status::Ok,
-                format!("migrated {skill_name} (done)"),
-            ));
-            res
-        }
+    with_session(&host_id, session_id, sink, |session_id, sink, mut handle| async move {
+        sink.emit(skillstar_ssh::progress::event(
+            &session_id,
+            skillstar_ssh::progress::Phase::Done,
+            skillstar_ssh::progress::Status::Start,
+            format!("migrating {skill_name} to ~/.skillstar/hub…"),
+        ));
+        let res = skillstar_ssh::hub::migrate_remote_skill_to_hub(
+            &mut handle,
+            &skill_name,
+            &agent_skills_dir,
+            &standalone_path,
+        )
+        .await
+        .map_err(to_ssh_err);
+        sink.emit(skillstar_ssh::progress::event(
+            &session_id,
+            skillstar_ssh::progress::Phase::Done,
+            skillstar_ssh::progress::Status::Ok,
+            format!("migrated {skill_name} (done)"),
+        ));
+        res
     })
     .await
 }
@@ -439,236 +443,13 @@ pub async fn delete_remote_skill(
 ) -> Result<(), AppError> {
     let session_id = new_session_id();
     let sink = TauriProgressSink { app };
-    with_session(&host_id, &session_id, &sink, {
-        let session_id = session_id.clone();
-        let sink = sink.clone();
-        move |mut handle| async move {
-            let sftp = sftp::open_sftp(&mut handle, &session_id, &sink)
-                .await
-                .map_err(to_ssh_err)?;
-            sftp::delete_remote_skill(&sftp, &remote_path)
-                .await
-                .map_err(to_ssh_err)
-        }
-    })
-    .await
-}
-
-// ── Remote skill content + lifecycle (new in unified UI) ──────────────
-
-#[tauri::command]
-pub async fn read_remote_skill_content(
-    host_id: String,
-    skill_name: String,
-    app: AppHandle,
-) -> Result<RemoteSkillContent, AppError> {
-    let session_id = new_session_id();
-    let sink = TauriProgressSink { app };
-    with_session(&host_id, &session_id, &sink, {
-        let session_id = session_id.clone();
-        let sink = sink.clone();
-        move |mut handle| async move {
-            sink.emit(skillstar_ssh::progress::event(
-                &session_id,
-                skillstar_ssh::progress::Phase::Done,
-                skillstar_ssh::progress::Status::Start,
-                format!("reading {skill_name}/SKILL.md"),
-            ));
-            let res = skillstar_ssh::hub::read_remote_skill_content(
-                &mut handle,
-                &session_id,
-                &sink,
-                &skill_name,
-            )
+    with_session(&host_id, session_id, sink, |session_id, sink, mut handle| async move {
+        let sftp = sftp::open_sftp(&mut handle, &session_id, &sink)
             .await
-            .map_err(to_ssh_err);
-            sink.emit(skillstar_ssh::progress::event(
-                &session_id,
-                skillstar_ssh::progress::Phase::Done,
-                skillstar_ssh::progress::Status::Ok,
-                format!("read {skill_name}"),
-            ));
-            res
-        }
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn write_remote_skill_content(
-    host_id: String,
-    skill_name: String,
-    content: String,
-    app: AppHandle,
-) -> Result<(), AppError> {
-    let session_id = new_session_id();
-    let sink = TauriProgressSink { app };
-    with_session(&host_id, &session_id, &sink, {
-        let session_id = session_id.clone();
-        let sink = sink.clone();
-        move |mut handle| async move {
-            sink.emit(skillstar_ssh::progress::event(
-                &session_id,
-                skillstar_ssh::progress::Phase::Done,
-                skillstar_ssh::progress::Status::Start,
-                format!("writing {skill_name}/SKILL.md"),
-            ));
-            let res = skillstar_ssh::hub::write_remote_skill_content(
-                &mut handle,
-                &session_id,
-                &sink,
-                &skill_name,
-                &content,
-            )
+            .map_err(to_ssh_err)?;
+        sftp::delete_remote_skill(&sftp, &remote_path)
             .await
-            .map_err(to_ssh_err);
-            sink.emit(skillstar_ssh::progress::event(
-                &session_id,
-                skillstar_ssh::progress::Phase::Done,
-                skillstar_ssh::progress::Status::Ok,
-                format!("wrote {skill_name}"),
-            ));
-            res
-        }
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn pull_remote_skill(
-    host_id: String,
-    skill_name: String,
-    app: AppHandle,
-) -> Result<(), AppError> {
-    let session_id = new_session_id();
-    let sink = TauriProgressSink { app };
-    with_session(&host_id, &session_id, &sink, {
-        let session_id = session_id.clone();
-        let sink = sink.clone();
-        move |mut handle| async move {
-            sink.emit(skillstar_ssh::progress::event(
-                &session_id,
-                skillstar_ssh::progress::Phase::Done,
-                skillstar_ssh::progress::Status::Start,
-                format!("pulling {skill_name}"),
-            ));
-            let res = skillstar_ssh::hub::pull_remote_skill(
-                &mut handle,
-                &session_id,
-                &sink,
-                &skill_name,
-            )
-            .await
-            .map_err(to_ssh_err);
-            sink.emit(skillstar_ssh::progress::event(
-                &session_id,
-                skillstar_ssh::progress::Phase::Done,
-                skillstar_ssh::progress::Status::Ok,
-                format!("pulled {skill_name}"),
-            ));
-            res
-        }
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn install_remote_skill(
-    host_id: String,
-    url: String,
-    skill_name: String,
-    agent_skills_dir: String,
-    app: AppHandle,
-) -> Result<(), AppError> {
-    let session_id = new_session_id();
-    let sink = TauriProgressSink { app };
-    with_session(&host_id, &session_id, &sink, {
-        let session_id = session_id.clone();
-        let sink = sink.clone();
-        move |mut handle| async move {
-            sink.emit(skillstar_ssh::progress::event(
-                &session_id,
-                skillstar_ssh::progress::Phase::Done,
-                skillstar_ssh::progress::Status::Start,
-                format!("installing {skill_name} from remote git"),
-            ));
-            let res = skillstar_ssh::hub::install_remote_skill(
-                &mut handle,
-                &session_id,
-                &sink,
-                &url,
-                &skill_name,
-                &agent_skills_dir,
-            )
-            .await
-            .map_err(to_ssh_err);
-            sink.emit(skillstar_ssh::progress::event(
-                &session_id,
-                skillstar_ssh::progress::Phase::Done,
-                skillstar_ssh::progress::Status::Ok,
-                format!("installed {skill_name}"),
-            ));
-            res
-        }
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn toggle_remote_agent_link(
-    host_id: String,
-    skill_name: String,
-    agent_skills_dir: String,
-    enable: bool,
-    app: AppHandle,
-) -> Result<(), AppError> {
-    let session_id = new_session_id();
-    let sink = TauriProgressSink { app };
-    with_session(&host_id, &session_id, &sink, move |mut handle| async move {
-        skillstar_ssh::hub::toggle_remote_agent_link(
-            &mut handle,
-            &skill_name,
-            &agent_skills_dir,
-            enable,
-        )
-        .await
-        .map_err(to_ssh_err)
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn check_remote_skill_updates(
-    host_id: String,
-    app: AppHandle,
-) -> Result<Vec<RemoteSkillUpdateState>, AppError> {
-    let session_id = new_session_id();
-    let sink = TauriProgressSink { app };
-    with_session(&host_id, &session_id, &sink, {
-        let session_id = session_id.clone();
-        let sink = sink.clone();
-        move |mut handle| async move {
-            sink.emit(skillstar_ssh::progress::event(
-                &session_id,
-                skillstar_ssh::progress::Phase::Done,
-                skillstar_ssh::progress::Status::Start,
-                "checking remote skill updates",
-            ));
-            let res = skillstar_ssh::hub::check_remote_skill_updates(
-                &mut handle,
-                &session_id,
-                &sink,
-            )
-            .await
-            .map_err(to_ssh_err);
-            sink.emit(skillstar_ssh::progress::event(
-                &session_id,
-                skillstar_ssh::progress::Phase::Done,
-                skillstar_ssh::progress::Status::Ok,
-                "update check done",
-            ));
-            res
-        }
+            .map_err(to_ssh_err)
     })
     .await
 }
@@ -680,18 +461,48 @@ pub async fn check_remote_skill_updates(
 /// and authenticate with the system key file directly — no keyring involved.
 async fn with_session<T, F, Fut, S>(
     host_id: &str,
-    session_id: &str,
-    sink: &S,
+    session_id: String,
+    sink: S,
     f: F,
 ) -> Result<T, AppError>
 where
-    F: FnOnce(Session) -> Fut,
+    F: FnOnce(String, S, Session) -> Fut,
     Fut: std::future::Future<Output = Result<T, AppError>>,
     S: ProgressSink,
 {
     let (host, secrets) = resolve_host_for_session(host_id)?;
 
-    let handle = skillstar_ssh::client::connect(&host, &secrets, session_id, sink)
+    let handle = skillstar_ssh::client::connect(&host, &secrets, &session_id, &sink)
+        .await
+        .map_err(|e| {
+            sink.emit(skillstar_ssh::progress::event(
+                &session_id,
+                skillstar_ssh::progress::Phase::Error,
+                skillstar_ssh::progress::Status::Fail,
+                e.to_string(),
+            ));
+            to_ssh_err(e)
+        })?;
+    f(session_id, sink, handle).await
+}
+
+/// Open a discover connection (prod dials; tests may install [`mock_connector_slot`]).
+async fn open_discover_connection<S: ProgressSink>(
+    host: &SshHostDef,
+    secrets: &KeyringSecretStore,
+    session_id: &str,
+    sink: &S,
+) -> Result<DiscoverConnection, AppError> {
+    #[cfg(test)]
+    if let Some(mock) = mock_connector_slot::take() {
+        emit_mock_connect_success(host, session_id, sink);
+        return Ok(DiscoverConnection::Mock {
+            exec: mock.exec,
+            fs: mock.fs,
+        });
+    }
+
+    let handle = skillstar_ssh::client::connect(host, secrets, session_id, sink)
         .await
         .map_err(|e| {
             sink.emit(skillstar_ssh::progress::event(
@@ -702,7 +513,57 @@ where
             ));
             to_ssh_err(e)
         })?;
-    f(handle).await
+    Ok(DiscoverConnection::Live(handle))
+}
+
+/// Synthetic connect progress for mock connector tests (no network dial).
+#[cfg(test)]
+fn emit_mock_connect_success(host: &SshHostDef, session_id: &str, sink: &impl ProgressSink) {
+    use skillstar_ssh::progress::{Phase, Status, event};
+    let port = if host.port == 0 { 22 } else { host.port };
+    let addr = format!("{}:{port}", host.host);
+    sink.emit(event(
+        session_id,
+        Phase::Dial,
+        Status::Start,
+        format!("dialing {addr} (system:vps-yy mock)…"),
+    ));
+    sink.emit(event(
+        session_id,
+        Phase::Handshake,
+        Status::Ok,
+        "connected (0ms), handshake done",
+    ));
+    sink.emit(event(
+        session_id,
+        Phase::Auth,
+        Status::Start,
+        format!("authenticating as {} (publickey)…", host.username),
+    ));
+    sink.emit(event(
+        session_id,
+        Phase::Auth,
+        Status::Ok,
+        "authenticated (publickey)",
+    ));
+    sink.emit(event(
+        session_id,
+        Phase::HostKey,
+        Status::Ok,
+        "server key matches saved fingerprint",
+    ));
+    sink.emit(event(
+        session_id,
+        Phase::Sftp,
+        Status::Start,
+        "opening SFTP subsystem…",
+    ));
+    sink.emit(event(
+        session_id,
+        Phase::Sftp,
+        Status::Ok,
+        "SFTP ready",
+    ));
 }
 
 /// Resolve a `SshHostDef` from either the managed store or `~/.ssh/config`.
@@ -737,35 +598,25 @@ fn resolve_host(host_id: &str) -> Result<(SshHostDef, KeyringSecretStore), AppEr
 }
 
 #[cfg(test)]
-struct DiscoverSessionBypass {
-    exec: skillstar_ssh::remote_fs::MockRemoteExec,
-    fs: skillstar_ssh::remote_fs::MockRemoteFs,
+pub(crate) struct MockConnector {
+    pub exec: skillstar_ssh::remote_fs::MockRemoteExec,
+    pub fs: skillstar_ssh::remote_fs::MockRemoteFs,
 }
 
 #[cfg(test)]
-mod discover_bypass_slot {
-    use super::DiscoverSessionBypass;
+pub(crate) mod mock_connector_slot {
+    use super::MockConnector;
     use std::sync::{Mutex, OnceLock};
 
-    static SLOT: OnceLock<Mutex<Option<DiscoverSessionBypass>>> = OnceLock::new();
+    static SLOT: OnceLock<Mutex<Option<MockConnector>>> = OnceLock::new();
 
-    pub fn install(bypass: DiscoverSessionBypass) {
-        *SLOT.get_or_init(|| Mutex::new(None)).lock().unwrap() = Some(bypass);
+    pub fn install(mock: MockConnector) {
+        *SLOT.get_or_init(|| Mutex::new(None)).lock().unwrap() = Some(mock);
     }
 
-    pub fn take() -> Option<DiscoverSessionBypass> {
+    pub fn take() -> Option<MockConnector> {
         SLOT.get_or_init(|| Mutex::new(None)).lock().unwrap().take()
     }
-}
-
-#[cfg(test)]
-fn test_install_discover_bypass(bypass: DiscoverSessionBypass) {
-    discover_bypass_slot::install(bypass);
-}
-
-#[cfg(test)]
-fn test_take_discover_bypass() -> Option<DiscoverSessionBypass> {
-    discover_bypass_slot::take()
 }
 
 #[cfg(test)]
@@ -844,17 +695,6 @@ Host vps-yy
         }
     }
 
-    #[derive(Clone)]
-    struct TestProgressSink {
-        events: Arc<Mutex<Vec<SshProgressEvent>>>,
-    }
-
-    impl ProgressSink for TestProgressSink {
-        fn emit(&self, event: SshProgressEvent) {
-            self.events.lock().unwrap().push(event);
-        }
-    }
-
     const VPS_YY_CONFIG: &str = r#"
 Host vps-yy
     HostName 64.83.38.21
@@ -863,31 +703,51 @@ Host vps-yy
     IdentityFile ~/.ssh/id_ed25519_dstools
 "#;
 
-    #[test]
-    fn with_session_resolve_system_vps_yy() {
-        let _home = with_ssh_home(VPS_YY_CONFIG);
-        let (host, _) = resolve_host_for_session("system:vps-yy").expect("resolve");
-        assert_eq!(host.id, "system:vps-yy");
-        assert_eq!(host.host, "64.83.38.21");
-        assert_eq!(host.port, 2222);
+    fn format_event_transcript(events: &[SshProgressEvent]) -> String {
+        events
+            .iter()
+            .map(|e| format!("{:?}/{:?}: {}", e.phase, e.status, e.message))
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
-    /// `discover_remote_skills` command body: resolve system:vps-yy → scan probe (mock, no dial).
+    fn assert_phases_in_order(events: &[SshProgressEvent], expected: &[Phase]) {
+        let mut last = 0usize;
+        for phase in expected {
+            let pos = events
+                .iter()
+                .skip(last)
+                .position(|e| e.phase == *phase)
+                .unwrap_or_else(|| panic!("missing phase {phase:?} in {events:?}"));
+            last += pos + 1;
+        }
+    }
+
+    /// Full chain: `discover_remote_skills` for system:vps-yy via mock connector.
     #[tokio::test]
-    async fn discover_remote_skills_system_vps_yy_command() {
+    async fn discover_remote_skills_system_vps_yy() {
+        use tauri::Listener;
+
         let _home = with_ssh_home(VPS_YY_CONFIG);
-        test_install_discover_bypass(DiscoverSessionBypass {
+        mock_connector_slot::install(MockConnector {
             exec: skillstar_ssh::remote_fs::MockRemoteExec::default(),
             fs: skillstar_ssh::remote_fs::MockRemoteFs::vps_yy_layout(),
         });
-        let sink = TestProgressSink {
-            events: Arc::new(Mutex::new(Vec::new())),
-        };
-        let result = discover_remote_skills_impl("system:vps-yy".into(), sink.clone())
-            .await
-            .expect("discover_remote_skills command path");
 
-        assert_eq!(result.skills.len(), 2);
+        let app = tauri::test::mock_app();
+        let events = Arc::new(Mutex::new(Vec::<SshProgressEvent>::new()));
+        let events_c = events.clone();
+        let _listener = app.handle().listen(CONNECT_STREAM_CHANNEL, move |event| {
+            if let Ok(ev) = serde_json::from_str::<SshProgressEvent>(event.payload()) {
+                events_c.lock().unwrap().push(ev);
+            }
+        });
+
+        let result = discover_remote_skills("system:vps-yy".into(), app.handle().clone())
+            .await
+            .expect("discover_remote_skills for system:vps-yy");
+
+        assert_eq!(result.skills.len(), 2, "vps-yy mock must report 2 skills");
         assert_eq!(result.needs_migration_count, 1);
         assert!(
             result.skills.iter().any(|s| {
@@ -895,14 +755,35 @@ Host vps-yy
             })
         );
 
-        let events = sink.events.lock().unwrap();
-        assert!(events.iter().any(|e| {
-            e.phase == Phase::Scan && e.status == Status::Start && e.message.contains("scanning remote")
-        }));
-        assert!(events.iter().any(|e| e.phase == Phase::Scan && e.status == Status::Ok));
+        let events = events.lock().unwrap();
+        let transcript = format_event_transcript(&events);
+        eprintln!("vps-yy discover event transcript:\n{transcript}");
+
         assert!(
-            !events.iter().any(|e| e.phase == Phase::Done),
-            "with_session must not emit done before scan"
+            transcript.contains("vps-yy"),
+            "progress must mention vps-yy alias"
+        );
+        assert!(
+            transcript.contains("found 2 skill"),
+            "scan Ok must report found 2 skills, got:\n{transcript}"
+        );
+        assert!(events.iter().any(|e| {
+            e.phase == Phase::Scan
+                && e.status == Status::Start
+                && e.message.contains("scanning remote")
+        }));
+        assert!(events.iter().any(|e| e.phase == Phase::Done && e.status == Status::Ok));
+        assert_phases_in_order(
+            &events,
+            &[
+                Phase::Dial,
+                Phase::Handshake,
+                Phase::Auth,
+                Phase::HostKey,
+                Phase::Sftp,
+                Phase::Scan,
+                Phase::Done,
+            ],
         );
     }
 }

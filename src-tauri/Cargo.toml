@@ -70,6 +70,7 @@ skillstar-ssh = { version = "0.1.0", path = "../crates/skillstar-ssh" }
 
 [dev-dependencies]
 tempfile = "3"
+tauri = { version = "2", features = ["test"] }
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-updater = "2"
