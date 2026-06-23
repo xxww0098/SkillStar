@@ -130,7 +130,7 @@ pub(crate) fn agent_id_from_home_dir(name: &str) -> Option<String> {
     }
 }
 
-/// Shell script used by [`classify_remote_skill_layout`] — extracted for unit tests.
+/// Shell script used by [`resolve_skill_layout`] — extracted for unit tests.
 pub(crate) fn layout_classify_shell_script(skill_path: &str, skill_name: &str) -> String {
     let hub_content = format!("{REMOTE_HUB_CONTENT}/{skill_name}");
     let path_q = shell_quote(skill_path);

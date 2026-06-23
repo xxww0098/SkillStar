@@ -15,9 +15,7 @@ use skillstar_ssh::client::HostKeyState;
 use skillstar_ssh::progress::{ProgressSink, SshProgressEvent};
 use skillstar_ssh::store::{KeyringSecretStore, accept_host_key, load_hosts};
 use skillstar_ssh::sftp;
-use skillstar_ssh::{
-    HostsStore, Session, SshHostDef, SystemHost, find_host_by_alias, parse_system_hosts,
-};
+use skillstar_ssh::{HostsStore, Session, SshHostDef, SystemHost, parse_system_hosts};
 use tauri::{AppHandle, Emitter};
 
 /// Re-exported DTOs so the command signatures stay terse.
@@ -235,22 +233,25 @@ fn encode_host_key_state(
 /// and reports every `<dir>/skills/<name>` that contains a `SKILL.md`, grouped
 /// by agent. Replaces the old fixed-path probe so unknown agents (grok,
 /// .agents, …) are found without a hardcoded table.
-/// Run discovery on an authenticated session (shared by the Tauri command and tests).
-pub(crate) async fn discover_skills_on_session(
-    handle: &mut Session,
+/// Run discovery once SFTP is available (emits `scan` progress; shared by command + tests).
+pub(crate) async fn discover_skills_with_progress<E, F, S>(
+    exec: &mut E,
+    fs: &F,
     session_id: &str,
-    sink: &TauriProgressSink,
-) -> Result<DiscoveryResult, AppError> {
-    let sftp = sftp::open_sftp(handle, session_id, sink)
-        .await
-        .map_err(to_ssh_err)?;
+    sink: &S,
+) -> Result<DiscoveryResult, AppError>
+where
+    E: skillstar_ssh::client::RemoteExec,
+    F: skillstar_ssh::remote_fs::RemoteDiscoveryFs,
+    S: ProgressSink,
+{
     sink.emit(skillstar_ssh::progress::event(
         session_id,
         skillstar_ssh::progress::Phase::Scan,
         skillstar_ssh::progress::Status::Start,
         "scanning remote for skills…",
     ));
-    let res = sftp::discover_remote_skills(handle, &sftp)
+    let res = sftp::discover_remote_skills(exec, fs)
         .await
         .map_err(to_ssh_err);
     sink.emit(skillstar_ssh::progress::event(
@@ -266,13 +267,49 @@ pub(crate) async fn discover_skills_on_session(
     res
 }
 
-#[tauri::command]
-pub async fn discover_remote_skills(
+/// Open SFTP on a live session, then scan for skills.
+pub(crate) async fn discover_skills_on_session<S>(
+    handle: &mut Session,
+    session_id: &str,
+    sink: &S,
+) -> Result<DiscoveryResult, AppError>
+where
+    S: ProgressSink,
+{
+    let sftp = sftp::open_sftp(handle, session_id, sink)
+        .await
+        .map_err(to_ssh_err)?;
+    discover_skills_with_progress(handle, &sftp, session_id, sink).await
+}
+
+/// Resolve step shared by [`with_session`] and the discover command (testable).
+fn resolve_host_for_session(host_id: &str) -> Result<(SshHostDef, KeyringSecretStore), AppError> {
+    resolve_host(host_id)
+}
+
+/// Body of [`discover_remote_skills`] — resolve host, connect (or test bypass), scan.
+pub(crate) async fn discover_remote_skills_impl<S>(
     host_id: String,
-    app: AppHandle,
-) -> Result<DiscoveryResult, AppError> {
+    sink: S,
+) -> Result<DiscoveryResult, AppError>
+where
+    S: ProgressSink + Clone,
+{
     let session_id = new_session_id();
-    let sink = TauriProgressSink { app };
+
+    #[cfg(test)]
+    if let Some(mut bypass) = test_take_discover_bypass() {
+        // Same resolve step `with_session` performs before connect.
+        resolve_host_for_session(&host_id)?;
+        return discover_skills_with_progress(
+            &mut bypass.exec,
+            &bypass.fs,
+            &session_id,
+            &sink,
+        )
+        .await;
+    }
+
     with_session(&host_id, &session_id, &sink, {
         let session_id = session_id.clone();
         let sink = sink.clone();
@@ -281,6 +318,14 @@ pub async fn discover_remote_skills(
         }
     })
     .await
+}
+
+#[tauri::command]
+pub async fn discover_remote_skills(
+    host_id: String,
+    app: AppHandle,
+) -> Result<DiscoveryResult, AppError> {
+    discover_remote_skills_impl(host_id, TauriProgressSink { app }).await
 }
 
 #[tauri::command]
@@ -579,20 +624,15 @@ pub async fn toggle_remote_agent_link(
 ) -> Result<(), AppError> {
     let session_id = new_session_id();
     let sink = TauriProgressSink { app };
-    with_session(&host_id, &session_id, &sink, {
-        let session_id = session_id.clone();
-        let sink = sink.clone();
-        move |mut handle| async move {
-            let res = skillstar_ssh::hub::toggle_remote_agent_link(
-                &mut handle,
-                &skill_name,
-                &agent_skills_dir,
-                enable,
-            )
-            .await
-            .map_err(to_ssh_err);
-            res
-        }
+    with_session(&host_id, &session_id, &sink, move |mut handle| async move {
+        skillstar_ssh::hub::toggle_remote_agent_link(
+            &mut handle,
+            &skill_name,
+            &agent_skills_dir,
+            enable,
+        )
+        .await
+        .map_err(to_ssh_err)
     })
     .await
 }
@@ -638,17 +678,18 @@ pub async fn check_remote_skill_updates(
 ///
 /// System hosts are resolved fresh from `~/.ssh/config` each call (read-only)
 /// and authenticate with the system key file directly — no keyring involved.
-async fn with_session<T, F, Fut>(
+async fn with_session<T, F, Fut, S>(
     host_id: &str,
     session_id: &str,
-    sink: &TauriProgressSink,
+    sink: &S,
     f: F,
 ) -> Result<T, AppError>
 where
     F: FnOnce(Session) -> Fut,
     Fut: std::future::Future<Output = Result<T, AppError>>,
+    S: ProgressSink,
 {
-    let (host, secrets) = resolve_host(host_id)?;
+    let (host, secrets) = resolve_host_for_session(host_id)?;
 
     let handle = skillstar_ssh::client::connect(&host, &secrets, session_id, sink)
         .await
@@ -661,12 +702,6 @@ where
             ));
             to_ssh_err(e)
         })?;
-    sink.emit(skillstar_ssh::progress::event(
-        session_id,
-        skillstar_ssh::progress::Phase::Done,
-        skillstar_ssh::progress::Status::Ok,
-        "session ready",
-    ));
     f(handle).await
 }
 
@@ -702,18 +737,65 @@ fn resolve_host(host_id: &str) -> Result<(SshHostDef, KeyringSecretStore), AppEr
 }
 
 #[cfg(test)]
+struct DiscoverSessionBypass {
+    exec: skillstar_ssh::remote_fs::MockRemoteExec,
+    fs: skillstar_ssh::remote_fs::MockRemoteFs,
+}
+
+#[cfg(test)]
+mod discover_bypass_slot {
+    use super::DiscoverSessionBypass;
+    use std::sync::{Mutex, OnceLock};
+
+    static SLOT: OnceLock<Mutex<Option<DiscoverSessionBypass>>> = OnceLock::new();
+
+    pub fn install(bypass: DiscoverSessionBypass) {
+        *SLOT.get_or_init(|| Mutex::new(None)).lock().unwrap() = Some(bypass);
+    }
+
+    pub fn take() -> Option<DiscoverSessionBypass> {
+        SLOT.get_or_init(|| Mutex::new(None)).lock().unwrap().take()
+    }
+}
+
+#[cfg(test)]
+fn test_install_discover_bypass(bypass: DiscoverSessionBypass) {
+    discover_bypass_slot::install(bypass);
+}
+
+#[cfg(test)]
+fn test_take_discover_bypass() -> Option<DiscoverSessionBypass> {
+    discover_bypass_slot::take()
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use skillstar_ssh::AuthMethod;
-    use std::sync::{Mutex, OnceLock};
+    use skillstar_ssh::progress::{Phase, Status};
+    use std::sync::{Arc, Mutex, OnceLock};
 
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(()))
     }
 
-    fn with_ssh_home(content: &str, f: impl FnOnce()) {
-        let _lock = env_lock().lock().unwrap();
+    struct SshHomeGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        _temp: tempfile::TempDir,
+    }
+
+    impl Drop for SshHomeGuard {
+        fn drop(&mut self) {
+            // SAFETY: env_lock serialises HOME mutations across crate tests.
+            unsafe {
+                std::env::remove_var("HOME");
+            }
+        }
+    }
+
+    fn with_ssh_home(content: &str) -> SshHomeGuard {
+        let lock = env_lock().lock().unwrap();
         let tmp = tempfile::TempDir::new().unwrap();
         let cfg_dir = tmp.path().join(".ssh");
         std::fs::create_dir_all(&cfg_dir).unwrap();
@@ -722,15 +804,15 @@ mod tests {
         unsafe {
             std::env::set_var("HOME", tmp.path());
         }
-        f();
-        unsafe {
-            std::env::remove_var("HOME");
+        SshHomeGuard {
+            _lock: lock,
+            _temp: tmp,
         }
     }
 
     #[test]
     fn resolve_host_system_vps_yy_uses_ssh_config_key_auth() {
-        with_ssh_home(
+        let _home = with_ssh_home(
             r#"
 Host vps-yy
     HostName 64.83.38.21
@@ -738,62 +820,89 @@ Host vps-yy
     Port 2222
     IdentityFile ~/.ssh/id_ed25519_dstools
 "#,
-            || {
-                let (def, _secrets) =
-                    resolve_host("system:vps-yy").expect("system:vps-yy must resolve");
-                assert_eq!(def.id, "system:vps-yy");
-                assert_eq!(def.display_name, "vps-yy");
-                assert_eq!(def.host, "64.83.38.21");
-                assert_eq!(def.username, "root");
-                assert_eq!(def.port, 2222);
-                match def.auth_method {
-                    AuthMethod::Key { key_path } => {
-                        assert_eq!(key_path, "~/.ssh/id_ed25519_dstools");
-                    }
-                    other => panic!("expected key auth, got {other:?}"),
-                }
-            },
         );
+        let (def, _secrets) = resolve_host("system:vps-yy").expect("system:vps-yy must resolve");
+        assert_eq!(def.id, "system:vps-yy");
+        assert_eq!(def.display_name, "vps-yy");
+        assert_eq!(def.host, "64.83.38.21");
+        assert_eq!(def.username, "root");
+        assert_eq!(def.port, 2222);
+        match def.auth_method {
+            AuthMethod::Key { key_path } => {
+                assert_eq!(key_path, "~/.ssh/id_ed25519_dstools");
+            }
+            other => panic!("expected key auth, got {other:?}"),
+        }
     }
 
     #[test]
     fn resolve_host_system_missing_alias_errors() {
-        with_ssh_home("Host other\n    HostName 1.2.3.4\n", || {
-            match resolve_host("system:vps-yy") {
-                Err(e) => assert!(e.to_string().contains("vps-yy")),
-                Ok(_) => panic!("expected system:vps-yy to fail when alias is absent"),
-            }
-        });
+        let _home = with_ssh_home("Host other\n    HostName 1.2.3.4\n");
+        match resolve_host("system:vps-yy") {
+            Err(e) => assert!(e.to_string().contains("vps-yy")),
+            Ok(_) => panic!("expected system:vps-yy to fail when alias is absent"),
+        }
     }
 
-    /// system:vps-yy resolve → real `discover_remote_skills` on vps-yy mock tree.
-    #[tokio::test]
-    async fn vps_yy_resolve_then_discover_remote_skills() {
-        with_ssh_home(
-            r#"
+    #[derive(Clone)]
+    struct TestProgressSink {
+        events: Arc<Mutex<Vec<SshProgressEvent>>>,
+    }
+
+    impl ProgressSink for TestProgressSink {
+        fn emit(&self, event: SshProgressEvent) {
+            self.events.lock().unwrap().push(event);
+        }
+    }
+
+    const VPS_YY_CONFIG: &str = r#"
 Host vps-yy
     HostName 64.83.38.21
     User root
     Port 2222
     IdentityFile ~/.ssh/id_ed25519_dstools
-"#,
-            || {
-                let (def, _) = resolve_host("system:vps-yy").expect("system:vps-yy");
-                assert_eq!(def.host, "64.83.38.21");
-            },
-        );
-        let mut exec = skillstar_ssh::remote_fs::MockRemoteExec::default();
-        let fs = skillstar_ssh::remote_fs::MockRemoteFs::vps_yy_layout();
-        let result = sftp::discover_remote_skills(&mut exec, &fs)
+"#;
+
+    #[test]
+    fn with_session_resolve_system_vps_yy() {
+        let _home = with_ssh_home(VPS_YY_CONFIG);
+        let (host, _) = resolve_host_for_session("system:vps-yy").expect("resolve");
+        assert_eq!(host.id, "system:vps-yy");
+        assert_eq!(host.host, "64.83.38.21");
+        assert_eq!(host.port, 2222);
+    }
+
+    /// `discover_remote_skills` command body: resolve system:vps-yy → scan probe (mock, no dial).
+    #[tokio::test]
+    async fn discover_remote_skills_system_vps_yy_command() {
+        let _home = with_ssh_home(VPS_YY_CONFIG);
+        test_install_discover_bypass(DiscoverSessionBypass {
+            exec: skillstar_ssh::remote_fs::MockRemoteExec::default(),
+            fs: skillstar_ssh::remote_fs::MockRemoteFs::vps_yy_layout(),
+        });
+        let sink = TestProgressSink {
+            events: Arc::new(Mutex::new(Vec::new())),
+        };
+        let result = discover_remote_skills_impl("system:vps-yy".into(), sink.clone())
             .await
-            .expect("discover on mock vps-yy layout");
+            .expect("discover_remote_skills command path");
+
         assert_eq!(result.skills.len(), 2);
         assert_eq!(result.needs_migration_count, 1);
         assert!(
-            result
-                .skills
-                .iter()
-                .any(|s| s.name == "hub-skill" && s.layout == skillstar_ssh::RemoteSkillLayout::HubManaged)
+            result.skills.iter().any(|s| {
+                s.name == "hub-skill" && s.layout == skillstar_ssh::RemoteSkillLayout::HubManaged
+            })
+        );
+
+        let events = sink.events.lock().unwrap();
+        assert!(events.iter().any(|e| {
+            e.phase == Phase::Scan && e.status == Status::Start && e.message.contains("scanning remote")
+        }));
+        assert!(events.iter().any(|e| e.phase == Phase::Scan && e.status == Status::Ok));
+        assert!(
+            !events.iter().any(|e| e.phase == Phase::Done),
+            "with_session must not emit done before scan"
         );
     }
 }
