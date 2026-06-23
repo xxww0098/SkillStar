@@ -409,6 +409,31 @@ Host vps-yy
         });
     }
 
+    /// Full vps-yy fixture: key auth + non-default port (typical VPS ssh config).
+    #[test]
+    fn vps_yy_system_host_resolves_for_remote_probe() {
+        with_home(
+            r#"
+Host vps-yy
+    HostName 64.83.38.21
+    User root
+    Port 2222
+    IdentityFile ~/.ssh/id_ed25519_dstools
+"#,
+            |_| {
+                let h = find_host_by_alias("vps-yy").expect("vps-yy must parse");
+                assert_eq!(h.alias, "vps-yy");
+                assert_eq!(h.host, "64.83.38.21");
+                assert_eq!(h.username, "root");
+                assert_eq!(h.port, 2222);
+                assert_eq!(
+                    h.identity_file.as_deref(),
+                    Some("~/.ssh/id_ed25519_dstools")
+                );
+            },
+        );
+    }
+
     #[test]
     fn glob_equals_matches_star_and_question() {
         assert!(glob_equals("*.conf", "a.conf"));
