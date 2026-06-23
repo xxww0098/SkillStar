@@ -27,11 +27,8 @@ pub use sftp::{
     KNOWN_AGENT_SKILL_DIRS, DiscoveryResult, PushResult, RemoteAgentDir, RemoteAgentSkills,
     discover_remote_skills, read_remote_file, write_remote_file,
 };
-pub use hub::{
-    MigrateResult, check_remote_skill_updates, install_remote_skill, pull_remote_skill,
-    read_remote_skill_content, toggle_remote_agent_link, write_remote_skill_content,
-};
-pub use types::{AuthMethod, RemoteSkill, RemoteSkillContent, RemoteSkillLayout, RemoteSkillUpdateState, SshHostDef, SystemHost};
+pub use hub::MigrateResult;
+pub use types::{AuthMethod, RemoteSkill, RemoteSkillLayout, SshHostDef, SystemHost};
 pub use store::HostsStore;
 pub use system_config::{find_host_by_alias, parse_system_hosts};
 

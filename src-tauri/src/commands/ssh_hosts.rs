@@ -318,7 +318,7 @@ async fn with_discover_session<S: ProgressSink>(
         session_id,
         skillstar_ssh::progress::Phase::Done,
         skillstar_ssh::progress::Status::Ok,
-        "session ready",
+        "discovery complete",
     ));
     Ok(result)
 }
@@ -772,7 +772,11 @@ Host vps-yy
                 && e.status == Status::Start
                 && e.message.contains("scanning remote")
         }));
-        assert!(events.iter().any(|e| e.phase == Phase::Done && e.status == Status::Ok));
+        assert!(events.iter().any(|e| {
+            e.phase == Phase::Done
+                && e.status == Status::Ok
+                && e.message.contains("discovery complete")
+        }));
         assert_phases_in_order(
             &events,
             &[
