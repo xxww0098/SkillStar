@@ -109,6 +109,14 @@ const BUILTIN_AGENT_DEFS: &[(&str, &str, &str, &[&str], &str, Option<&str>)] = &
         ".zcode/skills",
         Some("zcode"),
     ),
+    (
+        "grok",
+        "Grok",
+        "agents/grok.svg",
+        &[".grok", "skills"],
+        ".grok/skills",
+        Some("grok"),
+    ),
 ];
 
 /// Owned form of a built-in agent definition, cached once.

@@ -9,6 +9,7 @@ const TOOL_LABELS: Record<McpToolId, string> = {
   "claude-desktop": "Claude Desktop",
   codex: "Codex",
   gemini: "Gemini CLI",
+  grok: "Grok",
   opencode: "OpenCode",
   zcode: "ZCode",
 };

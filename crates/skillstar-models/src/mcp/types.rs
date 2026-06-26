@@ -14,6 +14,7 @@ pub const MCP_TOOL_IDS: &[&str] = &[
     "claude-desktop",
     "codex",
     "gemini",
+    "grok",
     "opencode",
     "zcode",
 ];
@@ -25,6 +26,7 @@ pub fn mcp_tool_label(tool_id: &str) -> &'static str {
         "claude-desktop" => "Claude Desktop",
         "codex" => "Codex",
         "gemini" => "Gemini CLI",
+        "grok" => "Grok",
         "opencode" => "OpenCode",
         "zcode" => "ZCode",
         _ => "Unknown",

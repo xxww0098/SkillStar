@@ -191,31 +191,17 @@ pub fn write_codex_config_flat(
     // Set top-level managed fields
     table.insert(
         "model_provider".to_string(),
-        toml::Value::String("skillstar".to_string()),
+        toml::Value::String(CODEX_MANAGED_PROVIDER_KEY.to_string()),
     );
     table.insert(
         "model".to_string(),
         toml::Value::String(activation.model.clone()),
     );
 
-    // Build [model_providers.skillstar] section
-    let mut skillstar_section = toml::Table::new();
-    skillstar_section.insert(
-        "name".to_string(),
-        toml::Value::String("SkillStar".to_string()),
-    );
-    skillstar_section.insert(
-        "base_url".to_string(),
-        toml::Value::String(provider.base_url_openai.clone()),
-    );
-    skillstar_section.insert(
-        "wire_api".to_string(),
-        toml::Value::String(settings.wire_api.clone()),
-    );
-    skillstar_section.insert(
-        "requires_openai_auth".to_string(),
-        toml::Value::Boolean(settings.auth_mode == "api_key"),
-    );
+    // Build the typed `[model_providers.<managed>]` table from a single source
+    // of truth. `CodexModelProvider::from_activation` owns the field set
+    // (name / base_url / wire_api / requires_openai_auth / optional env_key).
+    let skillstar_section = CodexModelProvider::from_activation(provider, settings).to_toml_table();
 
     // Get or create [model_providers] table
     let model_providers = table
@@ -332,16 +318,6 @@ pub fn resync_active_tools(
                     backup_path: None,
                 },
             },
-            "zcode" => match sync_to_zcode(provider, &activation.model) {
-                Ok(r) => r,
-                Err(e) => ToolSyncResultFlat {
-                    tool_id: tool_id.clone(),
-                    success: false,
-                    config_path: None,
-                    error: Some(e.to_string()),
-                    backup_path: None,
-                },
-            },
             "gemini" => match sync_to_gemini(provider, &activation.model) {
                 Ok(r) => r,
                 Err(e) => ToolSyncResultFlat {
@@ -357,7 +333,7 @@ pub fn resync_active_tools(
                 success: false,
                 config_path: None,
                 error: Some(format!(
-                    "Unknown tool_id '{}'. Supported: claude-code, codex, opencode, gemini, zcode.",
+                    "Unknown tool_id '{}'. Supported: claude-code, codex, opencode, gemini.",
                     tool_id
                 )),
                 backup_path: None,

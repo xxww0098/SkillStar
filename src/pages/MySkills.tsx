@@ -5,6 +5,7 @@ import {
   useMySkillsRemoteHosts,
   useMySkillsScope,
 } from "../features/my-skills";
+import { CloudSkillsContent } from "../features/s3";
 import { RemoteSkillsContent, SshHostForm } from "../features/ssh";
 
 interface MySkillsProps {
@@ -45,7 +46,7 @@ export function MySkills({
           initialShareCode={initialShareCode}
           onClearShareCode={onClearShareCode}
         />
-      ) : (
+      ) : scope === "remote" ? (
         <RemoteSkillsContent
           host={remoteHosts.selectedHost}
           hostsLoading={remoteHosts.isLoadingHosts}
@@ -65,6 +66,8 @@ export function MySkills({
             />
           }
         />
+      ) : (
+        <CloudSkillsContent scopeSwitch={scopeSwitch} />
       )}
 
       {scope === "remote" && (

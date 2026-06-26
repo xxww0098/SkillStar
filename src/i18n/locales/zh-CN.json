@@ -110,6 +110,7 @@
     "proxyBypass": "绕过列表",
     "proxyBypassPlaceholder": "localhost,127.0.0.1,.local",
     "githubMirror": "GitHub 加速",
+    "s3Sync": "云同步 (S3)",
     "githubMirrorConfig": "加速源配置",
     "githubMirrorNotice": "加速源本质是中间代理，仅建议用于公开仓库。如果已有代理/VPN，可能无需启用。",
     "mirrorCustom": "自定义加速源",
@@ -304,7 +305,8 @@
     "agentRelinkFailed": "更新完成，但以下 Agent 部署刷新失败：",
     "scopeLabel": "Skill 库范围",
     "scopeLocal": "本地",
-    "scopeRemote": "远端 (SSH)"
+    "scopeRemote": "远端 (SSH)",
+    "scopeCloud": "云端 (S3)"
   },
   "toolbar": {
     "searchPlaceholder": "搜索技能...",
@@ -554,7 +556,7 @@
     "openTerminal": "在终端打开",
     "openTerminalHint": "在本项目目录打开终端，并启动已关联的智能体 CLI。",
     "opening": "正在启动…",
-    "bannerNoClis": "未检测到任何智能体 CLI（如 claude、codex、gemini、opencode）。请先安装并加入 PATH，然后重新打开本项目。",
+    "bannerNoClis": "未检测到任何智能体 CLI（如 claude、codex、gemini、grok、opencode）。请先安装并加入 PATH，然后重新打开本项目。",
     "bannerNoAgent": "请先选择一个要启动的智能体。",
     "bannerModelsCta": "模型与账号",
     "disabledEmptyPanes": "请先关联一个智能体。"
@@ -938,6 +940,17 @@
     "providerPlaceholder": "选择供应商…",
     "pickProviderFromGrid": "请先在用量页点击对应供应商的占位卡，再完成绑定与配置。",
     "pickProviderFromSidebar": "请先在左侧列表选择要绑定的订阅商。",
+    "setActive": "切为当前账号",
+    "resyncCli": "重新同步到 CLI",
+    "switchCliSuccess": "已切为当前账号并同步到 CLI",
+    "switchCliFailed": "已切为当前账号，但同步到 CLI 失败",
+    "openInWindow": "在新窗口打开",
+    "cardMissingId": "缺少订阅 id",
+    "cardActive": "当前",
+    "cardPin": "置顶",
+    "cardUnpin": "取消置顶",
+    "cardBalance": "余额",
+    "cardNoData": "暂无用量数据",
     "allSubscriptions": "全部订阅",
     "homeEmptyTitle": "还没有任何订阅",
     "homeEmptyHint": "主页只展示已绑定的订阅。在左侧选择 Cursor、Codex 等供应商即可绑定；绑定后会出现在这里。",
@@ -1214,7 +1227,16 @@
       "codexTitle": "Codex 参数",
       "codexSubtitle": "写入 ~/.codex/（config.toml、auth.json）— CLI、桌面端与 IDE 扩展共用此配置",
       "wireApi": "API 格式",
-      "authMode": "认证模式"
+      "authMode": "认证模式",
+      "authModeApiKey": "API Key",
+      "authModeOauth": "OAuth (ChatGPT)",
+      "authModeThirdParty": "第三方 API",
+      "envKeyTitle": "第三方 API Key",
+      "envKeyHint": "将此行加入你的 shell 配置文件（~/.zshrc 或 ~/.bash_profile），重启终端与 Codex 后生效。Codex 通过环境变量读取 Key，你的 ChatGPT OAuth 登录完全不受影响。",
+      "envKeyMissing": "此供应商尚未设置 API Key，请先在供应商编辑器中填写。",
+      "copyExport": "复制 export",
+      "copied": "已复制",
+      "copyFailed": "复制失败"
     },
     "appAi": {
       "title": "应用内 AI",
@@ -1576,6 +1598,69 @@
       "later": "稍后",
       "progress": "正在迁移 {{done}} / {{total}}…",
       "failed": "部分失败：{{names}}"
+    }
+  },
+  "s3": {
+    "addTarget": "新建云目标",
+    "editTarget": "编辑目标",
+    "test": "测试",
+    "testFail": "失败",
+    "empty": "还没有云同步目标",
+    "emptyHint": "添加一个 S3 兼容目标（Cloudflare R2、Backblaze B2、MinIO、七牛云…），即可在多设备间同步 skill。",
+    "securityNotice": "Secret Access Key 存储在系统钥匙串里，不会写入配置文件。删除目标会同时清理钥匙串条目。",
+    "confirmDelete": "确认删除云目标「{{name}}」？",
+    "push": "推送到云端",
+    "pull": "从云端拉取",
+    "restore": "安装所选",
+    "pushing": "推送中…",
+    "pulling": "拉取中…",
+    "restoring": "还原中…",
+    "manifestEmpty": "云端清单为空。先推送本地 skill 来创建清单。",
+    "manifestError": "读取云端清单失败。请检查目标后重试。",
+    "badgeInstalled": "已安装",
+    "badgeHub": "git",
+    "badgeLocal": "本地",
+    "selectTarget": "请在左侧选择云目标",
+    "selectTargetHint": "在「设置 → 云同步」中配置目标。",
+    "form": {
+      "displayName": "显示名称",
+      "endpointUrl": "Endpoint 地址",
+      "endpointHint": "AWS S3 可留空。R2 / MinIO / 七牛 / OSS 必填。",
+      "region": "区域",
+      "bucket": "Bucket",
+      "prefix": "前缀",
+      "prefixHint": "bucket 内的对象 key 前缀（如 skillstar/）。",
+      "accessKeyId": "Access Key ID",
+      "secretAccessKey": "Secret Access Key",
+      "secretHintExisting": "留空则保留已存储的密钥。",
+      "forcePathStyle": "路径风格寻址",
+      "forcePathHint": "MinIO 等自建服务需要开启。"
+    },
+    "console": {
+      "title": "同步控制台",
+      "toggle": "控制台",
+      "empty": "同步事件将显示在此。"
+    },
+    "toast": {
+      "targetAdded": "已添加云目标",
+      "targetAddFailed": "添加目标失败",
+      "targetUpdated": "已更新云目标",
+      "targetUpdateFailed": "更新目标失败",
+      "targetDeleted": "已删除云目标",
+      "targetDeleteFailed": "删除目标失败",
+      "testFailed": "连接测试失败",
+      "pushed": "已推送到云端",
+      "pushedDesc": "{{hub}} 个 git + {{local}} 个本地 skill",
+      "pushFailed": "推送失败",
+      "restored": "已还原 skill",
+      "restoredDesc": "新装 {{installed}} 个 · 已存在 {{existing}} 个",
+      "restoreFailed": "还原失败"
+    },
+    "restoreDialog": {
+      "title": "从云端安装",
+      "selectAll": "全选",
+      "install": "安装 {{count}} 个",
+      "searchPlaceholder": "筛选 skill…"
     }
   }
 }

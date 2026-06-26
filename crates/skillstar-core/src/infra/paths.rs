@@ -126,6 +126,19 @@ pub fn ssh_known_hosts_path() -> PathBuf {
     config_dir().join("ssh_known_hosts.json")
 }
 
+/// `config/s3_targets.toml` — S3 cloud sync target definitions (non-sensitive
+/// metadata only: endpoint, region, bucket, prefix, access key id;
+/// `secret_access_key` lives in the system keyring, keyed by target id).
+pub fn s3_targets_config_path() -> PathBuf {
+    config_dir().join("s3_targets.toml")
+}
+
+/// `state/sync_device.json` — this device's identity (hostname + suffix) so
+/// pushed manifests can record their origin.
+pub fn sync_device_id_path() -> PathBuf {
+    state_dir().join("sync_device.json")
+}
+
 /// `db/marketplace.db` — local-first marketplace snapshot DB.
 pub fn marketplace_db_path() -> PathBuf {
     db_dir().join("marketplace.db")

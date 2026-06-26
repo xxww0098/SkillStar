@@ -88,6 +88,34 @@ export interface MigrateResult {
   hub_content_path: string;
 }
 
+/** Aggregate result of a batch push: per-skill outcome + tally. */
+export interface BatchPushResult {
+  pushed: PushResult[];
+  /** Skills that failed to push, with the error message. */
+  failed: BatchPushFailure[];
+  total: number;
+  succeeded: number;
+}
+
+export interface BatchPushFailure {
+  skill_name: string;
+  error: string;
+}
+
+/** Content of a remote skill's SKILL.md read from the remote hub layout. */
+export interface RemoteSkillContent {
+  name: string;
+  content: string;
+  modified?: string;
+}
+
+/** Update availability state for a remote skill (hub-managed git repo). */
+export interface RemoteSkillUpdateState {
+  name: string;
+  /** Whether `git rev-list HEAD..@{u}` reports > 0 commits. */
+  update_available: boolean;
+}
+
 /** SSH remote host + skill commands. */
 export interface SshCommands {
   list_ssh_hosts: { args: Record<string, never>; result: SshHostListItem[] };
@@ -121,4 +149,34 @@ export interface SshCommands {
     result: MigrateResult;
   };
   delete_remote_skill: { args: { hostId: string; remotePath: string }; result: void };
+
+  /** Push many skills to the same host in one SSH session (non-atomic; per-skill failures collected). */
+  push_skills_to_remote: {
+    args: { hostId: string; skillNames: string[]; remoteDir: string };
+    result: BatchPushResult;
+  };
+  /** Read the SKILL.md content of a hub-managed remote skill. */
+  read_remote_skill_content: {
+    args: { hostId: string; skillName: string };
+    result: RemoteSkillContent;
+  };
+  /** Write raw text to a hub-managed remote skill's SKILL.md (atomic write). */
+  write_remote_skill_content: {
+    args: { hostId: string; skillName: string; content: string };
+    result: void;
+  };
+  /** `git pull --ff-only` a hub-managed remote skill (git clones only). */
+  pull_remote_skill: { args: { hostId: string; skillName: string }; result: void };
+  /** Toggle (create/remove) the agent symlink for a hub-managed skill. */
+  toggle_remote_agent_link: {
+    args: { hostId: string; skillName: string; agentSkillsDir: string; enable: boolean };
+    result: void;
+  };
+  /** Install a skill from a git URL directly onto the remote host (clone + link). */
+  install_remote_skill: {
+    args: { hostId: string; url: string; skillName: string; agentSkillsDir: string };
+    result: void;
+  };
+  /** Check update availability for all hub-managed skills on a host. */
+  check_remote_skill_updates: { args: { hostId: string }; result: RemoteSkillUpdateState[] };
 }

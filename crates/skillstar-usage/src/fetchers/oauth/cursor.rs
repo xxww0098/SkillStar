@@ -154,6 +154,7 @@ async fn finalize_subscription(
         access_token_encrypted: Some(crypto::encrypt(&access_token)),
         refresh_token_encrypted: Some(crypto::encrypt(&refresh_token)),
         access_token_expires_at: token_refresh::jwt_exp(&access_token),
+        id_token_encrypted: None,
         oauth_account_id: auth_id,
         oauth_region: None,
         requires_reauth: false,
@@ -430,45 +431,82 @@ fn resolve_plan_name(profile: Option<&StripeProfile>) -> String {
 ///     [████████░░░░░░░░░]
 /// ```
 ///
-/// Cursor reports values in **cents (USD)**. Sub-quotas only ship as
-/// percentages — Cursor doesn't expose the per-category cap.
+/// Cursor reports values in **cents (USD)** when available, but the current
+/// Dashboard payload frequently ships only `totalPercentUsed` without a cents
+/// total. The parser therefore treats the percentage as the primary signal and
+/// enriches with `breakdown.total` cents when present. Sub-quotas only ever
+/// ship as percentages, so they always render as `used / 100` mini-windows.
 fn parse_total_with_breakdown(usage: &Value) -> Option<UsageWindow> {
     let reset_at = usage
         .get("billingCycleEnd")
         .and_then(Value::as_str)
-        .and_then(parse_iso_epoch);
+        .and_then(parse_iso_epoch)
+        .or_else(|| {
+            pick_i64(
+                usage,
+                &[&["resetAt"], &["periodEnd"], &["billingCycleEnd"]],
+            )
+        });
 
-    if let Some(plan) = usage.pointer("/individualUsage/plan") {
-        // Total (included + bonus). Reconstruct used from totalPercentUsed
-        // because the raw `used` field caps at the included limit.
-        let total_cents = pick_i64(plan, &[&["breakdown", "total"]]);
-        let percent_total = plan.get("totalPercentUsed").and_then(Value::as_f64);
+    let sub_window = |label: &str, percent: f64| UsageWindow {
+        label: label.to_string(),
+        used: percent.round() as i64,
+        total: Some(100),
+        percent: Some(percent.round() as i32),
+        reset_at,
+        breakdown: Vec::new(),
+    };
 
-        let sub_window = |label: &str, percent: f64| UsageWindow {
-            label: label.to_string(),
-            used: percent.round() as i64,
-            total: Some(100),
-            percent: Some(percent.round() as i32),
-            reset_at,
-            breakdown: Vec::new(),
-        };
+    // Cursor ships multiple `usage-summary` shapes over time. The plan node has
+    // moved between `individualUsage.plan`, `individual_usage.plan`,
+    // `planUsage`, and `plan_usage`. Resolve defensively before reading.
+    if let Some(plan) = pick_plan_node(usage) {
         let mut sub_bars = Vec::new();
-        if let Some(p) = plan.get("autoPercentUsed").and_then(Value::as_f64) {
+        if let Some(p) = plan
+            .get("autoPercentUsed")
+            .and_then(Value::as_f64)
+            .or_else(|| plan.get("auto_percent_used").and_then(Value::as_f64))
+        {
             sub_bars.push(sub_window("Auto + Composer", p));
         }
-        if let Some(p) = plan.get("apiPercentUsed").and_then(Value::as_f64) {
+        if let Some(p) = plan
+            .get("apiPercentUsed")
+            .and_then(Value::as_f64)
+            .or_else(|| plan.get("api_percent_used").and_then(Value::as_f64))
+        {
             sub_bars.push(sub_window("API", p));
         }
 
-        if let (Some(p), Some(t)) = (percent_total, total_cents)
-            && t > 0
+        // Sub-quotas are only ever percentages; the per-category cap isn't
+        // exposed, so they stay as `used / 100` mini-windows either way.
+
+        // Percentages: `totalPercentUsed` ships on its own, without a cents
+        // total, on the current Dashboard payload. It alone is enough to show
+        // the bar — treat cents as an optional absolute-value enrichment.
+        let percent_total = plan
+            .get("totalPercentUsed")
+            .and_then(Value::as_f64)
+            .or_else(|| plan.get("total_percent_used").and_then(Value::as_f64))
+            .or_else(|| {
+                // used + limit ratio fallback (some accounts omit percent).
+                let used = pick_number(plan, &["used", "totalSpend", "total_spend"])?;
+                let limit = pick_number(plan, &["limit"])?;
+                (limit > 0.0).then_some((used / limit) * 100.0)
+            });
+
+        if let Some(p) = percent_total
+            && p.is_finite()
         {
-            let used = ((p / 100.0) * t as f64).round() as i64;
+            let percent_i = clamp_percent(p);
+            let total_cents = pick_i64(plan, &[&["breakdown", "total"]]).filter(|t| *t > 0);
+            let used = total_cents
+                .map(|t| ((p / 100.0) * t as f64).round() as i64)
+                .unwrap_or(percent_i as i64);
             return Some(UsageWindow {
                 label: "Total".to_string(),
                 used,
-                total: Some(t),
-                percent: Some(p.round() as i32),
+                total: total_cents.or(Some(100)),
+                percent: Some(percent_i),
                 reset_at,
                 breakdown: sub_bars,
             });
@@ -502,9 +540,52 @@ fn parse_total_with_breakdown(usage: &Value) -> Option<UsageWindow> {
         used,
         total,
         percent,
-        reset_at: pick_i64(usage, &[&["resetAt"], &["periodEnd"], &["billingCycleEnd"]]),
+        reset_at,
         breakdown: Vec::new(),
     })
+}
+
+/// Resolve the plan node across Cursor's known `usage-summary` shapes.
+/// Order mirrors what the in-app Dashboard currently ships first.
+fn pick_plan_node<'a>(usage: &'a Value) -> Option<&'a Value> {
+    usage
+        .pointer("/individualUsage/plan")
+        .or_else(|| usage.pointer("/individual_usage/plan"))
+        .or_else(|| usage.get("planUsage"))
+        .or_else(|| usage.get("plan_usage"))
+}
+
+fn clamp_percent(value: f64) -> i32 {
+    if !value.is_finite() || value <= 0.0 {
+        return 0;
+    }
+    if value >= 100.0 {
+        return 100;
+    }
+    value.round() as i32
+}
+
+/// Read a finite number from the first matching key on `root` (flat lookup).
+/// Mirrors cockpit-tools `pick_number` so string-encoded numbers stay valid.
+fn pick_number(root: &Value, keys: &[&str]) -> Option<f64> {
+    let obj = root.as_object()?;
+    for key in keys {
+        let Some(raw) = obj.get(*key) else {
+            continue;
+        };
+        if let Some(n) = raw.as_f64()
+            && n.is_finite()
+        {
+            return Some(n);
+        }
+        if let Some(text) = raw.as_str()
+            && let Ok(parsed) = text.trim().parse::<f64>()
+            && parsed.is_finite()
+        {
+            return Some(parsed);
+        }
+    }
+    None
 }
 
 fn parse_iso_epoch(s: &str) -> Option<i64> {
@@ -536,4 +617,134 @@ fn pick_i64(value: &Value, paths: &[&[&str]]) -> Option<i64> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn parses_cents_plus_percent_shape() {
+        // Classic shape: breakdown.total (cents) + totalPercentUsed.
+        let usage = json!({
+            "billingCycleEnd": "2026-07-01T00:00:00Z",
+            "individualUsage": {
+                "plan": {
+                    "breakdown": { "total": 9495 },
+                    "totalPercentUsed": 49.0,
+                    "autoPercentUsed": 51.0,
+                    "apiPercentUsed": 43.0
+                }
+            }
+        });
+        let w = parse_total_with_breakdown(&usage).expect("should parse");
+        assert_eq!(w.label, "Total");
+        assert_eq!(w.total, Some(9495));
+        assert_eq!(w.percent, Some(49));
+        // used reconstructed from percent × cents.
+        assert_eq!(w.used, 4653);
+        assert_eq!(w.breakdown.len(), 2);
+        assert_eq!(w.breakdown[0].label, "Auto + Composer");
+        assert_eq!(w.breakdown[0].percent, Some(51));
+        assert_eq!(w.breakdown[1].label, "API");
+        assert_eq!(w.breakdown[1].percent, Some(43));
+        assert!(w.reset_at.is_some());
+    }
+
+    #[test]
+    fn parses_percent_only_shape() {
+        // Current Dashboard payload: totalPercentUsed but NO breakdown.total.
+        // This is the case that previously returned None → empty-card bug.
+        let usage = json!({
+            "billingCycleEnd": "2026-07-01T00:00:00Z",
+            "individualUsage": {
+                "plan": {
+                    "totalPercentUsed": 49.5,
+                    "autoPercentUsed": 51.0,
+                    "apiPercentUsed": 43.0
+                }
+            }
+        });
+        let w = parse_total_with_breakdown(&usage).expect("percent-only must parse");
+        assert_eq!(w.label, "Total");
+        assert_eq!(w.percent, Some(50)); // 49.5 rounds
+        assert_eq!(w.total, Some(100)); // degrades to percent scale
+        assert_eq!(w.used, 50);
+        assert_eq!(w.breakdown.len(), 2);
+    }
+
+    #[test]
+    fn parses_used_limit_ratio_shape() {
+        // Accounts that ship used/limit instead of any percent field.
+        let usage = json!({
+            "billingCycleEnd": "2026-07-01T00:00:00Z",
+            "individualUsage": {
+                "plan": {
+                    "used": 2375,
+                    "limit": 9495
+                }
+            }
+        });
+        let w = parse_total_with_breakdown(&usage).expect("ratio fallback must parse");
+        assert_eq!(w.label, "Total");
+        assert_eq!(w.percent, Some(25)); // 2375/9495 ≈ 25.02
+    }
+
+    #[test]
+    fn parses_snake_case_plan_paths() {
+        // Cursor occasionally ships snake_case variants of the same node.
+        let usage = json!({
+            "individual_usage": {
+                "plan": {
+                    "total_percent_used": 80.0,
+                    "auto_percent_used": 90.0,
+                    "api_percent_used": 70.0
+                }
+            }
+        });
+        let w = parse_total_with_breakdown(&usage).expect("snake_case must parse");
+        assert_eq!(w.percent, Some(80));
+        assert_eq!(w.breakdown.len(), 2);
+    }
+
+    #[test]
+    fn parses_flat_plan_usage_aliases() {
+        // Older flat aliases: planUsage / plan_usage at the root.
+        let usage = json!({ "planUsage": { "totalPercentUsed": 10.0 } });
+        let w = parse_total_with_breakdown(&usage).expect("flat alias must parse");
+        assert_eq!(w.percent, Some(10));
+        assert!(w.breakdown.is_empty());
+    }
+
+    #[test]
+    fn legacy_shape_still_supported() {
+        // Pre-breakdown shape: fastRequestsUsed / fastRequestsLimit at root.
+        let usage = json!({
+            "fastRequestsUsed": 30,
+            "fastRequestsLimit": 100,
+            "resetAt": 1751328000
+        });
+        let w = parse_total_with_breakdown(&usage).expect("legacy must parse");
+        assert_eq!(w.label, "30d");
+        assert_eq!(w.used, 30);
+        assert_eq!(w.total, Some(100));
+        assert_eq!(w.percent, Some(30));
+        assert_eq!(w.reset_at, Some(1751328000));
+    }
+
+    #[test]
+    fn returns_none_when_nothing_matches() {
+        let usage = json!({ "randomField": "value" });
+        assert!(parse_total_with_breakdown(&usage).is_none());
+    }
+
+    #[test]
+    fn clamps_non_finite_percent() {
+        let usage = json!({
+            "individualUsage": { "plan": { "totalPercentUsed": f64::NAN } }
+        });
+        // NaN percent → plan branch skips → no legacy fields → None.
+        assert!(parse_total_with_breakdown(&usage).is_none());
+    }
 }

@@ -443,6 +443,11 @@ pub fn run() {
             commands::usage_commands::clear_active_subscription,
             commands::usage_commands::import_subscription_from_local,
             commands::usage_commands::get_subscription_api_key,
+            commands::usage_commands::switch_active_subscription_to_cli,
+            // Usage floating card windows (multi-window)
+            commands::usage_windows::open_usage_card_window,
+            commands::usage_windows::close_usage_card_window,
+            commands::usage_windows::close_all_usage_card_windows,
             // Fingerprint management (Phase 4)
             commands::fingerprints::list_fingerprints,
             commands::fingerprints::get_fingerprint,
@@ -468,6 +473,22 @@ pub fn run() {
             commands::push_skill_to_remote,
             commands::migrate_remote_skill_to_hub,
             commands::delete_remote_skill,
+            commands::push_skills_to_remote,
+            commands::read_remote_skill_content,
+            commands::write_remote_skill_content,
+            commands::pull_remote_skill,
+            commands::toggle_remote_agent_link,
+            commands::install_remote_skill,
+            commands::check_remote_skill_updates,
+            // S3 cloud sync
+            commands::list_s3_targets,
+            commands::add_s3_target,
+            commands::update_s3_target,
+            commands::delete_s3_target,
+            commands::test_s3_connection,
+            commands::push_skills_to_cloud,
+            commands::pull_cloud_manifest,
+            commands::install_from_cloud_manifest,
             update_tray_language,
         ])
         .build(tauri::generate_context!())

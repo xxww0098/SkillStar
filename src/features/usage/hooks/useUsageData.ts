@@ -147,6 +147,14 @@ export function useUsageData() {
     return updated;
   }, []);
 
+  /** Re-push the active account's credentials to its CLI config (retry path
+   *  for when a previous switch failed — e.g. missing id_token that has since
+   *  been refreshed via OAuth). Returns the switch outcome for the caller to
+   *  toast. */
+  const switchActiveToCli = useCallback(async (catalogId: string) => {
+    return await usageApi.switchActiveSubscriptionToCli(catalogId);
+  }, []);
+
   return useMemo(
     () => ({
       catalog,
@@ -164,6 +172,7 @@ export function useUsageData() {
       reorder,
       dismissAlert,
       setActive,
+      switchActiveToCli,
     }),
     [
       catalog,

@@ -109,9 +109,6 @@ pub async fn activate_tool(
         "opencode" => {
             tool_sync::sync_to_opencode(provider, &activation.model).map_err(|e| e.to_string())?
         }
-        "zcode" => {
-            tool_sync::sync_to_zcode(provider, &activation.model).map_err(|e| e.to_string())?
-        }
         "gemini" => {
             tool_sync::sync_to_gemini(provider, &activation.model).map_err(|e| e.to_string())?
         }
@@ -120,7 +117,7 @@ pub async fn activate_tool(
             success: false,
             config_path: None,
             error: Some(format!(
-                "Unknown tool_id '{}'. Supported: claude-code, codex, opencode, gemini, zcode.",
+                "Unknown tool_id '{}'. Supported: claude-code, codex, opencode, gemini.",
                 tool_id
             )),
             backup_path: None,
@@ -169,9 +166,6 @@ pub async fn deactivate_tool(
         "opencode" => {
             tool_sync::unsync_opencode().map_err(|e| e.to_string())?;
         }
-        "zcode" => {
-            tool_sync::unsync_zcode().map_err(|e| e.to_string())?;
-        }
         "gemini" => {
             tool_sync::unsync_gemini().map_err(|e| e.to_string())?;
         }
@@ -216,9 +210,6 @@ pub async fn update_tool_settings(
         "opencode" => {
             tool_sync::sync_to_opencode(provider, &activation.model).map_err(|e| e.to_string())?
         }
-        "zcode" => {
-            tool_sync::sync_to_zcode(provider, &activation.model).map_err(|e| e.to_string())?
-        }
         "gemini" => {
             tool_sync::sync_to_gemini(provider, &activation.model).map_err(|e| e.to_string())?
         }
@@ -227,7 +218,7 @@ pub async fn update_tool_settings(
             success: false,
             config_path: None,
             error: Some(format!(
-                "Unknown tool_id '{}'. Supported: claude-code, codex, opencode, gemini, zcode.",
+                "Unknown tool_id '{}'. Supported: claude-code, codex, opencode, gemini.",
                 tool_id
             )),
             backup_path: None,
@@ -273,10 +264,9 @@ pub async fn detect_tool_installation(tool_id: String) -> Result<serde_json::Val
         "codex" => "codex",
         "opencode" => "opencode",
         "gemini" => "gemini",
-        "zcode" => "zcode",
         _ => {
             return Err(format!(
-                "Unknown tool_id: '{}'. Supported: claude-code, codex, opencode, claude-desktop, gemini, zcode.",
+                "Unknown tool_id: '{}'. Supported: claude-code, codex, opencode, claude-desktop, gemini.",
                 tool_id
             ));
         }
@@ -290,7 +280,6 @@ pub async fn detect_tool_installation(tool_id: String) -> Result<serde_json::Val
             "codex" => home.join(".codex").is_dir(),
             "opencode" => home.join(".config").join("opencode").is_dir(),
             "gemini" => home.join(".gemini").is_dir(),
-            "zcode" => home.join(".zcode").is_dir(),
             _ => false,
         })
         .unwrap_or(false);
@@ -425,12 +414,9 @@ pub async fn push_provider_to_tool_config(
         "opencode" => {
             tool_sync::sync_to_opencode(provider, &activation.model).map_err(|e| e.to_string())?
         }
-        "zcode" => {
-            tool_sync::sync_to_zcode(provider, &activation.model).map_err(|e| e.to_string())?
-        }
         _ => {
             return Err(format!(
-                "Unknown tool_id '{}'. Supported: claude-code, codex, opencode, zcode.",
+                "Unknown tool_id '{}'. Supported: claude-code, codex, opencode.",
                 tool_id
             ));
         }
@@ -529,9 +515,6 @@ pub async fn resync_tool(
         "codex" => tool_sync::sync_to_codex(provider, &activation).map_err(|e| e.to_string())?,
         "opencode" => {
             tool_sync::sync_to_opencode(provider, &activation.model).map_err(|e| e.to_string())?
-        }
-        "zcode" => {
-            tool_sync::sync_to_zcode(provider, &activation.model).map_err(|e| e.to_string())?
         }
         other => return Err(format!("Unknown tool_id '{}'", other)),
     };

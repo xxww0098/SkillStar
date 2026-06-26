@@ -28,7 +28,10 @@ pub use sftp::{
     discover_remote_skills, read_remote_file, write_remote_file,
 };
 pub use hub::MigrateResult;
-pub use types::{AuthMethod, RemoteSkill, RemoteSkillLayout, SshHostDef, SystemHost};
+pub use types::{
+    AuthMethod, KnownHost, RemoteSkill, RemoteSkillContent, RemoteSkillLayout,
+    RemoteSkillUpdateState, SshHostDef, SystemHost,
+};
 pub use store::HostsStore;
 pub use system_config::{find_host_by_alias, parse_system_hosts};
 

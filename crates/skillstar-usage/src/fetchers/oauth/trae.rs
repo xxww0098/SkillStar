@@ -156,6 +156,7 @@ async fn finalize(
         access_token_encrypted: Some(crypto::encrypt(&access_token)),
         refresh_token_encrypted: refresh_token.as_deref().map(crypto::encrypt),
         access_token_expires_at: expires_at,
+        id_token_encrypted: None,
         oauth_account_id: None,
         oauth_region: Some(region.clone()),
         requires_reauth: false,

@@ -5,6 +5,7 @@ import type {
   OAuthStart,
   Subscription,
   SubscriptionAlert,
+  SwitchOutcome,
   UpdateSubscriptionInput,
   UsageSummary,
 } from "./types";
@@ -37,4 +38,14 @@ export const usageApi = {
   setActiveSubscription: (subscriptionId: string) =>
     invoke<Subscription>("set_active_subscription", { subscriptionId }),
   clearActiveSubscription: (catalogId: string) => invoke<void>("clear_active_subscription", { catalogId }),
+  // Re-push the active account's credentials to its CLI config (retry after a
+  // failed switch, e.g. once a missing id_token has been refreshed).
+  switchActiveSubscriptionToCli: (catalogId: string) =>
+    invoke<SwitchOutcome>("switch_active_subscription_to_cli", { catalogId }),
+
+  // ── Floating card windows (multi-window) ─────────────────────────
+  openUsageCardWindow: (subscriptionId: string) =>
+    invoke<void>("open_usage_card_window", { subscriptionId }),
+  closeUsageCardWindow: (subscriptionId: string) =>
+    invoke<void>("close_usage_card_window", { subscriptionId }),
 };

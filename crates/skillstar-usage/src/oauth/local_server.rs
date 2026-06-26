@@ -1,7 +1,7 @@
 //! Local HTTP listener for OAuth `redirect_uri` callbacks.
 //!
 //! Spawns `tiny_http` on `127.0.0.1:{port}`, waits for a single GET to
-//! `/auth/callback?code=...&state=...`, validates `state`, returns the code.
+//! a local callback carrying `code` and `state`, validates `state`, returns the code.
 //!
 //! Codex uses fixed ports with `/cancel` shutdown (mirrors the official CLI).
 //! Antigravity and other providers may bind arbitrary ports.
@@ -223,9 +223,6 @@ fn handle_request(url: &str, expected_state: &str) -> RequestOutcome {
     if path == "/cancel" {
         return RequestOutcome::Cancelled;
     }
-    if path != "/auth/callback" {
-        return RequestOutcome::Ignored;
-    }
     match parse_callback(url, expected_state) {
         Ok(code) => RequestOutcome::Code(code),
         Err(_) => RequestOutcome::Ignored,
@@ -317,6 +314,14 @@ mod tests {
     fn parse_ok() {
         let r = parse_callback("/auth/callback?code=abc&state=xyz", "xyz");
         assert_eq!(r.unwrap(), "abc");
+    }
+
+    #[test]
+    fn callback_path_is_accepted() {
+        assert!(matches!(
+            handle_request("/callback?code=abc&state=xyz", "xyz"),
+            RequestOutcome::Code(code) if code == "abc"
+        ));
     }
 
     #[test]

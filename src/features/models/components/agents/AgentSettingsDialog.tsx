@@ -246,6 +246,7 @@ export function AgentSettingsDialog({
               authMode={values.codexAuthMode}
               onChangeWireApi={(v) => setParam("codexWireApi", v)}
               onChangeAuthMode={(v) => setParam("codexAuthMode", v)}
+              provider={provider}
             />
           </section>
         ) : null}

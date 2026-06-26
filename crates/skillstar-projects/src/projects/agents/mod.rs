@@ -124,7 +124,9 @@ mod tests {
             .filter_map(|d| d.binary.map(|_| d.id.as_str()))
             .collect();
         let expected: std::collections::HashSet<&str> =
-            ["opencode", "claude", "codex", "gemini", "zcode"].into_iter().collect();
+            ["opencode", "claude", "codex", "gemini", "grok", "zcode"]
+                .into_iter()
+                .collect();
         assert_eq!(
             cli_agents, expected,
             "builtin agents with a binary name drifted from the expected set"

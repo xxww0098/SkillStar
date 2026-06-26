@@ -312,6 +312,7 @@ export const MCP_STORE = {
         codex: true,
         "claude-desktop": false,
         gemini: false,
+        grok: false,
         opencode: false,
         zcode: false,
       },
@@ -330,6 +331,7 @@ export const MCP_STORE = {
         codex: false,
         "claude-desktop": false,
         gemini: false,
+        grok: false,
         opencode: false,
         zcode: false,
       },
@@ -349,6 +351,7 @@ export const MCP_TOOL_STATUSES = [
   },
   { toolId: "codex", label: "Codex", configPath: "~/.codex/config.toml", installed: true, serverCount: 1 },
   { toolId: "gemini", label: "Gemini CLI", configPath: "~/.gemini/settings.json", installed: false, serverCount: 0 },
+  { toolId: "grok", label: "Grok", configPath: "~/.grok/config.toml", installed: true, serverCount: 0 },
   {
     toolId: "opencode",
     label: "OpenCode",
@@ -893,5 +896,61 @@ export const SYSTEM_SSH_HOSTS = [
     port: 22,
     username: "root",
     identity_file: "~/.ssh/id_ed25519_dstools",
+  },
+];
+
+// S3 cloud sync targets (browser dev only). Cloudflare R2 + a MinIO-style
+// path-style target exercise both endpoint flavours the form supports.
+export const S3_TARGETS = [
+  {
+    id: "s3_demo_r2",
+    display_name: "Cloudflare R2",
+    endpoint_url: "https://abc123.r2.cloudflarestorage.com",
+    region: "auto",
+    bucket: "skillstar",
+    prefix: "skillstar/",
+    access_key_id: "r2-access-key-id",
+    force_path_style: false,
+  },
+  {
+    id: "s3_demo_minio",
+    display_name: "Home MinIO",
+    endpoint_url: "http://192.168.1.10:9000",
+    region: "us-east-1",
+    bucket: "skills",
+    prefix: "",
+    access_key_id: "minioadmin",
+    force_path_style: true,
+  },
+];
+
+// A sample cloud manifest — git-backed skills + a local-authored skill — so the
+// Cloud scope shows realistic cards before any real push happens.
+export const CLOUD_MANIFEST_SAMPLE = [
+  {
+    kind: "hub" as const,
+    name: "react-best-practices",
+    description: "React 19 patterns, hooks, and server components.",
+    git_url: "https://github.com/owner/react-best-practices.git",
+    source_folder: "skills/react",
+    tree_hash: "abc123",
+    installed_locally: true,
+  },
+  {
+    kind: "hub" as const,
+    name: "pdf-tools",
+    description: "Read, merge, split, and OCR PDF files.",
+    git_url: "https://github.com/owner/pdf-tools.git",
+    installed_locally: false,
+  },
+  {
+    kind: "local" as const,
+    name: "my-team-workflow",
+    description: "Internal on-call runbook and triage scripts.",
+    tarball_key: "tarballs/my-team-workflow/deadbeef.tar.gz",
+    sha256: "deadbeef",
+    size_bytes: 8192,
+    uploaded_at: "2026-06-20T09:00:00Z",
+    installed_locally: false,
   },
 ];

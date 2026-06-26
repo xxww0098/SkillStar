@@ -132,6 +132,7 @@ async fn finalize_from_firebase(firebase_token: &str) -> UsageResult<Subscriptio
         access_token_encrypted: Some(crypto::encrypt(&registered.api_key)),
         refresh_token_encrypted: Some(crypto::encrypt(firebase_token)),
         access_token_expires_at: None,
+        id_token_encrypted: None,
         oauth_account_id: Some(registered.api_server_url),
         oauth_region: None,
         requires_reauth: false,

@@ -22,6 +22,7 @@
 //! | `claude-desktop` | `claude_desktop_config.json`           | `mcpServers.<name>` (stdio only, no `type`) |
 //! | `codex`          | `~/.codex/config.toml`                 | `[mcp_servers.<name>]` TOML table |
 //! | `gemini`         | `~/.gemini/settings.json`              | `mcpServers.<name>` (community JSON) |
+//! | `grok`           | `~/.grok/config.toml`                  | `[mcp_servers.<name>]` TOML (`headers` for HTTP) |
 //! | `opencode`       | `~/.config/opencode/opencode.json`     | `mcp.<name>` (`local`/`remote` form) |
 //! | `zcode`          | `~/.zcode/cli/config.json`             | `mcp.servers.<name>` (community JSON) |
 //!
@@ -66,7 +67,10 @@ pub use store::*;
 // ---------------------------------------------------------------------------
 
 mod specs;
-pub(crate) use specs::{canonical_spec, claude_desktop_spec, codex_toml_table, opencode_spec, zcode_cli_spec};
+pub(crate) use specs::{
+    canonical_spec, claude_desktop_spec, codex_toml_table, grok_toml_table, opencode_spec,
+    zcode_cli_spec,
+};
 
 // ---------------------------------------------------------------------------
 // Per-tool config paths, installed detection & live config IO

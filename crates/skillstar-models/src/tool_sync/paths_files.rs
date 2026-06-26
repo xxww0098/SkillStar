@@ -8,7 +8,7 @@ use super::*;
 
 /// Resolve the config file path for a given tool_id.
 ///
-/// Only accepts "claude-code", "codex", "opencode", "claude-desktop", "gemini", and "zcode"
+/// Only accepts "claude-code", "codex", "opencode", "claude-desktop", and "gemini"
 /// as valid tool IDs.
 /// Returns an error for any other tool_id to prevent arbitrary file writes.
 pub fn resolve_tool_config_path(tool_id: &str) -> Result<PathBuf> {
@@ -19,9 +19,8 @@ pub fn resolve_tool_config_path(tool_id: &str) -> Result<PathBuf> {
         "opencode" => Ok(resolve_opencode_config_path()?),
         "claude-desktop" => Ok(resolve_claude_desktop_config_path()?),
         "gemini" => Ok(resolve_gemini_env_path()?),
-        "zcode" => Ok(resolve_zcode_config_path()?),
         _ => bail!(
-            "Unknown tool_id: '{}'. Supported: claude-code, codex, opencode, claude-desktop, gemini, zcode.",
+            "Unknown tool_id: '{}'. Supported: claude-code, codex, opencode, claude-desktop, gemini.",
             tool_id
         ),
     }
@@ -33,8 +32,14 @@ pub fn resolve_opencode_config_path() -> Result<PathBuf> {
     Ok(home.join(".config").join("opencode").join("opencode.json"))
 }
 
-/// `~/.zcode/v2/config.json` — model providers (`provider.*`) use the OpenCode schema.
-/// MCP for the ZCode desktop app is **not** read from here; see `mcp::resolve_zcode_cli_mcp_config_path`.
+/// `~/.zcode/v2/config.json` — ZCode desktop config (OpenCode schema).
+///
+/// Retained as a shared path resolver: the MCP subsystem uses it to clean up
+/// stale OpenCode-style `mcp` entries from this file
+/// (`mcp::zcode_v2_opencode_mcp_remove`), and the Usage subsystem resolves it
+/// for `switch_zcode`. ZCode is **no longer** a model-workbench provider tool
+/// (no `sync_to_zcode`), so this path is intentionally not wired into
+/// `resolve_tool_config_path` anymore.
 pub fn resolve_zcode_config_path() -> Result<PathBuf> {
     let home = sync_home_dir()?;
     Ok(home.join(".zcode").join("v2").join("config.json"))
@@ -69,7 +74,6 @@ pub fn resolve_tool_config_file_path(tool_id: &str, file_id: &str) -> Result<Pat
         ("opencode", "opencode") => resolve_opencode_config_path(),
         ("claude-desktop", "config") => resolve_claude_desktop_config_path(),
         ("gemini", "env") => resolve_gemini_env_path(),
-        ("zcode", "config") => resolve_zcode_config_path(),
         _ => bail!("Unknown tool config file: {tool_id}/{file_id}"),
     }
 }
@@ -121,17 +125,6 @@ pub fn list_tool_config_files(tool_id: &str) -> Result<Vec<ToolConfigFileInfo>> 
                 managed_by_skillstar: true,
             }])
         }
-        "zcode" => {
-            let path = resolve_zcode_config_path()?;
-            Ok(vec![ToolConfigFileInfo {
-                file_id: "config".to_string(),
-                label: "config.json".to_string(),
-                path: path.to_string_lossy().to_string(),
-                format: "json".to_string(),
-                exists: path.exists(),
-                managed_by_skillstar: true,
-            }])
-        }
         "claude-desktop" => {
             let path = resolve_claude_desktop_config_path()?;
             Ok(vec![ToolConfigFileInfo {
@@ -177,10 +170,6 @@ fn default_empty_config_content(tool_id: &str, file_id: &str) -> String {
             "model_provider = \"skillstar\"\nmodel = \"\"\n\n[model_providers.skillstar]\nname = \"SkillStar\"\nbase_url = \"\"\nwire_api = \"responses\"\nrequires_openai_auth = true\n".to_string()
         }
         ("opencode", "opencode") => {
-            "{\n  \"$schema\": \"https://opencode.ai/config.json\",\n  \"provider\": {}\n}\n".to_string()
-        }
-        // ZCode shares the OpenCode schema.
-        ("zcode", "config") => {
             "{\n  \"$schema\": \"https://opencode.ai/config.json\",\n  \"provider\": {}\n}\n".to_string()
         }
         // Claude Desktop only honours `mcpServers` — start with an empty list so the user
@@ -378,7 +367,6 @@ pub fn get_tool_config_targets() -> Result<Vec<ToolConfigTarget>> {
         ("codex", "Codex"),
         ("opencode", "OpenCode"),
         ("gemini", "Gemini CLI"),
-        ("zcode", "ZCode"),
     ];
     let mut targets = Vec::new();
 
@@ -439,7 +427,7 @@ fn detect_current_provider(tool_id: &str, path: &Path) -> Result<Option<String>>
             }
             Ok(None)
         }
-        "opencode" | "zcode" => {
+        "opencode" => {
             let content = std::fs::read_to_string(path)?;
             let json: Value = serde_json::from_str(&content)?;
             if let Some(name) = json

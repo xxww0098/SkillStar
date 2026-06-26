@@ -73,8 +73,15 @@ pub struct SwitchResult {
 }
 
 /// Response for `get_providers_flat` — returns the full flat store contents.
+///
+/// Field names are intentionally snake_case (no `rename_all = "camelCase"`)
+/// because the frontend `FlatProvidersResponse` type and every consumer reads
+/// `tool_activations` with an underscore. An earlier `rename_all` here
+/// serialized that field as `toolActivations`, so the frontend always saw
+/// `undefined` and every agent card reported "未接入" (inactive) even after a
+/// successful activation + disk sync. `version` / `providers` are single words,
+/// so dropping the attribute leaves them unchanged.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct FlatProvidersResponse {
     pub version: u32,
     pub providers: Vec<ProviderEntryFlat>,

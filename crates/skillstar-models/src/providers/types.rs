@@ -157,7 +157,9 @@ pub struct ProviderEntryFlat {
     /// Codex API format: `"responses"` (default) or `"chat"`.
     #[serde(default = "default_codex_wire_api")]
     pub codex_wire_api: String,
-    /// Codex auth mode: `"api_key"` (default) or `"oauth"`.
+    /// Codex auth mode: `"api_key"` (default, writes `OPENAI_API_KEY`),
+    /// `"oauth"` (preserves ChatGPT OAuth token), or `"third_party"` (routes
+    /// the key through `env_key` so a ChatGPT OAuth login can coexist).
     #[serde(default = "default_codex_auth_mode")]
     pub codex_auth_mode: String,
 }

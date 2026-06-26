@@ -89,7 +89,7 @@ pub fn read_servers_from_tool(tool_id: &str) -> Result<Vec<McpServerEntry>> {
         .with_context(|| format!("Failed to read {}", path.display()))?;
     let mut out = Vec::new();
     match tool_id {
-        "codex" => {
+        "codex" | "grok" => {
             let root: toml::Table = toml::from_str(&content)
                 .with_context(|| format!("Failed to parse {}", path.display()))?;
             if let Some(servers) = root.get("mcp_servers").and_then(|v| v.as_table()) {

@@ -28,6 +28,9 @@ pub enum AppError {
     #[error("SSH error: {0}")]
     Ssh(String),
 
+    #[error("Sync error: {0}")]
+    Sync(String),
+
     #[error("Bundle error: {0}")]
     Bundle(String),
 

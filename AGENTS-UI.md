@@ -65,7 +65,7 @@ src/
 
 ## Models Provider UI
 
-The Models mode follows a strict "职责分离" IA: **agent activation has exactly one entry point (the agent cards row)**; the provider drawer manages ONLY provider data. Tool-specific settings shown on the agent side (Claude tier mapping, Codex wire_api/auth_mode) still persist on the provider record via `update_provider_flat` — only their presentation moved.
+The Models mode follows a strict "职责分离" IA: **agent activation has exactly one entry point (the agent cards row)**; the provider drawer manages ONLY provider data. Tool-specific settings shown on the agent side (Claude tier mapping, Codex `wire_api` + three-state `auth_mode` = `api_key` | `oauth` | `third_party`) still persist on the provider record via `update_provider_flat` — only their presentation moved.
 
 - The Models mode is a **single hub page** (`pages/Models.tsx` → `features/models/components/hub/ModelsHub.tsx`). The old four-subpage split has been removed; `#models/<sub>` hashes redirect to `#models`.
 - Hub layout (top-down):
@@ -83,7 +83,7 @@ The Models mode follows a strict "职责分离" IA: **agent activation has exact
 - Endpoint probe: OpenAI bases use `GET /models`; URLs containing `/anthropic` use `POST /messages` (avoids false 404 on DeepSeek Anthropic gateway). Same logic for **端点测速** and **深度连接测试** (empty model).
 - Agent registry facts (`lib/agentRegistry.ts` — extend THERE when adding an agent, see ADDING-AN-AGENT.md):
   - `claude-code` writes `~/.claude/settings.json` (Claude Code CLI only — Anthropic's standalone desktop app stores config elsewhere and is not synced).
-  - `codex` writes `~/.codex/config.toml` + `~/.codex/auth.json` — the same `~/.codex/` directory is read by the Codex CLI, the `codex app` desktop experience, and the official VS Code / Cursor / Windsurf IDE extensions, so a single Codex binding covers every form-factor.
+  - `codex` writes `~/.codex/config.toml` + `~/.codex/auth.json` — the same `~/.codex/` directory is read by the Codex CLI, the `codex app` desktop experience, and the official VS Code / Cursor / Windsurf IDE extensions, so a single Codex binding covers every form-factor. The `CodexSettingsForm` auth-mode segmented control is **three-state**: `API Key` (writes `OPENAI_API_KEY` to `auth.json`), `OAuth (ChatGPT)` (leaves `auth.json` untouched so the ChatGPT token survives), and `Third-Party API` (writes an `env_key` like `SKILLSTAR_<ID_PREFIX>_KEY` into `[model_providers.skillstar]` + `requires_openai_auth=false`; `auth.json` stays untouched, so a concurrent ChatGPT OAuth login can coexist with the third-party model). In `Third-Party API` mode the form renders a read-only hint card with the env var name, a masked key preview, and a one-click "copy `export` command" button (sonner toast on success) — SkillStar never writes the user's shell rc; the user pastes the `export` line into `~/.zshrc` themselves.
   - `opencode` writes `~/.config/opencode/opencode.json`; `gemini` writes `~/.gemini/.env`.
 - **Sidebar in Models mode** renders the minimal `ModelsSidebar`: intro card with `新增供应商` + a "最近" rail of up to 6 providers. Clicking a recent provider requests the edit drawer via the `modelsDrawerRequest` navigation event (request-nonce pattern, like `usageCreateRequest`).
 - **CommandPalette** in Models mode exposes a single `Models 工作台` action.

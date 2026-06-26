@@ -175,6 +175,10 @@ pub(crate) fn sync_to_claude_code_inner(
     // Build managed fields for the env block. The tier-model overrides
     // (Haiku/Sonnet/Opus) come from `provider.meta`; each is written when set,
     // or passed as Null (→ key removed) when the user left it blank.
+    // `ANTHROPIC_MODEL` follows the same rule: an empty/whitespace model
+    // (e.g. a provider with no `default_model` activated without an explicit
+    // model) is treated as Null so Claude Code doesn't receive an invalid
+    // `"ANTHROPIC_MODEL": ""` that breaks model resolution.
     let managed_fields: Vec<(&str, Value)> = vec![
         (
             "ANTHROPIC_BASE_URL",
@@ -184,7 +188,7 @@ pub(crate) fn sync_to_claude_code_inner(
             "ANTHROPIC_AUTH_TOKEN",
             Value::String(provider.api_key.clone()),
         ),
-        ("ANTHROPIC_MODEL", Value::String(model.to_string())),
+        ("ANTHROPIC_MODEL", trim_or_null(model)),
         (
             "ANTHROPIC_DEFAULT_HAIKU_MODEL",
             meta_model_field(provider, "claude_haiku_model"),
@@ -218,6 +222,19 @@ fn meta_model_field(provider: &ProviderEntryFlat, key: &str) -> Value {
         .filter(|s| !s.is_empty())
         .map(|s| Value::String(s.to_string()))
         .unwrap_or(Value::Null)
+}
+
+/// Non-empty trimmed string → `Value::String`; empty/whitespace → `Value::Null`
+/// (which `merge_json_env_write` treats as "remove the key"). Used for
+/// `ANTHROPIC_MODEL` so an empty model selection is dropped instead of written
+/// as an invalid `""` value.
+fn trim_or_null(s: &str) -> Value {
+    let t = s.trim();
+    if t.is_empty() {
+        Value::Null
+    } else {
+        Value::String(t.to_string())
+    }
 }
 
 /// Sync a provider's credentials to Codex's config files.
@@ -288,8 +305,12 @@ fn sync_to_codex_inner(
     let mut first_backup: Option<PathBuf> = None;
 
     // --- Write auth.json ---
-    if settings.auth_mode == "api_key" {
-        // Create rolling backup if file exists
+    // Only the official API-key mode touches `auth.json`: it writes
+    // `OPENAI_API_KEY`. The OAuth and third_party modes NEVER touch it, so a
+    // pre-existing ChatGPT OAuth token survives intact (this is the invariant
+    // that lets "OAuth login + third-party API" coexist).
+    if !settings.preserves_oauth_token() {
+        // `api_key` mode: stamp the official key into auth.json.
         if auth_path.exists() {
             let backup = create_rolling_backup(&auth_path)?;
             if first_backup.is_none() {
@@ -307,18 +328,10 @@ fn sync_to_codex_inner(
         let auth_fields: Vec<(&str, Value)> =
             vec![("OPENAI_API_KEY", Value::String(provider.api_key.clone()))];
         merge_json_write(&auth_path, &auth_fields)?;
-    } else {
-        // OAuth mode: clear or skip OPENAI_API_KEY so Codex CLI handles auth itself
-        if auth_path.exists() {
-            let backup = create_rolling_backup(&auth_path)?;
-            if first_backup.is_none() {
-                first_backup = Some(backup);
-            }
-            let auth_fields: Vec<(&str, Value)> =
-                vec![("OPENAI_API_KEY", Value::String("".to_string()))];
-            merge_json_write(&auth_path, &auth_fields)?;
-        }
     }
+    // OAuth / third_party: intentionally do nothing to auth.json. The API key
+    // for third_party is delivered via `env_key` in config.toml (the UI tells
+    // the user to `export` it in their shell profile).
 
     // --- Write config.toml ---
     // Create rolling backup if file exists
@@ -356,32 +369,6 @@ pub fn sync_to_opencode(provider: &ProviderEntryFlat, model: &str) -> Result<Too
         }),
         Err(e) => Ok(ToolSyncResultFlat {
             tool_id: "opencode".to_string(),
-            success: false,
-            config_path: Some(config_path_str),
-            error: Some(e.to_string()),
-            backup_path: None,
-        }),
-    }
-}
-
-/// Sync a provider to ZCode's `~/.zcode/v2/config.json` under `provider.skillstar`.
-///
-/// ZCode uses the OpenCode config schema verbatim, so this reuses
-/// [`sync_to_opencode_inner`] and only differs in the resolved config path.
-pub fn sync_to_zcode(provider: &ProviderEntryFlat, model: &str) -> Result<ToolSyncResultFlat> {
-    let config_path = resolve_zcode_config_path()?;
-    let config_path_str = config_path.to_string_lossy().to_string();
-
-    match sync_to_opencode_inner(provider, model, &config_path) {
-        Ok(backup_path) => Ok(ToolSyncResultFlat {
-            tool_id: "zcode".to_string(),
-            success: true,
-            config_path: Some(config_path_str),
-            error: None,
-            backup_path: backup_path.map(|p| p.to_string_lossy().to_string()),
-        }),
-        Err(e) => Ok(ToolSyncResultFlat {
-            tool_id: "zcode".to_string(),
             success: false,
             config_path: Some(config_path_str),
             error: Some(e.to_string()),
@@ -553,18 +540,9 @@ pub fn unsync_opencode() -> Result<()> {
     unsync_opencode_at(&config_path)
 }
 
-/// Remove managed provider block from ZCode's `~/.zcode/v2/config.json`.
-/// ZCode uses the OpenCode schema, so the removal logic is identical — only the
-/// config path differs.
-pub fn unsync_zcode() -> Result<()> {
-    let config_path = resolve_zcode_config_path()?;
-    unsync_opencode_at(&config_path)
-}
-
 /// Shared core: remove the `provider.skillstar` block from an OpenCode-schema
-/// config file (used by both OpenCode and ZCode). Exposed `pub(crate)` so the
-/// unit tests can drive it against an isolated temp path instead of the shared
-/// sandbox HOME.
+/// config file. Exposed `pub(crate)` so the unit tests can drive it against an
+/// isolated temp path instead of the shared sandbox HOME.
 pub(crate) fn unsync_opencode_at(config_path: &Path) -> Result<()> {
     if !config_path.exists() {
         return Ok(());

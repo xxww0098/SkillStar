@@ -1,5 +1,6 @@
 import {
   Bot,
+  Cloud,
   EyeOff,
   Globe,
   HardDrive,
@@ -19,6 +20,7 @@ export const SETTINGS_SECTIONS: { id: string; labelKey: string; icon: LucideIcon
   { id: "settings-agents", labelKey: "settings.agentConnections", icon: Unlink },
   { id: "settings-proxy", labelKey: "settings.networkProxy", icon: Globe },
   { id: "settings-mirror", labelKey: "settings.githubMirror", icon: Zap },
+  { id: "settings-s3", labelKey: "settings.s3Sync", icon: Cloud },
   { id: "settings-ai", labelKey: "settings.aiProvider", icon: Sparkles },
   { id: "settings-acp", labelKey: "settings.acpTitle", icon: Bot },
   { id: "settings-background", labelKey: "settings.backgroundRun", icon: EyeOff },

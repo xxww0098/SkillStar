@@ -55,6 +55,7 @@ fn sync_server_to_tool_inner(entry: &McpServerEntry, tool_id: &str) -> Result<Op
             let _ = zcode_v2_opencode_mcp_remove(&entry.name);
         }
         "codex" => codex_upsert(&path, &entry.name, codex_toml_table(entry))?,
+        "grok" => codex_upsert(&path, &entry.name, grok_toml_table(entry))?,
         _ => bail!("Unsupported tool '{tool_id}'"),
     }
     Ok(backup)
@@ -96,7 +97,7 @@ fn remove_server_from_tool_inner(name: &str, tool_id: &str) -> Result<Option<Pat
             zcode_cli_remove(&path, name)?;
             let _ = zcode_v2_opencode_mcp_remove(name);
         }
-        "codex" => codex_remove(&path, name)?,
+        "codex" | "grok" => codex_remove(&path, name)?,
         _ => bail!("Unsupported tool '{tool_id}'"),
     }
     Ok(backup)

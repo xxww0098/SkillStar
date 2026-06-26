@@ -230,7 +230,7 @@ fn test_sync_provider_to_all_tools_isolation() {
 #[test]
 fn test_get_tool_config_targets_returns_both_tools() {
     let targets = get_tool_config_targets().unwrap();
-    assert_eq!(targets.len(), 5);
+    assert_eq!(targets.len(), 4);
 
     let claude_target = targets.iter().find(|t| t.tool_id == "claude-code").unwrap();
     assert_eq!(claude_target.display_name, "Claude Code");
@@ -476,6 +476,40 @@ fn test_sync_to_claude_code_inner_fails_without_anthropic_url() {
 }
 
 #[test]
+fn test_sync_to_claude_code_inner_empty_model_skips_key() {
+    // Regression: an empty model (provider with no default_model, activated
+    // without an explicit model) must NOT be written as `"ANTHROPIC_MODEL": ""`
+    // — that produces an invalid Claude Code config. Instead the key is dropped
+    // (Null → removed by merge_json_env_write), while BASE_URL/AUTH_TOKEN still
+    // land in the env block.
+    let tmp = TempDir::new().unwrap();
+    let config_path = tmp.path().join(".claude").join("settings.json");
+    let provider = make_test_provider_flat();
+
+    let result = sync_to_claude_code_inner(&provider, "", &config_path).unwrap();
+    assert!(result.is_none(), "no backup expected for a new file");
+
+    let content = std::fs::read_to_string(&config_path).unwrap();
+    let parsed: Value = serde_json::from_str(&content).unwrap();
+    let env = parsed.get("env").unwrap().as_object().unwrap();
+
+    // Credentials still written.
+    assert_eq!(
+        env.get("ANTHROPIC_BASE_URL").unwrap().as_str().unwrap(),
+        "https://api.example.com/anthropic"
+    );
+    assert_eq!(
+        env.get("ANTHROPIC_AUTH_TOKEN").unwrap().as_str().unwrap(),
+        "sk-test-key-flat-12345"
+    );
+    // Empty model is dropped, not written as "".
+    assert!(
+        !env.contains_key("ANTHROPIC_MODEL"),
+        "expected ANTHROPIC_MODEL to be absent for empty model, got: {env:?}"
+    );
+}
+
+#[test]
 fn test_write_codex_config_flat_new_file() {
     let tmp = TempDir::new().unwrap();
     let codex_dir = tmp.path().join(".codex");
@@ -594,98 +628,164 @@ base_url = "https://custom.example.com"
 }
 
 // ---------------------------------------------------------------------------
-// ZCode (OpenCode-schema profile under ~/.zcode/v2/config.json)
+// Three-state auth_mode (api_key / oauth / third_party)
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_resolve_tool_config_path_zcode() {
-    use_sandbox_home();
-    let path = resolve_tool_config_path("zcode").unwrap();
-    let path_str = path.to_string_lossy();
-    assert!(
-        path_str.contains(".zcode"),
-        "expected .zcode in path, got {path_str}"
-    );
-    assert!(
-        path_str.contains("v2"),
-        "expected v2 subdir, got {path_str}"
-    );
-    assert!(path_str.ends_with("config.json"));
+/// Helper: build a `ToolActivation` with explicit Codex settings.
+fn make_codex_activation(provider: &ProviderEntryFlat, settings: CodexSettings) -> ToolActivation {
+    ToolActivation {
+        provider_id: provider.id.clone(),
+        model: "model-a".to_string(),
+        settings: Some(serde_json::to_value(&settings).unwrap()),
+        last_sync_at: None,
+    }
 }
 
 #[test]
-fn test_sync_to_zcode_writes_provider_block() {
-    use_sandbox_home();
-    let provider = make_test_provider_flat();
-    let result = sync_to_zcode(&provider, "model-a").unwrap();
-
-    assert!(result.success, "sync should succeed: {:?}", result.error);
-    assert_eq!(result.tool_id, "zcode");
-
-    let config_path = resolve_zcode_config_path().unwrap();
-    let content = std::fs::read_to_string(&config_path).unwrap();
-    let json: Value = serde_json::from_str(&content).unwrap();
-
-    // Preserves the OpenCode schema marker.
-    assert_eq!(
-        json.get("$schema").and_then(Value::as_str),
-        Some("https://opencode.ai/config.json")
-    );
-
-    // provider.skillstar block injected with the provider's name + baseURL.
-    let block = json
-        .get("provider")
-        .and_then(|p| p.get("skillstar"))
-        .expect("provider.skillstar block should exist");
-    assert_eq!(
-        block.get("name").and_then(Value::as_str),
-        Some("Test Provider")
-    );
-    assert_eq!(
-        block
-            .get("options")
-            .and_then(|o| o.get("baseURL"))
-            .and_then(Value::as_str),
-        Some("https://api.example.com/v1")
-    );
-}
-
-#[test]
-fn test_unsync_zcode_removes_only_managed_block() {
-    // Use an isolated TempDir instead of the shared sandbox: `unsync_opencode_at`
-    // is the shared core that zcode reuses, and a standalone path avoids
-    // cross-test races on the global sandbox's config.json.
+fn test_codex_third_party_writes_env_key_and_disables_openai_auth() {
     let tmp = TempDir::new().unwrap();
-    let config_path = tmp.path().join("config.json");
-    // Seed a config with both the managed block and a user-owned provider.
-    let seeded = serde_json::json!({
-        "$schema": "https://opencode.ai/config.json",
-        "provider": {
-            "skillstar": { "name": "SkillStar", "options": { "baseURL": "https://a" } },
-            "user-owned": { "name": "Mine", "options": { "baseURL": "https://b" } }
-        }
-    });
-    std::fs::write(&config_path, serde_json::to_string_pretty(&seeded).unwrap()).unwrap();
+    let codex_dir = tmp.path().join(".codex");
+    let config_path = codex_dir.join("config.toml");
 
-    // `unsync_opencode_at` is the shared removal core that `unsync_zcode`
-    // delegates to (ZCode uses the OpenCode schema verbatim). Driving it on an
-    // isolated path exercises the real removal logic without touching the
-    // shared sandbox HOME.
-    unsync_opencode_at(&config_path).unwrap();
+    let provider = make_test_provider_flat();
+    let activation =
+        make_codex_activation(&provider, CodexSettings {
+            wire_api: "chat".to_string(),
+            auth_mode: CODEX_AUTH_MODE_THIRD_PARTY.to_string(),
+        });
 
-    let content = std::fs::read_to_string(&config_path).unwrap();
-    let json: Value = serde_json::from_str(&content).unwrap();
-    let providers = json
-        .get("provider")
-        .and_then(Value::as_object)
-        .expect("provider node should remain");
+    write_codex_config_flat(&config_path, &provider, &activation, &CodexSettings {
+        wire_api: "chat".to_string(),
+        auth_mode: CODEX_AUTH_MODE_THIRD_PARTY.to_string(),
+    })
+    .unwrap();
 
+    let parsed: toml::Table =
+        toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    let skillstar = parsed
+        .get("model_providers")
+        .unwrap()
+        .get("skillstar")
+        .unwrap()
+        .as_table()
+        .unwrap();
+
+    // third_party ⇒ requires_openai_auth = false
     assert!(
-        !providers.contains_key("skillstar"),
-        "managed block must be removed"
+        !skillstar
+            .get("requires_openai_auth")
+            .unwrap()
+            .as_bool()
+            .unwrap()
     );
+    // env_key is written and follows the SKILLSTAR_<prefix>_KEY rule.
+    let env_key = skillstar.get("env_key").unwrap().as_str().unwrap();
     assert!(
-        providers.contains_key("user-owned"),
-        "user-owned provider must be preserved"
+        env_key.starts_with("SKILLSTAR_"),
+        "env_key must be namespaced: got {env_key}"
     );
+    assert!(env_key.ends_with("_KEY"));
+    // Provider id "test-uuid-1234" → prefix "test-uui" → "TEST_UUI".
+    assert_eq!(env_key, "SKILLSTAR_TEST_UUI_KEY");
+}
+
+#[test]
+fn test_codex_oauth_enables_openai_auth_and_no_env_key() {
+    let tmp = TempDir::new().unwrap();
+    let codex_dir = tmp.path().join(".codex");
+    let config_path = codex_dir.join("config.toml");
+
+    let provider = make_test_provider_flat();
+    let settings = CodexSettings {
+        wire_api: "responses".to_string(),
+        auth_mode: CODEX_AUTH_MODE_OAUTH.to_string(),
+    };
+    let activation = make_codex_activation(&provider, settings.clone());
+
+    write_codex_config_flat(&config_path, &provider, &activation, &settings).unwrap();
+
+    let parsed: toml::Table =
+        toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    let skillstar = parsed
+        .get("model_providers")
+        .unwrap()
+        .get("skillstar")
+        .unwrap()
+        .as_table()
+        .unwrap();
+
+    // oauth ⇒ requires_openai_auth = true (routes through ChatGPT token)
+    assert!(
+        skillstar
+            .get("requires_openai_auth")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
+    // oauth never emits env_key
+    assert!(skillstar.get("env_key").is_none());
+}
+
+#[test]
+fn test_codex_oauth_and_third_party_preserve_existing_auth_json() {
+    // Regression guard: oauth AND third_party modes must NEVER touch auth.json.
+    // A pre-existing ChatGPT OAuth token object must survive both syncs.
+    // (Both cases are checked in one test to avoid them racing each other on
+    // the shared sandbox's single ~/.codex/auth.json.)
+    use_sandbox_home();
+    let codex_dir = resolve_codex_auth_path()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    std::fs::create_dir_all(&codex_dir).unwrap();
+    let auth_path = codex_dir.join("auth.json");
+
+    let provider = make_test_provider_flat();
+
+    let check_mode = |mode: &str| {
+        // Seed a realistic ChatGPT OAuth auth.json before each sync.
+        let oauth_blob = serde_json::json!({
+            "OPENAI_API_KEY": null,
+            "tokens": {
+                "access_token": format!("eyJchatgpt-access-{mode}"),
+                "refresh_token": format!("eyJchatgpt-refresh-{mode}"),
+                "id_token": "eyJchatgpt-id",
+                "account_id": "acct_123"
+            }
+        });
+        std::fs::write(&auth_path, oauth_blob.to_string()).unwrap();
+
+        let settings = CodexSettings {
+            wire_api: "responses".to_string(),
+            auth_mode: mode.to_string(),
+        };
+        let activation = make_codex_activation(&provider, settings.clone());
+
+        let _ = sync_to_codex(&provider, &activation);
+
+        // auth.json is byte-identical (neither mode writes it).
+        let after = std::fs::read_to_string(&auth_path).unwrap();
+        let after_json: serde_json::Value = serde_json::from_str(&after).unwrap();
+        assert_eq!(
+            after_json, oauth_blob,
+            "OAuth token must survive {mode} sync"
+        );
+    };
+
+    check_mode(CODEX_AUTH_MODE_OAUTH);
+    check_mode(CODEX_AUTH_MODE_THIRD_PARTY);
+}
+
+#[test]
+fn test_codex_env_key_rule_is_stable_and_shell_safe() {
+    // Non-alphanumeric chars in the id (dashes from a UUID) collapse to '_'.
+    let mut p = make_test_provider_flat();
+    p.id = "a1b2c3d4-rest-of-uuid".to_string();
+    assert_eq!(codex_env_key_for(&p), "SKILLSTAR_A1B2C3D4_KEY");
+
+    // Empty / pathological id still yields a usable var name.
+    p.id = "".to_string();
+    let fallback = codex_env_key_for(&p);
+    assert!(fallback.starts_with("SKILLSTAR_") && fallback.ends_with("_KEY"));
 }

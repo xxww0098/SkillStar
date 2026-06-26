@@ -254,7 +254,7 @@ pub fn activate_tool(
                 );
             }
         }
-        "codex" | "opencode" | "zcode" => {
+        "codex" | "opencode" => {
             if provider.base_url_openai.trim().is_empty() {
                 bail!(
                     "Provider '{}' has no OpenAI-compatible endpoint (base_url_openai is empty). \

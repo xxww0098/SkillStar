@@ -146,7 +146,14 @@ async fn drive_login(
     .or_else(|| token_refresh::jwt_string(&id_token, &["chatgpt_account_id"]))
     .or_else(|| token_refresh::jwt_string(&id_token, &["sub"]));
 
-    finalize(access_token, tokens.refresh_token, expires_at, account_id).await
+    finalize(
+        access_token,
+        tokens.refresh_token,
+        expires_at,
+        account_id,
+        id_token,
+    )
+    .await
 }
 
 async fn exchange_code(
@@ -186,6 +193,7 @@ async fn finalize(
     refresh_token: Option<String>,
     expires_at: Option<i64>,
     account_id: Option<String>,
+    id_token: String,
 ) -> UsageResult<Subscription> {
     let now = Utc::now().timestamp();
     let sub = Subscription {
@@ -205,6 +213,7 @@ async fn finalize(
         access_token_encrypted: Some(crypto::encrypt(&access_token)),
         refresh_token_encrypted: refresh_token.as_deref().map(crypto::encrypt),
         access_token_expires_at: expires_at,
+        id_token_encrypted: Some(crypto::encrypt(&id_token)),
         oauth_account_id: account_id.clone(),
         oauth_region: None,
         requires_reauth: false,
@@ -291,6 +300,7 @@ async fn refresh_codex_tokens(subscription: &mut Subscription) -> UsageResult<()
         .map(|s| Utc::now().timestamp() + s)
         .or_else(|| token_refresh::jwt_exp(&access_token));
     if let Some(id_token) = tokens.id_token.as_deref() {
+        subscription.id_token_encrypted = Some(crypto::encrypt(id_token));
         let account_id = token_refresh::jwt_string(id_token, &["chatgpt_account_id"])
             .or_else(|| token_refresh::jwt_string(id_token, &["sub"]));
         if account_id.is_some() {

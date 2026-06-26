@@ -141,6 +141,23 @@ export interface Subscription {
   created_at: number;
   updated_at: number;
   usage: SubscriptionUsage | null;
+  /** Outcome of the last CLI account-switch attempt (set by
+   *  `set_active_subscription` when it pushes credentials to the CLI).
+   *  Absent when no switch was attempted. */
+  switch_result?: SwitchOutcome | null;
+  /** Whether this catalog maps to a CLI SkillStar can switch credentials
+   *  for (codex / zcode / opencode). IDE-only catalogs are `false`. */
+  supports_cli_switch?: boolean;
+}
+
+/** Result of pushing a subscription's credentials into its CLI config. */
+export interface SwitchOutcome {
+  toolId: string;
+  configPath: string;
+  backupPath?: string | null;
+  keychainUpdated: boolean;
+  success: boolean;
+  error?: string | null;
 }
 
 export interface CreateSubscriptionInput {

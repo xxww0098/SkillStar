@@ -4,7 +4,20 @@
 //! 1. Open `https://auth.x.ai/oauth2/authorize` with PKCE and
 //!    `redirect_uri=http://127.0.0.1:56121/callback`.
 //! 2. Exchange `code` at `https://auth.x.ai/oauth2/token`.
-//! 3. GET `https://cli-chat-proxy.grok.com/v1/billing` for monthly credits.
+//! 3. GET `https://cli-chat-proxy.grok.com/v1/billing` for credit-quota data.
+//!
+//! xAI bills a single credit pool; the reset window (7d vs 30d) only decides
+//! the UI label. The real payload shape is:
+//! ```json
+//! {
+//!   "billingCycle": { "billingPeriodEnd": "..." },
+//!   "monthlyLimit": { "val": 99900 },
+//!   "onDemandCap":  { "val": 0 },
+//!   "usage": { "totalUsed": { "val": 12345 } }
+//! }
+//! ```
+//! Amount fields live at the root (the official shape). A `config` wrapper is
+//! also tolerated for proxy mirrors and older fixtures.
 
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
@@ -185,6 +198,7 @@ async fn finalize(tokens: TokenResponse) -> UsageResult<Subscription> {
         access_token_encrypted: Some(crypto::encrypt(access_token)),
         refresh_token_encrypted: refresh_token.map(crypto::encrypt),
         access_token_expires_at: expires_at,
+        id_token_encrypted: None,
         oauth_account_id: subject.or(email),
         oauth_region: None,
         requires_reauth: false,
@@ -304,22 +318,70 @@ async fn fetch_with_token(
     build_subscription_usage(subscription_id, &payload)
 }
 
+/// Amount fields may sit at the payload root (the real xAI shape) or under a
+/// `config` wrapper (some proxy mirrors / older fixtures). Return roots in
+/// lookup priority order: root first, `config` fallback.
+fn candidate_roots(payload: &Value) -> Vec<&Value> {
+    let mut roots = vec![payload];
+    if let Some(config) = payload.get("config").filter(|v| v.is_object()) {
+        roots.push(config);
+    }
+    roots
+}
+
+fn pick_value_multi<'a>(roots: &[&'a Value], paths: &[&[&str]]) -> Option<&'a Value> {
+    for root in roots {
+        for path in paths {
+            if let Some(value) = get_path_value(root, path) {
+                return Some(value);
+            }
+        }
+    }
+    None
+}
+
+fn pick_cent_multi(roots: &[&Value], paths: &[&[&str]]) -> Option<f64> {
+    pick_value_multi(roots, paths).and_then(cent_value)
+}
+
+/// xAI bills a single credit pool; the reset-window length decides the label.
+/// A sub-10-day window renders as "Weekly", otherwise "Monthly" — matching
+/// how the Grok CLI dashboard names the same bar.
+fn period_label(reset_at: i64) -> String {
+    let days = ((reset_at - Utc::now().timestamp()) / 86_400).max(0);
+    if days > 0 && days <= 10 {
+        "Weekly credits".to_string()
+    } else {
+        "Monthly credits".to_string()
+    }
+}
+
 fn build_subscription_usage(
     subscription_id: &str,
     payload: &Value,
 ) -> UsageResult<SubscriptionUsage> {
-    let config = payload
-        .get("config")
-        .filter(|v| v.is_object())
-        .ok_or_else(|| UsageError::Fetcher("Grok billing 未返回 config".into()))?;
+    let roots = candidate_roots(payload);
 
-    let monthly_limit = pick_cent(config, &[&["monthlyLimit"], &["monthly_limit"]]);
-    let used = pick_cent(config, &[&["used"]]);
-    let on_demand_cap = pick_cent(config, &[&["onDemandCap"], &["on_demand_cap"]]);
-    let billing_period_end = parse_timestamp(
-        get_path_value(config, &["billingPeriodEnd"])
-            .or_else(|| get_path_value(config, &["billing_period_end"])),
+    let monthly_limit = pick_cent_multi(&roots, &[&["monthlyLimit"], &["monthly_limit"]]);
+    let used = pick_cent_multi(
+        &roots,
+        &[
+            &["usage", "totalUsed"],
+            &["usage", "total_used"],
+            &["used"],
+        ],
     );
+    let on_demand_cap = pick_cent_multi(&roots, &[&["onDemandCap"], &["on_demand_cap"]]);
+    let billing_period_end = pick_value_multi(
+        &roots,
+        &[
+            &["billingCycle", "billingPeriodEnd"],
+            &["billing_cycle", "billing_period_end"],
+            &["billingPeriodEnd"],
+            &["billing_period_end"],
+        ],
+    )
+    .and_then(parse_timestamp);
 
     if monthly_limit.is_none()
         && used.is_none()
@@ -331,6 +393,10 @@ fn build_subscription_usage(
         ));
     }
 
+    let label = billing_period_end
+        .map(period_label)
+        .unwrap_or_else(|| "Monthly credits".to_string());
+
     let monthly = if monthly_limit.is_some() || used.is_some() {
         let used_cents = used.unwrap_or(0.0).round().max(0.0) as i64;
         let total_cents = monthly_limit.map(|v| v.round().max(0.0) as i64);
@@ -338,7 +404,7 @@ fn build_subscription_usage(
             .filter(|total| *total > 0)
             .map(|total| ((used_cents as f64 / total as f64) * 100.0).round() as i32);
         Some(UsageWindow {
-            label: "Monthly credits".to_string(),
+            label,
             used: used_cents,
             total: total_cents,
             percent,
@@ -381,18 +447,6 @@ fn get_path_value<'a>(root: &'a Value, path: &[&str]) -> Option<&'a Value> {
     Some(current)
 }
 
-fn pick_cent(root: &Value, paths: &[&[&str]]) -> Option<f64> {
-    for path in paths {
-        let Some(value) = get_path_value(root, path) else {
-            continue;
-        };
-        if let Some(amount) = cent_value(value) {
-            return Some(amount);
-        }
-    }
-    None
-}
-
 fn cent_value(value: &Value) -> Option<f64> {
     if let Some(obj) = value.as_object()
         && let Some(val) = obj.get("val")
@@ -413,8 +467,7 @@ fn cent_value(value: &Value) -> Option<f64> {
     None
 }
 
-fn parse_timestamp(value: Option<&Value>) -> Option<i64> {
-    let value = value?;
+fn parse_timestamp(value: &Value) -> Option<i64> {
     if let Some(seconds) = value.as_i64() {
         return normalize_timestamp(seconds);
     }
@@ -463,7 +516,35 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn parses_xai_billing_config() {
+    fn parses_root_shape_with_usage_total_used() {
+        // Real xAI shape: fields at root, used under usage.totalUsed.
+        let payload = json!({
+            "billingCycle": {
+                "billingPeriodStart": "2026-06-01T00:00:00Z",
+                "billingPeriodEnd": "2026-07-01T00:00:00Z"
+            },
+            "monthlyLimit": { "val": 99900 },
+            "onDemandCap": { "val": 2000 },
+            "usage": {
+                "includedUsed": { "val": 12345 },
+                "onDemandUsed": { "val": 0 },
+                "totalUsed": { "val": 12345 }
+            }
+        });
+
+        let usage = build_subscription_usage("sub-xai", &payload).unwrap();
+        let monthly = usage.monthly.unwrap();
+
+        assert_eq!(monthly.used, 12345);
+        assert_eq!(monthly.total, Some(99900));
+        assert_eq!(monthly.percent, Some(12));
+        assert_eq!(usage.credits.len(), 1);
+        assert_eq!(usage.credits[0].credit_amount.as_deref(), Some("$20"));
+    }
+
+    #[test]
+    fn parses_legacy_config_wrapper() {
+        // Older fixtures / proxy mirrors wrap fields under `config`.
         let payload = json!({
             "config": {
                 "monthlyLimit": { "val": "5000" },
@@ -476,17 +557,71 @@ mod tests {
         let usage = build_subscription_usage("sub-xai", &payload).unwrap();
         let monthly = usage.monthly.unwrap();
 
-        assert_eq!(monthly.label, "Monthly credits");
         assert_eq!(monthly.used, 1250);
         assert_eq!(monthly.total, Some(5000));
         assert_eq!(monthly.percent, Some(25));
-        assert_eq!(usage.credits.len(), 1);
         assert_eq!(usage.credits[0].credit_amount.as_deref(), Some("$20"));
+    }
+
+    #[test]
+    fn prefers_root_usage_over_config_used() {
+        // When both root (real) and config (legacy) shapes are present,
+        // root usage.totalUsed must win over a stray config.used.
+        let payload = json!({
+            "config": { "used": { "val": 999 } },
+            "monthlyLimit": { "val": 10000 },
+            "usage": { "totalUsed": { "val": 2500 } }
+        });
+        let usage = build_subscription_usage("sub-xai", &payload).unwrap();
+        assert_eq!(usage.monthly.unwrap().used, 2500);
+    }
+
+    #[test]
+    fn weekly_label_for_short_reset_window() {
+        // A ~7-day reset window should render as "Weekly credits".
+        let soon = Utc::now().timestamp() + 6 * 86_400;
+        let payload = json!({
+            "billingCycle": { "billingPeriodEnd": soon },
+            "monthlyLimit": { "val": 5000 },
+            "usage": { "totalUsed": { "val": 1000 } }
+        });
+        let usage = build_subscription_usage("sub-xai", &payload).unwrap();
+        assert_eq!(usage.monthly.unwrap().label, "Weekly credits");
+    }
+
+    #[test]
+    fn monthly_label_for_long_reset_window() {
+        // A ~30-day reset window should render as "Monthly credits".
+        let later = Utc::now().timestamp() + 29 * 86_400;
+        let payload = json!({
+            "billingCycle": { "billingPeriodEnd": later },
+            "monthlyLimit": { "val": 5000 },
+            "usage": { "totalUsed": { "val": 1000 } }
+        });
+        let usage = build_subscription_usage("sub-xai", &payload).unwrap();
+        assert_eq!(usage.monthly.unwrap().label, "Monthly credits");
+    }
+
+    #[test]
+    fn defaults_monthly_label_without_reset() {
+        // No billingPeriodEnd → still parses, defaults to Monthly label.
+        let payload = json!({
+            "monthlyLimit": { "val": 5000 },
+            "usage": { "totalUsed": { "val": 1000 } }
+        });
+        let usage = build_subscription_usage("sub-xai", &payload).unwrap();
+        assert_eq!(usage.monthly.unwrap().label, "Monthly credits");
     }
 
     #[test]
     fn rejects_empty_billing_config() {
         let payload = json!({ "config": {} });
+        assert!(build_subscription_usage("sub-xai", &payload).is_err());
+    }
+
+    #[test]
+    fn rejects_garbage_payload() {
+        let payload = json!({ "randomField": "value" });
         assert!(build_subscription_usage("sub-xai", &payload).is_err());
     }
 }

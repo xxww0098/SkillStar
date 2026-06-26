@@ -22,6 +22,8 @@ interface UsageGridProps {
   onDelete: (id: string) => void;
   onReauth?: (id: string) => void;
   onSetActive?: (id: string) => Promise<void>;
+  /** Re-push the active account's credentials to its CLI config (retry). */
+  onSwitchToCli?: (catalogId: string) => Promise<void>;
   onReorder: (orderedIds: string[]) => void;
   onAddNew: (catalogId?: string) => void;
   onBrowseProviders?: () => void;
@@ -29,7 +31,7 @@ interface UsageGridProps {
 
 type CardCallbacks = Pick<
   UsageGridProps,
-  "onRefresh" | "onEdit" | "onDelete" | "onReauth" | "onSetActive" | "refreshDisabled"
+  "onRefresh" | "onEdit" | "onDelete" | "onReauth" | "onSetActive" | "onSwitchToCli" | "refreshDisabled"
 >;
 
 interface ProviderGroup {
@@ -50,6 +52,7 @@ export function UsageGrid({
   onDelete,
   onReauth,
   onSetActive,
+  onSwitchToCli,
   onReorder,
   onAddNew,
   onBrowseProviders,
@@ -113,6 +116,7 @@ export function UsageGrid({
     onDelete,
     onReauth,
     onSetActive,
+    onSwitchToCli,
   };
 
   const gridClass = "grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]";

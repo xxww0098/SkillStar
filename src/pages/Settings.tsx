@@ -17,6 +17,7 @@ import { FingerprintsSection } from "../features/settings/sections/FingerprintsS
 import { GitHubMirrorSection } from "../features/settings/sections/GitHubMirrorSection";
 import { LanguageSection } from "../features/settings/sections/LanguageSection";
 import { ProxySection } from "../features/settings/sections/ProxySection";
+import { S3SyncSection } from "../features/settings/sections/S3SyncSection";
 import { StorageSection } from "../features/settings/sections/StorageSection";
 import { useAgentProfiles } from "../hooks/useAgentProfiles";
 import { useAiConfig } from "../hooks/useAiConfig";
@@ -657,6 +658,10 @@ export function Settings({
                   onToggleExpanded={handleToggleMirrorExpanded}
                   onConfigChange={handleMirrorConfigChange}
                 />
+              </section>
+
+              <section id="settings-s3" className="scroll-mt-3">
+                <S3SyncSection />
               </section>
 
               <section id="settings-ai" className="scroll-mt-3">

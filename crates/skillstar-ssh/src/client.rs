@@ -33,6 +33,11 @@ use crate::types::SshHostDef;
 /// Connect/read timeout applied to the TCP dial + SSH handshake.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// Bound on any single remote shell command. A hung remote process (NFS stall,
+/// unresponsive binary, …) must not stall the whole SSH operation forever.
+/// Generous so legitimate work (large `git pull`, `find`) still completes.
+pub const EXEC_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// Outcome of a host-key check during connect.
 #[derive(Debug, Clone)]
 pub enum HostKeyState {
@@ -93,11 +98,19 @@ impl Handler for SshHandler {
     }
 }
 
-/// Build a default SSH client config (sensible inactivity timeout, no
-/// streaming compression surprises).
+/// Build a default SSH client config (sensible inactivity timeout, keepalive
+/// so idle sessions survive NAT/firewall drops, no streaming compression
+/// surprises).
 fn default_config() -> Arc<russh::client::Config> {
     let mut cfg = russh::client::Config::default();
+    // Drop genuinely-dead sessions rather than leaving a zombie handle.
     cfg.inactivity_timeout = Some(Duration::from_secs(300));
+    // Keep NAT/firewall state tables warm so long-lived push/discovery
+    // sessions don't silently die after a few idle minutes.
+    cfg.keepalive_interval = Some(Duration::from_secs(30));
+    // Be defensive: cap how many unanswered keepalives we tolerate before
+    // declaring the connection dead.
+    cfg.keepalive_max = 3;
     Arc::new(cfg)
 }
 
@@ -117,17 +130,17 @@ impl SshHostDef {
     }
 }
 
-/// Dial + handshake + authenticate. Returns the live session handle plus the
-/// server fingerprint observed during the handshake.
+/// Dial + handshake only. Returns the live (unauthenticated) session handle
+/// plus the server fingerprint observed during the handshake.
 ///
-/// `sink` receives a progress event at each phase (dial / handshake / host_key
-/// / auth) so the UI console can stream the connection. The caller is
-/// responsible for the known-hosts decision (see [`resolve_host_key_state`]);
-/// this function does **not** enforce it so the fingerprint can be reported
-/// even for brand-new hosts.
-async fn dial_and_authenticate<S: SecretStore>(
+/// Splitting dial from authenticate is a **security requirement**: the caller
+/// must verify the host key (via [`resolve_host_key_state`]) *before*
+/// [`authenticate`] sends any credentials. A key `Mismatch` aborts the session
+/// without ever authenticating, so a man-in-the-middle can never harvest a
+/// password or private key. `sink` receives a progress event at each phase.
+async fn dial<S: SecretStore>(
     host: &SshHostDef,
-    secrets: &S,
+    _secrets: &S,
     session_id: &str,
     sink: &impl ProgressSink,
 ) -> Result<(Handle<SshHandler>, String)> {
@@ -142,7 +155,7 @@ async fn dial_and_authenticate<S: SecretStore>(
     sink.emit(event(session_id, Phase::Dial, Status::Start, format!("dialing {addr}…")));
     let dial_start = Instant::now();
     let connect_fut = client::connect(config, &addr, handler);
-    let mut handle = tokio::time::timeout(CONNECT_TIMEOUT, connect_fut)
+    let handle = tokio::time::timeout(CONNECT_TIMEOUT, connect_fut)
         .await
         .map_err(|_| {
             sink.emit(event(session_id, Phase::Dial, Status::Fail, format!("timeout after {}s", CONNECT_TIMEOUT.as_secs())));
@@ -155,6 +168,21 @@ async fn dial_and_authenticate<S: SecretStore>(
     let dial_ms = dial_start.elapsed().as_millis();
     sink.emit(event(session_id, Phase::Handshake, Status::Ok, format!("connected ({dial_ms}ms), handshake done")));
 
+    let fingerprint = fp_rx.await.unwrap_or_default();
+    Ok((handle, fingerprint))
+}
+
+/// Authenticate an already-dialled session. Emits `auth` progress events.
+///
+/// **Callers must verify the host key first** (see [`dial`] + [`resolve_host_key_state`]):
+/// this is the point at which credentials leave the machine.
+async fn authenticate<S: SecretStore>(
+    host: &SshHostDef,
+    secrets: &S,
+    session_id: &str,
+    sink: &impl ProgressSink,
+    handle: &mut Handle<SshHandler>,
+) -> Result<()> {
     // Authenticate according to the configured method.
     match &host.auth_method {
         crate::types::AuthMethod::Password => {
@@ -202,8 +230,22 @@ async fn dial_and_authenticate<S: SecretStore>(
             sink.emit(event(session_id, Phase::Auth, Status::Ok, "authenticated (publickey)"));
         }
     }
+    Ok(())
+}
 
-    let fingerprint = fp_rx.await.unwrap_or_default();
+/// Convenience: dial → authenticate, used by [`test_connection`] (which
+/// authenticates against unverified hosts on purpose, to validate credentials
+/// the user just typed). **Never use this for the production [`connect`] path**
+/// — production connections must verify the host key between dial and auth.
+#[allow(dead_code)]
+async fn dial_and_authenticate<S: SecretStore>(
+    host: &SshHostDef,
+    secrets: &S,
+    session_id: &str,
+    sink: &impl ProgressSink,
+) -> Result<(Handle<SshHandler>, String)> {
+    let (mut handle, fingerprint) = dial(host, secrets, session_id, sink).await?;
+    authenticate(host, secrets, session_id, sink, &mut handle).await?;
     Ok((handle, fingerprint))
 }
 
@@ -246,9 +288,15 @@ pub fn resolve_host_key_state(host_id: &str, observed: &str) -> HostKeyState {
 
 /// Open a fully-authenticated session to `host`.
 ///
-/// Enforces the known-hosts policy: an `Unverified` host emits a `host_key`
-/// pending event (with the fingerprint) and returns an `UNVERIFIED_HOST_KEY`
-/// error so the UI can prompt; a `Mismatch` always errors (refuses to connect).
+/// Enforces the known-hosts policy **before credentials are sent**:
+/// - `Mismatch` (known host, different key → possible MITM): the session is
+///   closed immediately and an error is returned — **authentication never
+///   happens**, so a man-in-the-middle cannot harvest a password or key.
+/// - `Unverified` (first connection): the session is closed and an
+///   `UNVERIFIED_HOST_KEY` error is returned with the fingerprint so the UI
+///   can prompt; the caller re-dials after `accept_host_key`.
+/// - `Verified`: authenticate and return the live session.
+///
 /// The fingerprint is only persisted when the caller explicitly invokes
 /// `store::accept_host_key`.
 pub async fn connect<S: SecretStore>(
@@ -257,11 +305,13 @@ pub async fn connect<S: SecretStore>(
     session_id: &str,
     sink: &impl ProgressSink,
 ) -> Result<Handle<SshHandler>> {
-    let (handle, fingerprint) = dial_and_authenticate(host, secrets, session_id, sink).await?;
+    // 1. Dial + handshake (no credentials yet).
+    let (mut handle, fingerprint) = dial(host, secrets, session_id, sink).await?;
+
+    // 2. Host-key gate: decide trust BEFORE authenticating.
     match resolve_host_key_state(&host.id, &fingerprint) {
         HostKeyState::Verified => {
             sink.emit(event(session_id, Phase::HostKey, Status::Ok, "server key matches saved fingerprint"));
-            Ok(handle)
         }
         HostKeyState::Unverified { .. } => {
             sink.emit(event_with_detail(
@@ -272,10 +322,12 @@ pub async fn connect<S: SecretStore>(
                 serde_json::json!({ "fingerprint": fingerprint }),
             ));
             // Close the session we just opened — the UI must accept the key first.
+            // We deliberately do NOT authenticate, so no credentials leave this
+            // machine for an untrusted server.
             let _ = handle
                 .disconnect(Disconnect::ByApplication, "host key not yet accepted", "en")
                 .await;
-            Err(anyhow::anyhow!("UNVERIFIED_HOST_KEY:{fingerprint}"))
+            return Err(anyhow::anyhow!("UNVERIFIED_HOST_KEY:{fingerprint}"));
         }
         HostKeyState::Mismatch { expected, actual } => {
             sink.emit(event_with_detail(
@@ -285,14 +337,21 @@ pub async fn connect<S: SecretStore>(
                 "server key mismatch — possible MITM",
                 serde_json::json!({ "expected": expected, "actual": actual }),
             ));
+            // SECURITY: disconnect without authenticating. A different key than
+            // the one the user previously accepted means the channel may be
+            // tampered; sending a password/key would hand it to an attacker.
             let _ = handle
                 .disconnect(Disconnect::ByApplication, "host key mismatch", "en")
                 .await;
-            Err(anyhow::anyhow!(
+            return Err(anyhow::anyhow!(
                 "HOST_KEY_MISMATCH: expected {expected}, got {actual}"
-            ))
+            ));
         }
     }
+
+    // 3. Host key trusted → safe to authenticate.
+    authenticate(host, secrets, session_id, sink, &mut handle).await?;
+    Ok(handle)
 }
 
 /// Probe a host: connect, authenticate, run `whoami` + `uname -a`, report
@@ -381,35 +440,51 @@ impl RemoteExec for Handle<SshHandler> {
 /// Run a command on the session and return its combined stdout/stderr as text.
 ///
 /// Used internally by `test_connection`; exported for Phase-2 remote-config reads.
+/// Bounded by [`EXEC_TIMEOUT`] so a hung remote process can't stall the whole
+/// SSH operation indefinitely.
 pub async fn exec_capture(
     handle: &mut Handle<SshHandler>,
     command: &str,
 ) -> Result<String> {
-    let mut channel = handle
-        .channel_open_session()
-        .await
-        .context("open session channel")?;
-    channel
-        .exec(true, command)
-        .await
-        .context("exec command")?;
+    let body = async {
+        let mut channel = handle
+            .channel_open_session()
+            .await
+            .context("open session channel")?;
+        channel
+            .exec(true, command)
+            .await
+            .context("exec command")?;
 
-    let mut out: Vec<u8> = Vec::new();
-    loop {
-        // Some servers send data on ChannelMsg::Data; EOF signals command end.
-        match channel.wait().await {
-            Some(russh::ChannelMsg::Data { ref data }) => {
-                out.extend_from_slice(data);
+        let mut out: Vec<u8> = Vec::new();
+        loop {
+            // Some servers send data on ChannelMsg::Data; EOF signals command end.
+            match channel.wait().await {
+                Some(russh::ChannelMsg::Data { ref data }) => {
+                    out.extend_from_slice(data);
+                }
+                Some(russh::ChannelMsg::ExtendedData { ref data, .. }) => {
+                    out.extend_from_slice(data);
+                }
+                Some(russh::ChannelMsg::ExitStatus { .. }) | None => break,
+                _ => {}
             }
-            Some(russh::ChannelMsg::ExtendedData { ref data, .. }) => {
-                out.extend_from_slice(data);
-            }
-            Some(russh::ChannelMsg::ExitStatus { .. }) | None => break,
-            _ => {}
         }
-    }
-    channel.eof().await.ok();
-    channel.close().await.ok();
+        channel.eof().await.ok();
+        channel.close().await.ok();
+
+        Ok::<Vec<u8>, anyhow::Error>(out)
+    };
+
+    let out = tokio::time::timeout(EXEC_TIMEOUT, body)
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "remote command timed out after {}s: {}",
+                EXEC_TIMEOUT.as_secs(),
+                command.split('\n').next().unwrap_or(command)
+            )
+        })??;
 
     Ok(String::from_utf8_lossy(&out).into_owned())
 }

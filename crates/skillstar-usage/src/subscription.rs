@@ -52,7 +52,13 @@ pub struct Subscription {
     pub refresh_token_encrypted: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub access_token_expires_at: Option<i64>,
-    /// Free-form extra (e.g. Codex `ChatGPT-Account-Id`, JWT `id_token`).
+    /// OpenID Connect `id_token` (JWT), encrypted. Required by Codex CLI
+    /// account switching — `~/.codex/auth.json` needs the full `tokens` block
+    /// including `id_token`, not just access/refresh tokens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id_token_encrypted: Option<String>,
+    /// Free-form extra — historically held Codex `ChatGPT-Account-Id`; now
+    /// the canonical Codex account id (extracted from `id_token` JWT).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oauth_account_id: Option<String>,
     /// Region code for Trae (`cn` / `sg` / `us` / `ttp`).

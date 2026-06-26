@@ -1,0 +1,22 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "usage-card",
+  "description": "Capability for usage floating card windows (label prefix usage-card-*). Grants the same core + usage command surface the main window has so card windows can refresh/switch accounts independently.",
+  "windows": ["usage-card-*"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-close",
+    "core:window:allow-set-always-on-top",
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "core:window:allow-set-focus",
+    "core:event:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": []
+    },
+    "shell:allow-open",
+    "dialog:default"
+  ]
+}

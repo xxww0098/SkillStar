@@ -19,7 +19,10 @@ use skillstar_ssh::{HostsStore, Session, SshHostDef, SystemHost, parse_system_ho
 use tauri::{AppHandle, Emitter, Runtime};
 
 /// Re-exported DTOs so the command signatures stay terse.
-pub use skillstar_ssh::{ConnectionTestResult, DiscoveryResult, MigrateResult, PushResult, RemoteSkill};
+pub use skillstar_ssh::{
+    ConnectionTestResult, DiscoveryResult, MigrateResult, PushResult, RemoteSkill,
+    RemoteSkillContent, RemoteSkillUpdateState,
+};
 
 /// The Tauri event channel the frontend listens on for connection progress.
 const CONNECT_STREAM_CHANNEL: &str = "ssh://connect-stream";
@@ -448,6 +451,229 @@ pub async fn delete_remote_skill(
             .await
             .map_err(to_ssh_err)?;
         sftp::delete_remote_skill(&sftp, &remote_path)
+            .await
+            .map_err(to_ssh_err)
+    })
+    .await
+}
+
+/// Result of a batch push: per-skill outcome plus a success/total tally.
+#[derive(Debug, serde::Serialize)]
+pub struct BatchPushResult {
+    pub pushed: Vec<PushResult>,
+    /// Skills that failed to push, with the error message.
+    pub failed: Vec<BatchPushFailure>,
+    pub total: u32,
+    pub succeeded: u32,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct BatchPushFailure {
+    pub skill_name: String,
+    pub error: String,
+}
+
+/// Push many local skills to the same remote host in **one** SSH session.
+///
+/// Each skill is pushed independently; a single failure does not abort the
+/// batch — failures are collected and surfaced to the UI (mirrors the global
+/// `batch_link_skills_to_agent` semantics for local agents). Uses the hub
+/// layout (content + symlink) per skill.
+#[tauri::command]
+pub async fn push_skills_to_remote(
+    host_id: String,
+    skill_names: Vec<String>,
+    remote_dir: String,
+    app: AppHandle,
+) -> Result<BatchPushResult, AppError> {
+    let session_id = new_session_id();
+    let sink = TauriProgressSink { app };
+    let total = skill_names.len() as u32;
+    with_session(&host_id, session_id, sink, |session_id, sink, mut handle| async move {
+        sink.emit(skillstar_ssh::progress::event(
+            &session_id,
+            skillstar_ssh::progress::Phase::Done,
+            skillstar_ssh::progress::Status::Start,
+            format!("batch pushing {total} skill(s) via ~/.skillstar/hub…"),
+        ));
+        let mut pushed = Vec::new();
+        let mut failed = Vec::new();
+        for name in &skill_names {
+            match skillstar_ssh::hub::push_skill_via_hub(
+                &mut handle,
+                &session_id,
+                &sink,
+                name,
+                &remote_dir,
+            )
+            .await
+            {
+                Ok(r) => pushed.push(r),
+                Err(e) => failed.push(BatchPushFailure {
+                    skill_name: name.clone(),
+                    error: e.to_string(),
+                }),
+            }
+        }
+        let succeeded = pushed.len() as u32;
+        sink.emit(skillstar_ssh::progress::event(
+            &session_id,
+            skillstar_ssh::progress::Phase::Done,
+            skillstar_ssh::progress::Status::Ok,
+            format!("batch push done: {succeeded}/{total} ok"),
+        ));
+        Ok(BatchPushResult {
+            pushed,
+            failed,
+            total,
+            succeeded,
+        })
+    })
+    .await
+}
+
+// ── Phase-2 remote skill content / git operations ──────────────────
+//
+// These wrap the crate helpers in `skillstar_ssh::hub` that were implemented
+// but not exposed over IPC. Each reuses the single `with_session` connect +
+// host-key gate, so they inherit the same TOFU + keepalive hardening.
+
+/// Read the SKILL.md content of a hub-managed remote skill.
+#[tauri::command]
+pub async fn read_remote_skill_content(
+    host_id: String,
+    skill_name: String,
+    app: AppHandle,
+) -> Result<RemoteSkillContent, AppError> {
+    let session_id = new_session_id();
+    let sink = TauriProgressSink { app };
+    with_session(&host_id, session_id, sink, |session_id, sink, mut handle| async move {
+        skillstar_ssh::hub::read_remote_skill_content(&mut handle, &session_id, &sink, &skill_name)
+            .await
+            .map_err(to_ssh_err)
+    })
+    .await
+}
+
+/// Write raw text to a hub-managed remote skill's SKILL.md (atomic write).
+#[tauri::command]
+pub async fn write_remote_skill_content(
+    host_id: String,
+    skill_name: String,
+    content: String,
+    app: AppHandle,
+) -> Result<(), AppError> {
+    let session_id = new_session_id();
+    let sink = TauriProgressSink { app };
+    with_session(&host_id, session_id, sink, |session_id, sink, mut handle| async move {
+        skillstar_ssh::hub::write_remote_skill_content(
+            &mut handle,
+            &session_id,
+            &sink,
+            &skill_name,
+            &content,
+        )
+        .await
+        .map_err(to_ssh_err)
+    })
+    .await
+}
+
+/// `git pull --ff-only` a hub-managed remote skill (git-backed clones only).
+#[tauri::command]
+pub async fn pull_remote_skill(
+    host_id: String,
+    skill_name: String,
+    app: AppHandle,
+) -> Result<(), AppError> {
+    let session_id = new_session_id();
+    let sink = TauriProgressSink { app };
+    with_session(&host_id, session_id, sink, |session_id, sink, mut handle| async move {
+        sink.emit(skillstar_ssh::progress::event(
+            &session_id,
+            skillstar_ssh::progress::Phase::Done,
+            skillstar_ssh::progress::Status::Start,
+            format!("pulling {skill_name}…"),
+        ));
+        let res = skillstar_ssh::hub::pull_remote_skill(
+            &mut handle,
+            &session_id,
+            &sink,
+            &skill_name,
+        )
+        .await
+        .map_err(to_ssh_err);
+        sink.emit(skillstar_ssh::progress::event(
+            &session_id,
+            skillstar_ssh::progress::Phase::Done,
+            skillstar_ssh::progress::Status::Ok,
+            format!("pulled {skill_name} (done)"),
+        ));
+        res
+    })
+    .await
+}
+
+/// Toggle (create/remove) the agent symlink for a hub-managed skill.
+#[tauri::command]
+pub async fn toggle_remote_agent_link(
+    host_id: String,
+    skill_name: String,
+    agent_skills_dir: String,
+    enable: bool,
+    app: AppHandle,
+) -> Result<(), AppError> {
+    let session_id = new_session_id();
+    let sink = TauriProgressSink { app };
+    with_session(&host_id, session_id, sink, |_session_id, _sink, mut handle| async move {
+        skillstar_ssh::hub::toggle_remote_agent_link(
+            &mut handle,
+            &skill_name,
+            &agent_skills_dir,
+            enable,
+        )
+        .await
+        .map_err(to_ssh_err)
+    })
+    .await
+}
+
+/// Install a skill from a git URL directly onto the remote host (clone + link).
+#[tauri::command]
+pub async fn install_remote_skill(
+    host_id: String,
+    url: String,
+    skill_name: String,
+    agent_skills_dir: String,
+    app: AppHandle,
+) -> Result<(), AppError> {
+    let session_id = new_session_id();
+    let sink = TauriProgressSink { app };
+    with_session(&host_id, session_id, sink, |session_id, sink, mut handle| async move {
+        skillstar_ssh::hub::install_remote_skill(
+            &mut handle,
+            &session_id,
+            &sink,
+            &url,
+            &skill_name,
+            &agent_skills_dir,
+        )
+        .await
+        .map_err(to_ssh_err)
+    })
+    .await
+}
+
+/// Check update availability for all hub-managed skills on a host (git repos).
+#[tauri::command]
+pub async fn check_remote_skill_updates(
+    host_id: String,
+    app: AppHandle,
+) -> Result<Vec<RemoteSkillUpdateState>, AppError> {
+    let session_id = new_session_id();
+    let sink = TauriProgressSink { app };
+    with_session(&host_id, session_id, sink, |session_id, sink, mut handle| async move {
+        skillstar_ssh::hub::check_remote_skill_updates(&mut handle, &session_id, &sink)
             .await
             .map_err(to_ssh_err)
     })

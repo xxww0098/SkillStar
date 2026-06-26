@@ -102,6 +102,47 @@ pub(crate) fn zcode_cli_spec(entry: &McpServerEntry) -> Value {
     canonical_spec(entry)
 }
 
+/// Grok `[mcp_servers.<name>]` TOML table (`~/.grok/config.toml`).
+pub(crate) fn grok_toml_table(entry: &McpServerEntry) -> toml::Table {
+    let mut t = toml::Table::new();
+    match entry.transport.as_str() {
+        "http" | "sse" => {
+            if let Some(url) = &entry.url {
+                t.insert("url".into(), toml::Value::String(url.clone()));
+            }
+            if !entry.headers.is_empty() {
+                t.insert(
+                    "headers".into(),
+                    toml::Value::Table(toml_string_table(&entry.headers)),
+                );
+            }
+        }
+        _ => {
+            if let Some(cmd) = &entry.command {
+                t.insert("command".into(), toml::Value::String(cmd.clone()));
+            }
+            if !entry.args.is_empty() {
+                let arr: Vec<toml::Value> = entry
+                    .args
+                    .iter()
+                    .map(|a| toml::Value::String(a.clone()))
+                    .collect();
+                t.insert("args".into(), toml::Value::Array(arr));
+            }
+            if let Some(cwd) = &entry.cwd {
+                t.insert("cwd".into(), toml::Value::String(cwd.clone()));
+            }
+            if !entry.env.is_empty() {
+                t.insert(
+                    "env".into(),
+                    toml::Value::Table(toml_string_table(&entry.env)),
+                );
+            }
+        }
+    }
+    t
+}
+
 /// Codex `[mcp_servers.<name>]` TOML table.
 pub(crate) fn codex_toml_table(entry: &McpServerEntry) -> toml::Table {
     let mut t = toml::Table::new();

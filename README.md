@@ -296,6 +296,7 @@ SkillStar/
 | OpenCode CLI | `~/.config/opencode/` | — |
 | OpenClaw | `~/.openclaw/` | — |
 | ZCode | `~/.zcode/` | — |
+| Grok | `~/.grok/` | ✅ OAuth |
 | 自定义 Agent | 自由配置 | — |
 
 ---

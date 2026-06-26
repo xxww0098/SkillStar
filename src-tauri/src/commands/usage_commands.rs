@@ -8,6 +8,7 @@ use chrono::Utc;
 use futures::future::join_all;
 use skillstar_core::config::proxy;
 use skillstar_core::infra::error::AppError;
+use tauri::AppHandle;
 use skillstar_usage::catalog::AuthMode;
 use skillstar_usage::cookie_jar;
 use skillstar_usage::subscription::{BillingCycle, Subscription};
@@ -179,6 +180,7 @@ pub fn create_subscription(input: CreateSubscriptionInput) -> Result<Subscriptio
         access_token_encrypted: None,
         refresh_token_encrypted: None,
         access_token_expires_at: None,
+        id_token_encrypted: None,
         oauth_account_id: None,
         oauth_region: input.oauth_region,
         requires_reauth: false,
@@ -287,8 +289,11 @@ pub fn update_subscription(
 }
 
 #[tauri::command]
-pub fn delete_subscription(id: String) -> Result<(), AppError> {
-    storage::delete_subscription(&id).map_err(map_err)
+pub fn delete_subscription(app: AppHandle, id: String) -> Result<(), AppError> {
+    storage::delete_subscription(&id).map_err(map_err)?;
+    // Dismiss any floating card window bound to the deleted subscription.
+    crate::commands::usage_windows::close_card_for_subscription(&app, &id);
+    Ok(())
 }
 
 #[tauri::command]
@@ -540,22 +545,55 @@ pub fn get_active_subscriptions() -> Result<std::collections::HashMap<String, St
     storage::list_active_per_catalog().map_err(map_err)
 }
 
-/// Pin `subscription_id` as the active account for its catalog. Returns
-/// the freshly-flagged DTO so the frontend can swap it in-place.
+/// Pin `subscription_id` as the active account for its catalog, and push
+/// its credentials into the real CLI config (`~/.codex/auth.json`,
+/// `~/.zcode/...`, etc.) so the switch actually takes effect in the agent
+/// CLI — not just a SkillStar-internal flag.
 ///
-/// The backend verifies that the subscription exists and that its
-/// `catalog_id` matches the one we're pinning under (so the store can't
-/// drift out of sync with the subscription list).
+/// Returns the freshly-flagged DTO (with `switch_result` describing whether
+/// the CLI write succeeded) so the frontend can swap it in-place and surface
+/// any CLI-sync failure.
+///
+/// The CLI push is best-effort: if it fails, the account is still pinned as
+/// active locally (so the UI reflects intent), and the failure is reported
+/// via `switch_result` for the user to act on.
 #[tauri::command]
-pub fn set_active_subscription(subscription_id: String) -> Result<SubscriptionDto, AppError> {
+pub fn set_active_subscription(
+    app: AppHandle,
+    subscription_id: String,
+) -> Result<SubscriptionDto, AppError> {
     let sub = storage::get_subscription(&subscription_id).map_err(map_err)?;
-    storage::set_active_subscription(&sub.catalog_id, &sub.id).map_err(map_err)?;
+    let catalog_id = sub.catalog_id.clone();
+    let sub_id = sub.id.clone();
+    storage::set_active_subscription(&catalog_id, &sub_id).map_err(map_err)?;
+    // Push credentials to the real CLI config. Best-effort: a failure here
+    // must not un-pin the account; the outcome is surfaced to the UI.
+    let outcome = crate::commands::usage_switch::switch_subscription_to_cli(&sub);
     let usage = storage::get_usage_snapshot(&sub.id).map_err(map_err)?;
     let active = storage::list_active_per_catalog().map_err(map_err)?;
-    Ok(fill_active(
-        SubscriptionDto::from_parts(sub, usage),
-        &active,
-    ))
+    let mut dto = fill_active(SubscriptionDto::from_parts(sub, usage), &active);
+    dto.switch_result = Some(outcome);
+    // Notify any open usage card windows so they refresh their is_active badge.
+    crate::commands::usage_windows::emit_active_changed(&app, &catalog_id, &sub_id);
+    Ok(dto)
+}
+
+/// Re-push the active account for `catalog_id` into its CLI config, without
+/// changing which account is active. Used by the "重新同步到 CLI" button when
+/// a previous switch failed (e.g. missing id_token that has since been
+/// refreshed).
+#[tauri::command]
+pub fn switch_active_subscription_to_cli(
+    catalog_id: String,
+) -> Result<crate::commands::usage_switch::SwitchOutcome, AppError> {
+    let active = storage::list_active_per_catalog().map_err(map_err)?;
+    let Some(sub_id) = active.get(&catalog_id) else {
+        return Err(AppError::Other(format!(
+            "catalog {catalog_id} 还没有设置活跃账号"
+        )));
+    };
+    let sub = storage::get_subscription(sub_id).map_err(map_err)?;
+    Ok(crate::commands::usage_switch::switch_subscription_to_cli(&sub))
 }
 
 /// Drop the pin for `catalog_id`. UI will fall back to no active account

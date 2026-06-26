@@ -13,6 +13,7 @@ import {
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { isTauri } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import { ExternalAnchor } from "@/components/ui/ExternalAnchor";
 import { cn } from "@/lib/utils";
@@ -39,6 +40,10 @@ interface SubscriptionCardProps {
   /** Switch this subscription to be the active account for its catalog
    *  (Phase 7 multi-account). When omitted, the switch button is hidden. */
   onSetActive?: (id: string) => Promise<void>;
+  /** Re-push the active account's credentials to its CLI config (retry path
+   *  shown when the previous CLI switch failed). Catalog must support CLI
+   *  switching (`supports_cli_switch`). */
+  onSwitchToCli?: (catalogId: string) => Promise<void>;
   refreshDisabled?: boolean;
   /** Drag handle pointer-down; passed through to dnd lib. */
   onDragHandlePointerDown?: (e: React.PointerEvent) => void;
@@ -52,6 +57,7 @@ export function SubscriptionCard({
   onDelete,
   onReauth,
   onSetActive,
+  onSwitchToCli,
   refreshDisabled = false,
   onDragHandlePointerDown,
 }: SubscriptionCardProps) {
@@ -92,6 +98,7 @@ export function SubscriptionCard({
   };
 
   const [activating, setActivating] = useState(false);
+  const [cliSyncing, setCliSyncing] = useState(false);
   const handleSetActive = async () => {
     if (!onSetActive || sub.is_active) return;
     setActivating(true);
@@ -99,6 +106,15 @@ export function SubscriptionCard({
       await onSetActive(sub.id);
     } finally {
       setActivating(false);
+    }
+  };
+  const handleSwitchToCli = async () => {
+    if (!onSwitchToCli) return;
+    setCliSyncing(true);
+    try {
+      await onSwitchToCli(sub.catalog_id);
+    } finally {
+      setCliSyncing(false);
     }
   };
 
@@ -296,12 +312,35 @@ export function SubscriptionCard({
             <Button
               size="icon-sm"
               variant="ghost"
-              title="切为当前账号"
+              title={t("usage.setActive", "切为当前账号")}
               onClick={handleSetActive}
               disabled={activating}
               className="text-zinc-500 hover:text-emerald-600 hover:scale-105 transition-transform"
             >
               <BadgeCheck className={cn("w-3.5 h-3.5", activating && "animate-pulse")} />
+            </Button>
+          )}
+          {onSwitchToCli && sub.is_active && sub.supports_cli_switch && sub.switch_result && !sub.switch_result.success && (
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              title={t("usage.resyncCli", "重新同步到 CLI")}
+              onClick={() => void handleSwitchToCli()}
+              disabled={cliSyncing}
+              className="text-amber-500 hover:text-amber-600 hover:scale-105 transition-transform"
+            >
+              <RefreshCw className={cn("w-3.5 h-3.5", cliSyncing && "animate-spin")} />
+            </Button>
+          )}
+          {isTauri() && (
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              title={t("usage.openInWindow", "在新窗口打开")}
+              onClick={() => void usageApi.openUsageCardWindow(sub.id)}
+              className="text-zinc-500 hover:text-zinc-800 hover:scale-105 transition-transform"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
             </Button>
           )}
           {sub.requires_reauth ? (

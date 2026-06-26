@@ -107,9 +107,38 @@ export function UsagePanel({ filter, usageCreateRequest, clearUsageCreateRequest
             onSetActive={async (id) => {
               try {
                 const updated = await data.setActive(id);
-                toast.success(t("usage.activeAccountSet", "已切为当前账号"), {
-                  description: updated.display_name,
-                });
+                const outcome = updated.switch_result ?? null;
+                if (outcome && !outcome.success && outcome.error) {
+                  // Active flag updated, but the real CLI config wasn't — tell
+                  // the user why (e.g. missing id_token, keychain write fail).
+                  toast.error(t("usage.switchCliFailed", "已切为当前账号，但同步到 CLI 失败"), {
+                    description: outcome.error,
+                  });
+                } else if (outcome && outcome.success) {
+                  toast.success(t("usage.switchCliSuccess", "已切为当前账号并同步到 CLI"), {
+                    description: `${updated.display_name} → ${outcome.toolId}`,
+                  });
+                } else {
+                  toast.success(t("usage.activeAccountSet", "已切为当前账号"), {
+                    description: updated.display_name,
+                  });
+                }
+              } catch (err) {
+                toast.error(err instanceof Error ? err.message : String(err));
+              }
+            }}
+            onSwitchToCli={async (catalogId) => {
+              try {
+                const outcome = await data.switchActiveToCli(catalogId);
+                if (outcome.success) {
+                  toast.success(t("usage.switchCliSuccess", "已同步到 CLI"), {
+                    description: `${outcome.toolId}: ${outcome.configPath}`,
+                  });
+                } else if (outcome.error) {
+                  toast.error(t("usage.switchCliFailed", "同步到 CLI 失败"), {
+                    description: outcome.error,
+                  });
+                }
               } catch (err) {
                 toast.error(err instanceof Error ? err.message : String(err));
               }

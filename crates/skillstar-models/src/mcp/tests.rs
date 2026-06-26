@@ -78,6 +78,23 @@ fn codex_http_uses_http_headers() {
 }
 
 #[test]
+fn grok_stdio_omits_type_and_matches_native_shape() {
+    let t = grok_toml_table(&stdio("fs"));
+    assert!(t.get("type").is_none());
+    assert_eq!(t["command"].as_str(), Some("npx"));
+    assert_eq!(t["args"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn grok_http_uses_headers_not_http_headers() {
+    let t = grok_toml_table(&http("r"));
+    assert!(t.get("type").is_none());
+    assert_eq!(t["url"].as_str(), Some("https://example.com/mcp"));
+    assert!(t.get("headers").is_some());
+    assert!(t.get("http_headers").is_none());
+}
+
+#[test]
 fn create_assigns_id_and_rejects_dupes() {
     let mut store = McpStore::default();
     let e = create_server(&mut store, stdio("fs")).unwrap();

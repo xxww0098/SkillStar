@@ -8,7 +8,7 @@
  */
 
 /** Tools that bind a provider (model sync). */
-export type ProviderToolId = "claude-code" | "codex" | "opencode" | "gemini" | "zcode";
+export type ProviderToolId = "claude-code" | "codex" | "opencode" | "gemini";
 
 /** All tools with on-disk config files the app can read/write. */
 export type AgentToolId = ProviderToolId | "claude-desktop";
@@ -69,16 +69,6 @@ export const PROVIDER_AGENTS: AgentDescriptor[] = [
     disabledTooltip: "此供应商未提供 OpenAI 兼容端点",
     configPathDisplay: "~/.gemini/.env",
   },
-  {
-    toolId: "zcode",
-    displayName: "ZCode",
-    iconId: "zcode",
-    requiredUrlField: "openai",
-    installDocsUrl: "https://z.ai",
-    tagline: "OpenCode 兼容 · 写入 ~/.zcode/v2/config.json",
-    disabledTooltip: "此供应商未提供 OpenAI 兼容端点",
-    configPathDisplay: "~/.zcode/v2/config.json (models); MCP → ~/.zcode/cli/config.json",
-  },
 ];
 
 export const CLAUDE_DESKTOP_TOOL_ID = "claude-desktop" as const;
@@ -104,5 +94,4 @@ export const CONFIG_FILE_TOOLS: { toolId: AgentToolId; label: string }[] = [
   { toolId: "opencode", label: "OpenCode" },
   { toolId: CLAUDE_DESKTOP_TOOL_ID, label: "Claude Desktop" },
   { toolId: "gemini", label: "Gemini CLI" },
-  { toolId: "zcode", label: "ZCode" },
 ];

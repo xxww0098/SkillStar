@@ -20,12 +20,15 @@ export function useMySkillsScope() {
     if (typeof localStorage !== "undefined") localStorage.setItem(SCOPE_STORAGE_KEY, next);
   }, []);
 
-  // Legacy deep-link: `#ssh` opens the remote scope, then normalises the hash.
+  // Legacy deep-link: `#ssh` (remote) or `#cloud` opens the matching scope,
+  // then normalises the hash.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (window.location.hash.slice(1) === "ssh") {
-      setScopeState("remote");
-      if (typeof localStorage !== "undefined") localStorage.setItem(SCOPE_STORAGE_KEY, "remote");
+    const hash = window.location.hash.slice(1);
+    if (hash === "ssh" || hash === "cloud") {
+      const target: MySkillsScope = hash === "cloud" ? "cloud" : "remote";
+      setScopeState(target);
+      if (typeof localStorage !== "undefined") localStorage.setItem(SCOPE_STORAGE_KEY, target);
       window.location.hash = "skills";
     }
   }, []);

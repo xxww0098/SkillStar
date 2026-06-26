@@ -29,6 +29,12 @@ pub fn resolve_gemini_settings_path() -> Result<PathBuf> {
     Ok(home.join(".gemini").join("settings.json"))
 }
 
+/// `~/.grok/config.toml`
+pub fn resolve_grok_config_path() -> Result<PathBuf> {
+    let home = dirs::home_dir().context("Could not determine home directory")?;
+    Ok(home.join(".grok").join("config.toml"))
+}
+
 /// Resolve the live MCP config file for a tool.
 pub fn resolve_mcp_config_path(tool_id: &str) -> Result<PathBuf> {
     match tool_id {
@@ -36,6 +42,7 @@ pub fn resolve_mcp_config_path(tool_id: &str) -> Result<PathBuf> {
         "claude-desktop" => resolve_claude_desktop_config_path(),
         "codex" => resolve_codex_config_path(),
         "gemini" => resolve_gemini_settings_path(),
+        "grok" => resolve_grok_config_path(),
         "opencode" => resolve_opencode_config_path(),
         // ZCode desktop reads `mcp.servers` from ~/.zcode/cli/config.json (see zcode_cli_*).
         "zcode" => resolve_zcode_cli_mcp_config_path(),
@@ -56,6 +63,7 @@ pub fn tool_installed(tool_id: &str) -> bool {
             .unwrap_or(false),
         "codex" => home.join(".codex").exists(),
         "gemini" => home.join(".gemini").exists(),
+        "grok" => home.join(".grok").exists(),
         "opencode" => {
             home.join(".config").join("opencode").exists()
                 || resolve_opencode_config_path()
@@ -81,7 +89,7 @@ fn count_live_servers(tool_id: &str) -> usize {
         Err(_) => return 0,
     };
     match tool_id {
-        "codex" => toml::from_str::<toml::Table>(&content)
+        "codex" | "grok" => toml::from_str::<toml::Table>(&content)
             .ok()
             .and_then(|t| {
                 t.get("mcp_servers")

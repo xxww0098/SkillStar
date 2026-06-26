@@ -31,6 +31,8 @@ import {
   PRESETS_FLAT,
   PROJECTS,
   REMOTE_SKILLS_SAMPLE,
+  CLOUD_MANIFEST_SAMPLE,
+  S3_TARGETS,
   SAMPLE_SKILLS,
   SSH_HOSTS,
   STORAGE_OVERVIEW,
@@ -42,6 +44,17 @@ import {
 } from "./devMockData";
 
 let devProviderSeq = 0;
+
+// S3 sync targets are held in memory so browser-dev add/edit/delete persists
+// across queries within a session (mirrors sshHostsStore above). Seeded from
+// S3_TARGETS once on first use.
+let s3TargetsStore: Record<string, unknown>[] | null = null;
+function s3Targets(): Record<string, unknown>[] {
+  if (s3TargetsStore === null) {
+    s3TargetsStore = S3_TARGETS.map((t) => ({ ...t }));
+  }
+  return s3TargetsStore;
+}
 
 // SSH hosts are held in memory so browser-dev add/edit/delete persists across
 // queries within a session (mirrors the real Tauri TOML store). Seeded from
@@ -462,6 +475,76 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
     remote_path: `~/.claude/skills/${args?.skillName ?? "skill"}`,
   }),
   delete_remote_skill: () => undefined,
+  push_skills_to_remote: (args) => {
+    const names: string[] = args?.skillNames ?? [];
+    const pushed = names.map((skillName) => ({
+      files_uploaded: 3,
+      bytes: 8192,
+      remote_path: `~/.claude/skills/${skillName}`,
+    }));
+    return {
+      pushed,
+      failed: [],
+      total: names.length,
+      succeeded: names.length,
+    };
+  },
+  read_remote_skill_content: (args) => ({
+    name: args?.skillName ?? "skill",
+    content: "---\nname: skill\ndescription: Mocked remote SKILL.md\n---\n\n# Mocked remote skill body.\n",
+    modified: "2025-01-01",
+  }),
+  write_remote_skill_content: () => undefined,
+  pull_remote_skill: () => undefined,
+  toggle_remote_agent_link: () => undefined,
+  install_remote_skill: () => undefined,
+  check_remote_skill_updates: () => [
+    { name: "code-review", update_available: false },
+    { name: "brandkit", update_available: true },
+  ],
+
+  // ── S3 cloud sync ──
+  list_s3_targets: () => s3Targets().map((t) => ({ ...t })),
+  add_s3_target: (args) => {
+    const def = (args?.def ?? {}) as Record<string, unknown>;
+    const created = { ...def, id: def.id ? String(def.id) : `s3_${Date.now()}` };
+    s3Targets().push(created);
+    return created;
+  },
+  update_s3_target: (args) => {
+    const { id, def } = (args ?? {}) as { id?: string; def?: Record<string, unknown> };
+    const idx = s3Targets().findIndex((t) => t.id === id);
+    if (idx >= 0 && def) s3Targets()[idx] = { ...def, id };
+    return undefined;
+  },
+  delete_s3_target: (args) => {
+    const { id } = (args ?? {}) as { id?: string };
+    const store = s3Targets();
+    const idx = store.findIndex((t) => t.id === id);
+    if (idx >= 0) store.splice(idx, 1);
+    return undefined;
+  },
+  test_s3_connection: () => ({ latency_ms: 38 }),
+  push_skills_to_cloud: () => ({
+    hubCount: 2,
+    localCount: 1,
+    tarballsUploaded: 1,
+    tarballsSkipped: 0,
+    manifestUploaded: true,
+  }),
+  pull_cloud_manifest: () => CLOUD_MANIFEST_SAMPLE.map((e) => ({ ...e })),
+  install_from_cloud_manifest: (args) => {
+    const entries = (args?.entries ?? []) as { name?: string }[];
+    const names = entries.map((e) => String(e.name ?? "")).filter(Boolean);
+    return {
+      requested_count: names.length,
+      installed_names: names,
+      existing_names: [] as string[],
+      restored_names: [] as string[],
+      skipped_names: [] as string[],
+      outcomes: names.map((name) => ({ status: "installed" as const, name })),
+    };
+  },
 };
 
 /**

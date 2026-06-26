@@ -110,6 +110,7 @@
     "proxyBypass": "Bypass List",
     "proxyBypassPlaceholder": "localhost,127.0.0.1,.local",
     "githubMirror": "GitHub Acceleration",
+    "s3Sync": "Cloud Sync (S3)",
     "githubMirrorConfig": "Mirror Configuration",
     "githubMirrorNotice": "Acceleration mirrors act as intermediaries. Only use for public repositories. If you have a VPN/proxy, you may not need this.",
     "mirrorCustom": "Custom Mirror",
@@ -304,7 +305,8 @@
     "agentRelinkFailed": "Updated, but some agent deployments could not be refreshed:",
     "scopeLabel": "Skill library scope",
     "scopeLocal": "Local",
-    "scopeRemote": "Remote (SSH)"
+    "scopeRemote": "Remote (SSH)",
+    "scopeCloud": "Cloud (S3)"
   },
   "toolbar": {
     "searchPlaceholder": "Search cards...",
@@ -554,7 +556,7 @@
     "openTerminal": "Open in terminal",
     "openTerminalHint": "Opens a terminal in this project and starts the assigned agent CLI.",
     "opening": "Starting…",
-    "bannerNoClis": "No agent CLI was detected (for example claude, codex, gemini, opencode). Install one on your PATH, then reopen this project.",
+    "bannerNoClis": "No agent CLI was detected (for example claude, codex, gemini, grok, opencode). Install one on your PATH, then reopen this project.",
     "bannerNoAgent": "Choose one agent before starting.",
     "bannerModelsCta": "Models & accounts",
     "disabledEmptyPanes": "Assign an agent first."
@@ -938,6 +940,17 @@
     "providerPlaceholder": "Select provider…",
     "pickProviderFromGrid": "Click a provider card on the Usage page first, then finish setup here.",
     "pickProviderFromSidebar": "Select a provider from the sidebar list first.",
+    "setActive": "Set as active account",
+    "resyncCli": "Re-sync to CLI",
+    "switchCliSuccess": "Set as active account and synced to CLI",
+    "switchCliFailed": "Set as active account, but CLI sync failed",
+    "openInWindow": "Open in a new window",
+    "cardMissingId": "Missing subscription id",
+    "cardActive": "Active",
+    "cardPin": "Pin",
+    "cardUnpin": "Unpin",
+    "cardBalance": "Balance",
+    "cardNoData": "No usage data",
     "allSubscriptions": "All subscriptions",
     "homeEmptyTitle": "No subscriptions yet",
     "homeEmptyHint": "The home view only shows bound subscriptions. Pick a provider in the sidebar (Cursor, Codex, …) to bind; it will appear here afterward.",
@@ -1214,7 +1227,16 @@
       "codexTitle": "Codex parameters",
       "codexSubtitle": "Written to ~/.codex/ (config.toml, auth.json) — shared by the CLI, desktop app and IDE extensions",
       "wireApi": "API format",
-      "authMode": "Auth mode"
+      "authMode": "Auth mode",
+      "authModeApiKey": "API Key",
+      "authModeOauth": "OAuth (ChatGPT)",
+      "authModeThirdParty": "Third-Party API",
+      "envKeyTitle": "Third-party API key",
+      "envKeyHint": "Add this line to your shell profile (~/.zshrc or ~/.bash_profile), then restart your terminal and Codex. Codex reads the key from the environment variable, so your ChatGPT OAuth login stays untouched.",
+      "envKeyMissing": "This provider has no API key set. Add one in the provider editor first.",
+      "copyExport": "Copy export",
+      "copied": "Copied",
+      "copyFailed": "Copy failed"
     },
     "appAi": {
       "title": "In-app AI",
@@ -1576,6 +1598,69 @@
       "later": "Later",
       "progress": "Migrating {{done}} / {{total}}…",
       "failed": "Some failed: {{names}}"
+    }
+  },
+  "s3": {
+    "addTarget": "New cloud target",
+    "editTarget": "Edit target",
+    "test": "Test",
+    "testFail": "Failed",
+    "empty": "No cloud sync targets yet",
+    "emptyHint": "Add an S3-compatible target (Cloudflare R2, Backblaze B2, MinIO, 七牛云…) to sync skills across devices.",
+    "securityNotice": "The secret access key is stored in your OS keyring — it never touches the config file. Deleting a target clears its keyring entry.",
+    "confirmDelete": "Delete cloud target \"{{name}}\"?",
+    "push": "Push to cloud",
+    "pull": "Pull from cloud",
+    "restore": "Install selected",
+    "pushing": "Pushing…",
+    "pulling": "Pulling…",
+    "restoring": "Restoring…",
+    "manifestEmpty": "No skills in the cloud manifest yet. Push your local skills to create one.",
+    "manifestError": "Could not read the cloud manifest. Check the target and try pulling again.",
+    "badgeInstalled": "Installed",
+    "badgeHub": "git",
+    "badgeLocal": "local",
+    "selectTarget": "Select a cloud target on the left",
+    "selectTargetHint": "Configure a target in Settings → Cloud Sync.",
+    "form": {
+      "displayName": "Display name",
+      "endpointUrl": "Endpoint URL",
+      "endpointHint": "Leave blank for AWS S3. Required for R2 / MinIO / 七牛 / OSS.",
+      "region": "Region",
+      "bucket": "Bucket",
+      "prefix": "Prefix",
+      "prefixHint": "Object key prefix inside the bucket (e.g. skillstar/).",
+      "accessKeyId": "Access key id",
+      "secretAccessKey": "Secret access key",
+      "secretHintExisting": "Leave blank to keep the stored key.",
+      "forcePathStyle": "Path-style addressing",
+      "forcePathHint": "Required for MinIO and some on-prem services."
+    },
+    "console": {
+      "title": "Sync console",
+      "toggle": "Console",
+      "empty": "Sync events will appear here."
+    },
+    "toast": {
+      "targetAdded": "Cloud target added",
+      "targetAddFailed": "Failed to add target",
+      "targetUpdated": "Cloud target updated",
+      "targetUpdateFailed": "Failed to update target",
+      "targetDeleted": "Cloud target deleted",
+      "targetDeleteFailed": "Failed to delete target",
+      "testFailed": "Connection test failed",
+      "pushed": "Pushed to cloud",
+      "pushedDesc": "{{hub}} git + {{local}} local skill(s)",
+      "pushFailed": "Push failed",
+      "restored": "Skills restored",
+      "restoredDesc": "{{installed}} installed · {{existing}} already present",
+      "restoreFailed": "Restore failed"
+    },
+    "restoreDialog": {
+      "title": "Install from cloud",
+      "selectAll": "Select all",
+      "install": "Install {{count}}",
+      "searchPlaceholder": "Filter skills…"
     }
   }
 }
