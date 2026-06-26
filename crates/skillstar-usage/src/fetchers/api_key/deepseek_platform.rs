@@ -17,55 +17,65 @@ const PLATFORM_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Apple
 const AMOUNT_BASE: &str = "https://platform.deepseek.com/api/v0/usage/amount";
 const COST_BASE: &str = "https://platform.deepseek.com/api/v0/usage/cost";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct Entry {
     #[serde(rename = "type")]
     kind: String,
     amount: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 struct ModelUsage {
     model: String,
+    #[serde(default)]
     usage: Vec<Entry>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 struct DayUsage {
     date: String,
+    #[serde(default)]
     data: Vec<ModelUsage>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 struct AmountBiz {
+    #[serde(default)]
     total: Vec<ModelUsage>,
+    #[serde(default)]
     days: Vec<DayUsage>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 struct AmountData {
+    #[serde(default)]
     biz_data: AmountBiz,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 struct AmountResp {
-    data: AmountData,
+    #[serde(default)]
+    data: Option<AmountData>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 struct CostBiz {
+    #[serde(default)]
     total: Vec<ModelUsage>,
+    #[serde(default)]
     days: Vec<DayUsage>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 struct CostData {
+    #[serde(default)]
     biz_data: Vec<CostBiz>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 struct CostResp {
-    data: CostData,
+    #[serde(default)]
+    data: Option<CostData>,
 }
 
 pub async fn fetch_analytics(
@@ -89,10 +99,9 @@ pub async fn fetch_analytics(
     let amount = amount?;
     let cost = cost?;
 
-    let mut daily = map_daily(&amount.data.biz_data.days, &cost);
-    let month_cost = cost
-        .data
-        .biz_data
+    let current_amount = resolve_amount_biz(&amount);
+    let mut daily = map_daily(&current_amount.days, &cost);
+    let month_cost = cost_biz_items(&cost)
         .first()
         .map(|item| item.total.iter().map(|m| cost_sum(&m.usage)).sum::<f64>())
         .unwrap_or(0.0);
@@ -106,7 +115,7 @@ pub async fn fetch_analytics(
             get_json::<AmountResp>(&client, &prev_amount_url, platform_token),
             get_json::<CostResp>(&client, &prev_cost_url, platform_token),
         ) {
-            let mut merged = map_daily(&prev_amount.data.biz_data.days, &prev_cost);
+            let mut merged = map_daily(&resolve_amount_biz(&prev_amount).days, &prev_cost);
             merged.extend(daily);
             daily = merged;
         }
@@ -162,8 +171,24 @@ fn map_platform_err(e: skillstar_fingerprint::RequestError) -> UsageError {
     UsageError::Fetcher(format!("DeepSeek 平台用量请求失败: {e}"))
 }
 
+fn resolve_amount_biz(amount: &AmountResp) -> AmountBiz {
+    amount
+        .data
+        .as_ref()
+        .map(|d| d.biz_data.clone())
+        .unwrap_or_default()
+}
+
+fn cost_biz_items(cost: &CostResp) -> &[CostBiz] {
+    cost.data
+        .as_ref()
+        .map(|d| d.biz_data.as_slice())
+        .unwrap_or(&[])
+}
+
 fn map_models(amount: &AmountResp, cost: &CostResp) -> Vec<DeepSeekModelUsage> {
-    let cost_total = cost.data.biz_data.first();
+    let amount_biz = resolve_amount_biz(amount);
+    let cost_total = cost_biz_items(cost).first();
     let cost_for_model = |model: &str| -> f64 {
         cost_total
             .and_then(|item| item.total.iter().find(|m| m.model == model))
@@ -172,7 +197,7 @@ fn map_models(amount: &AmountResp, cost: &CostResp) -> Vec<DeepSeekModelUsage> {
     };
 
     let mut models = Vec::new();
-    for model_usage in &amount.data.biz_data.total {
+    for model_usage in &amount_biz.total {
         let Some((key, name)) = model_label(&model_usage.model) else {
             continue;
         };
@@ -193,7 +218,7 @@ fn map_models(amount: &AmountResp, cost: &CostResp) -> Vec<DeepSeekModelUsage> {
 
 fn map_daily(days: &[DayUsage], cost: &CostResp) -> Vec<DeepSeekDailyUsage> {
     let mut cost_by_date: HashMap<String, f64> = HashMap::new();
-    if let Some(item) = cost.data.biz_data.first() {
+    if let Some(item) = cost_biz_items(cost).first() {
         for day in &item.days {
             let day_cost: f64 = day.data.iter().map(|m| cost_sum(&m.usage)).sum();
             cost_by_date.insert(day.date.clone(), day_cost);
@@ -373,6 +398,22 @@ mod tests {
             },
         ];
         assert_eq!(token_breakdown(&usage), (175, 12, 100, 50, 25));
+    }
+
+    #[test]
+    fn parses_null_amount_and_cost_payloads() {
+        let amount_json = r#"{"code":0,"data":null,"message":"success"}"#;
+        let cost_json = r#"{"code":0,"data":null,"message":"success"}"#;
+
+        let amount: AmountResp = serde_json::from_str(amount_json).expect("amount");
+        let cost: CostResp = serde_json::from_str(cost_json).expect("cost");
+
+        assert!(amount.data.is_none());
+        assert!(cost.data.is_none());
+        assert!(resolve_amount_biz(&amount).total.is_empty());
+        assert!(cost_biz_items(&cost).is_empty());
+        assert!(map_models(&amount, &cost).is_empty());
+        assert!(map_daily(&resolve_amount_biz(&amount).days, &cost).is_empty());
     }
 
     #[test]
