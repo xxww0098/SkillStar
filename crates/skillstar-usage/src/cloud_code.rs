@@ -13,9 +13,6 @@ const DAILY_SANDBOX_CLOUD_CODE_BASE: &str = "https://daily-cloudcode-pa.sandbox.
 const LOAD_PATH: &str = "v1internal:loadCodeAssist";
 const MODELS_PATH: &str = "v1internal:fetchAvailableModels";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
-const ANTIGRAVITY_CLIENT_ID: &str =
-    "ANTIGRAVITY_OAUTH_CLIENT_ID";
-const ANTIGRAVITY_CLIENT_SECRET: &str = "ANTIGRAVITY_OAUTH_CLIENT_SECRET";
 const DEFAULT_IDE_VERSION: &str = "1.21.9";
 
 /// Try to detect the installed Antigravity IDE version for more authentic UA.
@@ -123,10 +120,11 @@ pub fn cloud_code_user_agent() -> String {
 pub async fn refresh_antigravity_access_token(
     refresh_token: &str,
 ) -> UsageResult<GoogleTokenResponse> {
+    let oauth = crate::antigravity_oauth_config::antigravity_oauth_config()?;
     refresh_google_access_token(
         refresh_token,
-        ANTIGRAVITY_CLIENT_ID,
-        ANTIGRAVITY_CLIENT_SECRET,
+        &oauth.client_id,
+        &oauth.client_secret,
     )
     .await
 }

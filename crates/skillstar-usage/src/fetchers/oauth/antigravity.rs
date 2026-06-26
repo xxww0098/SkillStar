@@ -15,11 +15,11 @@ use crate::storage;
 use crate::subscription::{BillingCycle, Subscription, SubscriptionUsage, UsageWindow};
 use crate::{UsageError, UsageResult};
 
+use crate::antigravity_oauth_config::antigravity_oauth_config;
+
 const AUTHORIZE_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const USERINFO_URL: &str = "https://www.googleapis.com/oauth2/v2/userinfo?alt=json";
-const CLIENT_ID: &str = "ANTIGRAVITY_OAUTH_CLIENT_ID";
-const CLIENT_SECRET: &str = "ANTIGRAVITY_OAUTH_CLIENT_SECRET";
 const SCOPES: &str = "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/cclog https://www.googleapis.com/auth/experimentsandconfigs";
 const CALLBACK_PORT: u16 = 51121;
 
@@ -38,7 +38,7 @@ struct TokenResponse {
 pub async fn start_login(_region: Option<&str>) -> UsageResult<super::OAuthStartInfo> {
     let state = crate::oauth::pkce::random_state();
     let redirect = format!("http://localhost:{}/oauth-callback", CALLBACK_PORT);
-    let auth_url = build_auth_url(&redirect, &state);
+    let auth_url = build_auth_url(&redirect, &state, &antigravity_oauth_config()?.client_id);
 
     let pending_id = crate::oauth::pending_state::register("antigravity", None, auth_url.clone());
     let pid = pending_id.clone();
@@ -53,16 +53,15 @@ pub async fn start_login(_region: Option<&str>) -> UsageResult<super::OAuthStart
     Ok(super::OAuthStartInfo::browser(auth_url, pending_id))
 }
 
-fn build_auth_url(redirect: &str, state: &str) -> String {
-    let auth_url = format!(
+fn build_auth_url(redirect: &str, state: &str, client_id: &str) -> String {
+    format!(
         "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&access_type=offline&prompt=consent&state={}",
         AUTHORIZE_URL,
-        CLIENT_ID,
+        client_id,
         urlencoding(&redirect),
         urlencoding(SCOPES),
         state,
-    );
-    auth_url
+    )
 }
 
 async fn drive_login(state: String, redirect_uri: String) -> UsageResult<Subscription> {
@@ -104,14 +103,15 @@ async fn fetch_email(access_token: &str) -> Option<String> {
 }
 
 async fn exchange_code(code: &str, redirect_uri: &str) -> UsageResult<TokenResponse> {
+    let oauth = antigravity_oauth_config()?;
     let client = crate::http_client::usage_reqwest_with_active_fingerprint()?;
     let resp = client
         .post(TOKEN_URL)
         .form(&[
             ("grant_type", "authorization_code"),
             ("code", code),
-            ("client_id", CLIENT_ID),
-            ("client_secret", CLIENT_SECRET),
+            ("client_id", oauth.client_id.as_str()),
+            ("client_secret", oauth.client_secret.as_str()),
             ("redirect_uri", redirect_uri),
         ])
         .send()
@@ -343,11 +343,13 @@ mod tests {
 
     #[test]
     fn auth_url_uses_antigravity_client_without_pkce() {
-        let url = build_auth_url("http://localhost:51121/oauth-callback", "state-123");
+        let url = build_auth_url(
+            "http://localhost:51121/oauth-callback",
+            "state-123",
+            "test-client-id.apps.googleusercontent.com",
+        );
 
-        assert!(url.contains(
-            "client_id=ANTIGRAVITY_OAUTH_CLIENT_ID"
-        ));
+        assert!(url.contains("client_id=test-client-id.apps.googleusercontent.com"));
         assert!(url.contains("redirect_uri=http%3A%2F%2Flocalhost%3A51121%2Foauth-callback"));
         assert!(url.contains("https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcclog"));
         assert!(url.contains("https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fexperimentsandconfigs"));

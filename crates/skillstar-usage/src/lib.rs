@@ -15,6 +15,7 @@
 //! - [`fetchers`]     — Per-provider quota fetchers (API key + OAuth)
 
 pub mod alerts;
+pub mod antigravity_oauth_config;
 pub mod catalog;
 pub mod cloud_code;
 pub mod cookie_jar;

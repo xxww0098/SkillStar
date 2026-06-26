@@ -133,6 +133,12 @@ pub fn s3_targets_config_path() -> PathBuf {
     config_dir().join("s3_targets.toml")
 }
 
+/// `config/antigravity_oauth.json` — Antigravity Google OAuth client credentials
+/// (not shipped in the repo; copy from `.env.example` or Antigravity IDE).
+pub fn antigravity_oauth_config_path() -> PathBuf {
+    config_dir().join("antigravity_oauth.json")
+}
+
 /// `state/sync_device.json` — this device's identity (hostname + suffix) so
 /// pushed manifests can record their origin.
 pub fn sync_device_id_path() -> PathBuf {
