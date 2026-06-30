@@ -80,9 +80,9 @@ pub struct SubscriptionDto {
     /// `set_active_subscription` when it also pushes credentials to the CLI).
     /// Absent when no switch was attempted.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub switch_result: Option<crate::commands::usage_switch::SwitchOutcome>,
+    pub switch_result: Option<skillstar_app::usage_switch::SwitchOutcome>,
     /// Whether this catalog maps to a CLI whose credentials SkillStar can
-    /// switch (codex / zcode / opencode). IDE-only catalogs (cursor, trae, …)
+    /// switch (codex / opencode / grok). IDE-only catalogs (cursor, trae, …)
     /// are `false` — the UI hides the "sync to CLI" affordance for them.
     #[serde(default)]
     pub supports_cli_switch: bool,
@@ -106,7 +106,7 @@ impl SubscriptionDto {
             .platform_token_encrypted
             .as_ref()
             .is_some_and(|s| !s.is_empty());
-        let supports_cli = crate::commands::usage_switch::supports_cli_switch(&sub.catalog_id);
+        let supports_cli = skillstar_app::usage_switch::supports_cli_switch(&sub.catalog_id);
         Self {
             id: sub.id,
             catalog_id: sub.catalog_id,
@@ -139,7 +139,7 @@ impl SubscriptionDto {
 
     /// Attach the outcome of a CLI account-switch attempt (used by
     /// `set_active_subscription` after it pushes credentials).
-    pub fn with_switch_result(mut self, outcome: crate::commands::usage_switch::SwitchOutcome) -> Self {
+    pub fn with_switch_result(mut self, outcome: skillstar_app::usage_switch::SwitchOutcome) -> Self {
         self.switch_result = Some(outcome);
         self
     }

@@ -32,15 +32,11 @@ const THEMES: Record<string, BrandTheme> = {
   antigravity: { header: ["#4285F4", "#34A853"], bar: ["#4285F4", "#1A73E8"], fg: "#ffffff", glow: "#4285F4" },
   trae: { header: ["#FF7A45", "#F9376E"], bar: ["#FF7A45", "#FF5630"], fg: "#ffffff", glow: "#FF7A45" },
   qoder: { header: ["#7C3AED", "#5B21B6"], bar: ["#8B5CF6", "#7C3AED"], fg: "#ffffff", glow: "#7C3AED" },
-  kiro: { header: ["#6366F1", "#8B5CF6"], bar: ["#6366F1", "#818CF8"], fg: "#ffffff", glow: "#6366F1" },
-  windsurf: { header: ["#0EA5E9", "#0D9488"], bar: ["#0EA5E9", "#06B6D4"], fg: "#ffffff", glow: "#0EA5E9" },
-  "github-copilot": { header: ["#24292F", "#57606A"], bar: ["#57606A", "#24292F"], fg: "#ffffff", glow: "#57606A" },
   xai: { header: ["#1A1A1A", "#000000"], bar: ["#3F3F46", "#18181B"], fg: "#ffffff", glow: "#52525B" },
 
   // ── API-key plans ────────────────────────────────────────────────────
   deepseek: { header: ["#4D6BFE", "#1A56DB"], bar: ["#4D6BFE", "#3B5BDB"], fg: "#ffffff", glow: "#4D6BFE" },
   glm: { header: ["#4A90E2", "#2D6BD0"], bar: ["#4A90E2", "#2D6BD0"], fg: "#ffffff", glow: "#4A90E2" },
-  zcode: { header: ["#6366F1", "#4F46E5"], bar: ["#6366F1", "#4F46E5"], fg: "#ffffff", glow: "#6366F1" },
   kimi: { header: ["#23201A", "#F5B400"], bar: ["#F5B400", "#FF8A00"], fg: "#ffffff", glow: "#F5B400" },
   minimax: { header: ["#9333EA", "#C026D3"], bar: ["#9333EA", "#A855F7"], fg: "#ffffff", glow: "#9333EA" },
 

@@ -67,6 +67,20 @@ function sshHosts(): Record<string, unknown>[] {
   return sshHostsStore;
 }
 
+/** Minimal shape of a tool binding for the dev mock's in-memory state. */
+interface MockEntry {
+  provider_id: string;
+  model: string;
+  settings: unknown;
+  last_sync_at?: number;
+}
+interface MockBinding {
+  entries: MockEntry[];
+  active_index: number;
+}
+/** Tools whose config natively holds several providers (mirrors agentRegistry). */
+const MULTI_PROVIDER_TOOLS = new Set(["codex", "opencode"]);
+
 const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   // ── Global / app shell ──
   list_agent_profiles: () => AGENTS,
@@ -89,10 +103,10 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
     scopes: ["files"],
     "allowed-tools": ["Bash", "Read"],
     content:
-      "# PDF Tools\n\nA skill for working with **PDF** files — read, merge, split and OCR.\n\n## Features\n\n- Merge & split documents\n- OCR scanned pages\n- Fill interactive forms\n\n```bash\nskillstar run pdf-tools merge a.pdf b.pdf -o out.pdf\n```\n\n> Tip: pair with the `xlsx` skill for spreadsheet exports. See the [docs](https://example.com).",
+      "# PDF Tools\n\nA skill for working with **PDF** files — read, merge, split and OCR.\n\n## Features\n\n- Merge & split documents\n- OCR scanned pages\n- Fill interactive forms\n\n```bash\nskillstar run pdf-tools merge a.pdf b.pdf -o out.pdf\n```\n\n## Commands\n\n| Command | Description | Input formats | Output | Notes |\n| --- | --- | --- | --- | --- |\n| `merge` | Combine multiple PDFs into one document | PDF, PDF/A | single PDF | preserves bookmarks and metadata |\n| `split` | Split a PDF into separate pages or ranges | PDF | many PDFs | supports `1-3,5,8-` page expressions |\n| `ocr` | Run OCR over scanned pages and embed a text layer | PDF, PNG, JPEG, TIFF | searchable PDF | language auto-detected, falls back to English |\n| `form-fill` | Fill interactive AcroForm fields from a JSON map | PDF | filled PDF | flattening optional via `--flatten` |\n\n> Tip: pair with the `xlsx` skill for spreadsheet exports. See the [docs](https://example.com).",
   }),
   read_skill_file_raw: (args) =>
-    `---\nname: ${String((args?.name as string) ?? "pdf-tools")}\ndescription: Read, merge, split, and OCR PDF files.\n---\n\n# PDF Tools\n\nA skill for working with **PDF** files.`,
+    `---\nname: ${String((args?.name as string) ?? "pdf-tools")}\ndescription: Read, merge, split, and OCR PDF files.\n---\n\n# PDF Tools\n\nA skill for working with **PDF** files.\n\n## Commands\n\n| Command | Description | Input formats | Output | Notes |\n| --- | --- | --- | --- | --- |\n| \`merge\` | Combine multiple PDFs into one document | PDF, PDF/A | single PDF | preserves bookmarks and metadata |\n| \`split\` | Split a PDF into separate pages or ranges | PDF | many PDFs | supports \`1-3,5,8-\` page expressions |\n| \`ocr\` | Run OCR over scanned pages and embed a text layer | PDF, PNG, JPEG, TIFF | searchable PDF | language auto-detected, falls back to English |`,
   list_skill_files: () => ["SKILL.md", "scripts/merge.py", "README.md"],
   get_skill_deploy_status: (args) => {
     const name = String((args?.skillName as string) ?? "pdf-tools");
@@ -245,9 +259,14 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   delete_provider_flat: (args) => {
     const id = String(args?.id ?? "");
     FLAT_PROVIDERS.providers = FLAT_PROVIDERS.providers.filter((p) => p.id !== id);
-    for (const [toolId, activation] of Object.entries(FLAT_PROVIDERS.tool_activations)) {
-      if ((activation as { provider_id?: string } | null)?.provider_id === id) {
-        (FLAT_PROVIDERS.tool_activations as Record<string, unknown>)[toolId] = null;
+    const acts = FLAT_PROVIDERS.tool_activations as Record<string, MockBinding | null>;
+    for (const [toolId, binding] of Object.entries(acts)) {
+      if (!binding) continue;
+      const pos = binding.entries.findIndex((e) => e.provider_id === id);
+      if (pos >= 0) {
+        binding.entries.splice(pos, 1);
+        if (binding.active_index >= pos && binding.active_index > 0) binding.active_index -= 1;
+        acts[toolId] = binding;
       }
     }
     return undefined;
@@ -263,22 +282,65 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
     const toolId = String(args?.toolId ?? "");
     const providerId = String(args?.providerId ?? "");
     const provider = FLAT_PROVIDERS.providers.find((p) => p.id === providerId);
-    (FLAT_PROVIDERS.tool_activations as Record<string, unknown>)[toolId] = {
+    const acts = FLAT_PROVIDERS.tool_activations as Record<string, MockBinding | null>;
+    const entry = {
       provider_id: providerId,
       model: (args?.model as string) || provider?.default_model || "",
-      settings: args?.settings ?? null,
+      settings: (args?.settings ?? null) as unknown,
       last_sync_at: Math.floor(Date.now() / 1000),
     };
+    const prev = acts[toolId];
+    if (MULTI_PROVIDER_TOOLS.has(toolId) && prev) {
+      const pos = prev.entries.findIndex((e) => e.provider_id === providerId);
+      if (pos >= 0) {
+        prev.entries[pos] = entry;
+        prev.active_index = pos;
+      } else {
+        prev.entries.push(entry);
+        prev.active_index = prev.entries.length - 1;
+      }
+      acts[toolId] = prev;
+    } else {
+      acts[toolId] = { entries: [entry], active_index: 0 };
+    }
     return { tool_id: toolId, success: true, config_path: `~/.${toolId}/settings.json` };
   },
   deactivate_tool: (args) => {
-    (FLAT_PROVIDERS.tool_activations as Record<string, unknown>)[String(args?.toolId ?? "")] = null;
+    const acts = FLAT_PROVIDERS.tool_activations as Record<string, MockBinding>;
+    acts[String(args?.toolId ?? "")] = { entries: [], active_index: 0 };
     return undefined;
   },
   update_tool_settings: (args) => {
     const toolId = String(args?.toolId ?? "");
-    const existing = (FLAT_PROVIDERS.tool_activations as Record<string, { settings?: unknown } | null>)[toolId];
-    if (existing) existing.settings = args?.settings ?? null;
+    const acts = FLAT_PROVIDERS.tool_activations as Record<string, MockBinding | null>;
+    const binding = acts[toolId];
+    const active = binding?.entries[Math.min(binding.active_index, binding.entries.length - 1)];
+    if (active) active.settings = args?.settings ?? null;
+    return { tool_id: toolId, success: true };
+  },
+  set_active_binding: (args) => {
+    const toolId = String(args?.toolId ?? "");
+    const providerId = String(args?.providerId ?? "");
+    const acts = FLAT_PROVIDERS.tool_activations as Record<string, MockBinding | null>;
+    const binding = acts[toolId];
+    if (binding) {
+      const pos = binding.entries.findIndex((e) => e.provider_id === providerId);
+      if (pos >= 0) binding.active_index = pos;
+    }
+    return { tool_id: toolId, success: true };
+  },
+  remove_binding_entry: (args) => {
+    const toolId = String(args?.toolId ?? "");
+    const providerId = String(args?.providerId ?? "");
+    const acts = FLAT_PROVIDERS.tool_activations as Record<string, MockBinding | null>;
+    const binding = acts[toolId];
+    if (binding) {
+      const pos = binding.entries.findIndex((e) => e.provider_id === providerId);
+      if (pos >= 0) {
+        binding.entries.splice(pos, 1);
+        if (binding.active_index >= pos && binding.active_index > 0) binding.active_index -= 1;
+      }
+    }
     return { tool_id: toolId, success: true };
   },
   push_provider_to_tool_config: (args) => ({ tool_id: String(args?.toolId ?? ""), success: true }),
@@ -358,7 +420,32 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   check_gh_status: () => ({ status: "Ready", username: "dev-user" }),
   check_git_status: () => ({ status: "Installed", version: "2.45.0" }),
   list_repo_history: () => [],
-  list_user_repos: () => [],
+  list_user_repos: () => [
+    {
+      full_name: "dev-user/my-skills",
+      url: "https://github.com/dev-user/my-skills",
+      description: "Personal SkillStar skills collection",
+      is_public: true,
+      folders: ["pdf-tools", "xlsx"],
+    },
+    {
+      full_name: "dev-user/private-skills",
+      url: "https://github.com/dev-user/private-skills",
+      description: "Private work skills",
+      is_public: false,
+      folders: ["internal-tools"],
+    },
+  ],
+  inspect_repo_folders: (args) => {
+    const full = String((args?.repoFullName as string) ?? "");
+    return full.endsWith("private-skills") ? ["internal-tools"] : ["pdf-tools", "xlsx"];
+  },
+  publish_skill_to_github: (args) => {
+    const repoName = String((args?.repoName as string) ?? "my-skills");
+    const folderName = String((args?.folderName as string) ?? (args?.skillName as string) ?? "skill");
+    const url = `https://github.com/dev-user/${repoName}`;
+    return { url, git_url: `${url}.git`, source_folder: folderName };
+  },
 
   // ── Usage mode (subscriptions / quota) ──
   list_usage_catalog: () => USAGE_CATALOG,
@@ -476,7 +563,7 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   }),
   delete_remote_skill: () => undefined,
   push_skills_to_remote: (args) => {
-    const names: string[] = args?.skillNames ?? [];
+    const names = (args?.skillNames ?? []) as string[];
     const pushed = names.map((skillName) => ({
       files_uploaded: 3,
       bytes: 8192,

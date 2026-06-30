@@ -14,6 +14,7 @@ import {
   canonicalizeAntigravityModelName,
 } from "../lib/usageLabels";
 import type { UsageWindow } from "../types";
+import { ResetCountdown } from "./ResetCountdown";
 
 interface UsageWindowBarProps {
   window: UsageWindow;
@@ -251,18 +252,23 @@ function UsageSimpleWindow({ window }: { window: UsageWindow }) {
           <p className="text-[11px] font-bold text-zinc-700 leading-none">{label}</p>
           {isRateLimit && <p className="text-[9px] text-zinc-400 mt-1 leading-none">{t("usage.rateLimitWindow")}</p>}
         </div>
-        <span
-          className={cn(
-            "text-[9px] font-bold font-mono px-1.5 py-0.5 rounded-md",
-            percent >= 90
-              ? "bg-rose-500/10 text-rose-600"
-              : percent >= 75
-                ? "bg-amber-500/10 text-amber-600"
-                : "bg-zinc-100 text-zinc-600",
-          )}
-        >
-          {percent}%
-        </span>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {!isRateLimit && window.reset_at ? (
+            <ResetCountdown resetAt={window.reset_at} usedPercent={percent} mode="rateLimit" />
+          ) : null}
+          <span
+            className={cn(
+              "text-[9px] font-bold font-mono px-1.5 py-0.5 rounded-md",
+              percent >= 90
+                ? "bg-rose-500/10 text-rose-600"
+                : percent >= 75
+                  ? "bg-amber-500/10 text-amber-600"
+                  : "bg-zinc-100 text-zinc-600",
+            )}
+          >
+            {percent}%
+          </span>
+        </div>
       </div>
 
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-100 ring-1 ring-zinc-200/20">

@@ -18,7 +18,16 @@ export type McpTransport = "stdio" | "http" | "sse";
 
 /** Tool ids that can receive MCP servers (matches `MCP_TOOL_IDS`). */
 
-export const MCP_TOOL_IDS = ["claude-code", "claude-desktop", "codex", "gemini", "grok", "opencode", "zcode"] as const;
+export const MCP_TOOL_IDS = [
+  "claude-code",
+  "claude-desktop",
+  "codex",
+  "gemini",
+  "grok",
+  "opencode",
+  "zcode",
+  "kiro",
+] as const;
 
 export type McpToolId = (typeof MCP_TOOL_IDS)[number];
 

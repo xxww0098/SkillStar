@@ -1,164 +1,16 @@
-use crate::core::{local_skill, lockfile, repo_scanner, skill_pack};
+//! Storage management: the Settings storage overview plus cache cleanup and
+//! force-delete maintenance commands. These coordinate `crate::core`
+//! (lockfile, installed-skill cache) with agent unlinking — Tauri-side glue,
+//! not domain logic, so they live in the command layer.
+
+use crate::core::{lockfile, repo_scanner};
 use skillstar_core::infra::error::AppError;
 use skillstar_core::infra::{fs_ops, paths};
 use skillstar_projects::projects::agents as agent_profile;
 use skillstar_projects::projects::sync;
-use skillstar_skills::git::{dismissed_skills, gh_manager, repo_history};
+use skillstar_skills::git::repo_history;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use tracing::error;
-
-#[tauri::command]
-pub async fn check_gh_installed() -> Result<bool, AppError> {
-    Ok(gh_manager::is_gh_installed())
-}
-
-#[tauri::command]
-pub async fn check_gh_status() -> Result<gh_manager::GhStatus, AppError> {
-    Ok(tokio::task::spawn_blocking(gh_manager::check_status).await?)
-}
-
-#[tauri::command]
-pub async fn check_git_status() -> Result<gh_manager::GitStatus, AppError> {
-    Ok(tokio::task::spawn_blocking(gh_manager::check_git_status).await?)
-}
-
-#[tauri::command]
-pub async fn check_developer_mode() -> Result<bool, AppError> {
-    Ok(tokio::task::spawn_blocking(fs_ops::check_developer_mode).await?)
-}
-
-#[tauri::command]
-pub async fn publish_skill_to_github(
-    skill_name: String,
-    description: String,
-    is_public: bool,
-    existing_repo_url: Option<String>,
-    folder_name: String,
-    repo_name: String,
-) -> Result<gh_manager::PublishResult, AppError> {
-    let was_local = local_skill::is_local_skill(&skill_name);
-
-    let skill_name_clone = skill_name.clone();
-    let folder_name_clone = folder_name.clone();
-
-    let result = tokio::task::spawn_blocking(move || {
-        gh_manager::publish_skill(
-            &skill_name,
-            &repo_name,
-            &description,
-            is_public,
-            existing_repo_url.as_deref(),
-            &folder_name,
-            &lockfile::lockfile_path(),
-        )
-    })
-    .await?
-    .map_err(|e| AppError::Git(e.to_string()))?;
-
-    // Post-publish graduation: local → hub
-    if was_local {
-        let git_url = result.git_url.clone();
-        let source_folder = folder_name_clone.clone();
-
-        tokio::task::spawn_blocking(move || {
-            // 1. Delete from skills-local/ and remove hub symlink
-            if let Err(e) = local_skill::graduate(&skill_name_clone) {
-                error!(target: "publish", "failed to graduate local skill: {e}");
-                return;
-            }
-
-            // 2. Re-clone from GitHub into .repos/ and symlink to skills/
-            let scan = match repo_scanner::scan_repo_with_mode(&git_url, true) {
-                Ok(s) => s,
-                Err(e) => {
-                    error!(target: "publish", "failed to scan repo after publish: {e}");
-                    return;
-                }
-            };
-
-            let target = scan
-                .skills
-                .iter()
-                .find(|s| s.id == skill_name_clone || s.folder_path.ends_with(&source_folder))
-                .cloned();
-
-            if let Some(target) = target {
-                let install_target = repo_scanner::SkillInstallTarget {
-                    id: target.id,
-                    folder_path: target.folder_path,
-                };
-                match repo_scanner::install_from_repo(&scan.source, &git_url, &[install_target]) {
-                    Ok(_) => crate::core::installed_skill::invalidate_cache(),
-                    Err(e) => error!(target: "publish", "failed to re-install from repo: {e}"),
-                }
-            }
-        })
-        .await?;
-    }
-
-    Ok(result)
-}
-
-#[tauri::command]
-pub async fn list_user_repos(limit: Option<u32>) -> Result<Vec<gh_manager::UserRepo>, AppError> {
-    let repo_limit = limit.unwrap_or(30);
-    tokio::task::spawn_blocking(move || gh_manager::list_user_repos(repo_limit))
-        .await?
-        .map_err(|e| AppError::Git(e.to_string()))
-}
-
-#[tauri::command]
-pub async fn inspect_repo_folders(repo_full_name: String) -> Result<Vec<String>, AppError> {
-    tokio::task::spawn_blocking(move || gh_manager::inspect_repo_folders(&repo_full_name))
-        .await?
-        .map_err(|e| AppError::Git(e.to_string()))
-}
-
-#[tauri::command]
-pub async fn scan_github_repo(
-    url: String,
-    full_depth: Option<bool>,
-) -> Result<repo_scanner::ScanResult, AppError> {
-    let use_full_depth = full_depth.unwrap_or(false);
-    tokio::task::spawn_blocking(move || repo_scanner::scan_repo_with_mode(&url, use_full_depth))
-        .await?
-        .map_err(|e| AppError::Git(e.to_string()))
-}
-
-#[tauri::command]
-pub async fn install_from_scan(
-    repo_url: String,
-    source: String,
-    skills: Vec<repo_scanner::SkillInstallTarget>,
-) -> Result<Vec<String>, AppError> {
-    tokio::task::spawn_blocking(move || {
-        let install_result = repo_scanner::install_from_repo(&source, &repo_url, &skills);
-        crate::core::installed_skill::invalidate_cache();
-        install_result
-    })
-    .await?
-    .map_err(|e| AppError::Git(e.to_string()))
-}
-
-#[tauri::command]
-pub async fn list_repo_history() -> Result<Vec<repo_history::RepoHistoryEntry>, AppError> {
-    Ok(repo_history::list_entries())
-}
-
-#[tauri::command]
-pub async fn get_repo_cache_info() -> Result<repo_scanner::RepoCacheInfo, AppError> {
-    Ok(tokio::task::spawn_blocking(repo_scanner::get_cache_info).await?)
-}
-
-#[tauri::command]
-pub async fn clean_repo_cache() -> Result<usize, AppError> {
-    tokio::task::spawn_blocking(repo_scanner::clean_unused_cache)
-        .await?
-        .map_err(AppError::Anyhow)
-}
-
-// ── Storage management ──────────────────────────────────────────────
 
 /// Aggregated storage usage info for the Settings page.
 #[derive(serde::Serialize)]
@@ -413,6 +265,67 @@ pub async fn force_delete_app_config() -> Result<usize, AppError> {
     .await?)
 }
 
+/// Remove broken symlinks from the hub and prune orphaned lockfile entries.
+///
+/// Returns the number of issues fixed.
+#[tauri::command]
+pub async fn clean_broken_skills() -> Result<usize, AppError> {
+    tokio::task::spawn_blocking(|| -> Result<usize, AppError> {
+        let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
+        let mut fixed: usize = 0;
+        let mut removed_names: HashSet<String> = HashSet::new();
+
+        // Phase 1: Remove broken symlinks from hub
+        if let Ok(entries) = std::fs::read_dir(&hub_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.symlink_metadata().is_err() {
+                    continue;
+                }
+                if fs_ops::is_link(&path) && !path.exists() {
+                    // Broken symlink — target is gone
+                    if fs_ops::remove_symlink(&path).is_ok() {
+                        if let Some(name) = entry.file_name().to_str() {
+                            removed_names.insert(name.to_string());
+                        }
+                        fixed += 1;
+                    }
+                }
+            }
+        }
+
+        // Phase 2: Clean agent-side symlinks for removed skills
+        for name in &removed_names {
+            let _ = sync::remove_skill_from_all_agents(name);
+        }
+
+        // Phase 3: Prune orphaned lockfile entries
+        let _lock = lockfile::get_mutex()
+            .lock()
+            .map_err(|_| AppError::Lockfile("Lockfile mutex poisoned".to_string()))?;
+        let lock_path = lockfile::lockfile_path();
+        let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
+        let before = lf.skills.len();
+        lf.skills.retain(|entry| {
+            let skill_path = hub_dir.join(&entry.name);
+            // Keep entries that have a valid directory or valid symlink
+            skill_path.symlink_metadata().is_ok()
+                && (!fs_ops::is_link(&skill_path) || skill_path.exists())
+        });
+        let orphans_removed = before - lf.skills.len();
+        if orphans_removed > 0 {
+            let _ = lf.save(&lock_path);
+            crate::core::installed_skill::invalidate_cache();
+            fixed += orphans_removed;
+        }
+
+        Ok(fixed)
+    })
+    .await?
+}
+
+// ── size / count helpers ────────────────────────────────────────────
+
 /// Calculate total size of a directory recursively.
 fn dir_size_recursive(path: &std::path::Path) -> u64 {
     if !path.exists() {
@@ -504,65 +417,6 @@ fn count_hub_skills(hub_dir: &Path) -> (usize, usize) {
     (valid, broken)
 }
 
-/// Remove broken symlinks from the hub and prune orphaned lockfile entries.
-///
-/// Returns the number of issues fixed.
-#[tauri::command]
-pub async fn clean_broken_skills() -> Result<usize, AppError> {
-    tokio::task::spawn_blocking(|| -> Result<usize, AppError> {
-        let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
-        let mut fixed: usize = 0;
-        let mut removed_names: HashSet<String> = HashSet::new();
-
-        // Phase 1: Remove broken symlinks from hub
-        if let Ok(entries) = std::fs::read_dir(&hub_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.symlink_metadata().is_err() {
-                    continue;
-                }
-                if fs_ops::is_link(&path) && !path.exists() {
-                    // Broken symlink — target is gone
-                    if fs_ops::remove_symlink(&path).is_ok() {
-                        if let Some(name) = entry.file_name().to_str() {
-                            removed_names.insert(name.to_string());
-                        }
-                        fixed += 1;
-                    }
-                }
-            }
-        }
-
-        // Phase 2: Clean agent-side symlinks for removed skills
-        for name in &removed_names {
-            let _ = sync::remove_skill_from_all_agents(name);
-        }
-
-        // Phase 3: Prune orphaned lockfile entries
-        let _lock = lockfile::get_mutex()
-            .lock()
-            .map_err(|_| AppError::Lockfile("Lockfile mutex poisoned".to_string()))?;
-        let lock_path = lockfile::lockfile_path();
-        let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
-        let before = lf.skills.len();
-        lf.skills.retain(|entry| {
-            let skill_path = hub_dir.join(&entry.name);
-            // Keep entries that have a valid directory or valid symlink
-            skill_path.symlink_metadata().is_ok()
-                && (!fs_ops::is_link(&skill_path) || skill_path.exists())
-        });
-        let orphans_removed = before - lf.skills.len();
-        if orphans_removed > 0 {
-            let _ = lf.save(&lock_path);
-            crate::core::installed_skill::invalidate_cache();
-            fixed += orphans_removed;
-        }
-
-        Ok(fixed)
-    })
-    .await?
-}
-
 fn count_directories(path: &Path) -> usize {
     if !path.exists() {
         return 0;
@@ -587,83 +441,6 @@ fn repos_cache_dir() -> PathBuf {
     paths::repos_cache_dir()
 }
 
-// ── Skill Pack Commands ──────────────────────────────────────────────
-
-#[tauri::command]
-pub async fn install_pack_from_url(url: String) -> Result<Vec<String>, AppError> {
-    tokio::task::spawn_blocking(move || {
-        crate::core::skill_install::install_skill_pack(url).map_err(AppError::Other)
-    })
-    .await?
-}
-
-#[tauri::command]
-pub async fn list_installed_packs() -> Result<Vec<skill_pack::PackEntry>, AppError> {
-    Ok(tokio::task::spawn_blocking(skill_pack::list_packs).await?)
-}
-
-#[tauri::command]
-pub async fn remove_installed_pack(name: String) -> Result<Vec<String>, AppError> {
-    tokio::task::spawn_blocking(move || skill_pack::remove_pack(&name))
-        .await?
-        .map_err(|e| AppError::Other(e.to_string()))
-}
-
-#[tauri::command]
-pub async fn get_pack_doctor(name: String) -> Result<skill_pack::DoctorReport, AppError> {
-    tokio::task::spawn_blocking(move || skill_pack::doctor_pack(&name))
-        .await?
-        .map_err(|e| AppError::Other(e.to_string()))
-}
-
-// ── New-skill detection commands ────────────────────────────────────
-
-/// Manually check all cached repos for new uninstalled skills.
-/// Returns the list after filtering out dismissed entries.
-#[tauri::command]
-pub async fn check_new_repo_skills() -> Result<Vec<repo_scanner::RepoNewSkill>, AppError> {
-    let new_skills =
-        tokio::task::spawn_blocking(repo_scanner::detect_new_skills_in_cached_repos).await?;
-
-    let dismissed = dismissed_skills::load_dismissed();
-    let dismissed_set: std::collections::HashSet<&str> =
-        dismissed.iter().map(|s| s.as_str()).collect();
-
-    let filtered: Vec<repo_scanner::RepoNewSkill> = new_skills
-        .into_iter()
-        .filter(|s| {
-            let key = format!("{}/{}", s.repo_source, s.skill_id);
-            !dismissed_set.contains(key.as_str())
-        })
-        .collect();
-
-    Ok(filtered)
-}
-
-/// Dismiss a new-skill notification so it won't appear again.
-/// Key format: "repo_source/skill_id"
-#[tauri::command]
-pub async fn dismiss_new_skill(key: String) -> Result<(), AppError> {
-    tokio::task::spawn_blocking(move || dismissed_skills::dismiss(&key))
-        .await?
-        .map_err(|e| AppError::Other(e.to_string()))
-}
-
-/// Load all dismissed new-skill keys.
-#[tauri::command]
-pub async fn get_dismissed_new_skills() -> Result<Vec<String>, AppError> {
-    Ok(dismissed_skills::load_dismissed())
-}
-
-/// Batch dismiss multiple new-skill notifications.
-/// Used for repo-level "dismiss all" in the ghost card group header.
-#[tauri::command]
-pub async fn dismiss_new_skills_batch(keys: Vec<String>) -> Result<(), AppError> {
-    tokio::task::spawn_blocking(move || dismissed_skills::dismiss_batch(&keys))
-        .await?
-        .map_err(|e| AppError::Other(e.to_string()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -681,10 +458,7 @@ mod tests {
 
         // A directory with a 1MB file, placed OUTSIDE root, then symlinked in.
         // (If it were under root it would be counted as a normal subdir.)
-        let outside = std::env::temp_dir().join(format!(
-            "sst-storage-test-{}",
-            std::process::id()
-        ));
+        let outside = std::env::temp_dir().join(format!("sst-storage-test-{}", std::process::id()));
         std::fs::create_dir_all(&outside).unwrap();
         let payload = vec![0u8; 1_000_000];
         std::fs::write(outside.join("blob.bin"), &payload).unwrap();
@@ -718,11 +492,8 @@ mod tests {
 
         // Broken symlink → target missing.
         #[cfg(unix)]
-        std::os::unix::fs::symlink(
-            tmp.path().join("does-not-exist"),
-            hub.join("broken-skill"),
-        )
-        .unwrap();
+        std::os::unix::fs::symlink(tmp.path().join("does-not-exist"), hub.join("broken-skill"))
+            .unwrap();
 
         // Stray regular file → ignored entirely.
         std::fs::write(hub.join(".DS_Store"), b"x").unwrap();

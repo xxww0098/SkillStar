@@ -130,7 +130,7 @@ export function AgentHeroCard({
 
   const status = computeAgentStatus({
     agent,
-    activation: act.activation,
+    activation: act.activeEntry,
     boundProvider: act.boundProvider,
     installed: act.install.installed,
     installLoading: act.install.loading,
@@ -140,7 +140,7 @@ export function AgentHeroCard({
   });
   const tone = statusTone(status);
   const card = TONE_CARD[tone];
-  const connected = status.kind !== "not_installed" && status.kind !== "inactive" && Boolean(act.activation);
+  const connected = status.kind !== "not_installed" && status.kind !== "inactive" && Boolean(act.activeEntry);
 
   const availableModels = useMemo(() => {
     if (!act.boundProvider) return [];
@@ -193,7 +193,7 @@ export function AgentHeroCard({
           </label>
           <ProviderSelectPopover
             providers={act.compatibleProviders}
-            currentId={act.activation?.provider_id}
+            currentId={act.activeEntry?.provider_id}
             onPick={(id) => void act.activate(id)}
             onAddProvider={onAddProvider}
             busy={act.busy}

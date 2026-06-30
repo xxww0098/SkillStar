@@ -93,21 +93,31 @@ pub struct ProviderPreset {
 // Flat provider store types (v2 architecture)
 // ---------------------------------------------------------------------------
 
-/// Root structure for the flat provider store (`model_providers.json` v2).
+/// Current on-disk schema version of the flat provider store.
+///
+/// - v2 stored one `Option<ToolActivation>` per tool (single provider per agent).
+/// - v3 stores a [`ToolBinding`] per tool — an ordered list of provider+model
+///   entries with an `active_index` pointer. Single-provider agents
+///   (claude-code, gemini) keep 0 or 1 entry; multi-provider agents
+///   (codex, opencode) may hold several.
+pub const FLAT_STORE_VERSION: u32 = 3;
+
+/// Root structure for the flat provider store (`model_providers.json`).
 ///
 /// Stores providers as a flat array with a separate `tool_activations` map
-/// that records which provider + model each Agent tool is currently using.
+/// that records which providers + models each Agent tool is bound to.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FlatProvidersStore {
     pub version: u32,
     pub providers: Vec<ProviderEntryFlat>,
-    pub tool_activations: HashMap<String, Option<ToolActivation>>,
+    #[serde(default)]
+    pub tool_activations: HashMap<String, ToolBinding>,
 }
 
 impl Default for FlatProvidersStore {
     fn default() -> Self {
         Self {
-            version: 2,
+            version: FLAT_STORE_VERSION,
             providers: Vec::new(),
             tool_activations: HashMap::new(),
         }
@@ -204,7 +214,13 @@ pub struct ModelCatalogFetchResult {
     pub missing_cost_count: usize,
 }
 
-/// Records which provider and model a specific Agent tool is currently using.
+/// A single provider+model binding entry for an Agent tool.
+///
+/// One entry = one provider the agent can use, plus the model selected for it
+/// and any per-entry tool settings (e.g. Codex `wire_api` / `auth_mode`).
+/// Single-provider agents (claude-code, gemini) only ever hold one of these;
+/// multi-provider agents (codex, opencode) may hold several, all written to the
+/// agent's config file as parallel managed entries.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ToolActivation {
     pub provider_id: String,
@@ -215,6 +231,58 @@ pub struct ToolActivation {
     /// external-modification conflict detection. `None` until the first sync.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_sync_at: Option<u64>,
+}
+
+/// All provider+model bindings for one Agent tool, plus which one is active.
+///
+/// `entries` is the ordered list of providers bound to this agent. `active_index`
+/// points at the entry that owns the agent's "active" pointer on disk (Codex
+/// `model_provider`, OpenCode top-level `model`). For single-provider agents the
+/// list never exceeds one entry, so `active_index` is always 0. An empty
+/// `entries` means the tool is not bound to anything (the v2 `None` state).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct ToolBinding {
+    #[serde(default)]
+    pub entries: Vec<ToolActivation>,
+    #[serde(default)]
+    pub active_index: usize,
+}
+
+impl ToolBinding {
+    /// A binding holding exactly one entry (the single-provider agent shape).
+    pub fn single(entry: ToolActivation) -> Self {
+        Self {
+            entries: vec![entry],
+            active_index: 0,
+        }
+    }
+
+    /// The active entry, clamping a stale `active_index` to the last entry.
+    pub fn active(&self) -> Option<&ToolActivation> {
+        if self.entries.is_empty() {
+            return None;
+        }
+        let idx = self.active_index.min(self.entries.len() - 1);
+        self.entries.get(idx)
+    }
+
+    /// Mutable access to the active entry (clamped like [`active`]).
+    pub fn active_mut(&mut self) -> Option<&mut ToolActivation> {
+        if self.entries.is_empty() {
+            return None;
+        }
+        let idx = self.active_index.min(self.entries.len() - 1);
+        self.entries.get_mut(idx)
+    }
+
+    /// Whether any entry binds the given provider.
+    pub fn binds_provider(&self, provider_id: &str) -> bool {
+        self.entries.iter().any(|e| e.provider_id == provider_id)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
 }
 
 /// Partial update patch for a flat provider entry.

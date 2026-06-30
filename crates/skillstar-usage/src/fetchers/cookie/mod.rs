@@ -5,6 +5,7 @@
 //! Fetchers use these cookies to scrape usage data from provider consoles.
 
 pub mod opencode;
+pub mod stepfun;
 
 use crate::cookie_jar;
 use crate::crypto;
@@ -32,6 +33,7 @@ pub async fn dispatch(subscription: &mut Subscription) -> UsageResult<Subscripti
             });
             opencode::fetch(&subscription.id, &entries, &cookie_header, tier).await
         }
+        "stepfun" => stepfun::fetch(&subscription.id, &entries, &cookie_header).await,
         other => Err(super::unsupported(other)),
     };
 

@@ -6,6 +6,7 @@
 mod part1;
 mod part2;
 mod part3;
+mod part4;
 
 use super::*;
 use crate::providers::{ModelMapping, ProviderSettings};

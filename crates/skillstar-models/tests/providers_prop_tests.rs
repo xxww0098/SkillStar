@@ -17,7 +17,9 @@
 //! 5.5, 6.4, 7.3, 8.1, 8.2, 8.7**
 
 use proptest::prelude::*;
-use skillstar_models::providers::{FlatProvidersStore, ProviderEntryFlat, ToolActivation};
+use skillstar_models::providers::{
+    FlatProvidersStore, ProviderEntryFlat, ToolActivation, ToolBinding,
+};
 use std::path::PathBuf;
 use tempfile::TempDir;
 
@@ -57,9 +59,13 @@ fn arb_tool_activation() -> impl Strategy<Value = ToolActivation> {
         })
 }
 
-/// Strategy: generate an optional ToolActivation for the tool_activations map.
-fn arb_optional_tool_activation() -> impl Strategy<Value = Option<ToolActivation>> {
-    prop_oneof![Just(None), arb_tool_activation().prop_map(Some),]
+/// Strategy: generate a ToolBinding for the tool_activations map — either empty
+/// (the "not bound" state) or a single-entry binding.
+fn arb_optional_tool_activation() -> impl Strategy<Value = ToolBinding> {
+    prop_oneof![
+        Just(ToolBinding::default()),
+        arb_tool_activation().prop_map(ToolBinding::single),
+    ]
 }
 
 /// Strategy: generate an arbitrary ProviderEntryFlat.
@@ -153,7 +159,7 @@ fn arb_flat_providers_store() -> impl Strategy<Value = FlatProvidersStore> {
         ), // tool_activations
     )
         .prop_map(|(providers, tool_activations)| FlatProvidersStore {
-            version: 2,
+            version: skillstar_models::providers::FLAT_STORE_VERSION,
             providers,
             tool_activations,
         })

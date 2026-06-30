@@ -11,6 +11,7 @@ import {
   Search,
   Database,
   CloudLightning,
+  MessageCircle,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -36,6 +37,7 @@ export const PUBLISHER_BRAND_ICON: Record<string, ReactNode> = {
   brave: <Search className="h-6 w-6 text-primary/70" />,
   google: <Globe className="h-6 w-6 text-primary/70" />,
   supabase: <Database className="h-6 w-6 text-primary/70" />,
+  x: <MessageCircle className="h-6 w-6 text-primary/70" />,
 };
 
 /**

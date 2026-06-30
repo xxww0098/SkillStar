@@ -88,7 +88,8 @@ export function useProjectSkills({
           onAgentSkillsChange(() => canonicalizeAgentsBySharedPath(filteredAgents, preferredOwnerByPath));
         }
 
-        // Re-scan to confirm everything is clean
+        // Re-scan to confirm everything is clean. `managed` is recomputed by
+        // the backend against the freshly-saved manifest.
         const rescan = await scanProjectSkills(selectedProject.path);
         const remaining = filterUnmanagedByEnabledProfiles(rescan.skills);
         setUnmanagedSkills(remaining);

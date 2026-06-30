@@ -47,9 +47,7 @@ export function ConnectionConsole({ lines, pendingHostKey, active, onAcceptHostK
     <div className="flex flex-col rounded-lg border border-zinc-700/60 bg-zinc-950 overflow-hidden">
       <div className="flex items-center gap-2 border-b border-zinc-700/60 px-3 py-1.5">
         <Terminal className="size-3.5 text-zinc-400" />
-        <span className="text-[11px] font-medium uppercase tracking-wider text-zinc-400">
-          {t("ssh.console.title")}
-        </span>
+        <span className="text-[11px] font-medium uppercase tracking-wider text-zinc-400">{t("ssh.console.title")}</span>
         {active ? <Loader2 className="ml-auto size-3.5 animate-spin text-primary" /> : null}
       </div>
 

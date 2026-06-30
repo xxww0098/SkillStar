@@ -27,7 +27,7 @@ use skillstar_models::provider_ref::AiProviderRef;
 use skillstar_models::providers::ProviderPresetFlat;
 use skillstar_models::providers::{
     self, AppProviders, ModelCatalogFetchResult, ProviderEntry, ProviderEntryFlat, ProviderPatch,
-    ProviderPatchFlat, ProviderPreset, ProviderSettings, ProvidersStore, ToolActivation,
+    ProviderPatchFlat, ProviderPreset, ProviderSettings, ProvidersStore, ToolBinding,
 };
 use skillstar_models::tool_sync::{self, ToolConfigTarget, ToolSyncResult, ToolSyncResultFlat};
 
@@ -85,7 +85,7 @@ pub struct SwitchResult {
 pub struct FlatProvidersResponse {
     pub version: u32,
     pub providers: Vec<ProviderEntryFlat>,
-    pub tool_activations: std::collections::HashMap<String, Option<ToolActivation>>,
+    pub tool_activations: std::collections::HashMap<String, ToolBinding>,
 }
 
 /// Result of updating a flat provider, including tool re-sync outcomes.

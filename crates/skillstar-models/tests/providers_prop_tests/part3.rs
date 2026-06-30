@@ -701,16 +701,11 @@ proptest! {
             );
 
             // ── Invariant check after each activation ──
-            // Each tool_id should map to at most one provider_id
-            for (tid, activation) in &store_mut.tool_activations {
-                if let Some(act) = activation {
-                    // Count how many tool_activations entries reference this same provider
-                    // for THIS specific tool — there should be exactly one entry per tool_id
-                    // (which is guaranteed by HashMap keys being unique), but we verify the
-                    // value is consistent: only one provider_id per tool.
-                    //
-                    // The real invariant: for the tool we just activated, only the new
-                    // provider should be active.
+            // The tool we just activated must have the new provider as its
+            // ACTIVE entry. (Multi-provider tools may retain other entries, but
+            // the active pointer always follows the most recent activation.)
+            for (tid, binding) in &store_mut.tool_activations {
+                if let Some(act) = binding.active() {
                     if tid == tool_id {
                         prop_assert_eq!(
                             &act.provider_id, &provider_id,
@@ -721,32 +716,31 @@ proptest! {
                 }
             }
 
-            // Additional invariant: no two different tool_activations entries for the
-            // SAME tool_id can exist (HashMap guarantees this, but let's verify the
-            // broader property: each tool has at most one active provider)
+            // Each tool_id maps to exactly one binding (HashMap key), and that
+            // binding has exactly one active entry.
             let active_count_for_tool: usize = store_mut
                 .tool_activations
                 .iter()
-                .filter(|(tid, act)| *tid == tool_id && act.is_some())
+                .filter(|(tid, binding)| *tid == tool_id && binding.active().is_some())
                 .count();
             prop_assert!(
                 active_count_for_tool <= 1,
-                "At step {}: tool '{}' should have at most 1 active provider, found {}",
+                "At step {}: tool '{}' should have at most 1 active binding, found {}",
                 step, tool_id, active_count_for_tool
             );
         }
 
         // ── Final state verification ──
-        // After all operations, each tool_id should still have at most one active provider
+        // After all operations, each tool_id should still have at most one active binding
         for tool_id in TOOL_IDS {
             let active_count: usize = store_mut
                 .tool_activations
                 .iter()
-                .filter(|(tid, act)| tid.as_str() == *tool_id && act.is_some())
+                .filter(|(tid, binding)| tid.as_str() == *tool_id && binding.active().is_some())
                 .count();
             prop_assert!(
                 active_count <= 1,
-                "Final state: tool '{}' should have at most 1 active provider, found {}",
+                "Final state: tool '{}' should have at most 1 active binding, found {}",
                 tool_id, active_count
             );
         }
@@ -763,7 +757,11 @@ proptest! {
         }
 
         for (tool_id, expected_provider_id) in &expected_active {
-            if let Some(Some(activation)) = store_mut.tool_activations.get(*tool_id) {
+            if let Some(activation) = store_mut
+                .tool_activations
+                .get(*tool_id)
+                .and_then(|b| b.active())
+            {
                 prop_assert_eq!(
                     &activation.provider_id, *expected_provider_id,
                     "Final state: tool '{}' should have provider '{}' active, but found '{}'",

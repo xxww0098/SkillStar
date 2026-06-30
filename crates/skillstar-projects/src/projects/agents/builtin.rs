@@ -86,6 +86,14 @@ const BUILTIN_AGENT_DEFS: &[(&str, &str, &str, &[&str], &str, Option<&str>)] = &
         None, // IDE, not a terminal CLI
     ),
     (
+        "kiro",
+        "Kiro",
+        "agents/kiro.svg",
+        &[".kiro", "skills"],
+        ".kiro/skills",
+        None, // AWS AI IDE, not a terminal CLI — detected by directory presence
+    ),
+    (
         "openclaw",
         "OpenClaw",
         "agents/openclaw.svg",
@@ -171,5 +179,39 @@ impl AgentSpec for BuiltinSpec {
     }
     fn binary_name(&self) -> Option<&str> {
         self.0.binary
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    /// Guards the count any doc/README claims about built-in agents.
+    /// If you add/remove a row in `BUILTIN_AGENT_DEFS`, update this number
+    /// AND the "支持的 Agent CLI" table in `README.md` in the same change.
+    #[test]
+    fn builtin_agents_count() {
+        assert_eq!(BUILTIN_AGENT_DEFS.len(), 13);
+    }
+
+    #[test]
+    fn builtin_agent_ids_are_unique() {
+        let mut seen = HashSet::new();
+        for (id, ..) in BUILTIN_AGENT_DEFS {
+            assert!(seen.insert(*id), "duplicate builtin agent id: {id}");
+        }
+    }
+
+    /// Required fields must never be blank; only `project_skills_rel` may be
+    /// empty (marks a global-only agent like OpenClaw).
+    #[test]
+    fn builtin_agent_fields_are_well_formed() {
+        for (id, name, icon, subdirs, _rel, _binary) in BUILTIN_AGENT_DEFS {
+            assert!(!id.is_empty(), "blank agent id");
+            assert!(!name.is_empty(), "blank display_name for {id}");
+            assert!(icon.ends_with(".svg"), "icon for {id} must be an svg path");
+            assert!(!subdirs.is_empty(), "empty home subdirs for {id}");
+        }
     }
 }

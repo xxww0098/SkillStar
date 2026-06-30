@@ -159,6 +159,54 @@ fn write_then_read_store() {
 
 
 #[test]
+fn mcp_presets_catalog_is_well_formed() {
+    let presets = get_mcp_presets();
+    assert!(presets.len() >= 10, "preset catalog should be substantial");
+
+    let mut seen = std::collections::HashSet::new();
+    for p in &presets {
+        assert!(!p.name.is_empty(), "preset '{}' has empty name", p.id);
+        assert!(
+            seen.insert(p.id.clone()),
+            "duplicate preset id '{}'",
+            p.id
+        );
+        match p.transport.as_str() {
+            "http" | "sse" => assert!(
+                p.url.is_some(),
+                "remote preset '{}' must carry a url",
+                p.id
+            ),
+            _ => assert!(
+                p.command.is_some(),
+                "stdio preset '{}' must carry a command",
+                p.id
+            ),
+        }
+        // Every required_env key must exist in the env map so the form can
+        // surface it as a blank-to-fill field.
+        for key in &p.required_env {
+            assert!(
+                p.env.contains_key(key),
+                "preset '{}' lists required env '{key}' missing from env map",
+                p.id
+            );
+        }
+    }
+}
+
+#[test]
+fn kiro_resolves_to_settings_mcp_json() {
+    // Kiro reads user-scope MCP from ~/.kiro/settings/mcp.json (top-level mcpServers).
+    let p = resolve_mcp_config_path("kiro").unwrap();
+    assert!(
+        p.ends_with(".kiro/settings/mcp.json"),
+        "unexpected kiro path: {}",
+        p.display()
+    );
+}
+
+#[test]
 fn zcode_cli_spec_matches_community_stdio() {
     let v = zcode_cli_spec(&stdio("ads-mcp"));
     assert_eq!(v.get("type").and_then(|x| x.as_str()), Some("stdio"));
@@ -183,8 +231,8 @@ fn sync_to_unknown_tool_errors_instead_of_silently_passing() {
 
 #[test]
 fn sync_all_returns_one_result_per_known_tool() {
-    // sync_server_all_tools iterates MCP_TOOL_IDS (6 tools), so the result
-    // vector length is a stable contract the UI depends on.
+    // sync_server_all_tools iterates MCP_TOOL_IDS (one per supported tool), so
+    // the result vector length is a stable contract the UI depends on.
     let results = sync_server_all_tools(&stdio("fs"), false);
     assert_eq!(
         results.len(),

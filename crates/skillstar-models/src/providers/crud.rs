@@ -6,6 +6,27 @@ use super::*;
 // Flat store CRUD operations (v2 architecture)
 // ---------------------------------------------------------------------------
 
+/// Infer the recommended Codex `wire_api` and `auth_mode` for a provider from
+/// its OpenAI-compatible base URL.
+///
+/// Rule (single source of truth; mirrored verbatim in the frontend):
+/// - `api.openai.com` → `("responses", "api_key")` — OpenAI's native Responses
+///   API + official key path.
+/// - everything else → `("chat", "third_party")` — third-party OpenAI-compatible
+///   endpoints only implement `/v1/chat/completions` (not the Responses API),
+///   and `third_party` routes the key through `env_key` so `auth.json` is never
+///   touched (a concurrent ChatGPT OAuth login survives intact).
+///
+/// Empty / non-OpenAI URLs fall through to `("chat", "third_party")` — the safe
+/// default for any custom OpenAI-compatible endpoint.
+pub fn recommended_codex_defaults(base_url_openai: &str) -> (&'static str, &'static str) {
+    if base_url_openai.contains("api.openai.com") {
+        ("responses", "api_key")
+    } else {
+        ("chat", "third_party")
+    }
+}
+
 /// Validate that a URL string is a valid HTTP/HTTPS URL.
 ///
 /// Returns Ok(()) if the URL is valid, or an error describing the issue.
@@ -50,6 +71,20 @@ pub fn create_provider_flat(
 
     // Generate new UUID (overwrite any provided id)
     entry.id = Uuid::new_v4().to_string();
+
+    // Infer Codex defaults from the base URL when the caller didn't set them
+    // explicitly. PresetPicker (and most callers) omit these fields, so serde's
+    // hardcoded default (`responses` + `api_key`) fills them in — which breaks
+    // every third-party provider (DeepSeek/Kimi/GLM/…) since they only speak
+    // `/v1/chat/completions`. Here we correct that to the URL-appropriate pair.
+    // Any caller that deliberately chose a non-default value is preserved.
+    let (rec_wire, rec_auth) = recommended_codex_defaults(&entry.base_url_openai);
+    if entry.codex_wire_api == default_codex_wire_api() {
+        entry.codex_wire_api = rec_wire.to_string();
+    }
+    if entry.codex_auth_mode == default_codex_auth_mode() {
+        entry.codex_auth_mode = rec_auth.to_string();
+    }
 
     // Set created_at to current timestamp if not set
     if entry.created_at.is_none() {
@@ -161,12 +196,14 @@ pub fn delete_provider_flat(store: &mut FlatProvidersStore, id: &str) -> Result<
     // Remove the provider
     store.providers.remove(idx);
 
-    // Clean up tool_activations: set any activation referencing this provider to None
-    for activation in store.tool_activations.values_mut() {
-        if let Some(act) = activation
-            && act.provider_id == id
-        {
-            *activation = None;
+    // Clean up tool_activations: drop any binding entry referencing this
+    // provider and re-clamp the active pointer so it stays valid.
+    for binding in store.tool_activations.values_mut() {
+        if let Some(pos) = binding.entries.iter().position(|e| e.provider_id == id) {
+            binding.entries.remove(pos);
+            if binding.active_index >= pos && binding.active_index > 0 {
+                binding.active_index -= 1;
+            }
         }
     }
 
@@ -283,30 +320,116 @@ pub fn activate_tool(
         _ => provider.default_model.clone(),
     };
 
-    // 4. Determine settings: use provided, or preserve previous activation's settings
+    // 4. Determine settings: use provided, or preserve the existing entry's
+    //    settings for this provider if re-activating it.
     let resolved_settings = settings.or_else(|| {
         store
             .tool_activations
             .get(tool_id)
-            .and_then(|opt| opt.as_ref())
-            .and_then(|a| a.settings.clone())
+            .and_then(|binding| binding.entries.iter().find(|e| e.provider_id == provider_id))
+            .and_then(|e| e.settings.clone())
     });
 
-    // 5. Create ToolActivation
-    let activation = ToolActivation {
+    // 5. Create the entry
+    let entry = ToolActivation {
         provider_id: provider_id.to_string(),
         model: resolved_model,
         settings: resolved_settings,
         last_sync_at: None,
     };
 
-    // 6. Insert into store.tool_activations (replaces any previous activation for this tool)
-    store
-        .tool_activations
-        .insert(tool_id.to_string(), Some(activation.clone()));
+    // 6. Insert into the tool's binding.
+    //    - Multi-provider agents (codex, opencode): upsert the entry (update the
+    //      model/settings if this provider is already bound, else append) and
+    //      point `active_index` at it.
+    //    - Single-provider agents (claude-code, gemini): the binding holds at
+    //      most one entry, so activating replaces it wholesale.
+    let binding = store.tool_activations.entry(tool_id.to_string()).or_default();
+    if agent_supports_multiple_providers(tool_id) {
+        if let Some(pos) = binding.entries.iter().position(|e| e.provider_id == provider_id) {
+            binding.entries[pos] = entry.clone();
+            binding.active_index = pos;
+        } else {
+            binding.entries.push(entry.clone());
+            binding.active_index = binding.entries.len() - 1;
+        }
+    } else {
+        binding.entries = vec![entry.clone()];
+        binding.active_index = 0;
+    }
 
-    // 7. Return the activation
-    Ok(activation)
+    // 7. Return the activated entry
+    Ok(entry)
+}
+
+/// Whether a tool's config format natively supports several providers coexisting
+/// (Codex `[model_providers.*]`, OpenCode `provider.*`). Single-provider agents
+/// (claude-code, gemini) write a single global env block and hold one entry.
+///
+/// This is the one place agent "kind" is decided in the store layer; keep it
+/// data-driven here rather than scattering `tool_id == ...` checks.
+pub fn agent_supports_multiple_providers(tool_id: &str) -> bool {
+    matches!(tool_id, "codex" | "opencode")
+}
+
+/// Point a multi-provider tool's active pointer at an already-bound provider
+/// without otherwise touching the entry list.
+///
+/// # Errors
+/// - Tool has no binding / the provider is not bound to this tool
+pub fn set_active_binding(
+    store: &mut FlatProvidersStore,
+    tool_id: &str,
+    provider_id: &str,
+) -> Result<ToolActivation> {
+    let binding = store
+        .tool_activations
+        .get_mut(tool_id)
+        .filter(|b| !b.is_empty())
+        .with_context(|| format!("Tool '{}' has no active bindings", tool_id))?;
+
+    let pos = binding
+        .entries
+        .iter()
+        .position(|e| e.provider_id == provider_id)
+        .with_context(|| {
+            format!("Provider '{}' is not bound to tool '{}'", provider_id, tool_id)
+        })?;
+    binding.active_index = pos;
+    Ok(binding.entries[pos].clone())
+}
+
+/// Remove a single provider entry from a tool's binding.
+///
+/// Returns the binding's new active entry (if any remain). `active_index` is
+/// re-clamped so it keeps pointing at a valid entry.
+///
+/// # Errors
+/// - The provider is not bound to this tool
+pub fn remove_binding_entry(
+    store: &mut FlatProvidersStore,
+    tool_id: &str,
+    provider_id: &str,
+) -> Result<Option<ToolActivation>> {
+    let binding = store
+        .tool_activations
+        .get_mut(tool_id)
+        .with_context(|| format!("Tool '{}' has no bindings", tool_id))?;
+
+    let pos = binding
+        .entries
+        .iter()
+        .position(|e| e.provider_id == provider_id)
+        .with_context(|| {
+            format!("Provider '{}' is not bound to tool '{}'", provider_id, tool_id)
+        })?;
+
+    binding.entries.remove(pos);
+    // Re-clamp the active pointer: if we removed at/below it, shift left.
+    if binding.active_index >= pos && binding.active_index > 0 {
+        binding.active_index -= 1;
+    }
+    Ok(binding.active().cloned())
 }
 
 /// Update only the settings of an active tool without changing provider or model.
@@ -314,50 +437,43 @@ pub fn activate_tool(
 /// This is useful for front-end toggles like Codex's `wire_api` or `auth_mode`
 /// where the user wants to tweak per-tool config without a full re-activation.
 ///
+/// Updates the binding's currently-active entry.
+///
 /// # Errors
-/// - Tool is not currently active
+/// - Tool is not currently active (no entries bound)
 pub fn update_tool_settings(
     store: &mut FlatProvidersStore,
     tool_id: &str,
     settings: serde_json::Value,
 ) -> Result<ToolActivation> {
-    let activation = store
+    let binding = store
         .tool_activations
-        .get(tool_id)
-        .and_then(|opt| opt.as_ref())
+        .get_mut(tool_id)
+        .filter(|b| !b.is_empty())
         .with_context(|| format!("Tool '{}' is not currently active", tool_id))?;
 
-    let updated = ToolActivation {
-        provider_id: activation.provider_id.clone(),
-        model: activation.model.clone(),
-        settings: Some(settings),
-        last_sync_at: activation.last_sync_at,
-    };
-
-    store
-        .tool_activations
-        .insert(tool_id.to_string(), Some(updated.clone()));
-
-    Ok(updated)
+    let active = binding
+        .active_mut()
+        .with_context(|| format!("Tool '{}' has no active binding", tool_id))?;
+    active.settings = Some(settings);
+    Ok(active.clone())
 }
 
-/// Deactivate a tool by removing its activation entry.
+/// Deactivate a tool by clearing all of its provider bindings.
 ///
-/// Sets the tool's entry in `tool_activations` to `None`, effectively clearing
-/// the active provider for that tool.
+/// Empties the tool's binding (`entries: []`), clearing every bound provider.
 ///
 /// # Returns
-/// The previous `ToolActivation` (if any) so the caller can use it for backup
+/// The previously-active entry (if any) so the caller can use it for backup
 /// restoration or undo operations.
 pub fn deactivate_tool(
     store: &mut FlatProvidersStore,
     tool_id: &str,
 ) -> Result<Option<ToolActivation>> {
-    // Remove or set to None the tool_id entry in tool_activations
     let previous = store
         .tool_activations
-        .insert(tool_id.to_string(), None)
-        .flatten();
+        .insert(tool_id.to_string(), ToolBinding::default())
+        .and_then(|b| b.active().cloned());
 
     Ok(previous)
 }

@@ -51,6 +51,21 @@ pub fn resolve_gemini_env_path() -> Result<PathBuf> {
     Ok(home.join(".gemini").join(".env"))
 }
 
+/// `~/.grok/auth.json` — the xAI Grok Build CLI's OAuth credential store.
+///
+/// The file is a JSON object keyed by OIDC scope URLs
+/// (`https://auth.x.ai::<client-id>`); each entry carries `key` (the bearer
+/// access token), `refresh_token`, `expires_at`, and identity metadata. This
+/// is the file account-switching rewrites to flip which Grok account the CLI
+/// authenticates as. We deliberately mirror [`resolve_codex_auth_path`] and
+/// ignore the `GROK_HOME` override so resolution always funnels through the
+/// sandboxable [`sync_home_dir`] (keeps tests off the developer's real
+/// `~/.grok`).
+pub fn resolve_grok_auth_path() -> Result<PathBuf> {
+    let home = sync_home_dir()?;
+    Ok(home.join(".grok").join("auth.json"))
+}
+
 /// Resolve the Claude Desktop config file path.
 ///
 /// - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
@@ -412,13 +427,24 @@ fn detect_current_provider(tool_id: &str, path: &Path) -> Result<Option<String>>
         "codex" => {
             let content = std::fs::read_to_string(path)?;
             let table: toml::Table = toml::from_str(&content)?;
-            if let Some(mp) = table.get("model_providers").and_then(|v| v.as_table())
-                && let Some(ss) = mp
-                    .get(CODEX_MANAGED_PROVIDER_KEY)
+            // Follow the active pointer (`model_provider`) to its managed table,
+            // falling back to any skillstar* table or a legacy `[provider]`.
+            if let Some(mp) = table.get("model_providers").and_then(|v| v.as_table()) {
+                let active_key = table.get("model_provider").and_then(|v| v.as_str());
+                let active = active_key
+                    .and_then(|k| mp.get(k))
+                    .or_else(|| {
+                        mp.iter()
+                            .find(|(k, _)| is_skillstar_managed_key(k))
+                            .map(|(_, v)| v)
+                    });
+                if let Some(url) = active
                     .and_then(|v| v.as_table())
-                && let Some(url) = ss.get("base_url").and_then(|v| v.as_str())
-            {
-                return Ok(Some(url.to_string()));
+                    .and_then(|ss| ss.get("base_url"))
+                    .and_then(|v| v.as_str())
+                {
+                    return Ok(Some(url.to_string()));
+                }
             }
             if let Some(provider) = table.get("provider").and_then(|v| v.as_table())
                 && let Some(base_url) = provider.get("base_url").and_then(|v| v.as_str())
@@ -430,13 +456,24 @@ fn detect_current_provider(tool_id: &str, path: &Path) -> Result<Option<String>>
         "opencode" => {
             let content = std::fs::read_to_string(path)?;
             let json: Value = serde_json::from_str(&content)?;
-            if let Some(name) = json
-                .get("provider")
-                .and_then(|p| p.get(OPENCODE_MANAGED_PROVIDER_KEY))
-                .and_then(|c| c.get("name"))
-                .and_then(|v| v.as_str())
-            {
-                return Ok(Some(name.to_string()));
+            if let Some(providers) = json.get("provider").and_then(|p| p.as_object()) {
+                // Prefer the block named by the active `model` selector; else
+                // any skillstar* block.
+                let active_key = json
+                    .get("model")
+                    .and_then(|v| v.as_str())
+                    .and_then(|m| m.split('/').next());
+                let block = active_key
+                    .and_then(|k| providers.get(k))
+                    .or_else(|| {
+                        providers
+                            .iter()
+                            .find(|(k, _)| is_skillstar_managed_key(k))
+                            .map(|(_, v)| v)
+                    });
+                if let Some(name) = block.and_then(|c| c.get("name")).and_then(|v| v.as_str()) {
+                    return Ok(Some(name.to_string()));
+                }
             }
             Ok(None)
         }

@@ -1,4 +1,15 @@
-import { ArrowUpCircle, Check, Download, GitFork, Loader2, RefreshCw, Sparkles, X } from "lucide-react";
+import {
+  ArrowUpCircle,
+  Boxes,
+  Check,
+  ChevronDown,
+  Download,
+  GitFork,
+  Loader2,
+  RefreshCw,
+  Sparkles,
+  X,
+} from "lucide-react";
 
 import { Popover } from "radix-ui";
 import { useCallback, useEffect, useState } from "react";
@@ -160,9 +171,24 @@ export function Toolbar({
     ...(hideSortControls || hideStarsSort ? [] : [{ value: "updated" as SortOption, label: t("toolbar.updated") }]),
   ];
 
-  const [repoPopoverOpen, setRepoPopoverOpen] = useState(false);
-  const hasRepoFilter = Boolean(repoFilter);
-  const showRepoFilter = (repoSources?.length ?? 0) >= 1 && onRepoFilterChange;
+  const [originOpen, setOriginOpen] = useState(false);
+  const hasSourceFilter = Boolean(onSourceFilterChange) && (localCount ?? 0) > 0;
+  const showRepoFilter = (repoSources?.length ?? 0) >= 1 && Boolean(onRepoFilterChange);
+  const showOriginFilter = hasSourceFilter || showRepoFilter;
+  const effectiveSource = sourceFilter ?? "all";
+  const originActive = effectiveSource !== "all" || Boolean(repoFilter);
+  const originLabel = repoFilter
+    ? repoFilter
+    : effectiveSource === "hub"
+      ? "Hub"
+      : effectiveSource === "local"
+        ? "Local"
+        : t("toolbar.source");
+  const clearOrigin = () => {
+    onSourceFilterChange?.("all");
+    onRepoFilterChange?.(null);
+    setOriginOpen(false);
+  };
 
   // ── Search slot ──
   const searchSlot = (
@@ -266,72 +292,43 @@ export function Toolbar({
         </div>
       )}
 
-      {/* Source type filter (Hub / Local) */}
-      {onSourceFilterChange && (localCount ?? 0) > 0 && (
-        <div className="flex items-center gap-0.5 border border-border rounded-lg overflow-hidden h-8 p-0.5 bg-sidebar/30 shrink-0">
-          {(["all", "hub", "local"] as const).map((f) => {
-            const isActive = sourceFilter === f;
-            return (
-              <button
-                key={f}
-                onClick={() => onSourceFilterChange(f)}
-                aria-pressed={isActive}
-                className={cn(
-                  "relative h-full px-2.5 flex items-center justify-center rounded-md text-xs font-medium cursor-pointer whitespace-nowrap z-10 focus-ring",
-                  isActive
-                    ? "text-accent-foreground"
-                    : "text-muted-foreground hover:text-foreground hover:bg-sidebar-hover",
-                )}
-              >
-                <div
-                  className={cn(
-                    "absolute inset-0 bg-accent rounded-md -z-10 [backface-visibility:hidden]",
-                    isActive ? "opacity-100" : "opacity-0",
-                  )}
-                />
-                {f === "all" ? t("toolbar.all") : f === "hub" ? "Hub" : "Local"}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Repo source filter popover */}
-      {showRepoFilter && (
-        <Popover.Root open={repoPopoverOpen} onOpenChange={setRepoPopoverOpen}>
+      {/* Unified origin filter: source type (Hub / Local) + repo source in one compact dropdown */}
+      {showOriginFilter && (
+        <Popover.Root open={originOpen} onOpenChange={setOriginOpen}>
           <Popover.Trigger asChild>
             <button
               className={cn(
-                "flex items-center h-8 rounded-lg border text-xs font-medium cursor-pointer whitespace-nowrap shrink-0 transition-all duration-200 focus-ring gap-1.5",
-                hasRepoFilter
-                  ? "pl-2.5 pr-1.5 border-primary/40 bg-primary/8 text-primary hover:bg-primary/12 max-w-[180px]"
-                  : "w-8 justify-center border-border/80 bg-background/50 shadow-sm backdrop-blur-md text-muted-foreground hover:text-foreground hover:bg-accent/10 hover:border-accent/50",
+                "flex items-center h-8 gap-1.5 rounded-lg border text-xs font-medium cursor-pointer whitespace-nowrap shrink-0 transition-all duration-200 focus-ring pl-2.5",
+                originActive ? "pr-1.5" : "pr-2",
+                originActive
+                  ? "border-primary/40 bg-primary/8 text-primary hover:bg-primary/12 max-w-[180px]"
+                  : "border-border/80 bg-background/50 shadow-sm backdrop-blur-md text-muted-foreground hover:text-foreground hover:bg-accent/10 hover:border-accent/50",
               )}
-              title={t("toolbar.repoFilter", { defaultValue: "Filter by repo" })}
+              title={t("toolbar.source")}
+              aria-label={t("toolbar.source")}
             >
-              <GitFork className="w-3.5 h-3.5 shrink-0" />
-              {hasRepoFilter && (
-                <>
-                  <span className="max-w-[5rem] truncate">{repoFilter}</span>
-                  <span
-                    role="button"
-                    className="ml-0.5 rounded-sm hover:bg-primary/20 p-0.5 transition-colors shrink-0"
-                    onClick={(e) => {
+              <Boxes className="w-3.5 h-3.5 shrink-0" />
+              <span className="max-w-[7rem] truncate">{originLabel}</span>
+              {originActive ? (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  className="ml-0.5 rounded-sm hover:bg-primary/20 p-0.5 transition-colors shrink-0"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    clearOrigin();
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
                       e.stopPropagation();
-                      onRepoFilterChange?.(null);
-                      setRepoPopoverOpen(false);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.stopPropagation();
-                        onRepoFilterChange?.(null);
-                        setRepoPopoverOpen(false);
-                      }
-                    }}
-                  >
-                    <X className="w-3 h-3" />
-                  </span>
-                </>
+                      clearOrigin();
+                    }
+                  }}
+                >
+                  <X className="w-3 h-3" />
+                </span>
+              ) : (
+                <ChevronDown className="w-3 h-3 shrink-0 opacity-60" />
               )}
             </button>
           </Popover.Trigger>
@@ -339,46 +336,79 @@ export function Toolbar({
             <Popover.Content
               sideOffset={6}
               align="start"
-              className="z-50 min-w-[200px] max-w-[280px] max-h-[320px] overflow-y-auto rounded-xl border border-border bg-card/95 backdrop-blur-xl shadow-xl p-1.5 animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95"
+              className="z-50 min-w-[200px] max-w-[280px] max-h-[360px] overflow-y-auto rounded-xl border border-border bg-card/95 backdrop-blur-xl shadow-xl p-1.5 animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95"
             >
-              {/* Show all */}
-              <button
-                onClick={() => {
-                  onRepoFilterChange?.(null);
-                  setRepoPopoverOpen(false);
-                }}
-                className={cn(
-                  "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium cursor-pointer transition-colors",
-                  !hasRepoFilter ? "bg-accent text-accent-foreground" : "text-foreground/80 hover:bg-accent/50",
-                )}
-              >
-                <GitFork className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
-                <span>{t("toolbar.allRepos", { defaultValue: "All repos" })}</span>
-                {!hasRepoFilter && <Check className="w-3.5 h-3.5 ml-auto text-primary" />}
-              </button>
+              {/* Source type section */}
+              {hasSourceFilter && (
+                <>
+                  <div className="px-2.5 pt-1 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    {t("toolbar.sourceType")}
+                  </div>
+                  {(["all", "hub", "local"] as const).map((f) => {
+                    const isActive = effectiveSource === f;
+                    const label = f === "all" ? t("toolbar.all") : f === "hub" ? "Hub" : "Local";
+                    return (
+                      <button
+                        key={f}
+                        onClick={() => {
+                          onSourceFilterChange?.(f);
+                          if (f === "local") onRepoFilterChange?.(null);
+                        }}
+                        className={cn(
+                          "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs cursor-pointer transition-colors",
+                          isActive ? "bg-primary/10 text-primary font-medium" : "text-foreground/80 hover:bg-accent/50",
+                        )}
+                      >
+                        <span>{label}</span>
+                        {isActive && <Check className="w-3.5 h-3.5 ml-auto shrink-0 text-primary" />}
+                      </button>
+                    );
+                  })}
+                </>
+              )}
 
-              <div className="h-px bg-border/50 my-1" />
-
-              {/* Repo list */}
-              {repoSources?.map((source) => {
-                const isActive = repoFilter === source;
-                return (
+              {/* Repo source section (hidden when filtering to local-only skills) */}
+              {showRepoFilter && effectiveSource !== "local" && (
+                <>
+                  {hasSourceFilter && <div className="h-px bg-border/50 my-1" />}
+                  <div className="px-2.5 pt-1 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    {t("toolbar.repo")}
+                  </div>
                   <button
-                    key={source}
                     onClick={() => {
-                      onRepoFilterChange?.(isActive ? null : source);
-                      setRepoPopoverOpen(false);
+                      onRepoFilterChange?.(null);
+                      setOriginOpen(false);
                     }}
                     className={cn(
-                      "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs cursor-pointer transition-colors",
-                      isActive ? "bg-primary/10 text-primary font-medium" : "text-foreground/80 hover:bg-accent/50",
+                      "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium cursor-pointer transition-colors",
+                      !repoFilter ? "bg-accent text-accent-foreground" : "text-foreground/80 hover:bg-accent/50",
                     )}
                   >
-                    <span className="truncate">{source}</span>
-                    {isActive && <Check className="w-3.5 h-3.5 ml-auto shrink-0 text-primary" />}
+                    <GitFork className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+                    <span>{t("toolbar.allRepos")}</span>
+                    {!repoFilter && <Check className="w-3.5 h-3.5 ml-auto text-primary" />}
                   </button>
-                );
-              })}
+                  {repoSources?.map((source) => {
+                    const isActive = repoFilter === source;
+                    return (
+                      <button
+                        key={source}
+                        onClick={() => {
+                          onRepoFilterChange?.(isActive ? null : source);
+                          setOriginOpen(false);
+                        }}
+                        className={cn(
+                          "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs cursor-pointer transition-colors",
+                          isActive ? "bg-primary/10 text-primary font-medium" : "text-foreground/80 hover:bg-accent/50",
+                        )}
+                      >
+                        <span className="truncate">{source}</span>
+                        {isActive && <Check className="w-3.5 h-3.5 ml-auto shrink-0 text-primary" />}
+                      </button>
+                    );
+                  })}
+                </>
+              )}
             </Popover.Content>
           </Popover.Portal>
         </Popover.Root>

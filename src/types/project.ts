@@ -43,6 +43,8 @@ export interface ScannedSkill {
   is_symlink: boolean;
   in_hub: boolean;
   has_skill_md: boolean;
+  /** Backend-computed: skill is already recorded in skills-list.json (e.g. copy-mode deploy). */
+  managed: boolean;
 }
 
 export interface ProjectScanResult {

@@ -86,9 +86,18 @@ export function useProviderMutations() {
           ...previous,
           providers: previous.providers.filter((p) => p.id !== id),
           tool_activations: Object.fromEntries(
-            Object.entries(previous.tool_activations ?? {}).map(([toolId, activation]) => [
+            Object.entries(previous.tool_activations ?? {}).map(([toolId, binding]) => [
               toolId,
-              activation?.provider_id === id ? null : activation,
+              binding
+                ? {
+                    ...binding,
+                    entries: binding.entries.filter((e) => e.provider_id !== id),
+                    active_index: Math.max(
+                      0,
+                      Math.min(binding.active_index, binding.entries.filter((e) => e.provider_id !== id).length - 1),
+                    ),
+                  }
+                : binding,
             ]),
           ),
         });

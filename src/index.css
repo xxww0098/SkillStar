@@ -528,6 +528,55 @@
     height: auto;
   }
 
+  /* ── Variant: GFM table ── */
+  .scroll-box-table .scroll-box-inner {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    margin-block: 0.75rem;
+  }
+
+  .scroll-box-table table {
+    /* Stretch to fill when narrow, but grow past the container (→ horizontal
+       scroll) when the columns need more room, instead of squeezing cells. */
+    min-width: 100%;
+    width: max-content;
+    margin: 0; /* container owns the spacing */
+    border-collapse: collapse;
+    font-size: 0.8125rem;
+    line-height: 1.4;
+  }
+
+  .scroll-box-table th,
+  .scroll-box-table td {
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid var(--color-border);
+    border-right: 1px solid var(--color-border-subtle);
+    white-space: nowrap;
+  }
+
+  .scroll-box-table th:last-child,
+  .scroll-box-table td:last-child {
+    border-right: 0;
+  }
+
+  .scroll-box-table thead th {
+    background: var(--color-muted);
+    font-weight: 600;
+    color: var(--color-foreground);
+    position: sticky;
+    top: 0;
+  }
+
+  .scroll-box-table tbody tr:last-child td {
+    border-bottom: 0;
+  }
+
+  .scroll-box-table tbody tr:nth-child(even) td {
+    background: color-mix(in oklab, var(--color-muted) 35%, transparent);
+  }
+
   /* ── Inline SVG fallback (not from <img>) ── */
   .markdown-content > svg,
   .markdown-content p > svg,

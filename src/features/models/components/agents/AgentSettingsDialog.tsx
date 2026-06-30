@@ -105,7 +105,7 @@ export function AgentSettingsDialog({
         { codex_wire_api: params.codexWireApi, codex_auth_mode: params.codexAuthMode },
       );
       // Re-write the on-disk config so codex picks the new params up immediately.
-      if (toolId === "codex" && act.activation) {
+      if (toolId === "codex" && act.activeEntry) {
         await act.updateSettings({ wire_api: params.codexWireApi, auth_mode: params.codexAuthMode });
       }
       return "saved";
@@ -126,7 +126,7 @@ export function AgentSettingsDialog({
 
   const status = computeAgentStatus({
     agent: act.agent,
-    activation: act.activation,
+    activation: act.activeEntry,
     boundProvider: provider,
     installed: act.install.installed,
     installLoading: act.install.loading,
@@ -139,8 +139,8 @@ export function AgentSettingsDialog({
   }, [provider]);
 
   const modelCatalog = useMemo(() => getModelCatalogFromMeta(provider?.meta), [provider]);
-  const lastSync = act.activation?.last_sync_at
-    ? formatSyncTime(new Date(act.activation.last_sync_at * 1000).toISOString())
+  const lastSync = act.activeEntry?.last_sync_at
+    ? formatSyncTime(new Date(act.activeEntry.last_sync_at * 1000).toISOString())
     : null;
 
   const requestClose = useCallback(() => {
@@ -202,7 +202,7 @@ export function AgentSettingsDialog({
             <span className="text-[11px] font-medium text-muted-foreground">{t("models.card.providerLabel")}</span>
             <ProviderSelectPopover
               providers={act.compatibleProviders}
-              currentId={act.activation?.provider_id}
+              currentId={act.activeEntry?.provider_id}
               onPick={(id) => void act.activate(id)}
               onAddProvider={onAddProvider}
               busy={act.busy}
@@ -270,7 +270,7 @@ export function AgentSettingsDialog({
           <p className="rounded-lg border border-border/40 bg-background/35 px-2.5 py-2 font-mono text-[11px] text-muted-foreground">
             {act.agent.configPathDisplay}
           </p>
-          <AgentConfigFiles toolId={toolId} activeProviderId={act.activation?.provider_id ?? null} />
+          <AgentConfigFiles toolId={toolId} activeProviderId={act.activeEntry?.provider_id ?? null} />
           <div className="flex items-center justify-between text-[11px] text-muted-foreground">
             <span>{t("models.dialog.lastSync", { time: lastSync ?? t("models.dialog.neverSynced") })}</span>
             <Button
@@ -279,7 +279,7 @@ export function AgentSettingsDialog({
               size="sm"
               className="h-7 gap-1.5 text-[11px]"
               onClick={() => void act.resync()}
-              disabled={!act.activation || act.busy}
+              disabled={!act.activeEntry || act.busy}
             >
               <RefreshCw className={act.busy ? "h-3 w-3 animate-spin" : "h-3 w-3"} />
               {t("models.dialog.rewrite")}
@@ -297,7 +297,7 @@ export function AgentSettingsDialog({
           onClick={() => {
             void act.deactivate();
           }}
-          disabled={!act.activation || act.busy}
+          disabled={!act.activeEntry || act.busy}
         >
           <Unplug className="h-3.5 w-3.5" />
           {t("models.card.disconnect")}

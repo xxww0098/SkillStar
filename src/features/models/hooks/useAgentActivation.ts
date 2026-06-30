@@ -1,22 +1,25 @@
 /**
- * The single activation flow for one agent. Consumed by AgentHeroCard and
- * AgentSettingsDialog — replaces the three divergent paths that previously
- * lived in ModelsHub (callback threading), ToolActivationPanel (toggle with
- * its own state) and AgentHeroCard (busy handler cluster).
+ * The single activation flow for one agent. Consumed by the agent cards and
+ * the settings dialog — replaces the three divergent paths that previously
+ * lived in ModelsHub, ToolActivationPanel and AgentHeroCard.
  *
  * Data comes from the providers-flat cache; mutations (and their toasts) from
- * the api layer. `busy` covers the in-flight window for syncing status.
+ * the api layer. The agent's binding is exposed both as the active entry (for
+ * the single-provider surface) and the full entry list (for the multi-provider
+ * surface). `busy` covers the in-flight window for syncing status.
  */
 import { useCallback, useMemo, useState } from "react";
 import { useActivationMutations } from "../api/activations";
 import { useToolInstallStatuses } from "../api/install";
 import { useProvidersQuery } from "../api/providers";
 import { type AgentDescriptor, getAgent, type ProviderToolId, providerCompatibleWithAgent } from "../lib/agentRegistry";
+import { activeEntry as bindingActiveEntry, EMPTY_BINDING } from "../lib/toolBinding";
 
 export function useAgentActivation(toolId: ProviderToolId) {
   const agent = getAgent(toolId) as AgentDescriptor;
   const { data } = useProvidersQuery();
-  const { activateTool, deactivateTool, updateToolSettings } = useActivationMutations();
+  const { activateTool, deactivateTool, updateToolSettings, setActiveBinding, removeBindingEntry } =
+    useActivationMutations();
   const toolIds = useMemo(() => [toolId], [toolId]);
   const { byTool: installByTool, isLoading: installLoading } = useToolInstallStatuses(toolIds);
   const [busy, setBusy] = useState(false);
@@ -26,19 +29,33 @@ export function useAgentActivation(toolId: ProviderToolId) {
     return [...data.providers].sort((a, b) => a.sort_index - b.sort_index);
   }, [data]);
 
-  const activation = data?.tool_activations?.[toolId] ?? null;
+  const isMulti = agent.kind === "multi";
+  const binding = data?.tool_activations?.[toolId] ?? EMPTY_BINDING;
+  const activeEntry = useMemo(() => bindingActiveEntry(binding), [binding]);
+
+  /** All bound entries paired with their resolved provider (skips orphans). */
+  const entries = useMemo(
+    () =>
+      binding.entries
+        .map((entry) => ({
+          entry,
+          provider: providers.find((p) => p.id === entry.provider_id) ?? null,
+        }))
+        .filter((e): e is { entry: typeof e.entry; provider: NonNullable<typeof e.provider> } => e.provider !== null),
+    [binding, providers],
+  );
 
   const boundProvider = useMemo(() => {
-    if (!activation?.provider_id) return null;
-    return providers.find((p) => p.id === activation.provider_id) ?? null;
-  }, [activation, providers]);
+    if (!activeEntry?.provider_id) return null;
+    return providers.find((p) => p.id === activeEntry.provider_id) ?? null;
+  }, [activeEntry, providers]);
 
   const compatibleProviders = useMemo(
     () => providers.filter((p) => providerCompatibleWithAgent(agent, p)),
     [providers, agent],
   );
 
-  const currentModel = activation?.model || boundProvider?.default_model || "";
+  const currentModel = activeEntry?.model || boundProvider?.default_model || "";
 
   const withBusy = useCallback(async (op: () => Promise<unknown>) => {
     setBusy(true);
@@ -64,16 +81,33 @@ export function useAgentActivation(toolId: ProviderToolId) {
 
   /** Re-write the on-disk config with the current binding. */
   const resync = useCallback(() => {
-    if (!activation?.provider_id) return Promise.resolve();
-    return withBusy(() => activateTool(activation.provider_id, toolId, currentModel || undefined));
-  }, [withBusy, activation, activateTool, toolId, currentModel]);
+    if (!activeEntry?.provider_id) return Promise.resolve();
+    return withBusy(() => activateTool(activeEntry.provider_id, toolId, currentModel || undefined));
+  }, [withBusy, activeEntry, activateTool, toolId, currentModel]);
 
+  /** Set the model of a specific bound provider (defaults to the active one). */
   const pickModel = useCallback(
-    (model: string) => {
-      if (!activation?.provider_id) return Promise.resolve();
-      return withBusy(() => activateTool(activation.provider_id, toolId, model));
+    (model: string, providerId?: string) => {
+      const target = providerId ?? activeEntry?.provider_id;
+      if (!target) return Promise.resolve();
+      return withBusy(() => activateTool(target, toolId, model));
     },
-    [withBusy, activation, activateTool, toolId],
+    [withBusy, activeEntry, activateTool, toolId],
+  );
+
+  /** Multi-provider: add (or re-activate) a provider as a binding entry. */
+  const addProvider = useCallback((providerId: string, model?: string) => activate(providerId, model), [activate]);
+
+  /** Multi-provider: switch which bound provider is active. */
+  const setActive = useCallback(
+    (providerId: string) => withBusy(() => setActiveBinding(toolId, providerId)),
+    [withBusy, setActiveBinding, toolId],
+  );
+
+  /** Multi-provider: remove one bound provider entry. */
+  const removeEntry = useCallback(
+    (providerId: string) => withBusy(() => removeBindingEntry(toolId, providerId)),
+    [withBusy, removeBindingEntry, toolId],
   );
 
   const updateSettings = useCallback(
@@ -83,8 +117,13 @@ export function useAgentActivation(toolId: ProviderToolId) {
 
   return {
     agent,
+    isMulti,
     providers,
-    activation,
+    binding,
+    /** The active binding entry (single-provider shape). */
+    activeEntry,
+    /** All bound entries + resolved providers (multi-provider shape). */
+    entries,
     boundProvider,
     compatibleProviders,
     currentModel,
@@ -94,6 +133,9 @@ export function useAgentActivation(toolId: ProviderToolId) {
     deactivate,
     resync,
     pickModel,
+    addProvider,
+    setActive,
+    removeEntry,
     updateSettings,
   };
 }

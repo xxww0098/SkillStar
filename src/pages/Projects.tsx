@@ -13,13 +13,14 @@ import { DeployBanner } from "../features/projects/components/DeployBanner";
 import { ProjectDeployAgentDialog } from "../features/projects/components/ProjectDeployAgentDialog";
 import { ProjectDetailPanel } from "../features/projects/components/ProjectDetailPanel";
 import { ProjectListPanel } from "../features/projects/components/ProjectListPanel";
+import { UnsavedChangesDialog } from "../features/projects/components/UnsavedChangesDialog";
 import { useProjectAgentDetection } from "../features/projects/hooks/useProjectAgentDetection";
+import { useProjectDeployAgents } from "../features/projects/hooks/useProjectDeployAgents";
 import { useProjectManifest } from "../features/projects/hooks/useProjectManifest";
 import { useProjectSkills } from "../features/projects/hooks/useProjectSkills";
 import { useAgentProfiles } from "../hooks/useAgentProfiles";
-import { supportsProjectDeploy } from "../lib/agentProfiles";
 import { toast } from "../lib/toast";
-import type { ProjectEntry, ScannedSkill, Skill } from "../types";
+import type { ProjectDeployMode, ProjectEntry, ScannedSkill, Skill } from "../types";
 
 interface ProjectsProps {
   preSelectedSkills?: string[] | null;
@@ -57,68 +58,21 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
     updateSkillContent,
   } = useSkills();
   const { profiles } = useAgentProfiles();
-  const enabledProfiles = useMemo(
-    () => profiles.filter((profile) => profile.enabled && supportsProjectDeploy(profile)),
-    [profiles],
-  );
-  const enabledProfileIdSet = useMemo(() => new Set(enabledProfiles.map((profile) => profile.id)), [enabledProfiles]);
-  const enabledProfilesById = useMemo(
-    () => new Map(enabledProfiles.map((profile) => [profile.id, profile])),
-    [enabledProfiles],
-  );
-  const pathByAgentId = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const profile of enabledProfiles) {
-      map.set(profile.id, profile.project_skills_rel || profile.id);
-    }
-    return map;
-  }, [enabledProfiles]);
-  const agentIdsByPath = useMemo(() => {
-    const map = new Map<string, string[]>();
-    for (const profile of enabledProfiles) {
-      const path = profile.project_skills_rel || profile.id;
-      const current = map.get(path) ?? [];
-      current.push(profile.id);
-      map.set(path, current);
-    }
-    return map;
-  }, [enabledProfiles]);
-  const conflictAgentIdsByAgent = useMemo(() => {
-    const map = new Map<string, Set<string>>();
-    for (const ids of agentIdsByPath.values()) {
-      if (ids.length <= 1) continue;
-      const set = new Set(ids);
-      for (const id of ids) {
-        map.set(id, set);
-      }
-    }
-    return map;
-  }, [agentIdsByPath]);
-  const canonicalizeAgentsBySharedPath = useCallback(
-    (agents: Record<string, string[]>, forcedOwnerByPath?: Map<string, string>): Record<string, string[]> => {
-      const inputByAgent = new Map<string, string[]>();
-      for (const [agentId, skills] of Object.entries(agents)) {
-        if (!enabledProfileIdSet.has(agentId)) continue;
-        inputByAgent.set(agentId, [...new Set((skills ?? []).filter(Boolean))]);
-      }
-
-      const next: Record<string, string[]> = {};
-      for (const [path, ids] of agentIdsByPath.entries()) {
-        const activeIds = ids.filter((id) => inputByAgent.has(id));
-        if (activeIds.length === 0) continue;
-
-        const forcedOwner = forcedOwnerByPath?.get(path);
-        const owner = forcedOwner && activeIds.includes(forcedOwner) ? forcedOwner : activeIds[0];
-
-        next[owner] = [...new Set(activeIds.flatMap((id) => inputByAgent.get(id) ?? []))];
-      }
-      return next;
-    },
-    [agentIdsByPath, enabledProfileIdSet],
-  );
+  const {
+    enabledProfiles,
+    enabledProfileIdSet,
+    enabledProfilesById,
+    pathByAgentId,
+    conflictAgentIdsByAgent,
+    canonicalizeAgentsBySharedPath,
+    filterAgentsByEnabledProfiles,
+    filterUnmanagedByEnabledProfiles,
+    buildSymlinkSkillIndex,
+  } = useProjectDeployAgents(profiles);
 
   const [selectedProject, setSelectedProject] = useState<ProjectEntry | null>(null);
   const [agentSkills, setAgentSkills] = useState<Record<string, string[]>>({});
+  const [deployModes, setDeployModes] = useState<Record<string, ProjectDeployMode>>({});
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
   const [skillFilter, setSkillFilter] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
@@ -131,6 +85,8 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
   const [deployDialogInitialAgents, setDeployDialogInitialAgents] = useState<string[]>([]);
 
   const [detailSkillName, setDetailSkillName] = useState<string | null>(null);
+  // Pending project switch held back while the current project has unsaved edits.
+  const [pendingProjectSwitch, setPendingProjectSwitch] = useState<ProjectEntry | null>(null);
   const ownerBySharedPath = useMemo(() => {
     const map = new Map<string, string>();
     for (const agentId of Object.keys(agentSkills)) {
@@ -228,30 +184,6 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
     }
   }, [preSelectedSkills, onClearPreSelected]);
 
-  const filterAgentsByEnabledProfiles = useCallback(
-    (agents: Record<string, string[]>) =>
-      Object.fromEntries(Object.entries(agents).filter(([agentId]) => enabledProfileIdSet.has(agentId))),
-    [enabledProfileIdSet],
-  );
-
-  const filterUnmanagedByEnabledProfiles = useCallback(
-    (skills: ScannedSkill[]) => {
-      const deduped = new Map<string, ScannedSkill>();
-      for (const skill of skills) {
-        if (!enabledProfileIdSet.has(skill.agent_id) || skill.is_symlink || !skill.has_skill_md) {
-          continue;
-        }
-        const path = pathByAgentId.get(skill.agent_id) ?? skill.agent_id;
-        const key = `${path}::${skill.name}`;
-        if (!deduped.has(key)) {
-          deduped.set(key, skill);
-        }
-      }
-      return Array.from(deduped.values());
-    },
-    [enabledProfileIdSet, pathByAgentId],
-  );
-
   // ── Extracted hooks ──────────────────────────────────────────────
 
   const {
@@ -301,24 +233,6 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
       setAgentSkills(updater);
     }, []),
   });
-
-  const buildSymlinkSkillIndex = useCallback(
-    (skills: ScannedSkill[]): Record<string, string[]> => {
-      const index: Record<string, string[]> = {};
-      for (const skill of skills) {
-        if (!enabledProfileIdSet.has(skill.agent_id) || !skill.is_symlink) continue;
-        const name = skill.name.trim();
-        if (!name) continue;
-
-        const current = index[skill.agent_id] ?? [];
-        if (!current.includes(name)) {
-          index[skill.agent_id] = [...current, name];
-        }
-      }
-      return index;
-    },
-    [enabledProfileIdSet],
-  );
 
   const suggestDeployAgentIds = useCallback(
     (agents: Record<string, string[]>) => {
@@ -444,6 +358,18 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
 
       presentProjectState(project, agents, false);
 
+      // Hydrate per-agent deploy mode from the persisted (path-keyed) config.
+      // Absence means the default (symlink); only explicit entries are stored.
+      const loadedDeployModes: Record<string, ProjectDeployMode> = {};
+      if (skills?.deploy_modes) {
+        for (const profile of enabledProfiles) {
+          const path = pathByAgentId.get(profile.id) ?? profile.id;
+          const mode = skills.deploy_modes[path];
+          if (mode) loadedDeployModes[profile.id] = mode;
+        }
+      }
+      setDeployModes(loadedDeployModes);
+
       // Refresh stale copy-deployed skills in background
       tauriInvoke("refresh_stale_project_copies", { projectPath: project.path }).catch((e) => {
         if (import.meta.env.DEV) console.warn("Stale copy refresh failed:", e);
@@ -488,13 +414,26 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
     ],
   );
 
+  // Guard project switching: if the current project has unsaved edits, defer
+  // the switch and ask the user what to do first.
+  const requestSelectProject = useCallback(
+    (project: ProjectEntry) => {
+      if (dirty && selectedProject && selectedProject.name !== project.name) {
+        setPendingProjectSwitch(project);
+        return;
+      }
+      void handleSelectProject(project);
+    },
+    [dirty, selectedProject, handleSelectProject],
+  );
+
   const handleOpenFolder = useCallback(async () => {
     const path = await open({ directory: true, title: t("projects.chooseDir") });
     if (!path) return;
     const projectPath = path as string;
     const existing = projects.find((p) => p.path === projectPath);
     if (existing) {
-      await handleSelectProject(existing);
+      requestSelectProject(existing);
       return;
     }
 
@@ -505,7 +444,7 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
       if (import.meta.env.DEV) console.error("Register project failed:", e);
       toast.error(String(e) || t("projects.registerFailed", { defaultValue: "Register project failed" }));
     }
-  }, [projects, handleSelectProject, registerProject, t]);
+  }, [projects, handleSelectProject, requestSelectProject, registerProject, t]);
 
   const handleCloseDeployDialog = useCallback(() => {
     setDeployDialogOpen(false);
@@ -627,13 +566,46 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
     setDirty(true);
   }, []);
 
+  const handleToggleDeployMode = useCallback(
+    (agentId: string) => {
+      if (!enabledProfileIdSet.has(agentId)) return;
+      setDeployModes((prev) => {
+        const current = prev[agentId] ?? "symlink";
+        const next: ProjectDeployMode = current === "symlink" ? "copy" : "symlink";
+        // Apply to every agent sharing the same project directory so the
+        // path-keyed config stays consistent.
+        const path = pathByAgentId.get(agentId) ?? agentId;
+        const updated = { ...prev };
+        for (const profile of enabledProfiles) {
+          const profilePath = pathByAgentId.get(profile.id) ?? profile.id;
+          if (profilePath === path) {
+            updated[profile.id] = next;
+          }
+        }
+        return updated;
+      });
+      setDirty(true);
+    },
+    [enabledProfileIdSet, enabledProfiles, pathByAgentId],
+  );
+
   const handleApply = useCallback(async () => {
     if (!selectedProject) return;
     setSaving(true);
     setSyncResult(null);
     try {
       const filteredAgents = filterAgentsByEnabledProfiles(agentSkills);
-      const count = await saveAndSync(selectedProject.path, filteredAgents);
+      // Convert per-agent deploy modes to the persisted path-keyed map,
+      // recording only non-default (copy) entries for active agents.
+      const pathDeployModes: Record<string, ProjectDeployMode> = {};
+      for (const agentId of Object.keys(filteredAgents)) {
+        const mode = deployModes[agentId];
+        if (mode && mode !== "symlink") {
+          const path = pathByAgentId.get(agentId) ?? agentId;
+          pathDeployModes[path] = mode;
+        }
+      }
+      const count = await saveAndSync(selectedProject.path, filteredAgents, pathDeployModes);
       setSyncResult(count);
       setDirty(false);
       loadProjects();
@@ -644,7 +616,45 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
     } finally {
       setSaving(false);
     }
-  }, [selectedProject, agentSkills, filterAgentsByEnabledProfiles, saveAndSync, loadProjects, t]);
+  }, [
+    selectedProject,
+    agentSkills,
+    deployModes,
+    pathByAgentId,
+    filterAgentsByEnabledProfiles,
+    saveAndSync,
+    loadProjects,
+    t,
+  ]);
+
+  const handleDiscardAndSwitch = useCallback(() => {
+    const target = pendingProjectSwitch;
+    setPendingProjectSwitch(null);
+    setDirty(false);
+    if (target) void handleSelectProject(target);
+  }, [pendingProjectSwitch, handleSelectProject]);
+
+  const handleApplyAndSwitch = useCallback(async () => {
+    const target = pendingProjectSwitch;
+    setPendingProjectSwitch(null);
+    await handleApply();
+    if (target) void handleSelectProject(target);
+  }, [pendingProjectSwitch, handleApply, handleSelectProject]);
+
+  const handleCancelSwitch = useCallback(() => {
+    setPendingProjectSwitch(null);
+  }, []);
+
+  // Native warning when closing the window with unsaved project edits.
+  useEffect(() => {
+    if (!dirty) return;
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [dirty]);
 
   const handleRemoveProject = useCallback(
     async (e: React.MouseEvent, name: string) => {
@@ -654,6 +664,7 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
         if (selectedProject?.name === name) {
           setSelectedProject(null);
           setAgentSkills({});
+          setDeployModes({});
           setExpandedAgent(null);
 
           setDirty(false);
@@ -745,7 +756,7 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
           filteredProjects={filteredProjects}
           selectedProject={selectedProject}
           projectFilter={projectFilter}
-          onSelectProject={handleSelectProject}
+          onSelectProject={requestSelectProject}
           onRemoveProject={handleRemoveProject}
           onOpenFolder={handleOpenFolder}
         />
@@ -763,6 +774,7 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
             enabledAgents={enabledAgents}
             expandedAgent={expandedAgent}
             agentSkills={agentSkills}
+            deployModes={deployModes}
             skillFilter={skillFilter}
             totalSkills={totalSkills}
             syncResult={syncResult}
@@ -773,6 +785,7 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
             onImportAll={() => handleImportAll(selectedProject)}
             onToggleExpand={handleToggleExpand}
             onToggleAgent={handleToggleAgent}
+            onToggleDeployMode={handleToggleDeployMode}
             onNavigateToSkill={handleOpenSkillDetail}
             onRemoveSkill={handleRemoveSkill}
             onSkillFilterChange={setSkillFilter}
@@ -783,6 +796,13 @@ export function Projects({ preSelectedSkills, onClearPreSelected }: ProjectsProp
           />
         </div>
       </div>
+
+      <UnsavedChangesDialog
+        open={pendingProjectSwitch !== null}
+        onDiscard={handleDiscardAndSwitch}
+        onApply={handleApplyAndSwitch}
+        onCancel={handleCancelSwitch}
+      />
 
       <ProjectDeployAgentDialog
         open={deployDialogOpen}

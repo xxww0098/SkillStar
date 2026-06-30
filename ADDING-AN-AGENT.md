@@ -116,10 +116,15 @@ Provider（Base URL / API Key / 模型）时才做。现有目标：`claude-code
    —— 集成测试必须设置该环境变量（历史事故见 mod.rs 顶部注释）。
 4. **前端**（注册表驱动，只需两处）：
    - `src/features/models/lib/agentRegistry.ts`：在 `PROVIDER_AGENTS` 加一条
-     `AgentDescriptor`（toolId / displayName / requiredUrlField / installDocsUrl /
-     tagline / disabledTooltip / configPathDisplay），并视情况扩展
-     `CONFIG_FILE_TOOLS`。Agent 卡片、接入设置对话框、状态汇总、安装检测
-     全部由该注册表驱动，无需新组件；
+     `AgentDescriptor`（toolId / displayName / requiredUrlField / **kind** /
+     installDocsUrl / tagline / disabledTooltip / configPathDisplay），并视情况
+     扩展 `CONFIG_FILE_TOOLS`。**`kind` 决定卡片形态与绑定语义**：
+     `"single"`（全局 env，仅一个激活供应商，如 Claude Code / Gemini）渲染
+     `AgentHeroCard`；`"multi"`（配置文件原生并存多个供应商 + 指针，如 Codex /
+     OpenCode）渲染 `MultiProviderCard`（供应商列表 + 激活单选 + 增删）。后端须与之
+     对齐：`providers::crud::agent_supports_multiple_providers` 加上同一个 toolId，
+     `multi` 型的写盘走 `tool_sync::multi_provider`（多 `skillstar_<id>` 托管条目）。
+     Agent 卡片、接入设置对话框、状态汇总、安装检测全部由该注册表驱动，无需新组件；
    - `src/features/models/components/shared/AgentToolIcon.tsx` 的
      `AgentToolIconId` 联合类型 + 图标分支；
    - 如支持 MCP 配置同步，另见 `src/types/index.ts` 的 `MCP_TOOL_IDS`。

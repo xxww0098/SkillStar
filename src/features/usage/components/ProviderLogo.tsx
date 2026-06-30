@@ -3,18 +3,14 @@ import CodexIcon from "@lobehub/icons/es/Codex/components/Color";
 import CursorIcon from "@lobehub/icons/es/Cursor/components/Mono";
 import DeepSeekIcon from "@lobehub/icons/es/DeepSeek/components/Color";
 import GrokIcon from "@lobehub/icons/es/Grok/components/Mono";
-import GithubCopilotIcon from "@lobehub/icons/es/Copilot/components/Color";
 import KimiIcon from "@lobehub/icons/es/Kimi/components/Color";
 import MiniMaxIcon from "@lobehub/icons/es/Minimax/components/Color";
 import OpenCodeIcon from "@lobehub/icons/es/OpenCode/components/Mono";
 import QoderIcon from "@lobehub/icons/es/Qoder/components/Color";
 import StepfunIcon from "@lobehub/icons/es/Stepfun/components/Color";
 import TraeIcon from "@lobehub/icons/es/Trae/components/Color";
-import WindsurfIcon from "@lobehub/icons/es/Windsurf/components/Mono";
-import ZAIIcon from "@lobehub/icons/es/ZAI/components/Mono";
 import ZhipuIcon from "@lobehub/icons/es/Zhipu/components/Color";
 import { type ComponentType, type CSSProperties, useLayoutEffect, useRef } from "react";
-import KiroIcon from "@/features/usage/icons/KiroIcon";
 import { cn } from "@/lib/utils";
 
 type IconComponent = ComponentType<{ size?: number | string; className?: string; style?: CSSProperties }>;
@@ -33,16 +29,12 @@ const ICON_BY_CATALOG_ID: Record<string, IconComponent> = {
   antigravity: AntigravityIcon,
   trae: TraeIcon,
   qoder: QoderIcon,
-  kiro: KiroIcon,
-  windsurf: WindsurfIcon,
-  "github-copilot": GithubCopilotIcon,
   xai: GrokIcon,
   deepseek: DeepSeekIcon,
   glm: ZhipuIcon,
   kimi: KimiIcon,
   minimax: MiniMaxIcon,
   stepfun: StepfunIcon,
-  zcode: ZAIIcon,
   opencode: OpenCodeIcon,
 };
 

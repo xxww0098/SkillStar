@@ -110,33 +110,9 @@ pub const PROVIDER_IDENTITIES: &[ProviderIdentity] = &[
         preset_ids: &[],
     },
     ProviderIdentity {
-        canonical_id: "kiro",
-        display_name: "Kiro",
-        catalog_id: Some("kiro"),
-        preset_ids: &[],
-    },
-    ProviderIdentity {
-        canonical_id: "windsurf",
-        display_name: "Windsurf",
-        catalog_id: Some("windsurf"),
-        preset_ids: &[],
-    },
-    ProviderIdentity {
-        canonical_id: "github-copilot",
-        display_name: "GitHub Copilot",
-        catalog_id: Some("github-copilot"),
-        preset_ids: &[],
-    },
-    ProviderIdentity {
         canonical_id: "stepfun",
         display_name: "阶跃 Step",
         catalog_id: Some("stepfun"),
-        preset_ids: &[],
-    },
-    ProviderIdentity {
-        canonical_id: "zcode",
-        display_name: "ZCode",
-        catalog_id: Some("zcode"),
         preset_ids: &[],
     },
     ProviderIdentity {

@@ -1,0 +1,7 @@
+# Grandfathered files that already exceed the line limit (structural debt).
+# The guard FAILS on any NEW file over the limit, but only WARNS on these —
+# so the ratchet only tightens. As docs/ROADMAP.md P2 splits land, delete the
+# corresponding line here; once a file drops under the limit the guard will
+# tell you to remove its stale baseline entry.
+#
+# (empty) — no grandfathered debt remaining; every source file is under the limit.

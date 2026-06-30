@@ -69,19 +69,8 @@ pub const MINIMAX: BalanceSpec = BalanceSpec {
     ),
 };
 
-pub const ZCODE: BalanceSpec = BalanceSpec {
-    catalog_id: "zcode",
-    display_name: "ZCode",
-    endpoint: "https://zcode.z.ai/api/v1/zcode-plan/billing/balance?app_version=3.0.0",
-    auth: AuthScheme::Bearer,
-    auth_error_hint: Some(
-        "ZCode 401：请粘贴从 ZCode 登录后获得的有效 access_token（\
-         见 ~/.zcode/v2/logs 里的 zai.access_token），而非 GLM API Key。",
-    ),
-};
-
 /// All API-key balance specs, in catalog order.
-pub const API_KEY_BALANCE_SPECS: &[BalanceSpec] = &[DEEPSEEK, KIMI, GLM, MINIMAX, ZCODE];
+pub const API_KEY_BALANCE_SPECS: &[BalanceSpec] = &[DEEPSEEK, KIMI, GLM, MINIMAX];
 
 /// Look up a balance spec by catalog id.
 pub fn find(catalog_id: &str) -> Option<&'static BalanceSpec> {

@@ -102,10 +102,12 @@ pub fn write_flat_store(store: &FlatProvidersStore, path: &Path) -> Result<()> {
 
 /// Detect store version and migrate if needed.
 ///
-/// - If the file does not exist, returns a default empty v2 store.
-/// - If the file is already v2 (has `version: 2`), parses and returns it directly.
-/// - Otherwise, parses as v1 `ProvidersStore`, converts to v2, backs up the original
-///   file as `.json.bak`, writes the new v2 store, and returns it.
+/// - If the file does not exist, returns a default empty store at the current version.
+/// - If the file is already at [`FLAT_STORE_VERSION`], parses and returns it directly.
+/// - If it is v2 (single `Option<ToolActivation>` per tool), upgrades the
+///   activation map to v3 [`ToolBinding`]s in place.
+/// - Otherwise parses as v1 `ProvidersStore`, converts to the flat store, backs up
+///   the original file as `.json.bak`, writes the new store, and returns it.
 pub fn migrate_store_if_needed(path: &Path) -> Result<FlatProvidersStore> {
     // Edge case: file not found → return default
     if !path.exists() {
@@ -129,22 +131,38 @@ pub fn migrate_store_if_needed(path: &Path) -> Result<FlatProvidersStore> {
         }
     };
 
-    // Check if already v2
-    if value.get("version").and_then(|v| v.as_u64()) == Some(2) {
-        // Already v2 — parse directly
+    let version = value.get("version").and_then(|v| v.as_u64());
+
+    // Already current — parse directly (ToolBinding deserializes natively).
+    if version == Some(FLAT_STORE_VERSION as u64) {
         let store: FlatProvidersStore =
-            serde_json::from_value(value).context("Failed to parse v2 FlatProvidersStore")?;
+            serde_json::from_value(value).context("Failed to parse FlatProvidersStore")?;
         return Ok(store);
+    }
+
+    // v2 → v3: providers are unchanged; only the activation map shape changed
+    // from `Option<ToolActivation>` to `ToolBinding`. Upgrade it and persist.
+    if version == Some(2) {
+        let new_store = migrate_v2_to_v3(&value)?;
+        backup_and_write(path, &new_store);
+        return Ok(new_store);
     }
 
     // Parse as v1 ProvidersStore
     let old: ProvidersStore = serde_json::from_value(value)
         .context("Failed to parse v1 ProvidersStore during migration")?;
 
-    // Convert v1 → v2
+    // Convert v1 → flat store
     let new_store = convert_v1_to_v2(&old);
 
-    // Backup original file before overwriting
+    backup_and_write(path, &new_store);
+
+    Ok(new_store)
+}
+
+/// Back up the original file as `.json.bak` then atomically write the migrated
+/// store. A backup failure is logged but never aborts the migration.
+fn backup_and_write(path: &Path, store: &FlatProvidersStore) {
     let backup_path = path.with_extension("json.bak");
     if let Err(e) = std::fs::copy(path, &backup_path) {
         warn!(
@@ -152,11 +170,45 @@ pub fn migrate_store_if_needed(path: &Path) -> Result<FlatProvidersStore> {
             backup_path.display()
         );
     }
+    if let Err(e) = write_flat_store(store, path) {
+        warn!("Failed to persist migrated store {}: {e}", path.display());
+    }
+}
 
-    // Write the new v2 store
-    write_flat_store(&new_store, path)?;
+/// Upgrade a parsed v2 store JSON to a v3 [`FlatProvidersStore`].
+///
+/// The v2 `tool_activations` map is `{ tool_id: ToolActivation | null }`. Each
+/// non-null activation becomes a single-entry [`ToolBinding`]; nulls and missing
+/// tools become empty bindings (which serialize the same as "not bound").
+fn migrate_v2_to_v3(value: &Value) -> Result<FlatProvidersStore> {
+    #[derive(Deserialize)]
+    struct V2Store {
+        #[serde(default)]
+        providers: Vec<ProviderEntryFlat>,
+        #[serde(default)]
+        tool_activations: HashMap<String, Option<ToolActivation>>,
+    }
 
-    Ok(new_store)
+    let v2: V2Store =
+        serde_json::from_value(value.clone()).context("Failed to parse v2 FlatProvidersStore")?;
+
+    let tool_activations = v2
+        .tool_activations
+        .into_iter()
+        .map(|(tool_id, opt)| {
+            let binding = match opt {
+                Some(activation) => ToolBinding::single(activation),
+                None => ToolBinding::default(),
+            };
+            (tool_id, binding)
+        })
+        .collect();
+
+    Ok(FlatProvidersStore {
+        version: FLAT_STORE_VERSION,
+        providers: v2.providers,
+        tool_activations,
+    })
 }
 
 /// Convert a v1 `ProvidersStore` (per-app) to a v2 `FlatProvidersStore` (flat).
@@ -252,7 +304,7 @@ fn convert_v1_to_v2(old: &ProvidersStore) -> FlatProvidersStore {
     }
 
     // Build tool_activations from each app's `current` field
-    let mut tool_activations: HashMap<String, Option<ToolActivation>> = HashMap::new();
+    let mut tool_activations: HashMap<String, ToolBinding> = HashMap::new();
 
     // Map app_id to tool_id: claude.current → tool_activations["claude-code"]
     //                         codex.current → tool_activations["codex"]
@@ -272,7 +324,7 @@ fn convert_v1_to_v2(old: &ProvidersStore) -> FlatProvidersStore {
                     let model = models.first().cloned().unwrap_or_default();
                     tool_activations.insert(
                         tool_id.to_string(),
-                        Some(ToolActivation {
+                        ToolBinding::single(ToolActivation {
                             provider_id: flat_provider.id.clone(),
                             model,
                             settings: None,
@@ -285,7 +337,7 @@ fn convert_v1_to_v2(old: &ProvidersStore) -> FlatProvidersStore {
     }
 
     FlatProvidersStore {
-        version: 2,
+        version: FLAT_STORE_VERSION,
         providers: deduped,
         tool_activations,
     }

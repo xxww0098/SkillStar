@@ -12,12 +12,13 @@ import i18n from "../../../i18n";
 import { tauriInvoke } from "../../../lib/ipc";
 import type { FlatProvidersResponse, ToolActivationsMap, ToolSyncResult } from "../../../types";
 import { getAgent } from "../lib/agentRegistry";
+import { removeBindingEntry as removeEntryLocal, setActiveProvider, upsertBindingEntry } from "../lib/toolBinding";
 import { modelsKeys } from "./keys";
 
-/** Tool ids where this provider is the currently active provider. */
+/** Tool ids where this provider is bound in any binding entry. */
 export function getProviderToolBadges(providerId: string, toolActivations: ToolActivationsMap): string[] {
   return Object.entries(toolActivations ?? {})
-    .filter(([, activation]) => activation?.provider_id === providerId)
+    .filter(([, binding]) => binding?.entries?.some((e) => e.provider_id === providerId))
     .map(([toolId]) => toolId);
 }
 
@@ -61,11 +62,16 @@ export function useActivationMutations() {
       if (previous) {
         const provider = previous.providers.find((p) => p.id === providerId);
         const resolvedModel = model ?? provider?.default_model ?? "";
+        const prevBinding = previous.tool_activations[toolId];
+        const nextBinding = upsertBindingEntry(prevBinding, toolId, {
+          provider_id: providerId,
+          model: resolvedModel,
+        });
         queryClient.setQueryData<FlatProvidersResponse>(queryKey, {
           ...previous,
           tool_activations: {
             ...previous.tool_activations,
-            [toolId]: { provider_id: providerId, model: resolvedModel },
+            [toolId]: nextBinding,
           },
         });
       }
@@ -97,7 +103,7 @@ export function useActivationMutations() {
       if (previous) {
         queryClient.setQueryData<FlatProvidersResponse>(queryKey, {
           ...previous,
-          tool_activations: { ...previous.tool_activations, [toolId]: null },
+          tool_activations: { ...previous.tool_activations, [toolId]: { entries: [], active_index: 0 } },
         });
       }
       return { previous };
@@ -138,6 +144,65 @@ export function useActivationMutations() {
     onSettled: invalidate,
   });
 
+  const setActiveBindingMutation = useMutation({
+    mutationFn: ({ toolId, providerId }: { toolId: string; providerId: string }) =>
+      tauriInvoke("set_active_binding", { toolId, providerId }),
+    onMutate: async ({ toolId, providerId }) => {
+      await queryClient.cancelQueries({ queryKey });
+      const previous = queryClient.getQueryData<FlatProvidersResponse>(queryKey);
+      if (previous) {
+        queryClient.setQueryData<FlatProvidersResponse>(queryKey, {
+          ...previous,
+          tool_activations: {
+            ...previous.tool_activations,
+            [toolId]: setActiveProvider(previous.tool_activations[toolId], providerId),
+          },
+        });
+      }
+      return { previous };
+    },
+    onSuccess: (result, { toolId }) => {
+      if (result && !result.success) {
+        toast.error(result.error ?? i18n.t("models.toasts.syncFailed", { name: toolDisplayName(toolId) }));
+      }
+    },
+    onError: (err, { toolId }, context) => {
+      if (context?.previous) queryClient.setQueryData(queryKey, context.previous);
+      toast.error(
+        err instanceof Error ? err.message : i18n.t("models.toasts.syncFailed", { name: toolDisplayName(toolId) }),
+      );
+    },
+    onSettled: invalidate,
+  });
+
+  const removeBindingEntryMutation = useMutation({
+    mutationFn: ({ toolId, providerId }: { toolId: string; providerId: string }) =>
+      tauriInvoke("remove_binding_entry", { toolId, providerId }),
+    onMutate: async ({ toolId, providerId }) => {
+      await queryClient.cancelQueries({ queryKey });
+      const previous = queryClient.getQueryData<FlatProvidersResponse>(queryKey);
+      if (previous) {
+        queryClient.setQueryData<FlatProvidersResponse>(queryKey, {
+          ...previous,
+          tool_activations: {
+            ...previous.tool_activations,
+            [toolId]: removeEntryLocal(previous.tool_activations[toolId], providerId),
+          },
+        });
+      }
+      return { previous };
+    },
+    onError: (err, { toolId }, context) => {
+      if (context?.previous) queryClient.setQueryData(queryKey, context.previous);
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : i18n.t("models.toasts.deactivateFailed", { name: toolDisplayName(toolId) }),
+      );
+    },
+    onSettled: invalidate,
+  });
+
   const activateTool = useCallback(
     (
       providerId: string,
@@ -161,5 +226,17 @@ export function useActivationMutations() {
     [updateSettingsMutation],
   );
 
-  return { activateTool, deactivateTool, updateToolSettings };
+  const setActiveBinding = useCallback(
+    (toolId: string, providerId: string): Promise<ToolSyncResult> =>
+      setActiveBindingMutation.mutateAsync({ toolId, providerId }),
+    [setActiveBindingMutation],
+  );
+
+  const removeBindingEntry = useCallback(
+    (toolId: string, providerId: string): Promise<ToolSyncResult> =>
+      removeBindingEntryMutation.mutateAsync({ toolId, providerId }),
+    [removeBindingEntryMutation],
+  );
+
+  return { activateTool, deactivateTool, updateToolSettings, setActiveBinding, removeBindingEntry };
 }

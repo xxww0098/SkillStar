@@ -37,6 +37,9 @@ interface PublishSkillModalProps {
 
 type Phase = "checking" | "setup" | "pick-repo" | "form" | "publishing" | "done";
 
+/** GitHub repo + folder names allow letters, digits, and `.`/`-`/`_` only. */
+const GH_NAME_PATTERN = /^[A-Za-z0-9._-]+$/;
+
 export function PublishSkillModal({ open, onClose, skillName, skillDescription, onPublished }: PublishSkillModalProps) {
   const { t } = useTranslation();
   const [phase, setPhase] = useState<Phase>("checking");
@@ -153,6 +156,12 @@ export function PublishSkillModal({ open, onClose, skillName, skillDescription, 
         existingRepoUrl: createNew ? null : `${selectedRepo?.url}.git`,
         folderName,
       });
+      // Defensive: a malformed/empty response must not crash the whole app
+      // (the done phase reads result.url/source_folder). Surface a friendly
+      // error and stay on the form instead of throwing past the boundary.
+      if (!publishResult || typeof publishResult.url !== "string") {
+        throw new Error(t("publishModal.invalidResponse", { defaultValue: "发布失败：返回结果无效" }));
+      }
       setResult(publishResult);
       setPhase("done");
       onPublished?.(publishResult.git_url);
@@ -195,6 +204,13 @@ export function PublishSkillModal({ open, onClose, skillName, skillDescription, 
       repo.full_name.toLowerCase().includes(repoSearch.toLowerCase()) ||
       repo.description.toLowerCase().includes(repoSearch.toLowerCase()),
   );
+
+  // Inline validation: GitHub rejects names with spaces/special chars, so we
+  // catch it here instead of letting the publish call fail with a raw error.
+  const trimmedFolder = folderName.trim();
+  const trimmedRepo = newRepoName.trim();
+  const folderNameInvalid = trimmedFolder.length > 0 && !GH_NAME_PATTERN.test(trimmedFolder);
+  const repoNameInvalid = createNew && trimmedRepo.length > 0 && !GH_NAME_PATTERN.test(trimmedRepo);
 
   return (
     <ModalShell
@@ -409,8 +425,14 @@ export function PublishSkillModal({ open, onClose, skillName, skillDescription, 
                       value={newRepoName}
                       onChange={(e) => setNewRepoName(e.target.value)}
                       placeholder="my-skills"
-                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      aria-invalid={repoNameInvalid}
+                      className={`flex h-9 w-full rounded-md border bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 ${
+                        repoNameInvalid
+                          ? "border-destructive focus-visible:ring-destructive"
+                          : "border-input focus-visible:ring-ring"
+                      }`}
                     />
+                    {repoNameInvalid && <p className="text-micro text-destructive">{t("publishModal.nameInvalid")}</p>}
                   </div>
                   <div className="space-y-2">
                     <label className="text-sm font-medium">{t("publishModal.description_label")}</label>
@@ -460,9 +482,18 @@ export function PublishSkillModal({ open, onClose, skillName, skillDescription, 
                   value={folderName}
                   onChange={(e) => setFolderName(e.target.value)}
                   placeholder={skillName}
-                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  aria-invalid={folderNameInvalid}
+                  className={`flex h-9 w-full rounded-md border bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 ${
+                    folderNameInvalid
+                      ? "border-destructive focus-visible:ring-destructive"
+                      : "border-input focus-visible:ring-ring"
+                  }`}
                 />
-                <p className="text-micro text-muted-foreground">{t("publishModal.folderHint")}</p>
+                {folderNameInvalid ? (
+                  <p className="text-micro text-destructive">{t("publishModal.nameInvalid")}</p>
+                ) : (
+                  <p className="text-micro text-muted-foreground">{t("publishModal.folderHint")}</p>
+                )}
               </div>
 
               {error && (
@@ -599,7 +630,12 @@ export function PublishSkillModal({ open, onClose, skillName, skillDescription, 
             <Button
               size="sm"
               onClick={handlePublish}
-              disabled={!folderName.trim() || (createNew && !newRepoName.trim()) || loadingFolders}
+              disabled={
+                !folderName.trim() ||
+                folderNameInvalid ||
+                (createNew && (!newRepoName.trim() || repoNameInvalid)) ||
+                loadingFolders
+              }
             >
               <Github className="w-4 h-4 mr-2" />
               {selectedRepo ? t("publishModal.pushToRepo") : t("publishModal.createAndPush")}

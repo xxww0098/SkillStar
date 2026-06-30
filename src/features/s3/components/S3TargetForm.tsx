@@ -103,8 +103,12 @@ export function S3TargetForm({ open, initial, onOpenChange, onSubmit }: Props) {
   };
 
   return (
-    <ModalShell open={open} onOpenChange={onOpenChange}>
-      <ModalHeader title={initial ? t("s3.editTarget") : t("s3.addTarget")} onOpenChange={onOpenChange} />
+    <ModalShell
+      open={open}
+      onClose={() => onOpenChange(false)}
+      ariaLabel={initial ? t("s3.editTarget") : t("s3.addTarget")}
+    >
+      <ModalHeader title={initial ? t("s3.editTarget") : t("s3.addTarget")} onClose={() => onOpenChange(false)} />
       <form onSubmit={handleSubmit} className="space-y-4 p-4">
         <Field label={t("s3.form.displayName")}>
           <Input

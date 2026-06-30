@@ -1,6 +1,6 @@
 //! API-key fetchers (DeepSeek, GLM, MiniMax, Kimi).
 //!
-//! All four read `Subscription.fingerprint_id`; when set, the request goes
+//! All read `Subscription.fingerprint_id`; when set, the request goes
 //! through a [`FingerprintAwareClient`] built from the stored fingerprint
 //! (TLS/HTTP-2 emulation via wreq). When unset, the legacy reqwest path is
 //! used — behaviour is unchanged for existing subscriptions.
@@ -16,7 +16,6 @@ pub mod deepseek_platform;
 pub mod glm;
 pub mod kimi;
 pub mod minimax;
-pub mod zcode;
 
 use serde::de::DeserializeOwned;
 use skillstar_fingerprint::{DeviceFingerprint, Req, RequestError};
@@ -51,7 +50,6 @@ pub async fn dispatch(subscription: &mut Subscription) -> UsageResult<Subscripti
         "glm" => glm::fetch(&subscription.id, &api_key, fp).await,
         "minimax" => minimax::fetch(&subscription.id, &api_key, fp).await,
         "kimi" => kimi::fetch(&subscription.id, &api_key, fp).await,
-        "zcode" => zcode::fetch(&subscription.id, &api_key, fp).await,
         other => Err(super::unsupported(other)),
     }
 }

@@ -72,7 +72,6 @@ pub fn create_symlink_or_copy(src: &Path, dst: &Path) -> anyhow::Result<bool> {
     }
 }
 
-#[allow(dead_code)]
 pub fn create_copy_deploy(src: &Path, dst: &Path) -> anyhow::Result<()> {
     if dst.symlink_metadata().is_ok() || is_link(dst) || dst.exists() {
         anyhow::bail!(

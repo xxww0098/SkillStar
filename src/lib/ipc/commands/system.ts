@@ -20,6 +20,18 @@ interface UpdateCheckResult {
   body: string | null;
 }
 
+/** Result of an idempotent `export` write into `~/.zshrc` for Codex third_party auth. */
+export interface ShellRcWriteResult {
+  /** Absolute path of the rc file touched. */
+  path: string;
+  /** `false` when the file already had the exact target line (true no-op). */
+  written: boolean;
+  /** Timestamped backup path, when one was made. */
+  backupPath: string | null;
+  /** `"added"` | `"updated"` | `"noop"`. */
+  action: "added" | "updated" | "noop";
+}
+
 /**
  * OS / shell adapter commands: file system, external open, tray language,
  * patrol, proxy, GitHub mirror, updater, ACP, and platform checks.
@@ -52,6 +64,10 @@ export interface SystemCommands {
   save_github_mirror_config: { args: { config: GitHubMirrorConfig }; result: void };
   get_github_mirror_presets: { args: Record<string, never>; result: GitHubMirrorPreset[] };
   test_github_mirror: { args: { url: string }; result: number };
+
+  // Shell rc (Codex third_party auth env export)
+  write_codex_env_to_zshrc: { args: { envKey: string; value: string }; result: ShellRcWriteResult };
+  read_codex_env_from_zshrc: { args: { envKey: string }; result: string | null };
 
   // Updater
   check_app_update: { args: Record<string, never>; result: UpdateCheckResult };

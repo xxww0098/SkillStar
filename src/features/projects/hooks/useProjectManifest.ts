@@ -4,6 +4,7 @@ import type {
   ImportResult,
   ImportTarget,
   ProjectAgentDetection,
+  ProjectDeployMode,
   ProjectEntry,
   ProjectScanResult,
   SkillsList,
@@ -48,15 +49,19 @@ export function useProjectManifest() {
     }
   }, []);
 
-  const saveAndSync = useCallback(async (projectPath: string, agents: Record<string, string[]>) => {
-    const count = await tauriInvoke("save_and_sync_project", {
-      projectPath,
-      agents,
-    });
-    const updated = await tauriInvoke("list_projects");
-    setProjects(updated);
-    return count;
-  }, []);
+  const saveAndSync = useCallback(
+    async (projectPath: string, agents: Record<string, string[]>, deployModes?: Record<string, ProjectDeployMode>) => {
+      const count = await tauriInvoke("save_and_sync_project", {
+        projectPath,
+        agents,
+        deployModes,
+      });
+      const updated = await tauriInvoke("list_projects");
+      setProjects(updated);
+      return count;
+    },
+    [],
+  );
 
   const saveProjectSkillsList = useCallback(async (projectPath: string, agents: Record<string, string[]>) => {
     const result = await tauriInvoke("save_project_skills_list", {

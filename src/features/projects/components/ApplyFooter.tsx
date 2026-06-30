@@ -36,6 +36,17 @@ export function ApplyFooter({ totalSkills, enabledAgentsCount, syncResult, savin
             {syncResult} synced
           </motion.span>
         )}
+        {dirty && !saving && syncResult === null && (
+          <motion.span
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={MOTION_TRANSITION.fadeFast}
+            className="text-micro text-amber-500 font-medium flex items-center gap-1"
+          >
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500" />
+            {t("projects.unsavedBadge")}
+          </motion.span>
+        )}
       </div>
       <Button size="sm" onClick={onApply} disabled={saving || !dirty}>
         {saving ? (

@@ -178,6 +178,8 @@ mod tests {
         let temp_root = make_temp_root("project-import-register")?;
         let previous_home = std::env::var_os("HOME");
         set_env("HOME", temp_root.join("home"));
+        let previous_data_dir = std::env::var_os("SKILLSTAR_DATA_DIR");
+        set_env("SKILLSTAR_DATA_DIR", temp_root.join("home").join(".skillstar"));
         #[cfg(windows)]
         let previous_userprofile = std::env::var_os("USERPROFILE");
         #[cfg(windows)]
@@ -254,6 +256,10 @@ mod tests {
             Some(value) => set_env("HOME", value),
             None => remove_env("HOME"),
         }
+        match previous_data_dir {
+            Some(value) => set_env("SKILLSTAR_DATA_DIR", value),
+            None => remove_env("SKILLSTAR_DATA_DIR"),
+        }
         #[cfg(windows)]
         match previous_userprofile {
             Some(value) => set_env("USERPROFILE", value),
@@ -271,6 +277,8 @@ mod tests {
         let temp_root = make_temp_root("project-import-skip-invalid")?;
         let previous_home = std::env::var_os("HOME");
         set_env("HOME", temp_root.join("home"));
+        let previous_data_dir = std::env::var_os("SKILLSTAR_DATA_DIR");
+        set_env("SKILLSTAR_DATA_DIR", temp_root.join("home").join(".skillstar"));
         #[cfg(windows)]
         let previous_userprofile = std::env::var_os("USERPROFILE");
         #[cfg(windows)]
@@ -327,6 +335,10 @@ mod tests {
             Some(value) => set_env("HOME", value),
             None => remove_env("HOME"),
         }
+        match previous_data_dir {
+            Some(value) => set_env("SKILLSTAR_DATA_DIR", value),
+            None => remove_env("SKILLSTAR_DATA_DIR"),
+        }
         #[cfg(windows)]
         match previous_userprofile {
             Some(value) => set_env("USERPROFILE", value),
@@ -344,6 +356,8 @@ mod tests {
         let temp_root = make_temp_root("project-import-owner")?;
         let previous_home = std::env::var_os("HOME");
         set_env("HOME", temp_root.join("home"));
+        let previous_data_dir = std::env::var_os("SKILLSTAR_DATA_DIR");
+        set_env("SKILLSTAR_DATA_DIR", temp_root.join("home").join(".skillstar"));
         #[cfg(windows)]
         let previous_userprofile = std::env::var_os("USERPROFILE");
         #[cfg(windows)]
@@ -390,6 +404,10 @@ mod tests {
         match previous_home {
             Some(value) => set_env("HOME", value),
             None => remove_env("HOME"),
+        }
+        match previous_data_dir {
+            Some(value) => set_env("SKILLSTAR_DATA_DIR", value),
+            None => remove_env("SKILLSTAR_DATA_DIR"),
         }
         #[cfg(windows)]
         match previous_userprofile {

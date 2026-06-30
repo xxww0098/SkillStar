@@ -1,9 +1,8 @@
-import { motion, useReducedMotion } from "framer-motion";
-import { ChevronDown, Copy, ExternalLink, Eye, EyeOff, FolderInput, Loader2, Trash2, X } from "lucide-react";
+import { useReducedMotion } from "framer-motion";
+import { ChevronDown, FolderInput, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { ExternalAnchor } from "@/components/ui/ExternalAnchor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ModalShell } from "@/components/ui/ModalShell";
@@ -21,7 +20,12 @@ import {
 } from "../types";
 import { ProviderCatalogHero } from "./ProviderCatalogHero";
 import { AdvancedBillingSection } from "./subscriptionEdit/AdvancedBillingSection";
+import { ApiKeyFields } from "./subscriptionEdit/ApiKeyFields";
+import { AutoImportBanner } from "./subscriptionEdit/AutoImportBanner";
+import { cookieHelpForCatalog } from "./subscriptionEdit/cookieHelp";
+import { CookieField } from "./subscriptionEdit/CookieField";
 import { Field, parseDateInput, toDateInput } from "./subscriptionEdit/fields";
+import { OAuthLoginPanel } from "./subscriptionEdit/OAuthLoginPanel";
 
 interface SubscriptionEditDialogProps {
   open: boolean;
@@ -32,37 +36,6 @@ interface SubscriptionEditDialogProps {
   onCreated: (sub: Subscription) => void;
   onUpdated: (sub: Subscription) => void;
   onDeleted: () => void;
-}
-
-interface CookieHelp {
-  title: string;
-  openLabel: string;
-  intro: string;
-  requestTargets: string[];
-  outro: string;
-  copyHint: string;
-}
-
-function cookieHelpForCatalog(catalogId: string, displayName?: string): CookieHelp {
-  if (catalogId === "opencode") {
-    return {
-      title: "登录 OpenCode 控制台后复制 workspace 请求 Cookie，用于读取 Go / Zen 用量。",
-      openLabel: "打开 OpenCode",
-      intro: "在浏览器打开 opencode.ai 的 workspace/default/go 页面后，打开 DevTools → Network → 找到 ",
-      requestTargets: ["/workspace/...", "/_server"],
-      outro: " 请求 → 右键 ",
-      copyHint: " → 粘贴到终端中提取 Cookie 字段，或直接从 Request Headers 中复制 ",
-    };
-  }
-
-  return {
-    title: `登录 ${displayName ?? "服务"} 控制台后复制浏览器 Cookie。`,
-    openLabel: "打开控制台",
-    intro: "在浏览器打开对应控制台后，打开 DevTools → Network → 刷新页面，找到任意同域接口请求 → 右键 ",
-    requestTargets: [],
-    outro: "",
-    copyHint: " → 粘贴到终端中提取 Cookie 字段，或直接从 Request Headers 中复制 ",
-  };
 }
 
 export function SubscriptionEditDialog({
@@ -596,35 +569,14 @@ export function SubscriptionEditDialog({
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
         {/* ── 智能自动导入板块 (Smart Auto-Import Banner) ── */}
         {showAutoImportBanner && (
-          <div className="relative overflow-hidden rounded-2xl border border-primary/20 bg-primary/5 p-4 text-center">
-            <h4 className="mb-1.5 flex items-center justify-center gap-1.5 text-xs font-bold uppercase tracking-wider text-primary">
-              ⚡ 智能自动导入 (Smart Auto-Import)
-            </h4>
-            <p className="mx-auto mb-3.5 max-w-xs text-[11px] leading-normal text-muted-foreground sm:max-w-sm">
-              {catalogId
-                ? `自动扫描并导入本地的 ${selectedEntry?.display_name ?? catalogId} 账号凭证，无需手动填写。`
-                : "一键自动扫描并导入本地的 Codex / Antigravity / Qoder 账号凭证，无需手动填写。"}
-            </p>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={catalogId ? importFromLocal : handleAutoScanAll}
-              disabled={scanningLocal || submitting}
-              className="w-full border-primary/25 bg-primary/10 px-6 font-semibold text-primary hover:bg-primary/15 sm:w-auto"
-            >
-              {scanningLocal ? (
-                <>
-                  <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-                  正在扫描本地环境…
-                </>
-              ) : catalogId ? (
-                "🚀 自动扫描并导入"
-              ) : (
-                "🚀 一键自动扫描并导入"
-              )}
-            </Button>
-          </div>
+          <AutoImportBanner
+            catalogId={catalogId}
+            providerName={selectedEntry?.display_name}
+            scanningLocal={scanningLocal}
+            submitting={submitting}
+            onImportLocal={importFromLocal}
+            onAutoScanAll={handleAutoScanAll}
+          />
         )}
 
         {selectedEntry ? (
@@ -690,118 +642,24 @@ export function SubscriptionEditDialog({
         ) : null}
 
         {authMode === "o-auth" && selectedEntry && (
-          <div className="space-y-3 rounded-2xl border border-border bg-muted/30 p-3.5">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0">
-                <p className="text-xs font-semibold text-foreground">{t("usage.oauthPanelTitle")}</p>
-                <p className="mt-1 max-w-[62ch] text-[10px] leading-relaxed text-muted-foreground">
-                  {t("usage.oauthPanelDesc", { provider: selectedEntry.display_name })}
-                </p>
-              </div>
-              <Button
-                type="button"
-                size="sm"
-                onClick={startOAuthFlow}
-                disabled={submitting || !!oauthPendingId || !catalogId}
-                className="shrink-0"
-              >
-                {submitting && authMode === "o-auth" ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <ExternalLink className="h-3.5 w-3.5" />
-                )}
-                {oauthPendingId ? t("usage.btnWaitingLogin") : t("usage.oauthStartLogin")}
-              </Button>
-            </div>
-
-            {oauthStart ? (
-              <div className="rounded-xl border border-dashed border-border bg-background/60 p-3">
-                <p className="text-[10px] font-semibold text-muted-foreground">{t("usage.oauthAuthLink")}</p>
-                <p className="mt-1 max-h-24 overflow-y-auto break-all rounded-lg bg-muted/50 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-foreground">
-                  {oauthStart.auth_url}
-                </p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <Button type="button" size="xs" variant="outline" onClick={copyAuthLink}>
-                    <Copy className="h-3 w-3" />
-                    {t("usage.oauthCopyLink")}
-                  </Button>
-                  <Button type="button" size="xs" variant="outline" onClick={openOAuthLink}>
-                    <ExternalLink className="h-3 w-3" />
-                    {t("usage.oauthOpenLink")}
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <p className="rounded-xl border border-dashed border-border bg-background/40 px-3 py-2 text-[10px] text-muted-foreground">
-                {t("usage.oauthLinkPlaceholder")}
-              </p>
-            )}
-
-            {oauthStart?.user_code && (
-              <div className="space-y-1.5 rounded-xl border border-primary/20 bg-primary/5 p-3">
-                <p className="text-[10px] font-semibold text-foreground">{t("usage.oauthDeviceCodeTitle")}</p>
-                <p className="text-[9px] text-muted-foreground">{t("usage.oauthDeviceCodeHint")}</p>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 rounded-lg border border-border bg-background px-2.5 py-1.5 text-center text-base font-bold tracking-[0.18em] text-foreground tabular-nums">
-                    {oauthStart.user_code}
-                  </code>
-                  <Button type="button" size="xs" variant="outline" onClick={copyDeviceCode}>
-                    <Copy className="h-3 w-3" />
-                    {t("usage.oauthCopyCode")}
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            <div className="space-y-1.5">
-              <p className="text-[10px] font-semibold text-foreground">{t("usage.oauthCallbackLabel")}</p>
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <Input
-                  value={oauthCallbackInput}
-                  onChange={(e) => setOauthCallbackInput(e.target.value)}
-                  placeholder={t("usage.oauthCallbackPlaceholder")}
-                  disabled={!oauthPendingId || oauthSubmittingCallback}
-                  className="h-9 rounded-xl border-input-border bg-input text-xs text-foreground"
-                />
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={submitOAuthCallback}
-                  disabled={!oauthPendingId || oauthSubmittingCallback || !oauthCallbackInput.trim()}
-                  className="shrink-0"
-                >
-                  {oauthSubmittingCallback && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                  {t("usage.oauthSubmitCallback")}
-                </Button>
-              </div>
-              <p className="text-[9px] leading-relaxed text-muted-foreground">{t("usage.oauthCallbackHint")}</p>
-            </div>
-
-            {oauthStatus && (
-              <div className="relative flex items-center gap-2 overflow-hidden rounded-xl border border-primary/20 bg-primary/10 px-3 py-2 text-[10px] text-primary">
-                <motion.span
-                  className="pointer-events-none absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-transparent via-primary/15 to-transparent"
-                  animate={reduceMotion ? undefined : { x: ["-120%", "320%"] }}
-                  transition={reduceMotion ? undefined : { duration: 1.7, repeat: Infinity, ease: "linear" }}
-                />
-                <Loader2 className="relative h-3.5 w-3.5 animate-spin" />
-                <div className="relative min-w-0 flex-1">
-                  <p className="font-semibold">{oauthStatus}</p>
-                  <p className="mt-0.5 text-[9px] text-primary/75">{t("usage.oauthWaitingHint")}</p>
-                </div>
-                {oauthPendingId && (
-                  <button
-                    type="button"
-                    className="relative shrink-0 rounded-full px-2 py-1 underline hover:bg-primary/10"
-                    onClick={cancelOAuth}
-                  >
-                    {t("usage.cancelOAuth")}
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
+          <OAuthLoginPanel
+            selectedEntry={selectedEntry}
+            submitting={submitting}
+            oauthIsActiveMode={authMode === "o-auth"}
+            oauthStart={oauthStart}
+            oauthPendingId={oauthPendingId}
+            oauthStatus={oauthStatus}
+            oauthCallbackInput={oauthCallbackInput}
+            setOauthCallbackInput={setOauthCallbackInput}
+            oauthSubmittingCallback={oauthSubmittingCallback}
+            reduceMotion={reduceMotion}
+            onStartOAuth={startOAuthFlow}
+            onCopyAuthLink={copyAuthLink}
+            onOpenOAuthLink={openOAuthLink}
+            onCopyDeviceCode={copyDeviceCode}
+            onSubmitCallback={submitOAuthCallback}
+            onCancelOAuth={cancelOAuth}
+          />
         )}
 
         {/* ── 极其简化的核心字段 (Collapsible Minimal Form Fields) ── */}
@@ -809,149 +667,32 @@ export function SubscriptionEditDialog({
           <div className="space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
             {/* 1. API Key 认证仅需填 Key */}
             {authMode === "api-key" && (
-              <>
-                <Field
-                  label={editing ? t("usage.fieldApiKeyOptional") : "API Key"}
-                  hint={selectedEntry?.id === "glm" ? t("usage.glmApiKeyHint") : undefined}
-                >
-                  <div className="relative">
-                    <Input
-                      value={apiKey}
-                      onChange={(e) => setApiKey(e.target.value)}
-                      placeholder="sk-..."
-                      type={showKey ? "text" : "password"}
-                      autoComplete="off"
-                      className="h-9 rounded-xl border-input-border bg-input pr-9 text-xs text-foreground"
-                    />
-                    <button
-                      type="button"
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                      onClick={() => setShowKey((v) => !v)}
-                    >
-                      {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-                </Field>
-
-                {catalogId === "deepseek" && (
-                  <Field
-                    label={
-                      editing?.has_platform_token
-                        ? t("usage.deepseekPlatformTokenOptional")
-                        : t("usage.deepseekPlatformToken")
-                    }
-                    hint={t("usage.deepseekPlatformTokenHint")}
-                  >
-                    <div className="space-y-2">
-                      <div className="relative">
-                        <Input
-                          value={platformToken}
-                          onChange={(e) => setPlatformToken(e.target.value)}
-                          placeholder={t("usage.deepseekPlatformTokenPlaceholder")}
-                          type={showPlatformToken ? "text" : "password"}
-                          autoComplete="off"
-                          className="h-9 rounded-xl border-input-border bg-input pr-9 text-xs text-foreground"
-                        />
-                        <button
-                          type="button"
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                          onClick={() => setShowPlatformToken((v) => !v)}
-                        >
-                          {showPlatformToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                        </button>
-                      </div>
-                      {editing?.has_platform_token && (
-                        <p className="text-[9px] text-muted-foreground">{t("usage.deepseekPlatformTokenConfigured")}</p>
-                      )}
-                      <p className="text-[9px] leading-relaxed text-muted-foreground">
-                        <code className="rounded bg-muted px-1 py-0.5 text-[9px]">
-                          JSON.parse(localStorage.userToken).value
-                        </code>
-                      </p>
-                    </div>
-                  </Field>
-                )}
-              </>
+              <ApiKeyFields
+                editing={editing}
+                catalogId={catalogId}
+                selectedEntry={selectedEntry}
+                apiKey={apiKey}
+                setApiKey={setApiKey}
+                showKey={showKey}
+                setShowKey={setShowKey}
+                platformToken={platformToken}
+                setPlatformToken={setPlatformToken}
+                showPlatformToken={showPlatformToken}
+                setShowPlatformToken={setShowPlatformToken}
+              />
             )}
 
             {/* Cookie 模式：粘贴浏览器的 Cookie Header */}
             {authMode === "cookie" && (
-              <div className="space-y-2.5 rounded-2xl border border-border bg-muted/30 p-3.5">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                      🍪 浏览器 Cookie
-                    </h4>
-                    <p className="mt-1 text-[10px] leading-snug text-muted-foreground/75">{cookieHelp.title}</p>
-                  </div>
-                  {selectedEntry?.subscription_url && (
-                    <ExternalAnchor
-                      href={selectedEntry.subscription_url}
-                      className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-border bg-background/70 px-2 py-1.5 text-[10px] font-semibold text-foreground transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
-                      title={cookieHelp.openLabel}
-                    >
-                      <ExternalLink className="h-3 w-3" />
-                      {cookieHelp.openLabel}
-                    </ExternalAnchor>
-                  )}
-                </div>
-
-                {/* OpenCode: Go / Zen 选择器 */}
-                {catalogId === "opencode" && (
-                  <div className="rounded-xl border border-border bg-background/60 p-2.5">
-                    <p className="mb-2 text-[10px] font-semibold text-muted-foreground">选择订阅</p>
-                    <div className="flex gap-1.5 rounded-lg border border-border bg-muted/50 p-1">
-                      {["Go", "Zen"].map((choice) => (
-                        <button
-                          key={choice}
-                          type="button"
-                          onClick={() => setPlanTier(choice)}
-                          className={cn(
-                            "flex-1 rounded-md border px-3 py-1.5 text-[11px] font-bold tracking-wide transition-all duration-200",
-                            planTier === choice
-                              ? "border-primary/40 bg-primary/10 text-primary shadow-sm"
-                              : "border-transparent text-muted-foreground hover:text-foreground",
-                          )}
-                        >
-                          {choice === "Go" ? "🚀 Go" : "⚡ Zen"}
-                        </button>
-                      ))}
-                    </div>
-                    <p className="mt-1.5 text-[9px] leading-snug text-muted-foreground/70">
-                      {planTier === "Go"
-                        ? "$10/月 开源模型订阅"
-                        : planTier === "Zen"
-                          ? "按量付费 AI 网关"
-                          : "请选择 Go 或 Zen"}
-                    </p>
-                  </div>
-                )}
-
-                <p className="text-[10px] leading-relaxed text-muted-foreground">
-                  {cookieHelp.intro}
-                  {cookieHelp.requestTargets.map((target, index) => (
-                    <span key={target}>
-                      {index > 0 ? " 或 " : ""}
-                      <code className="mx-0.5 rounded bg-muted px-1 text-[10px]">{target}</code>
-                    </span>
-                  ))}
-                  {cookieHelp.outro}
-                  <code className="mx-0.5 rounded bg-muted px-1 text-[10px]">Copy as cURL</code>
-                  {cookieHelp.copyHint}
-                  <code className="mx-0.5 rounded bg-muted px-1 text-[10px]">Cookie:</code>
-                  后面的完整内容。
-                </p>
-                <textarea
-                  value={cookieHeader}
-                  onChange={(e) => setCookieHeader(e.target.value)}
-                  placeholder="sessionid=abc123; csrftoken=xyz789; ..."
-                  rows={3}
-                  className="w-full rounded-xl border border-input-border bg-input p-2.5 text-xs text-foreground placeholder:text-muted-foreground/60 resize-none focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/40"
-                />
-                <p className="text-[9px] leading-normal text-muted-foreground/70">
-                  Cookie 会加密存储在本机。粘贴后点击「添加」即可保存，之后可点击刷新按钮拉取最新用量数据。
-                </p>
-              </div>
+              <CookieField
+                catalogId={catalogId}
+                selectedEntry={selectedEntry}
+                cookieHelp={cookieHelp}
+                cookieHeader={cookieHeader}
+                setCookieHeader={setCookieHeader}
+                planTier={planTier}
+                setPlanTier={setPlanTier}
+              />
             )}
 
             {/* 2. 手动 Quota 录入 */}

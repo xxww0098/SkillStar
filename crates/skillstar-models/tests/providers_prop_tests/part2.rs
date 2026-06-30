@@ -7,8 +7,8 @@ use super::{arb_flat_providers_store, setup_temp_store};
 use proptest::prelude::*;
 use serde_json::Value;
 use skillstar_models::providers::{
-    AppProviders, FlatProvidersStore, ModelMapping, ProviderEntry, ProviderSettings,
-    ProvidersStore, migrate_store_if_needed, read_flat_store, write_flat_store,
+    AppProviders, FLAT_STORE_VERSION, FlatProvidersStore, ModelMapping, ProviderEntry,
+    ProviderSettings, ProvidersStore, migrate_store_if_needed, read_flat_store, write_flat_store,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -314,8 +314,12 @@ proptest! {
         // Perform migration
         let v2_store = migrate_store_if_needed(&path).unwrap();
 
-        // Verify: version is 2
-        prop_assert_eq!(v2_store.version, 2, "Migrated store should have version 2");
+        // Verify: store is at the current schema version
+        prop_assert_eq!(
+            v2_store.version,
+            FLAT_STORE_VERSION,
+            "Migrated store should be at the current schema version"
+        );
 
         // Collect all unique providers from v1 (keyed by base_url + api_key)
         let apps: &[&AppProviders] = &[
@@ -531,11 +535,11 @@ fn verify_tool_activation(
     match &app.current {
         None => {
             // If app has no current, tool_activations should either not contain this tool_id
-            // or contain None for it
-            if let Some(activation) = v2_store.tool_activations.get(tool_id) {
+            // or contain an empty binding for it
+            if let Some(binding) = v2_store.tool_activations.get(tool_id) {
                 prop_assert!(
-                    activation.is_none(),
-                    "tool_activations['{}'] should be None when app has no current provider",
+                    binding.is_empty(),
+                    "tool_activations['{}'] should be empty when app has no current provider",
                     tool_id
                 );
             }
@@ -556,23 +560,23 @@ fn verify_tool_activation(
 
                 if let Some(v2_provider) = v2_match {
                     // tool_activations should reference this provider
-                    let activation = v2_store.tool_activations.get(tool_id);
+                    let binding = v2_store.tool_activations.get(tool_id);
                     prop_assert!(
-                        activation.is_some(),
+                        binding.is_some(),
                         "tool_activations should contain key '{}' when app has current='{}'",
                         tool_id,
                         current_id
                     );
 
-                    let activation = activation.unwrap();
+                    let binding = binding.unwrap();
                     prop_assert!(
-                        activation.is_some(),
-                        "tool_activations['{}'] should be Some when app has current='{}'",
+                        !binding.is_empty(),
+                        "tool_activations['{}'] should be non-empty when app has current='{}'",
                         tool_id,
                         current_id
                     );
 
-                    let activation = activation.as_ref().unwrap();
+                    let activation = binding.active().unwrap();
                     prop_assert_eq!(
                         &activation.provider_id,
                         &v2_provider.id,

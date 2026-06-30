@@ -91,6 +91,14 @@ export interface ModelsCommands {
     args: { toolId: string; settings: Record<string, unknown> };
     result: ToolSyncResult;
   };
+  set_active_binding: {
+    args: { toolId: string; providerId: string };
+    result: ToolSyncResult;
+  };
+  remove_binding_entry: {
+    args: { toolId: string; providerId: string };
+    result: ToolSyncResult;
+  };
 
   // Tool config targets (v1)
   get_tool_config_targets: { args: { app_id: AppId }; result: ToolConfigTarget[] };

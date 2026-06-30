@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { MOTION_TRANSITION } from "../../../comm/motion";
 import { Button } from "../../../components/ui/button";
 import { formatPlatformPath } from "../../../lib/utils";
-import type { AgentProfile, ImportDone, ProjectEntry, ScannedSkill, Skill } from "../../../types";
+import type { AgentProfile, ImportDone, ProjectDeployMode, ProjectEntry, ScannedSkill, Skill } from "../../../types";
 import { AgentAccordion } from "./AgentAccordion";
 import { ApplyFooter } from "./ApplyFooter";
 import { ScanImportBanner } from "./ScanImportBanner";
@@ -22,6 +22,7 @@ interface ProjectDetailPanelProps {
   enabledAgents: string[];
   expandedAgent: string | null;
   agentSkills: Record<string, string[]>;
+  deployModes: Record<string, ProjectDeployMode>;
   skillFilter: string;
   totalSkills: number;
   syncResult: number | null;
@@ -32,6 +33,7 @@ interface ProjectDetailPanelProps {
   onImportAll: () => void;
   onToggleExpand: (agentId: string) => void;
   onToggleAgent: (agentId: string) => void;
+  onToggleDeployMode: (agentId: string) => void;
   onNavigateToSkill?: (skillName: string) => void;
   onRemoveSkill: (agentId: string, skillName: string) => void;
   onSkillFilterChange: (value: string) => void;
@@ -53,6 +55,7 @@ export function ProjectDetailPanel({
   enabledAgents,
   expandedAgent,
   agentSkills,
+  deployModes,
   skillFilter,
   totalSkills,
   syncResult,
@@ -63,6 +66,7 @@ export function ProjectDetailPanel({
   onImportAll,
   onToggleExpand,
   onToggleAgent,
+  onToggleDeployMode,
   onNavigateToSkill,
   onRemoveSkill,
   onSkillFilterChange,
@@ -180,10 +184,12 @@ export function ProjectDetailPanel({
           enabledAgents={enabledAgents}
           expandedAgent={expandedAgent}
           agentSkills={agentSkills}
+          deployModes={deployModes}
           skillFilter={skillFilter}
           getAvailableSkills={getAvailableSkills}
           onToggleExpand={onToggleExpand}
           onToggleAgent={onToggleAgent}
+          onToggleDeployMode={onToggleDeployMode}
           onNavigateToSkill={onNavigateToSkill}
           onRemoveSkill={onRemoveSkill}
           onSkillFilterChange={onSkillFilterChange}

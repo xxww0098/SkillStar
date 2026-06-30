@@ -160,6 +160,14 @@ pub(super) fn default_curated_mcp_servers() -> Vec<CuratedMcpSeed> {
         });
     }
 
+    // ── X / Twitter (source = "x") ──────────────────────────────────────
+    for (idx, srv) in x_curated_servers().into_iter().enumerate() {
+        seeds.push(CuratedMcpSeed {
+            priority: idx as i64,
+            server: srv,
+        });
+    }
+
     // Helper-free closure to build BigModel servers lives below; keep
     // `bigmodel_repo_url` referenced via the loop so a later tweak to the
     // repo url only touches one place.
@@ -865,5 +873,98 @@ fn supabase_curated_servers() -> Vec<McpRegistryServer> {
         "@supabase/mcp-server-supabase",
         &["SUPABASE_ACCESS_TOKEN"],
     )]
+}
+
+/// X (Twitter) official MCP servers — the `xurl` stdio bridge to the X API
+/// plus the no-auth remote docs server. `xapi` is hand-built rather than via
+/// `make_stdio_curated` because it needs `package_arguments` (`mcp <url>`)
+/// appended after the npm identifier, which the generic helper can't express.
+fn x_curated_servers() -> Vec<McpRegistryServer> {
+    let source = "x";
+    let repo = "https://docs.x.com/tools/mcp";
+
+    let xapi_desc = "X 官方 MCP — 通过 xurl 桥接 X API：发帖、搜索、用户/时间线、书签、趋势等（首次需浏览器 OAuth 登录）。";
+    let xapi_raw = r##"{
+        "id": "x-api",
+        "name": "xapi",
+        "description": "X 官方 MCP — 通过 xurl 桥接 X API：发帖、搜索、用户/时间线、书签、趋势等（首次需浏览器 OAuth 登录）。",
+        "packages": [
+            {
+                "registry_type": "npm",
+                "identifier": "@xdevplatform/xurl",
+                "runtime_hint": "npx",
+                "package_arguments": ["mcp", "https://api.x.com/mcp"],
+                "environment_variables": [
+                    { "name": "CLIENT_ID", "is_secret": true, "is_required": true },
+                    { "name": "CLIENT_SECRET", "is_secret": true, "is_required": true }
+                ]
+            }
+        ],
+        "remotes": [],
+        "repository": { "url": "https://docs.x.com/tools/mcp", "source": "github" }
+    }"##;
+
+    let xapi = McpRegistryServer {
+        id: "x-api".to_string(),
+        name: "xapi".to_string(),
+        namespace: "x-api".to_string(),
+        description: xapi_desc.to_string(),
+        repo_url: repo.to_string(),
+        stars: 0,
+        license: None,
+        version: None,
+        kind: McpServerKind::Stdio,
+        runtimes: vec!["npx".to_string()],
+        readme: Some(format!("# xapi\n\n{xapi_desc}")),
+        updated_at: None,
+        packages: vec![McpRegistryPackageSummary {
+            runtime: "npx".to_string(),
+            identifier: "@xdevplatform/xurl".to_string(),
+            version: None,
+            required_env: vec!["CLIENT_ID".to_string(), "CLIENT_SECRET".to_string()],
+        }],
+        remotes: Vec::new(),
+        raw_server_json: xapi_raw.to_string(),
+        recommended: false,
+        source: Some(source.to_string()),
+    };
+
+    let docs_desc = "X 官方文档 MCP — search_x / get_page_x 工具，检索 X API 指南与示例（无需鉴权）。";
+    let docs_raw = r##"{
+        "id": "x-docs",
+        "name": "x-docs",
+        "description": "X 官方文档 MCP — search_x / get_page_x 工具，检索 X API 指南与示例（无需鉴权）。",
+        "packages": [],
+        "remotes": [
+            { "transport_type": "streamable-http", "url": "https://docs.x.com/mcp" }
+        ],
+        "repository": { "url": "https://docs.x.com/tools/mcp", "source": "github" }
+    }"##;
+
+    let docs = McpRegistryServer {
+        id: "x-docs".to_string(),
+        name: "x-docs".to_string(),
+        namespace: "x-docs".to_string(),
+        description: docs_desc.to_string(),
+        repo_url: repo.to_string(),
+        stars: 0,
+        license: None,
+        version: None,
+        kind: McpServerKind::Remote,
+        runtimes: Vec::new(),
+        readme: Some(format!("# x-docs\n\n{docs_desc}")),
+        updated_at: None,
+        packages: Vec::new(),
+        remotes: vec![McpRegistryRemoteSummary {
+            transport: "http".to_string(),
+            url: "https://docs.x.com/mcp".to_string(),
+            required_headers: Vec::new(),
+        }],
+        raw_server_json: docs_raw.to_string(),
+        recommended: false,
+        source: Some(source.to_string()),
+    };
+
+    vec![xapi, docs]
 }
 

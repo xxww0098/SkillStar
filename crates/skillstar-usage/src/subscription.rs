@@ -165,9 +165,9 @@ pub struct SubscriptionUsage {
 pub struct DeepSeekAnalytics {
     pub month_cost: f64,
     pub today_cost: f64,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub models: Vec<DeepSeekModelUsage>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub daily: Vec<DeepSeekDailyUsage>,
 }
 
@@ -278,4 +278,18 @@ pub enum AlertKind {
     RenewSoon,
     Expired,
     NeedsReauth,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn deepseek_analytics_serializes_empty_arrays() {
+        let value = serde_json::to_value(DeepSeekAnalytics::default()).unwrap();
+
+        assert_eq!(value["models"], json!([]));
+        assert_eq!(value["daily"], json!([]));
+    }
 }

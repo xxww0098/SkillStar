@@ -8,12 +8,9 @@ mod start_info;
 pub mod antigravity;
 pub mod codex;
 pub mod cursor;
-pub mod github_copilot;
-pub mod kiro;
 pub mod opencode;
 pub mod qoder;
 pub mod trae;
-pub mod windsurf;
 pub mod xai;
 
 pub use start_info::OAuthStartInfo;
@@ -29,9 +26,6 @@ pub async fn dispatch(subscription: &mut Subscription) -> UsageResult<Subscripti
         "antigravity" => antigravity::fetch(subscription).await,
         "trae" => trae::fetch(subscription).await,
         "qoder" => qoder::fetch(subscription).await,
-        "kiro" => kiro::fetch(subscription).await,
-        "windsurf" => windsurf::fetch(subscription).await,
-        "github-copilot" => github_copilot::fetch(subscription).await,
         "xai" => xai::fetch(subscription).await,
         "opencode" => opencode::fetch(subscription).await,
         other => Err(super::unsupported(other)),
@@ -50,9 +44,6 @@ pub async fn start_login(
         "antigravity" => antigravity::start_login(region).await,
         "trae" => trae::start_login(region).await,
         "qoder" => qoder::start_login(region).await,
-        "kiro" => kiro::start_login(region).await,
-        "windsurf" => windsurf::start_login(region).await,
-        "github-copilot" => github_copilot::start_login(region).await,
         "xai" => xai::start_login(region).await,
         "opencode" => opencode::start_login(region, target_subscription_id).await,
         other => Err(super::unsupported(other)),

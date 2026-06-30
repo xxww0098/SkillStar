@@ -8,7 +8,8 @@ Respond to the user in Chinese (per AGENTS.md). Commit messages must be English,
 
 ## Detailed docs (read these for the area you're touching)
 
-- **AGENTS.md** — backend architecture + behavior rules (skills sync, marketplace, usage/OAuth, AI, CLI, patrol, storage). Document-first: backend/architecture changes must update AGENTS.md first.
+- **AGENTS.md** — structure single source of truth: tech stack, project tree, workspace-crate map, doc index. Structure/dependency/crate changes must update AGENTS.md first.
+- **docs/backend.md** — backend behavior rules per subsystem (skills sync, project detection, model/usage, AI, fingerprint, marketplace, SSH, S3, patrol, storage, github mirror, ACP, auto-update). Backend behavior changes must update this first.
 - **AGENTS-UI.md** — frontend structure, Models hub UI, streaming UX rules, visual system. Frontend convention changes must update AGENTS-UI.md first.
 - **ADDING-AN-AGENT.md** — step-by-step guide for adding a new Agent CLI (builtin data table, optional tool-sync axis, optional usage axis).
 - Significant bug investigations get logged in `docs/Error.md`.
@@ -67,7 +68,7 @@ Heavy logic belongs in `crates/*`, not in command wrappers. Commands are registe
 
 ### Frontend structure
 
-`src/features/<domain>/` slices (components + hooks per domain: my-skills, marketplace, projects, models, usage, mcp, fingerprints, settings); `src/pages/` are thin lazy-loaded shells; cross-page navigation state is centralized in `App.tsx`. State is hook-driven with TanStack Query — no external state library. Styling is Tailwind v4 utilities only (no CSS modules / styled-components), Radix primitives, dark glassmorphism design (`docs/impeccable.md`). i18n via i18next (`src/i18n/locales/en.json` + `zh-CN.json` — keep both in sync).
+`src/features/<domain>/` slices (components + hooks per domain: my-skills, marketplace, projects, models, usage, mcp, fingerprints, settings); `src/pages/` are thin lazy-loaded shells; cross-page navigation state is centralized in `App.tsx`. State is hook-driven with TanStack Query — no external state library. Styling is Tailwind v4 utilities only (no CSS modules / styled-components), Radix primitives, dark glassmorphism design (brand/visual direction in `PRODUCT.md`). i18n via i18next (`src/i18n/locales/en.json` + `zh-CN.json` — keep both in sync).
 
 Streaming AI flows use Tauri events (`ai://summarize-stream`, `ai://translate-stream`) with `start`/`delta`/`complete`/`error` phases.
 

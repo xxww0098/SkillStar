@@ -310,6 +310,8 @@ pub fn run() {
             commands::save_github_mirror_config,
             commands::get_github_mirror_presets,
             commands::test_github_mirror,
+            commands::write_codex_env_to_zshrc,
+            commands::read_codex_env_from_zshrc,
             commands::projects::register_project,
             commands::projects::list_projects,
             commands::projects::get_project_skills,
@@ -398,6 +400,8 @@ pub fn run() {
             commands::models_commands::activate_tool,
             commands::models_commands::deactivate_tool,
             commands::models_commands::update_tool_settings,
+            commands::models_commands::set_active_binding,
+            commands::models_commands::remove_binding_entry,
             commands::models_commands::get_tool_activations,
             // Model discovery, balance, and tool detection commands
             commands::models_commands::fetch_provider_models,

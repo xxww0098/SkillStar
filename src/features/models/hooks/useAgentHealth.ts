@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { tauriInvoke } from "../../../lib/ipc";
 import type { ConnectionTestResult, ProviderEntryFlat, ToolActivationsMap } from "../../../types";
 import { PROVIDER_AGENTS, providerCompatibleWithAgent } from "../lib/agentRegistry";
+import { activeEntry as bindingActiveEntry } from "../lib/toolBinding";
 
 export interface AgentHealth {
   results: Record<string, ConnectionTestResult | null>;
@@ -24,7 +25,7 @@ export function useAgentHealth(providers: ProviderEntryFlat[], toolActivations: 
   const targets = useMemo(
     () =>
       PROVIDER_AGENTS.map((agent) => {
-        const activation = toolActivations[agent.toolId] ?? null;
+        const activation = bindingActiveEntry(toolActivations[agent.toolId]);
         const provider = activation?.provider_id
           ? (providers.find((p) => p.id === activation.provider_id) ?? null)
           : null;

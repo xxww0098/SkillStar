@@ -18,7 +18,7 @@ pub enum AuthMode {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum CatalogTier {
-    /// OAuth — v1 implements 12 of these.
+    /// OAuth — v1 implements 6 of these.
     OAuth,
     /// Public API-key endpoint — v1 implements 4.
     ApiKey,
@@ -82,14 +82,12 @@ const fn entry(
 // literal directly across all toolchains, so define as `&[AuthMode]` consts).
 const OAUTH_ONLY: &[AuthMode] = &[AuthMode::OAuth];
 const APIKEY_ONLY: &[AuthMode] = &[AuthMode::ApiKey];
-const MANUAL_ONLY: &[AuthMode] = &[AuthMode::Manual];
-const COOKIE_ONLY: &[AuthMode] = &[AuthMode::Cookie];
 const COOKIE_MANUAL: &[AuthMode] = &[AuthMode::Cookie, AuthMode::Manual];
 
 /// Returns the full fixed catalog.
 pub fn catalog() -> Vec<CatalogEntry> {
     vec![
-        // ── Tier 1: OAuth (9) ──────────────────────────────────────────
+        // ── Tier 1: OAuth (6) ──────────────────────────────────────────
         CatalogEntry {
             id: "cursor",
             display_name: "Cursor",
@@ -150,44 +148,6 @@ pub fn catalog() -> Vec<CatalogEntry> {
             warning: None,
             regions: NO_REGIONS,
         },
-        CatalogEntry {
-            id: "kiro",
-            display_name: "Kiro",
-            description: "AWS AI IDE",
-            tier: CatalogTier::OAuth,
-            auth_modes: OAUTH_ONLY,
-            brand_color: "6366F1",
-            default_currency: "USD",
-            subscription_url: "https://kiro.dev/docs/billing/upgrading",
-            warning: Some(
-                "OAuth 流程基于社区蓝本，请优先使用 Google / GitHub 登录；Builder ID / IdC 需 Kiro 客户端完成认证。",
-            ),
-            regions: NO_REGIONS,
-        },
-        CatalogEntry {
-            id: "windsurf",
-            display_name: "Windsurf",
-            description: "Codeium IDE",
-            tier: CatalogTier::OAuth,
-            auth_modes: OAUTH_ONLY,
-            brand_color: "0EA5E9",
-            default_currency: "USD",
-            subscription_url: "https://windsurf.com/pricing",
-            warning: None,
-            regions: NO_REGIONS,
-        },
-        CatalogEntry {
-            id: "github-copilot",
-            display_name: "GitHub Copilot",
-            description: "IDE Copilot",
-            tier: CatalogTier::OAuth,
-            auth_modes: OAUTH_ONLY,
-            brand_color: "24292F",
-            default_currency: "USD",
-            subscription_url: "https://github.com/settings/copilot",
-            warning: None,
-            regions: NO_REGIONS,
-        },
         entry(
             "xai",
             "Grok",
@@ -220,16 +180,6 @@ pub fn catalog() -> Vec<CatalogEntry> {
             "https://bigmodel.cn/usercenter/order",
         ),
         entry(
-            "zcode",
-            "ZCode",
-            "Coding Plan",
-            CatalogTier::ApiKey,
-            APIKEY_ONLY,
-            "6366F1",
-            "CNY",
-            "https://chat.z.ai",
-        ),
-        entry(
             "kimi",
             "Kimi",
             "Moonshot",
@@ -249,17 +199,22 @@ pub fn catalog() -> Vec<CatalogEntry> {
             "CNY",
             "https://platform.minimaxi.com/user-center/basic-information/interface-key",
         ),
-        // ── Tier 3: Cookie (1) + Manual (1) ────────────────────────────
-        entry(
-            "stepfun",
-            "阶跃 Step",
-            "Step Plan",
-            CatalogTier::Manual,
-            MANUAL_ONLY,
-            "00B5A9",
-            "CNY",
-            "https://platform.stepfun.com/account-overview",
-        ),
+        // ── Tier 3: Cookie (2) + Manual ────────────────────────────────
+        CatalogEntry {
+            id: "stepfun",
+            display_name: "阶跃 Step",
+            description: "账户余额 / 消费",
+            tier: CatalogTier::Cookie,
+            auth_modes: COOKIE_MANUAL,
+            brand_color: "00B5A9",
+            default_currency: "CNY",
+            subscription_url: "https://platform.stepfun.com/account-overview",
+            warning: Some(
+                "阶跃官方未提供余额查询 API：请使用 Cookie 模式，登录 platform.stepfun.com 后，\
+                 从浏览器开发者工具复制包含 Oasis-Token 的 Cookie。",
+            ),
+            regions: NO_REGIONS,
+        },
         // ── OpenCode first-party services ──────────────────────────────
         CatalogEntry {
             id: "opencode",
@@ -288,8 +243,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn catalog_has_16_entries() {
-        assert_eq!(catalog().len(), 16);
+    fn catalog_has_12_entries() {
+        assert_eq!(catalog().len(), 12);
     }
 
     #[test]
@@ -308,10 +263,10 @@ mod tests {
         let api_key = c.iter().filter(|e| e.tier == CatalogTier::ApiKey).count();
         let cookie = c.iter().filter(|e| e.tier == CatalogTier::Cookie).count();
         let manual = c.iter().filter(|e| e.tier == CatalogTier::Manual).count();
-        assert_eq!(oauth, 9);
-        assert_eq!(api_key, 5);
-        assert_eq!(cookie, 1);
-        assert_eq!(manual, 1);
+        assert_eq!(oauth, 6);
+        assert_eq!(api_key, 4);
+        assert_eq!(cookie, 2);
+        assert_eq!(manual, 0);
     }
 
     #[test]

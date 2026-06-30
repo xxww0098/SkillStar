@@ -44,8 +44,6 @@ export const usageApi = {
     invoke<SwitchOutcome>("switch_active_subscription_to_cli", { catalogId }),
 
   // ── Floating card windows (multi-window) ─────────────────────────
-  openUsageCardWindow: (subscriptionId: string) =>
-    invoke<void>("open_usage_card_window", { subscriptionId }),
-  closeUsageCardWindow: (subscriptionId: string) =>
-    invoke<void>("close_usage_card_window", { subscriptionId }),
+  openUsageCardWindow: (subscriptionId: string) => invoke<void>("open_usage_card_window", { subscriptionId }),
+  closeUsageCardWindow: (subscriptionId: string) => invoke<void>("close_usage_card_window", { subscriptionId }),
 };

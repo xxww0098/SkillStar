@@ -10,3 +10,4 @@ pub mod mcp_marketplace;
 pub mod network;
 pub mod projects;
 pub mod shell;
+pub mod shell_rc;

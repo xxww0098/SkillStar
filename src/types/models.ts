@@ -155,6 +155,11 @@ export interface CodexSettings {
   auth_mode: "api_key" | "oauth";
 }
 
+/**
+ * One provider+model binding entry for an Agent tool. Mirrors the backend
+ * `ToolActivation`. Single-provider agents (claude-code, gemini) hold at most
+ * one; multi-provider agents (codex, opencode) may hold several.
+ */
 export interface ToolActivation {
   provider_id: string;
   model: string;
@@ -163,7 +168,17 @@ export interface ToolActivation {
   last_sync_at?: number | null;
 }
 
-export type ToolActivationsMap = Record<string, ToolActivation | null>;
+/**
+ * All provider+model bindings for one Agent tool, plus which one is active.
+ * `entries` is the ordered list; `active_index` points at the entry that owns
+ * the agent's active pointer on disk. Empty `entries` = not bound.
+ */
+export interface ToolBinding {
+  entries: ToolActivation[];
+  active_index: number;
+}
+
+export type ToolActivationsMap = Record<string, ToolBinding>;
 
 export interface FlatProvidersResponse {
   version: number;

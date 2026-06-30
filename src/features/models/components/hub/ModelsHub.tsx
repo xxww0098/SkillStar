@@ -13,11 +13,13 @@ import { useToolInstallStatuses } from "../../api/install";
 import { useAgentHealth } from "../../hooks/useAgentHealth";
 import { CLAUDE_DESKTOP_TOOL_ID, PROVIDER_AGENTS, type ProviderToolId } from "../../lib/agentRegistry";
 import { computeAgentStatus, summarizeAgentStatuses } from "../../lib/agentStatus";
+import { activeEntry as bindingActiveEntry } from "../../lib/toolBinding";
 import { AgentHeroCard } from "../agents/AgentHeroCard";
 import { AgentSettingsDialog } from "../agents/AgentSettingsDialog";
 import { AppAiCard } from "../agents/AppAiCard";
 import { ClaudeDesktopCard } from "../agents/ClaudeDesktopCard";
 import { ClaudeDesktopConfigDialog } from "../agents/ClaudeDesktopConfigDialog";
+import { MultiProviderCard } from "../agents/MultiProviderCard";
 import { PresetPicker } from "../provider/PresetPicker";
 import { DrawerShell } from "../shared/DrawerShell";
 import { ProviderEditorDrawer } from "../provider/ProviderEditorDrawer";
@@ -148,7 +150,7 @@ export function ModelsHub() {
   const agentStatuses = useMemo(
     () =>
       PROVIDER_AGENTS.map((agent) => {
-        const activation = toolActivations[agent.toolId] ?? null;
+        const activation = bindingActiveEntry(toolActivations[agent.toolId]);
         const boundProvider = activation?.provider_id
           ? (providers.find((p) => p.id === activation.provider_id) ?? null)
           : null;
@@ -168,7 +170,8 @@ export function ModelsHub() {
 
   const providerLatency = useMemo(() => {
     const map: Record<string, number | null> = {};
-    for (const [toolId, activation] of Object.entries(toolActivations)) {
+    for (const [toolId, binding] of Object.entries(toolActivations)) {
+      const activation = bindingActiveEntry(binding);
       const result = health.results[toolId];
       if (activation?.provider_id && result?.status === "ok") {
         map[activation.provider_id] = result.latency_ms ?? null;
@@ -178,7 +181,7 @@ export function ModelsHub() {
   }, [toolActivations, health.results]);
 
   const noAgentConnected = useMemo(
-    () => providers.length > 0 && Object.values(toolActivations).every((a) => !a),
+    () => providers.length > 0 && Object.values(toolActivations).every((b) => !b || b.entries.length === 0),
     [providers.length, toolActivations],
   );
 
@@ -245,16 +248,20 @@ export function ModelsHub() {
               </div>
             ) : null}
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {PROVIDER_AGENTS.map((agent) => (
-                <AgentHeroCard
-                  key={agent.toolId}
-                  agent={agent}
-                  health={health}
-                  onAddProvider={() => openCreateDrawer(agent.toolId)}
-                  onOpenSettings={() => setSettingsTool(agent.toolId)}
-                  onOpenProviderDrawer={openEditDrawer}
-                />
-              ))}
+              {PROVIDER_AGENTS.map((agent) => {
+                const cardProps = {
+                  agent,
+                  health,
+                  onAddProvider: () => openCreateDrawer(agent.toolId),
+                  onOpenSettings: () => setSettingsTool(agent.toolId),
+                  onOpenProviderDrawer: openEditDrawer,
+                };
+                return agent.kind === "multi" ? (
+                  <MultiProviderCard key={agent.toolId} {...cardProps} />
+                ) : (
+                  <AgentHeroCard key={agent.toolId} {...cardProps} />
+                );
+              })}
               <ClaudeDesktopCard
                 installed={installLoading ? false : (installStatus[CLAUDE_DESKTOP_TOOL_ID]?.installed ?? false)}
                 installLoading={installLoading}

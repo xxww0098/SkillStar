@@ -9,11 +9,11 @@ pub mod projects;
 pub mod updater;
 pub mod usage_commands;
 pub mod usage_dto;
-pub mod usage_switch;
 pub mod usage_windows;
 
 pub use skillstar_app::commands::acp;
 pub use skillstar_app::commands::network::*;
+pub use skillstar_app::commands::shell_rc::*;
 
 pub mod marketplace {
     pub use skillstar_app::commands::marketplace::*;

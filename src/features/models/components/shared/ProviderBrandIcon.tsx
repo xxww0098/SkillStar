@@ -2,10 +2,12 @@ import AnthropicIcon from "@lobehub/icons/es/Anthropic/components/Mono";
 import DeepSeekIcon from "@lobehub/icons/es/DeepSeek/components/Color";
 import GrokIcon from "@lobehub/icons/es/Grok/components/Mono";
 import KimiIcon from "@lobehub/icons/es/Kimi/components/Mono";
+import LongCatIcon from "@lobehub/icons/es/LongCat/components/Color";
 import MiniMaxIcon from "@lobehub/icons/es/Minimax/components/Color";
 import OpenAIIcon from "@lobehub/icons/es/OpenAI/components/Mono";
 import OpenRouterIcon from "@lobehub/icons/es/OpenRouter/components/Mono";
 import SiliconCloudIcon from "@lobehub/icons/es/SiliconCloud/components/Color";
+import XiaomiMiMoIcon from "@lobehub/icons/es/XiaomiMiMo/components/Mono";
 import ZhipuIcon from "@lobehub/icons/es/Zhipu/components/Color";
 import { type ComponentType, type CSSProperties, useLayoutEffect, useRef } from "react";
 import { cn } from "../../../../lib/utils";
@@ -25,6 +27,8 @@ const ICON_BY_PRESET_ID: Record<string, IconComponent> = {
   kimi: KimiIcon,
   "kimi-coding": KimiIcon,
   minimax: MiniMaxIcon,
+  longcat: LongCatIcon,
+  "xiaomi-mimo": XiaomiMiMoIcon,
   glm: ZhipuIcon,
   "glm-coding": ZhipuIcon,
   openrouter: OpenRouterIcon,
@@ -65,6 +69,8 @@ function resolvePresetId(presetId?: string | null, providerName?: string | null)
   if (name.includes("deepseek")) return "deepseek";
   if (name.includes("kimi") || name.includes("moonshot")) return "kimi";
   if (name.includes("minimax")) return "minimax";
+  if (name.includes("longcat")) return "longcat";
+  if (name.includes("mimo") || name.includes("xiaomi") || providerName.includes("小米")) return "xiaomi-mimo";
   if (name.includes("glm") || providerName.includes("智谱")) return "glm";
   if (name.includes("openrouter")) return "openrouter";
   if (name.includes("siliconflow") || providerName.includes("硅基")) return "siliconflow";
@@ -91,6 +97,7 @@ export function ProviderBrandIcon({
     resolvedPresetId === "openai-compatible" ||
     resolvedPresetId === "official" ||
     resolvedPresetId === "anthropic" ||
+    resolvedPresetId === "xiaomi-mimo" ||
     resolvedPresetId === "grok"
       ? fallbackColor
       : undefined;

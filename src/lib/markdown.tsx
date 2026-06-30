@@ -214,4 +214,15 @@ export const markdownComponents: Components = {
       </ScrollBox>
     );
   },
+
+  // Wide GFM tables overflow the reading panel; wrap them in the same
+  // scroll-isolated container as code blocks so they scroll horizontally
+  // (with arrows + edge fades) instead of breaking the layout.
+  table({ node: _node, children, ...props }) {
+    return (
+      <ScrollBox className="scroll-box-table">
+        <table {...props}>{children}</table>
+      </ScrollBox>
+    );
+  },
 };

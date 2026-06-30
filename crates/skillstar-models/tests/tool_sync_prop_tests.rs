@@ -9,6 +9,7 @@ use proptest::prelude::*;
 use serde_json::Value;
 use skillstar_models::providers::{
     FlatProvidersStore, ModelMapping, ProviderEntryFlat, ProviderSettings, ToolActivation,
+    ToolBinding,
 };
 use skillstar_models::tool_sync::{
     CodexSettings, TOOL_SYNC_HOME_ENV, generate_claude_code_config, generate_codex_config,
@@ -575,12 +576,11 @@ fn store_with_active_tools_strategy()
                     }
 
                     // Build tool_activations map
-                    let mut tool_activations: HashMap<String, Option<ToolActivation>> =
-                        HashMap::new();
+                    let mut tool_activations: HashMap<String, ToolBinding> = HashMap::new();
                     for tool_id in &active_tools {
                         tool_activations.insert(
                             tool_id.clone(),
-                            Some(ToolActivation {
+                            ToolBinding::single(ToolActivation {
                                 provider_id: target_id_clone.clone(),
                                 model: target_provider_clone.default_model.clone(),
                                 settings: None,
@@ -590,7 +590,7 @@ fn store_with_active_tools_strategy()
                     }
 
                     let store = FlatProvidersStore {
-                        version: 2,
+                        version: skillstar_models::providers::FLAT_STORE_VERSION,
                         providers: vec![target_provider_clone.clone()],
                         tool_activations,
                     };
@@ -671,14 +671,14 @@ fn store_with_mixed_activations_strategy()
                 };
 
                 // Build tool_activations: each tool points to either target or other
-                let mut tool_activations: HashMap<String, Option<ToolActivation>> = HashMap::new();
+                let mut tool_activations: HashMap<String, ToolBinding> = HashMap::new();
                 let mut expected_active_tools: Vec<String> = Vec::new();
 
                 // Claude Code activation
                 if claude_to_target {
                     tool_activations.insert(
                         "claude-code".to_string(),
-                        Some(ToolActivation {
+                        ToolBinding::single(ToolActivation {
                             provider_id: target_id.clone(),
                             model: model_target.clone(),
                             settings: None,
@@ -689,7 +689,7 @@ fn store_with_mixed_activations_strategy()
                 } else {
                     tool_activations.insert(
                         "claude-code".to_string(),
-                        Some(ToolActivation {
+                        ToolBinding::single(ToolActivation {
                             provider_id: other_id.clone(),
                             model: model_other.clone(),
                             settings: None,
@@ -702,7 +702,7 @@ fn store_with_mixed_activations_strategy()
                 if codex_to_target {
                     tool_activations.insert(
                         "codex".to_string(),
-                        Some(ToolActivation {
+                        ToolBinding::single(ToolActivation {
                             provider_id: target_id.clone(),
                             model: model_target.clone(),
                             settings: None,
@@ -713,7 +713,7 @@ fn store_with_mixed_activations_strategy()
                 } else {
                     tool_activations.insert(
                         "codex".to_string(),
-                        Some(ToolActivation {
+                        ToolBinding::single(ToolActivation {
                             provider_id: other_id.clone(),
                             model: model_other,
                             settings: None,
@@ -723,7 +723,7 @@ fn store_with_mixed_activations_strategy()
                 }
 
                 let store = FlatProvidersStore {
-                    version: 2,
+                    version: skillstar_models::providers::FLAT_STORE_VERSION,
                     providers: vec![target_provider, other_provider],
                     tool_activations,
                 };

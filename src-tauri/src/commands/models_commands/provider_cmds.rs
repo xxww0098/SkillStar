@@ -225,11 +225,11 @@ pub async fn get_providers_flat() -> Result<FlatProvidersResponse, String> {
 
 /// Returns the current tool activations map.
 ///
-/// This is a lightweight read that only returns which provider + model each
-/// tool is currently using, without the full provider list.
+/// This is a lightweight read that only returns which providers + models each
+/// tool is bound to, without the full provider list.
 #[tauri::command]
 pub async fn get_tool_activations()
--> Result<std::collections::HashMap<String, Option<ToolActivation>>, String> {
+-> Result<std::collections::HashMap<String, ToolBinding>, String> {
     let path = providers::flat_store_path();
     let store = providers::read_flat_store(&path).map_err(|e| e.to_string())?;
     Ok(store.tool_activations)

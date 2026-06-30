@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { ChevronRight, Plus, Search, X } from "lucide-react";
+import { ChevronRight, Copy, Link2, Plus, Search, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { MOTION_TRANSITION } from "../../../comm/motion";
 import { AgentIcon } from "../../../components/ui/AgentIcon";
@@ -8,17 +8,19 @@ import { CardTemplate } from "../../../components/ui/card-template";
 import { Input } from "../../../components/ui/input";
 import { Switch } from "../../../components/ui/switch";
 import { agentIconCls, cn, formatPlatformPath } from "../../../lib/utils";
-import type { AgentProfile, Skill } from "../../../types";
+import type { AgentProfile, ProjectDeployMode, Skill } from "../../../types";
 
 interface AgentAccordionProps {
   enabledProfiles: AgentProfile[];
   enabledAgents: string[];
   expandedAgent: string | null;
   agentSkills: Record<string, string[]>;
+  deployModes: Record<string, ProjectDeployMode>;
   skillFilter: string;
   getAvailableSkills: (agentId: string) => Skill[];
   onToggleExpand: (agentId: string) => void;
   onToggleAgent: (agentId: string) => void;
+  onToggleDeployMode: (agentId: string) => void;
   onNavigateToSkill?: (skillName: string) => void;
   onRemoveSkill: (agentId: string, skillName: string) => void;
   onSkillFilterChange: (value: string) => void;
@@ -32,10 +34,12 @@ export function AgentAccordion({
   enabledAgents,
   expandedAgent,
   agentSkills,
+  deployModes,
   skillFilter,
   getAvailableSkills,
   onToggleExpand,
   onToggleAgent,
+  onToggleDeployMode,
   onNavigateToSkill,
   onRemoveSkill,
   onSkillFilterChange,
@@ -58,6 +62,8 @@ export function AgentAccordion({
           const isEnabled = enabledAgents.includes(profile.id);
           const isExpanded = expandedAgent === profile.id;
           const skills = agentSkills[profile.id] ?? [];
+          const deployMode = deployModes[profile.id] ?? "symlink";
+          const isCopy = deployMode === "copy";
           const available = isExpanded ? getAvailableSkills(profile.id) : [];
 
           return (
@@ -96,6 +102,47 @@ export function AgentAccordion({
                   <Badge variant="outline" className="text-micro h-4 px-1.5 shrink-0">
                     {skills.length}
                   </Badge>
+                )}
+                {isEnabled && (
+                  <div
+                    onClick={(event) => event.stopPropagation()}
+                    className="shrink-0 inline-flex items-center rounded-lg border border-border bg-muted/40 p-0.5"
+                    role="group"
+                    aria-label={t("projects.deployMode", "部署方式")}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (isCopy) onToggleDeployMode(profile.id);
+                      }}
+                      className={cn(
+                        "flex items-center justify-center w-6 h-5 rounded-md transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                        !isCopy
+                          ? "bg-primary text-primary-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                      title={t("projects.deployModeSymlinkHint")}
+                      aria-label={t("projects.deploySymlink")}
+                      aria-pressed={!isCopy}
+                    >
+                      <Link2 className="w-3 h-3" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!isCopy) onToggleDeployMode(profile.id);
+                      }}
+                      className={cn(
+                        "flex items-center justify-center w-6 h-5 rounded-md transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                        isCopy ? "bg-amber-500 text-white shadow-sm" : "text-muted-foreground hover:text-foreground",
+                      )}
+                      title={t("projects.deployModeCopyHint")}
+                      aria-label={t("projects.deployCopy")}
+                      aria-pressed={isCopy}
+                    >
+                      <Copy className="w-3 h-3" />
+                    </button>
+                  </div>
                 )}
                 <label
                   onClick={(event) => event.stopPropagation()}

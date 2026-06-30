@@ -25,6 +25,7 @@
 //! | `grok`           | `~/.grok/config.toml`                  | `[mcp_servers.<name>]` TOML (`headers` for HTTP) |
 //! | `opencode`       | `~/.config/opencode/opencode.json`     | `mcp.<name>` (`local`/`remote` form) |
 //! | `zcode`          | `~/.zcode/cli/config.json`             | `mcp.servers.<name>` (community JSON) |
+//! | `kiro`           | `~/.kiro/settings/mcp.json`            | `mcpServers.<name>` (community JSON, keeps `type`) |
 //!
 //! All live writes create a rolling backup (last 5) and use merge semantics:
 //! only the single managed server key is touched, every other field is left

@@ -12,6 +12,7 @@ const TOOL_LABELS: Record<McpToolId, string> = {
   grok: "Grok",
   opencode: "OpenCode",
   zcode: "ZCode",
+  kiro: "Kiro",
 };
 
 export interface McpServerFormValue {

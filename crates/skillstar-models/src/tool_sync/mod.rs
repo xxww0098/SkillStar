@@ -38,6 +38,9 @@ pub use paths_files::*;
 mod sync;
 pub use sync::*;
 
+mod multi_provider;
+pub use multi_provider::*;
+
 // ---------------------------------------------------------------------------
 // Sandboxed home resolution (single source of truth for tool-config paths)
 // ---------------------------------------------------------------------------

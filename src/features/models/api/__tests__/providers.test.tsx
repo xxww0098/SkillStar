@@ -23,7 +23,7 @@ const BASE: FlatProvidersResponse = {
       sort_index: 0,
     } as FlatProvidersResponse["providers"][number],
   ],
-  tool_activations: { "claude-code": null },
+  tool_activations: { "claude-code": { entries: [], active_index: 0 } },
 };
 
 function makeWrapper() {
@@ -76,7 +76,9 @@ describe("useProviderMutations", () => {
 
   it("delete optimistically clears activations bound to the provider", async () => {
     const withActivation = structuredClone(BASE);
-    withActivation.tool_activations = { "claude-code": { provider_id: "p1", model: "m1" } };
+    withActivation.tool_activations = {
+      "claude-code": { entries: [{ provider_id: "p1", model: "m1" }], active_index: 0 },
+    };
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "delete_provider_flat") return undefined;
       if (cmd === "get_providers_flat") return structuredClone(withActivation);
@@ -89,6 +91,6 @@ describe("useProviderMutations", () => {
     await result.current.deleteProvider("p1");
     const cached = client.getQueryData<FlatProvidersResponse>(modelsKeys.providersFlat());
     expect(cached?.providers).toHaveLength(0);
-    expect(cached?.tool_activations["claude-code"]).toBeNull();
+    expect(cached?.tool_activations["claude-code"]?.entries).toHaveLength(0);
   });
 });

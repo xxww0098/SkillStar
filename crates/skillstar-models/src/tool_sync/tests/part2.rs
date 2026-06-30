@@ -325,7 +325,7 @@ fn test_codex_auth_json_merge_write() {
 
 #[test]
 fn test_resync_active_tools_syncs_correct_tools() {
-    use crate::providers::{FlatProvidersStore, ToolActivation};
+    use crate::providers::{FlatProvidersStore, ToolActivation, ToolBinding};
 
     // Sandbox: resync writes real config files; keep them off the dev's home.
     use_sandbox_home();
@@ -337,7 +337,7 @@ fn test_resync_active_tools_syncs_correct_tools() {
             let mut map = HashMap::new();
             map.insert(
                 "claude-code".to_string(),
-                Some(ToolActivation {
+                ToolBinding::single(ToolActivation {
                     provider_id: "test-uuid-1234".to_string(),
                     model: "model-a".to_string(),
                     settings: None,
@@ -346,7 +346,7 @@ fn test_resync_active_tools_syncs_correct_tools() {
             );
             map.insert(
                 "codex".to_string(),
-                Some(ToolActivation {
+                ToolBinding::single(ToolActivation {
                     provider_id: "test-uuid-1234".to_string(),
                     model: "model-b".to_string(),
                     settings: None,
@@ -383,7 +383,7 @@ fn test_resync_active_tools_provider_not_found() {
 
 #[test]
 fn test_resync_active_tools_skips_other_providers() {
-    use crate::providers::{FlatProvidersStore, ToolActivation};
+    use crate::providers::{FlatProvidersStore, ToolActivation, ToolBinding};
 
     // Sandbox: resync writes real config files; keep them off the dev's home.
     use_sandbox_home();
@@ -396,7 +396,7 @@ fn test_resync_active_tools_skips_other_providers() {
             // Claude Code uses a different provider
             map.insert(
                 "claude-code".to_string(),
-                Some(ToolActivation {
+                ToolBinding::single(ToolActivation {
                     provider_id: "other-provider-id".to_string(),
                     model: "other-model".to_string(),
                     settings: None,
@@ -406,7 +406,7 @@ fn test_resync_active_tools_skips_other_providers() {
             // Codex uses our provider
             map.insert(
                 "codex".to_string(),
-                Some(ToolActivation {
+                ToolBinding::single(ToolActivation {
                     provider_id: "test-uuid-1234".to_string(),
                     model: "model-a".to_string(),
                     settings: None,

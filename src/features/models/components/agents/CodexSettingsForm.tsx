@@ -1,11 +1,13 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Copy, Check } from "lucide-react";
+import { Copy, Check, Wand2, FileCheck2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+import type { ShellRcWriteResult } from "../../../../lib/ipc/commands/system";
 import { cn } from "../../../../lib/utils";
 import { AgentToolIcon } from "../shared/AgentToolIcon";
 import type { CodexAuthMode, CodexWireApi } from "../../lib/providerPatch";
-import { codexEnvKeyName, maskApiKey } from "../../lib/providerPatch";
+import { codexEnvKeyName, maskApiKey, recommendedCodexDefaults } from "../../lib/providerPatch";
 import type { ProviderEntryFlat } from "../../../../types";
 import { fieldLabelClass } from "../providerForm/ProviderConfigPrimitives";
 
@@ -84,6 +86,72 @@ export function CodexSettingsForm({
     }
   };
 
+  // Detect a sub-optimal Codex config (e.g. a third-party provider created
+  // before the default-inference shipped, still carrying responses + api_key).
+  // When the current values diverge from the URL-appropriate recommendation we
+  // surface a gentle one-click "apply recommended" fix. New providers are
+  // created correct, so this only ever shows for legacy/mis-configured ones.
+  const recommendation = useMemo(
+    () => (provider ? recommendedCodexDefaults(provider.base_url_openai) : null),
+    [provider],
+  );
+  const suboptimal = !!recommendation && (recommendation.wireApi !== wireApi || recommendation.authMode !== authMode);
+
+  const applyRecommended = () => {
+    if (!recommendation) return;
+    if (recommendation.wireApi !== wireApi) onChangeWireApi(recommendation.wireApi);
+    if (recommendation.authMode !== authMode) onChangeAuthMode(recommendation.authMode);
+  };
+
+  // --- ~/.zshrc export write (third_party auth) ---
+  // Detect whether ~/.zshrc already holds the matching export line so the UI
+  // can show "already written ✓" instead of a redundant button.
+  const [zshrcStatus, setZshrcStatus] = useState<"unknown" | "written" | "missing">("unknown");
+  const [writing, setWriting] = useState(false);
+
+  useEffect(() => {
+    // Only probe when there is a concrete key + api_key to export; otherwise
+    // the button is irrelevant.
+    if (authMode !== "third_party" || !provider || !envKeyName || !provider.api_key) {
+      setZshrcStatus("unknown");
+      return;
+    }
+    let cancelled = false;
+    tauriInvoke<string | null>("read_codex_env_from_zshrc", { envKey: envKeyName })
+      .then((current) => {
+        if (cancelled) return;
+        setZshrcStatus(current === provider.api_key ? "written" : "missing");
+      })
+      .catch(() => {
+        if (!cancelled) setZshrcStatus("unknown");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authMode, provider, envKeyName]);
+
+  const handleWriteZshrc = async () => {
+    if (!provider || !envKeyName || !provider.api_key) return;
+    setWriting(true);
+    try {
+      const result = await tauriInvoke<ShellRcWriteResult>("write_codex_env_to_zshrc", {
+        envKey: envKeyName,
+        value: provider.api_key,
+      });
+      setZshrcStatus("written");
+      if (result.action === "noop") {
+        toast.success(t("models.dialog.zshrcAlreadyWritten"));
+      } else {
+        toast.success(t("models.dialog.zshrcWritten"));
+      }
+    } catch (e) {
+      if (import.meta.env.DEV) console.error("write_codex_env_to_zshrc failed:", e);
+      toast.error(t("models.dialog.zshrcWriteFailed"));
+    } finally {
+      setWriting(false);
+    }
+  };
+
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
@@ -144,6 +212,48 @@ export function CodexSettingsForm({
           ) : provider && !provider.api_key ? (
             <p className="mt-2 text-[10px] text-amber-400">{t("models.dialog.envKeyMissing")}</p>
           ) : null}
+          {exportCommand ? (
+            <div className="mt-2 flex items-center gap-2">
+              {zshrcStatus === "written" ? (
+                <span className="inline-flex items-center gap-1 rounded-md border border-primary/40 bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary">
+                  <FileCheck2 className="h-3 w-3" />
+                  {t("models.dialog.zshrcWrittenBadge")}
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleWriteZshrc}
+                  disabled={disabled || writing}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-md border border-primary/40 bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary transition-colors hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {writing ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileCheck2 className="h-3 w-3" />}
+                  {t("models.dialog.writeToZshrc")}
+                </button>
+              )}
+              <span className="text-[10px] text-muted-foreground">{t("models.dialog.zshrcHint")}</span>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {suboptimal ? (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/[0.06] px-3 py-2.5">
+          <p className="text-[11px] font-medium text-amber-400">{t("models.dialog.codexSuboptimalTitle")}</p>
+          <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+            {t("models.dialog.codexSuboptimalHint", {
+              wireApi: recommendation!.wireApi,
+              authMode: recommendation!.authMode,
+            })}
+          </p>
+          <button
+            type="button"
+            onClick={applyRecommended}
+            disabled={disabled}
+            className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[10px] font-medium text-amber-300 transition-colors hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Wand2 className="h-3 w-3" />
+            {t("models.dialog.applyRecommended")}
+          </button>
         </div>
       ) : null}
     </div>

@@ -229,16 +229,26 @@ export const FLAT_PROVIDERS = {
   ],
   tool_activations: {
     "claude-code": {
-      provider_id: "p-deepseek",
-      model: "deepseek-chat",
-      settings: null,
-      last_sync_at: Math.floor(Date.now() / 1000) - 3600,
+      entries: [
+        {
+          provider_id: "p-deepseek",
+          model: "deepseek-chat",
+          settings: null,
+          last_sync_at: Math.floor(Date.now() / 1000) - 3600,
+        },
+      ],
+      active_index: 0,
     },
     codex: {
-      provider_id: "p-kimi",
-      model: "kimi-k2",
-      settings: { wire_api: "responses", auth_mode: "api_key" },
-      last_sync_at: Math.floor(Date.now() / 1000) - 7200,
+      entries: [
+        {
+          provider_id: "p-kimi",
+          model: "kimi-k2",
+          settings: { wire_api: "responses", auth_mode: "api_key" },
+          last_sync_at: Math.floor(Date.now() / 1000) - 7200,
+        },
+      ],
+      active_index: 0,
     },
   } as Record<string, unknown>,
 };

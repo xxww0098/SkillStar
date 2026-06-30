@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc f175e81328ab3b247d2931076d55661022a46d3ac2b2f96d25b2ef14ccfa3a11 # shrinks to v1_store = ProvidersStore { claude: AppProviders { providers: {}, current: None }, codex: AppProviders { providers: {}, current: None }, opencode: AppProviders { providers: {}, current: None }, gemini: AppProviders { providers: {}, current: None } }

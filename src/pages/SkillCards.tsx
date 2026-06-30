@@ -1,4 +1,3 @@
-import { tauriInvoke } from "../lib/ipc";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertTriangle,
@@ -14,7 +13,7 @@ import {
   Share2,
   Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { MOTION_TRANSITION } from "../comm/motion";
@@ -32,8 +31,14 @@ import { ExportShareCodeModal } from "../features/my-skills/components/ExportSha
 import { ImportDeckBundleModal } from "../features/my-skills/components/ImportDeckBundleModal";
 import { ImportShareCodeModal } from "../features/my-skills/components/ImportShareCodeModal";
 import { PublishSkillModal } from "../features/my-skills/components/PublishSkillModal";
+import { useDeckInstallProgress } from "../features/my-skills/hooks/useDeckInstallProgress";
 import { useSkillCards } from "../features/my-skills/hooks/useSkillCards";
 import { useSkills } from "../features/my-skills/hooks/useSkills";
+import {
+  normalizeSkillName,
+  normalizeSkillSources,
+  uniqueNormalizedSkillNames,
+} from "../features/my-skills/lib/skillNames";
 import { useAgentProfiles } from "../hooks/useAgentProfiles";
 import { useViewMode } from "../hooks/useViewMode";
 import { agentIconCls, cn } from "../lib/utils";
@@ -43,54 +48,6 @@ interface SkillCardsProps {
   onNavigateToProjects?: (skills?: string[]) => void;
   preSelectedSkills?: string[] | null;
   onClearPreSelected?: () => void;
-}
-
-const normalizeSkillName = (name: string) => name.trim();
-
-const uniqueNormalizedSkillNames = (names: string[]): string[] => {
-  const seen = new Set<string>();
-  const normalized: string[] = [];
-  for (const rawName of names) {
-    const name = normalizeSkillName(rawName);
-    if (!name || seen.has(name)) continue;
-    seen.add(name);
-    normalized.push(name);
-  }
-  return normalized;
-};
-
-const normalizeSkillSources = (sources?: Record<string, string>): Record<string, string> => {
-  const normalized: Record<string, string> = {};
-  if (!sources) return normalized;
-  for (const [rawName, rawUrl] of Object.entries(sources)) {
-    const name = normalizeSkillName(rawName);
-    const url = rawUrl?.trim();
-    if (!name || !url) continue;
-    normalized[name] = url;
-  }
-  return normalized;
-};
-
-// ── Module-level install progress store ─────────────────────────────
-// Survives component unmount/remount so switching pages doesn't lose
-// the active install state. Each entry maps groupId → progress.
-interface InstallProgressEntry {
-  done: number;
-  total: number;
-  abortController?: AbortController;
-}
-const activeInstalls = new Map<string, InstallProgressEntry>();
-const installListeners = new Set<() => void>();
-function notifyInstallListeners() {
-  for (const fn of installListeners) fn();
-}
-
-// Clean up module-level state during HMR to prevent stale data pollution
-if (import.meta.hot) {
-  import.meta.hot.dispose(() => {
-    activeInstalls.clear();
-    installListeners.clear();
-  });
 }
 
 export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPreSelected }: SkillCardsProps) {
@@ -108,20 +65,6 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
   const [viewMode, setViewMode] = useViewMode("grid");
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [publishTarget, setPublishTarget] = useState<string | null>(null);
-  const [installingMissing, setInstallingMissing] = useState<string | null>(
-    // Restore from module-level store on mount
-    () => {
-      for (const id of activeInstalls.keys()) return id;
-      return null;
-    },
-  );
-  const [installProgress, setInstallProgress] = useState<{ done: number; total: number } | null>(() => {
-    for (const [, entry] of activeInstalls) return { done: entry.done, total: entry.total };
-    return null;
-  });
-  const [backendInstalledNames, setBackendInstalledNames] = useState<Set<string>>(new Set());
-  // Track whether install handler is owned by this mount
-  const installOwnerRef = useRef(false);
   const enabledProfiles = profiles.filter((p) => p.enabled);
   // Batch-toggle state: { groupId::agentId → "linking" }
   const [linkState, setLinkState] = useState<Record<string, "linking">>({});
@@ -129,13 +72,11 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
     () => new Map(skills.map((skill) => [normalizeSkillName(skill.name), skill] as const)),
     [skills],
   );
-  const installedNameSet = useMemo(() => {
-    const next = new Set<string>(backendInstalledNames);
-    for (const name of skillByName.keys()) {
-      next.add(name);
-    }
-    return next;
-  }, [backendInstalledNames, skillByName]);
+  const { installingMissing, installProgress, installedNameSet, handleInstallMissing } = useDeckInstallProgress({
+    skillByName,
+    installSkill,
+    updateGroup,
+  });
   const filteredGroups = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     if (!query) return groups;
@@ -145,22 +86,6 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
       return group.skills.some((skillName) => skillName.toLowerCase().includes(query));
     });
   }, [groups, searchQuery]);
-
-  const refreshBackendInstalledNames = useCallback(async () => {
-    try {
-      const latest = await tauriInvoke("list_skills");
-      const next = new Set(latest.map((skill) => normalizeSkillName(skill.name)).filter(Boolean));
-      setBackendInstalledNames(next);
-      return next;
-    } catch (e) {
-      if (import.meta.env.DEV) console.error("Failed to refresh installed skills snapshot:", e);
-      return null;
-    }
-  }, []);
-
-  useEffect(() => {
-    void refreshBackendInstalledNames();
-  }, [refreshBackendInstalledNames]);
 
   const buildSkillSources = useCallback(
     (selectedSkills: string[], existingSources?: Record<string, string>) => {
@@ -243,154 +168,6 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
       setMenuOpenId(null);
     } catch (e) {
       if (import.meta.env.DEV) console.error("Duplicate failed:", e);
-    }
-  };
-
-  // Subscribe to module-level install progress changes so remounts pick up live state
-  useEffect(() => {
-    const listener = () => {
-      const entry = Array.from(activeInstalls.entries())[0];
-      if (entry) {
-        setInstallingMissing(entry[0]);
-        setInstallProgress({ done: entry[1].done, total: entry[1].total });
-      } else {
-        setInstallingMissing(null);
-        setInstallProgress(null);
-      }
-    };
-    installListeners.add(listener);
-    return () => {
-      installListeners.delete(listener);
-    };
-  }, []);
-
-  const handleInstallMissing = async (group: SkillCardDeck) => {
-    if (installingMissing || activeInstalls.has(group.id)) return;
-    const groupSkillNames = uniqueNormalizedSkillNames(group.skills);
-    if (groupSkillNames.length === 0) return;
-
-    const refreshedInstalled = await refreshBackendInstalledNames();
-    const installedSnapshot = refreshedInstalled ?? installedNameSet;
-    const missing = groupSkillNames.filter((name) => !installedSnapshot.has(name));
-    if (missing.length === 0) return;
-
-    const nextSources = normalizeSkillSources(group.skill_sources);
-
-    // Identify names that have no known source
-    const namesNeedingSource = missing.filter((name) => !nextSources[name]);
-
-    // Batch-resolve missing sources via backend marketplace search
-    if (namesNeedingSource.length > 0) {
-      try {
-        const resolved = await tauriInvoke("resolve_skill_sources", {
-          names: namesNeedingSource,
-          existingSources: nextSources,
-        });
-        for (const [name, url] of Object.entries(resolved)) {
-          if (url) nextSources[name] = url;
-        }
-      } catch (e) {
-        if (import.meta.env.DEV) console.error("[SkillCards] resolve_skill_sources failed:", e);
-      }
-    }
-
-    const installQueue: Array<{ name: string; url: string }> = [];
-    const noSourceNames: string[] = [];
-    for (const name of missing) {
-      const url = nextSources[name];
-      if (url) {
-        installQueue.push({ name, url });
-      } else {
-        noSourceNames.push(name);
-      }
-    }
-
-    if (installQueue.length === 0) {
-      toast.error(
-        t("skillCards.installNoSource", {
-          defaultValue: "No install source found for missing skills",
-        }),
-      );
-      return;
-    }
-
-    // Persist resolved sources back to the group
-    const sourcesChanged = namesNeedingSource.some((name) => !!nextSources[name]);
-
-    // Register in module-level store
-    const progressEntry: InstallProgressEntry = { done: 0, total: installQueue.length };
-    activeInstalls.set(group.id, progressEntry);
-    setInstallingMissing(group.id);
-    setInstallProgress({ done: 0, total: installQueue.length });
-    setMenuOpenId(null);
-    installOwnerRef.current = true;
-    notifyInstallListeners();
-
-    let successCount = 0;
-    const failedNames: string[] = [];
-
-    // Concurrent install with bounded parallelism (3 at a time)
-    const CONCURRENCY = 3;
-    let cursor = 0;
-    const runNext = async (): Promise<void> => {
-      while (cursor < installQueue.length) {
-        const idx = cursor++;
-        const item = installQueue[idx];
-        try {
-          await installSkill(item.url, item.name);
-          successCount++;
-        } catch (e) {
-          if (import.meta.env.DEV) console.error(`Failed to install ${item.name}:`, e);
-          failedNames.push(item.name);
-        }
-        // Update progress
-        progressEntry.done++;
-        activeInstalls.set(group.id, { ...progressEntry });
-        // Only update local state if this mount owns the install
-        if (installOwnerRef.current) {
-          setInstallProgress({ done: progressEntry.done, total: progressEntry.total });
-        }
-        notifyInstallListeners();
-      }
-    };
-
-    try {
-      await Promise.all(Array.from({ length: Math.min(CONCURRENCY, installQueue.length) }, () => runNext()));
-
-      if (sourcesChanged) {
-        await updateGroup(group.id, { skillSources: nextSources });
-      }
-      // Summary toast
-      if (successCount > 0 && failedNames.length === 0 && noSourceNames.length === 0) {
-        toast.success(
-          t("skillCards.installAllSuccess", {
-            count: successCount,
-            defaultValue: `Successfully installed ${successCount} skill(s)`,
-          }),
-        );
-      } else if (successCount > 0) {
-        toast.warning(
-          t("skillCards.installPartial", {
-            success: successCount,
-            failed: failedNames.length + noSourceNames.length,
-            defaultValue: `Installed ${successCount}, failed ${failedNames.length + noSourceNames.length}`,
-          }),
-        );
-      } else {
-        toast.error(
-          t("skillCards.installAllFailed", {
-            defaultValue: "Failed to install skills",
-          }),
-        );
-      }
-    } finally {
-      activeInstalls.delete(group.id);
-      installOwnerRef.current = false;
-      setInstallingMissing(null);
-      setInstallProgress(null);
-      notifyInstallListeners();
-      void refreshBackendInstalledNames();
-      window.dispatchEvent(new Event("skillstar:refresh-skills"));
     }
   };
 
@@ -892,7 +669,10 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
         skillName={publishTarget || ""}
         skillDescription={skills.find((s) => s.name === publishTarget)?.description || ""}
         onPublished={() => {
-          setPublishTarget(null);
+          // Stay on the success ("done") phase so the user can see / copy the
+          // published repo URL; closing here would skip it. Refresh the skills
+          // snapshot in the background so the new git-backed state is reflected.
+          window.dispatchEvent(new Event("skillstar:refresh-skills"));
         }}
       />
     </div>

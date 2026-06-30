@@ -320,18 +320,22 @@ export function SubscriptionCard({
               <BadgeCheck className={cn("w-3.5 h-3.5", activating && "animate-pulse")} />
             </Button>
           )}
-          {onSwitchToCli && sub.is_active && sub.supports_cli_switch && sub.switch_result && !sub.switch_result.success && (
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              title={t("usage.resyncCli", "重新同步到 CLI")}
-              onClick={() => void handleSwitchToCli()}
-              disabled={cliSyncing}
-              className="text-amber-500 hover:text-amber-600 hover:scale-105 transition-transform"
-            >
-              <RefreshCw className={cn("w-3.5 h-3.5", cliSyncing && "animate-spin")} />
-            </Button>
-          )}
+          {onSwitchToCli &&
+            sub.is_active &&
+            sub.supports_cli_switch &&
+            sub.switch_result &&
+            !sub.switch_result.success && (
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                title={t("usage.resyncCli", "重新同步到 CLI")}
+                onClick={() => void handleSwitchToCli()}
+                disabled={cliSyncing}
+                className="text-amber-500 hover:text-amber-600 hover:scale-105 transition-transform"
+              >
+                <RefreshCw className={cn("w-3.5 h-3.5", cliSyncing && "animate-spin")} />
+              </Button>
+            )}
           {isTauri() && (
             <Button
               size="icon-sm"

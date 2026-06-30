@@ -20,6 +20,7 @@ export const MCP_TOOL_ICON: Record<McpToolId, { profileId: string; icon: string;
   grok: { profileId: "grok", icon: "agents/grok.svg", label: "Grok" },
   opencode: { profileId: "opencode", icon: "agents/opencode.svg", label: "OpenCode" },
   zcode: { profileId: "zcode", icon: "agents/zcode.svg", label: "ZCode" },
+  kiro: { profileId: "kiro", icon: "agents/kiro.svg", label: "Kiro" },
 };
 
 interface McpServerCardProps {

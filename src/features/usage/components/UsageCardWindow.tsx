@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } fr
 import { useTranslation } from "react-i18next";
 import { PlanBadge } from "./PlanBadge";
 import { ProviderLogo, hasBrandIcon } from "./ProviderLogo";
+import { ResetCountdown } from "./ResetCountdown";
 import { UsageWindowBar } from "./UsageWindowBar";
 import { getBrandTheme } from "../lib/brandThemes";
 import { authModeLabel, formatQuotaNumber, getPrimaryResetInfo } from "../lib/usageLabels";
@@ -52,23 +53,26 @@ export function UsageCardWindow() {
   const [alwaysOnTop, setAlwaysOnTop] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const loadData = useCallback(async (subId: string) => {
-    try {
-      const subs = await usageApi.listSubscriptions();
-      const target = subs.find((s) => s.id === subId) ?? null;
-      setSubscription(target);
-      if (allCatalog.length === 0) {
-        const cat = await usageApi.listCatalog();
-        setAllCatalog(cat);
-        setCatalog(target ? cat.find((c) => c.id === target.catalog_id) ?? null : null);
-      } else {
-        setCatalog(target ? allCatalog.find((c) => c.id === target.catalog_id) ?? null : null);
+  const loadData = useCallback(
+    async (subId: string) => {
+      try {
+        const subs = await usageApi.listSubscriptions();
+        const target = subs.find((s) => s.id === subId) ?? null;
+        setSubscription(target);
+        if (allCatalog.length === 0) {
+          const cat = await usageApi.listCatalog();
+          setAllCatalog(cat);
+          setCatalog(target ? (cat.find((c) => c.id === target.catalog_id) ?? null) : null);
+        } else {
+          setCatalog(target ? (allCatalog.find((c) => c.id === target.catalog_id) ?? null) : null);
+        }
+        setError(null);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
       }
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }, [allCatalog]);
+    },
+    [allCatalog],
+  );
 
   // Initial load + focus reload.
   useEffect(() => {
@@ -76,11 +80,14 @@ export function UsageCardWindow() {
     void loadData(subscriptionId);
     const win = getCurrentWindow();
     let unlisten: (() => void) | null = null;
-    win.onFocusChanged(({ payload: focused }) => {
-      if (focused) void loadData(subscriptionId);
-    }).then((fn) => {
-      unlisten = fn;
-    }).catch(() => {});
+    win
+      .onFocusChanged(({ payload: focused }) => {
+        if (focused) void loadData(subscriptionId);
+      })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch(() => {});
     return () => {
       unlisten?.();
     };
@@ -163,7 +170,9 @@ export function UsageCardWindow() {
     const target = event.target as Element | null;
     if (target?.closest("button, select, input, a, [data-no-drag]")) return;
     event.preventDefault();
-    void getCurrentWindow().startDragging().catch(() => {});
+    void getCurrentWindow()
+      .startDragging()
+      .catch(() => {});
   }, []);
 
   if (!subscriptionId) {
@@ -189,9 +198,7 @@ export function UsageCardWindow() {
   const theme = getBrandTheme(subscription.catalog_id, brandColor);
   const hasIcon = hasBrandIcon(subscription.catalog_id);
   const cliFailed =
-    subscription.supports_cli_switch &&
-    subscription.switch_result &&
-    !subscription.switch_result.success;
+    subscription.supports_cli_switch && subscription.switch_result && !subscription.switch_result.success;
 
   return (
     <div
@@ -208,7 +215,12 @@ export function UsageCardWindow() {
       >
         <span className="flex h-6 w-6 items-center justify-center rounded-md" style={{ background: `${theme.glow}30` }}>
           {hasIcon ? (
-            <ProviderLogo catalogId={subscription.catalog_id} size={16} />
+            <ProviderLogo
+              catalogId={subscription.catalog_id}
+              displayName={catalog?.display_name ?? subscription.display_name}
+              brandColor={brandColor}
+              size="sm"
+            />
           ) : (
             <span className="text-xs font-bold" style={{ color: theme.glow }}>
               {(catalog?.display_name ?? subscription.display_name).charAt(0)}
@@ -252,7 +264,7 @@ export function UsageCardWindow() {
             </div>
             {planName && (
               <div className="mt-0.5 flex items-center gap-1.5">
-                <PlanBadge planName={planName} />
+                <PlanBadge plan={planName} />
               </div>
             )}
           </div>
@@ -276,7 +288,12 @@ export function UsageCardWindow() {
         )}
 
         {resetInfo && (
-          <div className="text-[10px] text-muted-foreground">{resetInfo.label}</div>
+          <ResetCountdown
+            resetAt={resetInfo.resetAt}
+            usedPercent={resetInfo.usedPercent}
+            mode={resetInfo.mode}
+            className="text-[10px]"
+          />
         )}
 
         {cliFailed && subscription.switch_result?.error && (
@@ -326,10 +343,7 @@ export function UsageCardWindow() {
 }
 
 /** Subscribe to `usage://active-changed` and refresh when our catalog changes. */
-function useActiveChangedListener(
-  catalogId: string | null,
-  onActiveChanged: () => void,
-) {
+function useActiveChangedListener(catalogId: string | null, onActiveChanged: () => void) {
   const handlerRef = useRef(onActiveChanged);
   handlerRef.current = onActiveChanged;
   useEffect(() => {

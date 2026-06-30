@@ -77,13 +77,13 @@ fn test_migrate_store_if_needed_v1_different_providers() {
         .tool_activations
         .get("claude-code")
         .unwrap()
-        .as_ref()
+        .active()
         .unwrap();
     let codex_act = result
         .tool_activations
         .get("codex")
         .unwrap()
-        .as_ref()
+        .active()
         .unwrap();
     assert_ne!(claude_act.provider_id, codex_act.provider_id);
 
@@ -121,7 +121,7 @@ fn test_migrate_store_if_needed_malformed_json() {
     std::fs::write(&path, "not valid json {{{").unwrap();
 
     let result = migrate_store_if_needed(&path).unwrap();
-    assert_eq!(result.version, 2);
+    assert_eq!(result.version, FLAT_STORE_VERSION);
     assert!(result.providers.is_empty());
 }
 #[test]
@@ -225,7 +225,7 @@ fn test_migrate_store_if_needed_no_current() {
     assert_eq!(result.providers.len(), 1);
     // No tool_activations should be set for claude-code
     let claude_act = result.tool_activations.get("claude-code");
-    assert!(claude_act.is_none() || claude_act.unwrap().is_none());
+    assert!(claude_act.is_none() || claude_act.unwrap().is_empty());
 }
 // -----------------------------------------------------------------------
 // Property 7: Active Provider Validity Invariant
@@ -321,7 +321,7 @@ fn test_activate_tool_success_claude_code() {
         .tool_activations
         .get("claude-code")
         .unwrap()
-        .as_ref()
+        .active()
         .unwrap();
     assert_eq!(stored.provider_id, created.id);
     assert_eq!(stored.model, "deepseek-chat");
@@ -347,7 +347,7 @@ fn test_activate_tool_success_codex() {
         .tool_activations
         .get("codex")
         .unwrap()
-        .as_ref()
+        .active()
         .unwrap();
     assert_eq!(stored.provider_id, created.id);
     assert_eq!(stored.model, "deepseek-reasoner");
@@ -490,7 +490,7 @@ fn test_activate_tool_replaces_previous_activation() {
         .tool_activations
         .get("claude-code")
         .unwrap()
-        .as_ref()
+        .active()
         .unwrap();
     assert_eq!(stored.provider_id, created1.id);
 
@@ -507,7 +507,7 @@ fn test_activate_tool_replaces_previous_activation() {
         .tool_activations
         .get("claude-code")
         .unwrap()
-        .as_ref()
+        .active()
         .unwrap();
     assert_eq!(stored.provider_id, created2.id);
     assert_eq!(stored.model, "model-b");
@@ -516,7 +516,7 @@ fn test_activate_tool_replaces_previous_activation() {
     let activations_for_claude: Vec<_> = store
         .tool_activations
         .iter()
-        .filter(|(k, v)| *k == "claude-code" && v.is_some())
+        .filter(|(k, v)| *k == "claude-code" && !v.is_empty())
         .collect();
     assert_eq!(activations_for_claude.len(), 1);
 }
@@ -543,9 +543,9 @@ fn test_deactivate_tool_returns_previous() {
     assert_eq!(prev.provider_id, created.id);
     assert_eq!(prev.model, "deepseek-chat");
 
-    // Verify it's now None in the store
+    // Verify it's now cleared in the store
     let stored = store.tool_activations.get("claude-code").unwrap();
-    assert!(stored.is_none());
+    assert!(stored.is_empty());
 }
 #[test]
 fn test_deactivate_tool_no_previous_activation() {
@@ -555,16 +555,18 @@ fn test_deactivate_tool_no_previous_activation() {
     let previous = deactivate_tool(&mut store, "claude-code").unwrap();
     assert!(previous.is_none());
 
-    // The entry should now exist as None
+    // The entry should now exist as an empty binding
     let stored = store.tool_activations.get("claude-code").unwrap();
-    assert!(stored.is_none());
+    assert!(stored.is_empty());
 }
 #[test]
 fn test_deactivate_tool_already_none() {
     let mut store = FlatProvidersStore::default();
-    store.tool_activations.insert("codex".to_string(), None);
+    store
+        .tool_activations
+        .insert("codex".to_string(), ToolBinding::default());
 
-    // Deactivate a tool that's already None
+    // Deactivate a tool that's already empty
     let previous = deactivate_tool(&mut store, "codex").unwrap();
     assert!(previous.is_none());
 }
@@ -586,7 +588,7 @@ fn test_activate_deactivate_round_trip() {
 
     // Verify tool is deactivated
     let stored = store.tool_activations.get("codex").unwrap();
-    assert!(stored.is_none());
+    assert!(stored.is_empty());
 }
 #[test]
 fn test_activate_multiple_tools_same_provider() {
@@ -617,7 +619,7 @@ fn test_activate_multiple_tools_same_provider() {
         .tool_activations
         .get("claude-code")
         .unwrap()
-        .as_ref()
+        .active()
         .unwrap();
     assert_eq!(claude.provider_id, created.id);
     assert_eq!(claude.model, "deepseek-chat");
@@ -626,7 +628,7 @@ fn test_activate_multiple_tools_same_provider() {
         .tool_activations
         .get("codex")
         .unwrap()
-        .as_ref()
+        .active()
         .unwrap();
     assert_eq!(codex.provider_id, created.id);
     assert_eq!(codex.model, "deepseek-reasoner");

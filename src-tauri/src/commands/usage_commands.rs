@@ -568,7 +568,7 @@ pub fn set_active_subscription(
     storage::set_active_subscription(&catalog_id, &sub_id).map_err(map_err)?;
     // Push credentials to the real CLI config. Best-effort: a failure here
     // must not un-pin the account; the outcome is surfaced to the UI.
-    let outcome = crate::commands::usage_switch::switch_subscription_to_cli(&sub);
+    let outcome = skillstar_app::usage_switch::switch_subscription_to_cli(&sub);
     let usage = storage::get_usage_snapshot(&sub.id).map_err(map_err)?;
     let active = storage::list_active_per_catalog().map_err(map_err)?;
     let mut dto = fill_active(SubscriptionDto::from_parts(sub, usage), &active);
@@ -585,7 +585,7 @@ pub fn set_active_subscription(
 #[tauri::command]
 pub fn switch_active_subscription_to_cli(
     catalog_id: String,
-) -> Result<crate::commands::usage_switch::SwitchOutcome, AppError> {
+) -> Result<skillstar_app::usage_switch::SwitchOutcome, AppError> {
     let active = storage::list_active_per_catalog().map_err(map_err)?;
     let Some(sub_id) = active.get(&catalog_id) else {
         return Err(AppError::Other(format!(
@@ -593,7 +593,7 @@ pub fn switch_active_subscription_to_cli(
         )));
     };
     let sub = storage::get_subscription(sub_id).map_err(map_err)?;
-    Ok(crate::commands::usage_switch::switch_subscription_to_cli(&sub))
+    Ok(skillstar_app::usage_switch::switch_subscription_to_cli(&sub))
 }
 
 /// Drop the pin for `catalog_id`. UI will fall back to no active account

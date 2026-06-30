@@ -277,57 +277,71 @@ pub fn resync_active_tools(
 
     let mut results: Vec<ToolSyncResultFlat> = Vec::new();
 
-    // 2. Iterate over tool_activations
-    for (tool_id, activation_opt) in &store.tool_activations {
-        // 3. For each tool where activation.provider_id == provider_id
-        let activation = match activation_opt {
-            Some(a) if a.provider_id == provider_id => a,
-            _ => continue,
-        };
+    // 2. Iterate over each tool's binding
+    for (tool_id, binding) in &store.tool_activations {
+        // 3. Skip tools that don't reference this provider at all. For
+        //    single-provider tools that means the active entry; for
+        //    multi-provider tools any entry (a provider edit must refresh that
+        //    provider's table among its siblings).
+        let touches_provider = binding.entries.iter().any(|e| e.provider_id == provider_id);
+        if !touches_provider {
+            continue;
+        }
 
-        // Call the appropriate sync function based on tool_id, preserving the
-        // tool's individually selected model.
+        // Multi-provider tools rewrite their whole binding so every managed
+        // table stays consistent; single-provider tools write the active entry.
         let result = match tool_id.as_str() {
-            "claude-code" => match sync_to_claude_code(provider, &activation.model) {
-                Ok(r) => r,
-                Err(e) => ToolSyncResultFlat {
+            "codex" => sync_codex_binding(binding, &store.providers).unwrap_or_else(|e| {
+                ToolSyncResultFlat {
                     tool_id: tool_id.clone(),
                     success: false,
                     config_path: None,
                     error: Some(e.to_string()),
                     backup_path: None,
-                },
-            },
-            "codex" => match sync_to_codex(provider, activation) {
-                Ok(r) => r,
-                Err(e) => ToolSyncResultFlat {
-                    tool_id: tool_id.clone(),
-                    success: false,
-                    config_path: None,
-                    error: Some(e.to_string()),
-                    backup_path: None,
-                },
-            },
-            "opencode" => match sync_to_opencode(provider, &activation.model) {
-                Ok(r) => r,
-                Err(e) => ToolSyncResultFlat {
-                    tool_id: tool_id.clone(),
-                    success: false,
-                    config_path: None,
-                    error: Some(e.to_string()),
-                    backup_path: None,
-                },
-            },
-            "gemini" => match sync_to_gemini(provider, &activation.model) {
-                Ok(r) => r,
-                Err(e) => ToolSyncResultFlat {
-                    tool_id: tool_id.clone(),
-                    success: false,
-                    config_path: None,
-                    error: Some(e.to_string()),
-                    backup_path: None,
-                },
-            },
+                }
+            }),
+            "opencode" => {
+                sync_opencode_binding(binding, &store.providers).unwrap_or_else(|e| {
+                    ToolSyncResultFlat {
+                        tool_id: tool_id.clone(),
+                        success: false,
+                        config_path: None,
+                        error: Some(e.to_string()),
+                        backup_path: None,
+                    }
+                })
+            }
+            "claude-code" => {
+                // Single-provider: only resync when the active entry matches.
+                let Some(activation) = binding.active().filter(|a| a.provider_id == provider_id)
+                else {
+                    continue;
+                };
+                sync_to_claude_code(provider, &activation.model).unwrap_or_else(|e| {
+                    ToolSyncResultFlat {
+                        tool_id: tool_id.clone(),
+                        success: false,
+                        config_path: None,
+                        error: Some(e.to_string()),
+                        backup_path: None,
+                    }
+                })
+            }
+            "gemini" => {
+                let Some(activation) = binding.active().filter(|a| a.provider_id == provider_id)
+                else {
+                    continue;
+                };
+                sync_to_gemini(provider, &activation.model).unwrap_or_else(|e| {
+                    ToolSyncResultFlat {
+                        tool_id: tool_id.clone(),
+                        success: false,
+                        config_path: None,
+                        error: Some(e.to_string()),
+                        backup_path: None,
+                    }
+                })
+            }
             _ => ToolSyncResultFlat {
                 tool_id: tool_id.clone(),
                 success: false,

@@ -103,6 +103,91 @@ fn test_create_provider_flat_empty_url_allowed() {
     let result = create_provider_flat(&mut store, entry);
     assert!(result.is_ok());
 }
+
+// ---------------------------------------------------------------------------
+// Codex default inference (recommended_codex_defaults + create injection)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_recommended_codex_defaults_official_openai() {
+    // api.openai.com → Responses API + official key path.
+    let (wire, auth) = recommended_codex_defaults("https://api.openai.com/v1");
+    assert_eq!(wire, "responses");
+    assert_eq!(auth, "api_key");
+}
+
+#[test]
+fn test_recommended_codex_defaults_third_party_providers() {
+    // Every known third-party provider only speaks /chat/completions and must
+    // use third_party auth (env_key) so auth.json is never touched.
+    for url in [
+        "https://api.deepseek.com/v1",
+        "https://api.moonshot.cn/v1",
+        "https://api.kimi.com/coding/v1",
+        "https://api.minimax.chat/v1",
+        "https://open.bigmodel.cn/api/paas/v4",
+        "https://openrouter.ai/api/v1",
+        "https://api.siliconflow.cn/v1",
+        "https://api.x.ai/v1", // Grok is "official" category but only supports chat completions
+    ] {
+        let (wire, auth) = recommended_codex_defaults(url);
+        assert_eq!(wire, "chat", "expected chat for {url}");
+        assert_eq!(auth, "third_party", "expected third_party for {url}");
+    }
+}
+
+#[test]
+fn test_recommended_codex_defaults_empty_and_custom_fallback() {
+    // Empty / custom OpenAI-compatible endpoint → safe third-party default.
+    for url in ["", "https://my-proxy.example.com/v1", "https://localhost:11434/v1"] {
+        let (wire, auth) = recommended_codex_defaults(url);
+        assert_eq!(wire, "chat");
+        assert_eq!(auth, "third_party");
+    }
+}
+
+#[test]
+fn test_create_provider_flat_infers_third_party_codex_defaults() {
+    // DeepSeek (third-party) created without explicit codex fields → must land
+    // as chat + third_party (the bug fix: previously defaulted to responses).
+    let mut store = FlatProvidersStore::default();
+    let mut entry = make_flat_entry("DeepSeek");
+    entry.base_url_openai = "https://api.deepseek.com/v1".to_string();
+    let created = create_provider_flat(&mut store, entry).unwrap();
+    assert_eq!(created.codex_wire_api, "chat");
+    assert_eq!(created.codex_auth_mode, "third_party");
+}
+
+#[test]
+fn test_create_provider_flat_keeps_openai_responses_default() {
+    // OpenAI official → responses + api_key (unchanged).
+    let mut store = FlatProvidersStore::default();
+    let mut entry = make_flat_entry("OpenAI");
+    entry.base_url_openai = "https://api.openai.com/v1".to_string();
+    let created = create_provider_flat(&mut store, entry).unwrap();
+    assert_eq!(created.codex_wire_api, "responses");
+    assert_eq!(created.codex_auth_mode, "api_key");
+}
+
+#[test]
+fn test_create_provider_flat_preserves_explicit_codex_choice() {
+    // The inference guard can only distinguish a *non-default* explicit value
+    // from the serde default. A caller that deliberately set a non-default
+    // value (e.g. `oauth`) must NOT be overridden. (Setting `"api_key"` is
+    // indistinguishable from the serde default, so it is still corrected —
+    // that's the intended trade-off: the common path is "caller omitted the
+    // field" and we fix it.)
+    let mut store = FlatProvidersStore::default();
+    let mut entry = make_flat_entry("DeepSeek OAuth");
+    entry.base_url_openai = "https://api.deepseek.com/v1".to_string();
+    // Explicit non-default values: preserved by the guard.
+    entry.codex_wire_api = "chat".to_string();
+    entry.codex_auth_mode = "oauth".to_string();
+    let created = create_provider_flat(&mut store, entry).unwrap();
+    assert_eq!(created.codex_wire_api, "chat");
+    assert_eq!(created.codex_auth_mode, "oauth");
+}
+
 #[test]
 fn test_create_provider_flat_generates_uuid() {
     let mut store = FlatProvidersStore::default();
@@ -223,7 +308,7 @@ fn test_delete_provider_flat_cleans_tool_activations() {
     // Set up tool_activations referencing this provider
     store.tool_activations.insert(
         "claude-code".to_string(),
-        Some(ToolActivation {
+        ToolBinding::single(ToolActivation {
             provider_id: created.id.clone(),
             model: "model-a".to_string(),
             settings: None,
@@ -232,7 +317,7 @@ fn test_delete_provider_flat_cleans_tool_activations() {
     );
     store.tool_activations.insert(
         "codex".to_string(),
-        Some(ToolActivation {
+        ToolBinding::single(ToolActivation {
             provider_id: created.id.clone(),
             model: "model-a".to_string(),
             settings: None,
@@ -242,9 +327,9 @@ fn test_delete_provider_flat_cleans_tool_activations() {
 
     delete_provider_flat(&mut store, &created.id).unwrap();
 
-    // Both activations should be cleared
-    assert_eq!(store.tool_activations.get("claude-code").unwrap(), &None);
-    assert_eq!(store.tool_activations.get("codex").unwrap(), &None);
+    // Both activations should be cleared (entries dropped → empty binding)
+    assert!(store.tool_activations.get("claude-code").unwrap().is_empty());
+    assert!(store.tool_activations.get("codex").unwrap().is_empty());
 }
 #[test]
 fn test_delete_provider_flat_preserves_other_activations() {
@@ -257,7 +342,7 @@ fn test_delete_provider_flat_preserves_other_activations() {
     // Set up tool_activations: claude-code → provider1, codex → provider2
     store.tool_activations.insert(
         "claude-code".to_string(),
-        Some(ToolActivation {
+        ToolBinding::single(ToolActivation {
             provider_id: created1.id.clone(),
             model: "model-a".to_string(),
             settings: None,
@@ -266,7 +351,7 @@ fn test_delete_provider_flat_preserves_other_activations() {
     );
     store.tool_activations.insert(
         "codex".to_string(),
-        Some(ToolActivation {
+        ToolBinding::single(ToolActivation {
             provider_id: created2.id.clone(),
             model: "model-a".to_string(),
             settings: None,
@@ -277,12 +362,12 @@ fn test_delete_provider_flat_preserves_other_activations() {
     // Delete provider1 — only claude-code should be cleared
     delete_provider_flat(&mut store, &created1.id).unwrap();
 
-    assert_eq!(store.tool_activations.get("claude-code").unwrap(), &None);
+    assert!(store.tool_activations.get("claude-code").unwrap().is_empty());
     let codex_act = store
         .tool_activations
         .get("codex")
         .unwrap()
-        .as_ref()
+        .active()
         .unwrap();
     assert_eq!(codex_act.provider_id, created2.id);
 }
@@ -520,15 +605,15 @@ async fn prop_concurrent_write_serialization() {
 fn test_migrate_store_if_needed_file_not_found() {
     let (_tmp, path) = setup_temp_store();
     let store = migrate_store_if_needed(&path).unwrap();
-    assert_eq!(store.version, 2);
+    assert_eq!(store.version, 3);
     assert!(store.providers.is_empty());
     assert!(store.tool_activations.is_empty());
 }
 #[test]
-fn test_migrate_store_if_needed_already_v2() {
+fn test_migrate_store_if_needed_already_v3() {
     let (_tmp, path) = setup_temp_store();
     let original = FlatProvidersStore {
-        version: 2,
+        version: 3,
         providers: vec![ProviderEntryFlat {
             id: "existing-id".to_string(),
             name: "Existing Provider".to_string(),
@@ -551,7 +636,7 @@ fn test_migrate_store_if_needed_already_v2() {
             let mut map = HashMap::new();
             map.insert(
                 "claude-code".to_string(),
-                Some(ToolActivation {
+                ToolBinding::single(ToolActivation {
                     provider_id: "existing-id".to_string(),
                     model: "model-a".to_string(),
                     settings: None,
@@ -564,7 +649,7 @@ fn test_migrate_store_if_needed_already_v2() {
     write_flat_store(&original, &path).unwrap();
 
     let result = migrate_store_if_needed(&path).unwrap();
-    assert_eq!(result.version, 2);
+    assert_eq!(result.version, 3);
     assert_eq!(result.providers.len(), 1);
     assert_eq!(result.providers[0].id, "existing-id");
     assert_eq!(result.providers[0].name, "Existing Provider");
@@ -573,11 +658,49 @@ fn test_migrate_store_if_needed_already_v2() {
             .tool_activations
             .get("claude-code")
             .unwrap()
-            .as_ref()
+            .active()
             .unwrap()
             .provider_id,
         "existing-id"
     );
+}
+#[test]
+fn test_migrate_store_if_needed_v2_to_v3() {
+    let (_tmp, path) = setup_temp_store();
+    // Write a raw v2 store (single Option<ToolActivation> per tool, null for none).
+    let v2_json = serde_json::json!({
+        "version": 2,
+        "providers": [{
+            "id": "p-v2",
+            "name": "V2 Provider",
+            "base_url_openai": "https://api.example.com/v1",
+            "base_url_anthropic": "",
+            "models_url": "",
+            "api_key": "sk-key",
+            "models": ["model-a"],
+            "default_model": "model-a",
+            "sort_index": 0,
+            "codex_wire_api": "responses",
+            "codex_auth_mode": "api_key"
+        }],
+        "tool_activations": {
+            "claude-code": { "provider_id": "p-v2", "model": "model-a" },
+            "codex": null
+        }
+    });
+    std::fs::write(&path, serde_json::to_string_pretty(&v2_json).unwrap()).unwrap();
+
+    let result = migrate_store_if_needed(&path).unwrap();
+    assert_eq!(result.version, 3);
+    assert_eq!(result.providers.len(), 1);
+    // Non-null activation → single-entry binding.
+    let claude = result.tool_activations.get("claude-code").unwrap();
+    assert_eq!(claude.entries.len(), 1);
+    assert_eq!(claude.active().unwrap().provider_id, "p-v2");
+    // Null activation → empty binding.
+    assert!(result.tool_activations.get("codex").unwrap().is_empty());
+    // A .bak of the original v2 file should exist.
+    assert!(path.with_extension("json.bak").exists());
 }
 #[test]
 fn test_migrate_store_if_needed_v1_basic() {
@@ -591,7 +714,7 @@ fn test_migrate_store_if_needed_v1_basic() {
     write_store_to(&store, &path).unwrap();
 
     let result = migrate_store_if_needed(&path).unwrap();
-    assert_eq!(result.version, 2);
+    assert_eq!(result.version, 3);
     assert_eq!(result.providers.len(), 1);
     assert_eq!(result.providers[0].name, "DeepSeek");
     assert_eq!(
@@ -604,7 +727,7 @@ fn test_migrate_store_if_needed_v1_basic() {
     // tool_activations should map claude → claude-code
     let claude_activation = result.tool_activations.get("claude-code");
     assert!(claude_activation.is_some());
-    let activation = claude_activation.unwrap().as_ref().unwrap();
+    let activation = claude_activation.unwrap().active().unwrap();
     assert_eq!(activation.provider_id, result.providers[0].id);
     assert_eq!(activation.model, "model-a");
 }
@@ -635,13 +758,13 @@ fn test_migrate_store_if_needed_v1_deduplication() {
         .tool_activations
         .get("claude-code")
         .unwrap()
-        .as_ref()
+        .active()
         .unwrap();
     let codex_act = result
         .tool_activations
         .get("codex")
         .unwrap()
-        .as_ref()
+        .active()
         .unwrap();
     assert_eq!(claude_act.provider_id, codex_act.provider_id);
 }

@@ -5,7 +5,7 @@ use tempfile::TempDir;
 fn test_read_flat_store_missing_file() {
     let (_tmp, path) = setup_temp_store();
     let store = read_flat_store(&path).unwrap();
-    assert_eq!(store.version, 2);
+    assert_eq!(store.version, FLAT_STORE_VERSION);
     assert!(store.providers.is_empty());
     assert!(store.tool_activations.is_empty());
 }
@@ -67,7 +67,7 @@ fn test_read_flat_store_malformed_json() {
     let (_tmp, path) = setup_temp_store();
     std::fs::write(&path, "not valid json {{{").unwrap();
     let store = read_flat_store(&path).unwrap();
-    assert_eq!(store.version, 2);
+    assert_eq!(store.version, FLAT_STORE_VERSION);
     assert!(store.providers.is_empty());
     assert!(store.tool_activations.is_empty());
 }
@@ -75,7 +75,7 @@ fn test_read_flat_store_malformed_json() {
 fn test_read_flat_store_with_bom() {
     let (_tmp, path) = setup_temp_store();
     let store = FlatProvidersStore {
-        version: 2,
+        version: FLAT_STORE_VERSION,
         providers: vec![ProviderEntryFlat {
             id: "test-id".to_string(),
             name: "Test".to_string(),
@@ -108,7 +108,7 @@ fn test_read_flat_store_with_bom() {
 fn test_write_and_read_flat_store() {
     let (_tmp, path) = setup_temp_store();
     let store = FlatProvidersStore {
-        version: 2,
+        version: FLAT_STORE_VERSION,
         providers: vec![ProviderEntryFlat {
             id: "p1".to_string(),
             name: "Provider 1".to_string(),
@@ -131,14 +131,14 @@ fn test_write_and_read_flat_store() {
             let mut map = HashMap::new();
             map.insert(
                 "claude-code".to_string(),
-                Some(ToolActivation {
+                ToolBinding::single(ToolActivation {
                     provider_id: "p1".to_string(),
                     model: "deepseek-chat".to_string(),
                     settings: None,
                     last_sync_at: None,
                 }),
             );
-            map.insert("codex".to_string(), None);
+            map.insert("codex".to_string(), ToolBinding::default());
             map
         },
     };
@@ -146,7 +146,7 @@ fn test_write_and_read_flat_store() {
     write_flat_store(&store, &path).unwrap();
     let loaded = read_flat_store(&path).unwrap();
 
-    assert_eq!(loaded.version, 2);
+    assert_eq!(loaded.version, FLAT_STORE_VERSION);
     assert_eq!(loaded.providers.len(), 1);
     assert_eq!(loaded.providers[0].id, "p1");
     assert_eq!(loaded.providers[0].name, "Provider 1");
@@ -168,13 +168,13 @@ fn test_write_and_read_flat_store() {
 
     // Check tool_activations
     let claude_activation = loaded.tool_activations.get("claude-code").unwrap();
-    assert!(claude_activation.is_some());
-    let activation = claude_activation.as_ref().unwrap();
+    assert!(!claude_activation.is_empty());
+    let activation = claude_activation.active().unwrap();
     assert_eq!(activation.provider_id, "p1");
     assert_eq!(activation.model, "deepseek-chat");
 
     let codex_activation = loaded.tool_activations.get("codex").unwrap();
-    assert!(codex_activation.is_none());
+    assert!(codex_activation.is_empty());
 }
 #[test]
 fn test_write_flat_store_creates_parent_dirs() {
@@ -199,7 +199,7 @@ fn test_read_flat_store_empty_file() {
     let (_tmp, path) = setup_temp_store();
     std::fs::write(&path, "").unwrap();
     let store = read_flat_store(&path).unwrap();
-    assert_eq!(store.version, 2);
+    assert_eq!(store.version, FLAT_STORE_VERSION);
     assert!(store.providers.is_empty());
 }
 #[test]
@@ -590,7 +590,7 @@ fn test_create_from_preset_invalid() {
 #[test]
 fn test_get_all_presets_flat_count() {
     let presets = get_all_presets_flat();
-    assert_eq!(presets.len(), 9);
+    assert_eq!(presets.len(), 11);
 }
 #[test]
 fn test_get_all_presets_flat_unique_ids() {
@@ -609,7 +609,7 @@ fn test_get_all_presets_flat_categories() {
         .filter(|p| p.category == "domestic")
         .collect();
     let relay: Vec<_> = presets.iter().filter(|p| p.category == "relay").collect();
-    assert_eq!(domestic.len(), 6);
+    assert_eq!(domestic.len(), 8);
     assert_eq!(relay.len(), 2);
 }
 #[test]

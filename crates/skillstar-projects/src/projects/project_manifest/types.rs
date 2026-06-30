@@ -36,6 +36,27 @@ pub fn deploy_skill_auto(source: &Path, target: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Deploy a skill from hub into a project directory using an explicit mode.
+///
+/// - [`ProjectDeployMode::Symlink`] tries symlink/junction first and
+///   auto-falls back to a full directory copy when the OS refuses (e.g.
+///   Windows without Developer Mode on a cross-drive path).
+/// - [`ProjectDeployMode::Copy`] always performs a full directory copy with
+///   no live link to the hub.
+pub fn deploy_skill_with_mode(
+    source: &Path,
+    target: &Path,
+    mode: ProjectDeployMode,
+) -> Result<()> {
+    match mode {
+        ProjectDeployMode::Symlink => deploy_skill_auto(source, target),
+        ProjectDeployMode::Copy => {
+            skillstar_core::infra::fs_ops::create_copy_deploy(source, target)?;
+            Ok(())
+        }
+    }
+}
+
 /// Drop deploy-mode entries for paths that no longer have an enabled agent in `agents`.
 pub fn prune_deploy_modes_for_agents(
     deploy_modes: &mut HashMap<String, ProjectDeployMode>,
@@ -146,6 +167,10 @@ pub struct ScannedSkill {
     pub is_symlink: bool,
     pub in_hub: bool,
     pub has_skill_md: bool,
+    /// True when this skill is already recorded in the project's
+    /// `skills-list.json` (e.g. a copy-mode deployment SkillStar made).
+    /// Such skills are managed and must not be reported as "unmanaged".
+    pub managed: bool,
 }
 
 /// Result of scanning a project for existing skill directories.
@@ -171,7 +196,6 @@ pub struct ImportResult {
 }
 
 #[derive(Debug, Clone, Default)]
-#[allow(dead_code)]
 pub struct CascadeUpdateSummary {
     pub projects_updated: Vec<String>,
 }

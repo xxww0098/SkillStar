@@ -21,14 +21,14 @@ export interface PageToolbarProps {
  * Unified page toolbar with three-zone layout:
  *
  * ┌──────────────────────────────────────────────────────────────────┐
- * │ [Title | Search]  ···drag zone···  [Filters]  |  [Actions]      │
+ * │ [Title | Search]  [Filters]···drag filler···  |  [Actions]      │
  * └──────────────────────────────────────────────────────────────────┘
  *
- * The flexible gap between search and filters/actions serves as the
- * window drag region on macOS (titleBarStyle: Overlay).
- *
- * The filters zone scrolls horizontally when overflowing; fade masks on
- * either edge make the overflow discoverable instead of silently clipping.
+ * The center zone is flexible: filters sit at its start and the trailing
+ * drag filler absorbs the slack (and doubles as the macOS window drag
+ * region). The filler yields its width first, so filters only scroll
+ * horizontally once the window is genuinely too narrow — at which point
+ * fade masks on either edge make the overflow discoverable.
  */
 export function PageToolbar({ title, search, filters, actions, className, children }: PageToolbarProps) {
   const filtersRef = useRef<HTMLDivElement>(null);
@@ -69,37 +69,40 @@ export function PageToolbar({ title, search, filters, actions, className, childr
 
       {search && <div className="shrink-0">{search}</div>}
 
-      {/* ── Center zone: Filters (scrollable when overflowing, with fade masks) ── */}
-      {filters && (
-        <div className="relative min-w-0 flex items-center">
-          {/* Left fade mask */}
-          {canLeft && (
-            <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-4 z-10 bg-gradient-to-r from-sidebar to-transparent" />
-          )}
-          <div
-            ref={filtersRef}
-            onWheel={(e) => {
-              const el = filtersRef.current;
-              if (!el) return;
-              if (el.scrollWidth <= el.clientWidth) return;
-              e.stopPropagation();
-              e.preventDefault();
-              el.scrollLeft += e.deltaY || e.deltaX;
-            }}
-            onScroll={updateOverflow}
-            className="flex items-center gap-2 min-w-0 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
-          >
-            {filters}
+      {/* ── Center zone: Filters claim the flexible middle; the drag filler yields its
+          space first so filters only scroll when the window is genuinely too narrow ── */}
+      <div className="flex-1 min-w-0 h-full flex items-center gap-2">
+        {filters && (
+          <div className="relative min-w-0 flex items-center">
+            {/* Left fade mask */}
+            {canLeft && (
+              <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-6 z-10 bg-gradient-to-r from-sidebar to-transparent" />
+            )}
+            <div
+              ref={filtersRef}
+              onWheel={(e) => {
+                const el = filtersRef.current;
+                if (!el) return;
+                if (el.scrollWidth <= el.clientWidth) return;
+                e.stopPropagation();
+                e.preventDefault();
+                el.scrollLeft += e.deltaY || e.deltaX;
+              }}
+              onScroll={updateOverflow}
+              className="flex items-center gap-2 min-w-0 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+            >
+              {filters}
+            </div>
+            {/* Right fade mask */}
+            {canRight && (
+              <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-6 z-10 bg-gradient-to-l from-sidebar to-transparent" />
+            )}
           </div>
-          {/* Right fade mask */}
-          {canRight && (
-            <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-4 z-10 bg-gradient-to-l from-sidebar to-transparent" />
-          )}
-        </div>
-      )}
+        )}
 
-      {/* ── Drag spacer: fills remaining space ── */}
-      <div data-tauri-drag-region className="flex-1 min-w-[48px] h-full" />
+        {/* Drag filler: absorbs the slack and shrinks to 0 before filters start scrolling */}
+        <div data-tauri-drag-region className="flex-1 min-w-0 h-full" />
+      </div>
 
       {/* ── Right zone: Actions ── */}
       {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}

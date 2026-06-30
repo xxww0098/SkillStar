@@ -788,7 +788,10 @@ export function LocalSkillsContent({
         skillName={publishTarget || ""}
         skillDescription={skills.find((s) => s.name === publishTarget)?.description || ""}
         onPublished={() => {
-          setPublishTarget(null);
+          // Keep the modal open on the success ("done") phase so the user can
+          // see / copy the repo URL — closing here would skip it entirely.
+          // The user dismisses via the footer button (→ onClose). Refresh in
+          // the background so the now-published skill reflects its new state.
           refresh(false, true);
         }}
       />

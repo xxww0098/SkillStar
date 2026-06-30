@@ -117,6 +117,27 @@ export function providerCodexAuthMode(provider: ProviderEntryFlat): CodexAuthMod
 }
 
 /**
+ * Infer the recommended Codex `wireApi` + `authMode` for a provider from its
+ * OpenAI-compatible base URL. Mirrors the backend `recommended_codex_defaults`
+ * rule verbatim (single source of truth lives in Rust; this is the TS twin):
+ *
+ * - `api.openai.com` → `responses` + `api_key` (OpenAI native Responses API).
+ * - everything else  → `chat` + `third_party` (third-party OpenAI-compatible
+ *   endpoints only implement `/v1/chat/completions`, and `third_party` routes
+ *   the key through `env_key` so `auth.json` is never touched).
+ *
+ * Used by `CodexSettingsForm` to flag a sub-optimal existing config and offer a
+ * one-click fix (e.g. a DeepSeek provider that was created before the default
+ * inference shipped and still carries `responses` + `api_key`).
+ */
+export function recommendedCodexDefaults(baseUrlOpenai: string): { wireApi: CodexWireApi; authMode: CodexAuthMode } {
+  if (baseUrlOpenai.includes("api.openai.com")) {
+    return { wireApi: "responses", authMode: "api_key" };
+  }
+  return { wireApi: "chat", authMode: "third_party" };
+}
+
+/**
  * Derive the env var name Codex reads a third-party API key from. Mirrors the
  * backend `codex_env_key_for` rule: `SKILLSTAR_<UPPER_PREFIX>_KEY` where the
  * prefix is the first 8 chars of the provider id (non-alphanumeric → `_`).

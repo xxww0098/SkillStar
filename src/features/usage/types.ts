@@ -146,7 +146,7 @@ export interface Subscription {
    *  Absent when no switch was attempted. */
   switch_result?: SwitchOutcome | null;
   /** Whether this catalog maps to a CLI SkillStar can switch credentials
-   *  for (codex / zcode / opencode). IDE-only catalogs are `false`. */
+   *  for (codex / opencode / grok). IDE-only catalogs are `false`. */
   supports_cli_switch?: boolean;
 }
 

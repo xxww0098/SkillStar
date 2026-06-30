@@ -35,11 +35,51 @@ pub use sync::{
     save_skills_list_only,
 };
 
-// ── Cascade update stubs (not yet implemented) ────────────────────────
+// ── Cascade update: refresh copy-deployed skills across all projects ──
 
-#[allow(dead_code)]
-pub fn cascade_skill_update_to_projects(_skills: &[String]) -> CascadeUpdateSummary {
-    CascadeUpdateSummary::default()
+/// After a hub skill is updated, push the new content into every project that
+/// deploys it via **copy** mode. Symlink deployments already track the hub live
+/// and need no action; [`refresh_stale_copies`] handles the per-project diff
+/// (it is idempotent — skills whose content matches the hub are skipped).
+///
+/// Only projects whose `skills-list.json` references at least one of the
+/// updated skills are touched. Returns the names of projects that actually had
+/// a copy refreshed.
+pub fn cascade_skill_update_to_projects(skills: &[String]) -> CascadeUpdateSummary {
+    let mut summary = CascadeUpdateSummary::default();
+    if skills.is_empty() {
+        return summary;
+    }
+
+    for project in list_projects() {
+        let Some(skills_list) = load_skills_list(&project.name) else {
+            continue;
+        };
+
+        let touches_updated_skill = skills_list
+            .agents
+            .values()
+            .flatten()
+            .any(|deployed| skills.iter().any(|updated| updated == deployed));
+        if !touches_updated_skill {
+            continue;
+        }
+
+        match refresh_stale_copies(&project.path) {
+            Ok(0) => {}
+            Ok(_) => summary.projects_updated.push(project.name.clone()),
+            Err(err) => {
+                tracing::warn!(
+                    target: "sync",
+                    project = %project.name,
+                    error = %format!("{err:#}"),
+                    "Cascade refresh failed for project"
+                );
+            }
+        }
+    }
+
+    summary
 }
 
 #[cfg(test)]
@@ -387,6 +427,115 @@ mod tests {
             assert!(
                 !project_path.join(".codex").exists(),
                 "missing skills must not create Codex project folders"
+            );
+
+            Ok(())
+        })();
+
+        match previous_home {
+            Some(value) => set_env("HOME", value),
+            None => remove_env("HOME"),
+        }
+        #[cfg(windows)]
+        match previous_userprofile {
+            Some(value) => set_env("USERPROFILE", value),
+            None => remove_env("USERPROFILE"),
+        }
+        let _ = std::fs::remove_dir_all(&temp_root);
+
+        result
+    }
+
+    #[test]
+    fn cascade_refreshes_copy_deployed_skill_and_reports_project() -> Result<()> {
+        let _guard = env_lock();
+
+        let temp_root = make_temp_root("project-cascade")?;
+        let previous_home = std::env::var_os("HOME");
+        set_env("HOME", temp_root.join("home"));
+        #[cfg(windows)]
+        let previous_userprofile = std::env::var_os("USERPROFILE");
+        #[cfg(windows)]
+        set_env("USERPROFILE", temp_root.join("home"));
+
+        let result = (|| -> Result<()> {
+            let hub_skill = fs_paths::hub_skills_dir().join("demo-skill");
+            std::fs::create_dir_all(&hub_skill)?;
+            std::fs::write(hub_skill.join("SKILL.md"), "description: v1")?;
+
+            // Copy-deploy demo-skill into a project (deploy_modes => Copy).
+            let project_path = temp_root.join("workspace").join("copy-project");
+            std::fs::create_dir_all(&project_path)?;
+            let project_path_str = project_path.to_string_lossy().to_string();
+
+            let claude_profile = crate::projects::agents::list_profiles()
+                .into_iter()
+                .find(|p| p.id == "claude")
+                .expect("claude profile must exist");
+            let mut deploy_modes = HashMap::new();
+            deploy_modes.insert(
+                claude_profile.project_skills_rel.clone(),
+                ProjectDeployMode::Copy,
+            );
+            let skills_list = SkillsList {
+                agents: HashMap::from([(
+                    "claude".to_string(),
+                    vec!["demo-skill".to_string()],
+                )]),
+                deploy_modes,
+                updated_at: chrono::Utc::now().to_rfc3339(),
+            };
+            register_project(&project_path_str)?;
+            let project_name = ensure_project_root_exists(&project_path_str)
+                .ok()
+                .and_then(|_| {
+                    list_projects()
+                        .into_iter()
+                        .find(|p| p.path == project_path_str)
+                        .map(|p| p.name)
+                })
+                .expect("registered project must resolve a name");
+            save_skills_list(&project_name, &skills_list)?;
+            full_sync(&project_path_str, &skills_list, None)?;
+
+            let deployed = project_path
+                .join(&claude_profile.project_skills_rel)
+                .join("demo-skill")
+                .join("SKILL.md");
+            assert!(
+                deployed.is_file() && !skillstar_core::infra::fs_ops::is_link(&deployed),
+                "expected a real copied file, not a symlink"
+            );
+            assert_eq!(std::fs::read_to_string(&deployed)?, "description: v1");
+
+            // A second project that does NOT use the skill must be untouched.
+            let other_path = temp_root.join("workspace").join("other-project");
+            std::fs::create_dir_all(&other_path)?;
+            register_project(&other_path.to_string_lossy())?;
+
+            // Update the hub content, then cascade.
+            std::fs::write(hub_skill.join("SKILL.md"), "description: v2-updated")?;
+            let summary = cascade_skill_update_to_projects(&["demo-skill".to_string()]);
+
+            assert_eq!(
+                std::fs::read_to_string(&deployed)?,
+                "description: v2-updated",
+                "copy-deployed skill should be refreshed to new hub content"
+            );
+            assert!(
+                summary
+                    .projects_updated
+                    .iter()
+                    .any(|name| name.contains("copy-project")),
+                "cascade summary should report the refreshed project, got {:?}",
+                summary.projects_updated
+            );
+            assert!(
+                !summary
+                    .projects_updated
+                    .iter()
+                    .any(|name| name.contains("other-project")),
+                "projects not using the skill must not be reported"
             );
 
             Ok(())

@@ -8,6 +8,7 @@ import {
   getMetaString,
   getModelCatalogFromMeta,
   providerToFormValues,
+  recommendedCodexDefaults,
   validatePatch,
 } from "../providerPatch";
 
@@ -133,5 +134,42 @@ describe("computeDirty", () => {
     const base = providerToFormValues(provider);
     // claudeHaikuModel adds a new id to the persisted models list → dirty
     expect(computeDirty(provider, { ...base, claudeHaikuModel: "haiku-x" })).toBe(true);
+  });
+});
+
+describe("recommendedCodexDefaults", () => {
+  it("recommends responses + api_key for official OpenAI", () => {
+    expect(recommendedCodexDefaults("https://api.openai.com/v1")).toEqual({
+      wireApi: "responses",
+      authMode: "api_key",
+    });
+  });
+
+  it("recommends chat + third_party for every known third-party provider", () => {
+    const urls = [
+      "https://api.deepseek.com/v1",
+      "https://api.moonshot.cn/v1",
+      "https://api.kimi.com/coding/v1",
+      "https://api.minimax.chat/v1",
+      "https://open.bigmodel.cn/api/paas/v4",
+      "https://openrouter.ai/api/v1",
+      "https://api.siliconflow.cn/v1",
+      "https://api.x.ai/v1",
+    ];
+    for (const url of urls) {
+      expect(recommendedCodexDefaults(url)).toEqual({
+        wireApi: "chat",
+        authMode: "third_party",
+      });
+    }
+  });
+
+  it("falls back to chat + third_party for empty and custom endpoints", () => {
+    for (const url of ["", "https://my-proxy.example.com/v1", "https://localhost:11434/v1"]) {
+      expect(recommendedCodexDefaults(url)).toEqual({
+        wireApi: "chat",
+        authMode: "third_party",
+      });
+    }
   });
 });

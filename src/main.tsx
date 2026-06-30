@@ -36,8 +36,7 @@ document.addEventListener("contextmenu", (event) => {
  */
 function isUsageCardWindow(): boolean {
   const fromQuery =
-    typeof window !== "undefined" &&
-    new URLSearchParams(window.location.search).get("window") === "usage-card";
+    typeof window !== "undefined" && new URLSearchParams(window.location.search).get("window") === "usage-card";
   if (fromQuery) return true;
   if (!isTauri()) return false;
   // Synchronous label read — safe because by the time JS runs the window

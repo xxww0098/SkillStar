@@ -2,8 +2,11 @@
 
 use anyhow::Result;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::Path;
 
+use super::index::load_index;
+use super::store::load_skills_list;
 use super::types::{
     AmbiguousGroup, DetectedAgent, ProjectAgentDetection, ProjectScanResult, ScannedSkill,
     ensure_project_root_exists,
@@ -71,6 +74,51 @@ pub fn detect_project_agents(project_path: &str) -> ProjectAgentDetection {
     }
 }
 
+/// Build the set of skills the project already manages, keyed by
+/// `<project_skills_rel>::<skill_name>` so it lines up with how the scan keys
+/// each discovered skill. Read-only: resolves the registered project name from
+/// the index by path and reads its `skills-list.json` without mutating state.
+///
+/// A copy-deployed skill is a real directory (not a symlink) containing
+/// SKILL.md, so it looks identical to an unmanaged skill on disk. The only
+/// authoritative signal that SkillStar owns it is the manifest, hence this
+/// comparison lives here in the backend rather than in the UI.
+fn tracked_skill_keys(
+    project_path: &str,
+    profiles: &[agent_profile::AgentProfile],
+) -> HashSet<String> {
+    let Some(name) = load_index()
+        .projects
+        .into_iter()
+        .find(|p| p.path == project_path)
+        .map(|p| p.name)
+    else {
+        return HashSet::new();
+    };
+    let Some(list) = load_skills_list(&name) else {
+        return HashSet::new();
+    };
+
+    // agent_id → project_skills_rel, so manifest entries can be keyed by the
+    // shared on-disk path (several agents may target the same directory).
+    let rel_by_agent: HashMap<&str, &str> = profiles
+        .iter()
+        .map(|p| (p.id.as_str(), p.project_skills_rel.as_str()))
+        .collect();
+
+    let mut keys = HashSet::new();
+    for (agent_id, skill_names) in &list.agents {
+        let rel = rel_by_agent
+            .get(agent_id.as_str())
+            .copied()
+            .unwrap_or(agent_id.as_str());
+        for skill_name in skill_names {
+            keys.insert(format!("{rel}::{skill_name}"));
+        }
+    }
+    keys
+}
+
 /// Scan a project directory for existing skill entries across all agent profiles.
 ///
 /// For each agent profile, look at `<project>/<project_skills_rel>/` and inspect
@@ -81,6 +129,7 @@ pub fn scan_project_skills(project_path: &str) -> Result<ProjectScanResult> {
     let hub_dir = fs_paths::hub_skills_dir();
     let profiles = agent_profile::list_profiles();
     let project = ensure_project_root_exists(project_path)?;
+    let tracked = tracked_skill_keys(project_path, &profiles);
 
     let mut skills = Vec::with_capacity(profiles.len() * 8); // reasonable pre-alloc
     let mut agents_found = Vec::with_capacity(profiles.len());
@@ -115,12 +164,15 @@ pub fn scan_project_skills(project_path: &str) -> Result<ProjectScanResult> {
                 continue;
             }
 
+            let managed = tracked.contains(&format!("{}::{}", profile.project_skills_rel, name));
+
             skills.push(ScannedSkill {
                 name,
                 agent_id: profile.id.clone(),
                 is_symlink,
                 in_hub,
                 has_skill_md,
+                managed,
             });
             found_any = true;
         }

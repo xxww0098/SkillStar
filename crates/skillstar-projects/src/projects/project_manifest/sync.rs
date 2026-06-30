@@ -8,8 +8,8 @@ use super::helpers::{clear_project_symlinks, prune_empty_dirs_upward};
 use super::index::{list_projects, register_project};
 use super::store::{load_skills_list, save_skills_list};
 use super::types::{
-    ProjectDeployMode, SkillsList, deploy_skill_auto, ensure_project_root_exists,
-    prune_deploy_modes_for_agents,
+    ProjectDeployMode, SkillsList, deploy_skill_auto, deploy_skill_with_mode,
+    ensure_project_root_exists, prune_deploy_modes_for_agents,
 };
 use crate::projects::agents as agent_profile;
 use skillstar_core::infra::{fs_ops, paths as fs_paths};
@@ -164,7 +164,15 @@ pub fn full_sync(
         let mut prepared_target_dir = false;
         let mut created_for_agent = 0u32;
 
-        // Create new symlinks (auto-fallback to copy if symlink fails)
+        // Per-directory deploy mode (defaults to symlink). `Symlink` still
+        // auto-falls back to copy when the OS refuses; `Copy` always copies.
+        let mode = skills_list
+            .deploy_modes
+            .get(&profile.project_skills_rel)
+            .copied()
+            .unwrap_or_default();
+
+        // Create new deploys honoring the configured mode.
         for skill_name in skill_names {
             let source = hub_dir.join(skill_name);
             if !source.exists() {
@@ -177,7 +185,7 @@ pub fn full_sync(
                 prepared_target_dir = true;
             }
             let target = target_dir.join(skill_name);
-            match deploy_skill_auto(&source, &target) {
+            match deploy_skill_with_mode(&source, &target, mode) {
                 Ok(()) => {
                     total += 1;
                     created_for_agent += 1;
@@ -226,13 +234,14 @@ pub fn save_and_sync(
     // Snapshot the old config so we can compute which agents were removed.
     let old_list = load_skills_list(&entry.name);
 
-    let _profiles = agent_profile::list_profiles();
-    // deploy_modes accepted for backward-compat but ignored;
-    // deploy always tries symlink first, auto-falling back to copy.
-    let _ = &deploy_modes;
+    let profiles = agent_profile::list_profiles();
+    let mut deploy_modes = deploy_modes;
+    // Drop deploy-mode entries whose directory no longer has an enabled agent.
+    prune_deploy_modes_for_agents(&mut deploy_modes, &agents, &profiles);
+
     let skills_list = SkillsList {
         agents,
-        deploy_modes: HashMap::new(),
+        deploy_modes,
         updated_at: chrono::Utc::now().to_rfc3339(),
     };
 
