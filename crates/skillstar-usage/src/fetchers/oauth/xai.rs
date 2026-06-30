@@ -6,8 +6,11 @@
 //! 2. Exchange `code` at `https://auth.x.ai/oauth2/token`.
 //! 3. GET `https://cli-chat-proxy.grok.com/v1/billing` for credit-quota data.
 //!
-//! xAI bills a single credit pool; the reset window (7d vs 30d) only decides
-//! the UI label. The real payload shape is:
+//! Grok exposes two distinct allowances (mirrored in its CLI `/usage`): a
+//! monthly numeric credit quota (`monthlyLimit`/`used`, USD cents) from the
+//! default view, and a weekly soft-limit progress (`creditUsagePercent` +
+//! `currentPeriod`) from the `?format=credits` view. We render both. The real
+//! default payload shape is:
 //! ```json
 //! {
 //!   "billingCycle": { "billingPeriodEnd": "..." },
@@ -22,6 +25,7 @@
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::Value;
+use std::sync::LazyLock;
 use std::time::Duration;
 use url::Url;
 
@@ -30,18 +34,56 @@ use crate::crypto;
 use crate::oauth::local_server;
 use crate::oauth::pkce::PkcePair;
 use crate::oauth::token_refresh;
+use crate::oauth_clients;
 use crate::storage;
 use crate::subscription::{BillingCycle, CreditInfo, Subscription, SubscriptionUsage, UsageWindow};
 use crate::{UsageError, UsageResult};
 
 const AUTHORIZE_URL: &str = "https://auth.x.ai/oauth2/authorize";
 const TOKEN_URL: &str = "https://auth.x.ai/oauth2/token";
-const CLIENT_ID: &str = "b1a00492-073a-47ea-816f-4c329264a828";
+static CLIENT_ID: LazyLock<String> = LazyLock::new(|| {
+    oauth_clients::client_id!(
+        "xai",
+        "SKILLSTAR_XAI_CLIENT_ID",
+        "b1a00492-073a-47ea-816f-4c329264a828"
+    )
+});
+
+/// The resolved Grok OAuth `client_id` (honours env / file overrides). The CLI
+/// account switch (`skillstar_app::usage_switch`) keys `~/.grok/auth.json` by
+/// `https://auth.x.ai::<this id>`, so it must read the same resolved value the
+/// fetcher uses rather than a separate hard-coded copy.
+pub fn client_id() -> &'static str {
+    CLIENT_ID.as_str()
+}
 const SCOPES: &str = "openid profile email offline_access grok-cli:access api:access";
 const CALLBACK_PORT: u16 = 56121;
 const CALLBACK_PATH: &str = "/callback";
 const BILLING_URL: &str = "https://cli-chat-proxy.grok.com/v1/billing";
+/// The `credits`-format billing view. Same endpoint, different projection: it
+/// drops the `monthlyLimit`/`used` numbers but adds `currentPeriod`
+/// (`{ type: USAGE_PERIOD_TYPE_WEEKLY|_MONTHLY, start, end }`) plus a
+/// `creditUsagePercent` (the weekly soft-limit usage, 0–100, omitted by proto3
+/// when 0). These are the authoritative source for the *weekly* progress bar:
+/// whether this account resets weekly, exactly when, and how much of the weekly
+/// allowance is consumed. The numbers (`monthlyLimit`/`used`) are NOT in this
+/// view — they come from the default view and drive the *monthly* numeric
+/// quota. Fetching both lets us show the two distinct bars the Grok CLI's own
+/// `/usage` shows (weekly limit left + monthly limit).
+const BILLING_CREDITS_URL: &str = "https://cli-chat-proxy.grok.com/v1/billing?format=credits";
 const DEFAULT_PLAN_NAME: &str = "Grok";
+
+/// The current usage period reported by `?format=credits`. `weekly` is
+/// `Some(true)` for a weekly-reset plan, `Some(false)` for monthly, and `None`
+/// when the type string is unrecognised. `usage_percent` is the weekly
+/// `creditUsagePercent` (0–100), `None`/0 when the proxy omits it (no usage yet
+/// this week).
+#[derive(Debug, Clone, Default)]
+struct CurrentPeriod {
+    weekly: Option<bool>,
+    end: Option<i64>,
+    usage_percent: Option<f64>,
+}
 
 #[derive(Debug, Deserialize, Default)]
 struct TokenResponse {
@@ -107,7 +149,7 @@ fn build_authorize_url(
         let mut pairs = url.query_pairs_mut();
         pairs
             .append_pair("response_type", "code")
-            .append_pair("client_id", CLIENT_ID)
+            .append_pair("client_id", CLIENT_ID.as_str())
             .append_pair("redirect_uri", redirect_uri)
             .append_pair("scope", SCOPES)
             .append_pair("code_challenge", code_challenge)
@@ -132,7 +174,7 @@ async fn exchange_code(
             ("grant_type", "authorization_code"),
             ("code", code),
             ("redirect_uri", redirect_uri),
-            ("client_id", CLIENT_ID),
+            ("client_id", CLIENT_ID.as_str()),
             ("code_verifier", verifier),
         ])
         .send()
@@ -257,7 +299,7 @@ async fn refresh_xai_tokens(subscription: &mut Subscription) -> UsageResult<()> 
         .post(TOKEN_URL)
         .form(&[
             ("grant_type", "refresh_token"),
-            ("client_id", CLIENT_ID),
+            ("client_id", CLIENT_ID.as_str()),
             ("refresh_token", refresh_token.trim()),
         ])
         .send()
@@ -315,7 +357,98 @@ async fn fetch_with_token(
 
     let payload: Value = serde_json::from_str(&body)
         .map_err(|e| UsageError::Fetcher(format!("Grok billing JSON 解析失败: {}", e)))?;
-    build_subscription_usage(subscription_id, &payload)
+
+    // Best-effort: the monthly numbers come from the default view above; the
+    // weekly progress bar (period type, reset, `creditUsagePercent`) comes from
+    // the credits view.
+    let period = fetch_current_period(&client, access_token).await;
+    let mut usage = build_subscription_usage(subscription_id, &payload, period)?;
+
+    // Card-shape stability: a weekly Grok plan must keep its weekly bar across
+    // refreshes. The credits view is slow (~2.5s) and best-effort, so a single
+    // transient miss would otherwise collapse the card from two bars to one
+    // (the "2 kinds of cards" symptom). When this round produced no weekly bar,
+    // reuse the subscription's last known weekly window instead of dropping it.
+    if usage.weekly.is_none()
+        && let Ok(Some(prev)) = storage::get_usage_snapshot(subscription_id)
+        && let Some(prev_weekly) = prev.weekly
+    {
+        usage.weekly = Some(prev_weekly);
+    }
+
+    Ok(usage)
+}
+
+/// Fetch `?format=credits` and extract the current usage period. Returns `None`
+/// only after a retry also fails, so the caller degrades gracefully. The retry
+/// matters because the credits view is slow and occasionally flaky under the
+/// parallel multi-account refresh — a silent miss would drop the weekly bar.
+async fn fetch_current_period(
+    client: &reqwest::Client,
+    access_token: &str,
+) -> Option<CurrentPeriod> {
+    for attempt in 0..2 {
+        if attempt > 0 {
+            tokio::time::sleep(Duration::from_millis(400)).await;
+        }
+        if let Some(period) = fetch_current_period_once(client, access_token).await {
+            return Some(period);
+        }
+    }
+    None
+}
+
+async fn fetch_current_period_once(
+    client: &reqwest::Client,
+    access_token: &str,
+) -> Option<CurrentPeriod> {
+    let resp = client
+        .get(BILLING_CREDITS_URL)
+        .bearer_auth(access_token.trim())
+        .header(reqwest::header::ACCEPT, "application/json")
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body = resp.text().await.ok()?;
+    let payload: Value = serde_json::from_str(&body).ok()?;
+    parse_current_period(&payload)
+}
+
+/// Parse `currentPeriod` from a `?format=credits` billing payload. Tolerates
+/// the root or `config`-wrapped shape (via [`candidate_roots`]).
+fn parse_current_period(payload: &Value) -> Option<CurrentPeriod> {
+    let roots = candidate_roots(payload);
+    let cp = pick_value_multi(&roots, &[&["currentPeriod"], &["current_period"]])?;
+    let typ = cp.get("type").and_then(Value::as_str).unwrap_or("");
+    let weekly = if typ.contains("WEEKLY") {
+        Some(true)
+    } else if typ.contains("MONTHLY") {
+        Some(false)
+    } else {
+        None
+    };
+    let end = cp
+        .get("end")
+        .and_then(parse_timestamp)
+        .or_else(|| cp.get("billingPeriodEnd").and_then(parse_timestamp));
+    // `creditUsagePercent` is a sibling of `currentPeriod` (not nested), a plain
+    // float in 0..=100. proto3 omits it when 0 → treat absence as 0% downstream.
+    let usage_percent = pick_value_multi(
+        &roots,
+        &[&["creditUsagePercent"], &["credit_usage_percent"]],
+    )
+    .and_then(percent_value);
+    if weekly.is_none() && end.is_none() {
+        return None;
+    }
+    Some(CurrentPeriod {
+        weekly,
+        end,
+        usage_percent,
+    })
 }
 
 /// Amount fields may sit at the payload root (the real xAI shape) or under a
@@ -344,21 +477,19 @@ fn pick_cent_multi(roots: &[&Value], paths: &[&[&str]]) -> Option<f64> {
     pick_value_multi(roots, paths).and_then(cent_value)
 }
 
-/// xAI bills a single credit pool; the reset-window length decides the label.
-/// A sub-10-day window renders as "Weekly", otherwise "Monthly" — matching
-/// how the Grok CLI dashboard names the same bar.
-fn period_label(reset_at: i64) -> String {
-    let days = ((reset_at - Utc::now().timestamp()) / 86_400).max(0);
-    if days > 0 && days <= 10 {
-        "Weekly credits".to_string()
-    } else {
-        "Monthly credits".to_string()
-    }
-}
-
+/// Build Grok usage as up to two distinct bars, mirroring the Grok CLI `/usage`:
+///
+/// * **Monthly numeric quota** (`monthly`) — `used`/`monthlyLimit` (USD cents)
+///   from the default billing view, resetting on the monthly billing cycle.
+///   Always present when the account exposes numbers.
+/// * **Weekly progress bar** (`weekly`) — only for weekly-reset plans. Driven by
+///   `creditUsagePercent` (a percent, no absolute number exists) from the
+///   `?format=credits` view, resetting on `currentPeriod.end`. Percent-only, so
+///   the UI renders it as a plain progress bar.
 fn build_subscription_usage(
     subscription_id: &str,
     payload: &Value,
+    period: Option<CurrentPeriod>,
 ) -> UsageResult<SubscriptionUsage> {
     let roots = candidate_roots(payload);
 
@@ -383,20 +514,26 @@ fn build_subscription_usage(
     )
     .and_then(parse_timestamp);
 
+    let is_weekly = matches!(period.as_ref().and_then(|p| p.weekly), Some(true));
+
     if monthly_limit.is_none()
         && used.is_none()
         && on_demand_cap.is_none()
         && billing_period_end.is_none()
+        && !is_weekly
     {
         return Err(UsageError::Fetcher(
             "Grok billing 未返回可展示额度字段".into(),
         ));
     }
 
-    let label = billing_period_end
-        .map(period_label)
-        .unwrap_or_else(|| "Monthly credits".to_string());
-
+    // Monthly numeric quota: absolute credits, resets on the monthly billing
+    // cycle (the default view's `billingPeriodEnd`; fall back to a monthly
+    // `currentPeriod.end` if the calendar-month field is missing).
+    let monthly_reset = billing_period_end.or_else(|| match period.as_ref() {
+        Some(p) if p.weekly == Some(false) => p.end,
+        _ => None,
+    });
     let monthly = if monthly_limit.is_some() || used.is_some() {
         let used_cents = used.unwrap_or(0.0).round().max(0.0) as i64;
         let total_cents = monthly_limit.map(|v| v.round().max(0.0) as i64);
@@ -404,16 +541,30 @@ fn build_subscription_usage(
             .filter(|total| *total > 0)
             .map(|total| ((used_cents as f64 / total as f64) * 100.0).round() as i32);
         Some(UsageWindow {
-            label,
+            label: "Monthly credits".to_string(),
             used: used_cents,
             total: total_cents,
             percent,
-            reset_at: billing_period_end,
+            reset_at: monthly_reset,
             breakdown: Vec::new(),
         })
     } else {
         None
     };
+
+    // Weekly progress bar: percent-only (no absolute weekly number is exposed),
+    // resets on `currentPeriod.end`. Only for weekly-reset plans.
+    let weekly = period.as_ref().filter(|_| is_weekly).map(|p| {
+        let pct = p.usage_percent.unwrap_or(0.0).round().clamp(0.0, 100.0) as i32;
+        UsageWindow {
+            label: "Weekly credits".to_string(),
+            used: 0,
+            total: None,
+            percent: Some(pct),
+            reset_at: p.end,
+            breakdown: Vec::new(),
+        }
+    });
 
     let mut credits = Vec::new();
     if let Some(cap) = on_demand_cap {
@@ -429,7 +580,7 @@ fn build_subscription_usage(
         fetched_at: Utc::now().timestamp(),
         plan_name: Some(DEFAULT_PLAN_NAME.to_string()),
         hourly: None,
-        weekly: None,
+        weekly,
         monthly,
         balance: None,
         credits,
@@ -465,6 +616,12 @@ fn cent_value(value: &Value) -> Option<f64> {
         return Some(num);
     }
     None
+}
+
+/// Read a percentage value (plain float or numeric string, or a `{ val }`
+/// wrapper). Used for `creditUsagePercent` (0..=100).
+fn percent_value(value: &Value) -> Option<f64> {
+    cent_value(value).filter(|n| n.is_finite())
 }
 
 fn parse_timestamp(value: &Value) -> Option<i64> {
@@ -532,7 +689,7 @@ mod tests {
             }
         });
 
-        let usage = build_subscription_usage("sub-xai", &payload).unwrap();
+        let usage = build_subscription_usage("sub-xai", &payload, None).unwrap();
         let monthly = usage.monthly.unwrap();
 
         assert_eq!(monthly.used, 12345);
@@ -554,7 +711,7 @@ mod tests {
             }
         });
 
-        let usage = build_subscription_usage("sub-xai", &payload).unwrap();
+        let usage = build_subscription_usage("sub-xai", &payload, None).unwrap();
         let monthly = usage.monthly.unwrap();
 
         assert_eq!(monthly.used, 1250);
@@ -572,34 +729,41 @@ mod tests {
             "monthlyLimit": { "val": 10000 },
             "usage": { "totalUsed": { "val": 2500 } }
         });
-        let usage = build_subscription_usage("sub-xai", &payload).unwrap();
+        let usage = build_subscription_usage("sub-xai", &payload, None).unwrap();
         assert_eq!(usage.monthly.unwrap().used, 2500);
     }
 
     #[test]
-    fn weekly_label_for_short_reset_window() {
-        // A ~7-day reset window should render as "Weekly credits".
+    fn no_weekly_window_without_current_period() {
+        // Without the credits view (period=None) we only know the monthly
+        // numbers: one "Monthly credits" bar, no weekly bar (no heuristic).
         let soon = Utc::now().timestamp() + 6 * 86_400;
         let payload = json!({
             "billingCycle": { "billingPeriodEnd": soon },
             "monthlyLimit": { "val": 5000 },
             "usage": { "totalUsed": { "val": 1000 } }
         });
-        let usage = build_subscription_usage("sub-xai", &payload).unwrap();
-        assert_eq!(usage.monthly.unwrap().label, "Weekly credits");
+        let usage = build_subscription_usage("sub-xai", &payload, None).unwrap();
+        assert_eq!(usage.monthly.unwrap().label, "Monthly credits");
+        assert!(usage.weekly.is_none(), "no weekly bar without currentPeriod");
     }
 
     #[test]
-    fn monthly_label_for_long_reset_window() {
-        // A ~30-day reset window should render as "Monthly credits".
-        let later = Utc::now().timestamp() + 29 * 86_400;
+    fn monthly_only_for_monthly_plan() {
+        // A monthly-plan currentPeriod yields the monthly bar only.
         let payload = json!({
-            "billingCycle": { "billingPeriodEnd": later },
+            "billingCycle": { "billingPeriodEnd": "2026-07-01T00:00:00Z" },
             "monthlyLimit": { "val": 5000 },
             "usage": { "totalUsed": { "val": 1000 } }
         });
-        let usage = build_subscription_usage("sub-xai", &payload).unwrap();
+        let period = CurrentPeriod {
+            weekly: Some(false),
+            end: Some(1782864000),
+            usage_percent: None,
+        };
+        let usage = build_subscription_usage("sub-xai", &payload, Some(period)).unwrap();
         assert_eq!(usage.monthly.unwrap().label, "Monthly credits");
+        assert!(usage.weekly.is_none(), "monthly plan has no weekly bar");
     }
 
     #[test]
@@ -609,19 +773,124 @@ mod tests {
             "monthlyLimit": { "val": 5000 },
             "usage": { "totalUsed": { "val": 1000 } }
         });
-        let usage = build_subscription_usage("sub-xai", &payload).unwrap();
+        let usage = build_subscription_usage("sub-xai", &payload, None).unwrap();
         assert_eq!(usage.monthly.unwrap().label, "Monthly credits");
     }
 
     #[test]
     fn rejects_empty_billing_config() {
         let payload = json!({ "config": {} });
-        assert!(build_subscription_usage("sub-xai", &payload).is_err());
+        assert!(build_subscription_usage("sub-xai", &payload, None).is_err());
     }
 
     #[test]
     fn rejects_garbage_payload() {
         let payload = json!({ "randomField": "value" });
-        assert!(build_subscription_usage("sub-xai", &payload).is_err());
+        assert!(build_subscription_usage("sub-xai", &payload, None).is_err());
+    }
+
+    #[test]
+    fn parses_current_period_weekly_from_credits_view() {
+        // Real `?format=credits` shape (config-wrapped), weekly plan.
+        let payload = json!({
+            "config": {
+                "currentPeriod": {
+                    "type": "USAGE_PERIOD_TYPE_WEEKLY",
+                    "start": "2026-06-27T05:57:15.869945+00:00",
+                    "end": "2026-07-04T05:57:15.869945+00:00"
+                },
+                "billingPeriodStart": "2026-06-27T05:57:15.869945+00:00",
+                "billingPeriodEnd": "2026-07-04T05:57:15.869945+00:00"
+            }
+        });
+        let cp = parse_current_period(&payload).expect("currentPeriod parsed");
+        assert_eq!(cp.weekly, Some(true));
+        // 2026-07-04T05:57:15Z
+        assert_eq!(cp.end, Some(1783144635));
+    }
+
+    #[test]
+    fn parses_current_period_monthly() {
+        let payload = json!({
+            "currentPeriod": {
+                "type": "USAGE_PERIOD_TYPE_MONTHLY",
+                "end": "2026-07-01T00:00:00Z"
+            }
+        });
+        let cp = parse_current_period(&payload).unwrap();
+        assert_eq!(cp.weekly, Some(false));
+        assert_eq!(cp.end, Some(1782864000));
+    }
+
+    #[test]
+    fn weekly_plan_builds_two_bars() {
+        // Weekly plan: monthly numeric quota (from the default view, resetting
+        // on the calendar-month billingPeriodEnd) AND a separate weekly
+        // progress bar (percent-only, resetting on currentPeriod.end).
+        let weekly_end_ts = 1783144635; // 2026-07-04T05:57:15Z
+        let month_end_ts = 1782864000; // 2026-07-01T00:00:00Z
+        let payload = json!({
+            "monthlyLimit": { "val": 20000 },
+            "used": { "val": 7006 },
+            "billingPeriodEnd": "2026-07-01T00:00:00Z"
+        });
+        let period = CurrentPeriod {
+            weekly: Some(true),
+            end: Some(weekly_end_ts),
+            usage_percent: Some(13.0),
+        };
+        let usage = build_subscription_usage("sub-xai", &payload, Some(period)).unwrap();
+
+        // Monthly: absolute numbers, monthly reset (NOT the weekly instant).
+        let monthly = usage.monthly.unwrap();
+        assert_eq!(monthly.label, "Monthly credits");
+        assert_eq!(monthly.used, 7006);
+        assert_eq!(monthly.total, Some(20000));
+        assert_eq!(monthly.percent, Some(35));
+        assert_eq!(monthly.reset_at, Some(month_end_ts));
+
+        // Weekly: percent-only progress bar, weekly reset.
+        let weekly = usage.weekly.expect("weekly bar present");
+        assert_eq!(weekly.label, "Weekly credits");
+        assert_eq!(weekly.percent, Some(13));
+        assert_eq!(weekly.total, None, "weekly bar carries no absolute number");
+        assert_eq!(weekly.reset_at, Some(weekly_end_ts));
+    }
+
+    #[test]
+    fn weekly_bar_zero_percent_when_omitted() {
+        // proto3 omits creditUsagePercent at 0% → weekly bar shows 0, not gone.
+        let payload = json!({ "monthlyLimit": { "val": 20000 }, "used": { "val": 7006 } });
+        let period = CurrentPeriod {
+            weekly: Some(true),
+            end: Some(1783144635),
+            usage_percent: None,
+        };
+        let usage = build_subscription_usage("sub-xai", &payload, Some(period)).unwrap();
+        assert_eq!(usage.weekly.unwrap().percent, Some(0));
+    }
+
+    #[test]
+    fn parses_credit_usage_percent_from_credits_view() {
+        // The `?format=credits` view carries creditUsagePercent next to
+        // currentPeriod (a plain float), the weekly soft-limit usage.
+        let payload = json!({
+            "config": {
+                "creditUsagePercent": 13.0,
+                "currentPeriod": {
+                    "type": "USAGE_PERIOD_TYPE_WEEKLY",
+                    "end": "2026-07-04T05:57:15.869945+00:00"
+                }
+            }
+        });
+        let cp = parse_current_period(&payload).expect("currentPeriod parsed");
+        assert_eq!(cp.weekly, Some(true));
+        assert_eq!(cp.usage_percent, Some(13.0));
+    }
+
+    #[test]
+    fn rejects_current_period_without_type_or_end() {
+        let payload = json!({ "currentPeriod": { "type": "USAGE_PERIOD_TYPE_UNSPECIFIED" } });
+        assert!(parse_current_period(&payload).is_none());
     }
 }

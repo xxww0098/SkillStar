@@ -139,6 +139,13 @@ pub fn antigravity_oauth_config_path() -> PathBuf {
     config_dir().join("antigravity_oauth.json")
 }
 
+/// `config/oauth_clients.json` — per-provider OAuth client id/secret overrides
+/// (codex / xai / trae / opencode). Optional; built-in defaults are used when
+/// absent. Shape: `{ "codex": { "client_id": "...", "client_secret": "..." }, ... }`.
+pub fn oauth_clients_config_path() -> PathBuf {
+    config_dir().join("oauth_clients.json")
+}
+
 /// `state/sync_device.json` — this device's identity (hostname + suffix) so
 /// pushed manifests can record their origin.
 pub fn sync_device_id_path() -> PathBuf {

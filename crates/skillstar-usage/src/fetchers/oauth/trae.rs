@@ -3,6 +3,7 @@
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use crate::catalog::AuthMode;
@@ -10,12 +11,16 @@ use crate::crypto;
 use crate::oauth::local_server;
 use crate::oauth::pkce;
 use crate::oauth::token_refresh;
+use crate::oauth_clients;
 use crate::storage;
 use crate::subscription::{BillingCycle, Subscription, SubscriptionUsage, UsageWindow};
 use crate::{UsageError, UsageResult};
 
-const CLIENT_ID: &str = "ono9krqynydwx5";
-const CLIENT_SECRET: &str = "-";
+static CLIENT_ID: LazyLock<String> =
+    LazyLock::new(|| oauth_clients::client_id!("trae", "SKILLSTAR_TRAE_CLIENT_ID", "ono9krqynydwx5"));
+static CLIENT_SECRET: LazyLock<String> = LazyLock::new(|| {
+    oauth_clients::client_secret!("trae", "SKILLSTAR_TRAE_CLIENT_SECRET", "-")
+});
 const CALLBACK_PORT: u16 = 1456;
 const LOGIN_PAGE: &str = "https://www.trae.ai/login";
 const EXCHANGE_PATH: &str = "/cloudide/api/v3/trae/oauth/ExchangeToken";
@@ -57,7 +62,7 @@ pub async fn start_login(region: Option<&str>) -> UsageResult<super::OAuthStartI
     let auth_url = format!(
         "{}?platform=ide&clientId={}&state={}&loginRegion={}&redirect={}",
         LOGIN_PAGE,
-        CLIENT_ID,
+        CLIENT_ID.as_str(),
         state,
         region,
         urlencoding(&redirect),
@@ -99,16 +104,18 @@ async fn exchange_code(
 ) -> UsageResult<ExchangeResponse> {
     let client = crate::http_client::usage_reqwest_with_active_fingerprint()?;
     let base = region_base_url(region);
+    let client_id = CLIENT_ID.as_str();
+    let client_secret = CLIENT_SECRET.as_str();
     let body = if let Some(c) = code {
-        json!({ "code": c, "clientId": CLIENT_ID })
+        json!({ "code": c, "clientId": client_id })
     } else {
         json!({
-            "ClientID": CLIENT_ID,
-            "clientId": CLIENT_ID,
+            "ClientID": client_id,
+            "clientId": client_id,
             "RefreshToken": refresh_token.unwrap_or(""),
             "refreshToken": refresh_token.unwrap_or(""),
             "refresh_token": refresh_token.unwrap_or(""),
-            "ClientSecret": CLIENT_SECRET,
+            "ClientSecret": client_secret,
         })
     };
     let resp = client

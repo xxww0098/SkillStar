@@ -13,6 +13,7 @@
 
 use chrono::Utc;
 use serde::Deserialize;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use crate::catalog::AuthMode;
@@ -20,6 +21,7 @@ use crate::crypto;
 use crate::oauth::local_server;
 use crate::oauth::pkce::PkcePair;
 use crate::oauth::token_refresh;
+use crate::oauth_clients;
 use crate::storage;
 use crate::subscription::{BillingCycle, Subscription, SubscriptionUsage};
 use crate::{UsageError, UsageResult};
@@ -27,7 +29,8 @@ use crate::{UsageError, UsageResult};
 const AUTHORIZE_URL: &str = "https://auth.opencode.ai/authorize";
 const TOKEN_URL: &str = "https://auth.opencode.ai/token";
 const CALLBACK_PORT: u16 = 1457;
-const CLIENT_ID: &str = "app";
+static CLIENT_ID: LazyLock<String> =
+    LazyLock::new(|| oauth_clients::client_id!("opencode", "SKILLSTAR_OPENCODE_CLIENT_ID", "app"));
 
 fn oauth_usage_unavailable() -> String {
     "OpenCode 官方 OAuth token 只适用于 CLI 授权，不能读取 opencode.ai 控制台用量；请在订阅设置中切换到 Cookie 模式，并从 opencode.ai 控制台请求复制 Cookie。".to_string()
@@ -54,7 +57,7 @@ pub async fn start_login(
     let auth_url = format!(
         "{}?client_id={}&redirect_uri={}&response_type=code&code_challenge={}&code_challenge_method=S256&state={}",
         AUTHORIZE_URL,
-        CLIENT_ID,
+        CLIENT_ID.as_str(),
         urlencoding(&redirect_uri),
         pkce.challenge,
         state,
@@ -182,7 +185,7 @@ async fn exchange_code(
             ("grant_type", "authorization_code"),
             ("code", code),
             ("redirect_uri", redirect_uri),
-            ("client_id", CLIENT_ID),
+            ("client_id", CLIENT_ID.as_str()),
             ("code_verifier", verifier),
         ])
         .send()

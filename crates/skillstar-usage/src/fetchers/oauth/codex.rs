@@ -13,6 +13,7 @@
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::Value;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use crate::catalog::AuthMode;
@@ -20,11 +21,13 @@ use crate::crypto;
 use crate::oauth::local_server::{self, CallbackSession};
 use crate::oauth::pkce::PkcePair;
 use crate::oauth::token_refresh;
+use crate::oauth_clients;
 use crate::storage;
 use crate::subscription::{BillingCycle, Subscription, SubscriptionUsage, UsageWindow};
 use crate::{UsageError, UsageResult};
 
-const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
+static CLIENT_ID: LazyLock<String> =
+    LazyLock::new(|| oauth_clients::client_id!("codex", "SKILLSTAR_CODEX_CLIENT_ID", "app_EMoamEEZ73f0CkXaXp7hrann"));
 const AUTHORIZE_URL: &str = "https://auth.openai.com/oauth/authorize";
 const TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
 const USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
@@ -102,7 +105,7 @@ pub async fn start_login(_region: Option<&str>) -> UsageResult<super::OAuthStart
 fn build_authorize_url(redirect_uri: &str, pkce: &PkcePair, state: &str) -> String {
     let params = [
         ("response_type", "code"),
-        ("client_id", CLIENT_ID),
+        ("client_id", CLIENT_ID.as_str()),
         ("redirect_uri", redirect_uri),
         ("scope", SCOPES),
         ("code_challenge", pkce.challenge.as_str()),
@@ -168,7 +171,7 @@ async fn exchange_code(
             ("grant_type", "authorization_code"),
             ("code", code),
             ("redirect_uri", redirect_uri),
-            ("client_id", CLIENT_ID),
+            ("client_id", CLIENT_ID.as_str()),
             ("code_verifier", verifier),
         ])
         .send()
@@ -278,7 +281,7 @@ async fn refresh_codex_tokens(subscription: &mut Subscription) -> UsageResult<()
         .form(&[
             ("grant_type", "refresh_token"),
             ("refresh_token", refresh.as_str()),
-            ("client_id", CLIENT_ID),
+            ("client_id", CLIENT_ID.as_str()),
         ])
         .send()
         .await

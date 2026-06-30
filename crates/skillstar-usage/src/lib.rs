@@ -2,13 +2,13 @@
 //!
 //! Provides a unified data model and storage for tracking subscriptions across
 //! AI coding plan providers (DeepSeek, GLM, Kimi, MiniMax, Cursor, Codex,
-//! Antigravity, Trae, Qoder, Kiro, Windsurf, GitHub Copilot,
+//! Antigravity, Trae, Qoder,
 //! plus cookie/manual-entry providers).
 //!
 //! The crate is organized into:
 //! - [`subscription`] — Domain types (Subscription, SubscriptionUsage, UsageWindow, ...)
 //! - [`storage`]      — JSON persistence at `~/.skillstar/config/usage/`
-//! - [`catalog`]      — Fixed catalog of 16 supported providers
+//! - [`catalog`]      — Fixed catalog of 12 supported providers
 //! - [`crypto`]       — AES-256-GCM helpers for API keys / OAuth tokens
 //! - [`alerts`]       — Threshold-based alert computation
 //! - [`oauth`]        — PKCE / local-server / poll-flow / device-flow primitives
@@ -24,6 +24,7 @@ pub mod fetchers;
 pub mod http_client;
 pub mod local_import;
 pub mod oauth;
+pub mod oauth_clients;
 pub mod protobuf_oauth;
 pub mod qoder_machine;
 pub mod refresh_guard;
