@@ -62,9 +62,6 @@ test_parse
 # Cursor agent config
 .cursor/
 
-# GitHub config (Actions workflows only tracked in CI)
-.github/
-
 # Sisyphus planning workspace
 .sisyphus/
 

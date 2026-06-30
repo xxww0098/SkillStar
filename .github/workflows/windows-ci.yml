@@ -1,0 +1,50 @@
+name: Windows CI
+
+# Catches Windows-specific regressions (paths, shell calls, line endings)
+# that local macOS/Linux development would miss.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: windows-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Frontend build (tsc + vite)
+        run: npm run build
+
+      - name: Frontend tests
+        run: npm test
+
+      - name: Rust tests (workspace)
+        run: cargo test --workspace --locked
+
+      - name: File-size guard (structural governance)
+        shell: bash
+        run: scripts/internal/check_file_size.sh
