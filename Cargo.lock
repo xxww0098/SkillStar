@@ -4895,6 +4895,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "junction"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "160f2eade097f30263b548aae5deb12ad349c909baa710fa24b92c9090b2e006"
+dependencies = [
+ "scopeguard",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "keccak"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8137,7 +8147,7 @@ dependencies = [
  "futures",
  "gix",
  "html2md",
- "junction",
+ "junction 1.4.2",
  "lazy_static",
  "machine-uid",
  "pbkdf2 0.12.2",
@@ -8248,7 +8258,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "dirs 6.0.0",
- "junction",
+ "junction 1.4.2",
  "r2d2",
  "r2d2_sqlite 0.34.0",
  "reqwest 0.13.3",
@@ -8356,6 +8366,7 @@ dependencies = [
  "dirs 5.0.1",
  "flate2",
  "gix",
+ "junction 2.0.0",
  "regex",
  "serde",
  "serde_json",
