@@ -15,10 +15,9 @@ import { Popover } from "radix-ui";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "../../lib/toast";
-import { agentIconCls, cn } from "../../lib/utils";
+import { cn } from "../../lib/utils";
 import type { AgentProfile, SortOption, ViewMode } from "../../types";
-import { AgentIcon } from "../ui/AgentIcon";
-import { HScrollRow } from "../ui/HScrollRow";
+import { AgentFilterPill } from "../ui/AgentFilterPill";
 import { SearchInput } from "../ui/SearchInput";
 import { ViewToggle } from "../ui/ViewToggle";
 import { PageToolbar } from "./PageToolbar";
@@ -238,58 +237,7 @@ export function Toolbar({
 
       {/* Agent filter */}
       {enabledProfiles.length > 0 && onAgentFilterChange && (
-        <div className="flex items-center gap-0 border border-border rounded-lg overflow-hidden h-8 p-0.5 bg-sidebar/30 shrink-0">
-          <button
-            onClick={() => onAgentFilterChange(null)}
-            aria-pressed={agentFilter === null}
-            className={cn(
-              "relative h-full px-2.5 flex items-center justify-center rounded-md text-xs font-medium cursor-pointer whitespace-nowrap z-10 shrink-0 focus-ring",
-              agentFilter === null
-                ? "text-accent-foreground"
-                : "text-muted-foreground hover:text-foreground hover:bg-sidebar-hover",
-            )}
-          >
-            <div
-              className={cn(
-                "absolute inset-0 bg-accent rounded-md -z-10 [backface-visibility:hidden]",
-                agentFilter === null ? "opacity-100" : "opacity-0",
-              )}
-            />
-            {t("toolbar.all")}
-          </button>
-          <HScrollRow count={enabledProfiles.length} maxVisible={4} className="gap-0.5">
-            {enabledProfiles.map((profile) => {
-              const isActive = agentFilter === profile.id;
-              return (
-                <button
-                  key={profile.id}
-                  onClick={() => onAgentFilterChange(agentFilter === profile.id ? null : profile.id)}
-                  title={profile.display_name}
-                  aria-pressed={isActive}
-                  className={cn(
-                    "relative h-full w-7 shrink-0 flex items-center justify-center rounded-md cursor-pointer z-10 focus-ring",
-                    !isActive && "hover:bg-sidebar-hover",
-                  )}
-                >
-                  <div
-                    className={cn(
-                      "absolute inset-0 bg-accent rounded-md -z-10 [backface-visibility:hidden]",
-                      isActive ? "opacity-100" : "opacity-0",
-                    )}
-                  />
-                  <AgentIcon
-                    profile={profile}
-                    className={cn(
-                      agentIconCls(profile.icon),
-                      "transition duration-200",
-                      isActive ? "drop-shadow-sm scale-[1.1]" : "opacity-60 hover:opacity-90 grayscale-0",
-                    )}
-                  />
-                </button>
-              );
-            })}
-          </HScrollRow>
-        </div>
+        <AgentFilterPill items={enabledProfiles} value={agentFilter ?? null} onChange={onAgentFilterChange} />
       )}
 
       {/* Unified origin filter: source type (Hub / Local) + repo source in one compact dropdown */}

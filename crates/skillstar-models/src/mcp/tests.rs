@@ -23,7 +23,7 @@ fn http(name: &str) -> McpServerEntry {
 
 #[test]
 fn canonical_stdio_has_type_command_args_env() {
-    let v = canonical_spec(&stdio("fs"));
+    let v = claude_code_spec(&stdio("fs"));
     assert_eq!(v["type"], "stdio");
     assert_eq!(v["command"], "npx");
     assert_eq!(v["args"][0], "-y");
@@ -86,6 +86,65 @@ fn grok_stdio_omits_type_and_matches_native_shape() {
 }
 
 #[test]
+fn kiro_projects_auto_approve_all_as_wildcard() {
+    let mut e = stdio("fs");
+    e.auto_approve_all = true;
+    e.disabled_tools = vec!["delete_file".into()];
+    let v = kiro_spec(&e);
+    assert_eq!(v["autoApprove"], serde_json::json!(["*"]));
+    assert_eq!(v["disabledTools"], serde_json::json!(["delete_file"]));
+}
+
+#[test]
+fn kiro_projects_specific_auto_approve_tools_when_not_all() {
+    let mut e = stdio("fs");
+    e.auto_approve_tools = vec!["read_file".into(), "list_dir".into()];
+    let v = kiro_spec(&e);
+    assert_eq!(v["autoApprove"], serde_json::json!(["read_file", "list_dir"]));
+}
+
+#[test]
+fn gemini_projects_trust_exclude_tools_and_timeout() {
+    let mut e = stdio("fs");
+    e.auto_approve_all = true;
+    e.disabled_tools = vec!["dangerous_tool".into()];
+    e.timeout_ms = Some(15_000);
+    let v = gemini_spec(&e);
+    assert_eq!(v["trust"], true);
+    assert_eq!(v["excludeTools"], serde_json::json!(["dangerous_tool"]));
+    assert_eq!(v["timeout"], 15_000);
+}
+
+#[test]
+fn gemini_omits_trust_and_timeout_when_unset() {
+    let v = gemini_spec(&stdio("fs"));
+    assert!(v.get("trust").is_none());
+    assert!(v.get("timeout").is_none());
+    assert!(v.get("excludeTools").is_none());
+}
+
+#[test]
+fn codex_projects_disabled_tools_and_timeout_seconds() {
+    let mut e = stdio("fs");
+    e.disabled_tools = vec!["delete_file".into()];
+    e.timeout_ms = Some(30_000);
+    let t = codex_toml_table(&e);
+    assert_eq!(
+        t["disabled_tools"].as_array().unwrap()[0].as_str(),
+        Some("delete_file")
+    );
+    assert_eq!(t["tool_timeout_sec"].as_integer(), Some(30));
+}
+
+#[test]
+fn opencode_projects_timeout_ms_verbatim() {
+    let mut e = stdio("fs");
+    e.timeout_ms = Some(8_000);
+    let v = opencode_spec(&e);
+    assert_eq!(v["timeout"], 8_000);
+}
+
+#[test]
 fn grok_http_uses_headers_not_http_headers() {
     let t = grok_toml_table(&http("r"));
     assert!(t.get("type").is_none());
@@ -127,7 +186,7 @@ fn set_tool_enabled_updates_map() {
 fn store_roundtrip_and_import_parse() {
     // canonical → json spec → parse back
     let e = stdio("fs");
-    let spec = canonical_spec(&e);
+    let spec = claude_code_spec(&e);
     let parsed = entry_from_json_spec("fs", &spec).unwrap();
     assert_eq!(parsed.command, Some("npx".to_string()));
     assert_eq!(parsed.args.len(), 2);
@@ -204,6 +263,33 @@ fn kiro_resolves_to_settings_mcp_json() {
         "unexpected kiro path: {}",
         p.display()
     );
+}
+
+#[test]
+fn cursor_resolves_to_mcp_json() {
+    // Cursor reads user-scope MCP from ~/.cursor/mcp.json (top-level mcpServers).
+    let p = resolve_mcp_config_path("cursor").unwrap();
+    assert!(
+        p.ends_with(".cursor/mcp.json"),
+        "unexpected cursor path: {}",
+        p.display()
+    );
+}
+
+#[test]
+fn cursor_spec_matches_community_canonical_shape() {
+    // Cursor uses the plain community mcpServers shape (type/command/args/env),
+    // with no per-server approval/exposure/timeout fields projected.
+    let v = cursor_spec(&stdio("fs"));
+    assert_eq!(v.get("type").and_then(|x| x.as_str()), Some("stdio"));
+    assert_eq!(v.get("command").and_then(|x| x.as_str()), Some("npx"));
+    assert_eq!(
+        v.get("args").and_then(|x| x.as_array()).map(|a| a.len()),
+        Some(2)
+    );
+    assert!(v.get("autoApprove").is_none());
+    assert!(v.get("disabledTools").is_none());
+    assert!(v.get("timeout").is_none());
 }
 
 #[test]

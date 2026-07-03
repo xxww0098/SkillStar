@@ -7,7 +7,7 @@ import { Button } from "../../../components/ui/button";
 import { EmptyState } from "../../../components/ui/EmptyState";
 import { LoadingLogo } from "../../../components/ui/LoadingLogo";
 import { SearchInput } from "../../../components/ui/SearchInput";
-import { AgentIcon } from "../../../components/ui/AgentIcon";
+import { AgentFilterPill } from "../../../components/ui/AgentFilterPill";
 import { cn } from "../../../lib/utils";
 import type { McpPreset, McpServerEntry, McpToolId } from "../../../types";
 import { useMcpServers } from "../hooks/useMcpServers";
@@ -76,20 +76,37 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
   const [createSeed, setCreateSeed] = useState<{ key: number; defaults?: Partial<McpServerFormValue> }>({ key: 0 });
   const [query, setQuery] = useState("");
   const normalizedQuery = query.trim().toLowerCase();
+  // Active tool filter: only show servers synced into this tool (null = all).
+  const [toolFilter, setToolFilter] = useState<string | null>(null);
 
   const filteredServers = useMemo(
     () =>
-      servers.filter((server) =>
-        matchesQuery(normalizedQuery, [
+      servers.filter((server) => {
+        if (toolFilter && !server.enabled[toolFilter as McpToolId]) return false;
+        return matchesQuery(normalizedQuery, [
           server.name,
           server.description,
           server.homepage,
           server.transport,
           server.tags,
           serverCommand(server),
-        ]),
-      ),
-    [servers, normalizedQuery],
+        ]);
+      }),
+    [servers, normalizedQuery, toolFilter],
+  );
+
+  // Pseudo-profiles for the shared filter pill: map each MCP tool to its icon.
+  const toolFilterItems = useMemo(
+    () =>
+      toolStatuses.map((status) => {
+        const meta = MCP_TOOL_ICON[status.toolId as McpToolId];
+        return {
+          id: status.toolId,
+          icon: meta?.icon ?? "",
+          display_name: meta?.label ?? status.label,
+        };
+      }),
+    [toolStatuses],
   );
 
   const editing = drawer.type === "edit" ? (servers.find((s) => s.id === drawer.id) ?? null) : null;
@@ -129,7 +146,7 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
         await updateServer(drawer.id, patch);
         toast.success(t("mcp.saved"));
       } else {
-        const entry: Partial<McpServerEntry> = { ...value };
+        const entry: Partial<McpServerEntry> = { ...value, timeoutMs: value.timeoutMs ?? undefined };
         await createServer(entry);
         toast.success(t("mcp.added"));
       }
@@ -181,42 +198,18 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
 
   const filtersSlot = (
     <>
-      <div className="flex h-8 items-center justify-center gap-1.5 rounded-lg border border-border/70 bg-background/50 px-3 text-xs font-medium tabular-nums text-foreground/80 shadow-sm">
+      {/* Tool filter — shared segmented pill, identical affordance to Skills' agent
+          filter. Clicking a tool shows only servers synced into it. */}
+      <AgentFilterPill items={toolFilterItems} value={toolFilter} onChange={setToolFilter} />
+
+      {/* Count badge — standalone read-only pill (mirrors Skills' countText). */}
+      <div className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border/70 bg-background/50 px-3 text-xs font-medium tabular-nums text-foreground/80 shadow-sm">
         <Boxes className="h-3.5 w-3.5 text-muted-foreground" />
         <span>{filteredServers.length}</span>
         {filteredServers.length !== servers.length ? (
           <span className="text-muted-foreground/70">/ {servers.length}</span>
         ) : null}
       </div>
-      {toolStatuses.map((status) => {
-        const toolId = status.toolId as McpToolId;
-        const meta = MCP_TOOL_ICON[toolId];
-        return (
-          <span
-            key={status.toolId}
-            title={status.configPath}
-            className={cn(
-              "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2 text-[11px] transition-colors",
-              status.installed
-                ? "border-border/70 bg-background/40 text-muted-foreground"
-                : "border-border/40 bg-muted/20 text-muted-foreground/60",
-            )}
-          >
-            <span
-              className={cn("h-1.5 w-1.5 rounded-full", status.installed ? "bg-success" : "bg-muted-foreground/35")}
-            />
-            {meta ? (
-              <AgentIcon
-                profile={{ id: meta.profileId, icon: meta.icon, display_name: meta.label }}
-                className="h-3.5 w-3.5"
-              />
-            ) : (
-              <span>{status.label}</span>
-            )}
-            <span className="text-muted-foreground/60">{status.serverCount}</span>
-          </span>
-        );
-      })}
     </>
   );
 
@@ -244,6 +237,9 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
   );
 
   const hasSearch = normalizedQuery.length > 0;
+  // Any active narrowing (text search or tool filter) means an empty result is a
+  // "no matches" state, not a "you have no servers yet" state.
+  const hasActiveFilter = hasSearch || toolFilter !== null;
   const showServers = filteredServers.length > 0;
 
   return (
@@ -298,10 +294,10 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
             ) : (
               <EmptyState
                 icon={<Search className="h-6 w-6" />}
-                title={hasSearch ? t("mcp.noMatches") : t("mcp.emptyTitle")}
-                description={hasSearch ? t("mcp.emptySearchDescription") : t("mcp.emptyDescription")}
+                title={hasActiveFilter ? t("mcp.noMatches") : t("mcp.emptyTitle")}
+                description={hasActiveFilter ? t("mcp.emptySearchDescription") : t("mcp.emptyDescription")}
                 action={
-                  hasSearch ? null : (
+                  hasActiveFilter ? null : (
                     <div className="flex flex-wrap justify-center gap-2">
                       <Button variant="outline" onClick={() => void handleImport()}>
                         <Download className="h-4 w-4" />

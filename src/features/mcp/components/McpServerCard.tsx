@@ -1,4 +1,5 @@
-import { Globe, Terminal } from "lucide-react";
+import { Globe, Terminal, Zap } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { AgentIcon } from "../../../components/ui/AgentIcon";
 import { CardDescription, CardTitle } from "../../../components/ui/card";
 import { CardTemplate } from "../../../components/ui/card-template";
@@ -21,6 +22,7 @@ export const MCP_TOOL_ICON: Record<McpToolId, { profileId: string; icon: string;
   opencode: { profileId: "opencode", icon: "agents/opencode.svg", label: "OpenCode" },
   zcode: { profileId: "zcode", icon: "agents/zcode.svg", label: "ZCode" },
   kiro: { profileId: "kiro", icon: "agents/kiro.svg", label: "Kiro" },
+  cursor: { profileId: "cursor", icon: "agents/cursor.svg", label: "Cursor" },
 };
 
 interface McpServerCardProps {
@@ -31,6 +33,7 @@ interface McpServerCardProps {
 }
 
 export function McpServerCard({ server, toolStatuses, onOpen, onToggleTool }: McpServerCardProps) {
+  const { t } = useTranslation();
   const isRemote = server.transport === "http" || server.transport === "sse";
   const summary = isRemote ? server.url : [server.command, ...(server.args ?? [])].filter(Boolean).join(" ");
   const enabledCount = MCP_TOOL_IDS.filter((t) => server.enabled[t]).length;
@@ -41,11 +44,22 @@ export function McpServerCard({ server, toolStatuses, onOpen, onToggleTool }: Mc
       className="group cursor-pointer"
       onClick={onOpen}
       topRightSlot={
-        <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-          {server.transport}
+        <span className="flex items-center gap-1">
+          {server.autoApproveAll ? (
+            <span
+              title={t("mcp.autoApproveAllHint")}
+              className="inline-flex items-center gap-0.5 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400"
+            >
+              <Zap className="h-2.5 w-2.5" />
+              {t("mcp.yoloBadge")}
+            </span>
+          ) : null}
+          <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+            {server.transport}
+          </span>
         </span>
       }
-      headerClassName="pr-20"
+      headerClassName="pr-28"
       header={
         <div className="flex items-center gap-2.5">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10">

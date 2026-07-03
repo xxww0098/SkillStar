@@ -49,7 +49,35 @@ pub(crate) fn entry_from_json_spec(name: &str, spec: &Value) -> Option<McpServer
             entry.command.as_ref()?; // require command
         }
     }
+    apply_common_approval_fields(&mut entry, obj);
     Some(entry)
+}
+
+/// Read back the approval/exposure fields any of our JSON writers may have
+/// set (`autoApprove` / `disabledTools` / `trust` / `excludeTools` /
+/// `timeout`), tolerating whichever subset a given tool actually wrote.
+fn apply_common_approval_fields(entry: &mut McpServerEntry, obj: &Map<String, Value>) {
+    if let Some(arr) = obj.get("autoApprove").and_then(Value::as_array) {
+        let tools: Vec<String> = arr.iter().filter_map(|v| v.as_str().map(String::from)).collect();
+        if tools.iter().any(|t| t == "*") {
+            entry.auto_approve_all = true;
+        } else {
+            entry.auto_approve_tools = tools;
+        }
+    }
+    if obj.get("trust").and_then(Value::as_bool) == Some(true) {
+        entry.auto_approve_all = true;
+    }
+    let disabled = obj
+        .get("disabledTools")
+        .or_else(|| obj.get("excludeTools"))
+        .and_then(Value::as_array);
+    if let Some(arr) = disabled {
+        entry.disabled_tools = arr.iter().filter_map(|v| v.as_str().map(String::from)).collect();
+    }
+    if let Some(ms) = obj.get("timeout").and_then(Value::as_u64) {
+        entry.timeout_ms = Some(ms);
+    }
 }
 
 pub(crate) fn blank_entry(name: &str, transport: &str) -> McpServerEntry {
@@ -67,6 +95,10 @@ pub(crate) fn blank_entry(name: &str, transport: &str) -> McpServerEntry {
         homepage: None,
         tags: Vec::new(),
         enabled: BTreeMap::new(),
+        auto_approve_all: false,
+        auto_approve_tools: Vec::new(),
+        disabled_tools: Vec::new(),
+        timeout_ms: None,
         sort_index: 0,
         created_at: None,
         updated_at: None,
@@ -189,6 +221,19 @@ fn entry_from_codex_table(name: &str, tbl: &toml::Table) -> Option<McpServerEntr
             entry.command.as_ref()?;
         }
     }
+    if let Some(arr) = tbl.get("disabled_tools").and_then(|v| v.as_array()) {
+        entry.disabled_tools = arr
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
+    }
+    let timeout_sec = tbl
+        .get("tool_timeout_sec")
+        .or_else(|| tbl.get("startup_timeout_sec"))
+        .and_then(|v| v.as_integer());
+    if let Some(sec) = timeout_sec {
+        entry.timeout_ms = Some((sec.max(0) as u64) * 1000);
+    }
     Some(entry)
 }
 
@@ -205,6 +250,9 @@ pub(crate) fn entry_from_opencode_spec(name: &str, spec: &Value) -> Option<McpSe
                 .map(json_str_map)
                 .unwrap_or_default();
             entry.url.as_ref()?;
+            if let Some(ms) = obj.get("timeout").and_then(Value::as_u64) {
+                entry.timeout_ms = Some(ms);
+            }
             Some(entry)
         }
         _ => {
@@ -225,6 +273,9 @@ pub(crate) fn entry_from_opencode_spec(name: &str, spec: &Value) -> Option<McpSe
                 .map(json_str_map)
                 .unwrap_or_default();
             entry.command.as_ref()?;
+            if let Some(ms) = obj.get("timeout").and_then(Value::as_u64) {
+                entry.timeout_ms = Some(ms);
+            }
             Some(entry)
         }
     }

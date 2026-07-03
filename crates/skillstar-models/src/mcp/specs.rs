@@ -6,10 +6,11 @@ use std::collections::BTreeMap;
 
 use super::*;
 
-/// Canonical "community" mcpServers value (used by Claude Code & Gemini).
-///
-/// stdio keeps `type` (modern Claude Code / Gemini accept it); http/sse carry
-/// `url` and optional `headers`.
+/// Canonical "community" mcpServers value (base shape shared by Claude Code,
+/// Gemini, Kiro, ZCode). stdio keeps `type`; http/sse carry `url` and
+/// optional `headers`. Does **not** include any tool-specific
+/// approval/exposure/timeout fields — callers layer those on top per tool
+/// (see [`claude_code_spec`], [`gemini_spec`], [`kiro_spec`]).
 pub(crate) fn canonical_spec(entry: &McpServerEntry) -> Value {
     let mut obj = Map::new();
     match entry.transport.as_str() {
@@ -41,6 +42,64 @@ pub(crate) fn canonical_spec(entry: &McpServerEntry) -> Value {
     Value::Object(obj)
 }
 
+/// Claude Code value (`~/.claude.json` `mcpServers.<name>`): canonical shape
+/// only. Claude Code has no verified native per-server auto-approve,
+/// disabled-tools, or timeout field, so none of the approval/exposure config
+/// is projected here.
+pub(crate) fn claude_code_spec(entry: &McpServerEntry) -> Value {
+    canonical_spec(entry)
+}
+
+/// Cursor value (`~/.cursor/mcp.json` `mcpServers.<name>`): canonical shape
+/// only. Cursor has no verified native per-server auto-approve,
+/// disabled-tools, or timeout field, so none of the approval/exposure config
+/// is projected here.
+pub(crate) fn cursor_spec(entry: &McpServerEntry) -> Value {
+    canonical_spec(entry)
+}
+
+/// Gemini CLI value (`~/.gemini/settings.json` `mcpServers.<name>`): canonical
+/// shape plus `trust` (bypass all confirmations), `excludeTools`, and
+/// `timeout` (ms) — all verified fields from Gemini's own docs.
+/// `auto_approve_tools` (a partial allowlist) has no Gemini equivalent
+/// (`trust` is all-or-nothing) and is not projected.
+pub(crate) fn gemini_spec(entry: &McpServerEntry) -> Value {
+    let mut obj = match canonical_spec(entry) {
+        Value::Object(m) => m,
+        _ => Map::new(),
+    };
+    if entry.auto_approve_all {
+        obj.insert("trust".into(), json!(true));
+    }
+    if !entry.disabled_tools.is_empty() {
+        obj.insert("excludeTools".into(), json!(entry.disabled_tools));
+    }
+    if let Some(ms) = entry.timeout_ms.filter(|&ms| ms > 0) {
+        obj.insert("timeout".into(), json!(ms));
+    }
+    Value::Object(obj)
+}
+
+/// Kiro value (`~/.kiro/settings/mcp.json` `mcpServers.<name>`): canonical
+/// shape plus `autoApprove` and `disabledTools` — the exact fields documented
+/// at kiro.dev/docs/cli/mcp/configuration. `timeout_ms` has no documented Kiro
+/// field and is not projected.
+pub(crate) fn kiro_spec(entry: &McpServerEntry) -> Value {
+    let mut obj = match canonical_spec(entry) {
+        Value::Object(m) => m,
+        _ => Map::new(),
+    };
+    if entry.auto_approve_all {
+        obj.insert("autoApprove".into(), json!(["*"]));
+    } else if !entry.auto_approve_tools.is_empty() {
+        obj.insert("autoApprove".into(), json!(entry.auto_approve_tools));
+    }
+    if !entry.disabled_tools.is_empty() {
+        obj.insert("disabledTools".into(), json!(entry.disabled_tools));
+    }
+    Value::Object(obj)
+}
+
 /// Claude Desktop value: stdio only, no `type` key.
 pub(crate) fn claude_desktop_spec(entry: &McpServerEntry) -> Result<Value> {
     if entry.transport != "stdio" {
@@ -64,6 +123,10 @@ pub(crate) fn claude_desktop_spec(entry: &McpServerEntry) -> Result<Value> {
 }
 
 /// OpenCode value: stdio→`local` (command array, `environment`), http/sse→`remote`.
+/// Also carries `timeout` (ms) — OpenCode's own documented field. OpenCode has
+/// no per-server auto-approve/disabled-tools field (tool exposure is
+/// controlled globally via the `tools`/`agent` glob config, out of scope for a
+/// single server entry), so those are not projected.
 pub(crate) fn opencode_spec(entry: &McpServerEntry) -> Value {
     let mut obj = Map::new();
     match entry.transport.as_str() {
@@ -90,6 +153,9 @@ pub(crate) fn opencode_spec(entry: &McpServerEntry) -> Value {
             }
             obj.insert("enabled".into(), json!(true));
         }
+    }
+    if let Some(ms) = entry.timeout_ms.filter(|&ms| ms > 0) {
+        obj.insert("timeout".into(), json!(ms));
     }
     Value::Object(obj)
 }
@@ -143,7 +209,11 @@ pub(crate) fn grok_toml_table(entry: &McpServerEntry) -> toml::Table {
     t
 }
 
-/// Codex `[mcp_servers.<name>]` TOML table.
+/// Codex `[mcp_servers.<name>]` TOML table. Also carries `disabled_tools`
+/// (blacklist) and `tool_timeout_sec` — both documented Codex fields.
+/// `auto_approve_*` has no Codex per-server equivalent (approval is
+/// controlled by the separate `[apps.<name>]` connector config) and is not
+/// projected.
 pub(crate) fn codex_toml_table(entry: &McpServerEntry) -> toml::Table {
     let mut t = toml::Table::new();
     match entry.transport.as_str() {
@@ -182,6 +252,18 @@ pub(crate) fn codex_toml_table(entry: &McpServerEntry) -> toml::Table {
                 );
             }
         }
+    }
+    if !entry.disabled_tools.is_empty() {
+        let arr: Vec<toml::Value> = entry
+            .disabled_tools
+            .iter()
+            .map(|d| toml::Value::String(d.clone()))
+            .collect();
+        t.insert("disabled_tools".into(), toml::Value::Array(arr));
+    }
+    if let Some(ms) = entry.timeout_ms.filter(|&ms| ms > 0) {
+        let sec = (ms / 1000).max(1) as i64;
+        t.insert("tool_timeout_sec".into(), toml::Value::Integer(sec));
     }
     t
 }

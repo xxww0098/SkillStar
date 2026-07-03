@@ -376,6 +376,20 @@ export const MCP_TOOL_STATUSES = [
     installed: true,
     serverCount: 0,
   },
+  {
+    toolId: "kiro",
+    label: "Kiro",
+    configPath: "~/.kiro/settings/mcp.json",
+    installed: false,
+    serverCount: 0,
+  },
+  {
+    toolId: "cursor",
+    label: "Cursor",
+    configPath: "~/.cursor/mcp.json",
+    installed: true,
+    serverCount: 0,
+  },
 ];
 
 export const MCP_PRESETS = [

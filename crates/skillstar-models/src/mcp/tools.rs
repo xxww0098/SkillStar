@@ -41,6 +41,12 @@ pub fn resolve_kiro_config_path() -> Result<PathBuf> {
     Ok(home.join(".kiro").join("settings").join("mcp.json"))
 }
 
+/// `~/.cursor/mcp.json` — Cursor's user-scope MCP servers (top-level `mcpServers`).
+pub fn resolve_cursor_config_path() -> Result<PathBuf> {
+    let home = dirs::home_dir().context("Could not determine home directory")?;
+    Ok(home.join(".cursor").join("mcp.json"))
+}
+
 /// Resolve the live MCP config file for a tool.
 pub fn resolve_mcp_config_path(tool_id: &str) -> Result<PathBuf> {
     match tool_id {
@@ -53,6 +59,7 @@ pub fn resolve_mcp_config_path(tool_id: &str) -> Result<PathBuf> {
         // ZCode desktop reads `mcp.servers` from ~/.zcode/cli/config.json (see zcode_cli_*).
         "zcode" => resolve_zcode_cli_mcp_config_path(),
         "kiro" => resolve_kiro_config_path(),
+        "cursor" => resolve_cursor_config_path(),
         _ => bail!("Unsupported tool '{tool_id}'"),
     }
 }
@@ -79,6 +86,7 @@ pub fn tool_installed(tool_id: &str) -> bool {
         }
         "zcode" => home.join(".zcode").exists(),
         "kiro" => home.join(".kiro").exists(),
+        "cursor" => home.join(".cursor").exists(),
         _ => false,
     }
 }
@@ -118,7 +126,7 @@ fn count_live_servers(tool_id: &str) -> usize {
                     .map(|m| m.len())
             })
             .unwrap_or(0),
-        // claude-code, claude-desktop, gemini, kiro all use top-level `mcpServers`.
+        // claude-code, claude-desktop, gemini, kiro, cursor all use top-level `mcpServers`.
         _ => serde_json::from_str::<Value>(&content)
             .ok()
             .and_then(|v| {

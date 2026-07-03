@@ -3,7 +3,7 @@ import CodexIcon from "@lobehub/icons/es/Codex/components/Color";
 import CursorIcon from "@lobehub/icons/es/Cursor/components/Mono";
 import DeepSeekIcon from "@lobehub/icons/es/DeepSeek/components/Color";
 import GrokIcon from "@lobehub/icons/es/Grok/components/Mono";
-import KimiIcon from "@lobehub/icons/es/Kimi/components/Color";
+import KimiIcon from "@lobehub/icons/es/Kimi/components/Mono";
 import MiniMaxIcon from "@lobehub/icons/es/Minimax/components/Color";
 import OpenCodeIcon from "@lobehub/icons/es/OpenCode/components/Mono";
 import QoderIcon from "@lobehub/icons/es/Qoder/components/Color";

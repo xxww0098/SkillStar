@@ -26,6 +26,7 @@
 //! | `opencode`       | `~/.config/opencode/opencode.json`     | `mcp.<name>` (`local`/`remote` form) |
 //! | `zcode`          | `~/.zcode/cli/config.json`             | `mcp.servers.<name>` (community JSON) |
 //! | `kiro`           | `~/.kiro/settings/mcp.json`            | `mcpServers.<name>` (community JSON, keeps `type`) |
+//! | `cursor`         | `~/.cursor/mcp.json`                   | `mcpServers.<name>` (community JSON, keeps `type`) |
 //!
 //! All live writes create a rolling backup (last 5) and use merge semantics:
 //! only the single managed server key is touched, every other field is left
@@ -69,8 +70,8 @@ pub use store::*;
 
 mod specs;
 pub(crate) use specs::{
-    canonical_spec, claude_desktop_spec, codex_toml_table, grok_toml_table, opencode_spec,
-    zcode_cli_spec,
+    claude_code_spec, claude_desktop_spec, codex_toml_table, cursor_spec, gemini_spec,
+    grok_toml_table, kiro_spec, opencode_spec, zcode_cli_spec,
 };
 
 // ---------------------------------------------------------------------------

@@ -27,6 +27,7 @@ export const MCP_TOOL_IDS = [
   "opencode",
   "zcode",
   "kiro",
+  "cursor",
 ] as const;
 
 export type McpToolId = (typeof MCP_TOOL_IDS)[number];
@@ -50,6 +51,15 @@ export interface McpServerEntry {
   tags?: string[];
   /** Per-tool enable flags, keyed by tool id. */
   enabled: Record<string, boolean>;
+  // tool-call approval / exposure (best-effort per tool)
+  /** Auto-approve every tool call ("YOLO"). Kiro `autoApprove:["*"]`, Gemini `trust:true`. */
+  autoApproveAll?: boolean;
+  /** Specific tool names to auto-approve (Kiro `autoApprove`). */
+  autoApproveTools?: string[];
+  /** Tool names to hide from the agent (Kiro `disabledTools`, Gemini `excludeTools`, Codex `disabled_tools`). */
+  disabledTools?: string[];
+  /** Request/startup timeout in ms (Gemini/OpenCode `timeout`, Codex `*_timeout_sec`). */
+  timeoutMs?: number;
   sortIndex: number;
   createdAt?: number;
   updatedAt?: number;
@@ -69,6 +79,11 @@ export interface McpServerPatch {
   description?: string;
   homepage?: string;
   tags?: string[];
+  autoApproveAll?: boolean;
+  autoApproveTools?: string[];
+  disabledTools?: string[];
+  /** `null` clears the timeout back to the tool default; omit to leave untouched. */
+  timeoutMs?: number | null;
 }
 
 export interface McpStore {

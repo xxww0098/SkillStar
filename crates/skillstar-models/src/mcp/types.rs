@@ -18,6 +18,7 @@ pub const MCP_TOOL_IDS: &[&str] = &[
     "opencode",
     "zcode",
     "kiro",
+    "cursor",
 ];
 
 /// Human-readable label for a tool id.
@@ -31,6 +32,7 @@ pub fn mcp_tool_label(tool_id: &str) -> &'static str {
         "opencode" => "OpenCode",
         "zcode" => "ZCode",
         "kiro" => "Kiro",
+        "cursor" => "Cursor",
         _ => "Unknown",
     }
 }
@@ -78,6 +80,29 @@ pub struct McpServerEntry {
     /// Per-tool enable flags, keyed by tool id (see [`MCP_TOOL_IDS`]).
     #[serde(default)]
     pub enabled: BTreeMap<String, bool>,
+
+    // --- tool-call approval / exposure (best-effort per tool, see `specs.rs`) ---
+    /// Auto-approve every tool call for this server without prompting ("YOLO").
+    /// Maps to Kiro's `autoApprove: ["*"]` and Gemini's `trust: true`. There is
+    /// no verified native equivalent for Claude Code/Desktop, OpenCode, Grok,
+    /// or ZCode, so this flag has no effect when projected to those tools.
+    #[serde(default)]
+    pub auto_approve_all: bool,
+    /// Specific tool names to auto-approve without prompting (Kiro
+    /// `autoApprove`). Ignored when `auto_approve_all` is true (which already
+    /// approves everything).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub auto_approve_tools: Vec<String>,
+    /// Tool names to hide from the agent entirely (Kiro `disabledTools`,
+    /// Gemini `excludeTools`, Codex `disabled_tools`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub disabled_tools: Vec<String>,
+    /// Request/startup timeout in milliseconds (Gemini `timeout`, OpenCode
+    /// `timeout`). Converted to whole seconds for Codex's
+    /// `startup_timeout_sec` / `tool_timeout_sec`. `None`/`0` means "use the
+    /// tool's own default".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
 
     #[serde(default)]
     pub sort_index: u32,
@@ -390,6 +415,17 @@ pub struct McpServerPatch {
     pub homepage: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_approve_all: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_approve_tools: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disabled_tools: Option<Vec<String>>,
+    /// `Some(None)` clears the timeout back to "use tool default"; `None`
+    /// leaves it untouched. Represented as `Option<Option<u64>>` so the
+    /// three-state patch semantics survive JSON round-tripping.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<Option<u64>>,
 }
 
 /// Root structure stored in `mcp_servers.json`.

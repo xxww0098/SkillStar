@@ -186,6 +186,18 @@ pub fn update_server(
     if let Some(v) = patch.tags {
         server.tags = v;
     }
+    if let Some(v) = patch.auto_approve_all {
+        server.auto_approve_all = v;
+    }
+    if let Some(v) = patch.auto_approve_tools {
+        server.auto_approve_tools = v;
+    }
+    if let Some(v) = patch.disabled_tools {
+        server.disabled_tools = v;
+    }
+    if let Some(v) = patch.timeout_ms {
+        server.timeout_ms = v;
+    }
     server.updated_at = Some(now_ms());
 
     let updated = server.clone();

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
 import { cn } from "../../../lib/utils";
@@ -13,6 +14,7 @@ const TOOL_LABELS: Record<McpToolId, string> = {
   opencode: "OpenCode",
   zcode: "ZCode",
   kiro: "Kiro",
+  cursor: "Cursor",
 };
 
 export interface McpServerFormValue {
@@ -27,6 +29,10 @@ export interface McpServerFormValue {
   description?: string;
   homepage?: string;
   enabled: Record<string, boolean>;
+  autoApproveAll?: boolean;
+  autoApproveTools?: string[];
+  disabledTools?: string[];
+  timeoutMs?: number | null;
 }
 
 interface McpServerFormProps {
@@ -61,6 +67,20 @@ function kvToText(rec?: Record<string, string>): string {
     .join("\n");
 }
 
+/** Parse a comma/newline-separated list into a trimmed, de-duped string array. */
+function parseList(text: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of text.split(/[\n,]/)) {
+    const item = raw.trim();
+    if (item && !seen.has(item)) {
+      seen.add(item);
+      out.push(item);
+    }
+  }
+  return out;
+}
+
 const textareaCls =
   "w-full rounded-lg border border-border bg-background/60 px-3 py-2 text-xs font-mono text-foreground outline-none transition focus:border-primary/50 focus:ring-2 focus:ring-primary/20";
 
@@ -74,6 +94,7 @@ function FieldLabel({ children, hint }: { children: React.ReactNode; hint?: stri
 }
 
 export function McpServerForm({ initial, defaults, onSubmit, onDelete, submitting, submitLabel }: McpServerFormProps) {
+  const { t } = useTranslation();
   const [name, setName] = useState(initial?.name ?? defaults?.name ?? "");
   const [transport, setTransport] = useState(initial?.transport ?? defaults?.transport ?? "stdio");
   const [command, setCommand] = useState(initial?.command ?? defaults?.command ?? "");
@@ -85,6 +106,20 @@ export function McpServerForm({ initial, defaults, onSubmit, onDelete, submittin
   const [description, setDescription] = useState(initial?.description ?? defaults?.description ?? "");
   const [homepage, setHomepage] = useState(initial?.homepage ?? defaults?.homepage ?? "");
   const [enabled, setEnabled] = useState<Record<string, boolean>>(initial?.enabled ?? defaults?.enabled ?? {});
+  const [autoApproveAll, setAutoApproveAll] = useState(initial?.autoApproveAll ?? defaults?.autoApproveAll ?? false);
+  const [autoApproveText, setAutoApproveText] = useState(
+    (initial?.autoApproveTools ?? defaults?.autoApproveTools ?? []).join("\n"),
+  );
+  const [disabledToolsText, setDisabledToolsText] = useState(
+    (initial?.disabledTools ?? defaults?.disabledTools ?? []).join("\n"),
+  );
+  const [timeoutText, setTimeoutText] = useState(
+    initial?.timeoutMs != null
+      ? String(initial.timeoutMs)
+      : defaults?.timeoutMs != null
+        ? String(defaults.timeoutMs)
+        : "",
+  );
   const [error, setError] = useState<string | null>(null);
 
   const isRemote = transport === "http" || transport === "sse";
@@ -109,6 +144,10 @@ export function McpServerForm({ initial, defaults, onSubmit, onDelete, submittin
       description: description.trim() || undefined,
       homepage: homepage.trim() || undefined,
       enabled,
+      autoApproveAll,
+      autoApproveTools: autoApproveAll ? [] : parseList(autoApproveText),
+      disabledTools: parseList(disabledToolsText),
+      timeoutMs: timeoutText.trim() ? Math.max(0, Math.round(Number(timeoutText.trim()))) || null : null,
     };
     if (isRemote) {
       value.url = url.trim();
@@ -232,6 +271,73 @@ export function McpServerForm({ initial, defaults, onSubmit, onDelete, submittin
             placeholder="https://"
           />
         </div>
+      </div>
+
+      <div className="space-y-3 rounded-xl border border-border/60 bg-background/30 p-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-foreground">{t("mcp.autoApproveAll")}</p>
+            <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">{t("mcp.autoApproveAllHint")}</p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={autoApproveAll}
+            onClick={() => setAutoApproveAll((v) => !v)}
+            className={cn(
+              "relative h-5 w-9 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+              autoApproveAll ? "bg-primary" : "bg-muted-foreground/30",
+            )}
+          >
+            <span
+              className={cn(
+                "absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform",
+                autoApproveAll ? "translate-x-4" : "translate-x-0.5",
+              )}
+            />
+          </button>
+        </div>
+
+        {autoApproveAll ? (
+          <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-600 dark:text-amber-400">
+            {t("mcp.yoloWarning")}
+          </p>
+        ) : (
+          <div>
+            <FieldLabel hint={t("mcp.toolListHint")}>{t("mcp.autoApproveTools")}</FieldLabel>
+            <textarea
+              value={autoApproveText}
+              onChange={(e) => setAutoApproveText(e.target.value)}
+              rows={2}
+              placeholder={"read_file\nlist_dir"}
+              className={textareaCls}
+            />
+          </div>
+        )}
+
+        <div>
+          <FieldLabel hint={t("mcp.toolListHint")}>{t("mcp.disabledTools")}</FieldLabel>
+          <textarea
+            value={disabledToolsText}
+            onChange={(e) => setDisabledToolsText(e.target.value)}
+            rows={2}
+            placeholder={"delete_file\nexecute_command"}
+            className={textareaCls}
+          />
+        </div>
+
+        <div>
+          <FieldLabel hint={t("mcp.timeoutHint")}>{t("mcp.timeout")}</FieldLabel>
+          <Input
+            value={timeoutText}
+            onChange={(e) => setTimeoutText(e.target.value.replace(/[^0-9]/g, ""))}
+            inputMode="numeric"
+            placeholder="30000"
+            className="h-9 font-mono"
+          />
+        </div>
+
+        <p className="text-[11px] leading-relaxed text-muted-foreground/80">{t("mcp.approvalSupportNote")}</p>
       </div>
 
       <div>

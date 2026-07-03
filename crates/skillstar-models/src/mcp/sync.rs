@@ -43,9 +43,10 @@ fn sync_server_to_tool_inner(entry: &McpServerEntry, tool_id: &str) -> Result<Op
     let path = resolve_mcp_config_path(tool_id)?;
     let backup = backup_if_exists(&path)?;
     match tool_id {
-        "claude-code" | "gemini" | "kiro" => {
-            json_mcpservers_upsert(&path, &entry.name, canonical_spec(entry))?
-        }
+        "claude-code" => json_mcpservers_upsert(&path, &entry.name, claude_code_spec(entry))?,
+        "gemini" => json_mcpservers_upsert(&path, &entry.name, gemini_spec(entry))?,
+        "kiro" => json_mcpservers_upsert(&path, &entry.name, kiro_spec(entry))?,
+        "cursor" => json_mcpservers_upsert(&path, &entry.name, cursor_spec(entry))?,
         "claude-desktop" => {
             json_mcpservers_upsert(&path, &entry.name, claude_desktop_spec(entry)?)?
         }
@@ -91,7 +92,7 @@ fn remove_server_from_tool_inner(name: &str, tool_id: &str) -> Result<Option<Pat
     }
     let backup = backup_if_exists(&path)?;
     match tool_id {
-        "claude-code" | "claude-desktop" | "gemini" | "kiro" => {
+        "claude-code" | "claude-desktop" | "gemini" | "kiro" | "cursor" => {
             json_mcpservers_remove(&path, name)?
         }
         "opencode" => opencode_remove(&path, name)?,

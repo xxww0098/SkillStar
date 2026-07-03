@@ -145,7 +145,7 @@ export function McpPublisherDetail({ publisher, onBack }: McpPublisherDetailProp
     async (value: McpServerFormValue) => {
       setMcpSaving(true);
       try {
-        const entry: Partial<McpServerEntry> = { ...value };
+        const entry: Partial<McpServerEntry> = { ...value, timeoutMs: value.timeoutMs ?? undefined };
         await createMcpServer(entry);
         toast.success(t("mcp.added"));
         setMcpInstallDrawer(null);
