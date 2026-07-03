@@ -649,10 +649,14 @@ export async function devInvoke<T>(command: string, args?: Record<string, unknow
   // Unmocked commands resolve to an empty array — safe for the dominant
   // "list" read pattern (`.length` / `.map` / `for..of`) so unmocked screens
   // degrade to empty state instead of crashing. Object-returning commands that
-  // need a richer shape are mocked explicitly above.
+  // need a richer shape are mocked explicitly above. Logged at `warn` (not
+  // `debug`) so gaps are visible by default instead of requiring verbose
+  // console filters; see devMockCoverage.test.ts for the automated coverage
+  // check against src/lib/ipc/commands/*.ts (KNOWN_MISSING_MOCKS there tracks
+  // today's known gaps, including this one falling through to `[]`).
   if (import.meta.env.DEV) {
     // eslint-disable-next-line no-console
-    console.debug(`[devMock] unmocked command "${command}" → []`, args ?? {});
+    console.warn(`[devMock] unmocked command "${command}" → []`, args ?? {});
   }
   return [] as unknown as T;
 }
