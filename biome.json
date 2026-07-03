@@ -84,7 +84,7 @@
       "!!**/.sisyphus",
       "!!**/src-tauri/gen",
       "!!**/.vscode",
-      "!!**/.claude",
+      "!!.claude",
       "!!**/src/types/generated"
     ]
   }
