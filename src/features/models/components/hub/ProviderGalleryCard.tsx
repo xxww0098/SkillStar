@@ -3,12 +3,12 @@ import { Copy, MoreHorizontal, Trash2 } from "lucide-react";
 import { Popover } from "radix-ui";
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { ProviderBrandIcon } from "../../../../components/shared/ProviderBrandIcon";
 import { cn } from "../../../../lib/utils";
 import type { ProviderEntryFlat, ToolActivationsMap } from "../../../../types";
 import { getProviderToolBadges } from "../../hooks/useProvidersFlat";
 import { getLatencyColor } from "../../lib/latencyColor";
 import { AgentToolIcon, type AgentToolIconId } from "../shared/AgentToolIcon";
-import { ProviderBrandIcon } from "../shared/ProviderBrandIcon";
 
 const TOOL_ID_TO_ICON: Record<string, AgentToolIconId> = {
   "claude-code": "claude-code",

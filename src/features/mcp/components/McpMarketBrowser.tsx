@@ -3,6 +3,7 @@ import { Download, ExternalLink, Globe, RefreshCw, Star, Terminal } from "lucide
 import { type CSSProperties, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
+import { DrawerShell } from "../../../components/shared/DrawerShell";
 import { EmptyState } from "../../../components/ui/EmptyState";
 import { ExternalAnchor } from "../../../components/ui/ExternalAnchor";
 import { LoadingLogo } from "../../../components/ui/LoadingLogo";
@@ -10,7 +11,6 @@ import { Markdown } from "../../../components/ui/Markdown";
 import { tauriInvoke } from "../../../lib/ipc";
 import { cn } from "../../../lib/utils";
 import type { LocalFirstResult, McpMarketEntry, McpMarketServerDetail, SnapshotStatus, ViewMode } from "../../../types";
-import { DrawerShell } from "../../models";
 import { McpMarketCard } from "./McpMarketCard";
 
 const GRID_GAP_PX = 16;

@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../../components/ui/button";
 import { ExternalAnchor } from "../../../../components/ui/ExternalAnchor";
+import { ProviderBrandIcon } from "../../../../components/shared/ProviderBrandIcon";
 import { cn } from "../../../../lib/utils";
 import { useAgentActivation } from "../../hooks/useAgentActivation";
 import type { AgentHealth } from "../../hooks/useAgentHealth";
@@ -12,7 +13,6 @@ import { computeAgentStatus } from "../../lib/agentStatus";
 import { buildModelCatalog, getModelCatalogFromMeta } from "../../lib/providerPatch";
 import { AgentToolIcon } from "../shared/AgentToolIcon";
 import { ModelSelectPopover } from "../shared/ModelSelectPopover";
-import { ProviderBrandIcon } from "../shared/ProviderBrandIcon";
 import { ProviderSelectPopover } from "../shared/ProviderSelectPopover";
 import { AgentStatusPill, statusTone } from "./AgentStatusPill";
 

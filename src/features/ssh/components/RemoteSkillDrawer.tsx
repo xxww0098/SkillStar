@@ -2,10 +2,10 @@ import { Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { AgentIcon } from "../../../components/ui/AgentIcon";
 import { Button } from "../../../components/ui/button";
+import { DrawerShell } from "../../../components/shared/DrawerShell";
 import { agentIconCls } from "../../../lib/utils";
 import type { AgentProfile } from "../../../types";
 import type { RemoteSkill } from "../../../lib/ipc/commands/ssh";
-import { DrawerShell } from "../../models";
 import { remoteAgentProfile } from "../lib/remoteAgentProfile";
 
 interface Props {

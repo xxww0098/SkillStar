@@ -23,7 +23,7 @@ vi.mock("sonner", () => ({
   },
 }));
 
-vi.mock("../../models/components/shared/ProviderBrandIcon", () => ({
+vi.mock("../../../components/shared/ProviderBrandIcon", () => ({
   ProviderBrandIcon: () => <span data-testid="provider-icon" />,
 }));
 

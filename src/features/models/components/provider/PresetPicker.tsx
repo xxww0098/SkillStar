@@ -4,12 +4,12 @@ import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../../components/ui/button";
 import { Input } from "../../../../components/ui/input";
+import { ProviderBrandIcon } from "../../../../components/shared/ProviderBrandIcon";
 import { openExternalUrl } from "../../../../lib/externalOpen";
 import { cn } from "../../../../lib/utils";
 import type { ProviderEntryFlat, ProviderPresetFlat } from "../../../../types";
 import { useProviderPresets } from "../../api/presets";
 import { useProvidersFlat } from "../../hooks/useProvidersFlat";
-import { ProviderBrandIcon } from "../shared/ProviderBrandIcon";
 
 export interface PresetPickerProps {
   /** Called once a provider has been created and the drawer should pivot to the edit form. */

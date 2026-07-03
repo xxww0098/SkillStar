@@ -2,9 +2,9 @@ import { Check, ChevronDown, Loader2, Plug } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Popover } from "radix-ui";
 import { useState } from "react";
+import { ProviderBrandIcon } from "../../../../components/shared/ProviderBrandIcon";
 import { cn } from "../../../../lib/utils";
 import type { ProviderEntryFlat } from "../../../../types";
-import { ProviderBrandIcon } from "./ProviderBrandIcon";
 
 export interface ProviderSelectPopoverProps {
   providers: ProviderEntryFlat[];

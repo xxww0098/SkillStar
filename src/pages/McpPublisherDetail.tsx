@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowUp, Boxes, ExternalLink, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PageToolbar } from "../components/layout/PageToolbar";
+import { DrawerShell } from "../components/shared/DrawerShell";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { EmptyState } from "../components/ui/EmptyState";
@@ -14,7 +15,6 @@ import { McpServerForm, type McpServerFormValue } from "../features/mcp/componen
 import { PUBLISHER_BRAND_ICON, hasPublisherBrandIcon } from "../features/mcp/components/McpPublishers";
 import { PublisherAvatar } from "../features/marketplace/components/OfficialPublishers";
 import { useMcpServers } from "../features/mcp/hooks/useMcpServers";
-import { DrawerShell } from "../features/models";
 import { tauriInvoke } from "../lib/ipc";
 import { toast } from "../lib/toast";
 import type {

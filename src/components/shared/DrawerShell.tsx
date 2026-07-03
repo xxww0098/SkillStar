@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import { Dialog } from "radix-ui";
 import type { ReactNode } from "react";
-import { cn } from "../../../../lib/utils";
+import { cn } from "../../lib/utils";
 
 export interface DrawerShellProps {
   open: boolean;

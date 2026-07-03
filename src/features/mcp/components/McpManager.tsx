@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { PageToolbar } from "../../../components/layout/PageToolbar";
+import { DrawerShell } from "../../../components/shared/DrawerShell";
 import { Button } from "../../../components/ui/button";
 import { EmptyState } from "../../../components/ui/EmptyState";
 import { LoadingLogo } from "../../../components/ui/LoadingLogo";
@@ -14,7 +15,6 @@ import { useMcpServers } from "../hooks/useMcpServers";
 import { useMcpPresets } from "../hooks/useMcpPresets";
 import { McpServerCard, MCP_TOOL_ICON } from "./McpServerCard";
 import { McpServerForm, type McpServerFormValue } from "./McpServerForm";
-import { DrawerShell } from "../../models";
 
 /** Map a recommended preset into create-form seed values. */
 function presetToDefaults(preset: McpPreset): Partial<McpServerFormValue> {

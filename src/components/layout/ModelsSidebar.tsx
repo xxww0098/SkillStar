@@ -1,6 +1,7 @@
 import { Plug, Server, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { ProviderBrandIcon, useProvidersFlat } from "@/features/models";
+import { ProviderBrandIcon } from "@/components/shared/ProviderBrandIcon";
+import { useProvidersFlat } from "@/features/models";
 import { cn } from "@/lib/utils";
 
 export interface ModelsSidebarProps {
