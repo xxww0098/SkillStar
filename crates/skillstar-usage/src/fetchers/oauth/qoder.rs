@@ -13,14 +13,13 @@ use chrono::Utc;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::catalog::AuthMode;
-use crate::crypto;
+use super::common::SubscriptionBuilder;
 use crate::oauth::pkce::PkcePair;
 use crate::oauth::poll_flow::{Poll, PollConfig, run};
 use crate::oauth::token_refresh;
 use crate::qoder_machine::{build_qoder_headers, read_machine_info};
 use crate::storage;
-use crate::subscription::{BillingCycle, Subscription, SubscriptionUsage, UsageWindow};
+use crate::subscription::{Subscription, SubscriptionUsage, UsageWindow};
 use crate::{UsageError, UsageResult};
 
 const LOGIN_BASE_URL: &str = "https://qoder.com/device/selectAccounts";
@@ -132,37 +131,9 @@ async fn finalize_subscription(
     refresh_token: Option<String>,
     expires_at: Option<i64>,
 ) -> UsageResult<Subscription> {
-    let now = Utc::now().timestamp();
-    let sub = Subscription {
-        id: uuid::Uuid::new_v4().to_string(),
-        catalog_id: "qoder".to_string(),
-        display_name: "Qoder".to_string(),
-        auth_mode: AuthMode::OAuth,
-        plan_tier: None,
-        monthly_price: None,
-        currency: "CNY".to_string(),
-        billing_cycle: BillingCycle::Monthly,
-        start_date: 0,
-        renew_date: 0,
-        auto_renew: false,
-        api_key_encrypted: None,
-        platform_token_encrypted: None,
-        access_token_encrypted: Some(crypto::encrypt(&access_token)),
-        refresh_token_encrypted: refresh_token.as_deref().map(crypto::encrypt),
-        access_token_expires_at: expires_at,
-        id_token_encrypted: None,
-        oauth_account_id: None,
-        oauth_region: None,
-        requires_reauth: false,
-        fingerprint_id: None,
-        cookie_jar_encrypted: None,
-        cookie_session_expires_at: None,
-        manual_quota: None,
-        note: None,
-        sort_index: 0,
-        created_at: now,
-        updated_at: now,
-    };
+    let sub = SubscriptionBuilder::new("qoder", "Qoder", "CNY", &access_token, expires_at)
+        .refresh_token(refresh_token)
+        .build();
 
     if let Ok(usage) = fetch_with_token(&sub.id, &access_token).await {
         storage::save_usage_snapshot(usage).ok();
@@ -172,10 +143,7 @@ async fn finalize_subscription(
     Ok(saved)
 }
 
-pub async fn fetch(subscription: &mut Subscription) -> UsageResult<SubscriptionUsage> {
-    let fp_id = subscription.fingerprint_id.clone();
-    crate::http_client::with_fingerprint(fp_id, fetch_inner(subscription)).await
-}
+super::common::impl_oauth_fetch!();
 
 async fn fetch_inner(subscription: &mut Subscription) -> UsageResult<SubscriptionUsage> {
     let access_token = crate::fetchers::decrypt_required(&subscription.access_token_encrypted, "access_token")?;

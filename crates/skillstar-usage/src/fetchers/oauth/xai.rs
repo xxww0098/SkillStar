@@ -29,14 +29,14 @@ use std::sync::LazyLock;
 use std::time::Duration;
 use url::Url;
 
-use crate::catalog::AuthMode;
+use super::common::SubscriptionBuilder;
 use crate::crypto;
 use crate::oauth::local_server;
 use crate::oauth::pkce::PkcePair;
 use crate::oauth::token_refresh;
 use crate::oauth_clients;
 use crate::storage;
-use crate::subscription::{BillingCycle, CreditInfo, Subscription, SubscriptionUsage, UsageWindow};
+use crate::subscription::{CreditInfo, Subscription, SubscriptionUsage, UsageWindow};
 use crate::{UsageError, UsageResult};
 
 const AUTHORIZE_URL: &str = "https://auth.x.ai/oauth2/authorize";
@@ -222,37 +222,10 @@ async fn finalize(tokens: TokenResponse) -> UsageResult<Subscription> {
         .or_else(|| token_refresh::jwt_exp(access_token))
         .or_else(|| id_token.and_then(token_refresh::jwt_exp));
 
-    let now = Utc::now().timestamp();
-    let sub = Subscription {
-        id: uuid::Uuid::new_v4().to_string(),
-        catalog_id: "xai".to_string(),
-        display_name,
-        auth_mode: AuthMode::OAuth,
-        plan_tier: None,
-        monthly_price: None,
-        currency: "USD".to_string(),
-        billing_cycle: BillingCycle::Monthly,
-        start_date: 0,
-        renew_date: 0,
-        auto_renew: false,
-        api_key_encrypted: None,
-        platform_token_encrypted: None,
-        access_token_encrypted: Some(crypto::encrypt(access_token)),
-        refresh_token_encrypted: refresh_token.map(crypto::encrypt),
-        access_token_expires_at: expires_at,
-        id_token_encrypted: None,
-        oauth_account_id: subject.or(email),
-        oauth_region: None,
-        requires_reauth: false,
-        fingerprint_id: None,
-        cookie_jar_encrypted: None,
-        cookie_session_expires_at: None,
-        manual_quota: None,
-        note: None,
-        sort_index: 0,
-        created_at: now,
-        updated_at: now,
-    };
+    let sub = SubscriptionBuilder::new("xai", display_name, "USD", access_token, expires_at)
+        .refresh_token(refresh_token.map(str::to_string))
+        .oauth_account_id(subject.or(email))
+        .build();
 
     if let Ok(usage) = fetch_with_token(&sub.id, access_token).await {
         storage::save_usage_snapshot(usage).ok();
@@ -261,10 +234,7 @@ async fn finalize(tokens: TokenResponse) -> UsageResult<Subscription> {
         .map_err(|e| UsageError::Other(format!("Grok 订阅保存失败: {}", e)))
 }
 
-pub async fn fetch(subscription: &mut Subscription) -> UsageResult<SubscriptionUsage> {
-    let fp_id = subscription.fingerprint_id.clone();
-    crate::http_client::with_fingerprint(fp_id, fetch_inner(subscription)).await
-}
+super::common::impl_oauth_fetch!();
 
 async fn fetch_inner(subscription: &mut Subscription) -> UsageResult<SubscriptionUsage> {
     if token_refresh::needs_refresh(subscription.access_token_expires_at) {

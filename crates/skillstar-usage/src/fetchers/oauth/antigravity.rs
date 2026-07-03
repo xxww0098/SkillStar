@@ -6,13 +6,13 @@ use chrono::Utc;
 use serde::Deserialize;
 use std::time::Duration;
 
-use crate::catalog::AuthMode;
+use super::common::SubscriptionBuilder;
 use crate::cloud_code::{self, LoadCodeAssistResult};
 use crate::crypto;
 use crate::oauth::local_server;
 use crate::oauth::token_refresh;
 use crate::storage;
-use crate::subscription::{BillingCycle, Subscription, SubscriptionUsage, UsageWindow};
+use crate::subscription::{Subscription, SubscriptionUsage, UsageWindow};
 use crate::{UsageError, UsageResult};
 
 use crate::antigravity_oauth_config::antigravity_oauth_config;
@@ -135,37 +135,12 @@ async fn finalize(
     expires_at: Option<i64>,
     email: Option<String>,
 ) -> UsageResult<Subscription> {
-    let now = Utc::now().timestamp();
-    let sub = Subscription {
-        id: uuid::Uuid::new_v4().to_string(),
-        catalog_id: "antigravity".to_string(),
-        display_name: email.clone().unwrap_or_else(|| "Antigravity".to_string()),
-        auth_mode: AuthMode::OAuth,
-        plan_tier: None,
-        monthly_price: None,
-        currency: "USD".to_string(),
-        billing_cycle: BillingCycle::Monthly,
-        start_date: 0,
-        renew_date: 0,
-        auto_renew: false,
-        api_key_encrypted: None,
-        platform_token_encrypted: None,
-        access_token_encrypted: Some(crypto::encrypt(&access_token)),
-        refresh_token_encrypted: refresh_token.as_deref().map(crypto::encrypt),
-        access_token_expires_at: expires_at,
-        id_token_encrypted: None,
-        oauth_account_id: email,
-        oauth_region: None,
-        requires_reauth: false,
-        fingerprint_id: None,
-        cookie_jar_encrypted: None,
-        cookie_session_expires_at: None,
-        manual_quota: None,
-        note: None,
-        sort_index: 0,
-        created_at: now,
-        updated_at: now,
-    };
+    let display_name = email.clone().unwrap_or_else(|| "Antigravity".to_string());
+    let sub = SubscriptionBuilder::new("antigravity", display_name, "USD", &access_token, expires_at)
+        .refresh_token(refresh_token)
+        .oauth_account_id(email)
+        .build();
+
     if let Ok(usage) = build_usage(&sub.id, &access_token, None).await {
         storage::save_usage_snapshot(usage).ok();
     }
@@ -173,10 +148,7 @@ async fn finalize(
         .map_err(|e| UsageError::Other(format!("Antigravity 订阅保存失败：{}", e)))
 }
 
-pub async fn fetch(subscription: &mut Subscription) -> UsageResult<SubscriptionUsage> {
-    let fp_id = subscription.fingerprint_id.clone();
-    crate::http_client::with_fingerprint(fp_id, fetch_inner(subscription)).await
-}
+super::common::impl_oauth_fetch!();
 
 async fn fetch_inner(subscription: &mut Subscription) -> UsageResult<SubscriptionUsage> {
     ensure_fresh_access_token(subscription).await?;

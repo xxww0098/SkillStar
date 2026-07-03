@@ -1,11 +1,17 @@
 //! OAuth fetchers for IDE / CLI subscription providers.
 //!
 //! Each submodule is independent. They share helpers from
-//! `crate::oauth::{pkce, local_server, poll_flow, token_refresh, ...}`.
+//! `crate::oauth::{pkce, local_server, poll_flow, token_refresh, ...}`, plus
+//! [`common::SubscriptionBuilder`] and [`common::impl_oauth_fetch`] for the
+//! `Subscription`-construction and `fetch()`-wrapper boilerplate every
+//! provider repeated (see `common.rs` for details). `cursor.rs` intentionally
+//! does not use `common` — it is excluded from this refactor per project
+//! rule.
 
 mod start_info;
 
 pub mod antigravity;
+pub(crate) mod common;
 pub mod codex;
 pub mod cursor;
 pub mod opencode;

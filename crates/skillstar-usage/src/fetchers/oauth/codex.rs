@@ -16,14 +16,14 @@ use serde_json::Value;
 use std::sync::LazyLock;
 use std::time::Duration;
 
-use crate::catalog::AuthMode;
+use super::common::SubscriptionBuilder;
 use crate::crypto;
 use crate::oauth::local_server::{self, CallbackSession};
 use crate::oauth::pkce::PkcePair;
 use crate::oauth::token_refresh;
 use crate::oauth_clients;
 use crate::storage;
-use crate::subscription::{BillingCycle, Subscription, SubscriptionUsage, UsageWindow};
+use crate::subscription::{Subscription, SubscriptionUsage, UsageWindow};
 use crate::{UsageError, UsageResult};
 
 static CLIENT_ID: LazyLock<String> =
@@ -198,37 +198,11 @@ async fn finalize(
     account_id: Option<String>,
     id_token: String,
 ) -> UsageResult<Subscription> {
-    let now = Utc::now().timestamp();
-    let sub = Subscription {
-        id: uuid::Uuid::new_v4().to_string(),
-        catalog_id: "codex".to_string(),
-        display_name: "Codex".to_string(),
-        auth_mode: AuthMode::OAuth,
-        plan_tier: None,
-        monthly_price: None,
-        currency: "USD".to_string(),
-        billing_cycle: BillingCycle::Monthly,
-        start_date: 0,
-        renew_date: 0,
-        auto_renew: false,
-        api_key_encrypted: None,
-        platform_token_encrypted: None,
-        access_token_encrypted: Some(crypto::encrypt(&access_token)),
-        refresh_token_encrypted: refresh_token.as_deref().map(crypto::encrypt),
-        access_token_expires_at: expires_at,
-        id_token_encrypted: Some(crypto::encrypt(&id_token)),
-        oauth_account_id: account_id.clone(),
-        oauth_region: None,
-        requires_reauth: false,
-        fingerprint_id: None,
-        cookie_jar_encrypted: None,
-        cookie_session_expires_at: None,
-        manual_quota: None,
-        note: None,
-        sort_index: 0,
-        created_at: now,
-        updated_at: now,
-    };
+    let sub = SubscriptionBuilder::new("codex", "Codex", "USD", &access_token, expires_at)
+        .refresh_token(refresh_token)
+        .id_token(Some(id_token))
+        .oauth_account_id(account_id.clone())
+        .build();
 
     if let Ok(usage) = fetch_with_token(&sub.id, &access_token, account_id.as_deref()).await {
         storage::save_usage_snapshot(usage).ok();
@@ -238,10 +212,7 @@ async fn finalize(
     Ok(saved)
 }
 
-pub async fn fetch(subscription: &mut Subscription) -> UsageResult<SubscriptionUsage> {
-    let fp_id = subscription.fingerprint_id.clone();
-    crate::http_client::with_fingerprint(fp_id, fetch_inner(subscription)).await
-}
+super::common::impl_oauth_fetch!();
 
 async fn fetch_inner(subscription: &mut Subscription) -> UsageResult<SubscriptionUsage> {
     if token_refresh::needs_refresh(subscription.access_token_expires_at) {
