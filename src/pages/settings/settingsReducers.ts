@@ -2,9 +2,10 @@ import type { AiConfig, GitHubMirrorConfig, ProxyConfig } from "../../types";
 
 export type ForceDeleteTarget = "hub" | "cache" | "config";
 
-export const AUTO_SAVE_DELAY_MS = 600;
 export const FORCE_DELETE_SLOW_HINT_MS = 2500;
 export const FORCE_DELETE_UI_TIMEOUT_MS = 15000;
+
+// ── Config equality (dirty-detection for useAutoSaveConfig) ──────────────────
 
 export function isSameProxyConfig(a: ProxyConfig, b: ProxyConfig): boolean {
   return (
@@ -40,29 +41,7 @@ export function isSameAiConfig(a: AiConfig, b: AiConfig): boolean {
   );
 }
 
-// ── Reducers ─────────────────────────────────────────────────────────────────
-
-export type ProxyAction =
-  | { type: "SET_FIELD"; field: keyof ProxyConfig; value: ProxyConfig[keyof ProxyConfig] }
-  | { type: "SET_CONFIG"; config: ProxyConfig }
-  | { type: "LOAD"; config: ProxyConfig }
-  | { type: "MARK_SAVED_CONFIG"; config: ProxyConfig }
-  | { type: "START_SAVE" }
-  | { type: "FINISH_SAVE" }
-  | { type: "MARK_SAVED_INDICATOR" }
-  | { type: "CLEAR_SAVED_INDICATOR" }
-  | { type: "TOGGLE_EXPANDED" }
-  | { type: "START_LOAD" }
-  | { type: "REVERT"; config: ProxyConfig };
-
-export interface ProxyState {
-  config: ProxyConfig;
-  savedConfig: ProxyConfig;
-  saving: boolean;
-  savedIndicator: boolean;
-  expanded: boolean;
-  loaded: boolean;
-}
+// ── Initial config values (used as useAutoSaveConfig's `fallback`) ───────────
 
 export const initialProxyConfig: ProxyConfig = {
   enabled: false,
@@ -74,153 +53,18 @@ export const initialProxyConfig: ProxyConfig = {
   bypass: null,
 };
 
-export function proxyReducer(state: ProxyState, action: ProxyAction): ProxyState {
-  switch (action.type) {
-    case "SET_FIELD":
-      return { ...state, config: { ...state.config, [action.field]: action.value } };
-    case "SET_CONFIG":
-      return { ...state, config: action.config };
-    case "LOAD":
-      return { ...state, config: action.config, savedConfig: action.config, loaded: true };
-    case "MARK_SAVED_CONFIG":
-      return { ...state, savedConfig: action.config };
-    case "START_SAVE":
-      return { ...state, saving: true };
-    case "FINISH_SAVE":
-      return { ...state, saving: false };
-    case "MARK_SAVED_INDICATOR":
-      return { ...state, savedIndicator: true };
-    case "CLEAR_SAVED_INDICATOR":
-      return { ...state, savedIndicator: false };
-    case "TOGGLE_EXPANDED":
-      return { ...state, expanded: !state.expanded };
-    case "START_LOAD":
-      return { ...state, loaded: false };
-    case "REVERT":
-      return { ...state, config: action.config, saving: false };
-    default:
-      return state;
-  }
-}
-
-// ── Mirror reducer ────────────────────────────────────────────────────────────
-
-export type MirrorAction =
-  | { type: "SET_FIELD"; field: keyof GitHubMirrorConfig; value: GitHubMirrorConfig[keyof GitHubMirrorConfig] }
-  | { type: "SET_CONFIG"; config: GitHubMirrorConfig }
-  | { type: "LOAD"; config: GitHubMirrorConfig }
-  | { type: "MARK_SAVED_CONFIG"; config: GitHubMirrorConfig }
-  | { type: "START_SAVE" }
-  | { type: "FINISH_SAVE" }
-  | { type: "MARK_SAVED_INDICATOR" }
-  | { type: "CLEAR_SAVED_INDICATOR" }
-  | { type: "TOGGLE_EXPANDED" }
-  | { type: "START_LOAD" }
-  | { type: "REVERT"; config: GitHubMirrorConfig };
-
-export interface MirrorState {
-  config: GitHubMirrorConfig;
-  savedConfig: GitHubMirrorConfig;
-  saving: boolean;
-  savedIndicator: boolean;
-  expanded: boolean;
-  loaded: boolean;
-}
-
 export const initialMirrorConfig: GitHubMirrorConfig = {
   enabled: false,
   preset_id: "ghproxy_vip",
   custom_url: null,
 };
 
-export function mirrorReducer(state: MirrorState, action: MirrorAction): MirrorState {
-  switch (action.type) {
-    case "SET_FIELD":
-      return { ...state, config: { ...state.config, [action.field]: action.value } };
-    case "SET_CONFIG":
-      return { ...state, config: action.config };
-    case "LOAD":
-      return { ...state, config: action.config, savedConfig: action.config, loaded: true };
-    case "MARK_SAVED_CONFIG":
-      return { ...state, savedConfig: action.config };
-    case "START_SAVE":
-      return { ...state, saving: true };
-    case "FINISH_SAVE":
-      return { ...state, saving: false };
-    case "MARK_SAVED_INDICATOR":
-      return { ...state, savedIndicator: true };
-    case "CLEAR_SAVED_INDICATOR":
-      return { ...state, savedIndicator: false };
-    case "TOGGLE_EXPANDED":
-      return { ...state, expanded: !state.expanded };
-    case "START_LOAD":
-      return { ...state, loaded: false };
-    case "REVERT":
-      return { ...state, config: action.config, saving: false };
-    default:
-      return state;
-  }
-}
-
-export type AiAction =
-  | { type: "SET_FIELD"; field: keyof AiConfig; value: AiConfig[keyof AiConfig] }
-  | { type: "SET_CONFIG"; config: AiConfig }
-  | { type: "LOAD"; config: AiConfig }
-  | { type: "MARK_SAVED_CONFIG"; config: AiConfig }
-  | { type: "START_SAVE" }
-  | { type: "FINISH_SAVE" }
-  | { type: "MARK_SAVED_INDICATOR" }
-  | { type: "CLEAR_SAVED_INDICATOR" }
-  | { type: "TOGGLE_EXPANDED" }
-  | { type: "START_TEST" }
-  | { type: "FINISH_TEST"; result: "success" | "error"; latency?: number }
-  | { type: "CLEAR_TEST_RESULT" }
-  | { type: "REVERT"; config: AiConfig };
-
-export interface AiState {
-  config: AiConfig;
-  savedConfig: AiConfig;
-  saving: boolean;
-  savedIndicator: boolean;
-  expanded: boolean;
-  testing: boolean;
-  testResult: "success" | "error" | null;
-  testLatency: number | null;
-  loaded: boolean;
-}
-
-export function aiReducer(state: AiState, action: AiAction): AiState {
-  switch (action.type) {
-    case "SET_FIELD":
-      return { ...state, config: { ...state.config, [action.field]: action.value } };
-    case "SET_CONFIG":
-      return { ...state, config: action.config };
-    case "LOAD":
-      return { ...state, config: action.config, savedConfig: action.config, loaded: true };
-    case "MARK_SAVED_CONFIG":
-      return { ...state, savedConfig: action.config };
-    case "START_SAVE":
-      return { ...state, saving: true };
-    case "FINISH_SAVE":
-      return { ...state, saving: false };
-    case "MARK_SAVED_INDICATOR":
-      return { ...state, savedIndicator: true };
-    case "CLEAR_SAVED_INDICATOR":
-      return { ...state, savedIndicator: false };
-    case "TOGGLE_EXPANDED":
-      return { ...state, expanded: !state.expanded };
-    case "START_TEST":
-      return { ...state, testing: true, testResult: null, testLatency: null };
-    case "FINISH_TEST":
-      return { ...state, testing: false, testResult: action.result, testLatency: action.latency ?? null };
-    case "CLEAR_TEST_RESULT":
-      return { ...state, testResult: null, testLatency: null };
-    case "REVERT":
-      return { ...state, config: action.config, saving: false };
-    default:
-      return state;
-  }
-}
+// ── Agent connections reducer ─────────────────────────────────────────────────
+//
+// Kept as a plain reducer (not migrated to useAutoSaveConfig): this is an
+// expand/cache state machine (which agent's linked-skills panel is open, and
+// the last-fetched linked-skills list per agent) with no load/save/debounce
+// lifecycle, so it does not share the proxy/mirror/AI auto-save shape.
 
 export type AgentAction =
   | { type: "SET_EXPANDED_AGENT"; agentId: string | null }

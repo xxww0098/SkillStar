@@ -21,6 +21,7 @@ import { S3SyncSection } from "../features/settings/sections/S3SyncSection";
 import { StorageSection } from "../features/settings/sections/StorageSection";
 import { useAgentProfiles } from "../hooks/useAgentProfiles";
 import { useAiConfig } from "../hooks/useAiConfig";
+import { useAutoSaveConfig } from "../hooks/useAutoSaveConfig";
 import { setLanguage } from "../i18n";
 import { applyBackgroundStyle, type BackgroundStyle, readBackgroundStyle } from "../lib/backgroundStyle";
 import { tauriInvoke } from "../lib/ipc";
@@ -29,8 +30,6 @@ import type { SettingsFocusTarget } from "../lib/utils";
 import type { AiConfig, GitHubMirrorConfig, ProxyConfig, StorageOverview } from "../types";
 import {
   agentReducer,
-  aiReducer,
-  AUTO_SAVE_DELAY_MS,
   FORCE_DELETE_SLOW_HINT_MS,
   FORCE_DELETE_UI_TIMEOUT_MS,
   type ForceDeleteTarget,
@@ -39,8 +38,6 @@ import {
   isSameAiConfig,
   isSameMirrorConfig,
   isSameProxyConfig,
-  mirrorReducer,
-  proxyReducer,
 } from "./settings/settingsReducers";
 import { SETTINGS_FOCUS_TO_SECTION_ID, SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 
@@ -67,39 +64,64 @@ export function Settings({
 
   useEffect(() => onBackgroundRunChanged(setBackgroundRun), []);
 
-  // Proxy reducer
-  const [proxyState, dispatchProxy] = useReducer(proxyReducer, {
-    config: initialProxyConfig,
-    savedConfig: initialProxyConfig,
-    saving: false,
-    savedIndicator: false,
-    expanded: false,
-    loaded: false,
+  // Proxy auto-save
+  const [proxyExpanded, setProxyExpanded] = useState(false);
+  const proxyAutoSave = useAutoSaveConfig<ProxyConfig>({
+    load: useCallback(() => tauriInvoke("get_proxy_config"), []),
+    fallback: initialProxyConfig,
+    save: useCallback((config: ProxyConfig) => tauriInvoke("save_proxy_config", { config }), []),
+    isEqual: isSameProxyConfig,
+    onSaveError: useCallback(
+      (e: unknown) => {
+        if (import.meta.env.DEV) console.error("Failed to save proxy config:", e);
+        toast.error(t("settings.saveProxyFailed"));
+      },
+      [t],
+    ),
   });
 
-  // Mirror reducer
-  const [mirrorState, dispatchMirror] = useReducer(mirrorReducer, {
-    config: initialMirrorConfig,
-    savedConfig: initialMirrorConfig,
-    saving: false,
-    savedIndicator: false,
-    expanded: false,
-    loaded: false,
+  // Mirror auto-save
+  const [mirrorExpanded, setMirrorExpanded] = useState(false);
+  const mirrorAutoSave = useAutoSaveConfig<GitHubMirrorConfig>({
+    load: useCallback(() => tauriInvoke("get_github_mirror_config"), []),
+    fallback: initialMirrorConfig,
+    save: useCallback((config: GitHubMirrorConfig) => tauriInvoke("save_github_mirror_config", { config }), []),
+    isEqual: isSameMirrorConfig,
+    onSaveError: useCallback(
+      (e: unknown) => {
+        if (import.meta.env.DEV) console.error("Failed to save mirror config:", e);
+        toast.error(t("settings.saveMirrorFailed"));
+      },
+      [t],
+    ),
   });
 
-  // AI reducer
+  // AI auto-save (config sourced from useAiConfig, which owns its own load/cache).
+  // `load` never resolves on its own — `hydrate()` below is the sole source of the
+  // initial/re-synced config, matching the previous LOAD-on-aiConfig-change effect
+  // (aiAutoSave.loaded stays false until useAiConfig's own load actually finishes).
   const { config: aiConfig, loading: aiLoading, saveConfig: saveAiConfig, testConnection } = useAiConfig();
-  const [aiState, dispatchAi] = useReducer(aiReducer, {
-    config: aiConfig,
-    savedConfig: aiConfig,
-    saving: false,
-    savedIndicator: false,
-    expanded: false,
-    testing: false,
-    testResult: null,
-    testLatency: null,
-    loaded: false,
+  const [aiExpanded, setAiExpanded] = useState(false);
+  const [aiTesting, setAiTesting] = useState(false);
+  const [aiTestResult, setAiTestResult] = useState<"success" | "error" | null>(null);
+  const [aiTestLatency, setAiTestLatency] = useState<number | null>(null);
+  const neverResolves = useCallback(() => new Promise<AiConfig>(() => {}), []);
+  const aiAutoSave = useAutoSaveConfig<AiConfig>({
+    load: neverResolves,
+    fallback: aiConfig,
+    save: saveAiConfig,
+    isEqual: isSameAiConfig,
+    skip: aiTesting,
+    onSaveError: useCallback(() => toast.error(t("settings.saveAiFailed")), [t]),
   });
+
+  // Re-sync from useAiConfig's own load (mirrors the previous LOAD-on-aiConfig-change effect).
+  // `aiAutoSave.hydrate` has a stable identity, so this only re-runs when aiConfig/aiLoading change.
+  useEffect(() => {
+    if (!aiLoading) {
+      aiAutoSave.hydrate(aiConfig);
+    }
+  }, [aiConfig, aiLoading, aiAutoSave.hydrate]);
 
   // Agent connections reducer
   const [agentState, dispatchAgent] = useReducer(agentReducer, {
@@ -118,108 +140,6 @@ export function Settings({
   const notifySkillsRefresh = useCallback(() => {
     window.dispatchEvent(new Event("skillstar:refresh-skills"));
   }, []);
-
-  // ── Proxy effects ─────────────────────────────────────────────────────────
-
-  useEffect(() => {
-    dispatchProxy({ type: "START_LOAD" });
-    tauriInvoke("get_proxy_config")
-      .then((config) => dispatchProxy({ type: "LOAD", config }))
-      .catch(() => dispatchProxy({ type: "LOAD", config: initialProxyConfig }))
-      .finally(() => dispatchProxy({ type: "FINISH_SAVE" }));
-  }, []);
-
-  useEffect(() => {
-    if (!proxyState.loaded || proxyState.saving || isSameProxyConfig(proxyState.config, proxyState.savedConfig)) {
-      return;
-    }
-
-    const previousConfig = proxyState.savedConfig;
-    const timer = setTimeout(() => {
-      dispatchProxy({ type: "START_SAVE" });
-      tauriInvoke("save_proxy_config", { config: proxyState.config })
-        .then(() => {
-          dispatchProxy({ type: "MARK_SAVED_CONFIG", config: proxyState.config });
-          dispatchProxy({ type: "MARK_SAVED_INDICATOR" });
-          setTimeout(() => dispatchProxy({ type: "CLEAR_SAVED_INDICATOR" }), 2000);
-        })
-        .catch((e) => {
-          if (import.meta.env.DEV) console.error("Failed to save proxy config:", e);
-          dispatchProxy({ type: "REVERT", config: previousConfig });
-          toast.error(t("settings.saveProxyFailed"));
-        })
-        .finally(() => dispatchProxy({ type: "FINISH_SAVE" }));
-    }, AUTO_SAVE_DELAY_MS);
-
-    return () => clearTimeout(timer);
-  }, [proxyState.config, proxyState.loaded, proxyState.saving, proxyState.savedConfig, t]);
-
-  // ── Mirror effects ────────────────────────────────────────────────────────
-
-  useEffect(() => {
-    dispatchMirror({ type: "START_LOAD" });
-    tauriInvoke("get_github_mirror_config")
-      .then((config) => dispatchMirror({ type: "LOAD", config }))
-      .catch(() => dispatchMirror({ type: "LOAD", config: initialMirrorConfig }))
-      .finally(() => dispatchMirror({ type: "FINISH_SAVE" }));
-  }, []);
-
-  useEffect(() => {
-    if (!mirrorState.loaded || mirrorState.saving || isSameMirrorConfig(mirrorState.config, mirrorState.savedConfig)) {
-      return;
-    }
-
-    const previousConfig = mirrorState.savedConfig;
-    const timer = setTimeout(() => {
-      dispatchMirror({ type: "START_SAVE" });
-      tauriInvoke("save_github_mirror_config", { config: mirrorState.config })
-        .then(() => {
-          dispatchMirror({ type: "MARK_SAVED_CONFIG", config: mirrorState.config });
-          dispatchMirror({ type: "MARK_SAVED_INDICATOR" });
-          setTimeout(() => dispatchMirror({ type: "CLEAR_SAVED_INDICATOR" }), 2000);
-        })
-        .catch((e) => {
-          if (import.meta.env.DEV) console.error("Failed to save mirror config:", e);
-          dispatchMirror({ type: "REVERT", config: previousConfig });
-          toast.error(t("settings.saveMirrorFailed"));
-        })
-        .finally(() => dispatchMirror({ type: "FINISH_SAVE" }));
-    }, AUTO_SAVE_DELAY_MS);
-
-    return () => clearTimeout(timer);
-  }, [mirrorState.config, mirrorState.loaded, mirrorState.saving, mirrorState.savedConfig, t]);
-
-  // ── AI effects ────────────────────────────────────────────────────────────
-
-  useEffect(() => {
-    if (!aiLoading) {
-      dispatchAi({ type: "LOAD", config: aiConfig });
-    }
-  }, [aiConfig, aiLoading]);
-
-  useEffect(() => {
-    if (!aiState.loaded || aiState.saving || aiState.testing || isSameAiConfig(aiState.config, aiState.savedConfig)) {
-      return;
-    }
-
-    const previousConfig = aiState.savedConfig;
-    const timer = setTimeout(() => {
-      dispatchAi({ type: "START_SAVE" });
-      saveAiConfig(aiState.config)
-        .then(() => {
-          dispatchAi({ type: "MARK_SAVED_CONFIG", config: aiState.config });
-          dispatchAi({ type: "MARK_SAVED_INDICATOR" });
-          setTimeout(() => dispatchAi({ type: "CLEAR_SAVED_INDICATOR" }), 2000);
-        })
-        .catch(() => {
-          dispatchAi({ type: "REVERT", config: previousConfig });
-          toast.error(t("settings.saveAiFailed"));
-        })
-        .finally(() => dispatchAi({ type: "FINISH_SAVE" }));
-    }, AUTO_SAVE_DELAY_MS);
-
-    return () => clearTimeout(timer);
-  }, [aiState.config, aiState.loaded, aiState.saving, aiState.testing, aiState.savedConfig, saveAiConfig, t]);
 
   // ── Storage effects ───────────────────────────────────────────────────────
 
@@ -247,8 +167,8 @@ export function Settings({
 
   const focusSettingsSection = useCallback(
     (target: SettingsFocusTarget) => {
-      if (target === "ai-provider" && !aiState.expanded) {
-        dispatchAi({ type: "TOGGLE_EXPANDED" });
+      if (target === "ai-provider" && !aiExpanded) {
+        setAiExpanded(true);
       }
 
       const sectionId = SETTINGS_FOCUS_TO_SECTION_ID[target];
@@ -267,7 +187,7 @@ export function Settings({
         }, 100);
       });
     },
-    [aiState.expanded],
+    [aiExpanded],
   );
 
   // ── Settings section focus from navigation intents ───────────────────────
@@ -373,23 +293,37 @@ export function Settings({
   // ── AI handlers ───────────────────────────────────────────────────────────
 
   const handleAiTestConnection = useCallback(async () => {
-    dispatchAi({ type: "START_TEST" });
+    setAiTesting(true);
+    setAiTestResult(null);
+    setAiTestLatency(null);
     try {
-      await saveAiConfig(aiState.config);
-      dispatchAi({ type: "MARK_SAVED_CONFIG", config: aiState.config });
+      await saveAiConfig(aiAutoSave.config);
+      aiAutoSave.markSaved(aiAutoSave.config);
       const latency = await testConnection();
-      dispatchAi({ type: "FINISH_TEST", result: "success", latency });
-      setTimeout(() => dispatchAi({ type: "CLEAR_TEST_RESULT" }), 3000);
+      setAiTesting(false);
+      setAiTestResult("success");
+      setAiTestLatency(latency);
+      setTimeout(() => {
+        setAiTestResult(null);
+        setAiTestLatency(null);
+      }, 3000);
     } catch (e) {
-      dispatchAi({ type: "FINISH_TEST", result: "error" });
+      setAiTesting(false);
+      setAiTestResult("error");
       toast.error(t("settings.connectionFailed", { error: e }));
-      setTimeout(() => dispatchAi({ type: "CLEAR_TEST_RESULT" }), 5000);
+      setTimeout(() => {
+        setAiTestResult(null);
+        setAiTestLatency(null);
+      }, 5000);
     }
-  }, [aiState.config, saveAiConfig, testConnection, t]);
+  }, [aiAutoSave.config, aiAutoSave.markSaved, saveAiConfig, testConnection, t]);
 
-  const handleAiEnabledChange = useCallback((enabled: boolean) => {
-    dispatchAi({ type: "SET_FIELD", field: "enabled", value: enabled });
-  }, []);
+  const handleAiEnabledChange = useCallback(
+    (enabled: boolean) => {
+      aiAutoSave.setConfig({ ...aiAutoSave.config, enabled });
+    },
+    [aiAutoSave.config, aiAutoSave.setConfig],
+  );
 
   // ── Storage handlers ───────────────────────────────────────────────────────
 
@@ -559,35 +493,17 @@ export function Settings({
     return `${parseFloat((bytes / unitBase ** sizeIndex).toFixed(2))} ${sizes[sizeIndex]}`;
   }, []);
 
-  // ── Proxy config change handler ────────────────────────────────────────────
+  // ── Proxy / mirror / AI config change + expand-toggle handlers ─────────────
+  // (setConfig/expanded setters already match the child sections' expected
+  // signatures, so no extra wrapping is needed.)
 
-  const handleProxyConfigChange = useCallback((next: ProxyConfig) => {
-    dispatchProxy({ type: "SET_CONFIG", config: next });
-  }, []);
+  const handleProxyConfigChange = proxyAutoSave.setConfig;
+  const handleMirrorConfigChange = mirrorAutoSave.setConfig;
+  const handleAiConfigChange = aiAutoSave.setConfig;
 
-  // ── Mirror config change handler ───────────────────────────────────────────
-
-  const handleMirrorConfigChange = useCallback((next: GitHubMirrorConfig) => {
-    dispatchMirror({ type: "SET_CONFIG", config: next });
-  }, []);
-
-  // ── AI config change handler ───────────────────────────────────────────────
-
-  const handleAiConfigChange = useCallback((next: AiConfig) => {
-    dispatchAi({ type: "SET_CONFIG", config: next });
-  }, []);
-
-  const handleToggleProxyExpanded = useCallback(() => {
-    dispatchProxy({ type: "TOGGLE_EXPANDED" });
-  }, []);
-
-  const handleToggleMirrorExpanded = useCallback(() => {
-    dispatchMirror({ type: "TOGGLE_EXPANDED" });
-  }, []);
-
-  const handleToggleAiExpanded = useCallback(() => {
-    dispatchAi({ type: "TOGGLE_EXPANDED" });
-  }, []);
+  const handleToggleProxyExpanded = useCallback(() => setProxyExpanded((prev) => !prev), []);
+  const handleToggleMirrorExpanded = useCallback(() => setMirrorExpanded((prev) => !prev), []);
+  const handleToggleAiExpanded = useCallback(() => setAiExpanded((prev) => !prev), []);
 
   const handleForceDeleteHub = useCallback(() => handleForceDelete("hub"), [handleForceDelete]);
   const handleForceDeleteCache = useCallback(() => handleForceDelete("cache"), [handleForceDelete]);
@@ -638,11 +554,11 @@ export function Settings({
 
               <section id="settings-proxy" className="scroll-mt-3">
                 <ProxySection
-                  proxyConfig={proxyState.config}
-                  ready={proxyState.loaded}
-                  proxyExpanded={proxyState.expanded}
-                  proxySaving={proxyState.saving}
-                  proxySaved={proxyState.savedIndicator}
+                  proxyConfig={proxyAutoSave.config}
+                  ready={proxyAutoSave.loaded}
+                  proxyExpanded={proxyExpanded}
+                  proxySaving={proxyAutoSave.saving}
+                  proxySaved={proxyAutoSave.showSaved}
                   onToggleExpanded={handleToggleProxyExpanded}
                   onConfigChange={handleProxyConfigChange}
                 />
@@ -650,11 +566,11 @@ export function Settings({
 
               <section id="settings-mirror" className="scroll-mt-3">
                 <GitHubMirrorSection
-                  mirrorConfig={mirrorState.config}
-                  ready={mirrorState.loaded}
-                  mirrorExpanded={mirrorState.expanded}
-                  mirrorSaving={mirrorState.saving}
-                  mirrorSaved={mirrorState.savedIndicator}
+                  mirrorConfig={mirrorAutoSave.config}
+                  ready={mirrorAutoSave.loaded}
+                  mirrorExpanded={mirrorExpanded}
+                  mirrorSaving={mirrorAutoSave.saving}
+                  mirrorSaved={mirrorAutoSave.showSaved}
                   onToggleExpanded={handleToggleMirrorExpanded}
                   onConfigChange={handleMirrorConfigChange}
                 />
@@ -666,14 +582,14 @@ export function Settings({
 
               <section id="settings-ai" className="scroll-mt-3">
                 <AiProviderSection
-                  localAiConfig={aiState.config}
-                  ready={aiState.loaded}
-                  aiExpanded={aiState.expanded}
-                  aiSaving={aiState.saving}
-                  aiSaved={aiState.savedIndicator}
-                  aiTesting={aiState.testing}
-                  aiTestResult={aiState.testResult}
-                  aiTestLatency={aiState.testLatency}
+                  localAiConfig={aiAutoSave.config}
+                  ready={aiAutoSave.loaded}
+                  aiExpanded={aiExpanded}
+                  aiSaving={aiAutoSave.saving}
+                  aiSaved={aiAutoSave.showSaved}
+                  aiTesting={aiTesting}
+                  aiTestResult={aiTestResult}
+                  aiTestLatency={aiTestLatency}
                   onToggleExpanded={handleToggleAiExpanded}
                   onEnabledChange={handleAiEnabledChange}
                   onConfigChange={handleAiConfigChange}
