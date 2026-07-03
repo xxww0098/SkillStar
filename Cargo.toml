@@ -6,6 +6,51 @@ members = [
 ]
 default-members = ["src-tauri"]
 
+# Shared third-party dependency versions for every member crate that pulls in
+# ≥2 of them. Pin to whatever Cargo.lock already resolved at the time this
+# table was introduced — the goal is convergence, not upgrades. Member crates
+# opt in with `dep = { workspace = true }` (optionally appending their own
+# extra `features = [...]`; workspace feature lists are unioned in, not
+# replaced). Path deps between our own skillstar-* crates stay declared
+# per-crate rather than routed through this table.
+[workspace.dependencies]
+aes-gcm = "0.10"
+anyhow = "1.0.102"
+async-trait = "0.1"
+base64 = "0.22"
+chrono = { version = "0.4.45", features = ["serde"] }
+clap = { version = "4.6.1", features = ["derive"] }
+dirs = "6.0.0"
+flate2 = "1"
+futures = "0.3"
+gix = { version = "0.80", default-features = false, features = ["max-control", "blocking-http-transport-reqwest-rust-tls", "revision", "credentials"] }
+html2md = "0.2"
+junction = "2.0.0"
+keyring = { version = "4", default-features = false, features = ["v1"] }
+lazy_static = "1.5.0"
+machine-uid = "0.5"
+r2d2 = "0.8.10"
+r2d2_sqlite = "0.34.0"
+rand = "0.10.0"
+regex = "1.12"
+reqwest = { version = "0.13.3", default-features = false }
+rusqlite = { version = "0.39.0", features = ["bundled"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+serde_yaml = "0.9.34"
+sha2 = "0.11.0"
+tar = "0.4"
+tauri = { version = "2.11.1", features = ["tray-icon", "image-png"] }
+tempfile = "3.27.0"
+thiserror = "2.0.18"
+tokio = { version = "1.52.3" }
+toml = "1.1"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+url = "2.5.8"
+uuid = { version = "1.23.1", features = ["v4"] }
+which = "8.0.2"
+
 [profile.release]
 lto = "fat"
 codegen-units = 1

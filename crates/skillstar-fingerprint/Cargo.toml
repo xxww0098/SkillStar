@@ -5,18 +5,18 @@ edition = "2024"
 rust-version = "1.94.1"
 
 [dependencies]
-anyhow = "1.0.102"
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
-thiserror = "2"
-tracing = "0.1.44"
-uuid = { version = "1", features = ["v4", "serde"] }
-chrono = { version = "0.4.44", features = ["serde"] }
-rand = "0.10"
-sha2 = "0.11"
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["serde"] }
+chrono = { workspace = true }
+rand = { workspace = true }
+sha2 = { workspace = true }
 
 # Default-impl HTTP client (rustls, kept for "original" fingerprint).
-reqwest = { version = "0.13.2", default-features = false, features = ["rustls", "json", "form"] }
+reqwest = { workspace = true, features = ["rustls", "json", "form"] }
 
 # Fingerprint-aware HTTP client (BoringSSL, JA3/JA4/H2 emulation).
 # Optional behind feature flag so the rest of the workspace doesn't pay
@@ -25,8 +25,8 @@ wreq = { version = "6.0.0-rc.28", features = ["json", "form"], optional = true }
 wreq-util = { version = "3.0.0-rc.6", optional = true }
 
 # Runtime + logging — used by the tls_poc binary and downstream tests.
-tokio = { version = "1.52.1", features = ["macros", "rt-multi-thread"] }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tracing-subscriber = { workspace = true }
 
 skillstar-core = { version = "0.1.0", path = "../skillstar-core" }
 
@@ -47,4 +47,4 @@ path = "src/bin/deepseek_poc.rs"
 required-features = ["impersonate"]
 
 [dev-dependencies]
-tempfile = "3.27.0"
+tempfile = { workspace = true }

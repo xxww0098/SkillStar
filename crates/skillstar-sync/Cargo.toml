@@ -7,26 +7,26 @@ rust-version = "1.94.1"
 [dependencies]
 skillstar-core = { version = "0.1.0", path = "../skillstar-core" }
 skillstar-skills = { version = "0.1.0", path = "../skillstar-skills" }
-anyhow = "1.0.102"
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
-tokio = { version = "1.52.1", features = ["sync", "rt", "macros", "fs", "io-util"] }
-tracing = "0.1.44"
-toml = "1.1"
-thiserror = "2"
-chrono = { version = "0.4", features = ["serde"] }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["sync", "rt", "macros", "fs", "io-util"] }
+tracing = { workspace = true }
+toml = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
 # S3-compatible object storage. aws-sdk-s3 talks to any S3 API
 # (Cloudflare R2 / Backblaze B2 / 七牛云 / 阿里云 OSS / 腾讯云 COS / AWS S3 / MinIO)
 # once a custom endpoint_url is supplied via S3TargetDef.
 aws-sdk-s3 = "1"
 aws-config = { version = "1", default-features = false, features = ["rustls"] }
 # Content-addressed tarballs (sha256) + packing for local-authored skills.
-sha2 = "0.11"
-tar = "0.4"
-flate2 = "1"
+sha2 = { workspace = true }
+tar = { workspace = true }
+flate2 = { workspace = true }
 # keyring v4 default (`v1`) bundles the native store for each desktop OS
 # (same configuration as skillstar-ssh — credentials never touch the TOML).
-keyring = { version = "4", default-features = false, features = ["v1"] }
+keyring = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3.27.0"
+tempfile = { workspace = true }

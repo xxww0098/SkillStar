@@ -79,6 +79,8 @@ SkillStar 是 Tauri v2 桌面应用（同一 `skillstar` 二进制内还含 CLI�
 
 ### 后端（Rust）
 
+> 共享第三方依赖版本由根 `Cargo.toml` 的 `[workspace.dependencies]` 统一治理；成员 crate 用 `dep = { workspace = true }` 引用，禁止各自漂移版本号。
+
 | 层 | 技术 | 版本 |
 | --- | --- | --- |
 | 语言 / 包结构 | Rust 2024，cargo workspace（`src-tauri` + `crates/*`） | edition 2024 |
@@ -166,7 +168,7 @@ SkillStar/
 ## Do NOT
 
 - **不**在未更新本文件「技术栈 / 项目树 / Workspace Crates」前就改依赖或目录结构。
-- **不**手改 `Cargo.toml` 加依赖：一律用 `cargo add`。
+- **不**手改 `Cargo.toml` 加依赖：一律用 `cargo add`（`workspace.dependencies` 归一化调整除外，仍禁止用手改方式引入**新**依赖）。
 - **不**在命令包装层（`src-tauri/src/commands/`）写重逻辑：域逻辑进 `crates/*`，Tauri 胶水进 `src-tauri/src/core/`。
 - **不**绕过 `core::infra::http_client::probe_http_client` 直接发远程 HTTP（会无视 `config/proxy.json`）。
 - **不**让单个源文件超过 ~1000 行；超出即拆模块。
