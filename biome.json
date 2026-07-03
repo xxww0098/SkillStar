@@ -82,7 +82,8 @@
       "!!**/.trae",
       "!!**/*.min.js",
       "!!**/.sisyphus",
-      "!!**/src-tauri/gen"
+      "!!**/src-tauri/gen",
+      "!!**/.vscode"
     ]
   }
 }
