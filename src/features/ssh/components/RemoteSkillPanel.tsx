@@ -19,6 +19,7 @@ import { ScopeDetailDrawer } from "../../my-skills/components/ScopeDetailDrawer"
 import { SkillGrid } from "../../my-skills/components/SkillGrid";
 import { UninstallConfirmDialog } from "../../my-skills/components/UninstallConfirmDialog";
 import { remoteHostItemKey } from "../../my-skills/lib/remoteHostKey";
+import { sshKeys } from "../api/keys";
 import {
   useAcceptHostKey,
   useDeleteRemoteSkill,
@@ -384,7 +385,7 @@ function PushSkillDialog({
   const { t } = useTranslation();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const { data: skills = [], isLoading } = useQuery<Skill[]>({
-    queryKey: ["ssh", "push-local-skills"],
+    queryKey: sshKeys.pushLocalSkills(),
     queryFn: () => tauriInvoke("list_skills"),
     enabled: open,
     staleTime: 30_000,

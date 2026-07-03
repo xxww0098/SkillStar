@@ -11,6 +11,7 @@ import { Markdown } from "../../../components/ui/Markdown";
 import { tauriInvoke } from "../../../lib/ipc";
 import { cn } from "../../../lib/utils";
 import type { LocalFirstResult, McpMarketEntry, McpMarketServerDetail, SnapshotStatus, ViewMode } from "../../../types";
+import { mcpKeys } from "../api/keys";
 import { McpMarketCard } from "./McpMarketCard";
 
 const GRID_GAP_PX = 16;
@@ -82,7 +83,7 @@ export function McpMarketBrowser({
       : undefined;
 
   const detailQuery = useQuery<LocalFirstResult<McpMarketServerDetail | null>>({
-    queryKey: ["mcp-market", "detail", detailId],
+    queryKey: mcpKeys.marketDetail(detailId),
     queryFn: () => tauriInvoke("get_mcp_market_server_detail_local", { id: detailId as string }),
     enabled: detailId != null,
   });

@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import { getVersion } from "@tauri-apps/api/app";
 import { homeDir } from "@tauri-apps/api/path";
 import { motion } from "framer-motion";
@@ -23,6 +24,17 @@ import { tauriInvoke } from "../../../lib/ipc";
 import { toast } from "../../../lib/toast";
 import { copyToClipboard, detectPlatform, type Platform, resolveSkillstarDataPath } from "../../../lib/utils";
 import type { GitStatus } from "../../../types";
+import { settingsKeys } from "../api/keys";
+
+/** Fallback rendered when `check_git_status` fails outright (rare — the
+ * backend command itself treats "git not found" as a normal `NotInstalled`
+ * result, not a rejection). Mirrors the pre-Query `.catch()` behavior. */
+const GIT_STATUS_FALLBACK: GitStatus = {
+  status: "NotInstalled",
+  os: "Unknown",
+  install_instructions: [],
+  download_url: "https://git-scm.com/downloads",
+};
 
 interface AboutSectionProps {
   ghInstalled: boolean | null;
@@ -44,27 +56,22 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
   const [appVersion, setAppVersion] = useState<string>("...");
   const [resolvedDataPath, setResolvedDataPath] = useState<string | null>(null);
 
-  // Git status
-  const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
-
   useEffect(() => {
     getVersion()
       .then((v) => setAppVersion(v))
       .catch(() => setAppVersion("unknown"));
   }, []);
 
-  useEffect(() => {
-    tauriInvoke("check_git_status")
-      .then(setGitStatus)
-      .catch(() =>
-        setGitStatus({
-          status: "NotInstalled",
-          os: "Unknown",
-          install_instructions: [],
-          download_url: "https://git-scm.com/downloads",
-        }),
-      );
-  }, []);
+  // Git status — loaded once via Query (staleTime: Infinity mirrors the old
+  // mount-only useEffect: no window-focus/interval refetch). On failure fall
+  // back to the same "NotInstalled" placeholder the old `.catch()` used,
+  // instead of surfacing an error state.
+  const gitStatusQuery = useQuery<GitStatus>({
+    queryKey: settingsKeys.gitStatus(),
+    queryFn: () => tauriInvoke("check_git_status"),
+    staleTime: Infinity,
+  });
+  const gitStatus = gitStatusQuery.data ?? (gitStatusQuery.isError ? GIT_STATUS_FALLBACK : null);
 
   const ghInstallPlatform = useMemo(() => detectPlatform(), []);
   const ghInstallCommand = ghInstallPlatform === "unknown" ? null : GH_INSTALL_COMMANDS[ghInstallPlatform];

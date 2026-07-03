@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { tauriInvoke } from "../../../lib/ipc";
 import type { McpPublisherSummary } from "../../../types";
+import { mcpKeys } from "../api/keys";
 
 const STALE_TIME_MS = 5 * 60_000;
-const PUBLISHERS_KEY = ["mcp-publishers"] as const;
 
 /**
  * Official MCP publishers for the marketplace grid. Curated publishers
@@ -12,7 +12,7 @@ const PUBLISHERS_KEY = ["mcp-publishers"] as const;
  */
 export function useMcpPublishers(enabled = true) {
   const query = useQuery<McpPublisherSummary[]>({
-    queryKey: [...PUBLISHERS_KEY],
+    queryKey: mcpKeys.publishers(),
     queryFn: () => tauriInvoke("list_mcp_publishers_local"),
     enabled,
     staleTime: STALE_TIME_MS,

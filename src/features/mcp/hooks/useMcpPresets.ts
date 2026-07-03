@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { tauriInvoke } from "../../../lib/ipc";
 import type { McpPreset } from "../../../types";
+import { mcpKeys } from "../api/keys";
 
 const PRESETS_STALE_TIME_MS = 60_000 * 60;
-const QUERY_KEY = ["mcp-presets"] as const;
 
 /**
  * Built-in / recommended MCP presets from the backend (single source of truth).
@@ -14,7 +14,7 @@ const QUERY_KEY = ["mcp-presets"] as const;
  */
 export function useMcpPresets() {
   const { data, isLoading, error } = useQuery<McpPreset[]>({
-    queryKey: QUERY_KEY,
+    queryKey: mcpKeys.presets(),
     queryFn: () => tauriInvoke("get_mcp_presets"),
     staleTime: PRESETS_STALE_TIME_MS,
   });

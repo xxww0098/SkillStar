@@ -5,6 +5,7 @@ import i18n from "../../../i18n";
 import { invalidateAiConfigCache } from "../../../hooks/useAiConfig";
 import { tauriInvoke } from "../../../lib/ipc";
 import type { AiConfig, AiProviderRef } from "../../../types";
+import { aiConfigKeys } from "./keys";
 
 export type AppAiAppId = "claude" | "codex";
 
@@ -19,7 +20,7 @@ export function useAppAiProvider() {
       tauriInvoke("set_app_ai_provider_ref", { appId, providerId }),
     onSuccess: () => {
       invalidateAiConfigCache();
-      queryClient.invalidateQueries({ queryKey: ["ai-config"] });
+      queryClient.invalidateQueries({ queryKey: aiConfigKeys.all });
     },
   });
 
@@ -27,7 +28,7 @@ export function useAppAiProvider() {
     mutationFn: () => tauriInvoke("clear_app_ai_provider_ref"),
     onSuccess: () => {
       invalidateAiConfigCache();
-      queryClient.invalidateQueries({ queryKey: ["ai-config"] });
+      queryClient.invalidateQueries({ queryKey: aiConfigKeys.all });
     },
   });
 

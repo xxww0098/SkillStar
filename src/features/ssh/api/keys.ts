@@ -4,4 +4,5 @@ export const sshKeys = {
   all: ["ssh"] as const,
   hosts: () => [...sshKeys.all, "hosts"] as const,
   remoteSkills: (hostId: string, remoteDir: string) => [...sshKeys.all, "remote-skills", hostId, remoteDir] as const,
+  pushLocalSkills: () => [...sshKeys.all, "push-local-skills"] as const,
 };

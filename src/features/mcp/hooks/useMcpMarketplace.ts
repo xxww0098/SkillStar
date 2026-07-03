@@ -2,9 +2,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { tauriInvoke } from "../../../lib/ipc";
 import type { LocalFirstResult, McpMarketEntry, SnapshotStatus } from "../../../types";
+import { mcpKeys } from "../api/keys";
 
 const STALE_TIME_MS = 5 * 60_000;
-const MARKET_KEY = ["mcp-market"] as const;
 const SCOPE = "mcp_registry";
 const SEARCH_DEBOUNCE_MS = 400;
 
@@ -26,14 +26,14 @@ export function useMcpMarketplace(enabled = true) {
   }, [query]);
 
   const listQuery = useQuery<LocalFirstResult<McpMarketEntry[]>>({
-    queryKey: [...MARKET_KEY, "list"],
+    queryKey: mcpKeys.marketList(),
     queryFn: () => tauriInvoke("list_mcp_market_servers_local"),
     enabled,
     staleTime: STALE_TIME_MS,
   });
 
   const searchQuery = useQuery<LocalFirstResult<McpMarketEntry[]>>({
-    queryKey: [...MARKET_KEY, "search", debounced],
+    queryKey: mcpKeys.marketSearch(debounced),
     queryFn: () => tauriInvoke("search_mcp_market_local", { query: debounced, limit: 100 }),
     enabled: enabled && debounced.length > 0,
     staleTime: STALE_TIME_MS,
@@ -45,7 +45,7 @@ export function useMcpMarketplace(enabled = true) {
 
   const syncMutation = useMutation({
     mutationFn: () => tauriInvoke("sync_mcp_market_scope", { scope: SCOPE }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: MARKET_KEY }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: mcpKeys.market() }),
   });
 
   // One background refresh per session when the cache is stale.

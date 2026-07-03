@@ -1,11 +1,13 @@
+import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronDown, Loader2, Wifi, WifiOff, Zap } from "lucide-react";
-import { memo, useEffect, useState } from "react";
+import { memo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Input } from "../../../components/ui/input";
 import { Switch } from "../../../components/ui/switch";
 import { tauriInvoke } from "../../../lib/ipc";
 import { cn } from "../../../lib/utils";
 import type { GitHubMirrorConfig, GitHubMirrorPreset } from "../../../types";
+import { settingsKeys } from "../api/keys";
 
 interface GitHubMirrorSectionProps {
   mirrorConfig: GitHubMirrorConfig;
@@ -27,15 +29,19 @@ export const GitHubMirrorSection = memo(function GitHubMirrorSection({
   onConfigChange,
 }: GitHubMirrorSectionProps) {
   const { t } = useTranslation();
-  const [presets, setPresets] = useState<GitHubMirrorPreset[]>([]);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, number | "error">>({});
 
-  useEffect(() => {
-    tauriInvoke("get_github_mirror_presets")
-      .then(setPresets)
-      .catch(() => {});
-  }, []);
+  // Loaded once via Query (staleTime: Infinity mirrors the old mount-only
+  // useEffect: no window-focus/interval refetch). On failure the old code
+  // silently swallowed the error and left `presets` as `[]` — same result
+  // here via `data ?? []`, just without a dedicated catch block.
+  const presetsQuery = useQuery<GitHubMirrorPreset[]>({
+    queryKey: settingsKeys.githubMirrorPresets(),
+    queryFn: () => tauriInvoke("get_github_mirror_presets"),
+    staleTime: Infinity,
+  });
+  const presets = presetsQuery.data ?? [];
 
   const handleTestMirror = async (url: string, id: string) => {
     setTestingId(id);

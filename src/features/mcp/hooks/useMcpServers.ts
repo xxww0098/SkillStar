@@ -2,10 +2,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import { tauriInvoke } from "../../../lib/ipc";
 import type { McpServerEntry, McpServerPatch, McpServerWithSync, McpStore, McpToolStatus } from "../../../types";
+import { mcpKeys } from "../api/keys";
 
 const MCP_STALE_TIME_MS = 30_000;
-const STORE_KEY = ["mcp-servers"] as const;
-const STATUS_KEY = ["mcp-tool-statuses"] as const;
+const STORE_KEY = mcpKeys.servers();
+const STATUS_KEY = mcpKeys.toolStatuses();
 
 /**
  * Hook for managing the unified MCP server store.

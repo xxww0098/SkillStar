@@ -1,14 +1,22 @@
+import { useQuery } from "@tanstack/react-query";
 import { Bot, Check, ChevronDown, ChevronRight } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { tauriInvoke } from "../../../lib/ipc";
+import { settingsKeys } from "../api/keys";
 
 interface AcpConfig {
   enabled: boolean;
   agent_command: string;
   agent_label: string;
 }
+
+const DEFAULT_ACP_CONFIG: AcpConfig = {
+  enabled: false,
+  agent_command: "npx -y @agentclientprotocol/claude-agent-acp",
+  agent_label: "Claude",
+};
 
 /** Built-in agent presets for quick selection. */
 const AGENT_PRESETS = [
@@ -22,27 +30,29 @@ function isSameAcpConfig(a: AcpConfig, b: AcpConfig): boolean {
 
 export function AcpSection() {
   const { t } = useTranslation();
-  const [config, setConfig] = useState<AcpConfig>({
-    enabled: false,
-    agent_command: "npx -y @agentclientprotocol/claude-agent-acp",
-    agent_label: "Claude",
-  });
+  const [config, setConfig] = useState<AcpConfig>(DEFAULT_ACP_CONFIG);
   const savedConfigRef = useRef<AcpConfig>(config);
-  const [loaded, setLoaded] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  // Load config
+  // Load config once via Query (staleTime: Infinity mirrors the old
+  // mount-only useEffect: no window-focus/interval refetch). `loaded` derives
+  // from "settled" (success OR error), matching the old code: on failure it
+  // still flipped `loaded = true` and left `config` at its hardcoded default
+  // — which is exactly what arms the auto-save effect below.
+  const configQuery = useQuery<AcpConfig>({
+    queryKey: settingsKeys.acpConfig(),
+    queryFn: () => tauriInvoke("get_acp_config"),
+    staleTime: Infinity,
+  });
+  const loaded = configQuery.isSuccess || configQuery.isError;
+
   useEffect(() => {
-    tauriInvoke("get_acp_config")
-      .then((cfg) => {
-        setConfig(cfg);
-        savedConfigRef.current = cfg;
-        setLoaded(true);
-      })
-      .catch(() => setLoaded(true));
-  }, []);
+    if (!configQuery.data) return;
+    setConfig(configQuery.data);
+    savedConfigRef.current = configQuery.data;
+  }, [configQuery.data]);
 
   // Auto-save on change — only when config actually differs from last saved
   useEffect(() => {
