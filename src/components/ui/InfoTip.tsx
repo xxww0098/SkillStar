@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { HelpCircle } from "lucide-react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { cn } from "../../lib/utils";
 
 interface InfoTipProps {
@@ -10,6 +11,7 @@ interface InfoTipProps {
 }
 
 export function InfoTip({ content, className, iconClassName }: InfoTipProps) {
+  const { t } = useTranslation();
   const [isHovered, setIsHovered] = useState(false);
 
   const parseContent = (text: string) => {
@@ -57,7 +59,7 @@ export function InfoTip({ content, className, iconClassName }: InfoTipProps) {
           iconClassName,
         )}
         tabIndex={0}
-        aria-label="配置帮助信息"
+        aria-label={t("common.helpInfo")}
       />
 
       <AnimatePresence>

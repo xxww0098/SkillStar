@@ -43,7 +43,7 @@ export function UsageNav({ selected, onSelect, collapsed }: UsageNavProps) {
     <div className="flex h-full min-h-0 flex-col">
       <div className={cn("mb-1 shrink-0", collapsed ? "px-1.5" : "px-0")}>
         <NavItem
-          label={t("usage.allSubscriptions", "全部订阅")}
+          label={t("usage.allSubscriptions")}
           count={totalCount}
           selected={selected === FILTER_ALL}
           onClick={() => onSelect(FILTER_ALL)}
@@ -65,7 +65,7 @@ export function UsageNav({ selected, onSelect, collapsed }: UsageNavProps) {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={t("usage.searchCatalog", "搜索订阅商...")}
+              placeholder={t("usage.searchCatalog")}
               className="h-7 w-full rounded-md border border-border/50 bg-muted/30 pl-7 pr-2 text-[12px] text-foreground transition placeholder:text-muted-foreground/60 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/40"
             />
             <Search
@@ -79,7 +79,7 @@ export function UsageNav({ selected, onSelect, collapsed }: UsageNavProps) {
       <div className="min-h-0 flex-1 overflow-y-auto">
         {filteredCatalog.length === 0 && searchQuery.trim() ? (
           <div className="px-3 py-4 text-center">
-            <p className="text-[11px] text-muted-foreground">{t("usage.noCatalogMatch", "无匹配结果")}</p>
+            <p className="text-[11px] text-muted-foreground">{t("usage.noCatalogMatch")}</p>
           </div>
         ) : (
           <div className="flex flex-col gap-0.5">

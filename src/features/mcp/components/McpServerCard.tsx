@@ -97,7 +97,7 @@ export function McpServerCard({ server, toolStatuses, onOpen, onToggleTool }: Mc
                       e.stopPropagation();
                       onToggleTool(toolId, !on);
                     }}
-                    title={`${meta.label} ${on ? "(取消)" : "(激活)"}${installed ? "" : " · 未检测到安装"}`}
+                    title={`${meta.label} ${on ? t("mcp.toggleOff") : t("mcp.toggleOn")}${installed ? "" : t("mcp.notDetectedSuffix")}`}
                     className={cn(
                       "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-lg border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-1 focus-visible:ring-offset-background",
                       on

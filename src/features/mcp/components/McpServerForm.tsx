@@ -43,7 +43,7 @@ interface McpServerFormProps {
   onSubmit: (value: McpServerFormValue) => Promise<void> | void;
   onDelete?: () => Promise<void> | void;
   submitting?: boolean;
-  /** Override the submit button label (defaults to 保存/添加). */
+  /** Override the submit button label (defaults to Save/Add). */
   submitLabel?: string;
 }
 
@@ -127,15 +127,15 @@ export function McpServerForm({ initial, defaults, onSubmit, onDelete, submittin
   const handleSubmit = async () => {
     setError(null);
     if (!name.trim()) {
-      setError("请填写服务器名称");
+      setError(t("mcp.errorNameRequired"));
       return;
     }
     if (isRemote && !url.trim()) {
-      setError("HTTP / SSE 传输需要填写 URL");
+      setError(t("mcp.errorUrlRequired"));
       return;
     }
     if (!isRemote && !command.trim()) {
-      setError("stdio 传输需要填写启动命令");
+      setError(t("mcp.errorCommandRequired"));
       return;
     }
     const value: McpServerFormValue = {
@@ -167,12 +167,17 @@ export function McpServerForm({ initial, defaults, onSubmit, onDelete, submittin
   return (
     <div className="space-y-5">
       <div>
-        <FieldLabel hint="写入各工具配置的 key">名称</FieldLabel>
-        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="例如 context7" className="h-9" />
+        <FieldLabel hint={t("mcp.fieldNameHint")}>{t("mcp.fieldName")}</FieldLabel>
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder={t("mcp.fieldNamePlaceholder")}
+          className="h-9"
+        />
       </div>
 
       <div>
-        <FieldLabel>传输方式</FieldLabel>
+        <FieldLabel>{t("mcp.fieldTransport")}</FieldLabel>
         <div className="flex gap-2">
           {(["stdio", "http", "sse"] as const).map((t) => (
             <button
@@ -204,7 +209,7 @@ export function McpServerForm({ initial, defaults, onSubmit, onDelete, submittin
             />
           </div>
           <div>
-            <FieldLabel hint="每行 KEY=VALUE">请求头</FieldLabel>
+            <FieldLabel hint={t("mcp.kvHint")}>{t("mcp.fieldHeaders")}</FieldLabel>
             <textarea
               value={headersText}
               onChange={(e) => setHeadersText(e.target.value)}
@@ -217,7 +222,7 @@ export function McpServerForm({ initial, defaults, onSubmit, onDelete, submittin
       ) : (
         <>
           <div>
-            <FieldLabel>启动命令</FieldLabel>
+            <FieldLabel>{t("mcp.fieldCommand")}</FieldLabel>
             <Input
               value={command}
               onChange={(e) => setCommand(e.target.value)}
@@ -226,7 +231,7 @@ export function McpServerForm({ initial, defaults, onSubmit, onDelete, submittin
             />
           </div>
           <div>
-            <FieldLabel hint="每行一个">参数</FieldLabel>
+            <FieldLabel hint={t("mcp.oneLineHint")}>{t("mcp.fieldArgs")}</FieldLabel>
             <textarea
               value={argsText}
               onChange={(e) => setArgsText(e.target.value)}
@@ -236,7 +241,7 @@ export function McpServerForm({ initial, defaults, onSubmit, onDelete, submittin
             />
           </div>
           <div>
-            <FieldLabel hint="每行 KEY=VALUE">环境变量</FieldLabel>
+            <FieldLabel hint={t("mcp.kvHint")}>{t("mcp.fieldEnv")}</FieldLabel>
             <textarea
               value={envText}
               onChange={(e) => setEnvText(e.target.value)}
@@ -246,7 +251,7 @@ export function McpServerForm({ initial, defaults, onSubmit, onDelete, submittin
             />
           </div>
           <div>
-            <FieldLabel hint="可选">工作目录</FieldLabel>
+            <FieldLabel hint={t("common.optional")}>{t("mcp.fieldCwd")}</FieldLabel>
             <Input
               value={cwd}
               onChange={(e) => setCwd(e.target.value)}
@@ -259,11 +264,11 @@ export function McpServerForm({ initial, defaults, onSubmit, onDelete, submittin
 
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <FieldLabel hint="可选">描述</FieldLabel>
+          <FieldLabel hint={t("common.optional")}>{t("mcp.fieldDescription")}</FieldLabel>
           <Input value={description} onChange={(e) => setDescription(e.target.value)} className="h-9" />
         </div>
         <div>
-          <FieldLabel hint="可选">主页</FieldLabel>
+          <FieldLabel hint={t("common.optional")}>{t("mcp.homepage")}</FieldLabel>
           <Input
             value={homepage}
             onChange={(e) => setHomepage(e.target.value)}
@@ -341,7 +346,7 @@ export function McpServerForm({ initial, defaults, onSubmit, onDelete, submittin
       </div>
 
       <div>
-        <FieldLabel hint="勾选即写入对应工具的配置文件">启用工具</FieldLabel>
+        <FieldLabel hint={t("mcp.fieldEnabledToolsHint")}>{t("mcp.fieldEnabledTools")}</FieldLabel>
         <div className="grid grid-cols-2 gap-2">
           {MCP_TOOL_IDS.map((toolId) => {
             const on = enabled[toolId] ?? false;
@@ -375,13 +380,13 @@ export function McpServerForm({ initial, defaults, onSubmit, onDelete, submittin
             className="text-destructive hover:bg-destructive/10"
             onClick={() => void onDelete()}
           >
-            删除
+            {t("common.delete")}
           </Button>
         ) : (
           <span />
         )}
         <Button onClick={() => void handleSubmit()} disabled={submitting}>
-          {submitting ? "保存中…" : (submitLabel ?? (initial ? "保存" : "添加"))}
+          {submitting ? t("common.saving") : (submitLabel ?? (initial ? t("common.save") : t("common.add")))}
         </Button>
       </div>
     </div>

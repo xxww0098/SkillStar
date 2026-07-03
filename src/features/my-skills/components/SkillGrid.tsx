@@ -290,17 +290,13 @@ export function SkillGrid({
               <div className="flex items-center gap-2 px-1 mb-2">
                 <div className="h-px flex-1 bg-primary/15" />
                 <span className="text-[11px] font-medium text-primary/60 whitespace-nowrap">
-                  {repoSource}{" "}
-                  {t("ghostCard.foundCount", {
-                    count: groupSkills.length,
-                    defaultValue: `发现 ${groupSkills.length} 个新技能`,
-                  })}
+                  {repoSource} {t("ghostCard.foundCount", { count: groupSkills.length })}
                 </span>
                 {onDismissGhostRepo && (
                   <button
                     onClick={() => onDismissGhostRepo(repoSource)}
                     className="p-0.5 rounded text-muted-foreground/40 hover:text-foreground hover:bg-muted/60 transition-all duration-150 cursor-pointer"
-                    title={t("ghostCard.dismissAll", "全部忽略")}
+                    title={t("ghostCard.dismissAll")}
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>

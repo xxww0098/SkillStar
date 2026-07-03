@@ -48,7 +48,8 @@
     "add": "Add",
     "refresh": "Refresh",
     "refreshed": "Data refreshed",
-    "unknown": "Unknown"
+    "unknown": "Unknown",
+    "helpInfo": "Configuration help"
   },
   "sidebar": {
     "navigation": "Navigation",
@@ -521,7 +522,27 @@
     "remoteEndpoints": "Remote endpoints (http / sse)",
     "requiredEnv": "Required: {{keys}}",
     "requiredHeaders": "Required headers: {{keys}}",
-    "notFound": "Server not found"
+    "notFound": "Server not found",
+    "fieldName": "Name",
+    "fieldNameHint": "the key written into each tool's config",
+    "fieldNamePlaceholder": "e.g. context7",
+    "fieldTransport": "Transport",
+    "fieldHeaders": "Request Headers",
+    "kvHint": "One KEY=VALUE per line",
+    "fieldCommand": "Command",
+    "fieldArgs": "Arguments",
+    "oneLineHint": "One per line",
+    "fieldEnv": "Environment Variables",
+    "fieldCwd": "Working Directory",
+    "fieldDescription": "Description",
+    "fieldEnabledTools": "Enabled Tools",
+    "fieldEnabledToolsHint": "Checked tools get this server written to their config",
+    "errorNameRequired": "Please enter a server name",
+    "errorUrlRequired": "HTTP / SSE transport requires a URL",
+    "errorCommandRequired": "stdio transport requires a start command",
+    "toggleOn": "(enable)",
+    "toggleOff": "(disable)",
+    "notDetectedSuffix": " · not detected"
   },
   "skillCards": {
     "title": "Decks",
@@ -703,6 +724,15 @@
     "noEnabledAgents": "No enabled agents available. Enable agents in Settings first.",
     "stageDeployment": "Stage Deployment"
   },
+  "ghostCard": {
+    "newSkill": "New Skill",
+    "dismiss": "Don't show again",
+    "dismissAll": "Dismiss all",
+    "noDescription": "No description",
+    "install": "Install",
+    "foundCount": "found {{count}} new skill",
+    "foundCount_other": "found {{count}} new skills"
+  },
   "githubImportModal": {
     "title": "Import from GitHub",
     "description": "Enter a GitHub repository URL to scan for cards",
@@ -799,7 +829,11 @@
     "privateRepoWarning": "Contains private repositories",
     "privateRepoDesc": "Deploying will require GitHub access to clone these cards. Downloads will fail without permission.",
     "creating": "Creating...",
-    "confirmImportBtn": "Confirm Import"
+    "confirmImportBtn": "Confirm Import",
+    "favorite": "Favorite",
+    "importAndDownload": "Import & Download",
+    "confirmFavorite": "Confirm Favorite",
+    "confirmImportAndDownload": "Confirm Import & Download"
   },
   "exportShareCodeModal": {
     "title": "Share Skills",
@@ -965,7 +999,8 @@
     "savedToFile": "Share code saved to file",
     "saveAsFile": "Save as file",
     "setPassword": "Set password",
-    "regenerate": "Regenerate"
+    "regenerate": "Regenerate",
+    "pasteToImportHint": "Copy this entire message to import"
   },
   "setupHook": {
     "title": "Setup Hook",
@@ -989,7 +1024,8 @@
     "actions": "Actions",
     "refresh": "Refresh",
     "navigate": "navigate",
-    "select": "select"
+    "select": "select",
+    "modelsWorkbench": "Models Workbench"
   },
   "emptyState": {
     "mySkillsCta": "Browse Marketplace",
@@ -1016,6 +1052,8 @@
     "cardBalance": "Balance",
     "cardNoData": "No usage data",
     "allSubscriptions": "All subscriptions",
+    "searchCatalog": "Search providers...",
+    "noCatalogMatch": "No matches",
     "homeEmptyTitle": "No subscriptions yet",
     "homeEmptyHint": "The home view only shows bound subscriptions. Pick a provider in the sidebar (Cursor, Codex, …) to bind; it will appear here afterward.",
     "homeEmptyAction": "Add a subscription",
@@ -1761,6 +1799,9 @@
       "install": "Install {{count}}",
       "searchPlaceholder": "Filter skills…"
     }
+  },
+  "ipc": {
+    "notInTauriShell": "This page is not running inside the SkillStar desktop window, so it cannot reach the backend: please launch the full app (e.g. bun run tauri dev) instead of opening Vite's local dev URL directly in a browser."
   },
   "fingerprints": {
     "title": "Device Fingerprints",

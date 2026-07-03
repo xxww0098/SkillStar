@@ -48,7 +48,8 @@
     "apply": "应用",
     "or": "或",
     "add": "添加",
-    "unknown": "未知"
+    "unknown": "未知",
+    "helpInfo": "配置帮助信息"
   },
   "sidebar": {
     "navigation": "导航",
@@ -521,7 +522,27 @@
     "remoteEndpoints": "远程端点 (http / sse)",
     "requiredEnv": "需填写：{{keys}}",
     "requiredHeaders": "需填写请求头：{{keys}}",
-    "notFound": "服务器不存在"
+    "notFound": "服务器不存在",
+    "fieldName": "名称",
+    "fieldNameHint": "写入各工具配置的 key",
+    "fieldNamePlaceholder": "例如 context7",
+    "fieldTransport": "传输方式",
+    "fieldHeaders": "请求头",
+    "kvHint": "每行 KEY=VALUE",
+    "fieldCommand": "启动命令",
+    "fieldArgs": "参数",
+    "oneLineHint": "每行一个",
+    "fieldEnv": "环境变量",
+    "fieldCwd": "工作目录",
+    "fieldDescription": "描述",
+    "fieldEnabledTools": "启用工具",
+    "fieldEnabledToolsHint": "勾选即写入对应工具的配置文件",
+    "errorNameRequired": "请填写服务器名称",
+    "errorUrlRequired": "HTTP / SSE 传输需要填写 URL",
+    "errorCommandRequired": "stdio 传输需要填写启动命令",
+    "toggleOn": "(激活)",
+    "toggleOff": "(取消)",
+    "notDetectedSuffix": " · 未检测到安装"
   },
   "skillCards": {
     "title": "卡组",
@@ -703,6 +724,15 @@
     "noEnabledAgents": "没有可用的已启用 Agent，请先在设置中启用。",
     "stageDeployment": "准备部署"
   },
+  "ghostCard": {
+    "newSkill": "新技能",
+    "dismiss": "不再提示",
+    "dismissAll": "全部忽略",
+    "noDescription": "暂无描述",
+    "install": "安装",
+    "foundCount": "发现 {{count}} 个新技能",
+    "foundCount_other": "发现 {{count}} 个新技能"
+  },
   "githubImportModal": {
     "title": "从 GitHub 导入",
     "description": "输入 GitHub 仓库地址以扫描 Skills",
@@ -799,7 +829,11 @@
     "privateRepoWarning": "包含私有仓库",
     "privateRepoDesc": "部署时需要 GitHub 访问权限才能克隆这些 Skill。如果没有权限，下载将失败。",
     "creating": "创建中...",
-    "confirmImportBtn": "确认导入"
+    "confirmImportBtn": "确认导入",
+    "favorite": "收藏",
+    "importAndDownload": "导入并下载",
+    "confirmFavorite": "确认收藏",
+    "confirmImportAndDownload": "确认导入并下载"
   },
   "exportShareCodeModal": {
     "title": "分享技能",
@@ -965,7 +999,8 @@
     "savedToFile": "分享码已保存到文件",
     "saveAsFile": "保存为文件",
     "setPassword": "设置密码",
-    "regenerate": "重新生成"
+    "regenerate": "重新生成",
+    "pasteToImportHint": "复制整段消息直接粘贴导入"
   },
   "setupHook": {
     "title": "构建钩子",
@@ -989,7 +1024,8 @@
     "actions": "操作",
     "refresh": "刷新",
     "navigate": "导航",
-    "select": "选择"
+    "select": "选择",
+    "modelsWorkbench": "Models 工作台"
   },
   "emptyState": {
     "mySkillsCta": "浏览市场",
@@ -1016,6 +1052,8 @@
     "cardBalance": "余额",
     "cardNoData": "暂无用量数据",
     "allSubscriptions": "全部订阅",
+    "searchCatalog": "搜索订阅商...",
+    "noCatalogMatch": "无匹配结果",
     "homeEmptyTitle": "还没有任何订阅",
     "homeEmptyHint": "主页只展示已绑定的订阅。在左侧选择 Cursor、Codex 等供应商即可绑定；绑定后会出现在这里。",
     "homeEmptyAction": "去添加订阅",
@@ -1761,6 +1799,9 @@
       "install": "安装 {{count}} 个",
       "searchPlaceholder": "筛选 skill…"
     }
+  },
+  "ipc": {
+    "notInTauriShell": "当前页面不在 SkillStar 桌面窗口中，无法调用后端：请启动完整应用（例如 bun run tauri dev），不要单独在浏览器中打开 Vite 的本地开发地址。"
   },
   "fingerprints": {
     "title": "设备指纹",

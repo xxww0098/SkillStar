@@ -108,7 +108,7 @@ export function AgentAccordion({
                     onClick={(event) => event.stopPropagation()}
                     className="shrink-0 inline-flex items-center rounded-lg border border-border bg-muted/40 p-0.5"
                     role="group"
-                    aria-label={t("projects.deployMode", "部署方式")}
+                    aria-label={t("projects.deployMode")}
                   >
                     <button
                       type="button"
@@ -206,7 +206,7 @@ export function AgentAccordion({
                               }}
                               className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
                             >
-                              {t("common.clearAll", "全部清空")}
+                              {t("common.clearAll")}
                             </button>
                           )}
                         </div>
@@ -237,10 +237,10 @@ export function AgentAccordion({
                                     )
                                   }
                                   className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-border text-micro text-muted-foreground hover:border-primary/40 hover:text-primary hover:bg-primary/5 transition-colors cursor-pointer"
-                                  title={t("common.selectAll", "全选")}
+                                  title={t("common.selectAll")}
                                 >
                                   <Plus className="w-2.5 h-2.5" />
-                                  {t("common.selectAll", "全选")}
+                                  {t("common.selectAll")}
                                 </button>
                               )}
                               {available.map((skill) => (

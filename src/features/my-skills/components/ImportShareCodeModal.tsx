@@ -111,7 +111,6 @@ export function ImportShareCodeModal({ open, onClose, onImport, existingGroups =
         setError(
           t("importShareCodeModal.alreadyHasGroup", {
             name: duplicateContentGroup.name,
-            defaultValue: "已导入过本卡组",
           }),
         );
         setLoading(false);
@@ -245,7 +244,7 @@ export function ImportShareCodeModal({ open, onClose, onImport, existingGroups =
               ) : (
                 <Star className="w-4 h-4 mr-2" />
               )}
-              {t("importShareCodeModal.favorite", { defaultValue: "收藏" })}
+              {t("importShareCodeModal.favorite")}
             </Button>
             <Button size="sm" onClick={() => handleParse(true)} disabled={loading || !code.trim()}>
               {loading && intentInstall ? (
@@ -253,7 +252,7 @@ export function ImportShareCodeModal({ open, onClose, onImport, existingGroups =
               ) : (
                 <Download className="w-4 h-4 mr-2" />
               )}
-              {t("importShareCodeModal.importAndDownload", { defaultValue: "导入并下载" })}
+              {t("importShareCodeModal.importAndDownload")}
             </Button>
           </div>
         </>
@@ -338,8 +337,8 @@ export function ImportShareCodeModal({ open, onClose, onImport, existingGroups =
               {loading
                 ? t("importShareCodeModal.creating")
                 : intentInstall
-                  ? t("importShareCodeModal.confirmImportAndDownload", { defaultValue: "确认导入并下载" })
-                  : t("importShareCodeModal.confirmFavorite", { defaultValue: "确认收藏" })}
+                  ? t("importShareCodeModal.confirmImportAndDownload")
+                  : t("importShareCodeModal.confirmFavorite")}
             </Button>
           </div>
         </>

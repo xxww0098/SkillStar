@@ -160,7 +160,7 @@ export function PublishSkillModal({ open, onClose, skillName, skillDescription, 
       // (the done phase reads result.url/source_folder). Surface a friendly
       // error and stay on the form instead of throwing past the boundary.
       if (!publishResult || typeof publishResult.url !== "string") {
-        throw new Error(t("publishModal.invalidResponse", { defaultValue: "发布失败：返回结果无效" }));
+        throw new Error(t("publishModal.invalidResponse"));
       }
       setResult(publishResult);
       setPhase("done");
@@ -170,7 +170,7 @@ export function PublishSkillModal({ open, onClose, skillName, skillDescription, 
       const copySuccess = await copyToClipboard(publishResult.url);
       if (copySuccess) {
         setCopied(true);
-        toast.success(t("publishModal.autoCopied", { defaultValue: "已自动复制链接到剪贴板" }));
+        toast.success(t("publishModal.autoCopied"));
         setTimeout(() => setCopied(false), 2000);
       }
     } catch (e) {

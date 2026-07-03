@@ -62,13 +62,13 @@ function GhostSkillCardInner({ skill, onInstall, onDismiss, onClick }: GhostSkil
             {/* "新技能" badge */}
             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-primary/12 text-primary text-[10px] font-semibold tracking-wide uppercase">
               <Sparkles className="w-3 h-3" />
-              {t("ghostCard.newSkill", "新技能")}
+              {t("ghostCard.newSkill")}
             </span>
             {/* Dismiss button */}
             <button
               onClick={handleDismiss}
               className="p-1 rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-muted/60 transition-all duration-150 opacity-0 group-hover/ghost:opacity-100 cursor-pointer"
-              title={t("ghostCard.dismiss", "不再提示")}
+              title={t("ghostCard.dismiss")}
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -84,7 +84,7 @@ function GhostSkillCardInner({ skill, onInstall, onDismiss, onClick }: GhostSkil
         body={
           <div className="flex-1">
             <CardDescription className="line-clamp-2 text-xs text-muted-foreground/70">
-              {skill.description || t("ghostCard.noDescription", "暂无描述")}
+              {skill.description || t("ghostCard.noDescription")}
             </CardDescription>
           </div>
         }
@@ -103,7 +103,7 @@ function GhostSkillCardInner({ skill, onInstall, onDismiss, onClick }: GhostSkil
               ) : (
                 <>
                   <Download className="w-3.5 h-3.5 mr-1" />
-                  {t("ghostCard.install", "安装")}
+                  {t("ghostCard.install")}
                 </>
               )}
             </Button>

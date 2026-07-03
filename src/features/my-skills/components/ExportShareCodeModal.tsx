@@ -203,7 +203,7 @@ export function ExportShareCodeModal({
       const copySuccess = await copyToClipboard(textToCopy);
       if (copySuccess) {
         setCopied(true);
-        toast.success(t("exportShareCodeModal.autoCopied", { defaultValue: "已自动复制到剪贴板" }));
+        toast.success(t("exportShareCodeModal.autoCopied"));
         setTimeout(() => setCopied(false), 2000);
       }
     } catch (e) {

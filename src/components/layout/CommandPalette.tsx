@@ -120,9 +120,9 @@ export function CommandPalette({
     if (onEnterModelsMode) {
       navActions.push({
         id: "nav-models",
-        label: "Models 工作台",
+        label: t("commandPalette.modelsWorkbench"),
         icon: <Server className="w-4 h-4" />,
-        section: "Models",
+        section: t("sidebar.models"),
         onSelect: onEnterModelsMode,
         keywords: ["providers", "models", "ai", "provider", "agent", "claude", "codex", "模型"],
       });

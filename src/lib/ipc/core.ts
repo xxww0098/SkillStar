@@ -12,11 +12,9 @@
  */
 import { type UseQueryOptions, useMutation, useQuery } from "@tanstack/react-query";
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import i18n from "../../i18n";
 
 import type { TauriCommands } from "./commands";
-
-const NOT_IN_TAURI_SHELL =
-  "当前页面不在 SkillStar 桌面窗口中，无法调用后端：请启动完整应用（例如 bun run tauri dev），不要单独在浏览器中打开 Vite 的本地开发地址。";
 
 function invokeInTauriShell<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   if (!isTauri()) {
@@ -27,7 +25,7 @@ function invokeInTauriShell<T>(command: string, args?: Record<string, unknown>):
     if (import.meta.env.DEV) {
       return import("./devMock").then((m) => m.devInvoke<T>(command, args));
     }
-    return Promise.reject(new Error(NOT_IN_TAURI_SHELL));
+    return Promise.reject(new Error(i18n.t("ipc.notInTauriShell")));
   }
   return args === undefined ? invoke<T>(command) : invoke<T>(command, args);
 }

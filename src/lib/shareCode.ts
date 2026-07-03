@@ -10,6 +10,7 @@
  *
  * Share codes expire after TTL_EXPIRE_DAYS (default 7 days).
  */
+import i18n from "../i18n";
 
 // We use abbreviated keys for max density
 export interface ShareCodeData {
@@ -186,7 +187,13 @@ export function formatShareMessage(data: ShareCodeData, code: string, type: Shar
   if (data.d) lines.push(`Description: ${data.d}`);
   if (skillNames) lines.push(`Skills: ${skillNames}`);
   lines.push("");
-  lines.push(`💡 Copy this entire message to import / 复制整段消息直接粘贴导入`);
+  // Always bilingual regardless of the sharer's active UI language, so either
+  // an English- or Chinese-speaking recipient can understand it — pull both
+  // fixed-language variants from the locale resources instead of the
+  // currently active language.
+  const enHint = i18n.getFixedT("en")("shareResultCard.pasteToImportHint");
+  const zhHint = i18n.getFixedT("zh-CN")("shareResultCard.pasteToImportHint");
+  lines.push(`💡 ${enHint} / ${zhHint}`);
   lines.push(code);
 
   return lines.join("\n");
