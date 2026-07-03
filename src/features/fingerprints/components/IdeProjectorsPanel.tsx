@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import { AlertCircle, CheckCircle2, Loader2, MonitorCog, RefreshCw, RotateCcw, Send } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -24,6 +25,7 @@ interface IdeProjectorsPanelProps {
  *   - "Apply" button + "Restore baseline" button (when baseline exists)
  */
 export function IdeProjectorsPanel({ fingerprints, activeId }: IdeProjectorsPanelProps) {
+  const { t } = useTranslation();
   const [ides, setIdes] = useState<SupportedIde[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -56,23 +58,29 @@ export function IdeProjectorsPanel({ fingerprints, activeId }: IdeProjectorsPane
       const updated = await fingerprintsApi.applyToIde(agentId, fpId);
       setIdes((prev) => prev.map((r) => (r.agentId === agentId ? updated : r)));
       const fpLabel = fingerprints.find((f) => f.id === fpId)?.name ?? fpId;
-      toast.success(`已写入 ${updated.displayName}`, { description: `指纹: ${fpLabel}` });
+      toast.success(t("fingerprints.idePanel.applySuccess", { name: updated.displayName }), {
+        description: t("fingerprints.idePanel.applySuccessDescription", { fingerprint: fpLabel }),
+      });
     } catch (e) {
-      toast.error("应用失败", { description: e instanceof Error ? e.message : String(e) });
+      toast.error(t("fingerprints.idePanel.applyFailed"), {
+        description: e instanceof Error ? e.message : String(e),
+      });
     } finally {
       setBusy((b) => ({ ...b, [agentId]: false }));
     }
   };
 
   const onRestore = async (agentId: string) => {
-    if (!window.confirm(`确认把 ${agentId} 的设备身份恢复到 SkillStar 首次写入前的状态？`)) return;
+    if (!window.confirm(t("fingerprints.idePanel.restoreConfirm", { agent: agentId }))) return;
     setBusy((b) => ({ ...b, [agentId]: true }));
     try {
       const updated = await fingerprintsApi.restoreIde(agentId);
       setIdes((prev) => prev.map((r) => (r.agentId === agentId ? updated : r)));
-      toast.success(`已恢复 ${updated.displayName}`);
+      toast.success(t("fingerprints.idePanel.restoreSuccess", { name: updated.displayName }));
     } catch (e) {
-      toast.error("恢复失败", { description: e instanceof Error ? e.message : String(e) });
+      toast.error(t("fingerprints.idePanel.restoreFailed"), {
+        description: e instanceof Error ? e.message : String(e),
+      });
     } finally {
       setBusy((b) => ({ ...b, [agentId]: false }));
     }
@@ -84,17 +92,17 @@ export function IdeProjectorsPanel({ fingerprints, activeId }: IdeProjectorsPane
         <div>
           <div className="flex items-center gap-2 text-sm font-semibold">
             <MonitorCog className="h-4 w-4 text-sky-500" />
-            IDE 设备身份
+            {t("fingerprints.idePanel.title")}
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            把指纹的 telemetry 字段（machineId / macMachineId / devDeviceId / sqmId）写入目标 IDE 的{" "}
+            {t("fingerprints.idePanel.descriptionBefore")}{" "}
             <code className="rounded bg-zinc-100 px-1 py-0.5 text-[10px]">storage.json</code>
-            。下次启动时该 IDE 会用新身份重新登记自己。
+            {t("fingerprints.idePanel.descriptionAfter")}
           </p>
         </div>
         <Button onClick={reload} size="sm" variant="ghost" className="shrink-0" disabled={loading}>
           <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", loading && "animate-spin")} />
-          刷新
+          {t("fingerprints.idePanel.refresh")}
         </Button>
       </header>
 
@@ -108,7 +116,7 @@ export function IdeProjectorsPanel({ fingerprints, activeId }: IdeProjectorsPane
       {loading ? (
         <div className="flex items-center gap-2 rounded-xl border border-zinc-200/60 bg-white/60 px-3 py-4 text-sm text-muted-foreground">
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          扫描已安装的 IDE…
+          {t("fingerprints.idePanel.scanning")}
         </div>
       ) : (
         <div className="space-y-2">
@@ -143,6 +151,7 @@ interface IdeRowProps {
 }
 
 function IdeRow({ row, fingerprints, activeId, selected, busy, onPick, onApply, onRestore }: IdeRowProps) {
+  const { t } = useTranslation();
   return (
     <motion.div
       layout
@@ -157,13 +166,17 @@ function IdeRow({ row, fingerprints, activeId, selected, busy, onPick, onApply, 
           {row.installed ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
               <CheckCircle2 className="h-3 w-3" />
-              已安装
+              {t("fingerprints.idePanel.installed")}
             </span>
           ) : (
-            <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500">未安装</span>
+            <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500">
+              {t("fingerprints.idePanel.notInstalled")}
+            </span>
           )}
           {row.hasBaseline && (
-            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">已备份</span>
+            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+              {t("fingerprints.idePanel.backedUp")}
+            </span>
           )}
         </div>
         {row.storagePath && (
@@ -171,7 +184,8 @@ function IdeRow({ row, fingerprints, activeId, selected, busy, onPick, onApply, 
         )}
         {row.current?.machine_id && (
           <div className="mt-1 truncate font-mono text-[10px] text-zinc-600">
-            当前 machineId: <span className="text-zinc-800">{row.current.machine_id}</span>
+            {t("fingerprints.idePanel.currentMachineIdLabel")}{" "}
+            <span className="text-zinc-800">{row.current.machine_id}</span>
           </div>
         )}
       </div>
@@ -182,18 +196,18 @@ function IdeRow({ row, fingerprints, activeId, selected, busy, onPick, onApply, 
           value={selected}
           onChange={(e) => onPick(e.target.value)}
           disabled={!row.installed || busy}
-          aria-label="选择指纹"
+          aria-label={t("fingerprints.idePanel.selectFingerprintAria")}
         >
           {fingerprints.map((fp) => (
             <option key={fp.id} value={fp.id}>
               {fp.name}
-              {fp.id === activeId ? " · 活跃" : ""}
+              {fp.id === activeId ? t("fingerprints.idePanel.activeSuffix") : ""}
             </option>
           ))}
         </select>
         <Button size="sm" variant="default" className="h-7 text-xs" onClick={onApply} disabled={!row.installed || busy}>
           {busy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Send className="mr-1 h-3 w-3" />}
-          应用
+          {t("fingerprints.idePanel.apply")}
         </Button>
         <Button
           size="sm"
@@ -201,10 +215,14 @@ function IdeRow({ row, fingerprints, activeId, selected, busy, onPick, onApply, 
           className="h-7 text-xs"
           onClick={onRestore}
           disabled={!row.installed || !row.hasBaseline || busy}
-          title={row.hasBaseline ? "恢复 SkillStar 首次写入前的设备身份" : "尚未保存基线"}
+          title={
+            row.hasBaseline
+              ? t("fingerprints.idePanel.restoreTitleAvailable")
+              : t("fingerprints.idePanel.restoreTitleUnavailable")
+          }
         >
           <RotateCcw className="mr-1 h-3 w-3" />
-          恢复
+          {t("fingerprints.idePanel.restore")}
         </Button>
       </div>
     </motion.div>

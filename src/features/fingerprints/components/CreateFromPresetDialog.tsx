@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { Loader2, Sparkles, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +22,7 @@ interface CreateFromPresetDialogProps {
  * 3. clicks "Create"
  */
 export function CreateFromPresetDialog({ open, presets, onClose, onSubmit }: CreateFromPresetDialogProps) {
+  const { t } = useTranslation();
   const [presetId, setPresetId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -48,20 +50,22 @@ export function CreateFromPresetDialog({ open, presets, onClose, onSubmit }: Cre
 
   const submit = async () => {
     if (!presetId) {
-      toast.error("请选择一个预设");
+      toast.error(t("fingerprints.createDialog.toastSelectPreset"));
       return;
     }
     if (!name.trim()) {
-      toast.error("请填写指纹名称");
+      toast.error(t("fingerprints.createDialog.toastNameRequired"));
       return;
     }
     setBusy(true);
     try {
       await onSubmit(presetId, name.trim());
-      toast.success("已创建指纹", { description: name.trim() });
+      toast.success(t("fingerprints.createDialog.toastCreated"), { description: name.trim() });
       onClose();
     } catch (e) {
-      toast.error("创建失败", { description: e instanceof Error ? e.message : String(e) });
+      toast.error(t("fingerprints.createDialog.toastCreateFailed"), {
+        description: e instanceof Error ? e.message : String(e),
+      });
     } finally {
       setBusy(false);
     }
@@ -99,10 +103,8 @@ export function CreateFromPresetDialog({ open, presets, onClose, onSubmit }: Cre
                 <Sparkles className="h-4 w-4" />
               </div>
               <div>
-                <h2 className="text-base font-semibold">从预设创建指纹</h2>
-                <p className="text-xs text-muted-foreground">
-                  挑一个浏览器画像，下次刷额度时自动套用它的 TLS / UA / 头部
-                </p>
+                <h2 className="text-base font-semibold">{t("fingerprints.createDialog.title")}</h2>
+                <p className="text-xs text-muted-foreground">{t("fingerprints.createDialog.subtitle")}</p>
               </div>
             </div>
 
@@ -135,27 +137,29 @@ export function CreateFromPresetDialog({ open, presets, onClose, onSubmit }: Cre
             </div>
 
             <div className="mt-5">
-              <label className="mb-1.5 block text-xs font-medium text-zinc-700">指纹名称</label>
+              <label className="mb-1.5 block text-xs font-medium text-zinc-700">
+                {t("fingerprints.createDialog.nameLabel")}
+              </label>
               <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="例如：Chrome on Mac (Office)"
+                placeholder={t("fingerprints.createDialog.namePlaceholder")}
                 disabled={busy}
               />
             </div>
 
             <div className="mt-5 flex justify-end gap-2">
               <Button variant="outline" onClick={onClose} disabled={busy}>
-                取消
+                {t("fingerprints.createDialog.cancel")}
               </Button>
               <Button onClick={submit} disabled={busy || !presetId}>
                 {busy ? (
                   <>
                     <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-                    创建中…
+                    {t("fingerprints.createDialog.creating")}
                   </>
                 ) : (
-                  "创建指纹"
+                  t("fingerprints.createDialog.create")
                 )}
               </Button>
             </div>

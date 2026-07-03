@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { Edit3, Globe2, Loader2, Network, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,9 +22,11 @@ interface EditFingerprintDialogProps {
   onSubmit: (input: UpdateFingerprintInput) => Promise<void>;
 }
 
-/** All TLS kinds the picker exposes. `default` keeps reqwest's stock rustls. */
+/** All TLS kinds the picker exposes. `default` keeps reqwest's stock rustls.
+ *  Labels are plain (non-translated) brand names — only "default" needs a
+ *  translated label, resolved inline where `TLS_KINDS` is consumed. */
 const TLS_KINDS: { value: TlsProfileKind; label: string; defaultMajor: number | null }[] = [
-  { value: "default", label: "默认 (rustls)", defaultMajor: null },
+  { value: "default", label: "default", defaultMajor: null },
   { value: "chrome", label: "Chrome", defaultMajor: 147 },
   { value: "safari", label: "Safari", defaultMajor: 26 },
   { value: "edge", label: "Edge", defaultMajor: 147 },
@@ -39,6 +42,7 @@ const TLS_KINDS: { value: TlsProfileKind; label: string; defaultMajor: number | 
  * pane to keep the UI legible.
  */
 export function EditFingerprintDialog({ open, row, onClose, onSubmit }: EditFingerprintDialogProps) {
+  const { t } = useTranslation();
   // -- form state ---------------------------------------------------
   const [name, setName] = useState("");
   const [tlsKind, setTlsKind] = useState<TlsProfileKind>("default");
@@ -101,7 +105,7 @@ export function EditFingerprintDialog({ open, row, onClose, onSubmit }: EditFing
 
   const submit = async () => {
     if (!name.trim()) {
-      toast.error("指纹名称不能为空");
+      toast.error(t("fingerprints.editDialog.toastNameRequired"));
       return;
     }
     setBusy(true);
@@ -133,10 +137,12 @@ export function EditFingerprintDialog({ open, row, onClose, onSubmit }: EditFing
 
     try {
       await onSubmit(input);
-      toast.success("指纹已保存", { description: name.trim() });
+      toast.success(t("fingerprints.editDialog.toastSaved"), { description: name.trim() });
       onClose();
     } catch (e) {
-      toast.error("保存失败", { description: e instanceof Error ? e.message : String(e) });
+      toast.error(t("fingerprints.editDialog.toastSaveFailed"), {
+        description: e instanceof Error ? e.message : String(e),
+      });
     } finally {
       setBusy(false);
     }
@@ -174,30 +180,28 @@ export function EditFingerprintDialog({ open, row, onClose, onSubmit }: EditFing
                 <Edit3 className="h-4 w-4" />
               </div>
               <div>
-                <h2 className="text-base font-semibold">编辑指纹</h2>
-                <p className="text-xs text-muted-foreground">
-                  调整 TLS 版本 / User-Agent / 代理；保存后下次刷新会自动套用
-                </p>
+                <h2 className="text-base font-semibold">{t("fingerprints.editDialog.title")}</h2>
+                <p className="text-xs text-muted-foreground">{t("fingerprints.editDialog.subtitle")}</p>
               </div>
             </div>
 
             <div className="max-h-[60vh] space-y-5 overflow-y-auto pr-1">
-              {/* ── 基础 ────────────────────────────────────────────── */}
-              <Section title="基础">
-                <Field label="名称">
+              {/* ── basic ────────────────────────────────────────────── */}
+              <Section title={t("fingerprints.editDialog.sectionBasic")}>
+                <Field label={t("fingerprints.editDialog.nameLabel")}>
                   <Input
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="如：Chrome on Mac (Office)"
+                    placeholder={t("fingerprints.editDialog.namePlaceholder")}
                     disabled={busy}
                   />
                 </Field>
               </Section>
 
               {/* ── TLS ──────────────────────────────────────────── */}
-              <Section title="TLS 指纹" icon={<Globe2 className="h-3.5 w-3.5" />}>
+              <Section title={t("fingerprints.editDialog.sectionTls")} icon={<Globe2 className="h-3.5 w-3.5" />}>
                 <div className="grid grid-cols-3 gap-2">
-                  <Field label="家族" className="col-span-2">
+                  <Field label={t("fingerprints.editDialog.familyLabel")} className="col-span-2">
                     <div className="flex flex-wrap gap-1.5">
                       {TLS_KINDS.map((k) => (
                         <button
@@ -212,30 +216,31 @@ export function EditFingerprintDialog({ open, row, onClose, onSubmit }: EditFing
                               : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300",
                           )}
                         >
-                          {k.label}
+                          {k.value === "default" ? t("fingerprints.tls.default") : k.label}
                         </button>
                       ))}
                     </div>
                   </Field>
-                  <Field label="主版本">
+                  <Field label={t("fingerprints.editDialog.majorVersionLabel")}>
                     <Input
                       value={tlsMajor}
                       onChange={(e) => setTlsMajor(e.target.value.replace(/\D/g, ""))}
-                      placeholder={tlsDisabled ? "—" : "如 147"}
+                      placeholder={
+                        tlsDisabled
+                          ? t("fingerprints.editDialog.majorVersionPlaceholderDisabled")
+                          : t("fingerprints.editDialog.majorVersionPlaceholder")
+                      }
                       disabled={busy || tlsDisabled}
                       inputMode="numeric"
                     />
                   </Field>
                 </div>
-                <p className="mt-2 text-[11px] text-muted-foreground">
-                  TLS 默认 = reqwest 原生 ClientHello；其他家族通过 wreq 模拟浏览器 JA3/JA4 + HTTP/2
-                  SETTINGS。后端会把版本号映射到最接近的内置 emulation。
-                </p>
+                <p className="mt-2 text-[11px] text-muted-foreground">{t("fingerprints.editDialog.tlsHint")}</p>
               </Section>
 
-              {/* ── HTTP 头 ────────────────────────────────────── */}
-              <Section title="HTTP 头">
-                <Field label="User-Agent">
+              {/* ── HTTP headers ────────────────────────────────────── */}
+              <Section title={t("fingerprints.editDialog.sectionHttpHeaders")}>
+                <Field label={t("fingerprints.editDialog.userAgentLabel")}>
                   <textarea
                     value={userAgent}
                     onChange={(e) => setUserAgent(e.target.value)}
@@ -245,7 +250,7 @@ export function EditFingerprintDialog({ open, row, onClose, onSubmit }: EditFing
                   />
                 </Field>
                 <div className="grid grid-cols-2 gap-2">
-                  <Field label="Accept-Language">
+                  <Field label={t("fingerprints.editDialog.acceptLanguageLabel")}>
                     <Input
                       value={acceptLanguage}
                       onChange={(e) => setAcceptLanguage(e.target.value)}
@@ -253,7 +258,7 @@ export function EditFingerprintDialog({ open, row, onClose, onSubmit }: EditFing
                       disabled={busy}
                     />
                   </Field>
-                  <Field label="Accept-Encoding">
+                  <Field label={t("fingerprints.editDialog.acceptEncodingLabel")}>
                     <Input
                       value={acceptEncoding}
                       onChange={(e) => setAcceptEncoding(e.target.value)}
@@ -263,7 +268,7 @@ export function EditFingerprintDialog({ open, row, onClose, onSubmit }: EditFing
                   </Field>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <Field label="Sec-CH-UA">
+                  <Field label={t("fingerprints.editDialog.secChUaLabel")}>
                     <Input
                       value={secChUa}
                       onChange={(e) => setSecChUa(e.target.value)}
@@ -271,7 +276,7 @@ export function EditFingerprintDialog({ open, row, onClose, onSubmit }: EditFing
                       disabled={busy}
                     />
                   </Field>
-                  <Field label="Sec-CH-UA-Platform">
+                  <Field label={t("fingerprints.editDialog.secChUaPlatformLabel")}>
                     <Input
                       value={secChUaPlatform}
                       onChange={(e) => setSecChUaPlatform(e.target.value)}
@@ -287,22 +292,22 @@ export function EditFingerprintDialog({ open, row, onClose, onSubmit }: EditFing
                     onChange={(e) => setSecChUaMobile(e.target.checked)}
                     disabled={busy}
                   />
-                  Sec-CH-UA-Mobile (?1)
+                  {t("fingerprints.editDialog.secChUaMobileLabel")}
                 </label>
               </Section>
 
-              {/* ── 网络 ───────────────────────────────────────── */}
-              <Section title="网络" icon={<Network className="h-3.5 w-3.5" />}>
-                <Field label="HTTP / SOCKS5 代理">
+              {/* ── network ───────────────────────────────────────── */}
+              <Section title={t("fingerprints.editDialog.sectionNetwork")} icon={<Network className="h-3.5 w-3.5" />}>
+                <Field label={t("fingerprints.editDialog.proxyLabel")}>
                   <Input
                     value={proxyUrl}
                     onChange={(e) => setProxyUrl(e.target.value)}
-                    placeholder="socks5h://127.0.0.1:1080 或 http://user:pass@host:port"
+                    placeholder="socks5h://127.0.0.1:1080 or http://user:pass@host:port"
                     disabled={busy}
                   />
                 </Field>
                 <div className="grid grid-cols-2 gap-2">
-                  <Field label="DNS-over-HTTPS">
+                  <Field label={t("fingerprints.editDialog.dohLabel")}>
                     <Input
                       value={dohUrl}
                       onChange={(e) => setDohUrl(e.target.value)}
@@ -310,7 +315,7 @@ export function EditFingerprintDialog({ open, row, onClose, onSubmit }: EditFing
                       disabled={busy}
                     />
                   </Field>
-                  <Field label="期望出口国家">
+                  <Field label={t("fingerprints.editDialog.egressCountryLabel")}>
                     <Input
                       value={egressCountry}
                       onChange={(e) => setEgressCountry(e.target.value.toUpperCase())}
@@ -320,24 +325,22 @@ export function EditFingerprintDialog({ open, row, onClose, onSubmit }: EditFing
                     />
                   </Field>
                 </div>
-                <p className="mt-2 text-[11px] text-muted-foreground">
-                  代理和 DoH 当前用于一致性记录；完整网络层接管会在后续 phase 接入。
-                </p>
+                <p className="mt-2 text-[11px] text-muted-foreground">{t("fingerprints.editDialog.networkHint")}</p>
               </Section>
             </div>
 
             <div className="mt-5 flex justify-end gap-2">
               <Button variant="outline" onClick={onClose} disabled={busy}>
-                取消
+                {t("fingerprints.editDialog.cancel")}
               </Button>
               <Button onClick={submit} disabled={busy}>
                 {busy ? (
                   <>
                     <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-                    保存中…
+                    {t("fingerprints.editDialog.saving")}
                   </>
                 ) : (
-                  "保存"
+                  t("fingerprints.editDialog.save")
                 )}
               </Button>
             </div>

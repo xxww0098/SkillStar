@@ -1,5 +1,6 @@
 import { Fingerprint } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { fingerprintsApi } from "../api";
 import type { FingerprintRow } from "../types";
@@ -25,6 +26,7 @@ interface FingerprintPickerProps {
  * panel being mounted.
  */
 export function FingerprintPicker({ value, onChange, disabled, showLabel = true }: FingerprintPickerProps) {
+  const { t } = useTranslation();
   const [items, setItems] = useState<FingerprintRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -47,15 +49,15 @@ export function FingerprintPicker({ value, onChange, disabled, showLabel = true 
   }, []);
 
   if (loading) {
-    return <div className="text-xs text-muted-foreground">加载指纹…</div>;
+    return <div className="text-xs text-muted-foreground">{t("fingerprints.picker.loading")}</div>;
   }
   if (error) {
-    return <div className="text-xs text-red-600">指纹加载失败：{error}</div>;
+    return <div className="text-xs text-red-600">{t("fingerprints.picker.loadFailed", { error })}</div>;
   }
 
   // Hide picker entirely if only "original" exists — keeps simple UIs simple.
   if (items.length <= 1) {
-    return <div className="text-[11px] text-muted-foreground">没有自定义指纹。先在 设置 → 设备指纹 创建一个。</div>;
+    return <div className="text-[11px] text-muted-foreground">{t("fingerprints.picker.empty")}</div>;
   }
 
   return (
@@ -63,18 +65,23 @@ export function FingerprintPicker({ value, onChange, disabled, showLabel = true 
       {showLabel && (
         <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-700">
           <Fingerprint className="h-3.5 w-3.5 text-violet-500" />
-          指纹绑定
+          {t("fingerprints.picker.label")}
         </div>
       )}
       <div className="flex flex-wrap gap-1.5">
-        <Pill label="默认" active={!value} disabled={disabled} onClick={() => onChange(null)} />
+        <Pill
+          label={t("fingerprints.picker.default")}
+          active={!value}
+          disabled={disabled}
+          onClick={() => onChange(null)}
+        />
         {items
           .filter((x) => !x.isOriginal)
           .map((row) => (
             <Pill
               key={row.id}
               label={row.name}
-              sublabel={tlsLabel(row.tls)}
+              sublabel={tlsLabel(row.tls, t)}
               active={value === row.id}
               disabled={disabled}
               onClick={() => onChange(row.id)}

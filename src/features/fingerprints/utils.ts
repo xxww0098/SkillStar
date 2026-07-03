@@ -1,22 +1,24 @@
+import type { TFunction } from "i18next";
 import type { TlsProfile } from "./types";
 
 /** Short human label for a TLS profile, e.g. "Chrome 147". */
-export function tlsLabel(tls: TlsProfile): string {
+export function tlsLabel(tls: TlsProfile, t: TFunction): string {
+  const major = tls.major ?? "?";
   switch (tls.kind) {
     case "default":
-      return "默认 (rustls)";
+      return t("fingerprints.tls.default");
     case "chrome":
-      return `Chrome ${tls.major ?? "?"}`;
+      return t("fingerprints.tls.chrome", { major });
     case "safari":
-      return `Safari ${tls.major ?? "?"}`;
+      return t("fingerprints.tls.safari", { major });
     case "edge":
-      return `Edge ${tls.major ?? "?"}`;
+      return t("fingerprints.tls.edge", { major });
     case "firefox":
-      return `Firefox ${tls.major ?? "?"}`;
+      return t("fingerprints.tls.firefox", { major });
     case "opera":
-      return `Opera ${tls.major ?? "?"}`;
+      return t("fingerprints.tls.opera", { major });
     case "ok_http":
-      return `OkHttp ${tls.major ?? "?"}`;
+      return t("fingerprints.tls.okHttp", { major });
     default:
       return tls.kind;
   }

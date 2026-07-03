@@ -100,7 +100,7 @@ describe("AppAiModelsPicker", () => {
   it("fetches models into the selected provider", async () => {
     render(<AppAiModelsPicker config={config} onConfigChange={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "获取模型" }));
+    fireEvent.click(screen.getByRole("button", { name: "models.modelsTab.fetchModels" }));
 
     await waitFor(() => {
       expect(mocks.fetchModels).toHaveBeenCalledWith("https://api.deepseek.com/v1/models", "sk-test");
@@ -118,8 +118,8 @@ describe("AppAiModelsPicker", () => {
     const onConfigChange = vi.fn();
     render(<AppAiModelsPicker config={config} onConfigChange={onConfigChange} />);
 
-    fireEvent.change(screen.getByLabelText("模型"), { target: { value: "deepseek-coder" } });
-    fireEvent.click(screen.getByRole("button", { name: /保存连接配置/ }));
+    fireEvent.change(screen.getByLabelText("settings.model"), { target: { value: "deepseek-coder" } });
+    fireEvent.click(screen.getByRole("button", { name: /settings.appAiSaveConnection/ }));
 
     await waitFor(() => {
       expect(mocks.updateProvider).toHaveBeenCalledWith(
@@ -160,13 +160,15 @@ describe("AppAiModelsPicker", () => {
       />,
     );
 
-    expect(screen.getByText("缺 Key")).toBeInTheDocument();
+    expect(screen.getByText("settings.appAiMissingKey")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Custom Gateway/ }));
     fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "sk-custom" } });
-    fireEvent.change(screen.getByLabelText("OpenAI Base URL"), { target: { value: "https://api.example.com/v1" } });
-    fireEvent.change(screen.getByLabelText("模型"), { target: { value: "gpt-test" } });
-    fireEvent.click(screen.getByRole("button", { name: /保存连接配置/ }));
+    fireEvent.change(screen.getByLabelText("settings.appAiPrimaryBaseUrlOpenai"), {
+      target: { value: "https://api.example.com/v1" },
+    });
+    fireEvent.change(screen.getByLabelText("settings.model"), { target: { value: "gpt-test" } });
+    fireEvent.click(screen.getByRole("button", { name: /settings.appAiSaveConnection/ }));
 
     await waitFor(() => {
       expect(mocks.updateProvider).toHaveBeenCalledWith(

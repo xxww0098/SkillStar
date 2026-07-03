@@ -151,11 +151,12 @@ function AppAiModelsPickerInner({ config, disabled, onConfigChange }: AppAiModel
 
   const providerReadiness = useMemo(() => {
     if (!selectedProvider) return { label: "", tone: "muted" as const };
-    if (hasConnectionChanges) return { label: "待保存", tone: "warn" as const };
-    if (!selectedProvider.api_key.trim()) return { label: "缺 API Key", tone: "warn" as const };
-    if (!activeBaseUrl(selectedProvider, selectedApp)) return { label: "缺 Base URL", tone: "warn" as const };
-    return { label: "可用于应用内 AI", tone: "ready" as const };
-  }, [hasConnectionChanges, selectedApp, selectedProvider]);
+    if (hasConnectionChanges) return { label: t("settings.appAiStatusPending"), tone: "warn" as const };
+    if (!selectedProvider.api_key.trim()) return { label: t("settings.appAiStatusMissingKey"), tone: "warn" as const };
+    if (!activeBaseUrl(selectedProvider, selectedApp))
+      return { label: t("settings.appAiStatusMissingBaseUrl"), tone: "warn" as const };
+    return { label: t("settings.appAiStatusReady"), tone: "ready" as const };
+  }, [hasConnectionChanges, selectedApp, selectedProvider, t]);
 
   const buildModelPatch = useCallback(
     (provider: ProviderEntryFlat, model: string, fetchedModels: string[] = []): ProviderPatchFlat => {
@@ -245,11 +246,11 @@ function AppAiModelsPickerInner({ config, disabled, onConfigChange }: AppAiModel
   const handleFetchProviderModels = useCallback(async () => {
     if (!selectedProvider) return;
     if (!draftModelsUrl.trim()) {
-      toast.error("请先填写获取模型 URL");
+      toast.error(t("settings.appAiToastMissingModelsUrl"));
       return;
     }
     if (!draftApiKey.trim()) {
-      toast.error("请先填写 API Key");
+      toast.error(t("settings.appAiToastMissingApiKey"));
       return;
     }
 
@@ -270,10 +271,10 @@ function AppAiModelsPickerInner({ config, disabled, onConfigChange }: AppAiModel
           api_format: selectedApp === "claude" ? "anthropic" : "openai",
         });
       }
-      toast.success(`已获取 ${fetched.length} 个模型`);
+      toast.success(t("settings.appAiToastFetchedModels", { count: fetched.length }));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      toast.error(`获取模型失败：${message}`);
+      toast.error(t("settings.appAiToastFetchFailed", { message }));
     }
   }, [
     buildConnectionPatch,
@@ -287,23 +288,24 @@ function AppAiModelsPickerInner({ config, disabled, onConfigChange }: AppAiModel
     selectedApp,
     selectedModel,
     selectedProvider,
+    t,
     updateProvider,
   ]);
 
   const handleSaveConnection = useCallback(async () => {
     if (!selectedProvider) return;
     if (!isValidHttpUrl(draftBaseUrlOpenai)) {
-      toast.error("OpenAI Base URL 格式无效");
+      toast.error(t("settings.appAiToastInvalidOpenaiUrl"));
       setConnectionState("error");
       return;
     }
     if (!isValidHttpUrl(draftBaseUrlAnthropic)) {
-      toast.error("Anthropic Base URL 格式无效");
+      toast.error(t("settings.appAiToastInvalidAnthropicUrl"));
       setConnectionState("error");
       return;
     }
     if (!isValidHttpUrl(draftModelsUrl)) {
-      toast.error("获取模型 URL 格式无效");
+      toast.error(t("settings.appAiToastInvalidModelsUrl"));
       setConnectionState("error");
       return;
     }
@@ -323,11 +325,11 @@ function AppAiModelsPickerInner({ config, disabled, onConfigChange }: AppAiModel
           provider_ref: null,
         });
       }
-      toast.success("连接配置已保存");
+      toast.success(t("settings.appAiToastSaved"));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setConnectionState("error");
-      toast.error(`保存失败：${message}`);
+      toast.error(t("settings.appAiToastSaveFailed", { message }));
     }
   }, [
     bindProviderForApp,
@@ -341,13 +343,18 @@ function AppAiModelsPickerInner({ config, disabled, onConfigChange }: AppAiModel
     onConfigChange,
     selectedApp,
     selectedProvider,
+    t,
     updateProvider,
   ]);
 
-  const primaryBaseLabel = selectedApp === "claude" ? "Claude Base URL" : "OpenAI Base URL";
+  const primaryBaseLabel =
+    selectedApp === "claude" ? t("settings.appAiPrimaryBaseUrlClaude") : t("settings.appAiPrimaryBaseUrlOpenai");
   const primaryBaseValue = selectedApp === "claude" ? draftBaseUrlAnthropic : draftBaseUrlOpenai;
   const setPrimaryBaseValue = selectedApp === "claude" ? setDraftBaseUrlAnthropic : setDraftBaseUrlOpenai;
-  const secondaryBaseLabel = selectedApp === "claude" ? "OpenAI 兼容 Base URL" : "Anthropic Base URL";
+  const secondaryBaseLabel =
+    selectedApp === "claude"
+      ? t("settings.appAiSecondaryBaseUrlOpenaiCompat")
+      : t("settings.appAiSecondaryBaseUrlAnthropic");
   const secondaryBaseValue = selectedApp === "claude" ? draftBaseUrlOpenai : draftBaseUrlAnthropic;
   const setSecondaryBaseValue = selectedApp === "claude" ? setDraftBaseUrlOpenai : setDraftBaseUrlAnthropic;
   const draftActiveBaseUrl =
@@ -362,22 +369,24 @@ function AppAiModelsPickerInner({ config, disabled, onConfigChange }: AppAiModel
   const saveLabel = useMemo(
     () =>
       connectionState === "saving"
-        ? "保存中"
+        ? t("settings.appAiSaving")
         : connectionState === "saved"
-          ? "已保存"
+          ? t("settings.appAiSaved")
           : connectionState === "error"
-            ? "重试保存"
-            : "保存连接配置",
-    [connectionState],
+            ? t("settings.appAiRetrySave")
+            : t("settings.appAiSaveConnection"),
+    [connectionState, t],
   );
   const primaryActionLabel =
-    !isBoundToCurrentProvider && !hasConnectionChanges && hasDraftCredentials ? "设为应用内 AI" : saveLabel;
+    !isBoundToCurrentProvider && !hasConnectionChanges && hasDraftCredentials
+      ? t("settings.appAiSetAsInAppAi")
+      : saveLabel;
 
   if (isLoading) {
     return (
       <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" />
-        {t("common.loading", { defaultValue: "加载中…" })}
+        {t("common.loading")}
       </div>
     );
   }
@@ -388,10 +397,8 @@ function AppAiModelsPickerInner({ config, disabled, onConfigChange }: AppAiModel
         <div className="flex items-start gap-2.5">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
           <div className="min-w-0 space-y-1">
-            <p className="text-sm font-medium text-foreground">还没有 Models 供应商</p>
-            <p className="text-xs leading-5 text-muted-foreground">
-              先在 Models 工作台新增一个供应商；新增后这里可以直接编辑 Base URL、API Key 和应用内 AI 模型。
-            </p>
+            <p className="text-sm font-medium text-foreground">{t("settings.appAiNoProvidersTitle")}</p>
+            <p className="text-xs leading-5 text-muted-foreground">{t("settings.appAiNoProvidersDesc")}</p>
           </div>
         </div>
       </div>
@@ -402,11 +409,7 @@ function AppAiModelsPickerInner({ config, disabled, onConfigChange }: AppAiModel
     <div className="space-y-4">
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <Sparkles className="h-3.5 w-3.5 text-primary" />
-        <span>
-          {t("settings.appAiModelsHint", {
-            defaultValue: "从 Models 供应商库选择，用于摘要、翻译与技能推荐。",
-          })}
-        </span>
+        <span>{t("settings.appAiModelsHint")}</span>
       </div>
 
       <div className="flex gap-2">
@@ -424,7 +427,7 @@ function AppAiModelsPickerInner({ config, disabled, onConfigChange }: AppAiModel
                 : "border-border/60 text-muted-foreground hover:border-border hover:text-foreground",
             )}
           >
-            {appId === "claude" ? "Claude 协议" : "OpenAI 协议"}
+            {appId === "claude" ? t("models.appAi.claudeProtocol") : t("models.appAi.openaiProtocol")}
           </button>
         ))}
       </div>
@@ -433,7 +436,11 @@ function AppAiModelsPickerInner({ config, disabled, onConfigChange }: AppAiModel
         {providers.map((p) => {
           const isSelected = p.id === selectedId;
           const ready = hasUsableCredentials(p, selectedApp);
-          const missingLabel = !p.api_key.trim() ? "缺 Key" : !activeBaseUrl(p, selectedApp) ? "缺 URL" : "";
+          const missingLabel = !p.api_key.trim()
+            ? t("settings.appAiMissingKey")
+            : !activeBaseUrl(p, selectedApp)
+              ? t("settings.appAiMissingUrl")
+              : "";
           return (
             <button
               key={p.id}
@@ -451,11 +458,13 @@ function AppAiModelsPickerInner({ config, disabled, onConfigChange }: AppAiModel
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-medium text-foreground">{p.name}</span>
                 <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
-                  {ready ? p.default_model || p.models[0] || "已配置" : missingLabel}
+                  {ready ? p.default_model || p.models[0] || t("settings.appAiConfigured") : missingLabel}
                 </span>
               </span>
               {isSelected ? (
-                <span className="rounded-md bg-primary/12 px-1.5 py-0.5 text-[10px] text-primary">当前</span>
+                <span className="rounded-md bg-primary/12 px-1.5 py-0.5 text-[10px] text-primary">
+                  {t("settings.appAiCurrent")}
+                </span>
               ) : null}
             </button>
           );
@@ -474,7 +483,7 @@ function AppAiModelsPickerInner({ config, disabled, onConfigChange }: AppAiModel
               />
               <div className="min-w-0">
                 <h3 className="truncate text-sm font-semibold text-foreground">{selectedProvider.name}</h3>
-                <p className="text-[11px] text-muted-foreground">应用内 AI 会复用这里的连接配置</p>
+                <p className="text-[11px] text-muted-foreground">{t("settings.appAiReuseHint")}</p>
               </div>
             </div>
             <span
@@ -502,7 +511,7 @@ function AppAiModelsPickerInner({ config, disabled, onConfigChange }: AppAiModel
                 <label htmlFor="app-ai-provider-api-key" className="text-xs font-medium text-muted-foreground">
                   API Key
                 </label>
-                <span className="text-[11px] text-muted-foreground">仅保存在本机 provider 配置</span>
+                <span className="text-[11px] text-muted-foreground">{t("settings.appAiKeyLocalHint")}</span>
               </div>
               <div className="relative">
                 <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/70" />
@@ -522,7 +531,7 @@ function AppAiModelsPickerInner({ config, disabled, onConfigChange }: AppAiModel
                   type="button"
                   onClick={() => setShowApiKey((value) => !value)}
                   className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground transition hover:text-foreground"
-                  aria-label={showApiKey ? "隐藏 API Key" : "显示 API Key"}
+                  aria-label={showApiKey ? t("settings.appAiHideKey") : t("settings.appAiShowKey")}
                 >
                   {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
@@ -571,7 +580,7 @@ function AppAiModelsPickerInner({ config, disabled, onConfigChange }: AppAiModel
 
             <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
               <label className="space-y-1.5">
-                <span className="text-xs font-medium text-muted-foreground">获取模型 URL</span>
+                <span className="text-xs font-medium text-muted-foreground">{t("settings.appAiModelsUrlLabel")}</span>
                 <Input
                   value={draftModelsUrl}
                   onChange={(e) => {
@@ -585,9 +594,7 @@ function AppAiModelsPickerInner({ config, disabled, onConfigChange }: AppAiModel
               </label>
 
               <label className="space-y-1.5">
-                <span className="text-xs font-medium text-muted-foreground">
-                  {t("settings.model", { defaultValue: "模型" })}
-                </span>
+                <span className="text-xs font-medium text-muted-foreground">{t("settings.model")}</span>
                 <Input
                   id="app-ai-provider-model"
                   value={draftModel}
@@ -595,7 +602,7 @@ function AppAiModelsPickerInner({ config, disabled, onConfigChange }: AppAiModel
                     setDraftModel(e.target.value);
                     setConnectionState("idle");
                   }}
-                  placeholder={t("models.noModels", { defaultValue: "暂无模型" })}
+                  placeholder={t("settings.appAiModelPlaceholder")}
                   list="app-ai-provider-model-options"
                   disabled={disabled || isSetting || connectionState === "saving"}
                   className="font-mono"
@@ -621,16 +628,14 @@ function AppAiModelsPickerInner({ config, disabled, onConfigChange }: AppAiModel
                   ) : (
                     <RefreshCw className="h-3.5 w-3.5" />
                   )}
-                  {t("models.fetchModels", { defaultValue: "获取模型" })}
+                  {t("models.modelsTab.fetchModels")}
                 </Button>
               </div>
             </div>
 
             <div className="flex items-center justify-between gap-3 border-t border-border/45 pt-3">
               <p className="min-w-0 text-xs text-muted-foreground">
-                {selectedApp === "claude"
-                  ? "Claude 协议优先使用 Anthropic Base URL，缺省时回退到 OpenAI 兼容端点。"
-                  : "OpenAI 协议会使用 OpenAI Base URL 和默认模型。"}
+                {selectedApp === "claude" ? t("settings.appAiClaudeHint") : t("settings.appAiOpenaiHint")}
               </p>
               <Button
                 type="button"

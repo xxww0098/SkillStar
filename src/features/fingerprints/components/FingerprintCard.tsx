@@ -1,5 +1,6 @@
 import { motion } from "framer-motion";
 import { CheckCircle2, Edit3, Globe, Lock, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { FingerprintRow } from "../types";
@@ -18,6 +19,7 @@ interface FingerprintCardProps {
  * hides both edit and delete buttons.
  */
 export function FingerprintCard({ row, onSetActive, onEdit, onDelete }: FingerprintCardProps) {
+  const { t } = useTranslation();
   return (
     <motion.div
       layout
@@ -34,35 +36,37 @@ export function FingerprintCard({ row, onSetActive, onEdit, onDelete }: Fingerpr
             {row.isOriginal && (
               <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100/80 px-2 py-0.5 text-[10px] font-medium text-zinc-600">
                 <Lock className="h-3 w-3" />
-                只读
+                {t("fingerprints.card.readOnly")}
               </span>
             )}
             {row.isActive && (
               <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
                 <CheckCircle2 className="h-3 w-3" />
-                活跃
+                {t("fingerprints.card.active")}
               </span>
             )}
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1 rounded-md bg-zinc-50 px-1.5 py-0.5">
               <Globe className="h-3 w-3" />
-              {tlsLabel(row.tls)}
+              {tlsLabel(row.tls, t)}
             </span>
             {row.network.proxy_url && (
               <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-amber-700">
-                代理 {hostFromUrl(row.network.proxy_url)}
+                {t("fingerprints.card.proxy", { host: hostFromUrl(row.network.proxy_url) })}
               </span>
             )}
             {row.network.egress_country && (
-              <span className="rounded-md bg-zinc-50 px-1.5 py-0.5">出口 {row.network.egress_country}</span>
+              <span className="rounded-md bg-zinc-50 px-1.5 py-0.5">
+                {t("fingerprints.card.egress", { country: row.network.egress_country })}
+              </span>
             )}
           </div>
         </div>
         <div className="flex shrink-0 gap-1">
           {!row.isActive && (
             <Button size="sm" variant="outline" className="h-7 text-xs" onClick={onSetActive} aria-label="set active">
-              设为活跃
+              {t("fingerprints.card.setActive")}
             </Button>
           )}
           {!row.isOriginal && (
@@ -72,7 +76,7 @@ export function FingerprintCard({ row, onSetActive, onEdit, onDelete }: Fingerpr
               className="h-7 w-7 p-0 text-muted-foreground hover:text-violet-600"
               onClick={onEdit}
               aria-label="edit fingerprint"
-              title="编辑"
+              title={t("fingerprints.card.edit")}
             >
               <Edit3 className="h-3.5 w-3.5" />
             </Button>
@@ -84,7 +88,7 @@ export function FingerprintCard({ row, onSetActive, onEdit, onDelete }: Fingerpr
               className="h-7 w-7 p-0 text-muted-foreground hover:text-red-600"
               onClick={onDelete}
               aria-label="delete fingerprint"
-              title="删除"
+              title={t("fingerprints.card.delete")}
             >
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
