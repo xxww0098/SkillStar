@@ -14,3 +14,16 @@ src/features/ssh/components/RemoteSkillPanel.tsx:18
 src/features/ssh/components/RemoteSkillPanel.tsx:19
 src/features/ssh/components/RemoteSkillPanel.tsx:20
 src/features/ssh/components/RemoteSkillPanel.tsx:21
+#
+# 2026-07-03 second pass: the original regex required a `/` after the feature
+# name, so bare barrel imports (`from "../../models"`) were invisible. After
+# fixing the pattern these 8 pre-existing imports surfaced; grandfathered
+# under the same shrink-only rule.
+src/features/my-skills/hooks/useMySkillsRemoteHosts.ts:3
+src/features/my-skills/hooks/useMySkillsRemoteHosts.ts:4
+src/features/settings/sections/FingerprintsSection.tsx:4
+src/features/settings/components/AppAiModelsPicker.tsx:21
+src/features/settings/components/AppAiModelsPicker.tsx:22
+src/features/settings/components/AppAiModelsPicker.tsx:23
+src/features/settings/components/AppAiModelsPicker.tsx:24
+src/features/usage/components/subscriptionEdit/AdvancedBillingSection.tsx:4

@@ -53,7 +53,7 @@ while IFS= read -r -d '' file; do
   while IFS=: read -r lineno content; do
     [ -z "$lineno" ] && continue
     # Extract which known feature name the matched import path points at.
-    target="$(printf '%s\n' "$content" | grep -oE "(\.\./)+($feature_list)/|@/features/($feature_list)/" | head -1 | grep -oE "($feature_list)")"
+    target="$(printf '%s\n' "$content" | grep -oE "(\.\./)+($feature_list)[/\"']|@/features/($feature_list)[/\"']" | head -1 | grep -oE "($feature_list)")"
     [ -z "$target" ] && continue
     [ "$target" = "$owner" ] && continue  # same-feature self-reference, not a violation
 
@@ -66,7 +66,7 @@ while IFS= read -r -d '' file; do
       printf 'FAIL  %s  [%s -> %s]  %s  (NEW cross-feature import)\n' "$entry" "$owner" "$target" "$content"
       new_violations=$((new_violations + 1))
     fi
-  done < <(grep -nE "from [\"'](\.\./)+($feature_list)/|from [\"']@/features/($feature_list)/" "$file" || true)
+  done < <(grep -nE "from [\"'](\.\./)+($feature_list)[/\"']|from [\"']@/features/($feature_list)[/\"']" "$file" || true)
 done < <(
   for ext in ts tsx; do
     find "$FEATURES_DIR" -name "*.${ext}" -type f -print0 2>/dev/null
