@@ -117,7 +117,7 @@ SkillStar 是 Tauri v2 桌面应用（同一 `skillstar` 二进制内还含 CLI�
 | `skillstar-projects` | 项目注册 + agent profiles + patrol + 终端（Launch Deck） |
 | `skillstar-ssh` | SSH 远程技能管理：russh 连接 + SFTP 推送/列出/删除 + 主机配置 + keyring 凭证 + TOFU 主机键 |
 | `skillstar-sync` | S3 云同步：aws-sdk-s3 + manifest.json + 本地技能 tar.gz 打包 + keyring 凭证 |
-| `skillstar-app` | Tauri-agnostic 命令助手（shell / network / marketplace / ACP）+ 跨 crate 胶水（`usage_switch`：CLI 账号切换，桥接 usage+models）+ CLI 入口（`skillstar` 二进制） |
+| `skillstar-app` | 不含 Tauri 命令：`shell_rc`（zshrc 幂等读写的纯逻辑，供 src-tauri 的命令包装调用）+ 跨 crate 胶水（`usage_switch`：CLI 账号切换，桥接 usage+models）+ CLI 入口（`skillstar` 二进制）。所有 `#[tauri::command]` 已回归 `src-tauri/src/commands/` |
 
 ## 项目树（精简）
 

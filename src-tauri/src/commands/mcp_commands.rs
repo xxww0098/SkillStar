@@ -273,7 +273,7 @@ pub async fn get_mcp_presets() -> Result<Vec<McpPreset>, String> {
 }
 
 fn curated_server_to_preset(server: &skillstar_marketplace::McpRegistryServer) -> McpPreset {
-    let draft = skillstar_app::commands::mcp_marketplace::registry_to_entry(server);
+    let draft = super::mcp_marketplace::registry_to_entry(server);
     let mut required_env = BTreeSet::new();
     for package in &server.packages {
         for key in &package.required_env {

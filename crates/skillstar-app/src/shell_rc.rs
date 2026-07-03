@@ -17,6 +17,9 @@
 //!   in-place mutation; we do not pile up rolling backups in the user's home.
 //! - **Explicit only**: the caller (a UI button) drives this; nothing in the
 //!   autosave path triggers it.
+//!
+//! This module is Tauri-agnostic: the `#[tauri::command]` wrappers that call
+//! into it live in `src-tauri/src/commands/shell_rc.rs`.
 
 use std::path::{Path, PathBuf};
 
@@ -264,29 +267,6 @@ pub fn remove_env_export(home: &Path, env_key: &str) -> Result<bool, AppError> {
     std::fs::write(&tmp, &new_content)?;
     std::fs::rename(&tmp, &path)?;
     Ok(true)
-}
-
-// ---------------------------------------------------------------------------
-// Tauri commands
-// ---------------------------------------------------------------------------
-
-/// Write `export <env_key>='<value>'` into `~/.zshrc` idempotently. Triggered
-/// only by an explicit button in `CodexSettingsForm` (third_party auth mode).
-#[tauri::command]
-pub async fn write_codex_env_to_zshrc(
-    env_key: String,
-    value: String,
-) -> Result<ShellRcWriteResult, AppError> {
-    let home = skillstar_core::infra::paths::home_dir();
-    ensure_env_export(&home, &env_key, &value)
-}
-
-/// Read the current value of `env_key` from `~/.zshrc`, if any. Powers the UI
-/// "already written ✓" badge so the user knows whether a click is still needed.
-#[tauri::command]
-pub async fn read_codex_env_from_zshrc(env_key: String) -> Result<Option<String>, AppError> {
-    let home = skillstar_core::infra::paths::home_dir();
-    Ok(read_env_export(&home, &env_key))
 }
 
 #[cfg(test)]

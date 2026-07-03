@@ -1,27 +1,24 @@
+pub mod acp;
 pub mod agents;
 pub mod ai;
 pub mod fingerprints;
 pub mod github;
+pub mod marketplace;
 pub mod mcp_commands;
+pub mod mcp_marketplace;
 pub mod models_commands;
+pub mod network;
 pub mod patrol;
 pub mod projects;
+pub mod shell;
+pub mod shell_rc;
 pub mod updater;
 pub mod usage_commands;
 pub mod usage_dto;
 pub mod usage_windows;
 
-pub use skillstar_app::commands::acp;
-pub use skillstar_app::commands::network::*;
-pub use skillstar_app::commands::shell_rc::*;
-
-pub mod marketplace {
-    pub use skillstar_app::commands::marketplace::*;
-}
-
-pub mod mcp_marketplace {
-    pub use skillstar_app::commands::mcp_marketplace::*;
-}
+pub use network::*;
+pub use shell_rc::*;
 
 mod adopt_folder;
 mod bundles;
@@ -43,4 +40,4 @@ pub use skill_groups::*;
 pub use skills::*;
 pub use s3_sync::*;
 pub use ssh_hosts::*;
-pub use skillstar_app::commands::shell::*;
+pub use shell::*;

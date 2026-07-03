@@ -1,3 +1,3 @@
 pub mod cli;
-pub mod commands;
+pub mod shell_rc;
 pub mod usage_switch;

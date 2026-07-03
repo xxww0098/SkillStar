@@ -7,7 +7,90 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use skillstar_core::infra::{fs_ops, paths as fs_paths};
 
-pub use skillstar_app::commands::projects::*;
+// Formerly re-exported from `skillstar_app::commands::projects` (that crate no
+// longer depends on Tauri, so its command wrappers were absorbed here).
+#[tauri::command]
+pub async fn create_project_skills(
+    project_path: String,
+    selected_skills: Vec<String>,
+    agent_types: Vec<String>,
+) -> Result<u32, AppError> {
+    skillstar_projects::projects::sync::create_project_skills(
+        &std::path::PathBuf::from(project_path),
+        &selected_skills,
+        &agent_types,
+    )
+    .map_err(|e| AppError::Other(e.to_string()))
+}
+
+#[tauri::command]
+pub async fn register_project(project_path: String) -> Result<pm::ProjectEntry, AppError> {
+    pm::register_project(&project_path).map_err(|e| AppError::Other(e.to_string()))
+}
+
+#[tauri::command]
+pub async fn list_projects() -> Result<Vec<pm::ProjectEntry>, AppError> {
+    Ok(pm::list_projects())
+}
+
+#[tauri::command]
+pub async fn get_project_skills(name: String) -> Result<Option<pm::SkillsList>, AppError> {
+    Ok(pm::load_skills_list(&name))
+}
+
+#[tauri::command]
+pub async fn save_and_sync_project(
+    project_path: String,
+    agents: HashMap<String, Vec<String>>,
+    deploy_modes: Option<HashMap<String, pm::ProjectDeployMode>>,
+) -> Result<u32, AppError> {
+    let (_name, count) =
+        pm::save_and_sync(&project_path, agents, deploy_modes.unwrap_or_default())
+            .map_err(|e| AppError::Other(e.to_string()))?;
+    Ok(count)
+}
+
+#[tauri::command]
+pub async fn save_project_skills_list(
+    project_path: String,
+    agents: HashMap<String, Vec<String>>,
+) -> Result<pm::SkillsList, AppError> {
+    pm::save_skills_list_only(&project_path, agents).map_err(|e| AppError::Other(e.to_string()))
+}
+
+#[tauri::command]
+pub async fn update_project_path(name: String, new_path: String) -> Result<u32, AppError> {
+    pm::update_project_path(&name, &new_path).map_err(|e| AppError::Other(e.to_string()))
+}
+
+#[tauri::command]
+pub async fn remove_project(name: String) -> Result<(), AppError> {
+    pm::remove_project(&name).map_err(|e| AppError::Other(e.to_string()))
+}
+
+#[tauri::command]
+pub async fn scan_project_skills(project_path: String) -> Result<pm::ProjectScanResult, AppError> {
+    pm::scan_project_skills(&project_path).map_err(|e| AppError::Other(e.to_string()))
+}
+
+#[tauri::command]
+pub async fn refresh_stale_project_copies(project_path: String) -> Result<u32, AppError> {
+    pm::refresh_stale_copies(&project_path).map_err(|e| AppError::Other(e.to_string()))
+}
+
+#[tauri::command]
+pub async fn rebuild_project_skills_from_disk(
+    project_path: String,
+) -> Result<pm::SkillsList, AppError> {
+    pm::rebuild_skills_list_from_disk(&project_path).map_err(|e| AppError::Other(e.to_string()))
+}
+
+#[tauri::command]
+pub async fn detect_project_agents(
+    project_path: String,
+) -> Result<pm::ProjectAgentDetection, AppError> {
+    Ok(pm::detect_project_agents(&project_path))
+}
 
 #[tauri::command]
 pub async fn import_project_skills(
