@@ -14,6 +14,7 @@ export const mcpKeys = {
   marketList: () => [...mcpKeys.market(), "list"] as const,
   marketSearch: (query: string) => [...mcpKeys.market(), "search", query] as const,
   marketDetail: (id: string | null) => [...mcpKeys.market(), "detail", id] as const,
+  marketByPublisher: (publisherId: string) => [...mcpKeys.market(), "by-publisher", publisherId] as const,
 
   // Curated publishers grid (`useMcpPublishers`).
   publishers: () => ["mcp-publishers"] as const,

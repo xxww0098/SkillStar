@@ -1,3 +1,4 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { tauriInvoke } from "../lib/ipc";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowLeft, ArrowUp, ChevronRight, ExternalLink, Folder, GitBranch, Package, Search } from "lucide-react";
@@ -11,9 +12,11 @@ import { ExternalAnchor } from "../components/ui/ExternalAnchor";
 import { Input } from "../components/ui/input";
 import { LoadingLogo } from "../components/ui/LoadingLogo";
 import { SkillGridSkeleton } from "../components/ui/Skeleton";
+import { marketplaceKeys } from "../features/marketplace/api/keys";
 import { PublisherAvatar } from "../features/marketplace/components/OfficialPublishers";
 import { SkillGrid } from "../features/my-skills/components/SkillGrid";
 import { useSkills } from "../features/my-skills/hooks/useSkills";
+import type { LocalFirstResult } from "../types";
 import { cn, formatInstalls } from "../lib/utils";
 import type { OfficialPublisher, PublisherRepo, Skill } from "../types";
 
@@ -30,18 +33,20 @@ interface PublisherDetailProps {
 
 export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const { installSkill, updateSkill, uninstallSkill, pendingUpdateNames } = useSkills();
-  const [skills, setSkills] = useState<Skill[]>([]);
   const [activeRepo, setActiveRepo] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [showBackToTop, setShowBackToTop] = useState(false);
   const [installingNames, setInstallingNames] = useState<Set<string>>(new Set());
   const [installStatus, setInstallStatus] = useState<string | null>(null);
-  const [publisherRepos, setPublisherRepos] = useState<PublisherRepo[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // One-shot-per-key guards: only the first stale snapshot for a given
+  // publisher/repo triggers a background sync (mirrors useMcpMarketplace's
+  // staleRefreshTriggered ref). Re-arm whenever the key changes.
+  const publisherReposStaleTriggeredFor = useRef<string | null>(null);
+  const repoSkillsStaleTriggeredFor = useRef<string | null>(null);
 
   useEffect(() => {
     setActiveRepo(null);
@@ -50,91 +55,86 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
     setShowBackToTop(false);
   }, [publisher.name, publisher.repo]);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-
-    (async () => {
-      try {
-        const readLocal = () =>
-          tauriInvoke("get_publisher_repos_local", {
-            publisherName: publisher.name,
-          });
-        const result = await readLocal();
-        if (cancelled) return;
-        setPublisherRepos(result.data);
-
-        if (result.snapshot_status === "stale") {
-          setRefreshing(true);
-          try {
-            await tauriInvoke("sync_marketplace_scope", {
-              scope: `publisher_repos:${publisher.name.toLowerCase()}`,
-            });
-            const fresh = await readLocal();
-            if (!cancelled) {
-              setPublisherRepos(fresh.data);
-            }
-          } finally {
-            if (!cancelled) setRefreshing(false);
-          }
-        }
-      } catch (e) {
-        if (import.meta.env.DEV) console.error("Failed to fetch publisher repos:", e);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [publisher.name]);
+  // Local-first load of the publisher's repos.
+  const publisherReposQuery = useQuery<LocalFirstResult<PublisherRepo[]>>({
+    queryKey: marketplaceKeys.publisherRepos(publisher.name),
+    queryFn: () =>
+      tauriInvoke("get_publisher_repos_local", {
+        publisherName: publisher.name,
+      }),
+  });
 
   useEffect(() => {
-    if (!activeRepo) {
-      setSkills([]);
-      return;
+    if (!publisherReposQuery.isError) return;
+    if (import.meta.env.DEV) console.error("Failed to fetch publisher repos:", publisherReposQuery.error);
+  }, [publisherReposQuery.isError, publisherReposQuery.error]);
+
+  const publisherRepos = publisherReposQuery.data?.data ?? [];
+
+  const syncPublisherReposMutation = useMutation({
+    mutationFn: () =>
+      tauriInvoke("sync_marketplace_scope", {
+        scope: `publisher_repos:${publisher.name.toLowerCase()}`,
+      }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: marketplaceKeys.publisherRepos(publisher.name),
+      }),
+  });
+
+  useEffect(() => {
+    const status = publisherReposQuery.data?.snapshot_status;
+    if (
+      status === "stale" &&
+      publisherReposStaleTriggeredFor.current !== publisher.name &&
+      !syncPublisherReposMutation.isPending
+    ) {
+      publisherReposStaleTriggeredFor.current = publisher.name;
+      syncPublisherReposMutation.mutate();
     }
+  }, [publisherReposQuery.data?.snapshot_status, publisher.name, syncPublisherReposMutation]);
 
-    let cancelled = false;
-    setLoading(true);
+  // Local-first load of the active repo's skills.
+  const repoSource = activeRepo ? `${publisher.name.toLowerCase()}/${activeRepo}` : null;
 
-    (async () => {
-      try {
-        const source = `${publisher.name.toLowerCase()}/${activeRepo}`;
-        const readLocal = () =>
-          tauriInvoke("get_repo_skills_local", {
-            source,
-          });
-        const result = await readLocal();
-        if (cancelled) return;
-        setSkills(result.data);
+  const repoSkillsQuery = useQuery<LocalFirstResult<Skill[]>>({
+    queryKey: marketplaceKeys.repoSkills(repoSource ?? ""),
+    queryFn: () =>
+      tauriInvoke("get_repo_skills_local", {
+        source: repoSource ?? "",
+      }),
+    enabled: repoSource != null,
+  });
 
-        if (result.snapshot_status === "stale") {
-          setRefreshing(true);
-          try {
-            await tauriInvoke("sync_marketplace_scope", {
-              scope: `repo_skills:${source}`,
-            });
-            const fresh = await readLocal();
-            if (!cancelled) {
-              setSkills(fresh.data);
-            }
-          } finally {
-            if (!cancelled) setRefreshing(false);
-          }
-        }
-      } catch (e) {
-        if (import.meta.env.DEV) console.error("Failed to resolve repo skills:", e);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
+  useEffect(() => {
+    if (!repoSkillsQuery.isError) return;
+    if (import.meta.env.DEV) console.error("Failed to resolve repo skills:", repoSkillsQuery.error);
+  }, [repoSkillsQuery.isError, repoSkillsQuery.error]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [publisher.name, activeRepo]);
+  const skills = repoSource ? (repoSkillsQuery.data?.data ?? []) : [];
+
+  const syncRepoSkillsMutation = useMutation({
+    mutationFn: () =>
+      tauriInvoke("sync_marketplace_scope", {
+        scope: `repo_skills:${repoSource}`,
+      }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: marketplaceKeys.repoSkills(repoSource ?? ""),
+      }),
+  });
+
+  useEffect(() => {
+    if (!repoSource) return;
+    const status = repoSkillsQuery.data?.snapshot_status;
+    if (status === "stale" && repoSkillsStaleTriggeredFor.current !== repoSource && !syncRepoSkillsMutation.isPending) {
+      repoSkillsStaleTriggeredFor.current = repoSource;
+      syncRepoSkillsMutation.mutate();
+    }
+  }, [repoSource, repoSkillsQuery.data?.snapshot_status, syncRepoSkillsMutation]);
+
+  const loading = activeRepo ? repoSkillsQuery.isLoading : publisherReposQuery.isLoading;
+  const refreshing = syncPublisherReposMutation.isPending || syncRepoSkillsMutation.isPending;
 
   const visiblePublisherRepos = useMemo(() => {
     if (activeRepo) return [];
@@ -160,23 +160,35 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
 
   const totalInstalls = useMemo(() => publisherRepos.reduce((sum, repo) => sum + repo.installs, 0), [publisherRepos]);
 
+  // Patch the currently-active repo's cached skill list in place (mirrors the
+  // old `setSkills((prev) => prev.map(...))` local-state updater, now applied
+  // to the query cache so it stays in sync with what the grid reads).
+  const patchSkill = useCallback(
+    (name: string, updater: (skill: Skill) => Skill) => {
+      if (!repoSource) return;
+      queryClient.setQueryData<LocalFirstResult<Skill[]>>(marketplaceKeys.repoSkills(repoSource), (prev) =>
+        prev
+          ? {
+              ...prev,
+              data: prev.data.map((entry) => (entry.name === name ? updater(entry) : entry)),
+            }
+          : prev,
+      );
+    },
+    [queryClient, repoSource],
+  );
+
   const handleInstall = useCallback(
     async (url: string, name: string) => {
       setInstallingNames((prev) => new Set(prev).add(name));
       try {
         const skill = await installSkill(url, name);
-        setSkills((prev) =>
-          prev.map((entry) =>
-            entry.name === name
-              ? {
-                  ...entry,
-                  installed: true,
-                  update_available: false,
-                  agent_links: skill.agent_links ?? entry.agent_links,
-                }
-              : entry,
-          ),
-        );
+        patchSkill(name, (entry) => ({
+          ...entry,
+          installed: true,
+          update_available: false,
+          agent_links: skill.agent_links ?? entry.agent_links,
+        }));
         setSelectedSkill((prev) =>
           prev?.name === name
             ? {
@@ -195,7 +207,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
       } catch (e) {
         const message = String(e).toLowerCase();
         if (message.includes("already installed")) {
-          setSkills((prev) => prev.map((entry) => (entry.name === name ? { ...entry, installed: true } : entry)));
+          patchSkill(name, (entry) => ({ ...entry, installed: true }));
           setSelectedSkill((prev) => (prev?.name === name ? { ...prev, installed: true } : prev));
           setInstallStatus(t("publisherDetail.installed"));
           setTimeout(() => setInstallStatus(null), 4000);
@@ -212,38 +224,32 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
         });
       }
     },
-    [installSkill, t],
+    [installSkill, patchSkill, t],
   );
 
   const handleUpdate = useCallback(
     async (name: string) => {
       try {
         await updateSkill(name);
-        setSkills((prev) => prev.map((entry) => (entry.name === name ? { ...entry, update_available: false } : entry)));
+        patchSkill(name, (entry) => ({ ...entry, update_available: false }));
         setSelectedSkill((prev) => (prev?.name === name ? { ...prev, update_available: false } : prev));
       } catch (e) {
         if (import.meta.env.DEV) console.error("Update failed:", e);
       }
     },
-    [updateSkill],
+    [updateSkill, patchSkill],
   );
 
   const handleUninstall = useCallback(
     async (name: string) => {
       try {
         await uninstallSkill(name);
-        setSkills((prev) =>
-          prev.map((entry) =>
-            entry.name === name
-              ? {
-                  ...entry,
-                  installed: false,
-                  update_available: false,
-                  agent_links: [],
-                }
-              : entry,
-          ),
-        );
+        patchSkill(name, (entry) => ({
+          ...entry,
+          installed: false,
+          update_available: false,
+          agent_links: [],
+        }));
         if (selectedSkill?.name === name) {
           setSelectedSkill((prev) =>
             prev
@@ -260,7 +266,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
         if (import.meta.env.DEV) console.error("[PublisherDetail] Uninstall failed:", e);
       }
     },
-    [uninstallSkill, selectedSkill],
+    [uninstallSkill, selectedSkill, patchSkill],
   );
 
   const handleReinstall = useCallback(

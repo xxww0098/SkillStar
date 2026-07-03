@@ -1,3 +1,4 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowLeft, ArrowUp, Boxes, ExternalLink, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -10,6 +11,7 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { ExternalAnchor } from "../components/ui/ExternalAnchor";
 import { Input } from "../components/ui/input";
 import { LoadingLogo } from "../components/ui/LoadingLogo";
+import { mcpKeys } from "../features/mcp/api/keys";
 import { McpMarketBrowser } from "../features/mcp/components/McpMarketBrowser";
 import { McpServerForm, type McpServerFormValue } from "../features/mcp/components/McpServerForm";
 import { PUBLISHER_BRAND_ICON, hasPublisherBrandIcon } from "../features/mcp/components/McpPublishers";
@@ -17,14 +19,9 @@ import { PublisherAvatar } from "../features/marketplace/components/OfficialPubl
 import { useMcpServers } from "../features/mcp/hooks/useMcpServers";
 import { tauriInvoke } from "../lib/ipc";
 import { toast } from "../lib/toast";
-import type {
-  LocalFirstResult,
-  McpMarketEntry,
-  McpPublisherSummary,
-  McpServerEntry,
-  SnapshotStatus,
-  ViewMode,
-} from "../types";
+import type { LocalFirstResult, McpMarketEntry, McpPublisherSummary, McpServerEntry, ViewMode } from "../types";
+
+const MCP_REGISTRY_SCOPE = "mcp_registry";
 
 interface McpPublisherDetailProps {
   publisher: McpPublisherSummary;
@@ -48,11 +45,8 @@ function draftToDefaults(draft: McpServerEntry): Partial<McpServerFormValue> {
 
 export function McpPublisherDetail({ publisher, onBack }: McpPublisherDetailProps) {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const { servers: mcpServers, createServer: createMcpServer } = useMcpServers();
-  const [entries, setEntries] = useState<McpMarketEntry[]>([]);
-  const [status, setStatus] = useState<SnapshotStatus | undefined>(undefined);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [showBackToTop, setShowBackToTop] = useState(false);
   const [mcpInstallDrawer, setMcpInstallDrawer] = useState<{
@@ -62,6 +56,10 @@ export function McpPublisherDetail({ publisher, onBack }: McpPublisherDetailProp
   const [mcpSaving, setMcpSaving] = useState(false);
   const [viewMode] = useState<ViewMode>("grid");
   const scrollRef = useRef<HTMLDivElement>(null);
+  // One-shot-per-publisher guard: only the first stale snapshot for a given
+  // publisher triggers a background sync (mirrors useMcpMarketplace's
+  // staleRefreshTriggered ref). Re-arms when the publisher changes.
+  const staleRefreshTriggeredFor = useRef<string | null>(null);
 
   const isGithub = publisher.id === "github";
   const hasBrandIcon = hasPublisherBrandIcon(publisher.id);
@@ -74,47 +72,47 @@ export function McpPublisherDetail({ publisher, onBack }: McpPublisherDetailProp
   }, [publisher.id]);
 
   // Local-first load (mirrors useMcpMarketplace but scoped to one publisher).
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-
-    const loadLocal = () =>
+  const entriesQuery = useQuery<LocalFirstResult<McpMarketEntry[]>>({
+    queryKey: mcpKeys.marketByPublisher(publisher.id),
+    queryFn: () =>
       tauriInvoke("list_mcp_servers_by_publisher_local", {
         publisherId: publisher.id,
-      }) as Promise<LocalFirstResult<McpMarketEntry[]>>;
+      }),
+  });
 
-    (async () => {
-      try {
-        const result = await loadLocal();
-        if (cancelled) return;
-        setEntries(result.data ?? []);
-        setStatus(result.snapshot_status);
+  useEffect(() => {
+    if (!entriesQuery.isError) return;
+    if (import.meta.env.DEV) console.error("Failed to load MCP publisher servers:", entriesQuery.error);
+  }, [entriesQuery.isError, entriesQuery.error]);
 
-        // Only the GitHub publisher benefits from a remote registry refresh.
-        if (isGithub && result.snapshot_status === "stale") {
-          setRefreshing(true);
-          try {
-            await tauriInvoke("sync_mcp_market_scope", { scope: "mcp_registry" });
-            const fresh = await loadLocal();
-            if (!cancelled) {
-              setEntries(fresh.data ?? []);
-              setStatus(fresh.snapshot_status);
-            }
-          } finally {
-            if (!cancelled) setRefreshing(false);
-          }
-        }
-      } catch (e) {
-        if (import.meta.env.DEV) console.error("Failed to load MCP publisher servers:", e);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
+  const result = entriesQuery.data;
+  const entries = result?.data ?? [];
+  const status = result?.snapshot_status;
 
-    return () => {
-      cancelled = true;
-    };
-  }, [publisher.id, isGithub]);
+  const syncMutation = useMutation({
+    mutationFn: () => tauriInvoke("sync_mcp_market_scope", { scope: MCP_REGISTRY_SCOPE }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: mcpKeys.marketByPublisher(publisher.id),
+      }),
+  });
+
+  // Only the GitHub publisher benefits from a remote registry refresh, and
+  // only once per publisher while its snapshot remains stale.
+  useEffect(() => {
+    if (
+      isGithub &&
+      status === "stale" &&
+      staleRefreshTriggeredFor.current !== publisher.id &&
+      !syncMutation.isPending
+    ) {
+      staleRefreshTriggeredFor.current = publisher.id;
+      syncMutation.mutate();
+    }
+  }, [isGithub, status, publisher.id, syncMutation]);
+
+  const loading = entriesQuery.isLoading;
+  const refreshing = syncMutation.isPending;
 
   // Client-side filter (the registry FTS is shared; here we keep it simple).
   const visibleEntries = useMemo(() => {
@@ -275,7 +273,7 @@ export function McpPublisherDetail({ publisher, onBack }: McpPublisherDetailProp
               query={searchQuery}
               refreshing={refreshing}
               viewMode={viewMode}
-              onRefresh={() => setRefreshing((r) => r)}
+              onRefresh={() => {}}
               onInstall={(id) => void handleMcpInstall(id)}
             />
           )}
