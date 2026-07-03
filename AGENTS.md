@@ -66,16 +66,16 @@ SkillStar 是 Tauri v2 桌面应用（同一 `skillstar` 二进制内还含 CLI�
 | 层 | 技术 | 版本 |
 | --- | --- | --- |
 | UI 运行时 | react / react-dom | 19.x |
-| 构建 | vite | 5.x |
-| 语言 | TypeScript | 5.x |
+| 构建 | vite | 8.x |
+| 语言 | TypeScript | 6.x |
 | 样式 | tailwindcss（仅 utilities） | 4.x |
 | IPC | @tauri-apps/api | 2.x |
 | 数据获取 | @tanstack/react-query | 5.x |
 | 动效 | framer-motion | 12.x |
-| 图标 / Toast / Markdown | lucide-react · sonner · react-markdown | 0.4x / 2.x / 10.x |
+| 图标 / Toast / Markdown | lucide-react · sonner · react-markdown | 1.x / 2.x / 10.x |
 | 无障碍原语 | @radix-ui/* | latest |
 | i18n | i18next（`src/i18n/locales/{en,zh-CN}.json`，需同步） | — |
-| Lint+Format / 测试 | @biomejs/biome · vitest + @testing-library/react（dev） | 2.x / 3.x + 16.x |
+| Lint+Format / 测试 | @biomejs/biome · vitest + @testing-library/react（dev） | 2.x / 4.x + 16.x |
 
 ### 后端（Rust）
 

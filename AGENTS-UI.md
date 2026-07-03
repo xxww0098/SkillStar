@@ -49,6 +49,15 @@ src/
 │   ├── ssh/                      # SSH remote skill management (connect / push / list / delete)
 │   │   ├── api/                  # keys.ts, hosts.ts, remote.ts (query + mutations)
 │   │   └── components/           # SshHostsList, SshHostForm, RemoteSkillPanel (+ PushSkillDialog)
+│   ├── usage/                    # subscription/quota dashboard
+│   │   ├── lib/                  # brandThemes.ts (per-brand card visuals, keyed by catalog_id)
+│   │   └── components/           # SubscriptionCard, …
+│   ├── s3/                       # S3 cloud sync target config + push
+│   │   ├── api/                  # sync target CRUD + push mutations
+│   │   └── components/           # S3 target form, sync status
+│   ├── fingerprints/             # TLS/device fingerprint management + IDE projector
+│   │   ├── api.ts                # fingerprint CRUD
+│   │   └── components/           # fingerprint list/editor, IDE projector UI
 │   └── settings/                 # app settings
 │       └── sections/             # AboutSection, AiProviderSection, …
 ├── pages/                        # thin route-level shells (lazy-loaded)
