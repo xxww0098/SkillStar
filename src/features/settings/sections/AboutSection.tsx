@@ -17,6 +17,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "../../../components/ui/badge";
 import { Button } from "../../../components/ui/button";
+import { UPDATER_ENABLED } from "../../../hooks/useUpdater";
 import { openExternalUrl } from "../../../lib/externalOpen";
 import { tauriInvoke } from "../../../lib/ipc";
 import { toast } from "../../../lib/toast";
@@ -286,18 +287,24 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
                 </motion.div>
               </div>
             </div>
-            <Button
-              size="sm"
-              variant="secondary"
-              className="h-8 text-xs px-3.5 rounded-full shadow-sm hover:shadow-md transition-all active:scale-95"
-              onClick={handleCheckUpdate}
-              disabled={isCheckingUpdate}
-            >
-              <RefreshCw
-                className={`w-3.5 h-3.5 mr-2 ${isCheckingUpdate ? "animate-spin text-primary" : "text-muted-foreground"}`}
-              />
-              {isCheckingUpdate ? t("settings.checkingUpdate") : t("settings.checkUpdate")}
-            </Button>
+            {UPDATER_ENABLED ? (
+              <Button
+                size="sm"
+                variant="secondary"
+                className="h-8 text-xs px-3.5 rounded-full shadow-sm hover:shadow-md transition-all active:scale-95"
+                onClick={handleCheckUpdate}
+                disabled={isCheckingUpdate}
+              >
+                <RefreshCw
+                  className={`w-3.5 h-3.5 mr-2 ${isCheckingUpdate ? "animate-spin text-primary" : "text-muted-foreground"}`}
+                />
+                {isCheckingUpdate ? t("settings.checkingUpdate") : t("settings.checkUpdate")}
+              </Button>
+            ) : (
+              <Badge variant="outline" title={t("settings.updateUnavailableHint")}>
+                {t("settings.updateUnavailable")}
+              </Badge>
+            )}
           </div>
         </div>
 

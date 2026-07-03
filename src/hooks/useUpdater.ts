@@ -3,6 +3,32 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { tauriInvoke } from "../lib/ipc";
 
+/**
+ * Master kill switch for the auto-updater.
+ *
+ * Why this exists: `src-tauri/tauri.conf.json` still ships `plugins.updater`
+ * (pubkey + GitHub `latest.json` endpoint), but `bundle.createUpdaterArtifacts`
+ * was set to `false` in commit 6a71546 because releases have no
+ * `TAURI_SIGNING_PRIVATE_KEY` configured. That means CI never produces the
+ * signed updater artifacts or `latest.json` the endpoint expects — every
+ * update check is querying a URL that will 404 forever. Left wired up, the
+ * UI would silently and permanently claim "you're up to date" (or surface a
+ * confusing fetch error) with no way for a user to tell the feature is dead.
+ *
+ * Flip this back to `true` ONLY after all of the following are true again:
+ *   1. A signing keypair exists and `TAURI_SIGNING_PRIVATE_KEY` (+ password,
+ *      if set) is wired into the release CI secrets.
+ *   2. `src-tauri/tauri.conf.json` → `bundle.createUpdaterArtifacts` is back
+ *      to `true`.
+ *   3. A real GitHub release has produced signed artifacts + `latest.json`
+ *      at the configured endpoint (verify the URL 200s before shipping).
+ *
+ * Until then, this hook must not perform any check/download network call,
+ * and the UI must show an honest "not available yet" state instead of a
+ * disguised dead feature.
+ */
+export const UPDATER_ENABLED = false;
+
 export type UpdateStatus = "idle" | "checking" | "available" | "downloading" | "ready" | "error";
 
 export interface UpdateState {
@@ -77,6 +103,7 @@ export function useUpdater() {
 
   // ── Check (via Rust command with mirror support) ──────────────────
   const check = useCallback(async (): Promise<{ found: boolean; version?: string; error?: boolean }> => {
+    if (!UPDATER_ENABLED) return { found: false };
     if (checkingRef.current) return { found: false };
     checkingRef.current = true;
 
@@ -122,6 +149,7 @@ export function useUpdater() {
 
   // ── Download + Install (via Rust command) ─────────────────────────
   const download = useCallback(async () => {
+    if (!UPDATER_ENABLED) return;
     try {
       setState((s) => ({ ...s, status: "downloading", progress: 0, error: "" }));
 
@@ -230,6 +258,7 @@ export function useUpdater() {
 
   // ── Auto-check on mount + periodic ────────────────────────────────
   useEffect(() => {
+    if (!UPDATER_ENABLED) return;
     const lastCheck = getLastCheck();
     const elapsed = Date.now() - lastCheck;
     const firstDelay = elapsed >= CHECK_INTERVAL_MS ? 500 : CHECK_INTERVAL_MS - elapsed;
