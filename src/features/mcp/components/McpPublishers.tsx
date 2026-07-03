@@ -105,7 +105,7 @@ function McpPublisherCard({ publisher, onClick }: { publisher: McpPublisherSumma
               <div className="flex items-center gap-3 mt-0.5">
                 <span className="ss-card-meta flex items-center gap-1">
                   <Boxes className="w-3 h-3" />
-                  {t("marketplace.mcpPublisherServerCount", { count: publisher.server_count })}
+                  {t("marketplace.mcpPublisherServerCount", { count: publisher.serverCount })}
                 </span>
               </div>
             </div>

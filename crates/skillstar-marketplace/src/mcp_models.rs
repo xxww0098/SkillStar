@@ -13,11 +13,13 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use ts_rs::TS;
 
 /// Whether a registry server can run locally (stdio package), remotely
 /// (http/sse url), or both.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "McpServerKind.ts")]
 pub enum McpServerKind {
     Stdio,
     Remote,
@@ -47,8 +49,9 @@ impl McpServerKind {
 }
 
 /// Summary of a runnable package (stdio transport) for card/detail display.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "McpRegistryPackageSummary.ts")]
 pub struct McpRegistryPackageSummary {
     /// Runner command we'd use: `npx` / `uvx` / `docker` / `dnx` / …
     pub runtime: String,
@@ -61,8 +64,9 @@ pub struct McpRegistryPackageSummary {
 }
 
 /// Summary of a remote endpoint (http/sse transport) for card/detail display.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "McpRegistryRemoteSummary.ts")]
 pub struct McpRegistryRemoteSummary {
     /// Normalized transport: `http` or `sse`.
     pub transport: String,
@@ -107,8 +111,9 @@ pub struct McpRegistryServer {
 }
 
 /// Lightweight card model for list/search results.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "McpMarketEntry.ts")]
 pub struct McpMarketEntry {
     pub id: String,
     pub name: String,
@@ -128,10 +133,12 @@ pub struct McpMarketEntry {
 }
 
 /// Detail model: card fields + readme + package/remote display.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "McpMarketServerDetail.ts")]
 pub struct McpMarketServerDetail {
     #[serde(flatten)]
+    #[ts(flatten)]
     pub entry: McpMarketEntry,
     pub readme: Option<String>,
     pub packages: Vec<McpRegistryPackageSummary>,
@@ -143,8 +150,9 @@ pub struct McpMarketServerDetail {
 /// The `id` doubles as the curated `source` bucket (`"adspower"` / `"bigmodel"`)
 /// or the special `"github"` publisher which maps to the full
 /// `mcp_registry_server` table.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "McpPublisherSummary.ts")]
 pub struct McpPublisherSummary {
     /// Publisher id — also the curated `source` value, or `"github"`.
     pub id: String,

@@ -234,7 +234,7 @@ export function McpPublisherDetail({ publisher, onBack }: McpPublisherDetailProp
                   <span className="text-sm text-muted-foreground flex items-center gap-1.5">
                     <Boxes className="w-3.5 h-3.5" />
                     {t("publisherDetail.mcpServers", {
-                      count: publisher.server_count,
+                      count: publisher.serverCount,
                       defaultValue: "{{count}} servers",
                     })}
                   </span>

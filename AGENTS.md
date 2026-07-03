@@ -90,7 +90,7 @@ SkillStar 是 Tauri v2 桌面应用（同一 `skillstar` 二进制内还含 CLI�
 | Git | gix（gitoxide）+ git 子进程 | 0.80 |
 | CLI 解析 | clap | 4 |
 | 序列化 | serde / serde_json / serde_yaml / toml / toml_edit | 1 / 0.9 / 1.1 |
-| TS 类型生成 | ts-rs（`skillstar-models::mcp::types` 的结构体 `#[derive(TS)]` 导出到 `src/types/generated/`，`bun run types:gen` 触发；见 AGENTS-UI.md） | 12 |
+| TS 类型生成 | ts-rs（`skillstar-models::mcp::types` + `skillstar-marketplace::mcp_models` 的结构体 `#[derive(TS)]` 导出到 `src/types/generated/`，`bun run types:gen` 触发；见 AGENTS-UI.md） | 12 |
 | SQLite | rusqlite (bundled) + r2d2 连接池 | 0.39 |
 | 加密 | aes-gcm (AES-256-GCM) + pbkdf2 + sha2 + machine-uid | 0.10 |
 | 打包 | flate2 + tar（`.ags`/`.agd` bundle） | 1 / 0.4 |

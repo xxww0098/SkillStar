@@ -74,7 +74,7 @@ export type ViewMode = "grid" | "list";
 
 export type NavPage = "my-skills" | "marketplace" | "skill-cards" | "projects" | "mcp" | "settings";
 
-/** One official MCP publisher on the marketplace grid (mirrors `McpPublisherSummary`). */
+/** Drill-down sub-page payloads; `mcp-publisher-detail` carries the generated `McpPublisherSummary` (see `./mcp`). */
 
 export type SubPage =
   | {

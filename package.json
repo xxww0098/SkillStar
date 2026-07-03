@@ -15,7 +15,7 @@
     "test:watch": "vitest",
     "icon:sync": "tauri icon public/skillstar-icon.svg",
     "avatars:sync": "node scripts/internal/download_avatars.cjs",
-    "types:gen": "cargo test -p skillstar-models export_bindings"
+    "types:gen": "cargo test -p skillstar-models -p skillstar-marketplace export_bindings"
   },
   "dependencies": {
     "@lobehub/icons": "^5.8.0",

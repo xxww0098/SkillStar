@@ -8258,6 +8258,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "ts-rs",
 ]
 
 [[package]]

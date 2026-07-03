@@ -18,6 +18,7 @@ serde_json = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
 skillstar-core = { version = "0.1.0", path = "../skillstar-core" }
+ts-rs = { workspace = true, features = ["serde-compat"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
