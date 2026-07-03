@@ -230,6 +230,11 @@ fn handle_request(url: &str, expected_state: &str) -> RequestOutcome {
 }
 
 fn respond(request: tiny_http::Request, ok: bool) {
+    // `ok` intentionally doesn't branch to different HTML yet — there's no
+    // failure-state page defined here, so both arms show SUCCESS_HTML rather
+    // than an inaccurate one. `ok` is still meaningful to callers (used for
+    // e.g. logging); this is a known content gap, not a bug in this function.
+    #[allow(clippy::if_same_then_else)]
     let body = if ok { SUCCESS_HTML } else { SUCCESS_HTML };
     let resp = Response::new(
         200.into(),

@@ -150,7 +150,7 @@ pub async fn read_remote_skill_content(
         .await
         .ok()
         .and_then(|s| s.trim().parse::<i64>().ok())
-        .and_then(|secs| chrono_like_rfc3339(secs));
+        .and_then(chrono_like_rfc3339);
 
     Ok(RemoteSkillContent {
         name: skill_name.to_string(),

@@ -42,6 +42,14 @@ use skillstar_core::infra::path_env::command_with_path;
 ///
 /// If the symlink target is relative, it is resolved relative to the
 /// symlink's parent directory.
+///
+/// Currently unused: this crate's public API (`is_repo_cached_skill`,
+/// `resolve_skill_repo_root`, etc.) calls `skillstar_core::types` directly
+/// instead of through this local wrapper. Kept as a `pub(crate)` escape
+/// hatch for future skillstar-skills-local callers rather than deleted —
+/// not tied to the app auto-updater kill switch (`UPDATER_ENABLED` in
+/// `useUpdater.ts`, which gates the unrelated Tauri self-update flow).
+#[allow(dead_code)]
 pub(crate) fn resolve_symlink(link_path: &Path) -> Option<PathBuf> {
     skillstar_core::types::resolve_symlink(link_path)
 }
@@ -54,12 +62,18 @@ pub fn is_repo_cached_skill(skill_path: &Path) -> bool {
     )
 }
 
+// Unused local wrapper — see `resolve_symlink` above for why this is kept
+// rather than deleted (not related to the app auto-updater kill switch).
+#[allow(dead_code)]
 fn normalize_path_for_compare(path: &Path) -> String {
     skillstar_core::types::normalize_path_for_compare(path)
 }
 
 /// Check whether a resolved path lies within the repo cache directory.
 ///
+/// Unused local wrapper — see `resolve_symlink` above for why this is kept
+/// rather than deleted (not related to the app auto-updater kill switch).
+#[allow(dead_code)]
 pub(crate) fn is_repo_cached_skill_target_path(target: &Path) -> bool {
     skillstar_core::types::is_repo_cached_skill_target_path(
         target,
@@ -156,12 +170,19 @@ pub fn check_update_local(
 }
 
 /// Compare local HEAD vs origin/HEAD, returning true if they differ.
+///
+/// Unused local wrapper — see `resolve_symlink` above for why this is kept
+/// rather than deleted (not related to the app auto-updater kill switch).
+/// The active implementation is `skillstar_core::types::update_checker`,
+/// used by this crate's `check_update`/`check_update_local`.
+#[allow(dead_code)]
 fn compare_heads(repo_root: &Path) -> Option<bool> {
     let local_head = git_rev_parse(repo_root, "HEAD")?;
     let remote_head = git_rev_parse(repo_root, "origin/HEAD")?;
     Some(!local_head.is_empty() && !remote_head.is_empty() && local_head != remote_head)
 }
 
+#[allow(dead_code)]
 fn git_rev_parse(repo_dir: &Path, rev: &str) -> Option<String> {
     command_with_path("git")
         .current_dir(repo_dir)

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 ///   machine (the key bytes are never persisted by SkillStar). An optional
 ///   passphrase for that key is stored in the keyring under the host id.
 /// - [`AuthMethod::Password`] authenticates with a password kept in the keyring.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum AuthMethod {
     /// Public-key auth using a local private key file.
@@ -22,13 +22,8 @@ pub enum AuthMethod {
         key_path: String,
     },
     /// Password auth (password itself is stored in the keyring).
+    #[default]
     Password,
-}
-
-impl Default for AuthMethod {
-    fn default() -> Self {
-        Self::Password
-    }
 }
 
 /// A user-defined SSH remote host. Non-sensitive fields only — see crate docs.

@@ -336,6 +336,10 @@ fn bigmodel_remote_url(id: &str) -> String {
 
 /// Build a stdio (npx) curated server. The `raw` must carry a `packages`
 /// entry with `registry_type: "npm"` + `runtime_hint: "npx"`.
+// Plain positional args mirror the curated-seed call sites below (20+
+// call sites); a builder/struct would churn all of them for no behavior
+// change, so the arg count is accepted here.
+#[allow(clippy::too_many_arguments)]
 fn make_stdio_curated(
     id: &str,
     name: &str,
@@ -374,6 +378,9 @@ fn make_stdio_curated(
 
 /// Build a remote (streamable-http) curated server. The `raw` must carry a
 /// `remotes` entry with `transport_type: "streamable-http"`.
+// Plain positional args mirror the curated-seed call sites below; see
+// `make_stdio_curated` for why a struct/builder isn't worth the churn here.
+#[allow(clippy::too_many_arguments)]
 fn make_remote_curated(
     id: &str,
     name: &str,

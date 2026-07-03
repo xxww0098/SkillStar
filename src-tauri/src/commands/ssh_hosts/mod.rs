@@ -287,7 +287,7 @@ Host vps-yy
 
         let _home = with_ssh_home(VPS_YY_CONFIG);
         mock_connector_slot::install(MockConnector {
-            exec: skillstar_ssh::remote_fs::MockRemoteExec::default(),
+            exec: skillstar_ssh::remote_fs::MockRemoteExec,
             fs: skillstar_ssh::remote_fs::MockRemoteFs::vps_yy_layout(),
         });
 

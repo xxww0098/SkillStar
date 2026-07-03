@@ -249,9 +249,9 @@ proptest! {
         let actual_count = count.min(names.len());
         let mut created_ids: Vec<String> = Vec::new();
 
-        for i in 0..actual_count {
+        for (i, name) in names.iter().enumerate().take(actual_count) {
             let id = format!("provider-{}", i);
-            let entry = make_valid_entry(&id, &names[i]);
+            let entry = make_valid_entry(&id, name);
             let result = create_provider_at(&app_id, entry, &path);
             prop_assert!(result.is_ok(), "Failed to create provider {}: {:?}", i, result.err());
             created_ids.push(id);

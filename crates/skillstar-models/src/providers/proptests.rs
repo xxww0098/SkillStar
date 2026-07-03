@@ -5,7 +5,7 @@ use proptest::prelude::*;
 use tempfile::TempDir;
 
 /// **Validates: Requirements 2.6, 2.7**
-
+///
 /// Strategy: generate a valid provider name (1..=64 non-empty ASCII chars).
 fn valid_name_strategy() -> impl Strategy<Value = String> {
     "[a-zA-Z0-9 _-]{1,64}".prop_filter("name must not be empty", |s| !s.is_empty())

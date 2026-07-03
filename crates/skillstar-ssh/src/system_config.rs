@@ -81,10 +81,10 @@ fn parse_file(path: &Path, depth: u8, out: &mut Vec<SystemHost>) {
         match key_lower.as_str() {
             "host" => {
                 // Close out the previous block.
-                if let Some(finished) = current.take() {
-                    if let Some(host) = finish_host(finished) {
-                        out.push(host);
-                    }
+                if let Some(finished) = current.take()
+                    && let Some(host) = finish_host(finished)
+                {
+                    out.push(host);
                 }
                 current = Some(PendingHost::new(value));
             }
@@ -120,10 +120,10 @@ fn parse_file(path: &Path, depth: u8, out: &mut Vec<SystemHost>) {
     }
 
     // Flush the trailing block.
-    if let Some(finished) = current.take() {
-        if let Some(host) = finish_host(finished) {
-            out.push(host);
-        }
+    if let Some(finished) = current.take()
+        && let Some(host) = finish_host(finished)
+    {
+        out.push(host);
     }
 }
 
@@ -202,10 +202,10 @@ fn expand_includes(value: &str, base_dir: Option<&Path>) -> Vec<PathBuf> {
 }
 
 fn resolve_one_include(token: &str, base_dir: Option<&Path>) -> PathBuf {
-    if let Some(rest) = token.strip_prefix("~/") {
-        if let Some(home) = home_dir() {
-            return home.join(rest);
-        }
+    if let Some(rest) = token.strip_prefix("~/")
+        && let Some(home) = home_dir()
+    {
+        return home.join(rest);
     }
     let p = PathBuf::from(token);
     if p.is_absolute() {
@@ -232,10 +232,11 @@ fn glob_match(pattern_path: &Path) -> Vec<PathBuf> {
     };
     let mut matched = Vec::new();
     for entry in entries.flatten() {
-        if let Some(name) = entry.file_name().to_str() {
-            if glob_equals(pattern_name, name) && entry.path().is_file() {
-                matched.push(entry.path());
-            }
+        if let Some(name) = entry.file_name().to_str()
+            && glob_equals(pattern_name, name)
+            && entry.path().is_file()
+        {
+            matched.push(entry.path());
         }
     }
     matched.sort();

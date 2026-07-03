@@ -233,7 +233,7 @@ pub async fn sync_mcp_registry_scope() -> Result<()> {
     // not yet ready) must not abort the sync itself. But silently dropping it
     // used to leave the marketplace UI showing "never synced" even after a
     // successful fetch, so log the bookkeeping failure instead of swallowing.
-    if let Err(e) = with_conn(|conn| mark_attempt(conn)) {
+    if let Err(e) = with_conn(mark_attempt) {
         warn!("mcp sync: failed to record attempt in sync_state ({e})");
     }
     match fetch_mcp_registry().await {

@@ -79,11 +79,8 @@ pub async fn ensure_remote_dir_pub(sftp: &SftpSession, remote_path: &str) -> Res
 
 pub(crate) async fn ensure_remote_dir(sftp: &SftpSession, remote_path: &str) -> Result<()> {
     for dir in remote_parent_dirs(remote_path) {
-        match sftp.create_dir(&dir).await {
-            Ok(()) => {}
-            // SFTP returns Failure for existing dirs — treat as success.
-            Err(_) => {}
-        }
+        // SFTP returns Failure for existing dirs — treat as success either way.
+        if let Ok(()) = sftp.create_dir(&dir).await {}
     }
     Ok(())
 }

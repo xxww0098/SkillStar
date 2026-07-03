@@ -25,7 +25,11 @@ struct Envelope {
     success: bool,
     #[serde(default)]
     code: i32,
+    // Kept for API-contract completeness — GLM's business-error message
+    // (e.g. `success: false` with a 200 status). Not consumed yet; wire into
+    // `error` in `fetch()` if GLM business errors need surfacing verbatim.
     #[serde(default)]
+    #[allow(dead_code)]
     msg: Option<String>,
     #[serde(default)]
     data: Value,

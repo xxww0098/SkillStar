@@ -20,7 +20,11 @@ use super::spec::AgentSpec;
 // presence, so a shared home root (e.g. Antigravity creating ~/.gemini) no
 // longer false-positives another agent. `None` marks IDE/GUI agents (detected
 // by directory presence) or global-only agents with no CLI.
-const BUILTIN_AGENT_DEFS: &[(&str, &str, &str, &[&str], &str, Option<&str>)] = &[
+/// `(id, display_name, icon, home_subdirs, project_skills_rel, binary)` — see
+/// the data-table comment above for field meaning.
+type BuiltinAgentDef = (&'static str, &'static str, &'static str, &'static [&'static str], &'static str, Option<&'static str>);
+
+const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
     (
         "opencode",
         "OpenCode",

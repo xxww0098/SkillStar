@@ -143,10 +143,10 @@ fn extract_args(value: Option<&Value>) -> Vec<String> {
             out.push(s.to_string());
             continue;
         }
-        if arg.get("type").and_then(Value::as_str) == Some("named") {
-            if let Some(name) = str_at(arg, "name") {
-                out.push(name);
-            }
+        if arg.get("type").and_then(Value::as_str) == Some("named")
+            && let Some(name) = str_at(arg, "name")
+        {
+            out.push(name);
         }
         if let Some(val) = str_at(arg, "value").or_else(|| str_at(arg, "default")) {
             out.push(val);

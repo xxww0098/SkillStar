@@ -705,14 +705,14 @@ proptest! {
             // ACTIVE entry. (Multi-provider tools may retain other entries, but
             // the active pointer always follows the most recent activation.)
             for (tid, binding) in &store_mut.tool_activations {
-                if let Some(act) = binding.active() {
-                    if tid == tool_id {
-                        prop_assert_eq!(
-                            &act.provider_id, &provider_id,
-                            "At step {}: tool '{}' should have provider '{}' active, but found '{}'",
-                            step, tool_id, provider_id, act.provider_id
-                        );
-                    }
+                if let Some(act) = binding.active()
+                    && tid == tool_id
+                {
+                    prop_assert_eq!(
+                        &act.provider_id, &provider_id,
+                        "At step {}: tool '{}' should have provider '{}' active, but found '{}'",
+                        step, tool_id, provider_id, act.provider_id
+                    );
                 }
             }
 

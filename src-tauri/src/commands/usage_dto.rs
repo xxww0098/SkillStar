@@ -137,12 +137,6 @@ impl SubscriptionDto {
         }
     }
 
-    /// Attach the outcome of a CLI account-switch attempt (used by
-    /// `set_active_subscription` after it pushes credentials).
-    pub fn with_switch_result(mut self, outcome: skillstar_app::usage_switch::SwitchOutcome) -> Self {
-        self.switch_result = Some(outcome);
-        self
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

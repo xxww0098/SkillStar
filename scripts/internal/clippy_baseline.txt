@@ -5,5 +5,10 @@
 # except for a deliberate, reviewed exception.
 #
 # Generated from an actual `cargo clippy --workspace --all-targets --locked`
-# run on 2026-07-03 (rustc/clippy 1.96.0 toolchain).
-66
+# run on 2026-07-03 (rustc/clippy 1.96.0 toolchain), after clearing 65 of the
+# prior 66 diagnostics (dead code from the src-tauri command-layer migration,
+# collapsible-if / redundant-closure / doc-comment cleanups, etc.). The 1
+# remaining diagnostic is `needless_lifetimes` in
+# crates/skillstar-usage/src/fetchers/oauth/cursor.rs, which is off-limits to
+# edit per project convention — do not fix it without explicit instruction.
+1

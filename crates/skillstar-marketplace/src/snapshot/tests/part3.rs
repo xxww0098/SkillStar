@@ -529,7 +529,7 @@ fn source_resolution_requires_unique_top_candidate_when_ambiguous() {
             resolve_skill_sources_from_snapshot(&conn, &requests, &HashMap::new(), &HashSet::new())
                 .expect("resolve ambiguous snapshot");
 
-        assert!(resolved.get("search").is_none());
+        assert!(!resolved.contains_key("search"));
     });
 }
 

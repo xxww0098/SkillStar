@@ -358,7 +358,7 @@ fn write_opencode_provider(
     // Read existing root (or seed the OpenCode schema), then merge the managed
     // provider block under `provider.<key>` without touching siblings.
     let mut root: serde_json::Value = if config_path.exists() {
-        let content = std::fs::read_to_string(&config_path)
+        let content = std::fs::read_to_string(config_path)
             .map_err(|e| format!("读取 {} 失败：{e}", config_path.display()))?;
         serde_json::from_str(&content).unwrap_or_else(|_| {
             serde_json::json!({

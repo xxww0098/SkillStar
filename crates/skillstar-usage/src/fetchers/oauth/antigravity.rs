@@ -58,7 +58,7 @@ fn build_auth_url(redirect: &str, state: &str, client_id: &str) -> String {
         "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&access_type=offline&prompt=consent&state={}",
         AUTHORIZE_URL,
         client_id,
-        urlencoding(&redirect),
+        urlencoding(redirect),
         urlencoding(SCOPES),
         state,
     )

@@ -90,11 +90,6 @@ async fn ensure_ai_config() -> Result<ai_provider::AiConfig, AppError> {
     Ok(config)
 }
 
-/// Public wrapper for other command modules that need AI config validation.
-pub async fn ensure_ai_config_pub() -> Result<ai_provider::AiConfig, AppError> {
-    ensure_ai_config().await
-}
-
 // ── Config Commands (stay in mod.rs, too small to warrant a file) ───
 
 #[tauri::command]

@@ -630,7 +630,7 @@ mod tests {
         assert!(skillstar_core::infra::fs_ops::is_link(&target));
         assert!(target.join("SKILL.md").exists());
         assert!(
-            !resync_staging_path(&target).symlink_metadata().is_ok(),
+            resync_staging_path(&target).symlink_metadata().is_err(),
             "staging entry must not be left behind"
         );
     }

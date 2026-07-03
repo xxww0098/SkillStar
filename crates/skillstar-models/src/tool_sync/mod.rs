@@ -62,14 +62,14 @@ pub const TOOL_SYNC_HOME_ENV: &str = "SKILLSTAR_TOOL_SYNC_HOME";
 /// override (a recurring footgun). Integration tests compile this lib in
 /// non-test mode, so they must set [`TOOL_SYNC_HOME_ENV`] explicitly.
 fn sandbox_home() -> Option<PathBuf> {
-    if let Some(v) = std::env::var_os(TOOL_SYNC_HOME_ENV) {
-        if !v.is_empty() {
-            return Some(PathBuf::from(v));
-        }
+    if let Some(v) = std::env::var_os(TOOL_SYNC_HOME_ENV)
+        && !v.is_empty()
+    {
+        return Some(PathBuf::from(v));
     }
     #[cfg(test)]
     {
-        return Some(test_sandbox_home());
+        Some(test_sandbox_home())
     }
     #[cfg(not(test))]
     None

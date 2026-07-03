@@ -11,7 +11,7 @@ pub fn catalog_from_provider_models(body: &Value) -> Vec<ModelCatalogEntry> {
         .map(|items| {
             items
                 .iter()
-                .filter_map(|item| model_entry_from_value(item))
+                .filter_map(model_entry_from_value)
                 .collect()
         })
         .unwrap_or_default()

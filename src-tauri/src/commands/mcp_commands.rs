@@ -284,10 +284,10 @@ fn curated_server_to_preset(server: &skillstar_marketplace::McpRegistryServer) -
     if server.recommended && !tags.iter().any(|tag| tag == "recommended") {
         tags.push("recommended".to_string());
     }
-    if let Some(source) = &server.source {
-        if !tags.iter().any(|tag| tag == source) {
-            tags.push(source.clone());
-        }
+    if let Some(source) = &server.source
+        && !tags.iter().any(|tag| tag == source)
+    {
+        tags.push(source.clone());
     }
 
     McpPreset {

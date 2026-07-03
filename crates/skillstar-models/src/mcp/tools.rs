@@ -338,10 +338,10 @@ pub(crate) fn zcode_cli_remove(path: &Path, name: &str) -> Result<()> {
         return Ok(());
     }
     let mut root = read_json_object(path);
-    if let Some(mcp) = root.get_mut("mcp").and_then(|v| v.as_object_mut()) {
-        if let Some(servers) = mcp.get_mut("servers").and_then(|v| v.as_object_mut()) {
-            servers.remove(name);
-        }
+    if let Some(mcp) = root.get_mut("mcp").and_then(|v| v.as_object_mut())
+        && let Some(servers) = mcp.get_mut("servers").and_then(|v| v.as_object_mut())
+    {
+        servers.remove(name);
     }
     write_json_pretty(path, &Value::Object(root))
 }

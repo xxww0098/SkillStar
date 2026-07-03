@@ -15,6 +15,7 @@
 //! - `AuthMethod::Key` → `russh::keys::load_secret_key(path, passphrase)` then
 //!   `authenticate_publickey` with SHA-256.
 //! - `AuthMethod::Password` → `authenticate_password`.
+//!
 //! The passphrase / password is read from the [`SecretStore`] (keyring).
 
 use std::sync::Arc;
@@ -102,15 +103,17 @@ impl Handler for SshHandler {
 /// so idle sessions survive NAT/firewall drops, no streaming compression
 /// surprises).
 fn default_config() -> Arc<russh::client::Config> {
-    let mut cfg = russh::client::Config::default();
-    // Drop genuinely-dead sessions rather than leaving a zombie handle.
-    cfg.inactivity_timeout = Some(Duration::from_secs(300));
-    // Keep NAT/firewall state tables warm so long-lived push/discovery
-    // sessions don't silently die after a few idle minutes.
-    cfg.keepalive_interval = Some(Duration::from_secs(30));
-    // Be defensive: cap how many unanswered keepalives we tolerate before
-    // declaring the connection dead.
-    cfg.keepalive_max = 3;
+    let cfg = russh::client::Config {
+        // Drop genuinely-dead sessions rather than leaving a zombie handle.
+        inactivity_timeout: Some(Duration::from_secs(300)),
+        // Keep NAT/firewall state tables warm so long-lived push/discovery
+        // sessions don't silently die after a few idle minutes.
+        keepalive_interval: Some(Duration::from_secs(30)),
+        // Be defensive: cap how many unanswered keepalives we tolerate before
+        // declaring the connection dead.
+        keepalive_max: 3,
+        ..Default::default()
+    };
     Arc::new(cfg)
 }
 
@@ -261,13 +264,10 @@ fn load_private_key(
 
 /// Expand a leading `~` / `~\` to the user's home directory.
 fn expand_tilde(path: &str) -> std::path::PathBuf {
-    if let Some(rest) = path
-        .strip_prefix("~/")
-        .or_else(|| path.strip_prefix("~\\"))
+    if let Some(rest) = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\"))
+        && let Some(home) = dirs::home_dir()
     {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest);
-        }
+        return home.join(rest);
     }
     std::path::PathBuf::from(path)
 }

@@ -260,7 +260,7 @@ mod tests {
         #[cfg(windows)]
         set_env("USERPROFILE", &temp_home);
 
-        let result = (|| -> Result<()> {
+        let result: Result<()> = {
             let profiles = list_profiles();
             let claude = profiles
                 .into_iter()
@@ -280,7 +280,7 @@ mod tests {
             );
 
             Ok(())
-        })();
+        };
 
         match previous_home {
             Some(value) => set_env("HOME", value),

@@ -612,7 +612,7 @@ mod tests {
     /// Drives the real `discover_remote_skills` entry point on a vps-yy mock tree.
     #[tokio::test]
     async fn discover_remote_skills_vps_yy_mock_fs() {
-        let mut exec = MockRemoteExec::default();
+        let mut exec = MockRemoteExec;
         let fs = MockRemoteFs::vps_yy_layout();
         let result = discover_remote_skills(&mut exec, &fs).await.unwrap();
 

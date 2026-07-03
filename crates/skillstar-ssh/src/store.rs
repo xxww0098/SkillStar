@@ -194,11 +194,11 @@ impl<S: SecretStore> HostsStore<S> {
             .find(|h| h.id == id)
             .ok_or_else(|| anyhow::anyhow!("SSH host '{}' not found", id))?;
         // If the id changed, move the secret so credentials follow the host.
-        if def.id != *id {
-            if let Some(pw) = self.secrets.get_secret(id)? {
-                self.secrets.set_secret(&def.id, &pw)?;
-                self.secrets.delete_secret(id)?;
-            }
+        if def.id != *id
+            && let Some(pw) = self.secrets.get_secret(id)?
+        {
+            self.secrets.set_secret(&def.id, &pw)?;
+            self.secrets.delete_secret(id)?;
         }
         if let Some(pw) = credential {
             if pw.is_empty() {

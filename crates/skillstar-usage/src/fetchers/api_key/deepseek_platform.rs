@@ -144,7 +144,7 @@ async fn get_json<T: serde::de::DeserializeOwned>(
         .bearer(token)
         .send()
         .await
-        .map_err(|e| map_platform_err(e))?;
+        .map_err(map_platform_err)?;
 
     if resp.is_auth_error() {
         return Err(UsageError::Fetcher(
