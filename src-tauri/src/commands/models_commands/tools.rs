@@ -10,8 +10,8 @@ use super::*;
 
 /// Returns the list of supported external tool config targets with their paths and existence status.
 #[tauri::command]
-pub async fn get_tool_config_targets() -> Result<Vec<ToolConfigTarget>, String> {
-    tool_sync::get_tool_config_targets().map_err(|e| e.to_string())
+pub async fn get_tool_config_targets() -> Result<Vec<ToolConfigTarget>, AppError> {
+    Ok(tool_sync::get_tool_config_targets()?)
 }
 
 /// Sync a provider's configuration to a single external tool.
@@ -22,17 +22,22 @@ pub async fn sync_provider_to_tool(
     app_id: String,
     provider_id: String,
     tool_id: String,
-) -> Result<ToolSyncResult, String> {
-    let store = providers::read_store().map_err(|e| e.to_string())?;
+) -> Result<ToolSyncResult, AppError> {
+    let store = providers::read_store()?;
 
     let provider = match app_id.as_str() {
         "claude" => store.claude.providers.get(&provider_id),
         "codex" => store.codex.providers.get(&provider_id),
         "opencode" => store.opencode.providers.get(&provider_id),
         "gemini" => store.gemini.providers.get(&provider_id),
-        _ => return Err(format!("Unknown app_id: {}", app_id)),
+        _ => return Err(AppError::Other(format!("Unknown app_id: {}", app_id))),
     }
-    .ok_or_else(|| format!("Provider '{}' not found in app '{}'", provider_id, app_id))?;
+    .ok_or_else(|| {
+        AppError::Other(format!(
+            "Provider '{}' not found in app '{}'",
+            provider_id, app_id
+        ))
+    })?;
 
     Ok(tool_sync::sync_provider_to_tool(provider, &tool_id))
 }
@@ -45,17 +50,22 @@ pub async fn sync_provider_to_all_tools(
     app_id: String,
     provider_id: String,
     tool_ids: Vec<String>,
-) -> Result<Vec<ToolSyncResult>, String> {
-    let store = providers::read_store().map_err(|e| e.to_string())?;
+) -> Result<Vec<ToolSyncResult>, AppError> {
+    let store = providers::read_store()?;
 
     let provider = match app_id.as_str() {
         "claude" => store.claude.providers.get(&provider_id),
         "codex" => store.codex.providers.get(&provider_id),
         "opencode" => store.opencode.providers.get(&provider_id),
         "gemini" => store.gemini.providers.get(&provider_id),
-        _ => return Err(format!("Unknown app_id: {}", app_id)),
+        _ => return Err(AppError::Other(format!("Unknown app_id: {}", app_id))),
     }
-    .ok_or_else(|| format!("Provider '{}' not found in app '{}'", provider_id, app_id))?;
+    .ok_or_else(|| {
+        AppError::Other(format!(
+            "Provider '{}' not found in app '{}'",
+            provider_id, app_id
+        ))
+    })?;
 
     Ok(tool_sync::sync_provider_to_all_tools(provider, &tool_ids))
 }
@@ -77,10 +87,10 @@ pub async fn activate_tool(
     tool_id: String,
     model: Option<String>,
     settings: Option<serde_json::Value>,
-) -> Result<ToolSyncResultFlat, String> {
+) -> Result<ToolSyncResultFlat, AppError> {
     let _guard = lock.0.lock().await;
     let path = providers::flat_store_path();
-    let mut store = providers::migrate_store_if_needed(&path).map_err(|e| e.to_string())?;
+    let mut store = providers::migrate_store_if_needed(&path)?;
 
     // 1. Update the tool_activations map (binding upsert + active pointer)
     providers::activate_tool(
@@ -89,11 +99,10 @@ pub async fn activate_tool(
         &tool_id,
         model.as_deref(),
         settings,
-    )
-    .map_err(|e| e.to_string())?;
+    )?;
 
     // 2. Persist the updated store
-    providers::write_flat_store(&store, &path).map_err(|e| e.to_string())?;
+    providers::write_flat_store(&store, &path)?;
 
     // 3. Sync to disk. Multi-provider agents (codex, opencode) project their
     //    whole binding; single-provider agents write the active entry. Routing
@@ -110,7 +119,7 @@ pub async fn activate_tool(
         {
             act.last_sync_at = Some(now_unix_secs());
         }
-        providers::write_flat_store(&store, &path).map_err(|e| e.to_string())?;
+        providers::write_flat_store(&store, &path)?;
     }
 
     Ok(sync_result)
@@ -124,30 +133,30 @@ pub async fn activate_tool(
 pub async fn deactivate_tool(
     lock: State<'_, ProvidersWriteLock>,
     tool_id: String,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let _guard = lock.0.lock().await;
     let path = providers::flat_store_path();
-    let mut store = providers::migrate_store_if_needed(&path).map_err(|e| e.to_string())?;
+    let mut store = providers::migrate_store_if_needed(&path)?;
 
     // 1. Remove the activation from the map
-    providers::deactivate_tool(&mut store, &tool_id).map_err(|e| e.to_string())?;
+    providers::deactivate_tool(&mut store, &tool_id)?;
 
     // 2. Persist the updated store
-    providers::write_flat_store(&store, &path).map_err(|e| e.to_string())?;
+    providers::write_flat_store(&store, &path)?;
 
     // 3. Unsync the tool's config file (remove ALL managed fields/entries)
     match tool_id.as_str() {
         "claude-code" => {
-            tool_sync::unsync_claude_code().map_err(|e| e.to_string())?;
+            tool_sync::unsync_claude_code()?;
         }
         "codex" => {
-            tool_sync::unsync_codex_all().map_err(|e| e.to_string())?;
+            tool_sync::unsync_codex_all()?;
         }
         "opencode" => {
-            tool_sync::unsync_opencode_all().map_err(|e| e.to_string())?;
+            tool_sync::unsync_opencode_all()?;
         }
         "gemini" => {
-            tool_sync::unsync_gemini().map_err(|e| e.to_string())?;
+            tool_sync::unsync_gemini()?;
         }
         _ => {}
     }
@@ -164,14 +173,13 @@ pub async fn set_active_binding(
     lock: State<'_, ProvidersWriteLock>,
     tool_id: String,
     provider_id: String,
-) -> Result<ToolSyncResultFlat, String> {
+) -> Result<ToolSyncResultFlat, AppError> {
     let _guard = lock.0.lock().await;
     let path = providers::flat_store_path();
-    let mut store = providers::migrate_store_if_needed(&path).map_err(|e| e.to_string())?;
+    let mut store = providers::migrate_store_if_needed(&path)?;
 
-    providers::set_active_binding(&mut store, &tool_id, &provider_id)
-        .map_err(|e| e.to_string())?;
-    providers::write_flat_store(&store, &path).map_err(|e| e.to_string())?;
+    providers::set_active_binding(&mut store, &tool_id, &provider_id)?;
+    providers::write_flat_store(&store, &path)?;
 
     let sync_result = tool_sync::sync_tool_binding(&store, &tool_id);
     if sync_result.success {
@@ -182,7 +190,7 @@ pub async fn set_active_binding(
         {
             act.last_sync_at = Some(now_unix_secs());
         }
-        providers::write_flat_store(&store, &path).map_err(|e| e.to_string())?;
+        providers::write_flat_store(&store, &path)?;
     }
     Ok(sync_result)
 }
@@ -197,14 +205,13 @@ pub async fn remove_binding_entry(
     lock: State<'_, ProvidersWriteLock>,
     tool_id: String,
     provider_id: String,
-) -> Result<ToolSyncResultFlat, String> {
+) -> Result<ToolSyncResultFlat, AppError> {
     let _guard = lock.0.lock().await;
     let path = providers::flat_store_path();
-    let mut store = providers::migrate_store_if_needed(&path).map_err(|e| e.to_string())?;
+    let mut store = providers::migrate_store_if_needed(&path)?;
 
-    providers::remove_binding_entry(&mut store, &tool_id, &provider_id)
-        .map_err(|e| e.to_string())?;
-    providers::write_flat_store(&store, &path).map_err(|e| e.to_string())?;
+    providers::remove_binding_entry(&mut store, &tool_id, &provider_id)?;
+    providers::write_flat_store(&store, &path)?;
 
     // sync_tool_binding unsyncs automatically when the binding is now empty.
     let sync_result = tool_sync::sync_tool_binding(&store, &tool_id);
@@ -216,7 +223,7 @@ pub async fn remove_binding_entry(
         {
             act.last_sync_at = Some(now_unix_secs());
         }
-        providers::write_flat_store(&store, &path).map_err(|e| e.to_string())?;
+        providers::write_flat_store(&store, &path)?;
     }
     Ok(sync_result)
 }
@@ -230,17 +237,16 @@ pub async fn update_tool_settings(
     lock: State<'_, ProvidersWriteLock>,
     tool_id: String,
     settings: serde_json::Value,
-) -> Result<ToolSyncResultFlat, String> {
+) -> Result<ToolSyncResultFlat, AppError> {
     let _guard = lock.0.lock().await;
     let path = providers::flat_store_path();
-    let mut store = providers::migrate_store_if_needed(&path).map_err(|e| e.to_string())?;
+    let mut store = providers::migrate_store_if_needed(&path)?;
 
     // 1. Update settings on the active entry of the binding
-    providers::update_tool_settings(&mut store, &tool_id, settings)
-        .map_err(|e| e.to_string())?;
+    providers::update_tool_settings(&mut store, &tool_id, settings)?;
 
     // 2. Persist the updated store
-    providers::write_flat_store(&store, &path).map_err(|e| e.to_string())?;
+    providers::write_flat_store(&store, &path)?;
 
     // 3. Re-sync the tool's config file (whole binding for multi-provider tools)
     let sync_result = tool_sync::sync_tool_binding(&store, &tool_id);
@@ -264,7 +270,7 @@ pub async fn update_tool_settings(
 /// The config_dir_found field provides additional context (a tool may be installed
 /// but not yet configured, or config may exist from a previous installation).
 #[tauri::command]
-pub async fn detect_tool_installation(tool_id: String) -> Result<serde_json::Value, String> {
+pub async fn detect_tool_installation(tool_id: String) -> Result<serde_json::Value, AppError> {
     // Claude Desktop is a GUI app, not a CLI — detect by app bundle / install path instead
     // of by binary on PATH.
     if tool_id == "claude-desktop" {
@@ -285,10 +291,10 @@ pub async fn detect_tool_installation(tool_id: String) -> Result<serde_json::Val
         "opencode" => "opencode",
         "gemini" => "gemini",
         _ => {
-            return Err(format!(
+            return Err(AppError::Other(format!(
                 "Unknown tool_id: '{}'. Supported: claude-code, codex, opencode, claude-desktop, gemini.",
                 tool_id
-            ));
+            )));
         }
     };
 
@@ -370,14 +376,14 @@ fn detect_claude_desktop_app() -> bool {
 #[tauri::command]
 pub async fn list_tool_config_files(
     tool_id: String,
-) -> Result<Vec<tool_sync::ToolConfigFileInfo>, String> {
-    tool_sync::list_tool_config_files(&tool_id).map_err(|e| e.to_string())
+) -> Result<Vec<tool_sync::ToolConfigFileInfo>, AppError> {
+    Ok(tool_sync::list_tool_config_files(&tool_id)?)
 }
 
 /// Read raw config file contents.
 #[tauri::command]
-pub async fn read_tool_config_file(tool_id: String, file_id: String) -> Result<String, String> {
-    tool_sync::read_tool_config_file(&tool_id, &file_id).map_err(|e| e.to_string())
+pub async fn read_tool_config_file(tool_id: String, file_id: String) -> Result<String, AppError> {
+    Ok(tool_sync::read_tool_config_file(&tool_id, &file_id)?)
 }
 
 /// Validate and save config file contents (with rolling backup).
@@ -386,7 +392,7 @@ pub async fn write_tool_config_file(
     tool_id: String,
     file_id: String,
     content: String,
-) -> Result<tool_sync::WriteToolConfigFileResult, String> {
+) -> Result<tool_sync::WriteToolConfigFileResult, AppError> {
     Ok(tool_sync::write_tool_config_file(
         &tool_id, &file_id, &content,
     ))
@@ -394,8 +400,8 @@ pub async fn write_tool_config_file(
 
 /// Pretty-format JSON/TOML without writing to disk.
 #[tauri::command]
-pub async fn format_tool_config_file(tool_id: String, file_id: String) -> Result<String, String> {
-    tool_sync::format_tool_config_file(&tool_id, &file_id).map_err(|e| e.to_string())
+pub async fn format_tool_config_file(tool_id: String, file_id: String) -> Result<String, AppError> {
+    Ok(tool_sync::format_tool_config_file(&tool_id, &file_id)?)
 }
 
 /// Push the active flat-store provider credentials to a tool's config files.
@@ -404,10 +410,10 @@ pub async fn push_provider_to_tool_config(
     lock: State<'_, ProvidersWriteLock>,
     provider_id: String,
     tool_id: String,
-) -> Result<ToolSyncResultFlat, String> {
+) -> Result<ToolSyncResultFlat, AppError> {
     let _guard = lock.0.lock().await;
     let path = providers::flat_store_path();
-    let store = providers::migrate_store_if_needed(&path).map_err(|e| e.to_string())?;
+    let store = providers::migrate_store_if_needed(&path)?;
 
     // The provider must be bound to this tool (in any entry).
     let bound = store
@@ -415,10 +421,10 @@ pub async fn push_provider_to_tool_config(
         .get(&tool_id)
         .is_some_and(|b| b.binds_provider(&provider_id));
     if !bound {
-        return Err(format!(
+        return Err(AppError::Other(format!(
             "Tool '{}' is not activated for provider '{}'",
             tool_id, provider_id
-        ));
+        )));
     }
 
     let result = tool_sync::sync_tool_binding(&store, &tool_id);
@@ -437,7 +443,7 @@ pub async fn push_provider_to_tool_config(
 ///
 /// Returns a list of detected conflicts as serialized JSON values.
 #[tauri::command]
-pub async fn detect_env_conflicts() -> Result<Vec<serde_json::Value>, String> {
+pub async fn detect_env_conflicts() -> Result<Vec<serde_json::Value>, AppError> {
     let conflicts = tool_sync::detect_env_conflicts();
     let serialized: Vec<serde_json::Value> = conflicts
         .into_iter()
@@ -460,9 +466,9 @@ fn now_unix_secs() -> u64 {
 #[tauri::command]
 pub async fn detect_provider_conflicts(
     provider_id: String,
-) -> Result<Vec<serde_json::Value>, String> {
+) -> Result<Vec<serde_json::Value>, AppError> {
     let path = providers::flat_store_path();
-    let store = providers::read_flat_store(&path).map_err(|e| e.to_string())?;
+    let store = providers::read_flat_store(&path)?;
 
     let mut conflicts: Vec<tool_sync::ConfigConflict> = Vec::new();
     for (tool_id, binding) in &store.tool_activations {
@@ -490,17 +496,17 @@ pub async fn detect_provider_conflicts(
 pub async fn resync_tool(
     lock: State<'_, ProvidersWriteLock>,
     tool_id: String,
-) -> Result<ToolSyncResultFlat, String> {
+) -> Result<ToolSyncResultFlat, AppError> {
     let _guard = lock.0.lock().await;
     let path = providers::flat_store_path();
-    let mut store = providers::migrate_store_if_needed(&path).map_err(|e| e.to_string())?;
+    let mut store = providers::migrate_store_if_needed(&path)?;
 
     let is_active = store
         .tool_activations
         .get(&tool_id)
         .is_some_and(|b| !b.is_empty());
     if !is_active {
-        return Err(format!("Tool '{}' is not active", tool_id));
+        return Err(AppError::Other(format!("Tool '{}' is not active", tool_id)));
     }
 
     let sync_result = tool_sync::sync_tool_binding(&store, &tool_id);
@@ -513,7 +519,7 @@ pub async fn resync_tool(
         {
             act.last_sync_at = Some(now_unix_secs());
         }
-        providers::write_flat_store(&store, &path).map_err(|e| e.to_string())?;
+        providers::write_flat_store(&store, &path)?;
     }
 
     Ok(sync_result)

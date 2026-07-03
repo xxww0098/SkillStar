@@ -4,5 +4,17 @@
 # whenever a stringly-typed error gets migrated to a real error enum
 # (thiserror) — never raise it except for a deliberate, reviewed exception.
 #
-# Generated from an actual scan on 2026-07-03.
-80
+# 2026-07-03: normalized all src-tauri/src command-layer signatures to
+# AppError (models_commands/*.rs, mcp_commands.rs, ai/*.rs, updater.rs,
+# core/app_shell.rs, lib.rs, commands/patrol.rs) — dropped 80 -> 22.
+# Remaining 22 hits are: (a) 4 nested-generic false positives from the
+# script's regex matching `HashMap<String, String>` inside `Result<...>`
+# (marketplace.rs, marketplace_snapshot/mod.rs, commands/marketplace.rs,
+# usage_commands.rs — all already AppError/anyhow in reality); (b) 5 private
+# helper fns whose owning #[tauri::command] is already AppError-typed
+# (core/skills/mod.rs's SkillManager trait, commands/share_install.rs's
+# decode_embedded) sitting in front of crates/skillstar-skills's own
+# Result<_, String> API; (c) 13 signatures inside crates/ (skillstar-skills,
+# skillstar-marketplace, skillstar-models, skillstar-app, skillstar-ai,
+# skillstar-usage), intentionally out of scope for this command-layer pass.
+22

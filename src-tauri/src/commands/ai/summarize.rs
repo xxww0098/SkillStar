@@ -1,14 +1,13 @@
 use skillstar_ai::ai_provider;
+use skillstar_core::infra::error::AppError;
 
 use super::{emit_summarize_stream_event, ensure_ai_config};
 
 #[tauri::command]
-pub async fn ai_summarize_skill(content: String) -> Result<String, String> {
+pub async fn ai_summarize_skill(content: String) -> Result<String, AppError> {
     let config = ensure_ai_config().await?;
 
-    let result = ai_provider::summarize_text(&config, &content)
-        .await
-        .map_err(|e| e.to_string())?;
+    let result = ai_provider::summarize_text(&config, &content).await?;
 
     Ok(result)
 }
@@ -18,7 +17,7 @@ pub async fn ai_summarize_skill_stream(
     window: tauri::Window,
     request_id: String,
     content: String,
-) -> Result<String, String> {
+) -> Result<String, AppError> {
     let config = ensure_ai_config().await?;
 
     let _ = emit_summarize_stream_event(&window, &request_id, "start", None, None);
@@ -42,17 +41,15 @@ pub async fn ai_summarize_skill_stream(
                 None,
                 Some(message.clone()),
             );
-            Err(message)
+            Err(AppError::Other(message))
         }
     }
 }
 
 #[tauri::command]
-pub async fn ai_test_connection() -> Result<u64, String> {
+pub async fn ai_test_connection() -> Result<u64, AppError> {
     let config = ensure_ai_config().await?;
-    ai_provider::test_connection(&config)
-        .await
-        .map_err(|e| e.to_string())
+    Ok(ai_provider::test_connection(&config).await?)
 }
 
 #[derive(serde::Deserialize)]
@@ -65,7 +62,7 @@ pub struct SkillMeta {
 pub async fn ai_pick_skills(
     prompt: String,
     skills: Vec<SkillMeta>,
-) -> Result<ai_provider::SkillPickResponse, String> {
+) -> Result<ai_provider::SkillPickResponse, AppError> {
     let config = ensure_ai_config().await?;
     let candidates = skills
         .into_iter()
@@ -75,7 +72,5 @@ pub async fn ai_pick_skills(
         })
         .collect();
 
-    ai_provider::pick_skills(&config, &prompt, candidates)
-        .await
-        .map_err(|e| e.to_string())
+    Ok(ai_provider::pick_skills(&config, &prompt, candidates).await?)
 }

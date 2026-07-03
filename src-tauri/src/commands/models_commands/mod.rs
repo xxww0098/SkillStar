@@ -18,6 +18,7 @@
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use skillstar_core::infra::error::AppError;
 use tauri::State;
 use tokio::sync::Mutex;
 

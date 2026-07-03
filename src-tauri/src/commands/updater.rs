@@ -13,6 +13,7 @@
 use std::sync::Mutex;
 
 use serde::Serialize;
+use skillstar_core::infra::error::AppError;
 use tauri::Manager;
 use tracing::{info, warn};
 
@@ -76,7 +77,7 @@ fn effective_endpoints() -> Vec<url::Url> {
 /// Returns update metadata.  The `Update` object is stored in app state so
 /// `download_app_update` / `install_app_update` can use it later.
 #[tauri::command]
-pub async fn check_app_update(app: tauri::AppHandle) -> Result<UpdateCheckResult, String> {
+pub async fn check_app_update(app: tauri::AppHandle) -> Result<UpdateCheckResult, AppError> {
     use tauri_plugin_updater::UpdaterExt;
 
     let endpoints = effective_endpoints();
@@ -85,10 +86,10 @@ pub async fn check_app_update(app: tauri::AppHandle) -> Result<UpdateCheckResult
     let updater = app
         .updater_builder()
         .endpoints(endpoints)
-        .map_err(|e| format!("failed to set endpoints: {e}"))?
+        .map_err(|e| AppError::Other(format!("failed to set endpoints: {e}")))?
         .timeout(std::time::Duration::from_secs(15))
         .build()
-        .map_err(|e| format!("failed to build updater: {e}"))?;
+        .map_err(|e| AppError::Other(format!("failed to build updater: {e}")))?;
 
     let update = match updater.check().await {
         Ok(u) => u,
@@ -138,7 +139,7 @@ pub async fn check_app_update(app: tauri::AppHandle) -> Result<UpdateCheckResult
 /// Emits `updater://download-progress` events with `{ chunk_length, content_length }`.
 /// After download completes, installs the update automatically.
 #[tauri::command]
-pub async fn download_and_install_update(app: tauri::AppHandle) -> Result<(), String> {
+pub async fn download_and_install_update(app: tauri::AppHandle) -> Result<(), AppError> {
     use tauri::Emitter;
 
     // Take the update out of the mutex — we own it for the remainder of this call.
@@ -147,8 +148,9 @@ pub async fn download_and_install_update(app: tauri::AppHandle) -> Result<(), St
         let mut slot = pending
             .inner
             .lock()
-            .map_err(|e| format!("lock error: {e}"))?;
-        slot.take().ok_or("no pending update to download")?
+            .map_err(|e| AppError::Other(format!("lock error: {e}")))?;
+        slot.take()
+            .ok_or_else(|| AppError::Other("no pending update to download".to_string()))?
     };
 
     let app_for_events = app.clone();
@@ -167,7 +169,7 @@ pub async fn download_and_install_update(app: tauri::AppHandle) -> Result<(), St
             || {},
         )
         .await
-        .map_err(|e| format!("download_and_install failed: {e}"))?;
+        .map_err(|e| AppError::Other(format!("download_and_install failed: {e}")))?;
 
     info!(target: "updater", "update downloaded and installed, ready for restart");
     Ok(())
@@ -175,6 +177,6 @@ pub async fn download_and_install_update(app: tauri::AppHandle) -> Result<(), St
 
 /// Restart the app to apply the installed update.
 #[tauri::command]
-pub async fn restart_after_update(app: tauri::AppHandle) -> Result<(), String> {
+pub async fn restart_after_update(app: tauri::AppHandle) -> Result<(), AppError> {
     app.restart();
 }

@@ -7,6 +7,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
+use skillstar_core::infra::error::AppError;
 use tauri::{Emitter, Manager};
 
 // ── Exit Control ──────────────────────────────────────────────────
@@ -215,17 +216,18 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
 // ── Tray Menu Refresh ──────────────────────────────────────────────
 
-pub fn refresh_tray_menu(app: &tauri::AppHandle) -> Result<(), String> {
+pub fn refresh_tray_menu(app: &tauri::AppHandle) -> Result<(), AppError> {
     let lang = app.state::<TrayState>().lang();
     let patrol_enabled = app
         .state::<crate::core::patrol::PatrolManager>()
         .status()
         .enabled;
 
-    let menu = build_tray_menu(app, &lang, patrol_enabled).map_err(|e| e.to_string())?;
+    let menu = build_tray_menu(app, &lang, patrol_enabled).map_err(|e| AppError::Other(e.to_string()))?;
     let tray = app
         .tray_by_id("main-tray")
-        .ok_or_else(|| "tray not found".to_string())?;
-    tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;
+        .ok_or_else(|| AppError::Other("tray not found".to_string()))?;
+    tray.set_menu(Some(menu))
+        .map_err(|e| AppError::Other(e.to_string()))?;
     Ok(())
 }

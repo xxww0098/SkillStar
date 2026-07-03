@@ -10,33 +10,33 @@ use super::*;
 
 /// Returns the full ProvidersStore (all apps).
 #[tauri::command]
-pub async fn get_providers_store() -> Result<ProvidersStore, String> {
-    providers::read_store().map_err(|e| e.to_string())
+pub async fn get_providers_store() -> Result<ProvidersStore, AppError> {
+    Ok(providers::read_store()?)
 }
 
 /// Returns providers and current active provider for a single AppId.
 #[tauri::command]
-pub async fn get_app_providers(app_id: String) -> Result<AppProviders, String> {
-    let store = providers::read_store().map_err(|e| e.to_string())?;
+pub async fn get_app_providers(app_id: String) -> Result<AppProviders, AppError> {
+    let store = providers::read_store()?;
     let app = match app_id.as_str() {
         "claude" => store.claude,
         "codex" => store.codex,
         "opencode" => store.opencode,
         "gemini" => store.gemini,
-        _ => return Err(format!("Unknown app_id: {}", app_id)),
+        _ => return Err(AppError::Other(format!("Unknown app_id: {}", app_id))),
     };
     Ok(app)
 }
 
 /// Returns the list of built-in provider presets.
 #[tauri::command]
-pub async fn get_provider_presets() -> Result<Vec<ProviderPreset>, String> {
+pub async fn get_provider_presets() -> Result<Vec<ProviderPreset>, AppError> {
     Ok(providers::get_provider_presets())
 }
 
 /// Returns built-in flat provider presets (v2) — single source of truth for the UI.
 #[tauri::command]
-pub async fn get_provider_presets_flat() -> Result<Vec<ProviderPresetFlat>, String> {
+pub async fn get_provider_presets_flat() -> Result<Vec<ProviderPresetFlat>, AppError> {
     Ok(providers::get_all_presets_flat())
 }
 
@@ -45,20 +45,22 @@ pub async fn get_provider_presets_flat() -> Result<Vec<ProviderPresetFlat>, Stri
 /// `app_id` must be `claude` (Anthropic) or `codex` (OpenAI). Validates that the
 /// provider exists and can be resolved before persisting.
 #[tauri::command]
-pub async fn set_app_ai_provider_ref(app_id: String, provider_id: String) -> Result<(), String> {
+pub async fn set_app_ai_provider_ref(app_id: String, provider_id: String) -> Result<(), AppError> {
     let app_id = app_id.trim();
     let provider_id = provider_id.trim();
     if !matches!(app_id, "claude" | "codex") {
-        return Err(format!("Unsupported app_id for app AI: '{app_id}'"));
+        return Err(AppError::Other(format!(
+            "Unsupported app_id for app AI: '{app_id}'"
+        )));
     }
     if provider_id.is_empty() {
-        return Err("provider_id cannot be empty".to_string());
+        return Err(AppError::Other("provider_id cannot be empty".to_string()));
     }
 
     let path = providers::flat_store_path();
-    let store = providers::migrate_store_if_needed(&path).map_err(|e| e.to_string())?;
+    let store = providers::migrate_store_if_needed(&path)?;
     if !store.providers.iter().any(|p| p.id == provider_id) {
-        return Err(format!("Provider '{}' not found", provider_id));
+        return Err(AppError::Other(format!("Provider '{}' not found", provider_id)));
     }
 
     let mut ai_config = ai_provider::load_config();
@@ -72,18 +74,19 @@ pub async fn set_app_ai_provider_ref(app_id: String, provider_id: String) -> Res
         _ => ai_provider::ApiFormat::Openai,
     };
 
-    ai_provider::resolve_provider_ref(&mut ai_config).map_err(|e| e.to_string())?;
-    ai_provider::save_config(&ai_config).map_err(|e| e.to_string())?;
+    ai_provider::resolve_provider_ref(&mut ai_config)?;
+    ai_provider::save_config(&ai_config)?;
 
     Ok(())
 }
 
 /// Clear application AI provider reference (switch back to manual/local config).
 #[tauri::command]
-pub async fn clear_app_ai_provider_ref() -> Result<(), String> {
+pub async fn clear_app_ai_provider_ref() -> Result<(), AppError> {
     let mut ai_config = ai_provider::load_config();
     ai_config.provider_ref = None;
-    ai_provider::save_config(&ai_config).map_err(|e| e.to_string())
+    ai_provider::save_config(&ai_config)?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -99,9 +102,9 @@ pub async fn create_provider(
     lock: State<'_, ProvidersWriteLock>,
     app_id: String,
     entry: ProviderEntry,
-) -> Result<ProviderEntry, String> {
+) -> Result<ProviderEntry, AppError> {
     let _guard = lock.0.lock().await;
-    providers::create_provider(&app_id, entry).map_err(|e| e.to_string())
+    Ok(providers::create_provider(&app_id, entry)?)
 }
 
 /// Create a provider from a built-in preset.
@@ -113,9 +116,9 @@ pub async fn create_provider_from_preset(
     app_id: String,
     preset_id: String,
     api_key: String,
-) -> Result<ProviderEntry, String> {
+) -> Result<ProviderEntry, AppError> {
     let _guard = lock.0.lock().await;
-    providers::create_from_preset(&app_id, &preset_id, &api_key).map_err(|e| e.to_string())
+    Ok(providers::create_from_preset(&app_id, &preset_id, &api_key)?)
 }
 
 /// Update an existing provider with a partial patch.
@@ -125,9 +128,9 @@ pub async fn update_provider(
     app_id: String,
     id: String,
     patch: ProviderPatch,
-) -> Result<ProviderEntry, String> {
+) -> Result<ProviderEntry, AppError> {
     let _guard = lock.0.lock().await;
-    providers::update_provider(&app_id, &id, patch).map_err(|e| e.to_string())
+    Ok(providers::update_provider(&app_id, &id, patch)?)
 }
 
 /// Delete a provider by ID.
@@ -138,9 +141,9 @@ pub async fn delete_provider(
     lock: State<'_, ProvidersWriteLock>,
     app_id: String,
     id: String,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let _guard = lock.0.lock().await;
-    providers::delete_provider(&app_id, &id).map_err(|e| e.to_string())
+    Ok(providers::delete_provider(&app_id, &id)?)
 }
 
 /// Switch the active provider for an app.
@@ -153,14 +156,14 @@ pub async fn switch_active_provider(
     app_id: String,
     provider_id: String,
     sync_tools: Option<Vec<String>>,
-) -> Result<SwitchResult, String> {
+) -> Result<SwitchResult, AppError> {
     let _guard = lock.0.lock().await;
 
     // Step 1: Update providers store
-    providers::switch_active_provider(&app_id, &provider_id).map_err(|e| e.to_string())?;
+    providers::switch_active_provider(&app_id, &provider_id)?;
 
     // Read back the provider name for the result
-    let store = providers::read_store().map_err(|e| e.to_string())?;
+    let store = providers::read_store()?;
     let provider = match app_id.as_str() {
         "claude" => store.claude.providers.get(&provider_id),
         "codex" => store.codex.providers.get(&provider_id),
@@ -168,7 +171,7 @@ pub async fn switch_active_provider(
         "gemini" => store.gemini.providers.get(&provider_id),
         _ => None,
     }
-    .ok_or_else(|| format!("Provider '{}' not found after switch", provider_id))?
+    .ok_or_else(|| AppError::Other(format!("Provider '{}' not found after switch", provider_id)))?
     .clone();
 
     // Step 2: Update ai.json provider_ref
@@ -177,7 +180,7 @@ pub async fn switch_active_provider(
         app_id: app_id.clone(),
         provider_id: provider_id.clone(),
     });
-    ai_provider::save_config(&ai_config).map_err(|e| e.to_string())?;
+    ai_provider::save_config(&ai_config)?;
 
     // Step 3: Optionally sync to external tools
     let tools_synced = if let Some(tool_ids) = sync_tools {
@@ -213,9 +216,9 @@ pub async fn switch_active_provider(
 ///
 /// Performs v1→v2 migration on first access if needed.
 #[tauri::command]
-pub async fn get_providers_flat() -> Result<FlatProvidersResponse, String> {
+pub async fn get_providers_flat() -> Result<FlatProvidersResponse, AppError> {
     let path = providers::flat_store_path();
-    let store = providers::migrate_store_if_needed(&path).map_err(|e| e.to_string())?;
+    let store = providers::migrate_store_if_needed(&path)?;
     Ok(FlatProvidersResponse {
         version: store.version,
         providers: store.providers,
@@ -229,9 +232,9 @@ pub async fn get_providers_flat() -> Result<FlatProvidersResponse, String> {
 /// tool is bound to, without the full provider list.
 #[tauri::command]
 pub async fn get_tool_activations()
--> Result<std::collections::HashMap<String, ToolBinding>, String> {
+-> Result<std::collections::HashMap<String, ToolBinding>, AppError> {
     let path = providers::flat_store_path();
-    let store = providers::read_flat_store(&path).map_err(|e| e.to_string())?;
+    let store = providers::read_flat_store(&path)?;
     Ok(store.tool_activations)
 }
 
@@ -247,13 +250,13 @@ pub async fn get_tool_activations()
 pub async fn create_provider_flat(
     lock: State<'_, ProvidersWriteLock>,
     entry: ProviderEntryFlat,
-) -> Result<ProviderEntryFlat, String> {
+) -> Result<ProviderEntryFlat, AppError> {
     let _guard = lock.0.lock().await;
     let path = providers::flat_store_path();
-    let mut store = providers::migrate_store_if_needed(&path).map_err(|e| e.to_string())?;
+    let mut store = providers::migrate_store_if_needed(&path)?;
 
-    let created = providers::create_provider_flat(&mut store, entry).map_err(|e| e.to_string())?;
-    providers::write_flat_store(&store, &path).map_err(|e| e.to_string())?;
+    let created = providers::create_provider_flat(&mut store, entry)?;
+    providers::write_flat_store(&store, &path)?;
 
     Ok(created)
 }
@@ -268,14 +271,13 @@ pub async fn update_provider_flat(
     lock: State<'_, ProvidersWriteLock>,
     id: String,
     patch: ProviderPatchFlat,
-) -> Result<ProviderUpdateFlatResult, String> {
+) -> Result<ProviderUpdateFlatResult, AppError> {
     let _guard = lock.0.lock().await;
     let path = providers::flat_store_path();
-    let mut store = providers::migrate_store_if_needed(&path).map_err(|e| e.to_string())?;
+    let mut store = providers::migrate_store_if_needed(&path)?;
 
-    let updated =
-        providers::update_provider_flat(&mut store, &id, patch).map_err(|e| e.to_string())?;
-    providers::write_flat_store(&store, &path).map_err(|e| e.to_string())?;
+    let updated = providers::update_provider_flat(&mut store, &id, patch)?;
+    providers::write_flat_store(&store, &path)?;
 
     let tool_sync_results = tool_sync::resync_active_tools(&store, &id);
 
@@ -294,13 +296,13 @@ pub async fn update_provider_flat(
 pub async fn delete_provider_flat(
     lock: State<'_, ProvidersWriteLock>,
     id: String,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let _guard = lock.0.lock().await;
     let path = providers::flat_store_path();
-    let mut store = providers::migrate_store_if_needed(&path).map_err(|e| e.to_string())?;
+    let mut store = providers::migrate_store_if_needed(&path)?;
 
-    providers::delete_provider_flat(&mut store, &id).map_err(|e| e.to_string())?;
-    providers::write_flat_store(&store, &path).map_err(|e| e.to_string())?;
+    providers::delete_provider_flat(&mut store, &id)?;
+    providers::write_flat_store(&store, &path)?;
 
     Ok(())
 }
@@ -313,13 +315,13 @@ pub async fn delete_provider_flat(
 pub async fn reorder_providers(
     lock: State<'_, ProvidersWriteLock>,
     ordered_ids: Vec<String>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let _guard = lock.0.lock().await;
     let path = providers::flat_store_path();
-    let mut store = providers::migrate_store_if_needed(&path).map_err(|e| e.to_string())?;
+    let mut store = providers::migrate_store_if_needed(&path)?;
 
-    providers::reorder_providers(&mut store, &ordered_ids).map_err(|e| e.to_string())?;
-    providers::write_flat_store(&store, &path).map_err(|e| e.to_string())?;
+    providers::reorder_providers(&mut store, &ordered_ids)?;
+    providers::write_flat_store(&store, &path)?;
 
     Ok(())
 }

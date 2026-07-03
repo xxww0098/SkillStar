@@ -4,6 +4,7 @@ mod core;
 
 use tracing::{error, warn};
 
+use skillstar_core::infra::error::AppError;
 use tauri::{Emitter, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
 
@@ -512,7 +513,7 @@ pub fn run() {
 // ── Tray language update command ────────────────────────────────────
 
 #[tauri::command]
-async fn update_tray_language(app: tauri::AppHandle, lang: String) -> Result<(), String> {
+async fn update_tray_language(app: tauri::AppHandle, lang: String) -> Result<(), AppError> {
     app.state::<core::app_shell::TrayState>().set_lang(lang);
     core::app_shell::refresh_tray_menu(&app)
 }

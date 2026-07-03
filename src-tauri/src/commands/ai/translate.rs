@@ -1,4 +1,5 @@
 use skillstar_ai::ai_provider;
+use skillstar_core::infra::error::AppError;
 use tauri::Emitter;
 
 use super::{emit_translate_pipeline_event, ensure_ai_config};
@@ -8,11 +9,9 @@ use super::{emit_translate_pipeline_event, ensure_ai_config};
 /// For users who don't need progress events. The streaming command emits
 /// pipeline-progress events alongside returning the same final result.
 #[tauri::command]
-pub async fn ai_translate_skill(content: String) -> Result<String, String> {
+pub async fn ai_translate_skill(content: String) -> Result<String, AppError> {
     let config = ensure_ai_config().await?;
-    ai_provider::translate::translate_skill(&config, &content, |_| {})
-        .await
-        .map_err(|e| e.to_string())
+    Ok(ai_provider::translate::translate_skill(&config, &content, |_| {}).await?)
 }
 
 /// Streaming translation: emits `ai://translate-stream` events with the
@@ -29,7 +28,7 @@ pub async fn ai_translate_skill_stream(
     request_id: String,
     content: String,
     force_refresh: Option<bool>,
-) -> Result<TranslateSkillStreamResponse, String> {
+) -> Result<TranslateSkillStreamResponse, AppError> {
     let config = ensure_ai_config().await?;
 
     let _ = emit_translate_pipeline_event(&window, &request_id, "start", None, None, None);
@@ -84,7 +83,7 @@ pub async fn ai_translate_skill_stream(
                 None,
                 Some(message.clone()),
             );
-            Err(message)
+            Err(AppError::Other(message))
         }
     }
 }
@@ -113,7 +112,7 @@ pub(super) fn emit_translate_pipeline_event_impl(
     progress: Option<ai_provider::translate::PipelineProgress>,
     metrics: Option<ai_provider::translate::TranslationMetrics>,
     message: Option<String>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let payload = TranslatePipelinePayload {
         request_id: request_id.to_string(),
         event: event.to_string(),
@@ -123,5 +122,5 @@ pub(super) fn emit_translate_pipeline_event_impl(
     };
     window
         .emit("ai://translate-stream", payload)
-        .map_err(|e| format!("Failed to emit translate event: {e}"))
+        .map_err(|e| AppError::Other(format!("Failed to emit translate event: {e}")))
 }

@@ -8,6 +8,7 @@ pub mod translate;
 
 use serde::Serialize;
 use skillstar_ai::ai_provider;
+use skillstar_core::infra::error::AppError;
 use tauri::Emitter;
 
 // ── Shared Types ────────────────────────────────────────────────────
@@ -30,7 +31,7 @@ fn emit_ai_stream_event(
     event: &str,
     delta: Option<String>,
     message: Option<String>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let payload = AiStreamPayload {
         request_id: request_id.to_string(),
         event: event.to_string(),
@@ -38,9 +39,9 @@ fn emit_ai_stream_event(
         message,
     };
 
-    window
-        .emit(channel, payload)
-        .map_err(|e| format!("Failed to emit {} event: {}", channel, e))
+    window.emit(channel, payload).map_err(|e| {
+        AppError::Other(format!("Failed to emit {} event: {}", channel, e))
+    })
 }
 
 fn emit_summarize_stream_event(
@@ -49,7 +50,7 @@ fn emit_summarize_stream_event(
     event: &str,
     delta: Option<String>,
     message: Option<String>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     emit_ai_stream_event(
         window,
         "ai://summarize-stream",
@@ -67,39 +68,41 @@ fn emit_translate_pipeline_event(
     progress: Option<ai_provider::translate::PipelineProgress>,
     metrics: Option<ai_provider::translate::TranslationMetrics>,
     message: Option<String>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     translate::emit_translate_pipeline_event_impl(
         window, request_id, event, progress, metrics, message,
     )
 }
 
-async fn ensure_ai_config() -> Result<ai_provider::AiConfig, String> {
+async fn ensure_ai_config() -> Result<ai_provider::AiConfig, AppError> {
     let config = ai_provider::load_config_async().await;
     if !config.enabled {
-        return Err("AI provider is disabled. Please enable it in Settings.".to_string());
+        return Err(AppError::Other(
+            "AI provider is disabled. Please enable it in Settings.".to_string(),
+        ));
     }
-    let config = ai_provider::resolve_runtime_config(&config).map_err(|e| e.to_string())?;
+    let config = ai_provider::resolve_runtime_config(&config)?;
     if config.api_key.trim().is_empty() && config.api_format != ai_provider::ApiFormat::Local {
-        return Err(
+        return Err(AppError::Other(
             "AI provider is not configured. Please choose a Models provider or local model in Settings.".to_string(),
-        );
+        ));
     }
     Ok(config)
 }
 
 /// Public wrapper for other command modules that need AI config validation.
-pub async fn ensure_ai_config_pub() -> Result<ai_provider::AiConfig, String> {
+pub async fn ensure_ai_config_pub() -> Result<ai_provider::AiConfig, AppError> {
     ensure_ai_config().await
 }
 
 // ── Config Commands (stay in mod.rs, too small to warrant a file) ───
 
 #[tauri::command]
-pub async fn get_ai_config() -> Result<ai_provider::AiConfig, String> {
+pub async fn get_ai_config() -> Result<ai_provider::AiConfig, AppError> {
     Ok(ai_provider::load_config_async().await)
 }
 
 #[tauri::command]
-pub async fn save_ai_config(config: ai_provider::AiConfig) -> Result<(), String> {
-    ai_provider::save_config(&config).map_err(|e| e.to_string())
+pub async fn save_ai_config(config: ai_provider::AiConfig) -> Result<(), AppError> {
+    Ok(ai_provider::save_config(&config)?)
 }

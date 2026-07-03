@@ -12,6 +12,7 @@
 use std::collections::BTreeSet;
 
 use serde::Serialize;
+use skillstar_core::infra::error::AppError;
 use tauri::State;
 use tokio::sync::Mutex;
 use tracing::warn;
@@ -59,14 +60,14 @@ pub struct McpServerWithSync {
 
 /// Return the full unified MCP store.
 #[tauri::command]
-pub async fn list_mcp_servers() -> Result<McpStore, String> {
+pub async fn list_mcp_servers() -> Result<McpStore, AppError> {
     let path = mcp::mcp_store_path();
-    mcp::read_mcp_store(&path).map_err(|e| e.to_string())
+    Ok(mcp::read_mcp_store(&path)?)
 }
 
 /// Probe each supported tool's MCP config target: installed? how many servers?
 #[tauri::command]
-pub async fn mcp_tool_statuses() -> Result<Vec<McpToolStatus>, String> {
+pub async fn mcp_tool_statuses() -> Result<Vec<McpToolStatus>, AppError> {
     Ok(mcp::tool_statuses())
 }
 
@@ -81,13 +82,13 @@ pub async fn mcp_tool_statuses() -> Result<Vec<McpToolStatus>, String> {
 pub async fn create_mcp_server(
     lock: State<'_, McpWriteLock>,
     entry: McpServerEntry,
-) -> Result<McpServerWithSync, String> {
+) -> Result<McpServerWithSync, AppError> {
     let _guard = lock.0.lock().await;
     let path = mcp::mcp_store_path();
-    let mut store = mcp::read_mcp_store(&path).map_err(|e| e.to_string())?;
+    let mut store = mcp::read_mcp_store(&path)?;
 
-    let created = mcp::create_server(&mut store, entry).map_err(|e| e.to_string())?;
-    mcp::write_mcp_store(&store, &path).map_err(|e| e.to_string())?;
+    let created = mcp::create_server(&mut store, entry)?;
+    mcp::write_mcp_store(&store, &path)?;
 
     let sync_results = mcp::sync_server_all_tools(&created, false);
     Ok(McpServerWithSync {
@@ -103,10 +104,10 @@ pub async fn update_mcp_server(
     lock: State<'_, McpWriteLock>,
     id: String,
     patch: McpServerPatch,
-) -> Result<McpServerWithSync, String> {
+) -> Result<McpServerWithSync, AppError> {
     let _guard = lock.0.lock().await;
     let path = mcp::mcp_store_path();
-    let mut store = mcp::read_mcp_store(&path).map_err(|e| e.to_string())?;
+    let mut store = mcp::read_mcp_store(&path)?;
 
     // Capture the old name so a rename can be cleaned out of live configs.
     let old_name = store
@@ -115,8 +116,8 @@ pub async fn update_mcp_server(
         .find(|s| s.id == id)
         .map(|s| s.name.clone());
 
-    let updated = mcp::update_server(&mut store, &id, patch).map_err(|e| e.to_string())?;
-    mcp::write_mcp_store(&store, &path).map_err(|e| e.to_string())?;
+    let updated = mcp::update_server(&mut store, &id, patch)?;
+    mcp::write_mcp_store(&store, &path)?;
 
     // If the server was renamed, purge the stale key from every tool first.
     if let Some(old) = old_name
@@ -140,13 +141,13 @@ pub async fn update_mcp_server(
 pub async fn delete_mcp_server(
     lock: State<'_, McpWriteLock>,
     id: String,
-) -> Result<Vec<McpSyncResult>, String> {
+) -> Result<Vec<McpSyncResult>, AppError> {
     let _guard = lock.0.lock().await;
     let path = mcp::mcp_store_path();
-    let mut store = mcp::read_mcp_store(&path).map_err(|e| e.to_string())?;
+    let mut store = mcp::read_mcp_store(&path)?;
 
-    let removed = mcp::delete_server(&mut store, &id).map_err(|e| e.to_string())?;
-    mcp::write_mcp_store(&store, &path).map_err(|e| e.to_string())?;
+    let removed = mcp::delete_server(&mut store, &id)?;
+    mcp::write_mcp_store(&store, &path)?;
 
     let results = mcp::MCP_TOOL_IDS
         .iter()
@@ -163,14 +164,13 @@ pub async fn set_mcp_tool_enabled(
     id: String,
     tool_id: String,
     enabled: bool,
-) -> Result<McpSyncResult, String> {
+) -> Result<McpSyncResult, AppError> {
     let _guard = lock.0.lock().await;
     let path = mcp::mcp_store_path();
-    let mut store = mcp::read_mcp_store(&path).map_err(|e| e.to_string())?;
+    let mut store = mcp::read_mcp_store(&path)?;
 
-    let entry =
-        mcp::set_tool_enabled(&mut store, &id, &tool_id, enabled).map_err(|e| e.to_string())?;
-    mcp::write_mcp_store(&store, &path).map_err(|e| e.to_string())?;
+    let entry = mcp::set_tool_enabled(&mut store, &id, &tool_id, enabled)?;
+    mcp::write_mcp_store(&store, &path)?;
 
     let result = if enabled {
         mcp::sync_server_to_tool(&entry, &tool_id, false)
@@ -186,16 +186,16 @@ pub async fn sync_mcp_server(
     lock: State<'_, McpWriteLock>,
     id: String,
     force: bool,
-) -> Result<Vec<McpSyncResult>, String> {
+) -> Result<Vec<McpSyncResult>, AppError> {
     let _guard = lock.0.lock().await;
     let path = mcp::mcp_store_path();
-    let store = mcp::read_mcp_store(&path).map_err(|e| e.to_string())?;
+    let store = mcp::read_mcp_store(&path)?;
 
     let entry = store
         .servers
         .iter()
         .find(|s| s.id == id)
-        .ok_or_else(|| format!("MCP server '{id}' not found"))?;
+        .ok_or_else(|| AppError::Other(format!("MCP server '{id}' not found")))?;
     Ok(mcp::sync_server_all_tools(entry, force))
 }
 
@@ -204,10 +204,10 @@ pub async fn sync_mcp_server(
 pub async fn sync_all_mcp(
     lock: State<'_, McpWriteLock>,
     force: bool,
-) -> Result<Vec<McpSyncResult>, String> {
+) -> Result<Vec<McpSyncResult>, AppError> {
     let _guard = lock.0.lock().await;
     let path = mcp::mcp_store_path();
-    let store = mcp::read_mcp_store(&path).map_err(|e| e.to_string())?;
+    let store = mcp::read_mcp_store(&path)?;
     Ok(mcp::sync_all(&store, force))
 }
 
@@ -217,14 +217,14 @@ pub async fn sync_all_mcp(
 pub async fn import_mcp_from_tool(
     lock: State<'_, McpWriteLock>,
     tool_id: String,
-) -> Result<usize, String> {
+) -> Result<usize, AppError> {
     let _guard = lock.0.lock().await;
     let path = mcp::mcp_store_path();
-    let mut store = mcp::read_mcp_store(&path).map_err(|e| e.to_string())?;
+    let mut store = mcp::read_mcp_store(&path)?;
 
-    let count = mcp::import_from_tool(&mut store, &tool_id).map_err(|e| e.to_string())?;
+    let count = mcp::import_from_tool(&mut store, &tool_id)?;
     if count > 0 {
-        mcp::write_mcp_store(&store, &path).map_err(|e| e.to_string())?;
+        mcp::write_mcp_store(&store, &path)?;
     }
     Ok(count)
 }
@@ -235,10 +235,10 @@ pub async fn import_mcp_from_tool(
 pub async fn reorder_mcp_servers(
     lock: State<'_, McpWriteLock>,
     ordered_ids: Vec<String>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let _guard = lock.0.lock().await;
     let path = mcp::mcp_store_path();
-    let mut store = mcp::read_mcp_store(&path).map_err(|e| e.to_string())?;
+    let mut store = mcp::read_mcp_store(&path)?;
 
     for (pos, id) in ordered_ids.iter().enumerate() {
         if let Some(s) = store.servers.iter_mut().find(|s| &s.id == id) {
@@ -246,13 +246,13 @@ pub async fn reorder_mcp_servers(
         }
     }
     store.servers.sort_by_key(|s| s.sort_index);
-    mcp::write_mcp_store(&store, &path).map_err(|e| e.to_string())?;
+    mcp::write_mcp_store(&store, &path)?;
     Ok(())
 }
 
 /// Returns the built-in / recommended MCP presets (read-only, no lock needed).
 #[tauri::command]
-pub async fn get_mcp_presets() -> Result<Vec<McpPreset>, String> {
+pub async fn get_mcp_presets() -> Result<Vec<McpPreset>, AppError> {
     if let Err(err) = crate::core::marketplace::initialize_local_snapshot() {
         warn!(target: "mcp", error = %err, "failed to initialize marketplace snapshot for MCP presets");
         return Ok(mcp::get_mcp_presets());
