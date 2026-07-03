@@ -74,7 +74,9 @@ fn emit_translate_pipeline_event(
     )
 }
 
-async fn ensure_ai_config() -> Result<ai_provider::AiConfig, AppError> {
+/// Shared across command modules (summarize/translate here, marketplace AI search).
+/// The two error strings are matched verbatim by the frontend (`formatAiErrorMessage`).
+pub(crate) async fn ensure_ai_config() -> Result<ai_provider::AiConfig, AppError> {
     let config = ai_provider::load_config_async().await;
     if !config.enabled {
         return Err(AppError::Other(

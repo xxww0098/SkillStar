@@ -1,4 +1,5 @@
-use skillstar_ai::ai_provider::{self, ApiFormat};
+use super::ai::ensure_ai_config;
+use skillstar_ai::ai_provider;
 use skillstar_core::infra::error::AppError;
 use skillstar_marketplace::remote;
 use skillstar_marketplace::snapshot;
@@ -134,19 +135,7 @@ pub async fn resolve_skill_sources(
 #[tauri::command]
 pub async fn ai_extract_search_keywords(query: String) -> Result<Vec<String>, AppError> {
     debug!(target: "marketplace", query = %query, "ai_extract_search_keywords called");
-    let config = ai_provider::load_config_async().await;
-    if !config.enabled {
-        return Err(AppError::Other(
-            "AI provider is disabled. Please enable it in Settings.".to_string(),
-        ));
-    }
-    let resolved = ai_provider::resolve_runtime_config(&config)
-        .map_err(|e| AppError::Other(format!("AI config error: {}", e)))?;
-    if resolved.api_key.trim().is_empty() && !matches!(resolved.api_format, ApiFormat::Local) {
-        return Err(AppError::Other(
-            "AI provider is not configured. Please choose a Models provider or local model in Settings.".to_string(),
-        ));
-    }
+    let resolved = ensure_ai_config().await?;
     let keywords = ai_provider::extract_search_keywords(&resolved, &query)
         .await
         .map_err(|e| AppError::Other(format!("AI keyword extraction failed: {}", e)))?;
