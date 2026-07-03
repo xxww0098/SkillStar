@@ -1,0 +1,17 @@
+# Workspace-wide cargo config. Cargo discovers `.cargo/config.toml` by
+# walking up from the *invocation* CWD (not the target package's manifest
+# dir), so this must live at the workspace root even though it only affects
+# skillstar-models today.
+#
+# TS_RS_EXPORT_DIR: ts-rs's `#[ts(export_to = "...")]` paths are relative to
+# this env var (default would be `<crate-root>/bindings/`). At test runtime,
+# `cargo test`'s CWD is always the target package's own manifest directory
+# (verified empirically: crates/skillstar-models/). IMPORTANT: do NOT use the
+# `{ value = "...", relative = true }` form here — Cargo pre-resolves that
+# against *this config file's own directory* (the workspace root), producing
+# an absolute path that then escapes the repo when ts-rs appends this same
+# relative suffix again. A plain string is passed through verbatim and
+# resolved by ts-rs relative to the test's CWD, which is what we want.
+# See crates/skillstar-models/src/mcp/types.rs and `bun run types:gen`.
+[env]
+TS_RS_EXPORT_DIR = "../../src/types/generated"

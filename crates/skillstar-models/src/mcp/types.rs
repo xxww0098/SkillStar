@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use ts_rs::TS;
 
 // ---------------------------------------------------------------------------
 // Supported tools
@@ -42,8 +43,9 @@ pub fn mcp_tool_label(tool_id: &str) -> &'static str {
 // ---------------------------------------------------------------------------
 
 /// A single MCP server in the unified store.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "McpServerEntry.ts")]
 pub struct McpServerEntry {
     #[serde(default)]
     pub id: String,
@@ -102,13 +104,24 @@ pub struct McpServerEntry {
     /// `startup_timeout_sec` / `tool_timeout_sec`. `None`/`0` means "use the
     /// tool's own default".
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    // ts-rs maps u64 -> bigint by default (technically correct, since u64 can
+    // exceed Number.MAX_SAFE_INTEGER), but this value only ever crosses the
+    // wire as JSON through serde_json + Tauri IPC + JS `JSON.parse`, none of
+    // which round-trip real bigint — they all produce a plain JS `number`.
+    // Millisecond timeouts never approach 2^53, so `number` is both accurate
+    // and what every consumer actually receives.
+    #[ts(type = "number")]
     pub timeout_ms: Option<u64>,
 
     #[serde(default)]
     pub sort_index: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    // Same bigint-vs-number rationale as `timeout_ms` above: epoch
+    // milliseconds today are ~1.7e12, far under 2^53.
+    #[ts(type = "number")]
     pub created_at: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "number")]
     pub updated_at: Option<u64>,
 }
 
@@ -126,8 +139,9 @@ fn default_transport() -> String {
 /// source of truth, exposed to the UI via the `get_mcp_presets` command. The
 /// UI pre-fills the create form from a preset (leaving any `required_env` keys
 /// blank for the user to fill in) and then creates a normal [`McpServerEntry`].
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "McpPreset.ts")]
 pub struct McpPreset {
     pub id: String,
     /// Server key written verbatim into each tool's config (and the entry name).
@@ -390,8 +404,9 @@ pub fn get_mcp_presets() -> Vec<McpPreset> {
 }
 
 /// Partial update patch for an MCP server. Only `Some` fields are applied.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "McpServerPatch.ts")]
 pub struct McpServerPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -425,11 +440,18 @@ pub struct McpServerPatch {
     /// leaves it untouched. Represented as `Option<Option<u64>>` so the
     /// three-state patch semantics survive JSON round-tripping.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    // Same bigint-vs-number rationale as McpServerEntry's timestamp fields;
+    // additionally overrides the whole type (rather than just the inner u64)
+    // because ts-rs's plain derive on nested Option<Option<u64>> produced a
+    // redundant `bigint | null | null` — see the pilot report for the before/
+    // after empirical diff.
+    #[ts(type = "number | null")]
     pub timeout_ms: Option<Option<u64>>,
 }
 
 /// Root structure stored in `mcp_servers.json`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "McpStore.ts")]
 pub struct McpStore {
     pub version: u32,
     #[serde(default)]
@@ -446,8 +468,9 @@ impl Default for McpStore {
 }
 
 /// Result of projecting one server into one tool's live config.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "McpSyncResult.ts")]
 pub struct McpSyncResult {
     pub tool_id: String,
     pub server_id: String,
@@ -464,8 +487,9 @@ pub struct McpSyncResult {
 }
 
 /// Installed/probe status for one tool's MCP config target.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "McpToolStatus.ts")]
 pub struct McpToolStatus {
     pub tool_id: String,
     pub label: String,

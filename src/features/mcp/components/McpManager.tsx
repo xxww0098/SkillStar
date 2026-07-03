@@ -21,10 +21,10 @@ function presetToDefaults(preset: McpPreset): Partial<McpServerFormValue> {
   return {
     name: preset.name,
     transport: preset.transport,
-    command: preset.command,
+    command: preset.command ?? undefined,
     args: preset.args,
     env: preset.env,
-    url: preset.url,
+    url: preset.url ?? undefined,
     headers: preset.headers,
     description: preset.description,
     homepage: preset.homepage,

@@ -15,6 +15,7 @@
 | Desktop IPC | `@tauri-apps/api` | 2.x |
 | Data/State | TanStack Query | 5.x |
 | Toasts | Sonner | 2.x |
+| Types (MCP) | Generated from Rust via ts-rs, not hand-mirrored — see `src/types/generated/` | — |
 
 ## Project Structure (Condensed)
 ```text
@@ -70,6 +71,7 @@ src/
 │   └── shared/                   # cross-feature: SkillEditor, SkillReader, DrawerShell, ProviderBrandIcon
 ├── lib/                          # utils, toast, share code
 └── types/                        # shared TS types
+    └── generated/                 # ts-rs output (MCP types) — generated, do not hand-edit; see Do NOT below
 ```
 
 ## Models Provider UI
@@ -190,3 +192,4 @@ My Skills manages skills across two scopes — **local** (hub + filesystem) and 
 ## Do NOT
 - Do not use CSS modules or styled-components.
 - Do not bypass backend commands with direct network fetches for app data flows.
+- Do not hand-edit `src/types/generated/`. MCP types (`McpServerEntry`, `McpServerPatch`, `McpStore`, `McpSyncResult`, `McpToolStatus`, `McpPreset`) are generated from `skillstar-models::mcp::types` via ts-rs — edit the Rust struct and run `bun run types:gen`, then commit the regenerated output. `src/types/mcp.ts` re-exports these; other MCP types (marketplace cards, publisher summaries) are still hand-mirrored pending a follow-up ts-rs pass.

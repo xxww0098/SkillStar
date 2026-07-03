@@ -35,13 +35,13 @@ function draftToDefaults(draft: McpServerEntry): Partial<McpServerFormValue> {
   return {
     name: draft.name,
     transport: draft.transport,
-    command: draft.command,
+    command: draft.command ?? undefined,
     args: draft.args,
     env: draft.env,
-    url: draft.url,
+    url: draft.url ?? undefined,
     headers: draft.headers,
-    description: draft.description,
-    homepage: draft.homepage,
+    description: draft.description ?? undefined,
+    homepage: draft.homepage ?? undefined,
     enabled: {},
   };
 }

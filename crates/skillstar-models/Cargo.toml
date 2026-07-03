@@ -19,6 +19,7 @@ uuid = { workspace = true }
 toml = { workspace = true }
 skillstar-core = { version = "0.1.0", path = "../skillstar-core" }
 skillstar-providers = { version = "0.1.0", path = "../skillstar-providers" }
+ts-rs = { workspace = true, features = ["serde-compat"] }
 
 [dev-dependencies]
 proptest = "1.11.0"

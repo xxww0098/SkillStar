@@ -83,7 +83,8 @@
       "!!**/*.min.js",
       "!!**/.sisyphus",
       "!!**/src-tauri/gen",
-      "!!**/.vscode"
+      "!!**/.vscode",
+      "!!**/src/types/generated"
     ]
   }
 }
