@@ -1,0 +1,8 @@
+# Ratchet baseline for check_error_strings.sh: max allowed count of
+# `Result<_, String>` signatures across src-tauri/src + crates/ (excluding
+# test code). The guard FAILS if the live count exceeds this number. Lower it
+# whenever a stringly-typed error gets migrated to a real error enum
+# (thiserror) — never raise it except for a deliberate, reviewed exception.
+#
+# Generated from an actual scan on 2026-07-03.
+80

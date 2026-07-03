@@ -1,0 +1,16 @@
+# Grandfathered cross-feature imports, one `file:line` entry per import line
+# (see check_feature_imports.sh). The guard FAILS on any NEW import that
+# reaches across a src/features/<a>/ -> src/features/<b>/ boundary, but only
+# WARNS on these. As each gets refactored (move the shared piece to
+# src/components or src/lib), delete its line here; once an entry no longer
+# matches anything the guard flags it as stale.
+#
+# Generated from an actual scan on 2026-07-03 (8 cross-feature imports).
+src/features/settings/sections/S3SyncSection.tsx:5
+src/features/settings/sections/S3SyncSection.tsx:6
+src/features/mcp/components/McpPublishers.tsx:21
+src/features/my-skills/components/ScopeDetailDrawer.tsx:6
+src/features/ssh/components/RemoteSkillPanel.tsx:18
+src/features/ssh/components/RemoteSkillPanel.tsx:19
+src/features/ssh/components/RemoteSkillPanel.tsx:20
+src/features/ssh/components/RemoteSkillPanel.tsx:21

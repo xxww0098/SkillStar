@@ -1,0 +1,9 @@
+# Ratchet baseline for check_clippy_ratchet.sh: max allowed count of
+# individual `cargo clippy --workspace --all-targets --locked` diagnostics
+# (see that script for the exact counting method). FAILS if the live count
+# exceeds this number. Lower it whenever warnings get fixed — never raise it
+# except for a deliberate, reviewed exception.
+#
+# Generated from an actual `cargo clippy --workspace --all-targets --locked`
+# run on 2026-07-03 (rustc/clippy 1.96.0 toolchain).
+66

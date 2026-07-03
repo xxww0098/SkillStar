@@ -1,0 +1,142 @@
+name: CI
+
+# Cross-platform quality gate: lint, tests, and the structural-governance
+# ratchets (file size / i18n hardcoding / feature-slice boundaries / stringly-
+# typed errors / clippy) on every PR and every push to main. Complements
+# windows-ci.yml (which catches Windows-specific path/shell regressions using
+# npm) — this workflow uses Bun, matching local development (bun.lock).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Tauri's Linux build links against system webkit2gtk/gtk/appindicator;
+      # `cargo check`/`cargo test --workspace` compiles the `skillstar`
+      # (src-tauri) crate, so these are needed even though this job never
+      # produces a bundle. Same package list as release.yml's ubuntu step.
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Frontend tests
+        run: bun run test
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Rust compile check (workspace)
+        run: cargo check --workspace --locked
+
+      - name: Rust tests (workspace)
+        run: cargo test --workspace --locked
+
+      - name: File-size guard (structural governance)
+        run: scripts/internal/check_file_size.sh
+
+      - name: i18n hardcoded-string guard
+        run: scripts/internal/check_i18n_hardcoded.sh
+
+      - name: Feature cross-import guard
+        run: scripts/internal/check_feature_imports.sh
+
+      - name: Stringly-typed error guard
+        run: scripts/internal/check_error_strings.sh
+
+      - name: Clippy ratchet
+        run: scripts/internal/check_clippy_ratchet.sh
+
+      # NOTE (found while wiring this up, not fixed here — see repo history /
+      # PR description): deny.toml exists but had never been wired into any
+      # workflow before, so this step currently FAILS for real, pre-existing
+      # reasons: ~15 workspace crates have no `license` field in Cargo.toml
+      # (LICENSE at repo root is Apache-2.0, which is already in the allow
+      # list below, so this is a metadata sync gap); a few third-party deps
+      # carry licenses not on the allow list (html2md = GPL-3.0+, wreq-util =
+      # LGPL-3.0 need an explicit accept/reject call; tiny-keccak = CC0-1.0
+      # and webpki-root-certs/webpki-roots = CDLA-Permissive-2.0 are low-risk
+      # permissive licenses); and `cargo deny check advisories` currently
+      # reports 7 real vulnerabilities (incl. an RSA timing side-channel), 1
+      # unsoundness, 22 unmaintained warnings, and 1 yanked crate. None of
+      # this is something a CI-wiring change should silently paper over by
+      # editing deny.toml's ignore/allow lists — that is a licensing/security
+      # call for whoever owns this repo, not for whoever wires up the runner.
+      # continue-on-error until the pre-existing findings above are triaged
+      # (license metadata + advisory calls belong to the repo owner) — a gate
+      # that is red on day one just teaches everyone to ignore red. Remove
+      # this line once deny.toml triage lands so the gate actually blocks.
+      - name: cargo-deny (advisories / licenses / sources)
+        continue-on-error: true
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: src-tauri/Cargo.toml
+          arguments: --config src-tauri/deny.toml
+
+  test-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Frontend tests
+        run: bun run test
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Rust compile check (workspace)
+        run: cargo check --workspace --locked
+
+      - name: Rust tests (workspace)
+        run: cargo test --workspace --locked
+      # Ratchet gates + clippy + cargo-deny intentionally do not re-run here —
+      # they're platform-agnostic checks already covered by test-linux, and
+      # duplicating the clippy compile (the slowest step) would roughly
+      # double this workflow's wall-clock time for no new signal.

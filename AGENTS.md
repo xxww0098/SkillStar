@@ -180,6 +180,7 @@ SkillStar/
 - 前端测试：`bun run test` / `bun run test:watch`（Vitest + jsdom）；测试文件 `*.test.ts(x)` / `*.spec.ts(x)` 与源码同放或在 `src/test/`。Tauri IPC 在 `src/test/setup.ts` 自动 mock。
 - 后端测试：`cargo test`（workspace）/ `cargo test -p <crate>` / `cargo test -p <crate> <test_fn>`；`cargo check` 快速编译检查。
 - CI：`.github/workflows/windows-ci.yml`（Windows 上 `npm ci` → lint → `npm run build` → `npm test` → `cargo test --workspace --locked`），用来兜住 macOS/Linux 本地开发漏掉的 Windows 路径 / shell / 换行回归。
+- CI：`.github/workflows/ci.yml`（Linux + macOS，Bun）——两个 job 都跑 `bun run lint` / `bun run test` / `cargo check --workspace --locked` / `cargo test --workspace --locked`；仅 Linux job 额外跑四个棘轮闸门脚本（`scripts/internal/check_i18n_hardcoded.sh` 硬编码中文、`check_feature_imports.sh` 跨 feature 越界 import、`check_error_strings.sh` 统计 `Result<_, String>`、`check_clippy_ratchet.sh` clippy 警告数）与 `cargo-deny`，避免 macOS job 重复跑一遍耗时的 clippy/deny 拉长总时长。四个闸门都沿用 `check_file_size.sh` 的棘轮基线模式：存量债计入 `scripts/internal/*_baseline.txt` 仅告警，新增超标才 fail。
 - 供应链策略：`src-tauri/deny.toml`（cargo-deny advisories / licenses / sources）。
 
 > 注：本地包管理器是 Bun（`bun.lock`）；Windows CI 用 npm（`package-lock.json`）。两套 lockfile 并存，改依赖后两者都要更新。
