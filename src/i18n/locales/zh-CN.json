@@ -1267,7 +1267,13 @@
       "resync": "重新同步",
       "settings": "接入设置",
       "disconnect": "断开接入",
-      "addAndConnect": "新增并接入"
+      "addAndConnect": "新增并接入",
+      "taglines": {
+        "claudeCode": "Anthropic 兼容 · 写入 ~/.claude/settings.json",
+        "codex": "CLI · Desktop App · IDE 扩展 共用 ~/.codex/ 配置",
+        "opencode": "OpenAI 兼容 · 开源 IDE 代理",
+        "gemini": "OpenAI 兼容 · 写入 ~/.gemini/.env"
+      }
     },
     "status": {
       "notInstalled": "未安装",
@@ -1549,7 +1555,8 @@
       "testEndpoints": "测速端点",
       "needCredentials": "填写 API Key 与至少一个端点 URL 后可测速",
       "proxyHint": "测速走设置里的系统代理。若超时或连接失败，请先在「设置 → 代理」启用本地代理（如 Clash）。",
-      "applyFastest": "应用最快端点 ({{ms}}ms)"
+      "applyFastest": "应用最快端点 ({{ms}}ms)",
+      "probeFailed": "失败"
     },
     "toasts": {
       "syncedToConfig": "{{name}} 已同步到配置文件",
@@ -1578,6 +1585,19 @@
       "syncedFromProvider": "已从供应商同步到配置文件",
       "queryTimeout": "查询超时",
       "parseBalanceFailed": "无法解析余额数据"
+    },
+    "errors": {
+      "nameRequired": "供应商名称不能为空",
+      "invalidOpenaiUrl": "OpenAI Base URL 格式无效",
+      "invalidAnthropicUrl": "Anthropic Base URL 格式无效",
+      "invalidModelsUrl": "获取模型 URL 格式无效"
+    },
+    "modelFormat": {
+      "contextPrefix": "上下文 {{value}}",
+      "outputPrefix": "输出 {{value}}",
+      "justNow": "刚刚",
+      "minutesAgo": "{{count}} 分钟前",
+      "hoursAgo": "{{count}} 小时前"
     },
     "sidebar": {
       "addProvider": "新增供应商",

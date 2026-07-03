@@ -140,7 +140,7 @@ export function AgentSettingsDialog({
 
   const modelCatalog = useMemo(() => getModelCatalogFromMeta(provider?.meta), [provider]);
   const lastSync = act.activeEntry?.last_sync_at
-    ? formatSyncTime(new Date(act.activeEntry.last_sync_at * 1000).toISOString())
+    ? formatSyncTime(new Date(act.activeEntry.last_sync_at * 1000).toISOString(), t)
     : null;
 
   const requestClose = useCallback(() => {

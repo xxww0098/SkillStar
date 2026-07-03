@@ -32,10 +32,13 @@ export interface AgentDescriptor {
   /** Provider-loading model — drives which card/dialog layout renders. */
   kind: AgentKind;
   installDocsUrl: string;
-  /** Tagline shown under the card title. */
-  tagline: string;
-  /** Tooltip when activation is blocked by the missing base URL. */
-  disabledTooltip: string;
+  /**
+   * i18n key for the tagline shown under the card title (e.g.
+   * "models.card.taglines.claudeCode"). Resolve with `t(agent.taglineKey)` —
+   * kept as a key rather than resolved text so this registry stays a plain
+   * data table with no dependency on i18n context.
+   */
+  taglineKey: string;
   /** Human-readable config file location(s), display only. */
   configPathDisplay: string;
 }
@@ -48,8 +51,7 @@ export const PROVIDER_AGENTS: AgentDescriptor[] = [
     requiredUrlField: "anthropic",
     kind: "single",
     installDocsUrl: "https://docs.anthropic.com/en/docs/claude-code/overview",
-    tagline: "Anthropic 兼容 · 写入 ~/.claude/settings.json",
-    disabledTooltip: "此供应商未提供 Anthropic 兼容端点",
+    taglineKey: "models.card.taglines.claudeCode",
     configPathDisplay: "~/.claude/settings.json",
   },
   {
@@ -59,8 +61,7 @@ export const PROVIDER_AGENTS: AgentDescriptor[] = [
     requiredUrlField: "openai",
     kind: "multi",
     installDocsUrl: "https://github.com/openai/codex",
-    tagline: "CLI · Desktop App · IDE 扩展 共用 ~/.codex/ 配置",
-    disabledTooltip: "此供应商未提供 OpenAI 兼容端点",
+    taglineKey: "models.card.taglines.codex",
     configPathDisplay: "~/.codex/config.toml · ~/.codex/auth.json",
   },
   {
@@ -70,8 +71,7 @@ export const PROVIDER_AGENTS: AgentDescriptor[] = [
     requiredUrlField: "openai",
     kind: "multi",
     installDocsUrl: "https://opencode.ai/docs",
-    tagline: "OpenAI 兼容 · 开源 IDE 代理",
-    disabledTooltip: "此供应商未提供 OpenAI 兼容端点",
+    taglineKey: "models.card.taglines.opencode",
     configPathDisplay: "~/.config/opencode/opencode.json",
   },
   {
@@ -81,8 +81,7 @@ export const PROVIDER_AGENTS: AgentDescriptor[] = [
     requiredUrlField: "openai",
     kind: "single",
     installDocsUrl: "https://github.com/google-gemini/gemini-cli",
-    tagline: "OpenAI 兼容 · 写入 ~/.gemini/.env",
-    disabledTooltip: "此供应商未提供 OpenAI 兼容端点",
+    taglineKey: "models.card.taglines.gemini",
     configPathDisplay: "~/.gemini/.env",
   },
 ];

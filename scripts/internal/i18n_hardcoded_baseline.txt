@@ -7,19 +7,15 @@
 # read 0.
 #
 # Generated from an actual scan on 2026-07-03 (162 hits across 34 files).
-# usage / mcp / models-lib carry most of the remaining debt; fingerprints and
-# AppAiModelsPicker have already been cleaned up and carry no baseline entry.
+# usage / mcp carry most of the remaining debt; fingerprints, AppAiModelsPicker
+# and models/lib + models/api/presets.ts (2026-07 cleanup) have already been
+# cleaned up and carry no baseline entry.
 src/components/layout/CommandPalette.tsx:10
 src/components/layout/UsageNav.tsx:3
 src/components/ui/InfoTip.tsx:1
 src/features/mcp/components/McpServerCard.tsx:1
 src/features/mcp/components/McpServerForm.tsx:16
-src/features/models/api/presets.ts:1
 src/components/shared/ProviderBrandIcon.tsx:3
-src/features/models/lib/agentRegistry.ts:8
-src/features/models/lib/endpointProbe.ts:2
-src/features/models/lib/modelFormat.ts:5
-src/features/models/lib/providerPatch.ts:4
 src/features/my-skills/components/ExportShareCodeModal.tsx:1
 src/features/my-skills/components/GhostSkillCard.tsx:4
 src/features/my-skills/components/ImportShareCodeModal.tsx:5

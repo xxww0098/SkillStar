@@ -59,9 +59,9 @@ export function useProviderForm(provider: ProviderEntryFlat) {
   /** One save attempt for useAutosave — validates, then persists via the api layer. */
   const save = useCallback(async (): Promise<SaveAttemptResult> => {
     const patch = buildProviderPatch(values, provider.meta);
-    const validationError = validatePatch(patch);
-    if (validationError) {
-      toast.error(validationError);
+    const validationErrorCode = validatePatch(patch);
+    if (validationErrorCode) {
+      toast.error(i18n.t(`models.errors.${validationErrorCode}`));
       return "validation";
     }
     try {

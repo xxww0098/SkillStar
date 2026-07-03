@@ -122,7 +122,7 @@ export function MultiProviderCard({
               </span>
             ) : null}
           </div>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">{agent.tagline}</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">{t(agent.taglineKey)}</p>
         </div>
       </header>
 

@@ -54,14 +54,14 @@ describe("getMetaString / getModelCatalogFromMeta", () => {
 
 describe("validatePatch", () => {
   it("requires a name", () => {
-    expect(validatePatch({ name: "  " })).toMatch(/名称/);
+    expect(validatePatch({ name: "  " })).toBe("nameRequired");
     expect(validatePatch({ name: "x" })).toBeNull();
   });
 
   it("rejects non-http(s) urls but allows empty", () => {
-    expect(validatePatch({ name: "x", base_url_openai: "ftp://x" })).toMatch(/OpenAI/);
-    expect(validatePatch({ name: "x", base_url_anthropic: "not a url" })).toMatch(/Anthropic/);
-    expect(validatePatch({ name: "x", models_url: "javascript:alert(1)" })).toMatch(/模型/);
+    expect(validatePatch({ name: "x", base_url_openai: "ftp://x" })).toBe("invalidOpenaiUrl");
+    expect(validatePatch({ name: "x", base_url_anthropic: "not a url" })).toBe("invalidAnthropicUrl");
+    expect(validatePatch({ name: "x", models_url: "javascript:alert(1)" })).toBe("invalidModelsUrl");
     expect(validatePatch({ name: "x", base_url_openai: "", models_url: "" })).toBeNull();
   });
 });

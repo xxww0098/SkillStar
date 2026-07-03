@@ -68,11 +68,19 @@ function isValidHttpUrl(value: string): boolean {
   }
 }
 
-export function validatePatch(patch: ProviderPatchFlat): string | null {
-  if (!patch.name?.trim()) return "供应商名称不能为空";
-  if (!isValidHttpUrl(patch.base_url_openai ?? "")) return "OpenAI Base URL 格式无效";
-  if (!isValidHttpUrl(patch.base_url_anthropic ?? "")) return "Anthropic Base URL 格式无效";
-  if (!isValidHttpUrl(patch.models_url ?? "")) return "获取模型 URL 格式无效";
+/** Stable i18n key suffix under `models.errors.*` — map with `t("models.errors." + code)`. */
+export type ValidatePatchErrorCode = "nameRequired" | "invalidOpenaiUrl" | "invalidAnthropicUrl" | "invalidModelsUrl";
+
+/**
+ * Returns a stable error code (not display text) so callers can map it
+ * through `t("models.errors." + code)` — keeps this pure-domain file free of
+ * i18n context. See useProviderForm.save for the consumer.
+ */
+export function validatePatch(patch: ProviderPatchFlat): ValidatePatchErrorCode | null {
+  if (!patch.name?.trim()) return "nameRequired";
+  if (!isValidHttpUrl(patch.base_url_openai ?? "")) return "invalidOpenaiUrl";
+  if (!isValidHttpUrl(patch.base_url_anthropic ?? "")) return "invalidAnthropicUrl";
+  if (!isValidHttpUrl(patch.models_url ?? "")) return "invalidModelsUrl";
   return null;
 }
 

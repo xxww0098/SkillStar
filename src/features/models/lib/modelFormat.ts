@@ -1,7 +1,14 @@
 /**
  * Display formatting for model catalog metadata and sync timestamps.
  * Pure functions — extracted from the old ToolActivationPanel.
+ *
+ * `formatModelMetadata` and `formatSyncTime` render UI-facing text, so they
+ * take a `TFunction` param (same pattern as
+ * ConnectionStatusPanel.getConnectionStatus) instead of hardcoding locale
+ * strings. `formatModelOptionLabel` and `formatCost` are locale-independent
+ * (fixed "K ctx" / "$x/$y / 1M" formatting) and stay plain.
  */
+import type { TFunction } from "i18next";
 import type { ModelCatalogEntry } from "../../../types";
 
 export function formatModelOptionLabel(modelId: string, metadata?: ModelCatalogEntry): string {
@@ -15,10 +22,14 @@ export function formatModelOptionLabel(modelId: string, metadata?: ModelCatalogE
   return details.length > 0 ? `${name} (${modelId}) · ${details.join(" · ")}` : `${name} (${modelId})`;
 }
 
-export function formatModelMetadata(metadata: ModelCatalogEntry): string {
+export function formatModelMetadata(metadata: ModelCatalogEntry, t: TFunction): string {
   const details = [
-    metadata.context_length ? `上下文 ${metadata.context_length.toLocaleString()}` : null,
-    metadata.max_completion_tokens ? `输出 ${metadata.max_completion_tokens.toLocaleString()}` : null,
+    metadata.context_length
+      ? t("models.modelFormat.contextPrefix", { value: metadata.context_length.toLocaleString() })
+      : null,
+    metadata.max_completion_tokens
+      ? t("models.modelFormat.outputPrefix", { value: metadata.max_completion_tokens.toLocaleString() })
+      : null,
     formatCost(metadata.cost),
   ].filter(Boolean);
   return details.length > 0 ? details.join(" · ") : metadata.id;
@@ -32,17 +43,17 @@ export function formatCost(cost: ModelCatalogEntry["cost"]): string | null {
   return `$${input ?? "?"}/$${output ?? "?"} / 1M`;
 }
 
-export function formatSyncTime(timestamp: string): string {
+export function formatSyncTime(timestamp: string, t: TFunction): string {
   try {
     const date = new Date(timestamp);
     if (Number.isNaN(date.getTime())) return timestamp;
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffMin = Math.floor(diffMs / 60000);
-    if (diffMin < 1) return "刚刚";
-    if (diffMin < 60) return `${diffMin} 分钟前`;
+    if (diffMin < 1) return t("models.modelFormat.justNow");
+    if (diffMin < 60) return t("models.modelFormat.minutesAgo", { count: diffMin });
     const diffHour = Math.floor(diffMin / 60);
-    if (diffHour < 24) return `${diffHour} 小时前`;
+    if (diffHour < 24) return t("models.modelFormat.hoursAgo", { count: diffHour });
     return date.toLocaleDateString("zh-CN", {
       month: "short",
       day: "numeric",

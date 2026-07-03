@@ -1267,7 +1267,13 @@
       "resync": "Re-sync",
       "settings": "Connection settings",
       "disconnect": "Disconnect",
-      "addAndConnect": "Add & connect"
+      "addAndConnect": "Add & connect",
+      "taglines": {
+        "claudeCode": "Anthropic-compatible · writes ~/.claude/settings.json",
+        "codex": "CLI · desktop app · IDE extension share ~/.codex/ config",
+        "opencode": "OpenAI-compatible · open-source IDE agent",
+        "gemini": "OpenAI-compatible · writes ~/.gemini/.env"
+      }
     },
     "status": {
       "notInstalled": "Not installed",
@@ -1549,7 +1555,8 @@
       "testEndpoints": "Test endpoints",
       "needCredentials": "Enter an API key and at least one endpoint URL to test",
       "proxyHint": "Tests go through the system proxy from Settings. On timeouts or failures, enable a local proxy (e.g. Clash) under Settings → Proxy first.",
-      "applyFastest": "Apply fastest endpoint ({{ms}}ms)"
+      "applyFastest": "Apply fastest endpoint ({{ms}}ms)",
+      "probeFailed": "Failed"
     },
     "toasts": {
       "syncedToConfig": "{{name}} synced to config file",
@@ -1578,6 +1585,19 @@
       "syncedFromProvider": "Synced from provider to config file",
       "queryTimeout": "Query timed out",
       "parseBalanceFailed": "Could not parse balance data"
+    },
+    "errors": {
+      "nameRequired": "Provider name is required",
+      "invalidOpenaiUrl": "OpenAI Base URL format is invalid",
+      "invalidAnthropicUrl": "Anthropic Base URL format is invalid",
+      "invalidModelsUrl": "Fetch-models URL format is invalid"
+    },
+    "modelFormat": {
+      "contextPrefix": "Context {{value}}",
+      "outputPrefix": "Output {{value}}",
+      "justNow": "Just now",
+      "minutesAgo": "{{count}}m ago",
+      "hoursAgo": "{{count}}h ago"
     },
     "sidebar": {
       "addProvider": "Add provider",

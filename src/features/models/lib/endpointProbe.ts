@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next";
 import type { EndpointLatencyResult } from "../../../types";
 
 export function isAuthProbeStatus(status: number | null | undefined): boolean {
@@ -11,13 +12,13 @@ export function isEndpointReachable(result: EndpointLatencyResult): boolean {
   return result.status < 400 || isAuthProbeStatus(result.status);
 }
 
-export function endpointProbeLabel(result: EndpointLatencyResult): string {
+export function endpointProbeLabel(result: EndpointLatencyResult, t: TFunction): string {
   if (result.error && result.latency_ms == null) {
     return result.error;
   }
   if (result.latency_ms != null) {
     if (isAuthProbeStatus(result.status)) {
-      return `${result.latency_ms}ms · 鉴权失败`;
+      return `${result.latency_ms}ms · ${t("models.diagnosticsPanel.authFailed")}`;
     }
     if (result.error) {
       return `${result.latency_ms}ms · ${result.error}`;
@@ -25,7 +26,7 @@ export function endpointProbeLabel(result: EndpointLatencyResult): string {
     const status = result.status != null ? ` · HTTP ${result.status}` : "";
     return `${result.latency_ms}ms${status}`;
   }
-  return "失败";
+  return t("models.diagnosticsPanel.probeFailed");
 }
 
 export function endpointProbeTone(result: EndpointLatencyResult): "ok" | "auth" | "error" {

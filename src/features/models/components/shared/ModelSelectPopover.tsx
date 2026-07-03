@@ -114,7 +114,7 @@ export function ModelSelectPopover({
                       </span>
                       {meta ? (
                         <span className="block truncate text-[10px] text-muted-foreground">
-                          {formatModelMetadata(meta)}
+                          {formatModelMetadata(meta, t)}
                         </span>
                       ) : null}
                     </span>

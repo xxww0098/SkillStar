@@ -67,7 +67,7 @@ function EndpointSpeedPanelInner({ urls, apiKey, onApplyFastest, className }: En
               )}
             >
               <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground">{result.url}</span>
-              <span className="shrink-0 font-medium">{endpointProbeLabel(result)}</span>
+              <span className="shrink-0 font-medium">{endpointProbeLabel(result, t)}</span>
             </li>
           ))}
         </ul>

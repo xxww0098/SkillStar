@@ -206,7 +206,7 @@ function ConnectionStatusPanelInner({
                     endpointProbeTone(r) === "error" && "text-destructive",
                   )}
                 >
-                  {endpointProbeLabel(r)}
+                  {endpointProbeLabel(r, t)}
                 </span>
               </li>
             ))}

@@ -96,7 +96,9 @@ export function ModelsTab({ form }: { form: ProviderForm }) {
               >
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-mono text-[11px] text-foreground">{meta?.display_name || id}</p>
-                  <p className="truncate text-[10px] text-muted-foreground">{meta ? formatModelMetadata(meta) : id}</p>
+                  <p className="truncate text-[10px] text-muted-foreground">
+                    {meta ? formatModelMetadata(meta, t) : id}
+                  </p>
                 </div>
                 <button
                   type="button"
