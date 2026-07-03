@@ -16,6 +16,7 @@ use skillstar_core::infra::error::AppError;
 use tauri::State;
 use tokio::sync::Mutex;
 use tracing::warn;
+use ts_rs::TS;
 
 use skillstar_models::mcp::{
     self, McpPreset, McpServerEntry, McpServerPatch, McpStore, McpSyncResult, McpToolStatus,
@@ -47,8 +48,9 @@ impl Default for McpWriteLock {
 // ---------------------------------------------------------------------------
 
 /// A server entry bundled with the results of projecting it to all tools.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "McpServerWithSync.ts")]
 pub struct McpServerWithSync {
     pub server: McpServerEntry,
     pub sync_results: Vec<McpSyncResult>,

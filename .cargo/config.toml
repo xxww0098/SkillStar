@@ -1,17 +1,43 @@
 # Workspace-wide cargo config. Cargo discovers `.cargo/config.toml` by
 # walking up from the *invocation* CWD (not the target package's manifest
-# dir), so this must live at the workspace root even though it only affects
-# skillstar-models today.
+# dir), so this must live at the workspace root. Affects every package that
+# generates TS bindings via ts-rs: skillstar-models, skillstar-marketplace,
+# and skillstar (src-tauri).
 #
 # TS_RS_EXPORT_DIR: ts-rs's `#[ts(export_to = "...")]` paths are relative to
 # this env var (default would be `<crate-root>/bindings/`). At test runtime,
-# `cargo test`'s CWD is always the target package's own manifest directory
-# (verified empirically: crates/skillstar-models/). IMPORTANT: do NOT use the
-# `{ value = "...", relative = true }` form here — Cargo pre-resolves that
-# against *this config file's own directory* (the workspace root), producing
-# an absolute path that then escapes the repo when ts-rs appends this same
-# relative suffix again. A plain string is passed through verbatim and
-# resolved by ts-rs relative to the test's CWD, which is what we want.
-# See crates/skillstar-models/src/mcp/types.rs and `bun run types:gen`.
+# `cargo test`'s CWD is always the target package's own manifest directory —
+# verified empirically for all three packages this repo generates types
+# from: `crates/skillstar-models/`, `crates/skillstar-marketplace/` (both 2
+# levels deep, under `crates/`), and `src-tauri/` (only 1 level deep, sits
+# directly under the workspace root — batch 3 added this one). Those two
+# depths mean a single *relative* string (e.g. "../../src/types/generated")
+# cannot be correct for both at once: it would land one directory outside
+# the repo when resolved from `src-tauri/`.
+#
+# The fix is the `{ value = "...", relative = true }` form — but note it
+# means something different from what it sounds like. Cargo does NOT defer
+# resolution to the test's CWD; it pre-resolves `value` against *this
+# config file's own directory* (the workspace root) once, at
+# Cargo-invocation time, producing an absolute path. That absolute path is
+# then passed through as the env var, so ts-rs's later
+# `export_dir.join(relative_path)` (a `PathBuf::join` where the base is
+# absolute) is CWD-independent — it resolves the same regardless of which
+# package's manifest dir is the process's CWD when the test actually runs.
+# (Verified empirically: a temporary probe test in both skillstar-models
+# and skillstar printed the identical absolute
+# `<repo-root>/src/types/generated` for TS_RS_EXPORT_DIR, despite the two
+# packages having different CWDs and different depths from the repo root.)
+#
+# IMPORTANT: `value` must have ZERO leading `../` segments (just the
+# direct repo-root-relative path, e.g. "src/types/generated"). Do NOT
+# combine `relative = true` with a `../../`-style value — Cargo resolves
+# `value` against the workspace root and then ts-rs's own join step would
+# apply on top, double-applying the `../` and escaping the repo (this was
+# the original bug in this comment's first version, from when only 2-deep
+# crates existed and a plain non-relative `"../../src/types/generated"`
+# string happened to work by coincidence of depth).
+# See crates/skillstar-models/src/mcp/types.rs,
+# src-tauri/src/commands/mcp_commands.rs, and `bun run types:gen`.
 [env]
-TS_RS_EXPORT_DIR = "../../src/types/generated"
+TS_RS_EXPORT_DIR = { value = "src/types/generated", relative = true }

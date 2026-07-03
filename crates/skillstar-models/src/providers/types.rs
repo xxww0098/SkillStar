@@ -1,6 +1,7 @@
 //! Provider data types: store models, flat-store entries, and patches.
 
 use super::*;
+use ts_rs::TS;
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -79,7 +80,8 @@ pub struct ProvidersStore {
 }
 
 /// A built-in provider preset template.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "ProviderPreset.ts")]
 pub struct ProviderPreset {
     pub id: String,
     pub name: String,

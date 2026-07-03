@@ -69,6 +69,7 @@ skillstar-fingerprint = { version = "0.1.0", path = "../crates/skillstar-fingerp
 skillstar-ssh = { version = "0.1.0", path = "../crates/skillstar-ssh" }
 skillstar-sync = { version = "0.1.0", path = "../crates/skillstar-sync" }
 sha2 = { workspace = true }
+ts-rs.workspace = true
 
 [dev-dependencies]
 tempfile = { workspace = true }

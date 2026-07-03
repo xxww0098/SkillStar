@@ -15,7 +15,7 @@
 | Desktop IPC | `@tauri-apps/api` | 2.x |
 | Data/State | TanStack Query | 5.x |
 | Toasts | Sonner | 2.x |
-| Types (MCP) | Generated from Rust (`skillstar-models` + `skillstar-marketplace`) via ts-rs, not hand-mirrored — see `src/types/generated/` | — |
+| Types (generated) | Generated from Rust (`skillstar-models` + `skillstar-marketplace` + `skillstar`/src-tauri) via ts-rs, not hand-mirrored — see `src/types/generated/` | — |
 
 ## Project Structure (Condensed)
 ```text
@@ -71,7 +71,7 @@ src/
 │   └── shared/                   # cross-feature: SkillEditor, SkillReader, DrawerShell, ProviderBrandIcon
 ├── lib/                          # utils, toast, share code
 └── types/                        # shared TS types
-    └── generated/                 # ts-rs output (MCP types) — generated, do not hand-edit; see Do NOT below
+    └── generated/                 # ts-rs output (MCP + ProviderPreset types) — generated, do not hand-edit; see Do NOT below
 ```
 
 ## Models Provider UI
@@ -192,8 +192,10 @@ My Skills manages skills across two scopes — **local** (hub + filesystem) and 
 ## Do NOT
 - Do not use CSS modules or styled-components.
 - Do not bypass backend commands with direct network fetches for app data flows.
-- Do not hand-edit `src/types/generated/`. MCP types are generated via ts-rs from two crates — edit the Rust struct and run `bun run types:gen`, then commit the regenerated output:
+- Do not hand-edit `src/types/generated/`. Types are generated via ts-rs from three packages — edit the Rust struct and run `bun run types:gen`, then commit the regenerated output:
   - `skillstar-models::mcp::types`: `McpServerEntry`, `McpServerPatch`, `McpStore`, `McpSyncResult`, `McpToolStatus`, `McpPreset`.
+  - `skillstar-models::providers::types`: `ProviderPreset`.
   - `skillstar-marketplace::mcp_models`: `McpPublisherSummary`, `McpServerKind`, `McpRegistryPackageSummary`, `McpRegistryRemoteSummary`, `McpMarketEntry`, `McpMarketServerDetail`.
+  - `skillstar` (src-tauri) `commands::mcp_commands`: `McpServerWithSync` (the Tauri-command-layer DTO wrapping a server plus its per-tool sync results — package name is `skillstar`, not `src-tauri`, since that's what its `Cargo.toml` declares).
 
-  `src/types/mcp.ts` re-exports all of these. The src-tauri command-layer DTO `McpServerWithSync` (`src-tauri/src/commands/mcp_commands.rs`) is still hand-declared, pending a follow-up ts-rs pass that wires src-tauri itself into the generator.
+  `src/types/mcp.ts` re-exports all of the MCP ones (including `McpServerWithSync`); `src/types/models.ts` re-exports `ProviderPreset`. `ToolActivation` in `models.ts` is still hand-declared — it lives in the already-ts-rs-wired `skillstar-models` crate but has only 4 fields, under the 5-field bar this codebase uses to decide a mirror is worth converting; revisit if it grows. Mirror-annotated types still hand-declared in crates without ts-rs wired up at all (`skillstar-usage`, `skillstar-projects`) are out of scope until one of those crates takes the ts-rs pilot.

@@ -1,7 +1,14 @@
 //! models domain types. Split out of the old monolithic index for
 //! navigability; all re-exported by `index.ts`.
+//!
+//! ProviderPreset is generated via ts-rs from
+//! `skillstar_models::providers::types::ProviderPreset` — see
+//! `src/types/generated/` and `bun run types:gen`. Do not hand-edit that
+//! shape here; edit the Rust struct and regenerate instead.
 
 import type { NavPage } from "./marketplace";
+
+export type { ProviderPreset } from "./generated/ProviderPreset";
 
 export type AppMode = "skills" | "usage" | "models";
 /**
@@ -85,19 +92,6 @@ export interface SwitchResult {
   provider_id: string;
   provider_name: string;
   tools_synced: ToolSyncResult[];
-}
-
-// === MCP (Model Context Protocol) Types ===
-// NOTE: these mirror `skillstar_models::mcp` structs, which serialize with
-// `#[serde(rename_all = "camelCase")]` — hence camelCase fields here.
-
-export interface ProviderPreset {
-  id: string;
-  name: string;
-  base_url: string;
-  api_key_url: string;
-  icon_color: string;
-  models: string[];
 }
 
 // === Flat Provider Store Types (v2 architecture) ===

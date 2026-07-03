@@ -9,9 +9,8 @@
 //! - McpPublisherSummary, McpServerKind, McpRegistryPackageSummary,
 //!   McpRegistryRemoteSummary, McpMarketEntry, McpMarketServerDetail come
 //!   from `skillstar_marketplace::mcp_models`.
-
-import type { McpServerEntry } from "./generated/McpServerEntry";
-import type { McpSyncResult } from "./generated/McpSyncResult";
+//! - McpServerWithSync comes from
+//!   `skillstar` (src-tauri) `commands::mcp_commands`.
 
 export type { McpServerEntry } from "./generated/McpServerEntry";
 export type { McpServerPatch } from "./generated/McpServerPatch";
@@ -26,6 +25,8 @@ export type { McpRegistryPackageSummary } from "./generated/McpRegistryPackageSu
 export type { McpRegistryRemoteSummary } from "./generated/McpRegistryRemoteSummary";
 export type { McpMarketEntry } from "./generated/McpMarketEntry";
 export type { McpMarketServerDetail } from "./generated/McpMarketServerDetail";
+
+export type { McpServerWithSync } from "./generated/McpServerWithSync";
 
 /** Sub-page navigation for drill-down views */
 
@@ -46,8 +47,3 @@ export const MCP_TOOL_IDS = [
 ] as const;
 
 export type McpToolId = (typeof MCP_TOOL_IDS)[number];
-
-export interface McpServerWithSync {
-  server: McpServerEntry;
-  syncResults: McpSyncResult[];
-}

@@ -65,7 +65,7 @@ jobs:
       - name: Rust tests (workspace)
         run: cargo test --workspace --locked
 
-      - name: Generated-types freshness guard (MCP types: skillstar-models + skillstar-marketplace)
+      - name: Generated-types freshness guard (skillstar-models + skillstar-marketplace + skillstar)
         run: scripts/internal/check_generated_types.sh
 
       - name: File-size guard (structural governance)
