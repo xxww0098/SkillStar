@@ -10,6 +10,8 @@ import { McpPublishers } from "../features/mcp/components/McpPublishers";
 import { useMcpPublishers } from "../features/mcp/hooks/useMcpPublishers";
 import { OfficialPublishers } from "../features/marketplace/components/OfficialPublishers";
 import { useMarketplace } from "../features/marketplace/hooks/useMarketplace";
+import { useMarketplaceActions } from "../features/marketplace/hooks/useMarketplaceActions";
+import { computeDisplaySkills } from "../features/marketplace/lib/skillDisplay";
 import { SkillGrid } from "../features/my-skills/components/SkillGrid";
 import { useSkills } from "../features/my-skills/hooks/useSkills";
 import { useViewMode } from "../hooks/useViewMode";
@@ -123,175 +125,33 @@ export function Marketplace({
     return () => clearTimeout(timer);
   }, [searchQuery, search, aiSearching, aiKeywords]);
 
-  const displaySkills = useMemo(() => {
-    if (isMcpTab) return [];
-
-    let skills: Skill[] = [];
-    const isAiMode = Boolean(aiKeywords && results);
-    const isSearchMode = Boolean(searchQuery.trim() && results) || isAiMode;
-
-    // Search results override
-    if (isSearchMode && results) {
-      skills = [...results.skills];
-    } else if (activeTab !== "official") {
-      skills = [...leaderboard];
-    }
-
-    // AI keyword toggle filter: only show skills matching active keywords
-    if (isAiMode) {
-      if (aiActiveKeywords.size === 0) {
-        // Allow deselecting all AI keywords; show empty result set.
-        skills = [];
-      } else if (Object.keys(aiKeywordSkillMap).length > 0) {
-        // Build set of skill names matching any active keyword
-        const allowedNames = new Set<string>();
-        for (const kw of aiActiveKeywords) {
-          const names = aiKeywordSkillMap[kw];
-          if (names) names.forEach((n) => allowedNames.add(n));
-        }
-        skills = skills.filter((s) => allowedNames.has(s.name));
-      }
-    }
-
-    // Sort
-    if (sortBy === "name") {
-      skills.sort((a, b) => a.name.localeCompare(b.name));
-    } else if (sortBy === "updated") {
-      skills.sort((a, b) => b.last_updated.localeCompare(a.last_updated));
-    } else if (isSearchMode) {
-      skills.sort((a, b) => b.stars - a.stars);
-    }
-
-    return skills.map((s, i) => {
-      const rank = sortBy === "stars-desc" ? (isSearchMode ? i + 1 : (s.rank ?? i + 1)) : s.rank;
-      if (rank === s.rank) return s;
-      return { ...s, rank };
-    });
-  }, [activeTab, results, leaderboard, sortBy, searchQuery, aiKeywords, aiActiveKeywords, aiKeywordSkillMap, isMcpTab]);
-
-  const handleInstall = useCallback(
-    async (url: string, name: string) => {
-      if (!url || !name) return;
-
-      setInstallingNames((prev) => {
-        const next = new Set(prev);
-        next.add(name);
-        return next;
-      });
-
-      try {
-        const skill = await installSkill(url, name);
-        patchSkill(name, (current) => ({
-          ...current,
-          installed: true,
-          update_available: false,
-          agent_links: skill.agent_links ?? current.agent_links,
-        }));
-        setSelectedSkill((prev) => {
-          if (!prev) return prev;
-          if (prev.name === name) {
-            return {
-              ...prev,
-              installed: true,
-              update_available: false,
-              agent_links: skill.agent_links ?? prev.agent_links,
-            };
-          }
-          return prev;
-        });
-
-        const agentCount = skill.agent_links?.length ?? 0;
-        setInstallStatus(
-          agentCount > 0
-            ? t("marketplace.installedSynced", {
-                count: agentCount,
-                defaultValue: "✓ Installed & synced to {{count}} agents",
-              })
-            : t("marketplace.installedViaGithub"),
-        );
-        setTimeout(() => setInstallStatus(null), 4000);
-      } catch (e) {
-        const message = String(e).toLowerCase();
-        if (message.includes("already installed")) {
-          patchSkill(name, (current) => ({ ...current, installed: true }));
-          setSelectedSkill((prev) => (prev?.name === name ? { ...prev, installed: true } : prev));
-          setInstallStatus(t("marketplace.installedViaGithub"));
-          setTimeout(() => setInstallStatus(null), 4000);
-          return;
-        }
-        if (import.meta.env.DEV) console.error("[Marketplace] Install failed:", e);
-        toast.error(String(e) ? `${t("mySkills.installFailed")}: ${String(e)}` : t("mySkills.installFailed"));
-      } finally {
-        setInstallingNames((prev) => {
-          const next = new Set(prev);
-          next.delete(name);
-          return next;
-        });
-      }
-    },
-    [installSkill, patchSkill, t],
+  const displaySkills = useMemo(
+    () =>
+      computeDisplaySkills({
+        isMcpTab,
+        results,
+        leaderboard,
+        sortBy,
+        searchQuery,
+        activeTab,
+        aiKeywords,
+        aiActiveKeywords,
+        aiKeywordSkillMap,
+      }),
+    [activeTab, results, leaderboard, sortBy, searchQuery, aiKeywords, aiActiveKeywords, aiKeywordSkillMap, isMcpTab],
   );
 
-  const handleUpdate = useCallback(
-    async (name: string) => {
-      try {
-        await updateSkill(name);
-        patchSkill(name, (current) => ({
-          ...current,
-          update_available: false,
-        }));
-        setSelectedSkill((prev) => (prev?.name === name ? { ...prev, update_available: false } : prev));
-      } catch (e) {
-        if (import.meta.env.DEV) console.error("Update failed:", e);
-        const reason = e instanceof Error ? e.message : String(e);
-        toast.error(reason ? `${t("marketplace.updateFailed")}: ${reason}` : t("marketplace.updateFailed"));
-      }
-    },
-    [patchSkill, t, updateSkill],
-  );
-
-  const handleUninstall = useCallback(
-    async (name: string) => {
-      try {
-        await uninstallSkill(name);
-        patchSkill(name, (current) => ({
-          ...current,
-          installed: false,
-          update_available: false,
-          agent_links: [],
-        }));
-        if (selectedSkill?.name === name) {
-          setSelectedSkill((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  installed: false,
-                  update_available: false,
-                  agent_links: [],
-                }
-              : null,
-          );
-        }
-      } catch (e) {
-        if (import.meta.env.DEV) console.error("[Marketplace] Uninstall failed:", e);
-        toast.error(t("marketplace.uninstallFailed"));
-      }
-    },
-    [patchSkill, uninstallSkill, selectedSkill, t],
-  );
-
-  const handleReinstall = useCallback(
-    async (url: string, name: string) => {
-      try {
-        await uninstallSkill(name);
-        await handleInstall(url, name);
-      } catch (e) {
-        if (import.meta.env.DEV) console.error("[Marketplace] Reinstall failed:", e);
-        toast.error(t("marketplace.reinstallFailed"));
-      }
-    },
-    [uninstallSkill, handleInstall, t],
-  );
+  const { handleInstall, handleUpdate, handleUninstall, handleReinstall } = useMarketplaceActions({
+    installSkill,
+    updateSkill,
+    uninstallSkill,
+    patchSkill,
+    selectedSkill,
+    setSelectedSkill,
+    setInstallingNames,
+    setInstallStatus,
+    t,
+  });
 
   const handleAiSearch = useCallback(() => {
     if (!searchQuery.trim()) {
