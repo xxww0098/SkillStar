@@ -26,6 +26,27 @@ const SUCCESS_HTML: &str = r#"<!doctype html>
 h1{margin:0 0 .5rem;font-size:1.4rem}p{margin:0;color:#9ba3b4}</style></head>
 <body><div class="card"><h1>✓ 登录成功</h1><p>可以关闭此窗口返回应用。</p></div></body></html>"#;
 
+const FAILURE_HTML: &str = r#"<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>登录失败</title>
+<style>body{font-family:-apple-system,system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0b1020;color:#e7e9ee}
+.card{background:rgba(255,255,255,0.04);padding:2rem 3rem;border-radius:12px;border:1px solid rgba(255,255,255,0.08);text-align:center}
+h1{margin:0 0 .5rem;font-size:1.4rem}p{margin:0;color:#9ba3b4}</style></head>
+<body><div class="card"><h1>✕ 登录失败</h1><p>授权被拒绝或回调无效，请关闭此窗口并在应用中重试。</p></div></body></html>"#;
+
+const CANCELLED_HTML: &str = r#"<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>登录已取消</title>
+<style>body{font-family:-apple-system,system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0b1020;color:#e7e9ee}
+.card{background:rgba(255,255,255,0.04);padding:2rem 3rem;border-radius:12px;border:1px solid rgba(255,255,255,0.08);text-align:center}
+h1{margin:0 0 .5rem;font-size:1.4rem}p{margin:0;color:#9ba3b4}</style></head>
+<body><div class="card"><h1>登录已取消</h1><p>可以关闭此窗口返回应用。</p></div></body></html>"#;
+
+const NOT_FOUND_HTML: &str = r#"<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>无效地址</title>
+<style>body{font-family:-apple-system,system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0b1020;color:#e7e9ee}
+.card{background:rgba(255,255,255,0.04);padding:2rem 3rem;border-radius:12px;border:1px solid rgba(255,255,255,0.08);text-align:center}
+h1{margin:0 0 .5rem;font-size:1.4rem}p{margin:0;color:#9ba3b4}</style></head>
+<body><div class="card"><h1>404</h1><p>此地址不是有效的登录回调。</p></div></body></html>"#;
+
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
 const BIND_RETRY_DELAY: Duration = Duration::from_millis(200);
 const BIND_MAX_ATTEMPTS: u32 = 10;
@@ -159,7 +180,7 @@ pub async fn wait(
                 Ok(Some(request)) => {
                     let url = request.url().to_string();
                     let outcome = handle_request(&url, &state);
-                    respond(request, outcome.is_ok());
+                    respond(request, &outcome);
                     match outcome {
                         RequestOutcome::Code(code) => {
                             if let Some(tx) = tx.take() {
@@ -173,7 +194,10 @@ pub async fn wait(
                             }
                             break;
                         }
-                        RequestOutcome::Ignored => {}
+                        // A failed redirect must not end the wait: forged local
+                        // requests could otherwise kill a legit pending login.
+                        // The user can redo the flow; timeout/cancel terminate.
+                        RequestOutcome::Failed | RequestOutcome::Ignored => {}
                     }
                 }
                 Ok(None) => {
@@ -209,13 +233,11 @@ pub async fn wait(
 enum RequestOutcome {
     Code(String),
     Cancelled,
+    /// A real OAuth redirect that failed validation (`error=` from the
+    /// provider, missing `code`/`state`, or state mismatch).
+    Failed,
+    /// Not an OAuth redirect at all (no query string — favicon.ico, probes).
     Ignored,
-}
-
-impl RequestOutcome {
-    fn is_ok(&self) -> bool {
-        matches!(self, RequestOutcome::Code(_) | RequestOutcome::Cancelled)
-    }
 }
 
 fn handle_request(url: &str, expected_state: &str) -> RequestOutcome {
@@ -223,21 +245,24 @@ fn handle_request(url: &str, expected_state: &str) -> RequestOutcome {
     if path == "/cancel" {
         return RequestOutcome::Cancelled;
     }
+    if !url.contains('?') {
+        return RequestOutcome::Ignored;
+    }
     match parse_callback(url, expected_state) {
         Ok(code) => RequestOutcome::Code(code),
-        Err(_) => RequestOutcome::Ignored,
+        Err(_) => RequestOutcome::Failed,
     }
 }
 
-fn respond(request: tiny_http::Request, ok: bool) {
-    // `ok` intentionally doesn't branch to different HTML yet — there's no
-    // failure-state page defined here, so both arms show SUCCESS_HTML rather
-    // than an inaccurate one. `ok` is still meaningful to callers (used for
-    // e.g. logging); this is a known content gap, not a bug in this function.
-    #[allow(clippy::if_same_then_else)]
-    let body = if ok { SUCCESS_HTML } else { SUCCESS_HTML };
+fn respond(request: tiny_http::Request, outcome: &RequestOutcome) {
+    let (status, body): (u16, &str) = match outcome {
+        RequestOutcome::Code(_) => (200, SUCCESS_HTML),
+        RequestOutcome::Cancelled => (200, CANCELLED_HTML),
+        RequestOutcome::Failed => (200, FAILURE_HTML),
+        RequestOutcome::Ignored => (404, NOT_FOUND_HTML),
+    };
     let resp = Response::new(
-        200.into(),
+        status.into(),
         vec![
             Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]).unwrap(),
         ],
@@ -346,6 +371,30 @@ mod tests {
         assert!(matches!(
             handle_request("/cancel", "xyz"),
             RequestOutcome::Cancelled
+        ));
+    }
+
+    #[test]
+    fn error_callback_is_failed() {
+        assert!(matches!(
+            handle_request("/auth/callback?error=access_denied&state=xyz", "xyz"),
+            RequestOutcome::Failed
+        ));
+    }
+
+    #[test]
+    fn state_mismatch_is_failed() {
+        assert!(matches!(
+            handle_request("/auth/callback?code=abc&state=zzz", "xyz"),
+            RequestOutcome::Failed
+        ));
+    }
+
+    #[test]
+    fn unrelated_request_is_ignored() {
+        assert!(matches!(
+            handle_request("/favicon.ico", "xyz"),
+            RequestOutcome::Ignored
         ));
     }
 
