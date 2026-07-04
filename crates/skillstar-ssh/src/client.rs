@@ -34,6 +34,12 @@ use crate::types::SshHostDef;
 /// Connect/read timeout applied to the TCP dial + SSH handshake.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// One automatic re-dial after a transient connect failure (TCP reset, brief
+/// route flap, dial timeout). Retrying is always safe here because the dial
+/// phase never sends credentials — the host-key gate and auth run afterwards.
+const DIAL_ATTEMPTS: u32 = 2;
+const DIAL_RETRY_DELAY: Duration = Duration::from_millis(1200);
+
 /// Bound on any single remote shell command. A hung remote process (NFS stall,
 /// unresponsive binary, …) must not stall the whole SSH operation forever.
 /// Generous so legitimate work (large `git pull`, `find`) still completes.
@@ -144,6 +150,37 @@ impl SshHostDef {
 async fn dial<S: SecretStore>(
     host: &SshHostDef,
     _secrets: &S,
+    session_id: &str,
+    sink: &impl ProgressSink,
+) -> Result<(Handle<SshHandler>, String)> {
+    let mut last_err = None;
+    for attempt in 1..=DIAL_ATTEMPTS {
+        match dial_once(host, session_id, sink).await {
+            Ok(ok) => return Ok(ok),
+            Err(e) => {
+                if attempt < DIAL_ATTEMPTS {
+                    sink.emit(event(
+                        session_id,
+                        Phase::Dial,
+                        Status::Warn,
+                        format!(
+                            "dial failed ({e}), retrying in {:.1}s (attempt {}/{DIAL_ATTEMPTS})…",
+                            DIAL_RETRY_DELAY.as_secs_f32(),
+                            attempt + 1
+                        ),
+                    ));
+                    tokio::time::sleep(DIAL_RETRY_DELAY).await;
+                }
+                last_err = Some(e);
+            }
+        }
+    }
+    Err(last_err.expect("dial loop ran at least once"))
+}
+
+/// Single dial attempt: TCP connect + SSH handshake, fingerprint capture.
+async fn dial_once(
+    host: &SshHostDef,
     session_id: &str,
     sink: &impl ProgressSink,
 ) -> Result<(Handle<SshHandler>, String)> {
@@ -442,10 +479,23 @@ impl RemoteExec for Handle<SshHandler> {
 /// Used internally by `test_connection`; exported for Phase-2 remote-config reads.
 /// Bounded by [`EXEC_TIMEOUT`] so a hung remote process can't stall the whole
 /// SSH operation indefinitely.
+///
+/// The remote exit status is **discarded** — callers that must distinguish
+/// success from failure use [`exec_capture_status`] instead.
 pub async fn exec_capture(
     handle: &mut Handle<SshHandler>,
     command: &str,
 ) -> Result<String> {
+    exec_capture_status(handle, command).await.map(|(out, _)| out)
+}
+
+/// Like [`exec_capture`] but also returns the remote exit status (`None` when
+/// the server closed the channel without reporting one — rare, e.g. a killed
+/// process on a minimal server).
+pub async fn exec_capture_status(
+    handle: &mut Handle<SshHandler>,
+    command: &str,
+) -> Result<(String, Option<u32>)> {
     let body = async {
         let mut channel = handle
             .channel_open_session()
@@ -457,6 +507,7 @@ pub async fn exec_capture(
             .context("exec command")?;
 
         let mut out: Vec<u8> = Vec::new();
+        let mut exit_code: Option<u32> = None;
         loop {
             // Some servers send data on ChannelMsg::Data; EOF signals command end.
             match channel.wait().await {
@@ -466,17 +517,21 @@ pub async fn exec_capture(
                 Some(russh::ChannelMsg::ExtendedData { ref data, .. }) => {
                     out.extend_from_slice(data);
                 }
-                Some(russh::ChannelMsg::ExitStatus { .. }) | None => break,
+                Some(russh::ChannelMsg::ExitStatus { exit_status }) => {
+                    exit_code = Some(exit_status);
+                    break;
+                }
+                None => break,
                 _ => {}
             }
         }
         channel.eof().await.ok();
         channel.close().await.ok();
 
-        Ok::<Vec<u8>, anyhow::Error>(out)
+        Ok::<(Vec<u8>, Option<u32>), anyhow::Error>((out, exit_code))
     };
 
-    let out = tokio::time::timeout(EXEC_TIMEOUT, body)
+    let (out, exit_code) = tokio::time::timeout(EXEC_TIMEOUT, body)
         .await
         .map_err(|_| {
             anyhow::anyhow!(
@@ -486,7 +541,25 @@ pub async fn exec_capture(
             )
         })??;
 
-    Ok(String::from_utf8_lossy(&out).into_owned())
+    Ok((String::from_utf8_lossy(&out).into_owned(), exit_code))
+}
+
+/// Bail with the remote output when a checked script reported a non-zero exit.
+///
+/// `None` exit codes pass (server didn't report one — we can't tell, and
+/// erroring there would break otherwise-working minimal servers).
+pub(crate) fn ensure_exec_ok(what: &str, out: &str, exit_code: Option<u32>) -> Result<()> {
+    match exit_code {
+        Some(0) | None => Ok(()),
+        Some(code) => {
+            let mut detail = out.trim().to_string();
+            if detail.len() > 400 {
+                detail.truncate(400);
+                detail.push('…');
+            }
+            anyhow::bail!("{what} failed on remote (exit {code}): {detail}")
+        }
+    }
 }
 
 #[cfg(test)]

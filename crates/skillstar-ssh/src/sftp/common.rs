@@ -13,6 +13,11 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::client::SshHandler;
 
+/// Bound on opening the SFTP subsystem (channel + subsystem + init handshake).
+/// A server with a broken/missing sftp subsystem must fail fast, not hang the
+/// whole operation until the connection-level inactivity timeout.
+const SFTP_OPEN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
 /// Open an SFTP subsystem session on an authenticated SSH handle.
 pub async fn open_sftp(
     handle: &mut Handle<SshHandler>,
@@ -25,17 +30,34 @@ pub async fn open_sftp(
         crate::progress::Status::Start,
         "opening SFTP subsystem…",
     ));
-    let channel = handle
-        .channel_open_session()
+    let open = async {
+        let channel = handle
+            .channel_open_session()
+            .await
+            .context("open SFTP session channel")?;
+        channel
+            .request_subsystem(true, "sftp")
+            .await
+            .context("request sftp subsystem")?;
+        SftpSession::new(channel.into_stream())
+            .await
+            .context("initialise SFTP session")
+    };
+    let session = tokio::time::timeout(SFTP_OPEN_TIMEOUT, open)
         .await
-        .context("open SFTP session channel")?;
-    channel
-        .request_subsystem(true, "sftp")
-        .await
-        .context("request sftp subsystem")?;
-    let session = SftpSession::new(channel.into_stream())
-        .await
-        .context("initialise SFTP session")?;
+        .map_err(|_| {
+            let msg = format!(
+                "SFTP subsystem did not open within {}s",
+                SFTP_OPEN_TIMEOUT.as_secs()
+            );
+            sink.emit(crate::progress::event(
+                session_id,
+                crate::progress::Phase::Sftp,
+                crate::progress::Status::Fail,
+                msg.clone(),
+            ));
+            anyhow::anyhow!(msg)
+        })??;
     sink.emit(crate::progress::event(
         session_id,
         crate::progress::Phase::Sftp,

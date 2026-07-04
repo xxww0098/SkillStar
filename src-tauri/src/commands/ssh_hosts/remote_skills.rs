@@ -28,6 +28,25 @@ where
     F: skillstar_ssh::remote_fs::RemoteDiscoveryFs,
     S: ProgressSink,
 {
+    // Best-effort self-heal of layouts created by the old literal-`~` bug
+    // (content under `$HOME/~/...`, dangling `~/`-target agent symlinks).
+    // Idempotent; a no-op on healthy hosts.
+    if let Ok(out) = exec
+        .exec_script(&skillstar_ssh::hub_scripts::heal_legacy_layout_script())
+        .await
+        && let Some((moved, relinked)) = skillstar_ssh::hub_scripts::parse_heal_output(&out)
+        && (moved > 0 || relinked > 0)
+    {
+        sink.emit(skillstar_ssh::progress::event(
+            session_id,
+            skillstar_ssh::progress::Phase::Scan,
+            skillstar_ssh::progress::Status::Warn,
+            format!(
+                "repaired legacy hub layout: moved {moved} skill dir(s), fixed {relinked} symlink(s)"
+            ),
+        ));
+    }
+
     sink.emit(skillstar_ssh::progress::event(
         session_id,
         skillstar_ssh::progress::Phase::Scan,
@@ -236,24 +255,40 @@ pub async fn push_skill_to_remote(
             skillstar_ssh::progress::Status::Start,
             format!("pushing {skill_name} via ~/.skillstar/hub…"),
         ));
-        let res = skillstar_ssh::hub::push_skill_via_hub(
-            &mut handle,
-            &session_id,
-            &sink,
-            &skill_name,
-            &remote_dir,
-        )
-        .await
-        .map_err(to_ssh_err);
-        sink.emit(skillstar_ssh::progress::event(
-            &session_id,
-            skillstar_ssh::progress::Phase::Done,
-            skillstar_ssh::progress::Status::Ok,
-            format!("pushed {skill_name} (done)"),
-        ));
+        let sftp = sftp::open_sftp(&mut handle, &session_id, &sink)
+            .await
+            .map_err(to_ssh_err)?;
+        let res = skillstar_ssh::hub::push_skill_via_hub(&mut handle, &sftp, &skill_name, &remote_dir)
+            .await
+            .map_err(to_ssh_err);
+        emit_outcome(&sink, &session_id, &res, || format!("pushed {skill_name} (done)"));
         res
     })
     .await
+}
+
+/// Emit a truthful terminal console line: `done` on success, `error` with the
+/// failure text otherwise (previously some ops printed "done" even on failure).
+fn emit_outcome<T>(
+    sink: &impl ProgressSink,
+    session_id: &str,
+    res: &Result<T, AppError>,
+    ok_msg: impl FnOnce() -> String,
+) {
+    match res {
+        Ok(_) => sink.emit(skillstar_ssh::progress::event(
+            session_id,
+            skillstar_ssh::progress::Phase::Done,
+            skillstar_ssh::progress::Status::Ok,
+            ok_msg(),
+        )),
+        Err(e) => sink.emit(skillstar_ssh::progress::event(
+            session_id,
+            skillstar_ssh::progress::Phase::Error,
+            skillstar_ssh::progress::Status::Fail,
+            e.to_string(),
+        )),
+    }
 }
 
 #[tauri::command]
@@ -281,12 +316,7 @@ pub async fn migrate_remote_skill_to_hub(
         )
         .await
         .map_err(to_ssh_err);
-        sink.emit(skillstar_ssh::progress::event(
-            &session_id,
-            skillstar_ssh::progress::Phase::Done,
-            skillstar_ssh::progress::Status::Ok,
-            format!("migrated {skill_name} (done)"),
-        ));
+        emit_outcome(&sink, &session_id, &res, || format!("migrated {skill_name} (done)"));
         res
     })
     .await
@@ -350,23 +380,31 @@ pub async fn push_skills_to_remote(
             skillstar_ssh::progress::Status::Start,
             format!("batch pushing {total} skill(s) via ~/.skillstar/hub…"),
         ));
+        // One SFTP channel for the whole batch: OpenSSH caps concurrent
+        // channels per connection (MaxSessions, default 10), so a channel per
+        // skill broke batches of ten or more.
+        let sftp = sftp::open_sftp(&mut handle, &session_id, &sink)
+            .await
+            .map_err(to_ssh_err)?;
         let mut pushed = Vec::new();
         let mut failed = Vec::new();
         for name in &skill_names {
-            match skillstar_ssh::hub::push_skill_via_hub(
-                &mut handle,
-                &session_id,
-                &sink,
-                name,
-                &remote_dir,
-            )
-            .await
+            match skillstar_ssh::hub::push_skill_via_hub(&mut handle, &sftp, name, &remote_dir)
+                .await
             {
                 Ok(r) => pushed.push(r),
-                Err(e) => failed.push(BatchPushFailure {
-                    skill_name: name.clone(),
-                    error: e.to_string(),
-                }),
+                Err(e) => {
+                    sink.emit(skillstar_ssh::progress::event(
+                        &session_id,
+                        skillstar_ssh::progress::Phase::Scan,
+                        skillstar_ssh::progress::Status::Warn,
+                        format!("push {name} failed: {e}"),
+                    ));
+                    failed.push(BatchPushFailure {
+                        skill_name: name.clone(),
+                        error: e.to_string(),
+                    });
+                }
             }
         }
         let succeeded = pushed.len() as u32;
@@ -402,7 +440,10 @@ pub async fn read_remote_skill_content(
     let session_id = new_session_id();
     let sink = TauriProgressSink { app };
     with_session(&host_id, session_id, sink, |session_id, sink, mut handle| async move {
-        skillstar_ssh::hub::read_remote_skill_content(&mut handle, &session_id, &sink, &skill_name)
+        let sftp = sftp::open_sftp(&mut handle, &session_id, &sink)
+            .await
+            .map_err(to_ssh_err)?;
+        skillstar_ssh::hub::read_remote_skill_content(&mut handle, &sftp, &skill_name)
             .await
             .map_err(to_ssh_err)
     })
@@ -420,15 +461,12 @@ pub async fn write_remote_skill_content(
     let session_id = new_session_id();
     let sink = TauriProgressSink { app };
     with_session(&host_id, session_id, sink, |session_id, sink, mut handle| async move {
-        skillstar_ssh::hub::write_remote_skill_content(
-            &mut handle,
-            &session_id,
-            &sink,
-            &skill_name,
-            &content,
-        )
-        .await
-        .map_err(to_ssh_err)
+        let sftp = sftp::open_sftp(&mut handle, &session_id, &sink)
+            .await
+            .map_err(to_ssh_err)?;
+        skillstar_ssh::hub::write_remote_skill_content(&sftp, &skill_name, &content)
+            .await
+            .map_err(to_ssh_err)
     })
     .await
 }
@@ -449,15 +487,10 @@ pub async fn pull_remote_skill(
             skillstar_ssh::progress::Status::Start,
             format!("pulling {skill_name}…"),
         ));
-        let res = skillstar_ssh::hub::pull_remote_skill(&mut handle, &session_id, &sink, &skill_name)
+        let res = skillstar_ssh::hub::pull_remote_skill(&mut handle, &skill_name)
             .await
             .map_err(to_ssh_err);
-        sink.emit(skillstar_ssh::progress::event(
-            &session_id,
-            skillstar_ssh::progress::Phase::Done,
-            skillstar_ssh::progress::Status::Ok,
-            format!("pulled {skill_name} (done)"),
-        ));
+        emit_outcome(&sink, &session_id, &res, || format!("pulled {skill_name} (done)"));
         res
     })
     .await
@@ -499,16 +532,16 @@ pub async fn install_remote_skill(
     let session_id = new_session_id();
     let sink = TauriProgressSink { app };
     with_session(&host_id, session_id, sink, |session_id, sink, mut handle| async move {
-        skillstar_ssh::hub::install_remote_skill(
+        let res = skillstar_ssh::hub::install_remote_skill(
             &mut handle,
-            &session_id,
-            &sink,
             &url,
             &skill_name,
             &agent_skills_dir,
         )
         .await
-        .map_err(to_ssh_err)
+        .map_err(to_ssh_err);
+        emit_outcome(&sink, &session_id, &res, || format!("installed {skill_name} (done)"));
+        res
     })
     .await
 }
@@ -521,8 +554,8 @@ pub async fn check_remote_skill_updates(
 ) -> Result<Vec<RemoteSkillUpdateState>, AppError> {
     let session_id = new_session_id();
     let sink = TauriProgressSink { app };
-    with_session(&host_id, session_id, sink, |session_id, sink, mut handle| async move {
-        skillstar_ssh::hub::check_remote_skill_updates(&mut handle, &session_id, &sink)
+    with_session(&host_id, session_id, sink, |_session_id, _sink, mut handle| async move {
+        skillstar_ssh::hub::check_remote_skill_updates(&mut handle)
             .await
             .map_err(to_ssh_err)
     })

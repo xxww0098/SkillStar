@@ -14,6 +14,7 @@
 
 pub mod client;
 pub mod hub;
+pub mod hub_scripts;
 pub mod progress;
 pub mod remote_fs;
 pub mod sftp;

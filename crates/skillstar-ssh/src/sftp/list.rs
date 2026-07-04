@@ -9,7 +9,8 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::client::RemoteExec;
-use crate::hub::{REMOTE_HUB_CONTENT, shell_quote};
+use crate::hub::REMOTE_HUB_CONTENT;
+use crate::hub_scripts::{expand_remote_home, hub_skill_abs, shell_quote, validate_skill_name};
 use crate::remote_fs::{RemoteDiscoveryFs, is_skill_entry};
 use crate::types::{RemoteSkill, RemoteSkillLayout};
 
@@ -117,16 +118,23 @@ pub(crate) fn agent_id_from_home_dir(name: &str) -> Option<String> {
 }
 
 /// Shell script used by [`resolve_skill_layout`] — extracted for unit tests.
+///
+/// The hub existence probe uses `"$HOME"` (runtime-expanded), never a quoted
+/// `~`, and also accepts the legacy literal-`~` location so un-healed hosts
+/// still classify correctly.
 pub(crate) fn layout_classify_shell_script(skill_path: &str, skill_name: &str) -> String {
-    let hub_content = format!("{REMOTE_HUB_CONTENT}/{skill_name}");
     let path_q = shell_quote(skill_path);
-    let hub_q = shell_quote(&hub_content);
+    let hub = crate::hub_scripts::hub_skill_expr(skill_name);
+    let legacy = format!(
+        "\"$HOME/~/.skillstar/hub/content\"/{}",
+        shell_quote(skill_name)
+    );
     format!(
         r#"if [ -L {path_q} ]; then
   tgt=$(readlink {path_q} 2>/dev/null || true)
   case "$tgt" in
-    *"/.skillstar/hub/content/{skill_name}"*|*".skillstar/hub/content/{skill_name}"*)
-      if [ -f {hub_q}/SKILL.md ]; then
+    *".skillstar/hub/content/{skill_name}"*)
+      if [ -f {hub}/SKILL.md ] || [ -f {legacy}/SKILL.md ]; then
         echo hub_managed
         exit 0
       fi
@@ -249,9 +257,35 @@ pub(crate) fn filter_remote_skill_list(
     skills
 }
 
+/// Probe whether the hub content for a skill has a SKILL.md — checks the
+/// canonical absolute location first, then the legacy literal-`~` layout
+/// (pre-heal hosts) via SFTP.
+async fn hub_content_has_skill_md<F: RemoteDiscoveryFs>(
+    fs: &F,
+    home: &str,
+    skill_name: &str,
+) -> bool {
+    if fs
+        .path_exists(&format!("{}/SKILL.md", hub_skill_abs(home, skill_name)))
+        .await
+    {
+        return true;
+    }
+    // Legacy literal-`~` dir (old buggy layout); probed relative to home.
+    fs.path_exists(&format!("{REMOTE_HUB_CONTENT}/{skill_name}/SKILL.md"))
+        .await
+        || fs
+            .path_exists(&format!(
+                "{}/{REMOTE_HUB_CONTENT}/{skill_name}/SKILL.md",
+                home.trim_end_matches('/')
+            ))
+            .await
+}
+
 /// Probe whether a skill entry has a readable `SKILL.md` (direct path or hub content for symlinks).
 async fn probe_has_skill_md<F: RemoteDiscoveryFs>(
     fs: &F,
+    home: &str,
     skill_path: &str,
     skill_name: &str,
     attrs: &russh_sftp::protocol::FileAttributes,
@@ -263,9 +297,7 @@ async fn probe_has_skill_md<F: RemoteDiscoveryFs>(
         return true;
     }
     if attrs.is_symlink() {
-        return fs
-            .path_exists(&format!("{REMOTE_HUB_CONTENT}/{skill_name}/SKILL.md"))
-            .await;
+        return hub_content_has_skill_md(fs, home, skill_name).await;
     }
     false
 }
@@ -274,6 +306,7 @@ async fn probe_has_skill_md<F: RemoteDiscoveryFs>(
 async fn resolve_skill_layout<E: RemoteExec, F: RemoteDiscoveryFs>(
     exec: &mut E,
     fs: &F,
+    home: &str,
     skill_path: &str,
     skill_name: &str,
     attrs: &russh_sftp::protocol::FileAttributes,
@@ -282,12 +315,13 @@ async fn resolve_skill_layout<E: RemoteExec, F: RemoteDiscoveryFs>(
     if !has_skill_md {
         return RemoteSkillLayout::Standalone;
     }
-    if attrs.is_symlink()
-        && fs
-            .path_exists(&format!("{REMOTE_HUB_CONTENT}/{skill_name}/SKILL.md"))
-            .await
-    {
+    if attrs.is_symlink() && hub_content_has_skill_md(fs, home, skill_name).await {
         return RemoteSkillLayout::HubManaged;
+    }
+    // Names that can't be safely embedded in a shell script are never
+    // hub-managed (hub ops validate names on write); skip the remote exec.
+    if validate_skill_name(skill_name).is_err() {
+        return RemoteSkillLayout::Standalone;
     }
     let script = layout_classify_shell_script(skill_path, skill_name);
     match exec.exec_script(&script).await {
@@ -325,10 +359,11 @@ where
             }
             let skill_path = format!("{skills_dir}/{skill_name}");
             let has_skill_md =
-                probe_has_skill_md(fs, &skill_path, &skill_name, &skill_attrs).await;
+                probe_has_skill_md(fs, &home, &skill_path, &skill_name, &skill_attrs).await;
             let layout = resolve_skill_layout(
                 exec,
                 fs,
+                &home,
                 &skill_path,
                 &skill_name,
                 &skill_attrs,
@@ -355,10 +390,12 @@ where
 
     let mut known_fallback = Vec::new();
     for (agent, path) in KNOWN_AGENT_SKILL_DIRS {
-        if fs.path_exists(path).await {
+        // SFTP servers don't expand `~` — probe (and report) the absolute path.
+        let abs = expand_remote_home(&home, path);
+        if fs.path_exists(&abs).await {
             known_fallback.push(RemoteAgentSkills {
                 agent: (*agent).to_string(),
-                path: (*path).to_string(),
+                path: abs,
                 count: 0,
             });
         }
@@ -373,7 +410,11 @@ pub async fn list_remote_skills<F: RemoteDiscoveryFs>(
     fs: &F,
     remote_dir: &str,
 ) -> Result<Vec<RemoteSkill>> {
-    let entries = fs.read_dir(remote_dir).await;
+    // A stored default dir may still be `~`-prefixed — expand it, since the
+    // SFTP server treats `~` as a literal path component.
+    let home = fs.canonicalize_home().await;
+    let remote_dir = expand_remote_home(&home, remote_dir);
+    let entries = fs.read_dir(&remote_dir).await;
     let base = remote_dir.trim_end_matches('/');
 
     let mut list_entries = Vec::new();
@@ -381,7 +422,7 @@ pub async fn list_remote_skills<F: RemoteDiscoveryFs>(
         let is_skill_entry = is_skill_entry(&attrs);
         let has_skill_md = if is_skill_entry && !name.starts_with('.') {
             let skill_path = format!("{base}/{name}");
-            probe_has_skill_md(fs, &skill_path, &name, &attrs).await
+            probe_has_skill_md(fs, &home, &skill_path, &name, &attrs).await
         } else {
             false
         };
@@ -393,7 +434,7 @@ pub async fn list_remote_skills<F: RemoteDiscoveryFs>(
             modified: attrs.mtime.and_then(|t| chrono_like_rfc3339(t as i64)),
         });
     }
-    Ok(filter_remote_skill_list(remote_dir, &list_entries))
+    Ok(filter_remote_skill_list(&remote_dir, &list_entries))
 }
 
 /// Best-effort RFC3339 formatting of a Unix timestamp.
@@ -608,6 +649,66 @@ mod tests {
     }
 
     use crate::remote_fs::{MockRemoteExec, MockRemoteFs};
+    use russh_sftp::protocol::FileAttributes;
+
+    fn dir_attrs() -> FileAttributes {
+        let mut a = FileAttributes::default();
+        a.set_dir(true);
+        a
+    }
+
+    fn symlink_attrs() -> FileAttributes {
+        let mut a = FileAttributes::empty();
+        a.set_symlink(true);
+        a
+    }
+
+    /// New (fixed) layout: hub content at the **absolute** path — the symlink
+    /// probe must classify it hub_managed without any legacy `~` entry.
+    #[tokio::test]
+    async fn discover_detects_absolute_hub_layout() {
+        let mut exec = MockRemoteExec;
+        let fs = MockRemoteFs::new("/root")
+            .with_dir("/root", vec![(".claude".into(), dir_attrs())])
+            .with_dir(
+                "/root/.claude/skills",
+                vec![("abs-skill".into(), symlink_attrs())],
+            )
+            .with_path("/root/.skillstar/hub/content/abs-skill/SKILL.md");
+
+        let result = discover_remote_skills(&mut exec, &fs).await.unwrap();
+        assert_eq!(result.skills.len(), 1);
+        assert_eq!(result.skills[0].layout, RemoteSkillLayout::HubManaged);
+        assert_eq!(result.needs_migration_count, 0);
+    }
+
+    /// Legacy (pre-heal) layout: content only reachable via the literal-`~`
+    /// probe — must still classify hub_managed so old hosts don't regress.
+    #[tokio::test]
+    async fn discover_detects_legacy_tilde_hub_layout() {
+        let mut exec = MockRemoteExec;
+        let fs = MockRemoteFs::new("/root")
+            .with_dir("/root", vec![(".claude".into(), dir_attrs())])
+            .with_dir(
+                "/root/.claude/skills",
+                vec![("old-skill".into(), symlink_attrs())],
+            )
+            .with_path("~/.skillstar/hub/content/old-skill/SKILL.md");
+
+        let result = discover_remote_skills(&mut exec, &fs).await.unwrap();
+        assert_eq!(result.skills.len(), 1);
+        assert_eq!(result.skills[0].layout, RemoteSkillLayout::HubManaged);
+    }
+
+    #[test]
+    fn layout_classify_script_never_quotes_tilde() {
+        let script = layout_classify_shell_script("/root/.codex/skills/sk", "sk");
+        assert!(
+            !script.contains("'~"),
+            "quoted tilde never expands on the remote shell:\n{script}"
+        );
+        assert!(script.contains("\"$HOME/.skillstar/hub/content\"/'sk'"));
+    }
 
     /// Drives the real `discover_remote_skills` entry point on a vps-yy mock tree.
     #[tokio::test]
