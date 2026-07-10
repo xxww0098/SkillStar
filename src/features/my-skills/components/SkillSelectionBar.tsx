@@ -16,6 +16,7 @@ import {
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AgentIcon } from "../../../components/ui/AgentIcon";
+import { selectTargetableAgentProfiles } from "../../../lib/agentProfiles";
 import { agentIconCls, cn } from "../../../lib/utils";
 import type { AgentProfile } from "../../../types";
 
@@ -75,7 +76,7 @@ export function SkillSelectionBar({
   );
   const [isUpdating, setIsUpdating] = useState(false);
   const [updateSuccess, setUpdateSuccess] = useState(false);
-  const enabledProfiles = agentProfiles?.filter((p) => p.enabled) ?? [];
+  const enabledProfiles = selectTargetableAgentProfiles(agentProfiles ?? []);
   const allSelected = totalCount !== undefined && selectedCount >= totalCount;
 
   const handleUpdate = async () => {

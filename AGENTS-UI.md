@@ -43,7 +43,8 @@ src/
 │   │       └── shared/           # AgentToolIcon, SaveBadge, Provider/Model select popovers (DrawerShell + ProviderBrandIcon moved to components/shared — cross-feature)
 │   ├── mcp/                      # MCP server management + marketplace browsing
 │   │   ├── components/           # McpManager, McpServerCard, McpServerForm, McpMarketBrowser
-│   │   └── hooks/                # useMcpServers, useMcpPresets, useMcpMarketplace
+│   │   ├── hooks/                # useMcpServers, useMcpPresets, useMcpMarketplace
+│   │   └── lib/                  # Agent profile ↔ MCP tool target projection
 │   ├── projects/                 # project registration + agent config
 │   │   ├── components/           # AgentAccordion, ProjectDetailPanel, …
 │   │   └── hooks/                # useProjectManifest, useProjectSkills, …
@@ -68,7 +69,7 @@ src/
 ├── components/
 │   ├── ui/                       # shared atomic primitives
 │   ├── layout/                   # Sidebar/Toolbar/DetailPanel
-│   └── shared/                   # cross-feature: SkillEditor, SkillReader, DrawerShell, ProviderBrandIcon
+│   └── shared/                   # cross-feature: AgentTargetCarousel, SkillEditor, SkillReader, DrawerShell, ProviderBrandIcon
 ├── lib/                          # utils, toast, share code
 └── types/                        # shared TS types
     └── generated/                 # ts-rs output (MCP + ProviderPreset types) — generated, do not hand-edit; see Do NOT below
@@ -165,6 +166,7 @@ My Skills manages skills across two scopes — **local** (hub + filesystem) and 
 - Centered glassmorphism modals must use `components/ui/ModalShell` (`ModalShell` + `ModalHeader` + `ModalCloseButton`) instead of hand-rolling AnimatePresence/backdrop/`modal-surface` scaffolding. Exceptions: Radix `AlertDialog`-based dialogs (keep Radix focus/Escape semantics) and dialogs with intentionally custom surfaces.
 - Tauri event subscriptions tied to component lifetime must use `hooks/useTauriEvent` (handles the `listen()` promise/cleanup race); only imperative per-request streams (`useAiStream`, `useAiTranslate`) manage listeners manually.
 - "Global-only agent" checks must be data-driven via `lib/agentProfiles.supportsProjectDeploy` (empty `project_skills_rel`), never hard-coded agent ids.
+- Local Agent targets are driven by the Settings profile list through `lib/agentProfiles.selectTargetableAgentProfiles`: only profiles with both `installed` and `enabled` are candidates, and local filters/project pickers must reuse that projection before passing data into shared presentation components. A card's own Skill/Deck link or MCP sync selection is a separate state; card rails in Skill, Deck, and MCP must reuse `components/shared/AgentTargetCarousel`. Capability-specific consumers intersect their supported targets with detected profiles and fail closed when status data is missing. Remote SSH Agent filters remain driven by remote discovery and must not be filtered by local installation state. Do not hard-code Agent SVG/profile lists in feature cards.
 - Types: shared types in `src/types/index.ts`.
 - Icons: Lucide React.
 - Avoid inline style unless dynamic value cannot be expressed with utility classes.
@@ -174,7 +176,7 @@ My Skills manages skills across two scopes — **local** (hub + filesystem) and 
 - Pages include `MySkills`, `Marketplace`, `PublisherDetail`, `SkillCards`, `Projects`, `Mcp`, `Settings`.
 - Marketplace is the unified discovery surface. Skill and MCP stay visually separated inside the same left-aligned category rail: skill tabs (`all` / `trending` / `hot` / `official`) stay grouped under `Skill`, and a single `mcp-official` ("官方") tab stays grouped under `MCP`. The MCP tab renders a **publisher card grid** (`McpPublishers`, mirrors `OfficialPublishers`) with one card per official publisher (AdsPower / BigModel / GitHub); clicking a card drills into `McpPublisherDetail` (mirrors `PublisherDetail` — hero banner + server grid), where servers are installed via the existing `McpServerForm` drawer. There is no longer a top-level "推荐" / "GitHub MCP" split; those two former tabs collapse into the publisher drill-down. MCP marketplace cards should follow the same card template, 320px grid column baseline, grid/list layout toggle, and toolbar layout controls as skill cards. The `Mcp` page is for installed MCP server management, recommended presets, and tool sync only; do not embed a separate MCP marketplace inside it.
 - `Projects` is master-detail and must reconcile removals as well as additions.
-- Only globally enabled agents should appear in project deploy target pickers.
+- Only targetable agents (currently installed and globally enabled) should appear in project deploy target pickers.
 - Shared project-path conflicts must be single-owner at selection time.
 - Destructive skill actions use explicit confirmation components, not browser `confirm()`.
 - **My Skills — remote (SSH) scope**: toolbar `MySkillsScopeSwitch` toggles local hub vs remote VPS (`skillstar.mySkills.scope` + `skillstar.mySkills.remoteHostKey` in `localStorage`). Remote mode embeds `MySkillsRemotePane` (same master-detail as the former `Ssh` page: `SshHostsList` + `RemoteSkillPanel` with `embedded`, shared push/migrate/delete/console). Legacy `#ssh` hash opens My Skills in remote scope then rewrites to `#skills`. Host-key trust (TOFU) unchanged: `test_ssh_connection` → inline console + trust action; credentials are write-only to the keyring.

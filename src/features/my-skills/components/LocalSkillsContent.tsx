@@ -8,6 +8,7 @@ import { LoadingLogo } from "../../../components/ui/LoadingLogo";
 import { useAgentProfiles } from "../../../hooks/useAgentProfiles";
 import { useSkillsSelectionShortcuts } from "../../../hooks/useSkillsSelectionShortcuts";
 import { useViewMode } from "../../../hooks/useViewMode";
+import { selectTargetableAgentProfiles, supportsProjectDeploy } from "../../../lib/agentProfiles";
 import { tauriInvoke } from "../../../lib/ipc";
 import { toast } from "../../../lib/toast";
 import { navigateToSettingsSection } from "../../../lib/utils";
@@ -218,14 +219,11 @@ export function LocalSkillsContent({
     return visibleSkills;
   }, [skills, searchQuery, sortBy, agentFilter, profiles, showUpdateOnly, sourceFilter, repoFilter]);
 
-  const compatibleSelectionProfiles = useMemo(
-    () => profiles.filter((profile) => profile.enabled && profile.id !== "openclaw"),
-    [profiles],
-  );
-
-  // Stable reference for the per-card agent toggles — a fresh `profiles.filter(...)`
-  // array in JSX would defeat SkillCard's React.memo and re-render every card.
-  const enabledProfiles = useMemo(() => profiles.filter((profile) => profile.enabled), [profiles]);
+  // Stable Settings-backed target list for filters, cards, selection actions,
+  // and project deployment. Persisted `enabled` alone is insufficient because
+  // it may remain true after an Agent is uninstalled.
+  const enabledProfiles = useMemo(() => selectTargetableAgentProfiles(profiles), [profiles]);
+  const compatibleSelectionProfiles = useMemo(() => enabledProfiles.filter(supportsProjectDeploy), [enabledProfiles]);
 
   const handleInstall = async (url: string) => {
     try {
@@ -573,7 +571,7 @@ export function LocalSkillsContent({
           }
           hideStarsSort={true}
           onRepoFilterChange={setRepoFilter}
-          agentProfiles={profiles}
+          agentProfiles={enabledProfiles}
           agentFilter={agentFilter}
           onAgentFilterChange={setAgentFilter}
           onImport={() => setImportModalOpen(true)}

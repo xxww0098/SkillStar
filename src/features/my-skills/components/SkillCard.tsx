@@ -2,12 +2,12 @@ import { motion } from "framer-motion";
 import { Check, Download, ExternalLink, GitBranch, Loader2 } from "lucide-react";
 import { memo } from "react";
 import { useTranslation } from "react-i18next";
+import { AgentTargetCarousel } from "../../../components/shared/AgentTargetCarousel";
 import { AgentIcon } from "../../../components/ui/AgentIcon";
 import { Badge } from "../../../components/ui/badge";
 import { Button } from "../../../components/ui/button";
 import { CardDescription, CardTitle } from "../../../components/ui/card";
 import { CardTemplate } from "../../../components/ui/card-template";
-import { HScrollRow } from "../../../components/ui/HScrollRow";
 import { SuccessCheckmark } from "../../../components/ui/SuccessCheckmark";
 import { agentIconCls, cn, formatInstalls } from "../../../lib/utils";
 import type { AgentProfile, Skill } from "../../../types";
@@ -301,42 +301,21 @@ function SkillCardInner({
                   />
                 </button>
               ) : profiles && onToggleAgent ? (
-                <HScrollRow count={profiles.length} itemWidth={28} gap={6} className="gap-1.5 min-w-0">
-                  {profiles.map((profile) => {
-                    const isUsed = skill.agent_links?.includes(profile.display_name) ?? false;
-                    const toggleKey = `${skill.name}::${profile.id}`;
-                    const isToggling = pendingAgentToggleKeys?.has(toggleKey) ?? false;
-                    const isDisabled = isToggling;
-                    return (
-                      <button
-                        key={profile.id}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (isDisabled) return;
-                          onToggleAgent(skill.name, profile.id, !isUsed, profile.display_name);
-                        }}
-                        disabled={isDisabled}
-                        className={cn(
-                          "w-7 h-7 shrink-0 rounded-lg flex items-center justify-center border transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-wait",
-                          isUsed
-                            ? "border-primary/40 bg-primary/10 shadow-[0_0_0_1px_rgba(var(--color-primary-rgb),0.15)] hover:shadow-[0_0_0_1px_rgba(var(--color-primary-rgb),0.3)] hover:bg-primary/20"
-                            : "border-transparent bg-transparent hover:bg-muted",
-                          isToggling && "opacity-65",
-                        )}
-                        title={`${profile.display_name} ${isUsed ? "(Remove)" : "(Add)"}`}
-                      >
-                        <AgentIcon
-                          profile={profile}
-                          className={cn(
-                            agentIconCls(profile.icon, "w-4 h-4"),
-                            "transition-[filter,opacity] drop-shadow-sm",
-                            !isUsed && "grayscale opacity-40 hover:opacity-70 hover:grayscale-0",
-                          )}
-                        />
-                      </button>
-                    );
+                <AgentTargetCarousel
+                  items={profiles.map((profile) => {
+                    const selected = skill.agent_links?.includes(profile.display_name) ?? false;
+                    return {
+                      id: profile.id,
+                      profile,
+                      selected,
+                      pending: pendingAgentToggleKeys?.has(`${skill.name}::${profile.id}`) ?? false,
+                      title: `${profile.display_name} (${t(selected ? "skillCard.remove" : "skillCard.add")})`,
+                    };
                   })}
-                </HScrollRow>
+                  onToggle={({ profile, selected }) => {
+                    onToggleAgent(skill.name, profile.id, selected !== true, profile.display_name);
+                  }}
+                />
               ) : skill.source ? (
                 <span className="text-micro text-muted-foreground/60 font-mono flex items-center gap-1">
                   <ExternalLink className="w-3 h-3" />

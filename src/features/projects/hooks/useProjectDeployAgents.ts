@@ -1,9 +1,9 @@
 import { useCallback, useMemo } from "react";
-import { supportsProjectDeploy } from "../../../lib/agentProfiles";
+import { selectTargetableAgentProfiles, supportsProjectDeploy } from "../../../lib/agentProfiles";
 import type { AgentProfile, ScannedSkill } from "../../../types";
 
 export interface ProjectDeployAgents {
-  /** Profiles that are enabled AND support project deploy (non-empty `project_skills_rel`). */
+  /** Installed + enabled profiles that support project deploy. */
   enabledProfiles: AgentProfile[];
   enabledProfileIdSet: Set<string>;
   enabledProfilesById: Map<string, AgentProfile>;
@@ -32,7 +32,7 @@ export interface ProjectDeployAgents {
  */
 export function useProjectDeployAgents(profiles: AgentProfile[]): ProjectDeployAgents {
   const enabledProfiles = useMemo(
-    () => profiles.filter((profile) => profile.enabled && supportsProjectDeploy(profile)),
+    () => selectTargetableAgentProfiles(profiles).filter(supportsProjectDeploy),
     [profiles],
   );
   const enabledProfileIdSet = useMemo(() => new Set(enabledProfiles.map((profile) => profile.id)), [enabledProfiles]);

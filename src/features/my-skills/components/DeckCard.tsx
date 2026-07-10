@@ -2,12 +2,11 @@ import { motion } from "framer-motion";
 import { AlertTriangle, Copy, Download, Edit2, Loader2, MoreHorizontal, Rocket, Share2, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { MOTION_TRANSITION } from "../../../comm/motion";
-import { AgentIcon } from "../../../components/ui/AgentIcon";
+import { AgentTargetCarousel } from "../../../components/shared/AgentTargetCarousel";
 import { Badge } from "../../../components/ui/badge";
 import { Button } from "../../../components/ui/button";
 import { CardTemplate } from "../../../components/ui/card-template";
-import { HScrollRow } from "../../../components/ui/HScrollRow";
-import { agentIconCls, cn } from "../../../lib/utils";
+import { cn } from "../../../lib/utils";
 import type { AgentProfile, Skill, SkillCardDeck, ViewMode } from "../../../types";
 
 interface DeckCardProps {
@@ -258,64 +257,35 @@ export function DeckCard({
             /* Normal footer: Agent icons + Deploy */
             <div className="flex items-center gap-1.5 flex-1 min-w-0">
               {/* Link to Agent icons */}
-              <HScrollRow count={enabledProfiles.length} itemWidth={28} gap={6} className="gap-1.5 min-w-0">
-                {enabledProfiles.map((profile) => {
-                  const key = `${group.id}::${profile.id}`;
-                  const state = linkState[key];
+              <AgentTargetCarousel
+                items={enabledProfiles.map((profile) => {
                   const linkedCount = groupInstalledSkillNames.filter((name) =>
                     skillByName.get(name)?.agent_links?.includes(profile.display_name),
                   ).length;
                   const allLinked =
                     groupInstalledSkillNames.length > 0 && linkedCount === groupInstalledSkillNames.length;
                   const partialLinked = linkedCount > 0 && linkedCount < groupInstalledSkillNames.length;
-                  const linking = state === "linking";
-                  return (
-                    <button
-                      key={profile.id}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onToggleGroupAgentLinks(
-                          group,
-                          profile.id,
-                          profile.display_name,
-                          groupInstalledSkillNames,
-                          allLinked,
-                        );
-                      }}
-                      disabled={linking || groupInstalledSkillNames.length === 0}
-                      title={
-                        allLinked
-                          ? t("skillCards.unlinkAllFrom", {
-                              agent: profile.display_name,
-                            })
-                          : t("skillCards.linkAllTo", {
-                              agent: profile.display_name,
-                            })
-                      }
-                      className={cn(
-                        "w-7 h-7 rounded-lg flex items-center justify-center border transition cursor-pointer shrink-0",
-                        allLinked
-                          ? "border-primary/20 bg-primary/5 shadow-sm"
-                          : linking
-                            ? "border-primary/30 bg-primary/5 opacity-60"
-                            : partialLinked
-                              ? "border-warning/30 bg-warning/5"
-                              : "border-transparent hover:bg-muted hover:border-border text-muted-foreground",
-                      )}
-                    >
-                      <AgentIcon
-                        profile={profile}
-                        className={cn(
-                          agentIconCls(profile.icon),
-                          "transition-[filter,opacity] duration-300",
-                          linking && "animate-pulse",
-                          !allLinked && !partialLinked && "grayscale opacity-40 hover:opacity-80 hover:grayscale-0",
-                        )}
-                      />
-                    </button>
-                  );
+                  return {
+                    id: profile.id,
+                    profile,
+                    selected: allLinked ? true : partialLinked ? ("mixed" as const) : false,
+                    pending: linkState[`${group.id}::${profile.id}`] === "linking",
+                    disabled: groupInstalledSkillNames.length === 0,
+                    title: allLinked
+                      ? t("skillCards.unlinkAllFrom", { agent: profile.display_name })
+                      : t("skillCards.linkAllTo", { agent: profile.display_name }),
+                  };
                 })}
-              </HScrollRow>
+                onToggle={({ profile, selected }) => {
+                  onToggleGroupAgentLinks(
+                    group,
+                    profile.id,
+                    profile.display_name,
+                    groupInstalledSkillNames,
+                    selected === true,
+                  );
+                }}
+              />
 
               {/* Separator */}
               {enabledProfiles.length > 0 && <div className="w-px h-4 bg-border mx-0.5 ml-auto shrink-0" />}

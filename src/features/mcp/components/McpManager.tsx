@@ -9,11 +9,13 @@ import { EmptyState } from "../../../components/ui/EmptyState";
 import { LoadingLogo } from "../../../components/ui/LoadingLogo";
 import { SearchInput } from "../../../components/ui/SearchInput";
 import { AgentFilterPill } from "../../../components/ui/AgentFilterPill";
+import { useAgentProfiles } from "../../../hooks/useAgentProfiles";
 import { cn } from "../../../lib/utils";
-import type { McpPreset, McpServerEntry, McpToolId } from "../../../types";
+import type { McpPreset, McpServerEntry } from "../../../types";
 import { useMcpServers } from "../hooks/useMcpServers";
 import { useMcpPresets } from "../hooks/useMcpPresets";
-import { McpServerCard, MCP_TOOL_ICON } from "./McpServerCard";
+import { resolveMcpToolFilter, selectMcpAgentTargets } from "../lib/agentTargets";
+import { McpServerCard } from "./McpServerCard";
 import { McpServerForm, type McpServerFormValue } from "./McpServerForm";
 
 /** Map a recommended preset into create-form seed values. */
@@ -54,6 +56,7 @@ function serverCommand(server: McpServerEntry): string {
 
 export function McpManager({ onOpenMarket }: McpManagerProps) {
   const { t } = useTranslation();
+  const { profiles } = useAgentProfiles();
   const {
     servers,
     toolStatuses,
@@ -78,11 +81,13 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
   const normalizedQuery = query.trim().toLowerCase();
   // Active tool filter: only show servers synced into this tool (null = all).
   const [toolFilter, setToolFilter] = useState<string | null>(null);
+  const agentTargets = useMemo(() => selectMcpAgentTargets(profiles, toolStatuses), [profiles, toolStatuses]);
+  const activeToolFilter = resolveMcpToolFilter(toolFilter, agentTargets);
 
   const filteredServers = useMemo(
     () =>
       servers.filter((server) => {
-        if (toolFilter && !server.enabled[toolFilter as McpToolId]) return false;
+        if (activeToolFilter && !server.enabled[activeToolFilter]) return false;
         return matchesQuery(normalizedQuery, [
           server.name,
           server.description,
@@ -92,21 +97,18 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
           serverCommand(server),
         ]);
       }),
-    [servers, normalizedQuery, toolFilter],
+    [servers, normalizedQuery, activeToolFilter],
   );
 
-  // Pseudo-profiles for the shared filter pill: map each MCP tool to its icon.
+  // The toolbar uses the same Settings-backed target set as every MCP card.
   const toolFilterItems = useMemo(
     () =>
-      toolStatuses.map((status) => {
-        const meta = MCP_TOOL_ICON[status.toolId as McpToolId];
-        return {
-          id: status.toolId,
-          icon: meta?.icon ?? "",
-          display_name: meta?.label ?? status.label,
-        };
-      }),
-    [toolStatuses],
+      agentTargets.map(({ toolId, profile }) => ({
+        id: toolId,
+        icon: profile.icon,
+        display_name: profile.display_name,
+      })),
+    [agentTargets],
   );
 
   const editing = drawer.type === "edit" ? (servers.find((s) => s.id === drawer.id) ?? null) : null;
@@ -200,7 +202,7 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
     <>
       {/* Tool filter — shared segmented pill, identical affordance to Skills' agent
           filter. Clicking a tool shows only servers synced into it. */}
-      <AgentFilterPill items={toolFilterItems} value={toolFilter} onChange={setToolFilter} />
+      <AgentFilterPill items={toolFilterItems} value={activeToolFilter} onChange={setToolFilter} />
 
       {/* Count badge — standalone read-only pill (mirrors Skills' countText). */}
       <div className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border/70 bg-background/50 px-3 text-xs font-medium tabular-nums text-foreground/80 shadow-sm">
@@ -239,7 +241,7 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
   const hasSearch = normalizedQuery.length > 0;
   // Any active narrowing (text search or tool filter) means an empty result is a
   // "no matches" state, not a "you have no servers yet" state.
-  const hasActiveFilter = hasSearch || toolFilter !== null;
+  const hasActiveFilter = hasSearch || activeToolFilter !== null;
   const showServers = filteredServers.length > 0;
 
   return (
@@ -285,7 +287,7 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
                   <McpServerCard
                     key={server.id}
                     server={server}
-                    toolStatuses={toolStatuses}
+                    agentTargets={agentTargets}
                     onOpen={() => setDrawer({ type: "edit", id: server.id })}
                     onToggleTool={(toolId, enabled) => void handleToggle(server.id, toolId, enabled)}
                   />

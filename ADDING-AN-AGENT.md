@@ -127,7 +127,10 @@ Provider（Base URL / API Key / 模型）时才做。现有目标：`claude-code
      Agent 卡片、接入设置对话框、状态汇总、安装检测全部由该注册表驱动，无需新组件；
    - `src/features/models/components/shared/AgentToolIcon.tsx` 的
      `AgentToolIconId` 联合类型 + 图标分支；
-   - 如支持 MCP 配置同步，另见 `src/types/index.ts` 的 `MCP_TOOL_IDS`。
+   - 如支持 MCP 配置同步，除扩展 `src/types/mcp.ts` / Rust 侧对应的 `MCP_TOOL_IDS`
+     外，还要在 `src/features/mcp/lib/agentTargets.ts` 登记 Settings Agent id → MCP
+     tool id 的能力映射。MCP 卡片轮播会用这张映射与当前 `installed && enabled` profiles、
+     MCP 实际安装检测取交集；图标与显示名直接来自 `AgentProfile`，不要另建 SVG 清单。
 5. 跑 `cargo test -p skillstar-models`（含属性测试 `tool_sync_prop_tests`）。
 
 ---

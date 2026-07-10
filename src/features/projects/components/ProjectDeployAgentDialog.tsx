@@ -8,7 +8,7 @@ import { Badge } from "../../../components/ui/badge";
 import { Button } from "../../../components/ui/button";
 import { ModalShell } from "../../../components/ui/ModalShell";
 import { SelectAllButton } from "../../../components/ui/SelectAllButton";
-import { supportsProjectDeploy } from "../../../lib/agentProfiles";
+import { selectTargetableAgentProfiles, supportsProjectDeploy } from "../../../lib/agentProfiles";
 import { agentIconCls, cn, formatPlatformPath } from "../../../lib/utils";
 import type { AgentProfile, ProjectEntry, Skill } from "../../../types";
 
@@ -36,7 +36,7 @@ export function ProjectDeployAgentDialog({
   const { t } = useTranslation();
   const prefersReducedMotion = useReducedMotion();
   const enabledProfiles = useMemo(
-    () => profiles.filter((profile) => profile.enabled && supportsProjectDeploy(profile)),
+    () => selectTargetableAgentProfiles(profiles).filter(supportsProjectDeploy),
     [profiles],
   );
 
