@@ -49,7 +49,10 @@ export function GrokUsagePanel({
   return (
     <div className={cn("space-y-3", compact && "space-y-2")}>
       {weekly && <GrokWeeklyBar window={weekly} accent={accent} compact={compact} />}
-      {!weekly && monthly && <UsageWindowBar window={monthly} compact={compact} />}
+      {/* Prefer weekly as the gating bar; still surface legacy monthly absolute quota when both exist. */}
+      {monthly && (!weekly || (monthly.total != null && monthly.total > 0 && monthly.used > 0)) && (
+        <UsageWindowBar window={monthly} compact={compact} />
+      )}
       {(parsedSpend || onDemandCap) && (
         <div
           className={cn("space-y-2 rounded-2xl border p-3", compact && "p-2")}

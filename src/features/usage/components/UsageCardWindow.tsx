@@ -303,10 +303,20 @@ export function UsageCardWindow() {
 
       {/* Body: dark chrome hosts light island with shared UsageCardBody (compact). */}
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3">
-        <div className="truncate text-xs text-muted-foreground">
-          {catalog?.display_name ?? subscription.catalog_id}
-          {" · "}
-          {authModeLabel(subscription.auth_mode, t)}
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground">
+          <span className="truncate">{catalog?.display_name ?? subscription.catalog_id}</span>
+          <span>·</span>
+          <span>{authModeLabel(subscription.auth_mode, t)}</span>
+          {subscription.requires_reauth && (
+            <span className="rounded bg-amber-500/15 px-1 py-0.5 text-[10px] font-medium text-amber-600">
+              {t("usage.reauthRequired")}
+            </span>
+          )}
+          {subscription.note?.trim() ? (
+            <span className="line-clamp-1 w-full text-[10px] text-muted-foreground/80" title={subscription.note}>
+              {subscription.note.trim()}
+            </span>
+          ) : null}
         </div>
 
         <LightBodySurface theme={theme} className="min-h-0 flex-1 space-y-2.5 overflow-y-auto">

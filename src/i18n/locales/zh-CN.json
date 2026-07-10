@@ -1283,7 +1283,20 @@
     "emptyUsagePending": "等待绑定凭证",
     "emptyUsageWindowName": "用量窗口",
     "emptyUsageTip": "支持多种认证方式：OAuth 浏览器登录、API Key 或手动维护。",
-    "bindNow": "立即绑定"
+    "bindNow": "立即绑定",
+    "remainingPercent": "剩余 {{percent}}%",
+    "awaitingUsageRefresh": "凭证已保存 — 点刷新加载实时用量。",
+    "awaitingUsageWithPlan": "套餐：{{plan}}。点刷新加载实时用量。",
+    "reauthRequired": "需重登",
+    "reauthRequiredHint": "请重新登录以刷新此账号。",
+    "cliSwitchSupportedHint": "可同步凭证到 CLI。",
+    "noCredential": "无凭证",
+    "billingCycle_monthly": "月付",
+    "billingCycle_annual": "年付",
+    "billingCycle_one-time": "一次性",
+    "balanceGrantedOnly": "赠送 {{granted}}",
+    "balanceTopupOnly": "充值 {{topup}}",
+    "creditMinimum": "使用门槛 {{min}}"
   },
   "models": {
     "hub": {

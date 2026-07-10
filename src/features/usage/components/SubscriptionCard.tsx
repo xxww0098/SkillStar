@@ -89,6 +89,11 @@ export function SubscriptionCard({
         <UsageCardMetaStrip
           authMode={sub.auth_mode}
           isActive={sub.is_active}
+          requiresReauth={sub.requires_reauth}
+          supportsCliSwitch={sub.supports_cli_switch}
+          hasCredential={sub.has_credential}
+          billingCycle={sub.billing_cycle}
+          note={sub.note}
           fetchedAt={usage?.fetched_at ?? 0}
           resetInfo={resetInfo}
           bodyOwnsPrimaryReset={bodyOwnsPrimaryReset}

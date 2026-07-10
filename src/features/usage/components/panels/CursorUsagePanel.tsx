@@ -52,7 +52,8 @@ export function CursorUsagePanel({
   return (
     <div className={cn("space-y-3", compact && "space-y-2")}>
       {monthly && <UsageWindowBar window={monthly} compact={compact} />}
-      {!monthly && weekly && <UsageWindowBar window={weekly} compact={compact} />}
+      {weekly && <UsageWindowBar window={weekly} compact={compact} />}
+      {usage.hourly && <UsageWindowBar window={usage.hourly} compact={compact} />}
       {hasSecondary && (
         <SecondaryPanel accent={accent} className={compact ? "p-2" : undefined}>
           {bonus?.credit_amount && (

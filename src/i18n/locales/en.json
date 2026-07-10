@@ -1283,7 +1283,20 @@
     "emptyUsagePending": "Waiting for credentials",
     "emptyUsageWindowName": "Usage window",
     "emptyUsageTip": "Supports multiple auth modes: OAuth browser login, API Key, or manual entry.",
-    "bindNow": "Bind Now"
+    "bindNow": "Bind Now",
+    "remainingPercent": "{{percent}}% left",
+    "awaitingUsageRefresh": "Credentials saved — refresh to load live usage.",
+    "awaitingUsageWithPlan": "Plan: {{plan}}. Refresh to load live usage.",
+    "reauthRequired": "Re-auth",
+    "reauthRequiredHint": "Sign in again to refresh this account.",
+    "cliSwitchSupportedHint": "Can push credentials to the CLI.",
+    "noCredential": "No credential",
+    "billingCycle_monthly": "Monthly",
+    "billingCycle_annual": "Annual",
+    "billingCycle_one-time": "One-time",
+    "balanceGrantedOnly": "Granted {{granted}}",
+    "balanceTopupOnly": "Top-up {{topup}}",
+    "creditMinimum": "Min for usage: {{min}}"
   },
   "models": {
     "hub": {
