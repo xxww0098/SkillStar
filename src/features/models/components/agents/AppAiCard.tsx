@@ -1,10 +1,10 @@
-import ClaudeIcon from "@lobehub/icons/es/Claude/components/Color";
-import CodexIcon from "@lobehub/icons/es/Codex/components/Color";
 import { motion } from "framer-motion";
 import { ArrowRight, Eraser, Loader2, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../../components/ui/button";
+import { ClaudeColor, CodexColor } from "../../../../components/ui/icons/lobe";
+import { LobeIcon } from "../../../../components/ui/icons/LobeIcon";
 import { getAiConfigCached } from "../../../../hooks/useAiConfig";
 import { cn } from "../../../../lib/utils";
 import type { AiConfig } from "../../../../types";
@@ -159,7 +159,11 @@ export function AppAiCard({ onOpenSettings }: AppAiCardProps) {
                           !canClaude(p) && "pointer-events-none opacity-40",
                         )}
                       >
-                        {isSetting ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <ClaudeIcon size={11} />}
+                        {isSetting ? (
+                          <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                        ) : (
+                          <LobeIcon icon={ClaudeColor} size={11} />
+                        )}
                         Claude
                       </button>
                       <button
@@ -175,7 +179,11 @@ export function AppAiCard({ onOpenSettings }: AppAiCardProps) {
                           !canCodex(p) && "pointer-events-none opacity-40",
                         )}
                       >
-                        {isSetting ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <CodexIcon size={11} />}
+                        {isSetting ? (
+                          <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                        ) : (
+                          <LobeIcon icon={CodexColor} size={11} />
+                        )}
                         OpenAI
                       </button>
                     </div>

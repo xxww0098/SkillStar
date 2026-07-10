@@ -18,7 +18,6 @@ export function McpServerCard({ server, agentTargets, onOpen, onToggleTool }: Mc
   const { t } = useTranslation();
   const isRemote = server.transport === "http" || server.transport === "sse";
   const summary = isRemote ? server.url : [server.command, ...(server.args ?? [])].filter(Boolean).join(" ");
-  const enabledCount = agentTargets.filter(({ toolId }) => server.enabled[toolId]).length;
   const TransportIcon = isRemote ? Globe : Terminal;
 
   return (
@@ -59,29 +58,24 @@ export function McpServerCard({ server, agentTargets, onOpen, onToggleTool }: Mc
           {server.description || (isRemote ? server.url : summary) || "—"}
         </CardDescription>
       }
-      footerClassName="ss-card-footer flex items-center justify-between mt-auto rounded-b-xl"
+      footerClassName="ss-card-footer flex items-center mt-auto rounded-b-xl"
       footer={
-        <>
-          <span className="text-micro text-muted-foreground/70 tabular-nums">
-            {enabledCount} / {agentTargets.length}
-          </span>
-          <div className="relative z-10 flex min-w-0 flex-1 items-center justify-end gap-1.5">
-            <AgentTargetCarousel
-              items={agentTargets.map(({ toolId, profile }) => {
-                const selected = server.enabled[toolId] ?? false;
-                return {
-                  id: toolId,
-                  profile,
-                  selected,
-                  title: `${profile.display_name} ${selected ? t("mcp.toggleOff") : t("mcp.toggleOn")}`,
-                };
-              })}
-              onToggle={({ id, selected }) => {
-                onToggleTool(id, selected !== true);
-              }}
-            />
-          </div>
-        </>
+        <div className="relative z-10 flex min-w-0 flex-1 items-center justify-end gap-1.5">
+          <AgentTargetCarousel
+            items={agentTargets.map(({ toolId, profile }) => {
+              const selected = server.enabled[toolId] ?? false;
+              return {
+                id: toolId,
+                profile,
+                selected,
+                title: `${profile.display_name} ${selected ? t("mcp.toggleOff") : t("mcp.toggleOn")}`,
+              };
+            })}
+            onToggle={({ id, selected }) => {
+              onToggleTool(id, selected !== true);
+            }}
+          />
+        </div>
       }
     />
   );

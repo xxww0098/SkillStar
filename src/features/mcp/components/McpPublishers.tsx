@@ -1,4 +1,3 @@
-import ZhipuColor from "@lobehub/icons/es/Zhipu/components/Color";
 import { motion } from "framer-motion";
 import {
   Boxes,
@@ -18,6 +17,8 @@ import { useTranslation } from "react-i18next";
 import { Badge } from "../../../components/ui/badge";
 import { CardTemplate } from "../../../components/ui/card-template";
 import { Github } from "../../../components/ui/icons/Github";
+import { ZhipuColor } from "../../../components/ui/icons/lobe";
+import { LobeIcon } from "../../../components/ui/icons/LobeIcon";
 import { PublisherAvatar } from "../../marketplace/components/OfficialPublishers";
 import { cn } from "../../../lib/utils";
 import type { McpPublisherSummary } from "../../../types";
@@ -28,7 +29,7 @@ import type { McpPublisherSummary } from "../../../types";
 // icon (adspower) fall through to the shared PublisherAvatar (asset → remote → icon).
 export const PUBLISHER_BRAND_ICON: Record<string, ReactNode> = {
   github: <Github className="h-6 w-6 text-primary/70" />,
-  bigmodel: <ZhipuColor size={26} />,
+  bigmodel: <LobeIcon icon={ZhipuColor} size={26} />,
   anthropic: <Bot className="h-6 w-6 text-primary/70" />,
   microsoft: <MonitorSmartphone className="h-6 w-6 text-primary/70" />,
   saas: <Cloud className="h-6 w-6 text-primary/70" />,

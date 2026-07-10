@@ -1,18 +1,14 @@
 import type {
   AppId,
-  AppProviders,
   ConnectionTestResult,
   FlatProvidersResponse,
   LatencyResult,
   ModelCatalogFetchResult,
-  ProviderEntry,
   ProviderEntryFlat,
   ProviderPatchFlat,
   ProviderUpdateFlatResult,
   EndpointLatencyResult,
-  ProviderPreset,
   ProviderPresetFlat,
-  SwitchResult,
   ToolActivationsMap,
   ToolConfigTarget,
   ToolConfigFileInfo,
@@ -40,22 +36,6 @@ interface BalanceRawResponse {
 
 /** Models mode: providers, presets, tool activations, and latency/balance checks. */
 export interface ModelsCommands {
-  // Per-app provider store (v1)
-  get_app_providers: { args: { appId: AppId }; result: AppProviders };
-  create_provider: {
-    args: { appId: AppId; entry: Omit<ProviderEntry, "id" | "created_at"> };
-    result: ProviderEntry;
-  };
-  update_provider: {
-    args: { appId: AppId; id: string; patch: Partial<ProviderEntry> };
-    result: ProviderEntry;
-  };
-  delete_provider: { args: { appId: AppId; id: string }; result: void };
-  switch_active_provider: {
-    args: { appId: AppId; providerId: string; syncTools: string[] };
-    result: SwitchResult;
-  };
-
   // Flat provider store (v2)
   get_providers_flat: { args: Record<string, never>; result: FlatProvidersResponse };
   create_provider_flat: { args: { entry: Partial<ProviderEntryFlat> }; result: ProviderEntryFlat };
@@ -100,19 +80,10 @@ export interface ModelsCommands {
     result: ToolSyncResult;
   };
 
-  // Tool config targets (v1)
+  // Tool config targets
   get_tool_config_targets: { args: { app_id: AppId }; result: ToolConfigTarget[] };
-  sync_provider_to_tool: {
-    args: { app_id: AppId; provider_id: string; tool_id: string };
-    result: ToolSyncResult;
-  };
-  sync_provider_to_all_tools: {
-    args: { app_id: AppId; provider_id: string; tool_ids: string[] };
-    result: ToolSyncResult[];
-  };
 
   // Presets and discovery
-  get_provider_presets: { args: Record<string, never>; result: ProviderPreset[] };
   get_provider_presets_flat: { args: Record<string, never>; result: ProviderPresetFlat[] };
   test_endpoints_latency: {
     args: { urls: string[]; apiKey?: string | null; timeoutMs?: number };
@@ -142,7 +113,6 @@ export interface ModelsCommands {
     };
     result: LatencyResult;
   };
-  test_all_providers_latency: { args: { app_id: AppId }; result: LatencyResult[] };
   query_provider_balance: {
     args: { presetId: string; apiKey: string; baseUrl: string };
     result: BalanceRawResponse;

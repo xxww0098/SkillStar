@@ -1,14 +1,7 @@
 //! models domain types. Split out of the old monolithic index for
 //! navigability; all re-exported by `index.ts`.
-//!
-//! ProviderPreset is generated via ts-rs from
-//! `skillstar_models::providers::types::ProviderPreset` — see
-//! `src/types/generated/` and `bun run types:gen`. Do not hand-edit that
-//! shape here; edit the Rust struct and regenerate instead.
 
 import type { NavPage } from "./marketplace";
-
-export type { ProviderPreset } from "./generated/ProviderPreset";
 
 export type AppMode = "skills" | "usage" | "models";
 /**
@@ -22,45 +15,6 @@ export type ModelsNavPage = "hub";
 export type AllNavPage = NavPage | ModelsNavPage;
 
 export type AppId = "claude" | "codex";
-
-export interface ProviderSettings {
-  base_url: string;
-  api_key: string;
-  models: ModelMapping[];
-  timeout_ms?: number;
-  max_retries?: number;
-}
-
-export interface ModelMapping {
-  source_model: string;
-  target_model: string;
-  enabled: boolean;
-}
-
-export interface ProviderEntry {
-  id: string;
-  name: string;
-  category: string;
-  settings_config: ProviderSettings;
-  preset_id?: string;
-  website_url?: string;
-  api_key_url?: string;
-  icon_color?: string;
-  notes?: string;
-  created_at?: number;
-  sort_index?: number;
-  meta?: Record<string, unknown>;
-}
-
-export interface AppProviders {
-  providers: Record<string, ProviderEntry>;
-  current: string | null;
-}
-
-export interface ProvidersStore {
-  claude: AppProviders;
-  codex: AppProviders;
-}
 
 export interface LatencyResult {
   provider_id: string;
@@ -85,13 +39,6 @@ export interface ToolSyncResult {
   config_path?: string;
   error?: string;
   backup_path?: string;
-}
-
-export interface SwitchResult {
-  app_id: AppId;
-  provider_id: string;
-  provider_name: string;
-  tools_synced: ToolSyncResult[];
 }
 
 // === Flat Provider Store Types (v2 architecture) ===

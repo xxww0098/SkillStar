@@ -15,8 +15,22 @@ function getNumLike(record: Record<string, unknown> | undefined, key: string): s
   return typeof v === "number" || typeof v === "string" ? v : undefined;
 }
 
+/** Unwrap the common `{ data: {...} }` envelope, falling back to the root object. */
+function unwrapData(data: Record<string, unknown>): Record<string, unknown> {
+  const nested = data.data;
+  return typeof nested === "object" && nested !== null && !Array.isArray(nested)
+    ? (nested as Record<string, unknown>)
+    : data;
+}
+
 /**
- * Parse raw balance API response into normalized BalanceInfo based on preset.
+ * Per-provider balance response parsers, keyed by `balance_parser` (which the
+ * Rust preset registry pins to equal the preset id — see the guard test
+ * `flat_preset_balance_parsers_are_pinned_to_frontend` in
+ * `crates/skillstar-models/src/providers/tests/part2.rs`).
+ *
+ * Adding a provider with a balance API means: add its parser here, cover it in
+ * `balance.test.ts`, and extend the pinned list in that Rust guard test.
  *
  * Each provider returns a different JSON shape:
  * - DeepSeek: { balance_infos: [{ total_balance: "1.23", currency: "CNY" }] }
@@ -24,75 +38,62 @@ function getNumLike(record: Record<string, unknown> | undefined, key: string): s
  * - OpenRouter: { data: { total_credits: 5.0, usage: 3.5 } } (USD)
  * - SiliconFlow: { data: { balance: "1.23" } } (CNY)
  */
-function parseBalanceResponse(presetId: string, raw: unknown): BalanceInfo | null {
+export const BALANCE_PARSERS: Record<string, (data: Record<string, unknown>, now: number) => BalanceInfo | null> = {
+  deepseek: (data, now) => {
+    const infos = data.balance_infos;
+    const info = Array.isArray(infos) ? (infos[0] as Record<string, unknown>) : undefined;
+    if (!info) return null;
+    const rawAvailable = getNumLike(info, "total_balance") ?? getNumLike(info, "available_balance") ?? "0";
+    const available = Number.parseFloat(String(rawAvailable));
+    return {
+      available: Number.isFinite(available) ? available : 0,
+      currency: getStr(info, "currency") ?? "CNY",
+      updated_at: now,
+    };
+  },
+  kimi: (data, now) => {
+    const d = unwrapData(data);
+    const rawAvailable = getNumLike(d, "available_balance") ?? getNumLike(d, "balance") ?? "0";
+    const available = Number.parseFloat(String(rawAvailable));
+    const totalRaw = getNumLike(d, "total_balance");
+    const total = totalRaw != null ? Number.parseFloat(String(totalRaw)) : undefined;
+    return {
+      available: Number.isFinite(available) ? available : 0,
+      total: total != null && Number.isFinite(total) ? total : undefined,
+      currency: getStr(d, "currency") ?? "CNY",
+      updated_at: now,
+    };
+  },
+  openrouter: (data, now) => {
+    const d = unwrapData(data);
+    const totalCredits = Number.parseFloat(String(getNumLike(d, "total_credits") ?? "0"));
+    const usage = Number.parseFloat(String(getNumLike(d, "usage") ?? "0"));
+    const available = totalCredits - usage;
+    return {
+      available: Number.isFinite(available) ? available : 0,
+      total: Number.isFinite(totalCredits) ? totalCredits : undefined,
+      currency: "USD",
+      updated_at: now,
+    };
+  },
+  siliconflow: (data, now) => {
+    const d = unwrapData(data);
+    const rawAvailable = getNumLike(d, "balance") ?? "0";
+    const available = Number.parseFloat(String(rawAvailable));
+    return {
+      available: Number.isFinite(available) ? available : 0,
+      currency: "CNY",
+      updated_at: now,
+    };
+  },
+};
+
+/** Parse a raw balance API response into normalized BalanceInfo based on preset. */
+export function parseBalanceResponse(presetId: string, raw: unknown): BalanceInfo | null {
   if (!raw || typeof raw !== "object") return null;
-
-  const now = Date.now();
-  const data = raw as Record<string, unknown>;
-
-  switch (presetId) {
-    case "deepseek": {
-      const infos = data.balance_infos;
-      const info = Array.isArray(infos) ? (infos[0] as Record<string, unknown>) : undefined;
-      if (!info) return null;
-      const rawAvailable = getNumLike(info, "total_balance") ?? getNumLike(info, "available_balance") ?? "0";
-      const available = Number.parseFloat(String(rawAvailable));
-      return {
-        available: Number.isFinite(available) ? available : 0,
-        currency: getStr(info, "currency") ?? "CNY",
-        updated_at: now,
-      };
-    }
-    case "kimi": {
-      const nested = data.data;
-      const d =
-        typeof nested === "object" && nested !== null && !Array.isArray(nested)
-          ? (nested as Record<string, unknown>)
-          : data;
-      const rawAvailable = getNumLike(d, "available_balance") ?? getNumLike(d, "balance") ?? "0";
-      const available = Number.parseFloat(String(rawAvailable));
-      const totalRaw = getNumLike(d, "total_balance");
-      const total = totalRaw != null ? Number.parseFloat(String(totalRaw)) : undefined;
-      return {
-        available: Number.isFinite(available) ? available : 0,
-        total: total != null && Number.isFinite(total) ? total : undefined,
-        currency: getStr(d, "currency") ?? "CNY",
-        updated_at: now,
-      };
-    }
-    case "openrouter": {
-      const nested = data.data;
-      const d =
-        typeof nested === "object" && nested !== null && !Array.isArray(nested)
-          ? (nested as Record<string, unknown>)
-          : data;
-      const totalCredits = Number.parseFloat(String(getNumLike(d, "total_credits") ?? "0"));
-      const usage = Number.parseFloat(String(getNumLike(d, "usage") ?? "0"));
-      const available = totalCredits - usage;
-      return {
-        available: Number.isFinite(available) ? available : 0,
-        total: Number.isFinite(totalCredits) ? totalCredits : undefined,
-        currency: "USD",
-        updated_at: now,
-      };
-    }
-    case "siliconflow": {
-      const nested = data.data;
-      const d =
-        typeof nested === "object" && nested !== null && !Array.isArray(nested)
-          ? (nested as Record<string, unknown>)
-          : data;
-      const rawAvailable = getNumLike(d, "balance") ?? "0";
-      const available = Number.parseFloat(String(rawAvailable));
-      return {
-        available: Number.isFinite(available) ? available : 0,
-        currency: "CNY",
-        updated_at: now,
-      };
-    }
-    default:
-      return null;
-  }
+  const parser = BALANCE_PARSERS[presetId];
+  if (!parser) return null;
+  return parser(raw as Record<string, unknown>, Date.now());
 }
 
 /**

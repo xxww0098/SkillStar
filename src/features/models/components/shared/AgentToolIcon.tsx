@@ -1,8 +1,7 @@
-import ClaudeIcon from "@lobehub/icons/es/Claude/components/Color";
-import CodexIcon from "@lobehub/icons/es/Codex/components/Color";
-import GeminiIcon from "@lobehub/icons/es/Gemini/components/Color";
-import { memo, type ReactNode } from "react";
-import { cn } from "../../../../lib/utils";
+import { memo } from "react";
+import { ClaudeColor, CodexColor, GeminiColor, type LobeIconComponent } from "@/components/ui/icons/lobe";
+import { LobeIcon } from "@/components/ui/icons/LobeIcon";
+import { cn } from "@/lib/utils";
 
 export type AgentToolIconId = "claude-code" | "codex" | "opencode" | "claude-desktop" | "gemini";
 
@@ -18,60 +17,33 @@ const SIZE_MAP = {
   md: { box: "h-7 w-7", icon: 18 },
 } as const;
 
-function LetterIcon({ letter, active }: { letter: string; active?: boolean }) {
-  return (
-    <span
-      className={cn(
-        "flex h-full w-full items-center justify-center rounded-md text-xs font-bold",
-        active ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground",
-      )}
-    >
-      {letter}
-    </span>
-  );
-}
+const DEFAULT_CHIP = "border-border/50 bg-background/70";
+
+type ToolGlyph = { icon: LobeIconComponent; chipClass: string } | { letter: string };
+
+const GLYPH_BY_TOOL_ID: Record<AgentToolIconId, ToolGlyph> = {
+  "claude-code": { icon: ClaudeColor, chipClass: DEFAULT_CHIP },
+  codex: { icon: CodexColor, chipClass: DEFAULT_CHIP },
+  gemini: { icon: GeminiColor, chipClass: DEFAULT_CHIP },
+  "claude-desktop": { icon: ClaudeColor, chipClass: "border-primary/25 bg-primary/[0.05]" },
+  opencode: { letter: "O" },
+};
 
 function AgentToolIconInner({ toolId, size = "sm", className }: AgentToolIconProps) {
   const s = SIZE_MAP[size];
-  let content: ReactNode;
-
-  switch (toolId) {
-    case "claude-code":
-      content = (
-        <span className="flex h-full w-full items-center justify-center rounded-md border border-border/50 bg-background/70">
-          <ClaudeIcon size={s.icon} />
-        </span>
-      );
-      break;
-    case "codex":
-      content = (
-        <span className="flex h-full w-full items-center justify-center rounded-md border border-border/50 bg-background/70">
-          <CodexIcon size={s.icon} />
-        </span>
-      );
-      break;
-    case "opencode":
-      content = <LetterIcon letter="O" />;
-      break;
-    case "gemini":
-      content = (
-        <span className="flex h-full w-full items-center justify-center rounded-md border border-border/50 bg-background/70">
-          <GeminiIcon size={s.icon} />
-        </span>
-      );
-      break;
-    case "claude-desktop":
-      content = (
-        <span className="flex h-full w-full items-center justify-center rounded-md border border-primary/25 bg-primary/[0.05]">
-          <ClaudeIcon size={s.icon} />
-        </span>
-      );
-      break;
-  }
+  const glyph = GLYPH_BY_TOOL_ID[toolId];
 
   return (
     <span className={cn("relative inline-flex shrink-0", s.box, className)} aria-hidden>
-      {content}
+      {"letter" in glyph ? (
+        <span className="flex h-full w-full items-center justify-center rounded-md bg-muted text-xs font-bold text-muted-foreground">
+          {glyph.letter}
+        </span>
+      ) : (
+        <span className={cn("flex h-full w-full items-center justify-center rounded-md border", glyph.chipClass)}>
+          <LobeIcon icon={glyph.icon} size={s.icon} />
+        </span>
+      )}
     </span>
   );
 }

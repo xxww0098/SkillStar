@@ -1,10 +1,11 @@
-import ZhipuColor from "@lobehub/icons/es/Zhipu/components/Color";
 import { Boxes, Check, Download, ExternalLink, Globe, Info, Sparkles, Star, Terminal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { CardDescription, CardTitle } from "../../../components/ui/card";
 import { CardTemplate } from "../../../components/ui/card-template";
 import { ExternalAnchor } from "../../../components/ui/ExternalAnchor";
+import { ZhipuColor } from "../../../components/ui/icons/lobe";
+import { LobeIcon } from "../../../components/ui/icons/LobeIcon";
 import { cn, formatInstalls } from "../../../lib/utils";
 import type { McpMarketEntry, McpServerKind } from "../../../types";
 
@@ -72,7 +73,11 @@ export function McpMarketCard({ entry, installed, onInstall, onOpenDetail, compa
               entry.recommended && "ring-1 ring-primary/25",
             )}
           >
-            {entry.source === "bigmodel" ? <ZhipuColor size={18} /> : <Boxes className="h-4 w-4 text-primary" />}
+            {entry.source === "bigmodel" ? (
+              <LobeIcon icon={ZhipuColor} size={18} />
+            ) : (
+              <Boxes className="h-4 w-4 text-primary" />
+            )}
           </div>
           <div className="min-w-0">
             <CardTitle className="truncate ss-card-title">{entry.name}</CardTitle>

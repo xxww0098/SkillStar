@@ -1,5 +1,6 @@
-import ClaudeIcon from "@lobehub/icons/es/Claude/components/Color";
 import { useTranslation } from "react-i18next";
+import { ClaudeColor } from "../../../../components/ui/icons/lobe";
+import { LobeIcon } from "../../../../components/ui/icons/LobeIcon";
 import { Input } from "../../../../components/ui/input";
 import { LATEST_CLAUDE_MODELS } from "../../lib/providerPatch";
 import { fieldLabelClass } from "../providerForm/ProviderConfigPrimitives";
@@ -37,7 +38,7 @@ export function ClaudeModelMapping({ values, options, onChange, disabled }: Clau
     <div className="space-y-3">
       <div className="flex items-center gap-2">
         <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-border/60 bg-background/70">
-          <ClaudeIcon size={18} />
+          <LobeIcon icon={ClaudeColor} size={18} />
         </span>
         <div>
           <p className="text-xs font-semibold text-foreground">{t("models.dialog.claudeMappingTitle")}</p>

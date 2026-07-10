@@ -363,15 +363,6 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   write_tool_config_file: () => ({ success: true }),
   format_tool_config_file: () => '{\n  "// demo": "formatted sample (browser dev mock)"\n}',
   get_provider_presets_flat: () => PRESETS_FLAT,
-  get_provider_presets: () =>
-    PRESETS_FLAT.map((p) => ({
-      id: p.id,
-      name: p.name,
-      base_url: p.base_url_openai,
-      api_key_url: p.api_key_url ?? "",
-      icon_color: p.icon_color,
-      models: p.models,
-    })),
   detect_env_conflicts: () => [],
   detect_provider_conflicts: () => [],
   get_tool_config_targets: () => [],
@@ -458,7 +449,9 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   }),
   get_subscription_alerts: () => USAGE_ALERTS,
   get_usage_summary: () => USAGE_SUMMARY,
-  refresh_all_subscriptions: () => USAGE_SUBSCRIPTIONS.map((s) => s.usage).filter(Boolean),
+  // Returns full Subscription list (backend shape). Optional catalogId is
+  // accepted for API parity; mock still returns every sample row.
+  refresh_all_subscriptions: (_args?: Record<string, unknown>) => USAGE_SUBSCRIPTIONS,
   refresh_subscription_usage: (args) => USAGE_SUBSCRIPTIONS.find((s) => s.id === args?.id)?.usage ?? null,
   get_subscription_api_key: () => "sk-demo-********",
 
