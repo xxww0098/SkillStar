@@ -11,7 +11,7 @@
 export type ProviderToolId = "claude-code" | "codex" | "opencode" | "gemini";
 
 /** All tools with on-disk config files the app can read/write. */
-export type AgentToolId = ProviderToolId | "claude-desktop";
+export type AgentToolId = ProviderToolId;
 
 /**
  * How an agent loads providers.
@@ -46,7 +46,7 @@ export interface AgentDescriptor {
 export const PROVIDER_AGENTS: AgentDescriptor[] = [
   {
     toolId: "claude-code",
-    displayName: "Claude",
+    displayName: "Claude Code",
     iconId: "claude-code",
     requiredUrlField: "anthropic",
     kind: "single",
@@ -86,8 +86,6 @@ export const PROVIDER_AGENTS: AgentDescriptor[] = [
   },
 ];
 
-export const CLAUDE_DESKTOP_TOOL_ID = "claude-desktop" as const;
-
 export function getAgent(toolId: string): AgentDescriptor | undefined {
   return PROVIDER_AGENTS.find((a) => a.toolId === toolId);
 }
@@ -107,11 +105,10 @@ export function providerCompatibleWithAgent(
     : Boolean(provider.base_url_openai?.trim());
 }
 
-/** Tools listed in the on-disk config file editor (provider agents + Claude Desktop). */
+/** Tools listed in the on-disk config file editor. */
 export const CONFIG_FILE_TOOLS: { toolId: AgentToolId; label: string }[] = [
-  { toolId: "claude-code", label: "Claude" },
+  { toolId: "claude-code", label: "Claude Code" },
   { toolId: "codex", label: "Codex" },
   { toolId: "opencode", label: "OpenCode" },
-  { toolId: CLAUDE_DESKTOP_TOOL_ID, label: "Claude Desktop" },
   { toolId: "gemini", label: "Gemini CLI" },
 ];

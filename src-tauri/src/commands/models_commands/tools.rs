@@ -202,7 +202,7 @@ pub async fn update_tool_settings(
 // Tool Installation Detection
 // ---------------------------------------------------------------------------
 
-/// Detect whether an Agent tool (CLI) is installed on the system.
+/// Detect whether an Agent tool is installed on the system.
 ///
 /// Checks:
 /// 1. Whether the CLI binary exists on the **enriched** PATH (Homebrew, agent
@@ -211,29 +211,16 @@ pub async fn update_tool_settings(
 ///
 /// Returns a JSON object: `{ "installed": bool, "binary_found": bool, "config_dir_found": bool }`
 ///
-/// A tool is considered "installed" if the binary is found on the enriched PATH.
-/// The config_dir_found field provides additional context (a tool may be installed
-/// but not yet configured, or config may exist from a previous installation).
+/// A tool is considered "installed" if the binary is found on the enriched PATH;
+/// Claude Code also accepts the shared Desktop app surface. The config_dir_found
+/// field provides additional context (a tool may be installed but not yet
+/// configured, or config may exist from a previous installation).
 ///
 /// Binary probing must stay aligned with agent-profile install detection
 /// (`skillstar_skills::…::detect`) — both call
 /// `skillstar_core::infra::path_env::which_in_enriched`.
 #[tauri::command]
 pub async fn detect_tool_installation(tool_id: String) -> Result<serde_json::Value, AppError> {
-    // Claude Desktop is a GUI app, not a CLI — detect by app bundle / install path instead
-    // of by binary on PATH.
-    if tool_id == "claude-desktop" {
-        let binary_found = skillstar_core::infra::path_env::desktop_app_installed("Claude");
-        let config_dir_found = dirs::config_dir()
-            .map(|base| base.join("Claude").is_dir())
-            .unwrap_or(false);
-        return Ok(serde_json::json!({
-            "installed": binary_found,
-            "binary_found": binary_found,
-            "config_dir_found": config_dir_found,
-        }));
-    }
-
     let binary_name = match tool_id.as_str() {
         "claude-code" => "claude",
         "codex" => "codex",
@@ -241,7 +228,7 @@ pub async fn detect_tool_installation(tool_id: String) -> Result<serde_json::Val
         "gemini" => "gemini",
         _ => {
             return Err(AppError::Other(format!(
-                "Unknown tool_id: '{}'. Supported: claude-code, codex, opencode, claude-desktop, gemini.",
+                "Unknown tool_id: '{}'. Supported: claude-code, codex, opencode, gemini.",
                 tool_id
             )));
         }
@@ -263,14 +250,28 @@ pub async fn detect_tool_installation(tool_id: String) -> Result<serde_json::Val
         })
         .unwrap_or(false);
 
-    // A tool is considered installed if the binary is found on the enriched PATH
-    let installed = binary_found;
+    // Desktop Code and the CLI are two surfaces of the same Claude Code Agent.
+    let desktop_code_found = tool_id == "claude-code"
+        && skillstar_core::infra::path_env::desktop_app_installed("Claude");
+    let installed = agent_tool_installed_from_signals(
+        &tool_id,
+        binary_found,
+        desktop_code_found,
+    );
 
     Ok(serde_json::json!({
         "installed": installed,
         "binary_found": binary_found,
         "config_dir_found": config_dir_found
     }))
+}
+
+fn agent_tool_installed_from_signals(
+    tool_id: &str,
+    binary_found: bool,
+    desktop_code_found: bool,
+) -> bool {
+    binary_found || (tool_id == "claude-code" && desktop_code_found)
 }
 
 // ---------------------------------------------------------------------------
@@ -428,4 +429,21 @@ pub async fn resync_tool(
     }
 
     Ok(sync_result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::agent_tool_installed_from_signals;
+
+    #[test]
+    fn claude_code_installation_accepts_cli_or_desktop_code() {
+        assert!(agent_tool_installed_from_signals("claude-code", true, false));
+        assert!(agent_tool_installed_from_signals("claude-code", false, true));
+        assert!(!agent_tool_installed_from_signals(
+            "claude-code",
+            false,
+            false
+        ));
+        assert!(!agent_tool_installed_from_signals("codex", false, true));
+    }
 }

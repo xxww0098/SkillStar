@@ -35,9 +35,17 @@ fn config_path() -> PathBuf {
 
 pub fn load_config() -> AcpConfig {
     let p = config_path();
-    match std::fs::read_to_string(&p) {
+    let mut config = match std::fs::read_to_string(&p) {
         Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
         Err(_) => AcpConfig::default(),
+    };
+    normalize_builtin_label(&mut config);
+    config
+}
+
+fn normalize_builtin_label(config: &mut AcpConfig) {
+    if config.agent_command == default_agent_command() && config.agent_label == "Claude" {
+        config.agent_label = default_agent_label();
     }
 }
 
@@ -49,4 +57,28 @@ pub fn save_config(config: &AcpConfig) -> anyhow::Result<()> {
     let content = serde_json::to_string_pretty(config)?;
     std::fs::write(&p, content)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalizes_legacy_claude_label_only_for_builtin_command() {
+        let mut builtin = AcpConfig {
+            enabled: true,
+            agent_command: default_agent_command(),
+            agent_label: "Claude".to_string(),
+        };
+        normalize_builtin_label(&mut builtin);
+        assert_eq!(builtin.agent_label, "Claude Code");
+
+        let mut custom = AcpConfig {
+            enabled: true,
+            agent_command: "custom-acp".to_string(),
+            agent_label: "Claude".to_string(),
+        };
+        normalize_builtin_label(&mut custom);
+        assert_eq!(custom.agent_label, "Claude");
+    }
 }

@@ -13,13 +13,15 @@ name: string,
  */
 transport: string, command?: string | null, args?: Array<string>, env?: { [key in string]: string }, cwd?: string | null, url?: string | null, headers?: { [key in string]: string }, description?: string | null, homepage?: string | null, tags?: Array<string>, 
 /**
- * Per-tool enable flags, keyed by tool id (see [`MCP_TOOL_IDS`]).
+ * Per-tool enable flags, keyed by tool id (see [`MCP_TOOL_IDS`]). Existing
+ * stores may retain a legacy Desktop Chat cleanup tombstone: `true` means
+ * cleanup is pending; a successful removal consumes it to `false`.
  */
 enabled: { [key in string]: boolean }, 
 /**
  * Auto-approve every tool call for this server without prompting ("YOLO").
  * Maps to Kiro's `autoApprove: ["*"]` and Gemini's `trust: true`. There is
- * no verified native equivalent for Claude Code/Desktop, OpenCode, Grok,
+ * no verified native equivalent for Claude Code, OpenCode, Grok,
  * or ZCode, so this flag has no effect when projected to those tools.
  */
 autoApproveAll: boolean, 

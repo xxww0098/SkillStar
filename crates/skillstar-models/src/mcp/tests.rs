@@ -2,6 +2,17 @@
 
 use super::*;
 
+static LEGACY_DESKTOP_CONFIG_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn reset_legacy_desktop_config() -> std::path::PathBuf {
+    let path = resolve_legacy_claude_desktop_config_path().unwrap();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    std::fs::remove_file(&path).ok();
+    path
+}
+
 fn stdio(name: &str) -> McpServerEntry {
     let mut e = blank_entry(name, "stdio");
     e.command = Some("npx".into());
@@ -31,11 +42,27 @@ fn canonical_stdio_has_type_command_args_env() {
 }
 
 #[test]
-fn claude_desktop_omits_type_and_rejects_http() {
-    let v = claude_desktop_spec(&stdio("fs")).unwrap();
-    assert!(v.get("type").is_none());
-    assert_eq!(v["command"], "npx");
-    assert!(claude_desktop_spec(&http("remote")).is_err());
+fn supported_tool_ids_have_one_claude_code_target() {
+    assert!(MCP_TOOL_IDS.contains(&"claude-code"));
+    assert!(!MCP_TOOL_IDS.contains(&"claude-desktop"));
+    assert_eq!(
+        MCP_TOOL_IDS
+            .iter()
+            .filter(|tool_id| tool_id.starts_with("claude"))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn claude_code_mcp_installation_accepts_each_shared_surface() {
+    assert!(claude_code_installed_from_signals(true, false, false, false));
+    assert!(claude_code_installed_from_signals(false, true, false, false));
+    assert!(claude_code_installed_from_signals(false, false, true, false));
+    assert!(claude_code_installed_from_signals(false, false, false, true));
+    assert!(!claude_code_installed_from_signals(
+        false, false, false, false
+    ));
 }
 
 #[test]
@@ -216,6 +243,178 @@ fn write_then_read_store() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+#[test]
+fn read_store_preserves_hidden_legacy_projection_without_broadening_public_scope() {
+    let dir = std::env::temp_dir().join(format!("ss-mcp-legacy-test-{}", now_ms()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("mcp_servers.json");
+    let mut entry = stdio("legacy-desktop-only");
+    entry.id = "legacy-id".into();
+    entry.enabled.insert("claude-desktop".into(), true);
+    let store = McpStore {
+        version: 1,
+        servers: vec![entry],
+    };
+    write_mcp_store(&store, &path).unwrap();
+
+    let loaded = read_mcp_store(&path).unwrap();
+    let enabled = &loaded.servers[0].enabled;
+    assert_eq!(enabled.get(LEGACY_CLAUDE_DESKTOP_TOOL_ID), Some(&true));
+    assert_ne!(enabled.get("claude-code"), Some(&true));
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn legacy_cleanup_tombstone_is_consumed_and_false_never_authorizes_deletion() {
+    let mut entry = stdio("legacy-cleanup-state");
+    entry
+        .enabled
+        .insert(LEGACY_CLAUDE_DESKTOP_TOOL_ID.into(), true);
+    mark_legacy_desktop_chat_clean(&mut entry);
+    assert_eq!(
+        entry.enabled.get(LEGACY_CLAUDE_DESKTOP_TOOL_ID),
+        Some(&false)
+    );
+    assert!(cleanup_legacy_desktop_chat(&mut entry).is_none());
+
+    let mut public_only = stdio("public-only-state");
+    mark_legacy_desktop_chat_clean(&mut public_only);
+    assert!(!public_only
+        .enabled
+        .contains_key(LEGACY_CLAUDE_DESKTOP_TOOL_ID));
+}
+
+#[test]
+fn legacy_cleanup_preserves_other_desktop_chat_config() {
+    let dir = std::env::temp_dir().join(format!("ss-mcp-desktop-cleanup-{}", now_ms()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("claude_desktop_config.json");
+    std::fs::write(
+        &path,
+        r#"{
+  "theme": "dark",
+  "mcpServers": {
+    "legacy-managed": { "command": "old" },
+    "user-owned": { "command": "keep" }
+  }
+}"#,
+    )
+    .unwrap();
+
+    json_mcpservers_remove_strict(&path, "legacy-managed").unwrap();
+    let value: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(value["theme"], "dark");
+    assert!(value["mcpServers"].get("legacy-managed").is_none());
+    assert_eq!(value["mcpServers"]["user-owned"]["command"], "keep");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn legacy_cleanup_refuses_to_overwrite_malformed_desktop_chat_config() {
+    let dir = std::env::temp_dir().join(format!("ss-mcp-desktop-malformed-{}", now_ms()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("claude_desktop_config.json");
+    let original = "{ definitely-not-json";
+    std::fs::write(&path, original).unwrap();
+
+    assert!(json_mcpservers_remove_strict(&path, "legacy-managed").is_err());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn update_helper_renames_and_consumes_pending_desktop_chat_cleanup() {
+    let _guard = LEGACY_DESKTOP_CONFIG_TEST_LOCK.lock().unwrap();
+    let path = reset_legacy_desktop_config();
+    std::fs::write(
+        &path,
+        r#"{
+  "theme": "dark",
+  "mcpServers": {
+    "old-name": { "command": "old" },
+    "new-name": { "command": "user-new" },
+    "user-owned": { "command": "keep" }
+  }
+}"#,
+    )
+    .unwrap();
+
+    let mut entry = stdio("old-name");
+    entry.id = "rename-id".into();
+    entry
+        .enabled
+        .insert(LEGACY_CLAUDE_DESKTOP_TOOL_ID.into(), true);
+    let mut store = McpStore {
+        version: 1,
+        servers: vec![entry],
+    };
+    let (updated, results) = update_server_and_sync(
+        &mut store,
+        "rename-id",
+        McpServerPatch {
+            name: Some("new-name".into()),
+            ..McpServerPatch::default()
+        },
+        false,
+    )
+    .unwrap();
+
+    assert_eq!(updated.name, "new-name");
+    assert_eq!(
+        updated.enabled.get(LEGACY_CLAUDE_DESKTOP_TOOL_ID),
+        Some(&false)
+    );
+    assert!(results
+        .iter()
+        .any(|result| result.tool_id == LEGACY_CLAUDE_DESKTOP_TOOL_ID));
+    let value: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert!(value["mcpServers"].get("old-name").is_none());
+    assert_eq!(value["mcpServers"]["new-name"]["command"], "user-new");
+    assert_eq!(value["mcpServers"]["user-owned"]["command"], "keep");
+    std::fs::remove_file(path).ok();
+}
+
+#[test]
+fn malformed_desktop_chat_config_keeps_update_and_delete_store_evidence() {
+    let _guard = LEGACY_DESKTOP_CONFIG_TEST_LOCK.lock().unwrap();
+    let path = reset_legacy_desktop_config();
+    let malformed = "{ definitely-not-json";
+    std::fs::write(&path, malformed).unwrap();
+
+    let mut entry = stdio("retryable-name");
+    entry.id = "retryable-id".into();
+    entry
+        .enabled
+        .insert(LEGACY_CLAUDE_DESKTOP_TOOL_ID.into(), true);
+    let original = McpStore {
+        version: 1,
+        servers: vec![entry],
+    };
+
+    let mut update_store = original.clone();
+    assert!(update_server_and_sync(
+        &mut update_store,
+        "retryable-id",
+        McpServerPatch {
+            name: Some("lost-name".into()),
+            ..McpServerPatch::default()
+        },
+        false,
+    )
+    .is_err());
+    assert_eq!(update_store.servers, original.servers);
+
+    let mut delete_store = original.clone();
+    assert!(delete_server_and_sync(&mut delete_store, "retryable-id").is_err());
+    assert_eq!(delete_store.servers, original.servers);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), malformed);
+    std::fs::remove_file(path).ok();
+}
 
 #[test]
 fn mcp_presets_catalog_is_well_formed() {
@@ -319,7 +518,8 @@ fn sync_to_unknown_tool_errors_instead_of_silently_passing() {
 fn sync_all_returns_one_result_per_known_tool() {
     // sync_server_all_tools iterates MCP_TOOL_IDS (one per supported tool), so
     // the result vector length is a stable contract the UI depends on.
-    let results = sync_server_all_tools(&stdio("fs"), false);
+    let mut entry = stdio("fs");
+    let results = sync_server_all_tools(&mut entry, false);
     assert_eq!(
         results.len(),
         MCP_TOOL_IDS.len(),
@@ -333,4 +533,29 @@ fn sync_all_returns_one_result_per_known_tool() {
             r.tool_id
         );
     }
+}
+
+#[test]
+fn sync_all_keeps_legacy_cleanup_internal_and_only_for_existing_entries() {
+    let _guard = LEGACY_DESKTOP_CONFIG_TEST_LOCK.lock().unwrap();
+    let path = reset_legacy_desktop_config();
+    let mut public = stdio("public-only");
+    let public_results = sync_server_all_tools(&mut public, false);
+    assert_eq!(public_results.len(), MCP_TOOL_IDS.len());
+
+    let mut legacy = stdio("legacy-managed");
+    legacy
+        .enabled
+        .insert(LEGACY_CLAUDE_DESKTOP_TOOL_ID.into(), true);
+    let results = sync_server_all_tools(&mut legacy, false);
+    assert_eq!(results.len(), MCP_TOOL_IDS.len() + 1);
+    assert_eq!(
+        results.last().map(|result| result.tool_id.as_str()),
+        Some(LEGACY_CLAUDE_DESKTOP_TOOL_ID)
+    );
+    assert_eq!(
+        legacy.enabled.get(LEGACY_CLAUDE_DESKTOP_TOOL_ID),
+        Some(&false)
+    );
+    std::fs::remove_file(path).ok();
 }

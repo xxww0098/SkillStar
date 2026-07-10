@@ -94,7 +94,7 @@ fn test_sandbox_home() -> PathBuf {
 /// Honors [`TOOL_SYNC_HOME_ENV`]. Do not call `dirs::home_dir()` directly
 /// elsewhere in this file: funnelling every path through here is what makes the
 /// whole module sandboxable and keeps tests off the real `~/.codex` etc.
-fn sync_home_dir() -> Result<PathBuf> {
+pub(crate) fn sync_home_dir() -> Result<PathBuf> {
     if let Some(dir) = sandbox_home() {
         return Ok(dir);
     }
@@ -108,9 +108,8 @@ fn sync_home_dir_opt() -> Option<PathBuf> {
 }
 
 /// Resolve the OS config directory (`~/Library/Application Support`, `%APPDATA%`,
-/// or `~/.config`) for tool-config sync, re-rooted under the sandbox when
-/// [`TOOL_SYNC_HOME_ENV`] is set.
-fn sync_config_dir() -> Result<PathBuf> {
+/// or `~/.config`) while keeping legacy MCP compatibility writes sandboxable.
+pub(crate) fn sync_config_dir() -> Result<PathBuf> {
     if let Some(dir) = sandbox_home() {
         return Ok(dir.join(".config"));
     }

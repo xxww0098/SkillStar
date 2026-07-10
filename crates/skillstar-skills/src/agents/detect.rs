@@ -66,17 +66,14 @@ pub(crate) fn count_symlinks(dir: &Path) -> u32 {
 /// operation; this function never writes to the filesystem.
 pub(crate) fn detect_installed(spec: &dyn AgentSpec, global_skills_dir: &Path) -> bool {
     if let Some(binary) = spec.binary_name() {
-        if binary_on_enriched_path(binary) {
-            return true;
-        }
-        if desktop_app_for_agent(spec.id()) {
-            return true;
-        }
-        // CLI not on PATH and no app bundle — accept a present skills dir only
-        // (not the parent), to avoid re-introducing the shared-home-root false
-        // positive (see the Antigravity ↔ Gemini asymmetry guarded by the
-        // mod-level tests).
-        return global_skills_dir.is_dir();
+        // The directory fallback is deliberately the skills dir itself (not
+        // its parent), avoiding shared-home-root false positives such as
+        // Antigravity's ~/.gemini being mistaken for Gemini CLI.
+        return cli_agent_installed_from_signals(
+            binary_on_enriched_path(binary),
+            desktop_app_for_agent(spec.id()),
+            global_skills_dir.is_dir(),
+        );
     }
 
     desktop_app_for_agent(spec.id())
@@ -87,22 +84,33 @@ pub(crate) fn detect_installed(spec: &dyn AgentSpec, global_skills_dir: &Path) -
             .is_some_and(|parent| parent.is_dir())
 }
 
+fn cli_agent_installed_from_signals(
+    binary_found: bool,
+    desktop_app_found: bool,
+    skills_dir_found: bool,
+) -> bool {
+    binary_found || desktop_app_found || skills_dir_found
+}
+
 /// Known desktop-app product names for agents that ship as GUI installs.
 ///
 /// Mapped by agent id (not display name). Keep this table in lockstep with
 /// real product names under `/Applications` / Windows Programs folders.
 fn desktop_app_for_agent(agent_id: &str) -> bool {
-    let app_name = match agent_id {
-        "cursor" => "Cursor",
-        "kiro" => "Kiro",
-        "trae" => "Trae",
-        "qoder" => "Qoder",
-        "zcode" => "ZCode",
-        "antigravity" => "Antigravity",
-        // Claude Code is a CLI; Claude Desktop is a separate Models-mode tool.
-        _ => return false,
-    };
-    desktop_app_installed(app_name)
+    desktop_app_name_for_agent(agent_id).is_some_and(desktop_app_installed)
+}
+
+fn desktop_app_name_for_agent(agent_id: &str) -> Option<&'static str> {
+    match agent_id {
+        "claude" => Some("Claude"),
+        "cursor" => Some("Cursor"),
+        "kiro" => Some("Kiro"),
+        "trae" => Some("Trae"),
+        "qoder" => Some("Qoder"),
+        "zcode" => Some("ZCode"),
+        "antigravity" => Some("Antigravity"),
+        _ => None,
+    }
 }
 
 /// Alternate CLI binaries that prove an IDE agent is present even when the
@@ -295,6 +303,19 @@ mod tests {
     #[test]
     fn desktop_app_for_agent_unknown_id_is_false() {
         assert!(!desktop_app_for_agent("not-a-real-agent-id"));
+    }
+
+    #[test]
+    fn claude_cli_and_desktop_share_one_app_detection_mapping() {
+        assert_eq!(desktop_app_name_for_agent("claude"), Some("Claude"));
+    }
+
+    #[test]
+    fn cli_agent_installation_accepts_each_surface_independently() {
+        assert!(cli_agent_installed_from_signals(true, false, false));
+        assert!(cli_agent_installed_from_signals(false, true, false));
+        assert!(cli_agent_installed_from_signals(false, false, true));
+        assert!(!cli_agent_installed_from_signals(false, false, false));
     }
 
     #[test]

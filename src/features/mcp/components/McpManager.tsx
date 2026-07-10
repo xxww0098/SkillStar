@@ -11,10 +11,11 @@ import { SearchInput } from "../../../components/ui/SearchInput";
 import { AgentFilterPill } from "../../../components/ui/AgentFilterPill";
 import { useAgentProfiles } from "../../../hooks/useAgentProfiles";
 import { cn } from "../../../lib/utils";
-import type { McpPreset, McpServerEntry } from "../../../types";
+import type { McpPreset, McpServerEntry, McpServerWithSync, McpToolId } from "../../../types";
 import { useMcpServers } from "../hooks/useMcpServers";
 import { useMcpPresets } from "../hooks/useMcpPresets";
 import { resolveMcpToolFilter, selectMcpAgentTargets } from "../lib/agentTargets";
+import { failedMcpSyncCount } from "../lib/syncResults";
 import { McpServerCard } from "./McpServerCard";
 import { McpServerForm, type McpServerFormValue } from "./McpServerForm";
 
@@ -122,7 +123,7 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
     setCreateSeed((prev) => ({ key: prev.key + 1, defaults: presetToDefaults(preset) }));
   };
 
-  const handleToggle = async (id: string, toolId: string, enabled: boolean) => {
+  const handleToggle = async (id: string, toolId: McpToolId, enabled: boolean) => {
     try {
       const result = await toggleTool(id, toolId, enabled);
       if (!result.success && !result.skipped) {
@@ -143,14 +144,19 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
   const handleSubmit = async (value: McpServerFormValue) => {
     setSaving(true);
     try {
+      let result: McpServerWithSync;
       if (drawer.type === "edit") {
         const { enabled: _enabled, ...patch } = value;
-        await updateServer(drawer.id, patch);
-        toast.success(t("mcp.saved"));
+        result = await updateServer(drawer.id, patch);
       } else {
         const entry: Partial<McpServerEntry> = { ...value, timeoutMs: value.timeoutMs ?? undefined };
-        await createServer(entry);
-        toast.success(t("mcp.added"));
+        result = await createServer(entry);
+      }
+      const failedCount = failedMcpSyncCount(result.syncResults);
+      if (failedCount > 0) {
+        toast.warning(t("mcp.syncPartial", { count: failedCount }));
+      } else {
+        toast.success(t(drawer.type === "edit" ? "mcp.saved" : "mcp.added"));
       }
       setDrawer({ type: "closed" });
     } catch (err) {
@@ -163,8 +169,13 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
   const handleDelete = async () => {
     if (drawer.type !== "edit") return;
     try {
-      await deleteServer(drawer.id);
-      toast.success(t("mcp.deleted"));
+      const results = await deleteServer(drawer.id);
+      const failedCount = failedMcpSyncCount(results);
+      if (failedCount > 0) {
+        toast.warning(t("mcp.syncPartial", { count: failedCount }));
+      } else {
+        toast.success(t("mcp.deleted"));
+      }
       setDrawer({ type: "closed" });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
@@ -187,9 +198,9 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
   const handleSyncAll = async () => {
     try {
       const results = await syncAll(false);
-      const failed = results.filter((r) => !r.success && !r.skipped);
-      if (failed.length > 0) {
-        toast.warning(t("mcp.syncPartial", { count: failed.length }));
+      const failedCount = failedMcpSyncCount(results);
+      if (failedCount > 0) {
+        toast.warning(t("mcp.syncPartial", { count: failedCount }));
       } else {
         toast.success(t("mcp.syncSuccess"));
       }

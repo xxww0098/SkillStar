@@ -99,8 +99,8 @@ SkillStar 里"支持一个 Agent"其实是 **三条互相独立的轴**，按需
 
 仅当该 Agent 有自己的磁盘配置文件、且希望在 Models 工作台一键写入
 Provider（Base URL / API Key / 模型）时才做。现有目标：`claude-code`、`codex`、
-`opencode`、`gemini`、`claude-desktop`、`zcode`（ZCode 复用 OpenCode 配置格式，
-只是路径不同，sync/unsync 逻辑完全复用 `sync_to_opencode_inner`）。
+`opencode`、`gemini`。Claude Code CLI 与 Desktop Code 共用 `claude-code`，不能因运行
+入口不同再增加一个 Agent 或 tool id。
 
 全部改动在 `crates/skillstar-models/src/tool_sync/` + 少量前端：
 

@@ -5,13 +5,13 @@ use serde_json::{Map, Value, json};
 use std::path::{Path, PathBuf};
 
 use crate::tool_sync::{
-    create_rolling_backup, resolve_claude_desktop_config_path, resolve_codex_config_path,
-    resolve_opencode_config_path, resolve_zcode_config_path,
+    create_rolling_backup, resolve_codex_config_path, resolve_opencode_config_path,
+    resolve_zcode_config_path, sync_config_dir, sync_home_dir,
 };
 
 /// ZCode desktop loads MCP from `~/.zcode/cli/config.json` (`mcp.servers`), not `v2/config.json`.
 pub fn resolve_zcode_cli_mcp_config_path() -> Result<PathBuf> {
-    let home = dirs::home_dir().context("Could not determine home directory")?;
+    let home = sync_home_dir()?;
     Ok(home.join(".zcode").join("cli").join("config.json"))
 }
 
@@ -19,31 +19,39 @@ use super::*;
 
 /// `~/.claude.json` — where Claude Code reads user-scope MCP servers.
 pub fn resolve_claude_json_path() -> Result<PathBuf> {
-    let home = dirs::home_dir().context("Could not determine home directory")?;
+    let home = sync_home_dir()?;
     Ok(home.join(".claude.json"))
+}
+
+/// Legacy Desktop Chat config. This is not a public Agent target; the resolver
+/// only exists so entries managed by older SkillStar releases remain cleanable.
+pub(crate) fn resolve_legacy_claude_desktop_config_path() -> Result<PathBuf> {
+    Ok(sync_config_dir()?
+        .join("Claude")
+        .join("claude_desktop_config.json"))
 }
 
 /// `~/.gemini/settings.json`
 pub fn resolve_gemini_settings_path() -> Result<PathBuf> {
-    let home = dirs::home_dir().context("Could not determine home directory")?;
+    let home = sync_home_dir()?;
     Ok(home.join(".gemini").join("settings.json"))
 }
 
 /// `~/.grok/config.toml`
 pub fn resolve_grok_config_path() -> Result<PathBuf> {
-    let home = dirs::home_dir().context("Could not determine home directory")?;
+    let home = sync_home_dir()?;
     Ok(home.join(".grok").join("config.toml"))
 }
 
 /// `~/.kiro/settings/mcp.json` — Kiro's user-scope MCP servers (top-level `mcpServers`).
 pub fn resolve_kiro_config_path() -> Result<PathBuf> {
-    let home = dirs::home_dir().context("Could not determine home directory")?;
+    let home = sync_home_dir()?;
     Ok(home.join(".kiro").join("settings").join("mcp.json"))
 }
 
 /// `~/.cursor/mcp.json` — Cursor's user-scope MCP servers (top-level `mcpServers`).
 pub fn resolve_cursor_config_path() -> Result<PathBuf> {
-    let home = dirs::home_dir().context("Could not determine home directory")?;
+    let home = sync_home_dir()?;
     Ok(home.join(".cursor").join("mcp.json"))
 }
 
@@ -51,7 +59,7 @@ pub fn resolve_cursor_config_path() -> Result<PathBuf> {
 pub fn resolve_mcp_config_path(tool_id: &str) -> Result<PathBuf> {
     match tool_id {
         "claude-code" => resolve_claude_json_path(),
-        "claude-desktop" => resolve_claude_desktop_config_path(),
+        LEGACY_CLAUDE_DESKTOP_TOOL_ID => resolve_legacy_claude_desktop_config_path(),
         "codex" => resolve_codex_config_path(),
         "gemini" => resolve_gemini_settings_path(),
         "grok" => resolve_grok_config_path(),
@@ -66,15 +74,16 @@ pub fn resolve_mcp_config_path(tool_id: &str) -> Result<PathBuf> {
 
 /// Best-effort "is this tool installed?" probe used to skip pointless writes.
 pub fn tool_installed(tool_id: &str) -> bool {
-    let home = match dirs::home_dir() {
-        Some(h) => h,
-        None => return false,
+    let Ok(home) = sync_home_dir() else {
+        return false;
     };
     match tool_id {
-        "claude-code" => home.join(".claude").exists() || home.join(".claude.json").exists(),
-        "claude-desktop" => resolve_claude_desktop_config_path()
-            .map(|p| p.exists() || p.parent().map(|d| d.exists()).unwrap_or(false))
-            .unwrap_or(false),
+        "claude-code" => claude_code_installed_from_signals(
+            skillstar_core::infra::path_env::binary_on_enriched_path("claude"),
+            skillstar_core::infra::path_env::desktop_app_installed("Claude"),
+            home.join(".claude").exists(),
+            home.join(".claude.json").exists(),
+        ),
         "codex" => home.join(".codex").exists(),
         "gemini" => home.join(".gemini").exists(),
         "grok" => home.join(".grok").exists(),
@@ -89,6 +98,15 @@ pub fn tool_installed(tool_id: &str) -> bool {
         "cursor" => home.join(".cursor").exists(),
         _ => false,
     }
+}
+
+pub(crate) fn claude_code_installed_from_signals(
+    binary_found: bool,
+    desktop_code_found: bool,
+    config_dir_found: bool,
+    mcp_config_found: bool,
+) -> bool {
+    binary_found || desktop_code_found || config_dir_found || mcp_config_found
 }
 
 /// Count MCP servers currently present in a tool's live config file.
@@ -126,7 +144,7 @@ fn count_live_servers(tool_id: &str) -> usize {
                     .map(|m| m.len())
             })
             .unwrap_or(0),
-        // claude-code, claude-desktop, gemini, kiro, cursor all use top-level `mcpServers`.
+        // Claude Code, Gemini, Kiro, and Cursor use top-level `mcpServers`.
         _ => serde_json::from_str::<Value>(&content)
             .ok()
             .and_then(|v| {
@@ -189,7 +207,7 @@ fn read_json_object(path: &Path) -> Map<String, Value> {
         .unwrap_or_default()
 }
 
-/// Upsert `mcpServers.<name>` in a JSON config file (claude-code/desktop/gemini).
+/// Upsert `mcpServers.<name>` in a JSON config file.
 pub(crate) fn json_mcpservers_upsert(path: &Path, name: &str, spec: Value) -> Result<()> {
     let mut root = read_json_object(path);
     let servers = root
@@ -215,6 +233,28 @@ pub(crate) fn json_mcpservers_remove(path: &Path, name: &str) -> Result<()> {
         map.remove(name);
     }
     write_json_pretty(path, &Value::Object(root))
+}
+
+/// Strict removal for the legacy Desktop Chat cleanup path. Existing malformed
+/// or non-object JSON must remain untouched instead of being replaced by `{}`.
+pub(crate) fn json_mcpservers_remove_strict(path: &Path, name: &str) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read {}", path.display()))?;
+    let mut root: Value = serde_json::from_str(&content)
+        .with_context(|| format!("Invalid JSON in {}", path.display()))?;
+    let object = root
+        .as_object_mut()
+        .with_context(|| format!("Expected a JSON object in {}", path.display()))?;
+    if let Some(servers) = object.get_mut("mcpServers") {
+        let servers = servers
+            .as_object_mut()
+            .with_context(|| format!("Expected mcpServers to be an object in {}", path.display()))?;
+        servers.remove(name);
+    }
+    write_json_pretty(path, &root)
 }
 
 fn write_json_pretty(path: &Path, value: &Value) -> Result<()> {
@@ -287,9 +327,6 @@ pub(crate) fn codex_remove(path: &Path, name: &str) -> Result<()> {
     }
     write_toml_pretty(path, &root)
 }
-
-
-
 fn ensure_mcp_servers_map(root: &mut Map<String, Value>) -> Result<Map<String, Value>> {
     let mcp_val = root
         .entry("mcp".to_string())

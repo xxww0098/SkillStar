@@ -34,16 +34,13 @@ export type McpTransport = "stdio" | "http" | "sse";
 
 /** Tool ids that can receive MCP servers (matches `MCP_TOOL_IDS`). */
 
-export const MCP_TOOL_IDS = [
-  "claude-code",
-  "claude-desktop",
-  "codex",
-  "gemini",
-  "grok",
-  "opencode",
-  "zcode",
-  "kiro",
-  "cursor",
-] as const;
+export const MCP_TOOL_IDS = ["claude-code", "codex", "gemini", "grok", "opencode", "zcode", "kiro", "cursor"] as const;
 
 export type McpToolId = (typeof MCP_TOOL_IDS)[number];
+
+const MCP_TOOL_ID_SET: ReadonlySet<string> = new Set(MCP_TOOL_IDS);
+
+/** Narrow raw backend/cache strings to the public MCP Agent target contract. */
+export function isMcpToolId(value: string): value is McpToolId {
+  return MCP_TOOL_ID_SET.has(value);
+}

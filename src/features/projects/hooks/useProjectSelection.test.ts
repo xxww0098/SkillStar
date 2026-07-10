@@ -21,7 +21,7 @@ const mockedInvoke = vi.mocked(invoke);
 
 const CLAUDE: AgentProfile = {
   id: "claude",
-  display_name: "Claude",
+  display_name: "Claude Code",
   icon: "claude.svg",
   enabled: true,
   global_skills_dir: "/home/user/.claude/skills",

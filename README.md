@@ -129,9 +129,9 @@ sudo mv SkillStar_x.x.x_amd64.AppImage /usr/local/bin/skillstar
 
 ## 前置要求
 
-至少安装一个 Agent CLI：
+至少安装一个受支持的 Agent（Claude Code CLI 与 Desktop Code 视为同一个 Agent）：
 
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+- [Claude Code（CLI / Desktop Code）](https://code.claude.com/docs/en/desktop)
 - [Codex CLI](https://github.com/openai/codex)
 - [Gemini CLI](https://github.com/google-gemini/gemini-cli)
 - [Cursor](https://cursor.com)

@@ -320,7 +320,6 @@ export const MCP_STORE = {
       enabled: {
         "claude-code": true,
         codex: true,
-        "claude-desktop": false,
         gemini: false,
         grok: false,
         opencode: false,
@@ -339,7 +338,6 @@ export const MCP_STORE = {
       enabled: {
         "claude-code": true,
         codex: false,
-        "claude-desktop": false,
         gemini: false,
         grok: false,
         opencode: false,
@@ -352,13 +350,6 @@ export const MCP_STORE = {
 
 export const MCP_TOOL_STATUSES = [
   { toolId: "claude-code", label: "Claude Code", configPath: "~/.claude.json", installed: true, serverCount: 2 },
-  {
-    toolId: "claude-desktop",
-    label: "Claude Desktop",
-    configPath: "~/Library/.../claude_desktop_config.json",
-    installed: true,
-    serverCount: 0,
-  },
   { toolId: "codex", label: "Codex", configPath: "~/.codex/config.toml", installed: true, serverCount: 1 },
   { toolId: "gemini", label: "Gemini CLI", configPath: "~/.gemini/settings.json", installed: false, serverCount: 0 },
   { toolId: "grok", label: "Grok", configPath: "~/.grok/config.toml", installed: true, serverCount: 0 },

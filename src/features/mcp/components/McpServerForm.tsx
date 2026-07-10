@@ -7,7 +7,6 @@ import { MCP_TOOL_IDS, type McpServerEntry, type McpToolId } from "../../../type
 
 const TOOL_LABELS: Record<McpToolId, string> = {
   "claude-code": "Claude Code",
-  "claude-desktop": "Claude Desktop",
   codex: "Codex",
   gemini: "Gemini CLI",
   grok: "Grok",

@@ -19,7 +19,6 @@
 //! | tool_id          | file                                   | location / format |
 //! |------------------|----------------------------------------|-------------------|
 //! | `claude-code`    | `~/.claude.json`                       | `mcpServers.<name>` (community JSON, keeps `type`) |
-//! | `claude-desktop` | `claude_desktop_config.json`           | `mcpServers.<name>` (stdio only, no `type`) |
 //! | `codex`          | `~/.codex/config.toml`                 | `[mcp_servers.<name>]` TOML table |
 //! | `gemini`         | `~/.gemini/settings.json`              | `mcpServers.<name>` (community JSON) |
 //! | `grok`           | `~/.grok/config.toml`                  | `[mcp_servers.<name>]` TOML (`headers` for HTTP) |
@@ -27,6 +26,10 @@
 //! | `zcode`          | `~/.zcode/cli/config.json`             | `mcp.servers.<name>` (community JSON) |
 //! | `kiro`           | `~/.kiro/settings/mcp.json`            | `mcpServers.<name>` (community JSON, keeps `type`) |
 //! | `cursor`         | `~/.cursor/mcp.json`                   | `mcpServers.<name>` (community JSON, keeps `type`) |
+//!
+//! Older stores may contain a `claude-desktop` tombstone. It is not a target:
+//! it only authorizes cleanup of the named entry from Desktop Chat's separate
+//! `claude_desktop_config.json`; no new values are projected there.
 //!
 //! All live writes create a rolling backup (last 5) and use merge semantics:
 //! only the single managed server key is touched, every other field is left
@@ -70,7 +73,7 @@ pub use store::*;
 
 mod specs;
 pub(crate) use specs::{
-    claude_code_spec, claude_desktop_spec, codex_toml_table, cursor_spec, gemini_spec,
+    claude_code_spec, codex_toml_table, cursor_spec, gemini_spec,
     grok_toml_table, kiro_spec, opencode_spec, zcode_cli_spec,
 };
 
@@ -81,9 +84,9 @@ pub(crate) use specs::{
 mod tools;
 pub use tools::*;
 pub(crate) use tools::{
-    backup_if_exists, codex_remove, codex_upsert, json_mcpservers_remove, json_mcpservers_upsert,
-    opencode_remove, opencode_upsert, zcode_cli_remove, zcode_cli_upsert,
-    zcode_v2_opencode_mcp_remove,
+    backup_if_exists, codex_remove, codex_upsert, json_mcpservers_remove,
+    json_mcpservers_remove_strict, json_mcpservers_upsert, opencode_remove, opencode_upsert,
+    zcode_cli_remove, zcode_cli_upsert, zcode_v2_opencode_mcp_remove,
 };
 
 // ---------------------------------------------------------------------------

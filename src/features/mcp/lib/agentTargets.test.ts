@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AgentProfile, McpToolStatus } from "../../../types";
+import { MCP_TOOL_IDS, isMcpToolId, type AgentProfile, type McpToolStatus } from "../../../types";
 import { resolveMcpToolFilter, selectMcpAgentTargets } from "./agentTargets";
 
 function profile(id: string, installed = true, enabled = true): AgentProfile {
@@ -49,7 +49,7 @@ describe("selectMcpAgentTargets", () => {
 
   it("fails closed when either the Settings profile or MCP detection status is absent", () => {
     expect(selectMcpAgentTargets([profile("claude"), profile("codex")], [])).toEqual([]);
-    expect(selectMcpAgentTargets([], [status("claude-code", true), status("claude-desktop", true)])).toEqual([]);
+    expect(selectMcpAgentTargets([], [status("claude-code", true)])).toEqual([]);
   });
 
   it("preserves Settings order instead of maintaining a second SVG registry", () => {
@@ -72,5 +72,11 @@ describe("selectMcpAgentTargets", () => {
     expect(resolveMcpToolFilter("claude-code", targets)).toBe("claude-code");
     expect(resolveMcpToolFilter("codex", targets)).toBeNull();
     expect(resolveMcpToolFilter(null, targets)).toBeNull();
+  });
+
+  it("exposes exactly one public Claude Code MCP target", () => {
+    expect(MCP_TOOL_IDS.filter((toolId) => toolId.startsWith("claude"))).toEqual(["claude-code"]);
+    expect(isMcpToolId("claude-code")).toBe(true);
+    expect(isMcpToolId("claude-desktop")).toBe(false);
   });
 });

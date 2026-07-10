@@ -1,6 +1,5 @@
-//! Per-tool wire-format spec generation (canonical JSON, Claude Desktop, OpenCode, Codex TOML).
+//! Per-tool wire-format spec generation (canonical JSON, OpenCode, Codex TOML).
 
-use anyhow::{Result, bail};
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 
@@ -98,28 +97,6 @@ pub(crate) fn kiro_spec(entry: &McpServerEntry) -> Value {
         obj.insert("disabledTools".into(), json!(entry.disabled_tools));
     }
     Value::Object(obj)
-}
-
-/// Claude Desktop value: stdio only, no `type` key.
-pub(crate) fn claude_desktop_spec(entry: &McpServerEntry) -> Result<Value> {
-    if entry.transport != "stdio" {
-        bail!(
-            "Claude Desktop only supports stdio MCP servers (server '{}' is {})",
-            entry.name,
-            entry.transport
-        );
-    }
-    let mut obj = Map::new();
-    if let Some(cmd) = &entry.command {
-        obj.insert("command".into(), json!(cmd));
-    }
-    if !entry.args.is_empty() {
-        obj.insert("args".into(), json!(entry.args));
-    }
-    if !entry.env.is_empty() {
-        obj.insert("env".into(), json!(string_map(&entry.env)));
-    }
-    Ok(Value::Object(obj))
 }
 
 /// OpenCode value: stdio→`local` (command array, `environment`), http/sse→`remote`.

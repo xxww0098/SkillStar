@@ -12,21 +12,19 @@ import type { ProviderEntryFlat } from "../../../../types";
 import { getProviderToolBadges, useProvidersFlat } from "../../hooks/useProvidersFlat";
 import { useToolInstallStatuses } from "../../api/install";
 import { useAgentHealth } from "../../hooks/useAgentHealth";
-import { CLAUDE_DESKTOP_TOOL_ID, PROVIDER_AGENTS, type ProviderToolId } from "../../lib/agentRegistry";
+import { PROVIDER_AGENTS, type ProviderToolId } from "../../lib/agentRegistry";
 import { computeAgentStatus, summarizeAgentStatuses } from "../../lib/agentStatus";
 import { activeEntry as bindingActiveEntry } from "../../lib/toolBinding";
 import { AgentHeroCard } from "../agents/AgentHeroCard";
 import { AgentSettingsDialog } from "../agents/AgentSettingsDialog";
 import { AppAiCard } from "../agents/AppAiCard";
-import { ClaudeDesktopCard } from "../agents/ClaudeDesktopCard";
-import { ClaudeDesktopConfigDialog } from "../agents/ClaudeDesktopConfigDialog";
 import { MultiProviderCard } from "../agents/MultiProviderCard";
 import { PresetPicker } from "../provider/PresetPicker";
 import { ProviderEditorDrawer } from "../provider/ProviderEditorDrawer";
 import { DeleteProviderDialog } from "./DeleteProviderDialog";
 import { ProviderGalleryCard } from "./ProviderGalleryCard";
 
-const HUB_TOOL_IDS = [...PROVIDER_AGENTS.map((a) => a.toolId), CLAUDE_DESKTOP_TOOL_ID];
+const HUB_TOOL_IDS = PROVIDER_AGENTS.map((agent) => agent.toolId);
 
 type DrawerMode =
   | { type: "closed" }
@@ -45,7 +43,6 @@ export function ModelsHub() {
 
   const [drawer, setDrawer] = useState<DrawerMode>({ type: "closed" });
   const [settingsTool, setSettingsTool] = useState<ProviderToolId | null>(null);
-  const [desktopConfigOpen, setDesktopConfigOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ProviderEntryFlat | null>(null);
   const [connectHintDismissed, setConnectHintDismissed] = useState(false);
   const { byTool: installStatus, isLoading: installLoading } = useToolInstallStatuses(HUB_TOOL_IDS);
@@ -262,11 +259,6 @@ export function ModelsHub() {
                   <AgentHeroCard key={agent.toolId} {...cardProps} />
                 );
               })}
-              <ClaudeDesktopCard
-                installed={installLoading ? false : (installStatus[CLAUDE_DESKTOP_TOOL_ID]?.installed ?? false)}
-                installLoading={installLoading}
-                onOpenConfig={() => setDesktopConfigOpen(true)}
-              />
               <AppAiCard onOpenSettings={() => navigate("settings")} />
             </div>
           </section>
@@ -358,9 +350,6 @@ export function ModelsHub() {
           </div>
         )}
       </DrawerShell>
-
-      {/* ── Claude Desktop MCP config dialog ──────────────────── */}
-      <ClaudeDesktopConfigDialog open={desktopConfigOpen} onClose={() => setDesktopConfigOpen(false)} />
 
       {/* ── Agent settings dialog ─────────────────────────────── */}
       {settingsTool ? (

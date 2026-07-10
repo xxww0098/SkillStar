@@ -6,6 +6,7 @@ import type {
   McpStore,
   McpSyncResult,
   McpToolStatus,
+  McpToolId,
 } from "../../../types";
 
 /**
@@ -19,12 +20,12 @@ export interface McpCommands {
   update_mcp_server: { args: { id: string; patch: McpServerPatch }; result: McpServerWithSync };
   delete_mcp_server: { args: { id: string }; result: McpSyncResult[] };
   set_mcp_tool_enabled: {
-    args: { id: string; toolId: string; enabled: boolean };
+    args: { id: string; toolId: McpToolId; enabled: boolean };
     result: McpSyncResult;
   };
   sync_mcp_server: { args: { id: string; force: boolean }; result: McpSyncResult[] };
   sync_all_mcp: { args: { force: boolean }; result: McpSyncResult[] };
-  import_mcp_from_tool: { args: { toolId: string }; result: number };
+  import_mcp_from_tool: { args: { toolId: McpToolId }; result: number };
   reorder_mcp_servers: { args: { orderedIds: string[] }; result: void };
   get_mcp_presets: { args: Record<string, never>; result: McpPreset[] };
 }

@@ -10,6 +10,10 @@ const DIR_ALIASES: Record<string, string> = {
   agent: "antigravity", // ~/.agent/skills is Antigravity's directory
 };
 
+const DISPLAY_NAMES: Readonly<Record<string, string>> = {
+  claude: "Claude Code",
+};
+
 function prettify(id: string): string {
   return id
     .split(/[-_]/)
@@ -34,7 +38,7 @@ export function remoteAgentProfile(agentId: string, builtin: AgentProfile[]): Ag
 
   return {
     id: canonical,
-    display_name: prettify(canonical),
+    display_name: DISPLAY_NAMES[canonical] ?? prettify(canonical),
     icon: `agents/${canonical}.svg`,
     global_skills_dir: "",
     project_skills_rel: "",

@@ -1,6 +1,6 @@
 //! Projecting servers into / removing servers from each tool's live config.
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use std::path::PathBuf;
 
 use super::*;
@@ -21,6 +21,11 @@ pub fn sync_server_to_tool(entry: &McpServerEntry, tool_id: &str, force: bool) -
         backup_path: None,
         error: None,
     };
+
+    if !is_supported_tool(tool_id) {
+        result.error = Some(format!("Unsupported public MCP target '{tool_id}'"));
+        return result;
+    }
 
     if !force && !tool_installed(tool_id) {
         result.success = true;
@@ -47,9 +52,6 @@ fn sync_server_to_tool_inner(entry: &McpServerEntry, tool_id: &str) -> Result<Op
         "gemini" => json_mcpservers_upsert(&path, &entry.name, gemini_spec(entry))?,
         "kiro" => json_mcpservers_upsert(&path, &entry.name, kiro_spec(entry))?,
         "cursor" => json_mcpservers_upsert(&path, &entry.name, cursor_spec(entry))?,
-        "claude-desktop" => {
-            json_mcpservers_upsert(&path, &entry.name, claude_desktop_spec(entry)?)?
-        }
         "opencode" => opencode_upsert(&path, &entry.name, opencode_spec(entry))?,
         "zcode" => {
             zcode_cli_upsert(&path, &entry.name, zcode_cli_spec(entry))?;
@@ -92,7 +94,8 @@ fn remove_server_from_tool_inner(name: &str, tool_id: &str) -> Result<Option<Pat
     }
     let backup = backup_if_exists(&path)?;
     match tool_id {
-        "claude-code" | "claude-desktop" | "gemini" | "kiro" | "cursor" => {
+        LEGACY_CLAUDE_DESKTOP_TOOL_ID => json_mcpservers_remove_strict(&path, name)?,
+        "claude-code" | "gemini" | "kiro" | "cursor" => {
             json_mcpservers_remove(&path, name)?
         }
         "opencode" => opencode_remove(&path, name)?,
@@ -106,9 +109,20 @@ fn remove_server_from_tool_inner(name: &str, tool_id: &str) -> Result<Option<Pat
     Ok(backup)
 }
 
-/// Project a server to all tools per its `enabled` map: enabled tools get an
-/// upsert, disabled tools get a removal. Returns one result per tool touched.
-pub fn sync_server_all_tools(entry: &McpServerEntry, force: bool) -> Vec<McpSyncResult> {
+/// Project a server to every public Agent target. Entries created by older
+/// SkillStar releases may additionally carry the hidden Desktop Chat key; that
+/// cleanup tombstone removes the old projection instead of updating it.
+pub fn sync_server_all_tools(entry: &mut McpServerEntry, force: bool) -> Vec<McpSyncResult> {
+    let mut results = sync_server_public_tools(entry, force);
+
+    if let Some(cleanup) = cleanup_legacy_desktop_chat(entry) {
+        results.push(cleanup);
+    }
+    results
+}
+
+/// Project a server only to the public Agent targets.
+pub fn sync_server_public_tools(entry: &McpServerEntry, force: bool) -> Vec<McpSyncResult> {
     MCP_TOOL_IDS
         .iter()
         .map(|&tool_id| {
@@ -122,11 +136,181 @@ pub fn sync_server_all_tools(entry: &McpServerEntry, force: bool) -> Vec<McpSync
         .collect()
 }
 
-/// Re-project every server in the store to every tool (full reconciliation).
-pub fn sync_all(store: &McpStore, force: bool) -> Vec<McpSyncResult> {
-    store
+/// Remove a server name from every public Agent target.
+pub fn remove_server_from_public_tools(name: &str) -> Vec<McpSyncResult> {
+    MCP_TOOL_IDS
+        .iter()
+        .map(|&tool_id| remove_server_from_tool(name, tool_id))
+        .collect()
+}
+
+/// Remove the old Desktop Chat projection when this entry carries migration
+/// evidence. Returning `None` for new entries keeps the separate product fully
+/// outside the public Claude Code flow.
+pub fn cleanup_legacy_desktop_chat(entry: &mut McpServerEntry) -> Option<McpSyncResult> {
+    if entry.enabled.get(LEGACY_CLAUDE_DESKTOP_TOOL_ID) != Some(&true) {
+        return None;
+    }
+    let result = remove_server_from_tool(&entry.name, LEGACY_CLAUDE_DESKTOP_TOOL_ID);
+    if result.success {
+        mark_legacy_desktop_chat_clean(entry);
+    }
+    Some(result)
+}
+
+/// Consume a successful legacy cleanup tombstone. The false value preserves
+/// old-store round-trip semantics without authorizing future deletions.
+pub fn mark_legacy_desktop_chat_clean(entry: &mut McpServerEntry) {
+    if entry.enabled.get(LEGACY_CLAUDE_DESKTOP_TOOL_ID) == Some(&true) {
+        entry
+            .enabled
+            .insert(LEGACY_CLAUDE_DESKTOP_TOOL_ID.into(), false);
+    }
+}
+
+fn cleanup_legacy_desktop_chat_or_bail(
+    entry: &mut McpServerEntry,
+) -> Result<Option<McpSyncResult>> {
+    let result = cleanup_legacy_desktop_chat(entry);
+    if let Some(cleanup) = &result
+        && !cleanup.success
+    {
+        bail!(
+            "Failed to clean legacy Claude Desktop Chat MCP '{}': {}",
+            entry.name,
+            cleanup.error.as_deref().unwrap_or("unknown error")
+        );
+    }
+    Ok(result)
+}
+
+fn ensure_cleanup_succeeded(results: &[McpSyncResult], action: &str) -> Result<()> {
+    if let Some(failed) = results.iter().find(|result| !result.success && !result.skipped) {
+        bail!(
+            "{action} failed for '{}': {}",
+            failed.tool_id,
+            failed.error.as_deref().unwrap_or("unknown error")
+        );
+    }
+    Ok(())
+}
+
+/// Apply an edit and reconcile all public targets plus any pending legacy
+/// cleanup. A rename cannot commit if cleaning the old Desktop Chat name fails.
+pub fn update_server_and_sync(
+    store: &mut McpStore,
+    id: &str,
+    patch: McpServerPatch,
+    force: bool,
+) -> Result<(McpServerEntry, Vec<McpSyncResult>)> {
+    let mut next = store.clone();
+    let mut old_entry = next
         .servers
         .iter()
+        .find(|server| server.id == id)
+        .cloned()
+        .with_context(|| format!("MCP server '{id}' not found"))?;
+    let preview = update_server(&mut next, id, patch)?;
+    let renamed = old_entry.name != preview.name;
+    let legacy_rename_cleanup = if renamed {
+        cleanup_legacy_desktop_chat_or_bail(&mut old_entry)?
+    } else {
+        None
+    };
+
+    if legacy_rename_cleanup.is_some() {
+        let stored = next
+            .servers
+            .iter_mut()
+            .find(|server| server.id == id)
+            .with_context(|| format!("MCP server '{id}' not found"))?;
+        mark_legacy_desktop_chat_clean(stored);
+    }
+
+    let mut results = legacy_rename_cleanup.into_iter().collect::<Vec<_>>();
+    if renamed {
+        let old_name_cleanup = remove_server_from_public_tools(&old_entry.name);
+        ensure_cleanup_succeeded(&old_name_cleanup, "Removing renamed MCP server")?;
+        results.extend(old_name_cleanup);
+    }
+    let updated = {
+        let stored = next
+            .servers
+            .iter_mut()
+            .find(|server| server.id == id)
+            .with_context(|| format!("MCP server '{id}' not found"))?;
+        results.extend(sync_server_all_tools(stored, force));
+        stored.clone()
+    };
+    *store = next;
+    Ok((updated, results))
+}
+
+/// Delete an entry only after any pending Desktop Chat cleanup succeeds.
+pub fn delete_server_and_sync(
+    store: &mut McpStore,
+    id: &str,
+) -> Result<(McpServerEntry, Vec<McpSyncResult>)> {
+    let mut next = store.clone();
+    let mut existing = next
+        .servers
+        .iter()
+        .find(|server| server.id == id)
+        .cloned()
+        .with_context(|| format!("MCP server '{id}' not found"))?;
+    let legacy_cleanup = cleanup_legacy_desktop_chat_or_bail(&mut existing)?;
+    let removed = delete_server(&mut next, id)?;
+    let mut results = remove_server_from_public_tools(&removed.name);
+    ensure_cleanup_succeeded(&results, "Removing deleted MCP server")?;
+    results.extend(legacy_cleanup);
+    *store = next;
+    Ok((removed, results))
+}
+
+/// Toggle one public target while consuming any pending legacy cleanup first.
+pub fn set_tool_enabled_and_sync(
+    store: &mut McpStore,
+    id: &str,
+    tool_id: &str,
+    enabled: bool,
+    force: bool,
+) -> Result<McpSyncResult> {
+    let mut next = store.clone();
+    set_tool_enabled(&mut next, id, tool_id, enabled)?;
+    let entry = next
+        .servers
+        .iter_mut()
+        .find(|server| server.id == id)
+        .with_context(|| format!("MCP server '{id}' not found"))?;
+    cleanup_legacy_desktop_chat_or_bail(entry)?;
+    let result = if enabled {
+        sync_server_to_tool(entry, tool_id, force)
+    } else {
+        remove_server_from_tool(&entry.name, tool_id)
+    };
+    *store = next;
+    Ok(result)
+}
+
+/// Reconcile one stored entry by id, consuming a successful cleanup tombstone.
+pub fn sync_server_by_id(
+    store: &mut McpStore,
+    id: &str,
+    force: bool,
+) -> Result<Vec<McpSyncResult>> {
+    let entry = store
+        .servers
+        .iter_mut()
+        .find(|server| server.id == id)
+        .with_context(|| format!("MCP server '{id}' not found"))?;
+    Ok(sync_server_all_tools(entry, force))
+}
+
+/// Re-project every server in the store to every tool (full reconciliation).
+pub fn sync_all(store: &mut McpStore, force: bool) -> Vec<McpSyncResult> {
+    store
+        .servers
+        .iter_mut()
         .flat_map(|s| sync_server_all_tools(s, force))
         .collect()
 }

@@ -2,7 +2,7 @@
 //!
 //! SkillStar owns a single unified MCP store (`~/.skillstar/config/mcp_servers.json`)
 //! and projects each server into the native config of every supported agent tool
-//! (Claude Code, Claude Desktop, Codex, Gemini CLI, OpenCode). The heavy lifting
+//! (Claude Code, Codex, Gemini CLI, OpenCode). The heavy lifting
 //! lives in [`skillstar_models::mcp`]; this module is the thin, write-serialized
 //! Tauri surface over it.
 //!
@@ -92,7 +92,7 @@ pub async fn create_mcp_server(
     let created = mcp::create_server(&mut store, entry)?;
     mcp::write_mcp_store(&store, &path)?;
 
-    let sync_results = mcp::sync_server_all_tools(&created, false);
+    let sync_results = mcp::sync_server_public_tools(&created, false);
     Ok(McpServerWithSync {
         server: created,
         sync_results,
@@ -111,26 +111,8 @@ pub async fn update_mcp_server(
     let path = mcp::mcp_store_path();
     let mut store = mcp::read_mcp_store(&path)?;
 
-    // Capture the old name so a rename can be cleaned out of live configs.
-    let old_name = store
-        .servers
-        .iter()
-        .find(|s| s.id == id)
-        .map(|s| s.name.clone());
-
-    let updated = mcp::update_server(&mut store, &id, patch)?;
+    let (updated, sync_results) = mcp::update_server_and_sync(&mut store, &id, patch, false)?;
     mcp::write_mcp_store(&store, &path)?;
-
-    // If the server was renamed, purge the stale key from every tool first.
-    if let Some(old) = old_name
-        && old != updated.name
-    {
-        for &tool_id in mcp::MCP_TOOL_IDS {
-            let _ = mcp::remove_server_from_tool(&old, tool_id);
-        }
-    }
-
-    let sync_results = mcp::sync_server_all_tools(&updated, false);
     Ok(McpServerWithSync {
         server: updated,
         sync_results,
@@ -148,13 +130,8 @@ pub async fn delete_mcp_server(
     let path = mcp::mcp_store_path();
     let mut store = mcp::read_mcp_store(&path)?;
 
-    let removed = mcp::delete_server(&mut store, &id)?;
+    let (_removed, results) = mcp::delete_server_and_sync(&mut store, &id)?;
     mcp::write_mcp_store(&store, &path)?;
-
-    let results = mcp::MCP_TOOL_IDS
-        .iter()
-        .map(|&tool_id| mcp::remove_server_from_tool(&removed.name, tool_id))
-        .collect();
     Ok(results)
 }
 
@@ -171,14 +148,9 @@ pub async fn set_mcp_tool_enabled(
     let path = mcp::mcp_store_path();
     let mut store = mcp::read_mcp_store(&path)?;
 
-    let entry = mcp::set_tool_enabled(&mut store, &id, &tool_id, enabled)?;
+    let result =
+        mcp::set_tool_enabled_and_sync(&mut store, &id, &tool_id, enabled, false)?;
     mcp::write_mcp_store(&store, &path)?;
-
-    let result = if enabled {
-        mcp::sync_server_to_tool(&entry, &tool_id, false)
-    } else {
-        mcp::remove_server_from_tool(&entry.name, &tool_id)
-    };
     Ok(result)
 }
 
@@ -191,14 +163,11 @@ pub async fn sync_mcp_server(
 ) -> Result<Vec<McpSyncResult>, AppError> {
     let _guard = lock.0.lock().await;
     let path = mcp::mcp_store_path();
-    let store = mcp::read_mcp_store(&path)?;
+    let mut store = mcp::read_mcp_store(&path)?;
 
-    let entry = store
-        .servers
-        .iter()
-        .find(|s| s.id == id)
-        .ok_or_else(|| AppError::Other(format!("MCP server '{id}' not found")))?;
-    Ok(mcp::sync_server_all_tools(entry, force))
+    let results = mcp::sync_server_by_id(&mut store, &id, force)?;
+    mcp::write_mcp_store(&store, &path)?;
+    Ok(results)
 }
 
 /// Re-project every server to every tool (full reconciliation).
@@ -209,8 +178,10 @@ pub async fn sync_all_mcp(
 ) -> Result<Vec<McpSyncResult>, AppError> {
     let _guard = lock.0.lock().await;
     let path = mcp::mcp_store_path();
-    let store = mcp::read_mcp_store(&path)?;
-    Ok(mcp::sync_all(&store, force))
+    let mut store = mcp::read_mcp_store(&path)?;
+    let results = mcp::sync_all(&mut store, force);
+    mcp::write_mcp_store(&store, &path)?;
+    Ok(results)
 }
 
 /// Import servers found in a tool's live config into the unified store.

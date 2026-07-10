@@ -17,6 +17,7 @@ import { McpServerForm, type McpServerFormValue } from "../features/mcp/componen
 import { PUBLISHER_BRAND_ICON, hasPublisherBrandIcon } from "../features/mcp/components/McpPublishers";
 import { PublisherAvatar } from "../features/marketplace/components/OfficialPublishers";
 import { useMcpServers } from "../features/mcp/hooks/useMcpServers";
+import { failedMcpSyncCount } from "../features/mcp/lib/syncResults";
 import { tauriInvoke } from "../lib/ipc";
 import { toast } from "../lib/toast";
 import type { LocalFirstResult, McpMarketEntry, McpPublisherSummary, McpServerEntry, ViewMode } from "../types";
@@ -144,8 +145,13 @@ export function McpPublisherDetail({ publisher, onBack }: McpPublisherDetailProp
       setMcpSaving(true);
       try {
         const entry: Partial<McpServerEntry> = { ...value, timeoutMs: value.timeoutMs ?? undefined };
-        await createMcpServer(entry);
-        toast.success(t("mcp.added"));
+        const result = await createMcpServer(entry);
+        const failedCount = failedMcpSyncCount(result.syncResults);
+        if (failedCount > 0) {
+          toast.warning(t("mcp.syncPartial", { count: failedCount }));
+        } else {
+          toast.success(t("mcp.added"));
+        }
         setMcpInstallDrawer(null);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : String(err));

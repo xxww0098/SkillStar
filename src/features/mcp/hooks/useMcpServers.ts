@@ -1,12 +1,22 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import { tauriInvoke } from "../../../lib/ipc";
-import type { McpServerEntry, McpServerPatch, McpServerWithSync, McpStore, McpToolStatus } from "../../../types";
+import {
+  isMcpToolId,
+  type McpServerEntry,
+  type McpServerPatch,
+  type McpServerWithSync,
+  type McpStore,
+  type McpToolId,
+  type McpToolStatus,
+} from "../../../types";
 import { mcpKeys } from "../api/keys";
 
 const MCP_STALE_TIME_MS = 30_000;
 const STORE_KEY = mcpKeys.servers();
 const STATUS_KEY = mcpKeys.toolStatuses();
+
+type PublicMcpToolStatus = McpToolStatus & { toolId: McpToolId };
 
 /**
  * Hook for managing the unified MCP server store.
@@ -24,9 +34,12 @@ export function useMcpServers() {
     staleTime: MCP_STALE_TIME_MS,
   });
 
-  const { data: toolStatuses } = useQuery<McpToolStatus[]>({
+  const { data: toolStatuses } = useQuery<PublicMcpToolStatus[]>({
     queryKey: STATUS_KEY,
-    queryFn: () => tauriInvoke("mcp_tool_statuses"),
+    queryFn: async () => {
+      const statuses = await tauriInvoke("mcp_tool_statuses");
+      return statuses.filter((status): status is PublicMcpToolStatus => isMcpToolId(status.toolId));
+    },
     staleTime: MCP_STALE_TIME_MS,
   });
 
@@ -57,7 +70,7 @@ export function useMcpServers() {
   });
 
   const toggleMutation = useMutation({
-    mutationFn: ({ id, toolId, enabled }: { id: string; toolId: string; enabled: boolean }) =>
+    mutationFn: ({ id, toolId, enabled }: { id: string; toolId: McpToolId; enabled: boolean }) =>
       tauriInvoke("set_mcp_tool_enabled", { id, toolId, enabled }),
     onMutate: async ({ id, toolId, enabled }) => {
       await queryClient.cancelQueries({ queryKey: STORE_KEY });
@@ -84,7 +97,7 @@ export function useMcpServers() {
   });
 
   const importMutation = useMutation({
-    mutationFn: (toolId: string) => tauriInvoke("import_mcp_from_tool", { toolId }),
+    mutationFn: (toolId: McpToolId) => tauriInvoke("import_mcp_from_tool", { toolId }),
     onSuccess: invalidate,
   });
 
@@ -103,11 +116,11 @@ export function useMcpServers() {
   );
   const deleteServer = useCallback((id: string) => deleteMutation.mutateAsync(id), [deleteMutation]);
   const toggleTool = useCallback(
-    (id: string, toolId: string, enabled: boolean) => toggleMutation.mutateAsync({ id, toolId, enabled }),
+    (id: string, toolId: McpToolId, enabled: boolean) => toggleMutation.mutateAsync({ id, toolId, enabled }),
     [toggleMutation],
   );
   const syncAll = useCallback((force = false) => syncAllMutation.mutateAsync(force), [syncAllMutation]);
-  const importFromTool = useCallback((toolId: string) => importMutation.mutateAsync(toolId), [importMutation]);
+  const importFromTool = useCallback((toolId: McpToolId) => importMutation.mutateAsync(toolId), [importMutation]);
   const reorder = useCallback((orderedIds: string[]) => reorderMutation.mutateAsync(orderedIds), [reorderMutation]);
 
   return {

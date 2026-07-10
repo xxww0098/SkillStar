@@ -8,7 +8,7 @@ use super::*;
 
 /// Resolve the config file path for a given tool_id.
 ///
-/// Only accepts "claude-code", "codex", "opencode", "claude-desktop", and "gemini"
+/// Only accepts "claude-code", "codex", "opencode", and "gemini"
 /// as valid tool IDs.
 /// Returns an error for any other tool_id to prevent arbitrary file writes.
 pub fn resolve_tool_config_path(tool_id: &str) -> Result<PathBuf> {
@@ -17,10 +17,9 @@ pub fn resolve_tool_config_path(tool_id: &str) -> Result<PathBuf> {
         "claude-code" => Ok(home.join(".claude").join("settings.json")),
         "codex" => Ok(home.join(".codex").join("config.toml")),
         "opencode" => Ok(resolve_opencode_config_path()?),
-        "claude-desktop" => Ok(resolve_claude_desktop_config_path()?),
         "gemini" => Ok(resolve_gemini_env_path()?),
         _ => bail!(
-            "Unknown tool_id: '{}'. Supported: claude-code, codex, opencode, claude-desktop, gemini.",
+            "Unknown tool_id: '{}'. Supported: claude-code, codex, opencode, gemini.",
             tool_id
         ),
     }
@@ -66,20 +65,6 @@ pub fn resolve_grok_auth_path() -> Result<PathBuf> {
     Ok(home.join(".grok").join("auth.json"))
 }
 
-/// Resolve the Claude Desktop config file path.
-///
-/// - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-/// - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
-/// - Linux: `~/.config/Claude/claude_desktop_config.json` (no official Linux Claude Desktop yet,
-///   but we mirror the macOS/Windows layout so power users running it via Wine/Flatpak still work).
-///
-/// Claude Desktop only honours the `mcpServers` section of this file — it does NOT accept
-/// custom `base_url` or API keys, since it authenticates via the user's Claude.ai account.
-pub fn resolve_claude_desktop_config_path() -> Result<PathBuf> {
-    let base = sync_config_dir()?;
-    Ok(base.join("Claude").join("claude_desktop_config.json"))
-}
-
 /// Resolve a config file path for `(tool_id, file_id)`.
 pub fn resolve_tool_config_file_path(tool_id: &str, file_id: &str) -> Result<PathBuf> {
     match (tool_id, file_id) {
@@ -87,7 +72,6 @@ pub fn resolve_tool_config_file_path(tool_id: &str, file_id: &str) -> Result<Pat
         ("codex", "config") => resolve_codex_config_path(),
         ("codex", "auth") => resolve_codex_auth_path(),
         ("opencode", "opencode") => resolve_opencode_config_path(),
-        ("claude-desktop", "config") => resolve_claude_desktop_config_path(),
         ("gemini", "env") => resolve_gemini_env_path(),
         _ => bail!("Unknown tool config file: {tool_id}/{file_id}"),
     }
@@ -140,19 +124,6 @@ pub fn list_tool_config_files(tool_id: &str) -> Result<Vec<ToolConfigFileInfo>> 
                 managed_by_skillstar: true,
             }])
         }
-        "claude-desktop" => {
-            let path = resolve_claude_desktop_config_path()?;
-            Ok(vec![ToolConfigFileInfo {
-                file_id: "config".to_string(),
-                label: "claude_desktop_config.json".to_string(),
-                path: path.to_string_lossy().to_string(),
-                format: "json".to_string(),
-                exists: path.exists(),
-                // Claude Desktop config is NOT "managed by SkillStar" in the usual sense —
-                // SkillStar only edits the `mcpServers` node, leaving everything else untouched.
-                managed_by_skillstar: false,
-            }])
-        }
         "gemini" => {
             let path = resolve_gemini_env_path()?;
             Ok(vec![ToolConfigFileInfo {
@@ -187,9 +158,6 @@ fn default_empty_config_content(tool_id: &str, file_id: &str) -> String {
         ("opencode", "opencode") => {
             "{\n  \"$schema\": \"https://opencode.ai/config.json\",\n  \"provider\": {}\n}\n".to_string()
         }
-        // Claude Desktop only honours `mcpServers` — start with an empty list so the user
-        // can drop entries in without first reading the schema.
-        ("claude-desktop", "config") => "{\n  \"mcpServers\": {}\n}\n".to_string(),
         ("gemini", "env") => {
             "GOOGLE_GEMINI_BASE_URL=\nGEMINI_API_KEY=[密钥]".to_string()
         }

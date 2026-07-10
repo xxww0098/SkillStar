@@ -12,7 +12,6 @@ use ts_rs::TS;
 /// Tool ids that can receive MCP servers, in display order.
 pub const MCP_TOOL_IDS: &[&str] = &[
     "claude-code",
-    "claude-desktop",
     "codex",
     "gemini",
     "grok",
@@ -22,11 +21,14 @@ pub const MCP_TOOL_IDS: &[&str] = &[
     "cursor",
 ];
 
+/// Legacy Desktop Chat projection retained only so existing SkillStar-managed
+/// entries can still be located and removed. It is not a public Agent target.
+pub(crate) const LEGACY_CLAUDE_DESKTOP_TOOL_ID: &str = "claude-desktop";
+
 /// Human-readable label for a tool id.
 pub fn mcp_tool_label(tool_id: &str) -> &'static str {
     match tool_id {
         "claude-code" => "Claude Code",
-        "claude-desktop" => "Claude Desktop",
         "codex" => "Codex",
         "gemini" => "Gemini CLI",
         "grok" => "Grok",
@@ -79,14 +81,16 @@ pub struct McpServerEntry {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
 
-    /// Per-tool enable flags, keyed by tool id (see [`MCP_TOOL_IDS`]).
+    /// Per-tool enable flags, keyed by tool id (see [`MCP_TOOL_IDS`]). Existing
+    /// stores may retain a legacy Desktop Chat cleanup tombstone: `true` means
+    /// cleanup is pending; a successful removal consumes it to `false`.
     #[serde(default)]
     pub enabled: BTreeMap<String, bool>,
 
     // --- tool-call approval / exposure (best-effort per tool, see `specs.rs`) ---
     /// Auto-approve every tool call for this server without prompting ("YOLO").
     /// Maps to Kiro's `autoApprove: ["*"]` and Gemini's `trust: true`. There is
-    /// no verified native equivalent for Claude Code/Desktop, OpenCode, Grok,
+    /// no verified native equivalent for Claude Code, OpenCode, Grok,
     /// or ZCode, so this flag has no effect when projected to those tools.
     #[serde(default)]
     pub auto_approve_all: bool,

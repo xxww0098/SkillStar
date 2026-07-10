@@ -3,7 +3,7 @@ import { ClaudeColor, CodexColor, GeminiColor, type LobeIconComponent } from "@/
 import { LobeIcon } from "@/components/ui/icons/LobeIcon";
 import { cn } from "@/lib/utils";
 
-export type AgentToolIconId = "claude-code" | "codex" | "opencode" | "claude-desktop" | "gemini";
+export type AgentToolIconId = "claude-code" | "codex" | "opencode" | "gemini";
 
 export interface AgentToolIconProps {
   toolId: AgentToolIconId;
@@ -25,7 +25,6 @@ const GLYPH_BY_TOOL_ID: Record<AgentToolIconId, ToolGlyph> = {
   "claude-code": { icon: ClaudeColor, chipClass: DEFAULT_CHIP },
   codex: { icon: CodexColor, chipClass: DEFAULT_CHIP },
   gemini: { icon: GeminiColor, chipClass: DEFAULT_CHIP },
-  "claude-desktop": { icon: ClaudeColor, chipClass: "border-primary/25 bg-primary/[0.05]" },
   opencode: { letter: "O" },
 };
 

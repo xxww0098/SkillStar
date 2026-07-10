@@ -15,12 +15,12 @@ interface AcpConfig {
 const DEFAULT_ACP_CONFIG: AcpConfig = {
   enabled: false,
   agent_command: "npx -y @agentclientprotocol/claude-agent-acp",
-  agent_label: "Claude",
+  agent_label: "Claude Code",
 };
 
 /** Built-in agent presets for quick selection. */
 const AGENT_PRESETS = [
-  { label: "Claude", command: "npx -y @agentclientprotocol/claude-agent-acp" },
+  { label: "Claude Code", command: "npx -y @agentclientprotocol/claude-agent-acp" },
   { label: "OpenCode", command: "opencode acp" },
 ] as const;
 

@@ -37,6 +37,13 @@ function input(overrides: Partial<AgentStatusInput> = {}): AgentStatusInput {
   };
 }
 
+describe("agent registry", () => {
+  it("exposes exactly one Claude Code provider Agent", () => {
+    expect(PROVIDER_AGENTS.filter((agent) => agent.toolId.startsWith("claude"))).toEqual([claude]);
+    expect(claude.displayName).toBe("Claude Code");
+  });
+});
+
 describe("computeAgentStatus", () => {
   it("reports not_installed only after detection finished", () => {
     expect(computeAgentStatus(input({ installed: false })).kind).toBe("not_installed");

@@ -12,11 +12,7 @@ use super::*;
 
 /// `~/.skillstar/config/mcp_servers.json`
 pub fn mcp_store_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".skillstar")
-        .join("config")
-        .join("mcp_servers.json")
+    skillstar_core::infra::paths::config_dir().join("mcp_servers.json")
 }
 
 /// Read the store, returning an empty default on missing/malformed files.
