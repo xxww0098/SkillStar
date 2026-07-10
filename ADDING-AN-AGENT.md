@@ -18,7 +18,7 @@ SkillStar 里"支持一个 Agent"其实是 **三条互相独立的轴**，按需
 
 **用户级自定义 Agent 是零代码路径。** 运行时即可添加：Settings → Agent 连接 →
 添加自定义 Agent（后端入口 `add_custom_agent_profile`，定义在
-`crates/skillstar-projects/src/projects/agents/custom.rs` 的 `CustomProfileDef`，
+`crates/skillstar-skills/src/agents/custom.rs` 的 `CustomProfileDef`，
 持久化在 `~/.skillstar/config/profiles.toml`）。自定义 Agent 支持自定义全局技能目录、
 项目级相对路径和 base64 图标，但不能覆盖内置 Agent 的 id。
 
@@ -31,7 +31,7 @@ SkillStar 里"支持一个 Agent"其实是 **三条互相独立的轴**，按需
 
 ### 1. 在内置数据表加一行
 
-`crates/skillstar-projects/src/projects/agents/builtin.rs` 的 `BUILTIN_AGENT_DEFS`：
+`crates/skillstar-skills/src/agents/builtin.rs` 的 `BUILTIN_AGENT_DEFS`：
 
 ```rust
 // (id, display_name, icon, home_subdirs, project_skills_rel, binary)
@@ -80,9 +80,9 @@ SkillStar 里"支持一个 Agent"其实是 **三条互相独立的轴**，按需
 ### 4. 测试与文档
 
 - 若 Agent 有特殊性质（仅全局 / 共享 home 根），在
-  `crates/skillstar-projects/src/projects/agents/mod.rs` 测试区加一条守卫测试
+  `crates/skillstar-skills/src/agents/mod.rs` 测试区加一条守卫测试
   （参考 `openclaw_has_no_project_level_skills_directory`）。
-- 跑 `cargo test -p skillstar-projects`（`validate_project_skills_rel_rules`
+- 跑 `cargo test -p skillstar-skills`（`validate_project_skills_rel_rules`
   会自动校验新行的路径规则）。
 - 更新 README.md 的 Agent 列表表格；如有特殊行为，在 AGENTS.md
   "Project Registration and Detection" 一节补一句。
@@ -165,7 +165,7 @@ Provider（Base URL / API Key / 模型）时才做。现有目标：`claude-code
 轴①（必做）
   [ ] builtin.rs 数据表 +1 行
   [ ] public/agents/<id>.svg
-  [ ] cargo test -p skillstar-projects 全绿
+  [ ] cargo test -p skillstar-skills 全绿
   [ ] README.md Agent 表格 / i18n 枚举文案（如涉及）
   [ ] 特殊性质 → mod.rs 守卫测试 + AGENTS.md 一句话
 

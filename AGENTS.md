@@ -31,9 +31,10 @@
 
    推论：文档里**不写代码已测试锁定的数字 / 清单**——要么描述性带过，要么指向代码；确需写明数字时，改动必须与对应单测同 PR 同步。
 
-2. **一个功能域 = 一个 crate + 一个 feature 切片 + backend.md 一节**。新增大功能时落点固定：
-   域逻辑进新的 `crates/skillstar-<域>`（在本文件 Workspace Crates 表登记）→ 前端进 `src/features/<域>/` → 行为约束进 `docs/backend.md` 一个小节。
-   不要把新功能塞进既有 crate 的杂项模块，也不要在命令包装层堆逻辑。
+2. **功能先形成内聚 module，满足晋升条件后再成为 crate**（module-first，不是「一个前端 feature 自动对应一个 crate」）。
+   新增大功能时落点固定：域逻辑优先进既有内聚 crate 的私有模块 + 窄 facade（在本文件 Workspace Crates 表登记职责）→ 前端进 `src/features/<域>/` → 行为约束进 `docs/backend.md` 一个小节。
+   只有当变更节奏、依赖集合或 deletion test 证明独立编译单元有收益时，才拆出新 `crates/skillstar-<域>`。
+   不要把新功能塞进既有 crate 的杂项公共出口，也不要在命令包装层堆逻辑。
 
 ## 架构
 
@@ -102,23 +103,31 @@ SkillStar 是 Tauri v2 桌面应用（同一 `skillstar` 二进制内还含 CLI�
 
 ### Workspace Crates（域逻辑 SSOT）
 
-> 依赖关系：`skillstar-ai` → `skillstar-models` → `skillstar-providers`；`skillstar-usage` → `skillstar-providers` + `skillstar-fingerprint`。
-> `skillstar-providers` 是零依赖叶子 crate，保持无依赖。
+> 允许的内部依赖方向：
+> `skillstar-ai` → `skillstar-models` → `skillstar-providers`；
+> `skillstar-usage` → `skillstar-fingerprint` + `skillstar-providers`；
+> `skillstar-sync` → `skillstar-skills`；
+> `skillstar-app` → 完成跨域 use case 所需的域 crate；
+> 域 crate → `skillstar-core`（仅基础设施或共享契约）；
+> `src-tauri` → `skillstar-app` 或域 crate 的公开 facade。
+>
+> 禁止：`skills ↔ marketplace`、`models → ai`、`usage → models`、域 crate → `src-tauri`、`core →` 任意域 crate。
+> 跨域编排（搜索结果安装、Usage 账号写入 CLI 等）由 `skillstar-app` 完成，不靠反向依赖。
+> `skillstar-providers` 是零依赖叶子 crate。重 feature（如 `impersonate`）由最终 binary root（`src-tauri`）显式选择，leaf 不得靠 default feature 隐式决定构建图。
 
 | Crate | 职责 |
 | --- | --- |
-| `skillstar-core` | 共享类型 + 基础设施（paths / fs_ops / db_pool / migration / error / util）+ 用户配置（proxy / github_mirror / ACP）+ `http_client::probe_http_client`（所有远程 HTTP 必须走它） |
+| `skillstar-core` | 共享类型（如 `Skill` 契约）+ 基础设施（paths / fs_ops / db_pool / migration / error / util）+ 用户配置（proxy / github_mirror / ACP）+ `http_client::probe_http_client`（所有远程 HTTP 必须走它）。**不含**技能域 lockfile / update detection 实现 |
 | `skillstar-providers` | 零依赖叶子：Provider 元数据（余额端点、鉴权方案）的单一事实来源；usage fetcher 与 models preset 都从这里派生 |
-| `skillstar-skills` | 技能生命周期（install / update / bundle / local 创作 / repo scan / discovery）+ git 操作 |
+| `skillstar-skills` | 技能库（install / update / bundle / local 创作 / repo scan / discovery / lockfile / update detection / git）+ Agent registry + 项目注册/manifest + deployment（link-copy reconcile）+ patrol 运行逻辑 + Launch Deck terminal。对外暴露窄 facade，实现默认私有 |
 | `skillstar-marketplace` | 本地优先 marketplace 快照 + SQLite FTS + MCP registry/curated |
 | `skillstar-models` | Provider store + presets + 外部工具同步（Claude Code / Codex / OpenCode / Gemini）+ latency + circuit breaker |
 | `skillstar-ai` | 推理：chat completion、流式 summarize/translate、skill pick（依赖 skillstar-models 解析 Provider） |
 | `skillstar-usage` | 订阅/配额：固定 catalog、OAuth + API-key fetchers、AES-256-GCM token 存储 |
 | `skillstar-fingerprint` | TLS/HTTP 指纹感知 HTTP 客户端（JA3/JA4/H2 模拟，经可选 `impersonate`/`wreq` feature）+ IDE projector |
-| `skillstar-projects` | 项目注册 + agent profiles + patrol + 终端（Launch Deck） |
 | `skillstar-ssh` | SSH 远程技能管理：russh 连接 + SFTP 推送/列出/删除 + 主机配置 + keyring 凭证 + TOFU 主机键 |
 | `skillstar-sync` | S3 云同步：aws-sdk-s3 + manifest.json + 本地技能 tar.gz 打包 + keyring 凭证 |
-| `skillstar-app` | 不含 Tauri 命令：`shell_rc`（zshrc 幂等读写的纯逻辑，供 src-tauri 的命令包装调用）+ 跨 crate 胶水（`usage_switch`：CLI 账号切换，桥接 usage+models）+ CLI 入口（`skillstar` 二进制）。所有 `#[tauri::command]` 已回归 `src-tauri/src/commands/` |
+| `skillstar-app` | library-only：`shell_rc`、跨域 use case（`usage_switch` 等）、CLI 解析与模式识别。可执行文件 `skillstar` 仅由 `src-tauri` package 产出。所有 `#[tauri::command]` 在 `src-tauri/src/commands/` |
 
 ## 项目树（精简）
 
@@ -141,11 +150,10 @@ SkillStar/
 │       │   ├── models_commands/  # provider CRUD / 健康面板
 │       │   └── *.rs           #   skills · bundles · projects · agents · github · patrol · mcp_commands
 │       │                      #     · usage_{commands,dto,switch,windows} · ssh_hosts · s3_sync · fingerprints ...
-│       └── core/              # Tauri 专用胶水（State / 事件 / 适配器）
+│       └── core/              # Tauri 专用胶水（State / 事件 / 适配器；无 skills pass-through）
 │           ├── acp_client/    #   ACP 客户端
 │           ├── marketplace_snapshot/  # 本地优先 marketplace DB（包 Tauri State）
-│           ├── skills/        #   skillstar-skills 薄适配层
-│           └── *.rs           #   marketplace · patrol · path_env · lockfile · update_checker ...
+│           └── *.rs           #   marketplace · patrol（Emitter/State）· path_env · skill 契约 re-export ...
 ├── crates/                    # workspace 域逻辑（见上方 Workspace Crates 表）
 ├── docs/                      # backend.md（后端行为）· Error.md（故障记录）
 ├── scripts/                   # release/ + internal/（维护脚本）

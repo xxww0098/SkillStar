@@ -282,7 +282,7 @@ skillstar gui                                   # 强制唤起桌面图形界面
 | Grok | `~/.grok/` | ✅ OAuth |
 | 自定义 Agent | 自由配置 | — |
 
-> 此表对应后端 `crates/skillstar-projects/.../agents/builtin.rs` 的 `BUILTIN_AGENT_DEFS`（13 个内置 + 自定义）；新增 Agent 见 [ADDING-AN-AGENT.md](./ADDING-AN-AGENT.md)，改动须两边同步。
+> 此表对应后端 `crates/skillstar-skills/.../agents/builtin.rs` 的 `BUILTIN_AGENT_DEFS`（13 个内置 + 自定义）；新增 Agent 见 [ADDING-AN-AGENT.md](./ADDING-AN-AGENT.md)，改动须两边同步。
 
 ---
 
