@@ -209,19 +209,18 @@ mod tests {
 
         let result = (|| -> Result<()> {
             let store = MemPrefsStore::new();
-            // Antigravity is an IDE agent (no binary), so install detection is
-            // directory-based and deterministic under an isolated temp HOME:
-            // ~/.gemini/antigravity-cli/skills doesn't exist there → not
-            // detected → default enabled=false → first toggle flips to true.
-            // (We can't use `claude` here anymore because its detection now
-            // probes PATH, which leaks the dev machine's real install.)
+            // openclaw is directory-only (no binary / desktop-app / alternate
+            // CLI), so under an isolated temp HOME it is deterministically
+            // uninstalled → default enabled=false → first toggle flips to true.
+            // (CLI agents and Antigravity's `agy` / Cursor's `cursor` alternate
+            // CLIs probe the host PATH and would leak the real install.)
             assert!(
-                registry::toggle("antigravity", &store)?,
+                registry::toggle("openclaw", &store)?,
                 "first toggle should enable when the agent is not detected"
             );
-            assert_eq!(store.load().enabled.get("antigravity"), Some(&true));
+            assert_eq!(store.load().enabled.get("openclaw"), Some(&true));
             assert!(
-                !registry::toggle("antigravity", &store)?,
+                !registry::toggle("openclaw", &store)?,
                 "second toggle should disable the explicit enabled state"
             );
 
@@ -262,13 +261,16 @@ mod tests {
 
         let result: Result<()> = {
             let profiles = list_profiles();
-            let claude = profiles
+            // openclaw is directory-only (no binary / desktop-app / alternate CLI),
+            // so under an isolated HOME with no `~/.openclaw` it is deterministically
+            // uninstalled — unlike CLI agents whose PATH probe leaks the host install.
+            let openclaw = profiles
                 .into_iter()
-                .find(|profile| profile.id == "claude")
-                .expect("claude profile should exist");
+                .find(|profile| profile.id == "openclaw")
+                .expect("openclaw profile should exist");
             assert!(
-                claude.installed,
-                "expected config root to count as installed"
+                !openclaw.installed,
+                "openclaw must not be detected under a temp HOME without its config root"
             );
             assert!(
                 !temp_home.join(".claude/skills").exists(),
@@ -277,6 +279,14 @@ mod tests {
             assert!(
                 !temp_home.join(".codex").exists(),
                 "read-only profile detection must not create unrelated agent roots"
+            );
+            assert!(
+                !temp_home.join(".openclaw").exists(),
+                "read-only profile detection must not create openclaw's config root"
+            );
+            assert!(
+                temp_home.join(".claude").is_dir(),
+                "fixture should have created ~/.claude"
             );
 
             Ok(())
@@ -310,11 +320,10 @@ mod tests {
         let temp_root =
             std::env::temp_dir().join(format!("skillstar-agent-profile-toggle-{}", stamp));
         let temp_home = temp_root.join("home");
-        // Use Antigravity (IDE agent, directory-detected) so the test is
-        // deterministic and doesn't depend on whether `claude` is on PATH on
-        // the dev/CI machine. Creating its config root makes install detection
-        // report true → default enabled=true.
-        std::fs::create_dir_all(temp_home.join(".gemini").join("antigravity-cli"))?;
+        // openclaw is directory-only (no PATH / desktop-app side channels), so
+        // creating its config root under an isolated HOME deterministically
+        // reports installed → default enabled=true, independent of host CLIs.
+        std::fs::create_dir_all(temp_home.join(".openclaw"))?;
         let previous_home = std::env::var_os("HOME");
         let previous_data_dir = std::env::var_os("SKILLSTAR_DATA_DIR");
         set_env("HOME", &temp_home);
@@ -327,14 +336,14 @@ mod tests {
         let result = (|| -> Result<()> {
             let initial = list_profiles()
                 .into_iter()
-                .find(|profile| profile.id == "antigravity")
-                .expect("antigravity profile should exist");
+                .find(|profile| profile.id == "openclaw")
+                .expect("openclaw profile should exist");
             assert!(
                 initial.enabled,
                 "expected default profile state to start enabled when config root exists"
             );
 
-            let toggled = toggle_profile("antigravity")?;
+            let toggled = toggle_profile("openclaw")?;
             assert!(
                 !toggled,
                 "expected first toggle to disable the profile from its implicit enabled state"
@@ -342,8 +351,8 @@ mod tests {
 
             let updated = list_profiles()
                 .into_iter()
-                .find(|profile| profile.id == "antigravity")
-                .expect("antigravity profile should exist after toggle");
+                .find(|profile| profile.id == "openclaw")
+                .expect("openclaw profile should exist after toggle");
             assert!(
                 !updated.enabled,
                 "expected persisted profile state to be disabled after one toggle"

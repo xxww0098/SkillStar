@@ -53,9 +53,12 @@ SkillStar 里"支持一个 Agent"其实是 **三条互相独立的轴**，按需
   只要项目级路径不同即可；这种关系**纯数据表达**，不允许代码特例。
 - 路径一律正斜杠；Windows 反斜杠输入由后端归一化。
 - `binary` 决定安装检测策略：填了名字的 Agent（`claude`/`codex`/`gemini`/`zcode` 等）
-  按二进制是否在增强 PATH 里判定（这能区分共享 home 根的 Agent——比如只装了 Antigravity
-  时，`gemini` 不会因为 `~/.gemini` 存在就被误判）；`None` 则回落到目录存在判定，适用于
-  IDE/GUI 型 Agent（Antigravity/Cursor/Qoder/Trae）和仅全局 Agent（OpenClaw）。
+  按二进制是否在**增强 PATH**（`path_env::which_in_enriched`：Homebrew / `~/.local/bin` /
+  `~/.opencode/bin` / `~/.grok/bin` / bun·volta·npm-global 等）里判定；找不到时再试
+  桌面应用安装路径（如 `ZCode.app`），最后才回落到 **skills 目录本身**（不含 parent，
+  以免共享 home 根误判）。`None` 则：桌面应用 / 备用 CLI（Cursor 的 `cursor`、
+  Antigravity 的 `agy`）→ 目录存在（skills 或 parent）。详见 `docs/backend.md`
+  「Project Registration and Detection」。
 
 其余全部自动生效：安装检测（`detect.rs` 只读判断 `installed`，**不**改动文件系统——
 创建 skills 目录是 deploy 操作才做的）、启用/禁用持久化（`profile_storage.rs`）、

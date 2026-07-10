@@ -16,10 +16,11 @@ use super::spec::AgentSpec;
 // no code special-case anywhere.
 //
 // `binary` is the CLI executable name used for install detection: when set,
-// `detect_installed` probes PATH (via `which`) instead of relying on directory
-// presence, so a shared home root (e.g. Antigravity creating ~/.gemini) no
-// longer false-positives another agent. `None` marks IDE/GUI agents (detected
-// by directory presence) or global-only agents with no CLI.
+// `detect_installed` probes the enriched PATH (via `path_env::which_in_enriched`)
+// instead of relying on directory presence, so a shared home root (e.g.
+// Antigravity creating ~/.gemini) no longer false-positives another agent.
+// `None` marks IDE/GUI agents (desktop-app + directory presence) or global-only
+// agents with no CLI.
 /// `(id, display_name, icon, home_subdirs, project_skills_rel, binary)` — see
 /// the data-table comment above for field meaning.
 type BuiltinAgentDef = (&'static str, &'static str, &'static str, &'static [&'static str], &'static str, Option<&'static str>);

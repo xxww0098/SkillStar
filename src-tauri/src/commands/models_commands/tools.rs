@@ -14,62 +14,6 @@ pub async fn get_tool_config_targets() -> Result<Vec<ToolConfigTarget>, AppError
     Ok(tool_sync::get_tool_config_targets()?)
 }
 
-/// Sync a provider's configuration to a single external tool.
-///
-/// Creates a backup of the existing config file before writing.
-#[tauri::command]
-pub async fn sync_provider_to_tool(
-    app_id: String,
-    provider_id: String,
-    tool_id: String,
-) -> Result<ToolSyncResult, AppError> {
-    let store = providers::read_store()?;
-
-    let provider = match app_id.as_str() {
-        "claude" => store.claude.providers.get(&provider_id),
-        "codex" => store.codex.providers.get(&provider_id),
-        "opencode" => store.opencode.providers.get(&provider_id),
-        "gemini" => store.gemini.providers.get(&provider_id),
-        _ => return Err(AppError::Other(format!("Unknown app_id: {}", app_id))),
-    }
-    .ok_or_else(|| {
-        AppError::Other(format!(
-            "Provider '{}' not found in app '{}'",
-            provider_id, app_id
-        ))
-    })?;
-
-    Ok(tool_sync::sync_provider_to_tool(provider, &tool_id))
-}
-
-/// Sync a provider's configuration to all supported external tools.
-///
-/// Syncs to each tool independently — a failure in one tool does not prevent others.
-#[tauri::command]
-pub async fn sync_provider_to_all_tools(
-    app_id: String,
-    provider_id: String,
-    tool_ids: Vec<String>,
-) -> Result<Vec<ToolSyncResult>, AppError> {
-    let store = providers::read_store()?;
-
-    let provider = match app_id.as_str() {
-        "claude" => store.claude.providers.get(&provider_id),
-        "codex" => store.codex.providers.get(&provider_id),
-        "opencode" => store.opencode.providers.get(&provider_id),
-        "gemini" => store.gemini.providers.get(&provider_id),
-        _ => return Err(AppError::Other(format!("Unknown app_id: {}", app_id))),
-    }
-    .ok_or_else(|| {
-        AppError::Other(format!(
-            "Provider '{}' not found in app '{}'",
-            provider_id, app_id
-        ))
-    })?;
-
-    Ok(tool_sync::sync_provider_to_all_tools(provider, &tool_ids))
-}
-
 /// Activate a provider for a specific Agent tool.
 ///
 /// Updates the `tool_activations` map and syncs the provider's credentials
@@ -261,20 +205,25 @@ pub async fn update_tool_settings(
 /// Detect whether an Agent tool (CLI) is installed on the system.
 ///
 /// Checks:
-/// 1. Whether the CLI binary exists in PATH (e.g., `claude` for claude-code, `codex` for codex)
-/// 2. Whether the tool's config directory exists (e.g., `~/.claude` for claude-code, `~/.codex` for codex)
+/// 1. Whether the CLI binary exists on the **enriched** PATH (Homebrew, agent
+///    self-install bins like `~/.opencode/bin` / `~/.grok/bin`, npm global, …)
+/// 2. Whether the tool's config directory exists (e.g., `~/.claude` for claude-code)
 ///
 /// Returns a JSON object: `{ "installed": bool, "binary_found": bool, "config_dir_found": bool }`
 ///
-/// A tool is considered "installed" if the binary is found in PATH.
+/// A tool is considered "installed" if the binary is found on the enriched PATH.
 /// The config_dir_found field provides additional context (a tool may be installed
 /// but not yet configured, or config may exist from a previous installation).
+///
+/// Binary probing must stay aligned with agent-profile install detection
+/// (`skillstar_projects::…::detect`) — both call
+/// `skillstar_core::infra::path_env::which_in_enriched`.
 #[tauri::command]
 pub async fn detect_tool_installation(tool_id: String) -> Result<serde_json::Value, AppError> {
     // Claude Desktop is a GUI app, not a CLI — detect by app bundle / install path instead
     // of by binary on PATH.
     if tool_id == "claude-desktop" {
-        let binary_found = detect_claude_desktop_app();
+        let binary_found = skillstar_core::infra::path_env::desktop_app_installed("Claude");
         let config_dir_found = dirs::config_dir()
             .map(|base| base.join("Claude").is_dir())
             .unwrap_or(false);
@@ -298,19 +247,23 @@ pub async fn detect_tool_installation(tool_id: String) -> Result<serde_json::Val
         }
     };
 
-    let binary_found = which::which(binary_name).is_ok();
+    let binary_found =
+        skillstar_core::infra::path_env::which_in_enriched(binary_name).is_some();
 
     let config_dir_found = dirs::home_dir()
         .map(|home| match tool_id.as_str() {
             "claude-code" => home.join(".claude").is_dir(),
             "codex" => home.join(".codex").is_dir(),
-            "opencode" => home.join(".config").join("opencode").is_dir(),
+            "opencode" => {
+                home.join(".config").join("opencode").is_dir()
+                    || home.join(".opencode").is_dir()
+            }
             "gemini" => home.join(".gemini").is_dir(),
             _ => false,
         })
         .unwrap_or(false);
 
-    // A tool is considered installed if the binary is found in PATH
+    // A tool is considered installed if the binary is found on the enriched PATH
     let installed = binary_found;
 
     Ok(serde_json::json!({
@@ -318,54 +271,6 @@ pub async fn detect_tool_installation(tool_id: String) -> Result<serde_json::Val
         "binary_found": binary_found,
         "config_dir_found": config_dir_found
     }))
-}
-
-/// Detect Claude Desktop App installation by scanning common install paths per OS.
-///
-/// - macOS: `/Applications/Claude.app` or `~/Applications/Claude.app`
-/// - Windows: `%LOCALAPPDATA%\Programs\Claude\Claude.exe` (per-user) or
-///   `%ProgramFiles%\Claude\Claude.exe` (machine-wide)
-/// - Linux: no official Linux Claude Desktop — returns false.
-fn detect_claude_desktop_app() -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        if std::path::Path::new("/Applications/Claude.app").exists() {
-            return true;
-        }
-        if let Some(home) = dirs::home_dir()
-            && home.join("Applications").join("Claude.app").exists()
-        {
-            return true;
-        }
-        false
-    }
-    #[cfg(target_os = "windows")]
-    {
-        if let Some(local) = dirs::data_local_dir() {
-            if local
-                .join("Programs")
-                .join("Claude")
-                .join("Claude.exe")
-                .exists()
-            {
-                return true;
-            }
-        }
-        if let Ok(pf) = std::env::var("ProgramFiles") {
-            if std::path::Path::new(&pf)
-                .join("Claude")
-                .join("Claude.exe")
-                .exists()
-            {
-                return true;
-            }
-        }
-        false
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    {
-        false
-    }
 }
 
 // ---------------------------------------------------------------------------

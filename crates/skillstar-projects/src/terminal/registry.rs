@@ -20,10 +20,14 @@ pub fn binary_name_for_agent(agent_id: &str) -> Option<&'static str> {
     binary_name_for_builtin(agent_id)
 }
 
-/// Find the binary path for a given agent id by searching PATH.
+/// Find the binary path for a given agent id by searching the enriched PATH.
+///
+/// Uses [`skillstar_core::infra::path_env::which_in_enriched`] so GUI-launched
+/// SkillStar still finds Homebrew / self-install agent bins (same probe as
+/// install detection in `agents::detect`).
 pub fn find_cli_binary(agent_id: &str) -> Option<PathBuf> {
     let binary_name = binary_name_for_agent(agent_id)?;
-    which::which(binary_name).ok()
+    skillstar_core::infra::path_env::which_in_enriched(binary_name)
 }
 
 /// List all terminal-launchable CLI agents with their installation status.
@@ -31,7 +35,7 @@ pub fn list_available_clis() -> Vec<AgentCliInfo> {
     agent_cli_entries()
         .into_iter()
         .map(|(id, name, binary)| {
-            let path = which::which(binary).ok();
+            let path = skillstar_core::infra::path_env::which_in_enriched(binary);
             AgentCliInfo {
                 id: id.to_string(),
                 name: name.to_string(),

@@ -13,7 +13,6 @@ sha2 = { workspace = true }
 skillstar-core = { version = "0.1.0", path = "../skillstar-core" }
 toml = { workspace = true }
 tracing = { workspace = true }
-which = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

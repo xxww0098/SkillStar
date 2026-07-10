@@ -1,6 +1,8 @@
 //! Filesystem detection helpers: install status + synced-skill counting.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+
+use skillstar_core::infra::path_env::{binary_on_enriched_path, desktop_app_installed};
 
 use super::spec::AgentSpec;
 
@@ -42,65 +44,85 @@ pub(crate) fn count_symlinks(dir: &Path) -> u32 {
 
 /// Detect installation without mutating the filesystem.
 ///
-/// Detection strategy is driven by the spec's [`AgentSpec::binary_name`]:
+/// Detection strategy is driven by the spec's [`AgentSpec::binary_name`] plus
+/// optional desktop-app / alternate-CLI probes keyed by agent id:
 ///
 /// - **CLI agents** (binary name set, e.g. `claude`, `gemini`): considered
-///   installed iff the executable is reachable in the *enriched* PATH. This is
-///   what disambiguates agents that share a home root — e.g. Antigravity and
-///   Gemini both live under `~/.gemini`, but only the one whose CLI is on PATH
-///   counts as installed. The enriched PATH covers Homebrew/cargo/snap dirs so
-///   GUI-launched Tauri (whose `PATH` may omit `/opt/homebrew/bin`) still finds
-///   user-installed CLIs.
-///   When the binary is *not* on PATH, we fall back to directory presence — but
-///   strictly on the skills dir itself (`global_skills_dir`), never its parent.
-///   This matters because some CLI agents ship with a config dir even when the
-///   CLI isn't on PATH: ZCode is a GUI app that never installs a `zcode` binary
-///   yet lays down `~/.zcode/skills`, and Codex's npm global sometimes fails to
-///   symlink into `/opt/homebrew/bin` even though `~/.codex/skills` exists.
-///   Restricting the fallback to the skills dir (not the parent) preserves the
-///   shared-root disambiguation: a stray `~/.gemini` from Antigravity (which
-///   has no `~/.gemini/skills`) still won't false-positive Gemini.
-/// - **IDE / global-only agents** (no binary name, e.g. Antigravity, OpenClaw):
-///   fall back to directory presence — either the skills directory or its
-///   parent (the agent's config root) existing.
+///   installed if any of:
+///   1. the executable is reachable in the *enriched* PATH
+///      ([`skillstar_core::infra::path_env::which_in_enriched`]);
+///   2. a known desktop app bundle/install path exists (hybrid GUI+CLI agents
+///      such as ZCode);
+///   3. the skills directory itself exists (`global_skills_dir`) — never its
+///      parent. Restricting the dir fallback preserves shared-home-root
+///      disambiguation (Antigravity's `~/.gemini` must not false-positive
+///      Gemini).
+/// - **IDE / global-only agents** (no binary name): considered installed if any of:
+///   1. a known desktop app is present (Cursor / Kiro / Trae / Qoder / …);
+///   2. an alternate CLI for that agent is on PATH (e.g. Antigravity's `agy`);
+///   3. the skills directory or its parent (the agent config root) exists.
 ///
 /// Creating a missing skills directory is reserved for an explicit deploy/link
 /// operation; this function never writes to the filesystem.
 pub(crate) fn detect_installed(spec: &dyn AgentSpec, global_skills_dir: &Path) -> bool {
     if let Some(binary) = spec.binary_name() {
-        if binary_in_enriched_path(binary) {
+        if binary_on_enriched_path(binary) {
             return true;
         }
-        // CLI not on PATH — accept a present skills dir only (not the parent),
-        // to avoid re-introducing the shared-home-root false positive (see the
-        // Antigravity ↔ Gemini asymmetry guarded by the mod-level tests).
+        if desktop_app_for_agent(spec.id()) {
+            return true;
+        }
+        // CLI not on PATH and no app bundle — accept a present skills dir only
+        // (not the parent), to avoid re-introducing the shared-home-root false
+        // positive (see the Antigravity ↔ Gemini asymmetry guarded by the
+        // mod-level tests).
         return global_skills_dir.is_dir();
     }
 
-    global_skills_dir.is_dir()
+    desktop_app_for_agent(spec.id())
+        || alternate_cli_for_agent(spec.id())
+        || global_skills_dir.is_dir()
         || global_skills_dir
             .parent()
             .is_some_and(|parent| parent.is_dir())
 }
 
-/// Resolve whether a CLI binary is reachable in the enriched PATH.
+/// Known desktop-app product names for agents that ship as GUI installs.
 ///
-/// Uses `skillstar_core::infra::path_env::enriched_path()` (which prepends
-/// Homebrew/snap/scoop/cargo bin dirs) instead of the raw `PATH` env var, so
-/// detection works even when the app was launched from a GUI context with a
-/// minimal `PATH`. `which_in` (not `which`) is what lets us feed that custom
-/// path list.
-fn binary_in_enriched_path(binary: &str) -> bool {
-    let path_str = skillstar_core::infra::path_env::enriched_path();
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    // `which_in` takes the PATH as a single OsStr (colon/semicolon-joined),
-    // not an iterator — so we hand it the enriched PATH string directly.
-    which::which_in(binary, Some(&path_str), &cwd).is_ok()
+/// Mapped by agent id (not display name). Keep this table in lockstep with
+/// real product names under `/Applications` / Windows Programs folders.
+fn desktop_app_for_agent(agent_id: &str) -> bool {
+    let app_name = match agent_id {
+        "cursor" => "Cursor",
+        "kiro" => "Kiro",
+        "trae" => "Trae",
+        "qoder" => "Qoder",
+        "zcode" => "ZCode",
+        "antigravity" => "Antigravity",
+        // Claude Code is a CLI; Claude Desktop is a separate Models-mode tool.
+        _ => return false,
+    };
+    desktop_app_installed(app_name)
+}
+
+/// Alternate CLI binaries that prove an IDE agent is present even when the
+/// config root has not been created yet (never-launched install).
+fn alternate_cli_for_agent(agent_id: &str) -> bool {
+    match agent_id {
+        // Antigravity CLI ships as `agy` (also used by Launch Deck-adjacent tooling).
+        "antigravity" => binary_on_enriched_path("agy"),
+        // Cursor installs `cursor` / `cursor-agent` shims into ~/.local/bin.
+        "cursor" => {
+            binary_on_enriched_path("cursor") || binary_on_enriched_path("cursor-agent")
+        }
+        _ => false,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn detect_installed_falls_back_to_dir_for_spec_without_binary() {
@@ -108,13 +130,21 @@ mod tests {
         // stub over a tempdir to keep this hermetic.
         struct DirOnlySpec;
         impl AgentSpec for DirOnlySpec {
-            fn id(&self) -> &str { "test" }
-            fn display_name(&self) -> &str { "Test" }
-            fn icon(&self) -> &str { "test.svg" }
-            fn resolve_global_dir(&self, home: &Path) -> std::path::PathBuf {
+            fn id(&self) -> &str {
+                "test"
+            }
+            fn display_name(&self) -> &str {
+                "Test"
+            }
+            fn icon(&self) -> &str {
+                "test.svg"
+            }
+            fn resolve_global_dir(&self, home: &Path) -> PathBuf {
                 home.join("skills")
             }
-            fn project_skills_rel(&self) -> Option<&str> { Some(".test/skills") }
+            fn project_skills_rel(&self) -> Option<&str> {
+                Some(".test/skills")
+            }
             // binary_name left as default None
         }
 
@@ -132,31 +162,54 @@ mod tests {
         // in this repo's dev environment, so it's a stable positive case.
         struct CargoSpec;
         impl AgentSpec for CargoSpec {
-            fn id(&self) -> &str { "test-cargo" }
-            fn display_name(&self) -> &str { "Test Cargo" }
-            fn icon(&self) -> &str { "test.svg" }
-            fn resolve_global_dir(&self, home: &Path) -> std::path::PathBuf {
+            fn id(&self) -> &str {
+                "test-cargo"
+            }
+            fn display_name(&self) -> &str {
+                "Test Cargo"
+            }
+            fn icon(&self) -> &str {
+                "test.svg"
+            }
+            fn resolve_global_dir(&self, home: &Path) -> PathBuf {
                 home.join(".test-cargo")
             }
-            fn project_skills_rel(&self) -> Option<&str> { Some(".test-cargo/skills") }
-            fn binary_name(&self) -> Option<&str> { Some("cargo") }
+            fn project_skills_rel(&self) -> Option<&str> {
+                Some(".test-cargo/skills")
+            }
+            fn binary_name(&self) -> Option<&str> {
+                Some("cargo")
+            }
         }
 
-        assert!(detect_installed(&CargoSpec, Path::new("/nonexistent/should/not/matter")));
+        assert!(detect_installed(
+            &CargoSpec,
+            Path::new("/nonexistent/should/not/matter")
+        ));
     }
 
     #[test]
     fn detect_installed_binary_not_present_returns_false() {
         struct FakeSpec;
         impl AgentSpec for FakeSpec {
-            fn id(&self) -> &str { "fake" }
-            fn display_name(&self) -> &str { "Fake" }
-            fn icon(&self) -> &str { "fake.svg" }
-            fn resolve_global_dir(&self, home: &Path) -> std::path::PathBuf {
+            fn id(&self) -> &str {
+                "fake"
+            }
+            fn display_name(&self) -> &str {
+                "Fake"
+            }
+            fn icon(&self) -> &str {
+                "fake.svg"
+            }
+            fn resolve_global_dir(&self, home: &Path) -> PathBuf {
                 home.join(".fake")
             }
-            fn project_skills_rel(&self) -> Option<&str> { Some(".fake/skills") }
-            fn binary_name(&self) -> Option<&str> { Some("skillstar-definitely-not-a-real-bin-xyz") }
+            fn project_skills_rel(&self) -> Option<&str> {
+                Some(".fake/skills")
+            }
+            fn binary_name(&self) -> Option<&str> {
+                Some("skillstar-definitely-not-a-real-bin-xyz")
+            }
         }
 
         assert!(!detect_installed(&FakeSpec, Path::new("/nonexistent")));
@@ -170,14 +223,24 @@ mod tests {
         // installed so the user can link skills to it.
         struct GuiCliSpec;
         impl AgentSpec for GuiCliSpec {
-            fn id(&self) -> &str { "gui-cli" }
-            fn display_name(&self) -> &str { "GUI CLI" }
-            fn icon(&self) -> &str { "gui.svg" }
-            fn resolve_global_dir(&self, home: &Path) -> std::path::PathBuf {
+            fn id(&self) -> &str {
+                "gui-cli"
+            }
+            fn display_name(&self) -> &str {
+                "GUI CLI"
+            }
+            fn icon(&self) -> &str {
+                "gui.svg"
+            }
+            fn resolve_global_dir(&self, home: &Path) -> PathBuf {
                 home.join(".gui-cli").join("skills")
             }
-            fn project_skills_rel(&self) -> Option<&str> { Some(".gui-cli/skills") }
-            fn binary_name(&self) -> Option<&str> { Some("skillstar-definitely-not-a-real-bin-xyz") }
+            fn project_skills_rel(&self) -> Option<&str> {
+                Some(".gui-cli/skills")
+            }
+            fn binary_name(&self) -> Option<&str> {
+                Some("skillstar-definitely-not-a-real-bin-xyz")
+            }
         }
 
         let tmp = tempfile::tempdir().unwrap();
@@ -197,14 +260,24 @@ mod tests {
         // `~/.gemini` from false-positiving Gemini when `gemini` isn't on PATH.
         struct SharedRootSpec;
         impl AgentSpec for SharedRootSpec {
-            fn id(&self) -> &str { "shared-root" }
-            fn display_name(&self) -> &str { "Shared Root" }
-            fn icon(&self) -> &str { "shared.svg" }
-            fn resolve_global_dir(&self, home: &Path) -> std::path::PathBuf {
+            fn id(&self) -> &str {
+                "shared-root"
+            }
+            fn display_name(&self) -> &str {
+                "Shared Root"
+            }
+            fn icon(&self) -> &str {
+                "shared.svg"
+            }
+            fn resolve_global_dir(&self, home: &Path) -> PathBuf {
                 home.join(".shared-root").join("skills")
             }
-            fn project_skills_rel(&self) -> Option<&str> { Some(".shared-root/skills") }
-            fn binary_name(&self) -> Option<&str> { Some("skillstar-definitely-not-a-real-bin-xyz") }
+            fn project_skills_rel(&self) -> Option<&str> {
+                Some(".shared-root/skills")
+            }
+            fn binary_name(&self) -> Option<&str> {
+                Some("skillstar-definitely-not-a-real-bin-xyz")
+            }
         }
 
         let tmp = tempfile::tempdir().unwrap();
@@ -217,5 +290,15 @@ mod tests {
             !detect_installed(&SharedRootSpec, &skills_dir),
             "parent-only presence must not count as installed for a binary agent"
         );
+    }
+
+    #[test]
+    fn desktop_app_for_agent_unknown_id_is_false() {
+        assert!(!desktop_app_for_agent("not-a-real-agent-id"));
+    }
+
+    #[test]
+    fn alternate_cli_for_unknown_agent_is_false() {
+        assert!(!alternate_cli_for_agent("not-a-real-agent-id"));
     }
 }
