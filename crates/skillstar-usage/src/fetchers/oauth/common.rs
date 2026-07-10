@@ -4,7 +4,7 @@
 //! ~20 of its ~27 fields are always the same default (`auth_mode: OAuth`,
 //! every non-OAuth-mode field `None`/`0`, timestamps `now`, etc). Only
 //! `catalog_id`, `display_name`, `currency`, the token trio, and (for some
-//! providers) `id_token_encrypted`/`oauth_account_id`/`oauth_region` vary.
+//! providers) `id_token_encrypted`/`oauth_account_id` vary.
 //! [`SubscriptionBuilder`] centralizes the constant part; it changes no
 //! field's value, only where the ~20 identical lines live.
 //!
@@ -24,8 +24,9 @@ use crate::subscription::{BillingCycle, Subscription};
 /// `requires_reauth`: `false`, `fingerprint_id`: `None`,
 /// `cookie_jar_encrypted`/`cookie_session_expires_at`: `None`,
 /// `manual_quota`/`note`: `None`, `sort_index`: `0`, `created_at` ==
-/// `updated_at` == now. `id_token_encrypted`/`oauth_account_id`/
-/// `oauth_region` default to `None`, opt-in via their setters.
+/// `updated_at` == now. `id_token_encrypted`/`oauth_account_id`
+/// default to `None`, opt-in via their setters. `oauth_region` is always
+/// `None` (no catalog currently needs region-scoped OAuth).
 pub struct SubscriptionBuilder {
     catalog_id: &'static str,
     display_name: String,
@@ -35,7 +36,6 @@ pub struct SubscriptionBuilder {
     access_token_expires_at: Option<i64>,
     id_token: Option<String>,
     oauth_account_id: Option<String>,
-    oauth_region: Option<String>,
 }
 
 impl SubscriptionBuilder {
@@ -57,7 +57,6 @@ impl SubscriptionBuilder {
             access_token_expires_at,
             id_token: None,
             oauth_account_id: None,
-            oauth_region: None,
         }
     }
 
@@ -76,12 +75,6 @@ impl SubscriptionBuilder {
     /// `oauth_account_id` (Codex account id / Antigravity email / xAI subject-or-email).
     pub fn oauth_account_id(mut self, account_id: Option<String>) -> Self {
         self.oauth_account_id = account_id;
-        self
-    }
-
-    /// Optional `oauth_region` for region-aware providers.
-    pub fn oauth_region(mut self, region: Option<String>) -> Self {
-        self.oauth_region = region;
         self
     }
 
@@ -108,7 +101,7 @@ impl SubscriptionBuilder {
             access_token_expires_at: self.access_token_expires_at,
             id_token_encrypted: self.id_token.as_deref().map(crypto::encrypt),
             oauth_account_id: self.oauth_account_id,
-            oauth_region: self.oauth_region,
+            oauth_region: None,
             requires_reauth: false,
             fingerprint_id: None,
             cookie_jar_encrypted: None,

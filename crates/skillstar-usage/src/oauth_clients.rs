@@ -96,20 +96,7 @@ macro_rules! client_id {
     };
 }
 
-/// Resolve a provider's `client_secret`. Same resolution order as [`client_id!`].
-macro_rules! client_secret {
-    ($provider:literal, $env_var:literal, $default:expr) => {
-        $crate::oauth_clients::resolve_client_secret(
-            $provider,
-            $env_var,
-            option_env!($env_var),
-            $default,
-        )
-    };
-}
-
 pub(crate) use client_id;
-pub(crate) use client_secret;
 
 #[doc(hidden)]
 pub fn resolve_client_id(
@@ -121,7 +108,11 @@ pub fn resolve_client_id(
     resolve(provider, env_var, compile_time, ClientField::Id, default)
 }
 
+/// Resolve `client_secret` with the same env → compile-time → file → default
+/// order as [`resolve_client_id`]. Kept for config/file overrides even when no
+/// catalog currently needs a secret at call sites.
 #[doc(hidden)]
+#[allow(dead_code)]
 pub fn resolve_client_secret(
     provider: &str,
     env_var: &str,

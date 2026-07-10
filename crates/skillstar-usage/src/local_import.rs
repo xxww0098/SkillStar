@@ -3,7 +3,6 @@
 use base64::{Engine as _, engine::general_purpose};
 use chrono::Utc;
 use serde::Deserialize;
-use serde_json::Value;
 
 use crate::catalog::AuthMode;
 use crate::cloud_code;
