@@ -26,7 +26,7 @@
    | 技术栈 / 目录 / crate 划分 | 本文件 | 在 README/CLAUDE 重列一份目录树 |
    | 后端子系统行为约束 | [docs/backend.md](./docs/backend.md) | 把实现细节抄进 AGENTS.md |
    | 前端结构 / 约定 | [AGENTS-UI.md](./AGENTS-UI.md) | — |
-   | **可枚举 / 计数型清单**（usage catalog、builtin agents、命令列表…） | **代码 + 单测**（如 `catalog.rs` 的 `catalog_has_16_entries`） | 在文档里硬写「16 家」却无人同步 |
+   | **可枚举 / 计数型清单**（usage catalog、builtin agents、命令列表…） | **代码 + 单测**（如 `catalog.rs` 的 `catalog_has_10_entries`） | 在文档里硬写「N 家」却无人同步 |
    | 产品对外话术 / 安装 | [README.md](./README.md) · [PRODUCT.md](./PRODUCT.md) | — |
 
    推论：文档里**不写代码已测试锁定的数字 / 清单**——要么描述性带过，要么指向代码；确需写明数字时，改动必须与对应单测同 PR 同步。

@@ -96,6 +96,17 @@ fn write_json<T: Serialize>(path: &PathBuf, value: &T) -> UsageResult<()> {
 pub fn list_subscriptions() -> UsageResult<Vec<Subscription>> {
     let file: SubscriptionsFile = read_json(&subscriptions_path())?;
     let mut subs = file.subscriptions;
+    // Drop rows whose catalog was removed (e.g. former qoder / trae usage entries).
+    let before = subs.len();
+    subs.retain(|s| crate::catalog::find(&s.catalog_id).is_some());
+    if subs.len() != before {
+        let _ = write_json(
+            &subscriptions_path(),
+            &SubscriptionsFile {
+                subscriptions: subs.clone(),
+            },
+        );
+    }
     subs.sort_by_key(|s| s.sort_index);
     Ok(subs)
 }

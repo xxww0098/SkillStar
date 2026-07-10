@@ -15,8 +15,6 @@ pub(crate) mod common;
 pub mod codex;
 pub mod cursor;
 pub mod opencode;
-pub mod qoder;
-pub mod trae;
 pub mod xai;
 
 pub use start_info::OAuthStartInfo;
@@ -30,8 +28,6 @@ pub async fn dispatch(subscription: &mut Subscription) -> UsageResult<Subscripti
         "cursor" => cursor::fetch(subscription).await,
         "codex" => codex::fetch(subscription).await,
         "antigravity" => antigravity::fetch(subscription).await,
-        "trae" => trae::fetch(subscription).await,
-        "qoder" => qoder::fetch(subscription).await,
         "xai" => xai::fetch(subscription).await,
         "opencode" => opencode::fetch(subscription).await,
         other => Err(super::unsupported(other)),
@@ -48,8 +44,6 @@ pub async fn start_login(
         "cursor" => cursor::start_login(region).await,
         "codex" => codex::start_login(region).await,
         "antigravity" => antigravity::start_login(region).await,
-        "trae" => trae::start_login(region).await,
-        "qoder" => qoder::start_login(region).await,
         "xai" => xai::start_login(region).await,
         "opencode" => opencode::start_login(region, target_subscription_id).await,
         other => Err(super::unsupported(other)),

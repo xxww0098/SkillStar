@@ -100,13 +100,13 @@ pub const PROVIDER_IDENTITIES: &[ProviderIdentity] = &[
     ProviderIdentity {
         canonical_id: "trae",
         display_name: "Trae",
-        catalog_id: Some("trae"),
+        catalog_id: None,
         preset_ids: &[],
     },
     ProviderIdentity {
         canonical_id: "qoder",
         display_name: "Qoder",
-        catalog_id: Some("qoder"),
+        catalog_id: None,
         preset_ids: &[],
     },
     ProviderIdentity {

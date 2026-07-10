@@ -22,7 +22,7 @@
 //! | `opencode` | OpenCode   | ApiKey    | `~/.config/opencode/opencode.json`      |
 //! | `xai`      | Grok CLI   | OAuth     | `~/.grok/auth.json` OIDC scope entry    |
 //!
-//! Other catalogs (cursor, antigravity, trae, …) are IDEs, not CLIs, and use
+//! Other catalogs (cursor, antigravity, …) are IDEs, not CLIs, and use
 //! entirely different switching mechanisms — out of scope here, surfaced as
 //! [`SwitchOutcome::Unsupported`].
 

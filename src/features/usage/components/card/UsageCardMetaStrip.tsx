@@ -1,7 +1,7 @@
 import { BadgeCheck, ShieldAlert, Terminal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { authModeLabel, formatRelativeSync, type PrimaryResetInfo } from "../../lib/usageLabels";
-import type { AuthMode, BillingCycle } from "../../types";
+import type { AuthMode } from "../../types";
 import { ResetCountdown, UsagePriorityHint } from "../ResetCountdown";
 
 export interface UsageCardMetaStripProps {
@@ -10,21 +10,20 @@ export interface UsageCardMetaStripProps {
   requiresReauth?: boolean;
   supportsCliSwitch?: boolean;
   hasCredential?: boolean;
-  billingCycle?: BillingCycle;
   note?: string | null;
   fetchedAt: number;
   resetInfo: PrimaryResetInfo | null;
   bodyOwnsPrimaryReset: boolean;
 }
 
-/** Auth / active / reauth / CLI badges · primary reset · last-sync · note · priority hint. */
+/** Auth / active / reauth / CLI badges · primary reset · last-sync · note · priority hint.
+ *  Billing type (月付 / 年付 / API Key) lives on the brand header band. */
 export function UsageCardMetaStrip({
   authMode,
   isActive,
   requiresReauth,
   supportsCliSwitch,
   hasCredential,
-  billingCycle,
   note,
   fetchedAt,
   resetInfo,
@@ -39,26 +38,6 @@ export function UsageCardMetaStrip({
           <span className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[9px] font-semibold tracking-wider text-zinc-600 uppercase ring-1 ring-zinc-200/60">
             {authModeLabel(authMode, t)}
           </span>
-          {billingCycle && (
-            <span
-              className={
-                billingCycle === "api-key"
-                  ? "shrink-0 rounded bg-violet-50 px-1.5 py-0.5 text-[9px] font-medium tracking-wider text-violet-700 uppercase ring-1 ring-violet-200/60"
-                  : "shrink-0 rounded bg-zinc-50 px-1.5 py-0.5 text-[9px] font-medium tracking-wider text-zinc-500 uppercase ring-1 ring-zinc-200/50"
-              }
-              title={
-                billingCycle === "api-key"
-                  ? t("usage.billingHintApiKey")
-                  : billingCycle === "annual"
-                    ? t("usage.billingHintAnnual")
-                    : billingCycle === "one-time"
-                      ? t("usage.billingHintOneTime")
-                      : t("usage.billingHintMonthly")
-              }
-            >
-              {t(`usage.billingCycle_${billingCycle}`)}
-            </span>
-          )}
           {isActive && (
             <span
               className="inline-flex shrink-0 items-center gap-0.5 rounded bg-emerald-50 px-1.5 py-0.5 text-[9px] font-semibold tracking-wider text-emerald-700 uppercase ring-1 ring-emerald-200/60"

@@ -79,7 +79,7 @@ impl SubscriptionBuilder {
         self
     }
 
-    /// `oauth_region`. Trae only: `cn` / `sg` / `us` / `ttp`.
+    /// Optional `oauth_region` for region-aware providers.
     pub fn oauth_region(mut self, region: Option<String>) -> Self {
         self.oauth_region = region;
         self

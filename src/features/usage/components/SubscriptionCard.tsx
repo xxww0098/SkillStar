@@ -84,6 +84,7 @@ export function SubscriptionCard({
           brandColorHex={brandColorHex}
           theme={theme}
           planName={planName}
+          billingCycle={sub.billing_cycle}
           onDragHandlePointerDown={onDragHandlePointerDown}
         />
         <UsageCardMetaStrip
@@ -92,7 +93,6 @@ export function SubscriptionCard({
           requiresReauth={sub.requires_reauth}
           supportsCliSwitch={sub.supports_cli_switch}
           hasCredential={sub.has_credential}
-          billingCycle={sub.billing_cycle}
           note={sub.note}
           fetchedAt={usage?.fetched_at ?? 0}
           resetInfo={resetInfo}

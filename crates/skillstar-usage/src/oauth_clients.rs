@@ -1,4 +1,4 @@
-//! Per-provider OAuth client credential resolution (codex / xai / trae / opencode).
+//! Per-provider OAuth client credential resolution (codex / xai / opencode).
 //!
 //! Each provider ships a built-in default `client_id` (and `client_secret` where
 //! applicable) so the app works out of the box. Deployers can override them

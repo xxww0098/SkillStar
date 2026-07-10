@@ -1,4 +1,4 @@
-//! Generic poll-based OAuth flow (Cursor / Qoder style).
+//! Generic poll-based OAuth flow (Cursor style).
 //!
 //! Caller provides:
 //! - the URL to poll

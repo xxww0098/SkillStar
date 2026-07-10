@@ -82,7 +82,7 @@ pub struct SubscriptionDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub switch_result: Option<skillstar_app::usage_switch::SwitchOutcome>,
     /// Whether this catalog maps to a CLI whose credentials SkillStar can
-    /// switch (codex / opencode / grok). IDE-only catalogs (cursor, trae, …)
+    /// switch (codex / opencode / grok). IDE-only catalogs (cursor, …)
     /// are `false` — the UI hides the "sync to CLI" affordance for them.
     #[serde(default)]
     pub supports_cli_switch: bool,

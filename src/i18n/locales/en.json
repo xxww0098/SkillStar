@@ -1160,7 +1160,7 @@
     "oauthCopyCode": "Copy code",
     "oauthCodeCopied": "Code copied",
     "importFromLocal": "Import from local CLI",
-    "importFromLocalHint": "Reads Codex/Gemini CLI or Antigravity/Qoder IDE local credentials",
+    "importFromLocalHint": "Reads Codex CLI or Antigravity IDE local credentials",
     "importFromLocalSuccess": "Imported from local credentials",
     "importFromLocalFailed": "Local import failed: {{error}}",
     "lastSynced": "Synced {{time}}",

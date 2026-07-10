@@ -12,25 +12,23 @@ use crate::oauth::token_refresh;
 use crate::protobuf_oauth;
 use crate::storage;
 use crate::subscription::{BillingCycle, Subscription};
-use crate::tool_paths::{antigravity_state_db_path, codex_auth_path, qoder_state_db_path};
+use crate::tool_paths::{antigravity_state_db_path, codex_auth_path};
 use crate::vscdb;
 use crate::{UsageError, UsageResult};
 
 const ANTIGRAVITY_OAUTH_KEY: &str = "antigravityUnifiedStateSync.oauthToken";
-const QODER_USER_INFO_KEY: &str = "secret://aicoding.auth.userInfo";
 
 /// Catalog ids that support `import_subscription_from_local`.
 pub fn local_import_supported(catalog_id: &str) -> bool {
-    matches!(catalog_id, "codex" | "antigravity" | "qoder")
+    matches!(catalog_id, "codex" | "antigravity")
 }
 
 pub async fn import_subscription_from_local(catalog_id: &str) -> UsageResult<Subscription> {
     match catalog_id {
         "codex" => import_codex_from_auth_json().await,
         "antigravity" => import_antigravity_from_state_db().await,
-        "qoder" => import_qoder_from_state_db().await,
         other => Err(UsageError::Other(format!(
-            "不支持从本地导入：{other}（支持 codex、antigravity、qoder）"
+            "不支持从本地导入：{other}（支持 codex、antigravity）"
         ))),
     }
 }
@@ -134,69 +132,6 @@ async fn import_antigravity_from_state_db() -> UsageResult<Subscription> {
     .await
 }
 
-async fn import_qoder_from_state_db() -> UsageResult<Subscription> {
-    let db_path = qoder_state_db_path();
-    if !db_path.exists() {
-        return Err(UsageError::Other(format!(
-            "未找到 Qoder state.vscdb：{}",
-            db_path.display()
-        )));
-    }
-
-    let raw = vscdb::read_item_string(&db_path, QODER_USER_INFO_KEY)?
-        .ok_or_else(|| UsageError::Other("Qoder IDE 未登录（缺少 userInfo）".into()))?;
-
-    let user_info = parse_json_value(&raw)?;
-    let access_token = pick_string(
-        &user_info,
-        &[
-            &["token"],
-            &["accessToken"],
-            &["access_token"],
-            &["data", "token"],
-        ],
-    )
-    .ok_or_else(|| UsageError::Other("Qoder userInfo 缺少 token".into()))?;
-
-    let refresh_token = pick_string(
-        &user_info,
-        &[
-            &["refreshToken"],
-            &["refresh_token"],
-            &["data", "refreshToken"],
-        ],
-    );
-
-    let display_name = pick_string(
-        &user_info,
-        &[&["email"], &["name"], &["displayName"], &["data", "email"]],
-    )
-    .unwrap_or_else(|| "Qoder".to_string());
-
-    let expires_at = pick_string(
-        &user_info,
-        &[&["expireTime"], &["expires_at"], &["expiresAt"]],
-    )
-    .and_then(|s| s.parse::<i64>().ok())
-    .map(|ms| {
-        if ms > 1_000_000_000_000 {
-            ms / 1000
-        } else {
-            ms
-        }
-    })
-    .or_else(|| token_refresh::jwt_exp(&access_token));
-
-    upsert_oauth_subscription(
-        "qoder",
-        display_name,
-        access_token,
-        refresh_token,
-        expires_at,
-        "CNY",
-    )
-    .await
-}
 
 async fn upsert_oauth_subscription(
     catalog_id: &str,
@@ -243,40 +178,6 @@ async fn upsert_oauth_subscription(
     }
 
     storage::upsert_subscription(sub).map_err(|e| UsageError::Other(e.to_string()))
-}
-
-fn parse_json_value(raw: &str) -> UsageResult<Value> {
-    if let Ok(v) = serde_json::from_str::<Value>(raw) {
-        return Ok(v);
-    }
-    if let Ok(inner) = serde_json::from_str::<String>(raw)
-        && let Ok(v) = serde_json::from_str::<Value>(&inner)
-    {
-        return Ok(v);
-    }
-    Err(UsageError::Other(
-        "Qoder userInfo 不是可解析的 JSON（可能为加密存储，请使用浏览器 OAuth 登录）".into(),
-    ))
-}
-
-fn pick_string(value: &Value, paths: &[&[&str]]) -> Option<String> {
-    for path in paths {
-        let mut cur = value;
-        let mut ok = true;
-        for key in *path {
-            match cur.get(*key) {
-                Some(v) => cur = v,
-                None => {
-                    ok = false;
-                    break;
-                }
-            }
-        }
-        if ok && let Some(s) = cur.as_str().filter(|s| !s.trim().is_empty()) {
-            return Some(s.to_string());
-        }
-    }
-    None
 }
 
 #[cfg(test)]

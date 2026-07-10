@@ -48,12 +48,11 @@ SkillStar 是一个 Tauri 桌面应用（同时附带 CLI），围绕 AI Agent �
 
 把所有 AI 订阅的额度和续费日聚合到一个手机桌面式网格面板。
 
-- **12 家固定 catalog**：
-  - **OAuth 自动同步（5 家）**：Codex (OpenAI OAuth) · Antigravity (Google OAuth) · Trae (区域感知 CN/SG/US/TTP) · Qoder (Device Flow) · Grok (xAI CLI OAuth)
-  - **API Key 自动同步（4 家）**：DeepSeek (`/user/balance`) · 智谱 GLM Coding Plan (`/monitor/usage/quota/limit`，5h + 周窗口 + `data.level`) · Kimi (`/v1/users/me/balance`) · MiniMax Token Plan (`/v1/token_plan/remains`)
-  - **Cookie（1 家）**：OpenCode（官方 OAuth token 读不到控制台用量，改用 Cookie 模式）
-  - **手动录入 / 自动导入（2 家）**：阶跃 Step（Cookie + Connect-RPC） · Cursor（PKCE OAuth）
-- **OAuth client 凭证可覆盖**：codex / xai / trae / opencode 的 OAuth `client_id`（及 trae 的 `client_secret`）内置默认值，可经 `SKILLSTAR_<PROVIDER>_CLIENT_ID` 环境变量、编译期 `option_env!`、或 `~/.skillstar/config/oauth_clients.json` 覆盖，无需改源码
+- **固定 catalog**（代码 + 单测锁定，见 `skillstar-usage` catalog）：
+  - **OAuth 自动同步**：Cursor (PKCE) · Codex (OpenAI OAuth) · Antigravity (Google OAuth) · Grok (xAI CLI OAuth)
+  - **API Key 自动同步**：DeepSeek (`/user/balance`) · 智谱 GLM Coding Plan · Kimi · MiniMax Token Plan
+  - **Cookie**：阶跃 Step · OpenCode（官方 OAuth token 读不到控制台用量，改用 Cookie）
+- **OAuth client 凭证可覆盖**：codex / xai / opencode 的 OAuth `client_id` 内置默认值，可经 `SKILLSTAR_<PROVIDER>_CLIENT_ID` 环境变量、编译期 `option_env!`、或 `~/.skillstar/config/oauth_clients.json` 覆盖，无需改源码
 - **卡片信息**：右上角 plan 徽章（PRO 蓝/PLUS 绿/MAX·ULTRA 紫/TEAM·BUSINESS 橙/ENTERPRISE 红/FREE·PAYG 灰），5h/7d/月度自适应进度条，余额型展示 CNY/USD，续费倒计时
 - **告警**：5h 剩余 < 20% 黄 / < 5% 红，7 天内到期 banner，OAuth 401 时卡片红框提示重新登录
 - **加密存储**：AES-256-GCM + machine_uid 派生密钥，API key / access_token / refresh_token 全部加密，存放于 `~/.skillstar/config/usage/`
@@ -249,7 +248,7 @@ skillstar gui                                   # 强制唤起桌面图形界面
 | Desktop Shell | Tauri v2 | 桌面容器 / IPC |
 | Backend | Rust 2024 + tokio + reqwest 0.13 | 业务逻辑 + 异步任务 |
 | Git Engine | gix 0.80 (gitoxide) | 克隆 / 拉取 / 哈希对比 |
-| OAuth | tiny_http 1455/1456/1457 + PKCE + JWT exp | Codex / Trae / Qoder / Antigravity / Grok 登录 |
+| OAuth | tiny_http 1455/1456/1457 + PKCE + JWT exp | Cursor / Codex / Antigravity / Grok 登录 |
 | Frontend | React 19 + TypeScript + Vite 8 | SPA UI |
 | UI | TailwindCSS v4 + Framer Motion 12 + Radix | 设计系统 / 交互 |
 | Storage | JSON files + SQLite | 配置持久化 + 翻译缓存 |
@@ -272,8 +271,8 @@ skillstar gui                                   # 强制唤起桌面图形界面
 | Gemini CLI | `~/.gemini/` | — |
 | Antigravity | `~/.gemini/antigravity-cli/` | ✅ Google OAuth |
 | Cursor | `~/.cursor/` | ✅ PKCE 轮询 |
-| Qoder | `~/.qoder/` | ✅ Device Flow |
-| Trae | `~/.trae/` | ✅ OAuth + 4 区域 |
+| Qoder | `~/.qoder/` | —（技能分发；无 Usage catalog） |
+| Trae | `~/.trae/` | —（技能分发；无 Usage catalog） |
 | Kiro | `~/.kiro/` | — |
 | OpenCode CLI | `~/.config/opencode/` | — |
 | OpenClaw | `~/.openclaw/`（global-only） | — |

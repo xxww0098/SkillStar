@@ -44,13 +44,11 @@ pub struct CatalogEntry {
     pub subscription_url: &'static str,
     /// Special warning shown in the create dialog (e.g. terms-of-use).
     pub warning: Option<&'static str>,
-    /// Available regions for region-aware providers (Trae).
+    /// Available regions for region-aware providers (empty for most).
     pub regions: &'static [&'static str],
 }
 
 const NO_REGIONS: &[&str] = &[];
-const TRAE_REGIONS: &[&str] = &["cn", "sg", "us", "ttp"];
-
 // A flat positional builder keeps the static catalog table below compact and
 // readable; a struct-with-builder would bloat each of the ~20 rows.
 #[allow(clippy::too_many_arguments)]
@@ -87,7 +85,7 @@ const COOKIE_MANUAL: &[AuthMode] = &[AuthMode::Cookie, AuthMode::Manual];
 /// Returns the full fixed catalog.
 pub fn catalog() -> Vec<CatalogEntry> {
     vec![
-        // ── Tier 1: OAuth (6) ──────────────────────────────────────────
+        // ── Tier 1: OAuth (4) ──────────────────────────────────────────
         CatalogEntry {
             id: "cursor",
             display_name: "Cursor",
@@ -121,30 +119,6 @@ pub fn catalog() -> Vec<CatalogEntry> {
             brand_color: "4285F4",
             default_currency: "USD",
             subscription_url: "https://antigravity.google",
-            warning: None,
-            regions: NO_REGIONS,
-        },
-        CatalogEntry {
-            id: "trae",
-            display_name: "Trae",
-            description: "字节系 AI IDE",
-            tier: CatalogTier::OAuth,
-            auth_modes: OAUTH_ONLY,
-            brand_color: "FF7A45",
-            default_currency: "CNY",
-            subscription_url: "https://trae.ai",
-            warning: None,
-            regions: TRAE_REGIONS,
-        },
-        CatalogEntry {
-            id: "qoder",
-            display_name: "Qoder",
-            description: "AI Coding Agent",
-            tier: CatalogTier::OAuth,
-            auth_modes: OAUTH_ONLY,
-            brand_color: "7C3AED",
-            default_currency: "CNY",
-            subscription_url: "https://qoder.com",
             warning: None,
             regions: NO_REGIONS,
         },
@@ -243,8 +217,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn catalog_has_12_entries() {
-        assert_eq!(catalog().len(), 12);
+    fn catalog_has_10_entries() {
+        assert_eq!(catalog().len(), 10);
     }
 
     #[test]
@@ -263,16 +237,10 @@ mod tests {
         let api_key = c.iter().filter(|e| e.tier == CatalogTier::ApiKey).count();
         let cookie = c.iter().filter(|e| e.tier == CatalogTier::Cookie).count();
         let manual = c.iter().filter(|e| e.tier == CatalogTier::Manual).count();
-        assert_eq!(oauth, 6);
+        assert_eq!(oauth, 4);
         assert_eq!(api_key, 4);
         assert_eq!(cookie, 2);
         assert_eq!(manual, 0);
-    }
-
-    #[test]
-    fn trae_has_regions() {
-        let trae = find("trae").expect("trae catalog entry");
-        assert_eq!(trae.regions.len(), 4);
     }
 
     #[test]

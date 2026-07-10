@@ -2,6 +2,7 @@ import { GripVertical } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import type { BrandTheme } from "../../lib/brandThemes";
+import type { BillingCycle } from "../../types";
 import { PlanBadge } from "../PlanBadge";
 import { hasBrandIcon, ProviderLogo } from "../ProviderLogo";
 
@@ -12,10 +13,12 @@ export interface UsageCardHeaderProps {
   brandColorHex: string;
   theme: BrandTheme;
   planName: string | null;
+  /** Billing type chip: 月付 / 年付 / API Key / 一次性 */
+  billingCycle?: BillingCycle;
   onDragHandlePointerDown?: (e: React.PointerEvent) => void;
 }
 
-/** Signature brand band — logo chip + title + plan badge + drag handle. */
+/** Signature brand band — logo chip + title + billing type + plan badge + drag handle. */
 export function UsageCardHeader({
   catalogId,
   displayName,
@@ -23,10 +26,12 @@ export function UsageCardHeader({
   brandColorHex,
   theme,
   planName,
+  billingCycle,
   onDragHandlePointerDown,
 }: UsageCardHeaderProps) {
   const { t } = useTranslation();
   const brandIcon = hasBrandIcon(catalogId);
+  const billingLabel = billingCycle ? t(`usage.billingCycle_${billingCycle}`) : null;
 
   return (
     <div
@@ -55,11 +60,24 @@ export function UsageCardHeader({
           <h3 className="line-clamp-2 pr-1 text-sm leading-snug font-bold" title={displayName}>
             {displayName}
           </h3>
-          {description && (
-            <p className="mt-0.5 line-clamp-1 text-[10px] leading-snug break-words opacity-90" title={description}>
-              {description}
-            </p>
-          )}
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            {billingLabel && (
+              <span
+                className="rounded-md bg-black/25 px-1.5 py-0.5 text-[10px] font-bold tracking-wide ring-1 ring-white/25 backdrop-blur-[2px]"
+                title={billingLabel}
+              >
+                {billingLabel}
+              </span>
+            )}
+            {description && (
+              <p
+                className="line-clamp-1 min-w-0 flex-1 text-[10px] leading-snug break-words opacity-90"
+                title={description}
+              >
+                {description}
+              </p>
+            )}
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-1 self-start">
           <PlanBadge plan={planName} variant="onBrand" />

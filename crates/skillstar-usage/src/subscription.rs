@@ -61,7 +61,7 @@ pub struct Subscription {
     /// the canonical Codex account id (extracted from `id_token` JWT).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oauth_account_id: Option<String>,
-    /// Region code for Trae (`cn` / `sg` / `us` / `ttp`).
+    /// Optional OAuth region code for region-aware providers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oauth_region: Option<String>,
     #[serde(default)]

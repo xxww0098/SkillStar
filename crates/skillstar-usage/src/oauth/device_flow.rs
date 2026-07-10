@@ -1,8 +1,7 @@
 //! Device Flow (RFC 8628) skeleton.
 //!
-//! Currently a thin marker module — Qoder's variant lives in
-//! `fetchers/oauth/qoder.rs` (it uses `poll_flow` internally because the
-//! "state → poll → token" shape is slightly different from canonical RFC 8628).
+//! Thin marker module holding the canonical device-code response shape.
+//! No catalog currently wires a Device Flow fetcher; keep the type for reuse.
 
 use serde::Deserialize;
 

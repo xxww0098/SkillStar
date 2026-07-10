@@ -140,7 +140,7 @@ pub fn antigravity_oauth_config_path() -> PathBuf {
 }
 
 /// `config/oauth_clients.json` — per-provider OAuth client id/secret overrides
-/// (codex / xai / trae / opencode). Optional; built-in defaults are used when
+/// (codex / xai / opencode). Optional; built-in defaults are used when
 /// absent. Shape: `{ "codex": { "client_id": "...", "client_secret": "..." }, ... }`.
 pub fn oauth_clients_config_path() -> PathBuf {
     config_dir().join("oauth_clients.json")
