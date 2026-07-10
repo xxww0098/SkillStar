@@ -1,5 +1,5 @@
 use super::ai::ensure_ai_config;
-use skillstar_ai::ai_provider;
+use skillstar_models::ai_provider;
 use skillstar_core::infra::error::AppError;
 use skillstar_marketplace::remote;
 use skillstar_marketplace::snapshot;

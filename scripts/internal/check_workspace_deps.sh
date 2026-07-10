@@ -51,6 +51,12 @@ for a, b in forbidden:
 if "skillstar-projects" in packages:
     errors.append("skillstar-projects crate still present — should be absorbed into skillstar-skills")
 
+# Wave 2A: fingerprint and ai absorbed
+if "skillstar-fingerprint" in packages:
+    errors.append("skillstar-fingerprint must be absorbed into skillstar-usage")
+if "skillstar-ai" in packages:
+    errors.append("skillstar-ai must be absorbed into skillstar-models")
+
 app = packages.get("skillstar-app")
 if app:
     bins = [t for t in app.get("targets", []) if "bin" in t.get("kind", [])]
@@ -59,7 +65,6 @@ if app:
 
 # Heavy features must not be default-on in leaf crates
 for crate, forbidden_feat in [
-    ("skillstar-fingerprint", "impersonate"),
     ("skillstar-usage", "impersonate"),
 ]:
     defaults = read_default_features(crate)

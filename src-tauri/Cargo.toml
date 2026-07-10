@@ -57,14 +57,12 @@ rand = { workspace = true }
 urlencoding = "2.1.3"
 lazy_static = { workspace = true }
 which = { workspace = true }
-skillstar-ai = { version = "0.1.0", path = "../crates/skillstar-ai" }
 skillstar-models = { version = "0.1.0", path = "../crates/skillstar-models" }
 skillstar-skills = { version = "0.1.0", path = "../crates/skillstar-skills" }
 tauri-plugin-deep-link = "2"
 skillstar-core = { version = "0.1.0", path = "../crates/skillstar-core" }
 skillstar-app = { version = "0.1.0", path = "../crates/skillstar-app" }
 skillstar-usage = { version = "0.1.0", path = "../crates/skillstar-usage", features = ["impersonate"] }
-skillstar-fingerprint = { version = "0.1.0", path = "../crates/skillstar-fingerprint", default-features = false }
 skillstar-ssh = { version = "0.1.0", path = "../crates/skillstar-ssh" }
 skillstar-sync = { version = "0.1.0", path = "../crates/skillstar-sync" }
 sha2 = { workspace = true }

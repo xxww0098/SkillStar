@@ -15,7 +15,7 @@
 
 use std::time::Duration;
 
-use skillstar_fingerprint::{
+use crate::fingerprint::{
     DeviceFingerprint, FingerprintAwareClient, FingerprintStore, HttpProfile, TlsProfile,
     build_client_with_timeout,
 };

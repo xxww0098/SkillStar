@@ -10,7 +10,7 @@
 use chrono::{Duration, Timelike, Utc};
 use serde::Deserialize;
 use serde_json::Value;
-use skillstar_fingerprint::{DeviceFingerprint, Req, RequestError};
+use crate::fingerprint::{DeviceFingerprint, Req, RequestError};
 use skillstar_providers::balance;
 
 use crate::http_client::usage_client_with_fingerprint;

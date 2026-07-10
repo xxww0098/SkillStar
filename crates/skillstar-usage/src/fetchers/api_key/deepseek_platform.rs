@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use chrono::{Datelike, Utc};
 use serde::Deserialize;
-use skillstar_fingerprint::{DeviceFingerprint, Req};
+use crate::fingerprint::{DeviceFingerprint, Req};
 
 use crate::http_client::usage_client_with_fingerprint;
 use crate::subscription::{DeepSeekAnalytics, DeepSeekDailyUsage, DeepSeekModelUsage};
@@ -133,7 +133,7 @@ pub async fn fetch_analytics(
 }
 
 async fn get_json<T: serde::de::DeserializeOwned>(
-    client: &skillstar_fingerprint::FingerprintAwareClient,
+    client: &crate::fingerprint::FingerprintAwareClient,
     url: &str,
     token: &str,
 ) -> UsageResult<T> {
@@ -162,7 +162,7 @@ async fn get_json<T: serde::de::DeserializeOwned>(
         .map_err(|e| UsageError::Fetcher(format!("DeepSeek 平台用量解析失败: {e}")))
 }
 
-fn map_platform_err(e: skillstar_fingerprint::RequestError) -> UsageError {
+fn map_platform_err(e: crate::fingerprint::RequestError) -> UsageError {
     if e.is_auth_error() {
         return UsageError::Fetcher(
             "DeepSeek 平台用量 Token 无效或已过期，请在订阅设置中重新粘贴".into(),

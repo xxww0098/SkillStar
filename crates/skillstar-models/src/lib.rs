@@ -1,22 +1,14 @@
-//! Model provider configuration domain.
+//! Model provider configuration + AI inference domain.
 //!
-//! This crate owns everything related to AI **model provider configuration**:
+//! - [`providers`]: provider store, presets, CRUD
+//! - [`tool_sync`]: external tool config projection
+//! - [`latency`] / [`circuit_breaker`]: health
+//! - [`mcp`]: MCP types / local store helpers
+//! - [`ai_provider`]: pure inference (chat, summarize, translate, skill pick)
 //!
-//! - [`providers`]: persisted provider store (v1 per-app + v2 flat) with CRUD,
-//!   migrations, and built-in presets, backed by
-//!   `~/.skillstar/config/model_providers.json`.
-//! - [`tool_sync`]: write provider credentials into external tool config files
-//!   (Claude Code, Codex), with rolling backups and merge semantics.
-//! - [`latency`]: provider `/models` endpoint reachability + latency probe used
-//!   by the Health Dashboard.
-//! - [`circuit_breaker`]: per-provider fault isolation persisted in
-//!   `~/.skillstar/state/circuit_breakers.json`.
-//! - [`provider_ref::AiProviderRef`]: the small reference type used by
-//!   `AiConfig.provider_ref` to point into the provider store.
-//!
-//! Pure-inference logic (chat completion, summarisation, skill pick) lives in
-//! `skillstar-ai`, which depends on this crate for provider resolution.
+//! Formerly split across `skillstar-models` + `skillstar-ai` (Wave 2A merge).
 
+pub mod ai_provider;
 pub mod circuit_breaker;
 pub mod latency;
 pub mod mcp;

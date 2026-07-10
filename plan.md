@@ -13,6 +13,8 @@
 > - [x] §11 完成定义与 §8.1 验证矩阵
 > - [ ] Phase 6（非目标 / deferred）：`skillstar-mcp` 决策门
 >
+> **继续收敛 crate 数量（11→9/8）**：见 [plan-wave2.md](./plan-wave2.md)（usage←fingerprint、models←ai；ssh+sync 可选）。
+>
 > 本文件是迁移执行计划，不是当前项目结构的 SSOT。实施过程中，技术栈、crate、目录和依赖结构仍以
 > [AGENTS.md](./AGENTS.md) 为准；后端行为以 [docs/backend.md](./docs/backend.md) 为准。
 > 每个迁移 PR 都必须先更新对应 SSOT，再修改代码。

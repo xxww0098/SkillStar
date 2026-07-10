@@ -12,7 +12,7 @@
 //! them in an enum lets every fetcher write idiomatic code for the layer it
 //! actually uses, while letting the factory pick the right backend.
 
-use crate::{DeviceFingerprint, TlsProfile};
+use super::{DeviceFingerprint, TlsProfile};
 use anyhow::{Context, Result};
 use std::time::Duration;
 
@@ -91,7 +91,7 @@ pub fn build_client_with_timeout(
         #[cfg(not(feature = "impersonate"))]
         other => {
             tracing::warn!(
-                target: "skillstar_fingerprint",
+                target: "skillstar_usage::fingerprint",
                 profile = %other.label(),
                 "impersonate feature disabled — falling back to reqwest",
             );

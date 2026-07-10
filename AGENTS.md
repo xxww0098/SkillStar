@@ -104,8 +104,8 @@ SkillStar 是 Tauri v2 桌面应用（同一 `skillstar` 二进制内还含 CLI�
 ### Workspace Crates（域逻辑 SSOT）
 
 > 允许的内部依赖方向：
-> `skillstar-ai` → `skillstar-models` → `skillstar-providers`；
-> `skillstar-usage` → `skillstar-fingerprint` + `skillstar-providers`；
+> `skillstar-models`（含推理 ai_provider）→ `skillstar-providers`；
+> `skillstar-usage`（含 fingerprint）→ `skillstar-providers`；
 > `skillstar-sync` → `skillstar-skills`；
 > `skillstar-app` → 完成跨域 use case 所需的域 crate；
 > 域 crate → `skillstar-core`（仅基础设施或共享契约）；
@@ -121,10 +121,8 @@ SkillStar 是 Tauri v2 桌面应用（同一 `skillstar` 二进制内还含 CLI�
 | `skillstar-providers` | 零依赖叶子：Provider 元数据（余额端点、鉴权方案）的单一事实来源；usage fetcher 与 models preset 都从这里派生 |
 | `skillstar-skills` | 技能库（install / update / bundle / local 创作 / repo scan / discovery / lockfile / update detection / git）+ Agent registry + 项目注册/manifest + deployment（link-copy reconcile）+ patrol 运行逻辑 + Launch Deck terminal。对外暴露窄 facade，实现默认私有 |
 | `skillstar-marketplace` | 本地优先 marketplace 快照 + SQLite FTS + MCP registry/curated |
-| `skillstar-models` | Provider store + presets + 外部工具同步（Claude Code / Codex / OpenCode / Gemini）+ latency + circuit breaker |
-| `skillstar-ai` | 推理：chat completion、流式 summarize/translate、skill pick（依赖 skillstar-models 解析 Provider） |
-| `skillstar-usage` | 订阅/配额：固定 catalog、OAuth + API-key fetchers、AES-256-GCM token 存储 |
-| `skillstar-fingerprint` | TLS/HTTP 指纹感知 HTTP 客户端（JA3/JA4/H2 模拟，经可选 `impersonate`/`wreq` feature）+ IDE projector |
+| `skillstar-models` | Provider store + presets + tool sync + latency/circuit breaker + **AI 推理**（原 skillstar-ai：chat/summarize/translate/skill pick） |
+| `skillstar-usage` | 订阅/配额（catalog、OAuth、API-key fetchers、token 存储）+ **TLS/HTTP 指纹**（原 skillstar-fingerprint 模块；`impersonate` 由 binary root 显式打开） |
 | `skillstar-ssh` | SSH 远程技能管理：russh 连接 + SFTP 推送/列出/删除 + 主机配置 + keyring 凭证 + TOFU 主机键 |
 | `skillstar-sync` | S3 云同步：aws-sdk-s3 + manifest.json + 本地技能 tar.gz 打包 + keyring 凭证 |
 | `skillstar-app` | library-only：`shell_rc`、跨域 use case（`usage_switch` 等）、CLI 解析与模式识别。可执行文件 `skillstar` 仅由 `src-tauri` package 产出。所有 `#[tauri::command]` 在 `src-tauri/src/commands/` |

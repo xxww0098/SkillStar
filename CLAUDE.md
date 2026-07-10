@@ -58,11 +58,9 @@ Heavy logic belongs in `crates/*`, not in command wrappers. Commands are registe
 - `skillstar-core` — shared types + infra (paths, fs_ops, db_pool, migrations, `http_client::probe_http_client` which honours `config/proxy.json` — all remote HTTP must use it)
 - `skillstar-skills` — skill library (install/update/bundle/local/repo scan/lockfile/update detection/git) + agent registry + project deployment + patrol + Launch Deck terminal
 - `skillstar-marketplace` — local-first marketplace snapshot + SQLite FTS
-- `skillstar-models` — provider store, presets, external tool sync (Claude Code / Codex / OpenCode on-disk configs), latency, circuit breaker
-- `skillstar-ai` — inference (chat completion, streaming summarize/translate, skill pick); depends on `skillstar-models` for provider resolution
+- `skillstar-models` — provider store, presets, tool sync, latency, circuit breaker, AI inference (former skillstar-ai)
 - `skillstar-providers` — zero-dependency leaf crate: single source of truth for provider metadata (balance endpoints, auth schemes); both usage fetchers and models presets derive from it
-- `skillstar-usage` — subscriptions/quota: fixed catalog, OAuth + API-key fetchers, AES-256-GCM encrypted token storage
-- `skillstar-fingerprint` — TLS-fingerprint-aware HTTP client (JA3/JA4/H2 emulation via optional `wreq` feature)
+- `skillstar-usage` — subscriptions/quota + TLS fingerprint module (former skillstar-fingerprint)
 - `skillstar-app` — library-only cross-domain use cases + CLI parse/mode; binary owned by `src-tauri`
 
 ### Frontend structure

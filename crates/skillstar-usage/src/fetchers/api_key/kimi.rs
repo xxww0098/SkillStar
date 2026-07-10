@@ -8,7 +8,7 @@
 
 use chrono::Utc;
 use serde::Deserialize;
-use skillstar_fingerprint::DeviceFingerprint;
+use crate::fingerprint::DeviceFingerprint;
 use skillstar_providers::balance;
 
 use crate::subscription::{MonetaryBalance, SubscriptionUsage};

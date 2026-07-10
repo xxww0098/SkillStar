@@ -14,7 +14,7 @@
 //! ## Example
 //!
 //! ```no_run
-//! use skillstar_fingerprint::{build_client, DeviceFingerprint, request::Req};
+//! use skillstar_usage::fingerprint::{build_client, DeviceFingerprint, request::Req};
 //!
 //! # #[derive(serde::Deserialize)] struct Balance { total: f64 }
 //! # async fn run() -> anyhow::Result<()> {
@@ -30,7 +30,7 @@
 //! # }
 //! ```
 
-use crate::client::FingerprintAwareClient;
+use super::client::FingerprintAwareClient;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::time::Duration;

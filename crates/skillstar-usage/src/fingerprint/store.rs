@@ -3,7 +3,7 @@
 //! Stored as a single JSON file at `~/.skillstar/config/fingerprints.json`.
 //! The store always contains at minimum an immutable [`DeviceFingerprint::original`].
 
-use crate::types::DeviceFingerprint;
+use super::types::DeviceFingerprint;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

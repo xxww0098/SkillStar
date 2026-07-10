@@ -18,7 +18,7 @@ pub mod kimi;
 pub mod minimax;
 
 use serde::de::DeserializeOwned;
-use skillstar_fingerprint::{DeviceFingerprint, Req, RequestError};
+use crate::fingerprint::{DeviceFingerprint, Req, RequestError};
 use skillstar_providers::balance::{AuthScheme, BalanceSpec};
 
 use crate::crypto;

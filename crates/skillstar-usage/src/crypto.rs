@@ -1,9 +1,9 @@
 //! AES-256-GCM encryption for API keys and OAuth tokens.
 //!
-//! Algorithm is identical to `skillstar-ai::translation_config::encrypt_api_key`
+//! Algorithm is identical to `skillstar-models::ai_provider::translation_config::encrypt_api_key`
 //! (machine_uid → SHA-256 → 32-byte key, random 12-byte nonce per encryption,
 //! ciphertext stored as `base64(nonce || ciphertext)`). Kept in-crate to avoid
-//! a heavy dependency on `skillstar-ai`.
+//! a heavy dependency on `skillstar-models::ai_provider`.
 
 use aes_gcm::{
     Aes256Gcm, Nonce,

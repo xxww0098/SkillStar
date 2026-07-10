@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-pub use skillstar_models::AiProviderRef;
+pub use crate::AiProviderRef;
 
 // ── Configuration ───────────────────────────────────────────────────
 

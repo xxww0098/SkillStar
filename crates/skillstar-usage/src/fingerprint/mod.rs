@@ -22,7 +22,7 @@
 //! backend-specific code for the few lines that actually send the request.
 //!
 //! ```no_run
-//! use skillstar_fingerprint::{build_client, DeviceFingerprint, FingerprintAwareClient};
+//! use skillstar_usage::fingerprint::{build_client, DeviceFingerprint, FingerprintAwareClient};
 //!
 //! # async fn run() -> anyhow::Result<()> {
 //! let fp = DeviceFingerprint::generate_chrome();

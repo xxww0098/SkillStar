@@ -1,4 +1,4 @@
-use skillstar_ai::ai_provider;
+use skillstar_models::ai_provider;
 use skillstar_core::infra::error::AppError;
 use tauri::Emitter;
 

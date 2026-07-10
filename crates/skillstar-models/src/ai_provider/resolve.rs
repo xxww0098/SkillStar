@@ -6,7 +6,7 @@
 use anyhow::{Context, Result};
 use tracing::warn;
 
-use skillstar_models::providers;
+use crate::providers;
 
 use super::*;
 

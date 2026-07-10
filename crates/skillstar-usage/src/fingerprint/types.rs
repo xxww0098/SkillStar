@@ -1,6 +1,6 @@
 //! Top-level fingerprint entity types.
 
-use crate::{Http2Profile, HttpProfile, IdeTelemetry, TlsProfile};
+use super::{Http2Profile, HttpProfile, IdeTelemetry, TlsProfile};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -30,7 +30,7 @@ pub struct DeviceFingerprint {
     pub http2: Http2Profile,
     #[serde(default)]
     pub network: NetworkProfile,
-    /// IDE telemetry identity applied by [`crate::IdeProjector`] when
+    /// IDE telemetry identity applied by [`super::IdeProjector`] when
     /// the user asks for it. Absent for the immutable `"original"` row.
     #[serde(default, skip_serializing_if = "IdeTelemetry::is_empty")]
     pub telemetry: IdeTelemetry,
@@ -131,7 +131,7 @@ pub enum FingerprintSource {
 }
 
 /// Network-layer hints. Currently informational; full proxy/DoH wiring
-/// will land alongside [`crate::FingerprintAwareClient`] in a later phase.
+/// will land alongside [`super::FingerprintAwareClient`] in a later phase.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct NetworkProfile {
     /// HTTP/HTTPS proxy URL (e.g. `socks5h://127.0.0.1:1080`).

@@ -10,7 +10,7 @@
 //! `~/.skillstar/fingerprints/baselines/<ide>.json` so [`IdeProjector::restore_baseline`]
 //! can put the original device identity back.
 
-use crate::telemetry::IdeTelemetry;
+use super::telemetry::IdeTelemetry;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
@@ -141,7 +141,7 @@ pub trait IdeProjector: Send + Sync {
         let serialized = serde_json::to_vec_pretty(&root)?;
         atomic_write(&path, &serialized)?;
         tracing::info!(
-            target: "skillstar_fingerprint::projector",
+            target: "crate::fingerprint::projector",
             ide = self.agent_id(),
             "telemetry applied",
         );
@@ -158,7 +158,7 @@ pub trait IdeProjector: Send + Sync {
         let original: IdeTelemetry = serde_json::from_slice(&raw)?;
         self.apply(&original)?;
         tracing::info!(
-            target: "skillstar_fingerprint::projector",
+            target: "crate::fingerprint::projector",
             ide = self.agent_id(),
             "telemetry restored from baseline",
         );

@@ -20,19 +20,19 @@ tokio = { workspace = true, features = ["sync", "time", "macros", "rt-multi-thre
 tiny_http = "0.12"
 tracing = { workspace = true }
 url = { workspace = true }
-uuid = { workspace = true }
+uuid = { workspace = true, features = ["serde"] }
 thiserror = { workspace = true }
 skillstar-core = { version = "0.1.0", path = "../skillstar-core" }
-skillstar-fingerprint = { version = "0.1.0", path = "../skillstar-fingerprint", default-features = false }
 skillstar-providers = { version = "0.1.0", path = "../skillstar-providers" }
 rusqlite = { workspace = true }
+wreq = { version = "6.0.0-rc.28", features = ["json", "form"], optional = true }
+wreq-util = { version = "3.0.0-rc.6", optional = true }
 
 [features]
 default = []
-# Forwards to skillstar-fingerprint's wreq-backed TLS emulation.
-# Disable for ultra-light builds (CI / tests) — fingerprint usage degrades
-# transparently to reqwest defaults.
-impersonate = ["skillstar-fingerprint/impersonate"]
+# Enables wreq-backed TLS/HTTP2 fingerprint emulation (in-crate fingerprint module).
+# Disable for ultra-light builds — degrades to reqwest defaults.
+impersonate = ["dep:wreq", "dep:wreq-util"]
 
 [dev-dependencies]
 tempfile = { workspace = true }

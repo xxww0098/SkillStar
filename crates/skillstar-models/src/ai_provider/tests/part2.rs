@@ -10,7 +10,7 @@ use super::*;
 #[test]
 fn resolve_from_flat_store_claude_uses_anthropic_endpoint() {
     with_temp_data_root(|_dir| {
-        use skillstar_models::providers::{
+        use crate::providers::{
             FlatProvidersStore, ProviderEntryFlat, flat_store_path, write_flat_store,
         };
 
@@ -69,7 +69,7 @@ fn resolve_from_flat_store_claude_uses_anthropic_endpoint() {
 #[test]
 fn resolve_from_flat_store_claude_falls_back_to_openai_url_when_anthropic_empty() {
     with_temp_data_root(|_dir| {
-        use skillstar_models::providers::{
+        use crate::providers::{
             FlatProvidersStore, ProviderEntryFlat, flat_store_path, write_flat_store,
         };
 
@@ -111,7 +111,7 @@ fn resolve_from_flat_store_claude_falls_back_to_openai_url_when_anthropic_empty(
 #[test]
 fn resolve_from_flat_store_codex_uses_openai_endpoint() {
     with_temp_data_root(|_dir| {
-        use skillstar_models::providers::{
+        use crate::providers::{
             FlatProvidersStore, ProviderEntryFlat, flat_store_path, write_flat_store,
         };
 
@@ -156,7 +156,7 @@ fn resolve_from_flat_store_codex_uses_openai_endpoint() {
 #[test]
 fn resolve_from_flat_store_fails_when_api_key_missing() {
     with_temp_data_root(|_dir| {
-        use skillstar_models::providers::{
+        use crate::providers::{
             FlatProvidersStore, ProviderEntryFlat, flat_store_path, write_flat_store,
         };
 
@@ -203,7 +203,7 @@ fn resolve_from_flat_store_fails_when_api_key_missing() {
 #[test]
 fn resolve_from_legacy_store_reads_claude_model_variants() {
     with_temp_data_root(|_dir| {
-        use skillstar_models::providers::{
+        use crate::providers::{
             AppProviders, ProviderEntry, ProvidersStore, write_store,
         };
         use std::collections::HashMap;

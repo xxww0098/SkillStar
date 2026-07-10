@@ -1,9 +1,9 @@
 //! Reference type pointing from `AiConfig` into the model provider store.
 //!
-//! `AiConfig` itself lives in `skillstar-ai` because it carries inference-time
+//! `AiConfig` itself lives in `skillstar-models::ai_provider` because it carries inference-time
 //! state (api_format / model / preset etc.), but its provider pointer belongs
 //! to the models domain, so we keep the type here and re-export it from
-//! `skillstar-ai` for backward compatibility.
+//! `skillstar-models::ai_provider` for backward compatibility.
 
 use serde::{Deserialize, Serialize};
 

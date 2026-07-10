@@ -9,8 +9,8 @@
 //! versions that `wreq-util` ships emulations for. If you want a more
 //! exotic mix, build a fingerprint by hand via [`DeviceFingerprint::new`].
 
-use crate::types::FingerprintSource;
-use crate::{DeviceFingerprint, HttpProfile, TlsProfile};
+use super::types::FingerprintSource;
+use super::{DeviceFingerprint, HttpProfile, TlsProfile};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -184,9 +184,9 @@ pub fn instantiate(preset: PresetId, name: impl Into<String>) -> DeviceFingerpri
         // Generate a fresh device identity unless this is the explicit
         // "default" preset (which should leave system telemetry untouched).
         telemetry: if matches!(preset, PresetId::Default) {
-            crate::IdeTelemetry::default()
+            super::IdeTelemetry::default()
         } else {
-            crate::IdeTelemetry::generate()
+            super::IdeTelemetry::generate()
         },
     }
 }

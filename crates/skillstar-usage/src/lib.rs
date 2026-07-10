@@ -21,6 +21,7 @@ pub mod cloud_code;
 pub mod cookie_jar;
 pub mod crypto;
 pub mod fetchers;
+pub mod fingerprint;
 pub mod http_client;
 pub mod local_import;
 pub mod oauth;

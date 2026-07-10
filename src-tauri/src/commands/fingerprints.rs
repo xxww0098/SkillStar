@@ -9,7 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 use skillstar_core::infra::error::AppError;
-use skillstar_fingerprint::{
+use skillstar_usage::fingerprint::{
     DeviceFingerprint, FingerprintStore, HttpProfile, IdeProjector, NetworkProfile, PresetId,
     PresetTemplate, SupportedIde, TlsProfile, VsCodeForkProjector, all_presets, instantiate,
 };
