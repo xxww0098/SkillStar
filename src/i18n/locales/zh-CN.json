@@ -1296,7 +1296,13 @@
     "billingCycle_one-time": "一次性",
     "balanceGrantedOnly": "赠送 {{granted}}",
     "balanceTopupOnly": "充值 {{topup}}",
-    "creditMinimum": "使用门槛 {{min}}"
+    "creditMinimum": "使用门槛 {{min}}",
+    "billingCycle_api-key": "API 额度",
+    "cycleApiKey": "API Key（按额度 / 预充）",
+    "cycleApiKeyShort": "API 额度",
+    "priceApiKey": "套餐 / 充值金额",
+    "pricePlaceholderApiKey": "例如预充值套餐价",
+    "billingHintApiKey": "按额度计费的 API Key 余额，没有月付续费周期；用预充额度跟踪花费。"
   },
   "models": {
     "hub": {

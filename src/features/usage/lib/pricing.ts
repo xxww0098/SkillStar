@@ -13,6 +13,8 @@ export function monthlyEquivalentPrice(sub: Pick<Subscription, "monthly_price" |
     case "annual":
       return price / 12;
     case "one-time":
+    case "api-key":
+      // Prepaid / one-shot balances are not a monthly burn rate.
       return null;
     default:
       return price;
@@ -26,6 +28,9 @@ export function totalSpendForSubscription(sub: Subscription, nowSec = Math.floor
 
   switch (sub.billing_cycle) {
     case "one-time":
+      return price;
+    case "api-key":
+      // Price field is the prepaid top-up / package amount (counted once).
       return price;
     case "annual":
       return billingPeriodsElapsed(sub, nowSec, "annual") * price;

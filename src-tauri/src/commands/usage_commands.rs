@@ -442,7 +442,8 @@ pub fn get_usage_summary() -> Result<UsageSummary, AppError> {
         let amount = match sub.billing_cycle {
             BillingCycle::Monthly => price,
             BillingCycle::Annual => price / 12.0,
-            BillingCycle::OneTime => 0.0,
+            // Prepaid/API-key balance and one-shots are not monthly burn.
+            BillingCycle::OneTime | BillingCycle::ApiKey => 0.0,
         };
         *totals.entry(sub.currency.clone()).or_insert(0.0) += amount;
     }

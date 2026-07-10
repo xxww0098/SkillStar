@@ -115,7 +115,9 @@ export function SubscriptionEditDialog({
       setDisplayName("");
       setPrice("");
       setCurrency(preselectedEntry?.default_currency ?? "CNY");
-      setBillingCycle("monthly");
+      // API-key catalogs default to quota billing; OAuth subscriptions default to monthly.
+      const defaultModes = selectableAuthModes(preselectedEntry?.auth_modes ?? []);
+      setBillingCycle(defaultModes[0] === "api-key" || preselectedEntry?.tier === "api-key" ? "api-key" : "monthly");
       setStartDate(today);
       setEndDate("");
       setAutoRenew(false);
@@ -148,6 +150,10 @@ export function SubscriptionEditDialog({
         setAuthMode(modes[0] ?? "o-auth");
       }
       setCurrency(entry.default_currency);
+      // Prefer quota billing for API-key-tier catalogs (DeepSeek / GLM / Kimi…).
+      if (entry.tier === "api-key" || modes[0] === "api-key") {
+        setBillingCycle("api-key");
+      }
       if (entry.regions.length > 0 && !entry.regions.includes(region)) {
         setRegion(entry.regions[0]);
       }
@@ -169,6 +175,8 @@ export function SubscriptionEditDialog({
         return t("usage.priceAnnual");
       case "one-time":
         return t("usage.priceOneTime");
+      case "api-key":
+        return t("usage.priceApiKey");
       default:
         return t("usage.priceMonthly");
     }
@@ -185,7 +193,7 @@ export function SubscriptionEditDialog({
     }
   };
 
-  const billingCycleOptions: BillingCycle[] = ["monthly", "annual", "one-time"];
+  const billingCycleOptions: BillingCycle[] = ["monthly", "annual", "one-time", "api-key"];
 
   const labelBillingCycle = (cycle: BillingCycle) => {
     switch (cycle) {
@@ -193,6 +201,8 @@ export function SubscriptionEditDialog({
         return t("usage.cycleAnnualShort");
       case "one-time":
         return t("usage.cycleOneTimeShort");
+      case "api-key":
+        return t("usage.cycleApiKeyShort");
       default:
         return t("usage.cycleMonthlyShort");
     }
@@ -203,7 +213,9 @@ export function SubscriptionEditDialog({
       ? t("usage.billingHintAnnual")
       : billingCycle === "one-time"
         ? t("usage.billingHintOneTime")
-        : t("usage.billingHintMonthly");
+        : billingCycle === "api-key"
+          ? t("usage.billingHintApiKey")
+          : t("usage.billingHintMonthly");
 
   const handleAutoScanAll = async () => {
     setScanningLocal(true);

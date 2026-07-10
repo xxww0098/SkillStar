@@ -107,10 +107,16 @@ fn default_currency() -> String {
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum BillingCycle {
+    /// Calendar subscription billed every month.
     #[default]
     Monthly,
+    /// Calendar subscription billed yearly (price is annual total).
     Annual,
+    /// One-shot purchase (price is a lump sum, not amortized).
     OneTime,
+    /// Prepaid / pay-as-you-go API key balance (quota-based, no renew cycle).
+    /// Serde tag: `"api-key"`.
+    ApiKey,
 }
 
 /// Manual-mode quota the user maintains by hand (e.g. for Kimi Coding Plan,

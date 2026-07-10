@@ -1296,7 +1296,13 @@
     "billingCycle_one-time": "One-time",
     "balanceGrantedOnly": "Granted {{granted}}",
     "balanceTopupOnly": "Top-up {{topup}}",
-    "creditMinimum": "Min for usage: {{min}}"
+    "creditMinimum": "Min for usage: {{min}}",
+    "billingCycle_api-key": "API Key",
+    "cycleApiKey": "API Key (quota / prepaid)",
+    "cycleApiKeyShort": "API Key",
+    "priceApiKey": "Package / top-up amount",
+    "pricePlaceholderApiKey": "e.g. prepaid package price",
+    "billingHintApiKey": "Quota-based API key balance — no monthly renew cycle. Track spend against prepaid credits."
   },
   "models": {
     "hub": {

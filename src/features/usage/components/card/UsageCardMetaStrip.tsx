@@ -40,7 +40,22 @@ export function UsageCardMetaStrip({
             {authModeLabel(authMode, t)}
           </span>
           {billingCycle && (
-            <span className="shrink-0 rounded bg-zinc-50 px-1.5 py-0.5 text-[9px] font-medium tracking-wider text-zinc-500 uppercase ring-1 ring-zinc-200/50">
+            <span
+              className={
+                billingCycle === "api-key"
+                  ? "shrink-0 rounded bg-violet-50 px-1.5 py-0.5 text-[9px] font-medium tracking-wider text-violet-700 uppercase ring-1 ring-violet-200/60"
+                  : "shrink-0 rounded bg-zinc-50 px-1.5 py-0.5 text-[9px] font-medium tracking-wider text-zinc-500 uppercase ring-1 ring-zinc-200/50"
+              }
+              title={
+                billingCycle === "api-key"
+                  ? t("usage.billingHintApiKey")
+                  : billingCycle === "annual"
+                    ? t("usage.billingHintAnnual")
+                    : billingCycle === "one-time"
+                      ? t("usage.billingHintOneTime")
+                      : t("usage.billingHintMonthly")
+              }
+            >
               {t(`usage.billingCycle_${billingCycle}`)}
             </span>
           )}

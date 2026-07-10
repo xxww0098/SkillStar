@@ -10,7 +10,8 @@ export function selectableAuthModes(modes: AuthMode[]): AuthMode[] {
 
 export type CatalogTier = "o-auth" | "api-key";
 
-export type BillingCycle = "monthly" | "annual" | "one-time";
+/** How the user pays for this row — independent of `AuthMode`. */
+export type BillingCycle = "monthly" | "annual" | "one-time" | "api-key";
 
 export type AlertSeverity = "info" | "warning" | "danger";
 

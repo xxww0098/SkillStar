@@ -115,7 +115,9 @@ export function AdvancedBillingSection({
                       ? t("usage.cycleAnnual")
                       : cycle === "one-time"
                         ? t("usage.cycleOneTime")
-                        : t("usage.cycleMonthly")
+                        : cycle === "api-key"
+                          ? t("usage.cycleApiKey")
+                          : t("usage.cycleMonthly")
                   }
                   className={cn(
                     "flex-1 rounded-full px-3 py-1.5 text-[11px] font-semibold transition-all duration-200",
@@ -142,7 +144,9 @@ export function AdvancedBillingSection({
                   ? t("usage.pricePlaceholderAnnual")
                   : billingCycle === "one-time"
                     ? t("usage.priceOneTime")
-                    : t("usage.pricePlaceholderMonthly")
+                    : billingCycle === "api-key"
+                      ? t("usage.pricePlaceholderApiKey")
+                      : t("usage.pricePlaceholderMonthly")
               }
               className="h-8 rounded-lg border-input-border bg-input text-xs text-foreground"
             />
