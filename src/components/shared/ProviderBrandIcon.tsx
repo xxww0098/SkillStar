@@ -1,18 +1,19 @@
-import AnthropicIcon from "@lobehub/icons/es/Anthropic/components/Mono";
-import DeepSeekIcon from "@lobehub/icons/es/DeepSeek/components/Color";
-import GrokIcon from "@lobehub/icons/es/Grok/components/Mono";
-import KimiIcon from "@lobehub/icons/es/Kimi/components/Mono";
-import LongCatIcon from "@lobehub/icons/es/LongCat/components/Color";
-import MiniMaxIcon from "@lobehub/icons/es/Minimax/components/Color";
-import OpenAIIcon from "@lobehub/icons/es/OpenAI/components/Mono";
-import OpenRouterIcon from "@lobehub/icons/es/OpenRouter/components/Mono";
-import SiliconCloudIcon from "@lobehub/icons/es/SiliconCloud/components/Color";
-import XiaomiMiMoIcon from "@lobehub/icons/es/XiaomiMiMo/components/Mono";
-import ZhipuIcon from "@lobehub/icons/es/Zhipu/components/Color";
-import { type ComponentType, type CSSProperties, useLayoutEffect, useRef } from "react";
-import { cn } from "../../lib/utils";
-
-type IconComponent = ComponentType<{ size?: number | string; className?: string; style?: CSSProperties }>;
+import {
+  AnthropicMono,
+  DeepSeekColor,
+  GrokMono,
+  KimiMono,
+  type LobeIconComponent,
+  LongCatColor,
+  MinimaxColor,
+  OpenAIMono,
+  OpenRouterMono,
+  SiliconCloudColor,
+  XiaomiMiMoMono,
+  ZhipuColor,
+} from "@/components/ui/icons/lobe";
+import { LobeIcon } from "@/components/ui/icons/LobeIcon";
+import { cn } from "@/lib/utils";
 
 interface ProviderBrandIconProps {
   presetId?: string | null;
@@ -22,22 +23,30 @@ interface ProviderBrandIconProps {
   className?: string;
 }
 
-const ICON_BY_PRESET_ID: Record<string, IconComponent> = {
-  deepseek: DeepSeekIcon,
-  kimi: KimiIcon,
-  "kimi-coding": KimiIcon,
-  minimax: MiniMaxIcon,
-  longcat: LongCatIcon,
-  "xiaomi-mimo": XiaomiMiMoIcon,
-  glm: ZhipuIcon,
-  "glm-coding": ZhipuIcon,
-  openrouter: OpenRouterIcon,
-  siliconflow: SiliconCloudIcon,
-  grok: GrokIcon,
-  anthropic: AnthropicIcon,
-  "openai-compatible": OpenAIIcon,
-  official: OpenAIIcon,
+/** `tinted` glyphs are Mono variants painted with the provider's accent color. */
+interface BrandGlyph {
+  icon: LobeIconComponent;
+  tinted?: boolean;
+}
+
+const GLYPH_BY_PRESET_ID: Record<string, BrandGlyph> = {
+  deepseek: { icon: DeepSeekColor },
+  kimi: { icon: KimiMono },
+  "kimi-coding": { icon: KimiMono },
+  minimax: { icon: MinimaxColor },
+  longcat: { icon: LongCatColor },
+  "xiaomi-mimo": { icon: XiaomiMiMoMono, tinted: true },
+  glm: { icon: ZhipuColor },
+  "glm-coding": { icon: ZhipuColor },
+  openrouter: { icon: OpenRouterMono, tinted: true },
+  siliconflow: { icon: SiliconCloudColor },
+  grok: { icon: GrokMono, tinted: true },
+  anthropic: { icon: AnthropicMono, tinted: true },
+  "openai-compatible": { icon: OpenAIMono, tinted: true },
+  official: { icon: OpenAIMono, tinted: true },
 };
+
+const BOX_CLASS = "border border-border/55 bg-background/75 shadow-sm";
 
 const SIZE_CLASS = {
   xs: "h-5 w-5 rounded-lg",
@@ -88,39 +97,27 @@ export function ProviderBrandIcon({
   size = "sm",
   className,
 }: ProviderBrandIconProps) {
-  const iconRef = useRef<HTMLSpanElement>(null);
   const resolvedPresetId = resolvePresetId(presetId, providerName);
-  const Icon = resolvedPresetId ? ICON_BY_PRESET_ID[resolvedPresetId] : undefined;
+  const glyph = resolvedPresetId ? GLYPH_BY_PRESET_ID[resolvedPresetId] : undefined;
   const fallbackColor = iconColor ?? "rgb(var(--color-primary-rgb))";
-  const monoColor =
-    resolvedPresetId === "openrouter" ||
-    resolvedPresetId === "openai-compatible" ||
-    resolvedPresetId === "official" ||
-    resolvedPresetId === "anthropic" ||
-    resolvedPresetId === "xiaomi-mimo" ||
-    resolvedPresetId === "grok"
-      ? fallbackColor
-      : undefined;
 
-  useLayoutEffect(() => {
-    iconRef.current?.querySelectorAll("title").forEach((title) => title.remove());
-  });
+  if (glyph) {
+    return (
+      <LobeIcon
+        icon={glyph.icon}
+        size={ICON_SIZE[size]}
+        className={cn(BOX_CLASS, SIZE_CLASS[size], className)}
+        style={glyph.tinted ? { color: fallbackColor } : undefined}
+      />
+    );
+  }
 
   return (
     <span
-      ref={iconRef}
-      className={cn(
-        "inline-flex shrink-0 items-center justify-center border border-border/55 bg-background/75 shadow-sm",
-        SIZE_CLASS[size],
-        className,
-      )}
+      className={cn("inline-flex shrink-0 items-center justify-center", BOX_CLASS, SIZE_CLASS[size], className)}
       aria-hidden
     >
-      {Icon ? (
-        <Icon size={ICON_SIZE[size]} style={monoColor ? { color: monoColor } : undefined} />
-      ) : (
-        <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: fallbackColor }} />
-      )}
+      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: fallbackColor }} />
     </span>
   );
 }

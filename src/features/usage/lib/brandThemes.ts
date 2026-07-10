@@ -25,24 +25,19 @@ export interface BrandTheme {
   glow: string;
 }
 
+/** Themes keyed by catalog id — only OAuth + API-key tiers remain. */
 const THEMES: Record<string, BrandTheme> = {
-  // ── OAuth IDEs / agents ──────────────────────────────────────────────
+  // ── OAuth (`catalog/oauth.rs` + `fetchers/oauth/`) ───────────────────
   cursor: { header: ["#0F1417", "#00C4A3"], bar: ["#00E5BC", "#00B89A"], fg: "#ffffff", glow: "#00E5BC" },
   codex: { header: ["#0E8E6D", "#19C37D"], bar: ["#10A37F", "#19C37D"], fg: "#ffffff", glow: "#10A37F" },
   antigravity: { header: ["#4285F4", "#34A853"], bar: ["#4285F4", "#1A73E8"], fg: "#ffffff", glow: "#4285F4" },
-  trae: { header: ["#FF7A45", "#F9376E"], bar: ["#FF7A45", "#FF5630"], fg: "#ffffff", glow: "#FF7A45" },
-  qoder: { header: ["#7C3AED", "#5B21B6"], bar: ["#8B5CF6", "#7C3AED"], fg: "#ffffff", glow: "#7C3AED" },
   xai: { header: ["#1A1A1A", "#000000"], bar: ["#3F3F46", "#18181B"], fg: "#ffffff", glow: "#52525B" },
 
-  // ── API-key plans ────────────────────────────────────────────────────
+  // ── API key (`catalog/api_key.rs` + `fetchers/api_key/`) ─────────────
   deepseek: { header: ["#4D6BFE", "#1A56DB"], bar: ["#4D6BFE", "#3B5BDB"], fg: "#ffffff", glow: "#4D6BFE" },
   glm: { header: ["#4A90E2", "#2D6BD0"], bar: ["#4A90E2", "#2D6BD0"], fg: "#ffffff", glow: "#4A90E2" },
   kimi: { header: ["#23201A", "#F5B400"], bar: ["#F5B400", "#FF8A00"], fg: "#ffffff", glow: "#F5B400" },
   minimax: { header: ["#9333EA", "#C026D3"], bar: ["#9333EA", "#A855F7"], fg: "#ffffff", glow: "#9333EA" },
-
-  // ── Cookie / manual ──────────────────────────────────────────────────
-  stepfun: { header: ["#008A80", "#00B5A9"], bar: ["#00B5A9", "#00D9C0"], fg: "#ffffff", glow: "#00B5A9" },
-  opencode: { header: ["#1E293B", "#334155"], bar: ["#64748B", "#334155"], fg: "#ffffff", glow: "#475569" },
 };
 
 function normalizeHex(hex: string): string {
@@ -84,4 +79,17 @@ export function getBrandTheme(catalogId: string, brandColorHex: string): BrandTh
   const deep = darken(base, 0.28);
   const fg = luminance(base) > 0.62 ? "#0b0b0c" : "#ffffff";
   return { header: [base, deep], bar: [base, deep], fg, glow: base };
+}
+
+/**
+ * Convert `#rrggbb` (or bare `rrggbb`) to a CSS `r, g, b` triplet for use in
+ * `rgba(var(--brand-rgb), …)` / `rgb(…)`. Shared by card chrome + catalog hero.
+ */
+export function hexToRgbTriplet(hex: string): string {
+  const h = hex.replace("#", "").trim();
+  if (!/^[0-9a-fA-F]{6}$/.test(h)) return "107, 114, 128";
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  return `${r}, ${g}, ${b}`;
 }

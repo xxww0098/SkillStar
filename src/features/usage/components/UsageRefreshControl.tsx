@@ -10,6 +10,8 @@ interface UsageRefreshControlProps {
   onRefresh: () => Promise<void>;
   refreshing: boolean;
   refreshDisabled?: boolean;
+  /** Button caption; defaults to i18n `usage.refreshAll`. Provider pages pass e.g. "刷新 Grok". */
+  refreshLabel?: string;
   autoRefreshEnabled: boolean;
   intervalMs: number;
   setAutoRefreshEnabled: (enabled: boolean) => void;
@@ -20,6 +22,7 @@ export function UsageRefreshControl({
   onRefresh,
   refreshing,
   refreshDisabled = false,
+  refreshLabel,
   autoRefreshEnabled,
   intervalMs,
   setAutoRefreshEnabled,
@@ -29,6 +32,7 @@ export function UsageRefreshControl({
   const [open, setOpen] = useState(false);
 
   const activeInterval = USAGE_REFRESH_INTERVALS.find((item) => item.ms === intervalMs) ?? USAGE_REFRESH_INTERVALS[1];
+  const buttonLabel = refreshLabel ?? t("usage.refreshAll");
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
@@ -50,7 +54,7 @@ export function UsageRefreshControl({
           )}
         >
           <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
-          <span>{t("usage.refreshAll")}</span>
+          <span>{buttonLabel}</span>
           {autoRefreshEnabled && (
             <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium text-primary">
               {t(`usage.${activeInterval.key}`)}

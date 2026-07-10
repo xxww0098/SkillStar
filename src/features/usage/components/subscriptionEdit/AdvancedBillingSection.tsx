@@ -32,8 +32,6 @@ interface AdvancedBillingSectionProps {
   endDateLabel: string;
   autoRenew: boolean;
   setAutoRenew: (value: boolean) => void;
-  periodLabel: string;
-  setPeriodLabel: (value: string) => void;
   note: string;
   setNote: (value: string) => void;
 }
@@ -65,8 +63,6 @@ export function AdvancedBillingSection({
   endDateLabel,
   autoRenew,
   setAutoRenew,
-  periodLabel,
-  setPeriodLabel,
   note,
   setNote,
 }: AdvancedBillingSectionProps) {
@@ -86,8 +82,8 @@ export function AdvancedBillingSection({
           <Input
             value={planTier}
             onChange={(e) => setPlanTier(e.target.value)}
-            placeholder={authMode === "manual" ? "Pro / Max" : t("usage.planAutoSync")}
-            disabled={authMode !== "manual"}
+            placeholder={t("usage.planAutoSync")}
+            disabled
             className="h-8 rounded-lg border-input-border bg-input text-xs text-foreground"
           />
         </Field>
@@ -183,17 +179,6 @@ export function AdvancedBillingSection({
             {t("usage.autoRenewLabel", { label: endDateLabel })}
           </label>
         </div>
-      )}
-
-      {authMode === "manual" && (
-        <Field label={t("usage.fieldPeriodLabel")}>
-          <Input
-            value={periodLabel}
-            onChange={(e) => setPeriodLabel(e.target.value)}
-            placeholder={t("usage.periodLabelPlaceholder")}
-            className="h-8 rounded-lg border-input-border bg-input text-xs text-foreground"
-          />
-        </Field>
       )}
 
       <Field label={t("usage.fieldNote")}>

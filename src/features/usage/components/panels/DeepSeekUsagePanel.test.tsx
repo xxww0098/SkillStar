@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { SubscriptionUsage } from "../types";
+import type { SubscriptionUsage } from "../../types";
 import { DeepSeekUsagePanel } from "./DeepSeekUsagePanel";
 
 vi.mock("react-i18next", () => ({

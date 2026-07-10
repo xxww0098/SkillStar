@@ -110,16 +110,19 @@ export function authModeLabel(mode: AuthMode, t: TFunction): string {
       return t("usage.authBadgeOAuth");
     case "api-key":
       return t("usage.authBadgeApiKey");
-    case "manual":
-      return t("usage.authBadgeManual");
-    case "cookie":
-      return t("usage.authBadgeCookie");
   }
 }
 
-/** True when window looks like Cursor-style monetary included usage (cents + breakdown). */
+/** True when window looks like monetary included usage (USD cents). */
 export function isMonetaryQuota(window: { label?: string; total: number | null; breakdown?: unknown[] }): boolean {
-  if (window.label === "Monthly credits") return window.total != null && window.total > 0;
+  // Grok legacy monthly bar is USD cents when total is set. Weekly is percent-only (never monetary).
+  if (window.label === "Monthly credits") {
+    return window.total != null && window.total > 0;
+  }
+  if (window.label === "Weekly credits") {
+    return false;
+  }
+  // Cursor-style: large cent totals with per-category breakdown.
   return window.total != null && window.total > 100 && (window.breakdown?.length ?? 0) > 0;
 }
 
@@ -153,6 +156,21 @@ export function formatQuotaNumber(n: number): string {
   if (Math.abs(n) >= 10_000) return `${(n / 10_000).toFixed(1)}万`;
   if (Math.abs(n) >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return String(Math.round(n));
+}
+
+/**
+ * Quota progress bars show **remaining** capacity, not consumed:
+ * 0% used → full bar (100%); as usage grows the bar shrinks toward 0%.
+ * Pass the consumed share (0–100); returns the fill width percent.
+ */
+export function remainingBarPercent(usedPercent: number): number {
+  if (!Number.isFinite(usedPercent)) return 100;
+  return Math.max(0, Math.min(100, Math.round(100 - usedPercent)));
+}
+
+/** CSS width for a remaining-quota progress fill. */
+export function remainingBarWidth(usedPercent: number): string {
+  return `${remainingBarPercent(usedPercent)}%`;
 }
 
 export function formatRelativeSync(epoch: number, t: TFunction): string {

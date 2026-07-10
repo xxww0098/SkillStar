@@ -9,7 +9,8 @@ import type { SubscriptionUsage } from "../types";
 type UsageDataContextValue = ReturnType<typeof useUsageData> & {
   refreshBusy: boolean;
   refreshingAll: boolean;
-  refreshAllWithUi: () => Promise<void>;
+  /** Optional `catalogId` scopes the batch to one provider (sidebar category). */
+  refreshAllWithUi: (catalogId?: string | null) => Promise<void>;
   refreshOneWithUi: (id: string) => Promise<void>;
   autoRefresh: ReturnType<typeof useUsageAutoRefreshSettings>;
 };
@@ -45,16 +46,19 @@ export function UsageDataProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const refreshAllWithUi = useCallback(async () => {
-    await withRefreshLock(async () => {
-      setRefreshingAll(true);
-      try {
-        await value.refreshAll();
-      } finally {
-        setRefreshingAll(false);
-      }
-    });
-  }, [value.refreshAll, withRefreshLock]);
+  const refreshAllWithUi = useCallback(
+    async (catalogId?: string | null) => {
+      await withRefreshLock(async () => {
+        setRefreshingAll(true);
+        try {
+          await value.refreshAll(catalogId);
+        } finally {
+          setRefreshingAll(false);
+        }
+      });
+    },
+    [value.refreshAll, withRefreshLock],
+  );
 
   const refreshOneWithUi = useCallback(
     async (id: string) => {

@@ -1,14 +1,14 @@
 // Mirrors `src-tauri/src/commands/usage_dto.rs`. Keep in sync.
+// Usage catalog is two tiers only: OAuth + API key (cookie mode removed).
 
-export type AuthMode = "api-key" | "o-auth" | "cookie" | "manual";
+export type AuthMode = "api-key" | "o-auth";
 
-/** Auth modes shown in the subscription dialog — drops manual when auto-fetch is available. */
+/** Auth modes shown in the subscription dialog (OAuth / API key only). */
 export function selectableAuthModes(modes: AuthMode[]): AuthMode[] {
-  const hasAutoFetch = modes.includes("o-auth") || modes.includes("api-key");
-  return hasAutoFetch ? modes.filter((mode) => mode !== "manual") : modes;
+  return modes.filter((mode) => mode === "o-auth" || mode === "api-key");
 }
 
-export type CatalogTier = "o-auth" | "api-key" | "cookie" | "manual";
+export type CatalogTier = "o-auth" | "api-key";
 
 export type BillingCycle = "monthly" | "annual" | "one-time";
 
@@ -177,8 +177,6 @@ export interface CreateSubscriptionInput {
   oauth_region?: string;
   manual_quota?: ManualQuota;
   note?: string;
-  /** Raw `Cookie:` header pasted from browser DevTools (Cookie mode only). */
-  cookie_header?: string;
   /** Bind this new subscription to a stored fingerprint id. */
   fingerprint_id?: string;
 }
@@ -197,8 +195,6 @@ export interface UpdateSubscriptionInput {
   clearPlatformToken?: boolean;
   manual_quota?: ManualQuota;
   note?: string;
-  /** Raw `Cookie:` header to replace existing cookies (Cookie mode only). */
-  cookie_header?: string;
   /** Bind to a fingerprint id (use `clearFingerprint` to remove the binding). */
   fingerprint_id?: string;
   /** When `true`, drop any existing fingerprint binding regardless of `fingerprint_id`. */
@@ -234,7 +230,7 @@ export interface OAuthStart {
 }
 
 /** Catalog ids that support `import_subscription_from_local`. */
-export const LOCAL_IMPORT_CATALOG_IDS = ["codex", "antigravity", "qoder"] as const;
+export const LOCAL_IMPORT_CATALOG_IDS = ["codex", "antigravity"] as const;
 
 /** Sidebar selection: "all" | a specific catalog id. */
 export type CatalogFilter = string;

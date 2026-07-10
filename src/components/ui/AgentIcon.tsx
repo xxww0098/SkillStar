@@ -1,11 +1,17 @@
-import GrokIcon from "@lobehub/icons/es/Grok/components/Mono";
 import { useEffect, useState } from "react";
 import type { AgentProfile } from "../../types";
 import { cn } from "../../lib/utils";
-import { AntigravityIcon } from "./icons/AntigravityIcon";
+import { AntigravityColor, GrokMono, type LobeIconComponent } from "./icons/lobe";
+import { LobeIcon } from "./icons/LobeIcon";
 
 /** Minimal shape required to render an agent icon. */
 type AgentIconProfile = Pick<AgentProfile, "id" | "icon" | "display_name">;
+
+/** Agents whose brand glyph comes from @lobehub/icons instead of a bundled asset. */
+const LOBE_ICON_BY_AGENT_ID: Record<string, LobeIconComponent> = {
+  antigravity: AntigravityColor,
+  grok: GrokMono,
+};
 
 interface AgentIconProps {
   profile: AgentIconProfile;
@@ -29,19 +35,9 @@ const svgCache = new Map<string, string>();
  * PNG / data-URI icons continue to use `<img>` which handles filters fine.
  */
 export function AgentIcon({ profile, className, alt }: AgentIconProps) {
-  if (profile.id === "antigravity") {
-    return <AntigravityIcon className={className} />;
-  }
-
-  if (profile.id === "grok") {
-    return (
-      <span
-        className={cn("inline-flex items-center justify-center shrink-0 pointer-events-none", className)}
-        aria-hidden
-      >
-        <GrokIcon className="h-full w-full" />
-      </span>
-    );
+  const BrandIcon = LOBE_ICON_BY_AGENT_ID[profile.id];
+  if (BrandIcon) {
+    return <LobeIcon icon={BrandIcon} size="100%" className={cn("pointer-events-none", className)} />;
   }
 
   const isSvg = profile.icon.endsWith(".svg") && !profile.icon.startsWith("data:image");

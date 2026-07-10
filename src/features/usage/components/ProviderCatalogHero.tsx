@@ -1,12 +1,13 @@
 import type { CSSProperties, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
+import { hexToRgbTriplet } from "../lib/brandThemes";
 import { authModeLabel } from "../lib/usageLabels";
 import type { AuthMode, CatalogEntry } from "../types";
 import { ProviderLogo } from "./ProviderLogo";
 
 export function catalogBrandVars(brandColor: string): CSSProperties {
-  const brandRgb = hexToRgb(brandColor);
+  const brandRgb = hexToRgbTriplet(brandColor);
   return {
     "--brand-rgb": brandRgb,
     "--brand-color": `#${brandColor.replace("#", "")}`,
@@ -35,8 +36,8 @@ export function ProviderCatalogHero({
 }: ProviderCatalogHeroProps) {
   const { t } = useTranslation();
   const title = displayTitle?.trim() || entry.display_name;
-  const chipMode = authMode ?? entry.auth_modes[0] ?? "manual";
-  const brandRgb = hexToRgb(entry.brand_color);
+  const chipMode = authMode ?? entry.auth_modes[0] ?? "o-auth";
+  const brandRgb = hexToRgbTriplet(entry.brand_color);
 
   const identity = (
     <div className="flex items-start gap-2.5">
@@ -113,12 +114,4 @@ export function ProviderCatalogHero({
       </div>
     </div>
   );
-}
-
-function hexToRgb(hex: string): string {
-  const h = hex.replace("#", "");
-  const r = parseInt(h.substring(0, 2), 16);
-  const g = parseInt(h.substring(2, 4), 16);
-  const b = parseInt(h.substring(4, 6), 16);
-  return Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b) ? "107, 114, 128" : `${r}, ${g}, ${b}`;
 }

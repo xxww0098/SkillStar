@@ -1,19 +1,16 @@
-import AntigravityIcon from "@lobehub/icons/es/Antigravity/components/Color";
-import CodexIcon from "@lobehub/icons/es/Codex/components/Color";
-import CursorIcon from "@lobehub/icons/es/Cursor/components/Mono";
-import DeepSeekIcon from "@lobehub/icons/es/DeepSeek/components/Color";
-import GrokIcon from "@lobehub/icons/es/Grok/components/Mono";
-import KimiIcon from "@lobehub/icons/es/Kimi/components/Mono";
-import MiniMaxIcon from "@lobehub/icons/es/Minimax/components/Color";
-import OpenCodeIcon from "@lobehub/icons/es/OpenCode/components/Mono";
-import QoderIcon from "@lobehub/icons/es/Qoder/components/Color";
-import StepfunIcon from "@lobehub/icons/es/Stepfun/components/Color";
-import TraeIcon from "@lobehub/icons/es/Trae/components/Color";
-import ZhipuIcon from "@lobehub/icons/es/Zhipu/components/Color";
-import { type ComponentType, type CSSProperties, useLayoutEffect, useRef } from "react";
+import {
+  AntigravityColor,
+  CodexColor,
+  CursorMono,
+  DeepSeekColor,
+  GrokMono,
+  KimiMono,
+  type LobeIconComponent,
+  MinimaxColor,
+  ZhipuColor,
+} from "@/components/ui/icons/lobe";
+import { LobeIcon } from "@/components/ui/icons/LobeIcon";
 import { cn } from "@/lib/utils";
-
-type IconComponent = ComponentType<{ size?: number | string; className?: string; style?: CSSProperties }>;
 
 interface ProviderLogoProps {
   catalogId: string;
@@ -23,19 +20,18 @@ interface ProviderLogoProps {
   className?: string;
 }
 
-const ICON_BY_CATALOG_ID: Record<string, IconComponent> = {
-  cursor: CursorIcon,
-  codex: CodexIcon,
-  antigravity: AntigravityIcon,
-  trae: TraeIcon,
-  qoder: QoderIcon,
-  xai: GrokIcon,
-  deepseek: DeepSeekIcon,
-  glm: ZhipuIcon,
-  kimi: KimiIcon,
-  minimax: MiniMaxIcon,
-  stepfun: StepfunIcon,
-  opencode: OpenCodeIcon,
+/** Icons for the OAuth + API-key Usage catalog only. */
+const ICON_BY_CATALOG_ID: Record<string, LobeIconComponent> = {
+  // oauth
+  cursor: CursorMono,
+  codex: CodexColor,
+  antigravity: AntigravityColor,
+  xai: GrokMono,
+  // api-key
+  deepseek: DeepSeekColor,
+  glm: ZhipuColor,
+  kimi: KimiMono,
+  minimax: MinimaxColor,
 };
 
 /** Whether a brand-authentic icon (not the letter fallback) exists for this id. */
@@ -71,26 +67,13 @@ function pickInitial(name: string, fallback: string): string {
 }
 
 export function ProviderLogo({ catalogId, displayName, brandColor, size = "md", className }: ProviderLogoProps) {
-  const iconRef = useRef<HTMLSpanElement>(null);
   const Icon = ICON_BY_CATALOG_ID[catalogId];
-  const bg = brandColor.startsWith("#") ? brandColor : `#${brandColor}`;
-
-  useLayoutEffect(() => {
-    iconRef.current?.querySelectorAll("title").forEach((title) => title.remove());
-  });
 
   if (Icon) {
-    return (
-      <span
-        ref={iconRef}
-        className={cn("inline-flex shrink-0 items-center justify-center", SIZE_CLASS[size], className)}
-        aria-hidden
-      >
-        <Icon size={ICON_SIZE[size]} />
-      </span>
-    );
+    return <LobeIcon icon={Icon} size={ICON_SIZE[size]} className={cn(SIZE_CLASS[size], className)} />;
   }
 
+  const bg = brandColor.startsWith("#") ? brandColor : `#${brandColor}`;
   const initial = pickInitial(displayName, catalogId);
   return (
     <div

@@ -102,11 +102,17 @@ export function useUsageData() {
     [refreshSummary],
   );
 
-  const refreshAll = useCallback(async () => {
-    const fresh = await usageApi.refreshAllSubscriptions();
-    setSubscriptions(fresh);
-    await refreshSummary();
-  }, [refreshSummary]);
+  /** Refresh all subscriptions, or only those for `catalogId` when scoped to a
+   *  provider page (e.g. `"xai"` on the Grok sidebar). Backend still returns
+   *  the full list so local state can be replaced in one shot. */
+  const refreshAll = useCallback(
+    async (catalogId?: string | null) => {
+      const fresh = await usageApi.refreshAllSubscriptions(catalogId);
+      setSubscriptions(fresh);
+      await refreshSummary();
+    },
+    [refreshSummary],
+  );
 
   const reorder = useCallback(async (orderedIds: string[]) => {
     // Optimistically reorder locally; backend persistence follows.

@@ -10,10 +10,10 @@ import {
   localizeWindowLabel,
   pickConsumedTone,
   pickRemainingTone,
-  pickUsedBarTone,
   canonicalizeAntigravityModelName,
 } from "../lib/usageLabels";
 import type { UsageWindow } from "../types";
+import { ProgressTrack } from "./card/primitives";
 import { ResetCountdown } from "./ResetCountdown";
 
 interface UsageWindowBarProps {
@@ -77,15 +77,7 @@ function UsageQuotaPanel({ window }: { window: UsageWindow }) {
           <div className="flex items-center justify-between text-[10px]">
             <span className="text-zinc-700 font-bold">{t("usage.usedPercent", { percent })}</span>
           </div>
-          <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-100 ring-1 ring-zinc-200/50">
-            <div
-              className={cn(
-                "h-full rounded-full transition-[width] duration-300 bg-gradient-to-r from-emerald-500 to-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.4)]",
-                pickUsedBarTone(percent, window.reset_at),
-              )}
-              style={{ width: `${Math.max(2, percent)}%` }}
-            />
-          </div>
+          <ProgressTrack usedPercent={percent} size="comfortable" tone="billing-used" resetAt={window.reset_at} />
         </div>
       </div>
 
@@ -111,21 +103,14 @@ function UsageBreakdownQuotaPanel({ window }: { window: UsageWindow }) {
   const percent = clamp(window.percent ?? computePercent(window.used, window.total));
   const label = localizeWindowLabel(window.label, t);
 
-  const barBgClass =
-    percent >= 90
-      ? "bg-gradient-to-r from-rose-500 to-rose-400 shadow-[0_0_10px_rgba(244,63,94,0.5)] animate-pulse"
-      : percent >= 75
-        ? "bg-gradient-to-r from-amber-500 to-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.5)]"
-        : "bg-gradient-to-r from-[var(--brand-color)] to-[var(--brand-color-2)] shadow-[0_0_10px_rgba(var(--brand-rgb),0.4)]";
-
   return (
     <div className="space-y-3">
-      <div className="space-y-2 rounded-2xl bg-zinc-50/40 border border-zinc-200/50 p-3 hover:bg-zinc-50/80 transition-colors relative overflow-hidden">
+      <div className="relative space-y-2 overflow-hidden rounded-2xl border border-zinc-200/50 bg-zinc-50/40 p-3 transition-colors hover:bg-zinc-50/80">
         <div className="flex items-center justify-between gap-2">
-          <p className="text-[11px] font-bold text-zinc-700 leading-none">{label}</p>
+          <p className="text-[11px] leading-none font-bold text-zinc-700">{label}</p>
           <span
             className={cn(
-              "text-[9px] font-bold font-mono px-1.5 py-0.5 rounded-md",
+              "rounded-md px-1.5 py-0.5 font-mono text-[9px] font-bold",
               percent >= 90
                 ? "bg-rose-500/10 text-rose-600"
                 : percent >= 75
@@ -136,12 +121,7 @@ function UsageBreakdownQuotaPanel({ window }: { window: UsageWindow }) {
             {percent}%
           </span>
         </div>
-        <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-100 ring-1 ring-zinc-200/20">
-          <div
-            className={cn("h-full rounded-full transition-all duration-500 ease-out", barBgClass)}
-            style={{ width: `${Math.max(2, percent)}%` }}
-          />
-        </div>
+        <ProgressTrack usedPercent={percent} size="compact" tone="brand-urgency" />
       </div>
 
       <div className="space-y-2 rounded-2xl border border-zinc-200/80 bg-zinc-50/50 p-2.5">
@@ -165,19 +145,18 @@ function UsageCategoryBar({ window }: { window: UsageWindow }) {
   const rawLabel = localizeCategoryLabel(window.label, t);
   const label = canonicalizeAntigravityModelName(rawLabel);
   const tone = pickConsumedTone(percent);
+  const monetary = isMonetaryQuota(window);
+  const rightLabel = monetary
+    ? `${formatUsdCents(window.used)}${window.total != null ? ` / ${formatUsdCents(window.total)}` : ""} · ${percent}%`
+    : t("usage.usedPercent", { percent });
 
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between gap-2 text-[10px]">
-        <span className="truncate text-zinc-700 font-medium">{label}</span>
-        <span className={cn("shrink-0 tabular-nums", tone.text)}>{t("usage.usedPercent", { percent })}</span>
+        <span className="truncate font-medium text-zinc-700">{label}</span>
+        <span className={cn("shrink-0 tabular-nums", tone.text)}>{rightLabel}</span>
       </div>
-      <div className="h-1 w-full overflow-hidden rounded-full bg-zinc-200/60">
-        <div
-          className={cn("h-full rounded-full transition-[width] duration-300", tone.bar)}
-          style={{ width: `${Math.max(2, percent)}%` }}
-        />
-      </div>
+      <ProgressTrack usedPercent={percent} size="category" tone="consumed" />
     </div>
   );
 }
@@ -189,20 +168,13 @@ function UsageStatsWindow({ window }: { window: UsageWindow }) {
   const percent = clamp(window.percent ?? computePercent(used, window.total));
   const label = localizeWindowLabel(window.label, t);
 
-  const barBgClass =
-    percent >= 90
-      ? "bg-gradient-to-r from-rose-500 to-rose-400 shadow-[0_0_10px_rgba(244,63,94,0.5)] animate-pulse"
-      : percent >= 75
-        ? "bg-gradient-to-r from-amber-500 to-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.5)]"
-        : "bg-gradient-to-r from-[var(--brand-color)] to-[var(--brand-color-2)] shadow-[0_0_10px_rgba(var(--brand-rgb),0.4)]";
-
   return (
-    <div className="space-y-2.5 rounded-2xl bg-zinc-50/40 border border-zinc-200/50 p-3 hover:bg-zinc-50/80 transition-colors relative overflow-hidden">
+    <div className="relative space-y-2.5 overflow-hidden rounded-2xl border border-zinc-200/50 bg-zinc-50/40 p-3 transition-colors hover:bg-zinc-50/80">
       <div className="flex items-center justify-between gap-2">
         <span className="text-[11px] font-bold text-zinc-700">{label}</span>
         <span
           className={cn(
-            "text-[9px] font-bold font-mono px-1.5 py-0.5 rounded-md",
+            "rounded-md px-1.5 py-0.5 font-mono text-[9px] font-bold",
             percent >= 90
               ? "bg-rose-500/10 text-rose-600"
               : percent >= 75
@@ -216,18 +188,13 @@ function UsageStatsWindow({ window }: { window: UsageWindow }) {
 
       {/* Dashboard Mono Large Quota */}
       <div className="flex items-baseline gap-1.5 py-0.5">
-        <span className="text-lg font-bold font-mono text-zinc-900 leading-none">{formatQuotaNumber(used)}</span>
+        <span className="font-mono text-lg leading-none font-bold text-zinc-900">{formatQuotaNumber(used)}</span>
         <span className="text-[10px] text-zinc-300">/</span>
-        <span className="text-[11px] font-semibold font-mono text-zinc-500">{formatQuotaNumber(total)}</span>
-        <span className="text-[10px] text-zinc-400 ml-auto font-medium">{t("usage.used")}</span>
+        <span className="font-mono text-[11px] font-semibold text-zinc-500">{formatQuotaNumber(total)}</span>
+        <span className="ml-auto text-[10px] font-medium text-zinc-400">{t("usage.used")}</span>
       </div>
 
-      <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-100 ring-1 ring-zinc-200/20">
-        <div
-          className={cn("h-full rounded-full transition-all duration-500 ease-out", barBgClass)}
-          style={{ width: `${Math.max(2, percent)}%` }}
-        />
-      </div>
+      <ProgressTrack usedPercent={percent} size="comfortable" tone="brand-urgency" />
     </div>
   );
 }
@@ -237,13 +204,6 @@ function UsageSimpleWindow({ window }: { window: UsageWindow }) {
   const percent = clamp(window.percent ?? computePercent(window.used, window.total));
   const label = localizeWindowLabel(window.label, t);
   const isRateLimit = window.label === "5h" || window.label === "7d";
-
-  const barBgClass =
-    percent >= 90
-      ? "bg-gradient-to-r from-rose-500 to-rose-400 shadow-[0_0_10px_rgba(244,63,94,0.5)] animate-pulse"
-      : percent >= 75
-        ? "bg-gradient-to-r from-amber-500 to-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.5)]"
-        : "bg-gradient-to-r from-[var(--brand-color)] to-[var(--brand-color-2)] shadow-[0_0_10px_rgba(var(--brand-rgb),0.4)]";
 
   return (
     <div className="space-y-2 rounded-2xl bg-zinc-50/40 border border-zinc-200/50 p-3 hover:bg-zinc-50/80 transition-colors relative overflow-hidden">
@@ -271,12 +231,7 @@ function UsageSimpleWindow({ window }: { window: UsageWindow }) {
         </div>
       </div>
 
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-100 ring-1 ring-zinc-200/20">
-        <div
-          className={cn("h-full rounded-full transition-all duration-500 ease-out", barBgClass)}
-          style={{ width: `${Math.max(2, percent)}%` }}
-        />
-      </div>
+      <ProgressTrack usedPercent={percent} size="compact" tone="brand-urgency" />
     </div>
   );
 }

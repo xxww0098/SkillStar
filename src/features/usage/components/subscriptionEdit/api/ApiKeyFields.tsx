@@ -1,8 +1,8 @@
 import { Eye, EyeOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Input } from "@/components/ui/input";
-import type { CatalogEntry, Subscription } from "../../types";
-import { Field } from "./fields";
+import type { CatalogEntry, Subscription } from "../../../types";
+import { Field } from "../fields";
 
 interface ApiKeyFieldsProps {
   editing: Subscription | null;

@@ -20,12 +20,10 @@ import {
 } from "../types";
 import { ProviderCatalogHero } from "./ProviderCatalogHero";
 import { AdvancedBillingSection } from "./subscriptionEdit/AdvancedBillingSection";
-import { ApiKeyFields } from "./subscriptionEdit/ApiKeyFields";
+import { ApiKeyFields } from "./subscriptionEdit/api/ApiKeyFields";
 import { AutoImportBanner } from "./subscriptionEdit/AutoImportBanner";
-import { cookieHelpForCatalog } from "./subscriptionEdit/cookieHelp";
-import { CookieField } from "./subscriptionEdit/CookieField";
 import { Field, parseDateInput, toDateInput } from "./subscriptionEdit/fields";
-import { OAuthLoginPanel } from "./subscriptionEdit/OAuthLoginPanel";
+import { OAuthLoginPanel } from "./subscriptionEdit/oauth/OAuthLoginPanel";
 
 interface SubscriptionEditDialogProps {
   open: boolean;
@@ -54,7 +52,7 @@ export function SubscriptionEditDialog({
   const title = isCreate ? t("usage.createTitle") : t("usage.editTitle");
 
   const [catalogId, setCatalogId] = useState("");
-  const [authMode, setAuthMode] = useState<AuthMode>("manual");
+  const [authMode, setAuthMode] = useState<AuthMode>("o-auth");
   const [planTier, setPlanTier] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [price, setPrice] = useState("");
@@ -67,11 +65,7 @@ export function SubscriptionEditDialog({
   const [platformToken, setPlatformToken] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [showPlatformToken, setShowPlatformToken] = useState(false);
-  const [cookieHeader, setCookieHeader] = useState("");
   const [region, setRegion] = useState("cn");
-  const [totalTokens, setTotalTokens] = useState("");
-  const [usedTokens, setUsedTokens] = useState("");
-  const [periodLabel, setPeriodLabel] = useState(() => t("usage.defaultPeriod"));
   const [note, setNote] = useState("");
   const [fingerprintId, setFingerprintId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -94,11 +88,9 @@ export function SubscriptionEditDialog({
     if (editing) {
       const editingEntry = catalog.find((c) => c.id === editing.catalog_id);
       const editingModes = selectableAuthModes(editingEntry?.auth_modes ?? []);
-      let resolvedAuthMode =
-        editing.catalog_id === "opencode" && editing.auth_mode === "o-auth" ? "cookie" : editing.auth_mode;
-      if (!editingModes.includes(resolvedAuthMode)) {
-        resolvedAuthMode = editingModes[0] ?? "manual";
-      }
+      const resolvedAuthMode = editingModes.includes(editing.auth_mode)
+        ? editing.auth_mode
+        : (editingModes[0] ?? "o-auth");
       setCatalogId(editing.catalog_id);
       setAuthMode(resolvedAuthMode);
       setPlanTier(editing.plan_tier ?? "");
@@ -112,17 +104,13 @@ export function SubscriptionEditDialog({
       setApiKey("");
       setPlatformToken("");
       setRegion(editing.oauth_region ?? "cn");
-      setCookieHeader("");
-      setTotalTokens(editing.manual_quota?.total_tokens?.toString() ?? "");
-      setUsedTokens(editing.manual_quota?.used_tokens?.toString() ?? "");
-      setPeriodLabel(editing.manual_quota?.period_label ?? t("usage.defaultPeriod"));
       setNote(editing.note ?? "");
       setFingerprintId(editing.fingerprint_id ?? null);
     } else {
       const preselectedEntry = preselectCatalogId ? catalog.find((c) => c.id === preselectCatalogId) : null;
       const today = toDateInput(Math.floor(Date.now() / 1000));
       setCatalogId(preselectCatalogId ?? "");
-      setAuthMode(selectableAuthModes(preselectedEntry?.auth_modes ?? [])[0] ?? "manual");
+      setAuthMode(selectableAuthModes(preselectedEntry?.auth_modes ?? [])[0] ?? "o-auth");
       setPlanTier("");
       setDisplayName("");
       setPrice("");
@@ -134,10 +122,6 @@ export function SubscriptionEditDialog({
       setApiKey("");
       setPlatformToken("");
       setRegion(preselectedEntry?.regions[0] ?? "cn");
-      setCookieHeader("");
-      setTotalTokens("");
-      setUsedTokens("");
-      setPeriodLabel(t("usage.defaultPeriod"));
       setNote("");
       setFingerprintId(null);
     }
@@ -154,32 +138,23 @@ export function SubscriptionEditDialog({
   useEffect(() => {
     if (!open || editing) return;
     if (!catalogId) {
-      setAuthMode("manual");
+      setAuthMode("o-auth");
       return;
     }
     const entry = catalog.find((c) => c.id === catalogId);
     if (entry) {
       const modes = selectableAuthModes(entry.auth_modes);
       if (!modes.includes(authMode)) {
-        setAuthMode(modes[0] ?? "manual");
-      } else if (authMode === "manual" && modes.length > 1) {
-        setAuthMode(modes.find((m) => m !== "manual") ?? "manual");
+        setAuthMode(modes[0] ?? "o-auth");
       }
       setCurrency(entry.default_currency);
       if (entry.regions.length > 0 && !entry.regions.includes(region)) {
         setRegion(entry.regions[0]);
       }
     }
-    if (catalogId === "opencode" && !planTier) {
-      setPlanTier("Go");
-    }
-  }, [catalogId, catalog, editing, authMode, planTier, region, open]);
+  }, [catalogId, catalog, editing, authMode, region, open]);
 
   const selectedEntry = useMemo(() => catalog.find((c) => c.id === catalogId) ?? null, [catalog, catalogId]);
-  const cookieHelp = useMemo(
-    () => cookieHelpForCatalog(catalogId, selectedEntry?.display_name),
-    [catalogId, selectedEntry?.display_name],
-  );
   const visibleAuthModes = useMemo(
     () => (selectedEntry ? selectableAuthModes(selectedEntry.auth_modes) : []),
     [selectedEntry],
@@ -207,10 +182,6 @@ export function SubscriptionEditDialog({
         return "API Key";
       case "o-auth":
         return "OAuth";
-      case "cookie":
-        return "Cookie";
-      case "manual":
-        return t("usage.authModeManual");
     }
   };
 
@@ -263,22 +234,13 @@ export function SubscriptionEditDialog({
       toast.success(t("usage.importFromLocalSuccess") + ` (${successCount})`);
       onClose();
     } else {
-      toast.error("未在本地环境中探测到任何可用的 Codex / Antigravity / Qoder 凭证");
+      toast.error("未在本地环境中探测到任何可用的 Codex / Antigravity 凭证");
     }
   };
 
   if (!open) return null;
 
   const buildPayload = () => {
-    const manualQuota =
-      authMode === "manual"
-        ? {
-            total_tokens: totalTokens ? Number(totalTokens) : null,
-            used_tokens: usedTokens ? Number(usedTokens) : null,
-            period_label: periodLabel || null,
-          }
-        : undefined;
-
     const billing =
       authMode === "api-key"
         ? {}
@@ -295,7 +257,6 @@ export function SubscriptionEditDialog({
       display_name: displayName || undefined,
       plan_tier: planTier || undefined,
       ...billing,
-      manual_quota: manualQuota,
       note: note || undefined,
     };
   };
@@ -308,11 +269,10 @@ export function SubscriptionEditDialog({
     setSubmitting(true);
     try {
       const payload = buildPayload();
-      const cookiePayload = authMode === "cookie" && cookieHeader.trim() ? cookieHeader.trim() : undefined;
       const apiKeyPayload = authMode === "api-key" && apiKey.trim() ? apiKey.trim() : undefined;
       const platformTokenPayload =
         catalogId === "deepseek" && authMode === "api-key" && platformToken.trim() ? platformToken.trim() : undefined;
-      const shouldRefreshAfterSave = Boolean(cookiePayload || apiKeyPayload || platformTokenPayload);
+      const shouldRefreshAfterSave = Boolean(apiKeyPayload || platformTokenPayload);
 
       const refreshAfterCredentialSave = async (sub: Subscription) => {
         if (!shouldRefreshAfterSave) return sub;
@@ -332,7 +292,6 @@ export function SubscriptionEditDialog({
           api_key: apiKeyPayload,
           platform_token: platformTokenPayload,
           oauth_region: authMode === "o-auth" ? region : undefined,
-          cookie_header: cookiePayload,
           fingerprint_id: fingerprintId ?? undefined,
           ...payload,
         });
@@ -343,7 +302,6 @@ export function SubscriptionEditDialog({
           ...payload,
           api_key: apiKeyPayload,
           platform_token: platformTokenPayload,
-          cookie_header: cookiePayload,
           fingerprint_id: fingerprintId ?? undefined,
           // When the user explicitly switched back to "默认" on an
           // editing row that previously had a binding, we need to
@@ -682,47 +640,7 @@ export function SubscriptionEditDialog({
               />
             )}
 
-            {/* Cookie 模式：粘贴浏览器的 Cookie Header */}
-            {authMode === "cookie" && (
-              <CookieField
-                catalogId={catalogId}
-                selectedEntry={selectedEntry}
-                cookieHelp={cookieHelp}
-                cookieHeader={cookieHeader}
-                setCookieHeader={setCookieHeader}
-                planTier={planTier}
-                setPlanTier={setPlanTier}
-              />
-            )}
-
-            {/* 2. 手动 Quota 录入 */}
-            {authMode === "manual" && (
-              <div className="grid grid-cols-2 gap-3.5 rounded-2xl border border-border bg-muted/30 p-3.5">
-                <h4 className="col-span-2 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                  📊 {t("usage.manualQuota")}
-                </h4>
-                <Field label={t("usage.fieldTotalTokens")}>
-                  <Input
-                    type="number"
-                    value={totalTokens}
-                    onChange={(e) => setTotalTokens(e.target.value)}
-                    placeholder="1,000,000"
-                    className="h-9 rounded-xl border-input-border bg-input text-xs text-foreground"
-                  />
-                </Field>
-                <Field label={t("usage.fieldUsedTokens")}>
-                  <Input
-                    type="number"
-                    value={usedTokens}
-                    onChange={(e) => setUsedTokens(e.target.value)}
-                    placeholder="120,000"
-                    className="h-9 rounded-xl border-input-border bg-input text-xs text-foreground"
-                  />
-                </Field>
-              </div>
-            )}
-
-            {/* 3. 高级与账单选项折叠面板 (Advanced Folding) */}
+            {/* 2. 高级与账单选项折叠面板 (Advanced Folding) */}
             <div className="mt-2.5">
               <button
                 type="button"
@@ -763,8 +681,6 @@ export function SubscriptionEditDialog({
                   endDateLabel={endDateLabel}
                   autoRenew={autoRenew}
                   setAutoRenew={setAutoRenew}
-                  periodLabel={periodLabel}
-                  setPeriodLabel={setPeriodLabel}
                   note={note}
                   setNote={setNote}
                 />

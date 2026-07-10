@@ -3,7 +3,7 @@ import { Copy, ExternalLink, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import type { CatalogEntry, OAuthStart } from "../../types";
+import type { CatalogEntry, OAuthStart } from "../../../types";
 
 interface OAuthLoginPanelProps {
   selectedEntry: CatalogEntry;

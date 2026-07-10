@@ -4,14 +4,16 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { BadgeCheck, Pin, PinOff, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { PlanBadge } from "./PlanBadge";
 import { ProviderLogo, hasBrandIcon } from "./ProviderLogo";
 import { ResetCountdown } from "./ResetCountdown";
-import { UsageWindowBar } from "./UsageWindowBar";
+import { LightBodySurface, UsageCardBody, resolveUsageBodyRegistration } from "./card";
 import { getBrandTheme } from "../lib/brandThemes";
-import { authModeLabel, formatQuotaNumber, getPrimaryResetInfo } from "../lib/usageLabels";
+import { computeBodyOwnsPrimaryReset } from "../lib/resetOwnership";
+import { authModeLabel, getPrimaryResetInfo } from "../lib/usageLabels";
 import { usageApi } from "../api";
-import type { CatalogEntry, Subscription } from "../types";
+import type { CatalogEntry, Subscription, SwitchOutcome } from "../types";
 import { cn } from "@/lib/utils";
 
 /** Payload of the `usage://active-changed` event broadcast by the backend. */
@@ -125,27 +127,71 @@ export function UsageCardWindow() {
     }
   }, [loadData, refreshing, subscriptionId]);
 
+  const reportSwitchOutcome = useCallback(
+    (outcome: SwitchOutcome | null | undefined, displayName: string) => {
+      if (!outcome) {
+        toast.success(t("usage.activeAccountSet", "已切为当前账号"), {
+          description: displayName,
+        });
+        return;
+      }
+      if (outcome.success) {
+        toast.success(t("usage.switchCliSuccess", "已切为当前账号并同步到 CLI"), {
+          description: `${displayName} → ${outcome.toolId}`,
+        });
+        return;
+      }
+      if (outcome.error) {
+        toast.error(t("usage.switchCliFailed", "已切为当前账号，但同步到 CLI 失败"), {
+          description: outcome.error,
+        });
+      }
+    },
+    [t],
+  );
+
   const handleSwitch = useCallback(async () => {
     if (!subscriptionId || switching || subscription?.is_active) return;
     setSwitching(true);
     try {
-      await usageApi.setActiveSubscription(subscriptionId);
+      const updated = await usageApi.setActiveSubscription(subscriptionId);
+      // Keep local state in sync immediately (don't wait solely on list reload).
+      setSubscription(updated);
+      reportSwitchOutcome(updated.switch_result, updated.display_name);
       await loadData(subscriptionId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      toast.error(t("usage.switchCliFailed", "切换账号失败"), { description: msg });
     } finally {
       setSwitching(false);
     }
-  }, [loadData, subscription?.is_active, subscriptionId, switching]);
+  }, [loadData, reportSwitchOutcome, subscription?.is_active, subscriptionId, switching, t]);
 
   const handleResyncCli = useCallback(async () => {
     if (!subscription?.catalog_id || syncing) return;
     setSyncing(true);
     try {
-      await usageApi.switchActiveSubscriptionToCli(subscription.catalog_id);
+      const outcome = await usageApi.switchActiveSubscriptionToCli(subscription.catalog_id);
+      if (outcome.success) {
+        toast.success(t("usage.switchCliSuccess", "已同步到 CLI"), {
+          description: `${outcome.toolId}: ${outcome.configPath}`,
+        });
+      } else if (outcome.error) {
+        toast.error(t("usage.switchCliFailed", "同步到 CLI 失败"), {
+          description: outcome.error,
+        });
+      }
+      // Stash outcome on the local card so the failure banner updates without a full reload.
+      setSubscription((prev) => (prev ? { ...prev, switch_result: outcome } : prev));
       await loadData(subscriptionId ?? "");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(t("usage.switchCliFailed", "同步到 CLI 失败"), { description: msg });
     } finally {
       setSyncing(false);
     }
-  }, [loadData, subscription?.catalog_id, subscriptionId, syncing]);
+  }, [loadData, subscription?.catalog_id, subscriptionId, syncing, t]);
 
   const handleClose = useCallback(async () => {
     try {
@@ -194,6 +240,8 @@ export function UsageCardWindow() {
   const usage = subscription.usage ?? null;
   const planName = (usage?.plan_name ?? subscription.plan_tier ?? null) || null;
   const resetInfo = getPrimaryResetInfo(usage);
+  const reg = resolveUsageBodyRegistration(subscription.catalog_id);
+  const bodyOwnsPrimaryReset = computeBodyOwnsPrimaryReset(usage, resetInfo, reg.ownsPrimaryReset);
   const brandColor = catalog?.brand_color ?? "6B7280";
   const theme = getBrandTheme(subscription.catalog_id, brandColor);
   const hasIcon = hasBrandIcon(subscription.catalog_id);
@@ -253,48 +301,30 @@ export function UsageCardWindow() {
         </button>
       </div>
 
-      {/* Body: quota */}
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
-        <div className="flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <div className="truncate text-xs text-muted-foreground">
-              {catalog?.display_name ?? subscription.catalog_id}
-              {" · "}
-              {authModeLabel(subscription.auth_mode, t)}
-            </div>
-            {planName && (
-              <div className="mt-0.5 flex items-center gap-1.5">
-                <PlanBadge plan={planName} />
-              </div>
-            )}
-          </div>
+      {/* Body: dark chrome hosts light island with shared UsageCardBody (compact). */}
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3">
+        <div className="truncate text-xs text-muted-foreground">
+          {catalog?.display_name ?? subscription.catalog_id}
+          {" · "}
+          {authModeLabel(subscription.auth_mode, t)}
         </div>
 
-        {usage?.hourly && <UsageWindowBar window={usage.hourly} compact />}
-        {usage?.weekly && <UsageWindowBar window={usage.weekly} compact />}
-        {usage?.monthly && <UsageWindowBar window={usage.monthly} compact />}
-        {usage?.balance && (
-          <div className="rounded-md border border-border/40 bg-muted/30 px-2.5 py-1.5 text-xs">
-            <span className="text-muted-foreground">{t("usage.cardBalance", "余额")}：</span>
-            <span className="font-medium">
-              {formatQuotaNumber(usage.balance.total)} {usage.balance.currency}
-            </span>
+        <LightBodySurface theme={theme} className="min-h-0 flex-1 space-y-2.5 overflow-y-auto">
+          {/* Island-top Meta: PlanBadge + primary Reset when body does not own it (K13b). */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0">{planName ? <PlanBadge plan={planName} /> : null}</div>
+            {resetInfo && !bodyOwnsPrimaryReset && (
+              <ResetCountdown
+                resetAt={resetInfo.resetAt}
+                usedPercent={resetInfo.usedPercent}
+                mode={resetInfo.mode}
+                className="text-[10px]"
+              />
+            )}
           </div>
-        )}
-        {!usage?.hourly && !usage?.weekly && !usage?.monthly && !usage?.balance && (
-          <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">
-            {usage?.error ?? t("usage.cardNoData", "暂无用量数据")}
-          </div>
-        )}
 
-        {resetInfo && (
-          <ResetCountdown
-            resetAt={resetInfo.resetAt}
-            usedPercent={resetInfo.usedPercent}
-            mode={resetInfo.mode}
-            className="text-[10px]"
-          />
-        )}
+          <UsageCardBody subscription={subscription} brandColorHex={brandColor} density="compact" surface="window" />
+        </LightBodySurface>
 
         {cliFailed && subscription.switch_result?.error && (
           <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-600">
@@ -317,12 +347,20 @@ export function UsageCardWindow() {
             {t("usage.setActive", "切为当前账号")}
           </button>
         )}
-        {subscription.is_active && subscription.supports_cli_switch && cliFailed && (
+        {/* Always offer CLI re-sync for active CLI-backed accounts (not only after a
+            failed switch). Grok especially: a live `grok` process can overwrite
+            auth.json, so users need a reliable re-push path. */}
+        {subscription.is_active && subscription.supports_cli_switch && (
           <button
             type="button"
             onClick={() => void handleResyncCli()}
             disabled={syncing}
-            className="flex flex-1 items-center justify-center gap-1 rounded-md border border-amber-500/40 px-2 py-1.5 text-xs font-medium text-amber-600 hover:bg-amber-500/10 disabled:opacity-50"
+            className={cn(
+              "flex flex-1 items-center justify-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium disabled:opacity-50",
+              cliFailed
+                ? "border border-amber-500/40 text-amber-600 hover:bg-amber-500/10"
+                : "border border-border/50 text-muted-foreground hover:bg-foreground/10",
+            )}
           >
             {syncing ? <RefreshCw size={12} className="animate-spin" /> : <RefreshCw size={12} />}
             {t("usage.resyncCli", "重新同步到 CLI")}

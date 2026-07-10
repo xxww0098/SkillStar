@@ -2,24 +2,36 @@ import { AlertTriangle, BarChart3, Brain, CheckCircle2, Zap } from "lucide-react
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
-import type { CreditInfo, DeepSeekAnalytics, DeepSeekDailyUsage, SubscriptionUsage } from "../types";
+import type { CreditInfo, DeepSeekAnalytics, DeepSeekDailyUsage, SubscriptionUsage } from "../../types";
+import { MetricCard } from "../card/primitives";
 
 interface DeepSeekUsagePanelProps {
   usage: SubscriptionUsage;
+  brandColorHex?: string;
   brandColor?: string;
+  density?: "comfortable" | "compact";
   hasPlatformToken?: boolean;
+  catalogId?: string;
+  context?: { hasPlatformToken?: boolean };
 }
 
 export function DeepSeekUsagePanel({
   usage,
+  brandColorHex,
   brandColor = "1A56DB",
+  density = "comfortable",
   hasPlatformToken = false,
+  context,
 }: DeepSeekUsagePanelProps) {
   const { t } = useTranslation();
-  const accent = `#${brandColor}`;
+  const hex = brandColorHex ?? brandColor;
+  const accent = hex.startsWith("#") ? hex : `#${hex}`;
+  const compact = density === "compact";
+  const platformToken = context?.hasPlatformToken ?? hasPlatformToken;
   const balance = usage.balance;
   const extraBalances = (usage.credits ?? []).filter((credit) => credit.credit_type.startsWith("deepseek-balance:"));
   const analytics = usage.deepseek_analytics ?? null;
+  const [analyticsOpen, setAnalyticsOpen] = useState(!compact);
 
   if (!balance) {
     return null;
@@ -29,7 +41,7 @@ export function DeepSeekUsagePanel({
   const showBreakdown = balance.granted > 0 || balance.topped_up > 0;
 
   return (
-    <div className="space-y-3">
+    <div className={cn("space-y-3", compact && "space-y-2")}>
       <div
         className={cn(
           "flex items-center justify-between gap-2 rounded-xl border px-3 py-2",
@@ -68,9 +80,30 @@ export function DeepSeekUsagePanel({
       </div>
 
       {analytics ? (
-        <DeepSeekAnalyticsSection analytics={analytics} accent={accent} />
+        compact ? (
+          <div className="rounded-2xl border border-zinc-200/60 bg-zinc-50/40">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between px-3 py-2 text-left text-[10px] font-semibold tracking-wider text-zinc-600 uppercase"
+              onClick={() => setAnalyticsOpen((v) => !v)}
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <BarChart3 className="h-3.5 w-3.5" />
+                {t("usage.deepseekAnalytics")}
+              </span>
+              <span className="text-zinc-400">{analyticsOpen ? "−" : "+"}</span>
+            </button>
+            {analyticsOpen && (
+              <div className="border-t border-zinc-200/50 px-3 pt-2 pb-3">
+                <DeepSeekAnalyticsSection analytics={analytics} accent={accent} />
+              </div>
+            )}
+          </div>
+        ) : (
+          <DeepSeekAnalyticsSection analytics={analytics} accent={accent} />
+        )
       ) : (
-        <DeepSeekAnalyticsHint hasPlatformToken={hasPlatformToken} accent={accent} />
+        <DeepSeekAnalyticsHint hasPlatformToken={platformToken} accent={accent} />
       )}
 
       {showBreakdown && (
@@ -154,17 +187,6 @@ function DeepSeekAnalyticsSection({ analytics, accent }: { analytics: DeepSeekAn
       )}
 
       <UsageTrendChart daily={analytics.daily} accent={accent} />
-    </div>
-  );
-}
-
-function MetricCard({ label, value, accent }: { label: string; value: string; accent: string }) {
-  return (
-    <div className="rounded-xl border px-3 py-2" style={{ borderColor: `${accent}20`, backgroundColor: `${accent}06` }}>
-      <p className="text-[9px] font-semibold uppercase tracking-wider text-zinc-500">{label}</p>
-      <p className="mt-1 font-mono text-sm font-bold tabular-nums" style={{ color: accent }}>
-        {value}
-      </p>
     </div>
   );
 }

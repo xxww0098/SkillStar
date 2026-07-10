@@ -27,7 +27,7 @@ export function AutoImportBanner({
       <p className="mx-auto mb-3.5 max-w-xs text-[11px] leading-normal text-muted-foreground sm:max-w-sm">
         {catalogId
           ? `自动扫描并导入本地的 ${providerName ?? catalogId} 账号凭证，无需手动填写。`
-          : "一键自动扫描并导入本地的 Codex / Antigravity / Qoder 账号凭证，无需手动填写。"}
+          : "一键自动扫描并导入本地的 Codex / Antigravity 账号凭证，无需手动填写。"}
       </p>
       <Button
         type="button"

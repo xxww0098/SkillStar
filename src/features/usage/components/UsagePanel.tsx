@@ -59,12 +59,21 @@ export function UsagePanel({ filter, usageCreateRequest, clearUsageCreateRequest
     clearUsageCreateRequest();
   }, [usageCreateRequest, clearUsageCreateRequest]);
 
+  const refreshScopeCatalogId = filter === FILTER_ALL ? null : filter;
+  const refreshScopeLabel = useMemo(() => {
+    if (!refreshScopeCatalogId) return null;
+    return data.catalog.find((c) => c.id === refreshScopeCatalogId)?.display_name ?? refreshScopeCatalogId;
+  }, [data.catalog, refreshScopeCatalogId]);
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <Header
-        onRefresh={data.refreshAllWithUi}
+        onRefresh={() => data.refreshAllWithUi(refreshScopeCatalogId)}
         refreshing={data.refreshingAll}
         refreshDisabled={data.refreshBusy}
+        refreshLabel={
+          refreshScopeLabel ? t("usage.refreshProvider", { provider: refreshScopeLabel }) : t("usage.refreshAll")
+        }
         autoRefreshEnabled={data.autoRefresh.autoRefreshEnabled}
         intervalMs={data.autoRefresh.intervalMs}
         setAutoRefreshEnabled={data.autoRefresh.setAutoRefreshEnabled}
@@ -176,6 +185,7 @@ function Header({
   onRefresh,
   refreshing,
   refreshDisabled = false,
+  refreshLabel,
   autoRefreshEnabled,
   intervalMs,
   setAutoRefreshEnabled,
@@ -184,6 +194,7 @@ function Header({
   onRefresh: () => Promise<void>;
   refreshing: boolean;
   refreshDisabled?: boolean;
+  refreshLabel?: string;
   autoRefreshEnabled: boolean;
   intervalMs: number;
   setAutoRefreshEnabled: (enabled: boolean) => void;
@@ -214,6 +225,7 @@ function Header({
         onRefresh={onRefresh}
         refreshing={refreshing}
         refreshDisabled={refreshDisabled}
+        refreshLabel={refreshLabel}
         autoRefreshEnabled={autoRefreshEnabled}
         intervalMs={intervalMs}
         setAutoRefreshEnabled={setAutoRefreshEnabled}
