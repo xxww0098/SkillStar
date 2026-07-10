@@ -10,6 +10,7 @@
 //! `project_manifest::*` paths and signatures are stable for all consumers.
 
 mod helpers;
+mod import;
 mod index;
 mod rebuild;
 mod refresh;
@@ -30,6 +31,7 @@ pub use rebuild::rebuild_skills_list_from_disk;
 pub use refresh::refresh_stale_copies;
 pub use scan::{detect_project_agents, scan_project_skills};
 pub use store::{load_skills_list, save_skills_list};
+pub use import::import_scanned_skills;
 pub use sync::{
     add_skills_to_project, full_sync, remove_skill_from_all_projects, save_and_sync,
     save_skills_list_only,

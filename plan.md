@@ -1,6 +1,17 @@
 # SkillStar Rust Workspace 迁移计划
 
-> 状态：Draft，尚未实施。
+> 状态：**Phases 0–5 已实施**（§11 完成定义已满足）。Phase 6（`skillstar-mcp`）仍为延后决策门，非本次目标。
+>
+> ## Task checklist（执行勾选）
+>
+> - [x] Phase 0：基线与文档决策（module-first SSOT、依赖方向、projects→skills 所有权）
+> - [x] Phase 1：清理虚依赖 + DAG/feature 护栏
+> - [x] Phase 2：Skills 拥有 lockfile + update detection
+> - [x] Phase 3：合并 Projects 到 Skills（agents/deployment/projects/patrol/terminal）
+> - [x] Phase 4：收深 facade；删除 Tauri skills pass-through + SkillManager
+> - [x] Phase 5：skillstar-app library-only；单一 skillstar 二进制；CLI use case 下沉 App
+> - [x] §11 完成定义与 §8.1 验证矩阵
+> - [ ] Phase 6（非目标 / deferred）：`skillstar-mcp` 决策门
 >
 > 本文件是迁移执行计划，不是当前项目结构的 SSOT。实施过程中，技术栈、crate、目录和依赖结构仍以
 > [AGENTS.md](./AGENTS.md) 为准；后端行为以 [docs/backend.md](./docs/backend.md) 为准。

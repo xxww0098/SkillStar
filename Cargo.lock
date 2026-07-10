@@ -8182,6 +8182,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "dirs",
  "serde",
  "serde_json",
  "sha2 0.11.0",

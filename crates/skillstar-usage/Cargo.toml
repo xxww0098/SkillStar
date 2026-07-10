@@ -28,7 +28,7 @@ skillstar-providers = { version = "0.1.0", path = "../skillstar-providers" }
 rusqlite = { workspace = true }
 
 [features]
-default = ["impersonate"]
+default = []
 # Forwards to skillstar-fingerprint's wreq-backed TLS emulation.
 # Disable for ultra-light builds (CI / tests) — fingerprint usage degrades
 # transparently to reqwest defaults.

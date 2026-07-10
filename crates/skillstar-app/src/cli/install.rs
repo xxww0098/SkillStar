@@ -2,7 +2,7 @@
 //! bundles, and local directories adopted as authored skills, plus `--list`
 //! and `--preview` modes.
 
-use skillstar_app::cli::{
+use super::{
     InstallOpts, derive_name_hint, normalize_agent_ids, print_project_targets,
     prompt_for_agent_selection, resolve_auto_project_agents, resolve_installed_name,
     resolve_rel_dirs_for_agents, validate_agent_ids,
@@ -545,7 +545,7 @@ fn find_target_skill_preview<'a>(
         .find(|s| s.id == search_key || s.id.to_lowercase() == search_key_lower)
 }
 
-pub(super) fn cmd_install(opts: InstallOpts<'_>) {
+pub fn cmd_install(opts: InstallOpts<'_>) {
     if opts.list {
         match classify_add_input(opts.url) {
             AddKind::Repo => list_skills_in_source(opts.url),

@@ -3,7 +3,12 @@
 use clap::{Parser, Subcommand};
 
 mod commands;
+mod install;
+mod manage;
+
 pub use commands::*;
+pub use install::cmd_install;
+pub use manage::{cmd_doctor, cmd_pack_list, cmd_pack_remove, cmd_publish, cmd_remove, cmd_update};
 
 mod helpers;
 pub use helpers::*;
@@ -276,5 +281,102 @@ mod mode_tests {
     fn unknown_args_do_not_look_like_cli() {
         assert!(!is_cli_subcommand("totally-unknown"));
         assert!(!is_cli_subcommand("--some-os-flag"));
+    }
+}
+
+// ── Input classification (install/add routing) ───────────────────────
+
+/// Classify a raw `install`/`add` argument to route to the right installer.
+pub enum AddKind {
+    Repo,
+    Bundle(std::path::PathBuf),
+    LocalDir(std::path::PathBuf),
+}
+
+pub fn classify_add_input(input: &str) -> AddKind {
+    let trimmed = input.trim();
+    let lower = trimmed.to_lowercase();
+    if lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with("git@")
+        || lower.starts_with("ssh://")
+    {
+        return AddKind::Repo;
+    }
+    let looks_like_path = trimmed.starts_with('.')
+        || trimmed.starts_with('/')
+        || trimmed.starts_with('~')
+        || trimmed.starts_with('\\')
+        || (trimmed.len() >= 2 && trimmed.chars().nth(1) == Some(':'));
+    if looks_like_path {
+        let expanded = expand_tilde(trimmed);
+        let path = std::path::PathBuf::from(&expanded);
+        if is_bundle_file(&path) {
+            return AddKind::Bundle(path);
+        }
+        if path.is_dir() {
+            return AddKind::LocalDir(path);
+        }
+    }
+    AddKind::Repo
+}
+
+fn expand_tilde(input: &str) -> String {
+    if let Some(rest) = input.strip_prefix("~/")
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.join(rest).to_string_lossy().to_string();
+    }
+    if input == "~"
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.to_string_lossy().to_string();
+    }
+    input.to_string()
+}
+
+fn is_bundle_file(path: &std::path::Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    matches!(
+        path.extension().and_then(|ext| ext.to_str()),
+        Some("ags") | Some("agd")
+    )
+}
+
+
+/// Build CLI handlers that run entirely in skillstar-app (no Tauri).
+pub fn default_handlers() -> CliHandlers {
+    CliHandlers {
+        migrate_and_run: default_migrate_and_run,
+        install: cmd_install,
+        update: cmd_update,
+        remove: cmd_remove,
+        publish: cmd_publish,
+        doctor: cmd_doctor,
+        pack_list: cmd_pack_list,
+        pack_remove: cmd_pack_remove,
+        gui: || {
+            println!("Launching SkillStar GUI...");
+        },
+    }
+}
+
+fn default_migrate_and_run() {
+    skillstar_core::infra::migration::migrate_legacy_paths();
+    // Configure marketplace snapshot paths so `find` hits the real DB.
+    skillstar_marketplace::snapshot::configure_runtime(
+        skillstar_marketplace::snapshot::SnapshotRuntimeConfig::new(
+            skillstar_core::infra::paths::marketplace_db_path(),
+            skillstar_core::infra::paths::data_root(),
+            skillstar_skills::installed_skill::installed_snapshot_markers,
+            || -> skillstar_marketplace::snapshot::InstalledSkillsFuture {
+                Box::pin(skillstar_skills::installed_skill::list_installed_skills_fast())
+            },
+        ),
+    );
+    if let Err(err) = skillstar_marketplace::snapshot::initialize() {
+        eprintln!("⚠ Marketplace snapshot init failed: {err}");
     }
 }

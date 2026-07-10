@@ -63,7 +63,7 @@ skillstar-skills = { version = "0.1.0", path = "../crates/skillstar-skills" }
 tauri-plugin-deep-link = "2"
 skillstar-core = { version = "0.1.0", path = "../crates/skillstar-core" }
 skillstar-app = { version = "0.1.0", path = "../crates/skillstar-app" }
-skillstar-usage = { version = "0.1.0", path = "../crates/skillstar-usage" }
+skillstar-usage = { version = "0.1.0", path = "../crates/skillstar-usage", features = ["impersonate"] }
 skillstar-fingerprint = { version = "0.1.0", path = "../crates/skillstar-fingerprint", default-features = false }
 skillstar-ssh = { version = "0.1.0", path = "../crates/skillstar-ssh" }
 skillstar-sync = { version = "0.1.0", path = "../crates/skillstar-sync" }

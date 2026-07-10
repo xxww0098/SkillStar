@@ -1,16 +1,16 @@
 //! Non-install CLI commands: update, remove, publish, doctor, and pack
 //! management. Thin handlers over `crate::core` + the domain crates.
 
-use skillstar_app::cli::RemoveOpts;
+use super::RemoveOpts;
 
 use skillstar_skills::local_skill;
-use crate::core::lockfile;
+use skillstar_skills::lockfile;
 use skillstar_skills::skill_install;
 use skillstar_skills::skill_pack;
 use skillstar_skills::git::{gh_manager, ops as git_ops};
 use std::io::{self, IsTerminal, Write};
 
-pub(super) fn cmd_update(name: Option<&str>) {
+pub fn cmd_update(name: Option<&str>) {
     let lock_path = lockfile::lockfile_path();
     let lockfile = match lockfile::Lockfile::load(&lock_path) {
         Ok(lf) => lf,
@@ -49,7 +49,7 @@ pub(super) fn cmd_update(name: Option<&str>) {
     }
 }
 
-pub(super) fn cmd_remove(opts: RemoveOpts<'_>) {
+pub fn cmd_remove(opts: RemoveOpts<'_>) {
     let targets: Vec<String> = if opts.all {
         let lock_path = lockfile::lockfile_path();
         let lockfile = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
@@ -139,7 +139,7 @@ pub(super) fn cmd_remove(opts: RemoveOpts<'_>) {
     }
 }
 
-pub(super) fn cmd_publish() {
+pub fn cmd_publish() {
     let status = gh_manager::check_status();
     match status {
         gh_manager::GhStatus::NotInstalled => {
@@ -178,7 +178,7 @@ pub(super) fn cmd_publish() {
     }
 }
 
-pub(super) fn cmd_doctor(name: Option<&str>) {
+pub fn cmd_doctor(name: Option<&str>) {
     if let Some(name) = name {
         match skill_pack::doctor_pack(name) {
             Ok(report) => {
@@ -225,7 +225,7 @@ pub(super) fn cmd_doctor(name: Option<&str>) {
     }
 }
 
-pub(super) fn cmd_pack_list() {
+pub fn cmd_pack_list() {
     let packs = skill_pack::list_packs();
     if packs.is_empty() {
         println!("No packs installed.");
@@ -246,7 +246,7 @@ pub(super) fn cmd_pack_list() {
     println!("\n{} pack(s) installed.", packs.len());
 }
 
-pub(super) fn cmd_pack_remove(name: &str) {
+pub fn cmd_pack_remove(name: &str) {
     match skill_pack::remove_pack(name) {
         Ok(removed) => {
             if removed.is_empty() {

@@ -2,10 +2,8 @@ use skillstar_core::infra::error::AppError;
 use skillstar_skills::projects as pm;
 use skillstar_skills::projects::{ImportResult, ImportTarget};
 use std::collections::HashMap;
-use std::path::Path;
 
-use anyhow::{Context, Result};
-use skillstar_core::infra::{fs_ops, paths as fs_paths};
+use anyhow::Result;
 
 // Formerly re-exported from `skillstar_app::commands::projects` (that crate no
 // longer depends on Tauri, so its command wrappers were absorbed here).
@@ -98,145 +96,16 @@ pub async fn import_project_skills(
     project_name: String,
     targets: Vec<ImportTarget>,
 ) -> Result<ImportResult, AppError> {
-    import_scanned_skills(&project_path, &project_name, &targets)
+    pm::import_scanned_skills(&project_path, &project_name, &targets)
         .map_err(|e| AppError::Other(e.to_string()))
-}
-
-/// Import discovered skills into local storage and update the project's
-/// skills-list.
-///
-/// Strategy A: Adopt + Replace with Symlink.
-/// - If a skill doesn't exist in the hub, move it into `skills-local/` and
-///   expose it through the hub symlink in `skills/`.
-/// - Replace the original real directory in the project with a symlink to the
-///   hub entry.
-/// - If the skill already exists in the hub, skip adoption but still write
-///   the mapping into `skills-list.json`.
-/// - Finally, merge all imported skills into the project's skills-list.json.
-pub(crate) fn import_scanned_skills(
-    project_path: &str,
-    project_name: &str,
-    targets: &[ImportTarget],
-) -> Result<ImportResult> {
-    let entry = pm::register_project(project_path)?;
-    let canonical_project_name = entry.name;
-
-    let hub_dir = fs_paths::hub_skills_dir();
-    skillstar_skills::local_skill::reconcile_hub_symlinks();
-    let profiles = skillstar_skills::agents::list_profiles();
-    let project = Path::new(project_path);
-
-    std::fs::create_dir_all(&hub_dir)
-        .with_context(|| format!("failed to create hub dir: {}", hub_dir.display()))?;
-
-    // Preserve any previously chosen owner for shared project paths.
-    let mut existing = pm::load_skills_list(&canonical_project_name)
-        .or_else(|| {
-            if project_name != canonical_project_name.as_str() {
-                pm::load_skills_list(project_name)
-            } else {
-                None
-            }
-        })
-        .unwrap_or_default();
-
-    let mut owner_by_path: HashMap<String, String> = HashMap::new();
-    for agent_id in existing.agents.keys() {
-        let Some(profile) = profiles.iter().find(|p| &p.id == agent_id) else {
-            continue;
-        };
-        if !profile.has_project_skills() {
-            continue;
-        }
-        owner_by_path
-            .entry(profile.project_skills_rel.clone())
-            .or_insert_with(|| agent_id.clone());
-    }
-
-    let mut imported_to_hub = Vec::new();
-    let mut symlink_count = 0u32;
-
-    for target in targets {
-        // Find the agent profile used to locate the on-disk project folder.
-        let Some(source_profile) = profiles.iter().find(|p| p.id == target.agent_id) else {
-            continue;
-        };
-        if !source_profile.has_project_skills() {
-            continue;
-        }
-
-        let source_dir = project
-            .join(&source_profile.project_skills_rel)
-            .join(&target.name);
-        if !source_dir.exists() {
-            continue;
-        }
-
-        // Skip if already a symlink (already managed)
-        if fs_ops::is_link(&source_dir) {
-            continue;
-        }
-
-        // Only valid skill folders are safe to import and replace.
-        if !source_dir.join("SKILL.md").exists() {
-            continue;
-        }
-
-        let effective_agent_id = owner_by_path
-            .get(&source_profile.project_skills_rel)
-            .cloned()
-            .unwrap_or_else(|| target.agent_id.clone());
-        owner_by_path
-            .entry(source_profile.project_skills_rel.clone())
-            .or_insert_with(|| effective_agent_id.clone());
-
-        let hub_skill_dir = hub_dir.join(&target.name);
-
-        // Step 1: Adopt into local storage if not already present in the hub.
-        if !hub_skill_dir.exists() {
-            skillstar_skills::local_skill::adopt_existing_dir(&target.name, &source_dir)
-                .with_context(|| {
-                    format!(
-                        "failed to adopt discovered project skill '{}' into skills-local",
-                        target.name
-                    )
-                })?;
-            imported_to_hub.push(target.name.clone());
-        } else {
-            // Step 2a: Skill already exists in the hub, so replace the
-            // unmanaged project copy with a symlink to the canonical hub entry.
-            std::fs::remove_dir_all(&source_dir)
-                .with_context(|| format!("failed to remove real dir: {}", source_dir.display()))?;
-        }
-
-        // Step 2b: Point the project entry at the hub entry, which may itself
-        // be a symlink into `skills-local/`.
-        fs_ops::create_symlink_or_copy(&hub_skill_dir, &source_dir)
-            .with_context(|| format!("failed to create symlink for skill '{}'", target.name))?;
-
-        symlink_count += 1;
-
-        let agent_skills = existing.agents.entry(effective_agent_id).or_default();
-        if !agent_skills.contains(&target.name) {
-            agent_skills.push(target.name.clone());
-        }
-    }
-
-    existing.updated_at = chrono::Utc::now().to_rfc3339();
-    pm::save_skills_list(&canonical_project_name, &existing)?;
-
-    Ok(ImportResult {
-        imported_to_hub,
-        skills_list_updated: true,
-        symlink_count,
-    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anyhow::Result;
+    use anyhow::{Context, Result};
     use pm::{list_projects, load_skills_list, register_project, save_skills_list};
+    use skillstar_core::infra::paths as fs_paths;
     use skillstar_skills::projects::SkillsList;
     use std::ffi::OsStr;
     use std::path::PathBuf;
@@ -282,7 +151,7 @@ mod tests {
             }];
 
             let import_result =
-                import_scanned_skills(&project_path_str, "demo-import-project", &targets)?;
+                pm::import_scanned_skills(&project_path_str, "demo-import-project", &targets)?;
             assert!(import_result.skills_list_updated);
             assert!(
                 import_result
@@ -381,7 +250,7 @@ mod tests {
             }];
 
             let import_result =
-                import_scanned_skills(&project_path_str, "demo-import-project", &targets)?;
+                pm::import_scanned_skills(&project_path_str, "demo-import-project", &targets)?;
 
             assert!(
                 import_result.imported_to_hub.is_empty(),
@@ -468,7 +337,7 @@ mod tests {
             }];
 
             let import_result =
-                import_scanned_skills(&project_path_str, "demo-import-project", &targets)?;
+                pm::import_scanned_skills(&project_path_str, "demo-import-project", &targets)?;
             assert_eq!(import_result.symlink_count, 1);
 
             let skills_list = load_skills_list(&entry.name)

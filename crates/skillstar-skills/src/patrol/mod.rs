@@ -1,14 +1,18 @@
-//! Patrol data, config, and pure helper logic.
+//! Patrol: config, types, and pure check/batch logic.
 //!
-//! This module owns the pure types and config for background patrol.
-//! The `PatrolManager`, `PatrolInner`, and async `patrol_loop` live in
-//! `src-tauri/src/core/patrol.rs` alongside Tauri/Tokio coupling.
+//! Domain ownership:
+//! - [`check`] — collect hub skills, prefetch, per-skill update detection
+//! - [`config`] / [`types`] — persisted config and event DTOs
 //!
-//! The `check_skill_update_local` helper lives in `src-tauri/src/core/patrol.rs`
-//! because it depends on `skillstar-skills` which would create a cyclic dependency.
+//! Tauri owns only State, tokio spawn, and Emitter adapters (`src-tauri/src/core/patrol.rs`).
 
+pub mod check;
 pub mod config;
 pub mod types;
 
+pub use check::{
+    check_skill_update_local, collect_hub_skills, detect_new_skills_in_cached_repos,
+    prefetch_failed_repos,
+};
 pub use config::{load_config, save_config};
 pub use types::{HubSkillEntry, PatrolCheckEvent, PatrolConfig, PatrolStatus};
