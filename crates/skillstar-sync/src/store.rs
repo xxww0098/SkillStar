@@ -1,6 +1,6 @@
 //! Persistence for S3 sync targets and their credentials.
 //!
-//! Two storage tiers, mirroring `skillstar_ssh::store`:
+//! Two storage tiers, mirroring `skillstar_sync::ssh::store`:
 //!
 //! - **Target metadata** (`~/.skillstar/config/s3_targets.toml`) — a
 //!   `Vec<S3TargetDef>` containing only non-sensitive fields (endpoint, region,

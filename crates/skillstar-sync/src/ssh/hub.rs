@@ -16,18 +16,18 @@ use russh::client::Handle;
 use russh_sftp::client::SftpSession;
 use serde::{Deserialize, Serialize};
 
-use crate::client::{SshHandler, ensure_exec_ok, exec_capture, exec_capture_status};
-use crate::hub_scripts::{
+use crate::ssh::client::{SshHandler, ensure_exec_ok, exec_capture, exec_capture_status};
+use crate::ssh::hub_scripts::{
     self, expand_remote_home, hub_skill_abs, validate_skill_name,
 };
-use crate::sftp::{PushResult, read_remote_file, upload_local_skill_tree, write_remote_file};
-use crate::types::{RemoteSkillContent, RemoteSkillUpdateState};
+use crate::ssh::sftp::{PushResult, read_remote_file, upload_local_skill_tree, write_remote_file};
+use crate::ssh::types::{RemoteSkillContent, RemoteSkillUpdateState};
 
 /// Legacy `~`-literal hub root (kept for discovery back-compat probing).
 pub const REMOTE_HUB_CONTENT: &str = hub_scripts::LEGACY_HUB_PREFIX;
 
 /// Re-export so existing callers (`sftp::list`) keep one quoting helper.
-pub use crate::hub_scripts::shell_quote;
+pub use crate::ssh::hub_scripts::shell_quote;
 
 /// Resolve the remote `$HOME` for SFTP path building. Fails loudly when the
 /// server can't canonicalize (an unusable relative home would silently create

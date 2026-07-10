@@ -26,13 +26,13 @@ pub use host_crud::*;
 pub use remote_skills::*;
 
 use skillstar_core::infra::error::AppError;
-use skillstar_ssh::progress::{ProgressSink, SshProgressEvent};
-use skillstar_ssh::store::KeyringSecretStore;
-use skillstar_ssh::{Session, SshHostDef};
+use skillstar_sync::ssh::progress::{ProgressSink, SshProgressEvent};
+use skillstar_sync::ssh::store::KeyringSecretStore;
+use skillstar_sync::ssh::{Session, SshHostDef};
 use tauri::{AppHandle, Emitter};
 
 /// Re-exported DTOs so the command signatures stay terse.
-pub use skillstar_ssh::{
+pub use skillstar_sync::ssh::{
     ConnectionTestResult, DiscoveryResult, MigrateResult, PushResult, RemoteSkill,
     RemoteSkillContent, RemoteSkillUpdateState,
 };
@@ -103,13 +103,13 @@ where
 {
     let (host, secrets) = resolve_host_for_session(host_id)?;
 
-    let handle = skillstar_ssh::client::connect(&host, &secrets, &session_id, &sink)
+    let handle = skillstar_sync::ssh::client::connect(&host, &secrets, &session_id, &sink)
         .await
         .map_err(|e| {
-            sink.emit(skillstar_ssh::progress::event(
+            sink.emit(skillstar_sync::ssh::progress::event(
                 &session_id,
-                skillstar_ssh::progress::Phase::Error,
-                skillstar_ssh::progress::Status::Fail,
+                skillstar_sync::ssh::progress::Phase::Error,
+                skillstar_sync::ssh::progress::Status::Fail,
                 e.to_string(),
             ));
             to_ssh_err(e)
@@ -120,7 +120,7 @@ where
 /// Resolve a `SshHostDef` from either the managed store or `~/.ssh/config`.
 fn resolve_host(host_id: &str) -> Result<(SshHostDef, KeyringSecretStore), AppError> {
     if let Some(alias) = host_id.strip_prefix("system:") {
-        let sys = skillstar_ssh::find_host_by_alias(alias)
+        let sys = skillstar_sync::ssh::find_host_by_alias(alias)
             .ok_or_else(|| AppError::Ssh(format!("system host '{alias}' not found")))?;
         let def = SshHostDef {
             id: host_id.to_string(),
@@ -133,8 +133,8 @@ fn resolve_host(host_id: &str) -> Result<(SshHostDef, KeyringSecretStore), AppEr
                 sys.username
             },
             auth_method: match sys.identity_file {
-                Some(path) => skillstar_ssh::AuthMethod::Key { key_path: path },
-                None => skillstar_ssh::AuthMethod::Password,
+                Some(path) => skillstar_sync::ssh::AuthMethod::Key { key_path: path },
+                None => skillstar_sync::ssh::AuthMethod::Password,
             },
             default_remote_dir: String::new(),
         };
@@ -151,13 +151,13 @@ fn resolve_host(host_id: &str) -> Result<(SshHostDef, KeyringSecretStore), AppEr
 /// Local alias for the crate's host loader (kept private to this module so the
 /// submodules go through `resolve_host`/`with_session` instead).
 fn load_hosts_internal() -> Vec<SshHostDef> {
-    skillstar_ssh::store::load_hosts()
+    skillstar_sync::ssh::store::load_hosts()
 }
 
 #[cfg(test)]
 pub(crate) struct MockConnector {
-    pub exec: skillstar_ssh::remote_fs::MockRemoteExec,
-    pub fs: skillstar_ssh::remote_fs::MockRemoteFs,
+    pub exec: skillstar_sync::ssh::remote_fs::MockRemoteExec,
+    pub fs: skillstar_sync::ssh::remote_fs::MockRemoteFs,
 }
 
 #[cfg(test)]
@@ -179,8 +179,8 @@ pub(crate) mod mock_connector_slot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use skillstar_ssh::AuthMethod;
-    use skillstar_ssh::progress::{Phase, Status};
+    use skillstar_sync::ssh::AuthMethod;
+    use skillstar_sync::ssh::progress::{Phase, Status};
     use std::sync::{Arc, Mutex, OnceLock};
 
     fn env_lock() -> &'static Mutex<()> {
@@ -287,8 +287,8 @@ Host vps-yy
 
         let _home = with_ssh_home(VPS_YY_CONFIG);
         mock_connector_slot::install(MockConnector {
-            exec: skillstar_ssh::remote_fs::MockRemoteExec,
-            fs: skillstar_ssh::remote_fs::MockRemoteFs::vps_yy_layout(),
+            exec: skillstar_sync::ssh::remote_fs::MockRemoteExec,
+            fs: skillstar_sync::ssh::remote_fs::MockRemoteFs::vps_yy_layout(),
         });
 
         let app = tauri::test::mock_app();
@@ -308,7 +308,7 @@ Host vps-yy
         assert_eq!(result.needs_migration_count, 1);
         assert!(
             result.skills.iter().any(|s| {
-                s.name == "hub-skill" && s.layout == skillstar_ssh::RemoteSkillLayout::HubManaged
+                s.name == "hub-skill" && s.layout == skillstar_sync::ssh::RemoteSkillLayout::HubManaged
             })
         );
 

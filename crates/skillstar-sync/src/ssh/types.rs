@@ -1,7 +1,7 @@
 //! Data model for SSH remote hosts and remote skills.
 //!
 //! `SshHostDef` intentionally stores **only non-sensitive metadata**. Passphrases
-//! and passwords live in the system keyring (see [`crate::store`]), keyed by the
+//! and passwords live in the system keyring (see [`crate::ssh::store`]), keyed by the
 //! host `id`, so the on-disk TOML is safe to back up.
 
 use serde::{Deserialize, Serialize};
@@ -29,7 +29,7 @@ pub enum AuthMethod {
 /// A user-defined SSH remote host. Non-sensitive fields only — see crate docs.
 ///
 /// `id` is stable across renames and is the keyring credential key. New hosts
-/// should get an auto-generated id; see [`crate::store`].
+/// should get an auto-generated id; see [`crate::ssh::store`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SshHostDef {
     /// Stable unique id (e.g. `ssh_<unix_ms>`). Used as the keyring account name.

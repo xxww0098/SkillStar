@@ -6,7 +6,7 @@
 //! - [`delete`] — recursive, guarded delete of a remote skill dir
 //!
 //! The public surface is re-exported here so callers keep using
-//! `skillstar_ssh::sftp::*` regardless of which submodule a symbol lives in.
+//! `skillstar_sync::ssh::sftp::*` regardless of which submodule a symbol lives in.
 
 mod common;
 mod delete;

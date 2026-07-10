@@ -3,8 +3,8 @@
 use std::collections::HashSet;
 
 use skillstar_core::infra::error::AppError;
-use skillstar_ssh::store::{KeyringSecretStore, load_hosts};
-use skillstar_ssh::{HostsStore, SshHostDef, SystemHost, parse_system_hosts};
+use skillstar_sync::ssh::store::{KeyringSecretStore, load_hosts};
+use skillstar_sync::ssh::{HostsStore, SshHostDef, SystemHost, parse_system_hosts};
 
 use super::whoami_username;
 
@@ -42,7 +42,7 @@ pub async fn list_ssh_hosts() -> Result<Vec<SshHostListItem>, AppError> {
 /// system IdentityFile path as the auth method.
 #[tauri::command]
 pub async fn import_system_host(alias: String) -> Result<SshHostDef, AppError> {
-    let sys = skillstar_ssh::find_host_by_alias(&alias)
+    let sys = skillstar_sync::ssh::find_host_by_alias(&alias)
         .ok_or_else(|| AppError::Ssh(format!("system host '{alias}' not found")))?;
     let def = SshHostDef {
         id: String::new(),
@@ -55,8 +55,8 @@ pub async fn import_system_host(alias: String) -> Result<SshHostDef, AppError> {
             sys.username
         },
         auth_method: match sys.identity_file {
-            Some(path) => skillstar_ssh::AuthMethod::Key { key_path: path },
-            None => skillstar_ssh::AuthMethod::Password,
+            Some(path) => skillstar_sync::ssh::AuthMethod::Key { key_path: path },
+            None => skillstar_sync::ssh::AuthMethod::Password,
         },
         default_remote_dir: String::new(),
     };

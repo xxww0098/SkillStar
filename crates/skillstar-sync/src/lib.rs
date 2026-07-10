@@ -1,18 +1,14 @@
-//! S3 cloud sync for SkillStar.
+//! Remote transport for SkillStar: S3 cloud sync + SSH remote skills.
 //!
-//! Mirrors `skillstar_ssh`'s two-tier structure: all logic lives in this crate
-//! (Tauri-agnostic), the command layer in `src-tauri` is a thin forwarder.
+//! Wave 2B merged former `skillstar-ssh` into this crate as [`ssh`].
 //!
 //! Layout:
-//! - [`types`] — serialisable data model (`S3TargetDef`, `Manifest`, …)
-//! - [`store`] — target-config TOML persistence + system-keyring credential store
-//! - [`client`] — aws-sdk-s3 client construction + connection test
-//! - [`manifest`] — cloud manifest build / parse / annotate
-//! - [`local_pack`] — local skill tar.gz pack / unpack
-//! - [`progress`] — Tauri-agnostic progress sink (forked from skillstar-ssh)
-//! - [`sync`] — push_all / pull_manifest / restore_entries orchestration
+//! - [`types`] / [`store`] / [`client`] / [`manifest`] / [`local_pack`] / [`sync`] — S3
+//! - [`progress`] — S3 progress sink
+//! - [`ssh`] — SSH hosts, SFTP, remote skill push/list/delete (Tauri-agnostic)
 
 pub mod client;
+pub mod ssh;
 pub mod local_pack;
 pub mod manifest;
 pub mod progress;
@@ -37,7 +33,7 @@ pub use types::{
 };
 
 #[cfg(test)]
-mod test_support {
+pub(crate) mod test_support {
     //! Tests across this crate mutate `SKILLSTAR_DATA_DIR` (to point the
     //! target/device stores at a temp dir). Those env mutations race when
     //! tests run in parallel, so every such test must hold this lock for its

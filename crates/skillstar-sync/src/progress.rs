@@ -1,6 +1,6 @@
 //! Progress reporting abstraction for S3 sync operations.
 //!
-//! Forked from `skillstar_ssh::progress` with sync-specific phases. The crate
+//! Forked from `skillstar_sync::ssh::progress` with sync-specific phases. The crate
 //! stays Tauri-agnostic: sync functions take an `&impl ProgressSink` and call
 //! `sink.emit(...)` at each phase. The Tauri command layer injects a sink that
 //! forwards to `window.emit("s3://sync-stream")`.

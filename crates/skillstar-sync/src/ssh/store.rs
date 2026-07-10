@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::types::{KnownHost, SshHostDef};
+use crate::ssh::types::{KnownHost, SshHostDef};
 
 /// Service name used for every keyring entry. The account name is the host `id`.
 const KEYRING_SERVICE: &str = "skillstar-ssh";
@@ -285,7 +285,7 @@ pub fn known_fingerprint(host_id: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::AuthMethod;
+    use crate::ssh::types::AuthMethod;
     use tempfile::TempDir;
 
     /// RAII guard that points `SKILLSTAR_DATA_DIR` at a temp dir for one test

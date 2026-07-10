@@ -11,7 +11,7 @@ use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::OpenFlags;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::client::SshHandler;
+use crate::ssh::client::SshHandler;
 
 /// Bound on opening the SFTP subsystem (channel + subsystem + init handshake).
 /// A server with a broken/missing sftp subsystem must fail fast, not hang the
@@ -22,12 +22,12 @@ const SFTP_OPEN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20
 pub async fn open_sftp(
     handle: &mut Handle<SshHandler>,
     session_id: &str,
-    sink: &impl crate::progress::ProgressSink,
+    sink: &impl crate::ssh::progress::ProgressSink,
 ) -> Result<SftpSession> {
-    sink.emit(crate::progress::event(
+    sink.emit(crate::ssh::progress::event(
         session_id,
-        crate::progress::Phase::Sftp,
-        crate::progress::Status::Start,
+        crate::ssh::progress::Phase::Sftp,
+        crate::ssh::progress::Status::Start,
         "opening SFTP subsystem…",
     ));
     let open = async {
@@ -50,18 +50,18 @@ pub async fn open_sftp(
                 "SFTP subsystem did not open within {}s",
                 SFTP_OPEN_TIMEOUT.as_secs()
             );
-            sink.emit(crate::progress::event(
+            sink.emit(crate::ssh::progress::event(
                 session_id,
-                crate::progress::Phase::Sftp,
-                crate::progress::Status::Fail,
+                crate::ssh::progress::Phase::Sftp,
+                crate::ssh::progress::Status::Fail,
                 msg.clone(),
             ));
             anyhow::anyhow!(msg)
         })??;
-    sink.emit(crate::progress::event(
+    sink.emit(crate::ssh::progress::event(
         session_id,
-        crate::progress::Phase::Sftp,
-        crate::progress::Status::Ok,
+        crate::ssh::progress::Phase::Sftp,
+        crate::ssh::progress::Status::Ok,
         "SFTP ready",
     ));
     Ok(session)

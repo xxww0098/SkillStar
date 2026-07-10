@@ -1,10 +1,10 @@
 //! Connection probe + host-key trust-on-first-use (TOFU) acceptance.
 
 use skillstar_core::infra::error::AppError;
-use skillstar_ssh::client::HostKeyState;
-use skillstar_ssh::progress::ProgressSink;
-use skillstar_ssh::store::{KeyringSecretStore, accept_host_key};
-use skillstar_ssh::SshHostDef;
+use skillstar_sync::ssh::client::HostKeyState;
+use skillstar_sync::ssh::progress::ProgressSink;
+use skillstar_sync::ssh::store::{KeyringSecretStore, accept_host_key};
+use skillstar_sync::ssh::SshHostDef;
 use tauri::AppHandle;
 
 use super::{ConnectionTestResult, TauriProgressSink, new_session_id, to_ssh_err};
@@ -32,13 +32,13 @@ pub async fn test_ssh_connection(
     let session_id = new_session_id();
     let sink = TauriProgressSink { app };
     let (result, state) =
-        skillstar_ssh::client::test_connection(&def, &secrets, &session_id, &sink)
+        skillstar_sync::ssh::client::test_connection(&def, &secrets, &session_id, &sink)
             .await
             .map_err(|e| {
-                sink.emit(skillstar_ssh::progress::event(
+                sink.emit(skillstar_sync::ssh::progress::event(
                     &session_id,
-                    skillstar_ssh::progress::Phase::Error,
-                    skillstar_ssh::progress::Status::Fail,
+                    skillstar_sync::ssh::progress::Phase::Error,
+                    skillstar_sync::ssh::progress::Status::Fail,
                     e.to_string(),
                 ));
                 to_ssh_err(e)

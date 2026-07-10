@@ -1,6 +1,6 @@
 # SkillStar Workspace 迁移计划 — Wave 2（继续收敛 crate 数量）
 
-> 状态：**Wave 2A 已实施**（fingerprint→usage，ai→models → 9 crates）。2B 仍可选。  
+> 状态：**Wave 2A+2B 已实施**（→ **8 crates**：fingerprint→usage，ai→models，ssh→sync::ssh）。  
 > 前置：Wave 1（`plan.md`）已完成 — `skillstar-projects` 并入 `skillstar-skills`，当前 **11** 个域 crate 文件夹。  
 > 本文件是 Wave 2 的执行计划，不是 SSOT。实施时仍先改 [AGENTS.md](./AGENTS.md) / [docs/backend.md](./docs/backend.md)，再改代码。
 
@@ -204,7 +204,7 @@ inference = []   # 打开 ai/ 模块与其额外依赖（若有）
 
 ### Phase 3（可选）— ssh/sync
 
-- [ ] 满足 §6 门槛后再开
+- [x] 满足 §6 门槛后再开（产品上远程传输一并维护，已实施 C1）
 - [ ] 选 C1 或 C2；更新 SSOT；删旧 crate
 
 ### Phase 4 — 收尾

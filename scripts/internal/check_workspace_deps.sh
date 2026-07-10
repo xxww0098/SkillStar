@@ -56,6 +56,8 @@ if "skillstar-fingerprint" in packages:
     errors.append("skillstar-fingerprint must be absorbed into skillstar-usage")
 if "skillstar-ai" in packages:
     errors.append("skillstar-ai must be absorbed into skillstar-models")
+if "skillstar-ssh" in packages:
+    errors.append("skillstar-ssh must be absorbed into skillstar-sync (as ssh module)")
 
 app = packages.get("skillstar-app")
 if app:

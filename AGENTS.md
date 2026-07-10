@@ -123,8 +123,7 @@ SkillStar 是 Tauri v2 桌面应用（同一 `skillstar` 二进制内还含 CLI�
 | `skillstar-marketplace` | 本地优先 marketplace 快照 + SQLite FTS + MCP registry/curated |
 | `skillstar-models` | Provider store + presets + tool sync + latency/circuit breaker + **AI 推理**（原 skillstar-ai：chat/summarize/translate/skill pick） |
 | `skillstar-usage` | 订阅/配额（catalog、OAuth、API-key fetchers、token 存储）+ **TLS/HTTP 指纹**（原 skillstar-fingerprint 模块；`impersonate` 由 binary root 显式打开） |
-| `skillstar-ssh` | SSH 远程技能管理：russh 连接 + SFTP 推送/列出/删除 + 主机配置 + keyring 凭证 + TOFU 主机键 |
-| `skillstar-sync` | S3 云同步：aws-sdk-s3 + manifest.json + 本地技能 tar.gz 打包 + keyring 凭证 |
+| `skillstar-sync` | 远程传输：S3 云同步（manifest + tar.gz + keyring）+ **SSH 远程技能**（原 skillstar-ssh 现为模块 `ssh`：russh/SFTP/主机 TOFU/keyring；keyring service 名仍为 `skillstar-ssh` 以兼容已存凭证） |
 | `skillstar-app` | library-only：`shell_rc`、跨域 use case（`usage_switch` 等）、CLI 解析与模式识别。可执行文件 `skillstar` 仅由 `src-tauri` package 产出。所有 `#[tauri::command]` 在 `src-tauri/src/commands/` |
 
 ## 项目树（精简）

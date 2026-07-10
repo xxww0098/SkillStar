@@ -8,11 +8,11 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::client::RemoteExec;
-use crate::hub::REMOTE_HUB_CONTENT;
-use crate::hub_scripts::{expand_remote_home, hub_skill_abs, shell_quote, validate_skill_name};
-use crate::remote_fs::{RemoteDiscoveryFs, is_skill_entry};
-use crate::types::{RemoteSkill, RemoteSkillLayout};
+use crate::ssh::client::RemoteExec;
+use crate::ssh::hub::REMOTE_HUB_CONTENT;
+use crate::ssh::hub_scripts::{expand_remote_home, hub_skill_abs, shell_quote, validate_skill_name};
+use crate::ssh::remote_fs::{RemoteDiscoveryFs, is_skill_entry};
+use crate::ssh::types::{RemoteSkill, RemoteSkillLayout};
 
 /// A known agent's skills directory on a remote host — the push targets the UI
 /// offers. Mirrors the agent `project_skills_rel` paths from the builtin agent
@@ -124,7 +124,7 @@ pub(crate) fn agent_id_from_home_dir(name: &str) -> Option<String> {
 /// still classify correctly.
 pub(crate) fn layout_classify_shell_script(skill_path: &str, skill_name: &str) -> String {
     let path_q = shell_quote(skill_path);
-    let hub = crate::hub_scripts::hub_skill_expr(skill_name);
+    let hub = crate::ssh::hub_scripts::hub_skill_expr(skill_name);
     let legacy = format!(
         "\"$HOME/~/.skillstar/hub/content\"/{}",
         shell_quote(skill_name)
@@ -648,7 +648,7 @@ mod tests {
         assert_eq!(skills[1].name, "hub-link");
     }
 
-    use crate::remote_fs::{MockRemoteExec, MockRemoteFs};
+    use crate::ssh::remote_fs::{MockRemoteExec, MockRemoteFs};
     use russh_sftp::protocol::FileAttributes;
 
     fn dir_attrs() -> FileAttributes {

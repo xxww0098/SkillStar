@@ -27,9 +27,9 @@ use russh::keys::{self, HashAlg, PrivateKeyWithHashAlg};
 use russh::Disconnect;
 use tokio::sync::oneshot;
 
-use crate::progress::{Phase, ProgressSink, Status, event, event_with_detail};
-use crate::store::{SecretStore, known_fingerprint};
-use crate::types::SshHostDef;
+use crate::ssh::progress::{Phase, ProgressSink, Status, event, event_with_detail};
+use crate::ssh::store::{SecretStore, known_fingerprint};
+use crate::ssh::types::SshHostDef;
 
 /// Connect/read timeout applied to the TCP dial + SSH handshake.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -225,7 +225,7 @@ async fn authenticate<S: SecretStore>(
 ) -> Result<()> {
     // Authenticate according to the configured method.
     match &host.auth_method {
-        crate::types::AuthMethod::Password => {
+        crate::ssh::types::AuthMethod::Password => {
             sink.emit(event(session_id, Phase::Auth, Status::Start, format!("authenticating as {} (password)…", host.username)));
             let password = secrets
                 .get_secret(&host.id)?
@@ -246,7 +246,7 @@ async fn authenticate<S: SecretStore>(
             }
             sink.emit(event(session_id, Phase::Auth, Status::Ok, "authenticated (password)"));
         }
-        crate::types::AuthMethod::Key { key_path } => {
+        crate::ssh::types::AuthMethod::Key { key_path } => {
             sink.emit(event(session_id, Phase::Auth, Status::Start, format!("authenticating as {} (publickey)…", host.username)));
             let passphrase = secrets.get_secret(&host.id)?;
             let key = load_private_key(key_path, passphrase.as_deref()).map_err(|e| {
@@ -565,8 +565,8 @@ pub(crate) fn ensure_exec_ok(what: &str, out: &str, exit_code: Option<u32>) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::MemSecretStore;
-    use crate::types::AuthMethod;
+    use crate::ssh::store::MemSecretStore;
+    use crate::ssh::types::AuthMethod;
 
     #[test]
     fn resolve_state_unverified_when_no_prior_entry() {
@@ -583,7 +583,7 @@ mod tests {
     #[test]
     fn resolve_state_verified_when_match() {
         let _guard = test_data_dir();
-        crate::store::accept_host_key("ssh_1", "h:22", "SHA256:abc").unwrap();
+        crate::ssh::store::accept_host_key("ssh_1", "h:22", "SHA256:abc").unwrap();
         assert!(matches!(
             resolve_host_key_state("ssh_1", "SHA256:abc"),
             HostKeyState::Verified
@@ -593,7 +593,7 @@ mod tests {
     #[test]
     fn resolve_state_mismatch_reports_both() {
         let _guard = test_data_dir();
-        crate::store::accept_host_key("ssh_1", "h:22", "SHA256:abc").unwrap();
+        crate::ssh::store::accept_host_key("ssh_1", "h:22", "SHA256:abc").unwrap();
         match resolve_host_key_state("ssh_1", "SHA256:xyz") {
             HostKeyState::Mismatch { expected, actual } => {
                 assert_eq!(expected, "SHA256:abc");

@@ -116,7 +116,7 @@ impl MockRemoteFs {
 #[derive(Debug, Default)]
 pub struct MockRemoteExec;
 
-impl crate::client::RemoteExec for MockRemoteExec {
+impl crate::ssh::client::RemoteExec for MockRemoteExec {
     async fn exec_script(&mut self, script: &str) -> anyhow::Result<String> {
         if script.contains("hub_managed") && script.contains("readlink") {
             Ok(String::new())

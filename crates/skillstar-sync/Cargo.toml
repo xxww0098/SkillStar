@@ -25,8 +25,13 @@ sha2 = { workspace = true }
 tar = { workspace = true }
 flate2 = { workspace = true }
 # keyring v4 default (`v1`) bundles the native store for each desktop OS
-# (same configuration as skillstar-ssh — credentials never touch the TOML).
+# Credentials never touch the TOML (keyring).
 keyring = { workspace = true }
+# SSH (former skillstar-ssh)
+dirs = { workspace = true }
+russh = { version = "0.61", default-features = false, features = ["ring", "rsa"] }
+russh-sftp = "2.3"
+ssh-key = { version = "=0.7.0-rc.10", features = ["alloc"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

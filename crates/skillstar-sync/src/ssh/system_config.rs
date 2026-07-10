@@ -15,7 +15,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::types::SystemHost;
+use crate::ssh::types::SystemHost;
 
 /// Max `Include` recursion depth to defuse include cycles.
 const MAX_INCLUDE_DEPTH: u8 = 8;

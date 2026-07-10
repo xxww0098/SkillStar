@@ -39,16 +39,3 @@ pub use system_config::{find_host_by_alias, parse_system_hosts};
 /// The russh session handle returned by [`client::connect`].
 pub type Session = russh::client::Handle<client::SshHandler>;
 
-#[cfg(test)]
-mod test_support {
-    //! Tests across this crate mutate `SKILLSTAR_DATA_DIR` (to point the
-    //! host/known-hosts stores at a temp dir). Those env mutations race when
-    //! tests run in parallel, so every such test must hold this lock for its
-    //! whole body — mirroring `skillstar_core::config::test_env_lock`.
-    use std::sync::{Mutex, OnceLock};
-
-    pub fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
-}
