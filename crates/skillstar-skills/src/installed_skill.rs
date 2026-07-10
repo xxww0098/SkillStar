@@ -5,11 +5,11 @@ use crate::{
     repo_scanner,
 };
 use anyhow::{Context, Result, anyhow};
-use skillstar_core::types::lockfile::LockEntry;
+use crate::lockfile::LockEntry;
 use skillstar_core::types::{
     Skill, SkillCategory, extract_github_source_from_url, extract_skill_description,
 };
-use skillstar_projects::projects::agents::{self as agent_profile, AgentProfile};
+use crate::agents::{self as agent_profile, AgentProfile};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;

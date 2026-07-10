@@ -1,5 +1,5 @@
 use skillstar_core::infra::paths::{hub_skills_dir, local_skills_dir, lockfile_path};
-use skillstar_core::types::lockfile::Lockfile;
+use skillstar_skills::lockfile::Lockfile;
 use skillstar_marketplace::snapshot;
 
 /// List scope filter for `skillstar list`.

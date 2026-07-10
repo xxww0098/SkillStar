@@ -2,7 +2,7 @@ use crate::discovery as skill_discover;
 use crate::source_resolver;
 use anyhow::{Context, Result, anyhow};
 use skillstar_core::infra::paths;
-use skillstar_core::types::lockfile;
+use crate::lockfile;
 use std::path::Path;
 
 use super::DiscoveredSkill;

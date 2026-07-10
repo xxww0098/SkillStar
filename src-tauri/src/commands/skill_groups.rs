@@ -1,13 +1,11 @@
 use std::collections::HashMap;
 use tracing::{error, warn};
 
-use crate::core::{
-    marketplace,
-    skill_group::{self, SkillGroup},
-    skill_install,
-};
+use crate::core::marketplace;
+use skillstar_skills::skill_group::{self, SkillGroup};
+use skillstar_skills::skill_install;
 use skillstar_core::infra::error::AppError;
-use skillstar_projects::projects::project_manifest;
+use skillstar_skills::projects;
 
 #[tauri::command]
 pub async fn list_skill_groups() -> Result<Vec<SkillGroup>, AppError> {
@@ -129,13 +127,13 @@ pub async fn deploy_skill_group(
         .map(|id| (id, group.skills.clone()))
         .collect();
 
-    let entry = project_manifest::register_project(&project_path)
+    let entry = projects::register_project(&project_path)
         .map_err(|e| AppError::Project(e.to_string()))?;
-    let deploy_modes = project_manifest::load_skills_list(&entry.name)
+    let deploy_modes = projects::load_skills_list(&entry.name)
         .map(|list| list.deploy_modes)
         .unwrap_or_default();
 
-    let (_name, count) = project_manifest::save_and_sync(&project_path, agents, deploy_modes)
+    let (_name, count) = projects::save_and_sync(&project_path, agents, deploy_modes)
         .map_err(|e| AppError::Project(e.to_string()))?;
 
     Ok(count)

@@ -2,8 +2,8 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
 use crate::git::ops as git_ops;
-use crate::{installed_skill, lockfile, project_manifest, repo_scanner, update_checker};
-use skillstar_projects::projects::sync;
+use crate::{installed_skill, lockfile, projects, repo_scanner, update_checker};
+use crate::deployment;
 
 /// Result of a hub skill update, including any project-level cascade work.
 #[derive(Debug, Clone)]
@@ -15,7 +15,7 @@ pub struct SkillUpdateOutcome {
     /// Per-agent re-link failures ("Agent: error"). The update itself
     /// succeeded; these tell the UI which agent deployments need attention.
     pub agent_link_failures: Vec<String>,
-    pub cascade: project_manifest::CascadeUpdateSummary,
+    pub cascade: projects::CascadeUpdateSummary,
 }
 
 fn push_unique(values: &mut Vec<String>, value: impl Into<String>) {
@@ -132,7 +132,7 @@ pub fn update_skill(name: &str) -> Result<SkillUpdateOutcome> {
     let mut agent_links = Vec::new();
     let mut agent_link_failures = Vec::new();
     for skill_name in &affected_skills {
-        match sync::resync_existing_links(skill_name) {
+        match deployment::resync_existing_links(skill_name) {
             Ok(report) => {
                 for failure in report.failures {
                     agent_link_failures.push(if skill_name == name {
@@ -153,7 +153,7 @@ pub fn update_skill(name: &str) -> Result<SkillUpdateOutcome> {
         }
     }
 
-    let cascade = project_manifest::cascade_skill_update_to_projects(&affected_skills);
+    let cascade = projects::cascade_skill_update_to_projects(&affected_skills);
     let git_url = lock_entry.map(|entry| entry.git_url).unwrap_or_default();
 
     sibling_names.sort();

@@ -3,7 +3,10 @@
 
 use skillstar_app::cli::RemoveOpts;
 
-use crate::core::{local_skill, lockfile, skill_install, skill_pack};
+use skillstar_skills::local_skill;
+use crate::core::lockfile;
+use skillstar_skills::skill_install;
+use skillstar_skills::skill_pack;
 use skillstar_skills::git::{gh_manager, ops as git_ops};
 use std::io::{self, IsTerminal, Write};
 

@@ -28,10 +28,9 @@ wreq-util = { version = "3.0.0-rc.6", optional = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tracing-subscriber = { workspace = true }
 
-skillstar-core = { version = "0.1.0", path = "../skillstar-core" }
 
 [features]
-default = ["impersonate"]
+default = []
 # Enables wreq + wreq-util for JA3/JA4/HTTP2 emulation.
 # Disable for fast CI builds that don't need fingerprint emulation.
 impersonate = ["dep:wreq", "dep:wreq-util"]

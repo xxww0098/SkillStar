@@ -15,43 +15,15 @@ fn main() {
 
     let args: Vec<String> = std::env::args().collect();
 
-    // CLI mode: if there are arguments and the first arg is a known subcommand
+    // CLI mode: first arg is a known subcommand owned by skillstar-app's Clap surface.
+    // Unknown args fall through to GUI so deep-links / OS launchers still work.
     if args.len() > 1 {
-        let first_arg = &args[1];
-        // Keep this list in sync with every variant + alias declared in
-        // `skillstar_app::cli::Commands`. Any CLI subcommand missing from
-        // here silently falls through to `run()` and launches the GUI,
-        // which hangs headless/CLI-only contexts until the process is killed.
-        let cli_commands = [
-            "list",
-            "find",
-            "search",
-            "install",
-            "add",
-            "update",
-            "remove",
-            "rm",
-            "uninstall",
-            "init",
-            "create",
-            "publish",
-            "doctor",
-            "pack",
-            "gui",
-            "help",
-            "-h",
-            "--help",
-            "-V",
-            "--version",
-        ];
-
-        if cli_commands.contains(&first_arg.as_str()) {
-            if first_arg == "gui" {
-                // Fall through to GUI mode
-            } else {
-                skillstar_lib::run_cli(args);
-                return;
-            }
+        let first_arg = args[1].as_str();
+        if skillstar_app::cli::is_gui_force_arg(first_arg) {
+            // Fall through to GUI mode
+        } else if skillstar_app::cli::is_cli_subcommand(first_arg) {
+            skillstar_lib::run_cli(args);
+            return;
         }
     }
 

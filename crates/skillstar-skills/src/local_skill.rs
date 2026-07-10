@@ -5,10 +5,10 @@
 //!
 //! This mirrors the `.repos/` pattern used for repo-cached skills.
 
-use crate::{lockfile, project_manifest};
+use crate::{lockfile, projects};
 use anyhow::{Context, Result};
 use skillstar_core::types::{Skill, SkillCategory, extract_skill_description};
-use skillstar_projects::projects::sync;
+use crate::deployment;
 use std::path::{Path, PathBuf};
 use tracing::{info, warn};
 
@@ -209,8 +209,8 @@ pub fn reconcile_hub_symlinks() {
 /// 3. Delete `skills-local/<name>/` directory
 pub fn delete(name: &str) -> Result<()> {
     // Remove symlinks from all agents
-    let _ = sync::remove_skill_from_all_agents(name);
-    let _ = project_manifest::remove_skill_from_all_projects(name);
+    let _ = deployment::remove_skill_from_all_agents(name);
+    let _ = projects::remove_skill_from_all_projects(name);
 
     // Remove hub symlink
     let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
@@ -286,7 +286,7 @@ pub fn migrate_existing() -> Result<u32> {
     // Load lockfile to check for git URLs
     let lock_path = lockfile::lockfile_path();
     let lockfile = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
-    let lock_map: std::collections::HashMap<String, &skillstar_core::types::lockfile::LockEntry> =
+    let lock_map: std::collections::HashMap<String, &crate::lockfile::LockEntry> =
         lockfile
             .skills
             .iter()

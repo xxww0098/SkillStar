@@ -93,7 +93,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-        crate::projects::lock_test_env()
+        crate::lock_test_env()
     }
 
     fn set_env<K: AsRef<OsStr>, V: AsRef<OsStr>>(key: K, value: V) {
@@ -468,7 +468,7 @@ mod tests {
             std::fs::create_dir_all(&project_path)?;
             let project_path_str = project_path.to_string_lossy().to_string();
 
-            let claude_profile = crate::projects::agents::list_profiles()
+            let claude_profile = crate::agents::list_profiles()
                 .into_iter()
                 .find(|p| p.id == "claude")
                 .expect("claude profile must exist");

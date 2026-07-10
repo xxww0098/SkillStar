@@ -2,15 +2,15 @@
 //!
 //! These helpers are pure enough to live in the skillstar-cli crate and
 //! depend only on extracted crates (skillstar-infra, skillstar-core-types,
-//! skillstar-projects, skillstar-skill-core).
+//! skillstar-skills, skillstar-skill-core).
 
 use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 
 use skillstar_core::infra::paths::{hub_skills_dir, lockfile_path};
-use skillstar_core::types::lockfile::Lockfile;
-use skillstar_projects::projects::agents::list_profiles;
-use skillstar_projects::projects::project_manifest::detect_project_agents;
+use skillstar_skills::lockfile::Lockfile;
+use skillstar_skills::agents::list_profiles;
+use skillstar_skills::projects::detect_project_agents;
 use skillstar_skills::source_resolver::same_remote_url;
 
 // ── Name resolution helpers ─────────────────────────────────────────────

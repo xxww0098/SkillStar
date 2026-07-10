@@ -1,12 +1,12 @@
 use crate::frontmatter::{render_with_front_matter, split_front_matter};
 use crate::git::ops as git_ops;
-use crate::{installed_skill, local_skill, lockfile, project_manifest, repo_scanner};
+use crate::{installed_skill, local_skill, lockfile, projects, repo_scanner};
 use serde_yaml::{Mapping, Value};
 use skillstar_core::infra::{fs_ops, paths};
 use skillstar_core::types::{
     Skill, SkillCategory, SkillType, extract_github_source_from_url, extract_skill_description,
 };
-use skillstar_projects::projects::sync;
+use crate::deployment;
 use std::path::{Path, PathBuf};
 use tracing::warn;
 
@@ -257,7 +257,7 @@ pub fn install_skill(url: String, name: Option<String>) -> Result<Skill, String>
     let lock_path = lockfile::lockfile_path();
     let mut lockfile = lockfile::Lockfile::load(&lock_path)
         .map_err(|e| format!("Failed to load lockfile '{}': {}", lock_path.display(), e))?;
-    lockfile.upsert(skillstar_core::types::lockfile::LockEntry {
+    lockfile.upsert(crate::lockfile::LockEntry {
         name: name_hint.clone(),
         git_url: url.clone(),
         tree_hash: tree_hash.clone(),
@@ -397,7 +397,7 @@ pub fn uninstall_skill(name: &str) -> Result<(), String> {
         return Ok(());
     }
 
-    let _ = sync::remove_skill_from_all_agents(name);
+    let _ = deployment::remove_skill_from_all_agents(name);
 
     let skills_dir = paths::hub_skills_dir();
     let path = skills_dir.join(name);
@@ -418,7 +418,7 @@ pub fn uninstall_skill(name: &str) -> Result<(), String> {
     lf.save(&lock_path)
         .map_err(|e| format!("Failed to save lockfile '{}': {}", lock_path.display(), e))?;
 
-    let _ = project_manifest::remove_skill_from_all_projects(name);
+    let _ = projects::remove_skill_from_all_projects(name);
     installed_skill::invalidate_cache();
 
     Ok(())

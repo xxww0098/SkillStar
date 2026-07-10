@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::projects::agents::{binary_name_for_builtin, builtin_cli_entries};
+use crate::agents::{binary_name_for_builtin, builtin_cli_entries};
 
 use super::types::AgentCliInfo;
 

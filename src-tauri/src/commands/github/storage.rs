@@ -3,11 +3,12 @@
 //! (lockfile, installed-skill cache) with agent unlinking — Tauri-side glue,
 //! not domain logic, so they live in the command layer.
 
-use crate::core::{lockfile, repo_scanner};
+use crate::core::lockfile;
+use skillstar_skills::repo_scanner;
 use skillstar_core::infra::error::AppError;
 use skillstar_core::infra::{fs_ops, paths};
-use skillstar_projects::projects::agents as agent_profile;
-use skillstar_projects::projects::sync;
+use skillstar_skills::agents as agent_profile;
+use skillstar_skills::deployment;
 use skillstar_skills::git::repo_history;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -146,7 +147,7 @@ pub async fn force_delete_installed_skills() -> Result<usize, AppError> {
 
         // Remove all global skill symlinks from known agents to avoid dangling links.
         for profile in agent_profile::list_profiles() {
-            let _ = sync::unlink_all_skills_from_agent(&profile.id);
+            let _ = deployment::unlink_all_skills_from_agent(&profile.id);
         }
 
         if hub_dir.exists() {
@@ -162,7 +163,7 @@ pub async fn force_delete_installed_skills() -> Result<usize, AppError> {
         let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
         lf.skills.clear();
         let _ = lf.save(&lock_path);
-        crate::core::installed_skill::invalidate_cache();
+        skillstar_skills::installed_skill::invalidate_cache();
         Ok(removed_count)
     })
     .await?
@@ -200,7 +201,7 @@ pub async fn force_delete_repo_caches() -> Result<usize, AppError> {
 
         // Remove linked references from agent skill dirs.
         for name in &removed_skill_names {
-            let _ = sync::remove_skill_from_all_agents(name);
+            let _ = deployment::remove_skill_from_all_agents(name);
         }
 
         // Prune lockfile entries for removed cache-backed skills.
@@ -213,7 +214,7 @@ pub async fn force_delete_repo_caches() -> Result<usize, AppError> {
             lf.skills
                 .retain(|entry| !removed_skill_names.contains(&entry.name));
             let _ = lf.save(&lock_path);
-            crate::core::installed_skill::invalidate_cache();
+            skillstar_skills::installed_skill::invalidate_cache();
         }
 
         if cache_dir.exists() {
@@ -296,7 +297,7 @@ pub async fn clean_broken_skills() -> Result<usize, AppError> {
 
         // Phase 2: Clean agent-side symlinks for removed skills
         for name in &removed_names {
-            let _ = sync::remove_skill_from_all_agents(name);
+            let _ = deployment::remove_skill_from_all_agents(name);
         }
 
         // Phase 3: Prune orphaned lockfile entries
@@ -315,7 +316,7 @@ pub async fn clean_broken_skills() -> Result<usize, AppError> {
         let orphans_removed = before - lf.skills.len();
         if orphans_removed > 0 {
             let _ = lf.save(&lock_path);
-            crate::core::installed_skill::invalidate_cache();
+            skillstar_skills::installed_skill::invalidate_cache();
             fixed += orphans_removed;
         }
 

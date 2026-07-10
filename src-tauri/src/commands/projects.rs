@@ -1,6 +1,6 @@
 use skillstar_core::infra::error::AppError;
-use skillstar_projects::projects::project_manifest as pm;
-use skillstar_projects::projects::project_manifest::{ImportResult, ImportTarget};
+use skillstar_skills::projects as pm;
+use skillstar_skills::projects::{ImportResult, ImportTarget};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -15,7 +15,7 @@ pub async fn create_project_skills(
     selected_skills: Vec<String>,
     agent_types: Vec<String>,
 ) -> Result<u32, AppError> {
-    skillstar_projects::projects::sync::create_project_skills(
+    skillstar_skills::deployment::create_project_skills(
         &std::path::PathBuf::from(project_path),
         &selected_skills,
         &agent_types,
@@ -122,8 +122,8 @@ pub(crate) fn import_scanned_skills(
     let canonical_project_name = entry.name;
 
     let hub_dir = fs_paths::hub_skills_dir();
-    crate::core::skills::local_skill::reconcile_hub_symlinks();
-    let profiles = skillstar_projects::projects::agents::list_profiles();
+    skillstar_skills::local_skill::reconcile_hub_symlinks();
+    let profiles = skillstar_skills::agents::list_profiles();
     let project = Path::new(project_path);
 
     std::fs::create_dir_all(&hub_dir)
@@ -194,7 +194,7 @@ pub(crate) fn import_scanned_skills(
 
         // Step 1: Adopt into local storage if not already present in the hub.
         if !hub_skill_dir.exists() {
-            crate::core::skills::local_skill::adopt_existing_dir(&target.name, &source_dir)
+            skillstar_skills::local_skill::adopt_existing_dir(&target.name, &source_dir)
                 .with_context(|| {
                     format!(
                         "failed to adopt discovered project skill '{}' into skills-local",
@@ -237,7 +237,7 @@ mod tests {
     use super::*;
     use anyhow::Result;
     use pm::{list_projects, load_skills_list, register_project, save_skills_list};
-    use skillstar_projects::projects::project_manifest::SkillsList;
+    use skillstar_skills::projects::SkillsList;
     use std::ffi::OsStr;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};

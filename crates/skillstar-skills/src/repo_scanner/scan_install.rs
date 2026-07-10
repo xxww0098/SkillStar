@@ -84,7 +84,7 @@ pub fn install_from_repo(
             Some(target.folder_path.clone())
         };
 
-        lf.upsert(skillstar_core::types::lockfile::LockEntry {
+        lf.upsert(crate::lockfile::LockEntry {
             name: target.id.clone(),
             git_url: repo_url.to_string(),
             tree_hash,
@@ -106,7 +106,7 @@ pub fn install_from_repo(
 fn can_replace_existing_skill(
     skill_name: &str,
     repo_url: &str,
-    existing_entry: Option<&skillstar_core::types::lockfile::LockEntry>,
+    existing_entry: Option<&crate::lockfile::LockEntry>,
 ) -> bool {
     if local_skill::is_local_skill(skill_name) {
         return false;

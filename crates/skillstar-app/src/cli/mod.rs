@@ -12,7 +12,8 @@ pub use helpers::*;
 #[derive(Parser)]
 #[command(
     name = "skillstar",
-    about = "SkillStar — Skill management for AI agents"
+    about = "SkillStar — Skill management for AI agents",
+    version
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -213,5 +214,67 @@ pub fn run(args: Vec<String>, handlers: CliHandlers) {
             PackAction::Remove { name } => (handlers.pack_remove)(&name),
         },
         Commands::Gui => (handlers.gui)(),
+    }
+}
+
+/// Return true when `args[1]` is a known CLI subcommand/flag that must not
+/// fall through to GUI mode. Driven from the same Clap `Commands` surface
+/// (and its aliases) so new subcommands only need updating here.
+pub fn is_cli_subcommand(first_arg: &str) -> bool {
+    matches!(
+        first_arg,
+        "list"
+            | "find"
+            | "search"
+            | "install"
+            | "add"
+            | "update"
+            | "remove"
+            | "rm"
+            | "uninstall"
+            | "init"
+            | "create"
+            | "publish"
+            | "doctor"
+            | "pack"
+            | "help"
+            | "-h"
+            | "--help"
+            | "-V"
+            | "--version"
+    )
+}
+
+/// `gui` is a CLI subcommand that intentionally falls through to GUI mode.
+pub fn is_gui_force_arg(first_arg: &str) -> bool {
+    first_arg == "gui"
+}
+
+#[cfg(test)]
+mod mode_tests {
+    use super::{is_cli_subcommand, is_gui_force_arg};
+
+    #[test]
+    fn known_cli_subcommands_are_detected() {
+        for arg in [
+            "list", "find", "search", "install", "add", "update", "remove", "rm",
+            "uninstall", "init", "create", "publish", "doctor", "pack", "help",
+            "-h", "--help", "-V", "--version",
+        ] {
+            assert!(is_cli_subcommand(arg), "{arg} should be CLI");
+            assert!(!is_gui_force_arg(arg));
+        }
+    }
+
+    #[test]
+    fn gui_force_is_not_cli_dispatch() {
+        assert!(is_gui_force_arg("gui"));
+        assert!(!is_cli_subcommand("gui"));
+    }
+
+    #[test]
+    fn unknown_args_do_not_look_like_cli() {
+        assert!(!is_cli_subcommand("totally-unknown"));
+        assert!(!is_cli_subcommand("--some-os-flag"));
     }
 }

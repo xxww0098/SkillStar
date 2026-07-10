@@ -1,10 +1,7 @@
-use crate::core::{
-    installed_skill, local_skill,
-    skill::{Skill, extract_github_source_from_url, extract_skill_description},
-    skills::{DefaultSkillManager, SkillManager},
-};
+use crate::core::skill::{Skill, extract_github_source_from_url, extract_skill_description};
 use skillstar_core::infra::error::AppError;
-use skillstar_projects::projects::sync;
+use skillstar_skills::deployment;
+use skillstar_skills::{installed_skill, local_skill, skill_install, skill_update};
 
 use super::skill_paths::resolve_skill_content_dir;
 
@@ -42,7 +39,7 @@ pub async fn refresh_skill_updates(
 
 #[tauri::command]
 pub async fn install_skill(url: String, name: Option<String>) -> Result<Skill, AppError> {
-    tokio::task::spawn_blocking(move || DefaultSkillManager.install_skill(url, name))
+    tokio::task::spawn_blocking(move || skill_install::install_skill(url, name))
         .await
         .map_err(|e| AppError::Other(format!("install task panicked: {e}")))?
         .map_err(AppError::Other)
@@ -56,9 +53,7 @@ pub async fn uninstall_skill(name: String) -> Result<(), AppError> {
 }
 
 fn uninstall_skill_sync(name: String) -> Result<(), AppError> {
-    DefaultSkillManager
-        .uninstall_skill(&name)
-        .map_err(AppError::Other)
+    skill_install::uninstall_skill(&name).map_err(AppError::Other)
 }
 
 #[tauri::command]
@@ -74,11 +69,11 @@ pub async fn toggle_skill_for_agent(
         enable,
         "toggle_skill_for_agent called"
     );
-    sync::toggle_skill_for_agent(&skill_name, &agent_id, enable).map_err(|e| {
+    deployment::toggle_skill_for_agent(&skill_name, &agent_id, enable).map_err(|e| {
         tracing::error!(target: "cmd", skill_name, agent_id, enable, error = %e, "toggle_skill_for_agent failed");
         AppError::Anyhow(e)
     })?;
-    crate::core::installed_skill::invalidate_cache();
+    installed_skill::invalidate_cache();
     tracing::info!(target: "cmd", skill_name, agent_id, enable, "toggle_skill_for_agent completed");
     Ok(())
 }
@@ -91,9 +86,7 @@ pub async fn update_skill(name: String) -> Result<UpdateResult, AppError> {
 }
 
 fn update_skill_sync(name: String) -> Result<UpdateResult, AppError> {
-    let outcome = DefaultSkillManager
-        .update_skill(&name)
-        .map_err(AppError::Anyhow)?;
+    let outcome = skill_update::update_skill(&name).map_err(AppError::Anyhow)?;
 
     let skills_dir = skillstar_core::infra::paths::hub_skills_dir();
     let path = skills_dir.join(&name);

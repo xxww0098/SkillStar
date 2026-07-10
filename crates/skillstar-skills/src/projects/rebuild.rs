@@ -7,7 +7,7 @@ use std::path::Path;
 use super::index::register_project;
 use super::store::{load_skills_list, save_skills_list};
 use super::types::{SkillsList, prune_deploy_modes_for_agents};
-use crate::projects::agents as agent_profile;
+use crate::agents as agent_profile;
 use skillstar_core::infra::fs_ops;
 
 /// Rebuild a project's skills-list.json from on-disk project skill directories.

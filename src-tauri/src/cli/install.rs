@@ -8,8 +8,11 @@ use skillstar_app::cli::{
     resolve_rel_dirs_for_agents, validate_agent_ids,
 };
 
-use crate::core::{local_skill, repo_scanner, skill_bundle, skill_install};
-use skillstar_projects::projects::sync;
+use skillstar_skills::local_skill;
+use skillstar_skills::repo_scanner;
+use skillstar_skills::skill_bundle;
+use skillstar_skills::skill_install;
+use skillstar_skills::deployment;
 use std::path::{Path, PathBuf};
 
 use super::{AddKind, classify_add_input};
@@ -295,7 +298,7 @@ fn install_local_dir(path: &Path, opts: &InstallOpts<'_>) {
     };
     let rel_dirs = resolve_rel_dirs_for_agents(&agent_ids);
 
-    match sync::create_project_skills(&project_path, &adopted, &agent_ids) {
+    match deployment::create_project_skills(&project_path, &adopted, &agent_ids) {
         Ok(link_count) => {
             println!(
                 "✓ Linked {} skill(s) into project {} ({} link(s)).",
@@ -641,7 +644,7 @@ pub(super) fn cmd_install(opts: InstallOpts<'_>) {
     let rel_dirs = resolve_rel_dirs_for_agents(&agent_ids);
     let selected_skills = skill_names.clone();
 
-    match sync::create_project_skills(&project_path, &selected_skills, &agent_ids) {
+    match deployment::create_project_skills(&project_path, &selected_skills, &agent_ids) {
         Ok(linked_count) => {
             println!(
                 "✓ Linked {} skill(s) into project {} ({} link(s)).",

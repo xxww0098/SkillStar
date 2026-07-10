@@ -216,7 +216,7 @@ pub async fn update_tool_settings(
 /// but not yet configured, or config may exist from a previous installation).
 ///
 /// Binary probing must stay aligned with agent-profile install detection
-/// (`skillstar_projects::…::detect`) — both call
+/// (`skillstar_skills::…::detect`) — both call
 /// `skillstar_core::infra::path_env::which_in_enriched`.
 #[tauri::command]
 pub async fn detect_tool_installation(tool_id: String) -> Result<serde_json::Value, AppError> {

@@ -4,7 +4,7 @@ use std::sync::{OnceLock, RwLock};
 use std::time::{Duration, Instant};
 use tracing::warn;
 
-use crate::projects::agents as agent_profile;
+use crate::agents as agent_profile;
 
 const PROFILE_CACHE_TTL: Duration = Duration::from_secs(2);
 
@@ -410,7 +410,7 @@ pub fn batch_link_skills_to_agent(skill_names: &[String], agent_id: &str) -> Res
 
 /// Create project-level skill symlinks in a project directory.
 ///
-/// This is a thin facade over `project_manifest::add_skills_to_project()` — all
+/// This is a thin facade over `crate::projects::add_skills_to_project()` — all
 /// project-level skill management is canonically owned by `project_manifest`.
 ///
 /// The function registers the project (if not already registered), merges the
@@ -421,7 +421,7 @@ pub fn create_project_skills(
     selected_skills: &[String],
     agent_types: &[String],
 ) -> Result<u32> {
-    crate::projects::project_manifest::add_skills_to_project(
+    crate::projects::add_skills_to_project(
         &project_path.to_string_lossy(),
         selected_skills,
         agent_types,
@@ -570,7 +570,7 @@ mod tests {
 
     #[test]
     fn batch_link_skips_missing_skills_without_creating_agent_dir() -> Result<()> {
-        let _guard = crate::projects::lock_test_env();
+        let _guard = crate::lock_test_env();
         invalidate_profile_cache();
 
         let tmp = tempfile::tempdir()?;

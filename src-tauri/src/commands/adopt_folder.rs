@@ -6,7 +6,8 @@
 use serde::Serialize;
 use std::path::PathBuf;
 
-use crate::core::{installed_skill, local_skill};
+use skillstar_skills::installed_skill;
+use skillstar_skills::local_skill;
 use skillstar_core::infra::error::AppError;
 
 #[derive(Debug, Clone, Serialize)]

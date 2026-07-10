@@ -3,7 +3,7 @@
 //! Built-in and custom agents both implement [`spec::AgentSpec`]; the
 //! [`registry::AgentRegistry`] turns specs + persisted [`profile_storage`]
 //! prefs into the enriched [`AgentProfile`] list. This module is the frozen
-//! public façade — `skillstar_projects::projects::agents::{list_profiles,
+//! public façade — `skillstar_skills::agents::{list_profiles,
 //! find_profile, toggle_profile, add_custom_profile, remove_custom_profile,
 //! AgentProfile, CustomProfileDef}` must keep their paths/signatures stable.
 
@@ -79,7 +79,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-        crate::projects::lock_test_env()
+        crate::lock_test_env()
     }
 
     fn set_env<K: AsRef<OsStr>, V: AsRef<OsStr>>(key: K, value: V) {

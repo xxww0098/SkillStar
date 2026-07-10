@@ -7,9 +7,9 @@ fn runtime_config() -> skillstar_marketplace::snapshot::SnapshotRuntimeConfig {
     skillstar_marketplace::snapshot::SnapshotRuntimeConfig::new(
         skillstar_core::infra::paths::marketplace_db_path(),
         skillstar_core::infra::paths::data_root(),
-        super::installed_skill::installed_snapshot_markers,
+        skillstar_skills::installed_skill::installed_snapshot_markers,
         || -> InstalledSkillsFuture {
-            Box::pin(super::installed_skill::list_installed_skills_fast())
+            Box::pin(skillstar_skills::installed_skill::list_installed_skills_fast())
         },
     )
 }

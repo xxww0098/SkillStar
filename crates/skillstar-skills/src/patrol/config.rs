@@ -48,7 +48,7 @@ mod tests {
         // Share the crate-wide env lock so patrol tests serialize with the
         // `projects` tests — they all mutate the process-global
         // `SKILLSTAR_DATA_DIR`, so a per-module lock would let them race.
-        let _guard = crate::projects::lock_test_env();
+        let _guard = crate::lock_test_env();
 
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)

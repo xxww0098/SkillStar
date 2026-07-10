@@ -5,7 +5,7 @@ use anyhow::Result;
 use super::index::list_projects;
 use super::store::load_skills_list;
 use super::types::{deploy_skill_auto, ensure_project_root_exists};
-use crate::projects::agents as agent_profile;
+use crate::agents as agent_profile;
 use skillstar_core::infra::{fs_ops, paths as fs_paths};
 
 /// Refresh copy-deployed skills whose content has drifted from the hub.

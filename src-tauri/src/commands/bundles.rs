@@ -1,4 +1,4 @@
-use crate::core::skill_bundle;
+use skillstar_skills::skill_bundle;
 use skillstar_core::infra::error::AppError;
 
 #[tauri::command]

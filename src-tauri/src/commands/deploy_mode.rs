@@ -44,7 +44,7 @@ pub async fn get_skill_deploy_status(
 }
 
 fn compute_status(skill_name: &str) -> Result<Vec<AgentDeployStatus>, AppError> {
-    let profiles = skillstar_projects::projects::agents::list_profiles();
+    let profiles = skillstar_skills::agents::list_profiles();
     let mut rows: Vec<AgentDeployStatus> = Vec::with_capacity(profiles.len());
 
     for profile in profiles {

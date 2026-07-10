@@ -13,9 +13,9 @@ use tracing::{error, warn};
 
 use std::collections::HashSet;
 
-use super::{local_skill, repo_scanner};
-use skillstar_projects::patrol::config::{load_config, save_config};
-pub use skillstar_projects::patrol::types::{
+use skillstar_skills::{local_skill, repo_scanner};
+use skillstar_skills::patrol::config::{load_config, save_config};
+pub use skillstar_skills::patrol::types::{
     HubSkillEntry, PatrolCheckEvent, PatrolConfig, PatrolStatus,
 };
 

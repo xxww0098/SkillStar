@@ -8116,7 +8116,6 @@ dependencies = [
  "skillstar-fingerprint",
  "skillstar-marketplace",
  "skillstar-models",
- "skillstar-projects",
  "skillstar-skills",
  "skillstar-ssh",
  "skillstar-sync",
@@ -8189,7 +8188,6 @@ dependencies = [
  "skillstar-core",
  "skillstar-marketplace",
  "skillstar-models",
- "skillstar-projects",
  "skillstar-skills",
  "skillstar-usage",
  "tempfile",
@@ -8231,7 +8229,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
- "skillstar-core",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -8287,21 +8284,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "skillstar-projects"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "skillstar-core",
- "tempfile",
- "toml 1.1.2+spec-1.1.0",
- "tracing",
-]
-
-[[package]]
 name = "skillstar-providers"
 version = "0.1.0"
 
@@ -8321,8 +8303,6 @@ dependencies = [
  "serde_yaml",
  "sha2 0.11.0",
  "skillstar-core",
- "skillstar-marketplace",
- "skillstar-projects",
  "tar",
  "tempfile",
  "tokio",

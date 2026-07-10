@@ -2,7 +2,7 @@ use crate::git::ops as git_ops;
 use anyhow::{Context, Result, anyhow};
 use skillstar_core::config::github_mirror;
 use skillstar_core::infra::{fs_ops, path_env::command_with_path, paths};
-use skillstar_core::types::update_checker;
+use crate::update_checker;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -112,29 +112,13 @@ fn is_shallow_repo(repo_dir: &Path) -> bool {
 }
 
 pub fn prefetch_unique_repos(skill_paths: &[PathBuf]) -> HashSet<PathBuf> {
-    update_checker::prefetch_unique_repos(
-        skill_paths,
-        &paths::repos_cache_dir(),
-        git_ops::find_repo_root,
-        |root| {
-            git_ops::run_git_shallow_fetch(root, &["fetch", "--depth", "1", "--quiet"])
-                .map(|_| ())
-                .map_err(|e| {
-                    tracing::warn!(
-                        target: "update_checker",
-                        path = %root.display(),
-                        error = %e,
-                        "prefetch git fetch failed — will preserve existing update state"
-                    );
-                    e
-                })
-        },
-    )
+    // Path-bound ownership lives in update_checker (git fetch + repos_cache_dir).
+    update_checker::prefetch_unique_repos(skill_paths)
 }
 
 pub fn check_repo_skill_update_local(
     skill_path: &Path,
     failed_fetch_roots: &HashSet<PathBuf>,
 ) -> Option<bool> {
-    update_checker::check_update_local(skill_path, failed_fetch_roots, git_ops::find_repo_root)
+    update_checker::check_update_local(skill_path, failed_fetch_roots)
 }

@@ -1,7 +1,5 @@
-use crate::core::{
-    local_skill,
-    skill::{Skill, SkillContent, parse_skill_content},
-};
+use crate::core::skill::{Skill, SkillContent, parse_skill_content};
+use skillstar_skills::local_skill;
 use skillstar_core::infra::error::AppError;
 use skillstar_skills::git::ops as git_ops;
 
@@ -35,7 +33,7 @@ pub async fn create_local_skill_from_content(
     }
 
     let _ = local_skill::create(&name, Some(&content)).map_err(AppError::Anyhow)?;
-    crate::core::installed_skill::invalidate_cache();
+    skillstar_skills::installed_skill::invalidate_cache();
 
     Ok(())
 }
@@ -43,14 +41,14 @@ pub async fn create_local_skill_from_content(
 #[tauri::command]
 pub async fn create_local_skill(name: String, content: Option<String>) -> Result<Skill, AppError> {
     let skill = local_skill::create(&name, content.as_deref()).map_err(AppError::Anyhow)?;
-    crate::core::installed_skill::invalidate_cache();
+    skillstar_skills::installed_skill::invalidate_cache();
     Ok(skill)
 }
 
 #[tauri::command]
 pub async fn delete_local_skill(name: String) -> Result<(), AppError> {
     local_skill::delete(&name).map_err(AppError::Anyhow)?;
-    crate::core::installed_skill::invalidate_cache();
+    skillstar_skills::installed_skill::invalidate_cache();
     Ok(())
 }
 

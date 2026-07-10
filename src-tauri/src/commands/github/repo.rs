@@ -2,7 +2,9 @@
 //! new-skill detection commands. Thin forwarders over `skillstar_skills::git`
 //! and `crate::core::repo_scanner`.
 
-use crate::core::{local_skill, lockfile, repo_scanner};
+use skillstar_skills::local_skill;
+use crate::core::lockfile;
+use skillstar_skills::repo_scanner;
 use skillstar_core::infra::error::AppError;
 use skillstar_core::infra::fs_ops;
 use skillstar_skills::git::{dismissed_skills, gh_manager, repo_history};
@@ -89,7 +91,7 @@ pub async fn publish_skill_to_github(
                     folder_path: target.folder_path,
                 };
                 match repo_scanner::install_from_repo(&scan.source, &git_url, &[install_target]) {
-                    Ok(_) => crate::core::installed_skill::invalidate_cache(),
+                    Ok(_) => skillstar_skills::installed_skill::invalidate_cache(),
                     Err(e) => error!(target: "publish", "failed to re-install from repo: {e}"),
                 }
             }
@@ -134,7 +136,7 @@ pub async fn install_from_scan(
 ) -> Result<Vec<String>, AppError> {
     tokio::task::spawn_blocking(move || {
         let install_result = repo_scanner::install_from_repo(&source, &repo_url, &skills);
-        crate::core::installed_skill::invalidate_cache();
+        skillstar_skills::installed_skill::invalidate_cache();
         install_result
     })
     .await?

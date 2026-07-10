@@ -390,8 +390,6 @@ pub fn run() {
             commands::models_commands::test_provider_latency,
             commands::models_commands::test_all_providers_latency,
             commands::models_commands::get_tool_config_targets,
-            commands::models_commands::sync_provider_to_tool,
-            commands::models_commands::sync_provider_to_all_tools,
             // Flat store commands (v2)
             commands::models_commands::get_providers_flat,
             commands::models_commands::create_provider_flat,

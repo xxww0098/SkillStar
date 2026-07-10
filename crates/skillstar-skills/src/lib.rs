@@ -1,15 +1,16 @@
-//! skillstar-skills: skill lifecycle management.
+//! skillstar-skills: skill library + agents + projects + patrol + terminal.
 //!
-//! This crate owns skill management logic including install, update, bundle,
-//! local skill authoring, repo scanning, discovery, and skill groups.
+//! Owns install/update/uninstall, lockfile, update detection, local authoring,
+//! agent registry, project deployment, patrol check logic, and Launch Deck
+//! terminal helpers. Callers should use the narrow public modules rather than
+//! reaching through temporary re-exports.
 //!
 //! | Module | Responsibility |
 //! |---|---|
-//! | [`discovery`] | Pure filesystem SKILL.md scanning (priority + full-depth) |
-//! | [`lockfile`] | Lockfile persistence (installed skill records) |
-//! | [`shared`] | Shared types (`Skill`, `SkillContent`) and helpers |
-//! | [`source_resolver`] | URL normalization and comparison |
-//! | [`skill_group`] | Skill group (deck) management |
+//! | [`lockfile`] / [`update_checker`] | Installed-skill records and repo update detection |
+//! | [`agents`] / [`projects`] / [`deployment`] | Agent profiles, project manifest, link-copy deploy |
+//! | [`patrol`] / [`terminal`] | Patrol config/types and Launch Deck CLI registry |
+//! | library modules | install, update, bundle, local, repo scan, discovery, groups |
 
 pub mod discovery;
 pub mod frontmatter;
@@ -28,7 +29,14 @@ pub mod skill_pack;
 pub mod skill_update;
 pub mod update_checker;
 
-pub use skillstar_projects::projects::project_manifest;
+// Agent / project / deployment / patrol / terminal (merged from former skillstar-projects)
+pub mod agents;
+pub mod projects;
+pub mod deployment;
+pub mod patrol;
+pub mod terminal;
+
+
 
 // ── Convenience re-exports ─────────────────────────────────────────
 
@@ -36,7 +44,7 @@ pub use discovery::{
     DiscoveredSkill, PRIORITY_SKILL_DIRS, dedupe_discovered_skills, discover_skills,
     find_all_skill_md_files, source_priority,
 };
-pub use lockfile::Lockfile;
+pub use lockfile::{LockEntry, Lockfile};
 pub use shared::{
     Skill, SkillCategory, SkillContent, SkillType, extract_github_source_from_url,
     extract_skill_description, parse_skill_content,
