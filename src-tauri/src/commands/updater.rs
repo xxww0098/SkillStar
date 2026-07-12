@@ -1,31 +1,37 @@
-//! App update commands with GitHub mirror support.
+//! App update detection via GitHub Releases (with optional mirror).
 //!
-//! The Tauri updater plugin's JS `check()` always uses the static endpoints
-//! from `tauri.conf.json`.  When the user enables GitHub mirror acceleration,
-//! those endpoints (which point to `github.com`) are unreachable.
+//! Active path (0.0.3+): query GitHub's public Releases API, compare the
+//! latest non-draft / non-prerelease tag with the running app version, and
+//! return a `release_url` the UI can open in the system browser.
 //!
-//! This module provides Rust-side commands that:
-//! 1. Read the mirror config at runtime
-//! 2. Rewrite the update endpoint URL through the active mirror
-//! 3. Use `UpdaterExt::updater_builder()` to build a one-off updater
-//! 4. Store the resulting `Update` object in app state for download/install
+//! Deferred path: `download_and_install_update` / `restart_after_update` still
+//! use `tauri-plugin-updater` for a future signed-artifact install once
+//! `TAURI_SIGNING_PRIVATE_KEY` + `createUpdaterArtifacts` are restored. See
+//! `docs/backend.md` § Auto-Update.
 
 use std::sync::Mutex;
+use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use skillstar_core::config::github_mirror;
 use skillstar_core::infra::error::AppError;
+use skillstar_core::infra::http_client::probe_http_client;
 use tauri::Manager;
 use tracing::{info, warn};
 
-use skillstar_core::config::github_mirror;
+/// Canonical GitHub Releases API for the SkillStar repo.
+const RELEASES_LATEST_API: &str =
+    "https://api.github.com/repos/xxww0098/SkillStar/releases/latest";
 
-/// The original (non-mirrored) update endpoint from tauri.conf.json.
-const UPSTREAM_ENDPOINT: &str =
-    "https://github.com/xxww0098/SkillStar/releases/latest/download/latest.json";
+/// Fallback page when the API payload has no `html_url`.
+const RELEASES_PAGE: &str = "https://github.com/xxww0098/SkillStar/releases/latest";
+
+const CHECK_TIMEOUT: Duration = Duration::from_secs(15);
 
 // ── State ──────────────────────────────────────────────────────────────
 
-/// Holds the pending `Update` object between check → download → install steps.
+/// Holds the pending `Update` object between check → download → install
+/// steps for the deferred tauri-plugin-updater install path.
 pub struct PendingUpdate {
     inner: Mutex<Option<tauri_plugin_updater::Update>>,
 }
@@ -46,103 +52,195 @@ pub struct UpdateCheckResult {
     pub version: Option<String>,
     pub date: Option<String>,
     pub body: Option<String>,
+    /// GitHub release page the user can open to download installers.
+    pub release_url: Option<String>,
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────
+// ── GitHub payload ─────────────────────────────────────────────────────
 
-/// Build the effective endpoint list.
-///
-/// If mirror is enabled, prepend the mirror-rewritten URL so it's tried first,
-/// then keep the direct GitHub URL as fallback.
-fn effective_endpoints() -> Vec<url::Url> {
-    let direct = url::Url::parse(UPSTREAM_ENDPOINT).expect("hardcoded URL is valid");
+#[derive(Debug, Deserialize)]
+struct GitHubRelease {
+    tag_name: String,
+    html_url: String,
+    #[serde(default)]
+    published_at: Option<String>,
+    #[serde(default)]
+    body: Option<String>,
+    #[serde(default)]
+    draft: bool,
+    #[serde(default)]
+    prerelease: bool,
+}
 
-    if let Some(mirror_base) = github_mirror::effective_mirror_url() {
-        // Mirror proxy pattern: `https://mirror.example/https://github.com/…`
-        let mirrored_url_str = format!("{mirror_base}{UPSTREAM_ENDPOINT}");
-        if let Ok(mirrored) = url::Url::parse(&mirrored_url_str) {
-            info!(target: "updater", "using mirror endpoint: {mirrored}");
-            return vec![mirrored, direct];
+// ── Pure helpers (unit-tested) ─────────────────────────────────────────
+
+/// Strip a single leading `v`/`V` and parse `major.minor.patch`.
+/// Extra pre-release/build suffixes after the third number are ignored for
+/// the numeric triple (e.g. `1.2.3-beta` → `(1,2,3)`).
+pub(crate) fn parse_semver_triple(raw: &str) -> Option<(u64, u64, u64)> {
+    let s = raw.trim().trim_start_matches(['v', 'V']);
+    if s.is_empty() {
+        return None;
+    }
+    let mut parts = s.split('.');
+    let major = parse_numeric_prefix(parts.next()?)?;
+    let minor = parse_numeric_prefix(parts.next()?)?;
+    let patch = parse_numeric_prefix(parts.next()?)?;
+    Some((major, minor, patch))
+}
+
+fn parse_numeric_prefix(part: &str) -> Option<u64> {
+    let digits: String = part.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        return None;
+    }
+    digits.parse().ok()
+}
+
+/// True when `remote` is a strictly greater semver than `current`.
+/// Falls back to string inequality (after stripping `v`) when either side
+/// is not parseable as `x.y.z`.
+pub(crate) fn is_remote_newer(remote: &str, current: &str) -> bool {
+    match (parse_semver_triple(remote), parse_semver_triple(current)) {
+        (Some(r), Some(c)) => r > c,
+        _ => {
+            let r = remote.trim().trim_start_matches(['v', 'V']);
+            let c = current.trim().trim_start_matches(['v', 'V']);
+            !r.is_empty() && r != c
         }
-        warn!(target: "updater", "failed to parse mirror URL, falling back to direct");
+    }
+}
+
+/// Normalise a tag like `v0.0.3` → `0.0.3` for display / comparison.
+pub(crate) fn strip_v_prefix(tag: &str) -> String {
+    tag.trim().trim_start_matches(['v', 'V']).to_string()
+}
+
+/// Candidate URLs for the Releases API: mirror-rewritten first (if any),
+/// then the direct GitHub URL as fallback.
+fn release_api_candidates() -> Vec<String> {
+    let mut urls = Vec::with_capacity(2);
+    if let Some(mirror_base) = github_mirror::effective_mirror_url() {
+        urls.push(format!("{mirror_base}{RELEASES_LATEST_API}"));
+    }
+    urls.push(RELEASES_LATEST_API.to_string());
+    urls
+}
+
+async fn fetch_latest_release(client: &reqwest::Client, user_agent: &str) -> Result<GitHubRelease, AppError> {
+    let mut last_err: Option<String> = None;
+
+    for url in release_api_candidates() {
+        info!(target: "updater", "fetching release metadata from {url}");
+        match client
+            .get(&url)
+            .header("User-Agent", user_agent)
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .send()
+            .await
+        {
+            Ok(resp) => {
+                let status = resp.status();
+                if !status.is_success() {
+                    let body = resp.text().await.unwrap_or_default();
+                    let snippet: String = body.chars().take(200).collect();
+                    last_err = Some(format!("GitHub API {status}: {snippet}"));
+                    warn!(target: "updater", "release fetch failed ({status}) via {url}");
+                    continue;
+                }
+                return resp
+                    .json::<GitHubRelease>()
+                    .await
+                    .map_err(|e| AppError::Other(format!("failed to parse release JSON: {e}")));
+            }
+            Err(e) => {
+                last_err = Some(e.to_string());
+                warn!(target: "updater", "release fetch error via {url}: {e}");
+            }
+        }
     }
 
-    vec![direct]
+    Err(AppError::Other(format!(
+        "update check failed: {}",
+        last_err.unwrap_or_else(|| "no endpoints tried".into())
+    )))
 }
 
 // ── Commands ───────────────────────────────────────────────────────────
 
-/// Check for an app update, using mirror-aware endpoints.
+/// Check GitHub Releases for a newer app version.
 ///
-/// Returns update metadata.  The `Update` object is stored in app state so
-/// `download_app_update` / `install_app_update` can use it later.
+/// Network / API failures return `Err` so the UI can show an honest error
+/// instead of silently claiming "up to date".
 #[tauri::command]
 pub async fn check_app_update(app: tauri::AppHandle) -> Result<UpdateCheckResult, AppError> {
-    use tauri_plugin_updater::UpdaterExt;
+    let current = app.package_info().version.to_string();
+    let user_agent = format!("SkillStar/{current}");
 
-    let endpoints = effective_endpoints();
-    info!(target: "updater", "checking for update with {} endpoint(s)", endpoints.len());
+    let client = probe_http_client(CHECK_TIMEOUT)
+        .map_err(|e| AppError::Other(format!("failed to build HTTP client: {e}")))?;
 
-    let updater = app
-        .updater_builder()
-        .endpoints(endpoints)
-        .map_err(|e| AppError::Other(format!("failed to set endpoints: {e}")))?
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| AppError::Other(format!("failed to build updater: {e}")))?;
+    let release = fetch_latest_release(&client, &user_agent).await?;
 
-    let update = match updater.check().await {
-        Ok(u) => u,
-        Err(e) => {
-            warn!(target: "updater", "update check returned error (no release published?): {e}");
-            return Ok(UpdateCheckResult {
-                available: false,
-                version: None,
-                date: None,
-                body: None,
-            });
-        }
+    if release.draft || release.prerelease {
+        info!(target: "updater", "latest release is draft/prerelease — treating as no update");
+        return Ok(UpdateCheckResult {
+            available: false,
+            version: None,
+            date: None,
+            body: None,
+            release_url: None,
+        });
+    }
+
+    let remote_version = strip_v_prefix(&release.tag_name);
+    if remote_version.is_empty() {
+        return Err(AppError::Other("release has empty tag_name".into()));
+    }
+
+    let release_url = if release.html_url.trim().is_empty() {
+        RELEASES_PAGE.to_string()
+    } else {
+        release.html_url
     };
 
-    match update {
-        Some(update) => {
-            let result = UpdateCheckResult {
-                available: true,
-                version: Some(update.version.clone()),
-                date: update.date.map(|d| d.to_string()),
-                body: update.body.clone(),
-            };
-
-            // Store for later download/install
-            let pending = app.state::<PendingUpdate>();
-            if let Ok(mut slot) = pending.inner.lock() {
-                *slot = Some(update);
-            }
-
-            info!(target: "updater", "update available: v{}", result.version.as_deref().unwrap_or("?"));
-            Ok(result)
-        }
-        None => {
-            info!(target: "updater", "already up to date");
-            Ok(UpdateCheckResult {
-                available: false,
-                version: None,
-                date: None,
-                body: None,
-            })
-        }
+    if is_remote_newer(&remote_version, &current) {
+        info!(
+            target: "updater",
+            "update available: v{remote_version} (current v{current})"
+        );
+        Ok(UpdateCheckResult {
+            available: true,
+            version: Some(remote_version),
+            date: release.published_at,
+            body: release.body,
+            release_url: Some(release_url),
+        })
+    } else {
+        info!(
+            target: "updater",
+            "already up to date (current v{current}, remote v{remote_version})"
+        );
+        Ok(UpdateCheckResult {
+            available: false,
+            version: Some(remote_version),
+            date: release.published_at,
+            body: None,
+            release_url: Some(release_url),
+        })
     }
 }
 
-/// Download and install the pending update.
+/// Download and install the pending update (deferred tauri-plugin path).
 ///
 /// Emits `updater://download-progress` events with `{ chunk_length, content_length }`.
-/// After download completes, installs the update automatically.
+/// Only usable once a prior check stored a plugin `Update` in [`PendingUpdate`]
+/// and signed updater artifacts are published.
 #[tauri::command]
 pub async fn download_and_install_update(app: tauri::AppHandle) -> Result<(), AppError> {
     use tauri::Emitter;
 
-    // Take the update out of the mutex — we own it for the remainder of this call.
     let update = {
         let pending = app.state::<PendingUpdate>();
         let mut slot = pending
@@ -179,4 +277,48 @@ pub async fn download_and_install_update(app: tauri::AppHandle) -> Result<(), Ap
 #[tauri::command]
 pub async fn restart_after_update(app: tauri::AppHandle) -> Result<(), AppError> {
     app.restart();
+}
+
+// ── Tests ──────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::{is_remote_newer, parse_semver_triple, strip_v_prefix};
+
+    #[test]
+    fn parse_semver_accepts_v_prefix_and_plain() {
+        assert_eq!(parse_semver_triple("v0.0.3"), Some((0, 0, 3)));
+        assert_eq!(parse_semver_triple("0.0.2"), Some((0, 0, 2)));
+        assert_eq!(parse_semver_triple("V1.2.10"), Some((1, 2, 10)));
+    }
+
+    #[test]
+    fn parse_semver_strips_prerelease_suffix() {
+        assert_eq!(parse_semver_triple("1.2.3-beta.1"), Some((1, 2, 3)));
+        assert_eq!(parse_semver_triple("v2.0.0+build"), Some((2, 0, 0)));
+    }
+
+    #[test]
+    fn parse_semver_rejects_garbage() {
+        assert_eq!(parse_semver_triple(""), None);
+        assert_eq!(parse_semver_triple("v"), None);
+        assert_eq!(parse_semver_triple("abc"), None);
+        assert_eq!(parse_semver_triple("1.2"), None);
+    }
+
+    #[test]
+    fn is_remote_newer_compares_triples() {
+        assert!(is_remote_newer("0.0.3", "0.0.2"));
+        assert!(is_remote_newer("v1.0.0", "0.9.9"));
+        assert!(!is_remote_newer("0.0.2", "0.0.2"));
+        assert!(!is_remote_newer("0.0.1", "0.0.2"));
+        assert!(!is_remote_newer("v0.0.3", "0.0.3"));
+    }
+
+    #[test]
+    fn strip_v_prefix_normalises() {
+        assert_eq!(strip_v_prefix("v0.0.3"), "0.0.3");
+        assert_eq!(strip_v_prefix("0.0.3"), "0.0.3");
+        assert_eq!(strip_v_prefix("  V1.2.3 "), "1.2.3");
+    }
 }

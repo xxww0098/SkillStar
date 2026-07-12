@@ -74,7 +74,9 @@
     "readyToInstall": "准备安装",
     "restart": "重启",
     "updateError": "更新出错",
-    "updateErrorFetchRelease": "无法从远程服务器获取发布信息"
+    "updateErrorFetchRelease": "无法从远程服务器获取发布信息",
+    "openDownload": "前往下载",
+    "updateErrorOpenRelease": "无法打开下载页面，请手动访问 GitHub Releases"
   },
   "settings": {
     "title": "设置",
@@ -304,7 +306,8 @@
     "devModeBannerStepsWin10": "设置 → 更新和安全 → 开发者选项 → 开启「开发人员模式」",
     "devModeBannerStepsWin11": "设置 → 系统 → 开发者选项 → 开启「开发人员模式」",
     "devModeBannerDismiss": "知道了",
-    "devModeBannerLearnMore": "打开系统设置"
+    "devModeBannerLearnMore": "打开系统设置",
+    "updateFoundDescGithub": "v{{version}} 可用，请在左侧边栏点击「前往下载」打开 GitHub Releases"
   },
   "mySkills": {
     "title": "技能",

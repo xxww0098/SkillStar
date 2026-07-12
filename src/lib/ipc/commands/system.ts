@@ -18,6 +18,8 @@ interface UpdateCheckResult {
   version: string | null;
   date: string | null;
   body: string | null;
+  /** GitHub release page for manual download (github-release mode). */
+  release_url: string | null;
 }
 
 /** Result of an idempotent `export` write into `~/.zshrc` for Codex third_party auth. */

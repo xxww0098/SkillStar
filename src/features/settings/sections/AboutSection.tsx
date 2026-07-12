@@ -18,7 +18,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "../../../components/ui/badge";
 import { Button } from "../../../components/ui/button";
-import { UPDATER_ENABLED } from "../../../hooks/useUpdater";
+import { UPDATER_ENABLED, UPDATER_MODE } from "../../../hooks/useUpdater";
 import { openExternalUrl } from "../../../lib/externalOpen";
 import { tauriInvoke } from "../../../lib/ipc";
 import { toast } from "../../../lib/toast";
@@ -143,8 +143,10 @@ export function AboutSection({ ghInstalled, onCheckUpdate, isCheckingUpdate = fa
       }
       if (result.found) {
         const { toast: sonnerToast } = await import("sonner");
+        const descKey =
+          UPDATER_MODE === "github-release" ? "settings.updateFoundDescGithub" : "settings.updateFoundDesc";
         sonnerToast.success(t("sidebar.newUpdate"), {
-          description: t("settings.updateFoundDesc", { version: result.version }),
+          description: t(descKey, { version: result.version }),
         });
       } else {
         const { toast: sonnerToast } = await import("sonner");

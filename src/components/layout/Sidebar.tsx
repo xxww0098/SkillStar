@@ -20,7 +20,7 @@ import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { applyBackgroundStyle, type BackgroundStyle, readBackgroundStyle } from "../../lib/backgroundStyle";
 import { useNavigation } from "../../hooks/useNavigation";
-import type { UpdateStatus } from "../../hooks/useUpdater";
+import { UPDATER_MODE, type UpdateStatus } from "../../hooks/useUpdater";
 import { cn, detectPlatform } from "../../lib/utils";
 import type { NavPage } from "../../types";
 import { ModeSwitcher } from "./ModeSwitcher";
@@ -188,7 +188,7 @@ function UpdateBanner({
                 className="flex-1 inline-flex justify-center items-center gap-1.5 text-[11px] font-medium bg-primary text-primary-foreground rounded-lg py-1.5 transition-all duration-200 cursor-pointer active:scale-[0.97]"
               >
                 <Download className="w-3 h-3" />
-                {t("sidebar.updateNow")}
+                {UPDATER_MODE === "github-release" ? t("sidebar.openDownload") : t("sidebar.updateNow")}
               </button>
               <button
                 onClick={onSkip}

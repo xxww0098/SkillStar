@@ -74,7 +74,9 @@
     "readyToInstall": "Ready to install",
     "restart": "Restart",
     "updateError": "Update Error",
-    "updateErrorFetchRelease": "Could not fetch release info from remote server"
+    "updateErrorFetchRelease": "Could not fetch release info from remote server",
+    "openDownload": "Download",
+    "updateErrorOpenRelease": "Could not open the download page. Please visit GitHub Releases manually."
   },
   "settings": {
     "title": "Settings",
@@ -304,7 +306,8 @@
     "devModeBannerStepsWin10": "Settings → Update & Security → For developers → Developer Mode → On",
     "devModeBannerStepsWin11": "Settings → System → For developers → Developer Mode → On",
     "devModeBannerDismiss": "Got it",
-    "devModeBannerLearnMore": "Learn More"
+    "devModeBannerLearnMore": "Learn More",
+    "updateFoundDescGithub": "v{{version}} is available — use Download in the sidebar to open GitHub Releases"
   },
   "mySkills": {
     "title": "Cards",
