@@ -141,27 +141,6 @@ fn resolve_install_destination(opts: &InstallOpts<'_>) -> Result<InstallDestinat
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::require_settings_enabled_agents;
-
-    #[test]
-    fn non_interactive_install_never_falls_back_to_every_agent() {
-        let error = require_settings_enabled_agents(Vec::new()).unwrap_err();
-        assert!(error.contains("enabled in Settings"));
-        assert!(error.contains("--agent"));
-        assert!(error.contains("--all"));
-    }
-
-    #[test]
-    fn non_interactive_install_keeps_the_manual_target_set() {
-        let enabled = vec!["claude".to_string(), "codex".to_string()];
-        assert_eq!(
-            require_settings_enabled_agents(enabled.clone()).unwrap(),
-            enabled
-        );
-    }
-}
 
 fn deploy_installed_skills(
     skill_names: &[String],
@@ -836,5 +815,27 @@ pub fn cmd_install(opts: InstallOpts<'_>) {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::require_settings_enabled_agents;
+
+    #[test]
+    fn non_interactive_install_never_falls_back_to_every_agent() {
+        let error = require_settings_enabled_agents(Vec::new()).unwrap_err();
+        assert!(error.contains("enabled in Settings"));
+        assert!(error.contains("--agent"));
+        assert!(error.contains("--all"));
+    }
+
+    #[test]
+    fn non_interactive_install_keeps_the_manual_target_set() {
+        let enabled = vec!["claude".to_string(), "codex".to_string()];
+        assert_eq!(
+            require_settings_enabled_agents(enabled.clone()).unwrap(),
+            enabled
+        );
     }
 }

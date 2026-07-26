@@ -101,6 +101,12 @@ pub fn default_lockfile_path() -> PathBuf {
         .join("lock.json")
 }
 
+
+/// App-specific lockfile path under the SkillStar data root.
+pub fn lockfile_path() -> std::path::PathBuf {
+    skillstar_core::infra::paths::lockfile_path()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -221,9 +227,4 @@ mod tests {
 
         assert!(path.exists());
     }
-}
-
-/// App-specific lockfile path under the SkillStar data root.
-pub fn lockfile_path() -> std::path::PathBuf {
-    skillstar_core::infra::paths::lockfile_path()
 }

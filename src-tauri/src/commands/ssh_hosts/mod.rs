@@ -1,6 +1,6 @@
 //! Tauri commands for SSH remote host management.
 //!
-//! Thin forwarder layer over the `skillstar-ssh` crate, mirroring the
+//! Thin forwarder layer over `skillstar_sync::ssh`, mirroring the
 //! `commands/agents.rs` two-tier structure: all logic lives in the crate, the
 //! commands only translate errors to [`AppError`] and pass types across IPC.
 //!

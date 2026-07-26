@@ -404,15 +404,14 @@ pub(crate) fn detect_gemini_provider(path: &Path) -> Result<Option<String>> {
 pub(crate) fn detect_pi_provider(path: &Path) -> Result<Option<String>> {
     let content = std::fs::read_to_string(path)?;
     let json: Value = serde_json::from_str(&content)?;
-    if let Some(providers) = json.get("providers").and_then(|p| p.as_object()) {
-        if let Some(url) = providers
+    if let Some(providers) = json.get("providers").and_then(|p| p.as_object())
+        && let Some(url) = providers
             .iter()
             .find(|(k, _)| is_skillstar_managed_key(k))
             .and_then(|(_, v)| v.get("baseUrl"))
             .and_then(|v| v.as_str())
-        {
-            return Ok(Some(url.to_string()));
-        }
+    {
+        return Ok(Some(url.to_string()));
     }
     Ok(None)
 }

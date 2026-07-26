@@ -71,34 +71,6 @@ pub fn apply_email_title(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn prefer_email_title_upgrades_placeholders_only() {
-        assert_eq!(
-            prefer_email_title("Codex", Some("a@b.com"), &["Codex"]).as_deref(),
-            Some("a@b.com")
-        );
-        assert_eq!(
-            prefer_email_title("Grok · a@b.com", Some("a@b.com"), &["Grok"]).as_deref(),
-            Some("a@b.com")
-        );
-        assert_eq!(
-            prefer_email_title("user_01ABC", Some("a@b.com"), &["Cursor"]).as_deref(),
-            Some("a@b.com")
-        );
-        assert_eq!(
-            prefer_email_title("My Work", Some("a@b.com"), &["Codex"]),
-            None
-        );
-        assert_eq!(
-            prefer_email_title("Codex", Some("user_01"), &["Codex"]),
-            None
-        );
-    }
-}
 
 /// Builds a fresh OAuth [`Subscription`], applying every default every
 /// provider's literal used to repeat: `plan_tier`/`monthly_price`: `None`,
@@ -216,3 +188,32 @@ macro_rules! impl_oauth_fetch {
 }
 
 pub(crate) use impl_oauth_fetch;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prefer_email_title_upgrades_placeholders_only() {
+        assert_eq!(
+            prefer_email_title("Codex", Some("a@b.com"), &["Codex"]).as_deref(),
+            Some("a@b.com")
+        );
+        assert_eq!(
+            prefer_email_title("Grok · a@b.com", Some("a@b.com"), &["Grok"]).as_deref(),
+            Some("a@b.com")
+        );
+        assert_eq!(
+            prefer_email_title("user_01ABC", Some("a@b.com"), &["Cursor"]).as_deref(),
+            Some("a@b.com")
+        );
+        assert_eq!(
+            prefer_email_title("My Work", Some("a@b.com"), &["Codex"]),
+            None
+        );
+        assert_eq!(
+            prefer_email_title("Codex", Some("user_01"), &["Codex"]),
+            None
+        );
+    }
+}

@@ -13,7 +13,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
 use chrono::Utc;
@@ -110,7 +110,7 @@ fn read_json<T: for<'de> Deserialize<'de> + Default>(path: &PathBuf) -> UsageRes
     Ok(serde_json::from_str(&raw)?)
 }
 
-fn write_json_unlocked<T: Serialize>(path: &PathBuf, value: &T) -> UsageResult<()> {
+fn write_json_unlocked<T: Serialize>(path: &Path, value: &T) -> UsageResult<()> {
     let raw = serde_json::to_string_pretty(value)?;
     skillstar_core::infra::fs_ops::atomic_write(path, raw.as_bytes())?;
     Ok(())

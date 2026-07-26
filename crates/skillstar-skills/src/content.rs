@@ -406,18 +406,13 @@ fn push_snapshot_file(
 }
 
 fn read_raw_link_target(path: &Path) -> std::io::Result<PathBuf> {
-    match std::fs::read_link(path) {
-        Ok(target) => Ok(target),
-        Err(error) => {
-            #[cfg(windows)]
-            {
-                junction::get_target(path).or(Err(error))
-            }
-            #[cfg(not(windows))]
-            {
-                Err(error)
-            }
-        }
+    #[cfg(windows)]
+    {
+        std::fs::read_link(path).or_else(|error| junction::get_target(path).or(Err(error)))
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::read_link(path)
     }
 }
 

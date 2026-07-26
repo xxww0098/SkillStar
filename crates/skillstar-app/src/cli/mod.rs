@@ -255,50 +255,6 @@ pub fn is_gui_force_arg(first_arg: &str) -> bool {
     first_arg == "gui"
 }
 
-#[cfg(test)]
-mod mode_tests {
-    use super::{is_cli_subcommand, is_gui_force_arg};
-
-    #[test]
-    fn known_cli_subcommands_are_detected() {
-        for arg in [
-            "list",
-            "find",
-            "search",
-            "install",
-            "add",
-            "update",
-            "remove",
-            "rm",
-            "uninstall",
-            "init",
-            "create",
-            "publish",
-            "doctor",
-            "pack",
-            "help",
-            "-h",
-            "--help",
-            "-V",
-            "--version",
-        ] {
-            assert!(is_cli_subcommand(arg), "{arg} should be CLI");
-            assert!(!is_gui_force_arg(arg));
-        }
-    }
-
-    #[test]
-    fn gui_force_is_not_cli_dispatch() {
-        assert!(is_gui_force_arg("gui"));
-        assert!(!is_cli_subcommand("gui"));
-    }
-
-    #[test]
-    fn unknown_args_do_not_look_like_cli() {
-        assert!(!is_cli_subcommand("totally-unknown"));
-        assert!(!is_cli_subcommand("--some-os-flag"));
-    }
-}
 
 // ── Input classification (install/add routing) ───────────────────────
 
@@ -393,5 +349,50 @@ fn default_migrate_and_run() {
     );
     if let Err(err) = skillstar_marketplace::snapshot::initialize() {
         eprintln!("⚠ Marketplace snapshot init failed: {err}");
+    }
+}
+
+#[cfg(test)]
+mod mode_tests {
+    use super::{is_cli_subcommand, is_gui_force_arg};
+
+    #[test]
+    fn known_cli_subcommands_are_detected() {
+        for arg in [
+            "list",
+            "find",
+            "search",
+            "install",
+            "add",
+            "update",
+            "remove",
+            "rm",
+            "uninstall",
+            "init",
+            "create",
+            "publish",
+            "doctor",
+            "pack",
+            "help",
+            "-h",
+            "--help",
+            "-V",
+            "--version",
+        ] {
+            assert!(is_cli_subcommand(arg), "{arg} should be CLI");
+            assert!(!is_gui_force_arg(arg));
+        }
+    }
+
+    #[test]
+    fn gui_force_is_not_cli_dispatch() {
+        assert!(is_gui_force_arg("gui"));
+        assert!(!is_cli_subcommand("gui"));
+    }
+
+    #[test]
+    fn unknown_args_do_not_look_like_cli() {
+        assert!(!is_cli_subcommand("totally-unknown"));
+        assert!(!is_cli_subcommand("--some-os-flag"));
     }
 }

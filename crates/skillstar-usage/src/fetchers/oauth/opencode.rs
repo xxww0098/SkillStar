@@ -239,10 +239,10 @@ async fn fetch_inner(subscription: &mut Subscription) -> UsageResult<Subscriptio
                 .map(str::to_string)
         });
         super::common::apply_email_title(subscription, email.as_deref(), &["OpenCode"]);
-        if subscription.oauth_account_id.is_none() {
-            if let Some(email) = email {
-                subscription.oauth_account_id = Some(email);
-            }
+        if subscription.oauth_account_id.is_none()
+            && let Some(email) = email
+        {
+            subscription.oauth_account_id = Some(email);
         }
     }
     Ok(authorized_snapshot_with_warning(

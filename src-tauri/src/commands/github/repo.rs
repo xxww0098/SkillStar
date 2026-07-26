@@ -1,6 +1,6 @@
 //! GitHub / git CLI status, skill publishing, repo scan + install, and
 //! new-skill detection commands. Thin forwarders over `skillstar_skills::git`
-//! and `crate::core::repo_scanner`.
+//! and `skillstar_skills::repo_scanner`.
 
 use skillstar_core::infra::error::AppError;
 use skillstar_skills::deployment;
