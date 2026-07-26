@@ -1,12 +1,8 @@
 //! Tool configuration sync module.
 //!
-//! Writes provider settings to external tool config files (Claude Code, Codex).
-//! Only supports hardcoded known config paths for security.
-//!
-//! ## Flat Store Sync (v2)
-//!
-//! The flat store sync functions write provider credentials from `ProviderEntryFlat`
-//! to external tool config files:
+//! Writes provider credentials from the flat store (`ProviderEntryFlat`) to
+//! external tool config files. Only supports hardcoded known config paths for
+//! security. For example:
 //! - Claude Code: `~/.claude/settings.json` env block (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, ANTHROPIC_MODEL)
 //! - Codex: `~/.codex/auth.json` (OPENAI_API_KEY) + `~/.codex/config.toml` (model_provider, model, [model_providers.skillstar])
 //!
@@ -14,13 +10,11 @@
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::providers::{
-    FlatProvidersStore, ModelCatalogEntry, ProviderEntry, ProviderEntryFlat, ProviderSettings,
-    ToolActivation, catalog_from_meta,
+    FlatProvidersStore, ModelCatalogEntry, ProviderEntryFlat, ToolActivation, catalog_from_meta,
 };
 
 mod types;

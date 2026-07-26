@@ -30,6 +30,4 @@ pub use store::*;
 pub use types::*;
 
 #[cfg(test)]
-mod proptests;
-#[cfg(test)]
 mod tests;

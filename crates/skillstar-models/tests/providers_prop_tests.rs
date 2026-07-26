@@ -5,10 +5,7 @@
 //! strategies that more than one part depends on; each `part*` module contains a
 //! cohesive group of property tests.
 //!
-//! - `part1`: Provider validation (Property 3), Malformed Store Recovery
-//!   (Property 15), Preset Creation Fills Expected Fields (Property 8).
-//! - `part2`: Store Serialization Round-Trip (Property 1), Migration Preserves
-//!   All Provider Data (Property 11).
+//! - `part2`: Store Serialization Round-Trip (Property 1).
 //! - `part3`: Provider List Sort Invariant (Property 2), Preset Creation Produces
 //!   Valid Provider (Property 12), Failed Operations Leave State Unchanged
 //!   (Property 9), Single Active Provider Per Tool (Property 5).
@@ -23,8 +20,6 @@ use skillstar_models::providers::{
 use std::path::PathBuf;
 use tempfile::TempDir;
 
-#[path = "providers_prop_tests/part1.rs"]
-mod part1;
 #[path = "providers_prop_tests/part2.rs"]
 mod part2;
 #[path = "providers_prop_tests/part3.rs"]

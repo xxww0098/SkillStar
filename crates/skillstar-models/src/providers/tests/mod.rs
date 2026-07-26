@@ -2,7 +2,6 @@
 //! Shared helpers live here; the `#[test]` fns live in `part1`/`part2`/`part3`.
 
 use super::*;
-use proptest::prelude::*;
 use tempfile::TempDir;
 
 // -----------------------------------------------------------------------
@@ -98,18 +97,7 @@ fn make_flat_entry(name: &str) -> ProviderEntryFlat {
     }
 }
 
-fn arb_provider_name() -> impl Strategy<Value = String> {
-    "[a-zA-Z0-9 _-]{1,64}"
-}
-
-fn arb_app_id() -> impl Strategy<Value = String> {
-    prop_oneof![Just("claude".to_string()), Just("codex".to_string())]
-}
-
-fn arb_provider_count() -> impl Strategy<Value = usize> {
-    1usize..=5
-}
-
 mod part1;
 mod part2;
 mod part3;
+mod part4;

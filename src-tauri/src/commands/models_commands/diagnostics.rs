@@ -38,52 +38,6 @@ pub async fn test_provider_latency(
     Ok(result)
 }
 
-/// Test latency for all providers of a given app_id sequentially with 100ms delay between tests.
-///
-/// Reads the provider store, iterates all providers for the specified app_id,
-/// and tests each one sequentially to avoid network contention.
-#[tauri::command]
-pub async fn test_all_providers_latency(app_id: String) -> Result<Vec<LatencyResult>, AppError> {
-    let store = providers::read_store()?;
-
-    let app_providers = match app_id.as_str() {
-        "claude" => &store.claude,
-        "codex" => &store.codex,
-        "opencode" => &store.opencode,
-        "gemini" => &store.gemini,
-        _ => return Err(AppError::Other(format!("Unknown app_id: {}", app_id))),
-    };
-
-    let mut results = Vec::new();
-
-    for (id, entry) in &app_providers.providers {
-        // Parse settings_config to get base_url and api_key
-        let settings: ProviderSettings = serde_json::from_value(entry.settings_config.clone())
-            .map_err(|e| {
-                AppError::Other(format!(
-                    "Failed to parse settings for provider '{}': {}",
-                    id, e
-                ))
-            })?;
-
-        let result = latency::test_provider_latency(
-            id,
-            &app_id,
-            &settings.base_url,
-            &settings.api_key,
-            settings.timeout_ms,
-        )
-        .await;
-
-        results.push(result);
-
-        // 100ms delay between tests to avoid network saturation
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-
-    Ok(results)
-}
-
 /// Test a provider's connection.
 ///
 /// Two modes:

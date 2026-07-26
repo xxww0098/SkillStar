@@ -390,7 +390,7 @@ fn extract_v1_settings(settings_config: &Value) -> (String, String, Vec<String>)
 
 /// Read the providers store from a specific path.
 /// Returns a default empty store if the file doesn't exist or contains malformed JSON.
-pub fn read_store_from(path: &Path) -> Result<ProvidersStore> {
+pub(crate) fn read_store_from(path: &Path) -> Result<ProvidersStore> {
     if !path.exists() {
         return Ok(ProvidersStore::default());
     }
@@ -419,12 +419,14 @@ pub fn read_store_from(path: &Path) -> Result<ProvidersStore> {
 
 /// Read the providers store from the default path.
 /// Returns a default empty store if the file doesn't exist or contains malformed JSON.
-pub fn read_store() -> Result<ProvidersStore> {
+pub(crate) fn read_store() -> Result<ProvidersStore> {
     read_store_from(&store_path())
 }
 
-/// Write the providers store to a specific path atomically (write to temp file, then rename).
-pub fn write_store_to(store: &ProvidersStore, path: &Path) -> Result<()> {
+/// Write a v1 providers store to a specific path atomically. Test-only: kept
+/// so migration tests can build v1 fixtures through the same serializer.
+#[cfg(test)]
+pub(crate) fn write_store_to(store: &ProvidersStore, path: &Path) -> Result<()> {
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
@@ -449,7 +451,9 @@ pub fn write_store_to(store: &ProvidersStore, path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Write the providers store to the default path atomically.
-pub fn write_store(store: &ProvidersStore) -> Result<()> {
+/// Write a v1 providers store to the default path. Test-only companion of
+/// [`write_store_to`] for legacy-fallback tests that resolve via `store_path`.
+#[cfg(test)]
+pub(crate) fn write_store(store: &ProvidersStore) -> Result<()> {
     write_store_to(store, &store_path())
 }

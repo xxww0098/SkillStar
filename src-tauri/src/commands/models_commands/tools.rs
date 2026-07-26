@@ -340,23 +340,6 @@ pub async fn push_provider_to_tool_config(
 // Environment Conflict Detection
 // ---------------------------------------------------------------------------
 
-/// Detect shell environment variable conflicts that may override tool config files.
-///
-/// Delegates to `tool_sync::detect_env_conflicts()` which checks for:
-/// - Anthropic/Claude-related env vars (ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, etc.)
-/// - OpenAI/Codex-related env vars (OPENAI_API_KEY, OPENAI_BASE_URL, etc.)
-///
-/// Returns a list of detected conflicts as serialized JSON values.
-#[tauri::command]
-pub async fn detect_env_conflicts() -> Result<Vec<serde_json::Value>, AppError> {
-    let conflicts = tool_sync::detect_env_conflicts();
-    let serialized: Vec<serde_json::Value> = conflicts
-        .into_iter()
-        .map(|c| serde_json::to_value(c).unwrap_or_default())
-        .collect();
-    Ok(serialized)
-}
-
 /// Current Unix time in seconds (best-effort; 0 if the clock is before epoch).
 fn now_unix_secs() -> u64 {
     std::time::SystemTime::now()

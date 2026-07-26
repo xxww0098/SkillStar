@@ -1,7 +1,6 @@
 //! Provider data types: store models, flat-store entries, and patches.
 
 use super::*;
-use ts_rs::TS;
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -9,7 +8,7 @@ use ts_rs::TS;
 
 /// A single model mapping entry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ModelMapping {
+pub(crate) struct ModelMapping {
     pub source_model: String,
     pub target_model: String,
     #[serde(default = "default_true")]
@@ -22,7 +21,7 @@ fn default_true() -> bool {
 
 /// Provider settings (nested inside ProviderEntry.settings_config).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ProviderSettings {
+pub(crate) struct ProviderSettings {
     pub base_url: String,
     #[serde(default)]
     pub api_key: String,
@@ -36,7 +35,7 @@ pub struct ProviderSettings {
 /// A single named provider entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ProviderEntry {
+pub(crate) struct ProviderEntry {
     pub id: String,
     pub name: String,
     pub category: String,
@@ -61,14 +60,14 @@ pub struct ProviderEntry {
 
 /// Per-app provider collection.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct AppProviders {
+pub(crate) struct AppProviders {
     pub providers: HashMap<String, ProviderEntry>,
     pub current: Option<String>,
 }
 
 /// Root structure stored in model_providers.json.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ProvidersStore {
+pub(crate) struct ProvidersStore {
     #[serde(default)]
     pub claude: AppProviders,
     #[serde(default)]
@@ -77,18 +76,6 @@ pub struct ProvidersStore {
     pub opencode: AppProviders,
     #[serde(default)]
     pub gemini: AppProviders,
-}
-
-/// A built-in provider preset template.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "ProviderPreset.ts")]
-pub struct ProviderPreset {
-    pub id: String,
-    pub name: String,
-    pub base_url: String,
-    pub api_key_url: String,
-    pub icon_color: String,
-    pub models: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -322,26 +309,3 @@ pub struct ProviderPatchFlat {
     pub codex_auth_mode: Option<String>,
 }
 
-/// Partial update patch for a provider.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct ProviderPatch {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub category: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub settings_config: Option<Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub website_url: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub api_key_url: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub icon_color: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub notes: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sort_index: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub meta: Option<Value>,
-}

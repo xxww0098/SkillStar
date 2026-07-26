@@ -17,5 +17,3 @@ pub mod tool_sync;
 
 pub use provider_ref::AiProviderRef;
 
-#[cfg(test)]
-mod providers_prop_tests;

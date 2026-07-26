@@ -9,7 +9,6 @@ import type {
   ProviderUpdateFlatResult,
   EndpointLatencyResult,
   ProviderPresetFlat,
-  ToolActivationsMap,
   ToolConfigTarget,
   ToolConfigFileInfo,
   ToolSyncResult,
@@ -61,7 +60,6 @@ export interface ModelsCommands {
   reorder_providers: { args: { orderedIds: string[] }; result: void };
 
   // Tool activations (v2)
-  get_tool_activations: { args: Record<string, never>; result: ToolActivationsMap };
   activate_tool: {
     args: { providerId: string; toolId: string; model?: string | null; settings?: Record<string, unknown> | null };
     result: ToolSyncResult;
@@ -119,7 +117,6 @@ export interface ModelsCommands {
   };
 
   // Environment / conflict detection
-  detect_env_conflicts: { args: Record<string, never>; result: ConfigConflict[] };
   detect_provider_conflicts: { args: { providerId: string }; result: ConfigConflict[] };
   resync_tool: { args: { toolId: string }; result: ToolSyncResult };
   detect_tool_installation: { args: { toolId: string }; result: ToolInstallStatus };

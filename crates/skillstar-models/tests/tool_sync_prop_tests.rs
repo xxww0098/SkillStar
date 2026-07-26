@@ -1,19 +1,17 @@
 //! Property-based tests for tool_sync module.
 //!
 //! Contains:
-//! - Property 9: Tool Config Serialization Round-Trip
 //! - Property 6: Config Merge Preserves Existing Fields
 //! - Property 8: Save Re-Syncs Active Tools
 
 use proptest::prelude::*;
 use serde_json::Value;
 use skillstar_models::providers::{
-    FlatProvidersStore, ModelMapping, ProviderEntryFlat, ProviderSettings, ToolActivation,
-    ToolBinding,
+    FlatProvidersStore, ProviderEntryFlat, ToolActivation, ToolBinding,
 };
 use skillstar_models::tool_sync::{
-    CodexSettings, TOOL_SYNC_HOME_ENV, generate_claude_code_config, generate_codex_config,
-    merge_json_env_write, resync_active_tools, write_codex_config_flat,
+    CodexSettings, TOOL_SYNC_HOME_ENV, merge_json_env_write, resync_active_tools,
+    write_codex_config_flat,
 };
 use std::collections::HashMap;
 use tempfile::TempDir;
@@ -71,43 +69,6 @@ fn api_key_strategy() -> impl Strategy<Value = String> {
         // Keys with special but safe characters
         "[a-zA-Z][a-zA-Z0-9\\-_\\.]{7,40}",
     ]
-}
-
-/// Strategy that generates a non-empty list of ModelMapping entries.
-fn model_mappings_strategy() -> impl Strategy<Value = Vec<ModelMapping>> {
-    prop::collection::vec(
-        (
-            "[a-z][a-z0-9\\-]{2,30}", // source_model
-            "[a-z][a-z0-9\\-]{2,30}", // target_model
-            any::<bool>(),            // enabled
-        )
-            .prop_map(|(source, target, enabled)| ModelMapping {
-                source_model: source,
-                target_model: target,
-                enabled,
-            }),
-        1..=5, // at least 1, at most 5 models
-    )
-}
-
-/// Strategy that generates valid ProviderSettings.
-fn valid_provider_settings_strategy() -> impl Strategy<Value = ProviderSettings> {
-    (
-        valid_url_strategy(),
-        api_key_strategy(),
-        model_mappings_strategy(),
-        prop::option::of(1000u64..60000u64), // timeout_ms
-        prop::option::of(1u32..5u32),        // max_retries
-    )
-        .prop_map(
-            |(base_url, api_key, models, timeout_ms, max_retries)| ProviderSettings {
-                base_url,
-                api_key,
-                models,
-                timeout_ms,
-                max_retries,
-            },
-        )
 }
 
 // ---------------------------------------------------------------------------
@@ -235,67 +196,6 @@ fn extra_toml_sections_strategy() -> impl Strategy<Value = Vec<(String, Vec<(Str
 /// Strategy that generates a model name for Codex sync.
 fn model_name_strategy() -> impl Strategy<Value = String> {
     "[a-z][a-z0-9\\-]{2,20}"
-}
-
-// ---------------------------------------------------------------------------
-// Property 9 Tests: Tool Config Serialization Round-Trip
-// ---------------------------------------------------------------------------
-
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
-
-    /// **Validates: Requirements 4.4**
-    ///
-    /// Property 9 (part 1): Claude Code JSON serialization round-trip.
-    #[test]
-    fn prop_claude_code_config_round_trip(settings in valid_provider_settings_strategy()) {
-        let json_str = generate_claude_code_config(&settings)
-            .expect("generate_claude_code_config should not fail for valid settings");
-
-        let parsed: HashMap<String, Value> = serde_json::from_str(&json_str)
-            .expect("Generated JSON should be valid");
-
-        let api_url = parsed.get("apiUrl")
-            .expect("Parsed JSON should contain 'apiUrl' key")
-            .as_str()
-            .expect("'apiUrl' should be a string");
-        prop_assert_eq!(api_url, settings.base_url.as_str());
-
-        let api_key = parsed.get("apiKey")
-            .expect("Parsed JSON should contain 'apiKey' key")
-            .as_str()
-            .expect("'apiKey' should be a string");
-        prop_assert_eq!(api_key, settings.api_key.as_str());
-    }
-
-    /// **Validates: Requirements 4.5**
-    ///
-    /// Property 9 (part 2): Codex TOML serialization round-trip.
-    #[test]
-    fn prop_codex_config_round_trip(settings in valid_provider_settings_strategy()) {
-        let toml_str = generate_codex_config(&settings)
-            .expect("generate_codex_config should not fail for valid settings");
-
-        let parsed: toml::Table = toml::from_str(&toml_str)
-            .expect("Generated TOML should be valid");
-
-        let provider_section = parsed.get("provider")
-            .expect("Parsed TOML should contain 'provider' section")
-            .as_table()
-            .expect("'provider' should be a table");
-
-        let base_url = provider_section.get("base_url")
-            .expect("[provider] should contain 'base_url' key")
-            .as_str()
-            .expect("'base_url' should be a string");
-        prop_assert_eq!(base_url, settings.base_url.as_str());
-
-        let api_key = provider_section.get("api_key")
-            .expect("[provider] should contain 'api_key' key")
-            .as_str()
-            .expect("'api_key' should be a string");
-        prop_assert_eq!(api_key, settings.api_key.as_str());
-    }
 }
 
 // ---------------------------------------------------------------------------

@@ -316,7 +316,6 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   // FLAT_PROVIDERS in place so the full create → edit → activate → delete flow
   // can be exercised in the browser without the Tauri backend.
   get_providers_flat: () => FLAT_PROVIDERS,
-  get_tool_activations: () => FLAT_PROVIDERS.tool_activations,
   create_provider_flat: (args) => {
     const entry = (args?.entry ?? {}) as Record<string, unknown>;
     const created = {
@@ -478,7 +477,6 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   write_tool_config_file: () => ({ success: true }),
   format_tool_config_file: () => '{\n  "// demo": "formatted sample (browser dev mock)"\n}',
   get_provider_presets_flat: () => PRESETS_FLAT,
-  detect_env_conflicts: () => [],
   detect_provider_conflicts: () => [],
   get_tool_config_targets: () => [],
   detect_tool_installation: () => ({

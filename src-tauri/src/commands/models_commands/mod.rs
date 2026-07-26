@@ -5,15 +5,9 @@
 //!
 //! ## Architecture
 //!
-//! This module contains two generations of commands:
-//!
-//! - **Legacy (per-app)**: `get_providers_store`, `create_provider`, etc.
-//!   These operate on the v1 per-app `ProvidersStore` format and are retained
-//!   for backward compatibility during the transition period.
-//!
-//! - **Flat store (v2)**: `get_providers_flat`, `create_provider_flat`, etc.
-//!   These operate on the new flat `FlatProvidersStore` format with a unified
-//!   provider list and `tool_activations` map.
+//! Commands operate on the flat `FlatProvidersStore` format (v2) with a unified
+//! provider list and `tool_activations` map. The legacy per-app (v1) store only
+//! survives as a read-once migration source inside `skillstar_models::providers`.
 
 use std::time::Duration;
 
@@ -27,10 +21,9 @@ use skillstar_models::ai_provider;
 use skillstar_models::latency::{self, EndpointLatencyResult, LatencyResult};
 use skillstar_models::providers::ProviderPresetFlat;
 use skillstar_models::providers::{
-    self, AppProviders, ModelCatalogFetchResult, ProviderEntry, ProviderEntryFlat, ProviderPatch,
-    ProviderPatchFlat, ProviderPreset, ProviderSettings, ProvidersStore, ToolBinding,
+    self, ModelCatalogFetchResult, ProviderEntryFlat, ProviderPatchFlat, ToolBinding,
 };
-use skillstar_models::tool_sync::{self, ToolConfigTarget, ToolSyncResult, ToolSyncResultFlat};
+use skillstar_models::tool_sync::{self, ToolConfigTarget, ToolSyncResultFlat};
 
 // ---------------------------------------------------------------------------
 // Submodules (mechanical split — commands re-exported so `models_commands::NAME`
@@ -62,16 +55,6 @@ impl ProvidersWriteLock {
 // ---------------------------------------------------------------------------
 // Response types
 // ---------------------------------------------------------------------------
-
-/// Result of switching the active provider (includes optional tool sync results).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SwitchResult {
-    pub app_id: String,
-    pub provider_id: String,
-    pub provider_name: String,
-    pub tools_synced: Vec<ToolSyncResult>,
-}
 
 /// Response for `get_providers_flat` — returns the full flat store contents.
 ///

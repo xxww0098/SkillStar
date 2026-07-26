@@ -217,16 +217,6 @@ pub struct ToolConfigTarget {
     pub current_provider: Option<String>,
 }
 
-/// Result of syncing a provider to a single tool.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolSyncResult {
-    pub tool_id: String,
-    pub success: bool,
-    pub error: Option<String>,
-    pub config_path: String,
-    pub backup_path: Option<String>,
-}
-
 /// Result of syncing a provider to a single tool using the flat store format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolSyncResultFlat {

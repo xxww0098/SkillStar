@@ -9,8 +9,7 @@ mod part3;
 mod part4;
 
 use super::*;
-use crate::providers::{ModelMapping, ProviderSettings};
-use proptest::prelude::*;
+use std::collections::HashMap;
 use tempfile::TempDir;
 
 /// A throwaway HOME sandbox shared by every test that invokes a
@@ -34,37 +33,6 @@ static TOOL_SYNC_SANDBOX: std::sync::LazyLock<TempDir> = std::sync::LazyLock::ne
 /// that exercises a home-resolving sync function.
 fn use_sandbox_home() {
     let _ = TOOL_SYNC_SANDBOX.path();
-}
-
-fn make_test_settings() -> ProviderSettings {
-    ProviderSettings {
-        base_url: "https://api.example.com/v1".to_string(),
-        api_key: "sk-test-key-12345".to_string(),
-        models: vec![ModelMapping {
-            source_model: "model-a".to_string(),
-            target_model: "model-a".to_string(),
-            enabled: true,
-        }],
-        timeout_ms: None,
-        max_retries: None,
-    }
-}
-
-fn make_test_provider() -> ProviderEntry {
-    ProviderEntry {
-        id: "test-provider".to_string(),
-        name: "Test Provider".to_string(),
-        category: "cloud".to_string(),
-        settings_config: serde_json::to_value(make_test_settings()).unwrap(),
-        preset_id: None,
-        website_url: None,
-        api_key_url: None,
-        icon_color: None,
-        notes: None,
-        created_at: None,
-        sort_index: None,
-        meta: None,
-    }
 }
 
 fn make_test_provider_flat() -> ProviderEntryFlat {
