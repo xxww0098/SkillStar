@@ -183,23 +183,35 @@ mod tests {
     use std::sync::Mutex;
 
     /// `import_subscription_from_local` reads `~/.codex/auth.json` via
-    /// `home_dir()`, which honours `$HOME` under `cfg(test)`. Serialize tests
-    /// with a mutex so they don't fight over the process-wide env var.
+    /// `paths::home_dir()`, which honours the platform home var — `$HOME` on
+    /// Unix, `%USERPROFILE%` on Windows. Sandbox BOTH so the fixture applies
+    /// on every platform (a HOME-only guard let these tests read the runner's
+    /// real profile on Windows). Serialize with a mutex so they don't fight
+    /// over the process-wide env vars; tolerate poisoning so one failure
+    /// cannot cascade into sibling PoisonError panics.
     static HOME_LOCK: Mutex<()> = Mutex::new(());
+
+    /// The home env vars `paths::home_dir()` consults, in platform order.
+    const HOME_VARS: &[&str] = &["HOME", "USERPROFILE"];
 
     struct HomeGuard {
         _guard: std::sync::MutexGuard<'static, ()>,
-        prev: Option<std::ffi::OsString>,
+        prev: Vec<(&'static str, Option<std::ffi::OsString>)>,
     }
 
     impl HomeGuard {
         fn new(tmp: &std::path::Path) -> Self {
-            let guard = HOME_LOCK.lock().unwrap();
-            let prev = std::env::var_os("HOME");
+            let guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let prev = HOME_VARS
+                .iter()
+                .map(|var| (*var, std::env::var_os(var)))
+                .collect();
             // SAFETY: tests are serialized by HOME_LOCK, so no other thread is
-            // reading HOME while we mutate it.
+            // reading these vars while we mutate them.
             unsafe {
-                std::env::set_var("HOME", tmp);
+                for var in HOME_VARS {
+                    std::env::set_var(var, tmp);
+                }
             }
             Self {
                 _guard: guard,
@@ -212,9 +224,11 @@ mod tests {
         fn drop(&mut self) {
             // SAFETY: same single-thread serialization via HOME_LOCK.
             unsafe {
-                match &self.prev {
-                    Some(v) => std::env::set_var("HOME", v),
-                    None => std::env::remove_var("HOME"),
+                for (var, value) in &self.prev {
+                    match value {
+                        Some(v) => std::env::set_var(var, v),
+                        None => std::env::remove_var(var),
+                    }
                 }
             }
         }
