@@ -27,6 +27,16 @@ name: Windows CI
 #
 # 3. Keep the file-size guard on bash even on Windows runners — the ratchet
 #    scripts assume a POSIX shell.
+#
+# 4. src-tauri's test exe cannot load on GitHub Windows runners (first seen
+#    2026-07-26, the first run that ever got past `npm ci`): it exits with
+#    0xc0000139 STATUS_ENTRYPOINT_NOT_FOUND before any test executes — a
+#    WebView2Loader/system DLL entrypoint mismatch, not a test failure. The
+#    Rust step therefore runs `--workspace --exclude skillstar`; Windows path
+#    and shell coverage lives in the crates, which all still run. If you want
+#    src-tauri unit tests on Windows, fix the DLL loading first (pin/install
+#    a matching WebView2 runtime on the runner) instead of removing the
+#    exclusion blindly.
 on:
   push:
     branches: [main]
@@ -67,8 +77,12 @@ jobs:
       - name: Frontend tests
         run: npm test
 
-      - name: Rust tests (workspace)
-        run: cargo test --workspace --locked
+      # src-tauri (`skillstar`) lib tests are excluded: the test exe dies at
+      # load time on GitHub Windows runners with 0xc0000139
+      # STATUS_ENTRYPOINT_NOT_FOUND (WebView2Loader/system DLL entrypoint
+      # mismatch) before running a single test — see failure lesson 4.
+      - name: Rust tests (workspace, excluding src-tauri)
+        run: cargo test --workspace --locked --exclude skillstar
 
       - name: File-size guard (structural governance)
         shell: bash
