@@ -49,7 +49,9 @@
     "or": "或",
     "add": "添加",
     "unknown": "未知",
-    "helpInfo": "配置帮助信息"
+    "helpInfo": "配置帮助信息",
+    "copyFailed": "复制失败",
+    "updated": "已更新"
   },
   "sidebar": {
     "navigation": "导航",
@@ -327,7 +329,15 @@
     "devModeBannerStepsWin10": "设置 → 更新和安全 → 开发者选项 → 开启「开发人员模式」",
     "devModeBannerStepsWin11": "设置 → 系统 → 开发者选项 → 开启「开发人员模式」",
     "devModeBannerDismiss": "知道了",
-    "devModeBannerLearnMore": "打开系统设置"
+    "devModeBannerLearnMore": "打开系统设置",
+    "aiSourceModels": "Models 供应商",
+    "aiSourceLocal": "本地 Ollama",
+    "modelsProvider": "Models 供应商",
+    "failedToReadIcon": "读取图标文件失败。",
+    "invalidIconFormat": "请上传有效的图片文件（SVG、PNG、JPG、WEBP）。",
+    "uploadIcon": "上传图标",
+    "shortTextServiceTitle": "短文本翻译",
+    "shortTextServiceHint": "技能描述翻译使用 AI 供应商，DeepL/DeepLX 作为兜底。"
   },
   "mySkills": {
     "title": "技能",
@@ -368,7 +378,8 @@
     "scopeLabel": "Skill 库范围",
     "scopeLocal": "本地",
     "scopeRemote": "远端 (SSH)",
-    "scopeCloud": "云端 (S3)"
+    "scopeCloud": "云端 (S3)",
+    "remoteHostPicker": "远程服务器"
   },
   "toolbar": {
     "searchPlaceholder": "搜索技能...",
@@ -484,7 +495,8 @@
     "snapshotStale": "本地快照已过期",
     "searchRemoteHint": "本地暂时没有命中结果。你可以执行一次在线搜索并把结果写回本地快照。",
     "searchOnlineSupplement": "在线搜索并保存到本地",
-    "mcpSearchPlaceholder": "搜索 MCP 服务器..."
+    "mcpSearchPlaceholder": "搜索 MCP 服务器...",
+    "installedSynced": "✓ 已安装并同步到 {{count}} 个 Agent"
   },
   "mcp": {
     "title": "MCP 服务器",
@@ -568,7 +580,8 @@
     "errorCommandRequired": "stdio 传输需要填写启动命令",
     "toggleOn": "(激活)",
     "toggleOff": "(取消)",
-    "notDetectedSuffix": " · 未检测到安装"
+    "notDetectedSuffix": " · 未检测到安装",
+    "installFailed": "启动安装失败"
   },
   "skillCards": {
     "title": "卡组",
@@ -595,7 +608,8 @@
     "installPartial": "安装 {{success}} 个成功，{{failed}} 个失败",
     "installAllFailed": "安装技能失败",
     "noMatching": "没有匹配的卡组",
-    "tryDifferent": "请尝试其他搜索词。"
+    "tryDifferent": "请尝试其他搜索词。",
+    "batchTogglePartialFailed": "{{failed}}/{{total}} 个链接更新失败"
   },
   "projects": {
     "title": "项目",
@@ -656,7 +670,8 @@
     "disambiguateTitle": "选择智能体",
     "disambiguateDesc": "当前项目中存在目录 <1>{{path}}</1>，它应归属哪个智能体？",
     "disambiguateConfirm": "确认",
-    "autoDetected": "根据已有技能目录自动检测"
+    "autoDetected": "根据已有技能目录自动检测",
+    "removeProject": "移除项目"
   },
   "launch": {
     "title": "启动",
@@ -727,7 +742,8 @@
     "cancel": "取消",
     "saving": "保存中...",
     "save": "保存",
-    "create": "创建"
+    "create": "创建",
+    "skillNotInstalled": "未安装 — 点击移除"
   },
   "deployModal": {
     "title": "部署",
@@ -1347,7 +1363,19 @@
     "cycleApiKeyShort": "API Key",
     "priceApiKey": "套餐 / 充值金额",
     "pricePlaceholderApiKey": "例如预充值套餐价",
-    "billingHintApiKey": "按额度计费的 API Key 余额，没有月付续费周期；用预充额度跟踪花费。"
+    "billingHintApiKey": "按额度计费的 API Key 余额，没有月付续费周期；用预充额度跟踪花费。",
+    "expandAllProviderGroups": "全部展开",
+    "collapseAllProviderGroups": "全部折叠",
+    "subscriptionAdded": "订阅已添加",
+    "subscriptionAddFailed": "添加失败：{{message}}",
+    "autoImportTitle": "⚡ 智能自动导入",
+    "autoImportDescProvider": "自动扫描并导入本地的 {{provider}} 账号凭证，无需手动填写。",
+    "autoImportDescAll": "一键自动扫描并导入本地的 Codex / Antigravity 账号凭证，无需手动填写。",
+    "autoImportScanning": "正在扫描本地环境…",
+    "autoImportScanProvider": "🚀 自动扫描并导入",
+    "autoImportScanAll": "🚀 一键自动扫描并导入",
+    "autoImportNoCredentials": "未在本地环境中探测到任何可用的 Codex / Antigravity 凭证",
+    "advancedBillingOptions": "⚙️ 付费及高级选项 (Advanced & Billing Settings)"
   },
   "models": {
     "hub": {
@@ -1694,7 +1722,10 @@
       "formatFailed": "格式化失败：{{message}}",
       "syncedFromProvider": "已从供应商同步到配置文件",
       "queryTimeout": "查询超时",
-      "parseBalanceFailed": "无法解析余额数据"
+      "parseBalanceFailed": "无法解析余额数据",
+      "boundAgent": "已将 {{provider}} 绑定到 {{agent}}",
+      "deleted": "{{name}} 已删除",
+      "duplicated": "已复制供应商"
     },
     "errors": {
       "nameRequired": "供应商名称不能为空",
@@ -1874,5 +1905,10 @@
   },
   "ipc": {
     "notInTauriShell": "当前页面不在 SkillStar 桌面窗口中，无法调用后端：请启动完整应用（例如 bun run tauri dev），不要单独在浏览器中打开 Vite 的本地开发地址。"
+  },
+  "importModal": {
+    "adoptFolder": "从本地文件夹收编",
+    "adoptFolderTitle": "选择包含 SKILL.md 的文件夹",
+    "adoptingFolder": "正在收编本地技能..."
   }
 }

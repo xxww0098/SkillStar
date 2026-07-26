@@ -242,7 +242,7 @@ export function SubscriptionEditDialog({
       toast.success(t("usage.importFromLocalSuccess") + ` (${successCount})`);
       onClose();
     } else {
-      toast.error("未在本地环境中探测到任何可用的 Codex / Antigravity 凭证");
+      toast.error(t("usage.autoImportNoCredentials"));
     }
   };
 
@@ -649,7 +649,7 @@ export function SubscriptionEditDialog({
                 onClick={() => setShowAdvanced((v) => !v)}
                 className="flex w-full items-center justify-between rounded-xl border border-border bg-muted/50 px-4 py-2.5 text-xs font-semibold text-foreground/75 transition-all hover:bg-muted/70 hover:text-foreground"
               >
-                <span>⚙️ 付费及高级选项 (Advanced & Billing Settings)</span>
+                <span>{t("usage.advancedBillingOptions")}</span>
                 <ChevronDown
                   className={cn("h-4 w-4 transition-transform duration-200", showAdvanced && "rotate-180")}
                 />

@@ -49,7 +49,9 @@
     "refresh": "Refresh",
     "refreshed": "Data refreshed",
     "unknown": "Unknown",
-    "helpInfo": "Configuration help"
+    "helpInfo": "Configuration help",
+    "copyFailed": "Copy failed",
+    "updated": "Updated"
   },
   "sidebar": {
     "navigation": "Navigation",
@@ -327,7 +329,15 @@
     "devModeBannerStepsWin10": "Settings → Update & Security → For developers → Developer Mode → On",
     "devModeBannerStepsWin11": "Settings → System → For developers → Developer Mode → On",
     "devModeBannerDismiss": "Got it",
-    "devModeBannerLearnMore": "Learn More"
+    "devModeBannerLearnMore": "Learn More",
+    "aiSourceModels": "Models provider",
+    "aiSourceLocal": "Local Ollama",
+    "modelsProvider": "Models provider",
+    "failedToReadIcon": "Failed to read icon file.",
+    "invalidIconFormat": "Please upload a valid image file (SVG, PNG, JPG, WEBP).",
+    "uploadIcon": "Upload Icon",
+    "shortTextServiceTitle": "Short Text Translation",
+    "shortTextServiceHint": "Uses AI provider for skill descriptions. DeepL/DeepLX used as fallback."
   },
   "mySkills": {
     "title": "Cards",
@@ -368,7 +378,8 @@
     "scopeLabel": "Skill library scope",
     "scopeLocal": "Local",
     "scopeRemote": "Remote (SSH)",
-    "scopeCloud": "Cloud (S3)"
+    "scopeCloud": "Cloud (S3)",
+    "remoteHostPicker": "Remote server"
   },
   "toolbar": {
     "searchPlaceholder": "Search cards...",
@@ -484,7 +495,8 @@
     "snapshotStale": "Snapshot is stale",
     "searchRemoteHint": "No local matches yet. You can run one remote search and seed the snapshot.",
     "searchOnlineSupplement": "Search online and save locally",
-    "mcpSearchPlaceholder": "Search MCP servers..."
+    "mcpSearchPlaceholder": "Search MCP servers...",
+    "installedSynced": "✓ Installed & synced to {{count}} agents"
   },
   "mcp": {
     "title": "MCP Servers",
@@ -568,7 +580,8 @@
     "errorCommandRequired": "stdio transport requires a start command",
     "toggleOn": "(enable)",
     "toggleOff": "(disable)",
-    "notDetectedSuffix": " · not detected"
+    "notDetectedSuffix": " · not detected",
+    "installFailed": "Failed to start install"
   },
   "skillCards": {
     "title": "Decks",
@@ -595,7 +608,8 @@
     "installPartial": "Installed {{success}}, failed {{failed}}",
     "installAllFailed": "Failed to install skills",
     "noMatching": "No matching decks",
-    "tryDifferent": "Try a different search term."
+    "tryDifferent": "Try a different search term.",
+    "batchTogglePartialFailed": "Failed to update {{failed}}/{{total}} links"
   },
   "projects": {
     "title": "Projects",
@@ -656,7 +670,8 @@
     "disambiguateTitle": "Choose Agent",
     "disambiguateDesc": "The directory <1>{{path}}</1> exists in this project. Which agent should manage it?",
     "disambiguateConfirm": "Confirm",
-    "autoDetected": "Auto-detected from existing skill directories"
+    "autoDetected": "Auto-detected from existing skill directories",
+    "removeProject": "Remove project"
   },
   "launch": {
     "title": "Launch",
@@ -727,7 +742,8 @@
     "cancel": "Cancel",
     "saving": "Saving...",
     "save": "Save",
-    "create": "Create"
+    "create": "Create",
+    "skillNotInstalled": "Not installed — click to remove"
   },
   "deployModal": {
     "title": "Deploy",
@@ -1347,7 +1363,19 @@
     "cycleApiKeyShort": "API Key",
     "priceApiKey": "Package / top-up amount",
     "pricePlaceholderApiKey": "e.g. prepaid package price",
-    "billingHintApiKey": "Quota-based API key balance — no monthly renew cycle. Track spend against prepaid credits."
+    "billingHintApiKey": "Quota-based API key balance — no monthly renew cycle. Track spend against prepaid credits.",
+    "expandAllProviderGroups": "Expand all",
+    "collapseAllProviderGroups": "Collapse all",
+    "subscriptionAdded": "Subscription added",
+    "subscriptionAddFailed": "Failed to add: {{message}}",
+    "autoImportTitle": "⚡ Smart Auto-Import",
+    "autoImportDescProvider": "Automatically scan and import local {{provider}} account credentials — no manual entry.",
+    "autoImportDescAll": "One click to scan and import local Codex / Antigravity account credentials — no manual entry.",
+    "autoImportScanning": "Scanning local environment…",
+    "autoImportScanProvider": "🚀 Scan & Import",
+    "autoImportScanAll": "🚀 One-Click Scan & Import",
+    "autoImportNoCredentials": "No usable Codex / Antigravity credentials detected locally",
+    "advancedBillingOptions": "⚙️ Advanced & Billing Settings"
   },
   "models": {
     "hub": {
@@ -1694,7 +1722,10 @@
       "formatFailed": "Format failed: {{message}}",
       "syncedFromProvider": "Synced from provider to config file",
       "queryTimeout": "Query timed out",
-      "parseBalanceFailed": "Could not parse balance data"
+      "parseBalanceFailed": "Could not parse balance data",
+      "boundAgent": "Bound {{provider}} to {{agent}}",
+      "deleted": "{{name}} deleted",
+      "duplicated": "Provider duplicated"
     },
     "errors": {
       "nameRequired": "Provider name is required",
@@ -1874,5 +1905,10 @@
   },
   "ipc": {
     "notInTauriShell": "This page is not running inside the SkillStar desktop window, so it cannot reach the backend: please launch the full app (e.g. bun run tauri dev) instead of opening Vite's local dev URL directly in a browser."
+  },
+  "importModal": {
+    "adoptFolder": "Adopt from Local Folder",
+    "adoptFolderTitle": "Pick a folder containing SKILL.md",
+    "adoptingFolder": "Adopting local skills..."
   }
 }

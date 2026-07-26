@@ -1,4 +1,5 @@
 import { Loader2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 
 interface AutoImportBannerProps {
@@ -19,15 +20,16 @@ export function AutoImportBanner({
   onImportLocal,
   onAutoScanAll,
 }: AutoImportBannerProps) {
+  const { t } = useTranslation();
   return (
     <div className="relative overflow-hidden rounded-2xl border border-primary/20 bg-primary/5 p-4 text-center">
       <h4 className="mb-1.5 flex items-center justify-center gap-1.5 text-xs font-bold uppercase tracking-wider text-primary">
-        ⚡ 智能自动导入 (Smart Auto-Import)
+        {t("usage.autoImportTitle")}
       </h4>
       <p className="mx-auto mb-3.5 max-w-xs text-[11px] leading-normal text-muted-foreground sm:max-w-sm">
         {catalogId
-          ? `自动扫描并导入本地的 ${providerName ?? catalogId} 账号凭证，无需手动填写。`
-          : "一键自动扫描并导入本地的 Codex / Antigravity 账号凭证，无需手动填写。"}
+          ? t("usage.autoImportDescProvider", { provider: providerName ?? catalogId })
+          : t("usage.autoImportDescAll")}
       </p>
       <Button
         type="button"
@@ -40,12 +42,12 @@ export function AutoImportBanner({
         {scanningLocal ? (
           <>
             <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-            正在扫描本地环境…
+            {t("usage.autoImportScanning")}
           </>
         ) : catalogId ? (
-          "🚀 自动扫描并导入"
+          t("usage.autoImportScanProvider")
         ) : (
-          "🚀 一键自动扫描并导入"
+          t("usage.autoImportScanAll")
         )}
       </Button>
     </div>

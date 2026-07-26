@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { usageApi } from "../api";
 import type {
@@ -29,6 +30,7 @@ export function mergeActiveSubscriptionUpdate(subscriptions: Subscription[], upd
  * keeps deps minimal.
  */
 export function useUsageData() {
+  const { t } = useTranslation();
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [summary, setSummary] = useState<UsageSummary | null>(null);
@@ -72,15 +74,15 @@ export function useUsageData() {
         const created = await usageApi.createSubscription(input);
         setSubscriptions((prev) => [...prev, created]);
         await refreshSummary();
-        toast.success("订阅已添加");
+        toast.success(t("usage.subscriptionAdded"));
         return created;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        toast.error(`添加失败：${msg}`);
+        toast.error(t("usage.subscriptionAddFailed", { message: msg }));
         throw err;
       }
     },
-    [refreshSummary],
+    [refreshSummary, t],
   );
 
   const update = useCallback(
