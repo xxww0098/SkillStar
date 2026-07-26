@@ -596,6 +596,9 @@ fn disk_adapter_commits_with_private_permissions() {
     assert_eq!(mode, 0o600);
 }
 
+/// Unix-only: the test reads the lock file while the lease holds it, which a
+/// Windows region lock forbids (os error 33) while Unix advisory locks allow.
+#[cfg(unix)]
 #[test]
 fn disk_adapter_uses_groks_official_lock_and_updates_holder() {
     let temp = tempfile::tempdir().unwrap();

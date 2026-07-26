@@ -462,6 +462,9 @@ mod tests {
 
     /// `count_hub_skills` distinguishes valid symlinks from broken ones and
     /// skips regular files. This is the storage-overview health signal.
+    /// Unix-only: the symlink fixtures are cfg(unix), so on Windows the test
+    /// would see just one valid entry and fail (windows-ci lesson 4 family).
+    #[cfg(unix)]
     #[test]
     fn count_hub_skills_separates_valid_and_broken_links() {
         let tmp = tempfile::tempdir().unwrap();
