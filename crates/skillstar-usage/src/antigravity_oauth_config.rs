@@ -86,19 +86,12 @@ pub fn antigravity_oauth_config() -> UsageResult<&'static AntigravityOAuthConfig
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, OnceLock};
-
-    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-    fn env_lock() -> &'static Mutex<()> {
-        ENV_LOCK.get_or_init(|| Mutex::new(()))
-    }
 
     #[test]
     fn missing_config_returns_error() {
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = crate::test_env_lock().lock().expect("env lock");
         let temp = tempfile::tempdir().expect("tempdir");
-        // SAFETY: serialized by ENV_LOCK; vars restored before return.
+        // SAFETY: serialized by the crate-wide test_env_lock.
         unsafe {
             std::env::set_var("SKILLSTAR_DATA_DIR", temp.path());
             std::env::remove_var("SKILLSTAR_ANTIGRAVITY_CLIENT_ID");
@@ -107,5 +100,10 @@ mod tests {
 
         let err = load_config().expect_err("expected missing config error");
         assert!(err.to_string().contains("Antigravity OAuth"));
+
+        // SAFETY: still serialized by the crate-wide test_env_lock.
+        unsafe {
+            std::env::remove_var("SKILLSTAR_DATA_DIR");
+        }
     }
 }

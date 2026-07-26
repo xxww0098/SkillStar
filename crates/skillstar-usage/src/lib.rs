@@ -39,6 +39,15 @@ pub use subscription::{
     UsageWindow,
 };
 
+/// Serializes tests that mutate process-wide environment variables
+/// (`SKILLSTAR_DATA_DIR`, …). Mirrors `skillstar_skills::test_env_lock`.
+#[cfg(test)]
+pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {
+    use std::sync::{Mutex, OnceLock};
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
 /// Crate-level error type (wraps anyhow under the hood for IO/serialization).
 #[derive(Debug, thiserror::Error)]
 pub enum UsageError {

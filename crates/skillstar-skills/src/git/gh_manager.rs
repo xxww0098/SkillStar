@@ -602,3 +602,82 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn copy_dir_recursive_copies_nested_content_but_never_repo_metadata() {
+        let temp = TempDir::new().unwrap();
+        let src = temp.path().join("src");
+        let dest = temp.path().join("dest");
+        std::fs::create_dir_all(src.join(".git")).unwrap();
+        std::fs::create_dir_all(src.join("scripts")).unwrap();
+        std::fs::write(src.join("SKILL.md"), "# skill body").unwrap();
+        std::fs::write(src.join(".git/config"), "[core]").unwrap();
+        std::fs::write(src.join(".DS_Store"), "junk").unwrap();
+        std::fs::write(src.join("scripts/run.sh"), "echo hi").unwrap();
+        std::fs::write(src.join("scripts/Thumbs.db"), "junk").unwrap();
+        std::fs::write(src.join("scripts/desktop.ini"), "junk").unwrap();
+
+        copy_dir_recursive(&src, &dest).unwrap();
+
+        // Real content survives with bytes intact, including nested dirs.
+        assert_eq!(
+            std::fs::read_to_string(dest.join("SKILL.md")).unwrap(),
+            "# skill body"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dest.join("scripts/run.sh")).unwrap(),
+            "echo hi"
+        );
+        // Git metadata and OS junk must not leak into the published copy,
+        // even below the top level.
+        assert!(!dest.join(".git").exists());
+        assert!(!dest.join(".DS_Store").exists());
+        assert!(!dest.join("scripts/Thumbs.db").exists());
+        assert!(!dest.join("scripts/desktop.ini").exists());
+    }
+
+    #[test]
+    fn ensure_gitignore_seeds_os_exclusions_once_but_preserves_user_edits() {
+        let temp = TempDir::new().unwrap();
+
+        ensure_gitignore(temp.path()).unwrap();
+        let seeded = std::fs::read_to_string(temp.path().join(".gitignore")).unwrap();
+        assert!(seeded.contains(".DS_Store"));
+        assert!(seeded.contains("Thumbs.db"));
+
+        // A user-edited .gitignore must be left byte-identical.
+        std::fs::write(temp.path().join(".gitignore"), "custom-only\n").unwrap();
+        ensure_gitignore(temp.path()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join(".gitignore")).unwrap(),
+            "custom-only\n"
+        );
+    }
+
+    /// The `status` serde tag is the discriminant the frontend switches on;
+    /// renaming a variant would silently break the UI's status handling.
+    #[test]
+    fn status_enums_serialize_with_the_status_tag_frontend_contract() {
+        let ready = serde_json::to_value(GhStatus::Ready {
+            username: "octocat".into(),
+        })
+        .unwrap();
+        assert_eq!(ready["status"], "Ready");
+        assert_eq!(ready["username"], "octocat");
+
+        let missing = serde_json::to_value(GhStatus::NotInstalled).unwrap();
+        assert_eq!(missing["status"], "NotInstalled");
+
+        let git = serde_json::to_value(GitStatus::Installed {
+            version: "2.44.0".into(),
+        })
+        .unwrap();
+        assert_eq!(git["status"], "Installed");
+        assert_eq!(git["version"], "2.44.0");
+    }
+}

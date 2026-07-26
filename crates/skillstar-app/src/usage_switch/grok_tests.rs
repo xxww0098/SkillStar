@@ -4,41 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::*;
-
-static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-struct EnvGuard {
-    saved: Vec<(&'static str, Option<std::ffi::OsString>)>,
-}
-
-impl EnvGuard {
-    fn set(values: &[(&'static str, &Path)]) -> Self {
-        let saved = values
-            .iter()
-            .map(|(key, _)| (*key, std::env::var_os(key)))
-            .collect();
-        for (key, value) in values {
-            // SAFETY: the only test in this process that mutates these roots
-            // holds ENV_LOCK until this guard restores every value.
-            unsafe { std::env::set_var(key, value) };
-        }
-        Self { saved }
-    }
-}
-
-impl Drop for EnvGuard {
-    fn drop(&mut self) {
-        for (key, value) in self.saved.drain(..) {
-            // SAFETY: see EnvGuard::set; ENV_LOCK is still held while drop runs.
-            unsafe {
-                match value {
-                    Some(value) => std::env::set_var(key, value),
-                    None => std::env::remove_var(key),
-                }
-            }
-        }
-    }
-}
+use crate::test_support::{ENV_LOCK, EnvGuard};
 
 const BILLING_ONLY_TOKEN: &str = concat!(
     "e30.",

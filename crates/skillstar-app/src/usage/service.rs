@@ -658,3 +658,7 @@ pub fn get_subscription_api_key(id: String) -> Result<Option<String>, AppError> 
         .filter(|pt| !pt.is_empty());
     Ok(key)
 }
+
+#[cfg(test)]
+#[path = "service_tests.rs"]
+mod tests;
