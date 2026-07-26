@@ -9,6 +9,7 @@
 //! Formerly split across `skillstar-models` + `skillstar-ai` (Wave 2A merge).
 
 pub mod ai_provider;
+pub mod diagnostics;
 pub mod latency;
 pub mod mcp;
 mod provider_ref;

@@ -9,8 +9,6 @@
 //! provider list and `tool_activations` map. The legacy per-app (v1) store only
 //! survives as a read-once migration source inside `skillstar_models::providers`.
 
-use std::time::Duration;
-
 use serde::{Deserialize, Serialize};
 use skillstar_core::infra::error::AppError;
 use tauri::State;
@@ -18,6 +16,7 @@ use tokio::sync::Mutex;
 
 use skillstar_models::AiProviderRef;
 use skillstar_models::ai_provider;
+use skillstar_models::diagnostics::ConnectionTestResult;
 use skillstar_models::latency::{self, EndpointLatencyResult, LatencyResult};
 use skillstar_models::providers::ProviderPresetFlat;
 use skillstar_models::providers::{
@@ -80,19 +79,4 @@ pub struct ProviderUpdateFlatResult {
     pub tool_sync_results: Vec<ToolSyncResultFlat>,
 }
 
-// ---------------------------------------------------------------------------
-// Connection test command (minimal chat completion request)
-// ---------------------------------------------------------------------------
 
-/// Result of a provider connection test using a minimal chat completion request.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConnectionTestResult {
-    /// `"ok"`, `"auth_failed"`, `"timeout"`, `"network_error"`, `"model_unavailable"`
-    pub status: String,
-    /// Round-trip latency in milliseconds (only present when status is "ok").
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub latency_ms: Option<u64>,
-    /// Error description (present for non-ok statuses).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-}
