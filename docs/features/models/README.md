@@ -17,6 +17,7 @@
 
 - Agent binding 使用 `ToolBinding { entries, active_index }`；所有读写通过 helper/facade，不直接索引 `entries[active_index]`。
 - Agent descriptor 的 `kind` 是 UI 和后端能力的共同开关：single 只激活一个 provider；multi 原生保留多个条目并维护 active 指针。
+- Rust 侧 Agent 事实（binary、配置目录探测、文件清单、kind、必需 URL）的 SSOT 是 `tool_sync::agents` 注册表；它与前端 `agentRegistry.ts` 各自持有同一份 toolId 清单，由两侧的表驱动一致性测试互相锁定。
 - tool-sync 只改自己管理的字段，保留用户已有配置；写入前备份并使用原子替换。
 - 所有测试设置 `SKILLSTAR_TOOL_SYNC_HOME` 到临时目录，绝不写真实 Agent 配置。
 - Claude Code CLI 与 Desktop Code 共用 `claude-code`；Codex CLI、桌面体验和官方编辑器扩展共用一份 Codex binding。

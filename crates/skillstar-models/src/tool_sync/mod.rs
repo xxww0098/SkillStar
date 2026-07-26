@@ -17,6 +17,9 @@ use crate::providers::{
     FlatProvidersStore, ModelCatalogEntry, ProviderEntryFlat, ToolActivation, catalog_from_meta,
 };
 
+mod agents;
+pub use agents::*;
+
 mod types;
 pub use types::*;
 

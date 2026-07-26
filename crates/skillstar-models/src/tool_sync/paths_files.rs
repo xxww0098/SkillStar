@@ -187,7 +187,7 @@ pub fn read_tool_config_file(tool_id: &str, file_id: &str) -> Result<String> {
     std::fs::read_to_string(&path).with_context(|| format!("Failed to read {}", path.display()))
 }
 
-fn default_empty_config_content(tool_id: &str, file_id: &str) -> String {
+pub(crate) fn default_empty_config_content(tool_id: &str, file_id: &str) -> String {
     match (tool_id, file_id) {
         ("claude-code", "settings") => "{\n  \"env\": {}\n}\n".to_string(),
         ("codex", "auth") => "{\n  \"OPENAI_API_KEY\": \"\"\n}\n".to_string(),
