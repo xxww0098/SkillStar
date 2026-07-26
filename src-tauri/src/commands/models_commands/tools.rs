@@ -88,25 +88,9 @@ pub async fn deactivate_tool(
     // 2. Persist the updated store
     providers::write_flat_store(&store, &path)?;
 
-    // 3. Unsync the tool's config file (remove ALL managed fields/entries)
-    match tool_id.as_str() {
-        "claude-code" => {
-            tool_sync::unsync_claude_code()?;
-        }
-        "codex" => {
-            tool_sync::unsync_codex_all()?;
-        }
-        "opencode" => {
-            tool_sync::unsync_opencode_all()?;
-        }
-        "gemini" => {
-            tool_sync::unsync_gemini()?;
-        }
-        "pi" => {
-            tool_sync::unsync_pi_all()?;
-        }
-        _ => {}
-    }
+    // 3. Unsync the tool's config file (remove ALL managed fields/entries).
+    //    Dispatch is registry-driven inside tool_sync.
+    tool_sync::unsync_tool(&tool_id)?;
 
     Ok(())
 }
@@ -224,32 +208,24 @@ pub async fn update_tool_settings(
 /// controlled solely by the user's Settings switch.
 #[tauri::command]
 pub async fn detect_tool_installation(tool_id: String) -> Result<serde_json::Value, AppError> {
-    let binary_name = match tool_id.as_str() {
-        "claude-code" => "claude",
-        "codex" => "codex",
-        "opencode" => "opencode",
-        "gemini" => "gemini",
-        "pi" => "pi",
-        _ => {
-            return Err(AppError::Other(format!(
-                "Unknown tool_id: '{}'. Supported: claude-code, codex, opencode, gemini, pi.",
-                tool_id
-            )));
-        }
-    };
+    let spec = tool_sync::agent_spec(&tool_id).ok_or_else(|| {
+        AppError::Other(format!(
+            "Unknown tool_id: '{}'. Supported: claude-code, codex, opencode, gemini, pi.",
+            tool_id
+        ))
+    })?;
 
-    let binary_found = skillstar_core::infra::path_env::which_in_enriched(binary_name).is_some();
+    let binary_found =
+        skillstar_core::infra::path_env::which_in_enriched(spec.binary_name).is_some();
 
     let config_dir_found = dirs::home_dir()
-        .map(|home| match tool_id.as_str() {
-            "claude-code" => home.join(".claude").is_dir(),
-            "codex" => home.join(".codex").is_dir(),
-            "opencode" => {
-                home.join(".config").join("opencode").is_dir() || home.join(".opencode").is_dir()
-            }
-            "gemini" => home.join(".gemini").is_dir(),
-            "pi" => home.join(".pi").is_dir(),
-            _ => false,
+        .map(|home| {
+            spec.config_dir_probes.iter().any(|probe| {
+                probe
+                    .split('/')
+                    .fold(home.clone(), |path, seg| path.join(seg))
+                    .is_dir()
+            })
         })
         .unwrap_or(false);
 

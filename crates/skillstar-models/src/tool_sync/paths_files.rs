@@ -6,20 +6,14 @@ use super::*;
 // Path resolution (security: only hardcoded known paths)
 // ---------------------------------------------------------------------------
 
-/// Resolve the config file path for a given tool_id.
+/// Resolve the primary config file path for a given tool_id.
 ///
-/// Only accepts "claude-code", "codex", "opencode", "gemini", and "pi"
-/// as valid tool IDs.
+/// Registry-driven: only tool ids registered in [`agent_specs`] resolve.
 /// Returns an error for any other tool_id to prevent arbitrary file writes.
 pub fn resolve_tool_config_path(tool_id: &str) -> Result<PathBuf> {
-    let home = sync_home_dir()?;
-    match tool_id {
-        "claude-code" => Ok(home.join(".claude").join("settings.json")),
-        "codex" => Ok(home.join(".codex").join("config.toml")),
-        "opencode" => Ok(resolve_opencode_config_path()?),
-        "gemini" => Ok(resolve_gemini_env_path()?),
-        "pi" => Ok(resolve_pi_models_path()?),
-        _ => bail!(
+    match agent_spec(tool_id) {
+        Some(spec) => (spec.files[0].resolve)(),
+        None => bail!(
             "Unknown tool_id: '{}'. Supported: claude-code, codex, opencode, gemini, pi.",
             tool_id
         ),
@@ -80,102 +74,31 @@ pub fn resolve_grok_auth_path() -> Result<PathBuf> {
     Ok(home.join(".grok").join("auth.json"))
 }
 
-/// Resolve a config file path for `(tool_id, file_id)`.
+/// Resolve a config file path for `(tool_id, file_id)` from the registry.
 pub fn resolve_tool_config_file_path(tool_id: &str, file_id: &str) -> Result<PathBuf> {
-    match (tool_id, file_id) {
-        ("claude-code", "settings") => resolve_tool_config_path("claude-code"),
-        ("codex", "config") => resolve_codex_config_path(),
-        ("codex", "auth") => resolve_codex_auth_path(),
-        ("opencode", "opencode") => resolve_opencode_config_path(),
-        ("gemini", "env") => resolve_gemini_env_path(),
-        ("pi", "models") => resolve_pi_models_path(),
-        ("pi", "settings") => resolve_pi_settings_path(),
-        _ => bail!("Unknown tool config file: {tool_id}/{file_id}"),
-    }
+    agent_spec(tool_id)
+        .and_then(|spec| spec.files.iter().find(|f| f.file_id == file_id))
+        .map(|file| (file.resolve)())
+        .unwrap_or_else(|| bail!("Unknown tool config file: {tool_id}/{file_id}"))
 }
 
 /// List editable config files for a tool (used by the JSON/TOML editor UI).
 pub fn list_tool_config_files(tool_id: &str) -> Result<Vec<ToolConfigFileInfo>> {
-    match tool_id {
-        "claude-code" => {
-            let path = resolve_tool_config_path("claude-code")?;
-            Ok(vec![ToolConfigFileInfo {
-                file_id: "settings".to_string(),
-                label: "settings.json".to_string(),
+    let spec = agent_spec(tool_id).with_context(|| format!("Unknown tool_id: '{tool_id}'"))?;
+    spec.files
+        .iter()
+        .map(|file| {
+            let path = (file.resolve)()?;
+            Ok(ToolConfigFileInfo {
+                file_id: file.file_id.to_string(),
+                label: file.label.to_string(),
                 path: path.to_string_lossy().to_string(),
-                format: "json".to_string(),
+                format: file.format.to_string(),
                 exists: path.exists(),
                 managed_by_skillstar: true,
-            }])
-        }
-        "codex" => {
-            let config = resolve_codex_config_path()?;
-            let auth = resolve_codex_auth_path()?;
-            Ok(vec![
-                ToolConfigFileInfo {
-                    file_id: "config".to_string(),
-                    label: "config.toml".to_string(),
-                    path: config.to_string_lossy().to_string(),
-                    format: "toml".to_string(),
-                    exists: config.exists(),
-                    managed_by_skillstar: true,
-                },
-                ToolConfigFileInfo {
-                    file_id: "auth".to_string(),
-                    label: "auth.json".to_string(),
-                    path: auth.to_string_lossy().to_string(),
-                    format: "json".to_string(),
-                    exists: auth.exists(),
-                    managed_by_skillstar: true,
-                },
-            ])
-        }
-        "opencode" => {
-            let path = resolve_opencode_config_path()?;
-            Ok(vec![ToolConfigFileInfo {
-                file_id: "opencode".to_string(),
-                label: "opencode.json".to_string(),
-                path: path.to_string_lossy().to_string(),
-                format: "json".to_string(),
-                exists: path.exists(),
-                managed_by_skillstar: true,
-            }])
-        }
-        "gemini" => {
-            let path = resolve_gemini_env_path()?;
-            Ok(vec![ToolConfigFileInfo {
-                file_id: "env".to_string(),
-                label: ".env".to_string(),
-                path: path.to_string_lossy().to_string(),
-                format: "env".to_string(),
-                exists: path.exists(),
-                managed_by_skillstar: true,
-            }])
-        }
-        "pi" => {
-            let models = resolve_pi_models_path()?;
-            let settings = resolve_pi_settings_path()?;
-            Ok(vec![
-                ToolConfigFileInfo {
-                    file_id: "models".to_string(),
-                    label: "models.json".to_string(),
-                    path: models.to_string_lossy().to_string(),
-                    format: "json".to_string(),
-                    exists: models.exists(),
-                    managed_by_skillstar: true,
-                },
-                ToolConfigFileInfo {
-                    file_id: "settings".to_string(),
-                    label: "settings.json".to_string(),
-                    path: settings.to_string_lossy().to_string(),
-                    format: "json".to_string(),
-                    exists: settings.exists(),
-                    managed_by_skillstar: true,
-                },
-            ])
-        }
-        _ => bail!("Unknown tool_id: '{tool_id}'"),
-    }
+            })
+        })
+        .collect()
 }
 
 /// Read raw config file contents (empty string if missing).
@@ -187,23 +110,13 @@ pub fn read_tool_config_file(tool_id: &str, file_id: &str) -> Result<String> {
     std::fs::read_to_string(&path).with_context(|| format!("Failed to read {}", path.display()))
 }
 
+/// Skeleton content served by the editor when a config file does not exist.
+/// Registry-driven; unknown ids fall back to an empty JSON object.
 pub(crate) fn default_empty_config_content(tool_id: &str, file_id: &str) -> String {
-    match (tool_id, file_id) {
-        ("claude-code", "settings") => "{\n  \"env\": {}\n}\n".to_string(),
-        ("codex", "auth") => "{\n  \"OPENAI_API_KEY\": \"\"\n}\n".to_string(),
-        ("codex", "config") => {
-            "model_provider = \"skillstar\"\nmodel = \"\"\n\n[model_providers.skillstar]\nname = \"SkillStar\"\nbase_url = \"\"\nwire_api = \"responses\"\nrequires_openai_auth = true\n".to_string()
-        }
-        ("opencode", "opencode") => {
-            "{\n  \"$schema\": \"https://opencode.ai/config.json\",\n  \"provider\": {}\n}\n".to_string()
-        }
-        ("gemini", "env") => {
-            "GOOGLE_GEMINI_BASE_URL=\nGEMINI_API_KEY=[密钥]".to_string()
-        }
-        ("pi", "models") => "{\n  \"providers\": {}\n}\n".to_string(),
-        ("pi", "settings") => "{}\n".to_string(),
-        _ => "{}".to_string(),
-    }
+    agent_spec(tool_id)
+        .and_then(|spec| spec.files.iter().find(|f| f.file_id == file_id))
+        .map(|file| file.default_content.to_string())
+        .unwrap_or_else(|| "{}".to_string())
 }
 
 /// Validate and write config file contents (creates rolling backup when file exists).
@@ -386,20 +299,13 @@ pub(crate) fn merge_env_write(
 
 /// Returns the list of supported tool config targets with their paths and existence status.
 pub fn get_tool_config_targets() -> Result<Vec<ToolConfigTarget>> {
-    let tool_ids = [
-        ("claude-code", "Claude Code"),
-        ("codex", "Codex"),
-        ("opencode", "OpenCode"),
-        ("gemini", "Gemini CLI"),
-        ("pi", "Pi"),
-    ];
     let mut targets = Vec::new();
 
-    for (tool_id, display_name) in &tool_ids {
-        let config_path = resolve_tool_config_path(tool_id)?;
+    for spec in agent_specs() {
+        let config_path = (spec.files[0].resolve)()?;
         let exists = config_path.exists();
         let current_provider = if exists {
-            detect_current_provider(tool_id, &config_path)
+            detect_current_provider(spec.id, &config_path)
                 .ok()
                 .flatten()
         } else {
@@ -407,8 +313,8 @@ pub fn get_tool_config_targets() -> Result<Vec<ToolConfigTarget>> {
         };
 
         targets.push(ToolConfigTarget {
-            tool_id: tool_id.to_string(),
-            display_name: display_name.to_string(),
+            tool_id: spec.id.to_string(),
+            display_name: spec.display_name.to_string(),
             config_path: config_path.to_string_lossy().to_string(),
             exists,
             current_provider,

@@ -280,33 +280,28 @@ pub fn activate_tool(
         .find(|p| p.id == provider_id)
         .with_context(|| format!("Provider '{}' not found", provider_id))?;
 
-    // 2. Validate the required URL is non-empty based on tool_id
-    match tool_id {
-        "claude-code" => {
+    // 2. Validate the required URL is non-empty, per the agent registry's
+    //    RequiredUrl column. Unknown tool ids keep the safe default of
+    //    requiring an OpenAI-compatible URL.
+    let required = crate::tool_sync::agent_spec(tool_id)
+        .map(|spec| spec.required_url)
+        .unwrap_or(crate::tool_sync::RequiredUrl::Openai);
+    match required {
+        crate::tool_sync::RequiredUrl::Anthropic => {
             if provider.base_url_anthropic.trim().is_empty() {
                 bail!(
                     "Provider '{}' has no Anthropic-compatible endpoint (base_url_anthropic is empty). \
-                     Claude Code requires an Anthropic-compatible URL.",
-                    provider.name
-                );
-            }
-        }
-        "codex" | "opencode" | "pi" => {
-            if provider.base_url_openai.trim().is_empty() {
-                bail!(
-                    "Provider '{}' has no OpenAI-compatible endpoint (base_url_openai is empty). \
-                     {} requires an OpenAI-compatible URL.",
+                     {} requires an Anthropic-compatible URL.",
                     provider.name,
                     tool_id
                 );
             }
         }
-        _ => {
-            // Default: require base_url_openai
+        crate::tool_sync::RequiredUrl::Openai => {
             if provider.base_url_openai.trim().is_empty() {
                 bail!(
                     "Provider '{}' has no OpenAI-compatible endpoint (base_url_openai is empty). \
-                     Tool '{}' requires an OpenAI-compatible URL.",
+                     {} requires an OpenAI-compatible URL.",
                     provider.name,
                     tool_id
                 );
@@ -379,10 +374,12 @@ pub fn activate_tool(
 /// Single-provider agents (claude-code, gemini) write a single global env block
 /// and hold one entry.
 ///
-/// This is the one place agent "kind" is decided in the store layer; keep it
-/// data-driven here rather than scattering `tool_id == ...` checks.
+/// This is the store layer's single kind decision point; the answer itself
+/// comes from the agent registry's `AgentKind` column. Unknown tool ids are
+/// treated as single-provider.
 pub fn agent_supports_multiple_providers(tool_id: &str) -> bool {
-    matches!(tool_id, "codex" | "opencode" | "pi")
+    crate::tool_sync::agent_spec(tool_id)
+        .is_some_and(|spec| matches!(spec.kind, crate::tool_sync::AgentKind::Multi))
 }
 
 /// Point a multi-provider tool's active pointer at an already-bound provider

@@ -109,15 +109,20 @@ Provider（Base URL / API Key / 模型）时才做。现有目标：`claude-code
 
 全部改动在 `crates/skillstar-models/src/tool_sync/` + 少量前端：
 
-1. **路径解析** `paths_files.rs`：
-   - `resolve_tool_config_path()` 加 `"myagent" => ...` 分支；
-   - `resolve_tool_config_file_path()` 加 `("myagent", "<file_id>")` 分支
-     （一个 Agent 可有多个文件，如 Codex 的 `config` + `auth`）；
-   - `list_tool_config_files()` 加文件清单（驱动前端"磁盘配置文件"编辑器）。
-2. **写入/卸载** `sync.rs`：实现 `sync_to_myagent()` 与对应的 unsync 函数，
-   返回 `ToolSyncResultFlat`。必须遵守的语义：
+1. **注册表** `agents.rs`：在 `AGENT_SPECS` 加一行 `AgentSpec`
+   （id / display_name / binary_name / config_dir_probes / **kind** /
+   required_url / 文件清单：每个文件带 file_id、label、format、沙箱 resolver
+   和编辑器默认内容）。路径解析、文件清单、config target 列表、安装探测、
+   激活时的 URL 校验、`agent_supports_multiple_providers` 的 kind 判定和
+   deactivate 分发（`unsync_tool`）全部由这张表驱动——不再有散布的
+   per-agent `match` 需要接线。表驱动一致性测试（`agents.rs` 内联）会
+   自动覆盖新行。
+2. **写入/卸载** `sync.rs`（single 型）或 `multi_provider.rs`（multi 型）：
+   实现 writer 与对应的 unsync 函数，返回 `ToolSyncResultFlat`，并在
+   `sync_tool_binding` / `resync_active_tools` / `unsync_tool` 的写盘
+   dispatch 各加一个分支。必须遵守的语义：
    - 只增删**自己管理的字段**，保留用户已有配置（参考各 `*_MANAGED_*` 常量，
-     定义在 `types.rs`；新格式则新增常量）；
+     定义在 `types.rs`；multi 型使用 `skillstar_<id8>` 托管键约定）；
    - 写前备份（backup_path 语义与现有实现一致）。
 3. **沙箱安全**：所有路径必须经 `tool_sync` 的 home 解析（受
    `SKILLSTAR_TOOL_SYNC_HOME` 重定向）。**测试绝不能写真实 `$HOME`**
@@ -129,9 +134,9 @@ Provider（Base URL / API Key / 模型）时才做。现有目标：`claude-code
      扩展 `CONFIG_FILE_TOOLS`。**`kind` 决定卡片形态与绑定语义**：
      `"single"`（全局 env，仅一个激活供应商，如 Claude Code / Gemini）渲染
      `AgentHeroCard`；`"multi"`（配置文件原生并存多个供应商 + 指针，如 Codex /
-     OpenCode / Pi）渲染 `MultiProviderCard`（供应商列表 + 激活单选 + 增删）。后端须与之
-     对齐：`providers::crud::agent_supports_multiple_providers` 加上同一个 toolId，
-     `multi` 型的写盘走 `tool_sync::multi_provider`（多 `skillstar_<id>` 托管条目）。
+     OpenCode / Pi）渲染 `MultiProviderCard`（供应商列表 + 激活单选 + 增删）。
+     前后端注册表各自钉住同一份 toolId 字面量清单
+     （`agentRegistry.test.ts` ↔ `agents.rs` 一致性测试），加行时两侧同步；
      Agent 卡片、接入设置对话框、状态汇总和工具配置检查全部由该注册表驱动，无需新组件；
    - `src/features/models/components/shared/AgentToolIcon.tsx` 的
      `AgentToolIconId` 联合类型 + 图标分支；

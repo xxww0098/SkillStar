@@ -554,6 +554,22 @@ pub(crate) fn sync_to_gemini_inner(
     merge_env_write(config_path, &managed)
 }
 
+/// Remove every SkillStar-managed field/entry from a tool's config files.
+///
+/// Registry-driven deactivation dispatch: known agents route to their unsync
+/// implementation; ids missing from the registry are a no-op (nothing was ever
+/// written for them).
+pub fn unsync_tool(tool_id: &str) -> Result<()> {
+    match agent_spec(tool_id).map(|spec| spec.id) {
+        Some("claude-code") => unsync_claude_code(),
+        Some("codex") => unsync_codex_all(),
+        Some("opencode") => unsync_opencode_all(),
+        Some("gemini") => unsync_gemini(),
+        Some("pi") => unsync_pi_all(),
+        _ => Ok(()),
+    }
+}
+
 /// Remove managed Gemini env keys from `~/.gemini/.env` (deactivation).
 pub fn unsync_gemini() -> Result<()> {
     let config_path = resolve_gemini_env_path()?;
