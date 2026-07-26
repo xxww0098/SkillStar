@@ -160,6 +160,13 @@ export function Marketplace({
     [displaySkills, results],
   );
 
+  // Stable identity so SkillGrid/SkillCard memoization holds across
+  // unrelated re-renders (e.g. every search-input keystroke).
+  const handleSkillClick = useCallback(
+    (skill: Skill) => setSelectedSkill((prev) => (prev?.name === skill.name ? null : skill)),
+    [],
+  );
+
   const { handleInstall, handleUpdate, handleUninstall, handleReinstall } = useMarketplaceActions({
     installSkill,
     updateSkill,
@@ -516,7 +523,7 @@ export function Marketplace({
               columnStrategy="auto-fill"
               minColumnWidth={320}
               scrollParentRef={scrollRef}
-              onSkillClick={(skill) => setSelectedSkill((prev) => (prev?.name === skill.name ? null : skill))}
+              onSkillClick={handleSkillClick}
               onInstall={handleInstall}
               installingNames={installingNames}
               onUpdate={handleUpdate}

@@ -250,27 +250,38 @@ export function LocalSkillsContent({
     [targetableProfiles],
   );
 
-  const handleInstall = async (url: string) => {
-    try {
-      await installSkill(url);
-    } catch (e) {
-      if (import.meta.env.DEV) console.error("[LocalSkills] installSkill failed:", e);
-      toast.error(t("mySkills.installFailed"));
-      throw e;
-    }
-  };
-
-  const handleUpdate = async (name: string) => {
-    try {
-      const updated = await updateSkill(name);
-      if (selectedSkill?.name === name) {
-        setSelectedSkill(updated);
+  // Stable identities so SkillGrid/SkillCard memoization holds across
+  // unrelated re-renders (e.g. every search-input keystroke).
+  const handleInstall = useCallback(
+    async (url: string) => {
+      try {
+        await installSkill(url);
+      } catch (e) {
+        if (import.meta.env.DEV) console.error("[LocalSkills] installSkill failed:", e);
+        toast.error(t("mySkills.installFailed"));
+        throw e;
       }
-    } catch (e) {
-      const reason = e instanceof Error ? e.message : String(e);
-      toast.error(reason ? `${t("mySkills.updateFailed")}: ${reason}` : t("mySkills.updateFailed"));
-    }
-  };
+    },
+    [installSkill, t],
+  );
+
+  const handleUpdate = useCallback(
+    async (name: string) => {
+      try {
+        const updated = await updateSkill(name);
+        setSelectedSkill((prev) => (prev?.name === name ? updated : prev));
+      } catch (e) {
+        const reason = e instanceof Error ? e.message : String(e);
+        toast.error(reason ? `${t("mySkills.updateFailed")}: ${reason}` : t("mySkills.updateFailed"));
+      }
+    },
+    [updateSkill, t],
+  );
+
+  const handleSkillClick = useCallback(
+    (skill: Skill) => setSelectedSkill((prev) => (prev?.name === skill.name ? null : skill)),
+    [],
+  );
 
   const handleSelectSkill = useCallback((name: string) => {
     setSelectedSkillNames((prev) => {
@@ -727,7 +738,7 @@ export function LocalSkillsContent({
               viewMode={viewMode}
               columnStrategy="auto-fill"
               minColumnWidth={320}
-              onSkillClick={(skill) => setSelectedSkill((prev) => (prev?.name === skill.name ? null : skill))}
+              onSkillClick={handleSkillClick}
               onInstall={handleInstall}
               onUpdate={handleUpdate}
               emptyMessage={getEmptyMessage()}
