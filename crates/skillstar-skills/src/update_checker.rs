@@ -322,6 +322,8 @@ mod tests {
         assert_eq!(root.as_deref(), Some(repo.as_path()));
     }
 
+    // Unix-only: fixtures use std::os::unix::fs::symlink.
+    #[cfg(unix)]
     #[test]
     fn subtree_hash_and_local_update_detection_work() {
         let remote = init_repo();
@@ -363,6 +365,8 @@ mod tests {
         assert_eq!(result, Some(true));
     }
 
+    // Unix-only: fixtures use std::os::unix::fs::symlink.
+    #[cfg(unix)]
     #[test]
     fn prefetch_unique_repos_deduplicates_and_tracks_failures() {
         let repo_cache = tempfile::tempdir().unwrap();
@@ -419,6 +423,8 @@ mod tests {
         assert!(!failed.contains(&repo_a));
     }
 
+    // Unix-only: fixtures use std::os::unix::fs::symlink.
+    #[cfg(unix)]
     #[test]
     fn check_update_calls_fetch_and_returns_false_on_head_compare_failure() {
         let repo_cache = tempfile::tempdir().unwrap();
@@ -448,6 +454,8 @@ mod tests {
         );
     }
 
+    // Unix-only: fixtures use std::os::unix::fs::symlink.
+    #[cfg(unix)]
     #[test]
     fn resolve_symlink_relative_target() {
         let dir = tempfile::tempdir().unwrap();
@@ -463,6 +471,8 @@ mod tests {
         assert_eq!(resolved, target);
     }
 
+    // Unix-only: fixtures use std::os::unix::fs::symlink.
+    #[cfg(unix)]
     #[test]
     fn app_level_is_repo_cached_skill_uses_repos_cache_dir() {
         let _guard = crate::lock_test_env();
