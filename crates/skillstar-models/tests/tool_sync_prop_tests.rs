@@ -11,7 +11,7 @@ use skillstar_models::providers::{
 };
 use skillstar_models::tool_sync::{
     CodexSettings, TOOL_SYNC_HOME_ENV, merge_json_env_write, resync_active_tools,
-    write_codex_config_flat,
+    skillstar_managed_key, sync_codex_binding_inner,
 };
 use std::collections::HashMap;
 use tempfile::TempDir;
@@ -312,14 +312,14 @@ proptest! {
     ///
     /// Property 6 (part 2): TOML merge (Codex) preserves existing fields.
     ///
-    /// Generate random TOML content with extra sections, then call write_codex_config_flat
-    /// with provider settings. Verify that all non-managed sections/keys are preserved
-    /// unchanged.
+    /// Generate random TOML content with extra sections, then write a
+    /// single-entry binding via `sync_codex_binding_inner`. Verify that all
+    /// non-managed sections/keys are preserved unchanged.
     ///
     /// Managed fields for Codex config.toml:
     /// - model_provider (top-level)
     /// - model (top-level)
-    /// - [model_providers.skillstar] section
+    /// - [model_providers.skillstar_<id8>] table
     #[test]
     fn prop_toml_merge_preserves_existing_fields(
         extra_sections in extra_toml_sections_strategy(),
@@ -345,15 +345,23 @@ proptest! {
         std::fs::write(&config_path, &initial_content)
             .expect("Failed to write initial config");
 
-        // Call write_codex_config_flat
-        let activation = ToolActivation {
-            provider_id: provider.id.clone(),
-            model: model.clone(),
-            settings: None,
-            last_sync_at: None,
+        // Write the binding. OAuth auth-mode keeps the case path-hermetic:
+        // it never touches the home-resolved auth.json (see the writer docs).
+        let settings = CodexSettings {
+            wire_api: "responses".to_string(),
+            auth_mode: "oauth".to_string(),
         };
-        write_codex_config_flat(&config_path, &provider, &activation, &CodexSettings::default())
-            .expect("write_codex_config_flat should succeed");
+        let binding = ToolBinding {
+            entries: vec![ToolActivation {
+                provider_id: provider.id.clone(),
+                model: model.clone(),
+                settings: Some(serde_json::to_value(&settings).unwrap()),
+                last_sync_at: None,
+            }],
+            active_index: 0,
+        };
+        sync_codex_binding_inner(&binding, std::slice::from_ref(&provider), &config_path)
+            .expect("sync_codex_binding_inner should succeed");
 
         // Read back the result
         let result_content = std::fs::read_to_string(&config_path)
@@ -362,10 +370,11 @@ proptest! {
             .expect("Result should be valid TOML");
 
         // Verify: managed fields are correctly set
+        let managed_key = skillstar_managed_key(&provider.id);
         prop_assert_eq!(
             result_table.get("model_provider").and_then(|v| v.as_str()),
-            Some("skillstar"),
-            "model_provider should be 'skillstar'"
+            Some(managed_key.as_str()),
+            "model_provider should be the managed skillstar_<id8> key"
         );
         prop_assert_eq!(
             result_table.get("model").and_then(|v| v.as_str()),
@@ -373,15 +382,15 @@ proptest! {
             "model should match the provided model"
         );
 
-        // Verify: [model_providers.skillstar] section is correctly set
+        // Verify: [model_providers.skillstar_<id8>] table is correctly set
         let mp = result_table.get("model_providers")
             .expect("Result should have 'model_providers'")
             .as_table()
             .expect("'model_providers' should be a table");
-        let skillstar = mp.get("skillstar")
-            .expect("model_providers should have 'skillstar'")
+        let skillstar = mp.get(managed_key.as_str())
+            .expect("model_providers should have the managed key")
             .as_table()
-            .expect("'skillstar' should be a table");
+            .expect("managed provider entry should be a table");
         prop_assert_eq!(
             skillstar.get("base_url").and_then(|v| v.as_str()),
             Some(provider.base_url_openai.as_str()),

@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::providers::{
-    FlatProvidersStore, ModelCatalogEntry, ProviderEntryFlat, ToolActivation, catalog_from_meta,
+    FlatProvidersStore, ModelCatalogEntry, ProviderEntryFlat, catalog_from_meta,
 };
 
 mod agents;

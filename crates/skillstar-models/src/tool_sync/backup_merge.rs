@@ -161,207 +161,64 @@ pub fn merge_json_env_write(path: &Path, managed_fields: &[(&str, Value)]) -> Re
     Ok(())
 }
 
-/// Write Codex config.toml with flat store format.
-///
-/// Sets:
-/// - `model_provider = "skillstar"`
-/// - `model = "<activation.model>"`
-/// - `[model_providers.skillstar]` table with name, base_url, wire_api, requires_openai_auth
-///
-/// `settings` controls:
-/// - `wire_api`: `"responses"` (default) or `"chat"`
-/// - `auth_mode`: `"api_key"` (default) or `"oauth"`
-///
-/// Preserves all other existing sections/fields.
-pub fn write_codex_config_flat(
-    path: &Path,
-    provider: &ProviderEntryFlat,
-    activation: &ToolActivation,
-    settings: &CodexSettings,
-) -> Result<()> {
-    // Read existing config or start with empty table
-    let mut table: toml::Table = if path.exists() {
-        let content = std::fs::read_to_string(path)
-            .with_context(|| format!("Failed to read {}", path.display()))?;
-        toml::from_str(&content).unwrap_or_default()
-    } else {
-        toml::Table::new()
-    };
-
-    // Set top-level managed fields
-    table.insert(
-        "model_provider".to_string(),
-        toml::Value::String(CODEX_MANAGED_PROVIDER_KEY.to_string()),
-    );
-    table.insert(
-        "model".to_string(),
-        toml::Value::String(activation.model.clone()),
-    );
-
-    // Build the typed `[model_providers.<managed>]` table from a single source
-    // of truth. `CodexModelProvider::from_activation` owns the field set
-    // (name / base_url / wire_api / requires_openai_auth / optional env_key).
-    let skillstar_section = CodexModelProvider::from_activation(provider, settings).to_toml_table();
-
-    // Get or create [model_providers] table
-    let model_providers = table
-        .entry("model_providers")
-        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
-
-    if let Some(mp_table) = model_providers.as_table_mut() {
-        mp_table.insert(
-            CODEX_MANAGED_PROVIDER_KEY.to_string(),
-            toml::Value::Table(skillstar_section),
-        );
-    } else {
-        // model_providers exists but is not a table — replace it
-        let mut mp_table = toml::Table::new();
-        mp_table.insert(
-            CODEX_MANAGED_PROVIDER_KEY.to_string(),
-            toml::Value::Table(skillstar_section),
-        );
-        table.insert("model_providers".to_string(), toml::Value::Table(mp_table));
-    }
-
-    // Ensure parent directory exists
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
-    }
-
-    // Write back as TOML
-    let output = toml::to_string_pretty(&table).context("Failed to serialize Codex config.toml")?;
-    std::fs::write(path, output).with_context(|| format!("Failed to write {}", path.display()))?;
-
-    Ok(())
-}
-
 // ---------------------------------------------------------------------------
 // Re-sync active tools after provider settings update
 // ---------------------------------------------------------------------------
 
-/// After a provider's settings are saved, re-sync all tools that are currently
-/// using this provider. Each tool's individually selected model is preserved.
+/// After a provider's settings are saved, re-sync all tools whose binding
+/// references this provider. Each tool's individually selected model is
+/// preserved.
 ///
-/// Returns a list of sync results (one per active tool).
+/// Returns a list of sync results (one per affected tool).
 ///
 /// # Per-tool error isolation
 /// One tool failing does not prevent syncing others. Each tool is synced
 /// independently and its result is collected regardless of success/failure.
 ///
-/// # Logic
-/// 1. Find the provider by `provider_id` in the store
-/// 2. Iterate over `store.tool_activations`
-/// 3. For each tool where `activation.provider_id == provider_id`:
-///    - Call the appropriate sync function (`sync_to_claude_code` or `sync_to_codex`)
-///      with the provider and the tool's individually selected model
-/// 4. Collect and return all results
+/// # Registry-driven filter, single dispatch
+/// This function only decides *which* tools are affected; the actual write is
+/// delegated to [`sync_tool_binding`] so there is exactly one sync dispatch.
+/// [`AgentKind`] drives the affectedness rule: multi-provider agents rewrite
+/// their whole binding when *any* entry references the provider (every managed
+/// table must stay consistent), single-provider agents only when the *active*
+/// entry does. Unknown tool ids that reference the provider surface as failed
+/// results via `sync_tool_binding`.
 pub fn resync_active_tools(
     store: &FlatProvidersStore,
     provider_id: &str,
 ) -> Vec<ToolSyncResultFlat> {
-    // 1. Find the provider by provider_id
-    let provider = match store.providers.iter().find(|p| p.id == provider_id) {
-        Some(p) => p,
-        None => {
-            // Provider not found — return a single error result
-            return vec![ToolSyncResultFlat {
-                tool_id: String::new(),
-                success: false,
-                config_path: None,
-                error: Some(format!("Provider '{}' not found in store", provider_id)),
-                backup_path: None,
-            }];
-        }
-    };
+    if !store.providers.iter().any(|p| p.id == provider_id) {
+        // Provider not found — return a single error result
+        return vec![ToolSyncResultFlat {
+            tool_id: String::new(),
+            success: false,
+            config_path: None,
+            error: Some(format!("Provider '{}' not found in store", provider_id)),
+            backup_path: None,
+        }];
+    }
 
     let mut results: Vec<ToolSyncResultFlat> = Vec::new();
 
-    // 2. Iterate over each tool's binding
     for (tool_id, binding) in &store.tool_activations {
-        // 3. Skip tools that don't reference this provider at all. For
-        //    single-provider tools that means the active entry; for
-        //    multi-provider tools any entry (a provider edit must refresh that
-        //    provider's table among its siblings).
-        let touches_provider = binding.entries.iter().any(|e| e.provider_id == provider_id);
-        if !touches_provider {
+        // Skip tools that don't reference this provider at all.
+        if !binding.entries.iter().any(|e| e.provider_id == provider_id) {
+            continue;
+        }
+        // Single-provider agents only resync when the active entry matches;
+        // multi-provider (and unknown → error result) always do.
+        let affected = match agent_spec(tool_id).map(|spec| spec.kind) {
+            Some(AgentKind::Single) => binding
+                .active()
+                .is_some_and(|a| a.provider_id == provider_id),
+            Some(AgentKind::Multi) | None => true,
+        };
+        if !affected {
             continue;
         }
 
-        // Multi-provider tools rewrite their whole binding so every managed
-        // table stays consistent; single-provider tools write the active entry.
-        let result = match tool_id.as_str() {
-            "codex" => sync_codex_binding(binding, &store.providers).unwrap_or_else(|e| {
-                ToolSyncResultFlat {
-                    tool_id: tool_id.clone(),
-                    success: false,
-                    config_path: None,
-                    error: Some(e.to_string()),
-                    backup_path: None,
-                }
-            }),
-            "opencode" => sync_opencode_binding(binding, &store.providers).unwrap_or_else(|e| {
-                ToolSyncResultFlat {
-                    tool_id: tool_id.clone(),
-                    success: false,
-                    config_path: None,
-                    error: Some(e.to_string()),
-                    backup_path: None,
-                }
-            }),
-            "pi" => {
-                sync_pi_binding(binding, &store.providers).unwrap_or_else(|e| ToolSyncResultFlat {
-                    tool_id: tool_id.clone(),
-                    success: false,
-                    config_path: None,
-                    error: Some(e.to_string()),
-                    backup_path: None,
-                })
-            }
-            "claude-code" => {
-                // Single-provider: only resync when the active entry matches.
-                let Some(activation) = binding.active().filter(|a| a.provider_id == provider_id)
-                else {
-                    continue;
-                };
-                sync_to_claude_code(provider, &activation.model).unwrap_or_else(|e| {
-                    ToolSyncResultFlat {
-                        tool_id: tool_id.clone(),
-                        success: false,
-                        config_path: None,
-                        error: Some(e.to_string()),
-                        backup_path: None,
-                    }
-                })
-            }
-            "gemini" => {
-                let Some(activation) = binding.active().filter(|a| a.provider_id == provider_id)
-                else {
-                    continue;
-                };
-                sync_to_gemini(provider, &activation.model).unwrap_or_else(|e| ToolSyncResultFlat {
-                    tool_id: tool_id.clone(),
-                    success: false,
-                    config_path: None,
-                    error: Some(e.to_string()),
-                    backup_path: None,
-                })
-            }
-            _ => ToolSyncResultFlat {
-                tool_id: tool_id.clone(),
-                success: false,
-                config_path: None,
-                error: Some(format!(
-                    "Unknown tool_id '{}'. Supported: claude-code, codex, opencode, gemini.",
-                    tool_id
-                )),
-                backup_path: None,
-            },
-        };
-
-        results.push(result);
+        results.push(sync_tool_binding(store, tool_id));
     }
 
-    // 4. Return all collected results
     results
 }

@@ -426,17 +426,18 @@ fn switch_opencode(sub: &Subscription) -> SwitchOutcome {
 }
 
 /// Provider block key SkillStar owns inside `provider.<key>` of
-/// `~/.config/opencode/opencode.json`. Mirrors
-/// `tool_sync::OPENCODE_MANAGED_PROVIDER_KEY` (which is `pub(crate)` there).
+/// `~/.config/opencode/opencode.json`. Matches the legacy `skillstar` key that
+/// `tool_sync::is_skillstar_managed_key` treats as managed.
 const MANAGED_PROVIDER_KEY: &str = "skillstar";
 
 /// Write/replace the `provider.skillstar` block (OpenCode schema) in the
 /// given config file, preserving all other top-level + sibling provider
 /// entries. Returns the backup path when a prior file existed.
 ///
-/// This mirrors `tool_sync::sync_to_opencode_inner` but works off a raw
-/// decrypted api_key instead of a full `ProviderEntryFlat` — account
-/// switching only ever needs to swap the key, not the routing metadata.
+/// This mirrors the OpenCode block shape written by
+/// `tool_sync::sync_opencode_binding` but works off a raw decrypted api_key
+/// instead of a full `ProviderEntryFlat` — account switching only ever needs
+/// to swap the key, not the routing metadata.
 fn write_opencode_provider(config_path: &Path, api_key: &str) -> Result<Option<PathBuf>, String> {
     let backup = if config_path.exists() {
         create_rolling_backup(config_path).ok()

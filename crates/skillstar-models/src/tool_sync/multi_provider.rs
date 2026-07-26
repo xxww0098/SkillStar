@@ -220,7 +220,11 @@ pub fn sync_codex_binding(
     }
 }
 
-pub(crate) fn sync_codex_binding_inner(
+/// Path-taking core of [`sync_codex_binding`] — public so property tests can
+/// drive the TOML merge against an isolated temp path instead of the shared
+/// sandbox HOME. (`auth.json` still resolves through the sandboxable home; use
+/// an OAuth/third-party auth mode to keep a test fully path-hermetic.)
+pub fn sync_codex_binding_inner(
     binding: &ToolBinding,
     providers: &[ProviderEntryFlat],
     config_path: &Path,

@@ -168,67 +168,6 @@ fn test_unsync_claude_code_removes_managed_fields() {
         "keep_me"
     );
 }
-
-#[test]
-fn test_unsync_codex_removes_managed_fields() {
-    let tmp = TempDir::new().unwrap();
-    let codex_dir = tmp.path().join(".codex");
-    std::fs::create_dir_all(&codex_dir).unwrap();
-
-    // Write config.toml with managed + custom sections
-    let config_path = codex_dir.join("config.toml");
-    let config_content = r#"
-model_provider = "skillstar"
-model = "model-a"
-
-[general]
-theme = "dark"
-
-[model_providers.skillstar]
-name = "SkillStar"
-base_url = "https://api.example.com/v1"
-wire_api = "responses"
-requires_openai_auth = true
-
-[model_providers.custom]
-name = "Custom"
-base_url = "https://custom.example.com"
-"#;
-    std::fs::write(&config_path, config_content).unwrap();
-
-    // Simulate unsync_codex logic for config.toml
-    create_rolling_backup(&config_path).unwrap();
-    let content = std::fs::read_to_string(&config_path).unwrap();
-    let mut table: toml::Table = toml::from_str(&content).unwrap();
-    table.remove("model_provider");
-    table.remove("model");
-    if let Some(model_providers) = table.get_mut("model_providers")
-        && let Some(mp_table) = model_providers.as_table_mut()
-    {
-        mp_table.remove(CODEX_MANAGED_PROVIDER_KEY);
-    }
-    std::fs::write(&config_path, toml::to_string_pretty(&table).unwrap()).unwrap();
-
-    // Verify config.toml
-    let config_result = std::fs::read_to_string(&config_path).unwrap();
-    let config_parsed: toml::Table = toml::from_str(&config_result).unwrap();
-    assert!(!config_parsed.contains_key("model_provider"));
-    assert!(!config_parsed.contains_key("model"));
-
-    // general section preserved
-    let general = config_parsed.get("general").unwrap().as_table().unwrap();
-    assert_eq!(general.get("theme").unwrap().as_str().unwrap(), "dark");
-
-    // model_providers.custom preserved, skillstar removed
-    let mp = config_parsed
-        .get("model_providers")
-        .unwrap()
-        .as_table()
-        .unwrap();
-    assert!(!mp.contains_key("skillstar"));
-    assert!(mp.contains_key("custom"));
-}
-
 #[test]
 fn test_rolling_backup_keeps_last_5() {
     let tmp = TempDir::new().unwrap();

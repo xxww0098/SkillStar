@@ -1,6 +1,7 @@
 //! tool_sync tests — part1 (split out of the original inline test module).
 
 use super::*;
+use crate::providers::{ToolActivation, ToolBinding};
 
 #[test]
 fn test_resolve_tool_config_path_claude_code() {
@@ -311,123 +312,6 @@ fn test_sync_to_claude_code_inner_empty_model_skips_key() {
     );
 }
 
-#[test]
-fn test_write_codex_config_flat_new_file() {
-    let tmp = TempDir::new().unwrap();
-    let codex_dir = tmp.path().join(".codex");
-    let config_path = codex_dir.join("config.toml");
-
-    let provider = make_test_provider_flat();
-    let activation = ToolActivation {
-        provider_id: provider.id.clone(),
-        model: "model-a".to_string(),
-        settings: None,
-        last_sync_at: None,
-    };
-    write_codex_config_flat(
-        &config_path,
-        &provider,
-        &activation,
-        &CodexSettings::default(),
-    )
-    .unwrap();
-
-    let content = std::fs::read_to_string(&config_path).unwrap();
-    let parsed: toml::Table = toml::from_str(&content).unwrap();
-
-    assert_eq!(
-        parsed.get("model_provider").unwrap().as_str().unwrap(),
-        "skillstar"
-    );
-    assert_eq!(parsed.get("model").unwrap().as_str().unwrap(), "model-a");
-
-    let mp = parsed.get("model_providers").unwrap().as_table().unwrap();
-    let skillstar = mp.get("skillstar").unwrap().as_table().unwrap();
-    assert_eq!(
-        skillstar.get("name").unwrap().as_str().unwrap(),
-        "SkillStar"
-    );
-    assert_eq!(
-        skillstar.get("base_url").unwrap().as_str().unwrap(),
-        "https://api.example.com/v1"
-    );
-    assert_eq!(
-        skillstar.get("wire_api").unwrap().as_str().unwrap(),
-        "responses"
-    );
-    assert!(
-        skillstar
-            .get("requires_openai_auth")
-            .unwrap()
-            .as_bool()
-            .unwrap()
-    );
-}
-
-#[test]
-fn test_write_codex_config_flat_merges_existing() {
-    let tmp = TempDir::new().unwrap();
-    let codex_dir = tmp.path().join(".codex");
-    std::fs::create_dir_all(&codex_dir).unwrap();
-    let config_path = codex_dir.join("config.toml");
-
-    // Write existing config with extra sections
-    let existing = r#"
-[general]
-theme = "dark"
-auto_update = true
-
-[model_providers.custom]
-name = "Custom Provider"
-base_url = "https://custom.example.com"
-"#;
-    std::fs::write(&config_path, existing).unwrap();
-
-    let provider = make_test_provider_flat();
-    let activation = ToolActivation {
-        provider_id: provider.id.clone(),
-        model: "model-b".to_string(),
-        settings: None,
-        last_sync_at: None,
-    };
-    write_codex_config_flat(
-        &config_path,
-        &provider,
-        &activation,
-        &CodexSettings::default(),
-    )
-    .unwrap();
-
-    let content = std::fs::read_to_string(&config_path).unwrap();
-    let parsed: toml::Table = toml::from_str(&content).unwrap();
-
-    // Managed fields are set
-    assert_eq!(
-        parsed.get("model_provider").unwrap().as_str().unwrap(),
-        "skillstar"
-    );
-    assert_eq!(parsed.get("model").unwrap().as_str().unwrap(), "model-b");
-
-    // Existing sections preserved
-    let general = parsed.get("general").unwrap().as_table().unwrap();
-    assert_eq!(general.get("theme").unwrap().as_str().unwrap(), "dark");
-    assert!(general.get("auto_update").unwrap().as_bool().unwrap());
-
-    // Existing model_providers.custom preserved
-    let mp = parsed.get("model_providers").unwrap().as_table().unwrap();
-    let custom = mp.get("custom").unwrap().as_table().unwrap();
-    assert_eq!(
-        custom.get("name").unwrap().as_str().unwrap(),
-        "Custom Provider"
-    );
-
-    // New model_providers.skillstar added
-    let skillstar = mp.get("skillstar").unwrap().as_table().unwrap();
-    assert_eq!(
-        skillstar.get("base_url").unwrap().as_str().unwrap(),
-        "https://api.example.com/v1"
-    );
-}
 
 // ---------------------------------------------------------------------------
 // Three-state auth_mode (api_key / oauth / third_party)
@@ -446,49 +330,40 @@ fn make_codex_activation(provider: &ProviderEntryFlat, settings: CodexSettings) 
 #[test]
 fn test_codex_third_party_writes_env_key_and_disables_openai_auth() {
     let tmp = TempDir::new().unwrap();
-    let codex_dir = tmp.path().join(".codex");
-    let config_path = codex_dir.join("config.toml");
+    let config_path = tmp.path().join("config.toml");
 
     let provider = make_test_provider_flat();
-    let activation = make_codex_activation(
-        &provider,
-        CodexSettings {
-            wire_api: "chat".to_string(),
-            auth_mode: CODEX_AUTH_MODE_THIRD_PARTY.to_string(),
-        },
-    );
+    let settings = CodexSettings {
+        wire_api: "chat".to_string(),
+        auth_mode: CODEX_AUTH_MODE_THIRD_PARTY.to_string(),
+    };
+    let binding = ToolBinding {
+        entries: vec![make_codex_activation(&provider, settings)],
+        active_index: 0,
+    };
 
-    write_codex_config_flat(
-        &config_path,
-        &provider,
-        &activation,
-        &CodexSettings {
-            wire_api: "chat".to_string(),
-            auth_mode: CODEX_AUTH_MODE_THIRD_PARTY.to_string(),
-        },
-    )
-    .unwrap();
+    sync_codex_binding_inner(&binding, std::slice::from_ref(&provider), &config_path).unwrap();
 
     let parsed: toml::Table =
         toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
-    let skillstar = parsed
+    let managed = parsed
         .get("model_providers")
         .unwrap()
-        .get("skillstar")
+        .get(skillstar_managed_key(&provider.id).as_str())
         .unwrap()
         .as_table()
         .unwrap();
 
     // third_party ⇒ requires_openai_auth = false
     assert!(
-        !skillstar
+        !managed
             .get("requires_openai_auth")
             .unwrap()
             .as_bool()
             .unwrap()
     );
     // env_key is written and follows the SKILLSTAR_<prefix>_KEY rule.
-    let env_key = skillstar.get("env_key").unwrap().as_str().unwrap();
+    let env_key = managed.get("env_key").unwrap().as_str().unwrap();
     assert!(
         env_key.starts_with("SKILLSTAR_"),
         "env_key must be namespaced: got {env_key}"
@@ -501,38 +376,40 @@ fn test_codex_third_party_writes_env_key_and_disables_openai_auth() {
 #[test]
 fn test_codex_oauth_enables_openai_auth_and_no_env_key() {
     let tmp = TempDir::new().unwrap();
-    let codex_dir = tmp.path().join(".codex");
-    let config_path = codex_dir.join("config.toml");
+    let config_path = tmp.path().join("config.toml");
 
     let provider = make_test_provider_flat();
     let settings = CodexSettings {
         wire_api: "responses".to_string(),
         auth_mode: CODEX_AUTH_MODE_OAUTH.to_string(),
     };
-    let activation = make_codex_activation(&provider, settings.clone());
+    let binding = ToolBinding {
+        entries: vec![make_codex_activation(&provider, settings)],
+        active_index: 0,
+    };
 
-    write_codex_config_flat(&config_path, &provider, &activation, &settings).unwrap();
+    sync_codex_binding_inner(&binding, std::slice::from_ref(&provider), &config_path).unwrap();
 
     let parsed: toml::Table =
         toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
-    let skillstar = parsed
+    let managed = parsed
         .get("model_providers")
         .unwrap()
-        .get("skillstar")
+        .get(skillstar_managed_key(&provider.id).as_str())
         .unwrap()
         .as_table()
         .unwrap();
 
     // oauth ⇒ requires_openai_auth = true (routes through ChatGPT token)
     assert!(
-        skillstar
+        managed
             .get("requires_openai_auth")
             .unwrap()
             .as_bool()
             .unwrap()
     );
     // oauth never emits env_key
-    assert!(skillstar.get("env_key").is_none());
+    assert!(managed.get("env_key").is_none());
 }
 
 #[test]
@@ -569,9 +446,12 @@ fn test_codex_oauth_and_third_party_preserve_existing_auth_json() {
             wire_api: "responses".to_string(),
             auth_mode: mode.to_string(),
         };
-        let activation = make_codex_activation(&provider, settings.clone());
+        let binding = ToolBinding {
+            entries: vec![make_codex_activation(&provider, settings)],
+            active_index: 0,
+        };
 
-        let _ = sync_to_codex(&provider, &activation);
+        let _ = sync_codex_binding(&binding, std::slice::from_ref(&provider));
 
         // auth.json is byte-identical (neither mode writes it).
         let after = std::fs::read_to_string(&auth_path).unwrap();

@@ -263,12 +263,6 @@ pub(crate) const CLAUDE_MANAGED_ENV_KEYS: &[&str] = &[
     "ANTHROPIC_DEFAULT_OPUS_MODEL",
 ];
 
-/// The key for the model_providers section managed by SkillStar in Codex's config.toml.
-pub(crate) const CODEX_MANAGED_PROVIDER_KEY: &str = "skillstar";
-
-/// Provider block key under `opencode.json` → `provider`.
-pub(crate) const OPENCODE_MANAGED_PROVIDER_KEY: &str = "skillstar";
-
 /// Fields managed by SkillStar in Gemini CLI's `~/.gemini/.env` file.
 pub(crate) const GEMINI_MANAGED_ENV_KEYS: &[&str] =
     &["GOOGLE_GEMINI_BASE_URL", "GEMINI_API_KEY", "GEMINI_MODEL"];
