@@ -17,7 +17,7 @@
 
 - Agent binding 使用 `ToolBinding { entries, active_index }`；所有读写通过 helper/facade，不直接索引 `entries[active_index]`。
 - Agent descriptor 的 `kind` 是 UI 和后端能力的共同开关：single 只激活一个 provider；multi 原生保留多个条目并维护 active 指针。
-- Rust 侧 Agent 事实（binary、配置目录探测、文件清单、kind、必需 URL）的 SSOT 是 `tool_sync::agents` 注册表；它与前端 `agentRegistry.ts` 各自持有同一份 toolId 清单，由两侧的表驱动一致性测试互相锁定。
+- Rust 侧 Agent 事实（binary、配置目录探测、文件清单、kind、必需 URL、sync/unsync/探测 dispatch）的 SSOT 是 `tool_sync::agents` 注册表；写盘、卸载、resync 与配置目标枚举都经它路由，新增 Agent 只加一行 spec 及其 writer。它与前端 `agentRegistry.ts` 各自持有同一份 toolId 清单，由两侧的表驱动一致性测试互相锁定。
 - tool-sync 只改自己管理的字段，保留用户已有配置；写入前备份并使用原子替换。
 - JSON 型 multi Agent（OpenCode / Pi）的写盘共享 `multi_provider` 内部骨架（备份 → retain 托管键 → 写块 → active 指针），各自只提供 build_block 与指针落点；Codex（TOML + auth.json 副通道）独立维护，理由见 decisions.md D-012。
 - 所有测试设置 `SKILLSTAR_TOOL_SYNC_HOME` 到临时目录，绝不写真实 Agent 配置。

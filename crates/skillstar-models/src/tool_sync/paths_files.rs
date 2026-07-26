@@ -305,9 +305,7 @@ pub fn get_tool_config_targets() -> Result<Vec<ToolConfigTarget>> {
         let config_path = (spec.files[0].resolve)()?;
         let exists = config_path.exists();
         let current_provider = if exists {
-            detect_current_provider(spec.id, &config_path)
-                .ok()
-                .flatten()
+            (spec.detect_provider)(&config_path).ok().flatten()
         } else {
             None
         };
@@ -324,95 +322,97 @@ pub fn get_tool_config_targets() -> Result<Vec<ToolConfigTarget>> {
     Ok(targets)
 }
 
-/// Attempt to detect the current provider name from an existing config file.
-fn detect_current_provider(tool_id: &str, path: &Path) -> Result<Option<String>> {
-    if !path.exists() {
-        return Ok(None);
-    }
+// ---------------------------------------------------------------------------
+// Per-agent current-provider detection (registry `detect_provider` column)
+// ---------------------------------------------------------------------------
+//
+// Each detector reads an *existing* config file and reports a human-readable
+// hint (base URL or provider name) for the provider currently wired in.
 
-    match tool_id {
-        "claude-code" => {
-            let content = std::fs::read_to_string(path)?;
-            let json: Value = serde_json::from_str(&content)?;
-            // Try to read apiUrl as a hint for the provider
-            if let Some(api_url) = json.get("apiUrl").and_then(|v| v.as_str()) {
-                return Ok(Some(api_url.to_string()));
-            }
-            Ok(None)
+/// Claude Code: read `apiUrl` from `~/.claude/settings.json` as a hint.
+pub(crate) fn detect_claude_code_provider(path: &Path) -> Result<Option<String>> {
+    let content = std::fs::read_to_string(path)?;
+    let json: Value = serde_json::from_str(&content)?;
+    Ok(json
+        .get("apiUrl")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string()))
+}
+
+/// Codex: follow the active pointer (`model_provider`) to its managed table,
+/// falling back to any skillstar* table or a legacy `[provider]`.
+pub(crate) fn detect_codex_provider(path: &Path) -> Result<Option<String>> {
+    let content = std::fs::read_to_string(path)?;
+    let table: toml::Table = toml::from_str(&content)?;
+    if let Some(mp) = table.get("model_providers").and_then(|v| v.as_table()) {
+        let active_key = table.get("model_provider").and_then(|v| v.as_str());
+        let active = active_key.and_then(|k| mp.get(k)).or_else(|| {
+            mp.iter()
+                .find(|(k, _)| is_skillstar_managed_key(k))
+                .map(|(_, v)| v)
+        });
+        if let Some(url) = active
+            .and_then(|v| v.as_table())
+            .and_then(|ss| ss.get("base_url"))
+            .and_then(|v| v.as_str())
+        {
+            return Ok(Some(url.to_string()));
         }
-        "codex" => {
-            let content = std::fs::read_to_string(path)?;
-            let table: toml::Table = toml::from_str(&content)?;
-            // Follow the active pointer (`model_provider`) to its managed table,
-            // falling back to any skillstar* table or a legacy `[provider]`.
-            if let Some(mp) = table.get("model_providers").and_then(|v| v.as_table()) {
-                let active_key = table.get("model_provider").and_then(|v| v.as_str());
-                let active = active_key.and_then(|k| mp.get(k)).or_else(|| {
-                    mp.iter()
-                        .find(|(k, _)| is_skillstar_managed_key(k))
-                        .map(|(_, v)| v)
-                });
-                if let Some(url) = active
-                    .and_then(|v| v.as_table())
-                    .and_then(|ss| ss.get("base_url"))
-                    .and_then(|v| v.as_str())
-                {
-                    return Ok(Some(url.to_string()));
-                }
-            }
-            if let Some(provider) = table.get("provider").and_then(|v| v.as_table())
-                && let Some(base_url) = provider.get("base_url").and_then(|v| v.as_str())
-            {
-                return Ok(Some(base_url.to_string()));
-            }
-            Ok(None)
-        }
-        "opencode" => {
-            let content = std::fs::read_to_string(path)?;
-            let json: Value = serde_json::from_str(&content)?;
-            if let Some(providers) = json.get("provider").and_then(|p| p.as_object()) {
-                // Prefer the block named by the active `model` selector; else
-                // any skillstar* block.
-                let active_key = json
-                    .get("model")
-                    .and_then(|v| v.as_str())
-                    .and_then(|m| m.split('/').next());
-                let block = active_key.and_then(|k| providers.get(k)).or_else(|| {
-                    providers
-                        .iter()
-                        .find(|(k, _)| is_skillstar_managed_key(k))
-                        .map(|(_, v)| v)
-                });
-                if let Some(name) = block.and_then(|c| c.get("name")).and_then(|v| v.as_str()) {
-                    return Ok(Some(name.to_string()));
-                }
-            }
-            Ok(None)
-        }
-        "gemini" => {
-            let content = std::fs::read_to_string(path)?;
-            let pairs = parse_env_file(&content);
-            Ok(pairs
-                .into_iter()
-                .find(|(k, _)| k == "GOOGLE_GEMINI_BASE_URL")
-                .map(|(_, v)| v))
-        }
-        "pi" => {
-            let content = std::fs::read_to_string(path)?;
-            let json: Value = serde_json::from_str(&content)?;
-            if let Some(providers) = json.get("providers").and_then(|p| p.as_object()) {
-                // Report the base URL of any skillstar* managed block.
-                if let Some(url) = providers
-                    .iter()
-                    .find(|(k, _)| is_skillstar_managed_key(k))
-                    .and_then(|(_, v)| v.get("baseUrl"))
-                    .and_then(|v| v.as_str())
-                {
-                    return Ok(Some(url.to_string()));
-                }
-            }
-            Ok(None)
-        }
-        _ => Ok(None),
     }
+    if let Some(provider) = table.get("provider").and_then(|v| v.as_table())
+        && let Some(base_url) = provider.get("base_url").and_then(|v| v.as_str())
+    {
+        return Ok(Some(base_url.to_string()));
+    }
+    Ok(None)
+}
+
+/// OpenCode: prefer the block named by the active `model` selector; else any
+/// skillstar* block. Reports the block's `name`.
+pub(crate) fn detect_opencode_provider(path: &Path) -> Result<Option<String>> {
+    let content = std::fs::read_to_string(path)?;
+    let json: Value = serde_json::from_str(&content)?;
+    if let Some(providers) = json.get("provider").and_then(|p| p.as_object()) {
+        let active_key = json
+            .get("model")
+            .and_then(|v| v.as_str())
+            .and_then(|m| m.split('/').next());
+        let block = active_key.and_then(|k| providers.get(k)).or_else(|| {
+            providers
+                .iter()
+                .find(|(k, _)| is_skillstar_managed_key(k))
+                .map(|(_, v)| v)
+        });
+        if let Some(name) = block.and_then(|c| c.get("name")).and_then(|v| v.as_str()) {
+            return Ok(Some(name.to_string()));
+        }
+    }
+    Ok(None)
+}
+
+/// Gemini: report `GOOGLE_GEMINI_BASE_URL` from `~/.gemini/.env`.
+pub(crate) fn detect_gemini_provider(path: &Path) -> Result<Option<String>> {
+    let content = std::fs::read_to_string(path)?;
+    let pairs = parse_env_file(&content);
+    Ok(pairs
+        .into_iter()
+        .find(|(k, _)| k == "GOOGLE_GEMINI_BASE_URL")
+        .map(|(_, v)| v))
+}
+
+/// Pi: report the base URL of any skillstar* managed block in `models.json`.
+pub(crate) fn detect_pi_provider(path: &Path) -> Result<Option<String>> {
+    let content = std::fs::read_to_string(path)?;
+    let json: Value = serde_json::from_str(&content)?;
+    if let Some(providers) = json.get("providers").and_then(|p| p.as_object()) {
+        if let Some(url) = providers
+            .iter()
+            .find(|(k, _)| is_skillstar_managed_key(k))
+            .and_then(|(_, v)| v.get("baseUrl"))
+            .and_then(|v| v.as_str())
+        {
+            return Ok(Some(url.to_string()));
+        }
+    }
+    Ok(None)
 }

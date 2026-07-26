@@ -1,15 +1,17 @@
 //! Agent registry — the single source of truth for per-agent facts.
 //!
 //! One [`AgentSpec`] row per model-workbench agent (mirroring the frontend
-//! `agentRegistry.ts`): identity, install probes, config-file inventory and
-//! binding kind. The consistency tests below reconcile every row against the
-//! existing per-tool `match` sites, so the two stay in lockstep until those
-//! matches are converged onto this table (spec #1 phase 2, contract step).
-//!
-//! Expand-step contract: this module only *adds* the table + lookup seam
-//! (`agent_spec` / `agent_specs`); no existing dispatch consults it yet.
+//! `agentRegistry.ts`): identity, install probes, config-file inventory,
+//! binding kind, and the per-agent dispatch columns (`sync_binding` /
+//! `unsync` / `detect_provider`). The tool-sync dispatch sites
+//! ([`sync_tool_binding`], [`unsync_tool`], [`resync_active_tools`],
+//! [`get_tool_config_targets`], path/file resolution) all consult this table;
+//! adding an agent means adding one row here plus its writer functions. The
+//! consistency tests below reconcile every row against the store-layer kind
+//! decision and the frontend-pinned literals.
 
 use super::*;
+use crate::providers::ToolBinding;
 
 /// Whether the agent's config format natively holds several providers.
 ///
@@ -62,6 +64,14 @@ pub struct AgentSpec {
     /// Config-file inventory. The first entry is the agent's primary config
     /// file (the one `resolve_tool_config_path` returns).
     pub files: &'static [AgentConfigFileSpec],
+    /// Project a whole [`ToolBinding`] onto disk. Single-provider agents
+    /// resolve the active entry; multi-provider agents write every entry.
+    pub sync_binding: fn(&ToolBinding, &[ProviderEntryFlat]) -> Result<ToolSyncResultFlat>,
+    /// Remove every SkillStar-managed field/entry from the agent's configs.
+    pub unsync: fn() -> Result<()>,
+    /// Read an *existing* primary config file and report a human-readable
+    /// hint (base URL / name) for the currently wired provider.
+    pub detect_provider: fn(&Path) -> Result<Option<String>>,
 }
 
 /// `~/.claude/settings.json` — named resolver for the registry (the legacy
@@ -89,6 +99,9 @@ static AGENT_SPECS: &[AgentSpec] = &[
             resolve: resolve_claude_settings_path,
             default_content: "{\n  \"env\": {}\n}\n",
         }],
+        sync_binding: sync_claude_code_binding,
+        unsync: unsync_claude_code,
+        detect_provider: detect_claude_code_provider,
     },
     AgentSpec {
         id: "codex",
@@ -113,6 +126,9 @@ static AGENT_SPECS: &[AgentSpec] = &[
                 default_content: "{\n  \"OPENAI_API_KEY\": \"\"\n}\n",
             },
         ],
+        sync_binding: sync_codex_binding,
+        unsync: unsync_codex_all,
+        detect_provider: detect_codex_provider,
     },
     AgentSpec {
         id: "opencode",
@@ -128,6 +144,9 @@ static AGENT_SPECS: &[AgentSpec] = &[
             resolve: resolve_opencode_config_path,
             default_content: "{\n  \"$schema\": \"https://opencode.ai/config.json\",\n  \"provider\": {}\n}\n",
         }],
+        sync_binding: sync_opencode_binding,
+        unsync: unsync_opencode_all,
+        detect_provider: detect_opencode_provider,
     },
     AgentSpec {
         id: "gemini",
@@ -143,6 +162,9 @@ static AGENT_SPECS: &[AgentSpec] = &[
             resolve: resolve_gemini_env_path,
             default_content: "GOOGLE_GEMINI_BASE_URL=\nGEMINI_API_KEY=[密钥]",
         }],
+        sync_binding: sync_gemini_binding,
+        unsync: unsync_gemini,
+        detect_provider: detect_gemini_provider,
     },
     AgentSpec {
         id: "pi",
@@ -167,6 +189,9 @@ static AGENT_SPECS: &[AgentSpec] = &[
                 default_content: "{}\n",
             },
         ],
+        sync_binding: sync_pi_binding,
+        unsync: unsync_pi_all,
+        detect_provider: detect_pi_provider,
     },
 ];
 

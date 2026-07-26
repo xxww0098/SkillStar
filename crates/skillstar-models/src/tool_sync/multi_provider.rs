@@ -509,35 +509,31 @@ pub(crate) fn sync_pi_binding_inner(
 // Unified dispatch
 // ---------------------------------------------------------------------------
 
-/// Write a tool's current binding to disk, routing by agent kind.
+/// Write a tool's current binding to disk, routing through the agent registry.
 ///
-/// The single sync entry point for the command layer: single-provider agents
-/// (claude-code, gemini) write their active entry's env block; multi-provider
-/// agents (codex, opencode) project their whole binding. An empty binding
-/// unsyncs the tool. Unknown tools return a failed result.
+/// The single sync entry point for the command layer: each agent's
+/// [`AgentSpec::sync_binding`] column projects the binding (single-provider
+/// agents write their active entry's env block, multi-provider agents project
+/// the whole binding). An empty binding unsyncs the tool via
+/// [`AgentSpec::unsync`]. Unknown tools return a failed result.
 pub fn sync_tool_binding(store: &FlatProvidersStore, tool_id: &str) -> ToolSyncResultFlat {
+    let Some(spec) = agent_spec(tool_id) else {
+        return ToolSyncResultFlat {
+            tool_id: tool_id.to_string(),
+            success: false,
+            config_path: None,
+            error: Some(format!("Unknown tool_id '{tool_id}'")),
+            backup_path: None,
+        };
+    };
+
     let binding = store.tool_activations.get(tool_id);
     let empty = ToolBinding::default();
     let binding = binding.unwrap_or(&empty);
 
     // Empty binding → ensure the tool is clean.
     if binding.is_empty() {
-        let unsync_result = match tool_id {
-            "claude-code" => unsync_claude_code(),
-            "gemini" => unsync_gemini(),
-            "codex" => unsync_codex_all(),
-            "opencode" => unsync_opencode_all(),
-            "pi" => unsync_pi_all(),
-            other => {
-                return ToolSyncResultFlat {
-                    tool_id: other.to_string(),
-                    success: false,
-                    config_path: None,
-                    error: Some(format!("Unknown tool_id '{other}'")),
-                    backup_path: None,
-                };
-            }
-        };
+        let unsync_result = (spec.unsync)();
         return ToolSyncResultFlat {
             tool_id: tool_id.to_string(),
             success: unsync_result.is_ok(),
@@ -547,40 +543,7 @@ pub fn sync_tool_binding(store: &FlatProvidersStore, tool_id: &str) -> ToolSyncR
         };
     }
 
-    match tool_id {
-        "codex" => {
-            sync_codex_binding(binding, &store.providers).unwrap_or_else(err_result(tool_id))
-        }
-        "opencode" => {
-            sync_opencode_binding(binding, &store.providers).unwrap_or_else(err_result(tool_id))
-        }
-        "pi" => sync_pi_binding(binding, &store.providers).unwrap_or_else(err_result(tool_id)),
-        "claude-code" | "gemini" => {
-            // Single-provider: resolve the active entry's provider and write it.
-            let Some(active) = binding.active() else {
-                return err_result(tool_id)(anyhow::anyhow!("no active entry"));
-            };
-            let Some(provider) = store.providers.iter().find(|p| p.id == active.provider_id) else {
-                return err_result(tool_id)(anyhow::anyhow!(
-                    "Provider '{}' not found",
-                    active.provider_id
-                ));
-            };
-            let res = if tool_id == "claude-code" {
-                sync_to_claude_code(provider, &active.model)
-            } else {
-                sync_to_gemini(provider, &active.model)
-            };
-            res.unwrap_or_else(err_result(tool_id))
-        }
-        other => ToolSyncResultFlat {
-            tool_id: other.to_string(),
-            success: false,
-            config_path: None,
-            error: Some(format!("Unknown tool_id '{other}'")),
-            backup_path: None,
-        },
-    }
+    (spec.sync_binding)(binding, &store.providers).unwrap_or_else(err_result(tool_id))
 }
 
 /// Build a closure that turns a sync error into a failed `ToolSyncResultFlat`

@@ -309,19 +309,47 @@ pub(crate) fn sync_to_gemini_inner(
     merge_env_write(config_path, &managed)
 }
 
+/// Registry adapter: write a Claude Code binding by resolving its active
+/// entry (single-provider agents only ever project the active entry).
+pub(crate) fn sync_claude_code_binding(
+    binding: &crate::providers::ToolBinding,
+    providers: &[ProviderEntryFlat],
+) -> Result<ToolSyncResultFlat> {
+    let (provider, model) = resolve_single_active(binding, providers)?;
+    sync_to_claude_code(provider, model)
+}
+
+/// Registry adapter: write a Gemini binding by resolving its active entry.
+pub(crate) fn sync_gemini_binding(
+    binding: &crate::providers::ToolBinding,
+    providers: &[ProviderEntryFlat],
+) -> Result<ToolSyncResultFlat> {
+    let (provider, model) = resolve_single_active(binding, providers)?;
+    sync_to_gemini(provider, model)
+}
+
+/// Resolve the active entry of a single-provider binding to `(provider, model)`.
+fn resolve_single_active<'a>(
+    binding: &'a crate::providers::ToolBinding,
+    providers: &'a [ProviderEntryFlat],
+) -> Result<(&'a ProviderEntryFlat, &'a str)> {
+    let active = binding.active().context("no active entry")?;
+    let provider = providers
+        .iter()
+        .find(|p| p.id == active.provider_id)
+        .with_context(|| format!("Provider '{}' not found", active.provider_id))?;
+    Ok((provider, active.model.as_str()))
+}
+
 /// Remove every SkillStar-managed field/entry from a tool's config files.
 ///
-/// Registry-driven deactivation dispatch: known agents route to their unsync
-/// implementation; ids missing from the registry are a no-op (nothing was ever
-/// written for them).
+/// Registry-driven deactivation dispatch: known agents route to their
+/// [`AgentSpec::unsync`] column; ids missing from the registry are a no-op
+/// (nothing was ever written for them).
 pub fn unsync_tool(tool_id: &str) -> Result<()> {
-    match agent_spec(tool_id).map(|spec| spec.id) {
-        Some("claude-code") => unsync_claude_code(),
-        Some("codex") => unsync_codex_all(),
-        Some("opencode") => unsync_opencode_all(),
-        Some("gemini") => unsync_gemini(),
-        Some("pi") => unsync_pi_all(),
-        _ => Ok(()),
+    match agent_spec(tool_id) {
+        Some(spec) => (spec.unsync)(),
+        None => Ok(()),
     }
 }
 
