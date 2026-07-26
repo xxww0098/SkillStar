@@ -16,6 +16,10 @@ name: Windows CI
 #    satisfy Y" because package.json / bun.lock moved and package-lock.json
 #    was left behind. Zero green runs → zero Windows path coverage. A red
 #    install step is not "Windows is flaky"; it is an unmaintained lockfile.
+#    Root cause found 2026-07-26: a developer-global ~/.npmrc with
+#    legacy-peer-deps=true generated lockfiles without auto-installed peers,
+#    which `npm ci` (default behaviour) rejects. The repo-level .npmrc now
+#    pins legacy-peer-deps=false so local lock generation matches CI.
 #
 # 2. Do not "fix" install failures with `npm install` (non-ci) in this
 #    workflow. That hides drift and makes Windows CI non-reproducible.

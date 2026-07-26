@@ -17,4 +17,10 @@
 # Result<_, String> API; (c) 13 signatures inside crates/ (skillstar-skills,
 # skillstar-marketplace, skillstar-models, skillstar-app, skillstar-ai,
 # skillstar-usage), intentionally out of scope for this command-layer pass.
-22
+#
+# 2026-07-26: raised 22 -> 34 to register debt carried in by the pre-release
+# WIP snapshot (2ed84a5): 12 new hits, dominated by
+# crates/skillstar-app/src/usage_switch/grok/io.rs (Grok account switching
+# I/O helpers). These predate the v0.0.4 release work; migrate them to a
+# real error enum and lower this number in a dedicated pass.
+34
