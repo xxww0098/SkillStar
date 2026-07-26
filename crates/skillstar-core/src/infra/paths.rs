@@ -40,13 +40,7 @@ pub fn data_root() -> PathBuf {
         let expanded = shellexpand_home(&dir);
         return PathBuf::from(expanded);
     }
-    #[cfg(test)]
-    if let Some(home) = std::env::var_os("HOME") {
-        return PathBuf::from(home).join(".skillstar");
-    }
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".skillstar")
+    home_dir().join(".skillstar")
 }
 
 /// Hub root — skills, repo cache, lockfile, publish cache live here.
@@ -62,12 +56,29 @@ pub fn hub_root() -> PathBuf {
 }
 
 /// User home directory (used for agent profile dirs like `~/.claude/skills`).
+///
+/// Honors the platform home env var before falling back to `dirs`. This is not
+/// merely a test affordance: `dirs::home_dir()` reads `$HOME` on Unix but
+/// resolves the Windows profile via `SHGetKnownFolderPath`, ignoring
+/// `USERPROFILE`. Without this branch a test that sandboxes `USERPROFILE`
+/// silently deploys into the runner's real profile on Windows — exactly the
+/// sandbox escape ci.yml failure lesson 2 warns about (observed as
+/// `batch_global_deploy_honors_explicit_copy_mode` failing on Windows CI).
 pub fn home_dir() -> PathBuf {
-    #[cfg(test)]
-    if let Some(home) = std::env::var_os("HOME") {
-        return PathBuf::from(home);
+    if let Some(home) = home_env_override() {
+        return home;
     }
     dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// `$HOME` on Unix, `%USERPROFILE%` on Windows — the canonical home env var
+/// for the platform. Empty values are ignored so a blank var never redirects
+/// paths to the filesystem root.
+fn home_env_override() -> Option<PathBuf> {
+    let var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    std::env::var_os(var)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
 }
 
 /// `~/.skillstar/config/` — user-editable configuration files.
@@ -221,8 +232,7 @@ pub fn lockfile_path() -> PathBuf {
 pub(crate) fn shellexpand_home(path: &str) -> String {
     let rest = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\"));
     if let Some(rest) = rest {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        home.join(rest).to_string_lossy().to_string()
+        home_dir().join(rest).to_string_lossy().to_string()
     } else {
         path.to_string()
     }
