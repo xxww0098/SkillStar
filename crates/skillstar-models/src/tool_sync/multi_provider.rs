@@ -94,6 +94,98 @@ fn resolve_entries<'a>(
 }
 
 // ---------------------------------------------------------------------------
+// Shared JSON managed-block skeleton (OpenCode, Pi)
+// ---------------------------------------------------------------------------
+
+/// Shared write skeleton for JSON multi-provider configs (OpenCode, Pi):
+/// rolling backup → read-or-init root → drop stale `skillstar_*` blocks →
+/// one managed block per bound provider (skipping entries without an
+/// OpenAI-compatible URL, computing the active `(key, model)` pair) → let the
+/// caller finalize the root (active selector, `$schema`, …) → persist.
+///
+/// Returns the backup path plus the active pointer when it resolved to a
+/// non-empty model. Codex deliberately does NOT go through this skeleton: its
+/// TOML document, `auth.json` side-channel and per-entry wire settings would
+/// push the adapter surface past the writer it replaces (see
+/// docs/decisions.md).
+/// Active pointer for a managed binding: `(skillstar_<id8> key, model_id)`.
+pub(crate) type ActivePointer = (String, String);
+
+pub(crate) fn sync_json_blocks_inner(
+    entries: &[(&ProviderEntryFlat, &crate::providers::ToolActivation)],
+    active_id: &str,
+    config_path: &Path,
+    blocks_key: &str,
+    init_root: impl Fn() -> Value,
+    build_block: impl Fn(&ProviderEntryFlat, &str) -> Value,
+    finish_root: impl FnOnce(&mut serde_json::Map<String, Value>, Option<&ActivePointer>),
+) -> Result<(Option<PathBuf>, Option<ActivePointer>)> {
+    let backup_path = if config_path.exists() {
+        Some(create_rolling_backup(config_path)?)
+    } else {
+        None
+    };
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
+    }
+
+    let mut root: Value = if config_path.exists() {
+        let content = std::fs::read_to_string(config_path)
+            .with_context(|| format!("Failed to read {}", config_path.display()))?;
+        serde_json::from_str(&content).unwrap_or_else(|_| init_root())
+    } else {
+        init_root()
+    };
+
+    let file_label = config_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| config_path.display().to_string());
+    let root_obj = root
+        .as_object_mut()
+        .with_context(|| format!("{file_label} root must be an object"))?;
+
+    let provider_map = root_obj
+        .entry(blocks_key)
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+    let provider_map = provider_map
+        .as_object_mut()
+        .with_context(|| format!("{file_label} `{blocks_key}` must be an object"))?;
+
+    // Drop stale skillstar* blocks, then write one per current entry.
+    provider_map.retain(|k, _| !is_skillstar_managed_key(k));
+    let mut active_pointer: Option<(String, String)> = None;
+    for (provider, entry) in entries {
+        if provider.base_url_openai.trim().is_empty() {
+            continue;
+        }
+        let key = skillstar_managed_key(&provider.id);
+        let block = build_block(provider, &entry.model);
+        if provider.id == active_id {
+            let model_id = if entry.model.trim().is_empty() {
+                provider.default_model.clone()
+            } else {
+                entry.model.clone()
+            };
+            if !model_id.trim().is_empty() {
+                active_pointer = Some((key.clone(), model_id));
+            }
+        }
+        provider_map.insert(key, block);
+    }
+
+    finish_root(root_obj, active_pointer.as_ref());
+
+    let output = serde_json::to_string_pretty(&root)
+        .with_context(|| format!("Failed to serialize {file_label}"))?;
+    std::fs::write(config_path, output)
+        .with_context(|| format!("Failed to write {}", config_path.display()))?;
+
+    Ok((backup_path, active_pointer))
+}
+
+// ---------------------------------------------------------------------------
 // Codex
 // ---------------------------------------------------------------------------
 
@@ -284,70 +376,23 @@ pub(crate) fn sync_opencode_binding_inner(
     let (entries, active_id) = resolve_entries(binding, providers)
         .context("OpenCode binding has no resolvable provider entries")?;
 
-    let backup_path = if config_path.exists() {
-        Some(create_rolling_backup(config_path)?)
-    } else {
-        None
-    };
-    if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
-    }
-
-    let mut root: Value = if config_path.exists() {
-        let content = std::fs::read_to_string(config_path)
-            .with_context(|| format!("Failed to read {}", config_path.display()))?;
-        serde_json::from_str(&content).unwrap_or_else(
-            |_| serde_json::json!({ "$schema": "https://opencode.ai/config.json", "provider": {} }),
-        )
-    } else {
-        serde_json::json!({ "$schema": "https://opencode.ai/config.json", "provider": {} })
-    };
-
-    let root_obj = root
-        .as_object_mut()
-        .context("opencode.json root must be an object")?;
-    root_obj
-        .entry("$schema")
-        .or_insert_with(|| Value::String("https://opencode.ai/config.json".to_string()));
-
-    let provider_map = root_obj
-        .entry("provider")
-        .or_insert_with(|| Value::Object(serde_json::Map::new()));
-    let provider_map = provider_map
-        .as_object_mut()
-        .context("opencode.json `provider` must be an object")?;
-
-    // Drop stale skillstar* blocks, then write one per current entry.
-    provider_map.retain(|k, _| !is_skillstar_managed_key(k));
-    let mut active_model_selector: Option<String> = None;
-    for (provider, entry) in &entries {
-        if provider.base_url_openai.trim().is_empty() {
-            continue;
-        }
-        let key = skillstar_managed_key(&provider.id);
-        let block = build_opencode_provider_block(provider, &entry.model);
-        if provider.id == active_id {
-            let model_id = if entry.model.trim().is_empty() {
-                provider.default_model.clone()
-            } else {
-                entry.model.clone()
-            };
-            if !model_id.trim().is_empty() {
-                active_model_selector = Some(format!("{key}/{model_id}"));
+    let (backup_path, _) = sync_json_blocks_inner(
+        &entries,
+        &active_id,
+        config_path,
+        "provider",
+        || serde_json::json!({ "$schema": "https://opencode.ai/config.json", "provider": {} }),
+        build_opencode_provider_block,
+        |root, active| {
+            root.entry("$schema")
+                .or_insert_with(|| Value::String("https://opencode.ai/config.json".to_string()));
+            // The active entry sets the top-level `model` selector; when no
+            // model resolved, any pre-existing selector is left untouched.
+            if let Some((key, model_id)) = active {
+                root.insert("model".to_string(), Value::String(format!("{key}/{model_id}")));
             }
-        }
-        provider_map.insert(key, block);
-    }
-
-    if let Some(selector) = active_model_selector {
-        root_obj.insert("model".to_string(), Value::String(selector));
-    }
-
-    let output =
-        serde_json::to_string_pretty(&root).context("Failed to serialize opencode.json")?;
-    std::fs::write(config_path, output)
-        .with_context(|| format!("Failed to write {}", config_path.display()))?;
+        },
+    )?;
 
     Ok(backup_path)
 }
@@ -427,59 +472,16 @@ pub(crate) fn sync_pi_binding_inner(
     let (entries, active_id) = resolve_entries(binding, providers)
         .context("Pi binding has no resolvable provider entries")?;
 
-    let backup_path = if config_path.exists() {
-        Some(create_rolling_backup(config_path)?)
-    } else {
-        None
-    };
-    if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
-    }
-
-    let mut root: Value = if config_path.exists() {
-        let content = std::fs::read_to_string(config_path)
-            .with_context(|| format!("Failed to read {}", config_path.display()))?;
-        serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({ "providers": {} }))
-    } else {
-        serde_json::json!({ "providers": {} })
-    };
-
-    let root_obj = root
-        .as_object_mut()
-        .context("models.json root must be an object")?;
-    let provider_map = root_obj
-        .entry("providers")
-        .or_insert_with(|| Value::Object(serde_json::Map::new()));
-    let provider_map = provider_map
-        .as_object_mut()
-        .context("models.json `providers` must be an object")?;
-
-    // Drop stale skillstar* blocks, then write one per current entry.
-    provider_map.retain(|k, _| !is_skillstar_managed_key(k));
-    let mut active_pointer: Option<(String, String)> = None;
-    for (provider, entry) in &entries {
-        if provider.base_url_openai.trim().is_empty() {
-            continue;
-        }
-        let key = skillstar_managed_key(&provider.id);
-        let block = build_pi_provider_block(provider, &entry.model);
-        if provider.id == active_id {
-            let model_id = if entry.model.trim().is_empty() {
-                provider.default_model.clone()
-            } else {
-                entry.model.clone()
-            };
-            if !model_id.trim().is_empty() {
-                active_pointer = Some((key.clone(), model_id));
-            }
-        }
-        provider_map.insert(key, block);
-    }
-
-    let output = serde_json::to_string_pretty(&root).context("Failed to serialize models.json")?;
-    std::fs::write(config_path, output)
-        .with_context(|| format!("Failed to write {}", config_path.display()))?;
+    let (backup_path, active_pointer) = sync_json_blocks_inner(
+        &entries,
+        &active_id,
+        config_path,
+        "providers",
+        || serde_json::json!({ "providers": {} }),
+        build_pi_provider_block,
+        // Pi's active pointer lives in settings.json, not models.json.
+        |_root, _active| {},
+    )?;
 
     // settings.json: point Pi's default model at the active entry, preserving
     // every other setting the user keeps there.

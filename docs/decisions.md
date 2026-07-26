@@ -103,6 +103,15 @@
 - 后果：额度抓取以 reqwest 默认 ClientHello 出网，若某 provider 将来按 TLS 指纹拦截，需要另行决策而不是恢复本模块；`~/.skillstar/config/fingerprints.json` 成为孤儿文件，不再读写，也不做迁移删除。构建图少两个 rc 依赖，Usage 的请求路径只剩一条。
 - 证据：`crates/skillstar-usage/src/request.rs`、`crates/skillstar-usage/src/http_client.rs`、`scripts/internal/check_workspace_deps.sh`。
 
+## D-012：multi-provider 写盘骨架只覆盖 JSON 型 Agent，Codex 与 unsync 不进抽象
+
+- 日期：2026-07-26
+- 状态：accepted
+- 背景：Codex/OpenCode/Pi 三个 multi-provider writer 的骨架（备份 → 读取/初始化 → retain 托管键 → 逐条写 `skillstar_*` 块 → active 指针 → 写盘）逐字同构，修一处写盘语义要改三处（spec #1 阶段三，票 #5）。
+- 决策：把骨架下沉为 `tool_sync::multi_provider::sync_json_blocks_inner`（internal seam，不进公共出口），OpenCode 与 Pi 只保留 `build_block` 与指针落点两个 adapter。Codex 触发止损不进骨架：其 TOML 文档、`auth.json` 副通道和 per-entry wire settings 会让 adapter 接口超过被取代实现的复杂度。三份 unsync 各约 30 行且指针清理语义各异（同文件 selector / 双文件条件清理 / TOML+auth），抽象后逻辑被切碎，同样保持现状。
+- 后果：JSON 型 multi Agent 的写盘语义修一处即全修，新 JSON 型 Agent 只写 build_block + 指针落点；Codex 的写盘语义变化仍需单独维护；未来若出现第二个 TOML 型 multi Agent，再评估 TOML 骨架（届时有两个 adapter 证明 seam）。
+- 证据：`crates/skillstar-models/src/tool_sync/multi_provider.rs`（`sync_json_blocks_inner` 及两个调用方），`tool_sync/tests/part4.rs` 的逐字节断言测试在重构前后原样通过。
+
 ## 新增记录格式
 
 ```text
