@@ -215,11 +215,7 @@ pub fn ensure_env_export(
     };
 
     // Atomic write: temp file in the same directory, then rename.
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    std::fs::create_dir_all(parent)?;
-    let tmp = parent.join(format!(".zshrc.skillstar.tmp.{}", std::process::id()));
-    std::fs::write(&tmp, &new_content)?;
-    std::fs::rename(&tmp, &path)?;
+    skillstar_core::infra::fs_ops::atomic_write(&path, new_content.as_bytes())?;
 
     let action = if existing_idx.is_some() {
         "updated"
@@ -282,10 +278,7 @@ pub fn remove_env_export(home: &Path, env_key: &str) -> Result<bool, AppError> {
         new_content.push('\n');
     }
 
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let tmp = parent.join(format!(".zshrc.skillstar.tmp.{}", std::process::id()));
-    std::fs::write(&tmp, &new_content)?;
-    std::fs::rename(&tmp, &path)?;
+    skillstar_core::infra::fs_ops::atomic_write(&path, new_content.as_bytes())?;
     Ok(true)
 }
 

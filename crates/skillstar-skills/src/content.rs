@@ -577,9 +577,7 @@ pub fn update(name: &str, content: &str) -> Result<(), AppError> {
         return Err(not_found(name));
     }
 
-    let temp_path = skill_path.with_extension("tmp");
-    std::fs::write(&temp_path, content)?;
-    std::fs::rename(temp_path, skill_path)?;
+    skillstar_core::infra::fs_ops::atomic_write(&skill_path, content.as_bytes())?;
     Ok(())
 }
 

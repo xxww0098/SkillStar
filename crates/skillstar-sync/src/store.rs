@@ -58,9 +58,8 @@ pub fn save_targets(targets: &[S3TargetDef]) -> Result<()> {
         targets: targets.to_vec(),
     };
     let content = toml::to_string_pretty(&file).context("serialize s3_targets.toml")?;
-    let tmp = path.with_extension("toml.tmp");
-    std::fs::write(&tmp, content).context("write s3_targets.toml.tmp")?;
-    std::fs::rename(&tmp, &path).context("rename s3_targets.toml")?;
+    skillstar_core::infra::fs_ops::atomic_write(&path, content.as_bytes())
+        .context("persist s3_targets.toml")?;
     Ok(())
 }
 

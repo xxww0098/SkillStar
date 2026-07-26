@@ -71,27 +71,12 @@ fn hydrate_update_state_cache() {
 
 fn persist_update_state_snapshot(states: &HashMap<String, bool>) {
     let path = update_state_snapshot_path();
-    let Some(parent) = path.parent() else {
-        return;
-    };
-
-    if let Err(err) = std::fs::create_dir_all(parent) {
-        tracing::warn!(target: "skill_update_cache", path = %parent.display(), error = %err, "failed to create skill update snapshot directory");
-        return;
-    }
-
-    let temp_path = path.with_extension("json.tmp");
     let Ok(content) = serde_json::to_string(states) else {
         return;
     };
 
-    if let Err(err) = std::fs::write(&temp_path, content) {
-        tracing::warn!(target: "skill_update_cache", path = %temp_path.display(), error = %err, "failed to write skill update snapshot");
-        return;
-    }
-
-    if let Err(err) = std::fs::rename(&temp_path, &path) {
-        tracing::warn!(target: "skill_update_cache", from = %temp_path.display(), to = %path.display(), error = %err, "failed to replace skill update snapshot");
+    if let Err(err) = skillstar_core::infra::fs_ops::atomic_write(&path, content.as_bytes()) {
+        tracing::warn!(target: "skill_update_cache", path = %path.display(), error = %err, "failed to write skill update snapshot");
     }
 }
 

@@ -492,16 +492,11 @@ fn write_opencode_provider(config_path: &Path, api_key: &str) -> Result<Option<P
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
-/// Atomic file write: tmp file + rename, so a crash mid-write can't leave a
-/// truncated CLI config.
+/// Atomic file write via the shared core helper; maps into this module's
+/// String-error convention.
 fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败：{e}"))?;
-    }
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, content).map_err(|e| format!("写入临时文件失败：{e}"))?;
-    std::fs::rename(&tmp, path).map_err(|e| format!("重命名失败：{e}"))?;
-    Ok(())
+    skillstar_core::infra::fs_ops::atomic_write(path, content.as_bytes())
+        .map_err(|e| format!("写入失败：{e}"))
 }
 
 #[cfg(test)]

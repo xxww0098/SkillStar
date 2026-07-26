@@ -70,9 +70,8 @@ impl LockfileV3 {
             std::fs::create_dir_all(parent)?;
         }
         let content = serde_json::to_string_pretty(self)?;
-        let tmp_path = path.with_extension("tmp");
-        std::fs::write(&tmp_path, content).context("Failed to write lockfile (temp)")?;
-        std::fs::rename(&tmp_path, path).context("Failed to rename lockfile into place")?;
+        skillstar_core::infra::fs_ops::atomic_write(path, content.as_bytes())
+            .context("Failed to write lockfile atomically")?;
         Ok(())
     }
 

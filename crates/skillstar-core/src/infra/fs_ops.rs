@@ -325,10 +325,64 @@ where
     Err(last_err.expect("last error exists after retries"))
 }
 
+/// Atomically replace `path` with `content`.
+///
+/// The single workspace-wide tmp+rename implementation: writes to a
+/// pid-suffixed sibling temp file (same directory, so the final `rename`
+/// cannot cross filesystems), fsyncs it, then renames over the target — a
+/// crash mid-write can never leave a truncated target file. Creates the
+/// parent directory when missing and cleans the temp file up on failure.
+pub fn atomic_write(path: &Path, content: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let parent = match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+        _ => PathBuf::from("."),
+    };
+    std::fs::create_dir_all(&parent)?;
+
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "file".to_string());
+    let tmp = parent.join(format!("{file_name}.skillstar-{}.tmp", std::process::id()));
+
+    let result = (|| {
+        let mut file = std::fs::File::create(&tmp)?;
+        file.write_all(content)?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&tmp, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{create_symlink_or_copy, remove_link_or_copy};
+    use super::{atomic_write, create_symlink_or_copy, remove_link_or_copy};
     use tempfile::TempDir;
+
+    #[test]
+    fn atomic_write_creates_parent_replaces_target_and_leaves_no_tmp() {
+        let temp = TempDir::new().unwrap();
+        let target = temp.path().join("nested").join("config.json");
+
+        atomic_write(&target, b"{\"v\":1}").unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "{\"v\":1}");
+
+        atomic_write(&target, b"{\"v\":2}").unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "{\"v\":2}");
+
+        let leftovers: Vec<_> = std::fs::read_dir(target.parent().unwrap())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "temp files must not survive: {leftovers:?}");
+    }
 
     #[test]
     fn copy_fallback_helpers_remove_real_directory() {

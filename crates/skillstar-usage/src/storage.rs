@@ -111,13 +111,8 @@ fn read_json<T: for<'de> Deserialize<'de> + Default>(path: &PathBuf) -> UsageRes
 }
 
 fn write_json_unlocked<T: Serialize>(path: &PathBuf, value: &T) -> UsageResult<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
     let raw = serde_json::to_string_pretty(value)?;
-    let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, raw.as_bytes())?;
-    fs::rename(&tmp, path)?;
+    skillstar_core::infra::fs_ops::atomic_write(path, raw.as_bytes())?;
     Ok(())
 }
 

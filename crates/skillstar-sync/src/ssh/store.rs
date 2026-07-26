@@ -57,10 +57,8 @@ pub fn save_hosts(hosts: &[SshHostDef]) -> Result<()> {
     };
     let content = toml::to_string_pretty(&file).context("serialize ssh_hosts.toml")?;
 
-    // Atomic write: tmp file then rename, mirroring update_skill_content.
-    let tmp = path.with_extension("toml.tmp");
-    std::fs::write(&tmp, content).context("write ssh_hosts.toml.tmp")?;
-    std::fs::rename(&tmp, &path).context("rename ssh_hosts.toml")?;
+    skillstar_core::infra::fs_ops::atomic_write(&path, content.as_bytes())
+        .context("persist ssh_hosts.toml")?;
     Ok(())
 }
 
