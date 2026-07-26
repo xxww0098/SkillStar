@@ -1,23 +1,28 @@
 /**
- * Coverage guard for the browser-dev IPC mock (see ./devMock.ts).
+ * Coverage guard for the browser-dev IPC mock (see ./devMock/index.ts).
  *
  * Command names are declared as *TypeScript types only* (`interface FooCommands
  * { command_name: { args: ...; result: ... } }` in ./commands/*.ts) — they do
  * not exist as runtime values, so nothing at runtime can enumerate them. This
  * test instead reads the source files as text with node:fs and extracts
  * command names with a small brace-depth state machine (see
- * `extractDeclaredCommands` / `extractHandlerKeys` below). That makes the
- * test resilient to reordering/reformatting, but it does mean: if you
- * restructure a `*Commands` interface or the `HANDLERS` object in a way that
- * breaks the "2-space-indented `key: ...` at brace-depth 1" shape these
+ * `extractDeclaredCommands` / `extractHandlerKeysByFile` below). That makes
+ * the test resilient to reordering/reformatting, but it does mean: if you
+ * restructure a `*Commands` interface or the `*_HANDLERS` fragments in a way
+ * that breaks the "2-space-indented `key: ...` at brace-depth 1" shape these
  * functions look for, update the extractors together with this test.
  *
+ * The mock is sharded by domain: every `./devMock/<domain>.ts` exports a
+ * `*_HANDLERS` fragment and ./devMock/index.ts merges them (throwing on
+ * duplicate keys at runtime). This test scans all fragments, checks coverage
+ * against the union, and statically enforces the same no-duplicate invariant.
+ *
  * Ratchet model (same spirit as scripts/internal/check_*.sh): as of writing,
- * src/lib/ipc/commands/*.ts declares more commands than devMock.ts's HANDLERS
- * table actually mocks. Known gaps are grandfathered in KNOWN_MISSING_MOCKS
- * below so this test passes today. Any NEWLY declared command that is not
- * mocked AND not in that allowlist fails the test by name — so the gap can
- * only shrink. When you add a mock for one of these, delete its entry from
+ * src/lib/ipc/commands/*.ts declares more commands than the devMock fragments
+ * actually mock. Known gaps are grandfathered in KNOWN_MISSING_MOCKS below so
+ * this test passes today. Any NEWLY declared command that is not mocked AND
+ * not in that allowlist fails the test by name — so the gap can only shrink.
+ * When you add a mock for one of these, delete its entry from
  * KNOWN_MISSING_MOCKS (a second test below fails loudly if you forget and the
  * mock already covers it, so the list cannot go stale unnoticed).
  */
@@ -29,7 +34,7 @@ import { describe, expect, it } from "vitest";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const COMMANDS_DIR = path.join(__dirname, "commands");
-const DEV_MOCK_PATH = path.join(__dirname, "devMock.ts");
+const DEV_MOCK_DIR = path.join(__dirname, "devMock");
 
 /**
  * Extract command names declared inside `export interface *Commands { ... }`
@@ -79,59 +84,82 @@ function extractDeclaredCommands(dir: string): Set<string> {
 }
 
 /**
- * Extract the keys of the `HANDLERS` lookup table in devMock.ts, using the
- * same brace-depth approach (only depth-1 keys inside the `const HANDLERS =
- * { ... }` block count, so nested return-value object literals never leak
- * their own keys into the result).
+ * Extract the keys of every `export const *_HANDLERS: ... = { ... }` fragment
+ * across src/lib/ipc/devMock/*.ts, using the same brace-depth approach (only
+ * depth-1 keys inside a fragment block count, so nested return-value object
+ * literals never leak their own keys into the result). Returns a map of
+ * fragment file → keys so the duplicate check below can name the colliding
+ * files.
  */
-function extractHandlerKeys(devMockPath: string): Set<string> {
-  const text = fs.readFileSync(devMockPath, "utf8");
-  const lines = text.split("\n");
-  const names = new Set<string>();
-  let inBlock = false;
-  let depth = 0;
+function extractHandlerKeysByFile(dir: string): Map<string, string[]> {
+  const result = new Map<string, string[]>();
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith(".ts"));
 
-  for (const line of lines) {
-    if (!inBlock) {
-      if (/^const HANDLERS\s*:/.test(line)) {
-        inBlock = true;
-        depth = 0;
-      } else {
-        continue;
+  for (const file of files) {
+    const text = fs.readFileSync(path.join(dir, file), "utf8");
+    const lines = text.split("\n");
+    const keys: string[] = [];
+    let inBlock = false;
+    let depth = 0;
+
+    for (const line of lines) {
+      if (!inBlock) {
+        if (/^export const \w+_HANDLERS\s*:/.test(line)) {
+          inBlock = true;
+          depth = 0;
+        } else {
+          continue;
+        }
+      }
+
+      if (depth === 1) {
+        const m = line.match(/^\s{2}([a-zA-Z_][a-zA-Z0-9_]*)\s*:/);
+        if (m && !/^\s*\/\//.test(line)) {
+          keys.push(m[1]);
+        }
+      }
+
+      const opens = (line.match(/\{/g) || []).length;
+      const closes = (line.match(/\}/g) || []).length;
+      depth += opens - closes;
+      if (depth <= 0) {
+        inBlock = false;
       }
     }
 
-    if (depth === 1) {
-      const m = line.match(/^\s{2}([a-zA-Z_][a-zA-Z0-9_]*)\s*:/);
-      if (m && !/^\s*\/\//.test(line)) {
-        names.add(m[1]);
-      }
-    }
-
-    const opens = (line.match(/\{/g) || []).length;
-    const closes = (line.match(/\}/g) || []).length;
-    depth += opens - closes;
-    if (depth <= 0 && inBlock) {
-      break;
+    if (keys.length > 0) {
+      result.set(file, keys);
     }
   }
 
+  return result;
+}
+
+/** Union of all fragment keys — the set of commands the dev mock handles. */
+function extractHandlerKeys(dir: string): Set<string> {
+  const names = new Set<string>();
+  for (const keys of extractHandlerKeysByFile(dir).values()) {
+    for (const key of keys) {
+      names.add(key);
+    }
+  }
   return names;
 }
 
 /**
- * Commands declared in src/lib/ipc/commands/*.ts that devMock.ts's HANDLERS
- * table does not yet mock (as of the scan that generated this list — see the
- * class doc comment above). Unmocked commands still work in browser dev: they
- * fall through devInvoke's "unknown command" branch and resolve to `[]` (see
- * devMock.ts), so list-shaped reads render empty instead of crashing; only
- * object-shaped reads or mutations need an entry here removed by adding a
- * real mock.
+ * Commands declared in src/lib/ipc/commands/*.ts that the devMock fragments
+ * do not yet mock (as of the scan that generated this list — see the class
+ * doc comment above). Unmocked commands still work in browser dev: they fall
+ * through devInvoke's "unknown command" branch and resolve to `[]` (see
+ * devMock/index.ts), so list-shaped reads render empty instead of crashing;
+ * only object-shaped reads or mutations need an entry here removed by adding
+ * a real mock.
  *
- * To fix one: add a handler for it in devMock.ts's HANDLERS table, then
- * delete its line here. Do NOT add new entries here for commands that don't
- * exist yet — this list only grandfathers a fixed, shrinking set of known
- * gaps; it is not a general-purpose exemption mechanism.
+ * To fix one: add a handler for it in the matching devMock/<domain>.ts
+ * fragment, then delete its line here. Do NOT add new entries here for
+ * commands that don't exist yet — this list only grandfathers a fixed,
+ * shrinking set of known gaps; it is not a general-purpose exemption
+ * mechanism.
  */
 const KNOWN_MISSING_MOCKS = new Set([
   "add_custom_agent_profile",
@@ -232,7 +260,7 @@ const KNOWN_MISSING_MOCKS = new Set([
 describe("devMock coverage", () => {
   it("mocks every declared command not explicitly grandfathered", () => {
     const declared = extractDeclaredCommands(COMMANDS_DIR);
-    const handled = extractHandlerKeys(DEV_MOCK_PATH);
+    const handled = extractHandlerKeys(DEV_MOCK_DIR);
 
     // Sanity check: the extractors should not silently return nothing (that
     // would make this whole test vacuously pass).
@@ -244,14 +272,44 @@ describe("devMock coverage", () => {
     expect(
       uncovered,
       uncovered.length > 0
-        ? `${uncovered.length} command(s) declared in src/lib/ipc/commands/*.ts have no devMock.ts handler and are not in KNOWN_MISSING_MOCKS: ${uncovered.sort().join(", ")}. Add a mock in devMock.ts's HANDLERS table, or if this is intentional debt, add the name to KNOWN_MISSING_MOCKS in this file.`
+        ? `${uncovered.length} command(s) declared in src/lib/ipc/commands/*.ts have no devMock handler and are not in KNOWN_MISSING_MOCKS: ${uncovered.sort().join(", ")}. Add a mock in the matching devMock/<domain>.ts fragment, or if this is intentional debt, add the name to KNOWN_MISSING_MOCKS in this file.`
+        : "",
+    ).toEqual([]);
+  });
+
+  it("keeps handler fragments free of cross-fragment duplicate commands", () => {
+    // Mirrors the runtime throw in devMock/shared.ts's mergeHandlerFragments:
+    // a command mocked by two fragments is a bug (object spread would silently
+    // keep one), so surface it in CI too, with the offending files named.
+    // (Duplicates *within* one fragment literal are a biome error already:
+    // `noDuplicateProperties`.)
+    const byFile = extractHandlerKeysByFile(DEV_MOCK_DIR);
+    expect(byFile.size).toBeGreaterThan(5);
+
+    const seen = new Map<string, string>();
+    const collisions: string[] = [];
+    for (const [file, keys] of byFile) {
+      for (const key of keys) {
+        const prev = seen.get(key);
+        if (prev) {
+          collisions.push(`"${key}" (${prev} + ${file})`);
+        } else {
+          seen.set(key, file);
+        }
+      }
+    }
+
+    expect(
+      collisions,
+      collisions.length > 0
+        ? `${collisions.length} command(s) are mocked by more than one devMock fragment: ${collisions.sort().join(", ")}. Keep each command in exactly one <domain>.ts fragment.`
         : "",
     ).toEqual([]);
   });
 
   it("keeps KNOWN_MISSING_MOCKS free of stale entries", () => {
     const declared = extractDeclaredCommands(COMMANDS_DIR);
-    const handled = extractHandlerKeys(DEV_MOCK_PATH);
+    const handled = extractHandlerKeys(DEV_MOCK_DIR);
 
     // An entry is stale if either: (a) it is already mocked (someone added a
     // handler and forgot to clean up the allowlist), or (b) it no longer
@@ -262,7 +320,7 @@ describe("devMock coverage", () => {
     expect(
       alreadyMocked,
       alreadyMocked.length > 0
-        ? `${alreadyMocked.length} command(s) in KNOWN_MISSING_MOCKS are now mocked in devMock.ts — remove from the allowlist: ${alreadyMocked.sort().join(", ")}.`
+        ? `${alreadyMocked.length} command(s) in KNOWN_MISSING_MOCKS are now mocked in a devMock fragment — remove from the allowlist: ${alreadyMocked.sort().join(", ")}.`
         : "",
     ).toEqual([]);
 
