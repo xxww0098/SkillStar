@@ -400,7 +400,6 @@
     "reading": "Reading...",
     "hideQuickRead": "Hide Quick Read",
     "aiQuickRead": "AI Quick Read SKILL.md",
-    "streamingQuickReadPreview": "Streaming quick-read preview...",
     "nonStreamingQuickReadNotice": "This provider returned quick-read as a single response (no streaming deltas).",
     "aiPromptHint": "Configure AI to enable Quick Read.",
     "goToAiConfig": "Go to AI Config",

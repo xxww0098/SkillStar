@@ -1,4 +1,3 @@
-import { listen } from "@tauri-apps/api/event";
 import { tauriInvoke } from "../../lib/ipc";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -20,8 +19,9 @@ import {
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { degradedDeploys, useDeployStatus } from "../../features/my-skills/hooks/useDeployStatus";
+import { useAiStream } from "../../hooks/useAiStream";
 import { formatAiErrorMessage, formatInstalls, navigateToAiSettings } from "../../lib/utils";
-import type { AiStreamPayload, MarketplaceSkillDetails, Skill, SkillContent } from "../../types";
+import type { MarketplaceSkillDetails, Skill, SkillContent } from "../../types";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { ExternalAnchor } from "../ui/ExternalAnchor";
@@ -83,55 +83,26 @@ export function DetailPanel({
   }, [skill, editing, reading, tutorialOpen, onClose]);
 
   // ── AI Quick Read ─────────────────────────────────────────────
-  const [summaryAiConfigured, setSummaryAiConfigured] = useState(false);
-
-  // AI Quick Read
-  const [quickReadContent, setQuickReadContent] = useState<string | null>(null);
-  const [quickReadVisible, setQuickReadVisible] = useState(false);
-  const [quickReading, setQuickReading] = useState(false);
-  const [quickReadHasDelta, setQuickReadHasDelta] = useState(false);
-  const [quickReadWasNonStreaming, setQuickReadWasNonStreaming] = useState(false);
-  const [quickReadError, setQuickReadError] = useState<string | null>(null);
-  const targetLanguage = ""; // Used for quick-read cache key
+  // Streaming state machine, AI readiness, cancellation and the safety
+  // timeout all live in the shared hook (same surface as SkillReader/Editor).
+  const quickRead = useAiStream({
+    command: "ai_summarize_skill_stream",
+    eventChannel: "ai://summarize-stream",
+  });
+  const summaryAiConfigured = quickRead.aiConfigured;
+  const targetLanguage = quickRead.targetLanguage; // Used for quick-read cache key
 
   // Marketplace detail fetching
   const [skillDetails, setSkillDetails] = useState<MarketplaceSkillDetails | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const quickReadCacheRef = useRef<Map<string, string>>(new Map());
 
-  // Cancel refs (quick read only)
-  const activeQuickReadIdRef = useRef<string | null>(null);
-  const quickReadUnlistenRef = useRef<(() => void) | null>(null);
   // Guard async setState after component unmount
   const mountedRef = useRef(true);
-
-  // Cleanup event listeners on unmount
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      activeQuickReadIdRef.current = null;
-      if (quickReadUnlistenRef.current) {
-        quickReadUnlistenRef.current();
-        quickReadUnlistenRef.current = null;
-      }
-    };
-  }, []);
-
-  // Check AI config availability
-  useEffect(() => {
-    let cancelled = false;
-    tauriInvoke("get_ai_config")
-      .then((config) => {
-        if (!cancelled) {
-          setSummaryAiConfigured(config.enabled && (config.provider_ref != null || config.api_format === "local"));
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setSummaryAiConfigured(false);
-      });
-    return () => {
-      cancelled = true;
     };
   }, []);
 
@@ -172,14 +143,13 @@ export function DetailPanel({
 
   // Reset state when skill changes
   useEffect(() => {
-    // Restore cached quick-read
+    // Drop any in-flight stream for the previous skill, then restore the
+    // cached quick-read for this one.
+    quickRead.cancel();
     const cacheKey = `${targetLanguage}::${skill?.name ?? ""}`;
-    const cachedQuickRead = quickReadCacheRef.current.get(cacheKey) ?? null;
-    setQuickReadContent(cachedQuickRead);
-    setQuickReadVisible(false);
-    setQuickReadHasDelta(false);
-    setQuickReadWasNonStreaming(false);
-    setQuickReadError(null);
+    quickRead.hydrate(quickReadCacheRef.current.get(cacheKey) ?? null, null);
+    quickRead.setVisible(false);
+    quickRead.setError(null);
 
     setSkillDetails(null);
     setReading(false);
@@ -197,119 +167,43 @@ export function DetailPanel({
     skill?.source,
     targetLanguage,
     fetchDetails,
+    quickRead.cancel,
+    quickRead.hydrate,
+    quickRead.setVisible,
+    quickRead.setError,
   ]);
 
   const handleQuickRead = async () => {
     // Cancel in-progress
-    if (quickReading) {
-      activeQuickReadIdRef.current = null;
-      if (quickReadUnlistenRef.current) {
-        quickReadUnlistenRef.current();
-        quickReadUnlistenRef.current = null;
-      }
-      setQuickReading(false);
-      if (!quickReadContent) {
-        setQuickReadVisible(false);
-      }
+    if (quickRead.loading) {
+      quickRead.cancel();
+      if (!quickRead.content) quickRead.setVisible(false);
       return;
     }
 
-    if (quickReadVisible) {
-      setQuickReadVisible(false);
+    if (quickRead.visible) {
+      quickRead.dismiss();
       return;
     }
 
-    if (quickReadContent) {
-      setQuickReadVisible(true);
+    if (quickRead.content) {
+      quickRead.setVisible(true);
       return;
     }
 
     if (!skill || !onReadContent || !summaryAiConfigured) return;
 
-    const requestId =
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : `detail-summary-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    activeQuickReadIdRef.current = requestId;
-    let streamedRaw = "";
-    let deltaCount = 0;
-
-    setQuickReading(true);
-    setQuickReadError(null);
-    setQuickReadHasDelta(false);
-    setQuickReadWasNonStreaming(false);
-    setQuickReadVisible(true);
-    setQuickReadContent(null);
-
-    let rafId: number | null = null;
-    const flushDelta = () => {
-      rafId = null;
-      if (activeQuickReadIdRef.current !== requestId) return;
-      setQuickReadContent(streamedRaw);
-      if (deltaCount >= 2) setQuickReadHasDelta(true);
-    };
-
     try {
-      const unlisten = await listen<AiStreamPayload>("ai://summarize-stream", (event) => {
-        if (activeQuickReadIdRef.current !== requestId) return;
-        const payload = event.payload;
-        if (payload.requestId !== requestId) return;
-
-        if (payload.event === "delta" && payload.delta) {
-          deltaCount += 1;
-          streamedRaw += payload.delta;
-          if (rafId == null) {
-            rafId = requestAnimationFrame(flushDelta);
-          }
-          return;
-        }
-
-        if (payload.event === "error" && payload.message) {
-          setQuickReadError(payload.message);
-        }
-      });
-      quickReadUnlistenRef.current = unlisten;
-
       const skillContent = await onReadContent(skill.name);
-      const result = await tauriInvoke("ai_summarize_skill_stream", {
-        requestId,
-        content: skillContent.content,
-      });
-
-      if (activeQuickReadIdRef.current !== requestId) return;
-      setQuickReadContent(result);
-      setQuickReadVisible(true);
-      setQuickReadWasNonStreaming(deltaCount < 2);
-      // Cache completed summary (language-aware)
-      if (skill) {
-        const cacheKey = `${targetLanguage}::${skill.name}`;
-        quickReadCacheRef.current.set(cacheKey, result);
+      const result = await quickRead.execute(skillContent.content);
+      if (result != null) {
+        // Cache completed summary (language-aware)
+        quickReadCacheRef.current.set(`${targetLanguage}::${skill.name}`, result);
       }
     } catch (e) {
-      if (activeQuickReadIdRef.current !== requestId) return;
-      setQuickReadHasDelta(deltaCount >= 2);
-      setQuickReadWasNonStreaming(false);
-      if (!streamedRaw.trim()) {
-        setQuickReadContent(null);
-        setQuickReadVisible(false);
-      } else {
-        setQuickReadContent(streamedRaw);
-        setQuickReadVisible(true);
-      }
-      setQuickReadError(String(e));
-    } finally {
-      if (rafId != null) {
-        cancelAnimationFrame(rafId);
-        rafId = null;
-      }
-      if (quickReadUnlistenRef.current) {
-        quickReadUnlistenRef.current();
-        quickReadUnlistenRef.current = null;
-      }
-      if (activeQuickReadIdRef.current === requestId) {
-        setQuickReading(false);
-        activeQuickReadIdRef.current = null;
-      }
+      // onReadContent failed before the stream started; execute reports its
+      // own errors through the hook state.
+      quickRead.setError(String(e));
     }
   };
 
@@ -326,7 +220,7 @@ export function DetailPanel({
   // Use enriched summary from detail fetch when available
   const enrichedDescription = skillDetails?.summary?.trim() || rawDescription;
   const hasDescription = enrichedDescription.length > 0;
-  const localizedQuickReadError = formatAiErrorMessage(quickReadError, t);
+  const localizedQuickReadError = formatAiErrorMessage(quickRead.error, t);
   const displayDescription = enrichedDescription;
 
   return (
@@ -523,23 +417,23 @@ export function DetailPanel({
                     <button
                       onClick={handleQuickRead}
                       className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition duration-300 cursor-pointer shadow-sm relative overflow-hidden group focus-ring ${
-                        quickReading
+                        quickRead.loading
                           ? "bg-destructive/10 text-destructive border border-destructive/20"
-                          : quickReadVisible
+                          : quickRead.visible
                             ? "bg-primary/10 text-primary border border-primary/20"
                             : "bg-gradient-to-br from-background to-muted/50 border border-border hover:border-primary/40 text-muted-foreground hover:text-foreground"
                       }`}
                     >
                       <div className="absolute inset-0 bg-gradient-to-r from-primary/0 via-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-                      {quickReading ? (
+                      {quickRead.loading ? (
                         <Square className="w-3.5 h-3.5 fill-current animate-pulse relative z-10" />
                       ) : (
                         <Sparkles className="w-3.5 h-3.5 relative z-10" />
                       )}
                       <span className="relative z-10">
-                        {quickReading
+                        {quickRead.loading
                           ? t("common.cancel")
-                          : quickReadVisible
+                          : quickRead.visible
                             ? t("detailPanel.hideQuickRead")
                             : t("detailPanel.aiQuickRead")}
                       </span>
@@ -552,7 +446,7 @@ export function DetailPanel({
               {skill.installed &&
                 onReadContent &&
                 summaryAiConfigured &&
-                (quickReadError || quickReading || quickReadVisible) && (
+                (quickRead.error || quickRead.loading || quickRead.visible) && (
                   <div className="space-y-2">
                     {localizedQuickReadError && (
                       <div className="text-xs text-destructive bg-destructive/10 rounded-md px-3 py-2">
@@ -560,22 +454,19 @@ export function DetailPanel({
                       </div>
                     )}
 
-                    {quickReading && quickReadHasDelta && (
-                      <div className="text-xs text-primary bg-primary/10 rounded-md px-3 py-2 border border-primary/20">
-                        {t("detailPanel.streamingQuickReadPreview")}
-                      </div>
-                    )}
-
-                    {!quickReading && quickReadVisible && quickReadContent && quickReadWasNonStreaming && (
+                    {!quickRead.loading && quickRead.visible && quickRead.content && quickRead.wasNonStreaming && (
                       <div className="text-xs text-muted-foreground bg-muted/40 rounded-md px-3 py-2 border border-border">
                         {t("detailPanel.nonStreamingQuickReadNotice")}
                       </div>
                     )}
 
-                    {quickReadVisible && quickReadContent && (
+                    {quickRead.visible && quickRead.content && (
                       <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
-                        <Markdown streaming={quickReading} className="text-xs [&_p]:my-1 [&_strong]:text-primary/90">
-                          {quickReadContent}
+                        <Markdown
+                          streaming={quickRead.loading}
+                          className="text-xs [&_p]:my-1 [&_strong]:text-primary/90"
+                        >
+                          {quickRead.content}
                         </Markdown>
                       </div>
                     )}

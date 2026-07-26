@@ -400,7 +400,6 @@
     "reading": "阅读中...",
     "hideQuickRead": "隐藏快速阅读",
     "aiQuickRead": "AI 快速阅读 SKILL.md",
-    "streamingQuickReadPreview": "正在实时流式快速阅读预览...",
     "nonStreamingQuickReadNotice": "当前提供商返回的是整段快速阅读结果（无流式增量）。",
     "aiPromptHint": "配置 AI 后可快速阅读 Skill 内容。",
     "goToAiConfig": "去配置 AI",
