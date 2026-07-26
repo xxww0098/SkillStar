@@ -45,22 +45,10 @@ pub fn sync_server_to_tool(entry: &McpServerEntry, tool_id: &str, force: bool) -
 
 fn sync_server_to_tool_inner(entry: &McpServerEntry, tool_id: &str) -> Result<Option<PathBuf>> {
     validate_entry(entry)?;
-    let path = resolve_mcp_config_path(tool_id)?;
+    let spec = mcp_tool_spec(tool_id).ok_or_else(|| anyhow::anyhow!("Unsupported tool '{tool_id}'"))?;
+    let path = (spec.resolve_config_path)()?;
     let backup = backup_if_exists(&path)?;
-    match tool_id {
-        "claude-code" => json_mcpservers_upsert(&path, &entry.name, claude_code_spec(entry))?,
-        "gemini" => json_mcpservers_upsert(&path, &entry.name, gemini_spec(entry))?,
-        "kiro" => json_mcpservers_upsert(&path, &entry.name, kiro_spec(entry))?,
-        "cursor" => json_mcpservers_upsert(&path, &entry.name, cursor_spec(entry))?,
-        "opencode" => opencode_upsert(&path, &entry.name, opencode_spec(entry))?,
-        "zcode" => {
-            zcode_cli_upsert(&path, &entry.name, zcode_cli_spec(entry))?;
-            let _ = zcode_v2_opencode_mcp_remove(&entry.name);
-        }
-        "codex" => codex_upsert(&path, &entry.name, codex_toml_table(entry))?,
-        "grok" => codex_upsert(&path, &entry.name, grok_toml_table(entry))?,
-        _ => bail!("Unsupported tool '{tool_id}'"),
-    }
+    (spec.upsert)(&path, entry)?;
     Ok(backup)
 }
 
@@ -93,17 +81,14 @@ fn remove_server_from_tool_inner(name: &str, tool_id: &str) -> Result<Option<Pat
         return Ok(None);
     }
     let backup = backup_if_exists(&path)?;
-    match tool_id {
-        LEGACY_CLAUDE_DESKTOP_TOOL_ID => json_mcpservers_remove_strict(&path, name)?,
-        "claude-code" | "gemini" | "kiro" | "cursor" => json_mcpservers_remove(&path, name)?,
-        "opencode" => opencode_remove(&path, name)?,
-        "zcode" => {
-            zcode_cli_remove(&path, name)?;
-            let _ = zcode_v2_opencode_mcp_remove(name);
-        }
-        "codex" | "grok" => codex_remove(&path, name)?,
-        _ => bail!("Unsupported tool '{tool_id}'"),
+    // The hidden legacy Desktop Chat projection is not a registry row; it only
+    // supports the strict removal used by the cleanup tombstone.
+    if tool_id == LEGACY_CLAUDE_DESKTOP_TOOL_ID {
+        json_mcpservers_remove_strict(&path, name)?;
+        return Ok(backup);
     }
+    let spec = mcp_tool_spec(tool_id).ok_or_else(|| anyhow::anyhow!("Unsupported tool '{tool_id}'"))?;
+    (spec.remove)(&path, name)?;
     Ok(backup)
 }
 

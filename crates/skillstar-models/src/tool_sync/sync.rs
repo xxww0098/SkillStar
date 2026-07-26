@@ -34,24 +34,11 @@ pub fn sync_to_claude_code(
     model: &str,
 ) -> Result<ToolSyncResultFlat> {
     let config_path = resolve_tool_config_path("claude-code")?;
-    let config_path_str = config_path.to_string_lossy().to_string();
-
-    match sync_to_claude_code_inner(provider, model, &config_path) {
-        Ok(backup_path) => Ok(ToolSyncResultFlat {
-            tool_id: "claude-code".to_string(),
-            success: true,
-            config_path: Some(config_path_str),
-            error: None,
-            backup_path: backup_path.map(|p| p.to_string_lossy().to_string()),
-        }),
-        Err(e) => Ok(ToolSyncResultFlat {
-            tool_id: "claude-code".to_string(),
-            success: false,
-            config_path: Some(config_path_str),
-            error: Some(e.to_string()),
-            backup_path: None,
-        }),
-    }
+    Ok(ToolSyncResultFlat::from_write_outcome(
+        "claude-code",
+        &config_path,
+        sync_to_claude_code_inner(provider, model, &config_path),
+    ))
 }
 
 /// Inner implementation for Claude Code sync.
@@ -242,36 +229,17 @@ fn build_opencode_model_entry(model_id: &str, catalog_entry: Option<&ModelCatalo
 /// preserving any other user-defined env entries. Creates a rolling backup
 /// before writing (keeps last 5).
 pub fn sync_to_gemini(provider: &ProviderEntryFlat, model: &str) -> Result<ToolSyncResultFlat> {
+    // Path resolution failure is reported without a config path (the one
+    // agent whose resolver can fail before any write is attempted).
     let config_path = match resolve_gemini_env_path() {
         Ok(p) => p,
-        Err(e) => {
-            return Ok(ToolSyncResultFlat {
-                tool_id: "gemini".to_string(),
-                success: false,
-                config_path: None,
-                error: Some(e.to_string()),
-                backup_path: None,
-            });
-        }
+        Err(e) => return Ok(ToolSyncResultFlat::failed_without_path("gemini", e)),
     };
-    let config_path_str = config_path.to_string_lossy().to_string();
-
-    match sync_to_gemini_inner(provider, model, &config_path) {
-        Ok(backup_path) => Ok(ToolSyncResultFlat {
-            tool_id: "gemini".to_string(),
-            success: true,
-            config_path: Some(config_path_str),
-            error: None,
-            backup_path: backup_path.map(|p| p.to_string_lossy().to_string()),
-        }),
-        Err(e) => Ok(ToolSyncResultFlat {
-            tool_id: "gemini".to_string(),
-            success: false,
-            config_path: Some(config_path_str),
-            error: Some(e.to_string()),
-            backup_path: None,
-        }),
-    }
+    Ok(ToolSyncResultFlat::from_write_outcome(
+        "gemini",
+        &config_path,
+        sync_to_gemini_inner(provider, model, &config_path),
+    ))
 }
 
 pub(crate) fn sync_to_gemini_inner(

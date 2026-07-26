@@ -118,6 +118,9 @@ fn json_str_map(m: &Map<String, Value>) -> BTreeMap<String, String> {
 }
 
 /// Read servers from a tool's live config into store entries (name → entry).
+///
+/// Registry-driven via the `read_servers` wire-format column. Unknown ids
+/// keep the historical fallback of parsing a top-level `mcpServers` map.
 pub fn read_servers_from_tool(tool_id: &str) -> Result<Vec<McpServerEntry>> {
     let path = resolve_mcp_config_path(tool_id)?;
     if !path.exists() {
@@ -125,56 +128,72 @@ pub fn read_servers_from_tool(tool_id: &str) -> Result<Vec<McpServerEntry>> {
     }
     let content = std::fs::read_to_string(&path)
         .with_context(|| format!("Failed to read {}", path.display()))?;
+    let read = mcp_tool_spec(tool_id)
+        .map(|spec| spec.read_servers)
+        .unwrap_or(read_json_mcpservers_entries);
+    read(&content).with_context(|| format!("Failed to parse {}", path.display()))
+}
+
+// ---------------------------------------------------------------------------
+// Per-format readers (registry `read_servers` column)
+// ---------------------------------------------------------------------------
+
+/// TOML `mcp_servers` table (Codex, Grok).
+pub(crate) fn read_toml_mcp_servers_entries(content: &str) -> Result<Vec<McpServerEntry>> {
+    let root: toml::Table = toml::from_str(content)?;
     let mut out = Vec::new();
-    match tool_id {
-        "codex" | "grok" => {
-            let root: toml::Table = toml::from_str(&content)
-                .with_context(|| format!("Failed to parse {}", path.display()))?;
-            if let Some(servers) = root.get("mcp_servers").and_then(|v| v.as_table()) {
-                for (name, val) in servers {
-                    if let Some(tbl) = val.as_table()
-                        && let Some(e) = entry_from_codex_table(name, tbl)
-                    {
-                        out.push(e);
-                    }
-                }
-            }
-        }
-        "opencode" => {
-            let root: Value = serde_json::from_str(&content)
-                .with_context(|| format!("Failed to parse {}", path.display()))?;
-            if let Some(map) = root.get("mcp").and_then(|v| v.as_object()) {
-                for (name, val) in map {
-                    if let Some(e) = entry_from_opencode_spec(name, val) {
-                        out.push(e);
-                    }
-                }
-            }
-        }
-        "zcode" => {
-            let root: Value = serde_json::from_str(&content)
-                .with_context(|| format!("Failed to parse {}", path.display()))?;
-            if let Some(map) = root
-                .get("mcp")
-                .and_then(|m| m.get("servers"))
-                .and_then(|v| v.as_object())
+    if let Some(servers) = root.get("mcp_servers").and_then(|v| v.as_table()) {
+        for (name, val) in servers {
+            if let Some(tbl) = val.as_table()
+                && let Some(e) = entry_from_codex_table(name, tbl)
             {
-                for (name, val) in map {
-                    if let Some(e) = entry_from_json_spec(name, val) {
-                        out.push(e);
-                    }
-                }
+                out.push(e);
             }
         }
-        _ => {
-            let root: Value = serde_json::from_str(&content)
-                .with_context(|| format!("Failed to parse {}", path.display()))?;
-            if let Some(map) = root.get("mcpServers").and_then(|v| v.as_object()) {
-                for (name, val) in map {
-                    if let Some(e) = entry_from_json_spec(name, val) {
-                        out.push(e);
-                    }
-                }
+    }
+    Ok(out)
+}
+
+/// OpenCode-style `mcp` JSON map.
+pub(crate) fn read_opencode_mcp_entries(content: &str) -> Result<Vec<McpServerEntry>> {
+    let root: Value = serde_json::from_str(content)?;
+    let mut out = Vec::new();
+    if let Some(map) = root.get("mcp").and_then(|v| v.as_object()) {
+        for (name, val) in map {
+            if let Some(e) = entry_from_opencode_spec(name, val) {
+                out.push(e);
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// ZCode CLI `mcp.servers` JSON map.
+pub(crate) fn read_zcode_cli_entries(content: &str) -> Result<Vec<McpServerEntry>> {
+    let root: Value = serde_json::from_str(content)?;
+    let mut out = Vec::new();
+    if let Some(map) = root
+        .get("mcp")
+        .and_then(|m| m.get("servers"))
+        .and_then(|v| v.as_object())
+    {
+        for (name, val) in map {
+            if let Some(e) = entry_from_json_spec(name, val) {
+                out.push(e);
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Top-level `mcpServers` JSON map (Claude Code, Gemini, Kiro, Cursor).
+pub(crate) fn read_json_mcpservers_entries(content: &str) -> Result<Vec<McpServerEntry>> {
+    let root: Value = serde_json::from_str(content)?;
+    let mut out = Vec::new();
+    if let Some(map) = root.get("mcpServers").and_then(|v| v.as_object()) {
+        for (name, val) in map {
+            if let Some(e) = entry_from_json_spec(name, val) {
+                out.push(e);
             }
         }
     }

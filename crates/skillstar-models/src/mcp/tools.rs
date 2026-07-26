@@ -5,8 +5,8 @@ use serde_json::{Map, Value, json};
 use std::path::{Path, PathBuf};
 
 use crate::tool_sync::{
-    create_rolling_backup, resolve_codex_config_path, resolve_opencode_config_path,
-    resolve_zcode_config_path, sync_config_dir, sync_home_dir,
+    create_rolling_backup, resolve_opencode_config_path, resolve_zcode_config_path,
+    sync_config_dir, sync_home_dir,
 };
 
 /// ZCode desktop loads MCP from `~/.zcode/cli/config.json` (`mcp.servers`), not `v2/config.json`.
@@ -56,48 +56,50 @@ pub fn resolve_cursor_config_path() -> Result<PathBuf> {
 }
 
 /// Resolve the live MCP config file for a tool.
+///
+/// Registry-driven; the hidden legacy Desktop Chat id resolves separately so
+/// old projections stay cleanable without becoming a public target.
 pub fn resolve_mcp_config_path(tool_id: &str) -> Result<PathBuf> {
-    match tool_id {
-        "claude-code" => resolve_claude_json_path(),
-        LEGACY_CLAUDE_DESKTOP_TOOL_ID => resolve_legacy_claude_desktop_config_path(),
-        "codex" => resolve_codex_config_path(),
-        "gemini" => resolve_gemini_settings_path(),
-        "grok" => resolve_grok_config_path(),
-        "opencode" => resolve_opencode_config_path(),
-        // ZCode desktop reads `mcp.servers` from ~/.zcode/cli/config.json (see zcode_cli_*).
-        "zcode" => resolve_zcode_cli_mcp_config_path(),
-        "kiro" => resolve_kiro_config_path(),
-        "cursor" => resolve_cursor_config_path(),
-        _ => bail!("Unsupported tool '{tool_id}'"),
+    if tool_id == LEGACY_CLAUDE_DESKTOP_TOOL_ID {
+        return resolve_legacy_claude_desktop_config_path();
+    }
+    match mcp_tool_spec(tool_id) {
+        Some(spec) => (spec.resolve_config_path)(),
+        None => bail!("Unsupported tool '{tool_id}'"),
     }
 }
 
 /// Best-effort "is this tool installed?" probe used to skip pointless writes.
+///
+/// Registry-driven; unknown ids report not-installed.
 pub fn tool_installed(tool_id: &str) -> bool {
     let Ok(home) = sync_home_dir() else {
         return false;
     };
-    match tool_id {
-        "claude-code" => claude_code_installed_from_signals(
-            skillstar_core::infra::path_env::binary_on_enriched_path("claude"),
-            skillstar_core::infra::path_env::desktop_app_installed("Claude"),
-            home.join(".claude").exists(),
-            home.join(".claude.json").exists(),
-        ),
-        "codex" => home.join(".codex").exists(),
-        "gemini" => home.join(".gemini").exists(),
-        "grok" => home.join(".grok").exists(),
-        "opencode" => {
-            home.join(".config").join("opencode").exists()
-                || resolve_opencode_config_path()
-                    .map(|p| p.exists())
-                    .unwrap_or(false)
-        }
-        "zcode" => home.join(".zcode").exists(),
-        "kiro" => home.join(".kiro").exists(),
-        "cursor" => home.join(".cursor").exists(),
-        _ => false,
+    match mcp_tool_spec(tool_id) {
+        Some(spec) => (spec.installed)(&home),
+        None => false,
     }
+}
+
+/// Claude Code install probe (registry `installed` column): any of binary /
+/// desktop app / config dir / user-scope MCP config counts.
+pub(crate) fn installed_claude_code(home: &Path) -> bool {
+    claude_code_installed_from_signals(
+        skillstar_core::infra::path_env::binary_on_enriched_path("claude"),
+        skillstar_core::infra::path_env::desktop_app_installed("Claude"),
+        home.join(".claude").exists(),
+        home.join(".claude.json").exists(),
+    )
+}
+
+/// OpenCode install probe (registry `installed` column): config dir or an
+/// existing opencode.json.
+pub(crate) fn installed_opencode(home: &Path) -> bool {
+    home.join(".config").join("opencode").exists()
+        || resolve_opencode_config_path()
+            .map(|p| p.exists())
+            .unwrap_or(false)
 }
 
 pub(crate) fn claude_code_installed_from_signals(
@@ -109,9 +111,59 @@ pub(crate) fn claude_code_installed_from_signals(
     binary_found || desktop_code_found || config_dir_found || mcp_config_found
 }
 
+// ---------------------------------------------------------------------------
+// Per-format live-server counters (registry `count_live` column)
+// ---------------------------------------------------------------------------
+
+/// Count entries in a top-level `mcpServers` JSON map (Claude Code, Gemini,
+/// Kiro, Cursor).
+pub(crate) fn count_json_mcpservers(content: &str) -> usize {
+    serde_json::from_str::<Value>(content)
+        .ok()
+        .and_then(|v| {
+            v.get("mcpServers")
+                .and_then(|m| m.as_object())
+                .map(|m| m.len())
+        })
+        .unwrap_or(0)
+}
+
+/// Count entries in a TOML `mcp_servers` table (Codex, Grok).
+pub(crate) fn count_toml_mcp_servers(content: &str) -> usize {
+    toml::from_str::<toml::Table>(content)
+        .ok()
+        .and_then(|t| {
+            t.get("mcp_servers")
+                .and_then(|v| v.as_table())
+                .map(|m| m.len())
+        })
+        .unwrap_or(0)
+}
+
+/// Count entries in an OpenCode-style `mcp` JSON map.
+pub(crate) fn count_opencode_mcp(content: &str) -> usize {
+    serde_json::from_str::<Value>(content)
+        .ok()
+        .and_then(|v| v.get("mcp").and_then(|m| m.as_object()).map(|m| m.len()))
+        .unwrap_or(0)
+}
+
+/// Count entries in a ZCode CLI `mcp.servers` JSON map.
+pub(crate) fn count_zcode_cli_servers(content: &str) -> usize {
+    serde_json::from_str::<Value>(content)
+        .ok()
+        .and_then(|v| {
+            v.get("mcp")
+                .and_then(|m| m.get("servers"))
+                .and_then(|s| s.as_object())
+                .map(|m| m.len())
+        })
+        .unwrap_or(0)
+}
+
 /// Count MCP servers currently present in a tool's live config file.
-fn count_live_servers(tool_id: &str) -> usize {
-    let path = match resolve_mcp_config_path(tool_id) {
+fn count_live_servers(spec: &McpToolSpec) -> usize {
+    let path = match (spec.resolve_config_path)() {
         Ok(p) => p,
         Err(_) => return 0,
     };
@@ -122,54 +174,23 @@ fn count_live_servers(tool_id: &str) -> usize {
         Ok(c) => c,
         Err(_) => return 0,
     };
-    match tool_id {
-        "codex" | "grok" => toml::from_str::<toml::Table>(&content)
-            .ok()
-            .and_then(|t| {
-                t.get("mcp_servers")
-                    .and_then(|v| v.as_table())
-                    .map(|m| m.len())
-            })
-            .unwrap_or(0),
-        "opencode" => serde_json::from_str::<Value>(&content)
-            .ok()
-            .and_then(|v| v.get("mcp").and_then(|m| m.as_object()).map(|m| m.len()))
-            .unwrap_or(0),
-        "zcode" => serde_json::from_str::<Value>(&content)
-            .ok()
-            .and_then(|v| {
-                v.get("mcp")
-                    .and_then(|m| m.get("servers"))
-                    .and_then(|s| s.as_object())
-                    .map(|m| m.len())
-            })
-            .unwrap_or(0),
-        // Claude Code, Gemini, Kiro, and Cursor use top-level `mcpServers`.
-        _ => serde_json::from_str::<Value>(&content)
-            .ok()
-            .and_then(|v| {
-                v.get("mcpServers")
-                    .and_then(|m| m.as_object())
-                    .map(|m| m.len())
-            })
-            .unwrap_or(0),
-    }
+    (spec.count_live)(&content)
 }
 
 /// Status of every supported tool's MCP target.
 pub fn tool_statuses() -> Vec<McpToolStatus> {
-    MCP_TOOL_IDS
+    mcp_tool_specs()
         .iter()
-        .map(|&tool_id| {
-            let config_path = resolve_mcp_config_path(tool_id)
+        .map(|spec| {
+            let config_path = (spec.resolve_config_path)()
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_default();
             McpToolStatus {
-                tool_id: tool_id.to_string(),
-                label: mcp_tool_label(tool_id).to_string(),
+                tool_id: spec.id.to_string(),
+                label: spec.label.to_string(),
                 config_path,
-                installed: tool_installed(tool_id),
-                server_count: count_live_servers(tool_id),
+                installed: tool_installed(spec.id),
+                server_count: count_live_servers(spec),
             }
         })
         .collect()

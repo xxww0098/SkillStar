@@ -25,19 +25,11 @@ pub const MCP_TOOL_IDS: &[&str] = &[
 /// entries can still be located and removed. It is not a public Agent target.
 pub(crate) const LEGACY_CLAUDE_DESKTOP_TOOL_ID: &str = "claude-desktop";
 
-/// Human-readable label for a tool id.
+/// Human-readable label for a tool id (registry-driven).
 pub fn mcp_tool_label(tool_id: &str) -> &'static str {
-    match tool_id {
-        "claude-code" => "Claude Code",
-        "codex" => "Codex",
-        "gemini" => "Gemini CLI",
-        "grok" => "Grok",
-        "opencode" => "OpenCode",
-        "zcode" => "ZCode",
-        "kiro" => "Kiro",
-        "cursor" => "Cursor",
-        _ => "Unknown",
-    }
+    super::mcp_tool_spec(tool_id)
+        .map(|spec| spec.label)
+        .unwrap_or("Unknown")
 }
 
 // ---------------------------------------------------------------------------

@@ -45,11 +45,18 @@ mod types;
 pub use types::*;
 
 // ---------------------------------------------------------------------------
+// Per-tool registry (SSOT for tool facts + wire-format dispatch)
+// ---------------------------------------------------------------------------
+
+mod registry;
+pub(crate) use registry::{McpToolSpec, mcp_tool_spec, mcp_tool_specs};
+
+// ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
 
 pub(crate) fn is_supported_tool(tool_id: &str) -> bool {
-    MCP_TOOL_IDS.contains(&tool_id)
+    mcp_tool_spec(tool_id).is_some()
 }
 
 /// Milliseconds since the Unix epoch (shared timestamp helper).

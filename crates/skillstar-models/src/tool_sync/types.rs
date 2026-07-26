@@ -227,6 +227,46 @@ pub struct ToolSyncResultFlat {
     pub backup_path: Option<String>,
 }
 
+impl ToolSyncResultFlat {
+    /// Fold a writer outcome into the flat result shape shared by every
+    /// agent: success carries the backup path, failure the error string;
+    /// both carry the resolved config path.
+    pub(crate) fn from_write_outcome(
+        tool_id: &str,
+        config_path: &std::path::Path,
+        outcome: anyhow::Result<Option<std::path::PathBuf>>,
+    ) -> Self {
+        let config_path = Some(config_path.to_string_lossy().to_string());
+        match outcome {
+            Ok(backup_path) => Self {
+                tool_id: tool_id.to_string(),
+                success: true,
+                config_path,
+                error: None,
+                backup_path: backup_path.map(|p| p.to_string_lossy().to_string()),
+            },
+            Err(e) => Self {
+                tool_id: tool_id.to_string(),
+                success: false,
+                config_path,
+                error: Some(e.to_string()),
+                backup_path: None,
+            },
+        }
+    }
+
+    /// Failure before a config path could be resolved.
+    pub(crate) fn failed_without_path(tool_id: &str, error: impl std::fmt::Display) -> Self {
+        Self {
+            tool_id: tool_id.to_string(),
+            success: false,
+            config_path: None,
+            error: Some(error.to_string()),
+            backup_path: None,
+        }
+    }
+}
+
 /// A single on-disk config file belonging to an agent tool.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

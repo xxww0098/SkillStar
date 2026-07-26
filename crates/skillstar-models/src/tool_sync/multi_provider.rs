@@ -201,23 +201,11 @@ pub fn sync_codex_binding(
     providers: &[ProviderEntryFlat],
 ) -> Result<ToolSyncResultFlat> {
     let config_path = resolve_codex_config_path()?;
-    let config_path_str = config_path.to_string_lossy().to_string();
-    match sync_codex_binding_inner(binding, providers, &config_path) {
-        Ok(backup) => Ok(ToolSyncResultFlat {
-            tool_id: "codex".to_string(),
-            success: true,
-            config_path: Some(config_path_str),
-            error: None,
-            backup_path: backup.map(|p| p.to_string_lossy().to_string()),
-        }),
-        Err(e) => Ok(ToolSyncResultFlat {
-            tool_id: "codex".to_string(),
-            success: false,
-            config_path: Some(config_path_str),
-            error: Some(e.to_string()),
-            backup_path: None,
-        }),
-    }
+    Ok(ToolSyncResultFlat::from_write_outcome(
+        "codex",
+        &config_path,
+        sync_codex_binding_inner(binding, providers, &config_path),
+    ))
 }
 
 /// Path-taking core of [`sync_codex_binding`] — public so property tests can
@@ -353,23 +341,11 @@ pub fn sync_opencode_binding(
     providers: &[ProviderEntryFlat],
 ) -> Result<ToolSyncResultFlat> {
     let config_path = resolve_opencode_config_path()?;
-    let config_path_str = config_path.to_string_lossy().to_string();
-    match sync_opencode_binding_inner(binding, providers, &config_path) {
-        Ok(backup) => Ok(ToolSyncResultFlat {
-            tool_id: "opencode".to_string(),
-            success: true,
-            config_path: Some(config_path_str),
-            error: None,
-            backup_path: backup.map(|p| p.to_string_lossy().to_string()),
-        }),
-        Err(e) => Ok(ToolSyncResultFlat {
-            tool_id: "opencode".to_string(),
-            success: false,
-            config_path: Some(config_path_str),
-            error: Some(e.to_string()),
-            backup_path: None,
-        }),
-    }
+    Ok(ToolSyncResultFlat::from_write_outcome(
+        "opencode",
+        &config_path,
+        sync_opencode_binding_inner(binding, providers, &config_path),
+    ))
 }
 
 pub(crate) fn sync_opencode_binding_inner(
@@ -417,23 +393,11 @@ pub fn sync_pi_binding(
 ) -> Result<ToolSyncResultFlat> {
     let config_path = resolve_pi_models_path()?;
     let settings_path = resolve_pi_settings_path()?;
-    let config_path_str = config_path.to_string_lossy().to_string();
-    match sync_pi_binding_inner(binding, providers, &config_path, &settings_path) {
-        Ok(backup) => Ok(ToolSyncResultFlat {
-            tool_id: "pi".to_string(),
-            success: true,
-            config_path: Some(config_path_str),
-            error: None,
-            backup_path: backup.map(|p| p.to_string_lossy().to_string()),
-        }),
-        Err(e) => Ok(ToolSyncResultFlat {
-            tool_id: "pi".to_string(),
-            success: false,
-            config_path: Some(config_path_str),
-            error: Some(e.to_string()),
-            backup_path: None,
-        }),
-    }
+    Ok(ToolSyncResultFlat::from_write_outcome(
+        "pi",
+        &config_path,
+        sync_pi_binding_inner(binding, providers, &config_path, &settings_path),
+    ))
 }
 
 /// Build one Pi provider block. Model entries carry only `id` — Pi supplies
@@ -549,13 +513,7 @@ pub fn sync_tool_binding(store: &FlatProvidersStore, tool_id: &str) -> ToolSyncR
 /// Build a closure that turns a sync error into a failed `ToolSyncResultFlat`
 /// for the given tool — keeps the dispatch arms terse.
 fn err_result(tool_id: &str) -> impl Fn(anyhow::Error) -> ToolSyncResultFlat + '_ {
-    move |e| ToolSyncResultFlat {
-        tool_id: tool_id.to_string(),
-        success: false,
-        config_path: None,
-        error: Some(e.to_string()),
-        backup_path: None,
-    }
+    move |e| ToolSyncResultFlat::failed_without_path(tool_id, e)
 }
 
 // ---------------------------------------------------------------------------

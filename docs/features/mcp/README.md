@@ -14,6 +14,7 @@
 
 ## Store 与工具同步
 
+- Rust 侧 MCP 工具事实（label、配置路径、安装探测、wire-format 的计数/读取/写入/移除 dispatch）的 SSOT 是 `skillstar_models::mcp` 的 `McpToolSpec` 注册表；新增工具只加一行 spec（新 wire format 才需要新的 spec builder）。隐藏的 legacy `claude-desktop` cleanup id 刻意不进注册表。
 - MCP store 与 Marketplace snapshot 是不同数据源：市场只负责发现，安装后进入 Models MCP store。
 - create/update/delete/rename 通过统一 store facade 编排各 Agent projector；部分失败要返回每个目标结果，不静默吞掉。
 - live config 路径使用与 Models tool-sync 相同的 `SKILLSTAR_TOOL_SYNC_HOME` resolver，测试不写真实 home。
