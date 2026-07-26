@@ -123,7 +123,7 @@ Cargo 只使用仓库根 `Cargo.lock`；workspace member 下出现嵌套 lockfil
 | 生成类型 | Rust struct → ts-rs → `src/types/generated/` | `package.json` 的 `types:gen` |
 | 本地技能与远端传输 | `skillstar-sync` 消费 `skillstar-skills` 的公开契约 | `crates/skillstar-sync/Cargo.toml` |
 
-`scripts/internal/check_command_boundaries.sh` 对 command 层新增的直接文件系统/path ownership 失败；存量按文件计数棘轮，只能下降。
+`scripts/internal/check_command_boundaries.sh` 对 command 层新增的直接文件系统/path ownership 与任何 HTTP 构造（`reqwest`/`probe_http_client`）失败；存量按文件计数棘轮，只能下降。
 
 ## 新代码放置决策
 

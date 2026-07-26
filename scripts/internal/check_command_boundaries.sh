@@ -2,6 +2,9 @@
 # Ratchet direct filesystem/infrastructure access in Tauri command production
 # code. Commands may parse DTOs, adapt State/events, schedule blocking work,
 # and call domain facades; path/file ownership belongs below the adapter seam.
+# HTTP is equally off-limits: request construction (even via probe_http_client)
+# is domain logic and must live in crates/* (architecture.md's probe_http_client
+# rule is enforced there, not by hand-rolled clients in the command layer).
 
 set -euo pipefail
 
@@ -27,6 +30,10 @@ patterns = (
     re.compile(r"\b(?:std|tokio)::fs::"),
     re.compile(r"skillstar_core::infra::(?:paths|fs_ops)\b"),
     re.compile(r"skillstar_core::infra::\{[^}]*\b(?:paths|fs_ops)\b"),
+    # HTTP construction: any reqwest surface or the shared probe client. The
+    # command layer must delegate remote calls to a domain crate function.
+    re.compile(r"\breqwest\b"),
+    re.compile(r"\bprobe_http_client\b"),
 )
 
 current: dict[str, int] = {}
