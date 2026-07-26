@@ -21,21 +21,13 @@ pub(crate) trait AgentSpec {
     /// means the two strategies never get mixed up.
     fn resolve_global_dir(&self, home: &Path) -> PathBuf;
 
-    /// Project-level skills path relative to a project root, e.g.
-    /// `".claude/skills"`. `None` means the agent is global-only (OpenClaw) —
-    /// it is excluded from all project-level operations.
-    fn project_skills_rel(&self) -> Option<&str>;
-
-    /// CLI executable name for install detection, e.g. `"claude"`, `"gemini"`.
-    ///
-    /// When set, [`super::detect::detect_installed`] probes the enriched PATH
-    /// (`path_env::which_in_enriched`) instead of relying on directory presence
-    /// — this is what lets agents that share a home root (Antigravity + Gemini
-    /// both under `~/.gemini`) be told apart. `None` marks IDE/GUI agents
-    /// (desktop-app / alternate-CLI / directory presence) or global-only agents
-    /// with no CLI; the default is `None` so custom agents and any new spec that
-    /// doesn't override it fall back to directory detection.
-    fn binary_name(&self) -> Option<&str> {
-        None
+    /// Whether the Agent supports a user-level skills directory.
+    fn supports_global(&self) -> bool {
+        true
     }
+
+    /// Project-level skills path relative to a project root, e.g.
+    /// `".claude/skills"`. `None` means the Agent is global-only and is
+    /// excluded from all project-level operations.
+    fn project_skills_rel(&self) -> Option<&str>;
 }

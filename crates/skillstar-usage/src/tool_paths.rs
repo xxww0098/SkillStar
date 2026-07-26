@@ -41,6 +41,3 @@ pub fn antigravity_state_db_path() -> Option<PathBuf> {
     antigravity_user_data_dir()
         .map(|root| root.join("User").join("globalStorage").join("state.vscdb"))
 }
-
-
-

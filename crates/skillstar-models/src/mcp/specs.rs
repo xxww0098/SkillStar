@@ -137,7 +137,6 @@ pub(crate) fn opencode_spec(entry: &McpServerEntry) -> Value {
     Value::Object(obj)
 }
 
-
 /// ZCode desktop agent MCP (`~/.zcode/cli/config.json` → `mcp.servers.<name>`).
 /// Uses the same community stdio / http shape as Claude Code (`command` + `args` + `env`),
 /// not the OpenCode `local`/`remote` form under `v2/config.json`.

@@ -53,9 +53,10 @@ describe("CursorUsagePanel", () => {
       />,
     );
 
-    // Monetary plan totals (USD cents → dollars).
+    // Monetary plan totals (USD cents → dollars). The unified meter renders
+    // used + total as one `$used / $total` figure, so total lives in the unit node.
     expect(screen.getByText("$46.53")).toBeInTheDocument();
-    expect(screen.getByText("$94.95")).toBeInTheDocument();
+    expect(screen.getByText((content) => content.includes("$94.95"))).toBeInTheDocument();
     // Secondary credits (bonus $20; on-demand $12 / $50 may be split across nodes).
     expect(screen.getByText("$20")).toBeInTheDocument();
     expect(screen.getByText("$12")).toBeInTheDocument();

@@ -7,7 +7,7 @@ import { EndpointSpeedPanel } from "../../diagnostics/EndpointSpeedPanel";
 export function DiagnosticsTab({ form, provider }: { form: ProviderForm; provider: ProviderEntryFlat }) {
   const { values } = form;
   return (
-    <div className="grid gap-5">
+    <div className="grid gap-3.5">
       <ConnectionStatusPanel
         providerId={provider.id}
         presetId={provider.preset_id}
@@ -16,13 +16,11 @@ export function DiagnosticsTab({ form, provider }: { form: ProviderForm; provide
         baseUrlAnthropic={values.baseUrlAnthropic}
       />
 
-      <section className="border-t border-border/40 pt-4">
-        <EndpointSpeedPanel
-          urls={form.speedTestUrls}
-          apiKey={values.apiKey}
-          onApplyFastest={form.handleApplyFastestEndpoint}
-        />
-      </section>
+      <EndpointSpeedPanel
+        urls={form.speedTestUrls}
+        apiKey={values.apiKey}
+        onApplyFastest={form.handleApplyFastestEndpoint}
+      />
     </div>
   );
 }

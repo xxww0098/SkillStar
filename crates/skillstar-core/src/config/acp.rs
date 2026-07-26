@@ -1,6 +1,28 @@
 use crate::infra::paths::acp_config_path;
 use std::path::PathBuf;
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TutorialStyle {
+    /// Progressive explanations optimized for first-time users.
+    #[default]
+    Guided,
+    /// Dense, lookup-oriented technical documentation.
+    Reference,
+    /// Task-driven exercises with checkpoints and recovery paths.
+    Workshop,
+}
+
+impl TutorialStyle {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Guided => "guided",
+            Self::Reference => "reference",
+            Self::Workshop => "workshop",
+        }
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AcpConfig {
     #[serde(default)]
@@ -9,6 +31,8 @@ pub struct AcpConfig {
     pub agent_command: String,
     #[serde(default = "default_agent_label")]
     pub agent_label: String,
+    #[serde(default)]
+    pub tutorial_style: TutorialStyle,
 }
 
 fn default_agent_command() -> String {
@@ -25,6 +49,7 @@ impl Default for AcpConfig {
             enabled: false,
             agent_command: default_agent_command(),
             agent_label: default_agent_label(),
+            tutorial_style: TutorialStyle::default(),
         }
     }
 }
@@ -69,6 +94,7 @@ mod tests {
             enabled: true,
             agent_command: default_agent_command(),
             agent_label: "Claude".to_string(),
+            tutorial_style: TutorialStyle::Guided,
         };
         normalize_builtin_label(&mut builtin);
         assert_eq!(builtin.agent_label, "Claude Code");
@@ -77,8 +103,31 @@ mod tests {
             enabled: true,
             agent_command: "custom-acp".to_string(),
             agent_label: "Claude".to_string(),
+            tutorial_style: TutorialStyle::Guided,
         };
         normalize_builtin_label(&mut custom);
         assert_eq!(custom.agent_label, "Claude");
+    }
+
+    #[test]
+    fn legacy_config_defaults_to_guided_tutorial_style() {
+        let config: AcpConfig = serde_json::from_str(
+            r#"{"enabled":true,"agent_command":"custom-acp","agent_label":"Custom"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.tutorial_style, TutorialStyle::Guided);
+    }
+
+    #[test]
+    fn tutorial_style_uses_stable_snake_case_ids() {
+        assert_eq!(
+            serde_json::to_string(&TutorialStyle::Reference).unwrap(),
+            r#""reference""#
+        );
+        assert_eq!(
+            serde_json::from_str::<TutorialStyle>(r#""workshop""#).unwrap(),
+            TutorialStyle::Workshop
+        );
     }
 }

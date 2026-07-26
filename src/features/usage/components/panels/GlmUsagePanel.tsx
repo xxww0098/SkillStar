@@ -1,7 +1,6 @@
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
-import { formatQuotaNumber, pickRateLimitUsageTone, type ResetUrgencyMode } from "../../lib/usageLabels";
+import { formatQuotaNumber } from "../../lib/usageLabels";
 import type { CreditInfo, SubscriptionUsage, UsageWindow } from "../../types";
 import { ProgressTrack } from "../card/primitives";
 import { ResetCountdown } from "../ResetCountdown";
@@ -15,6 +14,9 @@ interface GlmUsagePanelProps {
   context?: { hasPlatformToken?: boolean };
 }
 
+/**
+ * Dense GLM body: short quota rows + always-visible 24h activity (no collapse).
+ */
 export function GlmUsagePanel({
   usage,
   brandColorHex,
@@ -25,6 +27,7 @@ export function GlmUsagePanel({
   const hex = brandColorHex ?? brandColor;
   const accent = hex.startsWith("#") ? hex : `#${hex}`;
   const compact = density === "compact";
+
   const activityCredits = (usage.credits ?? []).filter(
     (c) => c.credit_type === "glm-24h-tokens" || c.credit_type === "glm-24h-calls",
   );
@@ -35,216 +38,141 @@ export function GlmUsagePanel({
 
   const hasQuota = Boolean(usage.hourly || usage.weekly || usage.monthly);
   const hasActivity = activityCredits.length > 0 || modelCredits.length > 0 || toolCredits.length > 0;
-  const [activityOpen, setActivityOpen] = useState(!compact);
 
   if (!hasQuota && !hasActivity) {
     return null;
   }
 
   return (
-    <div className={cn("space-y-3", compact && "space-y-2")}>
-      {hasQuota && (
-        <section className="space-y-2">
-          <p className="text-[10px] font-semibold tracking-wider text-zinc-500 uppercase">
-            {t("usage.glmQuotaSection")}
-          </p>
-          <div className="space-y-2">
-            {usage.hourly && (
-              <GlmTokenWindow
-                window={usage.hourly}
-                title={t("usage.window5h")}
-                accent={accent}
-                mode="rateLimit"
-                compact={compact}
-              />
-            )}
-            {usage.weekly && (
-              <GlmTokenWindow
-                window={usage.weekly}
-                title={t("usage.window7d")}
-                accent={accent}
-                mode="rateLimit"
-                compact={compact}
-              />
-            )}
-            {usage.monthly && <GlmMcpWindow window={usage.monthly} accent={accent} compact={compact} />}
-          </div>
-        </section>
+    <div className={cn("space-y-1.5", compact && "space-y-1")}>
+      {usage.hourly && (
+        <GlmQuotaRow window={usage.hourly} title={t("usage.window5h")} accent={accent} compact={compact} />
+      )}
+      {usage.weekly && (
+        <GlmQuotaRow window={usage.weekly} title={t("usage.window7d")} accent={accent} compact={compact} />
+      )}
+      {usage.monthly && (
+        <GlmQuotaRow
+          window={usage.monthly}
+          title={t("usage.glmMcpMonthly")}
+          accent={accent}
+          compact={compact}
+          breakdown={compact ? undefined : usage.monthly.breakdown}
+        />
       )}
 
       {hasActivity && (
-        <section className="space-y-2">
-          {compact ? (
-            <button
-              type="button"
-              className="flex w-full items-center justify-between rounded-xl border border-zinc-200/60 bg-zinc-50/50 px-3 py-2 text-left text-[10px] font-semibold tracking-wider text-zinc-500 uppercase"
-              onClick={() => setActivityOpen((v) => !v)}
-            >
-              <span>{t("usage.glmActivitySection")}</span>
-              <span className="text-zinc-400">{activityOpen ? "−" : "+"}</span>
-            </button>
-          ) : (
-            <p className="text-[10px] font-semibold tracking-wider text-zinc-500 uppercase">
-              {t("usage.glmActivitySection")}
-            </p>
-          )}
-          {(!compact || activityOpen) && (
-            <div
-              className="space-y-2 rounded-2xl border p-3"
-              style={{ backgroundColor: `${accent}06`, borderColor: `${accent}18` }}
-            >
-              {activityCredits.map((credit) => (
+        <div
+          className="space-y-1 rounded-xl border border-zinc-200/50 px-2.5 py-1.5"
+          style={{ backgroundColor: `${accent}06`, borderColor: `${accent}18` }}
+        >
+          <p className="text-[10px] font-semibold text-zinc-500">{t("usage.glmActivitySection")}</p>
+
+          {activityCredits.map((credit) => (
+            <ActivityRow key={credit.credit_type} credit={credit} accent={accent} />
+          ))}
+
+          {modelCredits.length > 0 && (
+            <div className="space-y-0.5 pt-0.5">
+              <p className="text-[9px] font-semibold tracking-wider text-zinc-400 uppercase">
+                {t("usage.glmModelBreakdown")}
+                <span className="ml-1 font-mono font-normal normal-case tabular-nums">({modelCredits.length})</span>
+              </p>
+              {modelCredits.map((credit) => (
                 <ActivityRow key={credit.credit_type} credit={credit} accent={accent} />
               ))}
-              {modelCredits.length > 0 && (
-                <div className="space-y-1.5 border-t border-zinc-200/50 pt-1">
-                  <p className="text-[9px] font-semibold tracking-wider text-zinc-400 uppercase">
-                    {t("usage.glmModelBreakdown")}
-                  </p>
-                  {modelCredits.map((credit) => (
-                    <ActivityRow key={credit.credit_type} credit={credit} accent={accent} compact />
-                  ))}
-                </div>
-              )}
-              {toolCredits.length > 0 && (
-                <div className="space-y-1.5 border-t border-zinc-200/50 pt-1">
-                  <p className="text-[9px] font-semibold tracking-wider text-zinc-400 uppercase">
-                    {t("usage.glmToolBreakdown")}
-                  </p>
-                  {toolCredits.map((credit) => (
-                    <ActivityRow key={credit.credit_type} credit={credit} accent={accent} compact />
-                  ))}
-                </div>
-              )}
             </div>
           )}
-        </section>
+
+          {toolCredits.length > 0 && (
+            <div className="space-y-0.5 border-t border-zinc-200/40 pt-1">
+              <p className="text-[9px] font-semibold tracking-wider text-zinc-400 uppercase">
+                {t("usage.glmToolBreakdown")}
+              </p>
+              {toolCredits.map((credit) => (
+                <ActivityRow key={credit.credit_type} credit={credit} accent={accent} />
+              ))}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
 }
 
-function GlmTokenWindow({
+/** One short row: title · numbers · reset · % · thin bar. */
+function GlmQuotaRow({
   window,
   title,
   accent,
-  mode,
   compact,
+  breakdown,
 }: {
   window: UsageWindow;
   title: string;
   accent: string;
-  mode: ResetUrgencyMode;
   compact?: boolean;
+  breakdown?: UsageWindow["breakdown"];
 }) {
   const { t } = useTranslation();
   const percent = clampPercent(window.percent ?? computePercent(window.used, window.total));
   const remaining = window.total != null ? Math.max(0, window.total - window.used) : null;
-  const tone = pickRateLimitUsageTone(percent);
+  const hasBreakdown = (breakdown?.length ?? 0) > 0;
+  const high = percent >= 75;
 
   return (
-    <div className={cn("space-y-2.5 rounded-2xl border border-zinc-200/60 bg-zinc-50/50 p-3", compact && "p-2")}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-[11px] font-bold text-zinc-800 leading-none">{title}</p>
-          <p className="text-[9px] text-zinc-400 mt-1">{t("usage.rateLimitWindow")}</p>
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {window.reset_at ? <ResetCountdown resetAt={window.reset_at} usedPercent={percent} mode={mode} /> : null}
+    <div
+      className={cn(
+        "rounded-2xl border border-zinc-200/50 bg-zinc-50/40 transition-colors hover:bg-zinc-50/80",
+        compact ? "space-y-1 px-2.5 py-2" : "space-y-1 px-3 py-2",
+      )}
+    >
+      <div className="flex items-center gap-1.5">
+        <span className="h-1.5 w-1.5 shrink-0 rounded-[2px]" style={{ backgroundColor: accent }} aria-hidden />
+        <p className="min-w-0 shrink-0 text-[11px] font-bold leading-none text-zinc-700">{title}</p>
+        {window.total != null ? (
+          <p className="min-w-0 flex-1 truncate font-mono text-[10px] tabular-nums text-zinc-500">
+            <span className="font-semibold text-zinc-800">{formatQuotaNumber(window.used)}</span>
+            <span className="mx-0.5 text-zinc-300">/</span>
+            {formatQuotaNumber(window.total)}
+            {remaining != null && !compact && (
+              <span className="ml-1 text-zinc-400">
+                · {t("usage.quotaRemaining", { remaining: formatQuotaNumber(remaining) })}
+              </span>
+            )}
+          </p>
+        ) : (
+          <span className="flex-1" />
+        )}
+        <div className="flex shrink-0 items-center gap-1">
+          {window.reset_at ? <ResetCountdown resetAt={window.reset_at} usedPercent={percent} mode="rateLimit" /> : null}
           <span
-            className={cn("text-[9px] font-bold font-mono px-1.5 py-0.5 rounded-md tabular-nums", tone.text)}
-            style={{ backgroundColor: `${accent}12` }}
+            className={cn(
+              "rounded-md px-1.5 py-0.5 font-mono text-[9px] font-bold tabular-nums",
+              percent >= 90
+                ? "bg-rose-500/10 text-rose-600"
+                : percent >= 75
+                  ? "bg-amber-500/10 text-amber-600"
+                  : "bg-zinc-100 text-zinc-600",
+            )}
           >
             {percent}%
           </span>
         </div>
       </div>
 
-      {window.total != null ? (
-        <div className="flex items-baseline gap-1.5">
-          <span className="text-lg font-bold font-mono tabular-nums text-zinc-900 leading-none">
-            {formatQuotaNumber(window.used)}
-          </span>
-          <span className="text-[10px] text-zinc-300">/</span>
-          <span className="text-[11px] font-semibold font-mono tabular-nums text-zinc-500">
-            {formatQuotaNumber(window.total)}
-          </span>
-          {remaining != null && (
-            <span className="ml-auto text-[9px] text-zinc-400">
-              {t("usage.quotaRemaining", { remaining: formatQuotaNumber(remaining) })}
-            </span>
-          )}
-        </div>
+      {high ? (
+        <ProgressTrack usedPercent={percent} size="compact" tone="brand-urgency" />
       ) : (
-        <p className="text-[10px] text-zinc-500">{t("usage.usedPercent", { percent })}</p>
+        <ProgressTrack usedPercent={percent} size="compact" tone="accent-static" accent={accent} />
       )}
 
-      {percent >= 75 ? (
-        <ProgressTrack usedPercent={percent} size={compact ? "compact" : "comfortable"} tone="brand-urgency" />
-      ) : (
-        <ProgressTrack
-          usedPercent={percent}
-          size={compact ? "compact" : "comfortable"}
-          tone="accent-static"
-          accent={accent}
-        />
-      )}
-    </div>
-  );
-}
-
-function GlmMcpWindow({ window, accent, compact }: { window: UsageWindow; accent: string; compact?: boolean }) {
-  const { t } = useTranslation();
-  const percent = clampPercent(window.percent ?? computePercent(window.used, window.total));
-  const tone = pickRateLimitUsageTone(percent);
-  const remaining = window.total != null ? Math.max(0, window.total - window.used) : null;
-
-  return (
-    <div className={cn("space-y-2.5 rounded-2xl border border-zinc-200/60 bg-zinc-50/50 p-3", compact && "p-2")}>
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-[11px] font-bold text-zinc-800">{t("usage.glmMcpMonthly")}</p>
-        <span className={cn("text-[9px] font-bold font-mono px-1.5 py-0.5 rounded-md tabular-nums", tone.text)}>
-          {percent}%
-        </span>
-      </div>
-
-      {window.total != null && (
-        <div className="flex items-baseline gap-1.5">
-          <span className="text-base font-bold font-mono tabular-nums text-zinc-900">
-            {formatQuotaNumber(window.used)}
-          </span>
-          <span className="text-[10px] text-zinc-300">/</span>
-          <span className="text-[11px] font-semibold font-mono tabular-nums text-zinc-500">
-            {formatQuotaNumber(window.total)}
-          </span>
-          {remaining != null && (
-            <span className="ml-auto text-[9px] text-zinc-400">
-              {t("usage.quotaRemaining", { remaining: formatQuotaNumber(remaining) })}
-            </span>
-          )}
-        </div>
-      )}
-
-      {percent >= 75 ? (
-        <ProgressTrack usedPercent={percent} size={compact ? "compact" : "comfortable"} tone="brand-urgency" />
-      ) : (
-        <ProgressTrack
-          usedPercent={percent}
-          size={compact ? "compact" : "comfortable"}
-          tone="accent-static"
-          accent={accent}
-        />
-      )}
-
-      {(window.breakdown?.length ?? 0) > 0 && !compact && (
-        <div className="space-y-1.5 pt-1 border-t border-zinc-200/50">
-          {window.breakdown!.map((item, index) => (
-            <div
-              key={`${item.label}-${index}`}
-              className="flex items-center justify-between gap-2 rounded-lg bg-white/60 px-2 py-1.5 text-[10px]"
-            >
-              <span className="text-zinc-600">{glmCreditLabel(item.label, t)}</span>
-              <span className="font-mono font-semibold tabular-nums text-zinc-800">{formatQuotaNumber(item.used)}</span>
+      {hasBreakdown && (
+        <div className="space-y-0.5 border-t border-zinc-200/40 pt-1">
+          {breakdown!.map((item, index) => (
+            <div key={`${item.label}-${index}`} className="flex items-center justify-between gap-2 px-0.5 text-[10px]">
+              <span className="truncate text-zinc-500">{glmCreditLabel(item.label, t)}</span>
+              <span className="font-mono font-semibold tabular-nums text-zinc-700">{formatQuotaNumber(item.used)}</span>
             </div>
           ))}
         </div>
@@ -253,22 +181,12 @@ function GlmMcpWindow({ window, accent, compact }: { window: UsageWindow; accent
   );
 }
 
-function ActivityRow({ credit, accent, compact = false }: { credit: CreditInfo; accent: string; compact?: boolean }) {
+function ActivityRow({ credit, accent }: { credit: CreditInfo; accent: string }) {
   const { t } = useTranslation();
   return (
-    <div
-      className={cn(
-        "flex items-center justify-between gap-2 rounded-lg bg-white/55 px-2.5",
-        compact ? "py-1" : "py-1.5",
-      )}
-    >
-      <span className={cn("text-zinc-600", compact ? "text-[9px]" : "text-[10px]")}>
-        {glmCreditLabel(credit.credit_type, t)}
-      </span>
-      <span
-        className={cn("font-mono font-semibold tabular-nums", compact ? "text-[10px]" : "text-[11px]")}
-        style={{ color: accent }}
-      >
+    <div className="flex items-center justify-between gap-2 px-0.5 py-0.5">
+      <span className="min-w-0 truncate text-[10px] text-zinc-600">{glmCreditLabel(credit.credit_type, t)}</span>
+      <span className="shrink-0 font-mono text-[10px] font-semibold tabular-nums" style={{ color: accent }}>
         {formatCreditAmount(credit)}
       </span>
     </div>
@@ -298,9 +216,6 @@ function formatCreditAmount(credit: CreditInfo): string {
   if (!raw) return "—";
   const parsed = Number(raw.replace(/,/g, ""));
   if (!Number.isFinite(parsed)) return raw;
-  if (credit.credit_type === "glm-24h-tokens" || credit.credit_type.startsWith("glm-model:")) {
-    return formatQuotaNumber(parsed);
-  }
   return formatQuotaNumber(parsed);
 }
 

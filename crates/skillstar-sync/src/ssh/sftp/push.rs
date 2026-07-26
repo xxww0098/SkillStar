@@ -126,7 +126,10 @@ pub async fn upload_local_skill_tree(
 
         let tmp_path = format!("{remote_file}.skillstar.tmp");
         let mut file = sftp
-            .open_with_flags(&tmp_path, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE)
+            .open_with_flags(
+                &tmp_path,
+                OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE,
+            )
             .await
             .with_context(|| format!("open remote {tmp_path}"))?;
         file.write_all(&local_bytes)
@@ -187,8 +190,14 @@ mod tests {
 
     #[test]
     fn remote_skill_dir_joins_without_double_slash() {
-        assert_eq!(remote_skill_dir("~/.claude/skills", "foo"), "~/.claude/skills/foo");
-        assert_eq!(remote_skill_dir("~/.claude/skills/", "foo"), "~/.claude/skills/foo");
+        assert_eq!(
+            remote_skill_dir("~/.claude/skills", "foo"),
+            "~/.claude/skills/foo"
+        );
+        assert_eq!(
+            remote_skill_dir("~/.claude/skills/", "foo"),
+            "~/.claude/skills/foo"
+        );
         assert_eq!(remote_skill_dir("", "foo"), "foo");
     }
 
@@ -234,9 +243,6 @@ mod tests {
         unsafe {
             std::env::set_var("SKILLSTAR_DATA_DIR", temp.path());
         }
-        DataDirGuard {
-            _temp: temp,
-            _lock,
-        }
+        DataDirGuard { _temp: temp, _lock }
     }
 }

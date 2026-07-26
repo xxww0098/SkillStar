@@ -15,7 +15,7 @@ import { mcpKeys } from "../features/mcp/api/keys";
 import { McpMarketBrowser } from "../features/mcp/components/McpMarketBrowser";
 import { McpServerForm, type McpServerFormValue } from "../features/mcp/components/McpServerForm";
 import { PUBLISHER_BRAND_ICON, hasPublisherBrandIcon } from "../features/mcp/components/McpPublishers";
-import { PublisherAvatar } from "../features/marketplace/components/OfficialPublishers";
+import { PublisherAvatar } from "../components/shared/PublisherAvatar";
 import { useMcpServers } from "../features/mcp/hooks/useMcpServers";
 import { failedMcpSyncCount } from "../features/mcp/lib/syncResults";
 import { tauriInvoke } from "../lib/ipc";

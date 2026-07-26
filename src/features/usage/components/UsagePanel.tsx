@@ -118,14 +118,15 @@ export function UsagePanel({ filter, usageCreateRequest, clearUsageCreateRequest
                 const updated = await data.setActive(id);
                 const outcome = updated.switch_result ?? null;
                 if (outcome && !outcome.success && outcome.error) {
-                  // Active flag updated, but the real CLI config wasn't — tell
-                  // the user why (e.g. missing id_token, keychain write fail).
-                  toast.error(t("usage.switchCliFailed", "已切为当前账号，但同步到 CLI 失败"), {
+                  const message = updated.is_active
+                    ? t("usage.switchCliFailed", "已切为当前账号，但同步到 CLI 失败")
+                    : t("usage.switchNotApplied", "切换未生效，已保留原当前账号");
+                  toast.error(message, {
                     description: outcome.error,
                   });
                 } else if (outcome && outcome.success) {
                   toast.success(t("usage.switchCliSuccess", "已切为当前账号并同步到 CLI"), {
-                    description: `${updated.display_name} → ${outcome.toolId}`,
+                    description: `${updated.display_name} → ${outcome.toolId} · ${t("usage.switchCliRestartHint", "请重启 CLI 后生效")}`,
                   });
                 } else {
                   toast.success(t("usage.activeAccountSet", "已切为当前账号"), {
@@ -141,7 +142,7 @@ export function UsagePanel({ filter, usageCreateRequest, clearUsageCreateRequest
                 const outcome = await data.switchActiveToCli(catalogId);
                 if (outcome.success) {
                   toast.success(t("usage.switchCliSuccess", "已同步到 CLI"), {
-                    description: `${outcome.toolId}: ${outcome.configPath}`,
+                    description: `${outcome.toolId}: ${outcome.configPath} · ${t("usage.switchCliRestartHint", "请重启 CLI 后生效")}`,
                   });
                 } else if (outcome.error) {
                   toast.error(t("usage.switchCliFailed", "同步到 CLI 失败"), {

@@ -131,7 +131,6 @@ async fn import_antigravity_from_state_db() -> UsageResult<Subscription> {
     .await
 }
 
-
 async fn upsert_oauth_subscription(
     catalog_id: &str,
     display_name: String,
@@ -162,7 +161,6 @@ async fn upsert_oauth_subscription(
         oauth_account_id: None,
         oauth_region: None,
         requires_reauth: false,
-        fingerprint_id: None,
         cookie_jar_encrypted: None,
         cookie_session_expires_at: None,
         manual_quota: None,

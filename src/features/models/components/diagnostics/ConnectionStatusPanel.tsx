@@ -1,14 +1,13 @@
 import type { TFunction } from "i18next";
 import { ExternalLink, Loader2, Play, RefreshCw, WalletCards } from "lucide-react";
-import { memo, useCallback, useMemo } from "react";
+import { memo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../../components/ui/button";
 import { openExternalUrl } from "../../../../lib/externalOpen";
 import { cn } from "../../../../lib/utils";
 import { useBalanceQuery } from "../../api/balance";
-import { useEndpointSpeedTest } from "../../api/diagnostics";
 import { useLatencyTest } from "../../api/diagnostics";
-import { endpointProbeLabel, endpointProbeTone } from "../../lib/endpointProbe";
+import { providerCardClass } from "../providerForm/ProviderConfigPrimitives";
 
 export interface ConnectionStatusPanelProps {
   providerId: string;
@@ -33,9 +32,9 @@ function isBalancePreset(presetId?: string): presetId is BalancePresetId {
   return Boolean(presetId && presetId in BALANCE_CONSOLE_URLS);
 }
 
-function formatBalanceAmount(available: number, currency: string) {
+function formatBalanceAmount(available: number, currency: string, locale: string) {
   const normalizedCurrency = currency.toUpperCase();
-  const value = new Intl.NumberFormat("zh-CN", {
+  const value = new Intl.NumberFormat(locale, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(available);
@@ -87,13 +86,12 @@ function ConnectionStatusPanelInner({
   baseUrlOpenai,
   baseUrlAnthropic,
 }: ConnectionStatusPanelProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const openaiUrl = (baseUrlOpenai ?? baseUrl ?? "").trim();
   const anthropicUrl = (baseUrlAnthropic ?? "").trim();
   const primaryUrl = openaiUrl || anthropicUrl;
 
   const { testConnection, isLoading: isTesting, result: latencyResult } = useLatencyTest();
-  const { testEndpoints, results: endpointResults, isLoading: isEndpointTesting } = useEndpointSpeedTest();
 
   const balancePresetId = isBalancePreset(presetId) ? presetId : null;
   const {
@@ -103,17 +101,11 @@ function ConnectionStatusPanelInner({
     refresh: refreshBalance,
   } = useBalanceQuery(balancePresetId, apiKey, primaryUrl);
 
-  const probeUrls = useMemo(() => [openaiUrl, anthropicUrl].filter(Boolean), [openaiUrl, anthropicUrl]);
-
   const handleTestConnection = useCallback(() => {
     if (!primaryUrl || !apiKey) return;
     const format = openaiUrl ? "openai" : "anthropic";
     testConnection(primaryUrl, apiKey, "", format);
   }, [primaryUrl, apiKey, openaiUrl, testConnection]);
-
-  const handleProbeEndpoints = useCallback(() => {
-    void testEndpoints(probeUrls, apiKey);
-  }, [testEndpoints, probeUrls, apiKey]);
 
   const handleRefreshBalance = useCallback(() => {
     void refreshBalance();
@@ -125,7 +117,9 @@ function ConnectionStatusPanelInner({
   }, [balancePresetId]);
 
   const status = getConnectionStatus(latencyResult, t);
-  const balanceAmount = balance ? formatBalanceAmount(balance.available, balance.currency) : "--";
+  const balanceAmount = balance
+    ? formatBalanceAmount(balance.available, balance.currency, i18n.resolvedLanguage ?? i18n.language)
+    : "--";
 
   let balanceHint = t("models.diagnosticsPanel.accountBalance");
   if (!apiKey) {
@@ -134,38 +128,36 @@ function ConnectionStatusPanelInner({
     balanceHint = t("models.diagnosticsPanel.balanceFailed");
   }
 
-  const isBusy = isTesting || isEndpointTesting;
-
   return (
     <div className="space-y-3">
-      <section className="space-y-3 rounded-xl border border-border/55 bg-card/55 p-4 shadow-sm backdrop-blur-sm transition duration-200 hover:-translate-y-0.5 hover:border-primary/25 hover:bg-card/75 hover:shadow-[0_16px_36px_-28px_var(--color-shadow)]">
-        <h4 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-          <span className="h-2.5 w-2.5 rounded-full bg-success shadow-[0_0_0_3px_rgba(var(--color-success-rgb),0.12)]" />
-          {t("models.diagnosticsPanel.connectionStatus")}
-        </h4>
-
-        <div className="flex items-center gap-2 text-xs font-medium">
-          {isBusy ? (
-            <>
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-              <span className="text-muted-foreground">{t("models.diagnosticsPanel.testing")}</span>
-            </>
-          ) : (
-            <>
-              <span className={cn("h-2 w-2 rounded-full", status.dotClass)} />
+      <section className={cn(providerCardClass, "space-y-3 p-4")}>
+        <div className="flex items-center justify-between gap-3">
+          <h4 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <span
+              className={cn("h-2.5 w-2.5 rounded-full", isTesting ? "animate-pulse bg-primary" : status.dotClass)}
+            />
+            {t("models.diagnosticsPanel.connectionStatus")}
+          </h4>
+          <div className="flex items-center gap-1.5 text-xs font-medium">
+            {isTesting ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                <span className="text-muted-foreground">{t("models.diagnosticsPanel.testing")}</span>
+              </>
+            ) : (
               <span className={status.textClass}>{status.label}</span>
-            </>
-          )}
+            )}
+          </div>
         </div>
 
-        <div className="grid gap-2">
+        <div>
           <Button
             type="button"
             variant="outline"
             size="sm"
             onClick={handleTestConnection}
-            disabled={isBusy || !primaryUrl || !apiKey}
-            className="h-9 w-full justify-center border-border/60 bg-background/50 text-xs font-semibold text-foreground/80 hover:border-primary/40 hover:bg-background/70 hover:text-foreground"
+            disabled={isTesting || !primaryUrl || !apiKey}
+            className="h-9 w-full justify-center text-xs"
           >
             {isTesting ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
@@ -174,48 +166,11 @@ function ConnectionStatusPanelInner({
             )}
             {t("models.diagnosticsPanel.deepTest")}
           </Button>
-          {probeUrls.length > 0 && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleProbeEndpoints}
-              disabled={isBusy || !apiKey}
-              className="h-9 w-full justify-center border-border/60 bg-background/50 text-xs font-semibold text-foreground/80 hover:border-primary/40 hover:bg-background/70 hover:text-foreground"
-            >
-              {isEndpointTesting ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-              ) : (
-                <Play className="h-3.5 w-3.5 text-primary" />
-              )}
-              {t("models.diagnosticsPanel.endpointSpeedCount", { count: probeUrls.length })}
-            </Button>
-          )}
         </div>
-
-        {endpointResults.length > 0 && (
-          <ul className="space-y-1 border-t border-border/40 pt-2">
-            {endpointResults.map((r) => (
-              <li key={r.url} className="flex justify-between gap-2 text-[10px]">
-                <span className="min-w-0 truncate font-mono text-muted-foreground">{r.url}</span>
-                <span
-                  className={cn(
-                    "shrink-0 font-medium",
-                    endpointProbeTone(r) === "ok" && "text-success",
-                    endpointProbeTone(r) === "auth" && "text-amber-500",
-                    endpointProbeTone(r) === "error" && "text-destructive",
-                  )}
-                >
-                  {endpointProbeLabel(r, t)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
       </section>
 
       {balancePresetId ? (
-        <section className="rounded-xl border border-border/55 bg-card/55 p-4 shadow-sm backdrop-blur-sm transition duration-200 hover:-translate-y-0.5 hover:border-primary/25 hover:bg-card/75 hover:shadow-[0_16px_36px_-28px_var(--color-shadow)]">
+        <section className={cn(providerCardClass, "p-4")}>
           <div className="flex items-center justify-between gap-3">
             <h4 className="flex items-center gap-2 text-sm font-semibold text-foreground">
               <span className="flex h-7 w-7 items-center justify-center rounded-full border border-primary/15 bg-primary/10 text-primary">
@@ -242,7 +197,7 @@ function ConnectionStatusPanelInner({
               size="sm"
               onClick={handleRefreshBalance}
               disabled={isBalanceLoading || !apiKey}
-              className="h-8 justify-center border-border/60 bg-background/50 text-xs font-semibold text-foreground/80 hover:border-primary/40 hover:bg-background/70 hover:text-foreground"
+              className="h-9 justify-center text-xs"
             >
               {isBalanceLoading ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
@@ -256,7 +211,7 @@ function ConnectionStatusPanelInner({
               variant="outline"
               size="sm"
               onClick={handleOpenConsole}
-              className="h-8 justify-center border-border/60 bg-background/50 text-xs font-semibold text-foreground/80 hover:border-primary/40 hover:bg-background/70 hover:text-foreground"
+              className="h-9 justify-center text-xs"
             >
               <ExternalLink className="h-3.5 w-3.5 text-primary" />
               {t("models.diagnosticsPanel.console")}

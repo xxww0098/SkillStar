@@ -1,14 +1,12 @@
 //! AI command module — split into domain-specific submodules.
 //!
 //! - `summarize`: summarization, AI connection test, skill pick
-//! - `translate`: AST-based Markdown translation pipeline
 
 pub mod summarize;
-pub mod translate;
 
 use serde::Serialize;
-use skillstar_models::ai_provider;
 use skillstar_core::infra::error::AppError;
+use skillstar_models::ai_provider;
 use tauri::Emitter;
 
 // ── Shared Types ────────────────────────────────────────────────────
@@ -39,9 +37,9 @@ fn emit_ai_stream_event(
         message,
     };
 
-    window.emit(channel, payload).map_err(|e| {
-        AppError::Other(format!("Failed to emit {} event: {}", channel, e))
-    })
+    window
+        .emit(channel, payload)
+        .map_err(|e| AppError::Other(format!("Failed to emit {} event: {}", channel, e)))
 }
 
 fn emit_summarize_stream_event(
@@ -61,20 +59,7 @@ fn emit_summarize_stream_event(
     )
 }
 
-fn emit_translate_pipeline_event(
-    window: &tauri::Window,
-    request_id: &str,
-    event: &str,
-    progress: Option<ai_provider::translate::PipelineProgress>,
-    metrics: Option<ai_provider::translate::TranslationMetrics>,
-    message: Option<String>,
-) -> Result<(), AppError> {
-    translate::emit_translate_pipeline_event_impl(
-        window, request_id, event, progress, metrics, message,
-    )
-}
-
-/// Shared across command modules (summarize/translate here, marketplace AI search).
+/// Shared across command modules (summarize here, marketplace AI search).
 /// The two error strings are matched verbatim by the frontend (`formatAiErrorMessage`).
 pub(crate) async fn ensure_ai_config() -> Result<ai_provider::AiConfig, AppError> {
     let config = ai_provider::load_config_async().await;

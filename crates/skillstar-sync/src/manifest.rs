@@ -208,7 +208,13 @@ mod tests {
                 uploaded_at: "2026-01-01T00:00:00Z".to_string(),
             },
         );
-        let m = build_manifest(hub, local, meta, "dev-1".to_string(), "2026-01-01T00:00:00Z".to_string());
+        let m = build_manifest(
+            hub,
+            local,
+            meta,
+            "dev-1".to_string(),
+            "2026-01-01T00:00:00Z".to_string(),
+        );
         assert_eq!(m.skills.len(), 2);
         let kinds: Vec<&str> = m.skills.iter().map(|e| e.name()).collect();
         assert!(kinds.contains(&"a"));
@@ -236,7 +242,13 @@ mod tests {
                 uploaded_at: "2026-01-01T00:00:00Z".to_string(),
             },
         );
-        let m = build_manifest(hub, local, meta, "dev-1".to_string(), "2026-01-01T00:00:00Z".to_string());
+        let m = build_manifest(
+            hub,
+            local,
+            meta,
+            "dev-1".to_string(),
+            "2026-01-01T00:00:00Z".to_string(),
+        );
         let bytes = serialise(&m).unwrap();
         let parsed = parse(&bytes).unwrap();
         assert_eq!(parsed.version, 1);

@@ -262,9 +262,7 @@ mod tests {
 
     #[test]
     fn which_in_enriched_missing_binary_returns_none() {
-        assert!(
-            which_in_enriched("skillstar-definitely-not-a-real-bin-xyz-99").is_none()
-        );
+        assert!(which_in_enriched("skillstar-definitely-not-a-real-bin-xyz-99").is_none());
     }
 
     #[test]

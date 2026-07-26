@@ -98,16 +98,44 @@ pub(crate) fn load_publishers(conn: &Connection) -> Result<Vec<McpPublisherSumma
     // of insertion order. Each maps to display name + landing page.
     const CURATED_ORDER: [(&str, &str, &str); 11] = [
         // (source id, display name, url)
-        ("adspower", "AdsPower", "https://github.com/AdsPower/adspower-browser"),
-        ("bigmodel", "BigModel", "https://docs.bigmodel.cn/cn/coding-plan/mcp/"),
-        ("anthropic", "Anthropic", "https://github.com/modelcontextprotocol/servers"),
-        ("microsoft", "Microsoft", "https://github.com/microsoft/playwright-mcp"),
+        (
+            "adspower",
+            "AdsPower",
+            "https://github.com/AdsPower/adspower-browser",
+        ),
+        (
+            "bigmodel",
+            "BigModel",
+            "https://docs.bigmodel.cn/cn/coding-plan/mcp/",
+        ),
+        (
+            "anthropic",
+            "Anthropic",
+            "https://github.com/modelcontextprotocol/servers",
+        ),
+        (
+            "microsoft",
+            "Microsoft",
+            "https://github.com/microsoft/playwright-mcp",
+        ),
         ("saas", "SaaS", "https://modelcontextprotocol.io"),
         ("cn-ai", "Dev Tools", "https://github.com/upstash/context7"),
-        ("cloudflare", "Cloudflare", "https://github.com/cloudflare/mcp-server-cloudflare"),
-        ("brave", "Brave", "https://github.com/brave/brave-search-mcp"),
+        (
+            "cloudflare",
+            "Cloudflare",
+            "https://github.com/cloudflare/mcp-server-cloudflare",
+        ),
+        (
+            "brave",
+            "Brave",
+            "https://github.com/brave/brave-search-mcp",
+        ),
         ("google", "Google", "https://developers.google.com/mcp"),
-        ("supabase", "Supabase", "https://github.com/supabase/mcp-server-supabase"),
+        (
+            "supabase",
+            "Supabase",
+            "https://github.com/supabase/mcp-server-supabase",
+        ),
         ("x", "X", "https://docs.x.com/tools/mcp"),
     ];
 
@@ -117,7 +145,9 @@ pub(crate) fn load_publishers(conn: &Connection) -> Result<Vec<McpPublisherSumma
         .prepare("SELECT source, COUNT(*) AS cnt FROM mcp_curated_server GROUP BY source")
         .context("Failed to prepare curated publisher count query")?;
     let rows = stmt
-        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })
         .context("Failed to query curated publisher counts")?;
     for row in rows {
         let (source, count) = row?;
@@ -141,14 +171,14 @@ pub(crate) fn load_publishers(conn: &Connection) -> Result<Vec<McpPublisherSumma
     // A transient DB error (e.g. SQLite BUSY) shouldn't abort the whole
     // publisher list, but `unwrap_or(0)` would silently render the GitHub card
     // as "0 servers" — log so the misleading zero is traceable.
-    let github_count = match conn.query_row(
-        "SELECT COUNT(*) FROM mcp_registry_server",
-        [],
-        |row| row.get::<_, i64>(0),
-    ) {
+    let github_count = match conn.query_row("SELECT COUNT(*) FROM mcp_registry_server", [], |row| {
+        row.get::<_, i64>(0)
+    }) {
         Ok(c) => c,
         Err(e) => {
-            warn!("mcp publishers: COUNT(*) on mcp_registry_server failed ({e}); GitHub card will show 0");
+            warn!(
+                "mcp publishers: COUNT(*) on mcp_registry_server failed ({e}); GitHub card will show 0"
+            );
             0
         }
     };
@@ -282,7 +312,11 @@ pub(crate) fn build_fts_match(query: &str) -> Option<String> {
     }
 }
 
-pub(crate) fn search_cards(conn: &Connection, query: &str, limit: u32) -> Result<Vec<McpMarketEntry>> {
+pub(crate) fn search_cards(
+    conn: &Connection,
+    query: &str,
+    limit: u32,
+) -> Result<Vec<McpMarketEntry>> {
     let Some(match_expr) = build_fts_match(query) else {
         let mut cards = load_cards(conn)?;
         cards.truncate(limit as usize);

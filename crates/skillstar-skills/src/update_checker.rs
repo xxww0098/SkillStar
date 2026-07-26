@@ -111,17 +111,15 @@ pub fn prefetch_unique_repos(skill_paths: &[PathBuf]) -> HashSet<PathBuf> {
         &skillstar_core::infra::paths::repos_cache_dir(),
         git_ops::find_repo_root,
         |root| {
-            git_ops::run_git_shallow_fetch(root, &["fetch", "--depth", "1", "--quiet"])
-                .map(|_| ())
-                .map_err(|e| {
-                    warn!(
-                        target: "update_checker",
-                        path = %root.display(),
-                        error = %e,
-                        "prefetch git fetch failed — will preserve existing update state"
-                    );
-                    e
-                })
+            fetch_tracked_ref(root).map_err(|e| {
+                warn!(
+                    target: "update_checker",
+                    path = %root.display(),
+                    error = %e,
+                    "prefetch git fetch failed — will preserve existing update state"
+                );
+                e
+            })
         },
     )
 }
@@ -156,24 +154,7 @@ where
 /// Check if a repo-cached skill has updates available (fetches first).
 #[allow(dead_code)]
 pub fn check_update(skill_path: &Path) -> bool {
-    check_update_with(
-        skill_path,
-        |repo_root| {
-            let mut fetch_cmd = command_with_path("git");
-            github_mirror::apply_mirror_args(&mut fetch_cmd);
-            let output = fetch_cmd
-                .current_dir(repo_root)
-                .args(["fetch", "--depth", "1", "--quiet"])
-                .output()
-                .map_err(anyhow::Error::from)?;
-            if output.status.success() {
-                Ok(())
-            } else {
-                anyhow::bail!(String::from_utf8_lossy(&output.stderr).trim().to_string())
-            }
-        },
-        git_ops::find_repo_root,
-    )
+    check_update_with(skill_path, fetch_tracked_ref, git_ops::find_repo_root)
 }
 
 pub fn check_update_with<F, G>(skill_path: &Path, fetch_repo: F, find_repo_root: G) -> bool
@@ -227,8 +208,42 @@ where
 
 fn compare_heads(repo_root: &Path) -> Option<bool> {
     let local_head = git_rev_parse(repo_root, "HEAD")?;
-    let remote_head = git_rev_parse(repo_root, "origin/HEAD")?;
+    let remote_head = if configured_git_ref(repo_root).is_some() {
+        git_rev_parse(repo_root, "FETCH_HEAD")?
+    } else {
+        git_rev_parse(repo_root, "origin/HEAD")?
+    };
     Some(!local_head.is_empty() && !remote_head.is_empty() && local_head != remote_head)
+}
+
+pub(crate) fn configured_git_ref(repo_root: &Path) -> Option<String> {
+    let output = command_with_path("git")
+        .current_dir(repo_root)
+        .args(["config", "--get", "skillstar.ref"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!value.is_empty()).then_some(value)
+}
+
+pub(crate) fn fetch_tracked_ref(repo_root: &Path) -> Result<()> {
+    let mut fetch_cmd = command_with_path("git");
+    github_mirror::apply_mirror_args(&mut fetch_cmd);
+    fetch_cmd
+        .current_dir(repo_root)
+        .args(["fetch", "--depth", "1", "--quiet"]);
+    if let Some(git_ref) = configured_git_ref(repo_root) {
+        fetch_cmd.args(["origin", git_ref.as_str()]);
+    }
+    let output = fetch_cmd.output().map_err(anyhow::Error::from)?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        anyhow::bail!(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
 }
 
 fn git_rev_parse(repo_dir: &Path, rev: &str) -> Option<String> {

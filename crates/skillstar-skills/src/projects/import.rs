@@ -10,9 +10,9 @@ use skillstar_core::infra::{fs_ops, paths as fs_paths};
 use std::collections::HashMap;
 use std::path::Path;
 
+use super::{ImportResult, ImportTarget, load_skills_list, register_project, save_skills_list};
 use crate::agents;
 use crate::local_skill;
-use super::{ImportResult, ImportTarget, load_skills_list, register_project, save_skills_list};
 
 /// Import discovered skills into local storage and update the project's skills-list.
 pub fn import_scanned_skills(
@@ -228,29 +228,33 @@ mod tests {
             std::fs::create_dir_all(&project)?;
             let entry = register_project(&project.to_string_lossy())?;
             let mut list = SkillsList::default();
-            list.agents
-                .insert("claude".into(), vec!["existing".into()]);
+            list.agents.insert("antigravity".into(), Vec::new());
             save_skills_list(&entry.name, &list)?;
 
-            // Seed existing skill in list only — shared path ownership stays claude
+            // Seed an owner for the universal path; importing through another
+            // compatible Agent must preserve that single owner.
             let loaded = load_skills_list(&entry.name).unwrap();
-            assert!(loaded.agents.contains_key("claude"));
+            assert!(loaded.agents.contains_key("antigravity"));
 
-            let claude_skills = project.join(".claude").join("skills");
-            std::fs::create_dir_all(&claude_skills)?;
-            write_skill(&claude_skills, "new-one");
+            let universal_skills = project.join(".agents").join("skills");
+            std::fs::create_dir_all(&universal_skills)?;
+            write_skill(&universal_skills, "new-one");
 
             let targets = vec![ImportTarget {
                 name: "new-one".into(),
-                agent_id: "claude".into(),
+                agent_id: "codex".into(),
             }];
             let project_path_str = project.to_string_lossy().to_string();
             let out = import_scanned_skills(&project_path_str, &entry.name, &targets)?;
+            assert_eq!(out.symlink_count, 1);
+            let updated = load_skills_list(&entry.name).unwrap();
             assert!(
-                out.symlink_count >= 1
-                    || !out.imported_to_hub.is_empty()
-                    || out.skills_list_updated
+                updated
+                    .agents
+                    .get("antigravity")
+                    .is_some_and(|skills| skills.iter().any(|skill| skill == "new-one"))
             );
+            assert!(!updated.agents.contains_key("codex"));
             Ok(())
         })();
 

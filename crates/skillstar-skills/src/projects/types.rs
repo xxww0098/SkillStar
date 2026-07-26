@@ -43,11 +43,7 @@ pub fn deploy_skill_auto(source: &Path, target: &Path) -> Result<()> {
 ///   Windows without Developer Mode on a cross-drive path).
 /// - [`ProjectDeployMode::Copy`] always performs a full directory copy with
 ///   no live link to the hub.
-pub fn deploy_skill_with_mode(
-    source: &Path,
-    target: &Path,
-    mode: ProjectDeployMode,
-) -> Result<()> {
+pub fn deploy_skill_with_mode(source: &Path, target: &Path, mode: ProjectDeployMode) -> Result<()> {
     match mode {
         ProjectDeployMode::Symlink => deploy_skill_auto(source, target),
         ProjectDeployMode::Copy => {
@@ -111,7 +107,7 @@ pub struct ProjectIndex {
 pub struct SkillsList {
     /// `agent_id → [skill_name, ...]`
     pub agents: HashMap<String, Vec<String>>,
-    /// `project_skills_rel` path (e.g. `.agent/skills`) → deploy mode for that directory.
+    /// `project_skills_rel` path (e.g. `.agents/skills`) → deploy mode for that directory.
     #[serde(default)]
     pub deploy_modes: HashMap<String, ProjectDeployMode>,
     /// ISO 8601 timestamp of last modification.

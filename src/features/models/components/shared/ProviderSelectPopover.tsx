@@ -5,6 +5,12 @@ import { useState } from "react";
 import { ProviderBrandIcon } from "../../../../components/shared/ProviderBrandIcon";
 import { cn } from "../../../../lib/utils";
 import type { ProviderEntryFlat } from "../../../../types";
+import {
+  modelCompactPopoverTriggerClass,
+  modelOptionClass,
+  modelPopoverContentClass,
+  modelPopoverTriggerClass,
+} from "../providerForm/ProviderConfigPrimitives";
 
 export interface ProviderSelectPopoverProps {
   providers: ProviderEntryFlat[];
@@ -13,6 +19,9 @@ export interface ProviderSelectPopoverProps {
   onAddProvider?: () => void;
   disabled?: boolean;
   busy?: boolean;
+  id?: string;
+  ariaLabel: string;
+  density?: "standard" | "compact";
   /** Extra classes for the trigger (status tint etc.). */
   triggerClassName?: string;
 }
@@ -25,6 +34,9 @@ export function ProviderSelectPopover({
   onAddProvider,
   disabled,
   busy,
+  id,
+  ariaLabel,
+  density = "compact",
   triggerClassName,
 }: ProviderSelectPopoverProps) {
   const { t } = useTranslation();
@@ -35,12 +47,12 @@ export function ProviderSelectPopover({
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
         <button
+          id={id}
           type="button"
+          aria-label={ariaLabel}
           disabled={disabled || busy}
           className={cn(
-            "flex w-full items-center gap-2 rounded-xl border border-input-border bg-input px-3 py-2 text-left text-xs transition",
-            "hover:border-primary/30 focus:outline-none focus:ring-2 focus:ring-primary/40",
-            "disabled:cursor-not-allowed disabled:opacity-50",
+            density === "standard" ? modelPopoverTriggerClass : modelCompactPopoverTriggerClass,
             triggerClassName,
           )}
         >
@@ -73,9 +85,9 @@ export function ProviderSelectPopover({
         <Popover.Content
           align="start"
           sideOffset={6}
-          className="z-[95] w-[var(--radix-popover-trigger-width)] min-w-[240px] rounded-xl border border-border/60 bg-card/95 p-1.5 shadow-[0_20px_60px_-24px_var(--color-shadow)] backdrop-blur-2xl"
+          className={cn(modelPopoverContentClass, "w-[var(--radix-popover-trigger-width)] min-w-[240px]")}
         >
-          <div className="max-h-72 overflow-y-auto">
+          <div className="max-h-72 overflow-y-auto" role="listbox" aria-label={ariaLabel}>
             {providers.length === 0 ? (
               <div className="px-3 py-3 text-center text-[11px] text-muted-foreground">
                 {t("models.picker.noCompatible")}
@@ -85,15 +97,13 @@ export function ProviderSelectPopover({
                 <button
                   key={p.id}
                   type="button"
+                  role="option"
+                  aria-selected={currentId === p.id}
                   onClick={() => {
                     setOpen(false);
                     onPick(p.id);
                   }}
-                  className={cn(
-                    "flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs",
-                    "transition hover:bg-primary/10",
-                    currentId === p.id && "bg-primary/10 text-primary",
-                  )}
+                  className={cn(modelOptionClass, currentId === p.id && "bg-primary/10 text-primary")}
                 >
                   <ProviderBrandIcon presetId={p.preset_id} providerName={p.name} iconColor={p.icon_color} size="xs" />
                   <span className="min-w-0 flex-1 truncate font-medium text-foreground">{p.name}</span>
@@ -110,7 +120,7 @@ export function ProviderSelectPopover({
                   setOpen(false);
                   onAddProvider();
                 }}
-                className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-primary transition hover:bg-primary/10"
+                className={cn(modelOptionClass, "text-primary")}
               >
                 <Plug className="h-3.5 w-3.5" />
                 {t("models.picker.addProvider")}

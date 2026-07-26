@@ -1,5 +1,5 @@
-import { Copy, Loader2, MoreHorizontal, Trash2 } from "lucide-react";
-import { DropdownMenu } from "radix-ui";
+import { Activity, Boxes, Cable, Copy, Loader2, MoreHorizontal, SlidersHorizontal, Trash2 } from "lucide-react";
+import { DropdownMenu, Tabs } from "radix-ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../../components/ui/button";
@@ -12,18 +12,17 @@ import { useProviderForm } from "../../hooks/useProviderForm";
 import type { ProviderEditorTab } from "../../types";
 import { ConflictWarnings } from "../diagnostics/ConflictWarnings";
 import { PostCreateGuide } from "./PostCreateGuide";
-import { SaveBadge } from "../shared/SaveBadge";
 import { AdvancedTab } from "./tabs/AdvancedTab";
 import { ConnectionTab } from "./tabs/ConnectionTab";
 import { DiagnosticsTab } from "./tabs/DiagnosticsTab";
 import { ModelsTab } from "./tabs/ModelsTab";
 
-const TABS: { id: ProviderEditorTab; labelKey: string }[] = [
-  { id: "connection", labelKey: "models.tabs.connection" },
-  { id: "models", labelKey: "models.tabs.models" },
-  { id: "advanced", labelKey: "models.tabs.advanced" },
-  { id: "diagnostics", labelKey: "models.tabs.diagnostics" },
-];
+const TABS = [
+  { id: "connection", labelKey: "models.tabs.connection", icon: Cable },
+  { id: "models", labelKey: "models.tabs.models", icon: Boxes },
+  { id: "advanced", labelKey: "models.tabs.advanced", icon: SlidersHorizontal },
+  { id: "diagnostics", labelKey: "models.tabs.diagnostics", icon: Activity },
+] satisfies { id: ProviderEditorTab; labelKey: string; icon: typeof Cable }[];
 
 export interface ProviderEditorDrawerProps {
   provider: ProviderEntryFlat;
@@ -41,8 +40,8 @@ export interface ProviderEditorDrawerProps {
 
 /**
  * Provider editor drawer — owns the form, the autosave state machine and the
- * tab navigation. Closing the drawer flushes any pending edit before the
- * debounce fires, so nothing is silently lost.
+ * tab navigation. Close always flushes pending edits first (best-effort), then
+ * dismisses — validation/network failure must never trap the user in the drawer.
  */
 function ProviderEditorDrawerInner({
   provider,
@@ -58,7 +57,11 @@ function ProviderEditorDrawerInner({
   const { t } = useTranslation();
   const [guideDismissed, setGuideDismissed] = useState(false);
   const form = useProviderForm(provider);
-  const { state: saveState, flush } = useAutosave({ dirty: form.dirty, save: form.save });
+  const { state: saveState, flush } = useAutosave({
+    dirty: form.dirty,
+    save: form.save,
+    changeToken: form.values,
+  });
 
   // Post-create convenience: fetch the model catalog once if credentials allow.
   const autoFetched = useRef(false);
@@ -74,20 +77,28 @@ function ProviderEditorDrawerInner({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showPostCreateGuide]);
 
-  const requestClose = useCallback(() => {
-    // Kick the pending save off synchronously before unmount; the mutation
-    // completes (and invalidates the cache) even after the drawer is gone.
-    void flush();
-    onClose();
+  // Best-effort flush, then always dismiss. Blocking close on validation/network
+  // error trapped users in the drawer (X / Esc / scrim all no-ops). Invalid
+  // dirty state was never persisted anyway; save already toasts on failure.
+  const closingRef = useRef(false);
+  const requestClose = useCallback(async () => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    try {
+      await flush();
+    } finally {
+      onClose();
+    }
   }, [flush, onClose]);
 
   return (
     <DrawerShell
       open={open}
       onOpenChange={(next) => {
-        if (!next) requestClose();
+        if (!next) void requestClose();
       }}
       maxWidthClassName="max-w-[640px]"
+      autoFocus
       title={
         <span className="flex min-w-0 items-center gap-2 text-foreground">
           <ProviderBrandIcon
@@ -99,12 +110,7 @@ function ProviderEditorDrawerInner({
           <span className="truncate">{form.values.name || provider.name}</span>
         </span>
       }
-      subtitle={
-        <span className="flex items-center gap-2">
-          <span>{t("models.drawer.subtitle")}</span>
-          <SaveBadge state={saveState} />
-        </span>
-      }
+      subtitle={<span>{t("models.drawer.subtitle")}</span>}
       headerAction={
         onDuplicate || onDelete ? (
           <DropdownMenu.Root>
@@ -162,7 +168,7 @@ function ProviderEditorDrawerInner({
               t("models.save.footerIdle")
             )}
           </span>
-          <Button variant="outline" size="sm" onClick={requestClose}>
+          <Button variant="outline" size="sm" onClick={() => void requestClose()}>
             {t("models.save.done")}
           </Button>
         </div>
@@ -173,39 +179,50 @@ function ProviderEditorDrawerInner({
           <PostCreateGuide
             agentBound={agentBoundOnCreate}
             onTestConnection={() => setTab("diagnostics")}
-            onGoConnect={requestClose}
+            onGoConnect={() => void requestClose()}
             onDismiss={() => setGuideDismissed(true)}
           />
         ) : null}
         <ConflictWarnings providerId={provider.id} />
 
-        {/* Tab bar — sticky inside the drawer scroll container */}
-        <div className="sticky -top-5 z-10 -mx-1 rounded-xl border border-border/50 bg-card/90 p-1 backdrop-blur-xl">
-          <div className="grid grid-cols-4 gap-1" role="tablist" aria-label={t("models.drawer.tablistAria")}>
-            {TABS.map((tabDef) => (
-              <button
-                key={tabDef.id}
-                type="button"
-                role="tab"
-                aria-selected={tab === tabDef.id}
-                onClick={() => setTab(tabDef.id)}
-                className={cn(
-                  "rounded-lg px-2 py-1.5 text-xs font-medium transition-colors",
-                  tab === tabDef.id
-                    ? "bg-primary/15 text-primary"
-                    : "text-muted-foreground hover:bg-muted/30 hover:text-foreground",
-                )}
-              >
-                {t(tabDef.labelKey)}
-              </button>
-            ))}
-          </div>
-        </div>
+        <Tabs.Root value={tab} onValueChange={(next) => setTab(next as ProviderEditorTab)}>
+          {/* Sticky, keyboard-navigable navigation inside the drawer scroll container. */}
+          <Tabs.List
+            className="sticky -top-5 z-10 -mx-1 grid grid-cols-4 gap-1 rounded-xl border border-border/55 bg-card/90 p-1 shadow-sm backdrop-blur-xl"
+            aria-label={t("models.drawer.tablistAria")}
+          >
+            {TABS.map((tabDef) => {
+              const Icon = tabDef.icon;
+              return (
+                <Tabs.Trigger
+                  key={tabDef.id}
+                  value={tabDef.id}
+                  className={cn(
+                    "flex min-h-9 min-w-0 items-center justify-center gap-1.5 rounded-[8px] px-2 text-xs font-semibold text-muted-foreground transition duration-200",
+                    "hover:bg-background/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35",
+                    "data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:ring-1 data-[state=active]:ring-border/60",
+                  )}
+                >
+                  <Icon className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{t(tabDef.labelKey)}</span>
+                </Tabs.Trigger>
+              );
+            })}
+          </Tabs.List>
 
-        {tab === "connection" && <ConnectionTab form={form} />}
-        {tab === "models" && <ModelsTab form={form} />}
-        {tab === "advanced" && <AdvancedTab form={form} />}
-        {tab === "diagnostics" && <DiagnosticsTab form={form} provider={provider} />}
+          <Tabs.Content value="connection" className="mt-4 focus-visible:outline-none">
+            <ConnectionTab form={form} />
+          </Tabs.Content>
+          <Tabs.Content value="models" className="mt-4 focus-visible:outline-none">
+            <ModelsTab form={form} />
+          </Tabs.Content>
+          <Tabs.Content value="advanced" className="mt-4 focus-visible:outline-none">
+            <AdvancedTab form={form} />
+          </Tabs.Content>
+          <Tabs.Content value="diagnostics" className="mt-4 focus-visible:outline-none">
+            <DiagnosticsTab form={form} provider={provider} />
+          </Tabs.Content>
+        </Tabs.Root>
       </div>
     </DrawerShell>
   );

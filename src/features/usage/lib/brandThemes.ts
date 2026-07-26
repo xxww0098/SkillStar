@@ -35,7 +35,8 @@ const THEMES: Record<string, BrandTheme> = {
 
   // ── API key (`catalog/api_key.rs` + `fetchers/api_key/`) ─────────────
   deepseek: { header: ["#4D6BFE", "#1A56DB"], bar: ["#4D6BFE", "#3B5BDB"], fg: "#ffffff", glow: "#4D6BFE" },
-  glm: { header: ["#4A90E2", "#2D6BD0"], bar: ["#4A90E2", "#2D6BD0"], fg: "#ffffff", glow: "#4A90E2" },
+  // Zhipu blue with deeper navy stop — richer band, body accent stays vivid.
+  glm: { header: ["#3B82F6", "#1D4ED8"], bar: ["#60A5FA", "#2563EB"], fg: "#ffffff", glow: "#3B82F6" },
   kimi: { header: ["#23201A", "#F5B400"], bar: ["#F5B400", "#FF8A00"], fg: "#ffffff", glow: "#F5B400" },
   minimax: { header: ["#9333EA", "#C026D3"], bar: ["#9333EA", "#A855F7"], fg: "#ffffff", glow: "#9333EA" },
 };
@@ -92,4 +93,70 @@ export function hexToRgbTriplet(hex: string): string {
   const g = parseInt(h.substring(2, 4), 16);
   const b = parseInt(h.substring(4, 6), 16);
   return `${r}, ${g}, ${b}`;
+}
+
+/** Inline styles for auth-mode chips drawn on dark glass (e.g. ProviderCatalogHero). */
+export interface BrandChipStyle {
+  color: string;
+  backgroundColor: string;
+  borderColor: string;
+}
+
+/**
+ * Auth-mode chip colors that stay readable on dark UI.
+ *
+ * Near-black brands (xAI `#111111`) make brand-tinted chips invisible; near-white
+ * brands invert text. Mid-luminance brands keep a brand-tinted chip.
+ */
+export function brandChipStyle(brandColorHex: string): BrandChipStyle {
+  const base = normalizeHex(brandColorHex);
+  const lum = luminance(base);
+  const rgb = hexToRgbTriplet(base);
+
+  // Near-black (e.g. xAI): light neutral chip on dark glass
+  if (lum < 0.18) {
+    return {
+      color: "rgb(228, 228, 231)",
+      backgroundColor: "rgba(255, 255, 255, 0.1)",
+      borderColor: "rgba(255, 255, 255, 0.28)",
+    };
+  }
+  // Near-white: dark text so it doesn't wash out on light/paper or pale bands
+  if (lum > 0.78) {
+    return {
+      color: "rgb(39, 39, 42)",
+      backgroundColor: "rgba(0, 0, 0, 0.06)",
+      borderColor: "rgba(0, 0, 0, 0.16)",
+    };
+  }
+  return {
+    color: `rgb(${rgb})`,
+    backgroundColor: `rgba(${rgb}, 0.14)`,
+    borderColor: `rgba(${rgb}, 0.32)`,
+  };
+}
+
+/** Card border / soft fill for catalog hero when brand is too dark to tint. */
+export function brandHeroSurface(brandColorHex: string): {
+  borderColor: string;
+  background: string;
+  glow: string;
+} {
+  const base = normalizeHex(brandColorHex);
+  const lum = luminance(base);
+  const rgb = hexToRgbTriplet(base);
+
+  if (lum < 0.18) {
+    return {
+      borderColor: "rgba(255, 255, 255, 0.16)",
+      background:
+        "linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.02) 48%, transparent 100%)",
+      glow: "rgba(255, 255, 255, 0.12)",
+    };
+  }
+  return {
+    borderColor: `rgba(${rgb}, 0.28)`,
+    background: `linear-gradient(135deg, rgba(${rgb}, 0.12) 0%, rgba(${rgb}, 0.03) 48%, transparent 100%)`,
+    glow: `rgb(${rgb})`,
+  };
 }

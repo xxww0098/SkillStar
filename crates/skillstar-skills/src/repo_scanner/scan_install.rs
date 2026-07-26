@@ -6,18 +6,31 @@ use skillstar_core::infra::{fs_ops, paths};
 use std::path::Path;
 use tracing::warn;
 
-use super::{SkillInstallTarget, cache_dir_name};
+use super::SkillInstallTarget;
 
+/// Backward-compatible scan/install facade for callers that identify the
+/// default-branch cache by source. Ref-pinned installs use
+/// [`install_from_repo_at`] so they retain their isolated cache and lock data.
 pub fn install_from_repo(
     source: &str,
     repo_url: &str,
     targets: &[SkillInstallTarget],
 ) -> Result<Vec<String>> {
+    let repo_dir = super::clone_or_fetch_repo(repo_url, source)?;
+    install_from_repo_at(&repo_dir, source, repo_url, None, targets)
+}
+
+pub fn install_from_repo_at(
+    repo_dir: &Path,
+    source: &str,
+    repo_url: &str,
+    git_ref: Option<&str>,
+    targets: &[SkillInstallTarget],
+) -> Result<Vec<String>> {
     let hub_skills_dir = paths::hub_skills_dir();
     std::fs::create_dir_all(&hub_skills_dir).context("Failed to create hub skills directory")?;
 
-    let cache_dir = paths::repos_cache_dir().join(cache_dir_name(source));
-    if !cache_dir.exists() {
+    if !repo_dir.exists() {
         return Err(anyhow!(
             "Repo cache not found. Please scan the repository first."
         ));
@@ -55,9 +68,9 @@ pub fn install_from_repo(
         }
 
         let source_path = if target.folder_path.is_empty() {
-            cache_dir.clone()
+            repo_dir.to_path_buf()
         } else {
-            cache_dir.join(&target.folder_path)
+            repo_dir.join(&target.folder_path)
         };
 
         if !source_path.exists() {
@@ -73,9 +86,9 @@ pub fn install_from_repo(
             .with_context(|| format!("Failed to symlink {:?} → {:?}", source_path, dest))?;
 
         let tree_hash = if target.folder_path.is_empty() {
-            git_ops::compute_tree_hash(&cache_dir).unwrap_or_default()
+            git_ops::compute_tree_hash(repo_dir).unwrap_or_default()
         } else {
-            super::compute_subtree_hash(&cache_dir, &target.folder_path).unwrap_or_default()
+            super::compute_subtree_hash(repo_dir, &target.folder_path).unwrap_or_default()
         };
 
         let source_folder = if target.folder_path.is_empty() {
@@ -87,6 +100,7 @@ pub fn install_from_repo(
         lf.upsert(crate::lockfile::LockEntry {
             name: target.id.clone(),
             git_url: repo_url.to_string(),
+            git_ref: git_ref.map(str::to_string),
             tree_hash,
             installed_at: chrono::Utc::now().to_rfc3339(),
             source_folder,

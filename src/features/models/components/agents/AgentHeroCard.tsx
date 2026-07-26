@@ -10,6 +10,8 @@ import type { AgentHealth } from "../../hooks/useAgentHealth";
 import type { AgentDescriptor } from "../../lib/agentRegistry";
 import { type AgentStatus, computeAgentStatus } from "../../lib/agentStatus";
 import { buildModelCatalog, getModelCatalogFromMeta } from "../../lib/providerPatch";
+import type { ProviderEditorTab } from "../../types";
+import { fieldLabelClass } from "../providerForm/ProviderConfigPrimitives";
 import { AgentToolIcon } from "../shared/AgentToolIcon";
 import { ModelSelectPopover } from "../shared/ModelSelectPopover";
 import { ProviderSelectPopover } from "../shared/ProviderSelectPopover";
@@ -20,7 +22,7 @@ export interface AgentHeroCardProps {
   health: AgentHealth;
   onAddProvider: () => void;
   onOpenSettings: () => void;
-  onOpenProviderDrawer: (providerId: string) => void;
+  onOpenProviderDrawer: (providerId: string, initialTab?: ProviderEditorTab) => void;
 }
 
 const TONE_CARD: Record<ReturnType<typeof statusTone>, { border: string; glow: string; strip: string }> = {
@@ -62,7 +64,7 @@ function StatusBanner({
   status: AgentStatus;
   agent: AgentDescriptor;
   boundProviderId: string | null;
-  onOpenProviderDrawer: (providerId: string) => void;
+  onOpenProviderDrawer: (providerId: string, initialTab?: ProviderEditorTab) => void;
   onRetest: () => void;
 }) {
   const { t } = useTranslation();
@@ -188,10 +190,9 @@ export function AgentHeroCard({
         />
 
         <div className="space-y-1.5">
-          <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            {t("models.card.providerLabel")}
-          </label>
+          <p className={fieldLabelClass}>{t("models.card.providerLabel")}</p>
           <ProviderSelectPopover
+            ariaLabel={t("models.card.providerLabel")}
             providers={act.compatibleProviders}
             currentId={act.activeEntry?.provider_id}
             onPick={(id) => void act.activate(id)}
@@ -207,10 +208,9 @@ export function AgentHeroCard({
 
         {connected && availableModels.length > 0 ? (
           <div className="space-y-1.5">
-            <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              {t("models.card.modelLabel")}
-            </label>
+            <p className={fieldLabelClass}>{t("models.card.modelLabel")}</p>
             <ModelSelectPopover
+              ariaLabel={t("models.card.modelLabel")}
               models={availableModels}
               catalog={modelCatalog}
               current={act.currentModel}
@@ -220,7 +220,7 @@ export function AgentHeroCard({
                 act.boundProvider
                   ? {
                       label: t("models.picker.manageModels"),
-                      onClick: () => onOpenProviderDrawer(act.boundProvider?.id ?? ""),
+                      onClick: () => onOpenProviderDrawer(act.boundProvider?.id ?? "", "models"),
                     }
                   : undefined
               }
@@ -233,7 +233,7 @@ export function AgentHeroCard({
             {t("models.card.noModelsFetched")}
             <button
               type="button"
-              onClick={() => onOpenProviderDrawer(act.boundProvider?.id ?? "")}
+              onClick={() => onOpenProviderDrawer(act.boundProvider?.id ?? "", "models")}
               className="ml-1 font-medium text-primary hover:underline"
             >
               {t("models.card.goFetch")}

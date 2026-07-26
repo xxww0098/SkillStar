@@ -42,12 +42,10 @@ pub async fn list_mcp_servers_by_publisher_local(
 pub async fn list_mcp_market_servers_local()
 -> Result<LocalFirstResult<Vec<McpMarketEntry>>, AppError> {
     debug!(target: "mcp_marketplace", "list_mcp_market_servers_local called");
-    mcp_snapshot::list_mcp_servers_local()
-        .await
-        .map_err(|e| {
-            error!(target: "mcp_marketplace", error = %e, "list local failed");
-            AppError::Other(e.to_string())
-        })
+    mcp_snapshot::list_mcp_servers_local().await.map_err(|e| {
+        error!(target: "mcp_marketplace", error = %e, "list local failed");
+        AppError::Other(e.to_string())
+    })
 }
 
 #[tauri::command]
@@ -78,14 +76,14 @@ pub async fn sync_mcp_market_scope(scope: String) -> Result<(), AppError> {
     // and reject anything unexpected so typos surface instead of silently
     // syncing the wrong thing.
     if !scope.is_empty() && scope != MCP_REGISTRY_SCOPE {
-        return Err(AppError::Other(format!("Unknown MCP market scope: {scope}")));
+        return Err(AppError::Other(format!(
+            "Unknown MCP market scope: {scope}"
+        )));
     }
-    mcp_snapshot::sync_mcp_registry_scope()
-        .await
-        .map_err(|e| {
-            error!(target: "mcp_marketplace", error = %e, "sync failed");
-            AppError::Other(e.to_string())
-        })
+    mcp_snapshot::sync_mcp_registry_scope().await.map_err(|e| {
+        error!(target: "mcp_marketplace", error = %e, "sync failed");
+        AppError::Other(e.to_string())
+    })
 }
 
 #[tauri::command]
@@ -101,9 +99,7 @@ pub async fn mcp_market_entry_to_draft(id: String) -> Result<McpServerEntry, App
     debug!(target: "mcp_marketplace", id = %id, "mcp_market_entry_to_draft called");
     let server = mcp_snapshot::get_registry_server_local(&id)
         .map_err(|e| AppError::Other(e.to_string()))?
-        .ok_or_else(|| {
-            AppError::Other(format!("MCP server '{id}' not found in local snapshot"))
-        })?;
+        .ok_or_else(|| AppError::Other(format!("MCP server '{id}' not found in local snapshot")))?;
     Ok(registry_to_entry(&server))
 }
 
@@ -116,10 +112,20 @@ pub async fn mcp_market_entry_to_draft(id: String) -> Result<McpServerEntry, App
 fn sanitize_key(name: &str) -> String {
     let cleaned: String = name
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
     let trimmed = cleaned.trim_matches('-');
-    if trimmed.is_empty() { "mcp-server".to_string() } else { trimmed.to_string() }
+    if trimmed.is_empty() {
+        "mcp-server".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn str_at(obj: &Value, key: &str) -> Option<String> {
@@ -163,13 +169,23 @@ fn extract_env(value: Option<&Value>) -> BTreeMap<String, String> {
         return env;
     };
     for item in arr {
-        let Some(name) = str_at(item, "name") else { continue };
-        let secret = item.get("is_secret").and_then(Value::as_bool).unwrap_or(false);
-        let required = item.get("is_required").and_then(Value::as_bool).unwrap_or(false);
+        let Some(name) = str_at(item, "name") else {
+            continue;
+        };
+        let secret = item
+            .get("is_secret")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let required = item
+            .get("is_required")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let value = if secret || required {
             String::new()
         } else {
-            str_at(item, "default").or_else(|| str_at(item, "value")).unwrap_or_default()
+            str_at(item, "default")
+                .or_else(|| str_at(item, "value"))
+                .unwrap_or_default()
         };
         env.insert(name, value);
     }
@@ -188,7 +204,9 @@ fn fill_stdio(entry: &mut McpServerEntry, pkg: &Value) {
         .or_else(|| str_at(pkg, "registry_name"))
         .unwrap_or_default();
     let runtime_hint = str_at(pkg, "runtime_hint").unwrap_or_default();
-    let identifier = str_at(pkg, "identifier").or_else(|| str_at(pkg, "name")).unwrap_or_default();
+    let identifier = str_at(pkg, "identifier")
+        .or_else(|| str_at(pkg, "name"))
+        .unwrap_or_default();
     let version = str_at(pkg, "version");
     let command = runtime_command_for(&registry_type, &runtime_hint);
 
@@ -240,13 +258,17 @@ fn fill_stdio(entry: &mut McpServerEntry, pkg: &Value) {
 
 fn fill_remote(entry: &mut McpServerEntry, remote: &Value) {
     entry.transport = normalize_transport(
-        &str_at(remote, "transport_type").or_else(|| str_at(remote, "type")).unwrap_or_default(),
+        &str_at(remote, "transport_type")
+            .or_else(|| str_at(remote, "type"))
+            .unwrap_or_default(),
     );
     entry.url = str_at(remote, "url");
     let mut headers = BTreeMap::new();
     if let Some(arr) = remote.get("headers").and_then(Value::as_array) {
         for header in arr {
-            let Some(name) = str_at(header, "name") else { continue };
+            let Some(name) = str_at(header, "name") else {
+                continue;
+            };
             // Keep the template value (e.g. "Bearer {TOKEN}") so the user sees
             // the expected format and replaces the placeholder.
             let value = str_at(header, "value").unwrap_or_default();
@@ -283,8 +305,14 @@ pub fn registry_to_entry(server: &McpRegistryServer) -> McpServerEntry {
         updated_at: None,
     };
 
-    let first_package = raw.get("packages").and_then(Value::as_array).and_then(|a| a.first());
-    let first_remote = raw.get("remotes").and_then(Value::as_array).and_then(|a| a.first());
+    let first_package = raw
+        .get("packages")
+        .and_then(Value::as_array)
+        .and_then(|a| a.first());
+    let first_remote = raw
+        .get("remotes")
+        .and_then(Value::as_array)
+        .and_then(|a| a.first());
 
     // Prefer a runnable local package; fall back to a remote endpoint.
     if let Some(pkg) = first_package {
@@ -334,7 +362,10 @@ mod tests {
         assert_eq!(entry.command.as_deref(), Some("npx"));
         assert_eq!(
             entry.args,
-            vec!["-y".to_string(), "@modelcontextprotocol/server-filesystem@1.2.0".to_string()]
+            vec![
+                "-y".to_string(),
+                "@modelcontextprotocol/server-filesystem@1.2.0".to_string()
+            ]
         );
         assert_eq!(entry.env.get("ROOT").map(String::as_str), Some("/tmp"));
         assert_eq!(entry.env.get("API_KEY").map(String::as_str), Some("")); // secret blanked
@@ -377,8 +408,14 @@ mod tests {
         ] }"#;
         let entry = registry_to_entry(&server_with_raw("mcp-server", raw));
         assert_eq!(entry.transport, "http");
-        assert_eq!(entry.url.as_deref(), Some("https://app.netdata.cloud/api/v1/mcp"));
-        assert_eq!(entry.headers.get("Authorization").map(String::as_str), Some("Bearer {TOKEN}"));
+        assert_eq!(
+            entry.url.as_deref(),
+            Some("https://app.netdata.cloud/api/v1/mcp")
+        );
+        assert_eq!(
+            entry.headers.get("Authorization").map(String::as_str),
+            Some("Bearer {TOKEN}")
+        );
         assert!(entry.command.is_none());
     }
 

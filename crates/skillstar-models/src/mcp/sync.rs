@@ -95,9 +95,7 @@ fn remove_server_from_tool_inner(name: &str, tool_id: &str) -> Result<Option<Pat
     let backup = backup_if_exists(&path)?;
     match tool_id {
         LEGACY_CLAUDE_DESKTOP_TOOL_ID => json_mcpservers_remove_strict(&path, name)?,
-        "claude-code" | "gemini" | "kiro" | "cursor" => {
-            json_mcpservers_remove(&path, name)?
-        }
+        "claude-code" | "gemini" | "kiro" | "cursor" => json_mcpservers_remove(&path, name)?,
         "opencode" => opencode_remove(&path, name)?,
         "zcode" => {
             zcode_cli_remove(&path, name)?;
@@ -185,7 +183,10 @@ fn cleanup_legacy_desktop_chat_or_bail(
 }
 
 fn ensure_cleanup_succeeded(results: &[McpSyncResult], action: &str) -> Result<()> {
-    if let Some(failed) = results.iter().find(|result| !result.success && !result.skipped) {
+    if let Some(failed) = results
+        .iter()
+        .find(|result| !result.success && !result.skipped)
+    {
         bail!(
             "{action} failed for '{}': {}",
             failed.tool_id,

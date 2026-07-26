@@ -1,11 +1,12 @@
-//! Multi-provider tool sync (Codex, OpenCode).
+//! Multi-provider tool sync (Codex, OpenCode, Pi).
 //!
 //! Single-provider agents (Claude Code, Gemini) write one global env block, so
 //! their writers live in `sync.rs` and take a single provider+model. The agents
-//! handled here — Codex and OpenCode — natively support several providers
+//! handled here — Codex, OpenCode and Pi — natively support several providers
 //! coexisting in one config file (Codex `[model_providers.*]`, OpenCode
-//! `provider.*`), with a pointer selecting the active one (Codex
-//! `model_provider`, OpenCode top-level `model`).
+//! `provider.*`, Pi `providers.*` in `models.json`), with a pointer selecting
+//! the active one (Codex `model_provider`, OpenCode top-level `model`, Pi
+//! `defaultProvider`/`defaultModel` in `settings.json`).
 //!
 //! These writers project an entire [`ToolBinding`] onto disk: one managed entry
 //! per bound provider, keyed `skillstar_<id8>`, plus the active pointer. Every
@@ -62,7 +63,10 @@ pub fn is_skillstar_managed_key(key: &str) -> bool {
 fn resolve_entries<'a>(
     binding: &'a ToolBinding,
     providers: &'a [ProviderEntryFlat],
-) -> Option<(Vec<(&'a ProviderEntryFlat, &'a crate::providers::ToolActivation)>, String)> {
+) -> Option<(
+    Vec<(&'a ProviderEntryFlat, &'a crate::providers::ToolActivation)>,
+    String,
+)> {
     let resolved: Vec<_> = binding
         .entries
         .iter()
@@ -168,8 +172,10 @@ pub(crate) fn sync_codex_binding_inner(
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("Failed to create directory {}", parent.display()))?;
         }
-        let auth_fields: Vec<(&str, Value)> =
-            vec![("OPENAI_API_KEY", Value::String(active_provider.api_key.clone()))];
+        let auth_fields: Vec<(&str, Value)> = vec![(
+            "OPENAI_API_KEY",
+            Value::String(active_provider.api_key.clone()),
+        )];
         merge_json_write(&auth_path, &auth_fields)?;
     }
 
@@ -291,9 +297,9 @@ pub(crate) fn sync_opencode_binding_inner(
     let mut root: Value = if config_path.exists() {
         let content = std::fs::read_to_string(config_path)
             .with_context(|| format!("Failed to read {}", config_path.display()))?;
-        serde_json::from_str(&content).unwrap_or_else(|_| {
-            serde_json::json!({ "$schema": "https://opencode.ai/config.json", "provider": {} })
-        })
+        serde_json::from_str(&content).unwrap_or_else(
+            |_| serde_json::json!({ "$schema": "https://opencode.ai/config.json", "provider": {} }),
+        )
     } else {
         serde_json::json!({ "$schema": "https://opencode.ai/config.json", "provider": {} })
     };
@@ -338,9 +344,157 @@ pub(crate) fn sync_opencode_binding_inner(
         root_obj.insert("model".to_string(), Value::String(selector));
     }
 
-    let output = serde_json::to_string_pretty(&root).context("Failed to serialize opencode.json")?;
+    let output =
+        serde_json::to_string_pretty(&root).context("Failed to serialize opencode.json")?;
     std::fs::write(config_path, output)
         .with_context(|| format!("Failed to write {}", config_path.display()))?;
+
+    Ok(backup_path)
+}
+
+// ---------------------------------------------------------------------------
+// Pi
+// ---------------------------------------------------------------------------
+
+/// Write a whole Pi binding to `~/.pi/agent/models.json` (+ `settings.json`).
+///
+/// Each bound provider becomes a `providers.skillstar_<id>` block
+/// (`api: "openai-completions"`, plaintext `apiKey`, minimal `{ id }` model
+/// entries so Pi's own defaults apply); the active entry drives
+/// `defaultProvider` / `defaultModel` in `settings.json`.
+pub fn sync_pi_binding(
+    binding: &ToolBinding,
+    providers: &[ProviderEntryFlat],
+) -> Result<ToolSyncResultFlat> {
+    let config_path = resolve_pi_models_path()?;
+    let settings_path = resolve_pi_settings_path()?;
+    let config_path_str = config_path.to_string_lossy().to_string();
+    match sync_pi_binding_inner(binding, providers, &config_path, &settings_path) {
+        Ok(backup) => Ok(ToolSyncResultFlat {
+            tool_id: "pi".to_string(),
+            success: true,
+            config_path: Some(config_path_str),
+            error: None,
+            backup_path: backup.map(|p| p.to_string_lossy().to_string()),
+        }),
+        Err(e) => Ok(ToolSyncResultFlat {
+            tool_id: "pi".to_string(),
+            success: false,
+            config_path: Some(config_path_str),
+            error: Some(e.to_string()),
+            backup_path: None,
+        }),
+    }
+}
+
+/// Build one Pi provider block. Model entries carry only `id` — Pi supplies
+/// its own `contextWindow` / `maxTokens` defaults, and we have no reliable
+/// per-model metadata to override them with.
+pub(crate) fn build_pi_provider_block(provider: &ProviderEntryFlat, model: &str) -> Value {
+    let base_url = provider.base_url_openai.trim().trim_end_matches('/');
+
+    let mut seen = std::collections::HashSet::new();
+    let mut model_ids: Vec<String> = Vec::new();
+    for candidate in std::iter::once(model)
+        .chain(std::iter::once(provider.default_model.as_str()))
+        .chain(provider.models.iter().map(String::as_str))
+    {
+        let id = candidate.trim();
+        if !id.is_empty() && seen.insert(id.to_string()) {
+            model_ids.push(id.to_string());
+        }
+    }
+
+    let models: Vec<Value> = model_ids
+        .into_iter()
+        .map(|id| serde_json::json!({ "id": id }))
+        .collect();
+
+    serde_json::json!({
+        "baseUrl": base_url,
+        "api": "openai-completions",
+        "apiKey": provider.api_key,
+        "models": models
+    })
+}
+
+pub(crate) fn sync_pi_binding_inner(
+    binding: &ToolBinding,
+    providers: &[ProviderEntryFlat],
+    config_path: &Path,
+    settings_path: &Path,
+) -> Result<Option<PathBuf>> {
+    let (entries, active_id) = resolve_entries(binding, providers)
+        .context("Pi binding has no resolvable provider entries")?;
+
+    let backup_path = if config_path.exists() {
+        Some(create_rolling_backup(config_path)?)
+    } else {
+        None
+    };
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
+    }
+
+    let mut root: Value = if config_path.exists() {
+        let content = std::fs::read_to_string(config_path)
+            .with_context(|| format!("Failed to read {}", config_path.display()))?;
+        serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({ "providers": {} }))
+    } else {
+        serde_json::json!({ "providers": {} })
+    };
+
+    let root_obj = root
+        .as_object_mut()
+        .context("models.json root must be an object")?;
+    let provider_map = root_obj
+        .entry("providers")
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+    let provider_map = provider_map
+        .as_object_mut()
+        .context("models.json `providers` must be an object")?;
+
+    // Drop stale skillstar* blocks, then write one per current entry.
+    provider_map.retain(|k, _| !is_skillstar_managed_key(k));
+    let mut active_pointer: Option<(String, String)> = None;
+    for (provider, entry) in &entries {
+        if provider.base_url_openai.trim().is_empty() {
+            continue;
+        }
+        let key = skillstar_managed_key(&provider.id);
+        let block = build_pi_provider_block(provider, &entry.model);
+        if provider.id == active_id {
+            let model_id = if entry.model.trim().is_empty() {
+                provider.default_model.clone()
+            } else {
+                entry.model.clone()
+            };
+            if !model_id.trim().is_empty() {
+                active_pointer = Some((key.clone(), model_id));
+            }
+        }
+        provider_map.insert(key, block);
+    }
+
+    let output = serde_json::to_string_pretty(&root).context("Failed to serialize models.json")?;
+    std::fs::write(config_path, output)
+        .with_context(|| format!("Failed to write {}", config_path.display()))?;
+
+    // settings.json: point Pi's default model at the active entry, preserving
+    // every other setting the user keeps there.
+    if let Some((provider_key, model_id)) = active_pointer {
+        if settings_path.exists() {
+            create_rolling_backup(settings_path)?;
+        }
+        merge_json_write(
+            settings_path,
+            &[
+                ("defaultProvider", Value::String(provider_key)),
+                ("defaultModel", Value::String(model_id)),
+            ],
+        )?;
+    }
 
     Ok(backup_path)
 }
@@ -367,6 +521,7 @@ pub fn sync_tool_binding(store: &FlatProvidersStore, tool_id: &str) -> ToolSyncR
             "gemini" => unsync_gemini(),
             "codex" => unsync_codex_all(),
             "opencode" => unsync_opencode_all(),
+            "pi" => unsync_pi_all(),
             other => {
                 return ToolSyncResultFlat {
                     tool_id: other.to_string(),
@@ -387,10 +542,13 @@ pub fn sync_tool_binding(store: &FlatProvidersStore, tool_id: &str) -> ToolSyncR
     }
 
     match tool_id {
-        "codex" => sync_codex_binding(binding, &store.providers).unwrap_or_else(err_result(tool_id)),
+        "codex" => {
+            sync_codex_binding(binding, &store.providers).unwrap_or_else(err_result(tool_id))
+        }
         "opencode" => {
             sync_opencode_binding(binding, &store.providers).unwrap_or_else(err_result(tool_id))
         }
+        "pi" => sync_pi_binding(binding, &store.providers).unwrap_or_else(err_result(tool_id)),
         "claude-code" | "gemini" => {
             // Single-provider: resolve the active entry's provider and write it.
             let Some(active) = binding.active() else {
@@ -465,7 +623,10 @@ pub(crate) fn unsync_codex_all_at(auth_path: &Path, config_path: &Path) -> Resul
             .with_context(|| format!("Failed to parse {}", config_path.display()))?;
         table.remove("model_provider");
         table.remove("model");
-        if let Some(mp) = table.get_mut("model_providers").and_then(|v| v.as_table_mut()) {
+        if let Some(mp) = table
+            .get_mut("model_providers")
+            .and_then(|v| v.as_table_mut())
+        {
             mp.retain(|k, _| !is_skillstar_managed_key(k));
             if mp.is_empty() {
                 table.remove("model_providers");
@@ -507,5 +668,48 @@ pub fn unsync_opencode_all() -> Result<()> {
     }
 
     std::fs::write(&config_path, serde_json::to_string_pretty(&json)?)?;
+    Ok(())
+}
+
+/// Remove every SkillStar-managed Pi provider block (`skillstar` +
+/// `skillstar_*`) from `models.json`, plus the `defaultProvider` /
+/// `defaultModel` pointer in `settings.json` when it points at one.
+pub fn unsync_pi_all() -> Result<()> {
+    let models_path = resolve_pi_models_path()?;
+    let settings_path = resolve_pi_settings_path()?;
+    unsync_pi_all_at(&models_path, &settings_path)
+}
+
+/// Path-taking core of [`unsync_pi_all`] — exposed `pub(crate)` so unit tests
+/// can drive it against isolated temp paths instead of the shared sandbox HOME.
+pub(crate) fn unsync_pi_all_at(models_path: &Path, settings_path: &Path) -> Result<()> {
+    if models_path.exists() {
+        create_rolling_backup(models_path)?;
+        let content = std::fs::read_to_string(models_path)?;
+        let mut json: Value = serde_json::from_str(&content)
+            .with_context(|| format!("Failed to parse {}", models_path.display()))?;
+        if let Some(root) = json.as_object_mut()
+            && let Some(providers) = root.get_mut("providers").and_then(|v| v.as_object_mut())
+        {
+            providers.retain(|k, _| !is_skillstar_managed_key(k));
+        }
+        std::fs::write(models_path, serde_json::to_string_pretty(&json)?)?;
+    }
+
+    if settings_path.exists() {
+        let content = std::fs::read_to_string(settings_path)?;
+        let mut json: Value = serde_json::from_str(&content)
+            .with_context(|| format!("Failed to parse {}", settings_path.display()))?;
+        let points_at_managed = json
+            .get("defaultProvider")
+            .and_then(|v| v.as_str())
+            .is_some_and(is_skillstar_managed_key);
+        if points_at_managed && let Some(root) = json.as_object_mut() {
+            create_rolling_backup(settings_path)?;
+            root.remove("defaultProvider");
+            root.remove("defaultModel");
+            std::fs::write(settings_path, serde_json::to_string_pretty(&json)?)?;
+        }
+    }
     Ok(())
 }

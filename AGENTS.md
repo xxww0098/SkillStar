@@ -1,202 +1,101 @@
 # 和我讲中文
 
-# SkillStar — Code Framework
+# SkillStar — Agent 项目规则
 
-> 本文件只维护三件事：**技术栈**、**项目树**、**文档索引**。它是项目**结构的单一事实来源**。
-> 后端的行为约束（各子系统实现细节）放 [docs/backend.md](./docs/backend.md)，前端约定放 [AGENTS-UI.md](./AGENTS-UI.md)，
-> 以免重复与漂移。
+SkillStar 是 Tauri v2 桌面应用：React SPA 负责界面，Rust workspace 负责域逻辑；同一个 `skillstar` 二进制同时提供 GUI 与 CLI。
 
-## 维护规则（先改文档，再写代码）
+本文件是 Agent 的唯一规则入口。完整项目树和依赖边界见 [docs/boundaries.md](./docs/boundaries.md)，运行架构见 [docs/architecture.md](./docs/architecture.md)。不要在 README、CLAUDE 或功能文档复制这两类事实。
 
-- **结构 / 技术栈变更**（新增删除依赖、升级版本、新增/移动/删除 crate 或顶层目录）→ **先更新本文件**的「技术栈 / 项目树 / Workspace Crates」再写代码。AGENTS.md 落后于代码即视为缺陷。
-- **后端行为变更**（某子系统的实现约束）→ 先更新 [docs/backend.md](./docs/backend.md)。
-- **前端结构 / 约定变更** → 先更新 [AGENTS-UI.md](./AGENTS-UI.md)。
-- **新增 Agent CLI** → 按 [ADDING-AN-AGENT.md](./ADDING-AN-AGENT.md) 走。
-- 重要 bug 调查与修复 → 在 [docs/Error.md](./docs/Error.md) 追加条目。
-- 文档与代码同 PR 提交，不留「待补」。
+## 修改前先确定唯一文档落点
 
-## 文档治理（防漂移）
+- 目录、crate、所有权或依赖方向变化：先更新 `docs/boundaries.md`；运行拓扑、数据所有权或技术选择变化时同时更新 `docs/architecture.md`。
+- 功能行为或 UX 变化：先更新对应的 `docs/features/<域>/README.md`。
+- 长期有效的架构选择：记录到 `docs/decisions.md`。
+- 根因不直观、可能复发的重要故障：记录到 `docs/errors.md`。
+- 用户安装、能力或 CLI 用法变化：更新 `README.md`。
+- 文档与代码同一变更序列完成，不留“待补”。历史稿只放 `docs/others/` 并标记 `historical`。
 
-功能越来越多，乱的根因是**同一个事实在多处各写一份、各自漂移**。规范只有两条核心：
+同一事实只允许一个 SSOT。可枚举清单和计数以代码注册表及其测试为准，文档只描述规则并链接代码，不手抄数量。
 
-1. **每个事实只有一个 SSOT（单一事实来源）**，其余地方一律链接过去、不复制：
+## 架构红线
 
-   | 事实类别 | SSOT | 反面教材 |
-   | --- | --- | --- |
-   | 技术栈 / 目录 / crate 划分 | 本文件 | 在 README/CLAUDE 重列一份目录树 |
-   | 后端子系统行为约束 | [docs/backend.md](./docs/backend.md) | 把实现细节抄进 AGENTS.md |
-   | 前端结构 / 约定 | [AGENTS-UI.md](./AGENTS-UI.md) | — |
-   | **可枚举 / 计数型清单**（usage catalog、builtin agents、命令列表…） | **代码 + 单测**（如 `catalog.rs` 的 `catalog_has_10_entries`） | 在文档里硬写「N 家」却无人同步 |
-   | 产品对外话术 / 安装 | [README.md](./README.md) · [PRODUCT.md](./PRODUCT.md) | — |
+- 前端只能通过 Tauri `invoke()` 和事件访问后端，不直接访问文件系统或业务网络接口。
+- `src-tauri/src/commands/` 只做命令注册、DTO、State、错误和事件适配；域逻辑进入 `crates/*`，Tauri 专用胶水进入 `src-tauri/src/core/`。
+- 跨域 use case 进入 `skillstar-app`，禁止靠域 crate 反向依赖完成编排。
+- 所有远程 HTTP 必须通过 `skillstar_core::infra::http_client::probe_http_client`，遵守用户代理配置。
+- 新功能先成为既有内聚 crate 的私有 module 和窄 facade；只有独立变更节奏、依赖集合或 deletion test 证明有收益时才新增 crate。
+- 不在既有 crate 的杂项公共出口或命令包装层堆放新逻辑。
+- 前端 feature 内部实现默认私有；跨 feature 复用优先提升到 `src/components/shared/` 或 `src/lib/`，并通过 `scripts/internal/check_feature_imports.sh`。
 
-   推论：文档里**不写代码已测试锁定的数字 / 清单**——要么描述性带过，要么指向代码；确需写明数字时，改动必须与对应单测同 PR 同步。
+## 安全与实现约束
 
-2. **功能先形成内聚 module，满足晋升条件后再成为 crate**（module-first，不是「一个前端 feature 自动对应一个 crate」）。
-   新增大功能时落点固定：域逻辑优先进既有内聚 crate 的私有模块 + 窄 facade（在本文件 Workspace Crates 表登记职责）→ 前端进 `src/features/<域>/` → 行为约束进 `docs/backend.md` 一个小节。
-   只有当变更节奏、依赖集合或 deletion test 证明独立编译单元有收益时，才拆出新 `crates/skillstar-<域>`。
-   不要把新功能塞进既有 crate 的杂项公共出口，也不要在命令包装层堆逻辑。
+- 新 Rust 依赖用 `cargo add`；workspace 版本归一化在根 `Cargo.toml` 维护。不要直接手写新增依赖。
+- 不让单个源文件超过约 1000 行；接近 800 行时开始拆分。
+- 测试不得写真实 `$HOME`。tool-sync 测试必须设置 `SKILLSTAR_TOOL_SYNC_HOME` 到临时目录。
+- 除非用户明确要求，不修改 `crates/skillstar-usage/src/fetchers/oauth/cursor.rs`。
+- 不手改 `src/types/generated/`；修改 Rust 来源后运行 `bun run types:gen` 并提交生成结果。
+- 不绕过后端解析真实数据目录；`SKILLSTAR_DATA_DIR`、`SKILLSTAR_HUB_DIR` 等覆盖必须继续生效。
+- 不把 `target/`、`dist/`、`node_modules/` 或 `.codegraph/` 当作项目结构或提交内容。
 
-## 架构
+## 常用验证
 
-SkillStar 是 Tauri v2 桌面应用（同一 `skillstar` 二进制内还含 CLI），React 19 SPA 前端 + Rust 后端。
-
-- 前端只通过 `invoke()` 与 Tauri 事件调用后端，不直接触达文件系统 / 网络。
-- Tauri 命令在 `src-tauri/src/commands/`（`mod.rs` 注册），保持**薄层**，无重逻辑。
-- 域逻辑全部住在 `crates/` 下的 workspace crate；`src-tauri/src/core/` 只保留 Tauri 专用胶水（State 句柄、事件发射、窗口绑定包装）。
-- 持久化在 `~/.skillstar/` 混合存储：config/project 元数据用 JSON，marketplace + 翻译缓存用 SQLite。
-- 技能向项目分发以 symlink 为先、自动回退到目录拷贝（Windows 无开发者模式时），保持项目目录干净。
-- 侧边栏顶部胶囊切换三种 mode：**Skills**（技能管理/分发）·**Usage**（订阅/配额面板）·**Models**（Provider 配置 + 工具同步）。
-
-数据根可被 `SKILLSTAR_DATA_DIR` / `SKILLSTAR_HUB_DIR` 覆盖。关键路径：
-
-| 用途 | 路径 |
-| --- | --- |
-| 数据根 / 配置 / 数据库 / 日志 / 状态 | `~/.skillstar/{,config/,db/,logs/,state/}` |
-| Hub（远端技能 / 本地创作 / 仓库缓存） | `~/.skillstar/hub/{skills,local,repos,content}/` |
-| AI / 代理 / GitHub 镜像配置 | `~/.skillstar/config/{ai,proxy,github_mirror}.json` |
-| SSH 主机 / 已信任主机键 | `~/.skillstar/config/ssh_hosts.toml` · `ssh_known_hosts.json` |
-| S3 同步目标 / 设备 id | `~/.skillstar/config/s3_targets.toml` · `state/sync_device.json` |
-
-## 技术栈
-
-> 版本以 `package.json` / `Cargo.toml`（各 crate）为单一事实来源；下表按主.次粒度标注。
-> 新增/移除依赖、或任何改变表内所标版本的升级都要同步本表。
-
-### 前端（React）
-
-| 层 | 技术 | 版本 |
-| --- | --- | --- |
-| UI 运行时 | react / react-dom | 19.x |
-| 构建 | vite | 8.x |
-| 语言 | TypeScript | 6.x |
-| 样式 | tailwindcss（仅 utilities） | 4.x |
-| IPC | @tauri-apps/api | 2.x |
-| 数据获取 | @tanstack/react-query | 5.x |
-| 动效 | framer-motion | 12.x |
-| 图标 / Toast / Markdown | lucide-react · sonner · react-markdown | 1.x / 2.x / 10.x |
-| 无障碍原语 | @radix-ui/* | latest |
-| i18n | i18next（`src/i18n/locales/{en,zh-CN}.json`，需同步） | — |
-| Lint+Format / 测试 | @biomejs/biome · vitest + @testing-library/react（dev） | 2.x / 4.x + 16.x |
-
-### 后端（Rust）
-
-> 共享第三方依赖版本由根 `Cargo.toml` 的 `[workspace.dependencies]` 统一治理；成员 crate 用 `dep = { workspace = true }` 引用，禁止各自漂移版本号。
-
-| 层 | 技术 | 版本 |
-| --- | --- | --- |
-| 语言 / 包结构 | Rust 2024，cargo workspace（`src-tauri` + `crates/*`） | edition 2024 |
-| 桌面框架 | tauri（+ updater / deep-link / dialog / shell / process 插件） | 2 |
-| 异步运行时 | tokio | 1 (full) |
-| HTTP | reqwest（统一经 `core::infra::http_client::probe_http_client`，遵循 `config/proxy.json`） | 0.13 |
-| Git | gix（gitoxide）+ git 子进程 | 0.80 |
-| CLI 解析 | clap | 4 |
-| 序列化 | serde / serde_json / serde_yaml / toml / toml_edit | 1 / 0.9 / 1.1 |
-| TS 类型生成 | ts-rs（`skillstar-models::mcp::types` + `skillstar-models::providers::types::ProviderPreset` + `skillstar-marketplace::mcp_models` + `skillstar`（src-tauri）`commands::mcp_commands::McpServerWithSync` 的结构体 `#[derive(TS)]` 导出到 `src/types/generated/`，`bun run types:gen` 触发；见 AGENTS-UI.md） | 12 |
-| SQLite | rusqlite (bundled) + r2d2 连接池 | 0.39 |
-| 加密 | aes-gcm (AES-256-GCM) + pbkdf2 + sha2 + machine-uid | 0.10 |
-| 打包 | flate2 + tar（`.ags`/`.agd` bundle） | 1 / 0.4 |
-| Markdown | html2md · pulldown-cmark | 0.2 / 0.13 |
-| 日志 | tracing + tracing-subscriber | 0.1 / 0.3 |
-| ACP | agent-client-protocol + async-trait + tokio-util + futures | 0.10 |
-| 错误 / 时间 / 其它 | anyhow · thiserror · chrono · regex · uuid · which · sys-locale | — |
-| Windows | junction（symlink 回退） | 1 |
-
-### Workspace Crates（域逻辑 SSOT）
-
-> 允许的内部依赖方向：
-> `skillstar-models`（含推理 ai_provider）→ `skillstar-providers`；
-> `skillstar-usage`（含 fingerprint）→ `skillstar-providers`；
-> `skillstar-sync` → `skillstar-skills`；
-> `skillstar-app` → 完成跨域 use case 所需的域 crate；
-> 域 crate → `skillstar-core`（仅基础设施或共享契约）；
-> `src-tauri` → `skillstar-app` 或域 crate 的公开 facade。
->
-> 禁止：`skills ↔ marketplace`、`models → ai`、`usage → models`、域 crate → `src-tauri`、`core →` 任意域 crate。
-> 跨域编排（搜索结果安装、Usage 账号写入 CLI 等）由 `skillstar-app` 完成，不靠反向依赖。
-> `skillstar-providers` 是零依赖叶子 crate。重 feature（如 `impersonate`）由最终 binary root（`src-tauri`）显式选择，leaf 不得靠 default feature 隐式决定构建图。
-
-| Crate | 职责 |
-| --- | --- |
-| `skillstar-core` | 共享类型（如 `Skill` 契约）+ 基础设施（paths / fs_ops / db_pool / migration / error / util）+ 用户配置（proxy / github_mirror / ACP）+ `http_client::probe_http_client`（所有远程 HTTP 必须走它）。**不含**技能域 lockfile / update detection 实现 |
-| `skillstar-providers` | 零依赖叶子：Provider 元数据（余额端点、鉴权方案）的单一事实来源；usage fetcher 与 models preset 都从这里派生 |
-| `skillstar-skills` | 技能库（install / update / bundle / local 创作 / repo scan / discovery / lockfile / update detection / git）+ Agent registry + 项目注册/manifest + deployment（link-copy reconcile）+ patrol 运行逻辑 + Launch Deck terminal。对外暴露窄 facade，实现默认私有 |
-| `skillstar-marketplace` | 本地优先 marketplace 快照 + SQLite FTS + MCP registry/curated |
-| `skillstar-models` | Provider store + presets + tool sync + latency/circuit breaker + **AI 推理**（原 skillstar-ai：chat/summarize/translate/skill pick） |
-| `skillstar-usage` | 订阅/配额（catalog、OAuth、API-key fetchers、token 存储）+ **TLS/HTTP 指纹**（原 skillstar-fingerprint 模块；`impersonate` 由 binary root 显式打开） |
-| `skillstar-sync` | 远程传输：S3 云同步（manifest + tar.gz + keyring）+ **SSH 远程技能**（原 skillstar-ssh 现为模块 `ssh`：russh/SFTP/主机 TOFU/keyring；keyring service 名仍为 `skillstar-ssh` 以兼容已存凭证） |
-| `skillstar-app` | library-only：`shell_rc`、跨域 use case（`usage_switch` 等）、CLI 解析与模式识别。可执行文件 `skillstar` 仅由 `src-tauri` package 产出。所有 `#[tauri::command]` 在 `src-tauri/src/commands/` |
-
-## 项目树（精简）
-
-```text
-SkillStar/
-├── src/                       # React 19 SPA（前端约定见 AGENTS-UI.md）
-│   ├── features/              # 域切片: my-skills · marketplace · projects · models · usage · mcp · fingerprints · ssh · s3 · settings
-│   ├── pages/                 # 轻量路由壳（含 settings/）
-│   ├── hooks/                 # 全局 hooks: useNavigation · useUpdater · useAiConfig · useAiStream · useAiTranslate ...
-│   ├── components/            # ui/ · layout/（Sidebar + ModeSwitcher）· shared/
-│   ├── lib/                   # 共享工具: ipc/ · tauriInvoke · shareCode · frontmatter · markdown ...
-│   ├── i18n/                  # i18next（locales/en.json + zh-CN.json）
-│   └── types/                 # 共享 TS 类型
-├── src-tauri/
-│   └── src/
-│       ├── cli.rs             # CLI 入口（GUI 与 skillstar CLI 共用二进制）
-│       ├── lib.rs / main.rs   # Tauri 启动 + 插件装配
-│       ├── commands/          # Tauri 命令薄层（mod.rs 注册）
-│       │   ├── ai/            #   AI 命令: summarize / skill pick
-│       │   ├── models_commands/  # provider CRUD / 健康面板
-│       │   └── *.rs           #   skills · bundles · projects · agents · github · patrol · mcp_commands
-│       │                      #     · usage_{commands,dto,switch,windows} · ssh_hosts · s3_sync · fingerprints ...
-│       └── core/              # Tauri 专用胶水（State / 事件 / 适配器；无 skills pass-through）
-│           ├── acp_client/    #   ACP 客户端
-│           ├── marketplace_snapshot/  # 本地优先 marketplace DB（包 Tauri State）
-│           └── *.rs           #   marketplace · patrol（Emitter/State）· path_env · skill 契约 re-export ...
-├── crates/                    # workspace 域逻辑（见上方 Workspace Crates 表）
-├── docs/                      # backend.md（后端行为）· Error.md（故障记录）
-├── scripts/                   # release/ + internal/（维护脚本）
-├── public/                    # 静态资源（agent SVG 图标等）
-└── AGENTS.md · AGENTS-UI.md · CLAUDE.md · PRODUCT.md · ADDING-AN-AGENT.md · README.md
+```bash
+bun run lint
+bun run build
+bun run test
+cargo check --workspace --locked
+cargo test --workspace --locked
 ```
+
+按风险优先运行最小相关测试，再运行上面的完整门槛。结构改动还应运行：
+
+```bash
+bash scripts/internal/check_workspace_deps.sh
+bash scripts/internal/check_feature_imports.sh
+bash scripts/internal/check_file_size.sh
+bash scripts/internal/check_command_boundaries.sh
+```
+
+CI 由 `.github/workflows/ci.yml`、`windows-ci.yml` 和 `release.yml` 负责。修改 workflow 前先阅读文件顶部的 `Failure lessons`。本地使用 Bun，但 Windows CI 使用 npm；依赖变化必须同步 `bun.lock` 与 `package-lock.json`。
 
 ## 文档索引
 
-| 文档 | 内容 | 何时更新 |
-| --- | --- | --- |
-| `AGENTS.md`（本文件） | 结构 SSOT：技术栈、项目树、Workspace Crates、文档索引。 | 依赖/版本/crate/顶层目录变更时，**先于代码**更新。 |
-| [docs/backend.md](./docs/backend.md) | 后端行为规则：各子系统实现约束（skills/sync、项目检测、model/usage、AI、fingerprint、marketplace、SSH、S3、patrol、storage、github mirror、ACP、auto-update）。 | 任何后端行为变更，**先改这里再写代码**。 |
-| [AGENTS-UI.md](./AGENTS-UI.md) | 前端结构与约定、Models/Usage UI、流式 UX、视觉系统。 | 前端结构/约定变更时先改这里。 |
-| [ADDING-AN-AGENT.md](./ADDING-AN-AGENT.md) | 新增 Agent CLI 的步骤指南（builtin 数据表 + 图标为核心路径，tool-sync/usage 为可选轴）。 | 新增/调整 Agent CLI 时。 |
-| [PRODUCT.md](./PRODUCT.md) | 产品北极星、用户、领域边界、设计与可访问性原则（含品牌视觉方向 `Precise. Unified. Effortless.`）。 | 产品定位或设计原则变化时。 |
-| [docs/Error.md](./docs/Error.md) | 错误速查与故障记录：根因不直观 / 可能复发的 bug。 | 定位到非显而易见的 bug 后，当次记录现象/根因/涉及文件/自检方法。 |
-| [docs/ROADMAP.md](./docs/ROADMAP.md) | 结构治理路线图：结构债现状量化 + 收敛清单 + 防回归护栏。 | 发现新的结构债、或完成整改项打勾时。 |
-| [README.md](./README.md) | 面向用户：安装、能力概览、CLI 用法、支持的 Agent。 | 对外能力或安装方式变化时。 |
+| 文档 | 唯一职责 |
+| --- | --- |
+| [README.md](./README.md) | 面向用户的产品、安装、使用和 CLI 入口 |
+| [docs/boundaries.md](./docs/boundaries.md) | 完整项目树、目录所有权、依赖方向和接缝 |
+| [docs/architecture.md](./docs/architecture.md) | 运行拓扑、数据所有权、不变量与技术选择 |
+| [docs/decisions.md](./docs/decisions.md) | 长期架构决策及其后果 |
+| [docs/errors.md](./docs/errors.md) | 可复发故障、根因和自检方法 |
+| [docs/features/](./docs/features/) | 随功能实现变化的行为、契约和 UX |
+| [docs/others/README.md](./docs/others/README.md) | 活动路线图和冻结历史的决策表 |
 
-## Do NOT
+功能入口：
 
-- **不**在未更新本文件「技术栈 / 项目树 / Workspace Crates」前就改依赖或目录结构。
-- **不**手改 `Cargo.toml` 加依赖：一律用 `cargo add`（`workspace.dependencies` 归一化调整除外，仍禁止用手改方式引入**新**依赖）。
-- **不**在命令包装层（`src-tauri/src/commands/`）写重逻辑：域逻辑进 `crates/*`，Tauri 胶水进 `src-tauri/src/core/`。
-- **不**绕过 `core::infra::http_client::probe_http_client` 直接发远程 HTTP（会无视 `config/proxy.json`）。
-- **不**让单个源文件超过 ~1000 行；超出即拆模块。
-- **不**在测试里写真实 `$HOME`：tool-sync 测试必须设 `SKILLSTAR_TOOL_SYNC_HOME` 指向临时目录（曾真实清掉过开发者的 `~/.codex/config.toml`）。
-- **不**修改 `crates/skillstar-usage/src/fetchers/oauth/cursor.rs`，除非被明确要求。
-- **不**把运行产物（`target/` / `dist/` / `node_modules/`）当作结构维护或提交。
+- [Agents](./docs/features/agents/README.md)
+- [Frontend](./docs/features/frontend/README.md)
+- [Skills](./docs/features/skills/README.md)
+- [Marketplace](./docs/features/marketplace/README.md)
+- [MCP](./docs/features/mcp/README.md)
+- [Models](./docs/features/models/README.md)
+- [Usage](./docs/features/usage/README.md)
+- [Sync](./docs/features/sync/README.md)
+- [Platform](./docs/features/platform/README.md)
 
-## 质量与 CI
+## Agent skills
 
-- Lint + Format：`bun run lint` / `bun run lint:fix` / `bun run format`（Biome）。
-- 前端测试：`bun run test` / `bun run test:watch`（Vitest + jsdom）；测试文件 `*.test.ts(x)` / `*.spec.ts(x)` 与源码同放或在 `src/test/`。Tauri IPC 在 `src/test/setup.ts` 自动 mock。
-- 后端测试：`cargo test`（workspace）/ `cargo test -p <crate>` / `cargo test -p <crate> <test_fn>`；`cargo check` 快速编译检查。
-- CI：`.github/workflows/windows-ci.yml`（Windows 上 `npm ci` → lint → `npm run build` → `npm test` → `cargo test --workspace --locked`），用来兜住 macOS/Linux 本地开发漏掉的 Windows 路径 / shell / 换行回归。
-- CI：`.github/workflows/ci.yml`（Linux + macOS，Bun）——两个 job 都跑 `bun run lint` / `bun run test` / `cargo check --workspace --locked` / `cargo test --workspace --locked`；仅 Linux job 额外跑四个棘轮闸门脚本（`scripts/internal/check_i18n_hardcoded.sh` 硬编码中文、`check_feature_imports.sh` 跨 feature 越界 import、`check_error_strings.sh` 统计 `Result<_, String>`、`check_clippy_ratchet.sh` clippy 警告数）与 `cargo-deny`，避免 macOS job 重复跑一遍耗时的 clippy/deny 拉长总时长。四个闸门都沿用 `check_file_size.sh` 的棘轮基线模式：存量债计入 `scripts/internal/*_baseline.txt` 仅告警，新增超标才 fail。
-- 供应链策略：`src-tauri/deny.toml`（cargo-deny advisories / licenses / sources）。
+### Issue tracker
 
-> 注：本地包管理器是 Bun（`bun.lock`）；Windows CI 用 npm（`package-lock.json`）。两套 lockfile 并存，改依赖后两者都要更新。
+Issues 和 PRD 跟踪在本仓库的 GitHub Issues，通过 `gh` CLI 操作。见 `docs/agents/issue-tracker.md`。
+
+### Triage labels
+
+使用默认五个 triage 标签（needs-triage / needs-info / ready-for-agent / ready-for-human / wontfix）。见 `docs/agents/triage-labels.md`。
+
+### Domain docs
+
+Single-context：根目录 `CONTEXT.md` + `docs/adr/`。见 `docs/agents/domain.md`。
 
 ## 提交规范
 
-Conventional Commits：`type(scope): description`
-
-- `type`：`feat` / `fix` / `docs` / `style` / `refactor` / `perf` / `test` / `chore`
-- `scope`：功能域，如 `skills` / `projects` / `agents` / `layout` / `usage` / `models`
-- 提交信息用英文。
+使用英文 Conventional Commits：`type(scope): description`。常用 type 为 `feat`、`fix`、`docs`、`refactor`、`test`、`chore`。

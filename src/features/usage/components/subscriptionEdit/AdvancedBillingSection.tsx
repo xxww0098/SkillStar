@@ -1,20 +1,16 @@
 import { useTranslation } from "react-i18next";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { FingerprintPicker } from "@/features/fingerprints";
 import type { AuthMode, BillingCycle, CatalogEntry } from "../../types";
 import { Field, selectClass } from "./fields";
 
 interface AdvancedBillingSectionProps {
   selectedEntry: CatalogEntry | null;
   authMode: AuthMode;
-  submitting: boolean;
   displayName: string;
   setDisplayName: (value: string) => void;
   planTier: string;
   setPlanTier: (value: string) => void;
-  fingerprintId: string | null;
-  setFingerprintId: (value: string | null) => void;
   billingCycleOptions: BillingCycle[];
   billingCycle: BillingCycle;
   setBillingCycle: (value: BillingCycle) => void;
@@ -39,13 +35,10 @@ interface AdvancedBillingSectionProps {
 export function AdvancedBillingSection({
   selectedEntry,
   authMode,
-  submitting,
   displayName,
   setDisplayName,
   planTier,
   setPlanTier,
-  fingerprintId,
-  setFingerprintId,
   billingCycleOptions,
   billingCycle,
   setBillingCycle,
@@ -87,10 +80,6 @@ export function AdvancedBillingSection({
             className="h-8 rounded-lg border-input-border bg-input text-xs text-foreground"
           />
         </Field>
-      </div>
-
-      <div className="rounded-2xl border border-border bg-muted/30 p-4">
-        <FingerprintPicker value={fingerprintId} onChange={setFingerprintId} disabled={submitting} />
       </div>
 
       {authMode !== "api-key" && (

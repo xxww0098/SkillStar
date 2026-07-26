@@ -1,6 +1,5 @@
 import { motion } from "framer-motion";
 import {
-  Bot,
   Check,
   CheckSquare,
   Layers,
@@ -16,7 +15,7 @@ import {
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AgentIcon } from "../../../components/ui/AgentIcon";
-import { selectTargetableAgentProfiles } from "../../../lib/agentProfiles";
+import { selectTargetableAgentProfiles, supportsGlobalDeploy } from "../../../lib/agentProfiles";
 import { agentIconCls, cn } from "../../../lib/utils";
 import type { AgentProfile } from "../../../types";
 
@@ -38,8 +37,6 @@ interface SkillSelectionBarProps {
   onBatchLink?: (agentId: string) => void;
   /** Batch-unlink selected skills from all agents */
   onBatchUnlinkAll?: () => void;
-  /** Batch AI Translation & Summary */
-  onBatchAiProcess?: () => Promise<void>;
   /** Controlled "Link to Agent" menu open state (enables the L shortcut). */
   linkMenuOpen?: boolean;
   onLinkMenuOpenChange?: (open: boolean) => void;
@@ -60,7 +57,6 @@ export function SkillSelectionBar({
   agentProfiles,
   onBatchLink,
   onBatchUnlinkAll,
-  onBatchAiProcess,
   linkMenuOpen: linkMenuOpenProp,
   onLinkMenuOpenChange,
 }: SkillSelectionBarProps) {
@@ -76,7 +72,7 @@ export function SkillSelectionBar({
   );
   const [isUpdating, setIsUpdating] = useState(false);
   const [updateSuccess, setUpdateSuccess] = useState(false);
-  const enabledProfiles = selectTargetableAgentProfiles(agentProfiles ?? []);
+  const enabledProfiles = selectTargetableAgentProfiles(agentProfiles ?? []).filter(supportsGlobalDeploy);
   const allSelected = totalCount !== undefined && selectedCount >= totalCount;
 
   const handleUpdate = async () => {
@@ -270,18 +266,6 @@ export function SkillSelectionBar({
             >
               <Share2 className="w-3.5 h-3.5 shrink-0 text-violet-500 dark:text-violet-400 group-hover:-translate-y-px group-hover:scale-105 transition-all duration-200" />
               {t("selectionBar.share")}
-            </button>
-          )}
-
-          {/* AI Batch Process */}
-          {onBatchAiProcess && (
-            <button
-              onClick={onBatchAiProcess}
-              disabled={disabled || isUpdating}
-              className="group inline-flex items-center gap-1.5 px-3 h-7 rounded-lg text-[12px] font-medium text-emerald-600 dark:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 active:bg-emerald-500/25 border border-emerald-500/20 hover:border-emerald-500/30 transition-all duration-200 cursor-pointer select-none disabled:opacity-40 disabled:pointer-events-none whitespace-nowrap"
-            >
-              <Bot className="w-3.5 h-3.5 shrink-0 text-emerald-500 dark:text-emerald-400 group-hover:rotate-12 group-hover:scale-105 transition-all duration-300" />
-              {t("selectionBar.batchAiProcess", { defaultValue: "Automate Translation" })}
             </button>
           )}
 

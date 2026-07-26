@@ -22,9 +22,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
+use russh::Disconnect;
 use russh::client::{self, Handle, Handler};
 use russh::keys::{self, HashAlg, PrivateKeyWithHashAlg};
-use russh::Disconnect;
 use tokio::sync::oneshot;
 
 use crate::ssh::progress::{Phase, ProgressSink, Status, event, event_with_detail};
@@ -55,10 +55,7 @@ pub enum HostKeyState {
     Unverified { fingerprint: String },
     /// The server presented a key that differs from the accepted one
     /// (possible MITM). Carries both the expected and actual fingerprints.
-    Mismatch {
-        expected: String,
-        actual: String,
-    },
+    Mismatch { expected: String, actual: String },
 }
 
 /// Result of a connection probe.
@@ -92,9 +89,7 @@ impl Handler for SshHandler {
         server_public_key: &keys::PublicKey,
     ) -> impl std::future::Future<Output = Result<bool, Self::Error>> + Send {
         // Compute the OpenSSH SHA-256 fingerprint (`SHA256:base64...`).
-        let fp = server_public_key
-            .fingerprint(HashAlg::Sha256)
-            .to_string();
+        let fp = server_public_key.fingerprint(HashAlg::Sha256).to_string();
         if let Some(tx) = self.fingerprint_tx.take() {
             let _ = tx.send(fp.clone());
         }
@@ -131,11 +126,7 @@ fn addr_string(host: &SshHostDef) -> String {
 impl SshHostDef {
     /// Port to dial, falling back to 22 if the stored value is 0.
     pub(crate) fn host_port(&self) -> u16 {
-        if self.port == 0 {
-            22
-        } else {
-            self.port
-        }
+        if self.port == 0 { 22 } else { self.port }
     }
 }
 
@@ -192,21 +183,41 @@ async fn dial_once(
     let addr = addr_string(host);
     let config = default_config();
 
-    sink.emit(event(session_id, Phase::Dial, Status::Start, format!("dialing {addr}…")));
+    sink.emit(event(
+        session_id,
+        Phase::Dial,
+        Status::Start,
+        format!("dialing {addr}…"),
+    ));
     let dial_start = Instant::now();
     let connect_fut = client::connect(config, &addr, handler);
     let handle = tokio::time::timeout(CONNECT_TIMEOUT, connect_fut)
         .await
         .map_err(|_| {
-            sink.emit(event(session_id, Phase::Dial, Status::Fail, format!("timeout after {}s", CONNECT_TIMEOUT.as_secs())));
+            sink.emit(event(
+                session_id,
+                Phase::Dial,
+                Status::Fail,
+                format!("timeout after {}s", CONNECT_TIMEOUT.as_secs()),
+            ));
             anyhow::anyhow!("SSH connect to {addr} timed out")
         })?
         .map_err(|e| {
-            sink.emit(event(session_id, Phase::Dial, Status::Fail, format!("connect failed: {e}")));
+            sink.emit(event(
+                session_id,
+                Phase::Dial,
+                Status::Fail,
+                format!("connect failed: {e}"),
+            ));
             anyhow::anyhow!("SSH connect failed").context(e)
         })?;
     let dial_ms = dial_start.elapsed().as_millis();
-    sink.emit(event(session_id, Phase::Handshake, Status::Ok, format!("connected ({dial_ms}ms), handshake done")));
+    sink.emit(event(
+        session_id,
+        Phase::Handshake,
+        Status::Ok,
+        format!("connected ({dial_ms}ms), handshake done"),
+    ));
 
     let fingerprint = fp_rx.await.unwrap_or_default();
     Ok((handle, fingerprint))
@@ -226,48 +237,95 @@ async fn authenticate<S: SecretStore>(
     // Authenticate according to the configured method.
     match &host.auth_method {
         crate::ssh::types::AuthMethod::Password => {
-            sink.emit(event(session_id, Phase::Auth, Status::Start, format!("authenticating as {} (password)…", host.username)));
-            let password = secrets
-                .get_secret(&host.id)?
-                .ok_or_else(|| {
-                    sink.emit(event(session_id, Phase::Auth, Status::Fail, "no password stored in keyring"));
-                    anyhow::anyhow!("no password stored for host '{}'", host.id)
-                })?;
+            sink.emit(event(
+                session_id,
+                Phase::Auth,
+                Status::Start,
+                format!("authenticating as {} (password)…", host.username),
+            ));
+            let password = secrets.get_secret(&host.id)?.ok_or_else(|| {
+                sink.emit(event(
+                    session_id,
+                    Phase::Auth,
+                    Status::Fail,
+                    "no password stored in keyring",
+                ));
+                anyhow::anyhow!("no password stored for host '{}'", host.id)
+            })?;
             let authed = handle
                 .authenticate_password(&host.username, password)
                 .await
                 .map_err(|e| {
-                    sink.emit(event(session_id, Phase::Auth, Status::Fail, format!("password auth error: {e}")));
+                    sink.emit(event(
+                        session_id,
+                        Phase::Auth,
+                        Status::Fail,
+                        format!("password auth error: {e}"),
+                    ));
                     anyhow::anyhow!("SSH password authentication failed").context(e)
                 })?;
             if !authed.success() {
-                sink.emit(event(session_id, Phase::Auth, Status::Fail, "password rejected by server"));
+                sink.emit(event(
+                    session_id,
+                    Phase::Auth,
+                    Status::Fail,
+                    "password rejected by server",
+                ));
                 anyhow::bail!("SSH password authentication rejected");
             }
-            sink.emit(event(session_id, Phase::Auth, Status::Ok, "authenticated (password)"));
+            sink.emit(event(
+                session_id,
+                Phase::Auth,
+                Status::Ok,
+                "authenticated (password)",
+            ));
         }
         crate::ssh::types::AuthMethod::Key { key_path } => {
-            sink.emit(event(session_id, Phase::Auth, Status::Start, format!("authenticating as {} (publickey)…", host.username)));
+            sink.emit(event(
+                session_id,
+                Phase::Auth,
+                Status::Start,
+                format!("authenticating as {} (publickey)…", host.username),
+            ));
             let passphrase = secrets.get_secret(&host.id)?;
             let key = load_private_key(key_path, passphrase.as_deref()).map_err(|e| {
-                sink.emit(event(session_id, Phase::Auth, Status::Fail, format!("could not load key {key_path}: {e}")));
+                sink.emit(event(
+                    session_id,
+                    Phase::Auth,
+                    Status::Fail,
+                    format!("could not load key {key_path}: {e}"),
+                ));
                 e
             })?;
             // Prefer SHA-256; russh negotiates RSA hash via PrivateKeyWithHashAlg.
-            let key_with_alg =
-                PrivateKeyWithHashAlg::new(Arc::new(key), Some(HashAlg::Sha256));
+            let key_with_alg = PrivateKeyWithHashAlg::new(Arc::new(key), Some(HashAlg::Sha256));
             let authed = handle
                 .authenticate_publickey(&host.username, key_with_alg)
                 .await
                 .map_err(|e| {
-                    sink.emit(event(session_id, Phase::Auth, Status::Fail, format!("publickey auth error: {e}")));
+                    sink.emit(event(
+                        session_id,
+                        Phase::Auth,
+                        Status::Fail,
+                        format!("publickey auth error: {e}"),
+                    ));
                     anyhow::anyhow!("SSH public-key authentication failed").context(e)
                 })?;
             if !authed.success() {
-                sink.emit(event(session_id, Phase::Auth, Status::Fail, "publickey rejected by server"));
+                sink.emit(event(
+                    session_id,
+                    Phase::Auth,
+                    Status::Fail,
+                    "publickey rejected by server",
+                ));
                 anyhow::bail!("SSH public-key authentication rejected");
             }
-            sink.emit(event(session_id, Phase::Auth, Status::Ok, "authenticated (publickey)"));
+            sink.emit(event(
+                session_id,
+                Phase::Auth,
+                Status::Ok,
+                "authenticated (publickey)",
+            ));
         }
     }
     Ok(())
@@ -290,10 +348,7 @@ async fn dial_and_authenticate<S: SecretStore>(
 }
 
 /// Load a private key, expanding `~` and passing an optional passphrase.
-fn load_private_key(
-    path: &str,
-    passphrase: Option<&str>,
-) -> Result<keys::PrivateKey> {
+fn load_private_key(path: &str, passphrase: Option<&str>) -> Result<keys::PrivateKey> {
     let expanded = expand_tilde(path);
     keys::load_secret_key(expanded, passphrase)
         .with_context(|| format!("failed to load private key at {path}"))
@@ -348,7 +403,12 @@ pub async fn connect<S: SecretStore>(
     // 2. Host-key gate: decide trust BEFORE authenticating.
     match resolve_host_key_state(&host.id, &fingerprint) {
         HostKeyState::Verified => {
-            sink.emit(event(session_id, Phase::HostKey, Status::Ok, "server key matches saved fingerprint"));
+            sink.emit(event(
+                session_id,
+                Phase::HostKey,
+                Status::Ok,
+                "server key matches saved fingerprint",
+            ));
         }
         HostKeyState::Unverified { .. } => {
             sink.emit(event_with_detail(
@@ -405,7 +465,12 @@ pub async fn test_connection<S: SecretStore>(
     let state = resolve_host_key_state(&host.id, &fingerprint);
     match &state {
         HostKeyState::Verified => {
-            sink.emit(event(session_id, Phase::HostKey, Status::Ok, "server key matches saved fingerprint"));
+            sink.emit(event(
+                session_id,
+                Phase::HostKey,
+                Status::Ok,
+                "server key matches saved fingerprint",
+            ));
         }
         HostKeyState::Unverified { fingerprint } => {
             sink.emit(event_with_detail(
@@ -447,7 +512,10 @@ pub async fn test_connection<S: SecretStore>(
         session_id,
         Phase::Done,
         Status::Ok,
-        format!("ready — {remote_user} · {} · {latency_ms}ms", system.as_deref().unwrap_or("—")),
+        format!(
+            "ready — {remote_user} · {} · {latency_ms}ms",
+            system.as_deref().unwrap_or("—")
+        ),
     ));
 
     Ok((
@@ -482,11 +550,10 @@ impl RemoteExec for Handle<SshHandler> {
 ///
 /// The remote exit status is **discarded** — callers that must distinguish
 /// success from failure use [`exec_capture_status`] instead.
-pub async fn exec_capture(
-    handle: &mut Handle<SshHandler>,
-    command: &str,
-) -> Result<String> {
-    exec_capture_status(handle, command).await.map(|(out, _)| out)
+pub async fn exec_capture(handle: &mut Handle<SshHandler>, command: &str) -> Result<String> {
+    exec_capture_status(handle, command)
+        .await
+        .map(|(out, _)| out)
 }
 
 /// Like [`exec_capture`] but also returns the remote exit status (`None` when
@@ -501,10 +568,7 @@ pub async fn exec_capture_status(
             .channel_open_session()
             .await
             .context("open session channel")?;
-        channel
-            .exec(true, command)
-            .await
-            .context("exec command")?;
+        channel.exec(true, command).await.context("exec command")?;
 
         let mut out: Vec<u8> = Vec::new();
         let mut exit_code: Option<u32> = None;
@@ -645,10 +709,7 @@ mod tests {
         unsafe {
             std::env::set_var("SKILLSTAR_DATA_DIR", temp.path());
         }
-        DataDirGuard {
-            _temp: temp,
-            _lock,
-        }
+        DataDirGuard { _temp: temp, _lock }
     }
 
     // Reference the generic param so the unused-import check stays happy

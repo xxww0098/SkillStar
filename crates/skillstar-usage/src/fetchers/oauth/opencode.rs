@@ -97,8 +97,8 @@ async fn drive_login(
     let (access_token, refresh_token, expires_at) =
         exchange_code(&code, &verifier, &redirect_uri).await?;
 
-    let display_name = token_refresh::jwt_string(&access_token, &["email"])
-        .unwrap_or_else(|| "OpenCode".to_string());
+    let email = super::common::email_from_jwt(&access_token);
+    let display_name = email.clone().unwrap_or_else(|| "OpenCode".to_string());
 
     let now = Utc::now().timestamp();
     let existing = target_subscription_id
@@ -133,10 +133,13 @@ async fn drive_login(
         refresh_token_encrypted: refresh_token.as_deref().map(crypto::encrypt),
         access_token_expires_at: expires_at,
         id_token_encrypted: None,
-        oauth_account_id: None,
+        oauth_account_id: email.or_else(|| {
+            existing
+                .as_ref()
+                .and_then(|sub| sub.oauth_account_id.clone())
+        }),
         oauth_region: None,
         requires_reauth: false,
-        fingerprint_id: None,
         cookie_jar_encrypted: None,
         cookie_session_expires_at: None,
         manual_quota: existing.as_ref().and_then(|sub| sub.manual_quota.clone()),
@@ -178,7 +181,7 @@ async fn exchange_code(
     verifier: &str,
     redirect_uri: &str,
 ) -> UsageResult<(String, Option<String>, Option<i64>)> {
-    let client = crate::http_client::usage_reqwest_with_active_fingerprint()?;
+    let client = crate::http_client::usage_http_client()?;
     let resp = client
         .post(TOKEN_URL)
         .form(&[
@@ -220,11 +223,28 @@ async fn exchange_code(
 }
 
 pub async fn fetch(subscription: &mut Subscription) -> UsageResult<SubscriptionUsage> {
-    let fp_id = subscription.fingerprint_id.clone();
-    crate::http_client::with_fingerprint(fp_id, fetch_inner(subscription)).await
+    fetch_inner(subscription).await
 }
 
 async fn fetch_inner(subscription: &mut Subscription) -> UsageResult<SubscriptionUsage> {
+    // Best-effort: access token JWT often carries email even when usage probe is unavailable.
+    if let Ok(access_token) =
+        crate::fetchers::decrypt_required(&subscription.access_token_encrypted, "access_token")
+    {
+        let email = super::common::email_from_jwt(&access_token).or_else(|| {
+            subscription
+                .oauth_account_id
+                .as_deref()
+                .filter(|s| super::common::looks_like_email(s))
+                .map(str::to_string)
+        });
+        super::common::apply_email_title(subscription, email.as_deref(), &["OpenCode"]);
+        if subscription.oauth_account_id.is_none() {
+            if let Some(email) = email {
+                subscription.oauth_account_id = Some(email);
+            }
+        }
+    }
     Ok(authorized_snapshot_with_warning(
         &subscription.id,
         oauth_usage_unavailable(),

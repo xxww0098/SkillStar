@@ -67,13 +67,6 @@ pub struct Subscription {
     #[serde(default)]
     pub requires_reauth: bool,
 
-    /// Optional fingerprint id (see `skillstar-fingerprint`). When `Some`,
-    /// the fetcher dispatcher resolves the fingerprint from the store and
-    /// builds a `FingerprintAwareClient`; when `None`, falls back to the
-    /// reqwest-default client used by SkillStar before v0.4.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fingerprint_id: Option<String>,
-
     // -- Cookie mode --
     /// JSON-serialised Vec<CookieEntry> encrypted with AES-256-GCM.
     /// Cookies are parsed from the raw `Cookie:` header the user pastes.

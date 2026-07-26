@@ -22,9 +22,9 @@ use skillstar_core::infra::error::AppError;
 use tauri::State;
 use tokio::sync::Mutex;
 
+use skillstar_models::AiProviderRef;
 use skillstar_models::ai_provider;
 use skillstar_models::latency::{self, EndpointLatencyResult, LatencyResult};
-use skillstar_models::provider_ref::AiProviderRef;
 use skillstar_models::providers::ProviderPresetFlat;
 use skillstar_models::providers::{
     self, AppProviders, ModelCatalogFetchResult, ProviderEntry, ProviderEntryFlat, ProviderPatch,

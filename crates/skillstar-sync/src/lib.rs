@@ -3,18 +3,18 @@
 //! Wave 2B merged former `skillstar-ssh` into this crate as [`ssh`].
 //!
 //! Layout:
-//! - [`types`] / [`store`] / [`client`] / [`manifest`] / [`local_pack`] / [`sync`] — S3
-//! - [`progress`] — S3 progress sink
+//! - private `types` / `store` / `client` / `manifest` / `local_pack` / `sync` — S3
+//! - private `progress` — S3 progress sink
 //! - [`ssh`] — SSH hosts, SFTP, remote skill push/list/delete (Tauri-agnostic)
 
-pub mod client;
+mod client;
+mod local_pack;
+mod manifest;
+mod progress;
 pub mod ssh;
-pub mod local_pack;
-pub mod manifest;
-pub mod progress;
-pub mod store;
-pub mod sync;
-pub mod types;
+mod store;
+mod sync;
+mod types;
 
 pub use client::{build_client, test_connection, test_connection_quiet};
 pub use progress::{
@@ -24,9 +24,7 @@ pub use store::{KeyringSecretStore, SecretStore, TargetsStore, load_targets};
 
 #[cfg(test)]
 pub use store::MemSecretStore;
-pub use sync::{
-    pull_manifest, push_all, resolve_client, resolve_target, restore_entries,
-};
+pub use sync::{pull_manifest, push_all, resolve_client, resolve_target, restore_entries};
 pub use types::{
     ConnectionTestResult, InstallOutcome, InstallSummary, Manifest, ManifestEntry,
     ManifestEntryView, PushSummary, S3TargetDef,

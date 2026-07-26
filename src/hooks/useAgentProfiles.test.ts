@@ -24,7 +24,7 @@ const MOCK_PROFILES: AgentProfile[] = [
     enabled: false,
     global_skills_dir: "/home/user/.cursor/rules/skills",
     project_skills_rel: ".cursor/rules/skills",
-    installed: true,
+    installed: false,
     synced_count: 0,
   },
 ];
@@ -82,6 +82,7 @@ describe("useAgentProfiles", () => {
     // Local state should be updated
     const cursor = result.current.profiles.find((p: AgentProfile) => p.id === "cursor");
     expect(cursor?.enabled).toBe(true);
+    expect(cursor?.installed).toBe(true);
   });
 
   it("unlinkAllFromAgent should update synced_count", async () => {
@@ -122,10 +123,10 @@ describe("useAgentProfiles", () => {
         id: "custom-1",
         display_name: "Custom Agent",
         icon: "custom.svg",
-        enabled: true,
+        enabled: false,
         global_skills_dir: "/home/user/.custom/skills",
         project_skills_rel: "",
-        installed: true,
+        installed: false,
         synced_count: 0,
       },
     ]);

@@ -155,9 +155,9 @@ pub fn unpack_skill(name: &str, bytes: &[u8]) -> Result<()> {
             tracing::warn!(target: "sync", path = ?rel, "skipping unsafe tar entry");
             continue;
         }
-        entry.unpack_in(&local_dir).with_context(|| {
-            format!("unpack {} into {}", rel.display(), local_dir.display())
-        })?;
+        entry
+            .unpack_in(&local_dir)
+            .with_context(|| format!("unpack {} into {}", rel.display(), local_dir.display()))?;
     }
 
     // Mirror local_skill::create: symlink hub/skills/<name> → hub/local/<name>.
@@ -252,7 +252,10 @@ mod tests {
 
         // Files restored and noise excluded.
         let restored = local_root.join("demo");
-        assert_eq!(std::fs::read_to_string(restored.join("SKILL.md")).unwrap(), "# demo\n");
+        assert_eq!(
+            std::fs::read_to_string(restored.join("SKILL.md")).unwrap(),
+            "# demo\n"
+        );
         assert_eq!(
             std::fs::read_to_string(restored.join("scripts").join("run.sh")).unwrap(),
             "echo hi\n"

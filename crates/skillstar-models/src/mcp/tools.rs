@@ -249,9 +249,9 @@ pub(crate) fn json_mcpservers_remove_strict(path: &Path, name: &str) -> Result<(
         .as_object_mut()
         .with_context(|| format!("Expected a JSON object in {}", path.display()))?;
     if let Some(servers) = object.get_mut("mcpServers") {
-        let servers = servers
-            .as_object_mut()
-            .with_context(|| format!("Expected mcpServers to be an object in {}", path.display()))?;
+        let servers = servers.as_object_mut().with_context(|| {
+            format!("Expected mcpServers to be an object in {}", path.display())
+        })?;
         servers.remove(name);
     }
     write_json_pretty(path, &root)

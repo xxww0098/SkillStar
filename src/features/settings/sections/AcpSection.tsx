@@ -1,21 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
-import { Bot, Check, ChevronDown, ChevronRight } from "lucide-react";
+import { BookOpen, Bot, Check, ChevronDown, ChevronRight, Hammer, Map as MapIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { tauriInvoke } from "../../../lib/ipc";
+import { type AcpConfig, tauriInvoke } from "../../../lib/ipc";
+import type { SkillTutorialStyle } from "../../../types";
 import { settingsKeys } from "../api/keys";
-
-interface AcpConfig {
-  enabled: boolean;
-  agent_command: string;
-  agent_label: string;
-}
 
 const DEFAULT_ACP_CONFIG: AcpConfig = {
   enabled: false,
   agent_command: "npx -y @agentclientprotocol/claude-agent-acp",
   agent_label: "Claude Code",
+  tutorial_style: "guided",
 };
 
 /** Built-in agent presets for quick selection. */
@@ -24,8 +20,39 @@ const AGENT_PRESETS = [
   { label: "OpenCode", command: "opencode acp" },
 ] as const;
 
+const TUTORIAL_STYLES = [
+  {
+    value: "guided",
+    labelKey: "settings.acpStyleGuided",
+    descriptionKey: "settings.acpStyleGuidedDesc",
+    icon: MapIcon,
+  },
+  {
+    value: "reference",
+    labelKey: "settings.acpStyleReference",
+    descriptionKey: "settings.acpStyleReferenceDesc",
+    icon: BookOpen,
+  },
+  {
+    value: "workshop",
+    labelKey: "settings.acpStyleWorkshop",
+    descriptionKey: "settings.acpStyleWorkshopDesc",
+    icon: Hammer,
+  },
+] as const satisfies ReadonlyArray<{
+  value: SkillTutorialStyle;
+  labelKey: string;
+  descriptionKey: string;
+  icon: typeof MapIcon;
+}>;
+
 function isSameAcpConfig(a: AcpConfig, b: AcpConfig): boolean {
-  return a.enabled === b.enabled && a.agent_command === b.agent_command && a.agent_label === b.agent_label;
+  return (
+    a.enabled === b.enabled &&
+    a.agent_command === b.agent_command &&
+    a.agent_label === b.agent_label &&
+    a.tutorial_style === b.tutorial_style
+  );
 }
 
 export function AcpSection() {
@@ -50,28 +77,39 @@ export function AcpSection() {
 
   useEffect(() => {
     if (!configQuery.data) return;
-    setConfig(configQuery.data);
-    savedConfigRef.current = configQuery.data;
+    const loadedConfig = {
+      ...configQuery.data,
+      tutorial_style: configQuery.data.tutorial_style || "guided",
+    } satisfies AcpConfig;
+    setConfig(loadedConfig);
+    savedConfigRef.current = loadedConfig;
   }, [configQuery.data]);
+
+  const persistConfig = useCallback(
+    (nextConfig: AcpConfig) => {
+      setSaving(true);
+      return tauriInvoke("save_acp_config", { config: nextConfig })
+        .then(() => {
+          savedConfigRef.current = nextConfig;
+          setSaved(true);
+          setTimeout(() => setSaved(false), 2000);
+        })
+        .catch(() => toast.error(t("setupHook.saveFailed")))
+        .finally(() => setSaving(false));
+    },
+    [t],
+  );
 
   // Auto-save on change — only when config actually differs from last saved
   useEffect(() => {
     if (!loaded || saving || isSameAcpConfig(config, savedConfigRef.current)) return;
 
     const timer = setTimeout(() => {
-      setSaving(true);
-      tauriInvoke("save_acp_config", { config })
-        .then(() => {
-          savedConfigRef.current = config;
-          setSaved(true);
-          setTimeout(() => setSaved(false), 2000);
-        })
-        .catch(() => toast.error(t("setupHook.saveFailed")))
-        .finally(() => setSaving(false));
+      void persistConfig(config);
     }, 600);
 
     return () => clearTimeout(timer);
-  }, [config, loaded, saving, t]);
+  }, [config, loaded, persistConfig, saving]);
 
   const selectPreset = useCallback((preset: (typeof AGENT_PRESETS)[number]) => {
     setConfig((prev) => ({
@@ -84,6 +122,18 @@ export function AcpSection() {
   const toggleEnabled = useCallback(() => {
     setConfig((prev) => ({ ...prev, enabled: !prev.enabled }));
   }, []);
+
+  const selectTutorialStyle = useCallback(
+    (tutorialStyle: SkillTutorialStyle) => {
+      if (config.tutorial_style === tutorialStyle || saving) return;
+      const nextConfig = { ...config, tutorial_style: tutorialStyle };
+      setConfig(nextConfig);
+      // A style click is a complete, discrete choice. Dispatch it immediately
+      // so navigating back to the Skill cannot cancel the debounced save.
+      void persistConfig(nextConfig);
+    },
+    [config, persistConfig, saving],
+  );
 
   return (
     <section>
@@ -141,6 +191,61 @@ export function AcpSection() {
         {expanded && (
           <div className="px-4 pb-4 space-y-3 border-t border-border/50">
             <p className="text-[11px] text-muted-foreground pt-3 leading-relaxed">{t("settings.acpDesc")}</p>
+
+            <div className="space-y-2">
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                  {t("settings.acpTutorialStyle")}
+                </p>
+                <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground/70">
+                  {t("settings.acpTutorialStyleHint")}
+                </p>
+              </div>
+              <div className="grid gap-2">
+                {TUTORIAL_STYLES.map((option) => {
+                  const active = config.tutorial_style === option.value;
+                  const Icon = option.icon;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      aria-pressed={active}
+                      disabled={saving}
+                      onClick={() => selectTutorialStyle(option.value)}
+                      className={`rounded-xl border p-3 text-left transition-colors ${
+                        active
+                          ? "border-primary/45 bg-primary/10 text-foreground"
+                          : "border-border/60 bg-background/35 text-muted-foreground hover:border-border hover:bg-muted/40 hover:text-foreground"
+                      }`}
+                    >
+                      <span className="flex items-start gap-3">
+                        <span
+                          className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border ${
+                            active ? "border-primary/30 bg-primary/15 text-primary" : "border-border/60 bg-muted/50"
+                          }`}
+                        >
+                          <Icon className="h-3.5 w-3.5" aria-hidden />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+                            {t(option.labelKey)}
+                            {option.value === "guided" ? (
+                              <span className="rounded-full border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium text-primary">
+                                {t("settings.acpStyleRecommended")}
+                              </span>
+                            ) : null}
+                          </span>
+                          <span className="mt-1 block text-[10px] leading-relaxed text-muted-foreground">
+                            {t(option.descriptionKey)}
+                          </span>
+                        </span>
+                        {active ? <Check className="mt-1 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden /> : null}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
             {/* Agent presets */}
             <div className="space-y-1.5">

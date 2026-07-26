@@ -4,11 +4,11 @@
  * Replaces four previously duplicated tables (ModelsHub.AGENTS,
  * ToolActivationPanel.KNOWN_TOOLS + TOOL_CONFIG_PATHS, HealthBar.AGENTS,
  * configFiles.AGENT_TOOLS). When adding a new agent CLI, extend this file —
- * see ADDING-AN-AGENT.md.
+ * see docs/features/agents/README.md.
  */
 
 /** Tools that bind a provider (model sync). */
-export type ProviderToolId = "claude-code" | "codex" | "opencode" | "gemini";
+export type ProviderToolId = "claude-code" | "codex" | "opencode" | "gemini" | "pi";
 
 /** All tools with on-disk config files the app can read/write. */
 export type AgentToolId = ProviderToolId;
@@ -84,6 +84,16 @@ export const PROVIDER_AGENTS: AgentDescriptor[] = [
     taglineKey: "models.card.taglines.gemini",
     configPathDisplay: "~/.gemini/.env",
   },
+  {
+    toolId: "pi",
+    displayName: "Pi",
+    iconId: "pi",
+    requiredUrlField: "openai",
+    kind: "multi",
+    installDocsUrl: "https://pi.dev/docs/latest",
+    taglineKey: "models.card.taglines.pi",
+    configPathDisplay: "~/.pi/agent/models.json · ~/.pi/agent/settings.json",
+  },
 ];
 
 export function getAgent(toolId: string): AgentDescriptor | undefined {
@@ -111,4 +121,5 @@ export const CONFIG_FILE_TOOLS: { toolId: AgentToolId; label: string }[] = [
   { toolId: "codex", label: "Codex" },
   { toolId: "opencode", label: "OpenCode" },
   { toolId: "gemini", label: "Gemini CLI" },
+  { toolId: "pi", label: "Pi" },
 ];

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   normalizeSkillMarkdownForPreview,
-  normalizeTranslatedDocument,
   parseFrontmatterEntries,
   parseFrontmatterKeys,
   readFrontmatterValue,
@@ -132,20 +131,5 @@ describe("stripLeadingDuplicatedMetadata", () => {
     const keys = new Set(["name"]);
     const content = "# Body without metadata";
     expect(stripLeadingDuplicatedMetadata(content, keys)).toBe("# Body without metadata");
-  });
-});
-
-describe("normalizeTranslatedDocument", () => {
-  it("should merge translated frontmatter with original name", () => {
-    const original = "---\nname: my-skill\ndescription: original desc\n---\n# Content";
-    const translated = "---\nname: translated-name\ndescription: 翻译描述\n---\n# 内容";
-    const result = normalizeTranslatedDocument(original, translated);
-    expect(result).toContain("name: my-skill"); // name preserved
-    expect(result).toContain("翻译描述");
-  });
-
-  it("should pass through when original has no frontmatter", () => {
-    const result = normalizeTranslatedDocument("# No FM", "# 翻译");
-    expect(result).toBe("# 翻译");
   });
 });

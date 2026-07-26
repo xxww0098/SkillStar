@@ -80,10 +80,6 @@ export function useAiConfig() {
     setConfig(newConfig);
   }, []);
 
-  const translateSkill = useCallback(async (content: string): Promise<string> => {
-    return tauriInvoke("ai_translate_skill", { content });
-  }, []);
-
   const summarizeSkill = useCallback(async (content: string): Promise<string> => {
     return tauriInvoke("ai_summarize_skill", { content });
   }, []);
@@ -96,7 +92,6 @@ export function useAiConfig() {
     config,
     loading,
     saveConfig,
-    translateSkill,
     summarizeSkill,
     testConnection,
   };

@@ -515,17 +515,22 @@ export function PublishSkillModal({ open, onClose, skillName, skillDescription, 
                     {createNew ? newRepoName || "my-skills" : selectedRepo?.full_name.split("/")[1] || "repo"}/
                   </span>
                 </div>
+                {/* Skills live under a top-level skills/ directory */}
+                <div className="flex items-center gap-1.5 pl-5 font-medium text-foreground/70 py-0.5">
+                  <FolderOpen className="w-3.5 h-3.5 text-primary/60" />
+                  <span>skills/</span>
+                </div>
                 {/* Existing folders */}
                 {repoFolders
                   .filter((f) => f !== folderName)
                   .map((f) => (
-                    <div key={f} className="flex items-center gap-1.5 pl-5 text-muted-foreground/60 py-0.5">
+                    <div key={f} className="flex items-center gap-1.5 pl-10 text-muted-foreground/60 py-0.5">
                       <FolderOpen className="w-3.5 h-3.5 opacity-70" />
                       <span>{f}/</span>
                     </div>
                   ))}
                 {/* New skill folder — highlighted */}
-                <div className="flex items-center gap-1.5 pl-5 text-primary font-medium py-1 bg-primary/10 -mx-2 px-2 rounded-md my-0.5">
+                <div className="flex items-center gap-1.5 pl-10 text-primary font-medium py-1 bg-primary/10 -mx-2 px-2 rounded-md my-0.5">
                   <FolderOpen className="w-3.5 h-3.5" />
                   <span>{folderName || skillName}/</span>
                   <span className="text-micro bg-primary/15 text-primary px-1.5 py-0.5 rounded-sm font-normal ml-auto uppercase tracking-wide">
@@ -538,7 +543,7 @@ export function PublishSkillModal({ open, onClose, skillName, skillDescription, 
                   return (
                     <div
                       key={i}
-                      className={`flex items-center gap-1.5 pl-10 py-0.5 ${isSkillMd ? "text-primary/90 font-medium" : "text-muted-foreground/80"}`}
+                      className={`flex items-center gap-1.5 pl-14 py-0.5 ${isSkillMd ? "text-primary/90 font-medium" : "text-muted-foreground/80"}`}
                     >
                       <FileText className={`w-3.5 h-3.5 ${isSkillMd ? "text-primary/70" : "opacity-60"}`} />
                       <span>{file}</span>

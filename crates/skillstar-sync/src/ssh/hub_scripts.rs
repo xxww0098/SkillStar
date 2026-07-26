@@ -29,8 +29,7 @@ pub const LEGACY_HUB_PREFIX: &str = "~/.skillstar/hub/content";
 /// credentials, ssh passphrase/host-key): that stalls the whole operation
 /// until `EXEC_TIMEOUT` — per skill, in the update-check loop. Fail fast
 /// instead.
-pub const GIT_NO_PROMPT_ENV: &str =
-    "GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND='ssh -oBatchMode=yes'";
+pub const GIT_NO_PROMPT_ENV: &str = "GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND='ssh -oBatchMode=yes'";
 
 /// Shell-safe single-quoted string.
 pub fn shell_quote(s: &str) -> String {
@@ -100,7 +99,10 @@ pub fn expand_remote_home(home: &str, path: &str) -> String {
 
 /// Absolute hub content dir for one skill, given the resolved remote home.
 pub fn hub_skill_abs(home: &str, skill_name: &str) -> String {
-    format!("{}/{REMOTE_HUB_REL}/{skill_name}", home.trim_end_matches('/'))
+    format!(
+        "{}/{REMOTE_HUB_REL}/{skill_name}",
+        home.trim_end_matches('/')
+    )
 }
 
 // ── operation scripts ───────────────────────────────────────────────
@@ -303,14 +305,23 @@ mod tests {
 
     #[test]
     fn shell_path_expr_expands_tilde_via_home_var() {
-        assert_eq!(shell_path_expr("~/.claude/skills"), "\"$HOME\"/'.claude/skills'");
+        assert_eq!(
+            shell_path_expr("~/.claude/skills"),
+            "\"$HOME\"/'.claude/skills'"
+        );
         assert_eq!(shell_path_expr("~"), "\"$HOME\"");
-        assert_eq!(shell_path_expr("/root/.codex/skills"), "'/root/.codex/skills'");
+        assert_eq!(
+            shell_path_expr("/root/.codex/skills"),
+            "'/root/.codex/skills'"
+        );
     }
 
     #[test]
     fn expand_remote_home_makes_absolute() {
-        assert_eq!(expand_remote_home("/root", "~/.claude/skills"), "/root/.claude/skills");
+        assert_eq!(
+            expand_remote_home("/root", "~/.claude/skills"),
+            "/root/.claude/skills"
+        );
         assert_eq!(expand_remote_home("/root/", "~"), "/root");
         assert_eq!(expand_remote_home("/root", "/abs/path"), "/abs/path");
     }
@@ -367,7 +378,10 @@ mod tests {
         assert!(s.starts_with("set -e"));
         let clone_pos = s.find("git clone").unwrap();
         let ln_pos = s.find("ln -sfn").unwrap();
-        assert!(clone_pos < ln_pos, "symlink must not be created when clone fails");
+        assert!(
+            clone_pos < ln_pos,
+            "symlink must not be created when clone fails"
+        );
     }
 
     #[test]
@@ -386,7 +400,10 @@ mod tests {
 
     #[test]
     fn parse_heal_output_extracts_counts() {
-        assert_eq!(parse_heal_output("HEALED moved=2 relinked=5\n"), Some((2, 5)));
+        assert_eq!(
+            parse_heal_output("HEALED moved=2 relinked=5\n"),
+            Some((2, 5))
+        );
         assert_eq!(parse_heal_output("HEALED moved=0 relinked=0"), Some((0, 0)));
         assert_eq!(parse_heal_output("standalone"), None);
     }

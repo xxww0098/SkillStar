@@ -4,6 +4,8 @@ export { useHostMutations, useImportSystemHost, useSshHostsQuery } from "./api/h
 export {
   useAcceptHostKey,
   useDeleteRemoteSkill,
+  useDiscoverRemoteSkillsQuery,
+  useMigrateRemoteSkill,
   usePushSkill,
   useRemoteSkillsQuery,
   useTestConnection,
@@ -11,7 +13,5 @@ export {
 export { SshHostsList } from "./components/SshHostsList";
 export { SshHostForm } from "./components/SshHostForm";
 export type { SshHostFormValues } from "./components/SshHostForm";
-export { RemoteSkillsContent } from "./components/RemoteSkillPanel";
-export { ConnectionConsole } from "./components/ConnectionConsole";
 export { useConnectStream } from "./hooks/useConnectStream";
-export type { SshProgressLine, PendingHostKey } from "./hooks/useConnectStream";
+export type { PendingHostKey, SshProgressLine } from "./hooks/useConnectStream";

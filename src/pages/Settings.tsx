@@ -1,11 +1,12 @@
 import { motion } from "framer-motion";
 import { useCallback, useEffect, useReducer, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { AiProviderSection } from "../features/models/components/settings/AiProviderSection";
+import { S3SyncSection } from "../features/s3/components/S3SyncSection";
 import { DevModeBanner } from "../features/settings/components/DevModeBanner";
 import { AboutSection } from "../features/settings/sections/AboutSection";
 import { AcpSection } from "../features/settings/sections/AcpSection";
 import { AgentConnectionsSection } from "../features/settings/sections/AgentConnectionsSection";
-import { AiProviderSection } from "../features/settings/sections/AiProviderSection";
 import { AppearanceSection } from "../features/settings/sections/AppearanceSection";
 import {
   BackgroundRunSection,
@@ -13,11 +14,9 @@ import {
   readBackgroundRun,
   writeBackgroundRun,
 } from "../features/settings/sections/BackgroundRunSection";
-import { FingerprintsSection } from "../features/settings/sections/FingerprintsSection";
 import { GitHubMirrorSection } from "../features/settings/sections/GitHubMirrorSection";
 import { LanguageSection } from "../features/settings/sections/LanguageSection";
 import { ProxySection } from "../features/settings/sections/ProxySection";
-import { S3SyncSection } from "../features/settings/sections/S3SyncSection";
 import { StorageSection } from "../features/settings/sections/StorageSection";
 import { useAgentProfiles } from "../hooks/useAgentProfiles";
 import { useAiConfig } from "../hooks/useAiConfig";
@@ -196,7 +195,7 @@ export function Settings({
     const applyStoredFocus = () => {
       try {
         const focus = localStorage.getItem("skillstar:settings-focus");
-        if (focus === "ai-provider" || focus === "storage") {
+        if (focus === "ai-provider" || focus === "acp" || focus === "storage") {
           localStorage.removeItem("skillstar:settings-focus");
           focusSettingsSection(focus);
         }
@@ -207,7 +206,7 @@ export function Settings({
 
     const handleFocusEvent = (event: Event) => {
       const target = (event as CustomEvent<{ target?: SettingsFocusTarget }>).detail?.target;
-      if (target === "ai-provider" || target === "storage") {
+      if (target === "ai-provider" || target === "acp" || target === "storage") {
         focusSettingsSection(target);
       }
     };
@@ -343,7 +342,7 @@ export function Settings({
         /* ignore */
       }
 
-      const total = result.repos_removed + result.history_cleared + result.translation_cleared;
+      const total = result.repos_removed + result.history_cleared;
       if (total > 0) {
         toast.success(t("settings.cacheCleanDone", { count: total }));
       } else {
@@ -599,10 +598,6 @@ export function Settings({
 
               <section id="settings-acp" className="scroll-mt-3">
                 <AcpSection />
-              </section>
-
-              <section id="settings-fingerprints" className="scroll-mt-3">
-                <FingerprintsSection />
               </section>
 
               <section id="settings-background" className="scroll-mt-3">

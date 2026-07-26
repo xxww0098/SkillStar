@@ -14,16 +14,14 @@ import { mcpKeys } from "../api/keys";
 
 const MCP_STALE_TIME_MS = 30_000;
 const STORE_KEY = mcpKeys.servers();
-const STATUS_KEY = mcpKeys.toolStatuses();
-
 type PublicMcpToolStatus = McpToolStatus & { toolId: McpToolId };
 
 /**
  * Hook for managing the unified MCP server store.
  *
  * Provides CRUD, per-tool enable toggles, sync, and import — all serialized
- * through the backend write-lock. Mutations invalidate both the store and the
- * per-tool status query so the UI reflects live config changes.
+ * through the backend write-lock. Host tool status is read only after the user
+ * explicitly asks to import existing configurations.
  */
 export function useMcpServers() {
   const queryClient = useQueryClient();
@@ -34,15 +32,6 @@ export function useMcpServers() {
     staleTime: MCP_STALE_TIME_MS,
   });
 
-  const { data: toolStatuses } = useQuery<PublicMcpToolStatus[]>({
-    queryKey: STATUS_KEY,
-    queryFn: async () => {
-      const statuses = await tauriInvoke("mcp_tool_statuses");
-      return statuses.filter((status): status is PublicMcpToolStatus => isMcpToolId(status.toolId));
-    },
-    staleTime: MCP_STALE_TIME_MS,
-  });
-
   const servers = useMemo(() => {
     if (!data) return [];
     return [...data.servers].sort((a, b) => a.sortIndex - b.sortIndex);
@@ -50,7 +39,6 @@ export function useMcpServers() {
 
   const invalidate = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: STORE_KEY });
-    queryClient.invalidateQueries({ queryKey: STATUS_KEY });
   }, [queryClient]);
 
   const createMutation = useMutation({
@@ -97,7 +85,22 @@ export function useMcpServers() {
   });
 
   const importMutation = useMutation({
-    mutationFn: (toolId: McpToolId) => tauriInvoke("import_mcp_from_tool", { toolId }),
+    mutationFn: async () => {
+      const statuses = await tauriInvoke("mcp_tool_statuses");
+      const importable = statuses.filter(
+        (status): status is PublicMcpToolStatus =>
+          isMcpToolId(status.toolId) && status.installed && status.serverCount > 0,
+      );
+      let total = 0;
+      for (const status of importable) {
+        try {
+          total += await tauriInvoke("import_mcp_from_tool", { toolId: status.toolId });
+        } catch {
+          // Best effort: an explicit bulk import continues past unreadable tools.
+        }
+      }
+      return total;
+    },
     onSuccess: invalidate,
   });
 
@@ -120,12 +123,11 @@ export function useMcpServers() {
     [toggleMutation],
   );
   const syncAll = useCallback((force = false) => syncAllMutation.mutateAsync(force), [syncAllMutation]);
-  const importFromTool = useCallback((toolId: McpToolId) => importMutation.mutateAsync(toolId), [importMutation]);
+  const importFromTools = useCallback(() => importMutation.mutateAsync(), [importMutation]);
   const reorder = useCallback((orderedIds: string[]) => reorderMutation.mutateAsync(orderedIds), [reorderMutation]);
 
   return {
     servers,
-    toolStatuses: toolStatuses ?? [],
     isLoading,
     error: error ?? null,
     createServer,
@@ -133,7 +135,7 @@ export function useMcpServers() {
     deleteServer,
     toggleTool,
     syncAll,
-    importFromTool,
+    importFromTools,
     reorder,
     syncing: syncAllMutation.isPending,
     importing: importMutation.isPending,

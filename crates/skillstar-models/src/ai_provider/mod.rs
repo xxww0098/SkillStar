@@ -9,7 +9,6 @@ pub mod openai_client;
 pub mod resolve;
 pub mod scan_params;
 pub mod skill_pick;
-pub mod translate;
 
 #[allow(unused_imports)]
 pub use config::{AiConfig, AiProviderRef, ApiFormat, FormatPreset};

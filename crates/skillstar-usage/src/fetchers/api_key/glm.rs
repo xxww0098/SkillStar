@@ -10,10 +10,10 @@
 use chrono::{Duration, Timelike, Utc};
 use serde::Deserialize;
 use serde_json::Value;
-use crate::fingerprint::{DeviceFingerprint, Req, RequestError};
 use skillstar_providers::balance;
 
-use crate::http_client::usage_client_with_fingerprint;
+use crate::http_client::usage_http_client;
+use crate::request::{Req, RequestError};
 use crate::subscription::{CreditInfo, SubscriptionUsage, UsageWindow};
 use crate::{UsageError, UsageResult};
 
@@ -35,18 +35,14 @@ struct Envelope {
     data: Value,
 }
 
-pub async fn fetch(
-    subscription_id: &str,
-    api_key: &str,
-    fingerprint: Option<&DeviceFingerprint>,
-) -> UsageResult<SubscriptionUsage> {
-    let quota = fetch_quota(api_key, fingerprint).await?;
+pub async fn fetch(subscription_id: &str, api_key: &str) -> UsageResult<SubscriptionUsage> {
+    let quota = fetch_quota(api_key).await?;
     let model_url = format!("{GLM_MONITOR_BASE}/model-usage?{}", usage_time_query());
     let tool_url = format!("{GLM_MONITOR_BASE}/tool-usage?{}", usage_time_query());
 
     let (model_usage, tool_usage) = tokio::join!(
-        fetch_optional_json(api_key, fingerprint, &model_url),
-        fetch_optional_json(api_key, fingerprint, &tool_url),
+        fetch_optional_json(api_key, &model_url),
+        fetch_optional_json(api_key, &tool_url),
     );
 
     let plan_name = pick_plan_name(&quota.data);
@@ -81,31 +77,20 @@ pub async fn fetch(
     })
 }
 
-async fn fetch_quota(
-    api_key: &str,
-    fingerprint: Option<&DeviceFingerprint>,
-) -> UsageResult<Envelope> {
-    super::fetch_spec(&balance::GLM, api_key, fingerprint).await
+async fn fetch_quota(api_key: &str) -> UsageResult<Envelope> {
+    super::fetch_spec(&balance::GLM, api_key).await
 }
 
-async fn fetch_optional_json(
-    api_key: &str,
-    fingerprint: Option<&DeviceFingerprint>,
-    url: &str,
-) -> Option<Envelope> {
-    match fetch_monitor_json(api_key, fingerprint, url).await {
+async fn fetch_optional_json(api_key: &str, url: &str) -> Option<Envelope> {
+    match fetch_monitor_json(api_key, url).await {
         Ok(env) if env.success || env.code == 200 => Some(env),
         _ => None,
     }
 }
 
-async fn fetch_monitor_json(
-    api_key: &str,
-    fingerprint: Option<&DeviceFingerprint>,
-    url: &str,
-) -> UsageResult<Envelope> {
-    let client = usage_client_with_fingerprint(fingerprint)
-        .map_err(|e| UsageError::Fetcher(format!("GLM client: {e}")))?;
+async fn fetch_monitor_json(api_key: &str, url: &str) -> UsageResult<Envelope> {
+    let client =
+        usage_http_client().map_err(|e| UsageError::Fetcher(format!("GLM client: {e}")))?;
 
     Req::get(&client, url)
         .header("Authorization", api_key)
@@ -163,7 +148,12 @@ fn urlencoding(value: &str) -> String {
         .map(|c| match c {
             ' ' => "%20".to_string(),
             ':' => "%3A".to_string(),
-            other if other.is_ascii_alphanumeric() || other == '-' || other == '_' || other == '.' => {
+            other
+                if other.is_ascii_alphanumeric()
+                    || other == '-'
+                    || other == '_'
+                    || other == '.' =>
+            {
                 other.to_string()
             }
             other => format!("%{:02X}", other as u32),
@@ -171,7 +161,13 @@ fn urlencoding(value: &str) -> String {
         .collect()
 }
 
-fn parse_quota_windows(data: &Value) -> (Option<UsageWindow>, Option<UsageWindow>, Option<UsageWindow>) {
+fn parse_quota_windows(
+    data: &Value,
+) -> (
+    Option<UsageWindow>,
+    Option<UsageWindow>,
+    Option<UsageWindow>,
+) {
     if let Some(limits) = data.get("limits").and_then(Value::as_array)
         && !limits.is_empty()
     {
@@ -183,7 +179,13 @@ fn parse_quota_windows(data: &Value) -> (Option<UsageWindow>, Option<UsageWindow
     (hourly, weekly, None)
 }
 
-fn parse_limits_array(limits: &[Value]) -> (Option<UsageWindow>, Option<UsageWindow>, Option<UsageWindow>) {
+fn parse_limits_array(
+    limits: &[Value],
+) -> (
+    Option<UsageWindow>,
+    Option<UsageWindow>,
+    Option<UsageWindow>,
+) {
     let mut hourly = None;
     let mut weekly = None;
     let mut monthly = None;
@@ -318,13 +320,19 @@ fn parse_model_credits(data: &Value) -> Vec<CreditInfo> {
     let total = data.get("totalUsage").or_else(|| data.get("total_usage"));
 
     if let Some(tokens) = total
-        .and_then(|v| v.get("totalTokensUsage").or_else(|| v.get("total_tokens_usage")))
+        .and_then(|v| {
+            v.get("totalTokensUsage")
+                .or_else(|| v.get("total_tokens_usage"))
+        })
         .and_then(Value::as_i64)
     {
         credits.push(credit_count("glm-24h-tokens", tokens));
     }
     if let Some(calls) = total
-        .and_then(|v| v.get("totalModelCallCount").or_else(|| v.get("total_model_call_count")))
+        .and_then(|v| {
+            v.get("totalModelCallCount")
+                .or_else(|| v.get("total_model_call_count"))
+        })
         .and_then(Value::as_i64)
     {
         credits.push(credit_count("glm-24h-calls", calls));
@@ -390,7 +398,9 @@ fn credit_count(kind: &str, count: i64) -> CreditInfo {
 fn compute_used(total: Option<i64>, current: Option<i64>, remaining: Option<i64>) -> i64 {
     if let (Some(limit), Some(rem)) = (total, remaining) {
         let from_remaining = (limit - rem).max(0);
-        return current.map(|c| from_remaining.max(c)).unwrap_or(from_remaining);
+        return current
+            .map(|c| from_remaining.max(c))
+            .unwrap_or(from_remaining);
     }
     current.unwrap_or(0)
 }
@@ -523,11 +533,23 @@ mod tests {
         });
 
         let model_credits = parse_model_credits(&model);
-        assert!(model_credits.iter().any(|c| c.credit_type == "glm-24h-tokens"));
-        assert!(model_credits.iter().any(|c| c.credit_type == "glm-model:glm-4.7"));
+        assert!(
+            model_credits
+                .iter()
+                .any(|c| c.credit_type == "glm-24h-tokens")
+        );
+        assert!(
+            model_credits
+                .iter()
+                .any(|c| c.credit_type == "glm-model:glm-4.7")
+        );
 
         let tool_credits = parse_tool_credits(&tool);
-        assert!(tool_credits.iter().any(|c| c.credit_type == "glm-24h-network-search"));
+        assert!(
+            tool_credits
+                .iter()
+                .any(|c| c.credit_type == "glm-24h-network-search")
+        );
     }
 
     #[test]

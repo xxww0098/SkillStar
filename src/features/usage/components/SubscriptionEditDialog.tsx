@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { ModalShell } from "@/components/ui/ModalShell";
 import { openExternalUrl } from "@/lib/externalOpen";
 import { cn } from "@/lib/utils";
@@ -67,7 +66,6 @@ export function SubscriptionEditDialog({
   const [showPlatformToken, setShowPlatformToken] = useState(false);
   const [region, setRegion] = useState("cn");
   const [note, setNote] = useState("");
-  const [fingerprintId, setFingerprintId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [oauthStart, setOauthStart] = useState<OAuthStart | null>(null);
   const [oauthPendingId, setOauthPendingId] = useState<string | null>(null);
@@ -105,7 +103,6 @@ export function SubscriptionEditDialog({
       setPlatformToken("");
       setRegion(editing.oauth_region ?? "cn");
       setNote(editing.note ?? "");
-      setFingerprintId(editing.fingerprint_id ?? null);
     } else {
       const preselectedEntry = preselectCatalogId ? catalog.find((c) => c.id === preselectCatalogId) : null;
       const today = toDateInput(Math.floor(Date.now() / 1000));
@@ -125,7 +122,6 @@ export function SubscriptionEditDialog({
       setPlatformToken("");
       setRegion(preselectedEntry?.regions[0] ?? "cn");
       setNote("");
-      setFingerprintId(null);
     }
     setShowKey(false);
     setShowPlatformToken(false);
@@ -304,7 +300,6 @@ export function SubscriptionEditDialog({
           api_key: apiKeyPayload,
           platform_token: platformTokenPayload,
           oauth_region: authMode === "o-auth" ? region : undefined,
-          fingerprint_id: fingerprintId ?? undefined,
           ...payload,
         });
         onCreated(await refreshAfterCredentialSave(created));
@@ -314,11 +309,6 @@ export function SubscriptionEditDialog({
           ...payload,
           api_key: apiKeyPayload,
           platform_token: platformTokenPayload,
-          fingerprint_id: fingerprintId ?? undefined,
-          // When the user explicitly switched back to "默认" on an
-          // editing row that previously had a binding, we need to
-          // tell the backend to drop it.
-          clearFingerprint: !!editing.fingerprint_id && fingerprintId === null,
         });
         onUpdated(await refreshAfterCredentialSave(updated));
         toast.success(t("usage.toastUpdated"));
@@ -657,7 +647,7 @@ export function SubscriptionEditDialog({
               <button
                 type="button"
                 onClick={() => setShowAdvanced((v) => !v)}
-                className="flex w-full items-center justify-between rounded-xl border border-border bg-muted/40 px-4 py-2.5 text-xs font-semibold text-muted-foreground transition-all hover:bg-muted/60 hover:text-foreground"
+                className="flex w-full items-center justify-between rounded-xl border border-border bg-muted/50 px-4 py-2.5 text-xs font-semibold text-foreground/75 transition-all hover:bg-muted/70 hover:text-foreground"
               >
                 <span>⚙️ 付费及高级选项 (Advanced & Billing Settings)</span>
                 <ChevronDown
@@ -669,13 +659,10 @@ export function SubscriptionEditDialog({
                 <AdvancedBillingSection
                   selectedEntry={selectedEntry}
                   authMode={authMode}
-                  submitting={submitting}
                   displayName={displayName}
                   setDisplayName={setDisplayName}
                   planTier={planTier}
                   setPlanTier={setPlanTier}
-                  fingerprintId={fingerprintId}
-                  setFingerprintId={setFingerprintId}
                   billingCycleOptions={billingCycleOptions}
                   billingCycle={billingCycle}
                   setBillingCycle={setBillingCycle}

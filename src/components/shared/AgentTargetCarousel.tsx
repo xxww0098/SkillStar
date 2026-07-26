@@ -1,4 +1,5 @@
 import type { AgentProfile } from "../../types";
+import { isTargetableAgentProfile } from "../../lib/agentProfiles";
 import { agentIconCls, cn } from "../../lib/utils";
 import { AgentIcon } from "../ui/AgentIcon";
 import { HScrollRow } from "../ui/HScrollRow";
@@ -8,7 +9,7 @@ export type AgentTargetSelection = boolean | "mixed";
 export interface AgentTargetCarouselItem {
   /** Consumer-owned target id: an Agent profile id or an MCP tool id. */
   id: string;
-  profile: Pick<AgentProfile, "id" | "icon" | "display_name">;
+  profile: Pick<AgentProfile, "id" | "icon" | "display_name" | "enabled">;
   /** Resource-local selection; independent from the Settings enabled flag. */
   selected: AgentTargetSelection;
   title: string;
@@ -24,19 +25,21 @@ interface AgentTargetCarouselProps<T extends AgentTargetCarouselItem> {
 
 /**
  * Shared card rail for toggling one resource across targetable Agents.
- * Availability is projected before rendering; this component owns only the
- * consistent icon-button states and horizontal overflow behavior.
+ * Callers project capability-specific availability before rendering. The rail
+ * additionally filters on the sole local activation invariant (`enabled`) so a
+ * stale caller cannot expose a target the user has disabled in Settings.
  */
 export function AgentTargetCarousel<T extends AgentTargetCarouselItem>({
   items,
   onToggle,
   className,
 }: AgentTargetCarouselProps<T>) {
-  if (items.length === 0) return null;
+  const targetableItems = items.filter(({ profile }) => isTargetableAgentProfile(profile));
+  if (targetableItems.length === 0) return null;
 
   return (
-    <HScrollRow count={items.length} itemWidth={28} gap={6} className={cn("min-w-0 gap-1.5", className)}>
-      {items.map((item) => {
+    <HScrollRow count={targetableItems.length} itemWidth={28} gap={6} className={cn("min-w-0 gap-1.5", className)}>
+      {targetableItems.map((item) => {
         const active = item.selected === true;
         const partial = item.selected === "mixed";
         const disabled = item.pending || item.disabled;
@@ -55,7 +58,7 @@ export function AgentTargetCarousel<T extends AgentTargetCarouselItem>({
             aria-busy={item.pending || undefined}
             title={item.title}
             className={cn(
-              "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-lg border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-wait",
+              "relative flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-lg border transition-[background-color,border-color,box-shadow,transform] duration-200 active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-wait disabled:active:scale-100",
               active
                 ? "border-primary/40 bg-primary/10 shadow-[0_0_0_1px_rgba(var(--color-primary-rgb),0.15)] hover:bg-primary/20 hover:shadow-[0_0_0_1px_rgba(var(--color-primary-rgb),0.3)]"
                 : partial

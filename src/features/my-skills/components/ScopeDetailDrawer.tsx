@@ -2,8 +2,7 @@ import { lazy, Suspense } from "react";
 import { LoadingLogo } from "../../../components/ui/LoadingLogo";
 import type { RemoteSkill } from "../../../lib/ipc/commands/ssh";
 import type { AgentProfile, Skill, SkillContent } from "../../../types";
-// Deep import (not the ssh barrel) to avoid a my-skills <-> ssh barrel cycle.
-import { RemoteSkillDrawer } from "../../ssh/components/RemoteSkillDrawer";
+import { RemoteSkillDrawer } from "../remote/RemoteSkillDrawer";
 
 const DetailPanel = lazy(() =>
   import("../../../components/layout/DetailPanel").then((m) => ({ default: m.DetailPanel })),

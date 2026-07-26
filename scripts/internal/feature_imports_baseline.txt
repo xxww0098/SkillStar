@@ -1,29 +1,3 @@
-# Grandfathered cross-feature imports, one `file:line` entry per import line
-# (see check_feature_imports.sh). The guard FAILS on any NEW import that
-# reaches across a src/features/<a>/ -> src/features/<b>/ boundary, but only
-# WARNS on these. As each gets refactored (move the shared piece to
-# src/components or src/lib), delete its line here; once an entry no longer
-# matches anything the guard flags it as stale.
-#
-# Generated from an actual scan on 2026-07-03 (8 cross-feature imports).
-src/features/settings/sections/S3SyncSection.tsx:5
-src/features/settings/sections/S3SyncSection.tsx:6
-src/features/mcp/components/McpPublishers.tsx:21
-src/features/my-skills/components/ScopeDetailDrawer.tsx:6
-src/features/ssh/components/RemoteSkillPanel.tsx:18
-src/features/ssh/components/RemoteSkillPanel.tsx:19
-src/features/ssh/components/RemoteSkillPanel.tsx:20
-src/features/ssh/components/RemoteSkillPanel.tsx:21
-#
-# 2026-07-03 second pass: the original regex required a `/` after the feature
-# name, so bare barrel imports (`from "../../models"`) were invisible. After
-# fixing the pattern these 8 pre-existing imports surfaced; grandfathered
-# under the same shrink-only rule.
-src/features/my-skills/hooks/useMySkillsRemoteHosts.ts:3
-src/features/my-skills/hooks/useMySkillsRemoteHosts.ts:4
-src/features/settings/sections/FingerprintsSection.tsx:4
-src/features/settings/components/AppAiModelsPicker.tsx:21
-src/features/settings/components/AppAiModelsPicker.tsx:22
-src/features/settings/components/AppAiModelsPicker.tsx:23
-src/features/settings/components/AppAiModelsPicker.tsx:24
-src/features/usage/components/subscriptionEdit/AdvancedBillingSection.tsx:4
+# Grandfathered cross-feature deep imports, one `file:line` per import line.
+# The 2026-07-14 ownership migration eliminated the current debt. Keep this
+# empty file so future temporary baselines remain explicit and shrink-only.

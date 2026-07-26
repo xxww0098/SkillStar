@@ -185,6 +185,31 @@ export function formatRelativeSync(epoch: number, t: TFunction): string {
   return t("usage.lastSynced", { time: `${days}d` });
 }
 
+/**
+ * Card title: account identity only — drop a redundant catalog prefix such as
+ * `Grok · user@x.com` → `user@x.com` (logo / plan badge already name the vendor).
+ */
+export function subscriptionCardTitle(displayName: string, catalogDisplayName?: string | null): string {
+  const name = displayName.trim();
+  if (!name) return name;
+
+  if (catalogDisplayName) {
+    const prefix = `${catalogDisplayName.trim()} · `;
+    if (prefix.length > 3 && name.startsWith(prefix)) {
+      const rest = name.slice(prefix.length).trim();
+      if (rest) return rest;
+    }
+  }
+
+  // Legacy Grok OAuth names stored before bare-email titles.
+  if (name.startsWith("Grok · ")) {
+    const rest = name.slice("Grok · ".length).trim();
+    if (rest) return rest;
+  }
+
+  return name;
+}
+
 function windowUsedPercent(window: { used: number; total: number | null; percent: number | null }): number {
   if (window.percent != null) return window.percent;
   if (window.total && window.total > 0) return Math.round((window.used / window.total) * 100);

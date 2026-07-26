@@ -1,8 +1,8 @@
-pub mod db;
+mod db;
 pub mod mcp_models;
-pub mod mcp_remote;
+mod mcp_remote;
 pub mod mcp_snapshot;
-pub mod models;
+mod models;
 pub mod remote;
 pub mod snapshot;
 
@@ -30,3 +30,14 @@ pub use skillstar_core::types::skill::{
 pub use snapshot::{
     LocalFirstResult, MarketplacePack, SnapshotRuntimeConfig, SnapshotStatus, SyncStateEntry,
 };
+
+#[cfg(test)]
+mod contract_tests {
+    use super::Skill;
+
+    #[test]
+    fn marketplace_skill_is_the_core_contract() {
+        fn accepts_marketplace_skill(_: Skill) {}
+        let _: fn(skillstar_core::types::Skill) = accepts_marketplace_skill;
+    }
+}

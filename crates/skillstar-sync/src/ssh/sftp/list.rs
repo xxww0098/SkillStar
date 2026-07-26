@@ -10,7 +10,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::ssh::client::RemoteExec;
 use crate::ssh::hub::REMOTE_HUB_CONTENT;
-use crate::ssh::hub_scripts::{expand_remote_home, hub_skill_abs, shell_quote, validate_skill_name};
+use crate::ssh::hub_scripts::{
+    expand_remote_home, hub_skill_abs, shell_quote, validate_skill_name,
+};
 use crate::ssh::remote_fs::{RemoteDiscoveryFs, is_skill_entry};
 use crate::ssh::types::{RemoteSkill, RemoteSkillLayout};
 
@@ -98,10 +100,7 @@ const SKIP_HOME_DIRS: &[&str] = &[
 
 /// Whether a top-level `$HOME` entry should be skipped during discovery.
 pub(crate) fn should_skip_home_dir(name: &str) -> bool {
-    name == "."
-        || name == ".."
-        || !name.starts_with('.')
-        || SKIP_HOME_DIRS.contains(&name)
+    name == "." || name == ".." || !name.starts_with('.') || SKIP_HOME_DIRS.contains(&name)
 }
 
 /// Derive agent id from a hidden home dir (`.codex` → `codex`).
@@ -110,11 +109,7 @@ pub(crate) fn agent_id_from_home_dir(name: &str) -> Option<String> {
         return None;
     }
     let id = name.trim_start_matches('.').to_string();
-    if id.is_empty() {
-        None
-    } else {
-        Some(id)
-    }
+    if id.is_empty() { None } else { Some(id) }
 }
 
 /// Shell script used by [`resolve_skill_layout`] — extracted for unit tests.
@@ -290,10 +285,7 @@ async fn probe_has_skill_md<F: RemoteDiscoveryFs>(
     skill_name: &str,
     attrs: &russh_sftp::protocol::FileAttributes,
 ) -> bool {
-    if fs
-        .path_exists(&format!("{skill_path}/SKILL.md"))
-        .await
-    {
+    if fs.path_exists(&format!("{skill_path}/SKILL.md")).await {
         return true;
     }
     if attrs.is_symlink() {
@@ -493,10 +485,7 @@ mod tests {
 
     #[test]
     fn layout_classify_script_targets_hub_content() {
-        let script = layout_classify_shell_script(
-            "/root/.codex/skills/my-skill",
-            "my-skill",
-        );
+        let script = layout_classify_shell_script("/root/.codex/skills/my-skill", "my-skill");
         assert!(script.contains("hub/content/my-skill"));
         assert!(script.contains("hub_managed"));
         assert!(script.contains("readlink"));
@@ -721,7 +710,11 @@ mod tests {
         assert_eq!(result.skills.len(), 2);
         assert_eq!(result.needs_migration_count, 1);
 
-        let hub = result.skills.iter().find(|s| s.name == "hub-skill").unwrap();
+        let hub = result
+            .skills
+            .iter()
+            .find(|s| s.name == "hub-skill")
+            .unwrap();
         assert_eq!(hub.agent, "codex");
         assert_eq!(hub.layout, RemoteSkillLayout::HubManaged);
 

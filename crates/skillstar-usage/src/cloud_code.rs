@@ -121,12 +121,7 @@ pub async fn refresh_antigravity_access_token(
     refresh_token: &str,
 ) -> UsageResult<GoogleTokenResponse> {
     let oauth = crate::antigravity_oauth_config::antigravity_oauth_config()?;
-    refresh_google_access_token(
-        refresh_token,
-        &oauth.client_id,
-        &oauth.client_secret,
-    )
-    .await
+    refresh_google_access_token(refresh_token, &oauth.client_id, &oauth.client_secret).await
 }
 
 async fn refresh_google_access_token(
@@ -134,7 +129,7 @@ async fn refresh_google_access_token(
     client_id: &str,
     client_secret: &str,
 ) -> UsageResult<GoogleTokenResponse> {
-    let client = crate::http_client::usage_reqwest_with_active_fingerprint()?;
+    let client = crate::http_client::usage_http_client()?;
     let resp = client
         .post(TOKEN_URL)
         .form(&[
@@ -193,7 +188,7 @@ async fn load_code_assist_with_body(
     project_id: Option<&str>,
     mut payload: Value,
 ) -> UsageResult<LoadCodeAssistResult> {
-    let client = crate::http_client::usage_reqwest_with_active_fingerprint()?;
+    let client = crate::http_client::usage_http_client()?;
     let ua = cloud_code_user_agent();
     attach_code_assist_project(&mut payload, project_id);
 
@@ -260,7 +255,7 @@ pub async fn fetch_model_quotas(
     access_token: &str,
     project_id: Option<&str>,
 ) -> UsageResult<Vec<UsageWindow>> {
-    let client = crate::http_client::usage_reqwest_with_active_fingerprint()?;
+    let client = crate::http_client::usage_http_client()?;
     let ua = cloud_code_user_agent();
     let payload = project_id
         .filter(|s| !s.is_empty())

@@ -230,7 +230,7 @@ fn test_sync_provider_to_all_tools_isolation() {
 #[test]
 fn test_get_tool_config_targets_returns_both_tools() {
     let targets = get_tool_config_targets().unwrap();
-    assert_eq!(targets.len(), 4);
+    assert_eq!(targets.len(), 5);
 
     let claude_target = targets.iter().find(|t| t.tool_id == "claude-code").unwrap();
     assert_eq!(claude_target.display_name, "Claude Code");
@@ -243,6 +243,10 @@ fn test_get_tool_config_targets_returns_both_tools() {
     let gemini_target = targets.iter().find(|t| t.tool_id == "gemini").unwrap();
     assert_eq!(gemini_target.display_name, "Gemini CLI");
     assert!(gemini_target.config_path.contains(".gemini"));
+
+    let pi_target = targets.iter().find(|t| t.tool_id == "pi").unwrap();
+    assert_eq!(pi_target.display_name, "Pi");
+    assert!(pi_target.config_path.contains(".pi"));
 }
 
 // =========================================================================
@@ -648,16 +652,23 @@ fn test_codex_third_party_writes_env_key_and_disables_openai_auth() {
     let config_path = codex_dir.join("config.toml");
 
     let provider = make_test_provider_flat();
-    let activation =
-        make_codex_activation(&provider, CodexSettings {
+    let activation = make_codex_activation(
+        &provider,
+        CodexSettings {
             wire_api: "chat".to_string(),
             auth_mode: CODEX_AUTH_MODE_THIRD_PARTY.to_string(),
-        });
+        },
+    );
 
-    write_codex_config_flat(&config_path, &provider, &activation, &CodexSettings {
-        wire_api: "chat".to_string(),
-        auth_mode: CODEX_AUTH_MODE_THIRD_PARTY.to_string(),
-    })
+    write_codex_config_flat(
+        &config_path,
+        &provider,
+        &activation,
+        &CodexSettings {
+            wire_api: "chat".to_string(),
+            auth_mode: CODEX_AUTH_MODE_THIRD_PARTY.to_string(),
+        },
+    )
     .unwrap();
 
     let parsed: toml::Table =

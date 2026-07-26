@@ -53,9 +53,10 @@ struct DeviceId {
 fn device_id() -> Result<String> {
     let path = skillstar_core::infra::paths::sync_device_id_path();
     if let Ok(content) = std::fs::read_to_string(&path)
-        && let Ok(parsed) = serde_json::from_str::<DeviceId>(&content) {
-            return Ok(parsed.device_id);
-        }
+        && let Ok(parsed) = serde_json::from_str::<DeviceId>(&content)
+    {
+        return Ok(parsed.device_id);
+    }
     // Mint a new one: <hostname-or-fallback>-<8 hex>.
     let host = std::env::var("HOSTNAME")
         .or_else(|_| std::env::var("USER"))
@@ -67,7 +68,9 @@ fn device_id() -> Result<String> {
         })
         .collect();
     let id = format!("{host}-{suffix}");
-    let blob = serde_json::to_vec(&DeviceId { device_id: id.clone() })?;
+    let blob = serde_json::to_vec(&DeviceId {
+        device_id: id.clone(),
+    })?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -85,7 +88,12 @@ pub async fn push_all<S: SecretStore>(
     sink: &impl ProgressSink,
 ) -> Result<PushSummary> {
     let (target, client) = resolve_client(target_id, secrets)?;
-    sink.emit(event(session_id, Phase::ListLocal, Status::Start, "Enumerating local skills…"));
+    sink.emit(event(
+        session_id,
+        Phase::ListLocal,
+        Status::Start,
+        "Enumerating local skills…",
+    ));
 
     let skills = skillstar_skills::installed_skill::list_installed_skills()
         .await
@@ -103,17 +111,36 @@ pub async fn push_all<S: SecretStore>(
     let mut uploaded = 0usize;
     let mut skipped = 0usize;
     for s in &local {
-        sink.emit(event(session_id, Phase::Pack, Status::Start, format!("Packing '{}'…", s.name)));
+        sink.emit(event(
+            session_id,
+            Phase::Pack,
+            Status::Start,
+            format!("Packing '{}'…", s.name),
+        ));
         let packed = pack_skill(&s.name).with_context(|| format!("pack '{}'", s.name))?;
         let key = target.tarball_key(&s.name, &packed.sha256);
 
         // Content-addressed dedup: skip upload if the object already exists.
-        let exists = head_object(&client, &target.bucket, &key).await.unwrap_or(false);
+        let exists = head_object(&client, &target.bucket, &key)
+            .await
+            .unwrap_or(false);
         if exists {
             skipped += 1;
-            sink.emit(event(session_id, Phase::Upload, Status::Ok, format!("'{}' unchanged (cached)", s.name)));
+            sink.emit(event(
+                session_id,
+                Phase::Upload,
+                Status::Ok,
+                format!("'{}' unchanged (cached)", s.name),
+            ));
         } else {
-            put_object(&client, &target.bucket, &key, &packed.bytes, "application/gzip").await?;
+            put_object(
+                &client,
+                &target.bucket,
+                &key,
+                &packed.bytes,
+                "application/gzip",
+            )
+            .await?;
             uploaded += 1;
             sink.emit(event(
                 session_id,
@@ -144,8 +171,20 @@ pub async fn push_all<S: SecretStore>(
         Utc::now().to_rfc3339(),
     );
     let bytes = serialise(&manifest).context("serialise manifest")?;
-    put_object(&client, &target.bucket, &target.manifest_key(), &bytes, "application/json").await?;
-    sink.emit(event(session_id, Phase::UploadManifest, Status::Ok, "Manifest uploaded"));
+    put_object(
+        &client,
+        &target.bucket,
+        &target.manifest_key(),
+        &bytes,
+        "application/json",
+    )
+    .await?;
+    sink.emit(event(
+        session_id,
+        Phase::UploadManifest,
+        Status::Ok,
+        "Manifest uploaded",
+    ));
 
     let summary = crate::manifest::summarise_push(hub.len(), local.len(), uploaded, skipped, true);
     sink.emit(event_with_detail(
@@ -168,7 +207,12 @@ pub async fn pull_manifest<S: SecretStore>(
     sink: &impl ProgressSink,
 ) -> Result<Vec<ManifestEntryView>> {
     let (target, client) = resolve_client(target_id, secrets)?;
-    sink.emit(event(session_id, Phase::Scan, Status::Start, "Fetching manifest…"));
+    sink.emit(event(
+        session_id,
+        Phase::Scan,
+        Status::Start,
+        "Fetching manifest…",
+    ));
     let bytes = get_object(&client, &target.bucket, &target.manifest_key())
         .await
         .context("download manifest")?;
@@ -177,10 +221,19 @@ pub async fn pull_manifest<S: SecretStore>(
         session_id,
         Phase::Scan,
         Status::Ok,
-        format!("Manifest v{} with {} skills", manifest.version, manifest.skills.len()),
+        format!(
+            "Manifest v{} with {} skills",
+            manifest.version,
+            manifest.skills.len()
+        ),
     ));
     let views = annotate_installed(manifest);
-    sink.emit(event(session_id, Phase::Done, Status::Ok, format!("{} skills listed", views.len())));
+    sink.emit(event(
+        session_id,
+        Phase::Done,
+        Status::Ok,
+        format!("{} skills listed", views.len()),
+    ));
     Ok(views)
 }
 
@@ -210,12 +263,22 @@ pub async fn restore_entries<S: SecretStore>(
 
     for entry in entries {
         let name = entry.name().to_string();
-        sink.emit(event(session_id, Phase::Resolve, Status::Start, format!("Restoring '{name}'…")));
+        sink.emit(event(
+            session_id,
+            Phase::Resolve,
+            Status::Start,
+            format!("Restoring '{name}'…"),
+        ));
 
         if is_installed_locally(&name) {
             existing_names.push(name.clone());
             outcomes.push(InstallOutcome::Existing { name: name.clone() });
-            sink.emit(event(session_id, Phase::Resolve, Status::Ok, format!("'{name}' already installed")));
+            sink.emit(event(
+                session_id,
+                Phase::Resolve,
+                Status::Ok,
+                format!("'{name}' already installed"),
+            ));
             continue;
         }
 
@@ -225,37 +288,69 @@ pub async fn restore_entries<S: SecretStore>(
                 // install call's slice. Clippy's `from_ref` suggestion would borrow
                 // `name` here, which is fine, but the clone keeps the move explicit.
                 #[allow(clippy::cloned_ref_to_slice_refs)]
-                let batch_result =
-                    skillstar_skills::skill_install::install_skills_batch(&git_url, &[name.clone()]);
+                let batch_result = skillstar_skills::skill_install::install_skills_batch(
+                    &git_url,
+                    &[name.clone()],
+                );
                 match batch_result {
                     Ok(_) => {
                         installed_names.push(name.clone());
-                        sink.emit(event(session_id, Phase::Resolve, Status::Ok, format!("Installed '{name}' from git")));
+                        sink.emit(event(
+                            session_id,
+                            Phase::Resolve,
+                            Status::Ok,
+                            format!("Installed '{name}' from git"),
+                        ));
                         InstallOutcome::Installed { name }
                     }
                     Err(e) => {
                         let reason = format!("git install failed: {e}");
                         skipped_names.push(name.clone());
-                        sink.emit(event(session_id, Phase::Resolve, Status::Warn, reason.clone()));
+                        sink.emit(event(
+                            session_id,
+                            Phase::Resolve,
+                            Status::Warn,
+                            reason.clone(),
+                        ));
                         InstallOutcome::Skipped { name, reason }
                     }
                 }
             }
             ManifestEntry::Local { tarball_key, .. } => {
-                sink.emit(event(session_id, Phase::Download, Status::Start, format!("Downloading '{name}'…")));
+                sink.emit(event(
+                    session_id,
+                    Phase::Download,
+                    Status::Start,
+                    format!("Downloading '{name}'…"),
+                ));
                 match get_object(&client, &target.bucket, &tarball_key).await {
                     Ok(bytes) => {
-                        sink.emit(event(session_id, Phase::Unpack, Status::Start, format!("Unpacking '{name}'…")));
+                        sink.emit(event(
+                            session_id,
+                            Phase::Unpack,
+                            Status::Start,
+                            format!("Unpacking '{name}'…"),
+                        ));
                         match unpack_skill(&name, &bytes) {
                             Ok(_) => {
                                 restored_names.push(name.clone());
-                                sink.emit(event(session_id, Phase::Unpack, Status::Ok, format!("Restored '{name}'")));
+                                sink.emit(event(
+                                    session_id,
+                                    Phase::Unpack,
+                                    Status::Ok,
+                                    format!("Restored '{name}'"),
+                                ));
                                 InstallOutcome::Restored { name }
                             }
                             Err(e) => {
                                 let reason = format!("unpack failed: {e}");
                                 skipped_names.push(name.clone());
-                                sink.emit(event(session_id, Phase::Unpack, Status::Warn, reason.clone()));
+                                sink.emit(event(
+                                    session_id,
+                                    Phase::Unpack,
+                                    Status::Warn,
+                                    reason.clone(),
+                                ));
                                 InstallOutcome::Skipped { name, reason }
                             }
                         }
@@ -263,7 +358,12 @@ pub async fn restore_entries<S: SecretStore>(
                     Err(e) => {
                         let reason = format!("download failed: {e}");
                         skipped_names.push(name.clone());
-                        sink.emit(event(session_id, Phase::Download, Status::Warn, reason.clone()));
+                        sink.emit(event(
+                            session_id,
+                            Phase::Download,
+                            Status::Warn,
+                            reason.clone(),
+                        ));
                         InstallOutcome::Skipped { name, reason }
                     }
                 }
@@ -282,7 +382,12 @@ pub async fn restore_entries<S: SecretStore>(
         skipped_names,
         outcomes,
     };
-    sink.emit(event(session_id, Phase::Done, Status::Ok, "Restore complete"));
+    sink.emit(event(
+        session_id,
+        Phase::Done,
+        Status::Ok,
+        "Restore complete",
+    ));
     Ok(summary)
 }
 

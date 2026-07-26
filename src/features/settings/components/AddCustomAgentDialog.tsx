@@ -93,7 +93,7 @@ export function AddCustomAgentDialog({ open, onClose, onConfirm, initialData, on
       if (!/^\.[a-zA-Z0-9_-]+\/skills$/.test(parsedProject)) {
         toast.error(
           t("settings.invalidProjectPathPattern", {
-            defaultValue: "Project skill path must strictly follow the format '.agent/skills'",
+            defaultValue: "Project skill path must strictly follow the format '.agents/skills'",
           }),
         );
         return;

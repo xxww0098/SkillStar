@@ -1,7 +1,7 @@
-use skillstar_skills::installed_skill;
 use skillstar_core::infra::error::AppError;
 use skillstar_skills::agents as agent_profile;
 use skillstar_skills::deployment;
+use skillstar_skills::installed_skill;
 
 #[tauri::command]
 pub async fn list_agent_profiles() -> Result<Vec<agent_profile::AgentProfile>, AppError> {

@@ -61,7 +61,9 @@ pub async fn import_system_host(alias: String) -> Result<SshHostDef, AppError> {
         default_remote_dir: String::new(),
     };
     let store = HostsStore::new(KeyringSecretStore);
-    store.add(def, None).map_err(|e| AppError::Ssh(e.to_string()))
+    store
+        .add(def, None)
+        .map_err(|e| AppError::Ssh(e.to_string()))
 }
 
 /// Add a new SSH host. `credential` is the passphrase (for key auth) or

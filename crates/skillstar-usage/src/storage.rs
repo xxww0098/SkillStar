@@ -12,9 +12,9 @@
 //! negligible.
 
 use std::collections::{HashMap, HashSet};
-use std::fs;
+use std::fs::{self, File, OpenOptions};
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -22,9 +22,40 @@ use serde::{Deserialize, Serialize};
 use crate::subscription::{Subscription, SubscriptionUsage};
 use crate::{UsageError, UsageResult};
 
-/// Coarse-grained mutex serializing all file writes. The volume is tiny so
-/// a single global is fine; OAuth callback handlers may race otherwise.
+/// Coarse-grained in-process mutex paired with an OS file lock. The volume is
+/// tiny, and the pair prevents OAuth callbacks and a second SkillStar process
+/// from losing each other's read-modify-write updates.
 static STORAGE_LOCK: Mutex<()> = Mutex::new(());
+
+struct StorageWriteGuard {
+    _process: MutexGuard<'static, ()>,
+    _file: File,
+}
+
+fn storage_write_guard() -> UsageResult<StorageWriteGuard> {
+    let process = STORAGE_LOCK
+        .lock()
+        .map_err(|_| UsageError::Other("usage storage lock poisoned".into()))?;
+    let path = usage_dir().join(".storage.lock");
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options.open(&path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
+    }
+    file.lock()?;
+    Ok(StorageWriteGuard {
+        _process: process,
+        _file: file,
+    })
+}
 
 fn usage_dir() -> PathBuf {
     let dir = skillstar_core::infra::paths::config_dir().join("usage");
@@ -79,8 +110,7 @@ fn read_json<T: for<'de> Deserialize<'de> + Default>(path: &PathBuf) -> UsageRes
     Ok(serde_json::from_str(&raw)?)
 }
 
-fn write_json<T: Serialize>(path: &PathBuf, value: &T) -> UsageResult<()> {
-    let _guard = STORAGE_LOCK.lock().expect("storage lock poisoned");
+fn write_json_unlocked<T: Serialize>(path: &PathBuf, value: &T) -> UsageResult<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -94,14 +124,16 @@ fn write_json<T: Serialize>(path: &PathBuf, value: &T) -> UsageResult<()> {
 // ── Subscriptions ─────────────────────────────────────────────────────
 
 pub fn list_subscriptions() -> UsageResult<Vec<Subscription>> {
-    let file: SubscriptionsFile = read_json(&subscriptions_path())?;
+    let _guard = storage_write_guard()?;
+    let path = subscriptions_path();
+    let file: SubscriptionsFile = read_json(&path)?;
     let mut subs = file.subscriptions;
     // Drop rows whose catalog was removed (e.g. former qoder / trae usage entries).
     let before = subs.len();
     subs.retain(|s| crate::catalog::find(&s.catalog_id).is_some());
     if subs.len() != before {
-        let _ = write_json(
-            &subscriptions_path(),
+        let _ = write_json_unlocked(
+            &path,
             &SubscriptionsFile {
                 subscriptions: subs.clone(),
             },
@@ -119,7 +151,15 @@ pub fn get_subscription(id: &str) -> UsageResult<Subscription> {
 }
 
 pub fn upsert_subscription(mut sub: Subscription) -> UsageResult<Subscription> {
-    let mut subs = list_subscriptions()?;
+    // Keep the full read-modify-write under the same lock used by narrow
+    // credential patches. Otherwise an OAuth callback could read a stale row,
+    // wait for a switch patch to finish, then overwrite the rotated token.
+    let _guard = storage_write_guard()?;
+    let path = subscriptions_path();
+    let mut file: SubscriptionsFile = read_json(&path)?;
+    file.subscriptions
+        .retain(|stored| crate::catalog::find(&stored.catalog_id).is_some());
+    let subs = &mut file.subscriptions;
     let now = Utc::now().timestamp();
     if let Some(existing) = subs.iter_mut().find(|s| s.id == sub.id) {
         sub.created_at = existing.created_at;
@@ -140,54 +180,109 @@ pub fn upsert_subscription(mut sub: Subscription) -> UsageResult<Subscription> {
         }
         subs.push(sub.clone());
     }
-    write_json(
-        &subscriptions_path(),
-        &SubscriptionsFile {
-            subscriptions: subs,
-        },
-    )?;
+    write_json_unlocked(&path, &file)?;
     Ok(sub)
 }
 
+/// Persist only OAuth credential fields from `source` onto its stored row.
+///
+/// Account switching and token refresh can race with edits to display/note/
+/// sort metadata. Replacing the whole [`Subscription`] from a stale clone
+/// would lose those unrelated changes, so this patch performs one locked
+/// read-modify-write and deliberately leaves every non-credential field
+/// untouched.
+pub fn patch_oauth_credentials(source: &Subscription) -> UsageResult<Subscription> {
+    let _guard = storage_write_guard()?;
+    let path = subscriptions_path();
+    let mut file: SubscriptionsFile = read_json(&path)?;
+    let target = file
+        .subscriptions
+        .iter_mut()
+        .find(|sub| sub.id == source.id)
+        .ok_or_else(|| UsageError::NotFound(source.id.clone()))?;
+
+    apply_oauth_credentials(target, source);
+    target.updated_at = Utc::now().timestamp();
+    let saved = target.clone();
+
+    write_json_unlocked(&path, &file)?;
+    Ok(saved)
+}
+
+/// Persist only fields a fetcher is allowed to rotate or normalize.
+///
+/// A refresh can spend seconds on the network. Writing its stale full row
+/// afterwards would undo concurrent note/price/order edits, so refresh callers
+/// use this locked patch instead of [`upsert_subscription`].
+pub fn patch_fetcher_state(source: &Subscription) -> UsageResult<Subscription> {
+    let _guard = storage_write_guard()?;
+    let path = subscriptions_path();
+    let mut file: SubscriptionsFile = read_json(&path)?;
+    let target = file
+        .subscriptions
+        .iter_mut()
+        .find(|sub| sub.id == source.id)
+        .ok_or_else(|| UsageError::NotFound(source.id.clone()))?;
+
+    apply_fetcher_state(target, source);
+    target.updated_at = Utc::now().timestamp();
+    let saved = target.clone();
+
+    write_json_unlocked(&path, &file)?;
+    Ok(saved)
+}
+
+fn apply_fetcher_state(target: &mut Subscription, source: &Subscription) {
+    apply_oauth_credentials(target, source);
+    target.display_name = source.display_name.clone();
+    target.note = source.note.clone();
+    target.cookie_session_expires_at = source.cookie_session_expires_at;
+}
+
+fn apply_oauth_credentials(target: &mut Subscription, source: &Subscription) {
+    target.access_token_encrypted = source.access_token_encrypted.clone();
+    target.refresh_token_encrypted = source.refresh_token_encrypted.clone();
+    target.access_token_expires_at = source.access_token_expires_at;
+    target.id_token_encrypted = source.id_token_encrypted.clone();
+    target.oauth_account_id = source.oauth_account_id.clone();
+    target.requires_reauth = source.requires_reauth;
+}
+
 pub fn delete_subscription(id: &str) -> UsageResult<()> {
-    let mut subs = list_subscriptions()?;
-    let len_before = subs.len();
-    subs.retain(|s| s.id != id);
-    if subs.len() == len_before {
+    let _guard = storage_write_guard()?;
+    let subscriptions_path = subscriptions_path();
+    let mut subscriptions: SubscriptionsFile = read_json(&subscriptions_path)?;
+    let len_before = subscriptions.subscriptions.len();
+    subscriptions.subscriptions.retain(|s| s.id != id);
+    if subscriptions.subscriptions.len() == len_before {
         return Err(UsageError::NotFound(id.to_string()));
     }
-    write_json(
-        &subscriptions_path(),
-        &SubscriptionsFile {
-            subscriptions: subs,
-        },
-    )?;
-    // Also drop any cached usage snapshot.
+    write_json_unlocked(&subscriptions_path, &subscriptions)?;
+
     let mut snapshots = read_usage_snapshots_file()?;
     snapshots.snapshots.remove(id);
-    write_json(&usage_snapshots_path(), &snapshots)?;
-    // Garbage-collect active-per-catalog bindings pointing at this row.
-    let _ = prune_active_bindings_for(id);
+    write_json_unlocked(&usage_snapshots_path(), &snapshots)?;
+
+    let mut active = read_active_per_catalog_file()?;
+    active.active.retain(|_, sub_id| sub_id != id);
+    write_json_unlocked(&active_per_catalog_path(), &active)?;
     Ok(())
 }
 
 /// Reorder subscriptions by the given id sequence. Ids missing from the slice
 /// keep their existing sort_index but are pushed to the end.
 pub fn reorder_subscriptions(ordered_ids: &[String]) -> UsageResult<()> {
-    let mut subs = list_subscriptions()?;
+    let _guard = storage_write_guard()?;
+    let path = subscriptions_path();
+    let mut file: SubscriptionsFile = read_json(&path)?;
     let now = Utc::now().timestamp();
     for (idx, id) in ordered_ids.iter().enumerate() {
-        if let Some(s) = subs.iter_mut().find(|s| &s.id == id) {
+        if let Some(s) = file.subscriptions.iter_mut().find(|s| &s.id == id) {
             s.sort_index = idx as i32;
             s.updated_at = now;
         }
     }
-    write_json(
-        &subscriptions_path(),
-        &SubscriptionsFile {
-            subscriptions: subs,
-        },
-    )?;
+    write_json_unlocked(&path, &file)?;
     Ok(())
 }
 
@@ -206,9 +301,21 @@ pub fn list_usage_snapshots() -> UsageResult<HashMap<String, SubscriptionUsage>>
 }
 
 pub fn save_usage_snapshot(usage: SubscriptionUsage) -> UsageResult<()> {
-    let mut file = read_usage_snapshots_file()?;
+    let _guard = storage_write_guard()?;
+    let path = usage_snapshots_path();
+    let mut file: UsageSnapshotsFile = read_json(&path)?;
     file.snapshots.insert(usage.subscription_id.clone(), usage);
-    write_json(&usage_snapshots_path(), &file)?;
+    write_json_unlocked(&path, &file)?;
+    Ok(())
+}
+
+pub fn delete_usage_snapshot(subscription_id: &str) -> UsageResult<()> {
+    let _guard = storage_write_guard()?;
+    let path = usage_snapshots_path();
+    let mut file: UsageSnapshotsFile = read_json(&path)?;
+    if file.snapshots.remove(subscription_id).is_some() {
+        write_json_unlocked(&path, &file)?;
+    }
     Ok(())
 }
 
@@ -220,9 +327,11 @@ pub fn dismissed_alert_ids() -> UsageResult<HashSet<String>> {
 }
 
 pub fn dismiss_alert(alert_id: &str) -> UsageResult<()> {
-    let mut file: AlertsDismissedFile = read_json(&alerts_dismissed_path())?;
+    let _guard = storage_write_guard()?;
+    let path = alerts_dismissed_path();
+    let mut file: AlertsDismissedFile = read_json(&path)?;
     file.dismissed.insert(alert_id.to_string());
-    write_json(&alerts_dismissed_path(), &file)?;
+    write_json_unlocked(&path, &file)?;
     Ok(())
 }
 
@@ -261,8 +370,16 @@ pub fn get_active_subscription(catalog_id: &str) -> UsageResult<Option<String>> 
 /// that the subscription exists and actually belongs to this catalog so
 /// the store can't get out-of-sync with reality.
 pub fn set_active_subscription(catalog_id: &str, subscription_id: &str) -> UsageResult<()> {
-    // Validate consistency.
-    let sub = get_subscription(subscription_id)?;
+    // Validate + patch the shared map under one storage lock. Activations for
+    // two different catalogs use different refresh guards and may run in
+    // parallel; a split read/write here would let one erase the other's pin.
+    let _guard = storage_write_guard()?;
+    let subscriptions: SubscriptionsFile = read_json(&subscriptions_path())?;
+    let sub = subscriptions
+        .subscriptions
+        .iter()
+        .find(|sub| sub.id == subscription_id)
+        .ok_or_else(|| UsageError::NotFound(subscription_id.to_string()))?;
     if sub.catalog_id != catalog_id {
         return Err(UsageError::Other(format!(
             "订阅 {} 的 catalog 是 {}，不匹配 {}",
@@ -272,27 +389,105 @@ pub fn set_active_subscription(catalog_id: &str, subscription_id: &str) -> Usage
     let mut file = read_active_per_catalog_file()?;
     file.active
         .insert(catalog_id.to_string(), subscription_id.to_string());
-    write_json(&active_per_catalog_path(), &file)?;
+    write_json_unlocked(&active_per_catalog_path(), &file)?;
     Ok(())
 }
 
 /// Drop the binding for `catalog_id` (UI defaults back to nothing pinned).
 pub fn clear_active_subscription(catalog_id: &str) -> UsageResult<()> {
+    let _guard = storage_write_guard()?;
     let mut file = read_active_per_catalog_file()?;
     if file.active.remove(catalog_id).is_some() {
-        write_json(&active_per_catalog_path(), &file)?;
+        write_json_unlocked(&active_per_catalog_path(), &file)?;
     }
     Ok(())
 }
 
-/// Garbage-collect bindings whose subscription has been deleted or whose
-/// catalog id no longer matches. Called from `delete_subscription`.
-fn prune_active_bindings_for(deleted_sub_id: &str) -> UsageResult<()> {
-    let mut file = read_active_per_catalog_file()?;
-    let before = file.active.len();
-    file.active.retain(|_, sub_id| sub_id != deleted_sub_id);
-    if file.active.len() != before {
-        write_json(&active_per_catalog_path(), &file)?;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::catalog::AuthMode;
+    use crate::subscription::BillingCycle;
+
+    fn subscription(id: &str) -> Subscription {
+        Subscription {
+            id: id.into(),
+            catalog_id: "xai".into(),
+            display_name: "alice@example.com".into(),
+            auth_mode: AuthMode::OAuth,
+            plan_tier: None,
+            monthly_price: None,
+            currency: "USD".into(),
+            billing_cycle: BillingCycle::Monthly,
+            start_date: 0,
+            renew_date: 0,
+            auto_renew: false,
+            api_key_encrypted: None,
+            platform_token_encrypted: None,
+            access_token_encrypted: Some("old-access".into()),
+            refresh_token_encrypted: Some("old-refresh".into()),
+            access_token_expires_at: Some(1),
+            id_token_encrypted: None,
+            oauth_account_id: Some("old-user".into()),
+            oauth_region: None,
+            requires_reauth: false,
+            cookie_jar_encrypted: None,
+            cookie_session_expires_at: None,
+            manual_quota: None,
+            note: Some("keep this metadata".into()),
+            sort_index: 7,
+            created_at: 10,
+            updated_at: 20,
+        }
     }
-    Ok(())
+
+    #[test]
+    fn oauth_credential_patch_keeps_unrelated_subscription_metadata() {
+        let mut stored = subscription("sub-1");
+        let mut refreshed = stored.clone();
+        refreshed.display_name = "stale title".into();
+        refreshed.note = Some("stale note".into());
+        refreshed.sort_index = 99;
+        refreshed.access_token_encrypted = Some("new-access".into());
+        refreshed.refresh_token_encrypted = Some("new-refresh".into());
+        refreshed.access_token_expires_at = Some(999);
+        refreshed.oauth_account_id = Some("new-user".into());
+        refreshed.requires_reauth = true;
+
+        apply_oauth_credentials(&mut stored, &refreshed);
+
+        assert_eq!(stored.access_token_encrypted.as_deref(), Some("new-access"));
+        assert_eq!(
+            stored.refresh_token_encrypted.as_deref(),
+            Some("new-refresh")
+        );
+        assert_eq!(stored.access_token_expires_at, Some(999));
+        assert_eq!(stored.oauth_account_id.as_deref(), Some("new-user"));
+        assert!(stored.requires_reauth);
+        assert_eq!(stored.display_name, "alice@example.com");
+        assert_eq!(stored.note.as_deref(), Some("keep this metadata"));
+        assert_eq!(stored.sort_index, 7);
+    }
+
+    #[test]
+    fn fetcher_patch_updates_runtime_state_without_replacing_billing_or_order() {
+        let mut stored = subscription("sub-1");
+        stored.monthly_price = Some(20.0);
+        let mut refreshed = stored.clone();
+        refreshed.access_token_encrypted = Some("new-access".into());
+        refreshed.display_name = "normalized@example.com".into();
+        refreshed.note = Some("fetcher-project-id".into());
+        refreshed.cookie_session_expires_at = Some(999);
+        refreshed.monthly_price = Some(999.0);
+        refreshed.sort_index = 99;
+
+        apply_fetcher_state(&mut stored, &refreshed);
+
+        assert_eq!(stored.access_token_encrypted.as_deref(), Some("new-access"));
+        assert_eq!(stored.display_name, "normalized@example.com");
+        assert_eq!(stored.note.as_deref(), Some("fetcher-project-id"));
+        assert_eq!(stored.cookie_session_expires_at, Some(999));
+        assert_eq!(stored.monthly_price, Some(20.0));
+        assert_eq!(stored.sort_index, 7);
+    }
 }

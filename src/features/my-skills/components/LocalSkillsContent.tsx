@@ -8,7 +8,7 @@ import { LoadingLogo } from "../../../components/ui/LoadingLogo";
 import { useAgentProfiles } from "../../../hooks/useAgentProfiles";
 import { useSkillsSelectionShortcuts } from "../../../hooks/useSkillsSelectionShortcuts";
 import { useViewMode } from "../../../hooks/useViewMode";
-import { selectTargetableAgentProfiles, supportsProjectDeploy } from "../../../lib/agentProfiles";
+import { selectTargetableAgentProfiles, supportsGlobalDeploy, supportsProjectDeploy } from "../../../lib/agentProfiles";
 import { tauriInvoke } from "../../../lib/ipc";
 import { toast } from "../../../lib/toast";
 import { navigateToSettingsSection } from "../../../lib/utils";
@@ -42,7 +42,7 @@ interface LocalSkillsContentProps {
 /**
  * Local (hub + filesystem) skill workspace. Self-contained: owns its own toolbar
  * (concrete callbacks, zero scope conditionals), selection/batch state, detail
- * drawer, and modals. Twin of {@link import("../../ssh").RemoteSkillsContent}.
+ * drawer, and modals. Twin of {@link import("../remote/RemoteSkillsContent").RemoteSkillsContent}.
  */
 export function LocalSkillsContent({
   scopeSwitch,
@@ -66,7 +66,6 @@ export function LocalSkillsContent({
     readSkillContent,
     updateSkillContent,
     batchRemoveSkillsFromAllAgents,
-    batchAiProcessSkills,
     ghostSkills,
     dismissGhostSkill,
     dismissGhostRepo,
@@ -87,6 +86,8 @@ export function LocalSkillsContent({
   const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [uninstallDialogOpen, setUninstallDialogOpen] = useState(false);
   const [pendingUninstallNames, setPendingUninstallNames] = useState<string[]>([]);
+  /** When set, a successful uninstall also dismisses ghost skills for this repo source. */
+  const [pendingRemoveSource, setPendingRemoveSource] = useState<string | null>(null);
   const [uninstalling, setUninstalling] = useState(false);
   const [uninstallError, setUninstallError] = useState<string | null>(null);
   const [importModalOpen, setImportModalOpen] = useState(false);
@@ -112,6 +113,26 @@ export function LocalSkillsContent({
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [skills]);
+
+  /** Full skill universe for Spotlight (client-side title/description/source match). */
+  const spotlightItems = useMemo(
+    () =>
+      skills.map((skill) => ({
+        id: skill.name,
+        title: skill.name,
+        subtitle: skill.localized_description || skill.description || undefined,
+        meta: skill.source,
+      })),
+    [skills],
+  );
+
+  const handleSpotlightSelect = useCallback(
+    (id: string) => {
+      const skill = skills.find((s) => s.name === id);
+      if (skill) setSelectedSkill(skill);
+    },
+    [skills],
+  );
 
   // Convert a ghost skill into a synthetic Skill for the detail drawer
   const handleGhostClick = useCallback((ghost: RepoNewSkill) => {
@@ -222,8 +243,12 @@ export function LocalSkillsContent({
   // Stable Settings-backed target list for filters, cards, selection actions,
   // and project deployment. Persisted `enabled` alone is insufficient because
   // it may remain true after an Agent is uninstalled.
-  const enabledProfiles = useMemo(() => selectTargetableAgentProfiles(profiles), [profiles]);
-  const compatibleSelectionProfiles = useMemo(() => enabledProfiles.filter(supportsProjectDeploy), [enabledProfiles]);
+  const targetableProfiles = useMemo(() => selectTargetableAgentProfiles(profiles), [profiles]);
+  const enabledProfiles = useMemo(() => targetableProfiles.filter(supportsGlobalDeploy), [targetableProfiles]);
+  const compatibleSelectionProfiles = useMemo(
+    () => targetableProfiles.filter(supportsProjectDeploy),
+    [targetableProfiles],
+  );
 
   const handleInstall = async (url: string) => {
     try {
@@ -276,10 +301,11 @@ export function LocalSkillsContent({
     });
   }, []);
 
-  const openUninstallDialog = useCallback((names: Iterable<string>) => {
+  const openUninstallDialog = useCallback((names: Iterable<string>, removeSource: string | null = null) => {
     const nextNames = Array.from(new Set(names));
     if (nextNames.length === 0) return;
     setPendingUninstallNames(nextNames);
+    setPendingRemoveSource(removeSource);
     setUninstallError(null);
     setUninstallDialogOpen(true);
   }, []);
@@ -287,6 +313,7 @@ export function LocalSkillsContent({
   const closeUninstallDialog = useCallback(() => {
     if (uninstalling) return;
     setPendingUninstallNames([]);
+    setPendingRemoveSource(null);
     setUninstallError(null);
     setUninstallDialogOpen(false);
   }, [uninstalling]);
@@ -302,11 +329,23 @@ export function LocalSkillsContent({
     openUninstallDialog(selectedSkillNames);
   }, [openUninstallDialog, selectedSkillNames]);
 
+  /** Uninstall every installed skill that came from a given repo source. */
+  const handleRemoveRepoSource = useCallback(
+    (source: string) => {
+      const names = skills.filter((skill) => skill.source === source).map((skill) => skill.name);
+      if (names.length === 0) return;
+      if (repoFilter === source) setRepoFilter(null);
+      openUninstallDialog(names, source);
+    },
+    [openUninstallDialog, repoFilter, skills],
+  );
+
   const confirmUninstall = useCallback(async () => {
     if (pendingUninstallNames.length === 0) return;
 
     setUninstalling(true);
     const failedNames: string[] = [];
+    const sourceToClean = pendingRemoveSource;
 
     for (const name of pendingUninstallNames) {
       try {
@@ -321,6 +360,13 @@ export function LocalSkillsContent({
     setUninstalling(false);
 
     if (failedNames.length === 0) {
+      if (sourceToClean) {
+        try {
+          await dismissGhostRepo(sourceToClean);
+        } catch {
+          // Ghost dismiss is best-effort; installed skills already removed.
+        }
+      }
       closeUninstallDialog();
       return;
     }
@@ -331,7 +377,15 @@ export function LocalSkillsContent({
         ? t("mySkills.batchUninstallFailed", { name: failedNames[0], count: 1 })
         : t("mySkills.batchUninstallFailed", { name: failedNames[0], count: failedNames.length }),
     );
-  }, [closeUninstallDialog, pendingUninstallNames, removeSkillFromUi, uninstallSkill, t]);
+  }, [
+    closeUninstallDialog,
+    dismissGhostRepo,
+    pendingRemoveSource,
+    pendingUninstallNames,
+    removeSkillFromUi,
+    uninstallSkill,
+    t,
+  ]);
 
   const handleBatchUpdate = async () => {
     // Only update skills that actually have updates available (skip local skills)
@@ -559,6 +613,8 @@ export function LocalSkillsContent({
           }
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
+          searchItems={spotlightItems}
+          onSearchSelect={handleSpotlightSelect}
           sortBy={sortBy}
           onSortChange={setSortBy}
           viewMode={viewMode}
@@ -588,6 +644,7 @@ export function LocalSkillsContent({
           isUpdatingAll={isUpdatingAll}
           repoSources={repoSources}
           repoFilter={repoFilter}
+          onRemoveRepoSource={handleRemoveRepoSource}
           showUpdateOnly={showUpdateOnly}
           onToggleUpdateOnly={() => setShowUpdateOnly((prev) => !prev)}
           pendingUpdateCount={pendingUpdateCount}
@@ -613,17 +670,6 @@ export function LocalSkillsContent({
               agentProfiles={compatibleSelectionProfiles}
               onBatchLink={handleBatchLink}
               onBatchUnlinkAll={handleBatchUnlinkAll}
-              onBatchAiProcess={async () => {
-                try {
-                  setBatchLoading(true);
-                  await batchAiProcessSkills(Array.from(selectedSkillNames));
-                  clearSelection();
-                } catch (e) {
-                  toast.error(t("mySkills.batchAiError", { defaultValue: "Failed to start AI processing" }));
-                } finally {
-                  setBatchLoading(false);
-                }
-              }}
             />
           )}
         </AnimatePresence>

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import {
@@ -13,8 +14,9 @@ import {
   pickRemainingTone,
   canonicalizeAntigravityModelName,
 } from "../lib/usageLabels";
+import { windowRendersOwnReset } from "../lib/resetOwnership";
 import type { UsageWindow } from "../types";
-import { ProgressTrack } from "./card/primitives";
+import { MeterFigure, ProgressTrack, UsageMeter } from "./card/primitives";
 import { ResetCountdown } from "./ResetCountdown";
 
 interface UsageWindowBarProps {
@@ -23,8 +25,9 @@ interface UsageWindowBarProps {
 }
 
 /**
- * Renders a usage quota bar. Monetary windows with breakdown (Cursor) use a
- * structured stat layout; everything else uses a labeled simple bar.
+ * Renders a usage quota bar. Every non-compact window flows through the shared
+ * `UsageMeter` grammar so monetary, absolute, and percent-only quotas read as
+ * one system across providers; compact windows stay a slim category row.
  */
 export function UsageWindowBar({ window, compact }: UsageWindowBarProps) {
   if (compact) {
@@ -46,6 +49,24 @@ export function UsageWindowBar({ window, compact }: UsageWindowBarProps) {
   return <UsageSimpleWindow window={window} />;
 }
 
+/** Nested per-category breakdown, shared by monetary + percent parent windows. */
+function BreakdownBlock({ breakdown }: { breakdown: UsageWindow[] }) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-2 rounded-xl border border-zinc-200/70 bg-zinc-50/60 p-2.5">
+      <div>
+        <p className="text-[10px] font-bold text-zinc-800">{t("usage.usageByCategory")}</p>
+        <p className="mt-0.5 text-[10px] leading-snug text-zinc-500">{t("usage.categoryUsageHint")}</p>
+      </div>
+      <div className="space-y-2.5">
+        {breakdown.map((sub, i) => (
+          <UsageWindowBar key={`${sub.label}-${i}`} window={sub} compact />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function UsageQuotaPanel({ window }: { window: UsageWindow }) {
   const { t } = useTranslation();
   const percent = clamp(window.percent ?? computePercent(window.used, window.total));
@@ -53,90 +74,48 @@ function UsageQuotaPanel({ window }: { window: UsageWindow }) {
   const remainingTone = pickRemainingTone(remainingPct, window.reset_at, percent);
   const total = window.total ?? 0;
   const remainingCents = Math.max(0, total - window.used);
+  const hasBreakdown = (window.breakdown?.length ?? 0) > 0;
 
   return (
-    <div className="space-y-3">
-      <div className="space-y-2.5">
-        <div>
-          <p className="text-xs font-bold text-zinc-800">{t("usage.currentPeriodUsage")}</p>
-          <p className="text-[10px] leading-snug text-zinc-500 mt-0.5">{t("usage.includedUsageHint")}</p>
-        </div>
-
-        <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1.5 text-[11px]">
-          <dt className="text-zinc-500 font-medium">{t("usage.used")}</dt>
-          <dd className="font-bold tabular-nums text-zinc-800">{formatUsdCents(window.used)}</dd>
-          <dt className="text-zinc-500 font-medium">{t("usage.includedQuota")}</dt>
-          <dd className="font-medium tabular-nums text-zinc-700">{formatUsdCents(total)}</dd>
-          <dt className="text-zinc-500 font-medium">{t("usage.remaining")}</dt>
-          <dd className={cn("font-bold tabular-nums", remainingTone.text)}>
-            {formatUsdCents(remainingCents)}
-            <span className="ml-1 font-normal text-zinc-500">({remainingPct}%)</span>
-          </dd>
-        </dl>
-
-        <div className="space-y-1">
-          <div className="flex items-center justify-between text-[10px]">
-            <span className="text-zinc-700 font-bold">{t("usage.usedPercent", { percent })}</span>
-          </div>
-          <ProgressTrack usedPercent={percent} size="comfortable" tone="billing-used" resetAt={window.reset_at} />
-        </div>
-      </div>
-
-      {(window.breakdown?.length ?? 0) > 0 && (
-        <div className="space-y-2 rounded-2xl border border-zinc-200/80 bg-zinc-50/50 p-2.5">
-          <div>
-            <p className="text-[10px] font-bold text-zinc-800">{t("usage.usageByCategory")}</p>
-            <p className="text-[10px] leading-snug text-zinc-500 mt-0.5">{t("usage.categoryUsageHint")}</p>
-          </div>
-          <div className="space-y-2.5">
-            {window.breakdown!.map((sub, i) => (
-              <UsageWindowBar key={`${sub.label}-${i}`} window={sub} compact />
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
+    <UsageMeter
+      label={localizeWindowLabel(window.label, t)}
+      dot="emerald"
+      usedPercent={percent}
+      figure={<MeterFigure value={formatUsdCents(window.used)} unit={`/ ${formatUsdCents(total)}`} />}
+      caption={t("usage.includedQuota")}
+      tone="billing-used"
+      resetAt={window.reset_at}
+      showReset={windowRendersOwnReset(window)}
+      resetMode="billing"
+      footNote={
+        <>
+          {t("usage.remaining")} {formatUsdCents(remainingCents)}
+          <span className="ml-1 font-sans font-normal text-zinc-400">({remainingPct}%)</span>
+        </>
+      }
+      footNoteClass={remainingTone.text}
+    >
+      {hasBreakdown ? <BreakdownBlock breakdown={window.breakdown!} /> : null}
+    </UsageMeter>
   );
 }
 
 function UsageBreakdownQuotaPanel({ window }: { window: UsageWindow }) {
   const { t } = useTranslation();
   const percent = clamp(window.percent ?? computePercent(window.used, window.total));
-  const label = localizeWindowLabel(window.label, t);
+  const remainingPct = Math.max(0, 100 - percent);
 
   return (
-    <div className="space-y-3">
-      <div className="relative space-y-2 overflow-hidden rounded-2xl border border-zinc-200/50 bg-zinc-50/40 p-3 transition-colors hover:bg-zinc-50/80">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-[11px] leading-none font-bold text-zinc-700">{label}</p>
-          <span
-            className={cn(
-              "rounded-md px-1.5 py-0.5 font-mono text-[9px] font-bold",
-              percent >= 90
-                ? "bg-rose-500/10 text-rose-600"
-                : percent >= 75
-                  ? "bg-amber-500/10 text-amber-600"
-                  : "bg-zinc-100 text-zinc-600",
-            )}
-          >
-            {percent}%
-          </span>
-        </div>
-        <ProgressTrack usedPercent={percent} size="compact" tone="brand-urgency" />
-      </div>
-
-      <div className="space-y-2 rounded-2xl border border-zinc-200/80 bg-zinc-50/50 p-2.5">
-        <div>
-          <p className="text-[10px] font-bold text-zinc-800">{t("usage.usageByCategory")}</p>
-          <p className="text-[10px] leading-snug text-zinc-500 mt-0.5">{t("usage.categoryUsageHint")}</p>
-        </div>
-        <div className="space-y-2.5">
-          {window.breakdown!.map((sub, i) => (
-            <UsageWindowBar key={`${sub.label}-${i}`} window={sub} compact />
-          ))}
-        </div>
-      </div>
-    </div>
+    <UsageMeter
+      label={localizeWindowLabel(window.label, t)}
+      usedPercent={percent}
+      resetAt={window.reset_at}
+      showReset={windowRendersOwnReset(window)}
+      resetMode="billing"
+      footNote={`${t("usage.remaining")} ${remainingPct}%`}
+    >
+      <BreakdownBlock breakdown={window.breakdown!} />
+    </UsageMeter>
   );
 }
 
@@ -179,51 +158,25 @@ function UsageStatsWindow({ window }: { window: UsageWindow }) {
   const percent = clamp(window.percent ?? computePercent(used, window.total));
   const remaining = total > 0 ? Math.max(0, total - used) : null;
   const remainingPct = Math.max(0, 100 - percent);
-  const label = localizeWindowLabel(window.label, t);
   const tone = pickConsumedTone(percent);
 
   return (
-    <div className="relative space-y-2.5 overflow-hidden rounded-2xl border border-zinc-200/50 bg-zinc-50/40 p-3 transition-colors hover:bg-zinc-50/80">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] font-bold text-zinc-700">{label}</span>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {window.reset_at ? <ResetCountdown resetAt={window.reset_at} usedPercent={percent} mode="billing" /> : null}
-          <span
-            className={cn(
-              "rounded-md px-1.5 py-0.5 font-mono text-[9px] font-bold",
-              percent >= 90
-                ? "bg-rose-500/10 text-rose-600"
-                : percent >= 75
-                  ? "bg-amber-500/10 text-amber-600"
-                  : "bg-zinc-100 text-zinc-600",
-            )}
-          >
-            {percent}%
-          </span>
-        </div>
-      </div>
-
-      {/* Dashboard Mono Large Quota */}
-      <div className="flex items-baseline gap-1.5 py-0.5">
-        <span className="font-mono text-lg leading-none font-bold text-zinc-900">{formatQuotaNumber(used)}</span>
-        <span className="text-[10px] text-zinc-300">/</span>
-        <span className="font-mono text-[11px] font-semibold text-zinc-500">{formatQuotaNumber(total)}</span>
-        <span className="ml-auto text-[10px] font-medium text-zinc-400">{t("usage.used")}</span>
-      </div>
-
-      <ProgressTrack usedPercent={percent} size="comfortable" tone="brand-urgency" />
-
-      <div className="flex items-center justify-between gap-2 text-[9px]">
-        <span className={cn("font-mono font-semibold tabular-nums", tone.text)}>
-          {remaining != null
-            ? t("usage.quotaRemaining", { remaining: formatQuotaNumber(remaining) })
-            : t("usage.remainingPercent", { percent: remainingPct })}
-        </span>
-        <span className="tabular-nums text-zinc-400">
-          {t("usage.used")} {percent}% · {t("usage.remaining")} {remainingPct}%
-        </span>
-      </div>
-    </div>
+    <UsageMeter
+      label={localizeWindowLabel(window.label, t)}
+      usedPercent={percent}
+      figure={<MeterFigure value={formatQuotaNumber(used)} unit={`/ ${formatQuotaNumber(total)}`} />}
+      caption={t("usage.used")}
+      tone="brand-urgency"
+      resetAt={window.reset_at}
+      showReset={windowRendersOwnReset(window)}
+      resetMode="billing"
+      footNote={
+        remaining != null
+          ? t("usage.quotaRemaining", { remaining: formatQuotaNumber(remaining) })
+          : t("usage.remainingPercent", { percent: remainingPct })
+      }
+      footNoteClass={tone.text}
+    />
   );
 }
 
@@ -236,65 +189,29 @@ function UsageSimpleWindow({ window }: { window: UsageWindow }) {
   const hasAbsolute = window.total != null && window.total > 0 && !(window.total === 100 && window.used <= 100);
   const remainingAbs = hasAbsolute && window.total != null ? Math.max(0, window.total - window.used) : null;
   const tone = pickRateLimitUsageTone(percent);
+  let figure: ReactNode = null;
+  if (hasAbsolute) {
+    figure = <MeterFigure value={formatQuotaNumber(window.used)} unit={`/ ${formatQuotaNumber(window.total ?? 0)}`} />;
+  }
 
   return (
-    <div className="space-y-2 rounded-2xl bg-zinc-50/40 border border-zinc-200/50 p-3 hover:bg-zinc-50/80 transition-colors relative overflow-hidden">
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-[11px] font-bold text-zinc-700 leading-none">{label}</p>
-          {isRateLimit && <p className="text-[9px] text-zinc-400 mt-1 leading-none">{t("usage.rateLimitWindow")}</p>}
-        </div>
-        <div className="flex items-center gap-1.5 shrink-0">
-          {window.reset_at ? (
-            <ResetCountdown
-              resetAt={window.reset_at}
-              usedPercent={percent}
-              mode={isRateLimit ? "rateLimit" : "billing"}
-            />
-          ) : null}
-          <span
-            className={cn(
-              "text-[9px] font-bold font-mono px-1.5 py-0.5 rounded-md",
-              percent >= 90
-                ? "bg-rose-500/10 text-rose-600"
-                : percent >= 75
-                  ? "bg-amber-500/10 text-amber-600"
-                  : "bg-zinc-100 text-zinc-600",
-            )}
-          >
-            {percent}%
-          </span>
-        </div>
-      </div>
-
-      {hasAbsolute && (
-        <div className="flex items-baseline gap-1.5">
-          <span className="font-mono text-sm font-bold tabular-nums text-zinc-900">
-            {formatQuotaNumber(window.used)}
-          </span>
-          <span className="text-[10px] text-zinc-300">/</span>
-          <span className="font-mono text-[11px] font-semibold tabular-nums text-zinc-500">
-            {formatQuotaNumber(window.total ?? 0)}
-          </span>
-          <span className="ml-auto text-[10px] font-medium text-zinc-400">{t("usage.used")}</span>
-        </div>
-      )}
-
-      <ProgressTrack usedPercent={percent} size="compact" tone="brand-urgency" />
-
-      <div className="flex items-center justify-between gap-2 text-[9px]">
-        <span className={cn("font-mono font-semibold tabular-nums", tone.text)}>
-          {remainingAbs != null
-            ? t("usage.quotaRemaining", { remaining: formatQuotaNumber(remainingAbs) })
-            : t("usage.remainingPercent", { percent: remainingPct })}
-        </span>
-        {!hasAbsolute && (
-          <span className="tabular-nums text-zinc-400">
-            {t("usage.used")} {percent}%
-          </span>
-        )}
-      </div>
-    </div>
+    <UsageMeter
+      label={label}
+      hint={isRateLimit ? t("usage.rateLimitWindow") : null}
+      usedPercent={percent}
+      figure={figure}
+      caption={hasAbsolute ? t("usage.used") : null}
+      tone="brand-urgency"
+      resetAt={window.reset_at}
+      showReset={windowRendersOwnReset(window)}
+      resetMode={isRateLimit ? "rateLimit" : "billing"}
+      footNote={
+        remainingAbs != null
+          ? t("usage.quotaRemaining", { remaining: formatQuotaNumber(remainingAbs) })
+          : `${t("usage.remaining")} ${remainingPct}%`
+      }
+      footNoteClass={tone.text}
+    />
   );
 }
 

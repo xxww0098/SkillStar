@@ -300,15 +300,22 @@ pub fn resync_active_tools(
                     backup_path: None,
                 }
             }),
-            "opencode" => {
-                sync_opencode_binding(binding, &store.providers).unwrap_or_else(|e| {
-                    ToolSyncResultFlat {
-                        tool_id: tool_id.clone(),
-                        success: false,
-                        config_path: None,
-                        error: Some(e.to_string()),
-                        backup_path: None,
-                    }
+            "opencode" => sync_opencode_binding(binding, &store.providers).unwrap_or_else(|e| {
+                ToolSyncResultFlat {
+                    tool_id: tool_id.clone(),
+                    success: false,
+                    config_path: None,
+                    error: Some(e.to_string()),
+                    backup_path: None,
+                }
+            }),
+            "pi" => {
+                sync_pi_binding(binding, &store.providers).unwrap_or_else(|e| ToolSyncResultFlat {
+                    tool_id: tool_id.clone(),
+                    success: false,
+                    config_path: None,
+                    error: Some(e.to_string()),
+                    backup_path: None,
                 })
             }
             "claude-code" => {
@@ -332,14 +339,12 @@ pub fn resync_active_tools(
                 else {
                     continue;
                 };
-                sync_to_gemini(provider, &activation.model).unwrap_or_else(|e| {
-                    ToolSyncResultFlat {
-                        tool_id: tool_id.clone(),
-                        success: false,
-                        config_path: None,
-                        error: Some(e.to_string()),
-                        backup_path: None,
-                    }
+                sync_to_gemini(provider, &activation.model).unwrap_or_else(|e| ToolSyncResultFlat {
+                    tool_id: tool_id.clone(),
+                    success: false,
+                    config_path: None,
+                    error: Some(e.to_string()),
+                    backup_path: None,
                 })
             }
             _ => ToolSyncResultFlat {

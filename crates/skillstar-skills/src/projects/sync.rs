@@ -8,8 +8,8 @@ use super::helpers::{clear_project_symlinks, prune_empty_dirs_upward};
 use super::index::{list_projects, register_project};
 use super::store::{load_skills_list, save_skills_list};
 use super::types::{
-    ProjectDeployMode, SkillsList, deploy_skill_auto, deploy_skill_with_mode,
-    ensure_project_root_exists, prune_deploy_modes_for_agents,
+    ProjectDeployMode, SkillsList, deploy_skill_with_mode, ensure_project_root_exists,
+    prune_deploy_modes_for_agents,
 };
 use crate::agents as agent_profile;
 use skillstar_core::infra::{fs_ops, paths as fs_paths};
@@ -43,6 +43,58 @@ fn normalize_project_agents(agents: HashMap<String, Vec<String>>) -> HashMap<Str
             }
         })
         .collect()
+}
+
+struct ProjectPathPlan<'a> {
+    profile: &'a agent_profile::AgentProfile,
+    skill_names: Vec<String>,
+    mode: ProjectDeployMode,
+}
+
+/// Collapse agent-owned manifest entries into physical project paths.
+/// Several compatible agents intentionally share `.agents/skills`; filesystem
+/// mutation must happen once per path using the union of their skill names.
+fn build_path_plans<'a>(
+    skills_list: &SkillsList,
+    profiles: &'a [agent_profile::AgentProfile],
+) -> Vec<ProjectPathPlan<'a>> {
+    let mut plans = Vec::<ProjectPathPlan<'a>>::new();
+    let mut index_by_path = HashMap::<String, usize>::new();
+
+    for profile in profiles {
+        let Some(agent_skills) = skills_list.agents.get(&profile.id) else {
+            continue;
+        };
+        if !profile.has_project_skills() {
+            continue;
+        }
+
+        let index = match index_by_path.get(&profile.project_skills_rel).copied() {
+            Some(index) => index,
+            None => {
+                let index = plans.len();
+                plans.push(ProjectPathPlan {
+                    profile,
+                    skill_names: Vec::new(),
+                    mode: skills_list
+                        .deploy_modes
+                        .get(&profile.project_skills_rel)
+                        .copied()
+                        .unwrap_or_default(),
+                });
+                index_by_path.insert(profile.project_skills_rel.clone(), index);
+                index
+            }
+        };
+
+        for name in agent_skills {
+            if !plans[index].skill_names.contains(name) {
+                plans[index].skill_names.push(name.clone());
+            }
+        }
+    }
+
+    plans
 }
 
 /// Remove a skill from every registered project's persisted metadata and
@@ -137,6 +189,7 @@ pub fn full_sync(
     // - agents in the new skills_list (will be rebuilt)
     // - agents in cleanup_agents (were in old config, now removed)
     let agents_in_list: HashSet<&str> = skills_list.agents.keys().map(|s| s.as_str()).collect();
+    let mut cleared_paths = HashSet::new();
 
     for profile in &profiles {
         if !profile.has_project_skills() {
@@ -147,33 +200,19 @@ pub fn full_sync(
         if !should_clear {
             continue;
         }
-        clear_project_symlinks(project.as_path(), profile)?;
+        if cleared_paths.insert(profile.project_skills_rel.clone()) {
+            clear_project_symlinks(project.as_path(), profile)?;
+        }
     }
 
-    for (agent_id, skill_names) in &skills_list.agents {
-        // Find the agent profile to get its project_skills_rel
-        let Some(profile) = profiles.iter().find(|p| &p.id == agent_id) else {
-            continue;
-        };
-        // Skip agents that have no project-level skills support
-        if !profile.has_project_skills() {
-            continue;
-        }
-
+    for plan in build_path_plans(skills_list, &profiles) {
+        let profile = plan.profile;
         let target_dir = project.join(&profile.project_skills_rel);
         let mut prepared_target_dir = false;
-        let mut created_for_agent = 0u32;
-
-        // Per-directory deploy mode (defaults to symlink). `Symlink` still
-        // auto-falls back to copy when the OS refuses; `Copy` always copies.
-        let mode = skills_list
-            .deploy_modes
-            .get(&profile.project_skills_rel)
-            .copied()
-            .unwrap_or_default();
+        let mut created_for_path = 0u32;
 
         // Create new deploys honoring the configured mode.
-        for skill_name in skill_names {
+        for skill_name in &plan.skill_names {
             let source = hub_dir.join(skill_name);
             if !source.exists() {
                 continue;
@@ -185,19 +224,20 @@ pub fn full_sync(
                 prepared_target_dir = true;
             }
             let target = target_dir.join(skill_name);
-            match deploy_skill_with_mode(&source, &target, mode) {
+            match deploy_skill_with_mode(&source, &target, plan.mode) {
                 Ok(()) => {
                     total += 1;
-                    created_for_agent += 1;
+                    created_for_path += 1;
                 }
                 Err(err) => failures.push(format!(
-                    "Failed to link '{skill_name}' for agent '{agent_id}' at {target}: {err}",
+                    "Failed to deploy '{skill_name}' for path '{}' at {target}: {err}",
+                    profile.project_skills_rel,
                     target = target.display()
                 )),
             }
         }
 
-        if created_for_agent == 0 && target_dir.exists() {
+        if created_for_path == 0 && target_dir.exists() {
             prune_empty_dirs_upward(&target_dir, project.as_path())?;
         }
     }
@@ -300,13 +340,26 @@ pub fn save_skills_list_only(
 /// This is the canonical path for CLI `skillstar install` and quick-deploy
 /// operations that should be additive, not destructive.
 ///
-/// If `agent_ids` is empty, falls back to the first profile whose
-/// `project_skills_rel` is `".agent/skills"` (i.e. Antigravity), or the
-/// first available profile with project-level support.
+/// If `agent_ids` is empty, falls back to the first universal
+/// `.agents/skills` profile, or the first available project-capable profile.
 pub fn add_skills_to_project(
     project_path: &str,
     skill_names: &[String],
     agent_ids: &[String],
+) -> Result<u32> {
+    add_skills_to_project_with_mode(
+        project_path,
+        skill_names,
+        agent_ids,
+        ProjectDeployMode::Symlink,
+    )
+}
+
+pub fn add_skills_to_project_with_mode(
+    project_path: &str,
+    skill_names: &[String],
+    agent_ids: &[String],
+    mode: ProjectDeployMode,
 ) -> Result<u32> {
     let hub_dir = fs_paths::hub_skills_dir();
     let mut seen_skill_names = HashSet::new();
@@ -350,10 +403,10 @@ pub fn add_skills_to_project(
                 agent_ids.join(", ")
             ));
         }
-        // Fallback: prefer the profile using .agent/skills, then first available
+        // Fallback: prefer the universal open-skills path, then first available.
         if let Some(fallback) = profiles
             .iter()
-            .find(|p| p.project_skills_rel == ".agent/skills" && p.has_project_skills())
+            .find(|p| p.project_skills_rel == ".agents/skills" && p.has_project_skills())
             .or_else(|| profiles.iter().find(|p| p.has_project_skills()))
         {
             target_agent_ids.push(fallback.id.clone());
@@ -362,14 +415,53 @@ pub fn add_skills_to_project(
 
     // Merge into existing skills-list.json
     let mut skills_list = load_skills_list(&entry.name).unwrap_or_default();
+    let mut target_profiles = Vec::new();
+    let mut selected_paths = HashSet::new();
 
     for agent_id in &target_agent_ids {
-        let agent_skills = skills_list.agents.entry(agent_id.clone()).or_default();
-        for name in &deployable_skill_names {
-            if !agent_skills.contains(name) {
-                agent_skills.push(name.clone());
+        let Some(profile) = profiles.iter().find(|profile| &profile.id == agent_id) else {
+            continue;
+        };
+        if !selected_paths.insert(profile.project_skills_rel.clone()) {
+            continue;
+        }
+
+        // A shared physical path has one manifest owner. Preserve an existing
+        // owner when possible; otherwise the first selected profile owns it.
+        let owner_id = profiles
+            .iter()
+            .find(|candidate| {
+                candidate.project_skills_rel == profile.project_skills_rel
+                    && skills_list.agents.contains_key(&candidate.id)
+            })
+            .map(|candidate| candidate.id.clone())
+            .unwrap_or_else(|| profile.id.clone());
+
+        let shared_agent_ids = profiles
+            .iter()
+            .filter(|candidate| candidate.project_skills_rel == profile.project_skills_rel)
+            .map(|candidate| candidate.id.clone())
+            .collect::<Vec<_>>();
+        let mut merged = Vec::new();
+        for shared_id in &shared_agent_ids {
+            if let Some(existing) = skills_list.agents.remove(shared_id) {
+                for name in existing {
+                    if !merged.contains(&name) {
+                        merged.push(name);
+                    }
+                }
             }
         }
+        for name in &deployable_skill_names {
+            if !merged.contains(name) {
+                merged.push(name.clone());
+            }
+        }
+        skills_list.agents.insert(owner_id, merged);
+        skills_list
+            .deploy_modes
+            .insert(profile.project_skills_rel.clone(), mode);
+        target_profiles.push(profile);
     }
     skills_list.updated_at = chrono::Utc::now().to_rfc3339();
     save_skills_list(&entry.name, &skills_list)?;
@@ -378,17 +470,10 @@ pub fn add_skills_to_project(
     let mut total = 0u32;
     let mut failures: Vec<String> = Vec::new();
 
-    for agent_id in &target_agent_ids {
-        let Some(profile) = profiles.iter().find(|p| &p.id == agent_id) else {
-            continue;
-        };
-        if !profile.has_project_skills() {
-            continue;
-        }
-
+    for profile in target_profiles {
         let target_dir = project.join(&profile.project_skills_rel);
         let mut prepared_target_dir = false;
-        let mut created_for_agent = 0u32;
+        let mut created_for_path = 0u32;
 
         for name in &deployable_skill_names {
             let source = hub_dir.join(name);
@@ -409,22 +494,22 @@ pub fn add_skills_to_project(
                 prepared_target_dir = true;
             }
 
-            match deploy_skill_auto(&source, &target) {
+            match deploy_skill_with_mode(&source, &target, mode) {
                 Ok(()) => {
                     total += 1;
-                    created_for_agent += 1;
+                    created_for_path += 1;
                 }
                 Err(err) => failures.push(format!(
-                    "Failed to link '{}' for agent '{}' at {}: {}",
+                    "Failed to deploy '{}' for path '{}' at {}: {}",
                     name,
-                    agent_id,
+                    profile.project_skills_rel,
                     target.display(),
                     err
                 )),
             }
         }
 
-        if created_for_agent == 0 && prepared_target_dir && target_dir.exists() {
+        if created_for_path == 0 && prepared_target_dir && target_dir.exists() {
             prune_empty_dirs_upward(&target_dir, project.as_path())?;
         }
     }

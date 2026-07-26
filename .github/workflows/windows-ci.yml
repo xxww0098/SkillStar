@@ -2,6 +2,27 @@ name: Windows CI
 
 # Catches Windows-specific regressions (paths, shell calls, line endings)
 # that local macOS/Linux development would miss.
+#
+# ## Failure lessons (from Actions history — do not re-learn the hard way)
+#
+# 1. Dual lockfile drift kills this job at step one.
+#    Local dev + Linux/macOS CI use Bun (`bun.lock`). This workflow uses npm
+#    (`package-lock.json`) on purpose so we exercise the Windows/npm path.
+#    After ANY dependency change you MUST update BOTH lockfiles in the same PR:
+#      bun install
+#      npm install --package-lock-only   # or full `npm install` if needed
+#    Historical signal: every Windows CI run through 2026-07 failed on
+#    `npm ci` with "Missing: … from lock file" / "lock file's X does not
+#    satisfy Y" because package.json / bun.lock moved and package-lock.json
+#    was left behind. Zero green runs → zero Windows path coverage. A red
+#    install step is not "Windows is flaky"; it is an unmaintained lockfile.
+#
+# 2. Do not "fix" install failures with `npm install` (non-ci) in this
+#    workflow. That hides drift and makes Windows CI non-reproducible.
+#    Keep `npm ci`; fix the lockfile in the PR instead.
+#
+# 3. Keep the file-size guard on bash even on Windows runners — the ratchet
+#    scripts assume a POSIX shell.
 on:
   push:
     branches: [main]

@@ -104,10 +104,7 @@ pub struct CodexModelProvider {
 
 impl CodexModelProvider {
     /// Build the provider table from an activation + resolved settings.
-    pub fn from_activation(
-        provider: &ProviderEntryFlat,
-        settings: &CodexSettings,
-    ) -> Self {
+    pub fn from_activation(provider: &ProviderEntryFlat, settings: &CodexSettings) -> Self {
         let env_key = if settings.auth_mode == CODEX_AUTH_MODE_THIRD_PARTY {
             Some(codex_env_key_for(provider))
         } else {
@@ -164,7 +161,11 @@ pub fn codex_env_key_for(provider: &ProviderEntryFlat) -> String {
             }
         })
         .collect();
-    let safe = if safe.is_empty() { "PROVIDER".to_string() } else { safe };
+    let safe = if safe.is_empty() {
+        "PROVIDER".to_string()
+    } else {
+        safe
+    };
     format!("SKILLSTAR_{safe}_KEY")
 }
 

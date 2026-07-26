@@ -7,7 +7,9 @@ export interface AgentProfile {
   icon: string;
   global_skills_dir: string;
   project_skills_rel: string;
+  /** Frozen IPC compatibility mirror of `enabled`; not an installation probe. */
   installed: boolean;
+  /** User-controlled activation state persisted by SkillStar. */
   enabled: boolean;
   synced_count: number;
 }
@@ -26,7 +28,7 @@ export interface ProjectEntry {
   created_at: string;
 }
 
-/** Per `project_skills_rel` path (e.g. `.agent/skills`), how hub skills are materialized in the project. */
+/** Per `project_skills_rel` path (e.g. `.agents/skills`), how hub skills are materialized in the project. */
 
 export type ProjectDeployMode = "symlink" | "copy";
 

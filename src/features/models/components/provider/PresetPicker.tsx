@@ -10,6 +10,12 @@ import { cn } from "../../../../lib/utils";
 import type { ProviderEntryFlat, ProviderPresetFlat } from "../../../../types";
 import { useProviderPresets } from "../../api/presets";
 import { useProvidersFlat } from "../../hooks/useProvidersFlat";
+import {
+  ModelFormField,
+  ModelFormSection,
+  modelInputClass,
+  providerCardClass,
+} from "../providerForm/ProviderConfigPrimitives";
 
 export interface PresetPickerProps {
   /** Called once a provider has been created and the drawer should pivot to the edit form. */
@@ -133,10 +139,15 @@ export function PresetPicker({ onProviderCreated, initialPreset = null }: Preset
     const showOpenaiUrl = !isDomestic;
     const showAnthropicUrl =
       !isDomestic && (selected.id === "openai-compatible" || Boolean(selected.base_url_anthropic?.trim()));
+    const apiKeyError = error && !apiKey.trim() ? error : null;
 
     return (
-      <motion.div
+      <motion.form
         key={`fill-${selected.id}`}
+        onSubmit={(event) => {
+          event.preventDefault();
+          void handleSubmit();
+        }}
         initial={{ opacity: 0, x: 10 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
@@ -151,7 +162,7 @@ export function PresetPicker({ onProviderCreated, initialPreset = null }: Preset
           {t("models.preset.changePreset")}
         </button>
 
-        <div className="rounded-xl border border-border/55 bg-card/60 px-4 py-4 shadow-sm backdrop-blur-sm">
+        <div className={cn(providerCardClass, "px-4 py-4")}>
           <div className="flex items-center gap-3">
             <ProviderBrandIcon
               presetId={selected.id}
@@ -171,77 +182,90 @@ export function PresetPicker({ onProviderCreated, initialPreset = null }: Preset
           </div>
         </div>
 
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between gap-2">
-            <label className="text-xs font-medium text-muted-foreground">API Key</label>
-            {selected.api_key_url ? (
+        <ModelFormSection
+          title={t("models.preset.connectionDetails")}
+          description={t("models.preset.connectionDetailsHint")}
+          icon={<KeyRound className="h-4 w-4" />}
+        >
+          <ModelFormField
+            id="preset-api-key"
+            label="API Key"
+            required
+            error={apiKeyError}
+            action={
+              selected.api_key_url ? (
+                <button
+                  type="button"
+                  onClick={() => void openExternalUrl(selected.api_key_url!)}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                >
+                  {t("models.preset.getKey")}
+                  <ExternalLink className="h-3 w-3" />
+                </button>
+              ) : null
+            }
+          >
+            <div className="relative">
+              <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/70" />
+              <Input
+                id="preset-api-key"
+                type={showApiKey ? "text" : "password"}
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="sk-..."
+                className={`${modelInputClass} pl-9 pr-10`}
+                autoFocus
+                autoComplete="off"
+                disabled={submitting}
+                aria-invalid={Boolean(apiKeyError)}
+                aria-describedby={apiKeyError ? "preset-api-key-error" : undefined}
+              />
               <button
                 type="button"
-                onClick={() => void openExternalUrl(selected.api_key_url!)}
-                className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+                onClick={() => setShowApiKey((v) => !v)}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground transition hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+                aria-label={showApiKey ? t("models.preset.hide") : t("models.preset.show")}
               >
-                {t("models.preset.getKey")}
-                <ExternalLink className="h-3 w-3" />
+                {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
-            ) : null}
-          </div>
-          <div className="relative">
-            <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/70" />
-            <Input
-              type={showApiKey ? "text" : "password"}
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="sk-..."
-              className="pl-9 pr-10"
-              autoFocus
-              disabled={submitting}
-            />
-            <button
-              type="button"
-              onClick={() => setShowApiKey((v) => !v)}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground transition hover:text-foreground"
-              aria-label={showApiKey ? t("models.preset.hide") : t("models.preset.show")}
-            >
-              {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-            </button>
-          </div>
-        </div>
+            </div>
+          </ModelFormField>
 
-        {showOpenaiUrl ? (
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">{t("models.preset.baseUrlOpenai")}</label>
-            <Input
-              value={baseUrlOpenai}
-              onChange={(e) => setBaseUrlOpenai(e.target.value)}
-              placeholder="https://api.example.com/v1"
-              disabled={submitting}
-            />
-          </div>
-        ) : null}
+          {showOpenaiUrl ? (
+            <ModelFormField id="preset-openai-url" label={t("models.preset.baseUrlOpenai")}>
+              <Input
+                id="preset-openai-url"
+                value={baseUrlOpenai}
+                onChange={(e) => setBaseUrlOpenai(e.target.value)}
+                placeholder="https://api.example.com/v1"
+                disabled={submitting}
+                className={modelInputClass}
+              />
+            </ModelFormField>
+          ) : null}
 
-        {showAnthropicUrl ? (
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">{t("models.preset.baseUrlAnthropic")}</label>
-            <Input
-              value={baseUrlAnthropic}
-              onChange={(e) => setBaseUrlAnthropic(e.target.value)}
-              placeholder="https://api.example.com/anthropic"
-              disabled={submitting}
-            />
-          </div>
-        ) : null}
+          {showAnthropicUrl ? (
+            <ModelFormField id="preset-anthropic-url" label={t("models.preset.baseUrlAnthropic")}>
+              <Input
+                id="preset-anthropic-url"
+                value={baseUrlAnthropic}
+                onChange={(e) => setBaseUrlAnthropic(e.target.value)}
+                placeholder="https://api.example.com/anthropic"
+                disabled={submitting}
+                className={modelInputClass}
+              />
+            </ModelFormField>
+          ) : null}
+        </ModelFormSection>
 
-        {error ? (
+        {error && !apiKeyError ? (
           <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
             {error}
           </div>
         ) : null}
 
-        <div className="flex items-center gap-2 pt-1">
-          <Button variant="ghost" onClick={handleBack} disabled={submitting}>
-            {t("models.preset.back")}
-          </Button>
-          <Button onClick={handleSubmit} disabled={submitting || !apiKey.trim()} className="min-w-[120px]">
+        <div className="flex items-center justify-end pt-1">
+          <Button type="submit" disabled={submitting || !apiKey.trim()} className="min-w-[140px]">
             {submitting ? (
               <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
             ) : (
@@ -252,7 +276,7 @@ export function PresetPicker({ onProviderCreated, initialPreset = null }: Preset
         </div>
 
         <p className="text-[11px] text-muted-foreground/80">{t("models.preset.afterCreateHint")}</p>
-      </motion.div>
+      </motion.form>
     );
   }
 
@@ -264,7 +288,7 @@ export function PresetPicker({ onProviderCreated, initialPreset = null }: Preset
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder={t("models.preset.searchPlaceholder")}
-          className="pl-9"
+          className={`${modelInputClass} pl-9`}
         />
       </div>
 
@@ -283,9 +307,7 @@ export function PresetPicker({ onProviderCreated, initialPreset = null }: Preset
               <header className="flex items-center gap-2">
                 <span className="text-base leading-none">{cat.emoji}</span>
                 <div>
-                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    {t(cat.labelKey)}
-                  </h4>
+                  <h4 className="text-xs font-semibold text-foreground/80">{t(cat.labelKey)}</h4>
                   <p className="text-[11px] text-muted-foreground/80">{t(cat.hintKey)}</p>
                 </div>
               </header>

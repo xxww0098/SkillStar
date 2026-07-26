@@ -11,6 +11,8 @@ import type { AgentHealth } from "../../hooks/useAgentHealth";
 import type { AgentDescriptor } from "../../lib/agentRegistry";
 import { computeAgentStatus } from "../../lib/agentStatus";
 import { buildModelCatalog, getModelCatalogFromMeta } from "../../lib/providerPatch";
+import type { ProviderEditorTab } from "../../types";
+import { fieldLabelClass } from "../providerForm/ProviderConfigPrimitives";
 import { AgentToolIcon } from "../shared/AgentToolIcon";
 import { ModelSelectPopover } from "../shared/ModelSelectPopover";
 import { ProviderSelectPopover } from "../shared/ProviderSelectPopover";
@@ -21,7 +23,7 @@ export interface MultiProviderCardProps {
   health: AgentHealth;
   onAddProvider: () => void;
   onOpenSettings: () => void;
-  onOpenProviderDrawer: (providerId: string) => void;
+  onOpenProviderDrawer: (providerId: string, initialTab?: ProviderEditorTab) => void;
 }
 
 const TONE_CARD: Record<ReturnType<typeof statusTone>, { border: string; glow: string; strip: string }> = {
@@ -186,6 +188,7 @@ export function MultiProviderCard({
                   </div>
                   <div className="mt-2 pl-6">
                     <ModelSelectPopover
+                      ariaLabel={`${provider.name} · ${t("models.card.modelLabel")}`}
                       models={models}
                       catalog={catalog}
                       current={entry.model || provider.default_model || ""}
@@ -193,7 +196,7 @@ export function MultiProviderCard({
                       disabled={act.busy}
                       footerAction={{
                         label: t("models.picker.manageModels"),
-                        onClick: () => onOpenProviderDrawer(provider.id),
+                        onClick: () => onOpenProviderDrawer(provider.id, "models"),
                       }}
                     />
                   </div>
@@ -219,10 +222,11 @@ export function MultiProviderCard({
         {/* Add another provider */}
         {status.kind !== "not_installed" ? (
           <div className="space-y-1.5">
-            <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <p className={fieldLabelClass}>
               {hasEntries ? t("models.card.addAnotherProvider") : t("models.card.providerLabel")}
-            </label>
+            </p>
             <ProviderSelectPopover
+              ariaLabel={hasEntries ? t("models.card.addAnotherProvider") : t("models.card.providerLabel")}
               providers={addable}
               currentId={null}
               onPick={(id) => void act.addProvider(id)}

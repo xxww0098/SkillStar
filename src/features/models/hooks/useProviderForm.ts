@@ -23,6 +23,7 @@ import {
   computeDirty,
   LATEST_CLAUDE_MODELS,
   type ProviderFormValues,
+  type ValidatePatchErrorCode,
   providerToFormValues,
   validatePatch,
 } from "../lib/providerPatch";
@@ -47,10 +48,12 @@ export function useProviderForm(provider: ProviderEntryFlat) {
   const { updateProvider } = useProviderMutations();
   const { fetchModelCatalog, isLoading: isFetchingModels, error: fetchError } = useModelFetch();
   const [modelFetchCount, setModelFetchCount] = useState<number | null>(null);
+  const [validationErrorCode, setValidationErrorCode] = useState<ValidatePatchErrorCode | null>(null);
 
   const preset = presets.find((p) => p.id === provider.preset_id);
 
   const setField = useCallback(<K extends keyof ProviderFormValues>(key: K, value: ProviderFormValues[K]) => {
+    setValidationErrorCode(null);
     dispatch({ type: "set", key, value });
   }, []);
 
@@ -59,11 +62,13 @@ export function useProviderForm(provider: ProviderEntryFlat) {
   /** One save attempt for useAutosave — validates, then persists via the api layer. */
   const save = useCallback(async (): Promise<SaveAttemptResult> => {
     const patch = buildProviderPatch(values, provider.meta);
-    const validationErrorCode = validatePatch(patch);
-    if (validationErrorCode) {
-      toast.error(i18n.t(`models.errors.${validationErrorCode}`));
+    const errorCode = validatePatch(patch);
+    if (errorCode) {
+      setValidationErrorCode(errorCode);
+      toast.error(i18n.t(`models.errors.${errorCode}`));
       return "validation";
     }
+    setValidationErrorCode(null);
     try {
       await updateProvider(provider.id, patch);
       return "saved";
@@ -155,6 +160,7 @@ export function useProviderForm(provider: ProviderEntryFlat) {
     isFetchingModels,
     fetchError,
     modelFetchCount,
+    validationErrorCode,
     handleFetchModels,
     claudeModelOptions,
     codexModelOptions,

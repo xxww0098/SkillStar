@@ -10,6 +10,16 @@ use tracing::{debug, info, warn};
 
 use crate::core::path_env;
 
+/// Capabilities and permission behavior exposed to an ACP agent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AcpAccessPolicy {
+    /// Setup/rebuild compatibility mode. The agent may read, write, and run
+    /// terminal commands inside the existing ACP client contract.
+    Full,
+    /// Analysis mode. Only reads rooted in `work_dir` are available.
+    ReadOnly,
+}
+
 /// Result of an ACP setup session.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AcpSetupResult {
@@ -58,12 +68,107 @@ impl TerminalManager {
 /// Full ACP Client. Implements permissions (auto-approve), session
 /// notifications (collect + stream text), filesystem ops, and terminal ops.
 pub(crate) struct SkillStarClient {
-    /// Collects all agent text output for later script extraction.
+    /// Collects agent text for the current prompt turn.
     pub(crate) collected: Arc<Mutex<String>>,
     /// Callback fired for every text chunk (for streaming to UI / logs).
     pub(crate) on_chunk: Box<dyn Fn(&str) + Send + Sync>,
     /// Terminal manager for running commands.
     pub(crate) terminals: Arc<TerminalManager>,
+    /// Restricts permissions and client methods for this session.
+    pub(crate) access_policy: AcpAccessPolicy,
+}
+
+impl SkillStarClient {
+    pub(crate) fn new(
+        collected: Arc<Mutex<String>>,
+        on_chunk: impl Fn(&str) + Send + Sync + 'static,
+        work_dir: PathBuf,
+        access_policy: AcpAccessPolicy,
+    ) -> Self {
+        Self {
+            collected,
+            on_chunk: Box::new(on_chunk),
+            terminals: Arc::new(TerminalManager::new(work_dir)),
+            access_policy,
+        }
+    }
+
+    fn reject_unavailable_in_read_only(&self, method: &str) -> acp::Result<()> {
+        if self.access_policy == AcpAccessPolicy::ReadOnly {
+            warn!(
+                target: "acp_client",
+                method,
+                "ACP method blocked by read-only policy"
+            );
+            Err(acp::Error::method_not_found())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+fn selected_permission_response(option: &acp::PermissionOption) -> acp::RequestPermissionResponse {
+    acp::RequestPermissionResponse::new(acp::RequestPermissionOutcome::Selected(
+        acp::SelectedPermissionOutcome::new(option.option_id.clone()),
+    ))
+}
+
+fn rejected_permission_response(
+    options: &[acp::PermissionOption],
+) -> acp::RequestPermissionResponse {
+    let rejection = options
+        .iter()
+        .find(|option| option.kind == acp::PermissionOptionKind::RejectOnce)
+        .or_else(|| {
+            options
+                .iter()
+                .find(|option| option.kind == acp::PermissionOptionKind::RejectAlways)
+        });
+
+    match rejection {
+        Some(option) => selected_permission_response(option),
+        None => acp::RequestPermissionResponse::new(acp::RequestPermissionOutcome::Cancelled),
+    }
+}
+
+fn has_trusted_read_only_title(title: Option<&str>) -> bool {
+    let Some(title) = title else {
+        return false;
+    };
+
+    let words: Vec<String> = title
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(str::to_ascii_lowercase)
+        .collect();
+    let Some(first) = words.first().map(String::as_str) else {
+        return false;
+    };
+
+    const READ_ONLY_PREFIXES: &[&str] = &[
+        "read", "readfile", "view", "inspect", "list", "search", "find", "grep", "glob", "think",
+        "analyze", "analyse",
+    ];
+    const MUTATING_OR_EXTERNAL_WORDS: &[&str] = &[
+        "write", "edit", "delete", "remove", "move", "rename", "execute", "run", "shell",
+        "terminal", "fetch", "download", "upload", "network", "http", "install", "create", "patch",
+        "apply",
+    ];
+
+    READ_ONLY_PREFIXES.contains(&first)
+        && !words
+            .iter()
+            .any(|word| MUTATING_OR_EXTERNAL_WORDS.contains(&word.as_str()))
+}
+
+fn read_only_tool_is_allowed(tool_call: &acp::ToolCallUpdate) -> bool {
+    match tool_call.fields.kind {
+        Some(acp::ToolKind::Read | acp::ToolKind::Search | acp::ToolKind::Think) => true,
+        // A few agents omit the kind while streaming the permission request.
+        // In that case only a narrow, verb-first title allowlist is accepted.
+        None => has_trusted_read_only_title(tool_call.fields.title.as_deref()),
+        Some(_) => false,
+    }
 }
 
 #[async_trait::async_trait(?Send)]
@@ -80,12 +185,40 @@ impl acp::Client for SkillStarClient {
             .collect();
         info!(
             target: "acp_client",
+            policy = ?self.access_policy,
             options = %options_desc.join(", "),
-            "permission requested → auto-approving"
+            "permission requested"
         );
 
-        // Prefer "allow_always" to minimize repeated permission prompts.
-        // Fall back to any allow-kind option, then first option.
+        if self.access_policy == AcpAccessPolicy::ReadOnly {
+            if read_only_tool_is_allowed(&args.tool_call) {
+                // Read-only sessions deliberately never persist a permission
+                // grant, even if AllowAlways is the only allow option.
+                if let Some(option) = args
+                    .options
+                    .iter()
+                    .find(|option| option.kind == acp::PermissionOptionKind::AllowOnce)
+                {
+                    info!(
+                        target: "acp_client",
+                        selected = %option.option_id,
+                        "approved one read-only operation"
+                    );
+                    return Ok(selected_permission_response(option));
+                }
+            }
+
+            warn!(
+                target: "acp_client",
+                kind = ?args.tool_call.fields.kind,
+                title = ?args.tool_call.fields.title,
+                "permission rejected by read-only policy"
+            );
+            return Ok(rejected_permission_response(&args.options));
+        }
+
+        // Prefer "allow_always" to minimize repeated permission prompts,
+        // but never select a rejection option as an approval fallback.
         let chosen = args
             .options
             .iter()
@@ -94,8 +227,7 @@ impl acp::Client for SkillStarClient {
                 args.options
                     .iter()
                     .find(|o| o.kind == acp::PermissionOptionKind::AllowOnce)
-            })
-            .or_else(|| args.options.first());
+            });
 
         if let Some(opt) = chosen {
             info!(
@@ -103,11 +235,7 @@ impl acp::Client for SkillStarClient {
                 selected = %opt.option_id,
                 "auto-approved permission"
             );
-            Ok(acp::RequestPermissionResponse::new(
-                acp::RequestPermissionOutcome::Selected(acp::SelectedPermissionOutcome::new(
-                    opt.option_id.clone(),
-                )),
-            ))
+            Ok(selected_permission_response(opt))
         } else {
             warn!(target: "acp_client", "no permission options available → cancelling");
             Ok(acp::RequestPermissionResponse::new(
@@ -180,6 +308,8 @@ impl acp::Client for SkillStarClient {
         &self,
         args: acp::WriteTextFileRequest,
     ) -> acp::Result<acp::WriteTextFileResponse> {
+        self.reject_unavailable_in_read_only("fs/write_text_file")?;
+
         let path = args.path;
         info!(target: "acp_client", path = %path.display(), "write_text_file");
 
@@ -208,6 +338,8 @@ impl acp::Client for SkillStarClient {
         &self,
         args: acp::CreateTerminalRequest,
     ) -> acp::Result<acp::CreateTerminalResponse> {
+        self.reject_unavailable_in_read_only("terminal/create")?;
+
         let cwd = args.cwd.unwrap_or_else(|| self.terminals.work_dir.clone());
         info!(
             target: "acp_client",
@@ -298,6 +430,8 @@ impl acp::Client for SkillStarClient {
         &self,
         args: acp::TerminalOutputRequest,
     ) -> acp::Result<acp::TerminalOutputResponse> {
+        self.reject_unavailable_in_read_only("terminal/output")?;
+
         let term_id = args.terminal_id.0.as_ref();
         let terminals = self.terminals.terminals.lock().unwrap();
         let term = terminals.get(term_id).ok_or_else(|| {
@@ -319,6 +453,8 @@ impl acp::Client for SkillStarClient {
         &self,
         args: acp::WaitForTerminalExitRequest,
     ) -> acp::Result<acp::WaitForTerminalExitResponse> {
+        self.reject_unavailable_in_read_only("terminal/wait_for_exit")?;
+
         let term_id = args.terminal_id.0.as_ref().to_string();
         info!(target: "acp_client", terminal_id = %term_id, "wait_for_terminal_exit");
 
@@ -361,6 +497,8 @@ impl acp::Client for SkillStarClient {
         &self,
         args: acp::KillTerminalRequest,
     ) -> acp::Result<acp::KillTerminalResponse> {
+        self.reject_unavailable_in_read_only("terminal/kill")?;
+
         let term_id = args.terminal_id.0.as_ref();
         info!(target: "acp_client", terminal_id = %term_id, "kill_terminal");
 
@@ -377,6 +515,8 @@ impl acp::Client for SkillStarClient {
         &self,
         args: acp::ReleaseTerminalRequest,
     ) -> acp::Result<acp::ReleaseTerminalResponse> {
+        self.reject_unavailable_in_read_only("terminal/release")?;
+
         let term_id = args.terminal_id.0.as_ref();
         info!(target: "acp_client", terminal_id = %term_id, "release_terminal");
 

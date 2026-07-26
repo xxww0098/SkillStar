@@ -42,9 +42,8 @@ pub async fn save_and_sync_project(
     agents: HashMap<String, Vec<String>>,
     deploy_modes: Option<HashMap<String, pm::ProjectDeployMode>>,
 ) -> Result<u32, AppError> {
-    let (_name, count) =
-        pm::save_and_sync(&project_path, agents, deploy_modes.unwrap_or_default())
-            .map_err(|e| AppError::Other(e.to_string()))?;
+    let (_name, count) = pm::save_and_sync(&project_path, agents, deploy_modes.unwrap_or_default())
+        .map_err(|e| AppError::Other(e.to_string()))?;
     Ok(count)
 }
 
@@ -131,7 +130,10 @@ mod tests {
         let previous_home = std::env::var_os("HOME");
         set_env("HOME", temp_root.join("home"));
         let previous_data_dir = std::env::var_os("SKILLSTAR_DATA_DIR");
-        set_env("SKILLSTAR_DATA_DIR", temp_root.join("home").join(".skillstar"));
+        set_env(
+            "SKILLSTAR_DATA_DIR",
+            temp_root.join("home").join(".skillstar"),
+        );
         #[cfg(windows)]
         let previous_userprofile = std::env::var_os("USERPROFILE");
         #[cfg(windows)]
@@ -230,7 +232,10 @@ mod tests {
         let previous_home = std::env::var_os("HOME");
         set_env("HOME", temp_root.join("home"));
         let previous_data_dir = std::env::var_os("SKILLSTAR_DATA_DIR");
-        set_env("SKILLSTAR_DATA_DIR", temp_root.join("home").join(".skillstar"));
+        set_env(
+            "SKILLSTAR_DATA_DIR",
+            temp_root.join("home").join(".skillstar"),
+        );
         #[cfg(windows)]
         let previous_userprofile = std::env::var_os("USERPROFILE");
         #[cfg(windows)]
@@ -309,7 +314,10 @@ mod tests {
         let previous_home = std::env::var_os("HOME");
         set_env("HOME", temp_root.join("home"));
         let previous_data_dir = std::env::var_os("SKILLSTAR_DATA_DIR");
-        set_env("SKILLSTAR_DATA_DIR", temp_root.join("home").join(".skillstar"));
+        set_env(
+            "SKILLSTAR_DATA_DIR",
+            temp_root.join("home").join(".skillstar"),
+        );
         #[cfg(windows)]
         let previous_userprofile = std::env::var_os("USERPROFILE");
         #[cfg(windows)]
@@ -318,7 +326,7 @@ mod tests {
         let result = (|| -> Result<()> {
             let project_path = temp_root.join("workspace").join("demo-import-project");
             let project_path_str = project_path.to_string_lossy().to_string();
-            let source_skill_dir = project_path.join(".codex/skills/shared-skill");
+            let source_skill_dir = project_path.join(".agents/skills/shared-skill");
 
             std::fs::create_dir_all(&source_skill_dir)?;
             std::fs::write(source_skill_dir.join("SKILL.md"), "description: shared")?;
@@ -345,9 +353,13 @@ mod tests {
             assert!(
                 skills_list
                     .agents
-                    .get("codex")
+                    .get("antigravity")
                     .is_some_and(|skills| skills.iter().any(|skill| skill == "shared-skill")),
-                "expected codex to own the imported skill at its unique .codex/skills path"
+                "expected the existing owner to retain the shared .agents/skills path"
+            );
+            assert!(
+                !skills_list.agents.contains_key("codex"),
+                "shared paths must not gain a second manifest owner"
             );
 
             Ok(())

@@ -3,7 +3,7 @@ import { selectTargetableAgentProfiles, supportsProjectDeploy } from "../../../l
 import type { AgentProfile, ScannedSkill } from "../../../types";
 
 export interface ProjectDeployAgents {
-  /** Installed + enabled profiles that support project deploy. */
+  /** Manually enabled profiles that support project deploy. */
   enabledProfiles: AgentProfile[];
   enabledProfileIdSet: Set<string>;
   enabledProfilesById: Map<string, AgentProfile>;

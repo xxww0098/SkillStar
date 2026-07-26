@@ -223,7 +223,8 @@ pub fn refresh_tray_menu(app: &tauri::AppHandle) -> Result<(), AppError> {
         .status()
         .enabled;
 
-    let menu = build_tray_menu(app, &lang, patrol_enabled).map_err(|e| AppError::Other(e.to_string()))?;
+    let menu =
+        build_tray_menu(app, &lang, patrol_enabled).map_err(|e| AppError::Other(e.to_string()))?;
     let tray = app
         .tray_by_id("main-tray")
         .ok_or_else(|| AppError::Other("tray not found".to_string()))?;

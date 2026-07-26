@@ -76,7 +76,12 @@ impl ProgressSink for NoopSink {
 }
 
 /// Helper to build an event with a fresh timestamp.
-pub fn event(session_id: &str, phase: Phase, status: Status, message: impl Into<String>) -> S3ProgressEvent {
+pub fn event(
+    session_id: &str,
+    phase: Phase,
+    status: Status,
+    message: impl Into<String>,
+) -> S3ProgressEvent {
     S3ProgressEvent {
         session_id: session_id.to_string(),
         phase,

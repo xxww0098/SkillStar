@@ -133,7 +133,9 @@ impl SecretStore for MemSecretStore {
         Ok(self.map.borrow().get(host_id).cloned())
     }
     fn set_secret(&self, host_id: &str, value: &str) -> Result<()> {
-        self.map.borrow_mut().insert(host_id.to_string(), value.into());
+        self.map
+            .borrow_mut()
+            .insert(host_id.to_string(), value.into());
         Ok(())
     }
     fn delete_secret(&self, host_id: &str) -> Result<()> {
@@ -379,7 +381,10 @@ mod tests {
         let mut new_def = sample_host("new");
         new_def.display_name = "Renamed".into();
         store.update("old", new_def, None).unwrap();
-        assert_eq!(store.secrets.get_secret("new").unwrap(), Some("secret".into()));
+        assert_eq!(
+            store.secrets.get_secret("new").unwrap(),
+            Some("secret".into())
+        );
         assert_eq!(store.secrets.get_secret("old").unwrap(), None);
     }
 

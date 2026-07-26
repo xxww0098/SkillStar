@@ -1,15 +1,15 @@
+use crate::agents::{self as agent_profile, AgentProfile};
 use crate::git::ops as git_ops;
+use crate::lockfile::LockEntry;
 use crate::{
     local_skill,
     lockfile::{self},
     repo_scanner,
 };
 use anyhow::{Context, Result, anyhow};
-use crate::lockfile::LockEntry;
 use skillstar_core::types::{
     Skill, SkillCategory, extract_github_source_from_url, extract_skill_description,
 };
-use crate::agents::{self as agent_profile, AgentProfile};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
@@ -459,6 +459,9 @@ fn refresh_single_skill_update(
 fn detect_agent_links(skill_name: &str, profiles: &[AgentProfile]) -> Vec<String> {
     let mut links = Vec::with_capacity(2); // most skills link to 1-2 agents
     for profile in profiles {
+        if !profile.has_global_skills() {
+            continue;
+        }
         let link_path = profile.global_skills_dir.join(skill_name);
         // Check symlinks/junctions: is_link() AND exists() (follows target — broken = false)
         if skillstar_core::infra::fs_ops::is_link(&link_path) && link_path.exists() {

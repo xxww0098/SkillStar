@@ -69,7 +69,12 @@ impl ProgressSink for NoopSink {
 
 /// Helper to build an event with a fresh timestamp.
 #[allow(dead_code)]
-pub fn event(session_id: &str, phase: Phase, status: Status, message: impl Into<String>) -> SshProgressEvent {
+pub fn event(
+    session_id: &str,
+    phase: Phase,
+    status: Status,
+    message: impl Into<String>,
+) -> SshProgressEvent {
     SshProgressEvent {
         session_id: session_id.to_string(),
         phase,
@@ -141,7 +146,12 @@ mod tests {
 
     #[test]
     fn scan_phase_serializes_as_snake_case() {
-        let e = event("s1", Phase::Scan, Status::Start, "scanning remote for skills…");
+        let e = event(
+            "s1",
+            Phase::Scan,
+            Status::Start,
+            "scanning remote for skills…",
+        );
         assert_eq!(e.phase, Phase::Scan);
         let json = serde_json::to_string(&e).unwrap();
         assert!(json.contains("\"phase\":\"scan\""));

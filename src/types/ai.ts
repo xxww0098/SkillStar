@@ -37,49 +37,6 @@ export interface AiStreamPayload {
   providerId?: string | null;
 }
 
-/** Phases of the AST-based translation pipeline reported by the backend. */
-
-export type AiTranslatePipelinePhase = "prepare" | "translate" | "finalize" | "guard";
-
-/** Per-event bundle progress reported on `ai://translate-stream`. */
-
-export interface AiTranslatePipelineProgress {
-  phase: AiTranslatePipelinePhase;
-  current: number;
-  total: number;
-}
-
-/** Translation model speed and usage reported when SKILL.md translation completes. */
-
-export interface AiTranslateMetrics {
-  model: string;
-  targetLanguage: string;
-  elapsedMs: number;
-  inputChars: number;
-  outputChars: number;
-  promptTokens?: number | null;
-  completionTokens?: number | null;
-  totalTokens?: number | null;
-  tps?: number | null;
-  cacheHit: boolean;
-  modelCalls: number;
-}
-
-export interface AiTranslateSkillStreamResult {
-  content: string;
-  metrics: AiTranslateMetrics;
-}
-
-/** Payload emitted on the `ai://translate-stream` Tauri event. */
-
-export interface AiTranslateStreamPayload {
-  requestId: string;
-  event: "start" | "progress" | "complete" | "error";
-  pipelineProgress?: AiTranslatePipelineProgress | null;
-  metrics?: AiTranslateMetrics | null;
-  message?: string | null;
-}
-
 export interface AiProviderRef {
   app_id: string;
   provider_id: string;

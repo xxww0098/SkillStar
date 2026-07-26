@@ -44,12 +44,13 @@ export function OAuthLoginPanel({
   onCancelOAuth,
 }: OAuthLoginPanelProps) {
   const { t } = useTranslation();
+  const callbackDisabled = !oauthPendingId || oauthSubmittingCallback;
   return (
-    <div className="space-y-3 rounded-2xl border border-border bg-muted/30 p-3.5">
+    <div className="space-y-3 rounded-2xl border border-border bg-muted/40 p-3.5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <p className="text-xs font-semibold text-foreground">{t("usage.oauthPanelTitle")}</p>
-          <p className="mt-1 max-w-[62ch] text-[10px] leading-relaxed text-muted-foreground">
+          <p className="mt-1 max-w-[62ch] text-[11px] leading-relaxed text-foreground/70">
             {t("usage.oauthPanelDesc", { provider: selectedEntry.display_name })}
           </p>
         </div>
@@ -70,9 +71,9 @@ export function OAuthLoginPanel({
       </div>
 
       {oauthStart ? (
-        <div className="rounded-xl border border-dashed border-border bg-background/60 p-3">
-          <p className="text-[10px] font-semibold text-muted-foreground">{t("usage.oauthAuthLink")}</p>
-          <p className="mt-1 max-h-24 overflow-y-auto break-all rounded-lg bg-muted/50 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-foreground">
+        <div className="rounded-xl border border-dashed border-border bg-background/70 p-3">
+          <p className="text-[11px] font-semibold text-foreground/75">{t("usage.oauthAuthLink")}</p>
+          <p className="mt-1 max-h-24 overflow-y-auto break-all rounded-lg bg-muted/60 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-foreground">
             {oauthStart.auth_url}
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
@@ -87,15 +88,15 @@ export function OAuthLoginPanel({
           </div>
         </div>
       ) : (
-        <p className="rounded-xl border border-dashed border-border bg-background/40 px-3 py-2 text-[10px] text-muted-foreground">
+        <p className="rounded-xl border border-dashed border-border/80 bg-muted/50 px-3 py-2.5 text-[11px] leading-relaxed text-foreground/60">
           {t("usage.oauthLinkPlaceholder")}
         </p>
       )}
 
       {oauthStart?.user_code && (
         <div className="space-y-1.5 rounded-xl border border-primary/20 bg-primary/5 p-3">
-          <p className="text-[10px] font-semibold text-foreground">{t("usage.oauthDeviceCodeTitle")}</p>
-          <p className="text-[9px] text-muted-foreground">{t("usage.oauthDeviceCodeHint")}</p>
+          <p className="text-[11px] font-semibold text-foreground">{t("usage.oauthDeviceCodeTitle")}</p>
+          <p className="text-[10px] text-foreground/65">{t("usage.oauthDeviceCodeHint")}</p>
           <div className="flex items-center gap-2">
             <code className="flex-1 rounded-lg border border-border bg-background px-2.5 py-1.5 text-center text-base font-bold tracking-[0.18em] text-foreground tabular-nums">
               {oauthStart.user_code}
@@ -109,28 +110,28 @@ export function OAuthLoginPanel({
       )}
 
       <div className="space-y-1.5">
-        <p className="text-[10px] font-semibold text-foreground">{t("usage.oauthCallbackLabel")}</p>
+        <p className="text-[11px] font-semibold text-foreground">{t("usage.oauthCallbackLabel")}</p>
         <div className="flex flex-col gap-2 sm:flex-row">
           <Input
             value={oauthCallbackInput}
             onChange={(e) => setOauthCallbackInput(e.target.value)}
             placeholder={t("usage.oauthCallbackPlaceholder")}
-            disabled={!oauthPendingId || oauthSubmittingCallback}
-            className="h-9 rounded-xl border-input-border bg-input text-xs text-foreground"
+            disabled={callbackDisabled}
+            className="h-9 rounded-xl border-input-border bg-input text-xs text-foreground placeholder:text-foreground/45 disabled:opacity-100 disabled:bg-muted/50 disabled:text-foreground/55 disabled:placeholder:text-foreground/40"
           />
           <Button
             type="button"
             size="sm"
             variant="outline"
             onClick={onSubmitCallback}
-            disabled={!oauthPendingId || oauthSubmittingCallback || !oauthCallbackInput.trim()}
-            className="shrink-0"
+            disabled={callbackDisabled || !oauthCallbackInput.trim()}
+            className="shrink-0 disabled:opacity-100 disabled:border-border disabled:bg-muted/40 disabled:text-foreground/50"
           >
             {oauthSubmittingCallback && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             {t("usage.oauthSubmitCallback")}
           </Button>
         </div>
-        <p className="text-[9px] leading-relaxed text-muted-foreground">{t("usage.oauthCallbackHint")}</p>
+        <p className="text-[10px] leading-relaxed text-foreground/60">{t("usage.oauthCallbackHint")}</p>
       </div>
 
       {oauthStatus && (

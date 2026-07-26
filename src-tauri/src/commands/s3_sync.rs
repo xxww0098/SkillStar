@@ -10,9 +10,10 @@
 //! string that is written to the system keyring and then dropped.
 
 use skillstar_core::infra::error::AppError;
-use skillstar_sync::progress::{Phase, ProgressSink, S3ProgressEvent, event};
-use skillstar_sync::store::KeyringSecretStore;
-use skillstar_sync::{TargetsStore, pull_manifest, push_all, restore_entries};
+use skillstar_sync::{
+    KeyringSecretStore, Phase, ProgressSink, S3ProgressEvent, TargetsStore, event, pull_manifest,
+    push_all, restore_entries,
+};
 use tauri::{AppHandle, Emitter};
 
 /// Re-exported DTOs so command signatures stay terse.
@@ -111,7 +112,12 @@ pub async fn push_skills_to_cloud(
     push_all(&target_id, &secrets, &session_id, &sink)
         .await
         .map_err(|e| {
-            sink.emit(event(&session_id, Phase::Error, skillstar_sync::Status::Fail, e.to_string()));
+            sink.emit(event(
+                &session_id,
+                Phase::Error,
+                skillstar_sync::Status::Fail,
+                e.to_string(),
+            ));
             to_sync_err(e)
         })
 }
@@ -127,7 +133,12 @@ pub async fn pull_cloud_manifest(
     pull_manifest(&target_id, &secrets, &session_id, &sink)
         .await
         .map_err(|e| {
-            sink.emit(event(&session_id, Phase::Error, skillstar_sync::Status::Fail, e.to_string()));
+            sink.emit(event(
+                &session_id,
+                Phase::Error,
+                skillstar_sync::Status::Fail,
+                e.to_string(),
+            ));
             to_sync_err(e)
         })
 }
@@ -144,7 +155,12 @@ pub async fn install_from_cloud_manifest(
     restore_entries(&target_id, &secrets, entries, &session_id, &sink)
         .await
         .map_err(|e| {
-            sink.emit(event(&session_id, Phase::Error, skillstar_sync::Status::Fail, e.to_string()));
+            sink.emit(event(
+                &session_id,
+                Phase::Error,
+                skillstar_sync::Status::Fail,
+                e.to_string(),
+            ));
             to_sync_err(e)
         })
 }

@@ -83,6 +83,12 @@ export function PageToolbar({ title, search, filters, actions, className, childr
               onWheel={(e) => {
                 const el = filtersRef.current;
                 if (!el) return;
+                // React synthetic events bubble through the React tree, so wheel
+                // events from portaled content (e.g. an open dropdown rendered to
+                // document.body) reach this handler even though they live outside
+                // the toolbar in the DOM. Only scroll for events that truly
+                // originate inside the filters container.
+                if (!el.contains(e.target as Node)) return;
                 if (el.scrollWidth <= el.clientWidth) return;
                 e.stopPropagation();
                 e.preventDefault();

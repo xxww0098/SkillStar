@@ -144,10 +144,6 @@ function useSkillsState() {
     };
   }, [refresh]);
 
-  useTauriEvent("ai://translations-updated", () => {
-    void refresh(true, true);
-  });
-
   // Rust backend emits "patrol://skill-checked"; merge into query cache.
   useTauriEvent<{ name: string; update_available: boolean }>("patrol://skill-checked", ({ name, update_available }) => {
     queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) => {
@@ -415,14 +411,6 @@ function useSkillsState() {
     [refresh],
   );
 
-  const batchAiProcessSkills = useCallback(async (skillNames: string[]) => {
-    try {
-      await tauriInvoke("ai_batch_process_skills", { skillNames });
-    } catch (e) {
-      throw new Error(String(e));
-    }
-  }, []);
-
   const readSkillContent = useCallback(async (name: string) => {
     try {
       return await tauriInvoke("read_skill_content", { name });
@@ -484,7 +472,6 @@ function useSkillsState() {
       updateSkillContent,
       createLocalSkill,
       deleteLocalSkill,
-      batchAiProcessSkills,
       ghostSkills,
       dismissGhostSkill,
       dismissGhostRepo,
@@ -506,7 +493,6 @@ function useSkillsState() {
       updateSkillContent,
       createLocalSkill,
       deleteLocalSkill,
-      batchAiProcessSkills,
       ghostSkills,
       dismissGhostSkill,
       dismissGhostRepo,

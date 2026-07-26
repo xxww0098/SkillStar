@@ -6,20 +6,20 @@ import { tauriInvoke } from "../lib/ipc";
 /**
  * How the app handles updates.
  *
- * - `"github-release"` (active, 0.0.3+): check GitHub Releases API via
- *   `check_app_update`, then open the release page for the user to download.
- *   No signing keys required. See docs/backend.md § Auto-Update.
- * - `"tauri-plugin"`: full signed in-app install (needs
- *   `createUpdaterArtifacts` + `TAURI_SIGNING_PRIVATE_KEY` + published
- *   `latest.json`). Not enabled yet.
- * - `"disabled"`: no check, no UI action (legacy kill switch).
+ * - `"tauri-plugin"` (active): signed in-app install via
+ *   `tauri-plugin-updater`. Needs `createUpdaterArtifacts`, CI
+ *   `TAURI_SIGNING_PRIVATE_KEY`, and a published `latest.json` on the
+ *   GitHub Release. See docs/features/platform/README.md § Updater 与发布.
+ * - `"github-release"`: check GitHub Releases API, open the release page
+ *   for manual download (no signing; legacy detect-only path).
+ * - `"disabled"`: no check, no UI action (kill switch).
  */
 export type UpdaterMode = "github-release" | "tauri-plugin" | "disabled";
 
-export const UPDATER_MODE: UpdaterMode = "github-release";
+export const UPDATER_MODE: UpdaterMode = "tauri-plugin";
 
 /** True when the About "Check for Updates" button and auto-check are live. */
-export const UPDATER_ENABLED = UPDATER_MODE !== "disabled";
+export const UPDATER_ENABLED = UPDATER_MODE !== ("disabled" as UpdaterMode);
 
 export type UpdateStatus = "idle" | "checking" | "available" | "downloading" | "ready" | "error";
 

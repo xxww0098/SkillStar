@@ -3,11 +3,11 @@
 
 use super::RemoveOpts;
 
+use skillstar_skills::git::{gh_manager, ops as git_ops};
 use skillstar_skills::local_skill;
 use skillstar_skills::lockfile;
 use skillstar_skills::skill_install;
 use skillstar_skills::skill_pack;
-use skillstar_skills::git::{gh_manager, ops as git_ops};
 use std::io::{self, IsTerminal, Write};
 
 pub fn cmd_update(name: Option<&str>) {

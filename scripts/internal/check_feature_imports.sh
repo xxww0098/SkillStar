@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# Structural-governance guard: catch src/features/<a>/ code importing directly
-# from src/features/<b>/ (a != b). Cross-feature reach-ins bypass the intended
-# slice boundary (each domain owns its own components/hooks/api); shared code
-# should move to src/components or src/lib instead. Both import spellings are
-# caught: relative (`../../<feature>/...`, any `../` depth) and absolute
-# (`@/features/<feature>/...`).
+# Structural-governance guard: catch src/features/<a>/ code reaching into
+# src/features/<b>/ internals (a != b). Cross-feature dependencies are allowed
+# only through the target feature's root index.ts; shared code without domain
+# meaning should move to src/components or src/lib instead. Both relative and
+# absolute import spellings are checked.
 #
 # Ratchet model (same as check_file_size.sh): current cross-feature imports are
 # grandfathered as exact `file:line` entries in `feature_imports_baseline.txt`
@@ -57,6 +56,12 @@ while IFS= read -r -d '' file; do
     [ -z "$target" ] && continue
     [ "$target" = "$owner" ] && continue  # same-feature self-reference, not a violation
 
+    # A target feature's root barrel is its explicit public interface. Internal
+    # paths below that root remain violations and are handled by the ratchet.
+    if printf '%s\n' "$content" | grep -Eq "from [\"']((\.\./)+${target}|@/features/${target})[\"']"; then
+      continue
+    fi
+
     entry="$file:$lineno"
     if is_baselined "$entry"; then
       printf 'WARN  %s  [%s -> %s]  %s  (baselined debt)\n' "$entry" "$owner" "$target" "$content"
@@ -89,7 +94,7 @@ echo ""
 echo "summary: ${new_violations} new cross-feature imports, ${warn_violations} baselined debt, ${stale} stale baseline entr$([ "$stale" = 1 ] && echo y || echo ies)."
 
 if [ "$new_violations" -gt 0 ]; then
-  echo "✗ New import reaches across a feature slice boundary. Move the shared code to src/components or src/lib, or if intentional, add the file:line to scripts/internal/feature_imports_baseline.txt."
+  echo "✗ New import reaches into another feature's internals. Consume its root index.ts, move domain-free shared code to src/components or src/lib, or refactor the ownership seam."
   exit 1
 fi
 

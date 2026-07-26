@@ -56,7 +56,10 @@ static CLIENT_ID: LazyLock<String> = LazyLock::new(|| {
 pub fn client_id() -> &'static str {
     CLIENT_ID.as_str()
 }
-const SCOPES: &str = "openid profile email offline_access grok-cli:access api:access";
+const SCOPES: &str = concat!(
+    "openid profile email offline_access ",
+    "grok-cli:access conversations:read conversations:write api:access"
+);
 const CALLBACK_PORT: u16 = 56121;
 const CALLBACK_PATH: &str = "/callback";
 const BILLING_URL: &str = "https://cli-chat-proxy.grok.com/v1/billing";
@@ -97,7 +100,10 @@ struct TokenResponse {
     expires_in: Option<i64>,
 }
 
-pub async fn start_login(_region: Option<&str>) -> UsageResult<super::OAuthStartInfo> {
+pub async fn start_login(
+    _region: Option<&str>,
+    target_subscription_id: Option<&str>,
+) -> UsageResult<super::OAuthStartInfo> {
     let pkce = PkcePair::generate();
     let state = crate::oauth::pkce::random_state();
     let nonce = crate::oauth::pkce::random_state();
@@ -110,12 +116,19 @@ pub async fn start_login(_region: Option<&str>) -> UsageResult<super::OAuthStart
         &nonce,
     )?;
 
-    let pending_id = crate::oauth::pending_state::register("xai", None, auth_url.clone());
+    let pending_id = register_pending_login(auth_url.clone(), target_subscription_id);
     let pid = pending_id.clone();
     let verifier = pkce.verifier.clone();
     let state_for_task = state.clone();
     tokio::spawn(async move {
-        let result = drive_login(state_for_task, verifier, redirect_uri).await;
+        let target_subscription_id = crate::oauth::pending_state::target_subscription_id(&pid);
+        let result = drive_login(
+            state_for_task,
+            verifier,
+            redirect_uri,
+            target_subscription_id,
+        )
+        .await;
         if let Some(tx) = crate::oauth::pending_state::take_sender(&pid) {
             let _ = tx.send(result);
         }
@@ -124,16 +137,29 @@ pub async fn start_login(_region: Option<&str>) -> UsageResult<super::OAuthStart
     Ok(super::OAuthStartInfo::browser(auth_url, pending_id))
 }
 
+fn register_pending_login(auth_url: String, target_subscription_id: Option<&str>) -> String {
+    let pending_id = crate::oauth::pending_state::register("xai", None, auth_url);
+    crate::oauth::pending_state::set_target_subscription_id(
+        &pending_id,
+        target_subscription_id.map(str::to_string),
+    );
+    pending_id
+}
+
 async fn drive_login(
     state: String,
     verifier: String,
     redirect_uri: String,
+    target_subscription_id: Option<String>,
 ) -> UsageResult<Subscription> {
     let code =
         local_server::wait_for_callback(CALLBACK_PORT, state, Some(Duration::from_secs(300)))
             .await?;
     let tokens = exchange_code(&code, &verifier, &redirect_uri).await?;
-    finalize(tokens).await
+    crate::refresh_guard::with_catalog_lock("xai", || async {
+        finalize(tokens, target_subscription_id.as_deref()).await
+    })
+    .await?
 }
 
 fn build_authorize_url(
@@ -188,7 +214,11 @@ async fn parse_token_response(resp: reqwest::Response, label: &str) -> UsageResu
     let status = resp.status();
     let body = resp.text().await.unwrap_or_default();
     if !status.is_success() {
-        if status == reqwest::StatusCode::UNAUTHORIZED {
+        let invalid_grant = serde_json::from_str::<Value>(&body)
+            .ok()
+            .and_then(|payload| payload.get("error")?.as_str().map(str::to_string))
+            .is_some_and(|error| error == "invalid_grant");
+        if status == reqwest::StatusCode::UNAUTHORIZED || invalid_grant {
             return Err(UsageError::AuthRequired);
         }
         return Err(UsageError::Fetcher(format!(
@@ -206,15 +236,73 @@ async fn parse_token_response(resp: reqwest::Response, label: &str) -> UsageResu
     Ok(tokens)
 }
 
-async fn finalize(tokens: TokenResponse) -> UsageResult<Subscription> {
+async fn finalize(
+    tokens: TokenResponse,
+    target_subscription_id: Option<&str>,
+) -> UsageResult<Subscription> {
+    let existing = match target_subscription_id {
+        Some(id) => {
+            let subscription = storage::get_subscription(id)?;
+            if subscription.catalog_id != "xai"
+                || subscription.auth_mode != crate::catalog::AuthMode::OAuth
+            {
+                return Err(UsageError::Other(format!(
+                    "Grok 重新授权目标 {id} 不是 xAI OAuth 订阅"
+                )));
+            }
+            Some(subscription)
+        }
+        None => None,
+    };
+    let sub = build_subscription(tokens, existing.as_ref())?;
+    let account_changed = existing.as_ref().is_some_and(|existing| {
+        let old_identity = subscription_account_identity(existing);
+        let new_identity = subscription_account_identity(&sub);
+        old_identity.is_some() && new_identity.is_some() && old_identity != new_identity
+    });
+    if account_changed {
+        // The row id stays stable during targeted reauthorization, but usage
+        // windows belong to the account identity. Do not carry the previous
+        // account's weekly fallback into the newly bound account.
+        storage::delete_usage_snapshot(&sub.id)?;
+    }
+    let access_token =
+        crate::fetchers::decrypt_required(&sub.access_token_encrypted, "access_token")?;
+
+    let usage = fetch_with_token(&sub.id, &access_token)
+        .await
+        .unwrap_or_else(|error| SubscriptionUsage {
+            subscription_id: sub.id.clone(),
+            fetched_at: Utc::now().timestamp(),
+            plan_name: Some(DEFAULT_PLAN_NAME.to_string()),
+            error: Some(format!("Grok 已重新授权，但用量刷新失败: {error}")),
+            ..Default::default()
+        });
+    storage::save_usage_snapshot(usage).ok();
+    storage::upsert_subscription(sub)
+        .map_err(|e| UsageError::Other(format!("Grok 订阅保存失败: {}", e)))
+}
+
+fn build_subscription(
+    tokens: TokenResponse,
+    existing: Option<&Subscription>,
+) -> UsageResult<Subscription> {
     let access_token = trim_opt(tokens.access_token.as_deref()).ok_or(UsageError::AuthRequired)?;
     let refresh_token = trim_opt(tokens.refresh_token.as_deref());
     let id_token = trim_opt(tokens.id_token.as_deref());
-    let email = id_token.and_then(|token| token_refresh::jwt_string(token, &["email"]));
-    let subject = id_token.and_then(|token| token_refresh::jwt_string(token, &["sub"]));
+    // Some xAI token exchanges omit `id_token` (especially targeted
+    // reauthorization). In that case the new access token is still the
+    // authoritative account identity; carrying the old row's account id would
+    // bind a fresh token to the wrong Grok card.
+    let email = id_token
+        .and_then(|token| token_refresh::jwt_string(token, &["email"]))
+        .or_else(|| token_refresh::jwt_string(access_token, &["email"]));
+    let subject = id_token
+        .and_then(|token| token_refresh::jwt_string(token, &["sub"]))
+        .or_else(|| token_refresh::jwt_string(access_token, &["sub"]));
+    // Card already shows provider branding (logo / plan badge); title is the account only.
     let display_name = email
-        .as_ref()
-        .map(|email| format!("Grok · {}", email))
+        .clone()
         .unwrap_or_else(|| DEFAULT_PLAN_NAME.to_string());
     let expires_at = tokens
         .expires_in
@@ -222,16 +310,64 @@ async fn finalize(tokens: TokenResponse) -> UsageResult<Subscription> {
         .or_else(|| token_refresh::jwt_exp(access_token))
         .or_else(|| id_token.and_then(token_refresh::jwt_exp));
 
-    let sub = SubscriptionBuilder::new("xai", display_name, "USD", access_token, expires_at)
+    let mut sub = SubscriptionBuilder::new("xai", display_name, "USD", access_token, expires_at)
         .refresh_token(refresh_token.map(str::to_string))
+        .id_token(id_token.map(str::to_string))
         .oauth_account_id(subject.or(email))
         .build();
 
-    if let Ok(usage) = fetch_with_token(&sub.id, access_token).await {
-        storage::save_usage_snapshot(usage).ok();
+    if let Some(existing) = existing {
+        let existing_identity = subscription_account_identity(existing);
+        let new_identity = subscription_account_identity(&sub);
+        let same_identity_proven = existing_identity.is_some() && existing_identity == new_identity;
+        sub.oauth_account_id = new_identity;
+        sub.id = existing.id.clone();
+        sub.plan_tier = existing.plan_tier.clone();
+        sub.monthly_price = existing.monthly_price;
+        sub.currency = existing.currency.clone();
+        sub.billing_cycle = existing.billing_cycle;
+        sub.start_date = existing.start_date;
+        sub.renew_date = existing.renew_date;
+        sub.auto_renew = existing.auto_renew;
+        if same_identity_proven {
+            sub.refresh_token_encrypted = sub
+                .refresh_token_encrypted
+                .or_else(|| existing.refresh_token_encrypted.clone());
+            sub.id_token_encrypted = sub
+                .id_token_encrypted
+                .or_else(|| existing.id_token_encrypted.clone());
+        }
+        sub.manual_quota = existing.manual_quota.clone();
+        sub.note = existing.note.clone();
+        sub.sort_index = existing.sort_index;
+        sub.created_at = existing.created_at;
     }
-    storage::upsert_subscription(sub)
-        .map_err(|e| UsageError::Other(format!("Grok 订阅保存失败: {}", e)))
+
+    Ok(sub)
+}
+
+fn subscription_account_identity(subscription: &Subscription) -> Option<String> {
+    for encrypted in [
+        subscription.access_token_encrypted.as_deref(),
+        subscription.id_token_encrypted.as_deref(),
+    ] {
+        if let Some(identity) = encrypted
+            .map(crypto::decrypt)
+            .filter(|token| !token.is_empty())
+            .and_then(|token| {
+                token_refresh::jwt_string(&token, &["sub"])
+                    .or_else(|| token_refresh::jwt_string(&token, &["email"]))
+            })
+        {
+            return Some(identity.trim().to_ascii_lowercase());
+        }
+    }
+    subscription
+        .oauth_account_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|identity| !identity.is_empty())
+        .map(str::to_ascii_lowercase)
 }
 
 super::common::impl_oauth_fetch!();
@@ -240,18 +376,64 @@ async fn fetch_inner(subscription: &mut Subscription) -> UsageResult<Subscriptio
     if token_refresh::needs_refresh(subscription.access_token_expires_at) {
         refresh_xai_tokens(subscription).await?;
     }
+    // Legacy "Grok · email" / bare "Grok" → bare email when oauth_account_id or id_token has it.
+    maybe_upgrade_xai_title(subscription);
 
     let access_token =
         crate::fetchers::decrypt_required(&subscription.access_token_encrypted, "access_token")?;
     match fetch_with_token(&subscription.id, &access_token).await {
         Err(UsageError::AuthRequired) => {
             refresh_xai_tokens(subscription).await?;
-            let access_token =
-                crate::fetchers::decrypt_required(&subscription.access_token_encrypted, "access_token")?;
+            maybe_upgrade_xai_title(subscription);
+            let access_token = crate::fetchers::decrypt_required(
+                &subscription.access_token_encrypted,
+                "access_token",
+            )?;
             fetch_with_token(&subscription.id, &access_token).await
         }
         other => other,
     }
+}
+
+fn maybe_upgrade_xai_title(subscription: &mut Subscription) {
+    let email = subscription
+        .id_token_encrypted
+        .as_deref()
+        .map(crypto::decrypt)
+        .filter(|s| !s.is_empty())
+        .and_then(|jwt| super::common::email_from_jwt(&jwt))
+        .or_else(|| {
+            subscription
+                .oauth_account_id
+                .as_deref()
+                .filter(|s| super::common::looks_like_email(s))
+                .map(str::to_string)
+        })
+        // Strip legacy "Grok · user@x.com" already stored as display_name.
+        .or_else(|| {
+            subscription
+                .display_name
+                .strip_prefix("Grok · ")
+                .map(str::trim)
+                .filter(|s| super::common::looks_like_email(s))
+                .map(str::to_string)
+        });
+    super::common::apply_email_title(subscription, email.as_deref(), &["Grok"]);
+}
+
+/// Refresh Grok OAuth material when the account-switch transaction has already
+/// determined that the effective expiry (stored metadata plus JWT `exp`) is
+/// near/unknown. This deliberately does not fetch billing data.
+pub async fn refresh_for_cli_switch(subscription: &mut Subscription) -> UsageResult<()> {
+    if subscription.catalog_id != "xai" {
+        return Err(UsageError::Other(format!(
+            "Grok credential refresh received catalog {}",
+            subscription.catalog_id
+        )));
+    }
+    refresh_xai_tokens(subscription).await?;
+    maybe_upgrade_xai_title(subscription);
+    Ok(())
 }
 
 async fn refresh_xai_tokens(subscription: &mut Subscription) -> UsageResult<()> {
@@ -289,6 +471,9 @@ async fn refresh_xai_tokens(subscription: &mut Subscription) -> UsageResult<()> 
         .or_else(|| trim_opt(tokens.id_token.as_deref()).and_then(token_refresh::jwt_exp));
 
     if let Some(id_token) = trim_opt(tokens.id_token.as_deref()) {
+        if let Some(email) = super::common::email_from_jwt(id_token) {
+            super::common::apply_email_title(subscription, Some(&email), &["Grok"]);
+        }
         let account_id = token_refresh::jwt_string(id_token, &["sub"])
             .or_else(|| token_refresh::jwt_string(id_token, &["email"]));
         if account_id.is_some() {
@@ -466,11 +651,7 @@ fn build_subscription_usage(
     let monthly_limit = pick_cent_multi(&roots, &[&["monthlyLimit"], &["monthly_limit"]]);
     let used = pick_cent_multi(
         &roots,
-        &[
-            &["usage", "totalUsed"],
-            &["usage", "total_used"],
-            &["used"],
-        ],
+        &[&["usage", "totalUsed"], &["usage", "total_used"], &["used"]],
     );
     let on_demand_cap = pick_cent_multi(&roots, &[&["onDemandCap"], &["on_demand_cap"]]);
     let billing_period_end = pick_value_multi(
@@ -537,9 +718,12 @@ fn build_subscription_usage(
     });
 
     let mut credits = Vec::new();
-    if let Some(cap) = on_demand_cap {
+    // Machine slug the frontend `GrokUsagePanel` matches on (`GROK_ON_DEMAND_CAP`);
+    // the human label comes from i18n, not this key. Omit a $0 cap — a zero
+    // pay-as-you-go ceiling is "not enabled", not a chip worth showing.
+    if let Some(cap) = on_demand_cap.filter(|c| *c > 0.0) {
         credits.push(CreditInfo {
-            credit_type: "Pay as you go cap".to_string(),
+            credit_type: "grok-on-demand-cap".to_string(),
             credit_amount: Some(format_usd_cents(cap)),
             minimum_credit_amount_for_usage: None,
         });
@@ -638,229 +822,5 @@ fn trim_opt(value: Option<&str>) -> Option<&str> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn parses_root_shape_with_usage_total_used() {
-        // Real xAI shape: fields at root, used under usage.totalUsed.
-        let payload = json!({
-            "billingCycle": {
-                "billingPeriodStart": "2026-06-01T00:00:00Z",
-                "billingPeriodEnd": "2026-07-01T00:00:00Z"
-            },
-            "monthlyLimit": { "val": 99900 },
-            "onDemandCap": { "val": 2000 },
-            "usage": {
-                "includedUsed": { "val": 12345 },
-                "onDemandUsed": { "val": 0 },
-                "totalUsed": { "val": 12345 }
-            }
-        });
-
-        let usage = build_subscription_usage("sub-xai", &payload, None).unwrap();
-        let monthly = usage.monthly.unwrap();
-
-        assert_eq!(monthly.used, 12345);
-        assert_eq!(monthly.total, Some(99900));
-        assert_eq!(monthly.percent, Some(12));
-        assert_eq!(usage.credits.len(), 1);
-        assert_eq!(usage.credits[0].credit_amount.as_deref(), Some("$20"));
-    }
-
-    #[test]
-    fn parses_legacy_config_wrapper() {
-        // Older fixtures / proxy mirrors wrap fields under `config`.
-        let payload = json!({
-            "config": {
-                "monthlyLimit": { "val": "5000" },
-                "used": { "val": 1250 },
-                "onDemandCap": { "val": 2000 },
-                "billingPeriodEnd": "2026-06-30T00:00:00Z"
-            }
-        });
-
-        let usage = build_subscription_usage("sub-xai", &payload, None).unwrap();
-        let monthly = usage.monthly.unwrap();
-
-        assert_eq!(monthly.used, 1250);
-        assert_eq!(monthly.total, Some(5000));
-        assert_eq!(monthly.percent, Some(25));
-        assert_eq!(usage.credits[0].credit_amount.as_deref(), Some("$20"));
-    }
-
-    #[test]
-    fn prefers_root_usage_over_config_used() {
-        // When both root (real) and config (legacy) shapes are present,
-        // root usage.totalUsed must win over a stray config.used.
-        let payload = json!({
-            "config": { "used": { "val": 999 } },
-            "monthlyLimit": { "val": 10000 },
-            "usage": { "totalUsed": { "val": 2500 } }
-        });
-        let usage = build_subscription_usage("sub-xai", &payload, None).unwrap();
-        assert_eq!(usage.monthly.unwrap().used, 2500);
-    }
-
-    #[test]
-    fn no_weekly_window_without_current_period() {
-        // Without the credits view (period=None) we only know the monthly
-        // numbers: one "Monthly credits" bar, no weekly bar (no heuristic).
-        let soon = Utc::now().timestamp() + 6 * 86_400;
-        let payload = json!({
-            "billingCycle": { "billingPeriodEnd": soon },
-            "monthlyLimit": { "val": 5000 },
-            "usage": { "totalUsed": { "val": 1000 } }
-        });
-        let usage = build_subscription_usage("sub-xai", &payload, None).unwrap();
-        assert_eq!(usage.monthly.unwrap().label, "Monthly credits");
-        assert!(usage.weekly.is_none(), "no weekly bar without currentPeriod");
-    }
-
-    #[test]
-    fn monthly_only_for_monthly_plan() {
-        // A monthly-plan currentPeriod yields the monthly bar only.
-        let payload = json!({
-            "billingCycle": { "billingPeriodEnd": "2026-07-01T00:00:00Z" },
-            "monthlyLimit": { "val": 5000 },
-            "usage": { "totalUsed": { "val": 1000 } }
-        });
-        let period = CurrentPeriod {
-            weekly: Some(false),
-            end: Some(1782864000),
-            usage_percent: None,
-        };
-        let usage = build_subscription_usage("sub-xai", &payload, Some(period)).unwrap();
-        assert_eq!(usage.monthly.unwrap().label, "Monthly credits");
-        assert!(usage.weekly.is_none(), "monthly plan has no weekly bar");
-    }
-
-    #[test]
-    fn defaults_monthly_label_without_reset() {
-        // No billingPeriodEnd → still parses, defaults to Monthly label.
-        let payload = json!({
-            "monthlyLimit": { "val": 5000 },
-            "usage": { "totalUsed": { "val": 1000 } }
-        });
-        let usage = build_subscription_usage("sub-xai", &payload, None).unwrap();
-        assert_eq!(usage.monthly.unwrap().label, "Monthly credits");
-    }
-
-    #[test]
-    fn rejects_empty_billing_config() {
-        let payload = json!({ "config": {} });
-        assert!(build_subscription_usage("sub-xai", &payload, None).is_err());
-    }
-
-    #[test]
-    fn rejects_garbage_payload() {
-        let payload = json!({ "randomField": "value" });
-        assert!(build_subscription_usage("sub-xai", &payload, None).is_err());
-    }
-
-    #[test]
-    fn parses_current_period_weekly_from_credits_view() {
-        // Real `?format=credits` shape (config-wrapped), weekly plan.
-        let payload = json!({
-            "config": {
-                "currentPeriod": {
-                    "type": "USAGE_PERIOD_TYPE_WEEKLY",
-                    "start": "2026-06-27T05:57:15.869945+00:00",
-                    "end": "2026-07-04T05:57:15.869945+00:00"
-                },
-                "billingPeriodStart": "2026-06-27T05:57:15.869945+00:00",
-                "billingPeriodEnd": "2026-07-04T05:57:15.869945+00:00"
-            }
-        });
-        let cp = parse_current_period(&payload).expect("currentPeriod parsed");
-        assert_eq!(cp.weekly, Some(true));
-        // 2026-07-04T05:57:15Z
-        assert_eq!(cp.end, Some(1783144635));
-    }
-
-    #[test]
-    fn parses_current_period_monthly() {
-        let payload = json!({
-            "currentPeriod": {
-                "type": "USAGE_PERIOD_TYPE_MONTHLY",
-                "end": "2026-07-01T00:00:00Z"
-            }
-        });
-        let cp = parse_current_period(&payload).unwrap();
-        assert_eq!(cp.weekly, Some(false));
-        assert_eq!(cp.end, Some(1782864000));
-    }
-
-    #[test]
-    fn weekly_plan_builds_two_bars() {
-        // Weekly plan: monthly numeric quota (from the default view, resetting
-        // on the calendar-month billingPeriodEnd) AND a separate weekly
-        // progress bar (percent-only, resetting on currentPeriod.end).
-        let weekly_end_ts = 1783144635; // 2026-07-04T05:57:15Z
-        let month_end_ts = 1782864000; // 2026-07-01T00:00:00Z
-        let payload = json!({
-            "monthlyLimit": { "val": 20000 },
-            "used": { "val": 7006 },
-            "billingPeriodEnd": "2026-07-01T00:00:00Z"
-        });
-        let period = CurrentPeriod {
-            weekly: Some(true),
-            end: Some(weekly_end_ts),
-            usage_percent: Some(13.0),
-        };
-        let usage = build_subscription_usage("sub-xai", &payload, Some(period)).unwrap();
-
-        // Monthly: absolute numbers, monthly reset (NOT the weekly instant).
-        let monthly = usage.monthly.unwrap();
-        assert_eq!(monthly.label, "Monthly credits");
-        assert_eq!(monthly.used, 7006);
-        assert_eq!(monthly.total, Some(20000));
-        assert_eq!(monthly.percent, Some(35));
-        assert_eq!(monthly.reset_at, Some(month_end_ts));
-
-        // Weekly: percent-only progress bar, weekly reset.
-        let weekly = usage.weekly.expect("weekly bar present");
-        assert_eq!(weekly.label, "Weekly credits");
-        assert_eq!(weekly.percent, Some(13));
-        assert_eq!(weekly.total, None, "weekly bar carries no absolute number");
-        assert_eq!(weekly.reset_at, Some(weekly_end_ts));
-    }
-
-    #[test]
-    fn weekly_bar_zero_percent_when_omitted() {
-        // proto3 omits creditUsagePercent at 0% → weekly bar shows 0, not gone.
-        let payload = json!({ "monthlyLimit": { "val": 20000 }, "used": { "val": 7006 } });
-        let period = CurrentPeriod {
-            weekly: Some(true),
-            end: Some(1783144635),
-            usage_percent: None,
-        };
-        let usage = build_subscription_usage("sub-xai", &payload, Some(period)).unwrap();
-        assert_eq!(usage.weekly.unwrap().percent, Some(0));
-    }
-
-    #[test]
-    fn parses_credit_usage_percent_from_credits_view() {
-        // The `?format=credits` view carries creditUsagePercent next to
-        // currentPeriod (a plain float), the weekly soft-limit usage.
-        let payload = json!({
-            "config": {
-                "creditUsagePercent": 13.0,
-                "currentPeriod": {
-                    "type": "USAGE_PERIOD_TYPE_WEEKLY",
-                    "end": "2026-07-04T05:57:15.869945+00:00"
-                }
-            }
-        });
-        let cp = parse_current_period(&payload).expect("currentPeriod parsed");
-        assert_eq!(cp.weekly, Some(true));
-        assert_eq!(cp.usage_percent, Some(13.0));
-    }
-
-    #[test]
-    fn rejects_current_period_without_type_or_end() {
-        let payload = json!({ "currentPeriod": { "type": "USAGE_PERIOD_TYPE_UNSPECIFIED" } });
-        assert!(parse_current_period(&payload).is_none());
-    }
-}
+#[path = "xai_tests.rs"]
+mod tests;

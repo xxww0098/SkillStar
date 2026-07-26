@@ -1,8 +1,8 @@
 //! Skill-pack (`.agd`) commands: install from URL, list, remove, doctor.
 //! Thin forwarders over `crate::core::{skill_pack, skill_install}`.
 
-use skillstar_skills::skill_pack;
 use skillstar_core::infra::error::AppError;
+use skillstar_skills::skill_pack;
 
 #[tauri::command]
 pub async fn install_pack_from_url(url: String) -> Result<Vec<String>, AppError> {

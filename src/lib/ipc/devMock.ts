@@ -45,6 +45,13 @@ import {
 
 let devProviderSeq = 0;
 
+let acpConfigStore = {
+  enabled: false,
+  agent_command: "",
+  agent_label: "",
+  tutorial_style: "guided" as "guided" | "reference" | "workshop",
+};
+
 // S3 sync targets are held in memory so browser-dev add/edit/delete persists
 // across queries within a session (mirrors sshHostsStore above). Seeded from
 // S3_TARGETS once on first use.
@@ -81,19 +88,77 @@ interface MockBinding {
 /** Tools whose config natively holds several providers (mirrors agentRegistry). */
 const MULTI_PROVIDER_TOOLS = new Set(["codex", "opencode"]);
 
+const DEMO_TUTORIAL_HTML = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:">
+  <title>PDF Tools Tutorial</title>
+  <style>
+    :root{color-scheme:light;font-family:Inter,ui-sans-serif,system-ui,sans-serif;color:#172033;background:#f5f7fb}
+    body{margin:0;padding:40px}.page{max-width:900px;margin:auto}.hero,.card{background:#fff;border:1px solid #dde3ee;border-radius:20px;padding:28px;box-shadow:0 12px 32px #1f2a4412}.hero{background:#172033;color:#fff}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-top:20px}.card{padding:20px}code{background:#edf1f7;border-radius:6px;padding:2px 6px}pre{overflow:auto;background:#111827;color:#e5e7eb;border-radius:12px;padding:16px}svg{width:100%;height:auto;margin-top:18px}.muted{color:#64748b}</style>
+</head>
+<body><main class="page"><section class="hero"><p>SKILLSTAR GUIDE</p><h1>PDF Tools</h1><p>Merge, split, OCR, and fill PDF documents with a predictable workflow.</p><svg viewBox="0 0 760 120" role="img" aria-label="PDF workflow"><rect x="10" y="30" width="180" height="60" rx="14" fill="#334155"/><rect x="290" y="30" width="180" height="60" rx="14" fill="#2563eb"/><rect x="570" y="30" width="180" height="60" rx="14" fill="#0f766e"/><path d="M190 60h100M470 60h100" stroke="#93c5fd" stroke-width="6"/><text x="100" y="66" fill="white" text-anchor="middle">Choose files</text><text x="380" y="66" fill="white" text-anchor="middle">Run a command</text><text x="660" y="66" fill="white" text-anchor="middle">Verify output</text></svg></section><section class="grid"><article class="card"><h2>1. Merge</h2><p class="muted">Combine several documents while preserving bookmarks.</p><pre><code>skillstar run pdf-tools merge a.pdf b.pdf -o out.pdf</code></pre></article><article class="card"><h2>2. OCR</h2><p class="muted">Turn scans into searchable PDFs with automatic language detection.</p></article><article class="card"><h2>3. Validate</h2><p class="muted">Open the result and confirm page order, text layer, and metadata.</p></article></section><section hidden><span data-skillstar-file="SKILL.md"></span><span data-skillstar-file="scripts/merge.py"></span><span data-skillstar-file="README.md"></span></section></main></body>
+</html>`;
+
+function demoSkillTutorial(args: Record<string, unknown>) {
+  const skillName = String(args.name ?? "pdf-tools");
+  return {
+    state: "fresh",
+    currentHash: "demo-skill-content-hash",
+    html: DEMO_TUTORIAL_HTML,
+    metadata: {
+      skillName,
+      contentHash: "demo-skill-content-hash",
+      promptVersion: "1",
+      schemaVersion: "1",
+      tutorialStyle: acpConfigStore.tutorial_style,
+      agentLabel: "Claude Code",
+      generatedAt: iso(0),
+      fileCount: 3,
+      totalBytes: 8_192,
+    },
+    staleReason: null,
+  };
+}
+
 const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   // ── Global / app shell ──
   list_agent_profiles: () => AGENTS,
-  toggle_agent_profile: () => true,
-  get_patrol_status: () => ({ enabled: true, running: true, interval_secs: 3600, last_check: iso(0) }),
+  toggle_agent_profile: (args) => {
+    const agent = AGENTS.find((profile) => profile.id === String(args.id));
+    if (!agent) return false;
+    const nextEnabled = !agent.enabled;
+    agent.enabled = nextEnabled;
+    // `installed` is a frozen compatibility field; manual activation is now
+    // the only source of truth in the browser mock as well.
+    agent.installed = nextEnabled;
+    return nextEnabled;
+  },
+  get_patrol_status: () => ({
+    enabled: true,
+    running: true,
+    interval_secs: 3600,
+    last_check: iso(0),
+  }),
   set_patrol_enabled: () => undefined,
   check_developer_mode: () => true,
-  check_app_update: () => ({ available: false, version: null, date: null, body: null }),
+  check_app_update: () => ({
+    available: false,
+    version: null,
+    date: null,
+    body: null,
+    release_url: null,
+  }),
 
   // ── Skills mode ──
   list_skills: () => SAMPLE_SKILLS,
   refresh_skill_updates: () =>
-    SAMPLE_SKILLS.filter((s) => s.update_available).map((s) => ({ name: s.name, update_available: true })),
+    SAMPLE_SKILLS.filter((s) => s.update_available).map((s) => ({
+      name: s.name,
+      update_available: true,
+    })),
   check_new_repo_skills: () => [],
   get_dismissed_new_skills: () => [],
   read_skill_content: (args) => ({
@@ -108,6 +173,8 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   read_skill_file_raw: (args) =>
     `---\nname: ${String((args?.name as string) ?? "pdf-tools")}\ndescription: Read, merge, split, and OCR PDF files.\n---\n\n# PDF Tools\n\nA skill for working with **PDF** files.\n\n## Commands\n\n| Command | Description | Input formats | Output | Notes |\n| --- | --- | --- | --- | --- |\n| \`merge\` | Combine multiple PDFs into one document | PDF, PDF/A | single PDF | preserves bookmarks and metadata |\n| \`split\` | Split a PDF into separate pages or ranges | PDF | many PDFs | supports \`1-3,5,8-\` page expressions |\n| \`ocr\` | Run OCR over scanned pages and embed a text layer | PDF, PNG, JPEG, TIFF | searchable PDF | language auto-detected, falls back to English |`,
   list_skill_files: () => ["SKILL.md", "scripts/merge.py", "README.md"],
+  get_skill_tutorial: (args) => demoSkillTutorial(args),
+  generate_skill_tutorial: (args) => demoSkillTutorial(args),
   get_skill_deploy_status: (args) => {
     const name = String((args?.skillName as string) ?? "pdf-tools");
     // Mixed kinds so the degraded-deploy badges are visible in browser dev:
@@ -138,12 +205,18 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   },
   list_skill_groups: () => DECKS,
   list_projects: () => PROJECTS,
-  get_project_skills: () => ({ agents: { claude: ["pdf-tools", "xlsx"] }, updated_at: iso(1) }),
+  get_project_skills: () => ({
+    agents: { claude: ["pdf-tools", "xlsx"] },
+    updated_at: iso(1),
+  }),
   // Disk scan of a project's agent skill folders. Returns an empty-but-well-
   // typed result so the Projects selection flow (buildSymlinkSkillIndex etc.)
   // runs end-to-end in browser dev instead of crashing on `undefined.skills`.
   scan_project_skills: () => ({ skills: [], agents_found: [] }),
-  rebuild_project_skills_from_disk: () => ({ agents: { claude: ["pdf-tools", "xlsx"] }, updated_at: iso(1) }),
+  rebuild_project_skills_from_disk: () => ({
+    agents: { claude: ["pdf-tools", "xlsx"] },
+    updated_at: iso(1),
+  }),
   detect_project_agents: () => ({
     detected: AGENTS.filter((a) => a.project_skills_rel).map((a) => ({
       agent_id: a.id,
@@ -157,8 +230,16 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   }),
 
   // ── Marketplace ──
-  list_marketplace_skills_local: () => ({ data: MARKET_SKILLS, snapshot_status: "fresh", snapshot_updated_at: iso(0) }),
-  get_leaderboard_local: () => ({ data: MARKET_SKILLS, snapshot_status: "fresh", snapshot_updated_at: iso(0) }),
+  list_marketplace_skills_local: () => ({
+    data: MARKET_SKILLS,
+    snapshot_status: "fresh",
+    snapshot_updated_at: iso(0),
+  }),
+  get_leaderboard_local: () => ({
+    data: MARKET_SKILLS,
+    snapshot_status: "fresh",
+    snapshot_updated_at: iso(0),
+  }),
   get_publishers_local: () => ({
     data: [
       {
@@ -252,9 +333,15 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
     const patch = (args?.patch ?? {}) as Record<string, unknown>;
     const index = FLAT_PROVIDERS.providers.findIndex((p) => p.id === id);
     if (index >= 0) {
-      FLAT_PROVIDERS.providers[index] = { ...FLAT_PROVIDERS.providers[index], ...patch } as never;
+      FLAT_PROVIDERS.providers[index] = {
+        ...FLAT_PROVIDERS.providers[index],
+        ...patch,
+      } as never;
     }
-    return { provider: FLAT_PROVIDERS.providers[index] ?? null, tool_sync_results: [] };
+    return {
+      provider: FLAT_PROVIDERS.providers[index] ?? null,
+      tool_sync_results: [],
+    };
   },
   delete_provider_flat: (args) => {
     const id = String(args?.id ?? "");
@@ -274,7 +361,10 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   reorder_providers: (args) => {
     const orderedIds = (args?.orderedIds ?? []) as string[];
     FLAT_PROVIDERS.providers = FLAT_PROVIDERS.providers
-      .map((p) => ({ ...p, sort_index: orderedIds.indexOf(p.id) === -1 ? p.sort_index : orderedIds.indexOf(p.id) }))
+      .map((p) => ({
+        ...p,
+        sort_index: orderedIds.indexOf(p.id) === -1 ? p.sort_index : orderedIds.indexOf(p.id),
+      }))
       .sort((a, b) => a.sort_index - b.sort_index) as never;
     return undefined;
   },
@@ -303,7 +393,11 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
     } else {
       acts[toolId] = { entries: [entry], active_index: 0 };
     }
-    return { tool_id: toolId, success: true, config_path: `~/.${toolId}/settings.json` };
+    return {
+      tool_id: toolId,
+      success: true,
+      config_path: `~/.${toolId}/settings.json`,
+    };
   },
   deactivate_tool: (args) => {
     const acts = FLAT_PROVIDERS.tool_activations as Record<string, MockBinding>;
@@ -343,18 +437,39 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
     }
     return { tool_id: toolId, success: true };
   },
-  push_provider_to_tool_config: (args) => ({ tool_id: String(args?.toolId ?? ""), success: true }),
+  push_provider_to_tool_config: (args) => ({
+    tool_id: String(args?.toolId ?? ""),
+    success: true,
+  }),
   set_app_ai_provider_ref: () => undefined,
   clear_app_ai_provider_ref: () => undefined,
-  test_provider_connection: () => ({ status: "ok", latency_ms: 180 + Math.floor(Math.random() * 240) }),
+  test_provider_connection: () => ({
+    status: "ok",
+    latency_ms: 180 + Math.floor(Math.random() * 240),
+  }),
   test_endpoints_latency: (args) =>
-    ((args?.urls ?? []) as string[]).map((url, i) => ({ url, latency_ms: 160 + i * 70, status: 200, error: null })),
+    ((args?.urls ?? []) as string[]).map((url, i) => ({
+      url,
+      latency_ms: 160 + i * 70,
+      status: 200,
+      error: null,
+    })),
   query_provider_balance: () => ({ balance: "12.50", currency: "USD" }),
   fetch_provider_model_catalog: () => ({
     models: ["dev-model-pro", "dev-model-mini"],
     catalog: [
-      { id: "dev-model-pro", display_name: "Dev Model Pro", context_length: 200000, max_completion_tokens: 8192 },
-      { id: "dev-model-mini", display_name: "Dev Model Mini", context_length: 128000, max_completion_tokens: 4096 },
+      {
+        id: "dev-model-pro",
+        display_name: "Dev Model Pro",
+        context_length: 200000,
+        max_completion_tokens: 8192,
+      },
+      {
+        id: "dev-model-mini",
+        display_name: "Dev Model Mini",
+        context_length: 128000,
+        max_completion_tokens: 4096,
+      },
     ],
     metadata_sources: ["mock"],
     missing_cost_count: 2,
@@ -366,7 +481,11 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   detect_env_conflicts: () => [],
   detect_provider_conflicts: () => [],
   get_tool_config_targets: () => [],
-  detect_tool_installation: () => ({ installed: true, binary_found: true, config_dir_found: true }),
+  detect_tool_installation: () => ({
+    installed: true,
+    binary_found: true,
+    config_dir_found: true,
+  }),
   list_tool_config_files: (args) => {
     const tool = String((args?.toolId as string) ?? "claude-code");
     const isCodex = tool === "codex";
@@ -397,14 +516,38 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
     password: null,
     bypass: null,
   }),
-  get_github_mirror_config: () => ({ enabled: false, preset_id: "ghproxy_vip", custom_url: null }),
+  get_github_mirror_config: () => ({
+    enabled: false,
+    preset_id: "ghproxy_vip",
+    custom_url: null,
+  }),
   get_github_mirror_presets: () => [
-    { id: "ghproxy_vip", name: "ghproxy.link", url: "https://ghproxy.link/", supports_clone: true },
-    { id: "gh_proxy", name: "gh-proxy.com", url: "https://gh-proxy.com/", supports_clone: true },
+    {
+      id: "ghproxy_vip",
+      name: "ghproxy.link",
+      url: "https://ghproxy.link/",
+      supports_clone: true,
+    },
+    {
+      id: "gh_proxy",
+      name: "gh-proxy.com",
+      url: "https://gh-proxy.com/",
+      supports_clone: true,
+    },
   ],
-  get_acp_config: () => ({ enabled: false, agent_command: "", agent_label: "" }),
+  get_acp_config: () => ({ ...acpConfigStore }),
+  save_acp_config: (args) => {
+    const config = args.config as typeof acpConfigStore;
+    acpConfigStore = { ...config };
+    return undefined;
+  },
   get_storage_overview: () => STORAGE_OVERVIEW,
-  get_repo_cache_info: () => ({ total_bytes: 64_200_000, repo_count: 8, unused_count: 2, unused_bytes: 9_800_000 }),
+  get_repo_cache_info: () => ({
+    total_bytes: 64_200_000,
+    repo_count: 8,
+    unused_count: 2,
+    unused_bytes: 9_800_000,
+  }),
 
   // ── GitHub ──
   check_gh_installed: () => true,
@@ -468,12 +611,18 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   },
   add_ssh_host: (args) => {
     const def = (args?.def ?? {}) as Record<string, unknown>;
-    const created = { ...def, id: def.id ? String(def.id) : `ssh_${Date.now()}` };
+    const created = {
+      ...def,
+      id: def.id ? String(def.id) : `ssh_${Date.now()}`,
+    };
     sshHosts().push(created);
     return created;
   },
   update_ssh_host: (args) => {
-    const { id, def } = (args ?? {}) as { id?: string; def?: Record<string, unknown> };
+    const { id, def } = (args ?? {}) as {
+      id?: string;
+      def?: Record<string, unknown>;
+    };
     const idx = sshHosts().findIndex((h) => h.id === id);
     if (idx >= 0 && def) sshHosts()[idx] = { ...def, id };
     return undefined;
@@ -502,7 +651,11 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
     return created;
   },
   test_ssh_connection: () => ({
-    result: { latency_ms: 42, remote_user: "ubuntu", system: "Linux 6.5 x86_64" },
+    result: {
+      latency_ms: 42,
+      remote_user: "ubuntu",
+      system: "Linux 6.5 x86_64",
+    },
     host_key_state: "verified",
   }),
   accept_ssh_host_key: () => undefined,
@@ -587,12 +740,18 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   list_s3_targets: () => s3Targets().map((t) => ({ ...t })),
   add_s3_target: (args) => {
     const def = (args?.def ?? {}) as Record<string, unknown>;
-    const created = { ...def, id: def.id ? String(def.id) : `s3_${Date.now()}` };
+    const created = {
+      ...def,
+      id: def.id ? String(def.id) : `s3_${Date.now()}`,
+    };
     s3Targets().push(created);
     return created;
   },
   update_s3_target: (args) => {
-    const { id, def } = (args ?? {}) as { id?: string; def?: Record<string, unknown> };
+    const { id, def } = (args ?? {}) as {
+      id?: string;
+      def?: Record<string, unknown>;
+    };
     const idx = s3Targets().findIndex((t) => t.id === id);
     if (idx >= 0 && def) s3Targets()[idx] = { ...def, id };
     return undefined;

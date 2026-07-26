@@ -4,18 +4,185 @@
 
 use super::{
     InstallOpts, derive_name_hint, normalize_agent_ids, print_project_targets,
-    prompt_for_agent_selection, resolve_auto_project_agents, resolve_installed_name,
-    resolve_rel_dirs_for_agents, validate_agent_ids,
+    prompt_for_agent_selection_for_scope, resolve_enabled_agents, resolve_installed_name,
+    resolve_rel_dirs_for_agents, supported_agent_ids, validate_agent_ids_for_scope,
 };
 
+use skillstar_skills::deployment;
 use skillstar_skills::local_skill;
 use skillstar_skills::repo_scanner;
 use skillstar_skills::skill_bundle;
 use skillstar_skills::skill_install;
-use skillstar_skills::deployment;
+use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use super::{AddKind, classify_add_input};
+
+#[derive(Debug)]
+enum InstallScope {
+    Project(PathBuf),
+    Global,
+}
+
+#[derive(Debug)]
+struct InstallDestination {
+    scope: InstallScope,
+    agent_ids: Vec<String>,
+    mode: skillstar_skills::projects::ProjectDeployMode,
+}
+
+fn require_settings_enabled_agents(enabled: Vec<String>) -> Result<Vec<String>, String> {
+    if enabled.is_empty() {
+        return Err(
+            "No target Agents are enabled in Settings. Enable at least one Agent, pass --agent <id>, or use --all explicitly."
+                .to_string(),
+        );
+    }
+    Ok(enabled)
+}
+
+fn resolve_install_destination(opts: &InstallOpts<'_>) -> Result<InstallDestination, String> {
+    let global = if opts.global {
+        true
+    } else if opts.project.is_some() || opts.yes || opts.all || !io::stdin().is_terminal() {
+        false
+    } else {
+        println!("Installation scope:");
+        println!("  [P] Project — current/specified project directory");
+        println!("  [G] Global  — selected Agent user directories");
+        print!("  Scope [P]: ");
+        let _ = io::stdout().flush();
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .map_err(|e| format!("Failed to read installation scope: {e}"))?;
+        matches!(input.trim().to_ascii_lowercase().as_str(), "g" | "global")
+    };
+
+    let requested_agents = if opts.all {
+        vec!["*".to_string()]
+    } else {
+        normalize_agent_ids(opts.agent)
+    };
+    let agent_ids = if requested_agents.iter().any(|id| id == "*") {
+        supported_agent_ids(global)
+    } else if !requested_agents.is_empty() {
+        validate_agent_ids_for_scope(&requested_agents, global)?
+    } else {
+        let enabled = resolve_enabled_agents(global);
+        let chosen = if opts.yes {
+            require_settings_enabled_agents(enabled)?
+        } else {
+            prompt_for_agent_selection_for_scope(&enabled, global)
+        };
+        validate_agent_ids_for_scope(&chosen, global)?
+    };
+    if agent_ids.is_empty() {
+        return Err("No target Agents selected".to_string());
+    }
+
+    let mode = if opts.copy {
+        skillstar_skills::projects::ProjectDeployMode::Copy
+    } else if opts.yes || opts.all || !io::stdin().is_terminal() {
+        skillstar_skills::projects::ProjectDeployMode::Symlink
+    } else {
+        let profiles = skillstar_skills::agents::list_profiles();
+        let unique_targets = agent_ids
+            .iter()
+            .filter_map(|id| profiles.iter().find(|profile| &profile.id == id))
+            .map(|profile| {
+                if global {
+                    profile.global_skills_dir.to_string_lossy().to_string()
+                } else {
+                    profile.project_skills_rel.clone()
+                }
+            })
+            .collect::<std::collections::HashSet<_>>();
+        if unique_targets.len() <= 1 {
+            skillstar_skills::projects::ProjectDeployMode::Symlink
+        } else {
+            println!("Installation method:");
+            println!("  [S] Symlink (recommended) — one source of truth");
+            println!("  [C] Copy — independent directories for every target");
+            print!("  Method [S]: ");
+            let _ = io::stdout().flush();
+            let mut input = String::new();
+            io::stdin()
+                .read_line(&mut input)
+                .map_err(|e| format!("Failed to read installation method: {e}"))?;
+            if matches!(input.trim().to_ascii_lowercase().as_str(), "c" | "copy") {
+                skillstar_skills::projects::ProjectDeployMode::Copy
+            } else {
+                skillstar_skills::projects::ProjectDeployMode::Symlink
+            }
+        }
+    };
+
+    let scope = if global {
+        InstallScope::Global
+    } else {
+        let project = opts.project.map(PathBuf::from).unwrap_or(
+            std::env::current_dir()
+                .map_err(|e| format!("Failed to read current directory: {e}"))?,
+        );
+        if !project.is_dir() {
+            return Err(format!(
+                "Project path is not a directory: {}",
+                project.display()
+            ));
+        }
+        InstallScope::Project(project)
+    };
+
+    Ok(InstallDestination {
+        scope,
+        agent_ids,
+        mode,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::require_settings_enabled_agents;
+
+    #[test]
+    fn non_interactive_install_never_falls_back_to_every_agent() {
+        let error = require_settings_enabled_agents(Vec::new()).unwrap_err();
+        assert!(error.contains("enabled in Settings"));
+        assert!(error.contains("--agent"));
+        assert!(error.contains("--all"));
+    }
+
+    #[test]
+    fn non_interactive_install_keeps_the_manual_target_set() {
+        let enabled = vec!["claude".to_string(), "codex".to_string()];
+        assert_eq!(
+            require_settings_enabled_agents(enabled.clone()).unwrap(),
+            enabled
+        );
+    }
+}
+
+fn deploy_installed_skills(
+    skill_names: &[String],
+    destination: &InstallDestination,
+) -> Result<u32, String> {
+    match &destination.scope {
+        InstallScope::Global => deployment::batch_deploy_skills_to_agents(
+            skill_names,
+            &destination.agent_ids,
+            destination.mode,
+        )
+        .map_err(|e| e.to_string()),
+        InstallScope::Project(project_path) => deployment::create_project_skills_with_mode(
+            project_path,
+            skill_names,
+            &destination.agent_ids,
+            destination.mode,
+        )
+        .map_err(|e| e.to_string()),
+    }
+}
 
 fn list_skills_in_bundle(path: &Path) {
     println!("Reading bundle {}...\n", path.display());
@@ -70,10 +237,10 @@ fn list_skills_in_bundle(path: &Path) {
     }
 }
 
-fn install_bundle_file(path: &Path, opts: &InstallOpts<'_>) {
+fn install_bundle_file(path: &Path, opts: &InstallOpts<'_>) -> Vec<String> {
     let path_str = path.to_string_lossy();
     let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-    let force = opts.yes;
+    let force = opts.yes || opts.all;
 
     match ext {
         "ags" => match skill_bundle::import_bundle(&path_str, force) {
@@ -88,6 +255,7 @@ fn install_bundle_file(path: &Path, opts: &InstallOpts<'_>) {
                     verb, result.name, result.file_count
                 );
                 println!("  Description: {}", result.description);
+                vec![result.name]
             }
             Err(err) => {
                 let msg = err.to_string();
@@ -113,6 +281,7 @@ fn install_bundle_file(path: &Path, opts: &InstallOpts<'_>) {
                 for name in &result.skill_names {
                     println!("  • {}", name);
                 }
+                result.skill_names
             }
             Err(err) => {
                 let msg = err.to_string();
@@ -165,7 +334,7 @@ fn list_skills_in_local_dir(path: &Path) {
     );
 }
 
-fn install_local_dir(path: &Path, opts: &InstallOpts<'_>) {
+fn install_local_dir(path: &Path, opts: &InstallOpts<'_>) -> Vec<String> {
     let canonical = match std::fs::canonicalize(path) {
         Ok(p) => p,
         Err(e) => {
@@ -186,7 +355,10 @@ fn install_local_dir(path: &Path, opts: &InstallOpts<'_>) {
     }
 
     // Filter by --skill / --name / --all if provided.
-    let selected: Vec<&skillstar_skills::DiscoveredSkill> = if opts.all {
+    let selected: Vec<&skillstar_skills::DiscoveredSkill> = if opts.all
+        || opts.skill.iter().any(|name| name == "*")
+        || (opts.yes && opts.name.is_none() && opts.skill.is_empty())
+    {
         skills.iter().collect()
     } else if !opts.skill.is_empty() {
         skills
@@ -205,15 +377,17 @@ fn install_local_dir(path: &Path, opts: &InstallOpts<'_>) {
     } else if skills.len() == 1 {
         skills.iter().collect()
     } else {
-        eprintln!(
-            "✗ {} skills found in {}. Select with --skill <name,...> or use --all.",
-            skills.len(),
-            canonical.display()
-        );
-        for skill in &skills {
-            eprintln!("  • {}", skill.id);
-        }
-        std::process::exit(2);
+        let selected_names = match prompt_for_skill_selection(&skills) {
+            Ok(names) => names,
+            Err(err) => {
+                eprintln!("✗ {err}");
+                std::process::exit(2);
+            }
+        };
+        skills
+            .iter()
+            .filter(|skill| selected_names.contains(&skill.id))
+            .collect()
     };
 
     if selected.is_empty() {
@@ -256,68 +430,7 @@ fn install_local_dir(path: &Path, opts: &InstallOpts<'_>) {
         "✓ Adopted {} skill(s) into ~/.skillstar/hub/local.",
         adopted.len()
     );
-
-    if opts.global {
-        return;
-    }
-
-    // Link into project (same shape as repo-install post step).
-    let project_path = match opts.project {
-        Some(p) => PathBuf::from(p),
-        None => match std::env::current_dir() {
-            Ok(p) => p,
-            Err(err) => {
-                eprintln!("✗ Failed to read current directory: {}", err);
-                std::process::exit(1);
-            }
-        },
-    };
-    if !project_path.is_dir() {
-        eprintln!(
-            "✗ Project path is not a directory: {}",
-            project_path.display()
-        );
-        std::process::exit(1);
-    }
-
-    let auto_agent_ids = resolve_auto_project_agents(&project_path);
-    let mut chosen = normalize_agent_ids(opts.agent);
-    if chosen.is_empty() {
-        chosen = if opts.yes {
-            auto_agent_ids.clone()
-        } else {
-            prompt_for_agent_selection(&auto_agent_ids)
-        };
-    }
-    let agent_ids = match validate_agent_ids(&chosen) {
-        Ok(ids) => ids,
-        Err(err) => {
-            eprintln!("✗ {}", err);
-            std::process::exit(1);
-        }
-    };
-    let rel_dirs = resolve_rel_dirs_for_agents(&agent_ids);
-
-    match deployment::create_project_skills(&project_path, &adopted, &agent_ids) {
-        Ok(link_count) => {
-            println!(
-                "✓ Linked {} skill(s) into project {} ({} link(s)).",
-                adopted.len(),
-                project_path.display(),
-                link_count
-            );
-            for name in &adopted {
-                print_project_targets(&project_path, &rel_dirs, name);
-            }
-        }
-        Err(err) => {
-            eprintln!(
-                "✗ Adopted into hub but failed to link into project: {}",
-                err
-            );
-            std::process::exit(1);
-        }
-    }
+    adopted
 }
 
 /// Sole entry point that decides between batch-install (multi-skill), single-skill,
@@ -327,54 +440,132 @@ fn install_or_reuse_skill(
     explicit_name: Option<&str>,
     skill_filter: &[String],
     all: bool,
+    yes: bool,
 ) -> Result<(Vec<String>, bool), String> {
-    let name_hint = derive_name_hint(url, explicit_name);
-
-    if all {
-        if explicit_name.is_some() {
-            return Err("--all cannot be combined with --name".to_string());
-        }
-        if !skill_filter.is_empty() {
-            return Err("--all cannot be combined with --skill".to_string());
-        }
-        let (_repo_url, _source, _, skills_found) = skill_install::fetch_repo_scanned(url, false)?;
-        if skills_found.is_empty() {
-            return Err("No skills discovered in repository".to_string());
-        }
-        let names: Vec<String> = skills_found.iter().map(|s| s.id.clone()).collect();
-        let installed = skill_install::install_skills_batch(url, &names)?;
-        return Ok((installed.into_iter().map(|s| s.name).collect(), true));
+    if explicit_name.is_some() && !skill_filter.is_empty() {
+        return Err("--name cannot be combined with --skill".to_string());
     }
 
-    // If skill filter is provided, use batch install
-    if !skill_filter.is_empty() {
-        if let Some(name) = explicit_name {
-            return Err(format!(
-                "Cannot use both --name ({}) and --skill ({})",
-                name,
-                skill_filter.join(", ")
-            ));
-        }
-        let installed = skill_install::install_skills_batch(url, skill_filter)?;
-        Ok((installed.into_iter().map(|s| s.name).collect(), true))
-    } else {
-        // Single skill install (original behavior)
-        if let Some(name) = resolve_installed_name(url, explicit_name, &name_hint)? {
-            return Ok((vec![name], false));
-        }
+    let (_, _, _, skills_found) = skill_install::fetch_repo_scanned(url, false)?;
+    if skills_found.is_empty() {
+        return Err("No valid SKILL.md found in the selected source".to_string());
+    }
 
-        match skill_install::install_skill(url.to_string(), explicit_name.map(str::to_string)) {
-            Ok(skill) => Ok((vec![skill.name], true)),
-            Err(err) => {
-                if err.contains("already installed")
-                    && let Some(name) = resolve_installed_name(url, explicit_name, &name_hint)?
+    let install_all = all || skill_filter.iter().any(|name| name == "*");
+    let selected_names =
+        if install_all || (yes && explicit_name.is_none() && skill_filter.is_empty()) {
+            skills_found
+                .iter()
+                .map(|skill| skill.id.clone())
+                .collect::<Vec<_>>()
+        } else if !skill_filter.is_empty() {
+            let mut selected = Vec::new();
+            let mut missing = Vec::new();
+            for requested in skill_filter {
+                match skills_found
+                    .iter()
+                    .find(|skill| skill.id.eq_ignore_ascii_case(requested))
                 {
-                    return Ok((vec![name], false));
+                    Some(skill) if !selected.contains(&skill.id) => selected.push(skill.id.clone()),
+                    Some(_) => {}
+                    None => missing.push(requested.clone()),
                 }
-                Err(err)
             }
+            if !missing.is_empty() {
+                return Err(format!(
+                    "Requested skills not found: {}. Available: {}",
+                    missing.join(", "),
+                    skills_found
+                        .iter()
+                        .map(|skill| skill.id.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
+            selected
+        } else if let Some(name) = explicit_name {
+            let skill = skills_found
+                .iter()
+                .find(|skill| skill.id.eq_ignore_ascii_case(name))
+                .or_else(|| (skills_found.len() == 1).then(|| &skills_found[0]))
+                .ok_or_else(|| {
+                    format!(
+                        "Skill '{name}' not found. Available: {}",
+                        skills_found
+                            .iter()
+                            .map(|skill| skill.id.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                })?;
+            vec![skill.id.clone()]
+        } else if skills_found.len() == 1 {
+            vec![skills_found[0].id.clone()]
+        } else {
+            prompt_for_skill_selection(&skills_found)?
+        };
+
+    let installed = skill_install::install_skills_batch(url, &selected_names)?;
+    Ok((selected_names, !installed.is_empty()))
+}
+
+fn prompt_for_skill_selection(
+    skills: &[repo_scanner::DiscoveredSkill],
+) -> Result<Vec<String>, String> {
+    if !io::stdin().is_terminal() {
+        return Err(
+            "Multiple skills found. Use --skill <name>, --skill '*', or -y in non-interactive mode."
+                .to_string(),
+        );
+    }
+
+    println!("Select skills to install (comma-separated, or * for all):");
+    for skill in skills {
+        println!(
+            "  • {:<28} {}",
+            skill.id,
+            if skill.description.is_empty() {
+                "—"
+            } else {
+                skill.description.as_str()
+            }
+        );
+    }
+    print!("  Skill(s): ");
+    let _ = io::stdout().flush();
+    let mut input = String::new();
+    io::stdin()
+        .read_line(&mut input)
+        .map_err(|e| format!("Failed to read skill selection: {e}"))?;
+    let requested = input
+        .trim()
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .collect::<Vec<_>>();
+    if requested.is_empty() {
+        return Err("No skills selected".to_string());
+    }
+    if requested.contains(&"*") {
+        return Ok(skills.iter().map(|skill| skill.id.clone()).collect());
+    }
+
+    let mut selected = Vec::new();
+    let mut missing = Vec::new();
+    for requested in requested {
+        match skills
+            .iter()
+            .find(|skill| skill.id.eq_ignore_ascii_case(requested))
+        {
+            Some(skill) if !selected.contains(&skill.id) => selected.push(skill.id.clone()),
+            Some(_) => {}
+            None => missing.push(requested.to_string()),
         }
     }
+    if !missing.is_empty() {
+        return Err(format!("Unknown skill(s): {}", missing.join(", ")));
+    }
+    Ok(selected)
 }
 
 /// `skillstar install --list` — scan the source without mutating anything.
@@ -560,36 +751,34 @@ pub fn cmd_install(opts: InstallOpts<'_>) {
         return;
     }
 
-    // Non-repo sources take priority and ignore the repo-only flags.
-    match classify_add_input(opts.url) {
-        AddKind::Bundle(path) => {
-            install_bundle_file(&path, &opts);
-            return;
+    let destination = match resolve_install_destination(&opts) {
+        Ok(destination) => destination,
+        Err(err) => {
+            eprintln!("✗ {err}");
+            std::process::exit(2);
         }
-        AddKind::LocalDir(path) => {
-            install_local_dir(&path, &opts);
-            return;
-        }
-        AddKind::Repo => {}
-    }
+    };
 
-    if opts.copy {
-        // Best-effort global signal; the project sync layer already falls back to copy,
-        // but we also make it visible in the output and skip symlink deployment for
-        // installers that honor the flag in future iterations.
-        println!("ⓘ Copy mode requested; project links will prefer directory copies.");
-    }
-
-    println!("Installing from {}...", opts.url);
-
-    let (skill_names, newly_installed) =
-        match install_or_reuse_skill(opts.url, opts.name, opts.skill, opts.all) {
-            Ok(result) => result,
-            Err(err) => {
-                eprintln!("✗ Failed to install into hub: {}", err);
-                std::process::exit(1);
+    let (skill_names, newly_installed) = match classify_add_input(opts.url) {
+        AddKind::Bundle(path) => (install_bundle_file(&path, &opts), true),
+        AddKind::LocalDir(path) => (install_local_dir(&path, &opts), true),
+        AddKind::Repo => {
+            println!("Installing from {}...", opts.url);
+            match install_or_reuse_skill(
+                opts.url,
+                opts.name,
+                opts.skill,
+                opts.all,
+                opts.yes || opts.all,
+            ) {
+                Ok(result) => result,
+                Err(err) => {
+                    eprintln!("✗ Failed to install into hub: {}", err);
+                    std::process::exit(1);
+                }
             }
-        };
+        }
+    };
 
     if newly_installed {
         println!("✓ Installed '{}' into hub.", skill_names.join(", "));
@@ -600,73 +789,52 @@ pub fn cmd_install(opts: InstallOpts<'_>) {
         );
     }
 
-    if opts.global {
-        println!("Done (global install mode).");
-        return;
-    }
-
-    let project_path = match opts.project {
-        Some(path) => PathBuf::from(path),
-        None => match std::env::current_dir() {
-            Ok(path) => path,
-            Err(err) => {
-                eprintln!("✗ Failed to read current directory: {}", err);
-                std::process::exit(1);
-            }
-        },
-    };
-
-    if !project_path.is_dir() {
-        eprintln!(
-            "✗ Project path is not a directory: {}",
-            project_path.display()
-        );
-        std::process::exit(1);
-    }
-
-    let auto_agent_ids = resolve_auto_project_agents(&project_path);
-    let mut chosen_agents = normalize_agent_ids(opts.agent);
-    if chosen_agents.is_empty() {
-        if opts.yes {
-            // Non-interactive: fall back to auto-detected agents (may be empty → .agent/skills)
-            chosen_agents = auto_agent_ids.clone();
-        } else {
-            chosen_agents = prompt_for_agent_selection(&auto_agent_ids);
-        }
-    }
-    let agent_ids = match validate_agent_ids(&chosen_agents) {
-        Ok(agent_ids) => agent_ids,
+    let deployed_count = match deploy_installed_skills(&skill_names, &destination) {
+        Ok(count) => count,
         Err(err) => {
-            eprintln!("✗ {}", err);
+            eprintln!("✗ Installed to hub but failed to deploy: {err}");
             std::process::exit(1);
         }
     };
-    let rel_dirs = resolve_rel_dirs_for_agents(&agent_ids);
-    let selected_skills = skill_names.clone();
 
-    match deployment::create_project_skills(&project_path, &selected_skills, &agent_ids) {
-        Ok(linked_count) => {
-            println!(
-                "✓ Linked {} skill(s) into project {} ({} link(s)).",
-                skill_names.len(),
-                project_path.display(),
-                linked_count
-            );
-            if agent_ids.is_empty() {
-                println!("  Target mode: fallback path (.agent/skills)");
-            } else {
-                println!("  Target agents: {}", agent_ids.join(", "));
-            }
+    let method = match destination.mode {
+        skillstar_skills::projects::ProjectDeployMode::Symlink => "link-first",
+        skillstar_skills::projects::ProjectDeployMode::Copy => "copy",
+    };
+    println!(
+        "✓ Deployed {} skill(s) to {} Agent target(s) ({} new deployment(s), {}).",
+        skill_names.len(),
+        destination.agent_ids.len(),
+        deployed_count,
+        method
+    );
+    println!("  Target agents: {}", destination.agent_ids.join(", "));
+
+    match &destination.scope {
+        InstallScope::Project(project_path) => {
+            let rel_dirs = resolve_rel_dirs_for_agents(&destination.agent_ids);
+            println!("  Project: {}", project_path.display());
             for skill_name in &skill_names {
-                print_project_targets(&project_path, &rel_dirs, skill_name);
+                print_project_targets(project_path, &rel_dirs, skill_name);
             }
         }
-        Err(err) => {
-            eprintln!(
-                "✗ Installed to hub but failed to link into project: {}",
-                err
-            );
-            std::process::exit(1);
+        InstallScope::Global => {
+            let profiles = skillstar_skills::agents::list_profiles();
+            let mut printed_dirs = std::collections::HashSet::new();
+            for agent_id in &destination.agent_ids {
+                let Some(profile) = profiles.iter().find(|profile| &profile.id == agent_id) else {
+                    continue;
+                };
+                if !printed_dirs.insert(profile.global_skills_dir.clone()) {
+                    continue;
+                }
+                for skill_name in &skill_names {
+                    println!(
+                        "  ↳ {}",
+                        profile.global_skills_dir.join(skill_name).display()
+                    );
+                }
+            }
         }
     }
 }

@@ -1,6 +1,5 @@
-import { AnimatePresence, motion } from "framer-motion";
 import { HelpCircle } from "lucide-react";
-import { useState } from "react";
+import { Tooltip } from "radix-ui";
 import { useTranslation } from "react-i18next";
 import { cn } from "../../lib/utils";
 
@@ -12,7 +11,6 @@ interface InfoTipProps {
 
 export function InfoTip({ content, className, iconClassName }: InfoTipProps) {
   const { t } = useTranslation();
-  const [isHovered, setIsHovered] = useState(false);
 
   const parseContent = (text: string) => {
     const lines = text.split("\n");
@@ -46,39 +44,32 @@ export function InfoTip({ content, className, iconClassName }: InfoTipProps) {
   };
 
   return (
-    <div
-      className={cn("relative inline-flex items-center justify-center select-none", className)}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      onFocus={() => setIsHovered(true)}
-      onBlur={() => setIsHovered(false)}
-    >
-      <HelpCircle
-        className={cn(
-          "w-3.5 h-3.5 text-muted-foreground/60 hover:text-foreground/90 transition-colors duration-200 cursor-help outline-none",
-          iconClassName,
-        )}
-        tabIndex={0}
-        aria-label={t("common.helpInfo")}
-      />
-
-      <AnimatePresence>
-        {isHovered && (
-          <motion.div
-            initial={{ opacity: 0, y: 6, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 6, scale: 0.96 }}
-            transition={{ duration: 0.12, ease: "easeOut" }}
-            className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 pointer-events-none w-64"
+    <Tooltip.Provider delayDuration={220} skipDelayDuration={80}>
+      <Tooltip.Root>
+        <Tooltip.Trigger asChild>
+          <button
+            type="button"
+            aria-label={t("common.helpInfo")}
+            className={cn(
+              "inline-flex items-center justify-center rounded-full text-muted-foreground/60 transition-colors duration-200 hover:text-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35",
+              className,
+            )}
           >
-            <div className="backdrop-blur-md bg-background/95 border border-border/45 rounded-xl p-3 text-xs text-foreground shadow-2xl text-left">
-              {parseContent(content)}
-            </div>
-            {/* Small tooltip indicator tip */}
-            <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-background/95" />
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+            <HelpCircle className={cn("h-3.5 w-3.5 cursor-help", iconClassName)} />
+          </button>
+        </Tooltip.Trigger>
+        <Tooltip.Portal>
+          <Tooltip.Content
+            side="top"
+            sideOffset={8}
+            collisionPadding={12}
+            className="z-[120] w-64 rounded-xl border border-border/55 bg-background/95 p-3 text-left text-xs text-foreground shadow-2xl backdrop-blur-xl data-[state=delayed-open]:animate-in data-[state=closed]:animate-out data-[state=delayed-open]:fade-in data-[state=closed]:fade-out"
+          >
+            {parseContent(content)}
+            <Tooltip.Arrow className="fill-background/95" width={10} height={5} />
+          </Tooltip.Content>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+    </Tooltip.Provider>
   );
 }

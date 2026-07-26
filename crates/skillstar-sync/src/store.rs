@@ -88,8 +88,7 @@ impl SecretStore for KeyringSecretStore {
     }
 
     fn set_secret(&self, target_id: &str, value: &str) -> Result<()> {
-        let entry = keyring::Entry::new(KEYRING_SERVICE, target_id)
-            .context("keyring entry new")?;
+        let entry = keyring::Entry::new(KEYRING_SERVICE, target_id).context("keyring entry new")?;
         entry.set_password(value).context("keyring set_password")?;
         Ok(())
     }
@@ -186,10 +185,11 @@ impl<S: SecretStore> TargetsStore<S> {
             .ok_or_else(|| anyhow::anyhow!("S3 target '{}' not found", id))?;
         // If the id changed, move the secret so credentials follow the target.
         if def.id != *id
-            && let Some(sk) = self.secrets.get_secret(id)? {
-                self.secrets.set_secret(&def.id, &sk)?;
-                self.secrets.delete_secret(id)?;
-            }
+            && let Some(sk) = self.secrets.get_secret(id)?
+        {
+            self.secrets.set_secret(&def.id, &sk)?;
+            self.secrets.delete_secret(id)?;
+        }
         if let Some(sk) = secret {
             if sk.is_empty() {
                 self.secrets.delete_secret(&def.id)?;
@@ -266,7 +266,9 @@ mod tests {
         assert_eq!(store.secret(&added.id).unwrap(), None);
 
         // update can clear secret
-        store.update("s3_moved", sample("s3_moved"), Some("")).unwrap();
+        store
+            .update("s3_moved", sample("s3_moved"), Some(""))
+            .unwrap();
         assert_eq!(store.secret("s3_moved").unwrap(), None);
 
         store.remove("s3_moved").unwrap();

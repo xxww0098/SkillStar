@@ -10,7 +10,7 @@ import { aiConfigKeys } from "./keys";
 export type AppAiAppId = "claude" | "codex";
 
 /**
- * Bind application AI (summarize / translate / skill pick) to a flat-store provider.
+ * Bind application AI (summarize / skill pick) to a flat-store provider.
  */
 export function useAppAiProvider() {
   const queryClient = useQueryClient();

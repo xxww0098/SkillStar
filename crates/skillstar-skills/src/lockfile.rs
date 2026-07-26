@@ -20,6 +20,8 @@ pub fn get_mutex() -> &'static Mutex<()> {
 pub struct LockEntry {
     pub name: String,
     pub git_url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_ref: Option<String>,
     pub tree_hash: String,
     pub installed_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -108,6 +110,7 @@ mod tests {
         LockEntry {
             name: name.to_string(),
             git_url: format!("https://github.com/test/{name}"),
+            git_ref: None,
             tree_hash: "abc123".to_string(),
             installed_at: "2026-01-01T00:00:00Z".to_string(),
             source_folder: None,
@@ -163,6 +166,7 @@ mod tests {
 
         let mut lf = Lockfile::default();
         let mut entry = make_entry("mono-skill");
+        entry.git_ref = Some("release/v2".to_string());
         entry.source_folder = Some("skills/react".to_string());
         lf.upsert(entry);
         lf.save(&path).unwrap();
@@ -173,6 +177,7 @@ mod tests {
             Some("skills/react")
         );
         assert_eq!(loaded.skills[0].tree_hash, "abc123");
+        assert_eq!(loaded.skills[0].git_ref.as_deref(), Some("release/v2"));
     }
 
     #[test]
@@ -218,7 +223,6 @@ mod tests {
         assert!(path.exists());
     }
 }
-
 
 /// App-specific lockfile path under the SkillStar data root.
 pub fn lockfile_path() -> std::path::PathBuf {

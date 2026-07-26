@@ -271,9 +271,7 @@ fn glob_match_inner(p: &[char], pi: usize, n: &[char], ni: usize) -> bool {
 
 /// Look up a single host by alias (used by `import_system_host`).
 pub fn find_host_by_alias(alias: &str) -> Option<SystemHost> {
-    parse_system_hosts()
-        .into_iter()
-        .find(|h| h.alias == alias)
+    parse_system_hosts().into_iter().find(|h| h.alias == alias)
 }
 
 #[cfg(test)]
@@ -337,16 +335,13 @@ Host vps-yy
 
     #[test]
     fn hostname_defaults_to_alias() {
-        with_home(
-            "Host mybox\n    User ubuntu\n",
-            |_| {
-                let hosts = parse_system_hosts();
-                assert_eq!(hosts.len(), 1);
-                assert_eq!(hosts[0].host, "mybox");
-                assert_eq!(hosts[0].username, "ubuntu");
-                assert_eq!(hosts[0].port, 22);
-            },
-        );
+        with_home("Host mybox\n    User ubuntu\n", |_| {
+            let hosts = parse_system_hosts();
+            assert_eq!(hosts.len(), 1);
+            assert_eq!(hosts[0].host, "mybox");
+            assert_eq!(hosts[0].username, "ubuntu");
+            assert_eq!(hosts[0].port, 22);
+        });
     }
 
     #[test]
@@ -376,7 +371,11 @@ Host vps-yy
             "Include extra.conf\nHost main\n    HostName 9.9.9.9\n",
             |home| {
                 // extra.conf is resolved relative to the config dir (~/.ssh/).
-                write(home, ".ssh/extra.conf", "Host nested\n    HostName 8.8.8.8\n");
+                write(
+                    home,
+                    ".ssh/extra.conf",
+                    "Host nested\n    HostName 8.8.8.8\n",
+                );
                 let hosts = parse_system_hosts();
                 let aliases: Vec<_> = hosts.iter().map(|h| h.alias.as_str()).collect();
                 assert!(aliases.contains(&"nested"));
@@ -403,11 +402,14 @@ Host vps-yy
 
     #[test]
     fn find_host_by_alias_works() {
-        with_home("Host vps-yy\n    HostName 64.83.38.21\n    User root\n", |_| {
-            let h = find_host_by_alias("vps-yy").unwrap();
-            assert_eq!(h.host, "64.83.38.21");
-            assert!(find_host_by_alias("nope").is_none());
-        });
+        with_home(
+            "Host vps-yy\n    HostName 64.83.38.21\n    User root\n",
+            |_| {
+                let h = find_host_by_alias("vps-yy").unwrap();
+                assert_eq!(h.host, "64.83.38.21");
+                assert!(find_host_by_alias("nope").is_none());
+            },
+        );
     }
 
     /// Full vps-yy fixture: key auth + non-default port (typical VPS ssh config).

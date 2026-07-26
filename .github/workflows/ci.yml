@@ -5,6 +5,40 @@ name: CI
 # typed errors / clippy) on every PR and every push to main. Complements
 # windows-ci.yml (which catches Windows-specific path/shell regressions using
 # npm) — this workflow uses Bun, matching local development (bun.lock).
+#
+# ## Failure lessons (from Actions history — do not re-learn the hard way)
+#
+# 1. Always run a production frontend build here, not only lint + unit tests.
+#    Release v0.0.3 burned all four matrix legs because `bun run build` (tsc)
+#    failed on unused imports / incomplete fixtures / dead type comparisons.
+#    Until this job ran `bun run build`, those errors only appeared inside
+#    `tauri-action`'s beforeBuildCommand — after a tag was already pushed.
+#    Lint (Biome) and Vitest do not substitute for `tsc -b` in the Vite build.
+#
+# 2. Tests must not depend on the runner's real $HOME / host machine state.
+#    Observed failures:
+#    - `list_profiles_detection_does_not_create_skills_dirs` (skillstar-skills /
+#      agents): "expected config root to count as installed" when the runner
+#      has (or lacks) real agent config roots under $HOME.
+#    - `commands::ssh_hosts::tests::*vps_yy*` (src-tauri): host resolve failed
+#      with "system host 'vps-yy' not found" and poisoned a shared HOME mutex,
+#      cascading into sibling tests. Fixture HOME via env is correct in intent,
+#      but any code path that still reads the real user SSH config or fails to
+#      serialize HOME mutations will red this job on clean GitHub runners.
+#    Rule (same spirit as SKILLSTAR_TOOL_SYNC_HOME): sandbox $HOME / data dirs
+#    in tests; never require a developer's ~/.ssh/config Host alias to exist.
+#
+# 3. `cargo test --workspace` compiles src-tauri, so Linux needs the same
+#    webkit2gtk/gtk system packages as release.yml even though we never
+#    produce a desktop bundle in this job.
+#
+# 4. Ratchet gates + clippy + cargo-deny run only on Linux (see test-macos
+#    note). Duplicating clippy on macOS roughly doubles wall-clock time for
+#    no new platform signal.
+#
+# 5. cargo-deny is continue-on-error until pre-existing findings are triaged
+#    (see the step comment below). A gate that is red on day one just teaches
+#    everyone to ignore red.
 on:
   push:
     branches: [main]
@@ -48,6 +82,10 @@ jobs:
       - name: Lint
         run: bun run lint
 
+      # Production build (tsc + vite). Required gate — see failure lesson #1.
+      - name: Frontend production build
+        run: bun run build
+
       - name: Frontend tests
         run: bun run test
 
@@ -58,6 +96,9 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+
+      - name: Workspace dependency and lockfile guard
+        run: scripts/internal/check_workspace_deps.sh
 
       - name: Rust compile check (workspace)
         run: cargo check --workspace --locked
@@ -76,6 +117,9 @@ jobs:
 
       - name: Feature cross-import guard
         run: scripts/internal/check_feature_imports.sh
+
+      - name: Tauri command boundary guard
+        run: scripts/internal/check_command_boundaries.sh
 
       - name: Stringly-typed error guard
         run: scripts/internal/check_error_strings.sh
@@ -124,6 +168,11 @@ jobs:
 
       - name: Lint
         run: bun run lint
+
+      # Same production-build gate as test-linux (lesson #1). Cheap relative
+      # to cargo test; keeps macOS green only when the app would actually ship.
+      - name: Frontend production build
+        run: bun run build
 
       - name: Frontend tests
         run: bun run test

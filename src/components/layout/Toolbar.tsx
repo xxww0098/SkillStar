@@ -7,7 +7,9 @@ import {
   GitFork,
   Loader2,
   RefreshCw,
+  Search,
   Sparkles,
+  Trash2,
   X,
 } from "lucide-react";
 
@@ -18,9 +20,9 @@ import { toast } from "../../lib/toast";
 import { cn } from "../../lib/utils";
 import type { AgentProfile, SortOption, ViewMode } from "../../types";
 import { AgentFilterPill } from "../ui/AgentFilterPill";
-import { SearchInput } from "../ui/SearchInput";
 import { ViewToggle } from "../ui/ViewToggle";
 import { PageToolbar } from "./PageToolbar";
+import { type SpotlightSearchItem, SpotlightSearch } from "./SpotlightSearch";
 
 interface ToolbarProps {
   searchQuery: string;
@@ -69,6 +71,10 @@ interface ToolbarProps {
   actionsLead?: React.ReactNode;
   /** Optional search placeholder override */
   searchPlaceholder?: string;
+  /** Candidates for Spotlight result list (filtered client-side by query). */
+  searchItems?: SpotlightSearchItem[];
+  /** Open detail / focus a result selected from Spotlight. */
+  onSearchSelect?: (id: string) => void;
   /** Hide sort segmented controls */
   hideSortControls?: boolean;
   /** Hide grid/list view toggle */
@@ -85,6 +91,8 @@ interface ToolbarProps {
   repoFilter?: string | null;
   /** Callback when repo filter changes */
   onRepoFilterChange?: (source: string | null) => void;
+  /** Remove all skills from a repo source (shown as a trash button on each source row) */
+  onRemoveRepoSource?: (source: string) => void;
 }
 
 export function Toolbar({
@@ -112,6 +120,8 @@ export function Toolbar({
   filtersLead,
   actionsLead,
   searchPlaceholder,
+  searchItems,
+  onSearchSelect,
   hideSortControls,
   hideViewToggle,
   sourceFilter,
@@ -122,8 +132,11 @@ export function Toolbar({
   repoSources,
   repoFilter,
   onRepoFilterChange,
+  onRemoveRepoSource,
 }: ToolbarProps) {
   const { t } = useTranslation();
+  const [spotlightOpen, setSpotlightOpen] = useState(false);
+  const hasActiveSearch = Boolean(searchQuery.trim());
 
   const enabledProfiles = agentProfiles?.filter((p) => p.enabled) ?? [];
   const hasPendingUpdates = (pendingUpdateCount ?? 0) > 0;
@@ -189,35 +202,93 @@ export function Toolbar({
     setOriginOpen(false);
   };
 
-  // ── Search slot ──
-  const searchSlot = (
-    <SearchInput
-      containerClassName="w-56"
-      value={searchQuery}
-      onChange={(e) => onSearchChange(e.target.value)}
-      placeholder={searchPlaceholder ?? t("toolbar.searchPlaceholder")}
-      className="pl-8 h-8 text-xs bg-sidebar/50 focus-visible:bg-background"
-      iconClassName="left-2.5"
-      suffix={
-        onAiSearch ? (
-          <button
-            onClick={onAiSearch}
-            disabled={aiSearching || !searchQuery.trim()}
-            className={cn(
-              "flex items-center justify-center w-6 h-6 rounded-md transition-all duration-300 cursor-pointer shrink-0",
-              aiSearching
-                ? "text-ai-text-hover animate-pulse"
-                : searchQuery.trim()
-                  ? "text-ai-text hover:text-ai-text-hover hover:bg-ai-bg-hover"
-                  : "text-muted-foreground/30 cursor-not-allowed",
-            )}
-            title={t("marketplace.aiSearch", { defaultValue: "AI Search" })}
-          >
-            {aiSearching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-          </button>
-        ) : undefined
+  // ⌘F / Ctrl+F opens Spotlight; bare `/` when not typing in an input.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const meta = e.metaKey || e.ctrlKey;
+      const target = e.target as HTMLElement | null;
+      const isInput = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.isContentEditable;
+
+      if (meta && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setSpotlightOpen(true);
+        return;
       }
-    />
+
+      if (!isInput && !meta && !e.altKey && e.key === "/") {
+        e.preventDefault();
+        setSpotlightOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  // ── Search slot: compact trigger + Spotlight overlay ──
+  const searchSlot = (
+    <>
+      <div className="flex items-center gap-1 shrink-0">
+        <button
+          type="button"
+          onClick={() => setSpotlightOpen(true)}
+          className={cn(
+            "flex items-center h-8 gap-1.5 rounded-lg border text-xs font-medium cursor-pointer whitespace-nowrap transition-all duration-200 focus-ring shadow-sm",
+            hasActiveSearch ? "pl-2.5 pr-1.5 max-w-[11rem]" : "px-2.5",
+            hasActiveSearch
+              ? "border-primary/50 bg-primary/12 text-primary hover:bg-primary/16"
+              : "border-border bg-background text-foreground/75 hover:text-foreground hover:bg-muted/60 hover:border-border",
+          )}
+          title={`${searchPlaceholder ?? t("toolbar.searchPlaceholder")} (⌘F)`}
+          aria-label={searchPlaceholder ?? t("toolbar.searchPlaceholder")}
+          aria-expanded={spotlightOpen}
+          aria-haspopup="dialog"
+        >
+          <Search className="w-3.5 h-3.5 shrink-0" />
+          {hasActiveSearch ? (
+            <>
+              <span className="min-w-0 truncate max-w-[5.5rem]">{searchQuery}</span>
+              <span
+                role="button"
+                tabIndex={0}
+                className="rounded-md p-0.5 transition-colors hover:bg-primary/25 shrink-0"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSearchChange("");
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    onSearchChange("");
+                  }
+                }}
+                aria-label={t("common.clear", { defaultValue: "Clear" })}
+              >
+                <X className="w-3 h-3" />
+              </span>
+            </>
+          ) : (
+            <kbd className="hidden sm:inline-flex items-center rounded-md border border-border bg-muted px-1.5 py-px font-mono text-[10px] font-semibold text-foreground/70">
+              ⌘F
+            </kbd>
+          )}
+        </button>
+      </div>
+
+      <SpotlightSearch
+        open={spotlightOpen}
+        onClose={() => setSpotlightOpen(false)}
+        query={searchQuery}
+        onQueryChange={onSearchChange}
+        items={searchItems ?? []}
+        onSelect={(id) => {
+          onSearchSelect?.(id);
+        }}
+        placeholder={searchPlaceholder}
+        onAiSearch={onAiSearch}
+        aiSearching={aiSearching}
+      />
+    </>
   );
 
   // ── Filters slot ──
@@ -240,7 +311,7 @@ export function Toolbar({
         <AgentFilterPill items={enabledProfiles} value={agentFilter ?? null} onChange={onAgentFilterChange} />
       )}
 
-      {/* Unified origin filter: source type (Hub / Local) + repo source in one compact dropdown */}
+      {/* Unified origin filter: source type (Hub / Local) + repo source, with count inlined */}
       {showOriginFilter && (
         <Popover.Root open={originOpen} onOpenChange={setOriginOpen}>
           <Popover.Trigger asChild>
@@ -249,7 +320,7 @@ export function Toolbar({
                 "flex items-center h-8 gap-1.5 rounded-lg border text-xs font-medium cursor-pointer whitespace-nowrap shrink-0 transition-all duration-200 focus-ring pl-2.5",
                 originActive ? "pr-1.5" : "pr-2",
                 originActive
-                  ? "border-primary/40 bg-primary/8 text-primary hover:bg-primary/12 max-w-[180px]"
+                  ? "border-primary/40 bg-primary/8 text-primary hover:bg-primary/12 max-w-[240px]"
                   : "border-border/80 bg-background/50 shadow-sm backdrop-blur-md text-muted-foreground hover:text-foreground hover:bg-accent/10 hover:border-accent/50",
               )}
               title={t("toolbar.source")}
@@ -257,6 +328,19 @@ export function Toolbar({
             >
               <Boxes className="w-3.5 h-3.5 shrink-0" />
               <span className="max-w-[7rem] truncate">{originLabel}</span>
+              {countText ? (
+                <>
+                  <span className="w-px h-3.5 shrink-0 bg-border/80" aria-hidden />
+                  <span
+                    className={cn(
+                      "flex items-center gap-1 tabular-nums shrink-0",
+                      originActive ? "text-primary/85" : "text-foreground/80",
+                    )}
+                  >
+                    {countText}
+                  </span>
+                </>
+              ) : null}
               {originActive ? (
                 <span
                   role="button"
@@ -286,33 +370,46 @@ export function Toolbar({
               align="start"
               className="z-50 min-w-[200px] max-w-[280px] max-h-[360px] overflow-y-auto rounded-xl border border-border bg-card/95 backdrop-blur-xl shadow-xl p-1.5 animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95"
             >
-              {/* Source type section */}
+              {/* Source type section — segmented tabs */}
               {hasSourceFilter && (
-                <>
-                  <div className="px-2.5 pt-1 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    {t("toolbar.sourceType")}
+                <div className="px-1.5 pt-1 pb-1.5">
+                  <div
+                    role="tablist"
+                    aria-label={t("toolbar.sourceType")}
+                    className="flex items-center gap-0.5 rounded-lg border border-border/80 bg-sidebar/30 p-0.5 h-8"
+                  >
+                    {(["all", "hub", "local"] as const).map((f) => {
+                      const isActive = effectiveSource === f;
+                      const label = f === "all" ? t("toolbar.all") : f === "hub" ? "Hub" : "Local";
+                      return (
+                        <button
+                          key={f}
+                          type="button"
+                          role="tab"
+                          aria-selected={isActive}
+                          onClick={() => {
+                            onSourceFilterChange?.(f);
+                            if (f === "local") onRepoFilterChange?.(null);
+                          }}
+                          className={cn(
+                            "relative flex-1 h-full px-2 rounded-md text-xs font-medium cursor-pointer z-10 transition-colors focus-ring",
+                            isActive
+                              ? "text-accent-foreground"
+                              : "text-muted-foreground hover:text-foreground hover:bg-sidebar-hover",
+                          )}
+                        >
+                          <div
+                            className={cn(
+                              "absolute inset-0 bg-accent rounded-md -z-10 [backface-visibility:hidden]",
+                              isActive ? "opacity-100" : "opacity-0",
+                            )}
+                          />
+                          {label}
+                        </button>
+                      );
+                    })}
                   </div>
-                  {(["all", "hub", "local"] as const).map((f) => {
-                    const isActive = effectiveSource === f;
-                    const label = f === "all" ? t("toolbar.all") : f === "hub" ? "Hub" : "Local";
-                    return (
-                      <button
-                        key={f}
-                        onClick={() => {
-                          onSourceFilterChange?.(f);
-                          if (f === "local") onRepoFilterChange?.(null);
-                        }}
-                        className={cn(
-                          "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs cursor-pointer transition-colors",
-                          isActive ? "bg-primary/10 text-primary font-medium" : "text-foreground/80 hover:bg-accent/50",
-                        )}
-                      >
-                        <span>{label}</span>
-                        {isActive && <Check className="w-3.5 h-3.5 ml-auto shrink-0 text-primary" />}
-                      </button>
-                    );
-                  })}
-                </>
+                </div>
               )}
 
               {/* Repo source section (hidden when filtering to local-only skills) */}
@@ -339,20 +436,45 @@ export function Toolbar({
                   {repoSources?.map((source) => {
                     const isActive = repoFilter === source;
                     return (
-                      <button
+                      <div
                         key={source}
-                        onClick={() => {
-                          onRepoFilterChange?.(isActive ? null : source);
-                          setOriginOpen(false);
-                        }}
                         className={cn(
-                          "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs cursor-pointer transition-colors",
+                          "group flex items-center gap-0.5 rounded-lg text-xs transition-colors",
                           isActive ? "bg-primary/10 text-primary font-medium" : "text-foreground/80 hover:bg-accent/50",
                         )}
                       >
-                        <span className="truncate">{source}</span>
-                        {isActive && <Check className="w-3.5 h-3.5 ml-auto shrink-0 text-primary" />}
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onRepoFilterChange?.(isActive ? null : source);
+                            setOriginOpen(false);
+                          }}
+                          className="min-w-0 flex-1 flex items-center gap-2 pl-3 pr-1 py-2 rounded-lg cursor-pointer text-left"
+                        >
+                          <span className="truncate">{source}</span>
+                          {isActive && <Check className="w-3.5 h-3.5 ml-auto shrink-0 text-primary" />}
+                        </button>
+                        {onRemoveRepoSource ? (
+                          <button
+                            type="button"
+                            className={cn(
+                              "mr-1.5 p-1 rounded-md shrink-0 cursor-pointer transition-colors",
+                              "text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10",
+                              "opacity-70 group-hover:opacity-100 focus-visible:opacity-100",
+                              "focus-ring",
+                            )}
+                            title={t("toolbar.removeSource", { source })}
+                            aria-label={t("toolbar.removeSource", { source })}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOriginOpen(false);
+                              onRemoveRepoSource(source);
+                            }}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        ) : null}
+                      </div>
                     );
                   })}
                 </>
@@ -362,12 +484,12 @@ export function Toolbar({
         </Popover.Root>
       )}
 
-      {/* Count badge */}
-      {countText && (
+      {/* Count badge — only when origin filter is absent (otherwise count is inlined) */}
+      {countText && !showOriginFilter ? (
         <div className="h-8 px-3 flex items-center justify-center rounded-lg border border-border/70 bg-background/50 shadow-sm text-xs font-medium text-foreground/80 tabular-nums whitespace-nowrap shrink-0">
           {countText}
         </div>
-      )}
+      ) : null}
     </>
   );
 

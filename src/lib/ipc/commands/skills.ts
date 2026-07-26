@@ -7,6 +7,7 @@ import type {
   Skill,
   SkillCardDeck,
   SkillContent,
+  SkillTutorial,
   SkillUpdateState,
   UpdateResult,
 } from "../../../types";
@@ -25,6 +26,11 @@ export interface SkillCommands {
   read_skill_content: { args: { name: string }; result: SkillContent };
   update_skill_content: { args: { name: string; content: string }; result: void };
   list_skill_files: { args: { name: string }; result: string[] };
+  get_skill_tutorial: { args: { name: string; locale: string }; result: SkillTutorial };
+  generate_skill_tutorial: {
+    args: { name: string; locale: string; forceRefresh?: boolean };
+    result: SkillTutorial;
+  };
 
   // Local-authored skills
   create_local_skill_from_content: { args: { name: string; content: string }; result: void };
@@ -34,7 +40,6 @@ export interface SkillCommands {
 
   // Batch maintenance
   clean_broken_skills: { args: Record<string, never>; result: number };
-  ai_batch_process_skills: { args: { skillNames: string[] }; result: void };
 
   // Share-code installer
   install_from_share_code: { args: { skills: ShareCodeSkillInput[] }; result: ShareCodeInstallSummary };

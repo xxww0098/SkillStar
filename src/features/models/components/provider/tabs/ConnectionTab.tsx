@@ -1,14 +1,14 @@
-import { Copy, Eye, EyeOff, Globe2, KeyRound, Plus, ShieldCheck } from "lucide-react";
+import { Copy, Eye, EyeOff, KeyRound, Network, Plus, UserRound } from "lucide-react";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../../../components/ui/button";
 import { Input } from "../../../../../components/ui/input";
 import type { ProviderForm } from "../../../hooks/useProviderForm";
-import { fieldLabelClass } from "../../providerForm/ProviderConfigPrimitives";
+import { ModelFormField, ModelFormSection, modelInputClass } from "../../providerForm/ProviderConfigPrimitives";
 
 /** 连接页签：名称、API Key、双端点、模型列表 URL。 */
 export function ConnectionTab({ form }: { form: ProviderForm }) {
-  const { values, setField } = form;
+  const { values, setField, validationErrorCode } = form;
   const { t } = useTranslation();
   const [showApiKey, setShowApiKey] = useState(false);
   const [showAnthropicUrl, setShowAnthropicUrl] = useState(Boolean(values.baseUrlAnthropic.trim()));
@@ -22,103 +22,143 @@ export function ConnectionTab({ form }: { form: ProviderForm }) {
     }
   }, [values.apiKey]);
 
-  return (
-    <div className="grid gap-4">
-      <label className="space-y-1">
-        <span className={fieldLabelClass}>{t("models.connectionTab.name")}</span>
-        <Input value={values.name} onChange={(e) => setField("name", e.target.value)} placeholder="DeepSeek" />
-      </label>
+  const fieldError = (code: typeof validationErrorCode) =>
+    validationErrorCode === code && code ? t(`models.errors.${code}`) : undefined;
+  const nameError = fieldError("nameRequired");
+  const openaiError = fieldError("invalidOpenaiUrl");
+  const anthropicError = fieldError("invalidAnthropicUrl");
+  const modelsUrlError = fieldError("invalidModelsUrl");
 
-      <div className="space-y-1">
-        <div className="flex items-center justify-between">
-          <span className={fieldLabelClass}>API Key</span>
+  return (
+    <div className="grid gap-3.5">
+      <ModelFormSection title={t("models.connectionTab.identitySection")} icon={<UserRound className="h-4 w-4" />}>
+        <ModelFormField id="provider-name" label={t("models.connectionTab.name")} error={nameError} required>
+          <Input
+            id="provider-name"
+            value={values.name}
+            onChange={(e) => setField("name", e.target.value)}
+            placeholder="DeepSeek"
+            className={modelInputClass}
+            aria-invalid={Boolean(nameError)}
+            aria-describedby={nameError ? "provider-name-error" : undefined}
+          />
+        </ModelFormField>
+      </ModelFormSection>
+
+      <ModelFormSection
+        title={t("models.connectionTab.credentialsSection")}
+        description={t("models.connectionTab.localCredentials")}
+        icon={<KeyRound className="h-4 w-4" />}
+      >
+        <ModelFormField
+          id="provider-api-key"
+          label="API Key"
+          action={
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              onClick={handleCopyApiKey}
+              disabled={!values.apiKey}
+              className="text-muted-foreground"
+            >
+              <Copy className="h-3 w-3" />
+              {t("models.connectionTab.copy")}
+            </Button>
+          }
+        >
+          <div className="relative">
+            <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/70" />
+            <Input
+              id="provider-api-key"
+              type={showApiKey ? "text" : "password"}
+              value={values.apiKey}
+              onChange={(e) => setField("apiKey", e.target.value)}
+              placeholder="sk-..."
+              autoComplete="off"
+              className={`${modelInputClass} pl-9 pr-10`}
+            />
+            <button
+              type="button"
+              onClick={() => setShowApiKey((v) => !v)}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground transition hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+              aria-label={showApiKey ? t("models.connectionTab.hide") : t("models.connectionTab.show")}
+            >
+              {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
+        </ModelFormField>
+      </ModelFormSection>
+
+      <ModelFormSection
+        title={t("models.connectionTab.endpointsSection")}
+        description={t("models.connectionTab.endpointsSectionHint")}
+        icon={<Network className="h-4 w-4" />}
+      >
+        <ModelFormField
+          id="provider-openai-endpoint"
+          label={t("models.connectionTab.openaiEndpoint")}
+          info={t("models.connectionTab.openaiEndpointHint")}
+          error={openaiError}
+        >
+          <Input
+            id="provider-openai-endpoint"
+            value={values.baseUrlOpenai}
+            onChange={(e) => setField("baseUrlOpenai", e.target.value)}
+            placeholder="https://api.example.com/v1"
+            className={modelInputClass}
+            aria-invalid={Boolean(openaiError)}
+            aria-describedby={openaiError ? "provider-openai-endpoint-error" : undefined}
+          />
+        </ModelFormField>
+
+        {showAnthropicUrl || values.baseUrlAnthropic ? (
+          <ModelFormField
+            id="provider-anthropic-endpoint"
+            label={t("models.connectionTab.anthropicEndpoint")}
+            info={t("models.connectionTab.anthropicEndpointHint")}
+            error={anthropicError}
+          >
+            <Input
+              id="provider-anthropic-endpoint"
+              value={values.baseUrlAnthropic}
+              onChange={(e) => setField("baseUrlAnthropic", e.target.value)}
+              placeholder="https://api.example.com/anthropic"
+              className={modelInputClass}
+              aria-invalid={Boolean(anthropicError)}
+              aria-describedby={anthropicError ? "provider-anthropic-endpoint-error" : undefined}
+            />
+          </ModelFormField>
+        ) : (
           <Button
             type="button"
             variant="ghost"
             size="sm"
-            onClick={handleCopyApiKey}
-            disabled={!values.apiKey}
-            className="h-6 px-2 text-[11px] text-muted-foreground"
+            className="w-fit gap-1.5 text-xs text-muted-foreground"
+            onClick={() => setShowAnthropicUrl(true)}
           >
-            <Copy className="mr-1 h-3 w-3" />
-            {t("models.connectionTab.copy")}
+            <Plus className="h-3.5 w-3.5" />
+            {t("models.connectionTab.addAnthropicEndpoint")}
           </Button>
-        </div>
-        <div className="relative">
-          <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/70" />
-          <Input
-            type={showApiKey ? "text" : "password"}
-            value={values.apiKey}
-            onChange={(e) => setField("apiKey", e.target.value)}
-            placeholder="sk-..."
-            className="pl-9 pr-10"
-          />
-          <button
-            type="button"
-            onClick={() => setShowApiKey((v) => !v)}
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground hover:text-foreground"
-            aria-label={showApiKey ? t("models.connectionTab.hide") : t("models.connectionTab.show")}
-          >
-            {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-          </button>
-        </div>
-      </div>
+        )}
 
-      <div className="space-y-1">
-        <span className={fieldLabelClass}>{t("models.connectionTab.openaiEndpoint")}</span>
-        <div className="relative">
-          <Globe2 className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/70" />
-          <Input
-            value={values.baseUrlOpenai}
-            onChange={(e) => setField("baseUrlOpenai", e.target.value)}
-            placeholder="https://api.example.com/v1"
-            className="pl-9"
-          />
-        </div>
-        <p className="text-[11px] text-muted-foreground/75">{t("models.connectionTab.openaiEndpointHint")}</p>
-      </div>
-
-      {showAnthropicUrl || values.baseUrlAnthropic ? (
-        <div className="space-y-1">
-          <span className={fieldLabelClass}>{t("models.connectionTab.anthropicEndpoint")}</span>
-          <div className="relative">
-            <Globe2 className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/70" />
-            <Input
-              value={values.baseUrlAnthropic}
-              onChange={(e) => setField("baseUrlAnthropic", e.target.value)}
-              placeholder="https://api.example.com/anthropic"
-              className="pl-9"
-            />
-          </div>
-          <p className="text-[11px] text-muted-foreground/75">{t("models.connectionTab.anthropicEndpointHint")}</p>
-        </div>
-      ) : (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-8 w-fit gap-1.5 text-xs text-muted-foreground"
-          onClick={() => setShowAnthropicUrl(true)}
+        <ModelFormField
+          id="provider-models-url"
+          label={t("models.connectionTab.modelsUrl")}
+          info={t("models.connectionTab.modelsUrlHint")}
+          error={modelsUrlError}
         >
-          <Plus className="h-3.5 w-3.5" />
-          {t("models.connectionTab.addAnthropicEndpoint")}
-        </Button>
-      )}
-
-      <label className="space-y-1">
-        <span className={fieldLabelClass}>{t("models.connectionTab.modelsUrl")}</span>
-        <Input
-          value={values.modelsUrl}
-          onChange={(e) => setField("modelsUrl", e.target.value)}
-          placeholder="https://api.example.com/v1/models"
-        />
-        <p className="text-[11px] text-muted-foreground/75">{t("models.connectionTab.modelsUrlHint")}</p>
-      </label>
-
-      <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-        <ShieldCheck className="h-3.5 w-3.5 text-primary/80" />
-        {t("models.connectionTab.localCredentials")}
-      </p>
+          <Input
+            id="provider-models-url"
+            value={values.modelsUrl}
+            onChange={(e) => setField("modelsUrl", e.target.value)}
+            placeholder="https://api.example.com/v1/models"
+            className={modelInputClass}
+            aria-invalid={Boolean(modelsUrlError)}
+            aria-describedby={modelsUrlError ? "provider-models-url-error" : undefined}
+          />
+        </ModelFormField>
+      </ModelFormSection>
     </div>
   );
 }

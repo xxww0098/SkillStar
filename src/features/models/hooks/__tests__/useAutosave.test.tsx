@@ -75,15 +75,56 @@ describe("useAutosave", () => {
 
   it("flush() saves immediately when dirty and is a no-op when clean", async () => {
     const { save, hook } = setup();
+    let dirtyResult: SaveAttemptResult | null = null;
     await act(async () => {
-      await hook.result.current.flush();
+      dirtyResult = await hook.result.current.flush();
     });
     expect(save).toHaveBeenCalledTimes(1);
+    expect(dirtyResult).toBe("saved");
 
     const clean = setup(false);
+    let cleanResult: SaveAttemptResult | null = "saved";
     await act(async () => {
-      await clean.hook.result.current.flush();
+      cleanResult = await clean.hook.result.current.flush();
     });
     expect(clean.save).not.toHaveBeenCalled();
+    expect(cleanResult).toBeNull();
+  });
+
+  it("flush() waits for an in-flight save and then persists a newer edit", async () => {
+    let resolveFirst: ((result: SaveAttemptResult) => void) | undefined;
+    const firstSave = vi.fn(
+      () =>
+        new Promise<SaveAttemptResult>((resolve) => {
+          resolveFirst = resolve;
+        }),
+    );
+    const secondSave = vi.fn(async (): Promise<SaveAttemptResult> => "saved");
+    const hook = renderHook(({ saveFn }) => useAutosave({ dirty: true, save: saveFn }), {
+      initialProps: { saveFn: firstSave },
+    });
+
+    let firstFlush: Promise<SaveAttemptResult | null> | undefined;
+    await act(async () => {
+      firstFlush = hook.result.current.flush();
+      await Promise.resolve();
+    });
+    expect(firstSave).toHaveBeenCalledTimes(1);
+
+    // A second edit arrives while the first request is unresolved. The close
+    // path receives the same serial promise and must not resolve before this
+    // latest save callback has run.
+    hook.rerender({ saveFn: secondSave });
+    let closeResult: SaveAttemptResult | null = null;
+    await act(async () => {
+      const closeFlush = hook.result.current.flush();
+      resolveFirst?.("saved");
+      closeResult = await closeFlush;
+      await firstFlush;
+    });
+
+    expect(secondSave).toHaveBeenCalledTimes(1);
+    expect(closeResult).toBe("saved");
+    expect(hook.result.current.state).toBe("saved");
   });
 });

@@ -14,12 +14,12 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { PublisherAvatar } from "../../../components/shared/PublisherAvatar";
 import { Badge } from "../../../components/ui/badge";
 import { CardTemplate } from "../../../components/ui/card-template";
 import { Github } from "../../../components/ui/icons/Github";
 import { ZhipuColor } from "../../../components/ui/icons/lobe";
 import { LobeIcon } from "../../../components/ui/icons/LobeIcon";
-import { PublisherAvatar } from "../../marketplace/components/OfficialPublishers";
 import { cn } from "../../../lib/utils";
 import type { McpPublisherSummary } from "../../../types";
 

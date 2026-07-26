@@ -58,7 +58,10 @@ pub(crate) fn entry_from_json_spec(name: &str, spec: &Value) -> Option<McpServer
 /// `timeout`), tolerating whichever subset a given tool actually wrote.
 fn apply_common_approval_fields(entry: &mut McpServerEntry, obj: &Map<String, Value>) {
     if let Some(arr) = obj.get("autoApprove").and_then(Value::as_array) {
-        let tools: Vec<String> = arr.iter().filter_map(|v| v.as_str().map(String::from)).collect();
+        let tools: Vec<String> = arr
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
         if tools.iter().any(|t| t == "*") {
             entry.auto_approve_all = true;
         } else {
@@ -73,7 +76,10 @@ fn apply_common_approval_fields(entry: &mut McpServerEntry, obj: &Map<String, Va
         .or_else(|| obj.get("excludeTools"))
         .and_then(Value::as_array);
     if let Some(arr) = disabled {
-        entry.disabled_tools = arr.iter().filter_map(|v| v.as_str().map(String::from)).collect();
+        entry.disabled_tools = arr
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
     }
     if let Some(ms) = obj.get("timeout").and_then(Value::as_u64) {
         entry.timeout_ms = Some(ms);

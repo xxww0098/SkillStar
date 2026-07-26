@@ -7,43 +7,40 @@
 //!
 //! | Module | Responsibility |
 //! |---|---|
-//! | [`lockfile`] / [`update_checker`] | Installed-skill records and repo update detection |
+//! | [`lockfile`] / internal update checker | Installed-skill records and repo update detection |
 //! | [`agents`] / [`projects`] / [`deployment`] | Agent profiles, project manifest, link-copy deploy |
-//! | [`patrol`] / [`terminal`] | Patrol config/types and Launch Deck CLI registry |
+//! | [`patrol`] | Patrol config/types and execution |
 //! | library modules | install, update, bundle, local, repo scan, discovery, groups |
 
-pub mod discovery;
-pub mod frontmatter;
+pub mod content;
+mod discovery;
+mod frontmatter;
 pub mod git;
 pub mod lockfile;
-pub mod shared;
+mod shared;
 pub mod source_resolver;
+pub mod tutorial;
 
 pub mod installed_skill;
 pub mod local_skill;
 pub mod repo_scanner;
+pub mod share_install;
 pub mod skill_bundle;
 pub mod skill_group;
 pub mod skill_install;
 pub mod skill_pack;
 pub mod skill_update;
-pub mod update_checker;
+mod update_checker;
 
 // Agent / project / deployment / patrol / terminal (merged from former skillstar-projects)
 pub mod agents;
-pub mod projects;
 pub mod deployment;
 pub mod patrol;
-pub mod terminal;
-
-
+pub mod projects;
 
 // ── Convenience re-exports ─────────────────────────────────────────
 
-pub use discovery::{
-    DiscoveredSkill, PRIORITY_SKILL_DIRS, dedupe_discovered_skills, discover_skills,
-    find_all_skill_md_files, source_priority,
-};
+pub use discovery::{DiscoveredSkill, discover_skills};
 pub use lockfile::{LockEntry, Lockfile};
 pub use shared::{
     Skill, SkillCategory, SkillContent, SkillType, extract_github_source_from_url,

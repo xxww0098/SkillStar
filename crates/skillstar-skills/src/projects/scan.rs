@@ -64,12 +64,9 @@ pub fn detect_project_agents(project_path: &str) -> ProjectAgentDetection {
         }
     }
 
-    // Disambiguation sealed — each agent now has a unique project_skills_rel,
-    // so ambiguous groups can no longer occur. The detection logic above is
-    // preserved but its output is discarded.
     ProjectAgentDetection {
         detected,
-        ambiguous_groups: Vec::new(),
+        ambiguous_groups,
         auto_enable,
     }
 }
@@ -194,14 +191,14 @@ mod tests {
 
     /// `detect_project_agents` is the read-only data-driven detector behind the
     /// Tauri command of the same name. AGENTS.md mandates:
-    ///  - unique `project_skills_rel` per agent (disambiguation sealed)
-    ///  - OpenClaw is global-only (`project_skills_rel` empty → never detected)
+    ///  - universal agents share `.agents/skills` and require disambiguation
+    ///  - OpenClaw uses its upstream project-level `skills` directory
     ///  - only the `skills` dir itself counts, never its parent
     #[test]
-    fn detects_codex_when_skills_dir_exists() {
+    fn detects_universal_agents_as_one_ambiguous_group() {
         let tmp = tempfile::tempdir().unwrap();
         let project = tmp.path();
-        std::fs::create_dir_all(project.join(".codex/skills")).unwrap();
+        std::fs::create_dir_all(project.join(".agents/skills")).unwrap();
 
         let detection = detect_project_agents(&project.to_string_lossy());
         let codex = detection
@@ -209,26 +206,31 @@ mod tests {
             .iter()
             .find(|d| d.agent_id == "codex")
             .expect("codex should be in the detection list");
-        assert!(codex.exists, ".codex/skills exists → codex.exists must be true");
-        assert_eq!(codex.project_skills_rel, ".codex/skills");
-        // Unique path → auto-enabled, no ambiguous group.
         assert!(
-            detection.auto_enable.contains(&"codex".to_string()),
-            "codex should be auto-enabled"
+            codex.exists,
+            ".agents/skills exists → codex.exists must be true"
         );
+        assert_eq!(codex.project_skills_rel, ".agents/skills");
         assert!(
-            detection.ambiguous_groups.is_empty(),
-            "sealed disambiguation must yield no ambiguous groups"
+            !detection.auto_enable.contains(&"codex".to_string()),
+            "a shared universal path cannot choose an owner automatically"
         );
+        let group = detection
+            .ambiguous_groups
+            .iter()
+            .find(|group| group.path == ".agents/skills")
+            .expect("universal path should be ambiguous");
+        assert!(group.agent_ids.contains(&"codex".to_string()));
+        assert!(group.agent_ids.contains(&"cursor".to_string()));
     }
 
     #[test]
     fn does_not_detect_agent_when_only_parent_dir_exists() {
         let tmp = tempfile::tempdir().unwrap();
         let project = tmp.path();
-        // Only `.codex` exists, NOT `.codex/skills` — must not be detected,
+        // Only `.agents` exists, NOT `.agents/skills` — must not be detected,
         // matching AGENTS.md ("strictly on the skills dir itself, never its parent").
-        std::fs::create_dir_all(project.join(".codex")).unwrap();
+        std::fs::create_dir_all(project.join(".agents")).unwrap();
 
         let detection = detect_project_agents(&project.to_string_lossy());
         let codex = detection
@@ -238,7 +240,7 @@ mod tests {
             .expect("codex should still be listed (with exists=false)");
         assert!(
             !codex.exists,
-            ".codex without skills/ must NOT count as detected"
+            ".agents without skills/ must NOT count as detected"
         );
         assert!(
             !detection.auto_enable.contains(&"codex".to_string()),
@@ -250,40 +252,46 @@ mod tests {
     fn detects_multiple_distinct_agents_simultaneously() {
         let tmp = tempfile::tempdir().unwrap();
         let project = tmp.path();
-        std::fs::create_dir_all(project.join(".codex/skills")).unwrap();
+        std::fs::create_dir_all(project.join(".agents/skills")).unwrap();
         std::fs::create_dir_all(project.join(".claude/skills")).unwrap();
-        std::fs::create_dir_all(project.join(".gemini/skills")).unwrap();
+        std::fs::create_dir_all(project.join(".qoder/skills")).unwrap();
 
         let detection = detect_project_agents(&project.to_string_lossy());
-        // Three distinct, unique rels → all auto-enabled, zero ambiguity.
-        assert_eq!(detection.auto_enable.len(), 3);
-        assert!(detection.ambiguous_groups.is_empty());
-        for id in &["codex", "claude", "gemini"] {
-            assert!(
-                detection.auto_enable.contains(&id.to_string()),
-                "{id} should be auto-enabled"
-            );
-        }
+        assert!(
+            detection
+                .ambiguous_groups
+                .iter()
+                .any(|group| group.path == ".agents/skills")
+        );
+        assert!(detection.auto_enable.contains(&"claude".to_string()));
+        assert!(
+            detection
+                .ambiguous_groups
+                .iter()
+                .any(|group| group.path == ".qoder/skills"
+                    && group.agent_ids.contains(&"qoder".to_string())
+                    && group.agent_ids.contains(&"qoder-cn".to_string())),
+            "Qoder and Qoder CN share the same upstream project path"
+        );
     }
 
-    /// OpenClaw has an empty `project_skills_rel` (global-only), so it must
-    /// never appear in the detected list regardless of directory state.
     #[test]
-    fn openclaw_is_never_detected_at_project_level() {
+    fn openclaw_project_skills_directory_is_detected() {
         let tmp = tempfile::tempdir().unwrap();
         let project = tmp.path();
-        // Even if ~/.openclaw/skills exists globally, the project detector
-        // only looks at project-relative dirs, and openclaw has no rel.
-        std::fs::create_dir_all(project.join(".openclaw/skills")).unwrap();
+        std::fs::create_dir_all(project.join("skills")).unwrap();
 
         let detection = detect_project_agents(&project.to_string_lossy());
         assert!(
-            !detection.detected.iter().any(|d| d.agent_id == "openclaw"),
-            "openclaw must not appear in project-level detection (global-only)"
+            detection
+                .detected
+                .iter()
+                .any(|d| d.agent_id == "openclaw" && d.exists),
+            "OpenClaw's upstream project skills dir should be detected"
         );
         assert!(
-            !detection.auto_enable.contains(&"openclaw".to_string()),
-            "openclaw must not be auto-enabled"
+            detection.auto_enable.contains(&"openclaw".to_string()),
+            "OpenClaw owns a unique project path"
         );
     }
 }

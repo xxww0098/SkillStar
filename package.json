@@ -18,7 +18,7 @@
     "types:gen": "cargo test -p skillstar-models -p skillstar-marketplace -p skillstar export_bindings"
   },
   "dependencies": {
-    "@lobehub/icons": "^5.8.0",
+    "@lobehub/icons": "^5.14.0",
     "@radix-ui/react-slot": "^1.1.0",
     "@radix-ui/react-switch": "^1.2.6",
     "@tailwindcss/typography": "^0.5.19",

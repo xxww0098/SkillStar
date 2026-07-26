@@ -6,10 +6,10 @@
 
 use std::time::Instant;
 
-use aws_sdk_s3::config::Region;
-use aws_sdk_s3::config::Credentials;
-use aws_sdk_s3::Config;
 use aws_sdk_s3::Client;
+use aws_sdk_s3::Config;
+use aws_sdk_s3::config::Credentials;
+use aws_sdk_s3::config::Region;
 
 use crate::progress::{NoopSink, Phase, ProgressSink, Status, event};
 use crate::store::SecretStore;
@@ -17,15 +17,8 @@ use crate::types::{ConnectionTestResult, S3TargetDef};
 
 /// Build an S3 client for the given target + resolved secret.
 pub fn build_client(target: &S3TargetDef, secret: Option<String>) -> Client {
-    let creds = secret.map(|s| {
-        Credentials::new(
-            &target.access_key_id,
-            s,
-            None,
-            None,
-            "skillstar-sync",
-        )
-    });
+    let creds =
+        secret.map(|s| Credentials::new(&target.access_key_id, s, None, None, "skillstar-sync"));
 
     let mut cfg = Config::builder()
         .behavior_version_latest()
@@ -58,11 +51,20 @@ pub async fn test_connection<S: SecretStore>(
     session_id: &str,
     sink: &impl ProgressSink,
 ) -> Result<ConnectionTestResult, anyhow::Error> {
-    sink.emit(event(session_id, Phase::Resolve, Status::Start, format!(
-        "Resolving bucket '{}' at {}…",
-        target.bucket,
-        if target.endpoint_url.is_empty() { target.region.clone() } else { target.endpoint_url.clone() }
-    )));
+    sink.emit(event(
+        session_id,
+        Phase::Resolve,
+        Status::Start,
+        format!(
+            "Resolving bucket '{}' at {}…",
+            target.bucket,
+            if target.endpoint_url.is_empty() {
+                target.region.clone()
+            } else {
+                target.endpoint_url.clone()
+            }
+        ),
+    ));
 
     let secret = secrets.get_secret(&target.id)?;
     let client = build_client(target, secret);
@@ -70,9 +72,12 @@ pub async fn test_connection<S: SecretStore>(
     match client.head_bucket().bucket(&target.bucket).send().await {
         Ok(_) => {
             let latency_ms = started.elapsed().as_millis() as u64;
-            sink.emit(event(session_id, Phase::Resolve, Status::Ok, format!(
-                "Bucket reachable ({latency_ms} ms)"
-            )));
+            sink.emit(event(
+                session_id,
+                Phase::Resolve,
+                Status::Ok,
+                format!("Bucket reachable ({latency_ms} ms)"),
+            ));
             Ok(ConnectionTestResult { latency_ms })
         }
         Err(err) => {

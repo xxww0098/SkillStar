@@ -26,6 +26,8 @@ use crate::{UsageError, UsageResult};
 const LOGIN_URL: &str = "https://cursor.com/loginDeepControl";
 const POLL_ENDPOINT: &str = "https://api2.cursor.sh/auth/poll";
 const USAGE_SUMMARY_URL: &str = "https://cursor.com/api/usage-summary";
+/// Session-cookie endpoint that returns the logged-in account email (not in the JWT).
+const AUTH_ME_URL: &str = "https://cursor.com/api/auth/me";
 const STRIPE_PROFILE_URL: &str = "https://api2.cursor.sh/auth/full_stripe_profile";
 const OAUTH_TOKEN_URL: &str = "https://api2.cursor.sh/oauth/token";
 const CLIENT_ID: &str = "KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB";
@@ -47,6 +49,27 @@ struct StripeProfile {
     individual_membership_type: Option<String>,
     is_team_member: Option<bool>,
     is_enterprise: Option<bool>,
+    /// Some Cursor builds put the login email at the top level.
+    email: Option<String>,
+    /// Others nest it under Stripe `customer.email`.
+    customer: Option<StripeCustomer>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct StripeCustomer {
+    email: Option<String>,
+}
+
+/// `GET /api/auth/me` — primary source of the login email for card titles.
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct AuthMe {
+    email: Option<String>,
+    /// Fallback display fields seen in older / alternate payloads.
+    name: Option<String>,
+    #[serde(alias = "user_email")]
+    user_email: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -131,16 +154,13 @@ async fn finalize_subscription(
     auth_id: Option<String>,
 ) -> UsageResult<Subscription> {
     let now = Utc::now().timestamp();
-    let display = auth_id
-        .as_deref()
-        .filter(|s| s.contains('@'))
-        .map(str::to_string)
-        .unwrap_or_else(|| "Cursor".to_string());
+    // Prefer a real email; never use WorkOS `user_…` ids as the card title.
+    let mut display = resolve_cursor_display_name(auth_id.as_deref(), None);
 
     let mut sub = Subscription {
         id: uuid::Uuid::new_v4().to_string(),
         catalog_id: "cursor".to_string(),
-        display_name: display,
+        display_name: display.clone(),
         auth_mode: AuthMode::OAuth,
         plan_tier: None,
         monthly_price: None,
@@ -155,10 +175,9 @@ async fn finalize_subscription(
         refresh_token_encrypted: Some(crypto::encrypt(&refresh_token)),
         access_token_expires_at: token_refresh::jwt_exp(&access_token),
         id_token_encrypted: None,
-        oauth_account_id: auth_id,
+        oauth_account_id: auth_id.clone(),
         oauth_region: None,
         requires_reauth: false,
-        fingerprint_id: None,
         cookie_jar_encrypted: None,
         cookie_session_expires_at: None,
         manual_quota: None,
@@ -168,9 +187,16 @@ async fn finalize_subscription(
         updated_at: now,
     };
 
-    // First-time refresh — capture usage + plan name. Failures are non-fatal:
-    // the subscription gets created either way, and the user can retry.
-    if let Ok(usage) = fetch_with_tokens(&sub.id, &access_token).await {
+    // First-time refresh — usage + plan + email from /api/auth/me (JWT has no email claim).
+    // Failures are non-fatal: the subscription gets created either way.
+    if let Ok((usage, account_email)) = fetch_with_tokens(&sub.id, &access_token).await {
+        if let Some(better) = prefer_email_display(
+            &display,
+            resolve_cursor_display_name(auth_id.as_deref(), account_email.as_deref()),
+        ) {
+            display = better;
+            sub.display_name = display;
+        }
         storage::save_usage_snapshot(usage).ok();
     }
 
@@ -199,23 +225,36 @@ pub async fn fetch(subscription: &mut Subscription) -> UsageResult<SubscriptionU
         }
     }
     match fetch_with_tokens(&subscription.id, &access_token).await {
-        Ok(usage) => Ok(usage),
+        Ok((usage, account_email)) => {
+            // Upgrade placeholder / WorkOS-id titles once we learn the email.
+            let candidate = resolve_cursor_display_name(
+                subscription.oauth_account_id.as_deref(),
+                account_email.as_deref(),
+            );
+            if let Some(better) = prefer_email_display(&subscription.display_name, candidate) {
+                subscription.display_name = better;
+            }
+            Ok(usage)
+        }
         Err(UsageError::AuthRequired) => Err(UsageError::AuthRequired),
         Err(e) => Err(e),
     }
 }
 
+/// Returns usage snapshot plus best-effort account email for the card title.
 async fn fetch_with_tokens(
     subscription_id: &str,
     access_token: &str,
-) -> UsageResult<SubscriptionUsage> {
+) -> UsageResult<(SubscriptionUsage, Option<String>)> {
     let client = http_client()?;
 
-    // Stripe profile + usage summary are independent — fetch in parallel.
-    let (profile_res, usage_res) = tokio::join!(
+    // Profile / usage / identity are independent — fetch in parallel.
+    let (profile_res, usage_res, me_res) = tokio::join!(
         fetch_stripe_profile(&client, access_token),
         fetch_usage_summary(&client, access_token),
+        fetch_auth_me(&client, access_token),
     );
+    // auth/me is best-effort identity only — a soft failure must not block usage refresh.
     if matches!(&profile_res, Err(UsageError::AuthRequired))
         || matches!(&usage_res, Err(UsageError::AuthRequired))
     {
@@ -226,6 +265,10 @@ async fn fetch_with_tokens(
         Err(e) => (None, Some(format!("stripe_profile: {}", e))),
     };
     let plan_name = resolve_plan_name(profile.as_ref());
+    let account_email = me_res
+        .ok()
+        .and_then(|me| email_from_auth_me(&me))
+        .or_else(|| profile.as_ref().and_then(email_from_profile));
 
     let (usage_json, usage_err) = match usage_res {
         Ok(v) => (Some(v), None),
@@ -249,19 +292,22 @@ async fn fetch_with_tokens(
         (None, None) => None,
     };
 
-    Ok(SubscriptionUsage {
-        subscription_id: subscription_id.to_string(),
-        fetched_at: Utc::now().timestamp(),
-        plan_name: Some(plan_name),
-        hourly: None,
-        weekly: None,
-        monthly: total_window,
-        balance: None,
-        credits: Vec::new(),
-        error,
-        api_keys: Vec::new(),
-        deepseek_analytics: None,
-    })
+    Ok((
+        SubscriptionUsage {
+            subscription_id: subscription_id.to_string(),
+            fetched_at: Utc::now().timestamp(),
+            plan_name: Some(plan_name),
+            hourly: None,
+            weekly: None,
+            monthly: total_window,
+            balance: None,
+            credits: Vec::new(),
+            error,
+            api_keys: Vec::new(),
+            deepseek_analytics: None,
+        },
+        account_email,
+    ))
 }
 
 async fn fetch_stripe_profile(
@@ -293,6 +339,41 @@ async fn fetch_stripe_profile(
     serde_json::from_str::<StripeProfile>(&body).map_err(|e| {
         let snippet = body.chars().take(200).collect::<String>();
         UsageError::Fetcher(format!("解析 stripe_profile: {} | body={}", e, snippet))
+    })
+}
+
+async fn fetch_auth_me(client: &reqwest::Client, access_token: &str) -> UsageResult<AuthMe> {
+    let cookie = build_session_cookie(access_token)
+        .ok_or_else(|| UsageError::Other("无法从 access_token 解析 WorkOS user id".into()))?;
+    let resp = client
+        .get(AUTH_ME_URL)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .header(reqwest::header::COOKIE, &cookie)
+        .header(
+            reqwest::header::USER_AGENT,
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+        )
+        .send()
+        .await
+        .map_err(|e| UsageError::Fetcher(format!("Cursor auth/me: {}", e)))?;
+    let status = resp.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        return Err(UsageError::AuthRequired);
+    }
+    if !status.is_success() {
+        return Err(UsageError::Fetcher(format!(
+            "Cursor auth/me 状态码 {}",
+            status
+        )));
+    }
+    let body = resp
+        .text()
+        .await
+        .map_err(|e| UsageError::Fetcher(format!("读取 auth/me 响应: {}", e)))?;
+    tracing::debug!("[cursor] auth/me raw body: {}", body);
+    serde_json::from_str::<AuthMe>(&body).map_err(|e| {
+        let snippet = body.chars().take(200).collect::<String>();
+        UsageError::Fetcher(format!("解析 auth/me: {} | body={}", e, snippet))
     })
 }
 
@@ -392,6 +473,60 @@ fn build_session_cookie(access_token: &str) -> Option<String> {
     ))
 }
 
+fn looks_like_email(s: &str) -> bool {
+    let s = s.trim();
+    s.contains('@') && s.len() > 3 && !s.contains(' ')
+}
+
+fn email_from_profile(profile: &StripeProfile) -> Option<String> {
+    profile
+        .email
+        .as_deref()
+        .or_else(|| profile.customer.as_ref().and_then(|c| c.email.as_deref()))
+        .map(str::trim)
+        .filter(|s| looks_like_email(s))
+        .map(str::to_string)
+}
+
+fn email_from_auth_me(me: &AuthMe) -> Option<String> {
+    me.email
+        .as_deref()
+        .or(me.user_email.as_deref())
+        .or(me.name.as_deref().filter(|s| looks_like_email(s)))
+        .map(str::trim)
+        .filter(|s| looks_like_email(s))
+        .map(str::to_string)
+}
+
+/// Card title: real account email only. Never surface WorkOS `user_…` ids
+/// (JWT `sub` looks like `auth0|user_01…` and is not human-readable).
+fn resolve_cursor_display_name(auth_id: Option<&str>, account_email: Option<&str>) -> String {
+    if let Some(email) = account_email.map(str::trim).filter(|s| looks_like_email(s)) {
+        return email.to_string();
+    }
+    if let Some(email) = auth_id.map(str::trim).filter(|s| looks_like_email(s)) {
+        return email.to_string();
+    }
+    "Cursor".to_string()
+}
+
+/// Replace placeholder / WorkOS-id titles with a real email. Never clobber a custom rename.
+fn prefer_email_display(current: &str, candidate: String) -> Option<String> {
+    let current = current.trim();
+    let candidate = candidate.trim();
+    if candidate.is_empty() || current == candidate || !looks_like_email(candidate) {
+        return None;
+    }
+    let placeholder = current.is_empty()
+        || current.eq_ignore_ascii_case("Cursor")
+        || current.starts_with("user_")
+        || current.contains("|user_");
+    if placeholder {
+        return Some(candidate.to_string());
+    }
+    None
+}
+
 fn resolve_plan_name(profile: Option<&StripeProfile>) -> String {
     let Some(p) = profile else {
         return "FREE".to_string();
@@ -441,12 +576,7 @@ fn parse_total_with_breakdown(usage: &Value) -> Option<UsageWindow> {
         .get("billingCycleEnd")
         .and_then(Value::as_str)
         .and_then(parse_iso_epoch)
-        .or_else(|| {
-            pick_i64(
-                usage,
-                &[&["resetAt"], &["periodEnd"], &["billingCycleEnd"]],
-            )
-        });
+        .or_else(|| pick_i64(usage, &[&["resetAt"], &["periodEnd"], &["billingCycleEnd"]]));
 
     let sub_window = |label: &str, percent: f64| UsageWindow {
         label: label.to_string(),
@@ -746,5 +876,49 @@ mod tests {
         });
         // NaN percent → plan branch skips → no legacy fields → None.
         assert!(parse_total_with_breakdown(&usage).is_none());
+    }
+
+    #[test]
+    fn display_name_prefers_account_email_over_auth_id() {
+        let name = resolve_cursor_display_name(Some("alice@example.com"), Some("from-me@x.com"));
+        assert_eq!(name, "from-me@x.com");
+    }
+
+    #[test]
+    fn display_name_uses_auth_id_email_when_no_me() {
+        let name = resolve_cursor_display_name(Some("alice@example.com"), None);
+        assert_eq!(name, "alice@example.com");
+    }
+
+    #[test]
+    fn display_name_never_uses_workos_user_id() {
+        // Previous bug: fell back to JWT `sub` → `user_01…` which is not readable.
+        assert_eq!(
+            resolve_cursor_display_name(Some("user_01JYNE26X44"), None),
+            "Cursor"
+        );
+        assert_eq!(resolve_cursor_display_name(None, None), "Cursor");
+    }
+
+    #[test]
+    fn prefer_email_upgrades_placeholder_and_user_id_only() {
+        assert_eq!(
+            prefer_email_display("Cursor", "user@x.com".into()).as_deref(),
+            Some("user@x.com")
+        );
+        assert_eq!(
+            prefer_email_display("user_01JYNE26X44", "user@x.com".into()).as_deref(),
+            Some("user@x.com")
+        );
+        assert_eq!(
+            prefer_email_display("My Work", "user@x.com".into()),
+            None,
+            "custom renames must not be overwritten"
+        );
+        assert_eq!(
+            prefer_email_display("Cursor", "user_01ABC".into()),
+            None,
+            "must not promote WorkOS ids into the title"
+        );
     }
 }

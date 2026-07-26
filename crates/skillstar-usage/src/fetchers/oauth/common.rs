@@ -15,13 +15,96 @@ use chrono::Utc;
 
 use crate::catalog::AuthMode;
 use crate::crypto;
+use crate::oauth::token_refresh;
 use crate::subscription::{BillingCycle, Subscription};
+
+/// True when `s` looks like an email suitable for a card title.
+pub fn looks_like_email(s: &str) -> bool {
+    let s = s.trim();
+    s.contains('@') && s.len() > 3 && !s.contains(' ')
+}
+
+/// Best-effort email claim from an OIDC access/id token.
+pub fn email_from_jwt(token: &str) -> Option<String> {
+    token_refresh::jwt_string(token, &["email"])
+        .filter(|s| looks_like_email(s))
+        .or_else(|| {
+            token_refresh::jwt_string(token, &["preferred_username"])
+                .filter(|s| looks_like_email(s))
+        })
+}
+
+/// Upgrade placeholder / `Brand · …` / WorkOS-style titles to a real email.
+/// Custom renames (anything that already looks intentional) are left alone.
+pub fn prefer_email_title(
+    current: &str,
+    candidate: Option<&str>,
+    catalog_placeholders: &[&str],
+) -> Option<String> {
+    let email = candidate.map(str::trim).filter(|s| looks_like_email(s))?;
+    let current = current.trim();
+    if current == email {
+        return None;
+    }
+    let is_placeholder = current.is_empty()
+        || current.starts_with("user_")
+        || current.contains("|user_")
+        || catalog_placeholders
+            .iter()
+            .any(|p| current.eq_ignore_ascii_case(p) || current.starts_with(&format!("{p} · ")));
+    if is_placeholder {
+        return Some(email.to_string());
+    }
+    None
+}
+
+/// Mutate `subscription.display_name` when `email` is better than a placeholder.
+pub fn apply_email_title(
+    subscription: &mut Subscription,
+    email: Option<&str>,
+    catalog_placeholders: &[&str],
+) {
+    if let Some(better) =
+        prefer_email_title(&subscription.display_name, email, catalog_placeholders)
+    {
+        subscription.display_name = better;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prefer_email_title_upgrades_placeholders_only() {
+        assert_eq!(
+            prefer_email_title("Codex", Some("a@b.com"), &["Codex"]).as_deref(),
+            Some("a@b.com")
+        );
+        assert_eq!(
+            prefer_email_title("Grok · a@b.com", Some("a@b.com"), &["Grok"]).as_deref(),
+            Some("a@b.com")
+        );
+        assert_eq!(
+            prefer_email_title("user_01ABC", Some("a@b.com"), &["Cursor"]).as_deref(),
+            Some("a@b.com")
+        );
+        assert_eq!(
+            prefer_email_title("My Work", Some("a@b.com"), &["Codex"]),
+            None
+        );
+        assert_eq!(
+            prefer_email_title("Codex", Some("user_01"), &["Codex"]),
+            None
+        );
+    }
+}
 
 /// Builds a fresh OAuth [`Subscription`], applying every default every
 /// provider's literal used to repeat: `plan_tier`/`monthly_price`: `None`,
 /// `billing_cycle`: `Monthly`, `start_date`/`renew_date`: `0`, `auto_renew`:
 /// `false`, `api_key_encrypted`/`platform_token_encrypted`: `None`,
-/// `requires_reauth`: `false`, `fingerprint_id`: `None`,
+/// `requires_reauth`: `false`,
 /// `cookie_jar_encrypted`/`cookie_session_expires_at`: `None`,
 /// `manual_quota`/`note`: `None`, `sort_index`: `0`, `created_at` ==
 /// `updated_at` == now. `id_token_encrypted`/`oauth_account_id`
@@ -103,7 +186,6 @@ impl SubscriptionBuilder {
             oauth_account_id: self.oauth_account_id,
             oauth_region: None,
             requires_reauth: false,
-            fingerprint_id: None,
             cookie_jar_encrypted: None,
             cookie_session_expires_at: None,
             manual_quota: None,
@@ -116,21 +198,19 @@ impl SubscriptionBuilder {
 }
 
 /// Generates the `pub async fn fetch(subscription: &mut Subscription)`
-/// wrapper every OAuth fetcher repeats verbatim: snapshot `fingerprint_id`,
-/// run the module's private `fetch_inner` scoped to it via
-/// [`crate::http_client::with_fingerprint`].
+/// wrapper every OAuth fetcher repeats verbatim: delegate to the module's
+/// private `fetch_inner`.
 ///
 /// A macro, not a generic fn: each call site's `fetch_inner(subscription)`
 /// is a distinct async fn borrowing `subscription` mutably, and expanding
-/// inline avoids fighting HRTBs for a three-line body. Same
+/// inline avoids fighting HRTBs for a one-line body. Same
 /// `macro_rules!` + `pub(crate) use` convention as `oauth_clients::client_id!`.
 macro_rules! impl_oauth_fetch {
     () => {
         pub async fn fetch(
             subscription: &mut crate::subscription::Subscription,
         ) -> crate::UsageResult<crate::subscription::SubscriptionUsage> {
-            let fp_id = subscription.fingerprint_id.clone();
-            crate::http_client::with_fingerprint(fp_id, fetch_inner(subscription)).await
+            fetch_inner(subscription).await
         }
     };
 }

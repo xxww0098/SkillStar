@@ -148,8 +148,7 @@ pub async fn set_mcp_tool_enabled(
     let path = mcp::mcp_store_path();
     let mut store = mcp::read_mcp_store(&path)?;
 
-    let result =
-        mcp::set_tool_enabled_and_sync(&mut store, &id, &tool_id, enabled, false)?;
+    let result = mcp::set_tool_enabled_and_sync(&mut store, &id, &tool_id, enabled, false)?;
     mcp::write_mcp_store(&store, &path)?;
     Ok(result)
 }
@@ -226,7 +225,7 @@ pub async fn reorder_mcp_servers(
 /// Returns the built-in / recommended MCP presets (read-only, no lock needed).
 #[tauri::command]
 pub async fn get_mcp_presets() -> Result<Vec<McpPreset>, AppError> {
-    if let Err(err) = crate::core::marketplace::initialize_local_snapshot() {
+    if let Err(err) = crate::core::marketplace_snapshot::initialize() {
         warn!(target: "mcp", error = %err, "failed to initialize marketplace snapshot for MCP presets");
         return Ok(mcp::get_mcp_presets());
     }

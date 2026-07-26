@@ -241,19 +241,13 @@ mod tests {
     #[test]
     fn extracts_token_from_cookie_entries() {
         let jar = vec![cookie("foo", "bar"), cookie("Oasis-Token", "tok123")];
-        assert_eq!(
-            extract_oasis_token(&jar, ""),
-            Some("tok123".to_string())
-        );
+        assert_eq!(extract_oasis_token(&jar, ""), Some("tok123".to_string()));
     }
 
     #[test]
     fn extracts_token_from_raw_header_case_insensitive() {
         let header = "foo=bar; oasis-token=hdr456; baz=qux";
-        assert_eq!(
-            extract_oasis_token(&[], header),
-            Some("hdr456".to_string())
-        );
+        assert_eq!(extract_oasis_token(&[], header), Some("hdr456".to_string()));
     }
 
     #[test]
@@ -295,9 +289,15 @@ mod tests {
     fn auth_error_body_maps_to_auth_required() {
         let body = r#"{"code":"unauthenticated","message":"auth failed: token is illegal",
             "details":[{"debug":{"code":120000}}]}"#;
-        assert!(matches!(map_error_body(401, body), UsageError::AuthRequired));
+        assert!(matches!(
+            map_error_body(401, body),
+            UsageError::AuthRequired
+        ));
         // Even a 200-ish status with the business code should be treated as auth.
-        assert!(matches!(map_error_body(500, body), UsageError::AuthRequired));
+        assert!(matches!(
+            map_error_body(500, body),
+            UsageError::AuthRequired
+        ));
     }
 
     #[test]

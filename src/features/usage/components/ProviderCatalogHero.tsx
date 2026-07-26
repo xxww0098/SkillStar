@@ -1,7 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
-import { hexToRgbTriplet } from "../lib/brandThemes";
+import { brandChipStyle, brandHeroSurface, hexToRgbTriplet } from "../lib/brandThemes";
 import { authModeLabel } from "../lib/usageLabels";
 import type { AuthMode, CatalogEntry } from "../types";
 import { ProviderLogo } from "./ProviderLogo";
@@ -37,7 +37,8 @@ export function ProviderCatalogHero({
   const { t } = useTranslation();
   const title = displayTitle?.trim() || entry.display_name;
   const chipMode = authMode ?? entry.auth_modes[0] ?? "o-auth";
-  const brandRgb = hexToRgbTriplet(entry.brand_color);
+  const chipStyle = brandChipStyle(entry.brand_color);
+  const surface = brandHeroSurface(entry.brand_color);
 
   const identity = (
     <div className="flex items-start gap-2.5">
@@ -58,14 +59,6 @@ export function ProviderCatalogHero({
         >
           {title}
         </h3>
-        {entry.description && (
-          <p
-            className="mt-0.5 text-[10px] leading-snug text-muted-foreground line-clamp-2 break-words"
-            title={entry.description}
-          >
-            {entry.description}
-          </p>
-        )}
       </div>
     </div>
   );
@@ -73,12 +66,8 @@ export function ProviderCatalogHero({
   const metaRow = (
     <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
       <span
-        className="shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider"
-        style={{
-          color: `rgb(${brandRgb})`,
-          backgroundColor: `rgba(${brandRgb}, 0.1)`,
-          borderColor: `rgba(${brandRgb}, 0.22)`,
-        }}
+        className="shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
+        style={chipStyle}
       >
         {authModeLabel(chipMode, t)}
       </span>
@@ -100,13 +89,13 @@ export function ProviderCatalogHero({
       className={cn("relative overflow-hidden rounded-2xl border p-4", className)}
       style={{
         ...catalogBrandVars(entry.brand_color),
-        borderColor: `rgba(${brandRgb}, 0.28)`,
-        background: `linear-gradient(135deg, rgba(${brandRgb}, 0.12) 0%, rgba(${brandRgb}, 0.03) 48%, transparent 100%)`,
+        borderColor: surface.borderColor,
+        background: surface.background,
       }}
     >
       <div
         className="pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full opacity-25 blur-[36px]"
-        style={{ backgroundColor: `rgb(${brandRgb})` }}
+        style={{ backgroundColor: surface.glow }}
       />
       <div className="relative z-10 space-y-2.5">
         {identity}

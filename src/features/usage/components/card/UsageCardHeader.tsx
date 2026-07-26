@@ -1,4 +1,4 @@
-import { GripVertical } from "lucide-react";
+import { BadgeCheck, GripVertical } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import type { BrandTheme } from "../../lib/brandThemes";
@@ -9,24 +9,25 @@ import { hasBrandIcon, ProviderLogo } from "../ProviderLogo";
 export interface UsageCardHeaderProps {
   catalogId: string;
   displayName: string;
-  description?: string | null;
   brandColorHex: string;
   theme: BrandTheme;
   planName: string | null;
   /** Billing type chip: 月付 / 年付 / API Key / 一次性 */
   billingCycle?: BillingCycle;
+  /** Active account for this catalog — shown here so MetaStrip height stays stable. */
+  isActive?: boolean;
   onDragHandlePointerDown?: (e: React.PointerEvent) => void;
 }
 
-/** Signature brand band — logo chip + title + billing type + plan badge + drag handle. */
+/** Signature brand band — logo chip + title + billing type + active + plan badge + drag handle. */
 export function UsageCardHeader({
   catalogId,
   displayName,
-  description,
   brandColorHex,
   theme,
   planName,
   billingCycle,
+  isActive,
   onDragHandlePointerDown,
 }: UsageCardHeaderProps) {
   const { t } = useTranslation();
@@ -60,22 +61,25 @@ export function UsageCardHeader({
           <h3 className="line-clamp-2 pr-1 text-sm leading-snug font-bold" title={displayName}>
             {displayName}
           </h3>
-          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+          {/* Fixed-height chip row (nowrap). Active badge lives here — not MetaStrip —
+              so becoming "当前" never wraps meta or grows card height. */}
+          <div className="mt-1 flex h-[18px] items-center gap-1.5 overflow-hidden">
             {billingLabel && (
               <span
-                className="rounded-md bg-black/25 px-1.5 py-0.5 text-[10px] font-bold tracking-wide ring-1 ring-white/25 backdrop-blur-[2px]"
+                className="shrink-0 rounded-md bg-black/25 px-1.5 py-0.5 text-[10px] leading-none font-bold tracking-wide ring-1 ring-white/25 backdrop-blur-[2px]"
                 title={billingLabel}
               >
                 {billingLabel}
               </span>
             )}
-            {description && (
-              <p
-                className="line-clamp-1 min-w-0 flex-1 text-[10px] leading-snug break-words opacity-90"
-                title={description}
+            {isActive && (
+              <span
+                className="inline-flex shrink-0 items-center gap-0.5 rounded-md bg-emerald-400/25 px-1.5 py-0.5 text-[10px] leading-none font-bold tracking-wide text-emerald-50 ring-1 ring-emerald-200/50 backdrop-blur-[2px]"
+                title={t("usage.cardActiveTitle")}
               >
-                {description}
-              </p>
+                <BadgeCheck className="h-2.5 w-2.5" />
+                {t("usage.cardActive")}
+              </span>
             )}
           </div>
         </div>

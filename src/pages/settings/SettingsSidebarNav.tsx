@@ -32,6 +32,7 @@ export const SETTINGS_SECTIONS: { id: string; labelKey: string; icon: LucideIcon
 
 export const SETTINGS_FOCUS_TO_SECTION_ID: Record<SettingsFocusTarget, string> = {
   "ai-provider": "settings-ai",
+  acp: "settings-acp",
   storage: "settings-storage",
 };
 

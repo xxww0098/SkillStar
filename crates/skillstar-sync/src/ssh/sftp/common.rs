@@ -84,7 +84,11 @@ fn remote_parent_dirs(remote_path: &str) -> Vec<String> {
             continue;
         }
         if acc.is_empty() {
-            acc = if absolute { format!("/{part}") } else { part.to_string() };
+            acc = if absolute {
+                format!("/{part}")
+            } else {
+                part.to_string()
+            };
         } else {
             acc.push('/');
             acc.push_str(part);
@@ -132,15 +136,15 @@ pub async fn read_remote_file(sftp: &SftpSession, remote_path: &str) -> Result<V
 /// over the target. This mirrors the pattern used by `upload_local_skill_tree`
 /// so that interrupted writes never leave a partially-written final file.
 pub async fn write_remote_file(sftp: &SftpSession, remote_path: &str, bytes: &[u8]) -> Result<()> {
-    let parent = remote_path
-        .rsplit_once('/')
-        .map(|(p, _)| p)
-        .unwrap_or(".");
+    let parent = remote_path.rsplit_once('/').map(|(p, _)| p).unwrap_or(".");
     ensure_remote_dir(sftp, parent).await?;
 
     let tmp_path = format!("{}.skillstar.tmp", remote_path);
     let mut file = sftp
-        .open_with_flags(&tmp_path, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE)
+        .open_with_flags(
+            &tmp_path,
+            OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE,
+        )
         .await
         .with_context(|| format!("open remote {} for write", tmp_path))?;
     file.write_all(bytes)

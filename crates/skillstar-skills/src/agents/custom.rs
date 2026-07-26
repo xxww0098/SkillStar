@@ -30,10 +30,7 @@ impl AgentSpec for CustomSpec<'_> {
         &self.0.display_name
     }
     fn icon(&self) -> &str {
-        self.0
-            .icon_data_uri
-            .as_deref()
-            .unwrap_or("agents/openclaw.svg")
+        self.0.icon_data_uri.as_deref().unwrap_or("lobe:custom")
     }
     fn resolve_global_dir(&self, home: &Path) -> PathBuf {
         let path_str = &self.0.global_skills_dir;
@@ -53,7 +50,7 @@ impl AgentSpec for CustomSpec<'_> {
     }
 }
 
-/// Add (or replace by id) a custom agent and enable it.
+/// Add (or replace by id) a custom agent without implicitly activating it.
 pub(crate) fn add(def: CustomProfileDef, store: &dyn PrefsStore) -> Result<()> {
     let normalized_project_rel = validate_project_skills_rel(&def.project_skills_rel)?;
 
@@ -71,8 +68,9 @@ pub(crate) fn add(def: CustomProfileDef, store: &dyn PrefsStore) -> Result<()> {
         );
     }
 
+    let enabled = prefs.enabled.get(&new_def.id).copied().unwrap_or(false);
     prefs.custom_profiles.retain(|p| p.id != new_def.id);
-    prefs.enabled.insert(new_def.id.clone(), true);
+    prefs.enabled.insert(new_def.id.clone(), enabled);
     prefs.custom_profiles.push(new_def);
     store.save(&prefs)
 }

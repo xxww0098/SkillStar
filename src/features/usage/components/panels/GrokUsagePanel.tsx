@@ -1,9 +1,9 @@
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
-import { formatUsdCents, localizeWindowLabel, pickRateLimitUsageTone } from "../../lib/usageLabels";
+import { windowRendersOwnReset } from "../../lib/resetOwnership";
+import { formatUsdCents, localizeWindowLabel } from "../../lib/usageLabels";
 import type { CreditInfo, SubscriptionUsage, UsageWindow } from "../../types";
-import { ProgressTrack } from "../card/primitives";
-import { ResetCountdown } from "../ResetCountdown";
+import { MeterFigure, UsageMeter } from "../card/primitives";
 import { UsageWindowBar } from "../UsageWindowBar";
 
 /** Backend credit types from `skillstar-usage` xai fetcher. */
@@ -48,7 +48,7 @@ export function GrokUsagePanel({
 
   return (
     <div className={cn("space-y-3", compact && "space-y-2")}>
-      {weekly && <GrokWeeklyBar window={weekly} accent={accent} compact={compact} />}
+      {weekly && <GrokWeeklyBar window={weekly} compact={compact} />}
       {/* Prefer weekly as the gating bar; still surface legacy monthly absolute quota when both exist. */}
       {monthly && (!weekly || (monthly.total != null && monthly.total > 0 && monthly.used > 0)) && (
         <UsageWindowBar window={monthly} compact={compact} />
@@ -90,47 +90,28 @@ export function GrokUsagePanel({
   );
 }
 
-function GrokWeeklyBar({ window, accent, compact }: { window: UsageWindow; accent: string; compact?: boolean }) {
+function GrokWeeklyBar({ window, compact }: { window: UsageWindow; compact?: boolean }) {
   const { t } = useTranslation();
   const usedPercent = clamp(window.percent ?? 0);
   const remainingPercent = Math.max(0, 100 - usedPercent);
   const label = localizeWindowLabel(window.label, t);
-  const tone = pickRateLimitUsageTone(usedPercent);
 
+  // Percent-only soft limit: lead with remaining, never show a used-% twin badge.
   return (
-    <div
-      className={cn(
-        "relative overflow-hidden rounded-2xl border border-zinc-200/50 bg-zinc-50/40 transition-colors hover:bg-zinc-50/80",
-        compact ? "space-y-1.5 p-2" : "space-y-2.5 p-3",
-      )}
-    >
-      {/* Title only — keep one calm line so the label never wraps against chips. */}
-      <div className="flex items-center gap-2">
-        <p className="text-[11px] leading-none font-bold whitespace-nowrap text-zinc-700">{label}</p>
-        <span
-          className="shrink-0 rounded-md px-1.5 py-0.5 text-[8px] font-bold tracking-wider uppercase"
-          style={{
-            color: accent,
-            backgroundColor: `${accent}12`,
-            boxShadow: `inset 0 0 0 1px ${accent}28`,
-          }}
-        >
-          {t("usage.grokWeeklyBadge")}
-        </span>
-      </div>
-
-      <ProgressTrack usedPercent={usedPercent} size={compact ? "compact" : "comfortable"} tone="brand-urgency" />
-
-      {/* Meta under the bar: remaining left, reset right. */}
-      <div className="flex items-center justify-between gap-2">
-        <span className={cn("font-mono text-[10px] font-semibold tabular-nums", tone.text)}>
-          {remainingPercent}% {t("usage.grokRemaining")}
-        </span>
-        {window.reset_at ? (
-          <ResetCountdown resetAt={window.reset_at} usedPercent={usedPercent} mode="rateLimit" />
-        ) : null}
-      </div>
-    </div>
+    <UsageMeter
+      label={label}
+      tag={t("usage.grokWeeklyBadge")}
+      dot="brand"
+      usedPercent={usedPercent}
+      showUsedBadge={false}
+      figure={<MeterFigure value={`${remainingPercent}%`} unit={t("usage.grokRemaining")} />}
+      caption={t("usage.rateLimitWindow")}
+      tone="brand-urgency"
+      resetAt={window.reset_at}
+      showReset={windowRendersOwnReset(window)}
+      resetMode="rateLimit"
+      compact={compact}
+    />
   );
 }
 

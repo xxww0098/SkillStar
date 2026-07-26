@@ -8,7 +8,7 @@ use super::*;
 
 /// Resolve the config file path for a given tool_id.
 ///
-/// Only accepts "claude-code", "codex", "opencode", and "gemini"
+/// Only accepts "claude-code", "codex", "opencode", "gemini", and "pi"
 /// as valid tool IDs.
 /// Returns an error for any other tool_id to prevent arbitrary file writes.
 pub fn resolve_tool_config_path(tool_id: &str) -> Result<PathBuf> {
@@ -18,8 +18,9 @@ pub fn resolve_tool_config_path(tool_id: &str) -> Result<PathBuf> {
         "codex" => Ok(home.join(".codex").join("config.toml")),
         "opencode" => Ok(resolve_opencode_config_path()?),
         "gemini" => Ok(resolve_gemini_env_path()?),
+        "pi" => Ok(resolve_pi_models_path()?),
         _ => bail!(
-            "Unknown tool_id: '{}'. Supported: claude-code, codex, opencode, gemini.",
+            "Unknown tool_id: '{}'. Supported: claude-code, codex, opencode, gemini, pi.",
             tool_id
         ),
     }
@@ -50,6 +51,20 @@ pub fn resolve_gemini_env_path() -> Result<PathBuf> {
     Ok(home.join(".gemini").join(".env"))
 }
 
+/// `~/.pi/agent/models.json` — Pi's custom provider/model registry
+/// (`providers.<key>` blocks with `baseUrl` / `api` / `apiKey` / `models`).
+pub fn resolve_pi_models_path() -> Result<PathBuf> {
+    let home = sync_home_dir()?;
+    Ok(home.join(".pi").join("agent").join("models.json"))
+}
+
+/// `~/.pi/agent/settings.json` — Pi's global settings; carries the
+/// `defaultProvider` / `defaultModel` pointer selecting the active model.
+pub fn resolve_pi_settings_path() -> Result<PathBuf> {
+    let home = sync_home_dir()?;
+    Ok(home.join(".pi").join("agent").join("settings.json"))
+}
+
 /// `~/.grok/auth.json` — the xAI Grok Build CLI's OAuth credential store.
 ///
 /// The file is a JSON object keyed by OIDC scope URLs
@@ -73,6 +88,8 @@ pub fn resolve_tool_config_file_path(tool_id: &str, file_id: &str) -> Result<Pat
         ("codex", "auth") => resolve_codex_auth_path(),
         ("opencode", "opencode") => resolve_opencode_config_path(),
         ("gemini", "env") => resolve_gemini_env_path(),
+        ("pi", "models") => resolve_pi_models_path(),
+        ("pi", "settings") => resolve_pi_settings_path(),
         _ => bail!("Unknown tool config file: {tool_id}/{file_id}"),
     }
 }
@@ -135,6 +152,28 @@ pub fn list_tool_config_files(tool_id: &str) -> Result<Vec<ToolConfigFileInfo>> 
                 managed_by_skillstar: true,
             }])
         }
+        "pi" => {
+            let models = resolve_pi_models_path()?;
+            let settings = resolve_pi_settings_path()?;
+            Ok(vec![
+                ToolConfigFileInfo {
+                    file_id: "models".to_string(),
+                    label: "models.json".to_string(),
+                    path: models.to_string_lossy().to_string(),
+                    format: "json".to_string(),
+                    exists: models.exists(),
+                    managed_by_skillstar: true,
+                },
+                ToolConfigFileInfo {
+                    file_id: "settings".to_string(),
+                    label: "settings.json".to_string(),
+                    path: settings.to_string_lossy().to_string(),
+                    format: "json".to_string(),
+                    exists: settings.exists(),
+                    managed_by_skillstar: true,
+                },
+            ])
+        }
         _ => bail!("Unknown tool_id: '{tool_id}'"),
     }
 }
@@ -161,6 +200,8 @@ fn default_empty_config_content(tool_id: &str, file_id: &str) -> String {
         ("gemini", "env") => {
             "GOOGLE_GEMINI_BASE_URL=\nGEMINI_API_KEY=[密钥]".to_string()
         }
+        ("pi", "models") => "{\n  \"providers\": {}\n}\n".to_string(),
+        ("pi", "settings") => "{}\n".to_string(),
         _ => "{}".to_string(),
     }
 }
@@ -350,6 +391,7 @@ pub fn get_tool_config_targets() -> Result<Vec<ToolConfigTarget>> {
         ("codex", "Codex"),
         ("opencode", "OpenCode"),
         ("gemini", "Gemini CLI"),
+        ("pi", "Pi"),
     ];
     let mut targets = Vec::new();
 
@@ -399,13 +441,11 @@ fn detect_current_provider(tool_id: &str, path: &Path) -> Result<Option<String>>
             // falling back to any skillstar* table or a legacy `[provider]`.
             if let Some(mp) = table.get("model_providers").and_then(|v| v.as_table()) {
                 let active_key = table.get("model_provider").and_then(|v| v.as_str());
-                let active = active_key
-                    .and_then(|k| mp.get(k))
-                    .or_else(|| {
-                        mp.iter()
-                            .find(|(k, _)| is_skillstar_managed_key(k))
-                            .map(|(_, v)| v)
-                    });
+                let active = active_key.and_then(|k| mp.get(k)).or_else(|| {
+                    mp.iter()
+                        .find(|(k, _)| is_skillstar_managed_key(k))
+                        .map(|(_, v)| v)
+                });
                 if let Some(url) = active
                     .and_then(|v| v.as_table())
                     .and_then(|ss| ss.get("base_url"))
@@ -431,14 +471,12 @@ fn detect_current_provider(tool_id: &str, path: &Path) -> Result<Option<String>>
                     .get("model")
                     .and_then(|v| v.as_str())
                     .and_then(|m| m.split('/').next());
-                let block = active_key
-                    .and_then(|k| providers.get(k))
-                    .or_else(|| {
-                        providers
-                            .iter()
-                            .find(|(k, _)| is_skillstar_managed_key(k))
-                            .map(|(_, v)| v)
-                    });
+                let block = active_key.and_then(|k| providers.get(k)).or_else(|| {
+                    providers
+                        .iter()
+                        .find(|(k, _)| is_skillstar_managed_key(k))
+                        .map(|(_, v)| v)
+                });
                 if let Some(name) = block.and_then(|c| c.get("name")).and_then(|v| v.as_str()) {
                     return Ok(Some(name.to_string()));
                 }
@@ -452,6 +490,22 @@ fn detect_current_provider(tool_id: &str, path: &Path) -> Result<Option<String>>
                 .into_iter()
                 .find(|(k, _)| k == "GOOGLE_GEMINI_BASE_URL")
                 .map(|(_, v)| v))
+        }
+        "pi" => {
+            let content = std::fs::read_to_string(path)?;
+            let json: Value = serde_json::from_str(&content)?;
+            if let Some(providers) = json.get("providers").and_then(|p| p.as_object()) {
+                // Report the base URL of any skillstar* managed block.
+                if let Some(url) = providers
+                    .iter()
+                    .find(|(k, _)| is_skillstar_managed_key(k))
+                    .and_then(|(_, v)| v.get("baseUrl"))
+                    .and_then(|v| v.as_str())
+                {
+                    return Ok(Some(url.to_string()));
+                }
+            }
+            Ok(None)
         }
         _ => Ok(None),
     }

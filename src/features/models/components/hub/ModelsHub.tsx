@@ -7,7 +7,6 @@ import { Button } from "../../../../components/ui/button";
 import { Input } from "../../../../components/ui/input";
 import { DrawerShell } from "../../../../components/shared/DrawerShell";
 import { useNavigation } from "../../../../hooks/useNavigation";
-import { cn } from "../../../../lib/utils";
 import type { ProviderEntryFlat } from "../../../../types";
 import { getProviderToolBadges, useProvidersFlat } from "../../hooks/useProvidersFlat";
 import { useToolInstallStatuses } from "../../api/install";
@@ -15,12 +14,14 @@ import { useAgentHealth } from "../../hooks/useAgentHealth";
 import { PROVIDER_AGENTS, type ProviderToolId } from "../../lib/agentRegistry";
 import { computeAgentStatus, summarizeAgentStatuses } from "../../lib/agentStatus";
 import { activeEntry as bindingActiveEntry } from "../../lib/toolBinding";
+import type { ProviderEditorTab } from "../../types";
 import { AgentHeroCard } from "../agents/AgentHeroCard";
 import { AgentSettingsDialog } from "../agents/AgentSettingsDialog";
 import { AppAiCard } from "../agents/AppAiCard";
 import { MultiProviderCard } from "../agents/MultiProviderCard";
 import { PresetPicker } from "../provider/PresetPicker";
 import { ProviderEditorDrawer } from "../provider/ProviderEditorDrawer";
+import { modelCompactInputClass } from "../providerForm/ProviderConfigPrimitives";
 import { DeleteProviderDialog } from "./DeleteProviderDialog";
 import { ProviderGalleryCard } from "./ProviderGalleryCard";
 
@@ -29,7 +30,13 @@ const HUB_TOOL_IDS = PROVIDER_AGENTS.map((agent) => agent.toolId);
 type DrawerMode =
   | { type: "closed" }
   | { type: "create"; autoBindToolId?: string }
-  | { type: "edit"; providerId: string; autoBindToolId?: string; postCreate?: boolean };
+  | {
+      type: "edit";
+      providerId: string;
+      autoBindToolId?: string;
+      postCreate?: boolean;
+      initialTab?: ProviderEditorTab;
+    };
 
 function ModelsTopDragStrip() {
   return <div data-tauri-drag-region className="h-4 w-full shrink-0" aria-hidden />;
@@ -68,9 +75,9 @@ export function ModelsHub() {
   }, []);
 
   const openEditDrawer = useCallback(
-    (providerId: string) => {
+    (providerId: string, initialTab: ProviderEditorTab = "connection") => {
       setSelectedProviderId(providerId);
-      setDrawer({ type: "edit", providerId });
+      setDrawer({ type: "edit", providerId, initialTab });
     },
     [setSelectedProviderId],
   );
@@ -277,7 +284,7 @@ export function ModelsHub() {
                   value={galleryQuery}
                   onChange={(e) => setGalleryQuery(e.target.value)}
                   placeholder={t("models.gallery.searchPlaceholder")}
-                  className="h-9 pl-9 text-xs"
+                  className={`${modelCompactInputClass} pl-9`}
                 />
               </div>
             </div>
@@ -330,6 +337,8 @@ export function ModelsHub() {
         onOpenChange={(open) => {
           if (!open) closeDrawer();
         }}
+        maxWidthClassName="max-w-[640px]"
+        autoFocus
         title={
           drawer.type === "create" ? (
             <span className="flex items-center gap-2 text-foreground">
@@ -361,9 +370,9 @@ export function ModelsHub() {
             setSettingsTool(null);
             openCreateDrawer(settingsTool);
           }}
-          onOpenProviderDrawer={(providerId) => {
+          onOpenProviderDrawer={(providerId, initialTab) => {
             setSettingsTool(null);
-            openEditDrawer(providerId);
+            openEditDrawer(providerId, initialTab);
           }}
         />
       ) : null}
@@ -373,6 +382,7 @@ export function ModelsHub() {
         <ProviderEditorDrawer
           provider={drawerProvider}
           open={drawer.type === "edit"}
+          initialTab={drawer.type === "edit" ? drawer.initialTab : undefined}
           showPostCreateGuide={drawer.type === "edit" && !!drawer.postCreate}
           agentBoundOnCreate={getProviderToolBadges(drawerProvider.id, toolActivations).length > 0}
           onClose={closeDrawer}
@@ -391,6 +401,3 @@ export function ModelsHub() {
     </div>
   );
 }
-
-// Help dead-code elimination — keep the obvious imports happy.
-void cn;

@@ -5,12 +5,107 @@
 //!
 //! This mirrors the `.repos/` pattern used for repo-cached skills.
 
+use crate::deployment;
 use crate::{lockfile, projects};
 use anyhow::{Context, Result};
+use serde::Serialize;
 use skillstar_core::types::{Skill, SkillCategory, extract_skill_description};
-use crate::deployment;
 use std::path::{Path, PathBuf};
 use tracing::{info, warn};
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AdoptedSkill {
+    pub name: String,
+    pub folder_path: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AdoptLocalFolderResult {
+    pub adopted: Vec<AdoptedSkill>,
+    pub skipped: Vec<SkippedLocalSkill>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SkippedLocalSkill {
+    pub name: String,
+    pub reason: String,
+}
+
+pub fn adopt_folder(
+    folder_path: &str,
+    names: Option<Vec<String>>,
+) -> Result<AdoptLocalFolderResult> {
+    let path = PathBuf::from(folder_path);
+    if !path.is_dir() {
+        anyhow::bail!("Not a directory: {}", path.display());
+    }
+    let canonical = std::fs::canonicalize(&path)
+        .with_context(|| format!("Failed to resolve {}", path.display()))?;
+    let skills = crate::discover_skills(&canonical, false);
+    if skills.is_empty() {
+        anyhow::bail!(
+            "No SKILL.md found in {} (root or priority dirs)",
+            canonical.display()
+        );
+    }
+
+    let requested: Option<Vec<String>> = names.map(|values| {
+        values
+            .into_iter()
+            .map(|value| value.trim().to_lowercase())
+            .filter(|value| !value.is_empty())
+            .collect()
+    });
+    let selected: Vec<_> = match &requested {
+        Some(wanted) if !wanted.is_empty() => skills
+            .iter()
+            .filter(|skill| wanted.iter().any(|name| name == &skill.id.to_lowercase()))
+            .collect(),
+        _ => skills.iter().collect(),
+    };
+    if selected.is_empty() {
+        anyhow::bail!("None of the requested skills were found in the folder");
+    }
+
+    let mut adopted = Vec::new();
+    let mut skipped = Vec::new();
+    for skill in selected {
+        let source_dir = if skill.folder_path.is_empty() {
+            canonical.clone()
+        } else {
+            canonical.join(&skill.folder_path)
+        };
+        let skill_md = source_dir.join("SKILL.md");
+        let content = match std::fs::read_to_string(&skill_md) {
+            Ok(content) => content,
+            Err(error) => {
+                skipped.push(SkippedLocalSkill {
+                    name: skill.id.clone(),
+                    reason: format!("read_failed: {error}"),
+                });
+                continue;
+            }
+        };
+
+        match create(&skill.id, Some(&content)) {
+            Ok(created) => adopted.push(AdoptedSkill {
+                name: created.name,
+                folder_path: skill.folder_path.clone(),
+                description: created.description,
+            }),
+            Err(error) => skipped.push(SkippedLocalSkill {
+                name: skill.id.clone(),
+                reason: error.to_string(),
+            }),
+        }
+    }
+
+    if !adopted.is_empty() {
+        crate::installed_skill::invalidate_cache();
+    }
+    Ok(AdoptLocalFolderResult { adopted, skipped })
+}
 
 /// Check if a skill in the hub is a local skill (symlink pointing into `skills-local/`).
 pub fn is_local_skill(name: &str) -> bool {
@@ -286,12 +381,11 @@ pub fn migrate_existing() -> Result<u32> {
     // Load lockfile to check for git URLs
     let lock_path = lockfile::lockfile_path();
     let lockfile = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
-    let lock_map: std::collections::HashMap<String, &crate::lockfile::LockEntry> =
-        lockfile
-            .skills
-            .iter()
-            .map(|e| (e.name.clone(), e))
-            .collect();
+    let lock_map: std::collections::HashMap<String, &crate::lockfile::LockEntry> = lockfile
+        .skills
+        .iter()
+        .map(|e| (e.name.clone(), e))
+        .collect();
 
     let entries = match std::fs::read_dir(&hub_dir) {
         Ok(entries) => entries,

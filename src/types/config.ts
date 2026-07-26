@@ -50,7 +50,6 @@ export interface StorageOverview {
 export interface CacheCleanResult {
   repos_removed: number;
   history_cleared: number;
-  translation_cleared: number;
 }
 
 // ── GitHub Publish ──────────────────────────────────────────────────

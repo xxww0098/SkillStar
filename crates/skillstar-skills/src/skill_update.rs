@@ -1,21 +1,33 @@
 use anyhow::{Context, Result};
+use serde::Serialize;
+use skillstar_core::types::{
+    Skill, SkillCategory, SkillType, extract_github_source_from_url, extract_skill_description,
+};
 use std::path::{Path, PathBuf};
 
 use crate::git::ops as git_ops;
-use crate::{installed_skill, lockfile, projects, repo_scanner, update_checker};
-use crate::deployment;
+use crate::{
+    content, deployment, installed_skill, local_skill, lockfile, projects, repo_scanner,
+    update_checker,
+};
 
 /// Result of a hub skill update, including any project-level cascade work.
 #[derive(Debug, Clone)]
-pub struct SkillUpdateOutcome {
-    pub tree_hash: String,
-    pub git_url: String,
-    pub sibling_names: Vec<String>,
-    pub agent_links: Vec<String>,
+struct UpdateOutcome {
+    tree_hash: String,
+    git_url: String,
+    sibling_names: Vec<String>,
+    agent_links: Vec<String>,
     /// Per-agent re-link failures ("Agent: error"). The update itself
     /// succeeded; these tell the UI which agent deployments need attention.
+    agent_link_failures: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UpdateResult {
+    pub skill: Skill,
+    pub siblings_cleared: Vec<String>,
     pub agent_link_failures: Vec<String>,
-    pub cascade: projects::CascadeUpdateSummary,
 }
 
 fn push_unique(values: &mut Vec<String>, value: impl Into<String>) {
@@ -44,7 +56,44 @@ fn compute_hash_for_skill_entry(skill_path: &Path, source_folder: Option<&str>) 
     git_ops::compute_tree_hash(skill_path).ok()
 }
 
-pub fn update_skill(name: &str) -> Result<SkillUpdateOutcome> {
+pub fn update_skill(name: &str) -> Result<UpdateResult> {
+    let outcome = apply_update(name)?;
+    let path = skillstar_core::infra::paths::hub_skills_dir().join(name);
+    let description = content::resolve_content_dir(name)
+        .map(|dir| extract_skill_description(&dir))
+        .unwrap_or_else(|| extract_skill_description(&path));
+    let source = extract_github_source_from_url(&outcome.git_url);
+    let skill_type = if local_skill::is_local_skill(name) {
+        SkillType::Local
+    } else {
+        SkillType::Hub
+    };
+
+    Ok(UpdateResult {
+        skill: Skill {
+            name: name.to_string(),
+            description,
+            localized_description: None,
+            skill_type,
+            stars: 0,
+            installed: true,
+            update_available: false,
+            last_updated: chrono::Utc::now().to_rfc3339(),
+            git_url: outcome.git_url,
+            tree_hash: Some(outcome.tree_hash),
+            category: SkillCategory::None,
+            author: None,
+            topics: Vec::new(),
+            agent_links: Some(outcome.agent_links),
+            rank: None,
+            source,
+        },
+        siblings_cleared: outcome.sibling_names,
+        agent_link_failures: outcome.agent_link_failures,
+    })
+}
+
+fn apply_update(name: &str) -> Result<UpdateOutcome> {
     let skills_dir = skillstar_core::infra::paths::hub_skills_dir();
     let path = skills_dir.join(name);
 
@@ -153,18 +202,17 @@ pub fn update_skill(name: &str) -> Result<SkillUpdateOutcome> {
         }
     }
 
-    let cascade = projects::cascade_skill_update_to_projects(&affected_skills);
+    projects::cascade_skill_update_to_projects(&affected_skills);
     let git_url = lock_entry.map(|entry| entry.git_url).unwrap_or_default();
 
     sibling_names.sort();
     sibling_names.dedup();
 
-    Ok(SkillUpdateOutcome {
+    Ok(UpdateOutcome {
         tree_hash,
         git_url,
         sibling_names,
         agent_links,
         agent_link_failures,
-        cascade,
     })
 }

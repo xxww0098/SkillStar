@@ -8,12 +8,7 @@ pub const MODEL_CATALOG_META_KEY: &str = "model_catalog";
 pub fn catalog_from_provider_models(body: &Value) -> Vec<ModelCatalogEntry> {
     body.get("data")
         .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(model_entry_from_value)
-                .collect()
-        })
+        .map(|items| items.iter().filter_map(model_entry_from_value).collect())
         .unwrap_or_default()
 }
 

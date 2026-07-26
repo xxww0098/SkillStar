@@ -1,5 +1,4 @@
 use super::ai::ensure_ai_config;
-use skillstar_models::ai_provider;
 use skillstar_core::infra::error::AppError;
 use skillstar_marketplace::remote;
 use skillstar_marketplace::snapshot;
@@ -13,6 +12,7 @@ use skillstar_marketplace::{
     MarketplaceUpdateNotification, MarketplaceUpdateNotificationUpsert, OfficialPublisher,
     PublisherRepo, PublisherRepoSkill, Skill, SyncStateEntry,
 };
+use skillstar_models::ai_provider;
 use std::collections::HashMap;
 use tracing::{debug, error, info};
 

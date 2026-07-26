@@ -139,7 +139,11 @@ fn test_recommended_codex_defaults_third_party_providers() {
 #[test]
 fn test_recommended_codex_defaults_empty_and_custom_fallback() {
     // Empty / custom OpenAI-compatible endpoint → safe third-party default.
-    for url in ["", "https://my-proxy.example.com/v1", "https://localhost:11434/v1"] {
+    for url in [
+        "",
+        "https://my-proxy.example.com/v1",
+        "https://localhost:11434/v1",
+    ] {
         let (wire, auth) = recommended_codex_defaults(url);
         assert_eq!(wire, "chat");
         assert_eq!(auth, "third_party");
@@ -328,7 +332,13 @@ fn test_delete_provider_flat_cleans_tool_activations() {
     delete_provider_flat(&mut store, &created.id).unwrap();
 
     // Both activations should be cleared (entries dropped → empty binding)
-    assert!(store.tool_activations.get("claude-code").unwrap().is_empty());
+    assert!(
+        store
+            .tool_activations
+            .get("claude-code")
+            .unwrap()
+            .is_empty()
+    );
     assert!(store.tool_activations.get("codex").unwrap().is_empty());
 }
 #[test]
@@ -362,7 +372,13 @@ fn test_delete_provider_flat_preserves_other_activations() {
     // Delete provider1 — only claude-code should be cleared
     delete_provider_flat(&mut store, &created1.id).unwrap();
 
-    assert!(store.tool_activations.get("claude-code").unwrap().is_empty());
+    assert!(
+        store
+            .tool_activations
+            .get("claude-code")
+            .unwrap()
+            .is_empty()
+    );
     let codex_act = store
         .tool_activations
         .get("codex")

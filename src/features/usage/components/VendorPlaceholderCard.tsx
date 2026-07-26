@@ -63,9 +63,6 @@ export function VendorPlaceholderCard({ entry, onClick }: VendorPlaceholderCardP
           )}
           <div className="min-w-0 flex-1">
             <h3 className="line-clamp-2 pr-1 text-sm leading-snug font-bold">{entry.display_name}</h3>
-            {entry.description && (
-              <p className="mt-0.5 line-clamp-1 text-[10px] leading-snug break-words opacity-90">{entry.description}</p>
-            )}
           </div>
           <p className="shrink-0 text-[9px] font-mono text-current/70 tabular-nums [text-shadow:none]">
             {t("usage.emptyUsageNotSynced")}

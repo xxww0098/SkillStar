@@ -42,12 +42,14 @@ impl SkillDiscoveryConfig {
         }
     }
 
+    #[cfg(test)]
     pub fn root_first() -> Self {
         Self {
             mode: DiscoveryMode::RootFirst,
         }
     }
 
+    #[cfg(test)]
     pub fn full_depth_mode() -> Self {
         Self {
             mode: DiscoveryMode::FullDepth,

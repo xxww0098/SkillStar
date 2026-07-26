@@ -9,7 +9,7 @@
 # Generated from an actual scan on 2026-07-03 (100 hits across 17 files),
 # after the 2026-07 i18n cleanup pass. usage / settings/sections carry most
 # of the remaining debt (both mid-migration in parallel sessions);
-# fingerprints, AppAiModelsPicker, models/lib + models/api/presets.ts, and
+# AppAiModelsPicker, models/lib + models/api/presets.ts, and
 # CommandPalette / InfoTip / mcp / my-skills / projects / lib/ipc & shareCode
 # (2026-07 cleanups) have already been cleaned up and carry no baseline
 # entry (or a reduced one — see CommandPalette.tsx, whose 9 remaining hits

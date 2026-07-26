@@ -8,7 +8,6 @@
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::Value;
-use crate::fingerprint::DeviceFingerprint;
 use skillstar_providers::balance;
 
 use crate::subscription::{SubscriptionUsage, UsageWindow};
@@ -27,9 +26,8 @@ struct Envelope {
 pub async fn fetch(
     subscription_id: &str,
     api_key: &str,
-    fingerprint: Option<&DeviceFingerprint>,
 ) -> UsageResult<SubscriptionUsage> {
-    let env: Envelope = super::fetch_spec(&balance::MINIMAX, api_key, fingerprint).await?;
+    let env: Envelope = super::fetch_spec(&balance::MINIMAX, api_key).await?;
 
     if env.code != 0 && env.code != 200 {
         return Err(UsageError::Fetcher(format!(

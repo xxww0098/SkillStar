@@ -6,6 +6,13 @@ import { Input } from "../../../../components/ui/input";
 import { cn } from "../../../../lib/utils";
 import type { ModelCatalogEntry } from "../../../../types";
 import { formatModelMetadata } from "../../lib/modelFormat";
+import {
+  modelCompactInputClass,
+  modelCompactPopoverTriggerClass,
+  modelOptionClass,
+  modelPopoverContentClass,
+  modelPopoverTriggerClass,
+} from "../providerForm/ProviderConfigPrimitives";
 
 export interface ModelSelectPopoverProps {
   models: string[];
@@ -13,6 +20,9 @@ export interface ModelSelectPopoverProps {
   current: string;
   onPick: (model: string) => void;
   disabled?: boolean;
+  id?: string;
+  ariaLabel: string;
+  density?: "standard" | "compact";
   /** Rendered at the bottom of the list, e.g. "管理模型列表 →". */
   footerAction?: { label: string; onClick: () => void };
 }
@@ -24,6 +34,9 @@ export function ModelSelectPopover({
   current,
   onPick,
   disabled,
+  id,
+  ariaLabel,
+  density = "compact",
   footerAction,
 }: ModelSelectPopoverProps) {
   const { t } = useTranslation();
@@ -49,13 +62,11 @@ export function ModelSelectPopover({
     >
       <Popover.Trigger asChild>
         <button
+          id={id}
           type="button"
+          aria-label={ariaLabel}
           disabled={disabled}
-          className={cn(
-            "flex w-full items-center gap-2 rounded-xl border border-input-border bg-input px-3 py-2 text-left text-xs transition",
-            "hover:border-primary/30 focus:outline-none focus:ring-2 focus:ring-primary/40",
-            "disabled:cursor-not-allowed disabled:opacity-50",
-          )}
+          className={density === "standard" ? modelPopoverTriggerClass : modelCompactPopoverTriggerClass}
         >
           <Sparkles className="h-3.5 w-3.5 text-primary/80" />
           <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground">
@@ -68,7 +79,7 @@ export function ModelSelectPopover({
         <Popover.Content
           align="start"
           sideOffset={6}
-          className="z-[95] w-[var(--radix-popover-trigger-width)] min-w-[260px] rounded-xl border border-border/60 bg-card/95 p-1.5 shadow-[0_20px_60px_-24px_var(--color-shadow)] backdrop-blur-2xl"
+          className={cn(modelPopoverContentClass, "w-[var(--radix-popover-trigger-width)] min-w-[260px]")}
         >
           {models.length > 8 ? (
             <div className="relative mb-1.5">
@@ -77,11 +88,11 @@ export function ModelSelectPopover({
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={t("models.picker.searchModels")}
-                className="h-7 pl-7 text-[11px]"
+                className={`${modelCompactInputClass} pl-7 text-[11px]`}
               />
             </div>
           ) : null}
-          <div className="max-h-72 overflow-y-auto">
+          <div className="max-h-72 overflow-y-auto" role="listbox" aria-label={ariaLabel}>
             {filtered.length === 0 ? (
               <div className="px-3 py-3 text-center text-[11px] text-muted-foreground">
                 {t("models.picker.noModelMatch")}
@@ -93,15 +104,13 @@ export function ModelSelectPopover({
                   <button
                     key={m}
                     type="button"
+                    role="option"
+                    aria-selected={m === current}
                     onClick={() => {
                       setOpen(false);
                       onPick(m);
                     }}
-                    className={cn(
-                      "flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-left",
-                      "transition hover:bg-primary/10",
-                      m === current && "bg-primary/10",
-                    )}
+                    className={cn(modelOptionClass, m === current && "bg-primary/10")}
                   >
                     <span className="min-w-0 flex-1">
                       <span
@@ -132,7 +141,7 @@ export function ModelSelectPopover({
                   setOpen(false);
                   footerAction.onClick();
                 }}
-                className="flex w-full cursor-pointer items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-[11px] text-primary transition hover:bg-primary/10"
+                className={cn(modelOptionClass, "justify-between text-[11px] text-primary")}
               >
                 {footerAction.label}
               </button>

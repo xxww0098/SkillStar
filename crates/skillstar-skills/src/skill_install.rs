@@ -1,3 +1,4 @@
+use crate::deployment;
 use crate::frontmatter::{render_with_front_matter, split_front_matter};
 use crate::git::ops as git_ops;
 use crate::{installed_skill, local_skill, lockfile, projects, repo_scanner};
@@ -6,7 +7,6 @@ use skillstar_core::infra::{fs_ops, paths};
 use skillstar_core::types::{
     Skill, SkillCategory, SkillType, extract_github_source_from_url, extract_skill_description,
 };
-use crate::deployment;
 use std::path::{Path, PathBuf};
 use tracing::warn;
 
@@ -45,12 +45,24 @@ pub fn fetch_repo_scanned(
     url: &str,
     full_depth: bool,
 ) -> Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>), String> {
-    let (repo_url, source) =
-        repo_scanner::normalize_repo_url(url).map_err(|e| format!("Invalid URL: {}", e))?;
-    let repo_dir = repo_scanner::clone_or_fetch_repo(&repo_url, &source)
-        .map_err(|e| format!("Failed to fetch repo: {}", e))?;
-    let skills_found = repo_scanner::scan_skills_in_repo(&repo_dir, &repo_url, full_depth);
-    Ok((repo_url, source, repo_dir, skills_found))
+    let parsed =
+        crate::source_resolver::Source::parse(url).map_err(|e| format!("Invalid source: {}", e))?;
+    let repo_dir = repo_scanner::clone_or_fetch_repo_at(
+        &parsed.repo_url,
+        &parsed.short,
+        parsed.git_ref.as_deref(),
+    )
+    .map_err(|e| format!("Failed to fetch repo: {}", e))?;
+    let mut skills_found = match parsed.subpath.as_deref() {
+        Some(subpath) => {
+            repo_scanner::scan_skills_in_repo_at(&repo_dir, &parsed.repo_url, subpath, full_depth)
+        }
+        None => repo_scanner::scan_skills_in_repo(&repo_dir, &parsed.repo_url, full_depth),
+    };
+    if let Some(skill_filter) = parsed.skill_filter.as_deref() {
+        skills_found.retain(|skill| skill.id.eq_ignore_ascii_case(skill_filter));
+    }
+    Ok((parsed.repo_url, parsed.short, repo_dir, skills_found))
 }
 
 #[inline]
@@ -162,9 +174,11 @@ fn try_install_from_repo_cache(
     name_hint: &str,
     skills_dir: &Path,
 ) -> Result<Option<Skill>, String> {
-    let Ok((repo_url, source, _, skills_found)) = fetch_repo_scanned(url, false) else {
+    let Ok((repo_url, source, repo_dir, skills_found)) = fetch_repo_scanned(url, false) else {
         return Ok(None);
     };
+    let parsed =
+        crate::source_resolver::Source::parse(url).map_err(|e| format!("Invalid source: {e}"))?;
     let target = find_target_skill(&skills_found, requested_name, name_hint);
 
     // Guard against overwriting a local skill whose name matches the repo skill
@@ -194,7 +208,13 @@ fn try_install_from_repo_cache(
         folder_path: skill.folder_path.clone(),
     }];
 
-    match repo_scanner::install_from_repo(&source, &repo_url, &targets) {
+    match repo_scanner::install_from_repo_at(
+        &repo_dir,
+        &source,
+        &repo_url,
+        parsed.git_ref.as_deref(),
+        &targets,
+    ) {
         Ok(installed) if !installed.is_empty() => {
             let installed_name = installed[0].clone();
             let dest = skills_dir.join(&installed_name);
@@ -260,6 +280,7 @@ pub fn install_skill(url: String, name: Option<String>) -> Result<Skill, String>
     lockfile.upsert(crate::lockfile::LockEntry {
         name: name_hint.clone(),
         git_url: url.clone(),
+        git_ref: None,
         tree_hash: tree_hash.clone(),
         installed_at: chrono::Utc::now().to_rfc3339(),
         source_folder: None,
@@ -287,7 +308,10 @@ pub fn install_skills_batch(url: &str, names: &[String]) -> Result<Vec<Skill>, S
     }
 
     let skills_dir = paths::hub_skills_dir();
-    let (repo_url, source, _, skills_found) = fetch_repo_scanned(url, false)?;
+    let (repo_url, source, repo_dir, skills_found) = fetch_repo_scanned(url, false)?;
+    let parsed =
+        crate::source_resolver::Source::parse(url).map_err(|e| format!("Invalid source: {e}"))?;
+    let existing_lock = lockfile::Lockfile::load(&lockfile::lockfile_path()).unwrap_or_default();
 
     let mut targets = Vec::new();
     let mut fallback_names = Vec::new();
@@ -306,8 +330,17 @@ pub fn install_skills_batch(url: &str, names: &[String]) -> Result<Vec<Skill>, S
                 continue;
             }
             if skills_dir.join(&skill.id).exists() {
-                // Already installed, skip
-                continue;
+                let same_source = existing_lock.skills.iter().any(|entry| {
+                    entry.name == skill.id
+                        && crate::source_resolver::same_remote_url(&entry.git_url, &repo_url)
+                });
+                if same_source {
+                    continue;
+                }
+                return Err(format!(
+                    "Skill '{}' already exists from a different source; remove it or choose another skill",
+                    skill.id
+                ));
             }
             targets.push(repo_scanner::SkillInstallTarget {
                 id: skill.id.clone(),
@@ -328,7 +361,13 @@ pub fn install_skills_batch(url: &str, names: &[String]) -> Result<Vec<Skill>, S
     let mut installed_skills = Vec::new();
 
     if !targets.is_empty() {
-        match repo_scanner::install_from_repo(&source, &repo_url, &targets) {
+        match repo_scanner::install_from_repo_at(
+            &repo_dir,
+            &source,
+            &repo_url,
+            parsed.git_ref.as_deref(),
+            &targets,
+        ) {
             Ok(installed) => {
                 installed_skill::invalidate_cache();
                 for installed_name in installed {
@@ -495,7 +534,6 @@ mod tests {
 
         let rendered = read_skill_md(dir.path());
         let split = split_front_matter(&rendered);
-        assert!(split.line_count > 0);
         assert_eq!(split.body, "# Skill\n\nBody\n");
         assert_eq!(
             split

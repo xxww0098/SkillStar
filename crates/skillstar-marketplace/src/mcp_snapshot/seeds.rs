@@ -423,7 +423,7 @@ fn stdio_npx_raw(
     description: &str,
     npm_pkg: &str,
     repo_url: &str,
-    env_vars: &[( &str, Option<&str>, bool )], // (name, default, is_required_secret)
+    env_vars: &[(&str, Option<&str>, bool)], // (name, default, is_required_secret)
 ) -> String {
     let envs: Vec<String> = env_vars
         .iter()
@@ -936,7 +936,8 @@ fn x_curated_servers() -> Vec<McpRegistryServer> {
         source: Some(source.to_string()),
     };
 
-    let docs_desc = "X 官方文档 MCP — search_x / get_page_x 工具，检索 X API 指南与示例（无需鉴权）。";
+    let docs_desc =
+        "X 官方文档 MCP — search_x / get_page_x 工具，检索 X API 指南与示例（无需鉴权）。";
     let docs_raw = r##"{
         "id": "x-docs",
         "name": "x-docs",
@@ -974,4 +975,3 @@ fn x_curated_servers() -> Vec<McpRegistryServer> {
 
     vec![xapi, docs]
 }
-

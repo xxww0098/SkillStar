@@ -17,9 +17,7 @@ use russh_sftp::client::SftpSession;
 use serde::{Deserialize, Serialize};
 
 use crate::ssh::client::{SshHandler, ensure_exec_ok, exec_capture, exec_capture_status};
-use crate::ssh::hub_scripts::{
-    self, expand_remote_home, hub_skill_abs, validate_skill_name,
-};
+use crate::ssh::hub_scripts::{self, expand_remote_home, hub_skill_abs, validate_skill_name};
 use crate::ssh::sftp::{PushResult, read_remote_file, upload_local_skill_tree, write_remote_file};
 use crate::ssh::types::{RemoteSkillContent, RemoteSkillUpdateState};
 
@@ -184,10 +182,7 @@ pub async fn write_remote_skill_content(
 ///
 /// A failed pull (diverged history, network, auth) now errors instead of being
 /// silently swallowed — the script's exit status is checked.
-pub async fn pull_remote_skill(
-    handle: &mut Handle<SshHandler>,
-    skill_name: &str,
-) -> Result<()> {
+pub async fn pull_remote_skill(handle: &mut Handle<SshHandler>, skill_name: &str) -> Result<()> {
     validate_skill_name(skill_name)?;
     let script = hub_scripts::pull_script(skill_name);
     let (out, code) = exec_capture_status(handle, &script).await?;
@@ -213,7 +208,11 @@ pub async fn toggle_remote_agent_link(
     };
     let (out, code) = exec_capture_status(handle, &script).await?;
     ensure_exec_ok(
-        if enable { "create agent symlink" } else { "remove agent symlink" },
+        if enable {
+            "create agent symlink"
+        } else {
+            "remove agent symlink"
+        },
         &out,
         code,
     )?;

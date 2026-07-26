@@ -3,13 +3,13 @@ import { useTranslation } from "react-i18next";
 import { Copy, Check, Wand2, FileCheck2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { Button } from "../../../../components/ui/button";
 import type { ShellRcWriteResult } from "../../../../lib/ipc/commands/system";
-import { cn } from "../../../../lib/utils";
 import { AgentToolIcon } from "../shared/AgentToolIcon";
 import type { CodexAuthMode, CodexWireApi } from "../../lib/providerPatch";
 import { codexEnvKeyName, maskApiKey, recommendedCodexDefaults } from "../../lib/providerPatch";
 import type { ProviderEntryFlat } from "../../../../types";
-import { fieldLabelClass } from "../providerForm/ProviderConfigPrimitives";
+import { ModelFormField, ModelSegmentedControl } from "../providerForm/ProviderConfigPrimitives";
 
 export interface CodexSettingsFormProps {
   wireApi: CodexWireApi;
@@ -19,40 +19,6 @@ export interface CodexSettingsFormProps {
   disabled?: boolean;
   /** Bound provider — used to render the env_key export hint in third_party mode. */
   provider?: ProviderEntryFlat | null;
-}
-
-function Segmented<T extends string>({
-  value,
-  options,
-  onChange,
-  disabled,
-}: {
-  value: T;
-  options: { value: T; label: string }[];
-  onChange: (value: T) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <div className="flex gap-1.5">
-      {options.map((opt) => (
-        <button
-          key={opt.value}
-          type="button"
-          disabled={disabled}
-          onClick={() => onChange(opt.value)}
-          className={cn(
-            "flex-1 rounded-lg border px-2 py-1.5 text-[11px] font-medium transition-colors",
-            value === opt.value
-              ? "border-primary/50 bg-primary/10 text-primary"
-              : "border-border/55 text-muted-foreground hover:text-foreground",
-            disabled && "cursor-not-allowed opacity-60",
-          )}
-        >
-          {opt.label}
-        </button>
-      ))}
-    </div>
-  );
 }
 
 /**
@@ -161,32 +127,32 @@ export function CodexSettingsForm({
           <p className="text-[11px] text-muted-foreground">{t("models.dialog.codexSubtitle")}</p>
         </div>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="space-y-1">
-          <span className={fieldLabelClass}>{t("models.dialog.wireApi")}</span>
-          <Segmented
+      <div className="grid gap-3">
+        <ModelFormField label={t("models.dialog.wireApi")} info={t("models.dialog.wireApiInfo")}>
+          <ModelSegmentedControl
             value={wireApi}
             onChange={onChangeWireApi}
             disabled={disabled}
+            ariaLabel={t("models.dialog.wireApi")}
             options={[
               { value: "responses", label: "Responses" },
               { value: "chat", label: "Chat Completions" },
             ]}
           />
-        </div>
-        <div className="space-y-1">
-          <span className={fieldLabelClass}>{t("models.dialog.authMode")}</span>
-          <Segmented
+        </ModelFormField>
+        <ModelFormField label={t("models.dialog.authMode")} info={t("models.dialog.authModeInfo")}>
+          <ModelSegmentedControl
             value={authMode}
             onChange={onChangeAuthMode}
             disabled={disabled}
+            ariaLabel={t("models.dialog.authMode")}
             options={[
               { value: "api_key", label: t("models.dialog.authModeApiKey") },
               { value: "oauth", label: t("models.dialog.authModeOauth") },
               { value: "third_party", label: t("models.dialog.authModeThirdParty") },
             ]}
           />
-        </div>
+        </ModelFormField>
       </div>
 
       {authMode === "third_party" ? (
@@ -195,19 +161,15 @@ export function CodexSettingsForm({
           <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{t("models.dialog.envKeyHint")}</p>
           {exportCommand ? (
             <div className="mt-2 flex items-center gap-2">
-              <code className="flex-1 truncate rounded-md bg-background/60 px-2 py-1 font-mono text-[10px] text-foreground/90">
+              <code className="flex-1 truncate rounded-md bg-background/60 px-2 py-1.5 font-mono text-[11px] text-foreground/90">
                 <span className="text-primary">{envKeyName}</span>
                 <span className="text-muted-foreground">=</span>
                 {maskedKey}
               </code>
-              <button
-                type="button"
-                onClick={handleCopy}
-                className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border/55 px-2 py-1 text-[10px] font-medium text-foreground transition-colors hover:bg-background/60"
-              >
+              <Button type="button" variant="outline" size="xs" onClick={handleCopy}>
                 {copied ? <Check className="h-3 w-3 text-primary" /> : <Copy className="h-3 w-3" />}
                 {t("models.dialog.copyExport")}
-              </button>
+              </Button>
             </div>
           ) : provider && !provider.api_key ? (
             <p className="mt-2 text-[10px] text-amber-400">{t("models.dialog.envKeyMissing")}</p>
@@ -220,15 +182,17 @@ export function CodexSettingsForm({
                   {t("models.dialog.zshrcWrittenBadge")}
                 </span>
               ) : (
-                <button
+                <Button
                   type="button"
+                  variant="outline"
+                  size="xs"
                   onClick={handleWriteZshrc}
                   disabled={disabled || writing}
-                  className="inline-flex shrink-0 items-center gap-1 rounded-md border border-primary/40 bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary transition-colors hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="border-primary/30 bg-primary/10 text-primary hover:bg-primary/15"
                 >
                   {writing ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileCheck2 className="h-3 w-3" />}
                   {t("models.dialog.writeToZshrc")}
-                </button>
+                </Button>
               )}
               <span className="text-[10px] text-muted-foreground">{t("models.dialog.zshrcHint")}</span>
             </div>
@@ -245,15 +209,17 @@ export function CodexSettingsForm({
               authMode: recommendation!.authMode,
             })}
           </p>
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="xs"
             onClick={applyRecommended}
             disabled={disabled}
-            className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[10px] font-medium text-amber-300 transition-colors hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+            className="mt-2 border-amber-500/35 bg-amber-500/10 text-amber-300 hover:bg-amber-500/15"
           >
             <Wand2 className="h-3 w-3" />
             {t("models.dialog.applyRecommended")}
-          </button>
+          </Button>
         </div>
       ) : null}
     </div>

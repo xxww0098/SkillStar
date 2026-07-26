@@ -291,7 +291,7 @@ pub fn activate_tool(
                 );
             }
         }
-        "codex" | "opencode" => {
+        "codex" | "opencode" | "pi" => {
             if provider.base_url_openai.trim().is_empty() {
                 bail!(
                     "Provider '{}' has no OpenAI-compatible endpoint (base_url_openai is empty). \
@@ -326,7 +326,12 @@ pub fn activate_tool(
         store
             .tool_activations
             .get(tool_id)
-            .and_then(|binding| binding.entries.iter().find(|e| e.provider_id == provider_id))
+            .and_then(|binding| {
+                binding
+                    .entries
+                    .iter()
+                    .find(|e| e.provider_id == provider_id)
+            })
             .and_then(|e| e.settings.clone())
     });
 
@@ -344,9 +349,16 @@ pub fn activate_tool(
     //      point `active_index` at it.
     //    - Single-provider agents (claude-code, gemini): the binding holds at
     //      most one entry, so activating replaces it wholesale.
-    let binding = store.tool_activations.entry(tool_id.to_string()).or_default();
+    let binding = store
+        .tool_activations
+        .entry(tool_id.to_string())
+        .or_default();
     if agent_supports_multiple_providers(tool_id) {
-        if let Some(pos) = binding.entries.iter().position(|e| e.provider_id == provider_id) {
+        if let Some(pos) = binding
+            .entries
+            .iter()
+            .position(|e| e.provider_id == provider_id)
+        {
             binding.entries[pos] = entry.clone();
             binding.active_index = pos;
         } else {
@@ -363,13 +375,14 @@ pub fn activate_tool(
 }
 
 /// Whether a tool's config format natively supports several providers coexisting
-/// (Codex `[model_providers.*]`, OpenCode `provider.*`). Single-provider agents
-/// (claude-code, gemini) write a single global env block and hold one entry.
+/// (Codex `[model_providers.*]`, OpenCode `provider.*`, Pi `providers.*`).
+/// Single-provider agents (claude-code, gemini) write a single global env block
+/// and hold one entry.
 ///
 /// This is the one place agent "kind" is decided in the store layer; keep it
 /// data-driven here rather than scattering `tool_id == ...` checks.
 pub fn agent_supports_multiple_providers(tool_id: &str) -> bool {
-    matches!(tool_id, "codex" | "opencode")
+    matches!(tool_id, "codex" | "opencode" | "pi")
 }
 
 /// Point a multi-provider tool's active pointer at an already-bound provider
@@ -393,7 +406,10 @@ pub fn set_active_binding(
         .iter()
         .position(|e| e.provider_id == provider_id)
         .with_context(|| {
-            format!("Provider '{}' is not bound to tool '{}'", provider_id, tool_id)
+            format!(
+                "Provider '{}' is not bound to tool '{}'",
+                provider_id, tool_id
+            )
         })?;
     binding.active_index = pos;
     Ok(binding.entries[pos].clone())
@@ -421,7 +437,10 @@ pub fn remove_binding_entry(
         .iter()
         .position(|e| e.provider_id == provider_id)
         .with_context(|| {
-            format!("Provider '{}' is not bound to tool '{}'", provider_id, tool_id)
+            format!(
+                "Provider '{}' is not bound to tool '{}'",
+                provider_id, tool_id
+            )
         })?;
 
     binding.entries.remove(pos);

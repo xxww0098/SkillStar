@@ -11,8 +11,8 @@
 mod start_info;
 
 pub mod antigravity;
-pub(crate) mod common;
 pub mod codex;
+pub(crate) mod common;
 pub mod cursor;
 pub mod opencode;
 pub mod xai;
@@ -44,7 +44,7 @@ pub async fn start_login(
         "cursor" => cursor::start_login(region).await,
         "codex" => codex::start_login(region).await,
         "antigravity" => antigravity::start_login(region).await,
-        "xai" => xai::start_login(region).await,
+        "xai" => xai::start_login(region, target_subscription_id).await,
         "opencode" => opencode::start_login(region, target_subscription_id).await,
         other => Err(super::unsupported(other)),
     }

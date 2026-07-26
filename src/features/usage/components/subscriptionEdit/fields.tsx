@@ -17,9 +17,9 @@ export function Field({
 }) {
   return (
     <div className={cn("space-y-1", className)}>
-      {label.trim() ? <label className="block text-[10px] font-semibold text-muted-foreground">{label}</label> : null}
+      {label.trim() ? <label className="block text-[11px] font-semibold text-foreground/75">{label}</label> : null}
       {children}
-      {hint && <p className="text-[10px] leading-normal text-muted-foreground">{hint}</p>}
+      {hint && <p className="text-[11px] leading-normal text-foreground/60">{hint}</p>}
     </div>
   );
 }

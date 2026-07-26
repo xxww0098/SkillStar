@@ -143,17 +143,17 @@ export const MARKET_SKILLS = [
 ];
 
 export const AGENTS = [
-  ["claude", "Claude Code", "agents/claude.svg", ".claude/skills", true, true, 4],
-  ["codex", "Codex CLI", "agents/codex.svg", ".codex/skills", true, true, 2],
-  ["cursor", "Cursor", "agents/cursor.svg", ".cursor/skills", true, false, 1],
-  ["gemini", "Gemini CLI", "agents/gemini.svg", ".gemini/skills", false, false, 0],
-  ["antigravity", "Antigravity", "agents/antigravity.svg", ".agent/skills", false, false, 0],
-  ["opencode", "OpenCode", "agents/opencode.svg", ".opencode/skills", true, true, 3],
-  ["qoder", "Qoder", "agents/qoder-color.svg", ".qoder/skills", false, false, 0],
-  ["trae", "Trae", "agents/trae-color.svg", ".trae/skills", false, false, 0],
-  ["openclaw", "OpenClaw", "agents/openclaw.svg", "", false, false, 0],
-  ["hermes", "Hermes", "agents/hermes.svg", ".hermes/skills", false, false, 0],
-  ["zcode", "ZCode", "agents/zcode.svg", ".zcode/skills", false, false, 0],
+  ["claude", "Claude Code", "lobe:claude", ".claude/skills", false, false, 4],
+  ["codex", "Codex", "lobe:codex", ".agents/skills", false, false, 2],
+  ["cursor", "Cursor", "lobe:cursor", ".agents/skills", false, false, 1],
+  ["gemini", "Gemini CLI", "lobe:gemini", ".agents/skills", false, false, 0],
+  ["antigravity", "Antigravity", "lobe:antigravity", ".agents/skills", false, false, 0],
+  ["opencode", "OpenCode", "lobe:opencode", ".agents/skills", false, false, 3],
+  ["qoder", "Qoder", "lobe:qoder", ".qoder/skills", false, false, 0],
+  ["trae", "Trae", "lobe:trae", ".trae/skills", false, false, 0],
+  ["openclaw", "OpenClaw", "lobe:openclaw", "skills", false, false, 0],
+  ["hermes", "Hermes Agent", "lobe:hermes", ".hermes/skills", false, false, 0],
+  ["zcode", "ZCode", "lobe:zcode", ".zcode/skills", false, false, 0],
 ].map(([id, display_name, icon, rel, installed, enabled, synced]) => ({
   id,
   display_name,
@@ -190,7 +190,11 @@ export const DECKS = [
 
 export const PROJECTS = [
   { path: "/Users/dev/work/web-app", name: "web-app", created_at: iso(30) },
-  { path: "/Users/dev/work/data-pipeline", name: "data-pipeline", created_at: iso(12) },
+  {
+    path: "/Users/dev/work/data-pipeline",
+    name: "data-pipeline",
+    created_at: iso(12),
+  },
 ];
 
 export const FLAT_PROVIDERS = {
@@ -349,10 +353,34 @@ export const MCP_STORE = {
 };
 
 export const MCP_TOOL_STATUSES = [
-  { toolId: "claude-code", label: "Claude Code", configPath: "~/.claude.json", installed: true, serverCount: 2 },
-  { toolId: "codex", label: "Codex", configPath: "~/.codex/config.toml", installed: true, serverCount: 1 },
-  { toolId: "gemini", label: "Gemini CLI", configPath: "~/.gemini/settings.json", installed: false, serverCount: 0 },
-  { toolId: "grok", label: "Grok", configPath: "~/.grok/config.toml", installed: true, serverCount: 0 },
+  {
+    toolId: "claude-code",
+    label: "Claude Code",
+    configPath: "~/.claude.json",
+    installed: true,
+    serverCount: 2,
+  },
+  {
+    toolId: "codex",
+    label: "Codex",
+    configPath: "~/.codex/config.toml",
+    installed: true,
+    serverCount: 1,
+  },
+  {
+    toolId: "gemini",
+    label: "Gemini CLI",
+    configPath: "~/.gemini/settings.json",
+    installed: false,
+    serverCount: 0,
+  },
+  {
+    toolId: "grok",
+    label: "Grok",
+    configPath: "~/.grok/config.toml",
+    installed: true,
+    serverCount: 0,
+  },
   {
     toolId: "opencode",
     label: "OpenCode",
@@ -479,13 +507,25 @@ export const MCP_MARKET = [
 export const MCP_MARKET_DETAILS: Record<string, Record<string, unknown>> = {
   "adspower-local-api": {
     readme: "# adspower-local-api\n\nAdsPower 浏览器 Local API — 通过 MCP 控制指纹浏览器 / 自动化。",
-    packages: [{ runtime: "npx", identifier: "local-api-mcp-typescript", version: null, requiredEnv: ["API_KEY"] }],
+    packages: [
+      {
+        runtime: "npx",
+        identifier: "local-api-mcp-typescript",
+        version: null,
+        requiredEnv: ["API_KEY"],
+      },
+    ],
     remotes: [],
   },
   "mkt-filesystem": {
     readme: "# server-filesystem\n\nGives the agent scoped read/write access to a local directory.",
     packages: [
-      { runtime: "npx", identifier: "@modelcontextprotocol/server-filesystem", version: "1.2.0", requiredEnv: [] },
+      {
+        runtime: "npx",
+        identifier: "@modelcontextprotocol/server-filesystem",
+        version: "1.2.0",
+        requiredEnv: [],
+      },
     ],
     remotes: [],
   },
@@ -502,7 +542,14 @@ export const MCP_MARKET_DETAILS: Record<string, Record<string, unknown>> = {
   },
   "mkt-markitdown": {
     readme: "# markitdown\n\nConvert many file formats to Markdown.",
-    packages: [{ runtime: "uvx", identifier: "markitdown-mcp", version: "0.0.1a4", requiredEnv: [] }],
+    packages: [
+      {
+        runtime: "uvx",
+        identifier: "markitdown-mcp",
+        version: "0.0.1a4",
+        requiredEnv: [],
+      },
+    ],
     remotes: [],
   },
 };
@@ -540,7 +587,12 @@ export function mcpMarketDraft(id: string): Record<string, unknown> {
     };
   }
   if (remote) {
-    return { ...base, transport: remote.transport, url: remote.url, headers: { Authorization: "Bearer {TOKEN}" } };
+    return {
+      ...base,
+      transport: remote.transport,
+      url: remote.url,
+      headers: { Authorization: "Bearer {TOKEN}" },
+    };
   }
   return base;
 }
@@ -555,9 +607,21 @@ export const AI_CONFIG = {
   target_language: "zh-CN",
   context_window_k: 128,
   max_concurrent_requests: 4,
-  openai_preset: { base_url: "https://api.deepseek.com/v1", api_key: "sk-demo", model: "deepseek-chat" },
-  anthropic_preset: { base_url: "https://api.anthropic.com", api_key: "", model: "claude-sonnet-4-6" },
-  local_preset: { base_url: "http://localhost:11434/v1", api_key: "", model: "qwen2.5" },
+  openai_preset: {
+    base_url: "https://api.deepseek.com/v1",
+    api_key: "sk-demo",
+    model: "deepseek-chat",
+  },
+  anthropic_preset: {
+    base_url: "https://api.anthropic.com",
+    api_key: "",
+    model: "claude-sonnet-4-6",
+  },
+  local_preset: {
+    base_url: "http://localhost:11434/v1",
+    api_key: "",
+    model: "qwen2.5",
+  },
 };
 
 export const STORAGE_OVERVIEW = {
@@ -731,14 +795,36 @@ export const USAGE_SUBSCRIPTIONS = [
         percent: 49,
         reset_at: nowSec() + days(3),
         breakdown: [
-          { label: "Auto + Composer", used: 51, total: 100, percent: 51, reset_at: null, breakdown: [] },
-          { label: "API", used: 43, total: 100, percent: 43, reset_at: null, breakdown: [] },
+          {
+            label: "Auto + Composer",
+            used: 51,
+            total: 100,
+            percent: 51,
+            reset_at: null,
+            breakdown: [],
+          },
+          {
+            label: "API",
+            used: 43,
+            total: 100,
+            percent: 43,
+            reset_at: null,
+            breakdown: [],
+          },
         ],
       },
       balance: null,
       credits: [
-        { credit_type: "cursor-bonus", credit_amount: "$20", minimum_credit_amount_for_usage: null },
-        { credit_type: "cursor-on-demand", credit_amount: "1200/5000", minimum_credit_amount_for_usage: null },
+        {
+          credit_type: "cursor-bonus",
+          credit_amount: "$20",
+          minimum_credit_amount_for_usage: null,
+        },
+        {
+          credit_type: "cursor-on-demand",
+          credit_amount: "1200/5000",
+          minimum_credit_amount_for_usage: null,
+        },
       ],
       error: null,
       api_keys: [],
@@ -757,8 +843,22 @@ export const USAGE_SUBSCRIPTIONS = [
       subscription_id: "sub-codex",
       fetched_at: nowSec() - 3600,
       plan_name: "PLUS",
-      hourly: { label: "5h", used: 38, total: 150, percent: 25, reset_at: nowSec() + 9000, breakdown: [] },
-      weekly: { label: "本周", used: 1240, total: 4000, percent: 31, reset_at: nowSec() + days(5), breakdown: [] },
+      hourly: {
+        label: "5h",
+        used: 38,
+        total: 150,
+        percent: 25,
+        reset_at: nowSec() + 9000,
+        breakdown: [],
+      },
+      weekly: {
+        label: "本周",
+        used: 1240,
+        total: 4000,
+        percent: 31,
+        reset_at: nowSec() + days(5),
+        breakdown: [],
+      },
       monthly: null,
       balance: null,
       credits: [],
@@ -824,7 +924,13 @@ export const USAGE_SUBSCRIPTIONS = [
       hourly: null,
       weekly: null,
       monthly: null,
-      balance: { currency: "CNY", total: 48.5, granted: 5, topped_up: 43.5, is_available: true },
+      balance: {
+        currency: "CNY",
+        total: 48.5,
+        granted: 5,
+        topped_up: 43.5,
+        is_available: true,
+      },
       credits: [{ credit_type: "deepseek-balance:USD", credit_amount: "2.00" }],
       error: null,
       api_keys: [],
@@ -866,8 +972,22 @@ export const USAGE_SUBSCRIPTIONS = [
         percent: 2,
         reset_at: null,
         breakdown: [
-          { label: "glm-mcp-search", used: 60, total: null, percent: null, reset_at: null, breakdown: [] },
-          { label: "glm-mcp-web-read", used: 30, total: null, percent: null, reset_at: null, breakdown: [] },
+          {
+            label: "glm-mcp-search",
+            used: 60,
+            total: null,
+            percent: null,
+            reset_at: null,
+            breakdown: [],
+          },
+          {
+            label: "glm-mcp-web-read",
+            used: 30,
+            total: null,
+            percent: null,
+            reset_at: null,
+            breakdown: [],
+          },
         ],
       },
       balance: null,
@@ -898,7 +1018,13 @@ export const USAGE_ALERTS = [
     kind: "quota-critical",
     message: "GLM 5 小时额度已用 90%",
   },
-  { id: "al-3", subscription_id: "sub-glm", severity: "warning", kind: "needs-reauth", message: "GLM 需要重新登录" },
+  {
+    id: "al-3",
+    subscription_id: "sub-glm",
+    severity: "warning",
+    kind: "needs-reauth",
+    message: "GLM 需要重新登录",
+  },
 ];
 
 export const USAGE_SUMMARY = {
@@ -931,8 +1057,18 @@ export const SSH_HOSTS = [
 ];
 
 export const REMOTE_SKILLS_SAMPLE = [
-  { name: "pdf-tools", path: "~/.claude/skills/pdf-tools", size: 12480, modified: "2026-06-10" },
-  { name: "git-flow", path: "~/.claude/skills/git-flow", size: 5120, modified: "2026-05-28" },
+  {
+    name: "pdf-tools",
+    path: "~/.claude/skills/pdf-tools",
+    size: 12480,
+    modified: "2026-06-10",
+  },
+  {
+    name: "git-flow",
+    path: "~/.claude/skills/git-flow",
+    size: 5120,
+    modified: "2026-05-28",
+  },
 ];
 
 // Hosts discovered from ~/.ssh/config (browser dev only — real backend parses

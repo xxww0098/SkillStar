@@ -1,5 +1,5 @@
-use skillstar_models::ai_provider;
 use skillstar_core::infra::error::AppError;
+use skillstar_models::ai_provider;
 
 use super::{emit_summarize_stream_event, ensure_ai_config};
 

@@ -11,7 +11,7 @@ import { ResetCountdown } from "./ResetCountdown";
 import { LightBodySurface, UsageCardBody, resolveUsageBodyRegistration } from "./card";
 import { getBrandTheme } from "../lib/brandThemes";
 import { computeBodyOwnsPrimaryReset } from "../lib/resetOwnership";
-import { authModeLabel, getPrimaryResetInfo } from "../lib/usageLabels";
+import { authModeLabel, getPrimaryResetInfo, subscriptionCardTitle } from "../lib/usageLabels";
 import { usageApi } from "../api";
 import type { CatalogEntry, Subscription, SwitchOutcome } from "../types";
 import { cn } from "@/lib/utils";
@@ -128,7 +128,7 @@ export function UsageCardWindow() {
   }, [loadData, refreshing, subscriptionId]);
 
   const reportSwitchOutcome = useCallback(
-    (outcome: SwitchOutcome | null | undefined, displayName: string) => {
+    (outcome: SwitchOutcome | null | undefined, displayName: string, isActive: boolean) => {
       if (!outcome) {
         toast.success(t("usage.activeAccountSet", "已切为当前账号"), {
           description: displayName,
@@ -137,12 +137,15 @@ export function UsageCardWindow() {
       }
       if (outcome.success) {
         toast.success(t("usage.switchCliSuccess", "已切为当前账号并同步到 CLI"), {
-          description: `${displayName} → ${outcome.toolId}`,
+          description: `${displayName} → ${outcome.toolId} · ${t("usage.switchCliRestartHint", "请重启 CLI 后生效")}`,
         });
         return;
       }
       if (outcome.error) {
-        toast.error(t("usage.switchCliFailed", "已切为当前账号，但同步到 CLI 失败"), {
+        const message = isActive
+          ? t("usage.switchCliFailed", "已切为当前账号，但同步到 CLI 失败")
+          : t("usage.switchNotApplied", "切换未生效，已保留原当前账号");
+        toast.error(message, {
           description: outcome.error,
         });
       }
@@ -157,7 +160,7 @@ export function UsageCardWindow() {
       const updated = await usageApi.setActiveSubscription(subscriptionId);
       // Keep local state in sync immediately (don't wait solely on list reload).
       setSubscription(updated);
-      reportSwitchOutcome(updated.switch_result, updated.display_name);
+      reportSwitchOutcome(updated.switch_result, updated.display_name, updated.is_active === true);
       await loadData(subscriptionId);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -175,7 +178,7 @@ export function UsageCardWindow() {
       const outcome = await usageApi.switchActiveSubscriptionToCli(subscription.catalog_id);
       if (outcome.success) {
         toast.success(t("usage.switchCliSuccess", "已同步到 CLI"), {
-          description: `${outcome.toolId}: ${outcome.configPath}`,
+          description: `${outcome.toolId}: ${outcome.configPath} · ${t("usage.switchCliRestartHint", "请重启 CLI 后生效")}`,
         });
       } else if (outcome.error) {
         toast.error(t("usage.switchCliFailed", "同步到 CLI 失败"), {
@@ -276,7 +279,10 @@ export function UsageCardWindow() {
           )}
         </span>
         <span className="flex-1 truncate text-sm font-semibold">
-          {subscription.display_name || catalog?.display_name || subscription.catalog_id}
+          {subscriptionCardTitle(
+            subscription.display_name || catalog?.display_name || subscription.catalog_id,
+            catalog?.display_name,
+          )}
         </span>
         {subscription.is_active && (
           <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-500">

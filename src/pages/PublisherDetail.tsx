@@ -13,7 +13,7 @@ import { Input } from "../components/ui/input";
 import { LoadingLogo } from "../components/ui/LoadingLogo";
 import { SkillGridSkeleton } from "../components/ui/Skeleton";
 import { marketplaceKeys } from "../features/marketplace/api/keys";
-import { PublisherAvatar } from "../features/marketplace/components/OfficialPublishers";
+import { PublisherAvatar } from "../components/shared/PublisherAvatar";
 import { SkillGrid } from "../features/my-skills/components/SkillGrid";
 import { useSkills } from "../features/my-skills/hooks/useSkills";
 import type { LocalFirstResult } from "../types";

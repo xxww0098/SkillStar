@@ -56,10 +56,18 @@ fn supported_tool_ids_have_one_claude_code_target() {
 
 #[test]
 fn claude_code_mcp_installation_accepts_each_shared_surface() {
-    assert!(claude_code_installed_from_signals(true, false, false, false));
-    assert!(claude_code_installed_from_signals(false, true, false, false));
-    assert!(claude_code_installed_from_signals(false, false, true, false));
-    assert!(claude_code_installed_from_signals(false, false, false, true));
+    assert!(claude_code_installed_from_signals(
+        true, false, false, false
+    ));
+    assert!(claude_code_installed_from_signals(
+        false, true, false, false
+    ));
+    assert!(claude_code_installed_from_signals(
+        false, false, true, false
+    ));
+    assert!(claude_code_installed_from_signals(
+        false, false, false, true
+    ));
     assert!(!claude_code_installed_from_signals(
         false, false, false, false
     ));
@@ -127,7 +135,10 @@ fn kiro_projects_specific_auto_approve_tools_when_not_all() {
     let mut e = stdio("fs");
     e.auto_approve_tools = vec!["read_file".into(), "list_dir".into()];
     let v = kiro_spec(&e);
-    assert_eq!(v["autoApprove"], serde_json::json!(["read_file", "list_dir"]));
+    assert_eq!(
+        v["autoApprove"],
+        serde_json::json!(["read_file", "list_dir"])
+    );
 }
 
 #[test]
@@ -280,9 +291,11 @@ fn legacy_cleanup_tombstone_is_consumed_and_false_never_authorizes_deletion() {
 
     let mut public_only = stdio("public-only-state");
     mark_legacy_desktop_chat_clean(&mut public_only);
-    assert!(!public_only
-        .enabled
-        .contains_key(LEGACY_CLAUDE_DESKTOP_TOOL_ID));
+    assert!(
+        !public_only
+            .enabled
+            .contains_key(LEGACY_CLAUDE_DESKTOP_TOOL_ID)
+    );
 }
 
 #[test]
@@ -368,9 +381,11 @@ fn update_helper_renames_and_consumes_pending_desktop_chat_cleanup() {
         updated.enabled.get(LEGACY_CLAUDE_DESKTOP_TOOL_ID),
         Some(&false)
     );
-    assert!(results
-        .iter()
-        .any(|result| result.tool_id == LEGACY_CLAUDE_DESKTOP_TOOL_ID));
+    assert!(
+        results
+            .iter()
+            .any(|result| result.tool_id == LEGACY_CLAUDE_DESKTOP_TOOL_ID)
+    );
     let value: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert!(value["mcpServers"].get("old-name").is_none());
@@ -397,16 +412,18 @@ fn malformed_desktop_chat_config_keeps_update_and_delete_store_evidence() {
     };
 
     let mut update_store = original.clone();
-    assert!(update_server_and_sync(
-        &mut update_store,
-        "retryable-id",
-        McpServerPatch {
-            name: Some("lost-name".into()),
-            ..McpServerPatch::default()
-        },
-        false,
-    )
-    .is_err());
+    assert!(
+        update_server_and_sync(
+            &mut update_store,
+            "retryable-id",
+            McpServerPatch {
+                name: Some("lost-name".into()),
+                ..McpServerPatch::default()
+            },
+            false,
+        )
+        .is_err()
+    );
     assert_eq!(update_store.servers, original.servers);
 
     let mut delete_store = original.clone();
@@ -424,17 +441,9 @@ fn mcp_presets_catalog_is_well_formed() {
     let mut seen = std::collections::HashSet::new();
     for p in &presets {
         assert!(!p.name.is_empty(), "preset '{}' has empty name", p.id);
-        assert!(
-            seen.insert(p.id.clone()),
-            "duplicate preset id '{}'",
-            p.id
-        );
+        assert!(seen.insert(p.id.clone()), "duplicate preset id '{}'", p.id);
         match p.transport.as_str() {
-            "http" | "sse" => assert!(
-                p.url.is_some(),
-                "remote preset '{}' must carry a url",
-                p.id
-            ),
+            "http" | "sse" => assert!(p.url.is_some(), "remote preset '{}' must carry a url", p.id),
             _ => assert!(
                 p.command.is_some(),
                 "stdio preset '{}' must carry a command",

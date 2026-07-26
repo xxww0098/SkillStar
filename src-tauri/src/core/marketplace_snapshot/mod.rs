@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use anyhow::Result;
 use skillstar_marketplace::snapshot::{self as core_snapshot, InstalledSkillsFuture};
 
@@ -26,36 +24,6 @@ pub fn initialize() -> Result<()> {
 pub async fn refresh_startup_scopes_if_needed() -> Result<()> {
     configure_runtime();
     core_snapshot::refresh_startup_scopes_if_needed().await
-}
-
-pub async fn resolve_skill_sources_local_first(
-    names: &[String],
-    existing_sources: &HashMap<String, String>,
-) -> Result<HashMap<String, String>> {
-    configure_runtime();
-    core_snapshot::resolve_skill_sources_local_first(names, existing_sources).await
-}
-
-#[allow(dead_code)]
-pub fn upsert_pack(
-    pack_key: &str,
-    source: &str,
-    name: &str,
-    description: &str,
-    author: Option<&str>,
-    git_url: &str,
-    skill_keys: &[(String, String)],
-) -> Result<()> {
-    configure_runtime();
-    core_snapshot::upsert_pack(
-        pack_key,
-        source,
-        name,
-        description,
-        author,
-        git_url,
-        skill_keys,
-    )
 }
 
 #[cfg(test)]

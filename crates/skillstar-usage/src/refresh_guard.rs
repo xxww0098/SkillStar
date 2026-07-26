@@ -2,11 +2,15 @@
 //! when one vendor has multiple accounts (rate limits / account bans).
 
 use std::collections::HashMap;
+use std::fs::{self, File, OpenOptions};
 use std::future::Future;
+use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 use tokio::sync::Mutex;
+
+use crate::{UsageError, UsageResult};
 
 /// Minimum gap between two refreshes for the same catalog id.
 const SAME_CATALOG_GAP: Duration = Duration::from_secs(1);
@@ -25,6 +29,49 @@ async fn catalog_lock(catalog_id: &str) -> Arc<Mutex<()>> {
         .entry(catalog_id.to_string())
         .or_insert_with(|| Arc::new(Mutex::new(())))
         .clone()
+}
+
+async fn catalog_file_lock(catalog_id: &str) -> UsageResult<File> {
+    let catalog_id: String = catalog_id
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    tokio::task::spawn_blocking(move || {
+        #[cfg(test)]
+        let root = std::env::temp_dir().join(format!(
+            "skillstar-refresh-guard-test-{}",
+            std::process::id()
+        ));
+        #[cfg(not(test))]
+        let root = skillstar_core::infra::paths::config_dir().join("usage");
+        let locks_dir: PathBuf = root.join("locks");
+        fs::create_dir_all(&locks_dir)?;
+        let path = locks_dir.join(format!("catalog-{catalog_id}.lock"));
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options.open(&path)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
+        }
+        file.lock()?;
+        Ok::<_, std::io::Error>(file)
+    })
+    .await
+    .map_err(|error| UsageError::Other(format!("catalog lock task failed: {error}")))?
+    .map_err(UsageError::from)
 }
 
 async fn wait_catalog_gap(catalog_id: &str) {
@@ -48,17 +95,36 @@ async fn mark_catalog_refreshed(catalog_id: &str) {
 }
 
 /// Run a single subscription refresh with per-catalog serialization + spacing.
-pub async fn with_catalog_refresh<F, Fut, T>(catalog_id: &str, f: F) -> T
+pub async fn with_catalog_refresh<F, Fut, T>(catalog_id: &str, f: F) -> UsageResult<T>
 where
     F: FnOnce() -> Fut,
     Fut: Future<Output = T>,
 {
-    wait_catalog_gap(catalog_id).await;
     let lock = catalog_lock(catalog_id).await;
     let _guard = lock.lock().await;
+    let _file_guard = catalog_file_lock(catalog_id).await?;
+    // Check spacing while holding the same lock. Otherwise two callers can
+    // both observe the old timestamp before either acquires the mutex, and the
+    // second request starts immediately after the first.
+    wait_catalog_gap(catalog_id).await;
     let result = f().await;
     mark_catalog_refreshed(catalog_id).await;
-    result
+    Ok(result)
+}
+
+/// Serialize non-refresh credential operations with refreshes for the same
+/// catalog, without applying the HTTP rate-limit spacing or updating its
+/// timestamp. Grok account activation uses this so a concurrent Usage refresh
+/// cannot rotate tokens underneath its capture/install transaction.
+pub async fn with_catalog_lock<F, Fut, T>(catalog_id: &str, f: F) -> UsageResult<T>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = T>,
+{
+    let lock = catalog_lock(catalog_id).await;
+    let _guard = lock.lock().await;
+    let _file_guard = catalog_file_lock(catalog_id).await?;
+    Ok(f().await)
 }
 
 /// Ensure only one batch refresh runs at a time.
@@ -98,11 +164,14 @@ mod tests {
             .await
         });
 
-        assert_eq!(first.await.unwrap(), 1);
-        assert_eq!(second.await.unwrap(), 2);
+        assert_eq!(first.await.unwrap().unwrap(), 1);
+        assert_eq!(second.await.unwrap().unwrap(), 2);
 
         let times = started.lock().await;
         assert_eq!(times.len(), 2);
-        assert!(times[1].duration_since(times[0]) >= Duration::from_millis(100));
+        assert!(
+            times[1].duration_since(times[0]) >= Duration::from_millis(900),
+            "the second request must observe the one-second catalog gap"
+        );
     }
 }

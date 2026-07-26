@@ -111,9 +111,18 @@ pub fn read_env_export(home: &Path, env_key: &str) -> Option<String> {
     found
 }
 
+/// Read a managed export for the current SkillStar user home.
+pub fn read_current_user_env_export(env_key: &str) -> Option<String> {
+    read_env_export(&skillstar_core::infra::paths::home_dir(), env_key)
+}
+
 /// Idempotently ensure `~/.zshrc` contains `export <env_key>='<value>'`. See the
 /// module docs for the full safety contract (backup, atomic rename, no-op).
-pub fn ensure_env_export(home: &Path, env_key: &str, value: &str) -> Result<ShellRcWriteResult, AppError> {
+pub fn ensure_env_export(
+    home: &Path,
+    env_key: &str,
+    value: &str,
+) -> Result<ShellRcWriteResult, AppError> {
     let path = zshrc_path(home);
     let content = if path.exists() {
         std::fs::read_to_string(&path)?
@@ -212,13 +221,25 @@ pub fn ensure_env_export(home: &Path, env_key: &str, value: &str) -> Result<Shel
     std::fs::write(&tmp, &new_content)?;
     std::fs::rename(&tmp, &path)?;
 
-    let action = if existing_idx.is_some() { "updated" } else { "added" };
+    let action = if existing_idx.is_some() {
+        "updated"
+    } else {
+        "added"
+    };
     Ok(ShellRcWriteResult {
         path: path.to_string_lossy().to_string(),
         written: true,
         backup_path,
         action: action.to_string(),
     })
+}
+
+/// Ensure a managed export in the current SkillStar user home.
+pub fn ensure_current_user_env_export(
+    env_key: &str,
+    value: &str,
+) -> Result<ShellRcWriteResult, AppError> {
+    ensure_env_export(&skillstar_core::infra::paths::home_dir(), env_key, value)
 }
 
 /// Remove the managed `export <env_key>=...` line (and its marker) from
@@ -237,8 +258,7 @@ pub fn remove_env_export(home: &Path, env_key: &str) -> Result<bool, AppError> {
     let mut i = 0;
     while i < lines.len() {
         let is_target = is_managed_export(&lines[i], env_key);
-        let is_marker_above_target =
-            is_target && i > 0 && lines[i - 1].trim_start() == MARKER;
+        let is_marker_above_target = is_target && i > 0 && lines[i - 1].trim_start() == MARKER;
         if is_marker_above_target {
             lines.remove(i - 1);
             // i now points at what was the export line (shifted down).
@@ -334,7 +354,8 @@ mod tests {
     #[test]
     fn preserves_unrelated_user_lines() {
         let tmp = TempDir::new().unwrap();
-        let original = "# my config\nexport PATH=/usr/local/bin:$PATH\nalias g=git\nexport MY_TOKEN=keepme\n";
+        let original =
+            "# my config\nexport PATH=/usr/local/bin:$PATH\nalias g=git\nexport MY_TOKEN=keepme\n";
         std::fs::write(zshrc_path(tmp.path()), original).unwrap();
 
         ensure_env_export(tmp.path(), "SKILLSTAR_AB_KEY", "sk-1").unwrap();
@@ -357,7 +378,10 @@ mod tests {
 
         let res = ensure_env_export(tmp.path(), "SKILLSTAR_AB_KEY", "sk-1").unwrap();
         let backup = std::fs::read_to_string(res.backup_path.unwrap()).unwrap();
-        assert_eq!(backup, original, "backup must be a byte copy of the original");
+        assert_eq!(
+            backup, original,
+            "backup must be a byte copy of the original"
+        );
     }
 
     #[test]

@@ -1,5 +1,5 @@
 import { selectTargetableAgentProfiles } from "../../../lib/agentProfiles";
-import type { AgentProfile, McpToolId, McpToolStatus } from "../../../types";
+import type { AgentProfile, McpToolId } from "../../../types";
 
 /** MCP capability mapping; visual identity always comes from AgentProfile. */
 const MCP_TOOL_BY_AGENT_ID: Readonly<Partial<Record<string, McpToolId>>> = {
@@ -25,17 +25,12 @@ export function resolveMcpToolFilter(toolFilter: string | null, targets: readonl
 }
 
 /**
- * Intersect Settings-active Agents with MCP support and live MCP detection.
- * Missing detection data is deliberately treated as unavailable.
+ * Intersect manually activated Settings profiles with static MCP support.
+ * Host tool detection must never hide a target the user explicitly enabled.
  */
-export function selectMcpAgentTargets(
-  profiles: readonly AgentProfile[],
-  toolStatuses: readonly McpToolStatus[],
-): McpAgentTarget[] {
-  const installedToolIds = new Set(toolStatuses.filter((status) => status.installed).map((status) => status.toolId));
-
+export function selectMcpAgentTargets(profiles: readonly AgentProfile[]): McpAgentTarget[] {
   return selectTargetableAgentProfiles(profiles).flatMap((profile) => {
     const toolId = MCP_TOOL_BY_AGENT_ID[profile.id];
-    return toolId && installedToolIds.has(toolId) ? [{ toolId, profile }] : [];
+    return toolId ? [{ toolId, profile }] : [];
   });
 }

@@ -260,14 +260,16 @@ pub fn list_user_repos(limit: u32) -> Result<Vec<UserRepo>> {
     Ok(repos)
 }
 
-/// Inspect a specific repo's top-level directories via GitHub API.
-/// Used to show existing skill folders when the user picks a repo.
+/// Inspect the skill folders inside a repo's top-level `skills/` directory.
+/// Used to show existing skill folders (and detect name clashes) when the user
+/// picks a repo. Skills always publish under `skills/<name>`, so we list that
+/// directory rather than the repo root.
 pub fn inspect_repo_folders(repo_full_name: &str) -> Result<Vec<String>> {
-    // Use gh api to list contents at the repo root
+    // List directory entries inside the repo's `skills/` folder.
     let output = command_with_path("gh")
         .args([
             "api",
-            &format!("repos/{}/contents", repo_full_name),
+            &format!("repos/{}/contents/skills", repo_full_name),
             "--jq",
             r#"[.[] | select(.type == "dir") | .name] | sort | .[]"#,
         ])
@@ -487,15 +489,19 @@ pub fn publish_skill(
     // Ensure .gitignore exists (covers existing repos that were cloned without one)
     ensure_gitignore(&cache_dir)?;
 
-    // Copy skill into the repo as a subfolder
-    let dest = cache_dir.join(folder_name);
+    // Skills always live under a top-level `skills/` directory in the repo, so
+    // the scanner's priority-dir discovery picks them up on re-import.
+    let repo_rel_path = format!("skills/{}", folder_name);
+
+    // Copy skill into the repo under skills/<folder_name>
+    let dest = cache_dir.join("skills").join(folder_name);
     if dest.exists() {
         std::fs::remove_dir_all(&dest)?;
     }
     copy_dir_recursive(&skill_source_resolved, &dest)?;
 
     // Commit and push
-    let commit_msg = format!("publish: {}", folder_name);
+    let commit_msg = format!("publish: {}", repo_rel_path);
     stage_and_commit(&cache_dir, &commit_msg)?;
     run_git_in(&cache_dir, &["push", "-u", "origin", "HEAD"])?;
 
@@ -514,16 +520,17 @@ pub fn publish_skill(
     lf.upsert(LockEntry {
         name: skill_name.to_string(),
         git_url: git_url.clone(),
+        git_ref: None,
         tree_hash,
         installed_at: chrono::Utc::now().to_rfc3339(),
-        source_folder: Some(folder_name.to_string()),
+        source_folder: Some(repo_rel_path.clone()),
     });
     let _ = lf.save(lockfile_path);
 
     Ok(PublishResult {
         url: clean_url,
         git_url,
-        source_folder: folder_name.to_string(),
+        source_folder: repo_rel_path,
     })
 }
 

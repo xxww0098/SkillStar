@@ -3,12 +3,12 @@
 //! Requires a browser session token from `platform.deepseek.com` — distinct from
 //! the API Key used for `/user/balance`.
 
-use std::collections::HashMap;
 use chrono::{Datelike, Utc};
 use serde::Deserialize;
-use crate::fingerprint::{DeviceFingerprint, Req};
+use std::collections::HashMap;
 
-use crate::http_client::usage_client_with_fingerprint;
+use crate::http_client::usage_http_client;
+use crate::request::{Req, RequestError};
 use crate::subscription::{DeepSeekAnalytics, DeepSeekDailyUsage, DeepSeekModelUsage};
 use crate::{UsageError, UsageResult};
 
@@ -78,15 +78,12 @@ struct CostResp {
     data: Option<CostData>,
 }
 
-pub async fn fetch_analytics(
-    platform_token: &str,
-    fingerprint: Option<&DeviceFingerprint>,
-) -> UsageResult<DeepSeekAnalytics> {
+pub async fn fetch_analytics(platform_token: &str) -> UsageResult<DeepSeekAnalytics> {
     let now = Utc::now();
     let month = now.month();
     let year = now.year() as u32;
 
-    let client = usage_client_with_fingerprint(fingerprint)
+    let client = usage_http_client()
         .map_err(|e| UsageError::Fetcher(format!("DeepSeek platform client: {e}")))?;
 
     let amount_url = format!("{AMOUNT_BASE}?month={month}&year={year}");
@@ -133,7 +130,7 @@ pub async fn fetch_analytics(
 }
 
 async fn get_json<T: serde::de::DeserializeOwned>(
-    client: &crate::fingerprint::FingerprintAwareClient,
+    client: &reqwest::Client,
     url: &str,
     token: &str,
 ) -> UsageResult<T> {
@@ -162,7 +159,7 @@ async fn get_json<T: serde::de::DeserializeOwned>(
         .map_err(|e| UsageError::Fetcher(format!("DeepSeek 平台用量解析失败: {e}")))
 }
 
-fn map_platform_err(e: crate::fingerprint::RequestError) -> UsageError {
+fn map_platform_err(e: RequestError) -> UsageError {
     if e.is_auth_error() {
         return UsageError::Fetcher(
             "DeepSeek 平台用量 Token 无效或已过期，请在订阅设置中重新粘贴".into(),

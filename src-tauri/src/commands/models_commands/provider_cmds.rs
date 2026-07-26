@@ -60,7 +60,10 @@ pub async fn set_app_ai_provider_ref(app_id: String, provider_id: String) -> Res
     let path = providers::flat_store_path();
     let store = providers::migrate_store_if_needed(&path)?;
     if !store.providers.iter().any(|p| p.id == provider_id) {
-        return Err(AppError::Other(format!("Provider '{}' not found", provider_id)));
+        return Err(AppError::Other(format!(
+            "Provider '{}' not found",
+            provider_id
+        )));
     }
 
     let mut ai_config = ai_provider::load_config();
@@ -118,7 +121,9 @@ pub async fn create_provider_from_preset(
     api_key: String,
 ) -> Result<ProviderEntry, AppError> {
     let _guard = lock.0.lock().await;
-    Ok(providers::create_from_preset(&app_id, &preset_id, &api_key)?)
+    Ok(providers::create_from_preset(
+        &app_id, &preset_id, &api_key,
+    )?)
 }
 
 /// Update an existing provider with a partial patch.

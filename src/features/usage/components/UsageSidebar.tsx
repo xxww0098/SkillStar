@@ -37,7 +37,6 @@ export function UsageSidebar({ catalog, subscriptions, selected, onSelect, onAdd
           <SidebarItem
             key={entry.id}
             label={entry.display_name}
-            description={entry.description}
             count={counts.get(entry.id) ?? 0}
             selected={selected === entry.id}
             onClick={() => onSelect(entry.id)}
@@ -64,14 +63,13 @@ export function UsageSidebar({ catalog, subscriptions, selected, onSelect, onAdd
 
 interface SidebarItemProps {
   label: string;
-  description?: string;
   count: number;
   selected: boolean;
   onClick: () => void;
   logo?: React.ReactNode;
 }
 
-function SidebarItem({ label, description, count, selected, onClick, logo }: SidebarItemProps) {
+function SidebarItem({ label, count, selected, onClick, logo }: SidebarItemProps) {
   return (
     <button
       type="button"
@@ -86,7 +84,6 @@ function SidebarItem({ label, description, count, selected, onClick, logo }: Sid
       {logo}
       <div className="min-w-0 flex-1">
         <div className="truncate text-[12px] font-medium">{label}</div>
-        {description && <div className="truncate text-[10px] text-muted-foreground/70">{description}</div>}
       </div>
       {count > 0 && (
         <span

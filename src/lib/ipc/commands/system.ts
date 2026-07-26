@@ -1,4 +1,4 @@
-import type { GitHubMirrorConfig, GitHubMirrorPreset, ProxyConfig } from "../../../types";
+import type { GitHubMirrorConfig, GitHubMirrorPreset, ProxyConfig, SkillTutorialStyle } from "../../../types";
 
 interface PatrolStatus {
   enabled: boolean;
@@ -11,6 +11,7 @@ interface AcpConfig {
   enabled: boolean;
   agent_command: string;
   agent_label: string;
+  tutorial_style: SkillTutorialStyle;
 }
 
 interface UpdateCheckResult {

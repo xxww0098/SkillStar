@@ -130,8 +130,6 @@ export interface Subscription {
   /** DeepSeek platform session token configured for usage charts. */
   has_platform_token?: boolean;
   requires_reauth: boolean;
-  /** Bound fingerprint id (see `features/fingerprints`). Absent → reqwest default. */
-  fingerprint_id?: string;
   /** `true` when this row is the currently-pinned account for its catalog
    *  (Phase 7 multi-account). At most one per catalog_id. */
   is_active?: boolean;
@@ -178,8 +176,6 @@ export interface CreateSubscriptionInput {
   oauth_region?: string;
   manual_quota?: ManualQuota;
   note?: string;
-  /** Bind this new subscription to a stored fingerprint id. */
-  fingerprint_id?: string;
 }
 
 export interface UpdateSubscriptionInput {
@@ -196,10 +192,6 @@ export interface UpdateSubscriptionInput {
   clearPlatformToken?: boolean;
   manual_quota?: ManualQuota;
   note?: string;
-  /** Bind to a fingerprint id (use `clearFingerprint` to remove the binding). */
-  fingerprint_id?: string;
-  /** When `true`, drop any existing fingerprint binding regardless of `fingerprint_id`. */
-  clearFingerprint?: boolean;
 }
 
 export interface SubscriptionAlert {

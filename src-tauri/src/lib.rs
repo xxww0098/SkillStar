@@ -150,14 +150,16 @@ pub fn run() {
             // Migrate v1 flat layout → v2 categorised layout (idempotent)
             skillstar_core::infra::migration::migrate_legacy_paths();
 
-            if let Err(err) = core::marketplace::initialize_local_snapshot() {
+            if let Err(err) = core::marketplace_snapshot::initialize() {
                 error!(target: "marketplace_snapshot", "init failed: {err}");
             }
             setup_deep_links(app);
 
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(err) = core::marketplace::refresh_local_snapshot_startup_scopes().await {
+                if let Err(err) =
+                    core::marketplace_snapshot::refresh_startup_scopes_if_needed().await
+                {
                     error!(target: "marketplace_snapshot", "startup refresh failed: {err}");
                 }
                 let _ = app_handle.emit("marketplace://ready", ());
@@ -188,6 +190,11 @@ pub fn run() {
             }
 
             core::app_shell::setup_tray(app)?;
+            // Add the Dock right-click menu hook and seed its rows from the last
+            // stored snapshots, so usage shows on launch before the user opens
+            // the usage page.
+            core::dock_menu::install();
+            core::dock_menu::refresh();
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -305,6 +312,8 @@ pub fn run() {
             commands::deploy_skill_group,
             commands::read_skill_content,
             commands::update_skill_content,
+            commands::get_skill_tutorial,
+            commands::generate_skill_tutorial,
             commands::get_proxy_config,
             commands::save_proxy_config,
             commands::get_github_mirror_config,
@@ -331,8 +340,6 @@ pub fn run() {
             commands::ai::summarize::ai_summarize_skill_stream,
             commands::ai::summarize::ai_test_connection,
             commands::ai::summarize::ai_pick_skills,
-            commands::ai::translate::ai_translate_skill,
-            commands::ai::translate::ai_translate_skill_stream,
             commands::github::scan_github_repo,
             commands::github::install_from_scan,
             commands::github::list_repo_history,
@@ -451,18 +458,6 @@ pub fn run() {
             commands::usage_windows::open_usage_card_window,
             commands::usage_windows::close_usage_card_window,
             commands::usage_windows::close_all_usage_card_windows,
-            // Fingerprint management (Phase 4)
-            commands::fingerprints::list_fingerprints,
-            commands::fingerprints::get_fingerprint,
-            commands::fingerprints::list_fingerprint_presets,
-            commands::fingerprints::create_fingerprint_from_preset,
-            commands::fingerprints::update_fingerprint,
-            commands::fingerprints::delete_fingerprint,
-            commands::fingerprints::set_active_fingerprint,
-            // IDE projector (Phase 6)
-            commands::fingerprints::list_supported_ides,
-            commands::fingerprints::apply_fingerprint_to_ide,
-            commands::fingerprints::restore_ide_baseline,
             // SSH remote skill management
             commands::list_ssh_hosts,
             commands::add_ssh_host,

@@ -102,6 +102,9 @@ pub async fn deactivate_tool(
         "gemini" => {
             tool_sync::unsync_gemini()?;
         }
+        "pi" => {
+            tool_sync::unsync_pi_all()?;
+        }
         _ => {}
     }
 
@@ -216,9 +219,9 @@ pub async fn update_tool_settings(
 /// field provides additional context (a tool may be installed but not yet
 /// configured, or config may exist from a previous installation).
 ///
-/// Binary probing must stay aligned with agent-profile install detection
-/// (`skillstar_skills::…::detect`) — both call
-/// `skillstar_core::infra::path_env::which_in_enriched`.
+/// This probe belongs only to the explicit Models tool-setup workflow. It must
+/// never feed Agent profile activation or card/MCP rail visibility; those are
+/// controlled solely by the user's Settings switch.
 #[tauri::command]
 pub async fn detect_tool_installation(tool_id: String) -> Result<serde_json::Value, AppError> {
     let binary_name = match tool_id.as_str() {
@@ -226,26 +229,26 @@ pub async fn detect_tool_installation(tool_id: String) -> Result<serde_json::Val
         "codex" => "codex",
         "opencode" => "opencode",
         "gemini" => "gemini",
+        "pi" => "pi",
         _ => {
             return Err(AppError::Other(format!(
-                "Unknown tool_id: '{}'. Supported: claude-code, codex, opencode, gemini.",
+                "Unknown tool_id: '{}'. Supported: claude-code, codex, opencode, gemini, pi.",
                 tool_id
             )));
         }
     };
 
-    let binary_found =
-        skillstar_core::infra::path_env::which_in_enriched(binary_name).is_some();
+    let binary_found = skillstar_core::infra::path_env::which_in_enriched(binary_name).is_some();
 
     let config_dir_found = dirs::home_dir()
         .map(|home| match tool_id.as_str() {
             "claude-code" => home.join(".claude").is_dir(),
             "codex" => home.join(".codex").is_dir(),
             "opencode" => {
-                home.join(".config").join("opencode").is_dir()
-                    || home.join(".opencode").is_dir()
+                home.join(".config").join("opencode").is_dir() || home.join(".opencode").is_dir()
             }
             "gemini" => home.join(".gemini").is_dir(),
+            "pi" => home.join(".pi").is_dir(),
             _ => false,
         })
         .unwrap_or(false);
@@ -253,11 +256,7 @@ pub async fn detect_tool_installation(tool_id: String) -> Result<serde_json::Val
     // Desktop Code and the CLI are two surfaces of the same Claude Code Agent.
     let desktop_code_found = tool_id == "claude-code"
         && skillstar_core::infra::path_env::desktop_app_installed("Claude");
-    let installed = agent_tool_installed_from_signals(
-        &tool_id,
-        binary_found,
-        desktop_code_found,
-    );
+    let installed = agent_tool_installed_from_signals(&tool_id, binary_found, desktop_code_found);
 
     Ok(serde_json::json!({
         "installed": installed,
@@ -378,7 +377,11 @@ pub async fn detect_provider_conflicts(
 
     let mut conflicts: Vec<tool_sync::ConfigConflict> = Vec::new();
     for (tool_id, binding) in &store.tool_activations {
-        if let Some(act) = binding.entries.iter().find(|e| e.provider_id == provider_id) {
+        if let Some(act) = binding
+            .entries
+            .iter()
+            .find(|e| e.provider_id == provider_id)
+        {
             for c in tool_sync::detect_conflicts(tool_id, act.last_sync_at) {
                 // Env overrides are global — added once below to avoid dupes.
                 if !matches!(c.conflict_type, tool_sync::ConflictType::EnvVarOverride) {
@@ -437,8 +440,16 @@ mod tests {
 
     #[test]
     fn claude_code_installation_accepts_cli_or_desktop_code() {
-        assert!(agent_tool_installed_from_signals("claude-code", true, false));
-        assert!(agent_tool_installed_from_signals("claude-code", false, true));
+        assert!(agent_tool_installed_from_signals(
+            "claude-code",
+            true,
+            false
+        ));
+        assert!(agent_tool_installed_from_signals(
+            "claude-code",
+            false,
+            true
+        ));
         assert!(!agent_tool_installed_from_signals(
             "claude-code",
             false,

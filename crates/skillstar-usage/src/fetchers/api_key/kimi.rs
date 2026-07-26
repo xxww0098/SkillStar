@@ -8,7 +8,6 @@
 
 use chrono::Utc;
 use serde::Deserialize;
-use crate::fingerprint::DeviceFingerprint;
 use skillstar_providers::balance;
 
 use crate::subscription::{MonetaryBalance, SubscriptionUsage};
@@ -37,9 +36,8 @@ struct BalanceData {
 pub async fn fetch(
     subscription_id: &str,
     api_key: &str,
-    fingerprint: Option<&DeviceFingerprint>,
 ) -> UsageResult<SubscriptionUsage> {
-    let env: Envelope = super::fetch_spec(&balance::KIMI, api_key, fingerprint).await?;
+    let env: Envelope = super::fetch_spec(&balance::KIMI, api_key).await?;
 
     if !env.status && env.code != 0 {
         return Err(UsageError::Fetcher(format!(

@@ -1,11 +1,9 @@
 import {
   Eye,
   FileText,
-  Languages,
   Loader2,
   PanelLeftClose,
   PanelLeftOpen,
-  RefreshCw,
   RotateCcw,
   Save,
   Sparkles,
@@ -15,7 +13,6 @@ import {
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAiStream } from "../../hooks/useAiStream";
-import { TRANSLATE_BUDGET_MS, useAiTranslate } from "../../hooks/useAiTranslate";
 import { normalizeSkillMarkdownForPreview, parseFrontmatterEntries, splitFrontmatter } from "../../lib/frontmatter";
 import { formatAiErrorMessage, navigateToAiSettings } from "../../lib/utils";
 import type { SkillContent } from "../../types";
@@ -23,8 +20,6 @@ import { Button } from "../ui/button";
 import { Markdown } from "../ui/Markdown";
 import { ResizablePanel } from "../ui/ResizablePanel";
 import { AiErrorBanner } from "./AiBanners";
-import { TranslationWaitBanner } from "./TranslationWaitBanner";
-import { TranslationMetricsPill } from "./TranslationMetricsPill";
 
 interface SkillEditorProps {
   skillName: string;
@@ -42,32 +37,21 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
   const [hasChanges, setHasChanges] = useState(false);
   const [isLeftPaneOpen, setIsLeftPaneOpen] = useState(false);
 
-  // AI features via shared hook
+  // AI summary via shared hook
   const summaryStream = useAiStream({
     command: "ai_summarize_skill_stream",
     eventChannel: "ai://summarize-stream",
   });
-  const translateStream = useAiTranslate();
 
   const summaryContent = summaryStream.content;
   const summaryVisible = summaryStream.visible;
   const summarizing = summaryStream.loading;
   const summaryHasDelta = summaryStream.hasDelta;
   const summaryAiConfigured = summaryStream.aiConfigured;
-  const aiError = summaryStream.error ?? translateStream.error;
+  const aiError = summaryStream.error;
   const localizedAiError = formatAiErrorMessage(aiError, t);
 
-  // The translated content reflects the *saved* editedContent.  When the user
-  // edits, we drop the translated preview so we never show stale output.
-  const showTranslated =
-    translateStream.showTranslated && translateStream.translated != null && translateStream.source === editedContent;
-  const hasTranslationForCurrentContent =
-    translateStream.translated != null && translateStream.source === editedContent;
-
-  const effectiveContent =
-    showTranslated && translateStream.translated != null ? translateStream.translated : editedContent;
-
-  const previewSource = normalizeSkillMarkdownForPreview(effectiveContent);
+  const previewSource = normalizeSkillMarkdownForPreview(editedContent);
   const previewFrontmatterEntries = parseFrontmatterEntries(splitFrontmatter(previewSource).frontmatter);
   const previewContent = splitFrontmatter(previewSource).body;
 
@@ -85,32 +69,6 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
 
   const clearAiError = () => {
     summaryStream.setError(null);
-    translateStream.setError(null);
-  };
-
-  const handleTranslate = async () => {
-    if (loadError) return;
-    if (!summaryAiConfigured) {
-      navigateToAiSettings();
-      return;
-    }
-    if (translateStream.loading) {
-      translateStream.cancel();
-      return;
-    }
-    summaryStream.setError(null);
-    await translateStream.translate(editedContent);
-  };
-
-  const handleRetranslate = async () => {
-    if (loadError) return;
-    if (!summaryAiConfigured) {
-      navigateToAiSettings();
-      return;
-    }
-    if (translateStream.loading) return;
-    clearAiError();
-    await translateStream.translate(editedContent, { forceRefresh: true });
   };
 
   useEffect(() => {
@@ -153,11 +111,6 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
     setEditedContent(value);
     setHasChanges(value !== content?.content);
     if (summaryVisible) summaryStream.setVisible(false);
-    // Edits invalidate any prior translation — drop it silently so the preview
-    // doesn't show out-of-sync content.
-    if (translateStream.translated != null && translateStream.source !== value) {
-      translateStream.reset();
-    }
   };
 
   if (loading) {
@@ -222,75 +175,6 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
 
             {/* AI Action Buttons */}
             <div className="ml-auto flex items-center gap-1 shrink-0">
-              {hasTranslationForCurrentContent && !translateStream.loading && (
-                <span className="hidden sm:inline-flex items-center rounded-md border border-primary/20 bg-primary/10 px-2 py-1 text-micro font-medium text-primary">
-                  {t("skillEditor.translationReady")}
-                </span>
-              )}
-              {hasTranslationForCurrentContent && !translateStream.loading && (
-                <TranslationMetricsPill metrics={translateStream.metrics} />
-              )}
-              <button
-                type="button"
-                onClick={() => {
-                  if (loadError) return;
-                  if (!summaryAiConfigured) {
-                    navigateToAiSettings();
-                    return;
-                  }
-                  void handleTranslate();
-                }}
-                disabled={!!loadError}
-                className={`flex items-center gap-1 px-2 py-1 rounded-md text-micro font-medium transition-colors cursor-pointer ${
-                  translateStream.loading
-                    ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
-                    : showTranslated
-                      ? "bg-primary/15 text-primary"
-                      : summaryAiConfigured && !loadError
-                        ? "text-muted-foreground hover:text-foreground hover:bg-card-hover"
-                        : loadError
-                          ? "text-muted-foreground/50 cursor-not-allowed"
-                          : "text-primary/80 bg-primary/5 border border-primary/20 hover:bg-primary/10"
-                }`}
-                title={
-                  loadError
-                    ? t("skillEditor.loadFailed")
-                    : translateStream.loading
-                      ? t("common.cancel")
-                      : translateStream.translated != null && translateStream.source === editedContent
-                        ? showTranslated
-                          ? t("skillEditor.showOriginal")
-                          : t("skillEditor.showTranslated")
-                        : t("skillEditor.translate")
-                }
-              >
-                {translateStream.loading ? (
-                  <Square className="w-3 h-3 fill-current" />
-                ) : (
-                  <Languages className="w-3 h-3" />
-                )}
-                {translateStream.loading
-                  ? t("skillEditor.translating")
-                  : hasTranslationForCurrentContent
-                    ? showTranslated
-                      ? t("skillEditor.showOriginal")
-                      : t("skillEditor.showTranslated")
-                    : t("skillEditor.translate")}
-              </button>
-
-              {hasTranslationForCurrentContent && !translateStream.loading && (
-                <button
-                  type="button"
-                  onClick={() => void handleRetranslate()}
-                  disabled={!!loadError}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-card-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                  title={t("skillEditor.retranslate")}
-                  aria-label={t("skillEditor.retranslate")}
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                </button>
-              )}
-
               <button
                 type="button"
                 onClick={() => {
@@ -336,15 +220,6 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
               </button>
             </div>
           </div>
-
-          {/* Translation progress banner */}
-          {translateStream.loading && (
-            <TranslationWaitBanner
-              elapsedSec={translateStream.elapsedSec}
-              budgetMs={TRANSLATE_BUDGET_MS}
-              pipelineProgress={translateStream.pipelineProgress}
-            />
-          )}
 
           {/* AI Error Banner */}
           <AiErrorBanner error={localizedAiError} onDismiss={clearAiError} />
@@ -401,7 +276,7 @@ export function SkillEditor({ skillName, onClose, onRead, onSave }: SkillEditorP
               </div>
             )}
 
-            {/* Main content: translated or original */}
+            {/* Main SKILL.md content */}
             {loadError ? (
               <div className="text-sm text-muted-foreground">{t("skillEditor.noContent")}</div>
             ) : previewContent.trim().length === 0 && previewFrontmatterEntries.length === 0 ? (

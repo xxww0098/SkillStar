@@ -1,10 +1,10 @@
 //! Connection probe + host-key trust-on-first-use (TOFU) acceptance.
 
 use skillstar_core::infra::error::AppError;
+use skillstar_sync::ssh::SshHostDef;
 use skillstar_sync::ssh::client::HostKeyState;
 use skillstar_sync::ssh::progress::ProgressSink;
 use skillstar_sync::ssh::store::{KeyringSecretStore, accept_host_key};
-use skillstar_sync::ssh::SshHostDef;
 use tauri::AppHandle;
 
 use super::{ConnectionTestResult, TauriProgressSink, new_session_id, to_ssh_err};

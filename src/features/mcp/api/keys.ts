@@ -6,7 +6,6 @@ export const mcpKeys = {
 
   // Unified MCP server store (`useMcpServers`).
   servers: () => ["mcp-servers"] as const,
-  toolStatuses: () => ["mcp-tool-statuses"] as const,
 
   // Local-first GitHub MCP registry browse (`useMcpMarketplace`,
   // `McpMarketBrowser`).

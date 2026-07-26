@@ -11,7 +11,6 @@
 
 use chrono::Utc;
 use serde::Deserialize;
-use crate::fingerprint::DeviceFingerprint;
 use skillstar_providers::balance;
 
 use crate::UsageResult;
@@ -40,9 +39,8 @@ struct BalanceInfo {
 pub async fn fetch(
     subscription: &Subscription,
     api_key: &str,
-    fingerprint: Option<&DeviceFingerprint>,
 ) -> UsageResult<SubscriptionUsage> {
-    let body: BalanceResponse = super::fetch_spec(&balance::DEEPSEEK, api_key, fingerprint).await?;
+    let body: BalanceResponse = super::fetch_spec(&balance::DEEPSEEK, api_key).await?;
     let (balance, credits, error) = map_balance_response(&body);
 
     let mut usage = SubscriptionUsage {
@@ -64,7 +62,7 @@ pub async fn fetch(
         if token.trim().is_empty() {
             append_platform_error(&mut usage, "平台用量 Token 解密失败");
         } else {
-            match super::deepseek_platform::fetch_analytics(token.trim(), fingerprint).await {
+            match super::deepseek_platform::fetch_analytics(token.trim()).await {
                 Ok(analytics) => usage.deepseek_analytics = Some(analytics),
                 Err(err) => append_platform_error(&mut usage, &err.to_string()),
             }
@@ -153,7 +151,10 @@ fn parse_decimal(s: &str) -> f64 {
             0.0
         }
         Err(_) => {
-            tracing::warn!("[deepseek] failed to parse balance field as number (raw={:?}); falling back to 0", s);
+            tracing::warn!(
+                "[deepseek] failed to parse balance field as number (raw={:?}); falling back to 0",
+                s
+            );
             0.0
         }
     }

@@ -1,16 +1,14 @@
 import type { AgentProfile } from "../types";
 
 /**
- * Whether Settings currently exposes an agent as a valid local target.
- *
- * `enabled` is a persisted user preference and can remain true after the
- * underlying agent is uninstalled, so neither flag is sufficient alone.
+ * Whether the user has explicitly activated an Agent in Settings.
+ * Host installation is deliberately not inferred from binaries or paths.
  */
-export function isTargetableAgentProfile(profile: AgentProfile): boolean {
-  return profile.installed && profile.enabled;
+export function isTargetableAgentProfile(profile: Pick<AgentProfile, "enabled">): boolean {
+  return profile.enabled;
 }
 
-/** Keep Settings order while removing agents that cannot receive local work. */
+/** Keep Settings order while removing Agents the user has not activated. */
 export function selectTargetableAgentProfiles(profiles: readonly AgentProfile[]): AgentProfile[] {
   return profiles.filter(isTargetableAgentProfile);
 }
@@ -23,4 +21,9 @@ export function selectTargetableAgentProfiles(profiles: readonly AgentProfile[])
  */
 export function supportsProjectDeploy(profile: AgentProfile): boolean {
   return profile.project_skills_rel.trim().length > 0;
+}
+
+/** Whether an Agent exposes a user-level skills directory. */
+export function supportsGlobalDeploy(profile: AgentProfile): boolean {
+  return profile.global_skills_dir.trim().length > 0;
 }

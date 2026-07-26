@@ -31,10 +31,6 @@ rand = { workspace = true }
 async-openai = { version = "0.27", features = ["rustls"] }
 futures-util = "0.3.32"
 futures = { workspace = true }
-comrak = "0.37"
-quick-xml = "0.37"
-blake3 = "1.5"
-rusqlite = { workspace = true }
 reqwest_012 = { package = "reqwest", version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
 
 [dev-dependencies]

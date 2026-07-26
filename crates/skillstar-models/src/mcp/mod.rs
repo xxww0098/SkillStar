@@ -73,8 +73,8 @@ pub use store::*;
 
 mod specs;
 pub(crate) use specs::{
-    claude_code_spec, codex_toml_table, cursor_spec, gemini_spec,
-    grok_toml_table, kiro_spec, opencode_spec, zcode_cli_spec,
+    claude_code_spec, codex_toml_table, cursor_spec, gemini_spec, grok_toml_table, kiro_spec,
+    opencode_spec, zcode_cli_spec,
 };
 
 // ---------------------------------------------------------------------------

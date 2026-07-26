@@ -243,7 +243,6 @@ function ProviderSubscriptionRow({
 }) {
   const { t } = useTranslation();
   const displayName = group.entry?.display_name ?? group.catalogId;
-  const description = group.entry?.description;
   const brandColor = group.entry?.brand_color ?? "6B7280";
   const countLabel = t("usage.providerSubscriptionCount", { count: group.subscriptions.length });
   const groupId = `usage-provider-group-${group.catalogId}`;
@@ -272,10 +271,7 @@ function ProviderSubscriptionRow({
         />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold text-foreground">{displayName}</p>
-          <p className="truncate text-[11px] text-muted-foreground">
-            {countLabel}
-            {description ? ` · ${description}` : ""}
-          </p>
+          <p className="truncate text-[11px] text-muted-foreground">{countLabel}</p>
         </div>
         <ChevronDown
           className={cn(

@@ -1,4 +1,11 @@
+mod status;
+
+pub use status::{
+    AgentDeployStatus, DeployKind, developer_mode_available, get_skill_deploy_status,
+};
+
 use anyhow::{Context, Result};
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::{OnceLock, RwLock};
 use std::time::{Duration, Instant};
@@ -49,6 +56,17 @@ fn cached_profiles() -> Vec<agent_profile::AgentProfile> {
     profiles
 }
 
+fn require_global_profile<'a>(
+    profiles: &'a [agent_profile::AgentProfile],
+    agent_id: &str,
+) -> Result<&'a agent_profile::AgentProfile> {
+    let profile = agent_profile::find_profile(profiles, agent_id)?;
+    if !profile.has_global_skills() {
+        anyhow::bail!("Agent '{}' does not support global skills", agent_id);
+    }
+    Ok(profile)
+}
+
 fn remove_managed_entry_for_overwrite(path: &Path) -> Result<bool> {
     let is_link = skillstar_core::infra::fs_ops::is_link(path);
     let is_copy = path.is_dir() && path.join("SKILL.md").exists();
@@ -92,7 +110,7 @@ pub fn toggle_skill_for_agent(skill_name: &str, agent_id: &str, enable: bool) ->
     }
 
     let profiles = cached_profiles();
-    let profile = agent_profile::find_profile(&profiles, agent_id)?;
+    let profile = require_global_profile(&profiles, agent_id)?;
     let target = profile.global_skills_dir.join(skill_name);
 
     tracing::info!(
@@ -160,6 +178,9 @@ pub fn remove_skill_from_all_agents(skill_name: &str) -> Result<Vec<String>> {
     let mut removed_from = Vec::with_capacity(profiles.len());
 
     for profile in &profiles {
+        if !profile.has_global_skills() {
+            continue;
+        }
         let target = profile.global_skills_dir.join(skill_name);
         match remove_entry_for_unlink(&target) {
             Ok(true) => {
@@ -187,7 +208,7 @@ pub fn unlink_all_skills_from_agent(agent_id: &str) -> Result<u32> {
     tracing::info!(target: "sync", agent_id, "unlink_all_skills_from_agent called");
 
     let profiles = cached_profiles();
-    let profile = agent_profile::find_profile(&profiles, agent_id)?;
+    let profile = require_global_profile(&profiles, agent_id)?;
 
     let skills_dir = &profile.global_skills_dir;
     if !skills_dir.exists() {
@@ -225,7 +246,7 @@ pub fn unlink_all_skills_from_agent(agent_id: &str) -> Result<u32> {
 /// List all skill names currently linked (symlinked) to a specific agent.
 pub fn list_linked_skills(agent_id: &str) -> Result<Vec<String>> {
     let profiles = cached_profiles();
-    let profile = agent_profile::find_profile(&profiles, agent_id)?;
+    let profile = require_global_profile(&profiles, agent_id)?;
 
     let skills_dir = &profile.global_skills_dir;
     if !skills_dir.exists() {
@@ -257,7 +278,7 @@ pub fn unlink_skill_from_agent(skill_name: &str, agent_id: &str) -> Result<()> {
     );
 
     let profiles = cached_profiles();
-    let profile = agent_profile::find_profile(&profiles, agent_id)?;
+    let profile = require_global_profile(&profiles, agent_id)?;
 
     let target = profile.global_skills_dir.join(skill_name);
     tracing::info!(
@@ -294,7 +315,7 @@ pub fn batch_link_skills_to_agent(skill_names: &[String], agent_id: &str) -> Res
 
     let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
     let profiles = cached_profiles();
-    let profile = agent_profile::find_profile(&profiles, agent_id)?;
+    let profile = require_global_profile(&profiles, agent_id)?;
     let target_dir = &profile.global_skills_dir;
 
     let mut linked = 0u32;
@@ -408,6 +429,100 @@ pub fn batch_link_skills_to_agent(skill_names: &[String], agent_id: &str) -> Res
     Ok(linked)
 }
 
+/// Deploy skills to one or more Agent global directories using an explicit
+/// install method. Physical target directories are deduplicated so aliases or
+/// compatible profiles that share a directory are only mutated once.
+pub fn batch_deploy_skills_to_agents(
+    skill_names: &[String],
+    agent_ids: &[String],
+    mode: crate::projects::ProjectDeployMode,
+) -> Result<u32> {
+    let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
+    let profiles = cached_profiles();
+    let mut target_dirs = Vec::new();
+    let mut seen_dirs = HashSet::new();
+    let mut invalid = Vec::new();
+
+    for agent_id in agent_ids {
+        let profile = match agent_profile::find_profile(&profiles, agent_id) {
+            Ok(profile) if profile.has_global_skills() => profile,
+            Ok(_) => {
+                invalid.push(format!("{agent_id} (project-only)"));
+                continue;
+            }
+            Err(_) => {
+                invalid.push(agent_id.clone());
+                continue;
+            }
+        };
+        if seen_dirs.insert(profile.global_skills_dir.clone()) {
+            target_dirs.push((profile.id.clone(), profile.global_skills_dir.clone()));
+        }
+    }
+    if !invalid.is_empty() {
+        anyhow::bail!("Unknown agent id(s): {}", invalid.join(", "));
+    }
+    if target_dirs.is_empty() {
+        anyhow::bail!("No target agents selected");
+    }
+
+    let mut deployed = 0u32;
+    let mut failures = Vec::new();
+    for (agent_id, target_dir) in target_dirs {
+        let mut prepared_target_dir = false;
+        for skill_name in skill_names {
+            let source = hub_dir.join(skill_name);
+            if !source.exists() {
+                failures.push(format!(
+                    "{agent_id}/{skill_name}: skill is missing from hub"
+                ));
+                continue;
+            }
+            let target = target_dir.join(skill_name);
+            if skillstar_core::infra::fs_ops::is_link(&target) || target.exists() {
+                // Existing deployments remain intact. This keeps add idempotent
+                // and avoids replacing an unmanaged real directory silently.
+                continue;
+            }
+            if !prepared_target_dir {
+                std::fs::create_dir_all(&target_dir).with_context(|| {
+                    format!(
+                        "Failed to create Agent skills dir '{}'",
+                        target_dir.display()
+                    )
+                })?;
+                prepared_target_dir = true;
+            }
+
+            let result = match mode {
+                crate::projects::ProjectDeployMode::Symlink => {
+                    skillstar_core::infra::fs_ops::create_symlink_or_copy(&source, &target)
+                        .map(|_| ())
+                }
+                crate::projects::ProjectDeployMode::Copy => {
+                    skillstar_core::infra::fs_ops::create_copy_deploy(&source, &target)
+                }
+            };
+            match result {
+                Ok(()) => deployed += 1,
+                Err(err) => failures.push(format!(
+                    "{agent_id}/{skill_name} at {}: {err:#}",
+                    target.display()
+                )),
+            }
+        }
+    }
+
+    if !failures.is_empty() {
+        anyhow::bail!(
+            "Global deploy incomplete: created {deployed} deployment(s), {} failure(s): {}",
+            failures.len(),
+            failures.into_iter().take(6).collect::<Vec<_>>().join("; ")
+        );
+    }
+    Ok(deployed)
+}
+
 /// Create project-level skill symlinks in a project directory.
 ///
 /// This is a thin facade over `crate::projects::add_skills_to_project()` — all
@@ -425,6 +540,20 @@ pub fn create_project_skills(
         &project_path.to_string_lossy(),
         selected_skills,
         agent_types,
+    )
+}
+
+pub fn create_project_skills_with_mode(
+    project_path: &Path,
+    selected_skills: &[String],
+    agent_types: &[String],
+    mode: crate::projects::ProjectDeployMode,
+) -> Result<u32> {
+    crate::projects::add_skills_to_project_with_mode(
+        &project_path.to_string_lossy(),
+        selected_skills,
+        agent_types,
+        mode,
     )
 }
 
@@ -509,6 +638,9 @@ pub fn resync_existing_links(skill_name: &str) -> Result<ResyncReport> {
     let mut report = ResyncReport::default();
 
     for profile in profiles.iter() {
+        if !profile.has_global_skills() {
+            continue;
+        }
         let target = profile.global_skills_dir.join(skill_name);
         let is_link = skillstar_core::infra::fs_ops::is_link(&target);
         let is_managed_copy = !is_link && target.is_dir() && target.join("SKILL.md").exists();
@@ -569,6 +701,23 @@ mod tests {
     }
 
     #[test]
+    fn project_only_agent_is_rejected_by_global_deployment_guard() {
+        let profiles = vec![agent_profile::AgentProfile {
+            id: "eve".to_string(),
+            display_name: "Eve".to_string(),
+            icon: "lobe:eve".to_string(),
+            global_skills_dir: std::path::PathBuf::new(),
+            project_skills_rel: "agent/skills".to_string(),
+            installed: true,
+            enabled: true,
+            synced_count: 0,
+        }];
+
+        let error = require_global_profile(&profiles, "eve").unwrap_err();
+        assert!(error.to_string().contains("does not support global skills"));
+    }
+
+    #[test]
     fn batch_link_skips_missing_skills_without_creating_agent_dir() -> Result<()> {
         let _guard = crate::lock_test_env();
         invalidate_profile_cache();
@@ -604,6 +753,73 @@ mod tests {
         match previous_data_dir {
             Some(value) => set_env("SKILLSTAR_DATA_DIR", value),
             None => remove_env("SKILLSTAR_DATA_DIR"),
+        }
+        #[cfg(windows)]
+        match previous_userprofile {
+            Some(value) => set_env("USERPROFILE", value),
+            None => remove_env("USERPROFILE"),
+        }
+        invalidate_profile_cache();
+
+        result
+    }
+
+    #[test]
+    fn batch_global_deploy_honors_explicit_copy_mode() -> Result<()> {
+        let _guard = crate::lock_test_env();
+        invalidate_profile_cache();
+
+        let tmp = tempfile::tempdir()?;
+        let home = tmp.path().join("home");
+        fs::create_dir_all(&home)?;
+
+        let previous_home = std::env::var_os("HOME");
+        let previous_data_dir = std::env::var_os("SKILLSTAR_DATA_DIR");
+        // The codex profile resolves its skills dir from CODEX_HOME first, so a
+        // CODEX_HOME leaking in from the ambient environment would redirect the
+        // deploy away from `home/.codex`. Sandbox it like HOME.
+        let previous_codex_home = std::env::var_os("CODEX_HOME");
+        set_env("HOME", &home);
+        set_env("SKILLSTAR_DATA_DIR", home.join(".skillstar"));
+        remove_env("CODEX_HOME");
+        #[cfg(windows)]
+        let previous_userprofile = std::env::var_os("USERPROFILE");
+        #[cfg(windows)]
+        set_env("USERPROFILE", &home);
+
+        let result = (|| -> Result<()> {
+            invalidate_profile_cache();
+            let hub_skill = skillstar_core::infra::paths::hub_skills_dir().join("demo-skill");
+            fs::create_dir_all(&hub_skill)?;
+            fs::write(hub_skill.join("SKILL.md"), "# original\n")?;
+
+            let deployed = batch_deploy_skills_to_agents(
+                &["demo-skill".to_string()],
+                &["codex".to_string()],
+                crate::projects::ProjectDeployMode::Copy,
+            )?;
+            assert_eq!(deployed, 1);
+
+            let target = home.join(".codex/skills/demo-skill");
+            assert!(target.join("SKILL.md").is_file());
+            assert!(!skillstar_core::infra::fs_ops::is_link(&target));
+
+            fs::write(hub_skill.join("SKILL.md"), "# changed\n")?;
+            assert_eq!(fs::read_to_string(target.join("SKILL.md"))?, "# original\n");
+            Ok(())
+        })();
+
+        match previous_home {
+            Some(value) => set_env("HOME", value),
+            None => remove_env("HOME"),
+        }
+        match previous_data_dir {
+            Some(value) => set_env("SKILLSTAR_DATA_DIR", value),
+            None => remove_env("SKILLSTAR_DATA_DIR"),
+        }
+        match previous_codex_home {
+            Some(value) => set_env("CODEX_HOME", value),
+            None => remove_env("CODEX_HOME"),
         }
         #[cfg(windows)]
         match previous_userprofile {

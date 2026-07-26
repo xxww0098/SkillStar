@@ -317,6 +317,7 @@ pub fn install_pack(repo_dir: &Path, source: &str, repo_url: &str) -> Result<Vec
         lf.upsert(crate::lockfile::LockEntry {
             name: skill.name.clone(),
             git_url: repo_url.to_string(),
+            git_ref: None,
             tree_hash: tree_hash.clone(),
             installed_at: chrono::Utc::now().to_rfc3339(),
             source_folder,

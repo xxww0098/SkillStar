@@ -100,15 +100,15 @@
   <text x="362" y="524" text-anchor="middle" font-size="12" fill="#a1a1aa">拦截恶意技能注入</text>
   <text x="362" y="542" text-anchor="middle" font-size="11" fill="#f87171" font-weight="600">三模防火墙</text>
 
-  <!-- F3: AI Translation -->
+  <!-- F3: ACP Local Tutorial -->
   <rect x="465" y="395" width="175" height="155" rx="10" fill="#27272a" stroke="#3f3f46" stroke-width="1"/>
-  <text x="552" y="425" text-anchor="middle" font-size="24">🌐</text>
-  <text x="552" y="450" text-anchor="middle" font-size="14" font-weight="700" fill="#e4e4e7">SKILL.md 翻译阅读</text>
-  <text x="552" y="470" text-anchor="middle" font-size="12" fill="#a1a1aa">外文技能看不懂？</text>
-  <text x="552" y="488" text-anchor="middle" font-size="12" fill="#a1a1aa">AI 流式边译边读</text>
-  <text x="552" y="506" text-anchor="middle" font-size="12" fill="#a1a1aa">双引擎翻译加速</text>
-  <text x="552" y="524" text-anchor="middle" font-size="12" fill="#a1a1aa">SQLite 离线缓存复用</text>
-  <text x="552" y="542" text-anchor="middle" font-size="11" fill="#2dd4bf" font-weight="600">打破语言壁垒</text>
+  <text x="552" y="425" text-anchor="middle" font-size="24">📖</text>
+  <text x="552" y="450" text-anchor="middle" font-size="14" font-weight="700" fill="#e4e4e7">ACP 图文教程</text>
+  <text x="552" y="470" text-anchor="middle" font-size="12" fill="#a1a1aa">递归分析完整 Skill</text>
+  <text x="552" y="488" text-anchor="middle" font-size="12" fill="#a1a1aa">三种提示词风格</text>
+  <text x="552" y="506" text-anchor="middle" font-size="12" fill="#a1a1aa">本地 tutorial.html</text>
+  <text x="552" y="524" text-anchor="middle" font-size="12" fill="#a1a1aa">Hash 过期提醒</text>
+  <text x="552" y="542" text-anchor="middle" font-size="11" fill="#2dd4bf" font-weight="600">离线持久复用</text>
 
   <!-- F4: Smart Pick -->
   <rect x="655" y="395" width="175" height="155" rx="10" fill="#27272a" stroke="#3f3f46" stroke-width="1"/>
@@ -171,7 +171,7 @@
   <path d="M 365 790 L 400 790" stroke="#4ade80" stroke-width="1.5" fill="none" stroke-dasharray="4 3" marker-end="url(#arr-g)"/>
   <path d="M 680 790 L 715 790" stroke="#818cf8" stroke-width="1.5" fill="none" stroke-dasharray="4 3" marker-end="url(#arr)"/>
 
-  <!-- ========== Agents Panel with Icons ========== -->
+  <!-- ========== Agents Panel ========== -->
   <rect x="715" y="695" width="280" height="250" rx="10" fill="#27272a" stroke="#3f3f46" stroke-width="1"/>
   <text x="735" y="724" font-size="16" font-weight="700" fill="#c084fc">🤖 管理的 Agent 终端</text>
   <line x1="725" y1="735" x2="985" y2="735" stroke="#3f3f46" stroke-width="1"/>
@@ -179,41 +179,32 @@
 
   <!-- Row 1: Gemini / Claude Code / Codex -->
   <rect x="735" y="768" width="80" height="34" rx="6" fill="#1e1b4b" stroke="#6366f1" stroke-width="0.8"/>
-  <image href="../agents/gemini.svg" x="740" y="772" width="16" height="16"/>
   <text x="777" y="791" text-anchor="middle" font-size="10" fill="#a5b4fc">Gemini</text>
 
   <rect x="822" y="768" width="80" height="34" rx="6" fill="#1e1b4b" stroke="#6366f1" stroke-width="0.8"/>
-  <image href="../agents/claude.svg" x="827" y="772" width="16" height="16"/>
   <text x="871" y="791" text-anchor="middle" font-size="8" fill="#a5b4fc">Claude Code</text>
 
   <rect x="909" y="768" width="72" height="34" rx="6" fill="#1e1b4b" stroke="#6366f1" stroke-width="0.8"/>
-  <image href="../agents/codex.svg" x="914" y="772" width="16" height="16"/>
   <text x="947" y="791" text-anchor="middle" font-size="10" fill="#a5b4fc">Codex</text>
 
   <!-- Row 2: Antigravity / OpenCode / OpenClaw -->
   <rect x="735" y="810" width="80" height="34" rx="6" fill="#1e1b4b" stroke="#6366f1" stroke-width="0.8"/>
-  <image href="../agents/antigravity.svg" x="740" y="814" width="16" height="16"/>
   <text x="777" y="833" text-anchor="middle" font-size="9" fill="#a5b4fc">Antigravity</text>
 
   <rect x="822" y="810" width="80" height="34" rx="6" fill="#1e1b4b" stroke="#6366f1" stroke-width="0.8"/>
-  <image href="../agents/opencode.svg" x="827" y="814" width="16" height="16"/>
   <text x="864" y="833" text-anchor="middle" font-size="10" fill="#a5b4fc">OpenCode</text>
 
   <rect x="909" y="810" width="72" height="34" rx="6" fill="#1e1b4b" stroke="#6366f1" stroke-width="0.8"/>
-  <image href="../agents/openclaw.svg" x="914" y="814" width="16" height="16"/>
   <text x="947" y="833" text-anchor="middle" font-size="10" fill="#a5b4fc">OpenClaw</text>
 
   <!-- Row 3: Cursor / Qoder / Trae -->
   <rect x="735" y="852" width="80" height="34" rx="6" fill="#1e1b4b" stroke="#6366f1" stroke-width="0.8"/>
-  <image href="../agents/cursor.svg" x="740" y="856" width="16" height="16"/>
   <text x="777" y="875" text-anchor="middle" font-size="10" fill="#a5b4fc">Cursor</text>
 
   <rect x="822" y="852" width="80" height="34" rx="6" fill="#1e1b4b" stroke="#6366f1" stroke-width="0.8"/>
-  <image href="../agents/qoder-color.svg" x="827" y="856" width="16" height="16"/>
   <text x="864" y="875" text-anchor="middle" font-size="10" fill="#a5b4fc">Qoder</text>
 
   <rect x="909" y="852" width="72" height="34" rx="6" fill="#1e1b4b" stroke="#6366f1" stroke-width="0.8"/>
-  <image href="../agents/trae-color.svg" x="914" y="856" width="16" height="16"/>
   <text x="947" y="875" text-anchor="middle" font-size="10" fill="#a5b4fc">Trae</text>
 
   <!-- Custom Agent - highlighted -->

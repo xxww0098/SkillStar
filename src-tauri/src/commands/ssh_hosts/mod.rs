@@ -306,11 +306,9 @@ Host vps-yy
 
         assert_eq!(result.skills.len(), 2, "vps-yy mock must report 2 skills");
         assert_eq!(result.needs_migration_count, 1);
-        assert!(
-            result.skills.iter().any(|s| {
-                s.name == "hub-skill" && s.layout == skillstar_sync::ssh::RemoteSkillLayout::HubManaged
-            })
-        );
+        assert!(result.skills.iter().any(|s| {
+            s.name == "hub-skill" && s.layout == skillstar_sync::ssh::RemoteSkillLayout::HubManaged
+        }));
 
         let events = events.lock().unwrap();
         let transcript = format_event_transcript(&events);

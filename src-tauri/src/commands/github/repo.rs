@@ -2,12 +2,12 @@
 //! new-skill detection commands. Thin forwarders over `skillstar_skills::git`
 //! and `crate::core::repo_scanner`.
 
-use skillstar_skills::local_skill;
-use crate::core::lockfile;
-use skillstar_skills::repo_scanner;
 use skillstar_core::infra::error::AppError;
-use skillstar_core::infra::fs_ops;
+use skillstar_skills::deployment;
 use skillstar_skills::git::{dismissed_skills, gh_manager, repo_history};
+use skillstar_skills::local_skill;
+use skillstar_skills::lockfile;
+use skillstar_skills::repo_scanner;
 use tracing::error;
 
 #[tauri::command]
@@ -27,7 +27,7 @@ pub async fn check_git_status() -> Result<gh_manager::GitStatus, AppError> {
 
 #[tauri::command]
 pub async fn check_developer_mode() -> Result<bool, AppError> {
-    Ok(tokio::task::spawn_blocking(fs_ops::check_developer_mode).await?)
+    Ok(tokio::task::spawn_blocking(deployment::developer_mode_available).await?)
 }
 
 #[tauri::command]

@@ -17,8 +17,8 @@ export interface AppAiCardProps {
 }
 
 /**
- * Compact in-app AI consumer card — the in-app AI (summarize / translate /
- * skill pick) is just another consumer of a provider, so it lives in the
+ * Compact in-app AI consumer card — the in-app AI (summarize / skill pick) is
+ * just another consumer of a provider, so it lives in the
  * agent grid. Replaces the old AppAiProviderInline that sat inside a single
  * provider's drawer. When Settings has local Ollama active this card defers.
  */

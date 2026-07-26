@@ -1,0 +1,117 @@
+# 架构决策记录
+
+状态：active
+
+这里只记录长期有效、影响多个改动的选择。当前结构以 [boundaries.md](./boundaries.md) 为准；实现行为以对应功能文档和代码为准。
+
+## D-001：GUI 与 CLI 共享一个二进制和域实现
+
+- 日期：2026-07-10
+- 状态：accepted
+- 背景：独立 CLI package 会复制入口、依赖和跨域流程。
+- 决策：可执行文件只由 `src-tauri` package 产出；启动时识别 CLI/GUI 模式。CLI 和 Tauri command 调用同一域 facade 或 `skillstar-app` use case。
+- 后果：`skillstar-app` 保持 library-only；不得重新添加第二个 `skillstar` binary。
+- 证据：`src-tauri/src/main.rs`、`crates/skillstar-app/src/cli/`，提交 `77ed14c`。
+
+## D-002：module-first，满足晋升条件后才拆 crate
+
+- 日期：2026-07-10
+- 状态：accepted
+- 背景：“一个前端 feature 一个 crate”造成浅模块、编译扇出和双向依赖压力。
+- 决策：新能力先进入最内聚的现有 crate，以私有 module + 窄 facade 暴露。只有独立变更节奏、依赖集合或 deletion test 证明收益时才建立新 crate。
+- 后果：前端切片与 Rust crate 不要求一一对应；crate 数不是架构质量目标。
+- 证据：Workspace Wave 1/2 迁移，提交 `77ed14c`、`871d0c6`、`3ea5f24`。
+
+## D-003：命令层保持薄，跨域编排归 `skillstar-app`
+
+- 日期：2026-07-10
+- 状态：accepted
+- 背景：把 use case 放在 `src-tauri/src/commands/` 会让 CLI 无法复用，也容易制造 `usage → models` 等反向依赖。
+- 决策：command 只做框架适配；单域逻辑归域 crate；多域事务归 `skillstar-app`。
+- 后果：新增 Tauri command 不代表新增业务实现；代码审查应检查 helper 和事务是否下沉到正确层。
+- 证据：`crates/skillstar-app/src/usage_switch*`、`src-tauri/src/commands/usage_commands.rs`。
+
+## D-004：Provider 元数据使用零依赖叶子
+
+- 日期：2026-07-10
+- 状态：accepted
+- 背景：Models preset 与 Usage catalog 都需要 Provider identity/鉴权事实，但二者不能相互依赖。
+- 决策：`skillstar-providers` 只保存 canonical identity、鉴权和余额端点元数据；Models 与 Usage 分别从它派生自己的产品注册表，并用测试锁定映射。
+- 后果：添加 Provider 先修改 identity；不得在命令层或前端复制鉴权规则。
+- 证据：`crates/skillstar-providers/src/`、Models/Usage guard tests。
+
+## D-005：技能部署采用 link-first、copy fallback
+
+- 日期：2026-06-10
+- 状态：accepted
+- 背景：symlink 能保持项目干净和自动跟随更新，但 Windows 权限或文件系统可能不允许。
+- 决策：部署按 symlink → junction → copy 的能力阶梯执行；reconcile 和更新必须认识实际部署类型。
+- 后果：文档和 UI 不能宣称“纯 symlink”；copy 需要 stale hash 刷新，失败不能破坏现有部署。
+- 证据：`crates/skillstar-skills/src/deployment/`、提交 `7fde474`。
+
+## D-006：文档按变化速率分层，并保持单一入口
+
+- 日期：2026-07-14
+- 状态：accepted
+- 背景：AGENTS、CLAUDE、README、backend 和计划文档重复维护项目树与规则，且 `docs/` 曾被整体忽略。
+- 决策：`AGENTS.md` 是唯一 Agent 规则入口，`CLAUDE.md` 仅委托；项目树归 `boundaries.md`，运行蓝图归 `architecture.md`，功能行为归 `docs/features/`，历史归 `docs/others/`。
+- 后果：同一事实只在一个主文档维护；文档目录必须进入 Git；移动文档时同步修复索引与链接。
+- 证据：2026-07-14 `/xxww-docs refactor` 审计与确认的迁移表。
+
+## D-007：Skill 安装采用 universal project surface 与 Agent path ownership
+
+- 日期：2026-07-14
+- 状态：accepted
+- 背景：逐 Agent 强制唯一项目路径会复制同一 Skill，也与 open agent skills 生态的 `.agents/skills` 共享约定不兼容；CLI 的 `--all`、通配、scope 与 copy 语义也不能只停留在参数外形。
+- 决策：对兼容 Agent 使用共享 `.agents/skills` project surface；专属路径只保留给上游明确要求的 Agent。项目扫描按路径产生唯一或 ambiguous 结果，manifest 为共享路径选择单一 owner，部署/清理按路径去重。CLI `install/add` 对齐 `npx skills add` 的来源、通配、`--all`、scope 与 symlink/copy 语义；隐式目标改由 D-009 的手动激活状态提供。
+- 后果：多个 Agent profile 可以映射到同一路径；任何 sync、scan、rebuild、remove 实现都不能假设 `project_skills_rel` 唯一。Global 与 Project 都从 SkillStar hub 部署，但写入各自真实目标并保留 SkillStar 的 lock/manifest 数据。
+- 证据：`crates/skillstar-skills/src/agents/`、`crates/skillstar-skills/src/projects/`、`crates/skillstar-app/src/cli/` 及对应测试；上游设计参考 `vercel-labs/skills` 的 `add`、`agents`、`installer`。
+
+## D-008：内置 Agent 以 vercel-labs 注册表为兼容基线，品牌图标统一投影
+
+- 日期：2026-07-14
+- 状态：accepted
+- 背景：逐个手工接入 Agent 会让路径、能力和图标清单各自漂移；部分上游 Agent 只有项目级目录，不能伪造全局目标。
+- 决策：`skillstar-skills` 的内置注册表同步 `vercel-labs/skills/src/agents.ts` 的 Agent 能力，并以测试锁定上游 id 覆盖；SkillStar 既有持久化 id 通过 CLI 兼容别名承接。内置品牌图标只通过 `@lobehub/icons` 的集中适配层渲染，无专属品牌时使用 LobeHub 通用图标。
+- 后果：上游新增/修改 Agent 时必须在同一变更中同步路径、别名、图标映射与文档；项目级 Agent 会被全局操作明确拒绝。前端不维护第二份 SVG 资产目录，8 字段 `AgentProfile` IPC 保持稳定。
+- 证据：`crates/skillstar-skills/src/agents/builtin.rs`、`src/components/ui/icons/agentIcons.ts` 及覆盖测试。
+
+## D-009：本机 Agent 采用纯手动激活，不推断系统安装状态
+
+- 日期：2026-07-14
+- 状态：accepted
+- 背景：binary、桌面应用、配置根和 skills 目录都不是可靠的 Agent 身份证据；尤其多个 Agent 共享 `~/.agents/skills` 时，部署残留会造成误发现、误启用和卡片 rail 泄漏。
+- 决策：删除本机 Agent 安装探测及其注册表元数据。所有 profile 默认关闭，Settings 持久化开关是本机 Agent 激活的唯一来源；CLI 隐式目标与所有本机 rail 都只消费该状态。冻结 `AgentProfile.installed` 在兼容期镜像 `enabled`，不再承载安装事实。
+- 后果：SkillStar 不会替用户判断 Agent 是否存在；用户可提前启用目标，实际部署或同步失败在动作边界显式返回。共享目录不再影响 profile 可见性，新增 Agent 也无需维护探测规则。
+- 证据：`crates/skillstar-skills/src/agents/`、`src/lib/agentProfiles.ts`、Settings 与 rail 回归测试。
+
+## D-010：Skill 教程使用 ACP 全目录快照与版本化 HTML artifact
+
+- 日期：2026-07-14
+- 状态：accepted
+- 背景：只翻译 `SKILL.md` 无法解释 scripts、references、assets 等完整 Skill 行为，provider 翻译缓存也不能表达“教程是否仍对应当前目录版本”。模型输出 HTML 又不能直接进入应用 DOM。
+- 决策：移除 SKILL.md 翻译功能。教程生成以 `skillstar-skills::content` 的完整递归快照和确定性内容 hash 为输入，通过用户显式配置的 ACP Agent 分析；后端只接受自包含、无脚本、覆盖全部文件清单的 HTML，并与 hash、教程风格、完整 prompt bundle hash/schema 版本 metadata 一起原子持久化。风格来自 Settings 中的受控注册表，每种风格使用独立 prompt 片段；前端用 sandbox iframe 展示。
+- 后果：教程能覆盖整个 Skill 并跨重启复用；任何内容、规范化界面语言、所选风格或生成契约变化都会产生 stale 提醒，刷新失败仍保留旧版。生成成本和时延高于翻译，编辑器必须先保存，ACP 未启用时不能生成新教程。
+- 证据：`crates/skillstar-skills/src/{content,tutorial}.rs`、`src-tauri/src/core/skill_tutorial.rs`、`src-tauri/prompts/acp/skill_tutorial.md`、Skill 教程面板回归测试。
+
+## D-011：删除设备指纹功能，Usage 请求回归统一代理 client
+
+- 日期：2026-07-23
+- 状态：accepted
+- 背景：设备指纹（TLS/HTTP2 伪装、浏览器 preset、IDE telemetry 投影、订阅级 fingerprint 绑定）横跨 usage crate、Tauri 命令、Settings 与订阅编辑四层，并通过 `impersonate` feature 引入 `wreq`/`wreq-util` 两个 rc 版依赖。它伪装的是客户端身份而非解决额度抓取本身的问题，收益不足以支撑这条贯穿全栈的接缝。
+- 决策：整体删除 `skillstar-usage::fingerprint`、`src-tauri/src/commands/fingerprints.rs`、`src/features/usage/fingerprints/` 及 `Subscription.fingerprint_id`。原 `fingerprint::request` 的请求构建器保留为 `skillstar-usage::request`（去掉 wreq 分支），所有 fetcher 统一走 `http_client::usage_http_client()`。`impersonate` feature 与 wreq 依赖一并移除，`check_workspace_deps.sh` 中相关守卫同步删除。
+- 后果：额度抓取以 reqwest 默认 ClientHello 出网，若某 provider 将来按 TLS 指纹拦截，需要另行决策而不是恢复本模块；`~/.skillstar/config/fingerprints.json` 成为孤儿文件，不再读写，也不做迁移删除。构建图少两个 rc 依赖，Usage 的请求路径只剩一条。
+- 证据：`crates/skillstar-usage/src/request.rs`、`crates/skillstar-usage/src/http_client.rs`、`scripts/internal/check_workspace_deps.sh`。
+
+## 新增记录格式
+
+```text
+## D-NNN：标题
+
+- 日期：YYYY-MM-DD
+- 状态：proposed | accepted | superseded
+- 背景：为什么必须做选择
+- 决策：选择了什么
+- 后果：获得什么、承担什么
+- 证据：代码、测试、issue 或提交
+```

@@ -203,9 +203,7 @@ fn resolve_from_flat_store_fails_when_api_key_missing() {
 #[test]
 fn resolve_from_legacy_store_reads_claude_model_variants() {
     with_temp_data_root(|_dir| {
-        use crate::providers::{
-            AppProviders, ProviderEntry, ProvidersStore, write_store,
-        };
+        use crate::providers::{AppProviders, ProviderEntry, ProvidersStore, write_store};
         use std::collections::HashMap;
 
         let settings_config = serde_json::json!({

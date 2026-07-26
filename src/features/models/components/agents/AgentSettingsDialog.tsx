@@ -1,6 +1,7 @@
-import { ExternalLink, RefreshCw, Terminal, Unplug } from "lucide-react";
+import { Cable, ExternalLink, FileCode2, RefreshCw, SlidersHorizontal, Terminal, Unplug } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { Button } from "../../../../components/ui/button";
 import { ExternalAnchor } from "../../../../components/ui/ExternalAnchor";
 import { ModalHeader, ModalShell } from "../../../../components/ui/ModalShell";
@@ -22,8 +23,9 @@ import {
   providerCodexWireApi,
 } from "../../lib/providerPatch";
 import { formatSyncTime } from "../../lib/modelFormat";
-import type { SaveAttemptResult } from "../../types";
+import type { ProviderEditorTab, SaveAttemptResult } from "../../types";
 import { ConflictWarnings } from "../diagnostics/ConflictWarnings";
+import { ModelFormField, ModelFormSection } from "../providerForm/ProviderConfigPrimitives";
 import { AgentToolIcon } from "../shared/AgentToolIcon";
 import { ModelSelectPopover } from "../shared/ModelSelectPopover";
 import { ProviderSelectPopover } from "../shared/ProviderSelectPopover";
@@ -40,7 +42,7 @@ export interface AgentSettingsDialogProps {
   onClose: () => void;
   onAddProvider: () => void;
   /** Open the provider editor drawer (e.g. to manage the model list). */
-  onOpenProviderDrawer: (providerId: string) => void;
+  onOpenProviderDrawer: (providerId: string, initialTab?: ProviderEditorTab) => void;
 }
 
 interface AgentParamValues extends ClaudeModelMappingValues {
@@ -48,8 +50,9 @@ interface AgentParamValues extends ClaudeModelMappingValues {
   codexAuthMode: CodexAuthMode;
 }
 
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{children}</h3>;
+interface AgentParamDraft {
+  providerId: string;
+  values: AgentParamValues;
 }
 
 /**
@@ -68,9 +71,11 @@ export function AgentSettingsDialog({
   const act = useAgentActivation(toolId);
   const metaPatch = useProviderMetaPatch();
   const provider = act.boundProvider;
+  const [configDirty, setConfigDirty] = useState(false);
 
-  // Agent-conditional params, seeded from the bound provider.
-  const [params, setParams] = useState<AgentParamValues | null>(null);
+  // Bind the draft to a provider id so switching providers can never write the
+  // previous provider's Claude/Codex parameters into the new one.
+  const [draft, setDraft] = useState<AgentParamDraft | null>(null);
   const persisted: AgentParamValues | null = useMemo(() => {
     if (!provider) return null;
     return {
@@ -83,6 +88,7 @@ export function AgentSettingsDialog({
     };
   }, [provider]);
 
+  const params = draft && draft.providerId === provider?.id ? draft.values : null;
   const values = params ?? persisted;
   const dirty = useMemo(() => {
     if (!params || !persisted) return false;
@@ -114,14 +120,20 @@ export function AgentSettingsDialog({
     }
   }, [provider, params, metaPatch, toolId, act]);
 
-  const { state: saveState, flush } = useAutosave({ dirty, save: saveParams });
+  const { state: saveState, flush } = useAutosave({ dirty, save: saveParams, changeToken: params });
 
   const setParam = useCallback(
     <K extends keyof AgentParamValues>(key: K, value: AgentParamValues[K]) => {
-      if (!persisted) return;
-      setParams((prev) => ({ ...(prev ?? persisted), [key]: value }));
+      if (!persisted || !provider) return;
+      setDraft((previous) => ({
+        providerId: provider.id,
+        values: {
+          ...(previous?.providerId === provider.id ? previous.values : persisted),
+          [key]: value,
+        },
+      }));
     },
-    [persisted],
+    [persisted, provider],
   );
 
   const status = computeAgentStatus({
@@ -143,10 +155,33 @@ export function AgentSettingsDialog({
     ? formatSyncTime(new Date(act.activeEntry.last_sync_at * 1000).toISOString(), t)
     : null;
 
-  const requestClose = useCallback(() => {
-    void flush();
-    onClose();
-  }, [flush, onClose]);
+  const flushThen = useCallback(
+    async (action: () => void | Promise<void>) => {
+      if (configDirty) {
+        toast.warning(t("models.configFiles.saveBeforeClose"));
+        return false;
+      }
+      const result = await flush();
+      if (result === "validation" || result === "error") return false;
+      await action();
+      return true;
+    },
+    [configDirty, flush, t],
+  );
+
+  const requestClose = useCallback(async () => {
+    await flushThen(onClose);
+  }, [flushThen, onClose]);
+
+  const handleProviderPick = useCallback(
+    async (providerId: string) => {
+      await flushThen(async () => {
+        setDraft(null);
+        await act.activate(providerId);
+      });
+    },
+    [act, flushThen],
+  );
 
   const claudeMappingOptions = useMemo(
     () =>
@@ -163,10 +198,11 @@ export function AgentSettingsDialog({
   return (
     <ModalShell
       open={open}
-      onClose={requestClose}
+      onClose={() => void requestClose()}
       ariaLabel={t("models.dialog.title", { name: act.agent.displayName })}
       panelClassName="max-w-[640px]"
       surfaceClassName="flex max-h-[85vh] flex-col"
+      dismissable={!configDirty}
     >
       <ModalHeader
         icon={<AgentToolIcon toolId={act.agent.iconId} size="sm" />}
@@ -174,13 +210,15 @@ export function AgentSettingsDialog({
           <span className="flex items-center gap-2">
             {t("models.dialog.title", { name: act.agent.displayName })}
             <AgentStatusPill status={status} />
-            {dirty || saveState !== "idle" ? <SaveBadge state={saveState} /> : null}
+            {configDirty || dirty || saveState !== "idle" ? (
+              <SaveBadge state={configDirty ? "dirty" : saveState} />
+            ) : null}
           </span>
         }
-        onClose={requestClose}
+        onClose={() => void requestClose()}
       />
 
-      <div className="ss-page-scroll min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-4">
+      <div className="ss-page-scroll min-h-0 flex-1 space-y-3.5 overflow-y-auto px-6 py-4">
         {provider ? <ConflictWarnings providerId={provider.id} toolId={toolId} /> : null}
 
         {!act.install.installed && !act.install.loading ? (
@@ -196,51 +234,64 @@ export function AgentSettingsDialog({
         ) : null}
 
         {/* ── Binding ──────────────────────────────────────────── */}
-        <section className="space-y-2.5">
-          <SectionTitle>{t("models.dialog.connectSection")}</SectionTitle>
-          <div className="space-y-1.5">
-            <span className="text-[11px] font-medium text-muted-foreground">{t("models.card.providerLabel")}</span>
+        <ModelFormSection
+          title={t("models.dialog.connectSection")}
+          description={t("models.dialog.connectSectionHint")}
+          icon={<Cable className="h-4 w-4" />}
+        >
+          <ModelFormField id="agent-provider" label={t("models.card.providerLabel")}>
             <ProviderSelectPopover
+              id="agent-provider"
+              ariaLabel={t("models.card.providerLabel")}
+              density="standard"
               providers={act.compatibleProviders}
               currentId={act.activeEntry?.provider_id}
-              onPick={(id) => void act.activate(id)}
-              onAddProvider={onAddProvider}
+              onPick={(id) => void handleProviderPick(id)}
+              onAddProvider={() => void flushThen(onAddProvider)}
               busy={act.busy}
-              disabled={!act.install.installed}
+              disabled={!act.install.installed || configDirty}
             />
-          </div>
+          </ModelFormField>
           {provider ? (
-            <div className="space-y-1.5">
-              <span className="text-[11px] font-medium text-muted-foreground">{t("models.card.modelLabel")}</span>
+            <ModelFormField id="agent-model" label={t("models.card.modelLabel")}>
               <ModelSelectPopover
+                id="agent-model"
+                ariaLabel={t("models.card.modelLabel")}
+                density="standard"
                 models={availableModels}
                 catalog={modelCatalog}
                 current={act.currentModel}
                 onPick={(m) => void act.pickModel(m)}
-                disabled={act.busy}
+                disabled={act.busy || configDirty}
                 footerAction={{
                   label: t("models.picker.manageModels"),
-                  onClick: () => onOpenProviderDrawer(provider.id),
+                  onClick: () => void flushThen(() => onOpenProviderDrawer(provider.id, "models")),
                 }}
               />
-            </div>
+            </ModelFormField>
           ) : null}
-        </section>
+        </ModelFormSection>
 
         {/* ── Model params (rendered per agent) ───────────────── */}
         {provider && values && toolId === "claude-code" ? (
-          <section className="space-y-2.5 border-t border-border/40 pt-4">
-            <SectionTitle>{t("models.dialog.modelParams")}</SectionTitle>
+          <ModelFormSection
+            title={t("models.dialog.modelParams")}
+            description={t("models.dialog.modelParamsHint")}
+            icon={<SlidersHorizontal className="h-4 w-4" />}
+          >
             <ClaudeModelMapping
               values={values}
               options={claudeMappingOptions}
               onChange={(key, value) => setParam(key, value)}
             />
-          </section>
+          </ModelFormSection>
         ) : null}
         {provider && values && toolId === "codex" ? (
-          <section className="space-y-2.5 border-t border-border/40 pt-4">
-            <SectionTitle>{t("models.dialog.modelParams")}</SectionTitle>
+          <ModelFormSection
+            title={t("models.dialog.modelParams")}
+            description={t("models.dialog.modelParamsHint")}
+            icon={<SlidersHorizontal className="h-4 w-4" />}
+          >
             <CodexSettingsForm
               wireApi={values.codexWireApi}
               authMode={values.codexAuthMode}
@@ -248,29 +299,27 @@ export function AgentSettingsDialog({
               onChangeAuthMode={(v) => setParam("codexAuthMode", v)}
               provider={provider}
             />
-          </section>
+          </ModelFormSection>
         ) : null}
 
         {/* ── Launch command (Claude only) ─────────────────────── */}
         {toolId === "claude-code" && act.currentModel ? (
-          <section className="space-y-2.5 border-t border-border/40 pt-4">
-            <SectionTitle>
-              <span className="inline-flex items-center gap-1.5">
-                <Terminal className="h-3 w-3" />
-                {t("models.dialog.launchCommand")}
-              </span>
-            </SectionTitle>
+          <ModelFormSection title={t("models.dialog.launchCommand")} icon={<Terminal className="h-4 w-4" />}>
             <AgentLaunchCommand model={act.currentModel} />
-          </section>
+          </ModelFormSection>
         ) : null}
 
         {/* ── Disk config ──────────────────────────────────────── */}
-        <section className="space-y-2.5 border-t border-border/40 pt-4">
-          <SectionTitle>{t("models.dialog.diskConfig")}</SectionTitle>
-          <p className="rounded-lg border border-border/40 bg-background/35 px-2.5 py-2 font-mono text-[11px] text-muted-foreground">
-            {act.agent.configPathDisplay}
-          </p>
-          <AgentConfigFiles toolId={toolId} activeProviderId={act.activeEntry?.provider_id ?? null} />
+        <ModelFormSection
+          title={t("models.dialog.diskConfig")}
+          description={act.agent.configPathDisplay}
+          icon={<FileCode2 className="h-4 w-4" />}
+        >
+          <AgentConfigFiles
+            toolId={toolId}
+            activeProviderId={act.activeEntry?.provider_id ?? null}
+            onDirtyChange={setConfigDirty}
+          />
           <div className="flex items-center justify-between text-[11px] text-muted-foreground">
             <span>{t("models.dialog.lastSync", { time: lastSync ?? t("models.dialog.neverSynced") })}</span>
             <Button
@@ -278,14 +327,14 @@ export function AgentSettingsDialog({
               variant="outline"
               size="sm"
               className="h-7 gap-1.5 text-[11px]"
-              onClick={() => void act.resync()}
-              disabled={!act.activeEntry || act.busy}
+              onClick={() => void flushThen(() => act.resync())}
+              disabled={!act.activeEntry || act.busy || configDirty}
             >
               <RefreshCw className={act.busy ? "h-3 w-3 animate-spin" : "h-3 w-3"} />
               {t("models.dialog.rewrite")}
             </Button>
           </div>
-        </section>
+        </ModelFormSection>
       </div>
 
       <footer className="flex shrink-0 items-center justify-between border-t border-border/50 px-6 py-3">
@@ -295,14 +344,23 @@ export function AgentSettingsDialog({
           size="sm"
           className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
           onClick={() => {
-            void act.deactivate();
+            void flushThen(async () => {
+              setDraft(null);
+              await act.deactivate();
+            });
           }}
-          disabled={!act.activeEntry || act.busy}
+          disabled={!act.activeEntry || act.busy || configDirty}
         >
           <Unplug className="h-3.5 w-3.5" />
           {t("models.card.disconnect")}
         </Button>
-        <Button variant="outline" size="sm" onClick={requestClose}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void requestClose()}
+          disabled={configDirty}
+          title={configDirty ? t("models.configFiles.saveBeforeClose") : undefined}
+        >
           {t("models.save.done")}
         </Button>
       </footer>

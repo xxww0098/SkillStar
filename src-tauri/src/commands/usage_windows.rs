@@ -15,7 +15,10 @@
 use std::collections::HashSet;
 
 use skillstar_core::infra::error::AppError;
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Runtime, WebviewUrl, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Emitter, LogicalPosition, Manager, Position, Runtime, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder,
+};
 
 /// Label prefix for usage card windows. The full label is
 /// `usage-card-<sanitized-subscription-id>` so each subscription gets its own
@@ -53,21 +56,25 @@ fn sanitize_label_segment(value: &str) -> String {
 }
 
 fn card_label(subscription_id: &str) -> String {
-    format!("{USAGE_CARD_LABEL_PREFIX}{}", sanitize_label_segment(subscription_id))
+    format!(
+        "{USAGE_CARD_LABEL_PREFIX}{}",
+        sanitize_label_segment(subscription_id)
+    )
 }
 
 /// Open (or focus) a floating card window for `subscription_id`.
 ///
-/// If a window with that label already exists it is just shown + focused;
-/// otherwise a new always-on-top, frameless, transparent window is created
-/// loading `index.html?window=usage-card&id=<subscription_id>`.
+/// If a window with that label already exists it is just shown + focused
+/// (and pulled back on-screen if a previous coordinate bug left it off-display);
+/// otherwise a new always-on-top, frameless window is created loading
+/// `index.html?window=usage-card&id=<subscription_id>`.
 #[tauri::command]
-pub fn open_usage_card_window(
-    app: AppHandle,
-    subscription_id: String,
-) -> Result<(), AppError> {
+pub fn open_usage_card_window(app: AppHandle, subscription_id: String) -> Result<(), AppError> {
     let label = card_label(&subscription_id);
     if let Some(window) = app.get_webview_window(&label) {
+        // Re-clamp if a prior Retina physical/logical mix parked the window
+        // off-screen (users then report the button as "dead").
+        ensure_card_window_on_screen(&app, &window);
         window
             .show()
             .map_err(|e| AppError::Other(format!("显示用量卡片失败：{e}")))?;
@@ -80,11 +87,13 @@ pub fn open_usage_card_window(
         return Ok(());
     }
 
-    let url = WebviewUrl::App(format!(
-        "index.html?window=usage-card&id={}",
-        urlencoding_minimal(&subscription_id),
-    )
-    .into());
+    let url = WebviewUrl::App(
+        format!(
+            "index.html?window=usage-card&id={}",
+            urlencoding_minimal(&subscription_id),
+        )
+        .into(),
+    );
 
     let mut builder = WebviewWindowBuilder::new(&app, &label, url)
         .title("SkillStar 用量卡片")
@@ -97,8 +106,11 @@ pub fn open_usage_card_window(
         .visible(false);
 
     // Position: cascade from top-right based on how many cards are already open.
-    if let Ok(Some(position)) = next_cascade_position(&app) {
-        builder = builder.position(position.x as f64, position.y as f64);
+    // `WebviewWindowBuilder::position` takes **logical** pixels; monitor work
+    // area is physical — convert via scale_factor or Retina/4K parks the card
+    // off-screen (e.g. x≈3460 on a 1920-logical main display).
+    if let Ok(Some((x, y))) = next_cascade_position_logical(&app) {
+        builder = builder.position(x, y);
     }
 
     let window = builder
@@ -113,10 +125,7 @@ pub fn open_usage_card_window(
 
 /// Close a single card window by subscription id. No-op if it isn't open.
 #[tauri::command]
-pub fn close_usage_card_window(
-    app: AppHandle,
-    subscription_id: String,
-) -> Result<(), AppError> {
+pub fn close_usage_card_window(app: AppHandle, subscription_id: String) -> Result<(), AppError> {
     let label = card_label(&subscription_id);
     if let Some(window) = app.get_webview_window(&label) {
         window
@@ -140,7 +149,11 @@ pub fn close_all_usage_card_windows(app: AppHandle) -> Result<(), AppError> {
 /// Broadcast that the active account for `catalog_id` changed (called by
 /// `set_active_subscription` after a successful pin). Open card windows
 /// subscribe to refresh their own `is_active` badge.
-pub fn emit_active_changed<R: Runtime>(app: &AppHandle<R>, catalog_id: &str, subscription_id: &str) {
+pub fn emit_active_changed<R: Runtime>(
+    app: &AppHandle<R>,
+    catalog_id: &str,
+    subscription_id: &str,
+) {
     let payload = serde_json::json!({
         "catalogId": catalog_id,
         "subscriptionId": subscription_id,
@@ -157,21 +170,83 @@ pub fn close_card_for_subscription<R: Runtime>(app: &AppHandle<R>, subscription_
     }
 }
 
-/// Compute the top-right cascade position for the next card window, offset by
-/// the number of currently-visible cards so stacks fan out instead of piling
-/// exactly on top of each other.
-fn next_cascade_position<R: Runtime>(app: &AppHandle<R>) -> Result<Option<PhysicalPosition<i32>>, ()> {
+/// Pure cascade math in **logical** pixels (unit-tested).
+///
+/// Places the card at the top-right of the work area, stepping down-left by
+/// `CARD_OFFSET_STEP` for each already-open card.
+pub(crate) fn cascade_logical_xy(
+    origin_x: f64,
+    origin_y: f64,
+    logical_width: f64,
+    stack_index: i32,
+) -> (f64, f64) {
+    let offset = f64::from(stack_index.max(0)) * f64::from(CARD_OFFSET_STEP);
+    let x = origin_x + logical_width - CARD_WIDTH - f64::from(CARD_DEFAULT_MARGIN) - offset;
+    let y = origin_y + f64::from(CARD_DEFAULT_MARGIN) + offset;
+    (x.max(origin_x), y)
+}
+
+/// Compute the top-right cascade position for the next card window in **logical**
+/// pixels (what `WebviewWindowBuilder::position` expects).
+fn next_cascade_position_logical<R: Runtime>(app: &AppHandle<R>) -> Result<Option<(f64, f64)>, ()> {
     let monitor = app.primary_monitor().map_err(|_| ())?.ok_or(())?;
-    let work_area = monitor.work_area();
+    let scale = monitor.scale_factor();
+    if !(scale.is_finite() && scale > 0.0) {
+        return Err(());
+    }
+    let work_area = monitor.work_area(); // physical
+    let origin_x = f64::from(work_area.position.x) / scale;
+    let origin_y = f64::from(work_area.position.y) / scale;
+    let logical_width = f64::from(work_area.size.width) / scale;
     let stack_index = count_visible_card_windows(app);
-    let offset = stack_index * CARD_OFFSET_STEP;
-    let x = work_area.position.x
-        + i32::try_from(work_area.size.width).unwrap_or(0)
-        - CARD_WIDTH as i32
-        - CARD_DEFAULT_MARGIN
-        - offset;
-    let y = work_area.position.y + CARD_DEFAULT_MARGIN + offset;
-    Ok(Some(PhysicalPosition::new(x.max(work_area.position.x), y)))
+    Ok(Some(cascade_logical_xy(
+        origin_x,
+        origin_y,
+        logical_width,
+        stack_index,
+    )))
+}
+
+/// If `window` is outside the primary work area (common after the pre-fix
+/// physical/logical mix-up), snap it back to the top-right cascade slot.
+fn ensure_card_window_on_screen<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) {
+    let Ok(Some(monitor)) = app.primary_monitor() else {
+        return;
+    };
+    let scale = monitor.scale_factor();
+    if !(scale.is_finite() && scale > 0.0) {
+        return;
+    }
+    let work = monitor.work_area();
+    let Ok(pos) = window.outer_position() else {
+        return;
+    };
+    let Ok(size) = window.outer_size() else {
+        return;
+    };
+
+    // Allow a small margin; treat "mostly outside" as off-screen.
+    let slack = 40i32;
+    let left = work.position.x - slack;
+    let top = work.position.y - slack;
+    let right = work.position.x + i32::try_from(work.size.width).unwrap_or(0) + slack;
+    let bottom = work.position.y + i32::try_from(work.size.height).unwrap_or(0) + slack;
+    let win_right = pos.x.saturating_add(i32::try_from(size.width).unwrap_or(0));
+    let win_bottom = pos
+        .y
+        .saturating_add(i32::try_from(size.height).unwrap_or(0));
+
+    let fully_off = win_right < left || win_bottom < top || pos.x > right || pos.y > bottom;
+    if !fully_off {
+        return;
+    }
+
+    // Place as the first cascade slot (ignore stack — this is a recovery path).
+    let origin_x = f64::from(work.position.x) / scale;
+    let origin_y = f64::from(work.position.y) / scale;
+    let logical_width = f64::from(work.size.width) / scale;
+    let (x, y) = cascade_logical_xy(origin_x, origin_y, logical_width, 0);
+    let _ = window.set_position(Position::Logical(LogicalPosition::new(x, y)));
 }
 
 fn count_visible_card_windows<R: Runtime>(app: &AppHandle<R>) -> i32 {
@@ -241,5 +316,27 @@ mod tests {
     fn urlencoding_encodes_unsafe() {
         assert_eq!(urlencoding_minimal("a b"), "a%20b");
         assert_eq!(urlencoding_minimal("a/b"), "a%2Fb");
+    }
+
+    #[test]
+    fn cascade_logical_places_top_right_of_1920_display() {
+        // Bug repro: physical 3840×2160 @ scale 2 → logical 1920×1080.
+        // Pre-fix code fed physical width into logical position → x≈3460 (off-screen).
+        let (x, y) = cascade_logical_xy(0.0, 0.0, 1920.0, 0);
+        assert!((x - (1920.0 - CARD_WIDTH - f64::from(CARD_DEFAULT_MARGIN))).abs() < 0.01);
+        assert!((y - f64::from(CARD_DEFAULT_MARGIN)).abs() < 0.01);
+        assert!(
+            x < 1920.0,
+            "card origin must stay inside logical width, got {x}"
+        );
+        assert!(x + CARD_WIDTH <= 1920.0 + 0.01);
+    }
+
+    #[test]
+    fn cascade_logical_steps_for_stack() {
+        let (x0, y0) = cascade_logical_xy(0.0, 0.0, 1920.0, 0);
+        let (x1, y1) = cascade_logical_xy(0.0, 0.0, 1920.0, 1);
+        assert!((x0 - x1 - f64::from(CARD_OFFSET_STEP)).abs() < 0.01);
+        assert!((y1 - y0 - f64::from(CARD_OFFSET_STEP)).abs() < 0.01);
     }
 }

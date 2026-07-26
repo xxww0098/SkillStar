@@ -4,12 +4,11 @@
 
 pub mod acp_client;
 pub mod app_shell;
-pub mod lockfile;
-pub mod marketplace;
+pub mod dock_menu;
 pub mod marketplace_snapshot;
 pub mod path_env;
 pub mod patrol;
-pub mod skill;
+pub mod skill_tutorial;
 
 #[cfg(test)]
 pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {

@@ -52,7 +52,7 @@ pub enum Commands {
     /// Install a skill from a Git URL, owner/repo, or local path
     #[command(alias = "add")]
     Install {
-        /// Install to hub only (do not link into current project)
+        /// Install to selected Agent user directories instead of a project
         #[arg(long, short = 'g')]
         global: bool,
         /// Target project path for project-level install (defaults to current dir)
@@ -70,13 +70,13 @@ pub enum Commands {
         /// List skills in the source without installing
         #[arg(long, short = 'l', conflicts_with_all = ["all", "preview"])]
         list: bool,
-        /// Install every skill discovered in the source
+        /// Install every discovered skill to every supported Agent without prompts
         #[arg(long, conflicts_with_all = ["skill", "name"])]
         all: bool,
-        /// Skip interactive prompts (auto-detect agents, take defaults)
+        /// Skip prompts (all skills; Settings-enabled Agents; Project scope)
         #[arg(long, short = 'y')]
         yes: bool,
-        /// Prefer copy deployment over symlink for project links
+        /// Copy files instead of linking for project or global Agent targets
         #[arg(long)]
         copy: bool,
         /// Preview/dry-run: show what would be installed without mutating hub, lockfile, or project links
@@ -262,9 +262,25 @@ mod mode_tests {
     #[test]
     fn known_cli_subcommands_are_detected() {
         for arg in [
-            "list", "find", "search", "install", "add", "update", "remove", "rm",
-            "uninstall", "init", "create", "publish", "doctor", "pack", "help",
-            "-h", "--help", "-V", "--version",
+            "list",
+            "find",
+            "search",
+            "install",
+            "add",
+            "update",
+            "remove",
+            "rm",
+            "uninstall",
+            "init",
+            "create",
+            "publish",
+            "doctor",
+            "pack",
+            "help",
+            "-h",
+            "--help",
+            "-V",
+            "--version",
         ] {
             assert!(is_cli_subcommand(arg), "{arg} should be CLI");
             assert!(!is_gui_force_arg(arg));
@@ -344,7 +360,6 @@ fn is_bundle_file(path: &std::path::Path) -> bool {
         Some("ags") | Some("agd")
     )
 }
-
 
 /// Build CLI handlers that run entirely in skillstar-app (no Tauri).
 pub fn default_handlers() -> CliHandlers {

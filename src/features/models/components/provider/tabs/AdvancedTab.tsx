@@ -1,9 +1,15 @@
+import { Gauge, StickyNote } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Input } from "../../../../../components/ui/input";
 import { Switch } from "../../../../../components/ui/switch";
-import { cn } from "../../../../../lib/utils";
 import type { ProviderForm } from "../../../hooks/useProviderForm";
-import { fieldLabelClass } from "../../providerForm/ProviderConfigPrimitives";
+import {
+  ModelFormField,
+  ModelFormSection,
+  modelControlSurfaceClass,
+  modelInputClass,
+  modelTextareaClass,
+} from "../../providerForm/ProviderConfigPrimitives";
 
 /** 高级页签：运行参数、备注。Agent 专属参数在各 Agent 的接入设置对话框里。 */
 export function AdvancedTab({ form }: { form: ProviderForm }) {
@@ -11,65 +17,102 @@ export function AdvancedTab({ form }: { form: ProviderForm }) {
   const { t } = useTranslation();
 
   return (
-    <div className="grid gap-5">
-      <section className="grid gap-3">
-        <h3 className="text-sm font-semibold text-foreground">{t("models.advancedTab.runtimeParams")}</h3>
+    <div className="grid gap-3.5">
+      <ModelFormSection
+        title={t("models.advancedTab.runtimeParams")}
+        description={t("models.advancedTab.runtimeParamsHint")}
+        icon={<Gauge className="h-4 w-4" />}
+      >
         <div className="grid gap-3 sm:grid-cols-2">
-          <label className="space-y-1">
-            <span className={fieldLabelClass}>{t("models.advancedTab.context")}</span>
+          <ModelFormField
+            id="provider-context-length"
+            label={t("models.advancedTab.context")}
+            info={t("models.advancedTab.contextHint")}
+          >
             <Input
+              id="provider-context-length"
               type="number"
               value={values.contextLength}
               onChange={(e) => setField("contextLength", Number(e.target.value))}
               min={1024}
+              className={modelInputClass}
             />
-          </label>
-          <label className="space-y-1">
-            <span className={fieldLabelClass}>{t("models.advancedTab.maxTokens")}</span>
+          </ModelFormField>
+          <ModelFormField
+            id="provider-max-tokens"
+            label={t("models.advancedTab.maxTokens")}
+            info={t("models.advancedTab.maxTokensHint")}
+          >
             <Input
+              id="provider-max-tokens"
               type="number"
               value={values.maxTokens}
               onChange={(e) => setField("maxTokens", Number(e.target.value))}
               min={1}
+              className={modelInputClass}
             />
-          </label>
-          <label className="space-y-1">
-            <span className={fieldLabelClass}>{t("models.advancedTab.timeout")}</span>
+          </ModelFormField>
+          <ModelFormField
+            id="provider-timeout"
+            label={t("models.advancedTab.timeout")}
+            info={t("models.advancedTab.timeoutHint")}
+          >
             <Input
+              id="provider-timeout"
               type="number"
               value={values.timeout}
               onChange={(e) => setField("timeout", Number(e.target.value))}
               min={1}
+              className={modelInputClass}
             />
-          </label>
-          <label className="space-y-1">
-            <span className={fieldLabelClass}>{t("models.advancedTab.retry")}</span>
+          </ModelFormField>
+          <ModelFormField
+            id="provider-retry-count"
+            label={t("models.advancedTab.retry")}
+            info={t("models.advancedTab.retryHint")}
+          >
             <Input
+              id="provider-retry-count"
               type="number"
               value={values.retryCount}
               onChange={(e) => setField("retryCount", Number(e.target.value))}
               min={0}
+              className={modelInputClass}
             />
-          </label>
+          </ModelFormField>
         </div>
-        <div className="flex items-center justify-between rounded-lg border border-border/45 bg-background/35 px-3 py-2">
-          <span className="text-xs font-medium text-foreground">{t("models.advancedTab.streaming")}</span>
-          <Switch checked={values.streaming} onCheckedChange={(v) => setField("streaming", v)} />
-        </div>
-      </section>
+        <ModelFormField
+          id="provider-streaming"
+          label={t("models.advancedTab.streaming")}
+          info={t("models.advancedTab.streamingHint")}
+        >
+          <div
+            className={`${modelControlSurfaceClass} flex min-h-10 items-center justify-between rounded-[10px] px-3 py-2`}
+          >
+            <span className="text-[11px] text-muted-foreground">
+              {values.streaming ? t("models.advancedTab.streamingOn") : t("models.advancedTab.streamingOff")}
+            </span>
+            <Switch
+              id="provider-streaming"
+              checked={values.streaming}
+              onCheckedChange={(v) => setField("streaming", v)}
+              aria-label={t("models.advancedTab.streaming")}
+            />
+          </div>
+        </ModelFormField>
+      </ModelFormSection>
 
-      <section className="grid gap-1 border-t border-border/40 pt-4">
-        <span className={fieldLabelClass}>{t("models.advancedTab.notes")}</span>
-        <textarea
-          value={values.notes}
-          onChange={(e) => setField("notes", e.target.value)}
-          rows={3}
-          className={cn(
-            "flex min-h-9 w-full resize-none rounded-xl border border-input-border bg-input px-3 py-2 text-sm",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-          )}
-        />
-      </section>
+      <ModelFormSection title={t("models.advancedTab.notes")} icon={<StickyNote className="h-4 w-4" />}>
+        <ModelFormField id="provider-notes" label={t("models.advancedTab.notes")}>
+          <textarea
+            id="provider-notes"
+            value={values.notes}
+            onChange={(e) => setField("notes", e.target.value)}
+            rows={4}
+            className={modelTextareaClass}
+          />
+        </ModelFormField>
+      </ModelFormSection>
     </div>
   );
 }

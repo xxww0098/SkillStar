@@ -1,11 +1,6 @@
 //! API-key fetchers (DeepSeek, GLM, MiniMax, Kimi).
 //!
-//! All read `Subscription.fingerprint_id`; when set, the request goes
-//! through a [`FingerprintAwareClient`] built from the stored fingerprint
-//! (TLS/HTTP-2 emulation via wreq). When unset, the legacy reqwest path is
-//! used — behaviour is unchanged for existing subscriptions.
-//!
-//! The request path itself is identical across all four providers (build the
+//! The request path is identical across all four providers (build the
 //! client, attach the key per the provider's auth scheme, GET, map transport
 //! errors). That shared boilerplate lives in [`fetch_spec`] + [`map_err`],
 //! driven by the [`BalanceSpec`] table in `skillstar-providers`. Only the
@@ -18,18 +13,15 @@ pub mod kimi;
 pub mod minimax;
 
 use serde::de::DeserializeOwned;
-use crate::fingerprint::{DeviceFingerprint, Req, RequestError};
 use skillstar_providers::balance::{AuthScheme, BalanceSpec};
 
 use crate::crypto;
-use crate::http_client::{load_fingerprint, usage_client_with_fingerprint};
+use crate::http_client::usage_http_client;
+use crate::request::{Req, RequestError};
 use crate::subscription::{Subscription, SubscriptionUsage};
 use crate::{UsageError, UsageResult};
 
 /// Dispatch an API-key refresh based on `subscription.catalog_id`.
-///
-/// Resolves the optional fingerprint *once* up front and threads it through
-/// to the per-provider fetcher so the client builder cache stays warm.
 pub async fn dispatch(subscription: &mut Subscription) -> UsageResult<SubscriptionUsage> {
     let key_cipher = subscription
         .api_key_encrypted
@@ -42,30 +34,26 @@ pub async fn dispatch(subscription: &mut Subscription) -> UsageResult<Subscripti
         ));
     }
 
-    let fingerprint = load_fingerprint(subscription.fingerprint_id.as_deref())?;
-    let fp = fingerprint.as_ref();
-
     match subscription.catalog_id.as_str() {
-        "deepseek" => deepseek::fetch(subscription, &api_key, fp).await,
-        "glm" => glm::fetch(&subscription.id, &api_key, fp).await,
-        "minimax" => minimax::fetch(&subscription.id, &api_key, fp).await,
-        "kimi" => kimi::fetch(&subscription.id, &api_key, fp).await,
+        "deepseek" => deepseek::fetch(subscription, &api_key).await,
+        "glm" => glm::fetch(&subscription.id, &api_key).await,
+        "minimax" => minimax::fetch(&subscription.id, &api_key).await,
+        "kimi" => kimi::fetch(&subscription.id, &api_key).await,
         other => Err(super::unsupported(other)),
     }
 }
 
 /// Shared request path for every API-key balance fetcher.
 ///
-/// Builds the (optionally fingerprinted) client, attaches the key per the
-/// spec's [`AuthScheme`], issues the GET, and decodes the JSON body into `T`.
-/// Transport errors are mapped uniformly via [`map_err`]. Each caller picks the
-/// concrete `T` matching that provider's response shape.
+/// Builds the client, attaches the key per the spec's [`AuthScheme`], issues
+/// the GET, and decodes the JSON body into `T`. Transport errors are mapped
+/// uniformly via [`map_err`]. Each caller picks the concrete `T` matching that
+/// provider's response shape.
 pub(super) async fn fetch_spec<T: DeserializeOwned>(
     spec: &BalanceSpec,
     api_key: &str,
-    fingerprint: Option<&DeviceFingerprint>,
 ) -> UsageResult<T> {
-    let client = usage_client_with_fingerprint(fingerprint)
+    let client = usage_http_client()
         .map_err(|e| UsageError::Fetcher(format!("{} client: {e}", spec.display_name)))?;
 
     let req = Req::get(&client, spec.endpoint).header("Accept", "application/json");

@@ -22,12 +22,20 @@ export interface DrawerShellProps {
   className?: string;
   /** Max panel width utility (default 560px). */
   maxWidthClassName?: string;
+  /** Let Radix move focus to the first focusable control when the drawer opens. */
+  autoFocus?: boolean;
 }
 
 /**
  * Right-side slide-in drawer used by the Models hub for creating and editing
  * providers. Built on Radix `Dialog` for focus management + accessibility, and
  * Framer Motion for the slide animation.
+ *
+ * Dismiss paths (all must reach `onOpenChange(false)`): header X, Escape, and
+ * click / pointer-down on the left scrim. Overlay handlers are wired explicitly
+ * so the left blank area always closes the drawer (not only Radix outside-detect).
+ * Do NOT force-dismiss on Content `onInteractOutside` — portaled popovers
+ * (DropdownMenu / Select) live outside Content and must not close the drawer.
  */
 export function DrawerShell({
   open,
@@ -39,9 +47,12 @@ export function DrawerShell({
   children,
   className,
   maxWidthClassName = "max-w-[560px]",
+  autoFocus = false,
 }: DrawerShellProps) {
   const { t } = useTranslation();
   const prefersReducedMotion = useReducedMotion();
+
+  const dismiss = () => onOpenChange(false);
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -54,16 +65,20 @@ export function DrawerShell({
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: prefersReducedMotion ? 0.01 : 0.2 }}
-                className="fixed inset-0 z-[80] bg-black/45 backdrop-blur-sm"
+                // Explicit scrim dismiss — left blank area closes the drawer.
+                onPointerDown={(event) => {
+                  if (event.target === event.currentTarget) {
+                    event.preventDefault();
+                    dismiss();
+                  }
+                }}
+                onClick={(event) => {
+                  if (event.target === event.currentTarget) dismiss();
+                }}
+                className="fixed inset-0 z-[80] cursor-pointer bg-black/45 backdrop-blur-sm"
               />
             </Dialog.Overlay>
-            <Dialog.Content
-              asChild
-              onOpenAutoFocus={(e) => {
-                // Avoid stealing focus on open — the body has its own inputs.
-                e.preventDefault();
-              }}
-            >
+            <Dialog.Content asChild onOpenAutoFocus={autoFocus ? undefined : (event) => event.preventDefault()}>
               <motion.aside
                 initial={{ x: prefersReducedMotion ? 0 : "100%", opacity: prefersReducedMotion ? 0 : 1 }}
                 animate={{ x: 0, opacity: 1 }}

@@ -13,8 +13,6 @@ pub struct SplitResult {
     pub data: HashMap<String, Value>,
     /// The Markdown body after the frontmatter block.
     pub body: String,
-    /// Number of lines consumed by the frontmatter block (including delimiters).
-    pub line_count: usize,
 }
 
 /// Split a Markdown document into YAML frontmatter and body.
@@ -27,7 +25,6 @@ pub fn split_front_matter(content: &str) -> SplitResult {
         return SplitResult {
             data: HashMap::new(),
             body: content.to_string(),
-            line_count: 0,
         };
     }
 
@@ -38,7 +35,6 @@ pub fn split_front_matter(content: &str) -> SplitResult {
             return SplitResult {
                 data: HashMap::new(),
                 body: content.to_string(),
-                line_count: 0,
             };
         }
     };
@@ -64,18 +60,14 @@ pub fn split_front_matter(content: &str) -> SplitResult {
             return SplitResult {
                 data: HashMap::new(),
                 body: content.to_string(),
-                line_count: 0,
             };
         }
     };
 
     let data: HashMap<String, Value> = serde_yaml::from_str(yaml_str).unwrap_or_default();
-    let line_count = yaml_str.lines().count() + 2; // +2 for the two `---` lines
-
     SplitResult {
         data,
         body: body_start.to_string(),
-        line_count,
     }
 }
 
@@ -105,7 +97,6 @@ mod tests {
         let result = split_front_matter(content);
         assert!(result.data.is_empty());
         assert_eq!(result.body, content);
-        assert_eq!(result.line_count, 0);
     }
 
     #[test]
@@ -117,7 +108,6 @@ mod tests {
             Some("Test")
         );
         assert_eq!(result.body, "# Hello\n\nBody\n");
-        assert!(result.line_count > 0);
     }
 
     #[test]

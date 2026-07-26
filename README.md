@@ -6,293 +6,187 @@
 
 ### _Your Second Brain for Agent CLIs_
 
-**统一编排 Skill、按项目精准分发到不同 Agent CLI，并实时洞察各家 AI 订阅的余额与到期。**
+**统一管理 Skill、模型供应商与 AI 订阅，并把它们可靠地分发到不同 Agent 和项目。**
 
 [![Tauri v2](https://img.shields.io/badge/Tauri-v2-blue?logo=tauri&logoColor=white)](https://v2.tauri.app)
 [![React 19](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)](https://react.dev)
-[![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust&logoColor=white)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust)](https://www.rust-lang.org)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-green.svg)](./LICENSE)
 
 </div>
 
 ## SkillStar 是什么
 
-SkillStar 是一个 Tauri 桌面应用（同时附带 CLI），围绕 AI Agent 开发者三件事：
+SkillStar 面向同时使用多个 Agent CLI、模型供应商和订阅账号的开发者。它是一个 Tauri 桌面应用，也提供同二进制 CLI，围绕三个工作区组织能力：
 
-1. **Skill 管理与分发** — 从 `skills.sh` / GitHub 拉技能，按项目精准同步到 Claude Code、Codex、Gemini CLI、Antigravity、Cursor、Qoder、Trae、Kiro、OpenCode、OpenClaw 等 Agent。
-2. **Model 配置** — 集中管理各家 API Provider、配额、健康度，按工具维度切换底层模型。
-3. **Usage 用量** — 把分散在各家控制台的订阅、余额、Token 配额、续费日期、套餐徽章聚合到本地一个面板，到期 / 用量预警直接弹。
+- **Skills**：发现、安装、创作和组合 Skill；按 Agent 或项目分发；管理本机、SSH 远端和 S3 同步。
+- **Usage**：聚合 OAuth/API Key 订阅的额度、余额、重置周期和续费信息，并在支持时切换真实 CLI 账号。
+- **Models**：集中管理 Provider、模型与 Agent binding，检测连接状态并同步目标工具配置。
 
-侧边栏顶部的胶囊 toggle 在三种 mode 之间切换：
-
-```
-┌──────────────┐
-│  ▣  ◴  ▤   │   Skills · Usage · Models
-└──────────────┘
-```
-
----
+产品追求 Precise、Unified、Effortless：高信息密度，但不把安全边界、失败状态和用户控制隐藏在“自动化”后面。
 
 ## 核心能力
 
-### ⚡️ Skill 管理与分发
+### Skill 管理与分发
 
-- **多 Agent 生态**: 原生支持 Gemini CLI、Claude Code、Codex CLI、OpenCode、OpenClaw、Antigravity、Cursor、Qoder、Trae、Kiro，自定义 Agent 任意扩展。
-- **纯 Symlink 注入**: 项目目录不落地副本，无侵入，避免 `git status` 污染或影响构建产物。
-- **项目级精准调度**: 在 `Projects` 注册工程，按需为不同 Agent 配置独立技能池，自动处理共享路径和冲突。
-- **Local-first Marketplace**: SQLite + FTS 全文检索的本地聚合快照，无需等待网络加载，离线可用，秒级响应。
-- **Deck 组合分发**: 一键将多个技能打包为 `.agd` 套牌，或提取单包 `.ags`。通过 Share Code 在网络/内网无缝流转。
-- **本地创作周期 (Authoring)**: 图形化界面直接创建并编辑技能（`skills-local`），通过 GitHub CLI 一键发布开源。
+- 从 GitHub、仓库简写、本地目录、`.ags`/`.agd` 和 Share Code 安装或导入。
+- Local-first Marketplace 使用 SQLite + FTS，本地快照优先，离线仍可搜索。
+- 项目级 reconciliation 同时处理新增与移除，并识别共享 Agent 路径冲突。
+- 部署优先使用 symlink；平台不允许时自动回退 junction/copy，而不会假装“纯 symlink”。
+- 本地创作位于 SkillStar hub，可编辑、打包并通过 GitHub 发布。
+- 可让已配置的 ACP Agent 阅读当前 Skill 的全部文件，按“循序导览 / 技术手册 / 实战工坊”风格和当前界面语言生成带流程图、示例和排错说明的本地持久化 `tutorial.html`；不依赖在线链接，Skill、语言或风格更新后会明确提醒重新生成。
+- My Skills 可切换本机、SSH 远端与 S3 云同步工作流。
 
-### 📊 Usage 用量记账
+### Usage 用量面板
 
-把所有 AI 订阅的额度和续费日聚合到一个手机桌面式网格面板。
+- catalog 由代码和测试维护，按 OAuth、API Key 或手动录入模式接入。
+- 卡片显示 provider 原生配额窗口、余额、重置时间、套餐和计费周期。
+- OAuth 重新授权会原位更新既有订阅，避免生成重复账号。
+- 支持的 CLI 账号切换以事务方式更新 active 状态和磁盘凭证；失败时保留原可用账号。
+- API key、access token、refresh token 使用域内加密存储；SSH/S3 secret 使用系统 keyring。
 
-- **固定 catalog**（代码 + 单测锁定，见 `skillstar-usage` catalog）：
-  - **OAuth 自动同步**：Cursor (PKCE) · Codex (OpenAI OAuth) · Antigravity (Google OAuth) · Grok (xAI CLI OAuth)
-  - **API Key 自动同步**：DeepSeek (`/user/balance`) · 智谱 GLM Coding Plan · Kimi · MiniMax Token Plan
-  - **Cookie**：阶跃 Step · OpenCode（官方 OAuth token 读不到控制台用量，改用 Cookie）
-- **OAuth client 凭证可覆盖**：codex / xai / opencode 的 OAuth `client_id` 内置默认值，可经 `SKILLSTAR_<PROVIDER>_CLIENT_ID` 环境变量、编译期 `option_env!`、或 `~/.skillstar/config/oauth_clients.json` 覆盖，无需改源码
-- **卡片信息**：右上角 plan 徽章（PRO 蓝/PLUS 绿/MAX·ULTRA 紫/TEAM·BUSINESS 橙/ENTERPRISE 红/FREE·PAYG 灰），5h/7d/月度自适应进度条，余额型展示 CNY/USD，续费倒计时
-- **告警**：5h 剩余 < 20% 黄 / < 5% 红，7 天内到期 banner，OAuth 401 时卡片红框提示重新登录
-- **加密存储**：AES-256-GCM + machine_uid 派生密钥，API key / access_token / refresh_token 全部加密，存放于 `~/.skillstar/config/usage/`
-- **OAuth 体验**：表单选 OAuth → 点击「用浏览器登录」→ 系统浏览器打开 → 后端长轮询完成 → 卡片自动同步用量
-- **月度支出**：Header 按 billing cycle (Monthly/Annual/OneTime) 折算并按币种分组累加
+> Provider 私有接口可能随上游升级变化。SkillStar 会区分“需要重新授权”“暂时无数据”和普通请求失败，不把所有错误伪装成空额度。
 
-> ⚠️ OAuth 自动同步端点多为社区蓝本（cockpit-tools），随官方升级可能失效，失败时可降级为手动录入。
+### Models 与 AI
 
-### 🧠 AI 深度赋能
+- Provider gallery、模型目录、连接诊断、余额查询和 Agent binding 集中在一个工作台。
+- 按 Agent 能力支持 single-provider 或 multi-provider binding。
+- Tool sync 只修改 SkillStar 管理的字段，保留用户已有配置并在写入前备份。
+- 内置摘要和 Skill 推荐共享 Models provider 配置，并以流式事件报告 route/fallback；Skill 图文教程使用独立的 ACP Agent 配置。
 
-- **AI 辅助阅读与翻译**: 基于 SQLite 持久化缓存的流式 SKILL.md 翻译与摘要，短文本双引擎并行加速。
-- **智能技能推荐 (Smart Pick)**: 本地先验排序 + 大模型多轮共识打分，从海量技能里精准推荐最匹配当前任务的工具。
+### 桌面体验与安全
 
-### 🛡️ 安全与可信
-
-- **源与沙箱隔离**: Hub（远端拉取）与 Local（本地开发）存储分离，文件 Hash 校验缓存，一旦篡改自动拦截。
-
-### 🖥️ 极客体验
-
-- **Dark Glassmorphism UI**: Framer Motion + TailwindCSS 4 沉浸式暗黑玻璃质感设计，每个动画都精雕。
-- **托盘后台自动巡检**: 系统 Tray 控制节点，低频静默更新云端知识与工具包。
-- **全界面双语适配**: 原生 中文/英文（基于设备区域自动探测 + 个人强制配置）。
-
----
+- 中英文界面、系统 Tray、后台巡检和签名应用内更新。
+- SSH 首次连接使用 host-key TOFU，在认证材料发送前完成信任检查。
+- 所有业务 HTTP 统一遵循 SkillStar proxy 配置；GitHub mirror 不修改用户全局 Git 配置。
+- 测试和生成工具有专用临时 home，避免触碰真实 Agent 配置。
 
 ## 安装
 
-### 1. macOS
-
-**Homebrew（推荐）**:
+### macOS
 
 ```bash
 brew tap xxww0098/skillstar
 brew install --cask skillstar
 ```
 
-**手动 `.dmg`**:
+手动安装 `.dmg` 后可建立 CLI 链接：
 
 ```bash
 sudo ln -sf /Applications/SkillStar.app/Contents/MacOS/SkillStar /usr/local/bin/skillstar
 ```
 
-> macOS 首次启动若提示"已损坏":
->
-> ```bash
-> xattr -cr /Applications/SkillStar.app
-> ```
+首次启动若被 Gatekeeper 标记为“已损坏”：
 
-### 2. Windows
+```bash
+xattr -cr /Applications/SkillStar.app
+```
 
-`.exe` 安装程序会自动注册环境变量。重启终端后 `skillstar` 全局可用。
+### Windows
 
-### 3. Linux
+运行 GitHub Release 中的安装程序。安装完成并重启终端后，`skillstar` 可从命令行使用。
 
-`.deb` / `.rpm` 直接安装到 `/usr/bin/skillstar`；`.AppImage` 便携版：
+### Linux
+
+安装 `.deb`/`.rpm`，或把 AppImage 放入 PATH：
 
 ```bash
 chmod +x SkillStar_x.x.x_amd64.AppImage
 sudo mv SkillStar_x.x.x_amd64.AppImage /usr/local/bin/skillstar
 ```
 
-### 手动下载
+安装包见 [GitHub Releases](https://github.com/xxww0098/SkillStar/releases/latest)。
 
-[GitHub Releases](https://github.com/xxww0098/SkillStar/releases/latest):
+## 开始使用
 
-| 平台 | 安装包 |
-|------|--------|
-| macOS (Apple Silicon) | `SkillStar_x.x.x_aarch64.dmg` |
-| macOS (Intel) | `SkillStar_x.x.x_x64.dmg` |
-| Windows | `SkillStar_x.x.x_x64-setup.exe` |
-| Linux | `.AppImage` / `.deb` / `.rpm` |
+先在 Settings 中手动启用准备使用的内置 Agent，或添加并启用自定义 Agent。SkillStar 不会探测
+binary、桌面应用或配置目录来自动启用 Agent；内置注册表同步
+[`vercel-labs/skills`](https://github.com/vercel-labs/skills) 的 Agent 目标能力；
+完整清单以 [`BUILTIN_AGENT_DEFS`](./crates/skillstar-skills/src/agents/builtin.rs) 及其测试为准。
 
----
+典型流程：
 
-## 前置要求
+1. 在 Marketplace 搜索并安装 Skill。
+2. 在 My Skills 选择本机 Agent，或切换到 SSH/S3 scope。
+3. 在 Projects 注册工程并 reconciliation 项目级技能。
+4. 在 Models 创建 Provider，并把 binding 同步到目标 Agent。
+5. 在 Usage 添加订阅，查看额度或切换支持的 CLI 账号。
 
-至少安装一个受支持的 Agent（Claude Code CLI 与 Desktop Code 视为同一个 Agent）：
+## CLI 快速用法
 
-- [Claude Code（CLI / Desktop Code）](https://code.claude.com/docs/en/desktop)
-- [Codex CLI](https://github.com/openai/codex)
-- [Gemini CLI](https://github.com/google-gemini/gemini-cli)
-- [Cursor](https://cursor.com)
-- [Qoder](https://qoder.com)
-- [Trae](https://trae.ai)
-- [Kiro](https://kiro.dev)
-- [OpenCode](https://github.com/opencode-ai/opencode)
-- [OpenClaw](https://github.com/openclaw/openclaw)
-- [Antigravity](https://antigravity.google)
+### 搜索与安装
 
----
+```bash
+skillstar find "code review"
+skillstar add vercel-labs/agent-skills
+skillstar add vercel-labs/agent-skills@frontend-design
+skillstar add https://github.com/vercel-labs/agent-skills/tree/main/skills/web-design-guidelines
+skillstar add vercel-labs/agent-skills --skill frontend-design --agent codex,claude-code
+skillstar add vercel-labs/agent-skills --skill '*' --agent '*'
+skillstar add vercel-labs/agent-skills --all          # 全部 Skill + 全部 Agent + -y
+skillstar add vercel-labs/agent-skills --global      # 部署到 Agent 用户级目录
+skillstar add vercel-labs/agent-skills --copy        # 强制复制，不创建 link
+skillstar add vercel-labs/agent-skills --list
+```
+
+`install` 与 `add` 等价；未加 `-y` 时会按需选择 Skill、Agent、Project/Global scope 和部署方式。`-y` 默认 Project，并只使用 Settings 中已手动启用的 Agent；若一个也没有则报错。`--agent` / `--all` 是显式覆盖。
+
+### 管理
+
+```bash
+skillstar list
+skillstar update [name]
+skillstar remove <name> [name...]
+skillstar remove --all
+```
+
+### 创建、发布与工具包
+
+```bash
+skillstar init [name]       # create 仍作为兼容 alias
+skillstar publish
+skillstar doctor [name]
+skillstar pack list
+skillstar pack remove <name>
+skillstar gui
+```
+
+精确参数以 `skillstar --help` 和各子命令 `--help` 为准。
 
 ## 从源码构建
+
+需要 [Bun](https://bun.sh/) 和 [Rust](https://rustup.rs/)：
 
 ```bash
 git clone https://github.com/xxww0098/SkillStar.git
 cd SkillStar
 bun install
-bun run tauri dev      # 开发模式
-bun run tauri build    # 打包
+bun run tauri dev
 ```
 
-需要 [Bun](https://bun.sh/) 和 [Rust](https://rustup.rs/)。
-
-### 质量校验
+质量校验：
 
 ```bash
-bun run lint           # Biome lint + format 检查
-bun run test           # 前端测试（Vitest + jsdom）
-cargo test --workspace # 全部 Rust 测试
+bun run lint
+bun run build
+bun run test
+cargo check --workspace --locked
+cargo test --workspace --locked
 ```
 
-### 发布
+Windows CI 使用 npm，因此依赖变化还要更新 `package-lock.json`。
 
-CI / 发布由 GitHub Actions 驱动（`.github/workflows/`）：
+## 架构与贡献
 
-- **Windows CI**（`windows-ci.yml`）：push 到 `main` 或 PR 时跑 lint + 前端构建/测试 + Rust 测试，捕获 Windows 平台特有回归。
-- **Release**（`release.yml`）：推送 `v*` tag 时，在 macOS（Apple Silicon + Intel）、Linux、Windows 三平台用 [`tauri-action`](https://github.com/tauri-apps/tauri-action) 构建并发布安装包到 GitHub Release（草稿）。
+- Agent 即时规则：[AGENTS.md](./AGENTS.md)
+- 项目树和依赖方向：[docs/boundaries.md](./docs/boundaries.md)
+- 运行架构和数据所有权：[docs/architecture.md](./docs/architecture.md)
+- 功能行为：[docs/features/](./docs/features/)
+- 新增 Agent：[docs/features/agents/README.md](./docs/features/agents/README.md)
+- 故障记录：[docs/errors.md](./docs/errors.md)
+- 结构路线图：[docs/others/roadmap.md](./docs/others/roadmap.md)
 
-发布新版本：
-
-```bash
-# 1. 更新 package.json / src-tauri/tauri.conf.json / src-tauri/Cargo.toml 的 version
-# 2. 提交后打 tag 触发三平台构建
-git tag -a v0.0.1 -m "Release v0.0.1"
-git push origin v0.0.1
-```
-
----
-
-## 典型工作流
-
-### Skills mode (▣)
-1. `Marketplace` 浏览并安装技能
-2. `My Skills` 管理已装技能、编辑 SKILL.md、配置 Agent 链接
-3. `Decks` 组合技能，一键部署到项目
-4. `Projects` 注册工程并按 Agent 同步
-
-### Usage mode (◴)
-1. 左侧 catalog 选一家供应商，或点底部「➕ 新增订阅」
-2. 选 Auth 模式：API Key / OAuth / Manual
-   - **API Key**：直接粘贴 key + 月费 + 续费日，保存后立即同步
-   - **OAuth**：点击「用浏览器登录」→ 完成授权 → 卡片自动出现
-   - **Manual**：录入「已用 / 总额」+ 窗口标签（本月 / 5h / 周）
-3. 卡片右上角看 plan 徽章；进度条和余额随刷新更新
-4. 接近上限或临近续费时自动弹告警
-
-### Models mode (▤)
-管理各家 Provider 配置、健康度、按工具维度切换底层模型（Provider / Health / Tool Configs / Settings）。
-
----
-
-## CLI 快速用法
-
-### 安装技能
-```bash
-skillstar install https://github.com/user/my-agent-skill                  # 默认：装到 Hub + 链接当前项目
-skillstar install --global https://github.com/user/my-agent-skill         # 全局：仅 Hub
-skillstar install --project /path/to/project https://github.com/u/skill   # 指定项目
-skillstar install --agent codex,claude https://github.com/u/skill         # 指定 Agent
-skillstar install --name cool-skill https://github.com/u/multi-skill-repo # 仓库多技能时指定
-```
-
-### 管理
-```bash
-skillstar list                                  # 列出已装技能
-skillstar update [name]                         # 更新（无名则更新全部）
-```
-
-### 创建 / 发布
-```bash
-skillstar create                                # 当前目录生成技能模板
-skillstar publish                               # 发布到 GitHub（依赖 gh CLI）
-```
-
-### 工具包 / 健康
-```bash
-skillstar pack list                             # 列出 Deck/Pack
-skillstar pack remove <name>                    # 卸载组合包
-skillstar doctor [name]                         # 健康检查
-```
-
-### GUI
-```bash
-skillstar gui                                   # 强制唤起桌面图形界面
-```
-
----
-
-## 技术架构
-
-| Layer | Technology | 作用 |
-|-------|------------|------|
-| Desktop Shell | Tauri v2 | 桌面容器 / IPC |
-| Backend | Rust 2024 + tokio + reqwest 0.13 | 业务逻辑 + 异步任务 |
-| Git Engine | gix 0.80 (gitoxide) | 克隆 / 拉取 / 哈希对比 |
-| OAuth | tiny_http 1455/1456/1457 + PKCE + JWT exp | Cursor / Codex / Antigravity / Grok 登录 |
-| Frontend | React 19 + TypeScript + Vite 8 | SPA UI |
-| UI | TailwindCSS v4 + Framer Motion 12 + Radix | 设计系统 / 交互 |
-| Storage | JSON files + SQLite | 配置持久化 + 翻译缓存 |
-| Crypto | AES-256-GCM + machine_uid → SHA-256 | API Key / OAuth token 加密存储 |
-
----
-
-## 目录概览
-
-项目结构、技术栈与 crate 划分以 [AGENTS.md](./AGENTS.md) 为单一事实来源（含项目树与 Workspace Crates 表），此处不再重复以免漂移。
-
----
-
-## 支持的 Agent CLI
-
-| Agent | Global Config | OAuth 用量同步 |
-|------|---------------|----------------|
-| Claude Code | `~/.claude/` | — |
-| Codex CLI | `~/.codex/` | ✅ PKCE + 1455 |
-| Gemini CLI | `~/.gemini/` | — |
-| Antigravity | `~/.gemini/antigravity-cli/` | ✅ Google OAuth |
-| Cursor | `~/.cursor/` | ✅ PKCE 轮询 |
-| Qoder | `~/.qoder/` | —（技能分发；无 Usage catalog） |
-| Trae | `~/.trae/` | —（技能分发；无 Usage catalog） |
-| Kiro | `~/.kiro/` | — |
-| OpenCode CLI | `~/.config/opencode/` | — |
-| OpenClaw | `~/.openclaw/`（global-only） | — |
-| Hermes | `~/.hermes/` | — |
-| ZCode | `~/.zcode/` | — |
-| Grok | `~/.grok/` | ✅ OAuth |
-| 自定义 Agent | 自由配置 | — |
-
-> 此表对应后端 `crates/skillstar-skills/.../agents/builtin.rs` 的 `BUILTIN_AGENT_DEFS`（13 个内置 + 自定义）；新增 Agent 见 [ADDING-AN-AGENT.md](./ADDING-AN-AGENT.md)，改动须两边同步。
-
----
-
-## 开发与协作
-
-- 后端结构或流程调整：先更新 `AGENTS.md`
-- 前端结构或交互规范调整：先更新 `AGENTS-UI.md`
-- 重要 bug 修复：在 `docs/Error.md` 追加条目
-- 新增 AI 厂商订阅类型：扩展 `crates/skillstar-usage/src/catalog.rs` + 视情况加 fetcher
-
----
+提交使用英文 Conventional Commits，文档与代码在同一变更序列中保持一致。
 
 ## 许可证
 

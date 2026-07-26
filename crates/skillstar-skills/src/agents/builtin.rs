@@ -1,166 +1,499 @@
-//! Built-in agent definitions (the data table) and their `AgentSpec` impl.
+//! Built-in Agent definitions synchronized with `vercel-labs/skills`.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use super::spec::AgentSpec;
 
-// ── Built-in agent definitions (data table) ─────────────────────────
-// (id, display_name, icon, home_subdirs, project_skills_rel, binary)
-//
-// Adding a new agent requires only one line here. `project_skills_rel` of ""
-// marks a global-only agent (no project-level skills). Antigravity shares the
-// ~/.gemini home root with Gemini but owns a distinct `.agent/skills` project
-// path (under `~/.gemini/antigravity-cli/skills` globally), so the two never
-// collide — that relationship is expressed purely as data in this table, with
-// no code special-case anywhere.
-//
-// `binary` is the CLI executable name used for install detection: when set,
-// `detect_installed` probes the enriched PATH (via `path_env::which_in_enriched`)
-// instead of relying on directory presence, so a shared home root (e.g.
-// Antigravity creating ~/.gemini) no longer false-positives another agent.
-// `None` marks IDE/GUI agents (desktop-app + directory presence) or global-only
-// agents with no CLI.
-/// `(id, display_name, icon, home_subdirs, project_skills_rel, binary)` — see
-/// the data-table comment above for field meaning.
-type BuiltinAgentDef = (&'static str, &'static str, &'static str, &'static [&'static str], &'static str, Option<&'static str>);
+#[derive(Clone, Copy)]
+enum GlobalRoot {
+    Home,
+    Config,
+    EnvOrHome(&'static str, &'static [&'static str]),
+    OpenClaw,
+    Unsupported,
+}
 
+#[derive(Clone, Copy)]
+struct GlobalDirDef {
+    root: GlobalRoot,
+    subdirs: &'static [&'static str],
+}
+
+type BuiltinAgentDef = (&'static str, &'static str, GlobalDirDef, &'static str);
+
+const fn home(subdirs: &'static [&'static str]) -> GlobalDirDef {
+    GlobalDirDef {
+        root: GlobalRoot::Home,
+        subdirs,
+    }
+}
+
+const fn config(subdirs: &'static [&'static str]) -> GlobalDirDef {
+    GlobalDirDef {
+        root: GlobalRoot::Config,
+        subdirs,
+    }
+}
+
+const fn env_or_home(
+    variable: &'static str,
+    fallback: &'static [&'static str],
+    subdirs: &'static [&'static str],
+) -> GlobalDirDef {
+    GlobalDirDef {
+        root: GlobalRoot::EnvOrHome(variable, fallback),
+        subdirs,
+    }
+}
+
+const fn openclaw() -> GlobalDirDef {
+    GlobalDirDef {
+        root: GlobalRoot::OpenClaw,
+        subdirs: &[],
+    }
+}
+
+const fn unsupported() -> GlobalDirDef {
+    GlobalDirDef {
+        root: GlobalRoot::Unsupported,
+        subdirs: &[],
+    }
+}
+
+// The four legacy SkillStar ids (`claude`, `gemini`, `kiro`, `hermes`) retain
+// their persisted identity. CLI/API normalization accepts the corresponding
+// upstream ids. Every other row uses the upstream id verbatim. `grok` is a
+// SkillStar extension kept after the synchronized upstream block.
 const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
     (
-        "opencode",
-        "OpenCode",
-        "agents/opencode.svg",
-        &[".config", "opencode", "skills"],
-        ".opencode/skills",
-        Some("opencode"),
+        "aider-desk",
+        "AiderDesk",
+        home(&[".aider-desk", "skills"]),
+        ".aider-desk/skills",
     ),
     (
-        "claude",
-        "Claude Code",
-        "agents/claude.svg",
-        &[".claude", "skills"],
-        ".claude/skills",
-        Some("claude"),
-    ),
-    (
-        "codex",
-        "Codex CLI",
-        "agents/codex.svg",
-        &[".codex", "skills"],
-        ".codex/skills",
-        Some("codex"),
+        "amp",
+        "Amp",
+        config(&["agents", "skills"]),
+        ".agents/skills",
     ),
     (
         "antigravity",
         "Antigravity",
-        "agents/antigravity.svg",
-        &[".gemini", "antigravity-cli", "skills"],
-        ".agent/skills",
-        None, // IDE, not a terminal CLI — detected by directory presence
+        home(&[".gemini", "antigravity", "skills"]),
+        ".agents/skills",
     ),
     (
-        "gemini",
-        "Gemini CLI",
-        "agents/gemini.svg",
-        &[".gemini", "skills"],
-        ".gemini/skills",
-        Some("gemini"),
+        "antigravity-cli",
+        "Antigravity CLI",
+        home(&[".gemini", "antigravity-cli", "skills"]),
+        ".agents/skills",
+    ),
+    (
+        "astrbot",
+        "AstrBot",
+        home(&[".astrbot", "data", "skills"]),
+        "data/skills",
+    ),
+    (
+        "autohand-code",
+        "Autohand Code CLI",
+        env_or_home("AUTOHAND_HOME", &[".autohand"], &["skills"]),
+        ".autohand/skills",
+    ),
+    (
+        "augment",
+        "Augment",
+        home(&[".augment", "skills"]),
+        ".augment/skills",
+    ),
+    ("bob", "IBM Bob", home(&[".bob", "skills"]), ".bob/skills"),
+    (
+        "claude",
+        "Claude Code",
+        env_or_home("CLAUDE_CONFIG_DIR", &[".claude"], &["skills"]),
+        ".claude/skills",
+    ),
+    ("openclaw", "OpenClaw", openclaw(), "skills"),
+    (
+        "cline",
+        "Cline",
+        home(&[".agents", "skills"]),
+        ".agents/skills",
+    ),
+    (
+        "codearts-agent",
+        "CodeArts Agent",
+        home(&[".codeartsdoer", "skills"]),
+        ".codeartsdoer/skills",
+    ),
+    (
+        "codebuddy",
+        "CodeBuddy",
+        home(&[".codebuddy", "skills"]),
+        ".codebuddy/skills",
+    ),
+    (
+        "codemaker",
+        "Codemaker",
+        home(&[".codemaker", "skills"]),
+        ".codemaker/skills",
+    ),
+    (
+        "codestudio",
+        "Code Studio",
+        home(&[".codestudio", "skills"]),
+        ".codestudio/skills",
+    ),
+    (
+        "codex",
+        "Codex",
+        env_or_home("CODEX_HOME", &[".codex"], &["skills"]),
+        ".agents/skills",
+    ),
+    (
+        "command-code",
+        "Command Code",
+        home(&[".commandcode", "skills"]),
+        ".commandcode/skills",
+    ),
+    (
+        "continue",
+        "Continue",
+        home(&[".continue", "skills"]),
+        ".continue/skills",
+    ),
+    (
+        "cortex",
+        "Cortex Code",
+        home(&[".snowflake", "cortex", "skills"]),
+        ".cortex/skills",
+    ),
+    (
+        "crush",
+        "Crush",
+        home(&[".config", "crush", "skills"]),
+        ".crush/skills",
     ),
     (
         "cursor",
         "Cursor",
-        "agents/cursor.svg",
-        &[".cursor", "skills"],
-        ".cursor/skills",
-        None, // IDE, not a terminal CLI
+        home(&[".cursor", "skills"]),
+        ".agents/skills",
     ),
     (
-        "qoder",
-        "Qoder",
-        "agents/qoder-color.svg",
-        &[".qoder", "skills"],
-        ".qoder/skills",
-        None, // IDE, not a terminal CLI
+        "deepagents",
+        "Deep Agents",
+        home(&[".deepagents", "agent", "skills"]),
+        ".agents/skills",
     ),
     (
-        "trae",
-        "Trae",
-        "agents/trae-color.svg",
-        &[".trae", "skills"],
-        ".trae/skills",
-        None, // IDE, not a terminal CLI
+        "devin",
+        "Devin for Terminal",
+        config(&["devin", "skills"]),
+        ".devin/skills",
     ),
     (
-        "kiro",
-        "Kiro",
-        "agents/kiro.svg",
-        &[".kiro", "skills"],
-        ".kiro/skills",
-        None, // AWS AI IDE, not a terminal CLI — detected by directory presence
+        "dexto",
+        "Dexto",
+        home(&[".agents", "skills"]),
+        ".agents/skills",
     ),
     (
-        "openclaw",
-        "OpenClaw",
-        "agents/openclaw.svg",
-        &[".openclaw", "skills"],
-        "",
-        None, // global-only, no CLI binary
+        "droid",
+        "Droid",
+        home(&[".factory", "skills"]),
+        ".factory/skills",
+    ),
+    ("eve", "Eve", unsupported(), "agent/skills"),
+    (
+        "firebender",
+        "Firebender",
+        home(&[".firebender", "skills"]),
+        ".agents/skills",
+    ),
+    (
+        "forgecode",
+        "ForgeCode",
+        home(&[".forge", "skills"]),
+        ".forge/skills",
+    ),
+    (
+        "gemini",
+        "Gemini CLI",
+        home(&[".gemini", "skills"]),
+        ".agents/skills",
+    ),
+    (
+        "github-copilot",
+        "GitHub Copilot",
+        home(&[".copilot", "skills"]),
+        ".agents/skills",
+    ),
+    (
+        "goose",
+        "Goose",
+        config(&["goose", "skills"]),
+        ".goose/skills",
     ),
     (
         "hermes",
-        "Hermes",
-        "agents/hermes.svg",
-        &[".hermes", "skills"],
+        "Hermes Agent",
+        env_or_home("HERMES_HOME", &[".hermes"], &["skills"]),
         ".hermes/skills",
-        None,
     ),
+    (
+        "inference-sh",
+        "inference.sh",
+        home(&[".inferencesh", "skills"]),
+        ".inferencesh/skills",
+    ),
+    ("jazz", "Jazz", home(&[".jazz", "skills"]), ".jazz/skills"),
+    (
+        "junie",
+        "Junie",
+        home(&[".junie", "skills"]),
+        ".junie/skills",
+    ),
+    (
+        "iflow-cli",
+        "iFlow CLI",
+        home(&[".iflow", "skills"]),
+        ".iflow/skills",
+    ),
+    (
+        "kilo",
+        "Kilo Code",
+        home(&[".kilocode", "skills"]),
+        ".kilocode/skills",
+    ),
+    (
+        "kimi-code-cli",
+        "Kimi Code CLI",
+        home(&[".agents", "skills"]),
+        ".agents/skills",
+    ),
+    ("kiro", "Kiro", home(&[".kiro", "skills"]), ".kiro/skills"),
+    ("kode", "Kode", home(&[".kode", "skills"]), ".kode/skills"),
+    (
+        "lingma",
+        "Lingma",
+        home(&[".lingma", "skills"]),
+        ".lingma/skills",
+    ),
+    (
+        "loaf",
+        "Loaf",
+        home(&[".agents", "skills"]),
+        ".agents/skills",
+    ),
+    (
+        "mcpjam",
+        "MCPJam",
+        home(&[".mcpjam", "skills"]),
+        ".mcpjam/skills",
+    ),
+    (
+        "mistral-vibe",
+        "Mistral Vibe",
+        env_or_home("VIBE_HOME", &[".vibe"], &["skills"]),
+        ".vibe/skills",
+    ),
+    (
+        "moxby",
+        "Moxby",
+        home(&[".moxby", "skills"]),
+        ".moxby/skills",
+    ),
+    ("mux", "Mux", home(&[".mux", "skills"]), ".mux/skills"),
+    (
+        "neovate",
+        "Neovate",
+        home(&[".neovate", "skills"]),
+        ".neovate/skills",
+    ),
+    (
+        "opencode",
+        "OpenCode",
+        config(&["opencode", "skills"]),
+        ".agents/skills",
+    ),
+    (
+        "openhands",
+        "OpenHands",
+        home(&[".openhands", "skills"]),
+        ".openhands/skills",
+    ),
+    ("ona", "Ona", home(&[".ona", "skills"]), ".ona/skills"),
+    ("pi", "Pi", home(&[".pi", "agent", "skills"]), ".pi/skills"),
+    (
+        "qoder",
+        "Qoder",
+        home(&[".qoder", "skills"]),
+        ".qoder/skills",
+    ),
+    (
+        "qoder-cn",
+        "Qoder CN",
+        home(&[".qoder-cn", "skills"]),
+        ".qoder/skills",
+    ),
+    (
+        "qwen-code",
+        "Qwen Code",
+        home(&[".qwen", "skills"]),
+        ".qwen/skills",
+    ),
+    (
+        "replit",
+        "Replit",
+        config(&["agents", "skills"]),
+        ".agents/skills",
+    ),
+    (
+        "reasonix",
+        "Reasonix",
+        home(&[".reasonix", "skills"]),
+        ".reasonix/skills",
+    ),
+    ("roo", "Roo Code", home(&[".roo", "skills"]), ".roo/skills"),
+    (
+        "rovodev",
+        "Rovo Dev",
+        home(&[".rovodev", "skills"]),
+        ".rovodev/skills",
+    ),
+    (
+        "tabnine-cli",
+        "Tabnine CLI",
+        home(&[".tabnine", "agent", "skills"]),
+        ".tabnine/agent/skills",
+    ),
+    (
+        "terramind",
+        "Terramind",
+        home(&[".terramind", "skills"]),
+        ".terramind/skills",
+    ),
+    (
+        "tinycloud",
+        "Tinycloud",
+        home(&[".tinycloud", "skills"]),
+        ".tinycloud/skills",
+    ),
+    ("trae", "Trae", home(&[".trae", "skills"]), ".trae/skills"),
+    (
+        "trae-cn",
+        "Trae CN",
+        home(&[".trae-cn", "skills"]),
+        ".trae/skills",
+    ),
+    (
+        "warp",
+        "Warp",
+        home(&[".agents", "skills"]),
+        ".agents/skills",
+    ),
+    (
+        "windsurf",
+        "Windsurf",
+        home(&[".codeium", "windsurf", "skills"]),
+        ".windsurf/skills",
+    ),
+    ("zed", "Zed", home(&[".agents", "skills"]), ".agents/skills"),
     (
         "zcode",
         "ZCode",
-        "agents/zcode.svg",
-        &[".zcode", "skills"],
+        home(&[".zcode", "skills"]),
         ".zcode/skills",
-        Some("zcode"),
     ),
     (
-        "grok",
-        "Grok",
-        "agents/grok.svg",
-        &[".grok", "skills"],
-        ".grok/skills",
-        Some("grok"),
+        "zencoder",
+        "Zencoder",
+        home(&[".zencoder", "skills"]),
+        ".zencoder/skills",
     ),
+    (
+        "zenflow",
+        "Zenflow",
+        home(&[".zencoder", "skills"]),
+        ".zencoder/skills",
+    ),
+    (
+        "pochi",
+        "Pochi",
+        home(&[".pochi", "skills"]),
+        ".pochi/skills",
+    ),
+    (
+        "promptscript",
+        "PromptScript",
+        unsupported(),
+        ".agents/skills",
+    ),
+    ("adal", "AdaL", home(&[".adal", "skills"]), ".adal/skills"),
+    (
+        "universal",
+        "Universal",
+        config(&["agents", "skills"]),
+        ".agents/skills",
+    ),
+    ("grok", "Grok", home(&[".grok", "skills"]), ".grok/skills"),
 ];
 
-/// Owned form of a built-in agent definition, cached once.
 pub(crate) struct BuiltinAgentData {
     pub id: String,
     pub display_name: String,
     pub icon: String,
-    pub subdirs: &'static [&'static str],
+    global: GlobalDirDef,
     pub project_skills_rel: String,
-    pub binary: Option<&'static str>,
 }
 
-/// The built-in agent table, materialized once into owned structs.
 pub(crate) fn builtin_agent_data() -> &'static [BuiltinAgentData] {
     static CACHED: OnceLock<Vec<BuiltinAgentData>> = OnceLock::new();
     CACHED.get_or_init(|| {
         BUILTIN_AGENT_DEFS
             .iter()
-            .map(|(id, name, icon, subdirs, rel, binary)| BuiltinAgentData {
+            .map(|(id, name, global, rel)| BuiltinAgentData {
                 id: (*id).to_string(),
                 display_name: (*name).to_string(),
-                icon: (*icon).to_string(),
-                subdirs,
+                icon: format!("lobe:{id}"),
+                global: *global,
                 project_skills_rel: (*rel).to_string(),
-                binary: *binary,
             })
             .collect()
     })
 }
 
-/// `AgentSpec` view over one built-in agent.
+fn config_home(home: &Path) -> PathBuf {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".config"))
+}
+
+fn env_or_home_path(variable: &str, home: &Path, fallback: &[&str]) -> PathBuf {
+    std::env::var_os(variable)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            fallback
+                .iter()
+                .fold(home.to_path_buf(), |p, part| p.join(part))
+        })
+}
+
+fn openclaw_skills_dir(home: &Path) -> PathBuf {
+    for root in [".openclaw", ".clawdbot", ".moltbot"] {
+        let path = home.join(root);
+        if path.exists() {
+            return path.join("skills");
+        }
+    }
+    home.join(".openclaw").join("skills")
+}
+
 pub(crate) struct BuiltinSpec(pub &'static BuiltinAgentData);
 
 impl AgentSpec for BuiltinSpec {
@@ -173,17 +506,26 @@ impl AgentSpec for BuiltinSpec {
     fn icon(&self) -> &str {
         &self.0.icon
     }
+
     fn resolve_global_dir(&self, home: &Path) -> PathBuf {
-        let mut dir = home.to_path_buf();
-        dir.extend(self.0.subdirs);
-        dir
+        let mut base = match self.0.global.root {
+            GlobalRoot::Home => home.to_path_buf(),
+            GlobalRoot::Config => config_home(home),
+            GlobalRoot::EnvOrHome(variable, fallback) => env_or_home_path(variable, home, fallback),
+            GlobalRoot::OpenClaw => return openclaw_skills_dir(home),
+            GlobalRoot::Unsupported => return PathBuf::new(),
+        };
+        base.extend(self.0.global.subdirs);
+        base
     }
+
+    fn supports_global(&self) -> bool {
+        !matches!(self.0.global.root, GlobalRoot::Unsupported)
+    }
+
     fn project_skills_rel(&self) -> Option<&str> {
         let rel = self.0.project_skills_rel.as_str();
         if rel.is_empty() { None } else { Some(rel) }
-    }
-    fn binary_name(&self) -> Option<&str> {
-        self.0.binary
     }
 }
 
@@ -192,31 +534,136 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
-    /// Guards the count any doc/README claims about built-in agents.
-    /// If you add/remove a row in `BUILTIN_AGENT_DEFS`, update this number
-    /// AND the "支持的 Agent CLI" table in `README.md` in the same change.
+    const UPSTREAM_AGENT_IDS: &[&str] = &[
+        "aider-desk",
+        "amp",
+        "antigravity",
+        "antigravity-cli",
+        "astrbot",
+        "autohand-code",
+        "augment",
+        "bob",
+        "claude-code",
+        "openclaw",
+        "cline",
+        "codearts-agent",
+        "codebuddy",
+        "codemaker",
+        "codestudio",
+        "codex",
+        "command-code",
+        "continue",
+        "cortex",
+        "crush",
+        "cursor",
+        "deepagents",
+        "devin",
+        "dexto",
+        "droid",
+        "eve",
+        "firebender",
+        "forgecode",
+        "gemini-cli",
+        "github-copilot",
+        "goose",
+        "hermes-agent",
+        "inference-sh",
+        "jazz",
+        "junie",
+        "iflow-cli",
+        "kilo",
+        "kimi-code-cli",
+        "kiro-cli",
+        "kode",
+        "lingma",
+        "loaf",
+        "mcpjam",
+        "mistral-vibe",
+        "moxby",
+        "mux",
+        "neovate",
+        "opencode",
+        "openhands",
+        "ona",
+        "pi",
+        "qoder",
+        "qoder-cn",
+        "qwen-code",
+        "replit",
+        "reasonix",
+        "roo",
+        "rovodev",
+        "tabnine-cli",
+        "terramind",
+        "tinycloud",
+        "trae",
+        "trae-cn",
+        "warp",
+        "windsurf",
+        "zed",
+        "zcode",
+        "zencoder",
+        "zenflow",
+        "pochi",
+        "promptscript",
+        "adal",
+        "universal",
+    ];
+
+    fn skillstar_id(upstream: &str) -> &str {
+        match upstream {
+            "claude-code" => "claude",
+            "gemini-cli" => "gemini",
+            "kiro-cli" => "kiro",
+            "hermes-agent" => "hermes",
+            id => id,
+        }
+    }
+
     #[test]
-    fn builtin_agents_count() {
-        assert_eq!(BUILTIN_AGENT_DEFS.len(), 13);
+    fn covers_every_upstream_agent_id() {
+        let ids = BUILTIN_AGENT_DEFS
+            .iter()
+            .map(|row| row.0)
+            .collect::<HashSet<_>>();
+        let missing = UPSTREAM_AGENT_IDS
+            .iter()
+            .filter(|id| !ids.contains(skillstar_id(id)))
+            .collect::<Vec<_>>();
+        assert!(
+            missing.is_empty(),
+            "missing upstream Agent ids: {missing:?}"
+        );
     }
 
     #[test]
     fn builtin_agent_ids_are_unique() {
         let mut seen = HashSet::new();
         for (id, ..) in BUILTIN_AGENT_DEFS {
-            assert!(seen.insert(*id), "duplicate builtin agent id: {id}");
+            assert!(seen.insert(*id), "duplicate builtin Agent id: {id}");
         }
     }
 
-    /// Required fields must never be blank; only `project_skills_rel` may be
-    /// empty (marks a global-only agent like OpenClaw).
     #[test]
     fn builtin_agent_fields_are_well_formed() {
-        for (id, name, icon, subdirs, _rel, _binary) in BUILTIN_AGENT_DEFS {
-            assert!(!id.is_empty(), "blank agent id");
+        for (id, name, _global, rel) in BUILTIN_AGENT_DEFS {
+            assert!(!id.is_empty(), "blank Agent id");
             assert!(!name.is_empty(), "blank display_name for {id}");
-            assert!(icon.ends_with(".svg"), "icon for {id} must be an svg path");
-            assert!(!subdirs.is_empty(), "empty home subdirs for {id}");
+            assert!(!rel.is_empty(), "blank project skills path for {id}");
+        }
+    }
+
+    #[test]
+    fn project_only_agents_have_no_global_path() {
+        let home = Path::new("/tmp/skillstar-test-home");
+        for id in ["eve", "promptscript"] {
+            let data = builtin_agent_data()
+                .iter()
+                .find(|agent| agent.id == id)
+                .unwrap();
+            let spec = BuiltinSpec(data);
+            assert!(!spec.supports_global());
+            assert!(spec.resolve_global_dir(home).as_os_str().is_empty());
         }
     }
 }

@@ -62,7 +62,7 @@ skillstar-skills = { version = "0.1.0", path = "../crates/skillstar-skills" }
 tauri-plugin-deep-link = "2"
 skillstar-core = { version = "0.1.0", path = "../crates/skillstar-core" }
 skillstar-app = { version = "0.1.0", path = "../crates/skillstar-app" }
-skillstar-usage = { version = "0.1.0", path = "../crates/skillstar-usage", features = ["impersonate"] }
+skillstar-usage = { version = "0.1.0", path = "../crates/skillstar-usage" }
 skillstar-sync = { version = "0.1.0", path = "../crates/skillstar-sync" }
 sha2 = { workspace = true }
 ts-rs.workspace = true
@@ -77,3 +77,8 @@ tauri-plugin-process = "2"
 
 [target.'cfg(windows)'.dependencies]
 junction = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSMenu", "NSMenuItem", "NSApplication", "NSResponder"] }
+objc2-foundation = "0.3"

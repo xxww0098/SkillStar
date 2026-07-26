@@ -119,7 +119,13 @@ pub fn resolve_client_secret(
     compile_time: Option<&'static str>,
     default: &'static str,
 ) -> String {
-    resolve(provider, env_var, compile_time, ClientField::Secret, default)
+    resolve(
+        provider,
+        env_var,
+        compile_time,
+        ClientField::Secret,
+        default,
+    )
 }
 
 #[cfg(test)]

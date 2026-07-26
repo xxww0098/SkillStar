@@ -26,15 +26,15 @@ pub use types::{
 };
 pub use types::{deploy_skill_auto, ensure_project_root_exists, prune_deploy_modes_for_agents};
 
+pub use import::import_scanned_skills;
 pub use index::{list_projects, register_project, remove_project, update_project_path};
 pub use rebuild::rebuild_skills_list_from_disk;
 pub use refresh::refresh_stale_copies;
 pub use scan::{detect_project_agents, scan_project_skills};
 pub use store::{load_skills_list, save_skills_list};
-pub use import::import_scanned_skills;
 pub use sync::{
-    add_skills_to_project, full_sync, remove_skill_from_all_projects, save_and_sync,
-    save_skills_list_only,
+    add_skills_to_project, add_skills_to_project_with_mode, full_sync,
+    remove_skill_from_all_projects, save_and_sync, save_skills_list_only,
 };
 
 // ── Cascade update: refresh copy-deployed skills across all projects ──
@@ -137,7 +137,7 @@ mod tests {
             full_sync(&project_path.to_string_lossy(), &first, None)?;
 
             let claude_link = project_path.join(".claude/skills/demo-skill");
-            let codex_link = project_path.join(".codex/skills/demo-skill");
+            let codex_link = project_path.join(".agents/skills/demo-skill");
             assert!(
                 claude_link.is_symlink(),
                 "expected initial symlink to exist"
@@ -163,7 +163,7 @@ mod tests {
             );
             assert!(
                 codex_link.symlink_metadata().is_err(),
-                "expected stale .codex symlink to be removed after deselecting agent"
+                "expected stale universal symlink to be removed after deselecting agent"
             );
             assert!(
                 !project_path.join(".claude/skills").exists(),
@@ -174,12 +174,12 @@ mod tests {
                 "expected empty .claude directory to be pruned"
             );
             assert!(
-                !project_path.join(".codex/skills").exists(),
-                "expected empty .codex/skills directory to be pruned"
+                !project_path.join(".agents/skills").exists(),
+                "expected empty .agents/skills directory to be pruned"
             );
             assert!(
-                !project_path.join(".codex").exists(),
-                "expected empty .codex directory to be pruned"
+                !project_path.join(".agents").exists(),
+                "expected empty .agents directory to be pruned"
             );
 
             Ok(())
@@ -398,6 +398,82 @@ mod tests {
     }
 
     #[test]
+    fn add_skills_to_shared_universal_path_uses_one_owner_and_honors_copy_mode() -> Result<()> {
+        let _guard = env_lock();
+
+        let temp_root = make_temp_root("project-add-shared-copy")?;
+        let previous_home = std::env::var_os("HOME");
+        let previous_data_dir = std::env::var_os("SKILLSTAR_DATA_DIR");
+        set_env("HOME", temp_root.join("home"));
+        set_env("SKILLSTAR_DATA_DIR", temp_root.join("data"));
+        #[cfg(windows)]
+        let previous_userprofile = std::env::var_os("USERPROFILE");
+        #[cfg(windows)]
+        set_env("USERPROFILE", temp_root.join("home"));
+
+        let result = (|| -> Result<()> {
+            let hub_skill = fs_paths::hub_skills_dir().join("demo-skill");
+            std::fs::create_dir_all(&hub_skill)?;
+            std::fs::write(hub_skill.join("SKILL.md"), "description: shared copy")?;
+
+            let project_path = temp_root.join("workspace").join("demo-project");
+            std::fs::create_dir_all(&project_path)?;
+            let agents = vec!["codex".to_string(), "opencode".to_string()];
+            let skills = vec!["demo-skill".to_string()];
+
+            let deployed = add_skills_to_project_with_mode(
+                &project_path.to_string_lossy(),
+                &skills,
+                &agents,
+                ProjectDeployMode::Copy,
+            )?;
+            assert_eq!(deployed, 1, "shared physical path must be deployed once");
+
+            let target = project_path.join(".agents/skills/demo-skill");
+            assert!(target.join("SKILL.md").is_file());
+            assert!(
+                !skillstar_core::infra::fs_ops::is_link(&target),
+                "explicit copy mode must create an independent directory"
+            );
+            assert!(!project_path.join(".codex/skills/demo-skill").exists());
+
+            let entry = register_project(&project_path.to_string_lossy())?;
+            let manifest = load_skills_list(&entry.name).context("missing project manifest")?;
+            let universal_owners = manifest
+                .agents
+                .keys()
+                .filter(|id| matches!(id.as_str(), "codex" | "opencode"))
+                .count();
+            assert_eq!(
+                universal_owners, 1,
+                "shared path must have one manifest owner"
+            );
+            assert_eq!(
+                manifest.deploy_modes.get(".agents/skills"),
+                Some(&ProjectDeployMode::Copy)
+            );
+            Ok(())
+        })();
+
+        match previous_home {
+            Some(value) => set_env("HOME", value),
+            None => remove_env("HOME"),
+        }
+        match previous_data_dir {
+            Some(value) => set_env("SKILLSTAR_DATA_DIR", value),
+            None => remove_env("SKILLSTAR_DATA_DIR"),
+        }
+        #[cfg(windows)]
+        match previous_userprofile {
+            Some(value) => set_env("USERPROFILE", value),
+            None => remove_env("USERPROFILE"),
+        }
+        let _ = std::fs::remove_dir_all(&temp_root);
+
+        result
+    }
+
+    #[test]
     fn add_skills_to_project_does_not_create_dirs_for_empty_or_missing_skills() -> Result<()> {
         let _guard = env_lock();
 
@@ -427,8 +503,8 @@ mod tests {
                 "empty deploy must not create Claude project folders"
             );
             assert!(
-                !project_path.join(".codex").exists(),
-                "missing skills must not create Codex project folders"
+                !project_path.join(".agents").exists(),
+                "missing skills must not create universal project folders"
             );
 
             Ok(())
@@ -480,10 +556,7 @@ mod tests {
                 ProjectDeployMode::Copy,
             );
             let skills_list = SkillsList {
-                agents: HashMap::from([(
-                    "claude".to_string(),
-                    vec!["demo-skill".to_string()],
-                )]),
+                agents: HashMap::from([("claude".to_string(), vec!["demo-skill".to_string()])]),
                 deploy_modes,
                 updated_at: chrono::Utc::now().to_rfc3339(),
             };

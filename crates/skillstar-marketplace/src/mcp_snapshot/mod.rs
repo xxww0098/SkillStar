@@ -545,9 +545,7 @@ pub fn mcp_market_sync_states() -> Result<Vec<SyncStateEntry>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mcp_models::{
-        McpRegistryPackageSummary, McpRegistryRemoteSummary, McpServerKind,
-    };
+    use crate::mcp_models::{McpRegistryPackageSummary, McpRegistryRemoteSummary, McpServerKind};
 
     fn test_conn() -> Connection {
         let conn = Connection::open_in_memory().expect("in-memory sqlite");
@@ -629,7 +627,10 @@ mod tests {
         // FTS search — "postgres" also matches the Supabase curated server
         // ("Postgres 数据库"), so filter to just the registry hit by id.
         let hits = search_cards(&conn, "postgres", 10).unwrap();
-        let pg_registry = hits.iter().find(|h| h.id == "2").expect("registry postgres hit");
+        let pg_registry = hits
+            .iter()
+            .find(|h| h.id == "2")
+            .expect("registry postgres hit");
         assert_eq!(pg_registry.name, "postgres");
 
         // empty query → all, truncated
@@ -648,7 +649,10 @@ mod tests {
         assert!(curated.recommended);
         assert_eq!(curated.packages[0].identifier, "local-api-mcp-typescript");
         // AdsPower is now its own publisher bucket.
-        assert_eq!(curated.to_detail().entry.source.as_deref(), Some("adspower"));
+        assert_eq!(
+            curated.to_detail().entry.source.as_deref(),
+            Some("adspower")
+        );
     }
 
     #[test]
@@ -770,32 +774,36 @@ mod tests {
         assert_eq!(bigmodel[0].kind, McpServerKind::Stdio);
         assert_eq!(bigmodel[1].kind, McpServerKind::Remote);
         // BigModel remote servers carry their endpoint URL on the detail row.
-        let vision_full = load_full_server(&conn, "bigmodel-vision")
-            .unwrap()
-            .unwrap();
+        let vision_full = load_full_server(&conn, "bigmodel-vision").unwrap().unwrap();
         assert_eq!(vision_full.packages[0].identifier, "@z_ai/mcp-server");
-        assert!(vision_full.packages[0]
-            .required_env
-            .iter()
-            .any(|e| e == "Z_AI_API_KEY"));
-        let search_full = load_full_server(&conn, "bigmodel-search")
-            .unwrap()
-            .unwrap();
+        assert!(
+            vision_full.packages[0]
+                .required_env
+                .iter()
+                .any(|e| e == "Z_AI_API_KEY")
+        );
+        let search_full = load_full_server(&conn, "bigmodel-search").unwrap().unwrap();
         assert_eq!(search_full.remotes.len(), 1);
         assert_eq!(
             search_full.remotes[0].url,
             "https://open.bigmodel.cn/api/mcp/web_search_prime/mcp"
         );
-        assert!(search_full.remotes[0]
-            .required_headers
-            .iter()
-            .any(|h| h == "Authorization"));
+        assert!(
+            search_full.remotes[0]
+                .required_headers
+                .iter()
+                .any(|h| h == "Authorization")
+        );
 
         // New curated publishers are filtered by their source bucket too.
         let anthropic = load_cards_by_publisher(&conn, "anthropic").unwrap();
         assert_eq!(anthropic.len(), 4);
         assert_eq!(anthropic[0].id, "anthropic-filesystem");
-        assert!(anthropic.iter().all(|c| c.source.as_deref() == Some("anthropic")));
+        assert!(
+            anthropic
+                .iter()
+                .all(|c| c.source.as_deref() == Some("anthropic"))
+        );
 
         let microsoft = load_cards_by_publisher(&conn, "microsoft").unwrap();
         assert_eq!(microsoft.len(), 2);
@@ -808,13 +816,13 @@ mod tests {
         let cn_ai = load_cards_by_publisher(&conn, "cn-ai").unwrap();
         assert_eq!(cn_ai.len(), 2);
         // Firecrawl requires an API key env var.
-        let fc = load_full_server(&conn, "extra-firecrawl")
-            .unwrap()
-            .unwrap();
-        assert!(fc.packages[0]
-            .required_env
-            .iter()
-            .any(|e| e == "FIRECRAWL_API_KEY"));
+        let fc = load_full_server(&conn, "extra-firecrawl").unwrap().unwrap();
+        assert!(
+            fc.packages[0]
+                .required_env
+                .iter()
+                .any(|e| e == "FIRECRAWL_API_KEY")
+        );
 
         // Second batch of curated publishers.
         let cloudflare = load_cards_by_publisher(&conn, "cloudflare").unwrap();

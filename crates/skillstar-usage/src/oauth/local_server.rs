@@ -69,7 +69,10 @@ impl CallbackSession {
 
 /// Bind a callback listener, retrying stale servers via `/cancel` and optional
 /// fallback port (Codex: 1455 → 1457).
-pub fn start_session(preferred_port: u16, fallback_port: Option<u16>) -> UsageResult<CallbackSession> {
+pub fn start_session(
+    preferred_port: u16,
+    fallback_port: Option<u16>,
+) -> UsageResult<CallbackSession> {
     let mut bind_port = preferred_port;
     let mut using_fallback = false;
     let mut cancel_attempted = false;
@@ -263,9 +266,7 @@ fn respond(request: tiny_http::Request, outcome: &RequestOutcome) {
     };
     let resp = Response::new(
         status.into(),
-        vec![
-            Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]).unwrap(),
-        ],
+        vec![Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]).unwrap()],
         Cursor::new(body.as_bytes().to_vec()),
         Some(body.len()),
         None,

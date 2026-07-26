@@ -26,8 +26,13 @@ use crate::storage;
 use crate::subscription::{Subscription, SubscriptionUsage, UsageWindow};
 use crate::{UsageError, UsageResult};
 
-static CLIENT_ID: LazyLock<String> =
-    LazyLock::new(|| oauth_clients::client_id!("codex", "SKILLSTAR_CODEX_CLIENT_ID", "app_EMoamEEZ73f0CkXaXp7hrann"));
+static CLIENT_ID: LazyLock<String> = LazyLock::new(|| {
+    oauth_clients::client_id!(
+        "codex",
+        "SKILLSTAR_CODEX_CLIENT_ID",
+        "app_EMoamEEZ73f0CkXaXp7hrann"
+    )
+});
 const AUTHORIZE_URL: &str = "https://auth.openai.com/oauth/authorize";
 const TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
 const USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
@@ -198,7 +203,11 @@ async fn finalize(
     account_id: Option<String>,
     id_token: String,
 ) -> UsageResult<Subscription> {
-    let sub = SubscriptionBuilder::new("codex", "Codex", "USD", &access_token, expires_at)
+    // Card title = login email (logo already says Codex). Fallback only when claim missing.
+    // `oauth_account_id` stays the ChatGPT account id used by the usage API header.
+    let email = super::common::email_from_jwt(&id_token);
+    let display_name = email.unwrap_or_else(|| "Codex".to_string());
+    let sub = SubscriptionBuilder::new("codex", display_name, "USD", &access_token, expires_at)
         .refresh_token(refresh_token)
         .id_token(Some(id_token))
         .oauth_account_id(account_id.clone())
@@ -214,18 +223,24 @@ async fn finalize(
 
 super::common::impl_oauth_fetch!();
 
+const CODEX_TITLE_PLACEHOLDERS: &[&str] = &["Codex"];
+
 async fn fetch_inner(subscription: &mut Subscription) -> UsageResult<SubscriptionUsage> {
     if token_refresh::needs_refresh(subscription.access_token_expires_at) {
         refresh_codex_tokens(subscription).await?;
     }
+    maybe_upgrade_codex_title(subscription);
     let access_token =
         crate::fetchers::decrypt_required(&subscription.access_token_encrypted, "access_token")?;
     let account_id = subscription.oauth_account_id.clone();
     match fetch_with_token(&subscription.id, &access_token, account_id.as_deref()).await {
         Err(UsageError::AuthRequired) => {
             refresh_codex_tokens(subscription).await?;
-            let access_token =
-                crate::fetchers::decrypt_required(&subscription.access_token_encrypted, "access_token")?;
+            maybe_upgrade_codex_title(subscription);
+            let access_token = crate::fetchers::decrypt_required(
+                &subscription.access_token_encrypted,
+                "access_token",
+            )?;
             fetch_with_token(
                 &subscription.id,
                 &access_token,
@@ -237,6 +252,23 @@ async fn fetch_inner(subscription: &mut Subscription) -> UsageResult<Subscriptio
     }
 }
 
+fn maybe_upgrade_codex_title(subscription: &mut Subscription) {
+    let email = subscription
+        .id_token_encrypted
+        .as_deref()
+        .map(crypto::decrypt)
+        .filter(|s| !s.is_empty())
+        .and_then(|jwt| super::common::email_from_jwt(&jwt))
+        .or_else(|| {
+            subscription
+                .oauth_account_id
+                .as_deref()
+                .filter(|s| super::common::looks_like_email(s))
+                .map(str::to_string)
+        });
+    super::common::apply_email_title(subscription, email.as_deref(), CODEX_TITLE_PLACEHOLDERS);
+}
+
 async fn refresh_codex_tokens(subscription: &mut Subscription) -> UsageResult<()> {
     let rt_cipher = subscription
         .refresh_token_encrypted
@@ -246,7 +278,7 @@ async fn refresh_codex_tokens(subscription: &mut Subscription) -> UsageResult<()
     if refresh.is_empty() {
         return Err(UsageError::AuthRequired);
     }
-    let client = crate::http_client::usage_reqwest_with_active_fingerprint()?;
+    let client = crate::http_client::usage_http_client()?;
     let resp = client
         .post(TOKEN_URL)
         .form(&[
@@ -275,8 +307,15 @@ async fn refresh_codex_tokens(subscription: &mut Subscription) -> UsageResult<()
         .or_else(|| token_refresh::jwt_exp(&access_token));
     if let Some(id_token) = tokens.id_token.as_deref() {
         subscription.id_token_encrypted = Some(crypto::encrypt(id_token));
-        let account_id = token_refresh::jwt_string(id_token, &["chatgpt_account_id"])
-            .or_else(|| token_refresh::jwt_string(id_token, &["sub"]));
+        if let Some(email) = super::common::email_from_jwt(id_token) {
+            super::common::apply_email_title(subscription, Some(&email), CODEX_TITLE_PLACEHOLDERS);
+        }
+        let account_id = token_refresh::jwt_string(
+            id_token,
+            &["https://api.openai.com/auth", "chatgpt_account_id"],
+        )
+        .or_else(|| token_refresh::jwt_string(id_token, &["chatgpt_account_id"]))
+        .or_else(|| token_refresh::jwt_string(id_token, &["sub"]));
         if account_id.is_some() {
             subscription.oauth_account_id = account_id;
         }
@@ -375,11 +414,7 @@ mod tests {
     #[test]
     fn authorize_url_matches_codex_cli_params() {
         let pkce = PkcePair::generate();
-        let url = build_authorize_url(
-            "http://localhost:1455/auth/callback",
-            &pkce,
-            "state-abc",
-        );
+        let url = build_authorize_url("http://localhost:1455/auth/callback", &pkce, "state-abc");
         assert!(url.contains("client_id=app_EMoamEEZ73f0CkXaXp7hrann"));
         assert!(url.contains("redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback"));
         assert!(url.contains("codex_cli_simplified_flow=true"));

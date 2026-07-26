@@ -10,6 +10,16 @@ import type {
   UsageSummary,
 } from "../types";
 
+export function mergeActiveSubscriptionUpdate(subscriptions: Subscription[], updated: Subscription): Subscription[] {
+  return subscriptions.map((subscription) => {
+    if (subscription.id === updated.id) return updated;
+    if (updated.is_active && subscription.catalog_id === updated.catalog_id) {
+      return subscription.is_active ? { ...subscription, is_active: false } : subscription;
+    }
+    return subscription;
+  });
+}
+
 /**
  * Single orchestrating hook for the usage page.
  *
@@ -140,16 +150,7 @@ export function useUsageData() {
    *  without a full reload; backend has already verified consistency. */
   const setActive = useCallback(async (id: string) => {
     const updated = await usageApi.setActiveSubscription(id);
-    setSubscriptions((prev) =>
-      prev.map((s) => {
-        if (s.id === updated.id) return updated;
-        if (s.catalog_id === updated.catalog_id) {
-          // Demote any sibling in the same catalog.
-          return s.is_active ? { ...s, is_active: false } : s;
-        }
-        return s;
-      }),
-    );
+    setSubscriptions((prev) => mergeActiveSubscriptionUpdate(prev, updated));
     return updated;
   }, []);
 

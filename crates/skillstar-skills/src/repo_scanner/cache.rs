@@ -9,12 +9,36 @@ use tracing::warn;
 pub use crate::source_resolver::cache_dir_name;
 
 pub fn clone_or_fetch_repo(repo_url: &str, source: &str) -> Result<PathBuf> {
+    clone_or_fetch_repo_at(repo_url, source, None)
+}
+
+pub fn clone_or_fetch_repo_at(
+    repo_url: &str,
+    source: &str,
+    git_ref: Option<&str>,
+) -> Result<PathBuf> {
     let cache_dir = paths::repos_cache_dir();
     std::fs::create_dir_all(&cache_dir).context("Failed to create repo cache directory")?;
 
-    let repo_dir = cache_dir.join(cache_dir_name(source));
+    let cache_key = match git_ref {
+        Some(git_ref) => {
+            validate_git_ref(git_ref)?;
+            format!(
+                "{}--ref--{}",
+                cache_dir_name(source),
+                cache_dir_name(git_ref)
+            )
+        }
+        None => cache_dir_name(source),
+    };
+    let repo_dir = cache_dir.join(cache_key);
 
     if repo_dir.join(".git").exists() {
+        if let Some(git_ref) = git_ref {
+            fetch_and_reset_ref(&repo_dir, git_ref)?;
+            return Ok(repo_dir);
+        }
+
         let mut fetch_cmd = command_with_path("git");
         github_mirror::apply_mirror_args(&mut fetch_cmd);
         let output = fetch_cmd
@@ -53,6 +77,14 @@ pub fn clone_or_fetch_repo(repo_url: &str, source: &str) -> Result<PathBuf> {
         }
 
         Ok(repo_dir)
+    } else if let Some(git_ref) = git_ref {
+        // Ref-pinned sources use an isolated cache entry. A shallow worktree is
+        // intentionally preferred here: after fetching an arbitrary ref we
+        // need its files available before applying any subpath filter.
+        git_ops::clone_repo_shallow(repo_url, &repo_dir)
+            .with_context(|| format!("Failed to shallow-clone {}", repo_url))?;
+        fetch_and_reset_ref(&repo_dir, git_ref)?;
+        Ok(repo_dir)
     } else {
         match clone_sparse_with_skills(repo_url, &repo_dir) {
             Ok(()) => Ok(repo_dir),
@@ -65,6 +97,63 @@ pub fn clone_or_fetch_repo(repo_url: &str, source: &str) -> Result<PathBuf> {
             }
         }
     }
+}
+
+fn validate_git_ref(git_ref: &str) -> Result<()> {
+    let invalid = git_ref.is_empty()
+        || git_ref.starts_with('-')
+        || git_ref.ends_with('/')
+        || git_ref.ends_with('.')
+        || git_ref.ends_with(".lock")
+        || git_ref.contains("..")
+        || git_ref.contains("//")
+        || git_ref.contains("@{")
+        || git_ref
+            .chars()
+            .any(|ch| ch.is_control() || ch.is_whitespace() || "~^:?*[\\".contains(ch));
+    if invalid {
+        anyhow::bail!("Unsafe or invalid Git ref: {git_ref}");
+    }
+    Ok(())
+}
+
+fn fetch_and_reset_ref(repo_dir: &Path, git_ref: &str) -> Result<()> {
+    validate_git_ref(git_ref)?;
+
+    let mut fetch_cmd = command_with_path("git");
+    github_mirror::apply_mirror_args(&mut fetch_cmd);
+    let output = fetch_cmd
+        .current_dir(repo_dir)
+        .args(["fetch", "--depth", "1", "--quiet", "origin", git_ref])
+        .output()
+        .context("Failed to fetch requested Git ref")?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("git fetch for ref '{git_ref}' failed: {}", err.trim());
+    }
+
+    let mut reset_cmd = command_with_path("git");
+    github_mirror::apply_mirror_args(&mut reset_cmd);
+    let output = reset_cmd
+        .current_dir(repo_dir)
+        .args(["reset", "--hard", "FETCH_HEAD"])
+        .output()
+        .context("Failed to checkout requested Git ref")?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("git checkout for ref '{git_ref}' failed: {}", err.trim());
+    }
+
+    let output = command_with_path("git")
+        .current_dir(repo_dir)
+        .args(["config", "skillstar.ref", git_ref])
+        .output()
+        .context("Failed to persist requested Git ref in repo cache")?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("failed to persist Git ref '{git_ref}': {}", err.trim());
+    }
+    Ok(())
 }
 
 fn clone_sparse_with_skills(repo_url: &str, dest: &Path) -> Result<()> {

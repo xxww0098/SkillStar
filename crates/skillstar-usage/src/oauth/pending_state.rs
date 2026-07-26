@@ -91,9 +91,7 @@ pub fn target_subscription_id(pending_id: &str) -> Option<String> {
 
 /// Look up the auth_url for a pending session.
 pub fn auth_url(pending_id: &str) -> Option<String> {
-    lock_registry()
-        .get(pending_id)
-        .map(|p| p.auth_url.clone())
+    lock_registry().get(pending_id).map(|p| p.auth_url.clone())
 }
 
 /// Take the receiver half; caller awaits this. Idempotent — second take returns None.

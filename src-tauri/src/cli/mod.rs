@@ -7,7 +7,7 @@ use skillstar_app::cli::{CliHandlers, default_handlers};
 
 fn migrate_and_run() {
     skillstar_core::infra::migration::migrate_legacy_paths();
-    if let Err(err) = crate::core::marketplace::initialize_local_snapshot() {
+    if let Err(err) = crate::core::marketplace_snapshot::initialize() {
         eprintln!("⚠ Marketplace snapshot init failed: {err}");
     }
 }

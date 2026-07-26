@@ -15,6 +15,7 @@ function item(
       id,
       display_name: id,
       icon: ICON,
+      enabled: true,
     },
     selected,
     title: `Toggle ${id}`,
@@ -56,5 +57,20 @@ describe("AgentTargetCarousel", () => {
   it("renders nothing when no Agent is targetable", () => {
     const { container } = render(<AgentTargetCarousel items={[]} onToggle={vi.fn()} />);
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("uses only the manual Settings switch and ignores installation compatibility state", () => {
+    render(
+      <AgentTargetCarousel
+        items={[
+          item("ready", false),
+          item("disabled", false, { profile: { ...item("disabled", false).profile, enabled: false } }),
+        ]}
+        onToggle={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Toggle ready" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Toggle disabled" })).not.toBeInTheDocument();
   });
 });

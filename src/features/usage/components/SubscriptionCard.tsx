@@ -1,7 +1,7 @@
 import { motion } from "framer-motion";
 import { getBrandTheme } from "../lib/brandThemes";
 import { monthlyEquivalentPrice } from "../lib/pricing";
-import { getPrimaryResetInfo } from "../lib/usageLabels";
+import { getPrimaryResetInfo, subscriptionCardTitle } from "../lib/usageLabels";
 import { computeBodyOwnsPrimaryReset } from "../lib/resetOwnership";
 import type { CatalogEntry, Subscription } from "../types";
 import { priorityCardClass } from "./ResetCountdown";
@@ -60,6 +60,7 @@ export function SubscriptionCard({
   const bodyOwnsPrimaryReset = computeBodyOwnsPrimaryReset(usage, resetInfo, reg.ownsPrimaryReset);
   const brandColorHex = catalog?.brand_color ?? "6B7280";
   const theme = getBrandTheme(sub.catalog_id, brandColorHex);
+  const cardTitle = subscriptionCardTitle(sub.display_name, catalog?.display_name);
 
   return (
     <motion.article
@@ -74,22 +75,21 @@ export function SubscriptionCard({
         requiresReauth: sub.requires_reauth,
         priorityClass: resetInfo && priorityCardClass(resetInfo.resetAt, resetInfo.usedPercent, resetInfo.mode),
       })}
-      aria-label={sub.display_name}
+      aria-label={cardTitle}
     >
       <header className="relative z-10">
         <UsageCardHeader
           catalogId={sub.catalog_id}
-          displayName={sub.display_name}
-          description={catalog?.description}
+          displayName={cardTitle}
           brandColorHex={brandColorHex}
           theme={theme}
           planName={planName}
           billingCycle={sub.billing_cycle}
+          isActive={sub.is_active}
           onDragHandlePointerDown={onDragHandlePointerDown}
         />
         <UsageCardMetaStrip
           authMode={sub.auth_mode}
-          isActive={sub.is_active}
           requiresReauth={sub.requires_reauth}
           supportsCliSwitch={sub.supports_cli_switch}
           hasCredential={sub.has_credential}

@@ -60,7 +60,10 @@ pub async fn test_all_providers_latency(app_id: String) -> Result<Vec<LatencyRes
         // Parse settings_config to get base_url and api_key
         let settings: ProviderSettings = serde_json::from_value(entry.settings_config.clone())
             .map_err(|e| {
-                AppError::Other(format!("Failed to parse settings for provider '{}': {}", id, e))
+                AppError::Other(format!(
+                    "Failed to parse settings for provider '{}': {}",
+                    id, e
+                ))
             })?;
 
         let result = latency::test_provider_latency(
@@ -279,10 +282,9 @@ pub async fn fetch_provider_models(
         .await
         .map_err(|e| AppError::Other(format!("invalid response: {}", e)))?;
 
-    let models = body
-        .get("data")
-        .and_then(|d| d.as_array())
-        .ok_or_else(|| AppError::Other("invalid response: missing or invalid 'data' field".to_string()))?;
+    let models = body.get("data").and_then(|d| d.as_array()).ok_or_else(|| {
+        AppError::Other("invalid response: missing or invalid 'data' field".to_string())
+    })?;
 
     let model_ids: Vec<String> = models
         .iter()

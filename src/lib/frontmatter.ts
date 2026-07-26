@@ -40,18 +40,6 @@ export function writeFrontmatterValue(frontmatter: string, key: string, value: s
   return `${line}\n${frontmatter}`.trim();
 }
 
-export function readDescriptionFromAnyText(text: string): string | null {
-  const lineMatch = text.match(/^\s*description:\s*(.+)\s*$/m);
-  if (lineMatch) {
-    return lineMatch[1].trim();
-  }
-
-  // Handle collapsed single-line metadata like:
-  // "name: ... description: ... user-invocable: false"
-  const inlineMatch = text.match(/\bdescription:\s*([\s\S]*?)(?=\s+\b[a-zA-Z][a-zA-Z-]*:\s|$)/i);
-  return inlineMatch ? inlineMatch[1].trim() : null;
-}
-
 // ── Frontmatter entry parsing ──────────────────────────────────────
 
 /**
@@ -239,52 +227,4 @@ export function normalizeSkillMarkdownForPreview(content: string): string {
   if (cleanedBody === body) return raw;
 
   return `---\n${frontmatter}\n---${cleanedBody ? `\n${cleanedBody}` : ""}`;
-}
-
-// ── Translation normalization ──────────────────────────────────────
-
-/**
- * Merge an AI-translated document with the original's frontmatter structure.
- *
- * Handles three cases:
- * 1. AI returned proper frontmatter + body → merge, preserve original `name`
- * 2. AI returned only body with inline metadata → extract description, keep original FM
- * 3. No frontmatter in original → use translated document as-is
- */
-export function normalizeTranslatedDocument(originalContent: string, translatedContent: string): string {
-  const translatedRaw = unwrapOuterMarkdownFence(translatedContent);
-  const original = splitFrontmatter(originalContent);
-  const translated = splitFrontmatter(translatedRaw);
-  const frontmatterKeys = new Set(parseFrontmatterEntries(original.frontmatter).map((entry) => entry.key));
-
-  // No frontmatter: use translated document directly.
-  if (!original.frontmatter) {
-    return translatedRaw;
-  }
-
-  // Preferred path: AI returned frontmatter and body.
-  if (translated.frontmatter) {
-    let mergedFrontmatter = translated.frontmatter;
-    const originalName = readFrontmatterValue(original.frontmatter, "name");
-    if (originalName) {
-      mergedFrontmatter = writeFrontmatterValue(mergedFrontmatter, "name", originalName);
-    }
-    const translatedBody = stripLeadingDuplicatedMetadata(translated.body, frontmatterKeys);
-    return normalizeSkillMarkdownForPreview(
-      `---\n${mergedFrontmatter}\n---${translatedBody ? `\n${translatedBody}` : ""}`,
-    );
-  }
-
-  // Fallback path: keep original frontmatter structure, patch translated description if present.
-  const translatedDescription =
-    readDescriptionFromAnyText(translatedRaw) ?? readFrontmatterValue(original.frontmatter, "description");
-
-  const mergedFrontmatter = translatedDescription
-    ? writeFrontmatterValue(original.frontmatter, "description", translatedDescription)
-    : original.frontmatter;
-
-  const translatedBody = stripLeadingDuplicatedMetadata(translatedRaw, frontmatterKeys);
-  return normalizeSkillMarkdownForPreview(
-    `---\n${mergedFrontmatter}\n---${translatedBody ? `\n${translatedBody}` : ""}`,
-  );
 }

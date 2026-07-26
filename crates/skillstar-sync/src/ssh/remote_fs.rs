@@ -63,7 +63,11 @@ impl MockRemoteFs {
         }
     }
 
-    pub fn with_dir(mut self, path: impl Into<String>, entries: Vec<(String, FileAttributes)>) -> Self {
+    pub fn with_dir(
+        mut self,
+        path: impl Into<String>,
+        entries: Vec<(String, FileAttributes)>,
+    ) -> Self {
         self.dirs.insert(path.into(), entries);
         self
     }

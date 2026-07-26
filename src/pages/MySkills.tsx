@@ -2,11 +2,12 @@ import {
   LocalSkillsContent,
   MySkillsRemoteHostPicker,
   MySkillsScopeSwitch,
+  RemoteSkillsContent,
   useMySkillsRemoteHosts,
   useMySkillsScope,
 } from "../features/my-skills";
 import { CloudSkillsContent } from "../features/s3";
-import { RemoteSkillsContent, SshHostForm } from "../features/ssh";
+import { SshHostForm } from "../features/ssh";
 
 interface MySkillsProps {
   initialFocusSkill?: string | null;

@@ -5,3 +5,4 @@ export { MySkillsScopeSwitch, type MySkillsScope } from "./components/MySkillsSc
 export { ScopeDetailDrawer, type ScopeDetailProps } from "./components/ScopeDetailDrawer";
 export { useMySkillsRemoteHosts } from "./hooks/useMySkillsRemoteHosts";
 export { useMySkillsScope } from "./hooks/useMySkillsScope";
+export { RemoteSkillsContent } from "./remote/RemoteSkillsContent";

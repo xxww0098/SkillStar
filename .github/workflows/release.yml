@@ -2,6 +2,39 @@ name: Release
 
 # Build and publish desktop bundles for macOS, Linux, and Windows whenever a
 # version tag (v*) is pushed. Drafts a GitHub Release and uploads the installers.
+#
+# ## Failure lessons (from Actions history — do not re-learn the hard way)
+#
+# 1. Tag only after CI is green AND a local production frontend build passes.
+#    `tauri-action` runs `beforeBuildCommand` (`bun run build` / tsc+vite).
+#    v0.0.3 failed on ALL four matrix legs with the same 4 TypeScript errors
+#    (unused import, incomplete test fixtures vs generated types, dead type
+#    comparison in useUpdater). Those never hit main CI while Linux/macOS CI
+#    only ran `bun run lint` + `bun run test` and skipped the production
+#    build. Pre-tag checklist:
+#      bun run build          # must pass (tsc is strict in production)
+#      bun run test && cargo test --workspace --locked
+#      # wait for CI + Windows CI green on the commit you will tag
+#
+# 2. Windows-only Rust deps must be declared as target-specific.
+#    v0.0.1 Windows release failed with E0433 `cannot find crate junction`
+#    while macOS/Linux matrix legs succeeded. `junction` is a Windows-only
+#    symlink fallback; declare it under
+#    `[target.'cfg(windows)'.dependencies]` (or equivalent) in the crate
+#    that uses it — not as an unconditional dep, and never "forgot to add".
+#    Fixed later by "declare junction as Windows-only dependency"; the
+#    successful v0.0.1 / v0.0.2 releases only landed after that.
+#
+# 3. Updater signing secrets (required — createUpdaterArtifacts is true).
+#    Repo secrets must include:
+#      TAURI_SIGNING_PRIVATE_KEY          # contents of ~/.tauri/skillstar.key
+#      TAURI_SIGNING_PRIVATE_KEY_PASSWORD # passphrase used when generating the key
+#    Without them every matrix leg fails at the signing step. Do not push a
+#    tag to "see what happens" — a partial matrix burn costs ~20–35 min × N.
+#
+# 4. Matrix is `fail-fast: false` on purpose so one platform's failure still
+#    surfaces the others (v0.0.1 junction was Windows-only; without fail-fast
+#    we still learned macOS/Linux were fine).
 on:
   push:
     tags:
@@ -61,13 +94,22 @@ jobs:
       - name: Install JS dependencies
         run: bun install --frozen-lockfile
 
+      # Cheap gate before the long Tauri compile: catch TS/vite errors that
+      # historically only failed at release time (see failure lesson #1).
+      - name: Frontend production build (pre-flight)
+        run: bun run build
+
       - name: Build and release Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "SkillStar ${{ github.ref_name }}"
           releaseDraft: true
           prerelease: false
+          # Default true: merge multi-platform platforms into latest.json on the release.
+          uploadUpdaterJson: true
           args: ${{ matrix.args }}

@@ -25,7 +25,7 @@ export function useAgentProfiles() {
   const toggleProfile = useCallback(async (id: string) => {
     try {
       const newState = await tauriInvoke("toggle_agent_profile", { id });
-      setProfiles((prev) => prev.map((p) => (p.id === id ? { ...p, enabled: newState } : p)));
+      setProfiles((prev) => prev.map((p) => (p.id === id ? { ...p, enabled: newState, installed: newState } : p)));
       return newState;
     } catch (e) {
       throw new Error(String(e));

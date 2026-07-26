@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { isBreakdownQuotaWindow, isMonetaryQuota, remainingBarPercent } from "./usageLabels";
+import { isBreakdownQuotaWindow, isMonetaryQuota, remainingBarPercent, subscriptionCardTitle } from "./usageLabels";
+
+describe("subscriptionCardTitle", () => {
+  it("strips catalog · prefix and legacy Grok · names", () => {
+    expect(subscriptionCardTitle("Grok · user@x.com", "Grok")).toBe("user@x.com");
+    expect(subscriptionCardTitle("Grok · user@x.com")).toBe("user@x.com");
+    expect(subscriptionCardTitle("Codex · personal", "Codex")).toBe("personal");
+    expect(subscriptionCardTitle("user@x.com", "Grok")).toBe("user@x.com");
+    expect(subscriptionCardTitle("plain name")).toBe("plain name");
+  });
+});
 
 describe("remainingBarPercent", () => {
   it("is full when nothing is used and empty when fully consumed", () => {

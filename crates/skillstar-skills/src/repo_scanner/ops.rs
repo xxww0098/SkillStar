@@ -1,8 +1,8 @@
 use crate::git::ops as git_ops;
+use crate::update_checker;
 use anyhow::{Context, Result, anyhow};
 use skillstar_core::config::github_mirror;
 use skillstar_core::infra::{fs_ops, path_env::command_with_path, paths};
-use crate::update_checker;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -55,28 +55,18 @@ pub fn pull_repo_skill_update(skill_path: &Path, folder_path: Option<&str>) -> R
     let repo_root = git_ops::find_repo_root(&absolute_path)
         .ok_or_else(|| anyhow!("Cannot find git repo root for symlinked skill"))?;
 
-    if is_shallow_repo(&repo_root) {
-        git_ops::run_git_shallow_fetch(&repo_root, &["fetch", "--depth", "1", "--quiet"])
-            .context("Failed to fetch repo-cached update (shallow)")?;
-    } else {
-        let mut fetch_cmd = command_with_path("git");
-        github_mirror::apply_mirror_args(&mut fetch_cmd);
-        let output = fetch_cmd
-            .current_dir(&repo_root)
-            .args(["fetch", "--quiet"])
-            .output()
-            .context("Failed to execute git fetch for repo-cached update")?;
-        if !output.status.success() {
-            let err = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow!("git fetch failed: {}", err.trim()));
-        }
-    }
+    update_checker::fetch_tracked_ref(&repo_root).context("Failed to fetch repo-cached update")?;
 
     let mut reset_cmd = command_with_path("git");
     github_mirror::apply_mirror_args(&mut reset_cmd);
+    let reset_target = if update_checker::configured_git_ref(&repo_root).is_some() {
+        "FETCH_HEAD"
+    } else {
+        "origin/HEAD"
+    };
     let output = reset_cmd
         .current_dir(&repo_root)
-        .args(["reset", "--hard", "origin/HEAD"])
+        .args(["reset", "--hard", reset_target])
         .output()
         .context("Failed to execute git reset for repo-cached update")?;
     if !output.status.success() {
@@ -105,10 +95,6 @@ pub fn pull_repo_skill_update(skill_path: &Path, folder_path: Option<&str>) -> R
         Some(fp) if !fp.is_empty() => compute_subtree_hash(&repo_root, fp),
         _ => git_ops::compute_tree_hash(&repo_root),
     }
-}
-
-fn is_shallow_repo(repo_dir: &Path) -> bool {
-    repo_dir.join(".git/shallow").exists()
 }
 
 pub fn prefetch_unique_repos(skill_paths: &[PathBuf]) -> HashSet<PathBuf> {

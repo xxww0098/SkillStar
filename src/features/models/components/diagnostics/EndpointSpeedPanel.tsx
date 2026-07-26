@@ -5,6 +5,7 @@ import { Button } from "../../../../components/ui/button";
 import { cn } from "../../../../lib/utils";
 import { useEndpointSpeedTest } from "../../api/diagnostics";
 import { endpointProbeLabel, endpointProbeTone, isEndpointReachable } from "../../lib/endpointProbe";
+import { providerCardClass } from "../providerForm/ProviderConfigPrimitives";
 
 export interface EndpointSpeedPanelProps {
   urls: string[];
@@ -32,16 +33,16 @@ function EndpointSpeedPanelInner({ urls, apiKey, onApplyFastest, className }: En
   const canTest = urls.some((u) => u.trim()) && apiKey.trim();
 
   return (
-    <div className={cn("space-y-2.5 rounded-xl border border-border/50 bg-muted/15 px-3 py-2.5", className)}>
+    <section className={cn(providerCardClass, "space-y-3 p-4", className)}>
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-medium text-muted-foreground">{t("models.diagnosticsPanel.speedTitle")}</p>
+        <p className="text-sm font-semibold text-foreground">{t("models.diagnosticsPanel.speedTitle")}</p>
         <Button
           type="button"
           variant="outline"
           size="sm"
           onClick={handleTest}
           disabled={isLoading || !canTest}
-          className="h-7 gap-1.5 text-xs"
+          className="h-9 gap-1.5 text-xs"
           aria-label={t("models.diagnosticsPanel.testAllAria")}
         >
           {isLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}
@@ -52,7 +53,7 @@ function EndpointSpeedPanelInner({ urls, apiKey, onApplyFastest, className }: En
       {!canTest && (
         <p className="text-[11px] leading-4 text-muted-foreground">{t("models.diagnosticsPanel.needCredentials")}</p>
       )}
-      <p className="text-[10px] leading-4 text-muted-foreground/80">{t("models.diagnosticsPanel.proxyHint")}</p>
+      <p className="text-[11px] leading-4 text-muted-foreground/80">{t("models.diagnosticsPanel.proxyHint")}</p>
 
       {results.length > 0 && (
         <ul className="space-y-1.5">
@@ -66,7 +67,7 @@ function EndpointSpeedPanelInner({ urls, apiKey, onApplyFastest, className }: En
                 endpointProbeTone(result) === "error" && "border-destructive/20 bg-destructive/5 text-destructive",
               )}
             >
-              <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground">{result.url}</span>
+              <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">{result.url}</span>
               <span className="shrink-0 font-medium">{endpointProbeLabel(result, t)}</span>
             </li>
           ))}
@@ -78,7 +79,7 @@ function EndpointSpeedPanelInner({ urls, apiKey, onApplyFastest, className }: En
           type="button"
           variant="ghost"
           size="sm"
-          className="h-7 w-full text-xs text-primary"
+          className="h-9 w-full text-xs text-primary"
           onClick={() => {
             const url = fastest.url;
             if (url.includes("/models")) {
@@ -94,7 +95,7 @@ function EndpointSpeedPanelInner({ urls, apiKey, onApplyFastest, className }: En
           {t("models.diagnosticsPanel.applyFastest", { ms: fastest.latency_ms })}
         </Button>
       )}
-    </div>
+    </section>
   );
 }
 

@@ -87,7 +87,7 @@ async fn drive_login(state: String, redirect_uri: String) -> UsageResult<Subscri
 }
 
 async fn fetch_email(access_token: &str) -> Option<String> {
-    let client = crate::http_client::usage_reqwest_with_active_fingerprint().ok()?;
+    let client = crate::http_client::usage_http_client().ok()?;
     let resp = client
         .get(USERINFO_URL)
         .bearer_auth(access_token)
@@ -104,7 +104,7 @@ async fn fetch_email(access_token: &str) -> Option<String> {
 
 async fn exchange_code(code: &str, redirect_uri: &str) -> UsageResult<TokenResponse> {
     let oauth = antigravity_oauth_config()?;
-    let client = crate::http_client::usage_reqwest_with_active_fingerprint()?;
+    let client = crate::http_client::usage_http_client()?;
     let resp = client
         .post(TOKEN_URL)
         .form(&[
@@ -136,10 +136,16 @@ async fn finalize(
     email: Option<String>,
 ) -> UsageResult<Subscription> {
     let display_name = email.clone().unwrap_or_else(|| "Antigravity".to_string());
-    let sub = SubscriptionBuilder::new("antigravity", display_name, "USD", &access_token, expires_at)
-        .refresh_token(refresh_token)
-        .oauth_account_id(email)
-        .build();
+    let sub = SubscriptionBuilder::new(
+        "antigravity",
+        display_name,
+        "USD",
+        &access_token,
+        expires_at,
+    )
+    .refresh_token(refresh_token)
+    .oauth_account_id(email)
+    .build();
 
     if let Ok(usage) = build_usage(&sub.id, &access_token, None).await {
         storage::save_usage_snapshot(usage).ok();
@@ -152,7 +158,21 @@ super::common::impl_oauth_fetch!();
 
 async fn fetch_inner(subscription: &mut Subscription) -> UsageResult<SubscriptionUsage> {
     ensure_fresh_access_token(subscription).await?;
-    let access_token = crate::fetchers::decrypt_required(&subscription.access_token_encrypted, "access_token")?;
+    let access_token =
+        crate::fetchers::decrypt_required(&subscription.access_token_encrypted, "access_token")?;
+    // Upgrade "Antigravity" placeholders once userinfo (or cached oauth_account_id) yields email.
+    if let Some(email) = fetch_email(&access_token).await.or_else(|| {
+        subscription
+            .oauth_account_id
+            .as_deref()
+            .filter(|s| super::common::looks_like_email(s))
+            .map(str::to_string)
+    }) {
+        super::common::apply_email_title(subscription, Some(&email), &["Antigravity"]);
+        if subscription.oauth_account_id.is_none() {
+            subscription.oauth_account_id = Some(email);
+        }
+    }
     let cached_project = subscription.note.clone();
     let (load, cleared_cached_project) = match load_code_assist_with_project_fallback(
         &access_token,

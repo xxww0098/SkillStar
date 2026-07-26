@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 use tracing::warn;
 
 use crate::local_skill;
-use crate::repo_scanner;
 use crate::patrol::types::HubSkillEntry;
+use crate::repo_scanner;
 
 /// Check a single skill for available updates without network (after prefetch).
 ///

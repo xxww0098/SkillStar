@@ -90,6 +90,11 @@ pub fn state_dir() -> PathBuf {
     data_root().join("state")
 }
 
+/// `~/.skillstar/tutorials/` — persistent generated Skill tutorials.
+pub fn tutorials_dir() -> PathBuf {
+    data_root().join("tutorials")
+}
+
 /// `config/ai.json` — AI provider configuration.
 pub fn ai_config_path() -> PathBuf {
     config_dir().join("ai.json")
@@ -225,7 +230,7 @@ pub(crate) fn shellexpand_home(path: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{data_root, home_dir, hub_root, shellexpand_home};
+    use super::{data_root, home_dir, hub_root, shellexpand_home, tutorials_dir};
     use tempfile::TempDir;
 
     #[test]
@@ -238,6 +243,7 @@ mod tests {
             std::env::set_var("SKILLSTAR_DATA_DIR", temp.path());
         }
         assert_eq!(data_root(), temp.path());
+        assert_eq!(tutorials_dir(), temp.path().join("tutorials"));
         unsafe {
             std::env::remove_var("SKILLSTAR_DATA_DIR");
         }

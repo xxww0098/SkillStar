@@ -9,3 +9,4 @@ export {
   type ProgressTrackTone,
 } from "./ProgressTrack";
 export { SecondaryPanel, type SecondaryPanelProps } from "./SecondaryPanel";
+export { UsageMeter, MeterFigure, type UsageMeterProps } from "./UsageMeter";

@@ -1,6 +1,6 @@
+use crate::lockfile;
 use crate::source_resolver;
 use skillstar_core::infra::paths;
-use crate::lockfile;
 
 use super::RepoNewSkill;
 use super::cache::cache_dir_name;

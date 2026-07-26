@@ -1,4 +1,4 @@
-import type { AiConfig, AiPickResponse, AiTranslateSkillStreamResult } from "../../../types";
+import type { AiConfig, AiPickResponse } from "../../../types";
 
 interface SkillMetaInput {
   name: string;
@@ -15,12 +15,6 @@ export interface AiCommands {
     args: { requestId: string; content: string; forceRefresh?: boolean };
     result: string;
   };
-  ai_translate_skill: { args: { content: string }; result: string };
-  ai_translate_skill_stream: {
-    args: { requestId: string; content: string; forceRefresh?: boolean };
-    result: AiTranslateSkillStreamResult;
-  };
-
   ai_test_connection: { args: Record<string, never>; result: number };
   ai_pick_skills: {
     args: { prompt: string; skills: SkillMetaInput[] };

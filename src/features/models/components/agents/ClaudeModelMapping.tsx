@@ -1,9 +1,9 @@
 import { useTranslation } from "react-i18next";
 import { ClaudeColor } from "../../../../components/ui/icons/lobe";
 import { LobeIcon } from "../../../../components/ui/icons/LobeIcon";
-import { Input } from "../../../../components/ui/input";
 import { LATEST_CLAUDE_MODELS } from "../../lib/providerPatch";
-import { fieldLabelClass } from "../providerForm/ProviderConfigPrimitives";
+import { ModelFormField } from "../providerForm/ProviderConfigPrimitives";
+import { EditableModelCombobox } from "../shared/EditableModelCombobox";
 
 export interface ClaudeModelMappingValues {
   claudeMainModel: string;
@@ -14,17 +14,43 @@ export interface ClaudeModelMappingValues {
 
 export interface ClaudeModelMappingProps {
   values: ClaudeModelMappingValues;
-  /** Model id suggestions shown in the datalist. */
+  /** Model id suggestions shown in the themed combobox. */
   options: string[];
   onChange: <K extends keyof ClaudeModelMappingValues>(key: K, value: string) => void;
   disabled?: boolean;
 }
 
-const FIELDS: { key: keyof ClaudeModelMappingValues; label?: string; labelKey?: string; placeholder: string }[] = [
-  { key: "claudeMainModel", labelKey: "models.dialog.mainModel", placeholder: LATEST_CLAUDE_MODELS.main },
-  { key: "claudeHaikuModel", label: "Haiku", placeholder: LATEST_CLAUDE_MODELS.haiku },
-  { key: "claudeSonnetModel", label: "Sonnet", placeholder: LATEST_CLAUDE_MODELS.sonnet },
-  { key: "claudeOpusModel", label: "Opus", placeholder: LATEST_CLAUDE_MODELS.opus },
+const FIELDS: {
+  key: keyof ClaudeModelMappingValues;
+  label?: string;
+  labelKey?: string;
+  infoKey: string;
+  placeholder: string;
+}[] = [
+  {
+    key: "claudeMainModel",
+    labelKey: "models.dialog.mainModel",
+    infoKey: "models.dialog.mainModelInfo",
+    placeholder: LATEST_CLAUDE_MODELS.main,
+  },
+  {
+    key: "claudeHaikuModel",
+    label: "Haiku",
+    infoKey: "models.dialog.haikuModelInfo",
+    placeholder: LATEST_CLAUDE_MODELS.haiku,
+  },
+  {
+    key: "claudeSonnetModel",
+    label: "Sonnet",
+    infoKey: "models.dialog.sonnetModelInfo",
+    placeholder: LATEST_CLAUDE_MODELS.sonnet,
+  },
+  {
+    key: "claudeOpusModel",
+    label: "Opus",
+    infoKey: "models.dialog.opusModelInfo",
+    placeholder: LATEST_CLAUDE_MODELS.opus,
+  },
 ];
 
 /**
@@ -47,23 +73,24 @@ export function ClaudeModelMapping({ values, options, onChange, disabled }: Clau
       </div>
       <div className="grid gap-2.5 sm:grid-cols-2">
         {FIELDS.map((field) => (
-          <label key={field.key} className="space-y-1">
-            <span className={fieldLabelClass}>{field.labelKey ? t(field.labelKey) : field.label}</span>
-            <Input
+          <ModelFormField
+            key={field.key}
+            id={`claude-${field.key}`}
+            label={field.labelKey ? t(field.labelKey) : field.label}
+            info={t(field.infoKey)}
+          >
+            <EditableModelCombobox
+              id={`claude-${field.key}`}
               value={values[field.key]}
-              onChange={(e) => onChange(field.key, e.target.value)}
+              options={options}
+              onChange={(value) => onChange(field.key, value)}
               placeholder={field.placeholder}
-              list="claude-mapping-models"
+              ariaLabel={field.labelKey ? t(field.labelKey) : (field.label ?? "")}
               disabled={disabled}
             />
-          </label>
+          </ModelFormField>
         ))}
       </div>
-      <datalist id="claude-mapping-models">
-        {options.map((m) => (
-          <option key={m} value={m} />
-        ))}
-      </datalist>
     </div>
   );
 }

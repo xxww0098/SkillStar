@@ -49,16 +49,14 @@ pub(crate) fn unsupported(id: &str) -> UsageError {
     UsageError::Other(format!("`{}` 暂未实现自动同步（请等待 v1.1）", id))
 }
 
-/// Shared HTTP client used by the fingerprint-aware OAuth fetchers.
+/// Shared proxy-aware HTTP client used by the OAuth fetchers.
 ///
 /// Equivalent to the per-file `fn http_client()` shims that used to live in
 /// each fetcher: they were all one-line wrappers around
-/// [`usage_reqwest_with_active_fingerprint`]. Fetchers should call this
+/// [`crate::http_client::usage_http_client`]. Fetchers should call this
 /// directly instead of re-declaring a local alias.
-///
-/// [`usage_reqwest_with_active_fingerprint`]: crate::http_client::usage_reqwest_with_active_fingerprint
 pub(crate) fn http_client() -> UsageResult<reqwest::Client> {
-    crate::http_client::usage_reqwest_with_active_fingerprint()
+    crate::http_client::usage_http_client()
 }
 
 /// Decrypt a required credential field.
@@ -67,10 +65,7 @@ pub(crate) fn http_client() -> UsageResult<reqwest::Client> {
 /// `"缺少 access_token"`), so each fetcher keeps its original wording while
 /// sharing the decrypt + empty-check logic that used to be copy-pasted
 /// across the OAuth fetchers.
-pub(crate) fn decrypt_required(
-    cipher: &Option<String>,
-    field_label: &str,
-) -> UsageResult<String> {
+pub(crate) fn decrypt_required(cipher: &Option<String>, field_label: &str) -> UsageResult<String> {
     let cipher = cipher
         .as_deref()
         .ok_or_else(|| UsageError::Other(format!("缺少 {field_label}")))?;

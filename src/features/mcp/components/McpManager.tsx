@@ -60,7 +60,6 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
   const { profiles } = useAgentProfiles();
   const {
     servers,
-    toolStatuses,
     isLoading,
     error,
     createServer,
@@ -68,7 +67,7 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
     deleteServer,
     toggleTool,
     syncAll,
-    importFromTool,
+    importFromTools,
     syncing,
     importing,
   } = useMcpServers();
@@ -82,7 +81,7 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
   const normalizedQuery = query.trim().toLowerCase();
   // Active tool filter: only show servers synced into this tool (null = all).
   const [toolFilter, setToolFilter] = useState<string | null>(null);
-  const agentTargets = useMemo(() => selectMcpAgentTargets(profiles, toolStatuses), [profiles, toolStatuses]);
+  const agentTargets = useMemo(() => selectMcpAgentTargets(profiles), [profiles]);
   const activeToolFilter = resolveMcpToolFilter(toolFilter, agentTargets);
 
   const filteredServers = useMemo(
@@ -183,16 +182,12 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
   };
 
   const handleImport = async () => {
-    let total = 0;
-    for (const status of toolStatuses) {
-      if (!status.installed || status.serverCount === 0) continue;
-      try {
-        total += await importFromTool(status.toolId);
-      } catch {
-        // best-effort; skip tools that can't be read
-      }
+    try {
+      const total = await importFromTools();
+      toast.success(total > 0 ? t("mcp.importedCount", { count: total }) : t("mcp.importedNone"));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
     }
-    toast.success(total > 0 ? t("mcp.importedCount", { count: total }) : t("mcp.importedNone"));
   };
 
   const handleSyncAll = async () => {

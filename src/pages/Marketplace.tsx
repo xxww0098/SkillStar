@@ -141,6 +141,25 @@ export function Marketplace({
     [activeTab, results, leaderboard, sortBy, searchQuery, aiKeywords, aiActiveKeywords, aiKeywordSkillMap, isMcpTab],
   );
 
+  const spotlightItems = useMemo(
+    () =>
+      displaySkills.map((skill) => ({
+        id: skill.name,
+        title: skill.name,
+        subtitle: skill.localized_description || skill.description || undefined,
+        meta: skill.source,
+      })),
+    [displaySkills],
+  );
+
+  const handleSpotlightSelect = useCallback(
+    (id: string) => {
+      const skill = displaySkills.find((s) => s.name === id) ?? results?.skills.find((s) => s.name === id);
+      if (skill) setSelectedSkill(skill);
+    },
+    [displaySkills, results],
+  );
+
   const { handleInstall, handleUpdate, handleUninstall, handleReinstall } = useMarketplaceActions({
     installSkill,
     updateSkill,
@@ -259,6 +278,8 @@ export function Marketplace({
           titleNode={<h1>{t("sidebar.market")}</h1>}
           searchQuery={toolbarSearchQuery}
           onSearchChange={handleToolbarSearchChange}
+          searchItems={spotlightItems}
+          onSearchSelect={handleSpotlightSelect}
           sortBy={sortBy}
           onSortChange={setSortBy}
           viewMode={viewMode}

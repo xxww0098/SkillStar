@@ -1,25 +1,8 @@
-use crate::core::skill::{Skill, extract_github_source_from_url, extract_skill_description};
 use skillstar_core::infra::error::AppError;
 use skillstar_skills::deployment;
-use skillstar_skills::{installed_skill, local_skill, skill_install, skill_update};
+use skillstar_skills::{Skill, installed_skill, skill_install, skill_update};
 
-use super::skill_paths::resolve_skill_content_dir;
-
-/// Result of updating a single skill. For repo-cached skills, pulling the
-/// repo also advances all sibling skills from the same repository.
-#[derive(serde::Serialize)]
-pub struct UpdateResult {
-    /// The skill that was explicitly updated.
-    pub skill: Skill,
-    /// Names of sibling skills from the same repo whose update state was
-    /// also cleared by the pull. The frontend should set
-    /// `update_available = false` for these.
-    pub siblings_cleared: Vec<String>,
-    /// Per-agent re-link failures after the update ("Agent: error"). The
-    /// update itself succeeded; the frontend should warn so the user knows
-    /// an agent deployment may be stale or unlinked.
-    pub agent_link_failures: Vec<String>,
-}
+pub use skillstar_skills::skill_update::UpdateResult;
 
 #[tauri::command]
 pub async fn list_skills() -> Result<Vec<Skill>, AppError> {
@@ -80,49 +63,8 @@ pub async fn toggle_skill_for_agent(
 
 #[tauri::command]
 pub async fn update_skill(name: String) -> Result<UpdateResult, AppError> {
-    tokio::task::spawn_blocking(move || update_skill_sync(name))
+    tokio::task::spawn_blocking(move || skill_update::update_skill(&name))
         .await
         .map_err(|e| AppError::Other(format!("update task panicked: {e}")))?
-}
-
-fn update_skill_sync(name: String) -> Result<UpdateResult, AppError> {
-    let outcome = skill_update::update_skill(&name).map_err(AppError::Anyhow)?;
-
-    let skills_dir = skillstar_core::infra::paths::hub_skills_dir();
-    let path = skills_dir.join(&name);
-
-    let description = resolve_skill_content_dir(&name)
-        .map(|dir| extract_skill_description(&dir))
-        .unwrap_or_else(|| extract_skill_description(&path));
-
-    let source = extract_github_source_from_url(&outcome.git_url);
-
-    let skill_type = if local_skill::is_local_skill(&name) {
-        crate::core::skill::SkillType::Local
-    } else {
-        crate::core::skill::SkillType::Hub
-    };
-
-    Ok(UpdateResult {
-        skill: Skill {
-            name,
-            description,
-            localized_description: None,
-            skill_type,
-            stars: 0,
-            installed: true,
-            update_available: false,
-            last_updated: chrono::Utc::now().to_rfc3339(),
-            git_url: outcome.git_url,
-            tree_hash: Some(outcome.tree_hash),
-            category: crate::core::skill::SkillCategory::None,
-            author: None,
-            topics: Vec::new(),
-            agent_links: Some(outcome.agent_links),
-            rank: None,
-            source,
-        },
-        siblings_cleared: outcome.sibling_names,
-        agent_link_failures: outcome.agent_link_failures,
-    })
+        .map_err(AppError::Anyhow)
 }

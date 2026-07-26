@@ -623,15 +623,24 @@
 /* ========== Shared Component Patterns ========== */
 
 @layer components {
-  /* Reusable modal dialog surface — used by 8+ modal components */
+  /* Reusable modal dialog surface — used by 8+ modal components.
+     Dark glass uses a near-solid mix of background (not translucent card)
+     so secondary text and disabled controls keep WCAG AA contrast. */
   .modal-surface {
-    @apply relative overflow-hidden rounded-[24px] border border-glass-border bg-card/95 backdrop-blur-3xl ring-1 ring-glass-ring;
+    @apply relative overflow-hidden rounded-[24px] border border-glass-border backdrop-blur-3xl ring-1 ring-glass-ring;
+    background-color: color-mix(in srgb, var(--color-background) 90%, rgb(255 255 255) 10%);
     box-shadow: 0 0 80px -20px rgba(0, 0, 0, 0.5);
   }
 
   .modal-surface-subtle {
-    @apply relative overflow-hidden rounded-[24px] border border-border bg-card/95 backdrop-blur-3xl ring-1 ring-border-subtle;
+    @apply relative overflow-hidden rounded-[24px] border border-border backdrop-blur-3xl ring-1 ring-border-subtle;
+    background-color: color-mix(in srgb, var(--color-background) 92%, rgb(255 255 255) 8%);
     box-shadow: 0 0 80px -20px rgba(0, 0, 0, 0.5);
+  }
+
+  :root[data-bg-style="paper"] .modal-surface,
+  :root[data-bg-style="paper"] .modal-surface-subtle {
+    background-color: var(--color-card);
   }
 
   /* ── Drag-to-reorder (classList-driven, zero React re-renders) ── */

@@ -8,9 +8,8 @@ use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 
 use skillstar_core::infra::paths::{hub_skills_dir, lockfile_path};
-use skillstar_skills::lockfile::Lockfile;
 use skillstar_skills::agents::list_profiles;
-use skillstar_skills::projects::detect_project_agents;
+use skillstar_skills::lockfile::Lockfile;
 use skillstar_skills::source_resolver::same_remote_url;
 
 // ── Name resolution helpers ─────────────────────────────────────────────
@@ -18,6 +17,20 @@ use skillstar_skills::source_resolver::same_remote_url;
 /// Derive a skill name hint from a Git URL.
 pub fn derive_name_hint(url: &str, explicit_name: Option<&str>) -> String {
     explicit_name.map(str::to_string).unwrap_or_else(|| {
+        if let Ok(source) = skillstar_skills::source_resolver::Source::parse(url) {
+            if let Some(skill) = source.skill_filter {
+                return skill;
+            }
+            if let Some(subpath) = source.subpath
+                && let Some(name) = subpath.rsplit('/').next()
+            {
+                return name.to_string();
+            }
+            if let Some(name) = source.short.rsplit('/').next() {
+                return name.to_string();
+            }
+        }
+
         url.rsplit('/')
             .next()
             .unwrap_or("skill")
@@ -91,7 +104,15 @@ pub fn resolve_installed_name(
 pub fn normalize_agent_ids(agent_ids: &[String]) -> Vec<String> {
     let mut normalized: Vec<String> = agent_ids
         .iter()
-        .map(|id| id.trim().to_lowercase())
+        .map(|id| match id.trim().to_lowercase().as_str() {
+            // Accept the canonical ids documented by vercel-labs/skills while
+            // preserving SkillStar's existing persisted profile ids.
+            "claude-code" => "claude".to_string(),
+            "gemini-cli" => "gemini".to_string(),
+            "kiro-cli" => "kiro".to_string(),
+            "hermes-agent" => "hermes".to_string(),
+            normalized => normalized.to_string(),
+        })
         .filter(|id| !id.is_empty())
         .collect();
     normalized.sort();
@@ -111,25 +132,50 @@ pub fn supported_project_agents() -> Vec<(String, String)> {
     supported
 }
 
+pub fn supported_agent_ids(global: bool) -> Vec<String> {
+    let mut supported = list_profiles()
+        .into_iter()
+        .filter(|profile| {
+            if global {
+                profile.has_global_skills()
+            } else {
+                profile.has_project_skills()
+            }
+        })
+        .map(|profile| profile.id)
+        .collect::<Vec<_>>();
+    supported.sort();
+    supported.dedup();
+    supported
+}
+
 /// Prompt the user to select agent IDs interactively.
-pub fn prompt_for_agent_selection(auto_agent_ids: &[String]) -> Vec<String> {
+pub fn prompt_for_agent_selection(enabled_agent_ids: &[String]) -> Vec<String> {
+    prompt_for_agent_selection_for_scope(enabled_agent_ids, false)
+}
+
+pub fn prompt_for_agent_selection_for_scope(
+    enabled_agent_ids: &[String],
+    global: bool,
+) -> Vec<String> {
     if !io::stdin().is_terminal() {
-        return auto_agent_ids.to_vec();
+        return enabled_agent_ids.to_vec();
     }
 
-    let supported = supported_project_agents();
-    if supported.is_empty() {
-        return auto_agent_ids.to_vec();
+    let supported_ids = supported_agent_ids(global);
+    if supported_ids.is_empty() {
+        return enabled_agent_ids.to_vec();
     }
+    let default_text = if enabled_agent_ids.is_empty() {
+        "manual selection".to_string()
+    } else {
+        format!("Settings-enabled ({})", enabled_agent_ids.join(", "))
+    };
 
-    let supported_ids: Vec<String> = supported.into_iter().map(|(id, _)| id).collect();
-	    let default_text = if auto_agent_ids.is_empty() {
-	        "auto fallback (.agent/skills)".to_string()
-	    } else {
-	        format!("auto detected ({})", auto_agent_ids.join(", "))
-	    };
-
-    println!("Select target agent(s) for project link:");
+    println!(
+        "Select target agent(s) for {} install:",
+        if global { "global" } else { "project" }
+    );
     println!("  Available: {}", supported_ids.join(", "));
     println!(
         "  Press Enter for {} or input comma-separated agent ids.",
@@ -140,12 +186,12 @@ pub fn prompt_for_agent_selection(auto_agent_ids: &[String]) -> Vec<String> {
 
     let mut input = String::new();
     if io::stdin().read_line(&mut input).is_err() {
-        return auto_agent_ids.to_vec();
+        return enabled_agent_ids.to_vec();
     }
 
     let input = input.trim();
     if input.is_empty() {
-        return auto_agent_ids.to_vec();
+        return enabled_agent_ids.to_vec();
     }
 
     let parsed: Vec<String> = input
@@ -158,13 +204,19 @@ pub fn prompt_for_agent_selection(auto_agent_ids: &[String]) -> Vec<String> {
 
 /// Validate agent IDs against supported project agents.
 pub fn validate_agent_ids(agent_ids: &[String]) -> Result<Vec<String>, String> {
+    validate_agent_ids_for_scope(agent_ids, false)
+}
+
+pub fn validate_agent_ids_for_scope(
+    agent_ids: &[String],
+    global: bool,
+) -> Result<Vec<String>, String> {
     let normalized = normalize_agent_ids(agent_ids);
     if normalized.is_empty() {
         return Ok(Vec::new());
     }
 
-    let supported = supported_project_agents();
-    let supported_ids: Vec<String> = supported.iter().map(|(id, _)| id.clone()).collect();
+    let supported_ids = supported_agent_ids(global);
     let mut invalid = Vec::new();
     for agent_id in &normalized {
         if !supported_ids.iter().any(|id| id == agent_id) {
@@ -186,7 +238,7 @@ pub fn validate_agent_ids(agent_ids: &[String]) -> Result<Vec<String>, String> {
 /// Resolve relative skill directories for the given agent IDs.
 pub fn resolve_rel_dirs_for_agents(agent_ids: &[String]) -> Vec<String> {
     if agent_ids.is_empty() {
-        return vec![".agent/skills".to_string()];
+        return vec![".agents/skills".to_string()];
     }
 
     let supported = supported_project_agents();
@@ -200,7 +252,7 @@ pub fn resolve_rel_dirs_for_agents(agent_ids: &[String]) -> Vec<String> {
     rel_dirs.sort();
     rel_dirs.dedup();
     if rel_dirs.is_empty() {
-        rel_dirs.push(".agent/skills".to_string());
+        rel_dirs.push(".agents/skills".to_string());
     }
     rel_dirs
 }
@@ -230,18 +282,28 @@ fn describe_deploy_kind(path: &Path) -> &'static str {
     "unknown"
 }
 
-/// Auto-detect project agents from a project directory.
-pub fn resolve_auto_project_agents(project_path: &Path) -> Vec<String> {
-    let detection = detect_project_agents(&project_path.to_string_lossy());
-    let mut agent_ids: Vec<String> = detection
-        .detected
-        .iter()
-        .filter(|agent| agent.exists)
-        .map(|agent| agent.agent_id.clone())
+/// Resolve the Agents the user has manually enabled in Settings.
+pub fn resolve_enabled_agents(global: bool) -> Vec<String> {
+    let mut agent_ids: Vec<String> = list_profiles()
+        .into_iter()
+        .filter(|profile| profile.enabled)
+        .filter(|profile| {
+            if global {
+                profile.has_global_skills()
+            } else {
+                profile.has_project_skills()
+            }
+        })
+        .map(|profile| profile.id)
         .collect();
     agent_ids.sort();
     agent_ids.dedup();
     agent_ids
+}
+
+/// Project-scoped wrapper used by install call sites.
+pub fn resolve_enabled_project_agents(_project_path: &Path) -> Vec<String> {
+    resolve_enabled_agents(false)
 }
 
 #[cfg(test)]
@@ -260,8 +322,16 @@ mod tests {
         );
         assert_eq!(
             derive_name_hint("https://github.com/user/my-skill/tree/main", None),
-            "main"
+            "my-skill"
         );
+        assert_eq!(
+            derive_name_hint(
+                "https://github.com/user/my-skill/tree/main/skills/react",
+                None
+            ),
+            "react"
+        );
+        assert_eq!(derive_name_hint("user/my-skill@selected", None), "selected");
     }
 
     #[test]
@@ -300,5 +370,20 @@ mod tests {
     fn test_normalize_agent_ids_sorts_and_dedups() {
         let ids = vec!["zulu".to_string(), "alpha".to_string(), "zulu".to_string()];
         assert_eq!(normalize_agent_ids(&ids), vec!["alpha", "zulu"]);
+    }
+
+    #[test]
+    fn test_normalize_agent_ids_accepts_upstream_names() {
+        let ids = vec![
+            "claude-code".to_string(),
+            "gemini-cli".to_string(),
+            "kiro-cli".to_string(),
+            "hermes-agent".to_string(),
+            "antigravity-cli".to_string(),
+        ];
+        assert_eq!(
+            normalize_agent_ids(&ids),
+            vec!["antigravity-cli", "claude", "gemini", "hermes", "kiro"]
+        );
     }
 }
