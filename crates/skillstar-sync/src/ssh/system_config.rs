@@ -36,8 +36,21 @@ pub fn parse_system_hosts() -> Vec<SystemHost> {
     out
 }
 
-/// Resolve `~/.ssh/config`, honouring the `HOME` env var on Unix.
+/// Env override for the ssh config path (same sandbox spirit as
+/// `SKILLSTAR_TOOL_SYNC_HOME`, see ci.yml failure lesson 2): tests point this
+/// at a fixture file so nothing ever depends on the runner's real
+/// `~/.ssh/config` — and it works identically on Windows, where the fallback
+/// reads `USERPROFILE` rather than `HOME`.
+pub const SSH_CONFIG_PATH_ENV: &str = "SKILLSTAR_SSH_CONFIG";
+
+/// Resolve the ssh config path: [`SSH_CONFIG_PATH_ENV`] override first, then
+/// `~/.ssh/config` from the `HOME` env var on Unix.
 fn user_ssh_config_path() -> Option<PathBuf> {
+    if let Some(p) = std::env::var_os(SSH_CONFIG_PATH_ENV)
+        && !p.is_empty()
+    {
+        return Some(PathBuf::from(p));
+    }
     let home = home_dir()?;
     Some(home.join(".ssh").join("config"))
 }
@@ -289,21 +302,25 @@ mod tests {
         p
     }
 
-    /// Build a temp dir, write a config, and point HOME at it so
-    /// `user_ssh_config_path` resolves to our fixture.
+    /// Build a temp dir, write a config, and point [`SSH_CONFIG_PATH_ENV`] at
+    /// it so `user_ssh_config_path` resolves to our fixture. Never touches
+    /// HOME/USERPROFILE, so it is host-independent on every platform (ci.yml
+    /// failure lesson 2).
     fn with_home(content: &str, f: impl FnOnce(&Path)) {
-        // Hold the crate-wide env lock so parallel tests don't clobber HOME.
-        let _lock = crate::test_support::env_lock().lock().unwrap();
+        // Hold the crate-wide env lock so parallel tests don't clobber the
+        // override; tolerate poisoning so one failure cannot cascade.
+        let _lock = crate::test_support::env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let tmp = TempDir::new().unwrap();
         let cfg = write(tmp.path(), ".ssh/config", content);
         // SAFETY: the env lock above serialises all with_home callers.
         unsafe {
-            std::env::set_var("HOME", tmp.path());
+            std::env::set_var(SSH_CONFIG_PATH_ENV, &cfg);
         }
-        let _ = &cfg;
         f(tmp.path());
         unsafe {
-            std::env::remove_var("HOME");
+            std::env::remove_var(SSH_CONFIG_PATH_ENV);
         }
     }
 
@@ -386,17 +403,18 @@ Host vps-yy
 
     #[test]
     fn missing_config_returns_empty() {
-        with_home("", |_| {
-            // empty HOME → no .ssh/config file present
-        });
-        // Point HOME at a fresh empty dir to guarantee no config.
+        // Point the override at a path that does not exist to guarantee no
+        // config, holding the env lock like every other override writer.
+        let _lock = crate::test_support::env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let tmp = TempDir::new().unwrap();
         unsafe {
-            std::env::set_var("HOME", tmp.path());
+            std::env::set_var(SSH_CONFIG_PATH_ENV, tmp.path().join("no-config"));
         }
         assert!(parse_system_hosts().is_empty());
         unsafe {
-            std::env::remove_var("HOME");
+            std::env::remove_var(SSH_CONFIG_PATH_ENV);
         }
     }
 

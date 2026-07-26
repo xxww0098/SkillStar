@@ -27,6 +27,8 @@ name: CI
 #      serialize HOME mutations will red this job on clean GitHub runners.
 #    Rule (same spirit as SKILLSTAR_TOOL_SYNC_HOME): sandbox $HOME / data dirs
 #    in tests; never require a developer's ~/.ssh/config Host alias to exist.
+#    Fixed via the SKILLSTAR_SSH_CONFIG override (ssh::system_config): ssh
+#    tests point it at a fixture file and never mutate HOME/USERPROFILE.
 #
 # 3. `cargo test --workspace` compiles src-tauri, so Linux needs the same
 #    webkit2gtk/gtk system packages as release.yml even though we never

@@ -195,22 +195,26 @@ mod tests {
 
     impl Drop for SshHomeGuard {
         fn drop(&mut self) {
-            // SAFETY: env_lock serialises HOME mutations across crate tests.
+            // SAFETY: env_lock serialises override mutations across crate tests.
             unsafe {
-                std::env::remove_var("HOME");
+                std::env::remove_var(skillstar_sync::ssh::system_config::SSH_CONFIG_PATH_ENV);
             }
         }
     }
 
+    /// Point `SKILLSTAR_SSH_CONFIG` at a fixture file. Never touches
+    /// HOME/USERPROFILE (host-independent on every platform, and Windows'
+    /// home resolution reads USERPROFILE anyway — ci.yml failure lesson 2).
+    /// The lock tolerates poisoning so one failing test cannot cascade into
+    /// sibling PoisonError panics.
     fn with_ssh_home(content: &str) -> SshHomeGuard {
-        let lock = env_lock().lock().unwrap();
+        let lock = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::TempDir::new().unwrap();
-        let cfg_dir = tmp.path().join(".ssh");
-        std::fs::create_dir_all(&cfg_dir).unwrap();
-        std::fs::write(cfg_dir.join("config"), content).unwrap();
-        // SAFETY: env_lock serialises HOME mutations across crate tests.
+        let cfg = tmp.path().join("ssh_config");
+        std::fs::write(&cfg, content).unwrap();
+        // SAFETY: env_lock serialises override mutations across crate tests.
         unsafe {
-            std::env::set_var("HOME", tmp.path());
+            std::env::set_var(skillstar_sync::ssh::system_config::SSH_CONFIG_PATH_ENV, &cfg);
         }
         SshHomeGuard {
             _lock: lock,
