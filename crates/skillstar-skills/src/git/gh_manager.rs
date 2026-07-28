@@ -387,16 +387,8 @@ pub fn publish_skill(
     // Resolve local skill symlinks (skills/ → skills-local/) to their actual directory.
     // Repo-cached symlinks (.repos/) are still rejected — those should be forked first.
     let skill_source_resolved = if skillstar_core::infra::fs_ops::is_link(&skill_source) {
-        let link_target = std::fs::read_link(&skill_source);
-        #[cfg(windows)]
-        let link_target = link_target.or_else(|_| junction::get_target(&skill_source));
-        let target =
-            link_target.with_context(|| format!("Failed to read symlink for '{}'", skill_name))?;
-        let resolved = if target.is_absolute() {
-            target
-        } else {
-            skill_source.parent().unwrap_or(Path::new(".")).join(target)
-        };
+        let resolved = skillstar_core::infra::fs_ops::read_link_resolved(&skill_source)
+            .with_context(|| format!("Failed to read symlink for '{}'", skill_name))?;
 
         let local_dir = skillstar_core::infra::paths::local_skills_dir();
         if !resolved.starts_with(&local_dir) {

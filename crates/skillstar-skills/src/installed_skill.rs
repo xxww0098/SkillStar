@@ -285,24 +285,9 @@ fn build_installed_skill(
 
     let name = skill_name_from_path(&path).unwrap_or_default();
 
-    // For symlinked skills, read SKILL.md from the symlink target
+    // For symlinked skills, read SKILL.md from the link target.
     let effective_path = if is_repo_skill {
-        let link_target = std::fs::read_link(&path);
-
-        #[cfg(windows)]
-        let link_target = link_target.or_else(|_| junction::get_target(&path));
-
-        link_target
-            .map(|target| {
-                if target.is_absolute() {
-                    target
-                } else {
-                    path.parent()
-                        .unwrap_or(std::path::Path::new("."))
-                        .join(target)
-                }
-            })
-            .unwrap_or_else(|_| path.clone())
+        skillstar_core::infra::fs_ops::read_link_resolved(&path).unwrap_or_else(|_| path.clone())
     } else {
         path.clone()
     };

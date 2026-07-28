@@ -47,7 +47,7 @@ SkillStar/
 | --- | --- | --- |
 | `skillstar-core` | 路径、文件操作、DB pool/migration、共享错误和配置、HTTP client、共享 `Skill` 契约 | 任一产品域的业务流程 |
 | `skillstar-providers` | Provider identity、鉴权和余额端点元数据 | Provider 持久化、Usage 抓取或 UI preset |
-| `skillstar-skills` | 安装、更新、bundle、本地创作、repo scan、lockfile、Agent registry、项目 manifest、deployment、patrol | Marketplace 搜索、Usage 或 Models |
+| `skillstar-skills` | 安装、更新、bundle、本地创作、repo scan、lockfile、repo-link 判定、update 状态、Agent registry、项目 manifest、deployment、patrol | Marketplace 搜索、Usage 或 Models |
 | `skillstar-marketplace` | SQLite 快照、FTS、技能市场和 MCP registry/curated 数据 | 技能安装实现、MCP 本地配置 |
 | `skillstar-models` | Provider store/preset、tool sync、AI 推理、MCP store | Usage 订阅或 Marketplace 快照 |
 | `skillstar-usage` | catalog、OAuth/API-key fetcher、加密 token、请求构建器 | Models provider store、CLI 凭证文件编排 |

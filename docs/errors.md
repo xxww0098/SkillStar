@@ -2,6 +2,23 @@
 
 状态：active
 
+## 2026-07-29 - Skill update 链路上的三处静默分叉
+
+- Symptom: 三个互相独立、都不报错的现象 —— (a) 从 Finder 启动的 GUI 永远显示"无更新"，而同一台机器上 CLI 正常；(b) patrol 发现的更新在重启后消失；(c) `skillstar update` 跑完后技能仍显示可更新，且 Agent 侧内容没变。
+- Root cause（三处同源问题：同一个事实有多个实现）：
+  1. **repo-cache 判定两份实现且已分叉。** `update_checker` 用 `std::fs::read_link` 解析链接，`repo_scanner::ops` 用 `fs_ops::read_link_resolved`（含 Windows junction 回退）。junction 部署的技能在 update 应用侧算 repo-cached、在 update 检测侧不算。
+  2. **update 检测的 git 子进程绕过 `command_with_path`。** `update_checker::git_rev_parse` 和它自己那份 `compute_subtree_hash` 用裸 `Command::new("git")`；同 crate 的 `repo_scanner::scan` 那份用 `command_with_path`。macOS 从 Finder 启动的进程没有 login shell PATH，`git` 找不到 → `rev_parse` 失败 → `compare_heads` 返回 `None` → 汇报"无更新"，全程无日志。
+  3. **`update_available` 有三个所有者。** patrol 只 emit `patrol://skill-checked` 事件、从不落盘，所以它的发现活不过重启，并在重启前与 JSON snapshot 长期不一致。
+  4. **CLI 绕过 update 事务。** `cmd_update` 只做 `git_ops::check_update` + `pull_repo`，跳过 lockfile hash 写入、同 repo 兄弟扇出、Agent relink、项目 cascade 和 update state 清除；对 repo-cached 技能还在错误的目录层级 pull。
+- Fix: `repo_link` 独占链接判定并统一走 `read_link_resolved`；subtree hash 合并进 `git_ops::compute_subtree_hash`（内部 `run_git` → `command_with_path`）；`update_state` 独占 update 可用状态，三个写入者全部写穿，陈旧判定按技能名 revision 在该 module 内裁决；CLI 与 GUI 共用 `skill_update` 事务。
+- Files: `crates/skillstar-skills/src/{repo_link.rs,update_state.rs,update_checker.rs,git/ops.rs,installed_skill.rs,skill_update/}`、`crates/skillstar-app/src/cli/manage.rs`、`src-tauri/src/core/patrol.rs`。
+- Self-check:
+  - `grep -rn 'Command::new("git")' crates/` 应只命中测试 fixture；产品代码一律走 `command_with_path`（否则 GUI 从 Finder 启动时静默失效）。
+  - `grep -rn 'repos_cache_dir' crates/skillstar-skills/src/` 中做「是不是 repo cache 链接」判定的只能是 `repo_link`；`repo_scanner::{cache,detect,maintenance}` 命中的是 cache 目录管理，不是该判定。
+  - `grep -rn 'junction::get_target' crates/` 应只命中 `fs_ops::read_link_resolved`，以及 `content::read_raw_link_target` 这一个有意的例外 —— 内容快照要 hash 链接的字面目标，解析成绝对路径会让 hash 依赖机器。除此之外，手写 `std::fs::read_link` + junction 回退就是在复制 `read_link_resolved`；这类手抄版本次共清理掉四份。
+  - `cargo test -p skillstar-skills repo_link update_state skill_update::plan`。
+  - 通用判据：一个事实如果存在两个入口、且能给出不同答案，那就是分叉，无论两份代码看起来多像。
+
 ## 2026-07-12 - Grok account switch could overwrite a working CLI session with a billing-only token
 
 - Symptom: switching the active Grok Usage card succeeded in SkillStar, but launching Grok immediately opened browser OAuth again.

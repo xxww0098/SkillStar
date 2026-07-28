@@ -13,7 +13,9 @@
 - 技能组部署的“补全 Marketplace 来源 → 安装缺失技能 → 同步 Project”由 `skillstar-app::skill_group_deploy` 编排，command 与单域 crate 都不复制该事务。
 - `skillstar-skills::content` 是技能内容读取、文件枚举、本地创建/删除和嵌套内容目录解析的 facade；Tauri command 不直接组合 hub path、lockfile、Git checkout 与 cache invalidation。
 - `skillstar-skills::content` 同时产出教程生成使用的只读 Skill 快照：有效内容根、递归文件清单和确定性内容 hash。`skillstar-skills::tutorial` 拥有 HTML 安全/覆盖校验、freshness 和 artifact 持久化；ACP 子进程与会话编排属于 `src-tauri/src/core/` 的桌面胶水，command 只转发 DTO 和事件。
-- `skillstar-skills::skill_update::update_skill` 返回完整公开结果，command 不再从底层 update outcome 二次拼装 `Skill` DTO。
+- `skillstar-skills::skill_update` 拥有 update 事务，`update_skill` 返回完整公开结果，command 不再从底层 update outcome 二次拼装 `Skill` DTO。批量入口 `update_skills` 拥有「同 repo 的技能一次 update 覆盖」这条规则；前端和 CLI 都不重复按 `git_url` 分组。
+- `skillstar-skills::update_state` 是 `update_available` 的唯一所有者。批量 refresh、patrol 和 update 完成都写穿它；陈旧判定在该 module 内解决，UI 不再自行挡竞态。
+- `skillstar-skills::repo_link` 拥有「hub 条目是否为 repo cache 链接、其 repo root 在哪」的判定；update 检测与 update 应用不得各自解析 symlink/junction。
 - 本地目录 adoption、share-code 安装和 deploy-status 检查同样由 Skills 域公开 use case 完成；command 只保留 blocking 调度与 `AppError` 适配。
 
 ## 安装与更新
@@ -29,6 +31,9 @@
 - 与 `vercel-labs/skills` 兼容的 Agent 共用项目级 `.agents/skills`。共享目录是 universal install surface；Agent 归属只用于 UI/manifest，不得重复部署或让一个 Agent 的移除误删另一个仍在使用的共享目录。
 - update 使用 staged swap；刷新失败不得先删除用户现有可用 link/copy。失败按 Agent 聚合并显式返回。
 - repo check/update 复用 `~/.skillstar/hub/repos/` cache，远程 HTTP/Git 遵循统一 proxy/mirror 规则。
+- 一次 update 是一个事务：pull、lockfile hash 写入、同 repo 兄弟技能的 hash 扇出、Agent relink、项目 cascade 和 update state 清除必须一起发生。GUI 与 CLI 走同一入口，任何调用方都不得只做 pull。
+- 批量 update 每个 repo 只拉一次；未被拉取但内容随之移动的技能报告为 `skipped`，失败的 repo 把它本会覆盖的全部名字报告为 `failed`，不得计入成功。
+- `update_available` 的判定可能过期：一次扫描开始后若该技能被更新，扫描结果作废。该规则由 `update_state` 按技能名的 revision 裁决，扫描以起始 revision 提交。patrol 事件是通知而非记录，其载荷是已裁决后的状态。
 
 ## Agent 注册、手动启用与项目检测
 

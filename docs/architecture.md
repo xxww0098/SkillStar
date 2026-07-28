@@ -46,6 +46,7 @@ flowchart LR
 | 已安装、创作和仓库技能 | `~/.skillstar/hub/{skills,local,repos,content}/` | `skillstar-skills` |
 | Skill 图文教程 artifact | `~/.skillstar/tutorials/<skill-key>/{tutorial.html,metadata.json}` | `skillstar-skills` 提供内容快照并拥有校验/freshness/原子持久化；`src-tauri::core::skill_tutorial` 只编排 ACP 会话 |
 | Project 技能 manifest | `~/.skillstar/state/projects/` | `skillstar-skills`；共享项目路径只记录一个 Agent owner |
+| 技能 update 可用状态 | `~/.skillstar/state/skill_update_states.json` | `skillstar-skills::update_state` 唯一所有者；批量 refresh、patrol 和 update 完成都写穿它，UI 与事件只是投影 |
 | Agent profile 与可消费的技能部署 | `~/.skillstar/config/profiles.toml`；Agent 用户级目录或项目内 `.agents/skills`/专属目录 | `skillstar-skills` 持有手动激活偏好并从 hub 物化；内置路径/能力跟随 `vercel-labs/skills` 注册表基线，Agent 不拥有 canonical 内容 |
 | Models provider 与工具同步状态 | `~/.skillstar/config/` 及 Agent 配置文件 | `skillstar-models` |
 | Usage 订阅和 OAuth/token 状态 | `~/.skillstar/config/usage/` | `skillstar-usage`；跨域 CLI 激活由 `skillstar-app` 编排 |
@@ -69,6 +70,7 @@ flowchart LR
 - 内置 Agent 注册表区分 Home、XDG config、环境变量覆盖、动态 OpenClaw 根和不支持全局目录；空全局路径只能表示项目级 Agent，任何全局部署入口都必须先做能力检查。
 - 本机 Agent 不做 PATH、桌面应用或目录存在性探测；profile 默认关闭，Settings 持久化开关是进入所有本机 Agent 投影的唯一激活来源。冻结 IPC 字段 `installed` 仅镜像 `enabled`，不得恢复为探测状态。
 - reconciliation 同时处理新增和删除；失败的 staged swap 不得先破坏可用部署。
+- 判断一个 hub 条目是否为 repo cache 链接只有一个实现；symlink 与 Windows junction 必须由同一入口解析，否则 update 检测与 update 应用会对同一技能得出不同结论。
 - 扫描、检测等只读动作不得创建用户目录。
 - 所有覆盖写入使用临时文件/目录和原子替换，尽量保留已有可用状态。
 
