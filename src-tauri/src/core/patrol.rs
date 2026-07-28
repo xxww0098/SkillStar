@@ -11,6 +11,7 @@ use tokio::sync::watch;
 use tracing::{error, warn};
 
 use skillstar_skills::patrol::{self, load_config, save_config};
+use skillstar_skills::update_state;
 
 // Re-export types used by commands
 pub use skillstar_skills::patrol::{PatrolCheckEvent, PatrolConfig, PatrolStatus};
@@ -176,6 +177,9 @@ async fn patrol_loop(
             let skill_name = entry.name.clone();
             let skill_path = entry.path.clone();
             let failed_roots = Arc::clone(&failed_fetch_roots);
+            // Stamped before the check so a finding overtaken by an update
+            // applied mid-check is dropped rather than re-asserting the badge.
+            let checked_from = update_state::stamp();
             let update_result = tokio::task::spawn_blocking(move || {
                 patrol::check_skill_update_local(&skill_name, &skill_path, &failed_roots)
             })
@@ -197,6 +201,20 @@ async fn patrol_loop(
                 }
                 continue;
             };
+
+            // Write through before emitting: the event is a notification, not
+            // the record. Patrol findings used to live only in the event, so
+            // they vanished on restart and drifted from the persisted snapshot.
+            let update_available = update_state::commit_scan(
+                checked_from,
+                &[update_state::SkillUpdateState {
+                    name: entry.name.clone(),
+                    update_available,
+                }],
+            )
+            .first()
+            .map(|state| state.update_available)
+            .unwrap_or(update_available);
 
             let event = {
                 let mut inner = state.lock().unwrap_or_else(|p| p.into_inner());

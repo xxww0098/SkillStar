@@ -12,10 +12,8 @@ pub async fn list_skills() -> Result<Vec<Skill>, AppError> {
 }
 
 #[tauri::command]
-pub async fn refresh_skill_updates(
-    names: Option<Vec<String>>,
-) -> Result<Vec<installed_skill::SkillUpdateState>, AppError> {
-    installed_skill::refresh_skill_updates(names)
+pub async fn refresh_skill_updates() -> Result<Vec<installed_skill::SkillUpdateState>, AppError> {
+    installed_skill::refresh_skill_updates()
         .await
         .map_err(AppError::Anyhow)
 }

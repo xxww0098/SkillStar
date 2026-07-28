@@ -56,17 +56,11 @@ function useSkillsState() {
       queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) => {
         if (prev.length === 0) return prev;
 
-        // Read the current pending-update set so we never overwrite skills
-        // whose update_available was just cleared by an in-flight updateSkill.
-        const pending = pendingUpdateRef.current;
-
+        // Applied as-is: the backend resolves staleness before answering. A
+        // scan that began before an update landed loses to it there, so a
+        // response can no longer re-assert a badge the update just cleared.
         let changed = false;
         const next = prev.map((skill) => {
-          // Skip skills currently being updated — their state is authoritative
-          // from the updateSkill handler, not from a potentially stale refetch.
-          if (pending.has(skill.name)) {
-            return skill;
-          }
           const updateAvailable = updatesByName.get(skill.name);
           if (updateAvailable === undefined || updateAvailable === skill.update_available) {
             return skill;
@@ -92,7 +86,7 @@ function useSkillsState() {
 
   const updatesQuery = useQuery({
     queryKey: SKILL_UPDATES_QUERY_KEY,
-    queryFn: () => tauriInvoke("refresh_skill_updates", {}),
+    queryFn: () => tauriInvoke("refresh_skill_updates"),
     enabled: skills.length > 0 && !isTogglingAgent,
     refetchOnWindowFocus: false,
     refetchInterval: isTogglingAgent ? false : updateCheckIntervalMs,
@@ -144,7 +138,9 @@ function useSkillsState() {
     };
   }, [refresh]);
 
-  // Rust backend emits "patrol://skill-checked"; merge into query cache.
+  // Rust backend emits "patrol://skill-checked"; merge into query cache. The
+  // payload is the state patrol recorded, not the raw check result — a finding
+  // overtaken by an update mid-check has already lost to it backend-side.
   useTauriEvent<{ name: string; update_available: boolean }>("patrol://skill-checked", ({ name, update_available }) => {
     queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) => {
       const skill = prev.find((item) => item.name === name);
@@ -294,11 +290,6 @@ function useSkillsState() {
       try {
         const result = await tauriInvoke("update_skill", { name });
 
-        // Cancel any in-flight update-check queries so a stale periodic refetch
-        // that started before the pull doesn't overwrite our freshly-cleared
-        // update_available states for sibling skills.
-        await queryClient.cancelQueries({ queryKey: SKILL_UPDATES_QUERY_KEY });
-
         // `Update All` already knows which installed skills share a repo.
         // Merge that UI-known sibling list with the backend response so the
         // grid clears every updated card immediately instead of waiting for a
@@ -324,12 +315,9 @@ function useSkillsState() {
         void refetchUpdates();
         return result.skill;
       } catch (e) {
-        // Restore update_available in the cache — if a concurrent periodic
-        // refresh happened to clear it while the update was in flight, we
-        // need to put it back so the UI continues showing the update button.
-        queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) =>
-          prev.map((item) => (item.name === name ? { ...item, update_available: true } : item)),
-        );
+        // No rollback: a failed update writes nothing, so the recorded state
+        // is still whatever it was. Forcing update_available back to true here
+        // would invent an update for a skill that may not have one.
         throw new Error(String(e));
       } finally {
         pendingUpdateRef.current.delete(name);

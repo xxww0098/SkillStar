@@ -4,8 +4,9 @@ use crate::lockfile::LockEntry;
 use crate::{
     local_skill,
     lockfile::{self},
-    repo_link, update_checker,
+    repo_link, update_checker, update_state,
 };
+pub use crate::update_state::SkillUpdateState;
 use anyhow::{Context, Result, anyhow};
 use skillstar_core::types::{
     Skill, SkillCategory, extract_github_source_from_url, extract_skill_description,
@@ -18,8 +19,6 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
 static SKILL_CACHE: LazyLock<RwLock<Option<Vec<Skill>>>> = LazyLock::new(|| RwLock::new(None));
-static UPDATE_STATE_CACHE: LazyLock<RwLock<HashMap<String, bool>>> =
-    LazyLock::new(|| RwLock::new(HashMap::new()));
 
 pub fn invalidate_cache() {
     if let Ok(mut cache) = SKILL_CACHE.write() {
@@ -27,57 +26,9 @@ pub fn invalidate_cache() {
     }
 }
 
+/// Record that a skill was just updated, so no scan can re-assert its badge.
 pub fn clear_update_state(name: &str) {
-    let mut snapshot = load_update_state_snapshot();
-    snapshot.insert(name.to_string(), false);
-
-    if let Ok(mut cache) = UPDATE_STATE_CACHE.write() {
-        // Assume false since we just updated it, rather than deleting entirely
-        // which could cause a flash if the UI forces a refresh before the next update check
-        cache.insert(name.to_string(), false);
-    }
-
-    persist_update_state_snapshot(&snapshot);
-}
-
-fn update_state_snapshot_path() -> PathBuf {
-    skillstar_core::infra::paths::state_dir().join("skill_update_states.json")
-}
-
-fn load_update_state_snapshot() -> HashMap<String, bool> {
-    let path = update_state_snapshot_path();
-    let Ok(content) = std::fs::read_to_string(&path) else {
-        return HashMap::new();
-    };
-
-    serde_json::from_str::<HashMap<String, bool>>(&content).unwrap_or_else(|err| {
-        tracing::warn!(target: "skill_update_cache", path = %path.display(), error = %err, "failed to read skill update snapshot");
-        HashMap::new()
-    })
-}
-
-fn hydrate_update_state_cache() {
-    let snapshot = load_update_state_snapshot();
-    if snapshot.is_empty() {
-        return;
-    }
-
-    if let Ok(mut cache) = UPDATE_STATE_CACHE.write()
-        && cache.is_empty()
-    {
-        *cache = snapshot;
-    }
-}
-
-fn persist_update_state_snapshot(states: &HashMap<String, bool>) {
-    let path = update_state_snapshot_path();
-    let Ok(content) = serde_json::to_string(states) else {
-        return;
-    };
-
-    if let Err(err) = skillstar_core::infra::fs_ops::atomic_write(&path, content.as_bytes()) {
-        tracing::warn!(target: "skill_update_cache", path = %path.display(), error = %err, "failed to write skill update snapshot");
-    }
+    update_state::set(name, false);
 }
 
 fn normalize_snapshot_component(raw: &str) -> Option<String> {
@@ -128,20 +79,8 @@ pub fn installed_snapshot_markers() -> HashSet<String> {
     markers
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SkillUpdateState {
-    pub name: String,
-    pub update_available: bool,
-}
-
 fn apply_cached_update_states(mut skills: Vec<Skill>) -> Vec<Skill> {
-    if let Ok(update_states) = UPDATE_STATE_CACHE.read() {
-        for skill in &mut skills {
-            if let Some(&update_available) = update_states.get(&skill.name) {
-                skill.update_available = update_available;
-            }
-        }
-    }
+    update_state::apply_to(&mut skills);
     skills
 }
 
@@ -150,7 +89,6 @@ pub async fn list_installed_skills_fast() -> Result<Vec<Skill>> {
 }
 
 pub async fn list_installed_skills() -> Result<Vec<Skill>> {
-    hydrate_update_state_cache();
     if let Ok(cache) = SKILL_CACHE.read()
         && let Some(skills) = &*cache
     {
@@ -208,12 +146,12 @@ pub async fn list_installed_skills() -> Result<Vec<Skill>> {
     Ok(skills)
 }
 
-pub async fn refresh_skill_updates(names: Option<Vec<String>>) -> Result<Vec<SkillUpdateState>> {
-    let name_filter = names.map(|values| values.into_iter().collect::<HashSet<_>>());
-    let skill_dirs = collect_skill_dirs(
-        &skillstar_core::infra::paths::hub_skills_dir(),
-        name_filter.as_ref(),
-    )?;
+pub async fn refresh_skill_updates() -> Result<Vec<SkillUpdateState>> {
+    // Taken before any checking starts: findings overtaken by an update that
+    // lands while this scan runs are dropped when it commits.
+    let scan_started = update_state::stamp();
+
+    let skill_dirs = collect_skill_dirs(&skillstar_core::infra::paths::hub_skills_dir(), None)?;
 
     if skill_dirs.is_empty() {
         return Ok(Vec::new());
@@ -277,21 +215,9 @@ pub async fn refresh_skill_updates(names: Option<Vec<String>>) -> Result<Vec<Ski
     }
 
     states.sort_by(|left, right| left.name.cmp(&right.name));
-    let mut snapshot = load_update_state_snapshot();
-    if let Ok(mut cache) = UPDATE_STATE_CACHE.write() {
-        // Only update entries we got definitive results for; leave the rest
-        // as-is so failed-fetch skills keep their previous state.
-        for state in &states {
-            cache.insert(state.name.clone(), state.update_available);
-            snapshot.insert(state.name.clone(), state.update_available);
-        }
-    } else {
-        for state in &states {
-            snapshot.insert(state.name.clone(), state.update_available);
-        }
-    }
-    persist_update_state_snapshot(&snapshot);
-    Ok(states)
+    // Skills whose fetch failed were never pushed, so they keep their previous
+    // state; the rest land unless an update overtook them mid-scan.
+    Ok(update_state::commit_scan(scan_started, &states))
 }
 
 fn load_lock_map() -> HashMap<String, LockEntry> {
@@ -504,29 +430,33 @@ mod tests {
     }
 
     #[test]
-    fn applies_persisted_update_states_to_listed_skills() {
+    fn listed_skills_carry_the_recorded_update_state() {
         let _guard = crate::lock_test_env();
         let temp = tempfile::tempdir().unwrap();
         unsafe {
             std::env::set_var("SKILLSTAR_DATA_DIR", temp.path());
             std::env::remove_var("SKILLSTAR_HUB_DIR");
         }
+        update_state::reset_for_test();
 
-        if let Ok(mut cache) = UPDATE_STATE_CACHE.write() {
-            cache.clear();
-        }
-
-        let states = HashMap::from([
-            ("cached-update".to_string(), true),
-            ("cached-current".to_string(), false),
-        ]);
-        persist_update_state_snapshot(&states);
-        hydrate_update_state_cache();
+        update_state::commit_scan(
+            update_state::stamp(),
+            &[
+                update_state::SkillUpdateState {
+                    name: "recorded-update".to_string(),
+                    update_available: true,
+                },
+                update_state::SkillUpdateState {
+                    name: "recorded-current".to_string(),
+                    update_available: false,
+                },
+            ],
+        );
 
         let skills =
-            apply_cached_update_states(vec![test_skill("cached-update"), test_skill("unknown")]);
+            apply_cached_update_states(vec![test_skill("recorded-update"), test_skill("unknown")]);
 
         assert!(skills[0].update_available);
-        assert!(!skills[1].update_available);
+        assert!(!skills[1].update_available, "unscanned skills stay as built");
     }
 }

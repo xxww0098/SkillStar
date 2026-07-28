@@ -16,7 +16,7 @@ import type {
 export interface SkillCommands {
   // Installed skill lifecycle
   list_skills: { args: Record<string, never>; result: Skill[] };
-  refresh_skill_updates: { args: { names?: string[] }; result: SkillUpdateState[] };
+  refresh_skill_updates: { args: Record<string, never>; result: SkillUpdateState[] };
   install_skill: { args: { url: string; name?: string }; result: Skill };
   uninstall_skill: { args: { name: string }; result: void };
   update_skill: { args: { name: string }; result: UpdateResult };

@@ -32,6 +32,7 @@ pub mod skill_install;
 pub mod skill_pack;
 pub mod skill_update;
 mod update_checker;
+pub mod update_state;
 
 // Agent / project / deployment / patrol / terminal (merged from former skillstar-projects)
 pub mod agents;
