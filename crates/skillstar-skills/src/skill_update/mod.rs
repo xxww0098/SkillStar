@@ -1,3 +1,5 @@
+mod plan;
+
 use anyhow::{Context, Result};
 use serde::Serialize;
 use skillstar_core::types::{
@@ -6,9 +8,11 @@ use skillstar_core::types::{
 use std::path::Path;
 
 use crate::git::ops as git_ops;
+use crate::lockfile::LockEntry;
 use crate::{
     content, deployment, installed_skill, local_skill, lockfile, projects, repo_link, repo_scanner,
 };
+use plan::{SiblingState, UpdatePlan};
 
 /// Result of a hub skill update, including any project-level cascade work.
 #[derive(Debug, Clone)]
@@ -27,13 +31,6 @@ pub struct UpdateResult {
     pub skill: Skill,
     pub siblings_cleared: Vec<String>,
     pub agent_link_failures: Vec<String>,
-}
-
-fn push_unique(values: &mut Vec<String>, value: impl Into<String>) {
-    let value = value.into();
-    if !values.contains(&value) {
-        values.push(value);
-    }
 }
 
 fn compute_hash_for_skill_entry(skill_path: &Path, source_folder: Option<&str>) -> Option<String> {
@@ -88,6 +85,30 @@ pub fn update_skill(name: &str) -> Result<UpdateResult> {
     })
 }
 
+/// Look up what a sibling of the updated skill looks like on disk.
+///
+/// This is the one thing [`plan::plan_update`] cannot decide on its own, so it
+/// is injected — which is also what lets the planning tests run without a hub
+/// directory or a git remote.
+fn sibling_state_on_disk(skills_dir: &Path, entry: &LockEntry) -> SiblingState {
+    let sibling_path = skills_dir.join(&entry.name);
+    if !sibling_path.exists() {
+        return SiblingState::Absent;
+    }
+    SiblingState::Present(compute_hash_for_skill_entry(
+        &sibling_path,
+        entry.source_folder.as_deref(),
+    ))
+}
+
+fn apply_hash_writes(lockfile: &mut lockfile::Lockfile, writes: &[(String, String)]) {
+    for (name, hash) in writes {
+        if let Some(entry) = lockfile.skills.iter_mut().find(|entry| entry.name == *name) {
+            entry.tree_hash = hash.clone();
+        }
+    }
+}
+
 fn apply_update(name: &str) -> Result<UpdateOutcome> {
     let skills_dir = skillstar_core::infra::paths::hub_skills_dir();
     let path = skills_dir.join(name);
@@ -97,85 +118,55 @@ fn apply_update(name: &str) -> Result<UpdateOutcome> {
     }
 
     let is_repo_skill = repo_link::is_repo_cached(&path);
+    let lock_path = lockfile::lockfile_path();
 
-    let lock_entry = {
-        let lock_path = lockfile::lockfile_path();
-        lockfile::Lockfile::load(&lock_path)
-            .ok()
-            .and_then(|lf| lf.skills.into_iter().find(|entry| entry.name == name))
-    };
+    // Read unlocked to learn which subfolder to pull. The planning read below
+    // happens again under the mutex: holding it across a network fetch would
+    // serialise every concurrent update, and another update may land meanwhile.
+    let source_folder = lockfile::Lockfile::load(&lock_path)
+        .ok()
+        .and_then(|lf| lf.skills.into_iter().find(|entry| entry.name == name))
+        .and_then(|entry| entry.source_folder);
 
     let tree_hash = if is_repo_skill {
-        let source_folder = lock_entry
-            .as_ref()
-            .and_then(|entry| entry.source_folder.as_deref());
-        repo_scanner::pull_repo_skill_update(&path, source_folder)
+        repo_scanner::pull_repo_skill_update(&path, source_folder.as_deref())
             .context("failed to pull repo-cached skill update")?
     } else {
         git_ops::pull_repo(&path).context("failed to pull hub skill update")?;
         git_ops::compute_tree_hash(&path).context("failed to compute updated tree hash")?
     };
 
-    let mut sibling_names: Vec<String> = Vec::new();
-
-    {
+    let plan: UpdatePlan = {
         let _lock = lockfile::get_mutex()
             .lock()
             .map_err(|_| anyhow::anyhow!("Lockfile mutex poisoned"))?;
-        let lock_path = lockfile::lockfile_path();
         let mut lockfile = lockfile::Lockfile::load(&lock_path)
             .with_context(|| format!("Failed to load lockfile '{}'", lock_path.display()))?;
 
-        if is_repo_skill {
-            if let Some(ref entry) = lock_entry {
-                let git_url = &entry.git_url;
-                for sibling in lockfile
-                    .skills
-                    .iter_mut()
-                    .filter(|entry| entry.git_url == *git_url)
-                {
-                    if sibling.name == name {
-                        sibling.tree_hash = tree_hash.clone();
-                        continue;
-                    }
+        let plan = plan::plan_update(
+            &lockfile.skills,
+            name,
+            &tree_hash,
+            is_repo_skill,
+            |entry| sibling_state_on_disk(&skills_dir, entry),
+        );
 
-                    let sibling_path = skills_dir.join(&sibling.name);
-                    if !sibling_path.exists() {
-                        continue;
-                    }
-
-                    if let Some(hash) = compute_hash_for_skill_entry(
-                        &sibling_path,
-                        sibling.source_folder.as_deref(),
-                    ) {
-                        sibling.tree_hash = hash;
-                    }
-                    push_unique(&mut sibling_names, sibling.name.clone());
-                }
-            }
-        } else if let Some(entry) = lockfile.skills.iter_mut().find(|entry| entry.name == name) {
-            entry.tree_hash = tree_hash.clone();
-        }
-
+        apply_hash_writes(&mut lockfile, &plan.hash_writes);
         lockfile
             .save(&lock_path)
             .with_context(|| format!("Failed to save lockfile '{}'", lock_path.display()))?;
-    }
+        plan
+    };
 
     installed_skill::invalidate_cache();
 
-    let mut affected_skills = vec![name.to_string()];
-    for sibling_name in &sibling_names {
-        push_unique(&mut affected_skills, sibling_name.clone());
-    }
-
-    for skill_name in &affected_skills {
+    for skill_name in &plan.affected {
         installed_skill::clear_update_state(skill_name);
     }
 
     let mut agent_links = Vec::new();
     let mut agent_link_failures = Vec::new();
-    for skill_name in &affected_skills {
+    for skill_name in &plan.affected {
         match deployment::resync_existing_links(skill_name) {
             Ok(report) => {
                 for failure in report.failures {
@@ -197,16 +188,12 @@ fn apply_update(name: &str) -> Result<UpdateOutcome> {
         }
     }
 
-    projects::cascade_skill_update_to_projects(&affected_skills);
-    let git_url = lock_entry.map(|entry| entry.git_url).unwrap_or_default();
-
-    sibling_names.sort();
-    sibling_names.dedup();
+    projects::cascade_skill_update_to_projects(&plan.affected);
 
     Ok(UpdateOutcome {
         tree_hash,
-        git_url,
-        sibling_names,
+        git_url: plan.git_url,
+        sibling_names: plan.siblings_cleared,
         agent_links,
         agent_link_failures,
     })
