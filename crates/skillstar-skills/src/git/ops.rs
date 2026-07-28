@@ -103,6 +103,25 @@ fn has_git_ancestor(path: &Path) -> bool {
     find_repo_root(path).is_some()
 }
 
+/// Resolve a revision to its object id (`git rev-parse <rev>`).
+///
+/// Routed through [`run_git`] so the call inherits `command_with_path` — a GUI
+/// launched from Finder has no login-shell PATH and would otherwise fail to
+/// find git, silently reporting "no update".
+pub fn rev_parse(repo_path: &Path, rev: &str) -> Result<String> {
+    run_git(repo_path, &["rev-parse", rev])
+}
+
+/// Git tree hash of a single folder inside a repo (`HEAD:<folder>`).
+///
+/// Used to tell apart skills that share a repo: each one hashes only its own
+/// `source_folder`, so an unrelated commit elsewhere in the repo does not mark
+/// every sibling as updated.
+pub fn compute_subtree_hash(repo_path: &Path, folder_path: &str) -> Result<String> {
+    rev_parse(repo_path, &format!("HEAD:{folder_path}"))
+        .with_context(|| format!("Failed to read subtree hash for '{folder_path}'"))
+}
+
 /// Clone a repository from a URL to a destination path.
 ///
 /// Always uses `--depth 1 --single-branch` to minimise network transfer

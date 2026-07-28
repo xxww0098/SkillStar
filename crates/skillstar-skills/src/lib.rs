@@ -23,6 +23,7 @@ pub mod tutorial;
 
 pub mod installed_skill;
 pub mod local_skill;
+pub(crate) mod repo_link;
 pub mod repo_scanner;
 pub mod share_install;
 pub mod skill_bundle;

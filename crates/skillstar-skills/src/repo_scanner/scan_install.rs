@@ -88,7 +88,7 @@ pub fn install_from_repo_at(
         let tree_hash = if target.folder_path.is_empty() {
             git_ops::compute_tree_hash(repo_dir).unwrap_or_default()
         } else {
-            super::compute_subtree_hash(repo_dir, &target.folder_path).unwrap_or_default()
+            git_ops::compute_subtree_hash(repo_dir, &target.folder_path).unwrap_or_default()
         };
 
         let source_folder = if target.folder_path.is_empty() {
@@ -128,8 +128,4 @@ fn can_replace_existing_skill(
     existing_entry
         .map(|entry| source_resolver::same_remote_url(&entry.git_url, repo_url))
         .unwrap_or(false)
-}
-
-pub fn compute_subtree_hash_pub(repo_dir: &Path, folder_path: &str) -> Result<String> {
-    super::compute_subtree_hash(repo_dir, folder_path)
 }

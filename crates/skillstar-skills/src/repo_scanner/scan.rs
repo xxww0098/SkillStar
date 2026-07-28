@@ -1,7 +1,6 @@
 use crate::discovery as skill_discover;
 use crate::lockfile;
 use crate::source_resolver;
-use anyhow::{Context, Result, anyhow};
 use skillstar_core::infra::paths;
 use std::path::Path;
 
@@ -96,19 +95,4 @@ fn annotate_discovered_skills(
 
 fn option_str_eq(left: Option<&str>, right: Option<&str>) -> bool {
     left == right
-}
-
-pub fn compute_subtree_hash(repo_dir: &Path, folder_path: &str) -> Result<String> {
-    let output = skillstar_core::infra::path_env::command_with_path("git")
-        .current_dir(repo_dir)
-        .args(["rev-parse", &format!("HEAD:{}", folder_path)])
-        .output()
-        .context("Failed to execute git rev-parse for subtree")?;
-
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!("git rev-parse failed: {}", err.trim()));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }

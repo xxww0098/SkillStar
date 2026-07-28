@@ -1,7 +1,8 @@
-//! Update detection for repo-cached skills.
+//! Update detection for repo-backed skills.
 //!
-//! Handles the "does this skill have an update?" flow for skills installed
-//! from git repositories. All git operations go through `git_ops`.
+//! Answers "does this skill have an update?" given a way to find each skill's
+//! repo root. Link resolution is not this module's business — [`crate::repo_link`]
+//! owns that, and production callers hand its `repo_root_of` in.
 //!
 //! # Batch workflow
 //!
@@ -14,91 +15,15 @@
 //!
 //! This avoids N redundant fetches when N skills share the same repo.
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use tracing::warn;
 
 use crate::git::ops as git_ops;
+use crate::repo_link;
 use skillstar_core::config::github_mirror;
 use skillstar_core::infra::path_env::command_with_path;
-
-// ── Path helpers ────────────────────────────────────────────────────
-
-/// Resolve a symlink to its absolute target path.
-pub fn resolve_symlink(link_path: &Path) -> Option<PathBuf> {
-    let target = std::fs::read_link(link_path).ok()?;
-    if target.is_absolute() {
-        Some(target)
-    } else {
-        Some(link_path.parent()?.join(target))
-    }
-}
-
-pub fn normalize_path_for_compare(path: &Path) -> String {
-    let normalized = path
-        .to_string_lossy()
-        .replace('\\', "/")
-        .trim_end_matches('/')
-        .to_string();
-    #[cfg(windows)]
-    {
-        normalized.to_ascii_lowercase()
-    }
-    #[cfg(not(windows))]
-    {
-        normalized
-    }
-}
-
-pub fn is_repo_cached_skill_target_path(target: &Path, repo_cache_dir: &Path) -> bool {
-    let target_norm = normalize_path_for_compare(target);
-    let repo_root_norm = normalize_path_for_compare(repo_cache_dir);
-    target_norm == repo_root_norm || target_norm.starts_with(&(repo_root_norm + "/"))
-}
-
-/// Check whether a skill directory is a symlink into the repo cache.
-pub fn is_repo_cached_skill(skill_path: &Path) -> bool {
-    is_repo_cached_skill_with_cache(skill_path, &skillstar_core::infra::paths::repos_cache_dir())
-}
-
-pub fn is_repo_cached_skill_with_cache(skill_path: &Path, repo_cache_dir: &Path) -> bool {
-    let Ok(meta) = std::fs::symlink_metadata(skill_path) else {
-        return false;
-    };
-    if !meta.file_type().is_symlink() {
-        return false;
-    }
-    let Some(target) = resolve_symlink(skill_path) else {
-        return false;
-    };
-    is_repo_cached_skill_target_path(&target, repo_cache_dir)
-}
-
-/// Resolve a repo-cached skill path to its repository root.
-pub fn resolve_skill_repo_root(skill_path: &Path) -> Option<PathBuf> {
-    resolve_skill_repo_root_with(
-        skill_path,
-        &skillstar_core::infra::paths::repos_cache_dir(),
-        git_ops::find_repo_root,
-    )
-}
-
-pub fn resolve_skill_repo_root_with<F>(
-    skill_path: &Path,
-    repo_cache_dir: &Path,
-    find_repo_root: F,
-) -> Option<PathBuf>
-where
-    F: Fn(&Path) -> Option<PathBuf>,
-{
-    if !is_repo_cached_skill_with_cache(skill_path, repo_cache_dir) {
-        return None;
-    }
-    let real_path = resolve_symlink(skill_path)?;
-    find_repo_root(&real_path)
-}
 
 // ── Batch Prefetch ──────────────────────────────────────────────────
 
@@ -106,28 +31,22 @@ where
 ///
 /// Returns the set of repo roots where the fetch **failed**.
 pub fn prefetch_unique_repos(skill_paths: &[PathBuf]) -> HashSet<PathBuf> {
-    prefetch_unique_repos_with(
-        skill_paths,
-        &skillstar_core::infra::paths::repos_cache_dir(),
-        git_ops::find_repo_root,
-        |root| {
-            fetch_tracked_ref(root).map_err(|e| {
-                warn!(
-                    target: "update_checker",
-                    path = %root.display(),
-                    error = %e,
-                    "prefetch git fetch failed — will preserve existing update state"
-                );
-                e
-            })
-        },
-    )
+    prefetch_unique_repos_with(skill_paths, repo_link::repo_root_of, |root| {
+        fetch_tracked_ref(root).map_err(|e| {
+            warn!(
+                target: "update_checker",
+                path = %root.display(),
+                error = %e,
+                "prefetch git fetch failed — will preserve existing update state"
+            );
+            e
+        })
+    })
 }
 
 pub fn prefetch_unique_repos_with<F, G>(
     skill_paths: &[PathBuf],
-    repo_cache_dir: &Path,
-    find_repo_root: F,
+    repo_root_of: F,
     fetch_repo: G,
 ) -> HashSet<PathBuf>
 where
@@ -138,7 +57,7 @@ where
     let mut failed = HashSet::new();
 
     for path in skill_paths {
-        if let Some(root) = resolve_skill_repo_root_with(path, repo_cache_dir, &find_repo_root)
+        if let Some(root) = repo_root_of(path)
             && fetched.insert(root.clone())
             && fetch_repo(&root).is_err()
         {
@@ -151,54 +70,30 @@ where
 
 // ── Update Detection ────────────────────────────────────────────────
 
-/// Check if a repo-cached skill has updates available (fetches first).
-#[allow(dead_code)]
-pub fn check_update(skill_path: &Path) -> bool {
-    check_update_with(skill_path, fetch_tracked_ref, git_ops::find_repo_root)
-}
-
-pub fn check_update_with<F, G>(skill_path: &Path, fetch_repo: F, find_repo_root: G) -> bool
-where
-    F: Fn(&Path) -> Result<()>,
-    G: Fn(&Path) -> Option<PathBuf>,
-{
-    let real_path = match resolve_symlink(skill_path) {
-        Some(path) => path,
-        None => return false,
-    };
-    let repo_root = match find_repo_root(&real_path) {
-        Some(path) => path,
-        None => return false,
-    };
-    if fetch_repo(&repo_root).is_err() {
-        return false;
-    }
-    compare_heads(&repo_root).unwrap_or(false)
-}
-
-/// Check if a repo-cached skill has updates **without fetching**.
+/// Check if a repo-backed skill has updates available **without fetching**.
+///
+/// `None` means "the prefetch failed for this skill's repo, status unknown" —
+/// callers must preserve the previous state rather than clearing the badge.
 pub fn check_update_local(
     skill_path: &Path,
     failed_fetch_roots: &HashSet<PathBuf>,
 ) -> Option<bool> {
-    check_update_local_with(skill_path, failed_fetch_roots, git_ops::find_repo_root)
+    check_update_local_with(skill_path, failed_fetch_roots, repo_link::repo_root_of)
 }
 
 pub fn check_update_local_with<F>(
     skill_path: &Path,
     failed_fetch_roots: &HashSet<PathBuf>,
-    find_repo_root: F,
+    repo_root_of: F,
 ) -> Option<bool>
 where
     F: Fn(&Path) -> Option<PathBuf>,
 {
-    let real_path = match resolve_symlink(skill_path) {
-        Some(path) => path,
-        None => return Some(false),
-    };
-    let repo_root = match find_repo_root(&real_path) {
-        Some(path) => path,
-        None => return Some(false),
+    // No resolvable repo root: nothing to compare against, so report "no
+    // update" rather than "unknown". `None` is reserved for a failed fetch,
+    // where the previous badge must survive.
+    let Some(repo_root) = repo_root_of(skill_path) else {
+        return Some(false);
     };
     if failed_fetch_roots.contains(&repo_root) {
         return None;
@@ -207,12 +102,13 @@ where
 }
 
 fn compare_heads(repo_root: &Path) -> Option<bool> {
-    let local_head = git_rev_parse(repo_root, "HEAD")?;
-    let remote_head = if configured_git_ref(repo_root).is_some() {
-        git_rev_parse(repo_root, "FETCH_HEAD")?
+    let local_head = git_ops::rev_parse(repo_root, "HEAD").ok()?;
+    let remote_ref = if configured_git_ref(repo_root).is_some() {
+        "FETCH_HEAD"
     } else {
-        git_rev_parse(repo_root, "origin/HEAD")?
+        "origin/HEAD"
     };
+    let remote_head = git_ops::rev_parse(repo_root, remote_ref).ok()?;
     Some(!local_head.is_empty() && !remote_head.is_empty() && local_head != remote_head)
 }
 
@@ -246,35 +142,12 @@ pub(crate) fn fetch_tracked_ref(repo_root: &Path) -> Result<()> {
     }
 }
 
-fn git_rev_parse(repo_dir: &Path, rev: &str) -> Option<String> {
-    Command::new("git")
-        .current_dir(repo_dir)
-        .args(["rev-parse", rev])
-        .output()
-        .ok()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-}
-
-/// Compute the git tree hash for a specific subfolder within a repo.
-pub fn compute_subtree_hash(repo_dir: &Path, folder_path: &str) -> Result<String> {
-    let output = Command::new("git")
-        .current_dir(repo_dir)
-        .args(["rev-parse", &format!("HEAD:{folder_path}")])
-        .output()
-        .map_err(|e| anyhow!("Failed to execute git rev-parse for subtree: {e}"))?;
-
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!("git rev-parse failed: {}", err.trim()));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::anyhow;
     use std::fs;
+    use std::process::Command;
 
     fn run_git(repo: &Path, args: &[&str]) {
         let output = Command::new("git")
@@ -298,30 +171,6 @@ mod tests {
         dir
     }
 
-    #[test]
-    fn normalize_repo_cache_paths() {
-        let repo_cache = Path::new("/tmp/cache/repos");
-        let target = Path::new("/tmp/cache/repos/acme--demo");
-        assert!(is_repo_cached_skill_target_path(target, repo_cache));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn repo_cached_symlink_detection_and_root_resolution() {
-        let repo_cache = tempfile::tempdir().unwrap();
-        let repo = repo_cache.path().join("acme--demo");
-        fs::create_dir_all(repo.join("skill")).unwrap();
-        let link_parent = tempfile::tempdir().unwrap();
-        let link = link_parent.path().join("demo");
-        std::os::unix::fs::symlink(repo.join("skill"), &link).unwrap();
-
-        assert!(is_repo_cached_skill_with_cache(&link, repo_cache.path()));
-        let root = resolve_skill_repo_root_with(&link, repo_cache.path(), |path| {
-            Some(path.parent()?.to_path_buf())
-        });
-        assert_eq!(root.as_deref(), Some(repo.as_path()));
-    }
-
     // Unix-only: fixtures use std::os::unix::fs::symlink.
     #[cfg(unix)]
     #[test]
@@ -343,7 +192,7 @@ mod tests {
             ],
         );
 
-        let initial_hash = compute_subtree_hash(&clone_path, "skills/demo").unwrap();
+        let initial_hash = git_ops::compute_subtree_hash(&clone_path, "skills/demo").unwrap();
         assert!(!initial_hash.is_empty());
 
         fs::write(remote.path().join("skills/demo/SKILL.md"), "v2").unwrap();
@@ -354,46 +203,56 @@ mod tests {
 
         let skill_link_parent = tempfile::tempdir().unwrap();
         let skill_link = skill_link_parent.path().join("demo");
-        #[cfg(unix)]
         std::os::unix::fs::symlink(clone_path.join("skills/demo"), &skill_link).unwrap();
-        #[cfg(windows)]
-        std::os::windows::fs::symlink_dir(clone_path.join("skills/demo"), &skill_link).unwrap();
 
         let result = check_update_local_with(&skill_link, &HashSet::new(), |path| {
-            Some(path.parent()?.parent()?.to_path_buf())
+            let real = std::fs::read_link(path).ok()?;
+            Some(real.parent()?.parent()?.to_path_buf())
         });
         assert_eq!(result, Some(true));
     }
 
-    // Unix-only: fixtures use std::os::unix::fs::symlink.
-    #[cfg(unix)]
+    #[test]
+    fn unresolvable_repo_root_reports_no_update() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = check_update_local_with(&dir.path().join("nope"), &HashSet::new(), |_| None);
+        assert_eq!(
+            result,
+            Some(false),
+            "None is reserved for failed fetches, not for missing repo roots"
+        );
+    }
+
+    #[test]
+    fn failed_prefetch_root_preserves_previous_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        let failed = HashSet::from([repo.clone()]);
+        let result = check_update_local_with(&dir.path().join("skill"), &failed, |_| {
+            Some(repo.clone())
+        });
+        assert_eq!(result, None, "failed fetch must not clear the badge");
+    }
+
     #[test]
     fn prefetch_unique_repos_deduplicates_and_tracks_failures() {
-        let repo_cache = tempfile::tempdir().unwrap();
-        let repo_a = repo_cache.path().join("repo_a");
-        let repo_b = repo_cache.path().join("repo_b");
-        fs::create_dir_all(&repo_a).unwrap();
-        fs::create_dir_all(&repo_b).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let repo_a = dir.path().join("repo_a");
+        let repo_b = dir.path().join("repo_b");
+        let skill_a1 = dir.path().join("skill_a1");
+        let skill_a2 = dir.path().join("skill_a2");
+        let skill_b = dir.path().join("skill_b");
 
-        let link_parent = tempfile::tempdir().unwrap();
-        let skill_a1 = link_parent.path().join("skill_a1");
-        let skill_a2 = link_parent.path().join("skill_a2");
-        let skill_b = link_parent.path().join("skill_b");
-
-        #[cfg(unix)]
-        {
-            std::os::unix::fs::symlink(&repo_a, &skill_a1).unwrap();
-            std::os::unix::fs::symlink(&repo_a, &skill_a2).unwrap();
-            std::os::unix::fs::symlink(&repo_b, &skill_b).unwrap();
-        }
-        #[cfg(windows)]
-        {
-            std::os::windows::fs::symlink_dir(&repo_a, &skill_a1).unwrap();
-            std::os::windows::fs::symlink_dir(&repo_a, &skill_a2).unwrap();
-            std::os::windows::fs::symlink_dir(&repo_b, &skill_b).unwrap();
-        }
-
-        let find_repo_root = |path: &Path| -> Option<PathBuf> { Some(path.to_path_buf()) };
+        let repo_a_for_lookup = repo_a.clone();
+        let repo_b_for_lookup = repo_b.clone();
+        let skill_b_for_lookup = skill_b.clone();
+        let repo_root_of = move |path: &Path| -> Option<PathBuf> {
+            if path == skill_b_for_lookup {
+                Some(repo_b_for_lookup.clone())
+            } else {
+                Some(repo_a_for_lookup.clone())
+            }
+        };
 
         let fetch_calls = std::cell::RefCell::new(Vec::new());
         let fetch_repo = |root: &Path| -> Result<()> {
@@ -406,9 +265,8 @@ mod tests {
         };
 
         let failed = prefetch_unique_repos_with(
-            &[skill_a1.clone(), skill_a2.clone(), skill_b.clone()],
-            repo_cache.path(),
-            find_repo_root,
+            &[skill_a1, skill_a2, skill_b],
+            repo_root_of,
             fetch_repo,
         );
 
@@ -421,82 +279,5 @@ mod tests {
         assert!(fetch_calls.borrow().contains(&repo_b));
         assert!(failed.contains(&repo_b));
         assert!(!failed.contains(&repo_a));
-    }
-
-    // Unix-only: fixtures use std::os::unix::fs::symlink.
-    #[cfg(unix)]
-    #[test]
-    fn check_update_calls_fetch_and_returns_false_on_head_compare_failure() {
-        let repo_cache = tempfile::tempdir().unwrap();
-        let repo = repo_cache.path().join("repo");
-        fs::create_dir_all(&repo).unwrap();
-
-        let link_parent = tempfile::tempdir().unwrap();
-        let link = link_parent.path().join("skill");
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&repo, &link).unwrap();
-        #[cfg(windows)]
-        std::os::windows::fs::symlink_dir(&repo, &link).unwrap();
-
-        let fetch_called = std::cell::Cell::new(false);
-        let fetch_repo = |_: &Path| -> Result<()> {
-            fetch_called.set(true);
-            Ok(())
-        };
-
-        let find_repo_root = |_: &Path| -> Option<PathBuf> { Some(repo.clone()) };
-
-        let result = check_update_with(&link, fetch_repo, find_repo_root);
-        assert!(fetch_called.get(), "fetch should be called");
-        assert!(
-            !result,
-            "should return false when heads can't be compared (not a git repo)"
-        );
-    }
-
-    // Unix-only: fixtures use std::os::unix::fs::symlink.
-    #[cfg(unix)]
-    #[test]
-    fn resolve_symlink_relative_target() {
-        let dir = tempfile::tempdir().unwrap();
-        let target = dir.path().join("target");
-        fs::write(&target, "x").unwrap();
-        let link = dir.path().join("link");
-        #[cfg(unix)]
-        std::os::unix::fs::symlink("target", &link).unwrap();
-        #[cfg(windows)]
-        std::os::windows::fs::symlink_file("target", &link).unwrap();
-
-        let resolved = resolve_symlink(&link).unwrap();
-        assert_eq!(resolved, target);
-    }
-
-    // Unix-only: fixtures use std::os::unix::fs::symlink.
-    #[cfg(unix)]
-    #[test]
-    fn app_level_is_repo_cached_skill_uses_repos_cache_dir() {
-        let _guard = crate::lock_test_env();
-        let temp = tempfile::tempdir().unwrap();
-        unsafe {
-            std::env::set_var("SKILLSTAR_DATA_DIR", temp.path());
-        }
-
-        let repo_cache = skillstar_core::infra::paths::repos_cache_dir();
-        fs::create_dir_all(&repo_cache).unwrap();
-        let repo = repo_cache.join("demo-repo");
-        fs::create_dir_all(&repo).unwrap();
-
-        let link_parent = tempfile::tempdir().unwrap();
-        let link = link_parent.path().join("demo");
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&repo, &link).unwrap();
-        #[cfg(windows)]
-        std::os::windows::fs::symlink_dir(&repo, &link).unwrap();
-
-        assert!(is_repo_cached_skill(&link));
-
-        unsafe {
-            std::env::remove_var("SKILLSTAR_DATA_DIR");
-        }
     }
 }

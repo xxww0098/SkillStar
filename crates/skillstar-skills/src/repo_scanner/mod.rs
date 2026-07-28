@@ -14,12 +14,9 @@ pub use crate::source_resolver::normalize_repo_url;
 pub use cache::{cache_dir_name, clone_or_fetch_repo, clone_or_fetch_repo_at};
 pub use detect::detect_new_skills_in_cached_repos;
 pub use maintenance::{RepoCacheInfo, clean_unused_cache, get_cache_info};
-pub use ops::{
-    check_repo_skill_update_local, is_repo_cached_skill, prefetch_unique_repos,
-    pull_repo_skill_update, resolve_skill_repo_root,
-};
-pub use scan::{compute_subtree_hash, scan_skills_in_repo, scan_skills_in_repo_at};
-pub use scan_install::{compute_subtree_hash_pub, install_from_repo, install_from_repo_at};
+pub use ops::pull_repo_skill_update;
+pub use scan::{scan_skills_in_repo, scan_skills_in_repo_at};
+pub use scan_install::{install_from_repo, install_from_repo_at};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanResult {

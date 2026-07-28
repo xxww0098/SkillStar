@@ -10,7 +10,7 @@ use tracing::warn;
 
 use crate::local_skill;
 use crate::patrol::types::HubSkillEntry;
-use crate::repo_scanner;
+use crate::{repo_link, repo_scanner, update_checker};
 
 /// Check a single skill for available updates without network (after prefetch).
 ///
@@ -21,8 +21,8 @@ pub fn check_skill_update_local(
     skill_path: &Path,
     failed_fetch_roots: &HashSet<PathBuf>,
 ) -> Option<bool> {
-    if repo_scanner::is_repo_cached_skill(skill_path) {
-        return repo_scanner::check_repo_skill_update_local(skill_path, failed_fetch_roots);
+    if repo_link::is_repo_cached(skill_path) {
+        return update_checker::check_update_local(skill_path, failed_fetch_roots);
     }
 
     // Fallback for non-repo-cached hub skills.
@@ -75,7 +75,7 @@ pub fn collect_hub_skills() -> Result<Vec<HubSkillEntry>> {
 
 /// Prefetch unique repos for a skill path batch; returns failed roots.
 pub fn prefetch_failed_repos(skill_paths: &[PathBuf]) -> HashSet<PathBuf> {
-    repo_scanner::prefetch_unique_repos(skill_paths)
+    update_checker::prefetch_unique_repos(skill_paths)
 }
 
 /// Detect newly available skills in already-fetched repo caches.

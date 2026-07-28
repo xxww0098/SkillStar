@@ -3,12 +3,11 @@ use serde::Serialize;
 use skillstar_core::types::{
     Skill, SkillCategory, SkillType, extract_github_source_from_url, extract_skill_description,
 };
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::git::ops as git_ops;
 use crate::{
-    content, deployment, installed_skill, local_skill, lockfile, projects, repo_scanner,
-    update_checker,
+    content, deployment, installed_skill, local_skill, lockfile, projects, repo_link, repo_scanner,
 };
 
 /// Result of a hub skill update, including any project-level cascade work.
@@ -37,17 +36,13 @@ fn push_unique(values: &mut Vec<String>, value: impl Into<String>) {
     }
 }
 
-fn resolve_repo_root_from_symlink(skill_path: &Path) -> Option<PathBuf> {
-    update_checker::resolve_skill_repo_root(skill_path)
-}
-
 fn compute_hash_for_skill_entry(skill_path: &Path, source_folder: Option<&str>) -> Option<String> {
     if let Some(folder) = source_folder.filter(|folder| !folder.is_empty()) {
-        let repo_root = resolve_repo_root_from_symlink(skill_path)?;
-        return update_checker::compute_subtree_hash(&repo_root, folder).ok();
+        let repo_root = repo_link::repo_root_of(skill_path)?;
+        return git_ops::compute_subtree_hash(&repo_root, folder).ok();
     }
 
-    if let Some(repo_root) = resolve_repo_root_from_symlink(skill_path) {
+    if let Some(repo_root) = repo_link::repo_root_of(skill_path) {
         return git_ops::compute_tree_hash(&repo_root)
             .ok()
             .or_else(|| git_ops::compute_tree_hash(skill_path).ok());
@@ -101,7 +96,7 @@ fn apply_update(name: &str) -> Result<UpdateOutcome> {
         anyhow::bail!("Skill '{}' not found in hub", name);
     }
 
-    let is_repo_skill = update_checker::is_repo_cached_skill(&path);
+    let is_repo_skill = repo_link::is_repo_cached(&path);
 
     let lock_entry = {
         let lock_path = lockfile::lockfile_path();

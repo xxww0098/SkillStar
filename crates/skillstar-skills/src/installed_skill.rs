@@ -4,7 +4,7 @@ use crate::lockfile::LockEntry;
 use crate::{
     local_skill,
     lockfile::{self},
-    repo_scanner,
+    repo_link, update_checker,
 };
 use anyhow::{Context, Result, anyhow};
 use skillstar_core::types::{
@@ -227,7 +227,7 @@ pub async fn refresh_skill_updates(names: Option<Vec<String>>) -> Result<Vec<Ski
     let failed_fetch_roots: Arc<std::collections::HashSet<std::path::PathBuf>> = {
         let dirs = skill_dirs.clone();
         let result =
-            tokio::task::spawn_blocking(move || repo_scanner::prefetch_unique_repos(&dirs))
+            tokio::task::spawn_blocking(move || update_checker::prefetch_unique_repos(&dirs))
                 .await
                 .unwrap_or_default();
         Arc::new(result)
@@ -351,7 +351,7 @@ fn build_installed_skill(
     profiles: &[AgentProfile],
 ) -> Result<Skill> {
     // For repo-cached skills (symlinks into .repos/), resolve the actual path
-    let is_repo_skill = repo_scanner::is_repo_cached_skill(&path);
+    let is_repo_skill = repo_link::is_repo_cached(&path);
 
     if !is_repo_skill {
         let _ = git_ops::ensure_worktree_checked_out(&path);
@@ -434,8 +434,8 @@ fn refresh_single_skill_update(
     // For repo-cached skills, the repo has already been fetched by
     // prefetch_unique_repos; only compare local HEAD vs origin/HEAD.
     // Returns None when the prefetch failed for this skill's repo.
-    if repo_scanner::is_repo_cached_skill(path) {
-        return repo_scanner::check_repo_skill_update_local(path, failed_fetch_roots);
+    if repo_link::is_repo_cached(path) {
+        return update_checker::check_update_local(path, failed_fetch_roots);
     }
     let _ = git_ops::ensure_worktree_checked_out(path);
     Some(git_ops::check_update(path).unwrap_or(false))
