@@ -12,7 +12,7 @@ import { selectTargetableAgentProfiles, supportsGlobalDeploy, supportsProjectDep
 import { tauriInvoke } from "../../../lib/ipc";
 import { toast } from "../../../lib/toast";
 import { navigateToSettingsSection } from "../../../lib/utils";
-import type { RepoNewSkill, Skill, SortOption } from "../../../types";
+import type { RepoNewSkill, Skill, SkillUpdateReport, SortOption } from "../../../types";
 import { useSkillCards } from "../hooks/useSkillCards";
 import { useSkills } from "../hooks/useSkills";
 import { AiPickSkillsModal } from "./AiPickSkillsModal";
@@ -60,6 +60,7 @@ export function LocalSkillsContent({
     installSkill,
     uninstallSkill,
     updateSkill,
+    updateSkills,
     pendingUpdateNames,
     toggleSkillForAgent,
     pendingAgentToggleKeys,
@@ -398,122 +399,77 @@ export function LocalSkillsContent({
     t,
   ]);
 
-  const handleBatchUpdate = async () => {
-    // Only update skills that actually have updates available (skip local skills)
-    const updatableNames = Array.from(selectedSkillNames).filter((name) => {
-      const skill = skills.find((s) => s.name === name);
-      return skill?.update_available && skill.skill_type !== "local";
-    });
+  /** Summarise a batch update. The backend already collapsed names sharing a
+   *  repository, so `skipped` counts as updated: that content moved too. */
+  const reportBatchUpdate = useCallback(
+    (report: SkillUpdateReport) => {
+      const successCount = report.updated.length + report.skipped.length;
 
-    if (updatableNames.length === 0) {
-      toast.info(t("mySkills.noUpdates"));
-      return;
-    }
-
-    setBatchLoading(true);
-    let successCount = 0;
-    const failedNames: string[] = [];
-    const errors: string[] = [];
-
-    for (const name of updatableNames) {
-      try {
-        await updateSkill(name);
-        successCount++;
-      } catch (e) {
-        failedNames.push(name);
-        errors.push(e instanceof Error ? e.message : String(e));
-      }
-    }
-
-    clearSelection();
-    setBatchLoading(false);
-
-    // Summary toast
-    if (failedNames.length === 0) {
-      toast.success(
-        t("mySkills.batchUpdateSuccess", { count: successCount, defaultValue: `${successCount} skill(s) updated` }),
-      );
-    } else if (successCount > 0) {
-      toast.warning(
-        t("mySkills.batchUpdatePartial", {
-          success: successCount,
-          failed: failedNames.length,
-          defaultValue: `${successCount} updated, ${failedNames.length} failed`,
-        }),
-      );
-    } else {
-      const reason = errors[0];
-      toast.error(reason ? `${t("mySkills.updateFailed")}: ${reason}` : t("mySkills.updateFailed"));
-    }
-  };
-
-  const handleUpdateAll = async () => {
-    const allUpdatable = skills.filter((s) => s.update_available && s.skill_type !== "local");
-    if (allUpdatable.length === 0) {
-      toast.info(t("mySkills.noUpdates"));
-      return;
-    }
-
-    setIsUpdatingAll(true);
-
-    // Group by git_url — same repo only needs one update (backend clears siblings)
-    const repoGroups = new Map<string, typeof allUpdatable>();
-    for (const skill of allUpdatable) {
-      const key = skill.git_url || skill.name; // fallback for non-repo skills
-      const group = repoGroups.get(key) ?? [];
-      group.push(skill);
-      repoGroups.set(key, group);
-    }
-
-    // Update one representative per repo concurrently
-    const tasks = Array.from(repoGroups.values()).map(async (group) => {
-      const representative = group[0];
-      try {
-        const updated = await updateSkill(
-          representative.name,
-          group.map((s) => s.name),
+      if (report.failed.length === 0) {
+        toast.success(
+          t("mySkills.batchUpdateSuccess", { count: successCount, defaultValue: `${successCount} skill(s) updated` }),
         );
-        if (selectedSkill?.name === representative.name) {
-          setSelectedSkill(updated);
-        }
-        return { success: group.length, failed: [] as string[], error: null as string | null };
-      } catch (e) {
-        return { success: 0, failed: group.map((s) => s.name), error: e instanceof Error ? e.message : String(e) };
+        return;
       }
-    });
 
-    const results = await Promise.allSettled(tasks);
-
-    let successCount = 0;
-    const failedNames: string[] = [];
-    const errors: string[] = [];
-    for (const r of results) {
-      if (r.status === "fulfilled") {
-        successCount += r.value.success;
-        failedNames.push(...r.value.failed);
-        if (r.value.error) errors.push(r.value.error);
+      if (successCount > 0) {
+        toast.warning(
+          t("mySkills.batchUpdatePartial", {
+            success: successCount,
+            failed: report.failed.length,
+            defaultValue: `${successCount} updated, ${report.failed.length} failed`,
+          }),
+        );
+        return;
       }
-    }
 
-    setIsUpdatingAll(false);
-
-    if (failedNames.length === 0) {
-      toast.success(
-        t("mySkills.batchUpdateSuccess", { count: successCount, defaultValue: `${successCount} skill(s) updated` }),
-      );
-    } else if (successCount > 0) {
-      toast.warning(
-        t("mySkills.batchUpdatePartial", {
-          success: successCount,
-          failed: failedNames.length,
-          defaultValue: `${successCount} updated, ${failedNames.length} failed`,
-        }),
-      );
-    } else {
-      const reason = errors[0];
+      const reason = report.failed[0]?.error;
       toast.error(reason ? `${t("mySkills.updateFailed")}: ${reason}` : t("mySkills.updateFailed"));
-    }
-  };
+    },
+    [t],
+  );
+
+  /** Skills the user can actually pull: local ones have no remote to check. */
+  const updatableNamesAmong = useCallback(
+    (candidates: Iterable<string>) =>
+      Array.from(candidates).filter((name) => {
+        const skill = skills.find((item) => item.name === name);
+        return Boolean(skill?.update_available) && skill?.skill_type !== "local";
+      }),
+    [skills],
+  );
+
+  const runBatchUpdate = useCallback(
+    async (names: string[], setBusy: (busy: boolean) => void) => {
+      if (names.length === 0) {
+        toast.info(t("mySkills.noUpdates"));
+        return;
+      }
+
+      setBusy(true);
+      try {
+        const report = await updateSkills(names);
+        const refreshed = report.updated.find((result) => result.skill.name === selectedSkill?.name);
+        if (refreshed) {
+          setSelectedSkill(refreshed.skill);
+        }
+        reportBatchUpdate(report);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [reportBatchUpdate, selectedSkill?.name, t, updateSkills],
+  );
+
+  const handleBatchUpdate = useCallback(async () => {
+    await runBatchUpdate(updatableNamesAmong(selectedSkillNames), setBatchLoading);
+    clearSelection();
+  }, [clearSelection, runBatchUpdate, selectedSkillNames, updatableNamesAmong]);
+
+  const handleUpdateAll = useCallback(
+    () => runBatchUpdate(updatableNamesAmong(skills.map((skill) => skill.name)), setIsUpdatingAll),
+    [runBatchUpdate, skills, updatableNamesAmong],
+  );
 
   const handleBatchLink = useCallback(
     async (agentId: string) => {

@@ -8,6 +8,7 @@ import type {
   SkillCardDeck,
   SkillContent,
   SkillTutorial,
+  SkillUpdateReport,
   SkillUpdateState,
   UpdateResult,
 } from "../../../types";
@@ -20,6 +21,7 @@ export interface SkillCommands {
   install_skill: { args: { url: string; name?: string }; result: Skill };
   uninstall_skill: { args: { name: string }; result: void };
   update_skill: { args: { name: string }; result: UpdateResult };
+  update_skills: { args: { names: string[] }; result: SkillUpdateReport };
 
   // Skill content (editor)
   read_skill_file_raw: { args: { name: string }; result: string };

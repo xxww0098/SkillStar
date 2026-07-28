@@ -5,7 +5,9 @@ use serde::Serialize;
 use skillstar_core::types::{
     Skill, SkillCategory, SkillType, extract_github_source_from_url, extract_skill_description,
 };
+use std::collections::VecDeque;
 use std::path::Path;
+use std::sync::Mutex;
 
 use crate::git::ops as git_ops;
 use crate::lockfile::LockEntry;
@@ -31,6 +33,116 @@ pub struct UpdateResult {
     pub skill: Skill,
     pub siblings_cleared: Vec<String>,
     pub agent_link_failures: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SkillUpdateFailure {
+    pub name: String,
+    pub error: String,
+}
+
+/// Outcome of a batch update.
+///
+/// `skipped` names were not updated because a skill sharing their repository
+/// was — their content moved anyway. A failed update reports every name it
+/// would have covered, so nothing is quietly counted as done.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct SkillUpdateReport {
+    pub updated: Vec<UpdateResult>,
+    pub failed: Vec<SkillUpdateFailure>,
+    pub skipped: Vec<String>,
+}
+
+/// Update several skills, pulling each repository at most once.
+///
+/// This is where "skills sharing a repository need one update between them"
+/// lives. It used to live in the UI, alongside a second copy of the sibling
+/// fan-out it was mirroring.
+pub fn update_skills(names: &[String]) -> SkillUpdateReport {
+    let entries = lockfile::Lockfile::load(&lockfile::lockfile_path())
+        .map(|lockfile| lockfile.skills)
+        .unwrap_or_default();
+    let groups = plan::group_by_repo(&entries, names);
+
+    let mut report = SkillUpdateReport::default();
+    for (group, outcome) in run_groups(groups) {
+        match outcome {
+            Ok(result) => {
+                report.updated.push(result);
+                report.skipped.extend(group.covered);
+            }
+            Err(err) => {
+                let error = format!("{err:#}");
+                report.failed.push(SkillUpdateFailure {
+                    name: group.representative,
+                    error: error.clone(),
+                });
+                // The rest of the repository did not move either.
+                for name in group.covered {
+                    report.failed.push(SkillUpdateFailure {
+                        name,
+                        error: error.clone(),
+                    });
+                }
+            }
+        }
+    }
+    report
+}
+
+/// Run one update per repository, a few at a time, and restore request order.
+///
+/// Separate repositories are separate checkouts, so they pull independently;
+/// the bound keeps a large "update all" from opening a fetch per repository at
+/// once.
+fn run_groups(groups: Vec<plan::RepoGroup>) -> Vec<(plan::RepoGroup, Result<UpdateResult>)> {
+    if groups.len() <= 1 {
+        return groups
+            .into_iter()
+            .map(|group| {
+                let outcome = update_skill(&group.representative);
+                (group, outcome)
+            })
+            .collect();
+    }
+
+    let queue: Mutex<VecDeque<(usize, plan::RepoGroup)>> =
+        Mutex::new(groups.into_iter().enumerate().collect());
+    let done: Mutex<Vec<(usize, plan::RepoGroup, Result<UpdateResult>)>> = Mutex::new(Vec::new());
+    let workers = update_concurrency_limit().min(lock(&queue).len());
+
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| {
+                loop {
+                    let Some((index, group)) = lock(&queue).pop_front() else {
+                        return;
+                    };
+                    let outcome = update_skill(&group.representative);
+                    lock(&done).push((index, group, outcome));
+                }
+            });
+        }
+    });
+
+    let mut results = done.into_inner().unwrap_or_else(|err| err.into_inner());
+    results.sort_by_key(|(index, _, _)| *index);
+    results
+        .into_iter()
+        .map(|(_, group, outcome)| (group, outcome))
+        .collect()
+}
+
+/// A panicking worker leaves the queue intact — its entries are plain data
+/// with no invariant to corrupt — so recover rather than poisoning the batch.
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|err| err.into_inner())
+}
+
+fn update_concurrency_limit() -> usize {
+    std::thread::available_parallelism()
+        .map(|parallelism| parallelism.get().clamp(2, 4))
+        .unwrap_or(3)
 }
 
 fn compute_hash_for_skill_entry(skill_path: &Path, source_folder: Option<&str>) -> Option<String> {

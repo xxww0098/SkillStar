@@ -229,6 +229,7 @@ pub fn run() {
             commands::uninstall_skill,
             commands::toggle_skill_for_agent,
             commands::update_skill,
+            commands::update_skills,
             commands::marketplace::search_skills_sh,
             commands::marketplace::get_skills_sh_leaderboard,
             commands::marketplace::get_official_publishers,

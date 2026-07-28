@@ -29,8 +29,33 @@ function demoSkillTutorial(args: Record<string, unknown>) {
   };
 }
 
+/** Mirror the backend's one-update-per-repository collapse. */
+function demoUpdateReport(names: string[]) {
+  const seenRepo = new Set<string>();
+  const updated: unknown[] = [];
+  const skipped: string[] = [];
+
+  for (const name of names) {
+    const skill = SAMPLE_SKILLS.find((candidate) => candidate.name === name);
+    const repo = skill?.git_url || `standalone:${name}`;
+    if (seenRepo.has(repo)) {
+      skipped.push(name);
+      continue;
+    }
+    seenRepo.add(repo);
+    updated.push({
+      skill: { ...(skill ?? SAMPLE_SKILLS[0]), name, update_available: false },
+      siblings_cleared: [],
+      agent_link_failures: [],
+    });
+  }
+
+  return { updated, failed: [], skipped };
+}
+
 export const SKILLS_HANDLERS: DevMockHandlers = {
   list_skills: () => SAMPLE_SKILLS,
+  update_skills: (args) => demoUpdateReport((args?.names as string[]) ?? []),
   refresh_skill_updates: () =>
     SAMPLE_SKILLS.filter((s) => s.update_available).map((s) => ({
       name: s.name,

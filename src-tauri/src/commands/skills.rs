@@ -2,7 +2,7 @@ use skillstar_core::infra::error::AppError;
 use skillstar_skills::deployment;
 use skillstar_skills::{Skill, installed_skill, skill_install, skill_update};
 
-pub use skillstar_skills::skill_update::UpdateResult;
+pub use skillstar_skills::skill_update::{SkillUpdateReport, UpdateResult};
 
 #[tauri::command]
 pub async fn list_skills() -> Result<Vec<Skill>, AppError> {
@@ -65,4 +65,14 @@ pub async fn update_skill(name: String) -> Result<UpdateResult, AppError> {
         .await
         .map_err(|e| AppError::Other(format!("update task panicked: {e}")))?
         .map_err(AppError::Anyhow)
+}
+
+/// Update several skills at once, pulling each repository only once.
+///
+/// Per-skill failures ride in the report rather than failing the batch.
+#[tauri::command]
+pub async fn update_skills(names: Vec<String>) -> Result<SkillUpdateReport, AppError> {
+    tokio::task::spawn_blocking(move || skill_update::update_skills(&names))
+        .await
+        .map_err(|e| AppError::Other(format!("update task panicked: {e}")))
 }

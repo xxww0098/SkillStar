@@ -43,6 +43,21 @@ export interface UpdateResult {
   agent_link_failures: string[];
 }
 
+export interface SkillUpdateFailure {
+  name: string;
+  error: string;
+}
+
+/** Return type of the `update_skills` batch command. `skipped` names were not
+ *  pulled because a skill sharing their repository was — their content moved
+ *  anyway. A failed update reports every name it would have covered, so
+ *  nothing is quietly counted as done. */
+export interface SkillUpdateReport {
+  updated: UpdateResult[];
+  failed: SkillUpdateFailure[];
+  skipped: string[];
+}
+
 /** A new skill found in a cached repo that the user hasn't installed yet. */
 
 export interface SkillCardDeck {

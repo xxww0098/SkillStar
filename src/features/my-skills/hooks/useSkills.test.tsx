@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Skill, UpdateResult } from "../../../types";
+import type { Skill, SkillUpdateReport } from "../../../types";
 import { SkillsProvider, useSkills } from "./useSkills";
 
 const mockedInvoke = vi.mocked(invoke);
@@ -93,19 +93,27 @@ describe("useSkills", () => {
           return [];
         case "migrate_local_skills":
           return 0;
-        case "update_skill": {
-          expect(args).toEqual({ name: "opencli-repair" });
+        case "update_skills": {
+          // The backend collapses the repo down to one pull and reports the
+          // rest as skipped — the UI does not group by git_url itself.
+          expect(args).toEqual({ names: INITIAL_SKILLS.map((skill) => skill.name) });
 
-          const result: UpdateResult = {
-            skill: {
-              ...INITIAL_SKILLS[0],
-              update_available: false,
-              last_updated: "2026-04-08T08:00:00.000Z",
-            },
-            siblings_cleared: [],
-            agent_link_failures: [],
+          const report: SkillUpdateReport = {
+            updated: [
+              {
+                skill: {
+                  ...INITIAL_SKILLS[0],
+                  update_available: false,
+                  last_updated: "2026-04-08T08:00:00.000Z",
+                },
+                siblings_cleared: [],
+                agent_link_failures: [],
+              },
+            ],
+            failed: [],
+            skipped: INITIAL_SKILLS.slice(1).map((skill) => skill.name),
           };
-          return result;
+          return report;
         }
         default:
           return undefined;
@@ -113,7 +121,7 @@ describe("useSkills", () => {
     });
   });
 
-  it("clears UI-known same-repo siblings immediately after update-all", async () => {
+  it("clears every card the backend reports as moved after update-all", async () => {
     const { result } = renderHook(() => useSkills(), { wrapper: createWrapper() });
 
     await waitFor(() => {
@@ -124,10 +132,7 @@ describe("useSkills", () => {
     expect(result.current.skills.every((skill) => skill.update_available)).toBe(true);
 
     await act(async () => {
-      await result.current.updateSkill(
-        "opencli-repair",
-        INITIAL_SKILLS.map((skill) => skill.name),
-      );
+      await result.current.updateSkills(INITIAL_SKILLS.map((skill) => skill.name));
     });
 
     await waitFor(() => {

@@ -13,7 +13,7 @@ import {
 import { useTauriEvent } from "../../../hooks/useTauriEvent";
 import { tauriInvoke } from "../../../lib/ipc";
 import { toast } from "../../../lib/toast";
-import type { RepoNewSkill, Skill, SkillUpdateState } from "../../../types";
+import type { RepoNewSkill, Skill, SkillUpdateReport, SkillUpdateState } from "../../../types";
 import i18n from "../../../i18n";
 
 const SKILLS_QUERY_KEY = ["skills"] as const;
@@ -275,59 +275,79 @@ function useSkillsState() {
     [uninstallMutation],
   );
 
-  const updateSkill = useCallback(
-    async (name: string, siblingNames: string[] = []) => {
-      if (pendingUpdateRef.current.has(name)) {
-        throw new Error("Update already in progress");
+  /** The one way to update skills. The backend collapses names sharing a
+   *  repository down to a single pull and reports per-skill outcomes, so
+   *  callers neither group by repo nor aggregate errors themselves. */
+  const updateSkills = useCallback(
+    async (names: string[]): Promise<SkillUpdateReport> => {
+      const toUpdate = names.filter((name) => !pendingUpdateRef.current.has(name));
+      if (toUpdate.length === 0) {
+        return { updated: [], failed: [], skipped: [] };
       }
 
-      pendingUpdateRef.current.add(name);
-      for (const sib of siblingNames) {
-        pendingUpdateRef.current.add(sib);
+      for (const name of toUpdate) {
+        pendingUpdateRef.current.add(name);
       }
       setPendingUpdateNames(new Set(pendingUpdateRef.current));
 
       try {
-        const result = await tauriInvoke("update_skill", { name });
+        const report = await tauriInvoke("update_skills", { names: toUpdate });
 
-        // `Update All` already knows which installed skills share a repo.
-        // Merge that UI-known sibling list with the backend response so the
-        // grid clears every updated card immediately instead of waiting for a
-        // follow-up refresh to reconcile the rest of the repo.
-        const siblingSet = new Set(
-          [...siblingNames, ...result.siblings_cleared].filter((siblingName) => siblingName !== name),
-        );
-        queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) =>
-          prev.map((item) => {
-            if (item.name === name) return result.skill;
-            if (siblingSet.has(item.name)) {
+        queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) => {
+          const refreshed = new Map(report.updated.map((result) => [result.skill.name, result.skill]));
+          // Skipped names rode along on a sibling's pull; siblings_cleared are
+          // installed skills from the same repo that were not even requested.
+          const movedWithTheirRepo = new Set([
+            ...report.skipped,
+            ...report.updated.flatMap((result) => result.siblings_cleared),
+          ]);
+
+          return prev.map((item) => {
+            const fresh = refreshed.get(item.name);
+            if (fresh) return fresh;
+            if (movedWithTheirRepo.has(item.name)) {
               return { ...item, update_available: false };
             }
             return item;
-          }),
-        );
-        if (result.agent_link_failures?.length) {
-          // The update succeeded but one or more agent deployments could not
-          // be refreshed (e.g. symlink privileges revoked) — surface it so
-          // the user knows which agent may be stale instead of failing silently.
-          toast.warning(`${i18n.t("mySkills.agentRelinkFailed")}\n${result.agent_link_failures.join("\n")}`);
+          });
+        });
+
+        // The updates succeeded but some agent deployments could not be
+        // refreshed (e.g. symlink privileges revoked) — surface it so the user
+        // knows which agent may be stale instead of failing silently.
+        const relinkFailures = report.updated.flatMap((result) => result.agent_link_failures ?? []);
+        if (relinkFailures.length > 0) {
+          toast.warning(`${i18n.t("mySkills.agentRelinkFailed")}\n${relinkFailures.join("\n")}`);
         }
+
         void refetchUpdates();
-        return result.skill;
-      } catch (e) {
-        // No rollback: a failed update writes nothing, so the recorded state
-        // is still whatever it was. Forcing update_available back to true here
-        // would invent an update for a skill that may not have one.
-        throw new Error(String(e));
+        return report;
       } finally {
-        pendingUpdateRef.current.delete(name);
-        for (const sib of siblingNames) {
-          pendingUpdateRef.current.delete(sib);
+        for (const name of toUpdate) {
+          pendingUpdateRef.current.delete(name);
         }
         setPendingUpdateNames(new Set(pendingUpdateRef.current));
       }
     },
     [queryClient, refetchUpdates],
+  );
+
+  /** Single-skill convenience over {@link updateSkills}; throws so existing
+   *  call sites keep their try/catch shape. */
+  const updateSkill = useCallback(
+    async (name: string): Promise<Skill> => {
+      const report = await updateSkills([name]);
+      const failure = report.failed.find((entry) => entry.name === name);
+      if (failure) {
+        throw new Error(failure.error);
+      }
+      const updated = report.updated.find((result) => result.skill.name === name);
+      if (!updated) {
+        throw new Error("Update already in progress");
+      }
+      return updated.skill;
+    },
+    [updateSkills],
   );
 
   const toggleSkillForAgent = useCallback(
@@ -453,6 +473,7 @@ function useSkillsState() {
       installSkill,
       uninstallSkill,
       updateSkill,
+      updateSkills,
       toggleSkillForAgent,
       batchRemoveSkillsFromAllAgents,
       pendingAgentToggleKeys,
@@ -474,6 +495,7 @@ function useSkillsState() {
       installSkill,
       uninstallSkill,
       updateSkill,
+      updateSkills,
       toggleSkillForAgent,
       batchRemoveSkillsFromAllAgents,
       pendingAgentToggleKeys,
