@@ -3,11 +3,12 @@
 
 use super::RemoveOpts;
 
-use skillstar_skills::git::{gh_manager, ops as git_ops};
+use skillstar_skills::git::gh_manager;
 use skillstar_skills::local_skill;
 use skillstar_skills::lockfile;
 use skillstar_skills::skill_install;
 use skillstar_skills::skill_pack;
+use skillstar_skills::skill_update;
 use std::io::{self, IsTerminal, Write};
 
 pub fn cmd_update(name: Option<&str>) {
@@ -20,31 +21,43 @@ pub fn cmd_update(name: Option<&str>) {
         }
     };
 
-    let skills_dir = skillstar_core::infra::paths::hub_skills_dir();
-    let skills_to_update: Vec<_> = if let Some(name) = name {
-        lockfile.skills.iter().filter(|s| s.name == name).collect()
-    } else {
-        lockfile.skills.iter().collect()
+    let names: Vec<String> = match name {
+        Some(name) => lockfile
+            .skills
+            .iter()
+            .filter(|entry| entry.name == name)
+            .map(|entry| entry.name.clone())
+            .collect(),
+        None => lockfile
+            .skills
+            .iter()
+            .map(|entry| entry.name.clone())
+            .collect(),
     };
 
-    if skills_to_update.is_empty() {
+    if names.is_empty() {
         println!("No skills to update.");
         return;
     }
 
-    for skill in skills_to_update {
-        let path = skills_dir.join(&skill.name);
-        print!("Checking '{}' for updates... ", skill.name);
-        match git_ops::check_update(&path) {
-            Ok(true) => {
-                print!("update available, pulling... ");
-                match git_ops::pull_repo(&path) {
-                    Ok(_) => println!("✓ updated"),
-                    Err(e) => println!("✗ {}", e),
+    // Goes through the same transaction the GUI uses. Pulling the checkout by
+    // hand — as this used to — skips the lockfile hash write, the sibling
+    // fan-out, the agent relink and the project cascade, so a CLI update left
+    // the install in a different state than a GUI update of the same skill.
+    for name in &names {
+        print!("Updating '{}'... ", name);
+        let _ = io::stdout().flush();
+        match skill_update::update_skill(name) {
+            Ok(result) => {
+                println!("✓ updated");
+                for sibling in &result.siblings_cleared {
+                    println!("  ↳ {} refreshed (same repository)", sibling);
+                }
+                for failure in &result.agent_link_failures {
+                    eprintln!("  ! agent relink failed: {}", failure);
                 }
             }
-            Ok(false) => println!("already up to date"),
-            Err(e) => println!("✗ {}", e),
+            Err(e) => println!("✗ {:#}", e),
         }
     }
 }
