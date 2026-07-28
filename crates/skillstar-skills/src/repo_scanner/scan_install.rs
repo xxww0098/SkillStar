@@ -1,4 +1,3 @@
-use super::upsert_repo_history_entry;
 use crate::git::ops as git_ops;
 use crate::{local_skill, lockfile, source_resolver};
 use anyhow::{Context, Result, anyhow};
@@ -17,12 +16,11 @@ pub fn install_from_repo(
     targets: &[SkillInstallTarget],
 ) -> Result<Vec<String>> {
     let repo_dir = super::clone_or_fetch_repo(repo_url, source)?;
-    install_from_repo_at(&repo_dir, source, repo_url, None, targets)
+    install_from_repo_at(&repo_dir, repo_url, None, targets)
 }
 
 pub fn install_from_repo_at(
     repo_dir: &Path,
-    source: &str,
     repo_url: &str,
     git_ref: Option<&str>,
     targets: &[SkillInstallTarget],
@@ -111,8 +109,6 @@ pub fn install_from_repo_at(
 
     lf.save(&lock_path)
         .context("Failed to save lockfile after batch install")?;
-
-    let _ = upsert_repo_history_entry(source, repo_url);
 
     Ok(installed_names)
 }

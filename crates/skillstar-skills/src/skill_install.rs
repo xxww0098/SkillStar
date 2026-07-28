@@ -174,7 +174,7 @@ fn try_install_from_repo_cache(
     name_hint: &str,
     skills_dir: &Path,
 ) -> Result<Option<Skill>, String> {
-    let Ok((repo_url, source, repo_dir, skills_found)) = fetch_repo_scanned(url, false) else {
+    let Ok((repo_url, _source, repo_dir, skills_found)) = fetch_repo_scanned(url, false) else {
         return Ok(None);
     };
     let parsed =
@@ -210,7 +210,6 @@ fn try_install_from_repo_cache(
 
     match repo_scanner::install_from_repo_at(
         &repo_dir,
-        &source,
         &repo_url,
         parsed.git_ref.as_deref(),
         &targets,
@@ -308,7 +307,7 @@ pub fn install_skills_batch(url: &str, names: &[String]) -> Result<Vec<Skill>, S
     }
 
     let skills_dir = paths::hub_skills_dir();
-    let (repo_url, source, repo_dir, skills_found) = fetch_repo_scanned(url, false)?;
+    let (repo_url, _source, repo_dir, skills_found) = fetch_repo_scanned(url, false)?;
     let parsed =
         crate::source_resolver::Source::parse(url).map_err(|e| format!("Invalid source: {e}"))?;
     let existing_lock = lockfile::Lockfile::load(&lockfile::lockfile_path()).unwrap_or_default();
@@ -363,7 +362,6 @@ pub fn install_skills_batch(url: &str, names: &[String]) -> Result<Vec<Skill>, S
     if !targets.is_empty() {
         match repo_scanner::install_from_repo_at(
             &repo_dir,
-            &source,
             &repo_url,
             parsed.git_ref.as_deref(),
             &targets,

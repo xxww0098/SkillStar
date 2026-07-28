@@ -5,7 +5,7 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 static LOCKFILE_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
@@ -92,15 +92,6 @@ impl LockfileV3 {
 
 /// Alias Lockfile to LockfileV3 for backward compatibility with existing call sites.
 pub type Lockfile = LockfileV3;
-
-pub fn default_lockfile_path() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".skillstar")
-        .join("hub")
-        .join("lock.json")
-}
-
 
 /// App-specific lockfile path under the SkillStar data root.
 pub fn lockfile_path() -> std::path::PathBuf {
