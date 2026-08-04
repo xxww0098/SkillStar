@@ -110,6 +110,7 @@ describe("useSkills", () => {
                 agent_link_failures: [],
               },
             ],
+            blocked: [],
             failed: [],
             skipped: INITIAL_SKILLS.slice(1).map((skill) => skill.name),
           };
@@ -138,5 +139,71 @@ describe("useSkills", () => {
     await waitFor(() => {
       expect(result.current.skills.every((skill) => !skill.update_available)).toBe(true);
     });
+  });
+
+  it("keeps a divergent card unchanged until the user resolves the blocked update", async () => {
+    mockedInvoke.mockImplementation(async (command) => {
+      switch (command) {
+        case "list_skills":
+          return INITIAL_SKILLS;
+        case "refresh_skill_updates":
+        case "check_new_repo_skills":
+          return [];
+        case "migrate_local_skills":
+          return 0;
+        case "update_skills":
+          return {
+            updated: [],
+            blocked: [
+              {
+                name: "opencli-repair",
+                reason: "content_changed",
+                suggested_local_name: "opencli-repair.local",
+                error: null,
+              },
+            ],
+            failed: [],
+            skipped: [],
+          };
+        case "resolve_skill_update":
+          return {
+            update: {
+              skill: {
+                ...INITIAL_SKILLS[0],
+                update_available: false,
+                last_updated: "2026-04-08T09:00:00.000Z",
+              },
+              siblings_cleared: [],
+              agent_link_failures: [],
+            },
+            local_copy: { ...INITIAL_SKILLS[0], name: "opencli-repair.local", skill_type: "local" },
+          };
+        default:
+          return undefined;
+      }
+    });
+
+    const { result } = renderHook(() => useSkills(), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let report: SkillUpdateReport | undefined;
+    await act(async () => {
+      report = await result.current.updateSkills(["opencli-repair"]);
+    });
+    expect(report?.blocked[0]?.suggested_local_name).toBe("opencli-repair.local");
+    expect(result.current.skills[0].update_available).toBe(true);
+
+    await act(async () => {
+      await result.current.resolveSkillUpdate("opencli-repair", {
+        kind: "preserve",
+        local_name: "opencli-repair.local",
+      });
+    });
+
+    expect(mockedInvoke).toHaveBeenCalledWith("resolve_skill_update", {
+      name: "opencli-repair",
+      resolution: { kind: "preserve", local_name: "opencli-repair.local" },
+    });
+    expect(result.current.skills[0].update_available).toBe(false);
   });
 });

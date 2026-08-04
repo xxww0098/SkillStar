@@ -1,6 +1,7 @@
 import type {
   ImportBundleResult,
   ImportMultiBundleResult,
+  LocalDivergenceResolution,
   RepoNewSkill,
   ShareCodeInstallSummary,
   ShareCodeSkillInput,
@@ -10,6 +11,7 @@ import type {
   SkillTutorial,
   SkillUpdateReport,
   SkillUpdateState,
+  ResolveSkillUpdateResult,
   UpdateResult,
 } from "../../../types";
 
@@ -22,6 +24,10 @@ export interface SkillCommands {
   uninstall_skill: { args: { name: string }; result: void };
   update_skill: { args: { name: string }; result: UpdateResult };
   update_skills: { args: { names: string[] }; result: SkillUpdateReport };
+  resolve_skill_update: {
+    args: { name: string; resolution: LocalDivergenceResolution };
+    result: ResolveSkillUpdateResult;
+  };
 
   // Skill content (editor)
   read_skill_file_raw: { args: { name: string }; result: string };

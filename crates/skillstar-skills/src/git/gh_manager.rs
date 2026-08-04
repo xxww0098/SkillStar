@@ -514,6 +514,9 @@ pub fn publish_skill(
         git_url: git_url.clone(),
         git_ref: None,
         tree_hash,
+        content_hash: crate::content::snapshot(skill_name)
+            .ok()
+            .map(|snapshot| snapshot.content_hash),
         installed_at: chrono::Utc::now().to_rfc3339(),
         source_folder: Some(repo_rel_path.clone()),
     });

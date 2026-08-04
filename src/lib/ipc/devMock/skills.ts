@@ -50,12 +50,29 @@ function demoUpdateReport(names: string[]) {
     });
   }
 
-  return { updated, failed: [], skipped };
+  return { updated, blocked: [], failed: [], skipped };
 }
 
 export const SKILLS_HANDLERS: DevMockHandlers = {
   list_skills: () => SAMPLE_SKILLS,
   update_skills: (args) => demoUpdateReport((args?.names as string[]) ?? []),
+  resolve_skill_update: (args) => ({
+    update: demoUpdateReport([String(args?.name ?? "pdf-tools")]).updated[0],
+    local_copy:
+      (args?.resolution as { kind?: string; local_name?: string } | undefined)?.kind === "preserve"
+        ? {
+            ...SAMPLE_SKILLS[0],
+            name: String(
+              (args?.resolution as { local_name?: string } | undefined)?.local_name ??
+                `${String(args?.name ?? "pdf-tools")}.local`,
+            ),
+            skill_type: "local",
+            git_url: "",
+            tree_hash: null,
+            source: undefined,
+          }
+        : null,
+  }),
   refresh_skill_updates: () =>
     SAMPLE_SKILLS.filter((s) => s.update_available).map((s) => ({
       name: s.name,

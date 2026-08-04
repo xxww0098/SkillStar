@@ -1,5 +1,5 @@
 use crate::git::ops as git_ops;
-use crate::{local_skill, lockfile, source_resolver};
+use crate::{content, local_skill, lockfile, source_resolver};
 use anyhow::{Context, Result, anyhow};
 use skillstar_core::infra::{fs_ops, paths};
 use std::path::Path;
@@ -100,6 +100,9 @@ pub fn install_from_repo_at(
             git_url: repo_url.to_string(),
             git_ref: git_ref.map(str::to_string),
             tree_hash,
+            content_hash: content::snapshot(&target.id)
+                .ok()
+                .map(|snapshot| snapshot.content_hash),
             installed_at: chrono::Utc::now().to_rfc3339(),
             source_folder,
         });

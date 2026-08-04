@@ -125,6 +125,17 @@ pub fn is_local_skill(name: &str) -> bool {
 }
 
 fn prepare_new_local_skill_paths(name: &str) -> Result<(PathBuf, PathBuf)> {
+    if name.is_empty()
+        || name.contains(['/', '\\', '\0'])
+        || matches!(name, "." | "..")
+        || !matches!(
+            Path::new(name).components().collect::<Vec<_>>().as_slice(),
+            [std::path::Component::Normal(_)]
+        )
+    {
+        anyhow::bail!("Invalid local Skill name: {name:?}");
+    }
+
     let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
     let local_dir = skillstar_core::infra::paths::local_skills_dir();
     let skill_local_path = local_dir.join(name);
@@ -184,6 +195,49 @@ pub fn create(name: &str, content: Option<&str>) -> Result<Skill> {
 
     let description = extract_skill_description(&skill_local_path);
 
+    Ok(Skill {
+        name: name.to_string(),
+        description,
+        localized_description: None,
+        skill_type: skillstar_core::types::SkillType::Local,
+        stars: 0,
+        installed: true,
+        update_available: false,
+        last_updated: chrono::Utc::now().to_rfc3339(),
+        git_url: String::new(),
+        tree_hash: None,
+        category: SkillCategory::None,
+        author: None,
+        topics: Vec::new(),
+        agent_links: Some(Vec::new()),
+        rank: None,
+        source: None,
+    })
+}
+
+/// Preserve a bounded content snapshot as a new independently-owned local
+/// Skill. The snapshot was captured before any source update, so every managed
+/// regular file is copied from one coherent view of disk.
+pub fn create_from_snapshot(name: &str, snapshot: &crate::content::SkillSnapshot) -> Result<Skill> {
+    let (skill_local_path, skill_hub_path) = prepare_new_local_skill_paths(name)?;
+    snapshot
+        .materialize_owned_to(&skill_local_path)
+        .map_err(anyhow::Error::from)
+        .with_context(|| format!("Failed to preserve Skill as local copy '{name}'"))?;
+
+    if let Err(error) =
+        skillstar_core::infra::fs_ops::create_symlink(&skill_local_path, &skill_hub_path)
+            .with_context(|| format!("Failed to create hub symlink for '{name}'"))
+    {
+        let _ = std::fs::remove_dir_all(&skill_local_path);
+        return Err(error);
+    }
+
+    let description = extract_skill_description(&skill_local_path);
+    installed_local_skill(name, description)
+}
+
+fn installed_local_skill(name: &str, description: String) -> Result<Skill> {
     Ok(Skill {
         name: name.to_string(),
         description,

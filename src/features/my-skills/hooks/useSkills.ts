@@ -13,7 +13,13 @@ import {
 import { useTauriEvent } from "../../../hooks/useTauriEvent";
 import { tauriInvoke } from "../../../lib/ipc";
 import { toast } from "../../../lib/toast";
-import type { RepoNewSkill, Skill, SkillUpdateReport, SkillUpdateState } from "../../../types";
+import type {
+  LocalDivergenceResolution,
+  RepoNewSkill,
+  Skill,
+  SkillUpdateReport,
+  SkillUpdateState,
+} from "../../../types";
 import i18n from "../../../i18n";
 
 const SKILLS_QUERY_KEY = ["skills"] as const;
@@ -282,7 +288,7 @@ function useSkillsState() {
     async (names: string[]): Promise<SkillUpdateReport> => {
       const toUpdate = names.filter((name) => !pendingUpdateRef.current.has(name));
       if (toUpdate.length === 0) {
-        return { updated: [], failed: [], skipped: [] };
+        return { updated: [], blocked: [], failed: [], skipped: [] };
       }
 
       for (const name of toUpdate) {
@@ -348,6 +354,42 @@ function useSkillsState() {
       return updated.skill;
     },
     [updateSkills],
+  );
+
+  const resolveSkillUpdate = useCallback(
+    async (name: string, resolution: LocalDivergenceResolution) => {
+      if (pendingUpdateRef.current.has(name)) {
+        throw new Error("Update already in progress");
+      }
+      pendingUpdateRef.current.add(name);
+      setPendingUpdateNames(new Set(pendingUpdateRef.current));
+
+      try {
+        const result = await tauriInvoke("resolve_skill_update", { name, resolution });
+        queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) => {
+          const movedWithRepo = new Set(result.update.siblings_cleared);
+          const next = prev.map((item) => {
+            if (item.name === result.update.skill.name) return result.update.skill;
+            if (movedWithRepo.has(item.name)) return { ...item, update_available: false };
+            return item;
+          });
+          if (result.local_copy && !next.some((item) => item.name === result.local_copy?.name)) {
+            next.push(result.local_copy);
+          }
+          return next;
+        });
+
+        if (result.update.agent_link_failures.length > 0) {
+          toast.warning(`${i18n.t("mySkills.agentRelinkFailed")}\n${result.update.agent_link_failures.join("\n")}`);
+        }
+        void refetchUpdates();
+        return result;
+      } finally {
+        pendingUpdateRef.current.delete(name);
+        setPendingUpdateNames(new Set(pendingUpdateRef.current));
+      }
+    },
+    [queryClient, refetchUpdates],
   );
 
   const toggleSkillForAgent = useCallback(
@@ -461,6 +503,7 @@ function useSkillsState() {
       uninstallSkill,
       updateSkill,
       updateSkills,
+      resolveSkillUpdate,
       toggleSkillForAgent,
       batchRemoveSkillsFromAllAgents,
       pendingAgentToggleKeys,
@@ -482,6 +525,7 @@ function useSkillsState() {
       uninstallSkill,
       updateSkill,
       updateSkills,
+      resolveSkillUpdate,
       toggleSkillForAgent,
       batchRemoveSkillsFromAllAgents,
       pendingAgentToggleKeys,

@@ -2,7 +2,9 @@ use skillstar_core::infra::error::AppError;
 use skillstar_skills::deployment;
 use skillstar_skills::{Skill, installed_skill, skill_install, skill_update};
 
-pub use skillstar_skills::skill_update::{SkillUpdateReport, UpdateResult};
+pub use skillstar_skills::skill_update::{
+    LocalDivergenceResolution, ResolveSkillUpdateResult, SkillUpdateReport, UpdateResult,
+};
 
 #[tauri::command]
 pub async fn list_skills() -> Result<Vec<Skill>, AppError> {
@@ -75,4 +77,15 @@ pub async fn update_skills(names: Vec<String>) -> Result<SkillUpdateReport, AppE
     tokio::task::spawn_blocking(move || skill_update::update_skills(&names))
         .await
         .map_err(|e| AppError::Other(format!("update task panicked: {e}")))
+}
+
+#[tauri::command]
+pub async fn resolve_skill_update(
+    name: String,
+    resolution: LocalDivergenceResolution,
+) -> Result<ResolveSkillUpdateResult, AppError> {
+    tokio::task::spawn_blocking(move || skill_update::resolve_skill_update(&name, resolution))
+        .await
+        .map_err(|e| AppError::Other(format!("update resolution task panicked: {e}")))?
+        .map_err(AppError::Anyhow)
 }

@@ -319,6 +319,9 @@ pub fn install_pack(repo_dir: &Path, source: &str, repo_url: &str) -> Result<Vec
             git_url: repo_url.to_string(),
             git_ref: None,
             tree_hash: tree_hash.clone(),
+            content_hash: crate::content::snapshot(&skill.name)
+                .ok()
+                .map(|snapshot| snapshot.content_hash),
             installed_at: chrono::Utc::now().to_rfc3339(),
             source_folder,
         });

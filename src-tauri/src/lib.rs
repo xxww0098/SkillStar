@@ -230,6 +230,7 @@ pub fn run() {
             commands::toggle_skill_for_agent,
             commands::update_skill,
             commands::update_skills,
+            commands::resolve_skill_update,
             commands::marketplace::resolve_skill_sources,
             commands::marketplace::ai_extract_search_keywords,
             commands::marketplace::get_leaderboard_local,

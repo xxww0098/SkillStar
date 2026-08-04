@@ -316,7 +316,7 @@ fn collect_snapshot_files(
     entries.sort_by_key(|entry| entry.file_name());
     for entry in entries {
         let path = entry.path();
-        if entry.file_name() == ".git" {
+        if snapshot_entry_is_ignored(&entry.file_name()) {
             continue;
         }
 
@@ -370,6 +370,20 @@ fn collect_snapshot_files(
         }
     }
     Ok(())
+}
+
+fn snapshot_entry_is_ignored(name: &std::ffi::OsStr) -> bool {
+    let Some(name) = name.to_str() else {
+        return false;
+    };
+    matches!(
+        name,
+        ".git" | ".skillstar" | ".DS_Store" | "Thumbs.db" | "desktop.ini"
+    ) || name.starts_with("._")
+        || name.ends_with('~')
+        || name.ends_with(".swp")
+        || name.ends_with(".swo")
+        || name.ends_with(".tmp")
 }
 
 fn push_snapshot_file(

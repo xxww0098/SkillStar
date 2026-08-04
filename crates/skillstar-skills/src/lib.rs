@@ -13,6 +13,7 @@
 //! | library modules | install, update, bundle, local, repo scan, discovery, groups |
 
 pub mod content;
+mod content_copy;
 mod discovery;
 mod frontmatter;
 pub mod git;

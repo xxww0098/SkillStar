@@ -48,12 +48,29 @@ export interface SkillUpdateFailure {
   error: string;
 }
 
+export type LocalDivergenceReason = "content_changed" | "baseline_missing" | "snapshot_failed";
+
+export interface SkillUpdateBlocked {
+  name: string;
+  reason: LocalDivergenceReason;
+  suggested_local_name: string;
+  error: string | null;
+}
+
+export type LocalDivergenceResolution = { kind: "preserve"; local_name: string } | { kind: "discard" };
+
+export interface ResolveSkillUpdateResult {
+  update: UpdateResult;
+  local_copy: Skill | null;
+}
+
 /** Return type of the `update_skills` batch command. `skipped` names were not
  *  pulled because a skill sharing their repository was — their content moved
  *  anyway. A failed update reports every name it would have covered, so
  *  nothing is quietly counted as done. */
 export interface SkillUpdateReport {
   updated: UpdateResult[];
+  blocked: SkillUpdateBlocked[];
   failed: SkillUpdateFailure[];
   skipped: string[];
 }

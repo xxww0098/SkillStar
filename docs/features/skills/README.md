@@ -30,6 +30,9 @@
 - 默认部署为 link-first；多个目标时交互选择 symlink/copy，`--copy` 必须真实强制目录复制，不能只改变日志。相同目标目录只物化一次。
 - 与 `vercel-labs/skills` 兼容的 Agent 共用项目级 `.agents/skills`。共享目录是 universal install surface；Agent 归属只用于 UI/manifest，不得重复部署或让一个 Agent 的移除误删另一个仍在使用的共享目录。
 - update 使用 staged swap；刷新失败不得先删除用户现有可用 link/copy。失败按 Agent 聚合并显式返回。
+- Git-backed Skill 安装或成功更新后记录完整受管内容的 baseline hash。更新开始前必须重新计算当前完整目录 hash；若与 baseline 不同，则将该 Skill 标记为“本地分歧”并在任何 fetch/reset、lockfile 写入或部署变更之前停止。
+- 本地分歧只能由用户显式解决：一是把当前完整内容保留为独立本地副本后继续更新，二是丢弃修改后继续更新。默认副本名为 `<原名>.local`，允许编辑；名称冲突时提出 `.local.2` 等非破坏性候选。是否为本地 Skill 只由存储位置与 provenance/type 决定，不解析名称后缀。
+- 完整内容 hash 与保留副本覆盖 `SKILL.md`、scripts、templates、references、assets 及其他受管文件，同时排除 `.git`、SkillStar 自有状态和操作系统临时文件。共享同一 repo checkout 的任一已安装 Skill 存在本地分歧时，该次 repo pull 必须整体停在写入之前，避免兄弟 Skill 被间接 reset。
 - repo check/update 复用 `~/.skillstar/hub/repos/` cache，远程 HTTP/Git 遵循统一 proxy/mirror 规则。
 - 一次 update 是一个事务：pull、lockfile hash 写入、同 repo 兄弟技能的 hash 扇出、Agent relink、项目 cascade 和 update state 清除必须一起发生。GUI 与 CLI 走同一入口，任何调用方都不得只做 pull。
 - 批量 update 每个 repo 只拉一次；未被拉取但内容随之移动的技能报告为 `skipped`，失败的 repo 把它本会覆盖的全部名字报告为 `failed`，不得计入成功。
@@ -69,7 +72,7 @@
 ## ACP 图文教程
 
 - SKILL.md 翻译入口已移除。已安装 Skill 的详情页提供唯一的“AI 图文教程”入口，阅读器和编辑器只保留原文/编辑与摘要能力；教程只使用 Settings 中显式启用的 ACP Agent。
-- 教程分析对象是当前 Skill 的**整个有效内容目录**，不是只把 `SKILL.md` 文本发给模型。`skillstar-skills::content` 递归枚举目录内的文件，排除不属于 Skill 内容的 `.git` 元数据，不跟随逃出 Skill 根目录的内部符号链接；确定性 SHA-256 同时覆盖相对路径、文件类型和内容。该文件清单随 prompt 提供，生成结果必须逐项给出覆盖说明。
+- 教程分析对象是当前 Skill 的**整个有效内容目录**，不是只把 `SKILL.md` 文本发给模型。`skillstar-skills::content` 递归枚举目录内的文件，排除不属于 Skill 内容的 `.git`、`.skillstar`、操作系统垃圾和编辑器临时文件，不跟随逃出 Skill 根目录的内部符号链接；确定性 SHA-256 同时覆盖相对路径、文件类型和内容。该文件清单随 prompt 提供，生成结果必须逐项给出覆盖说明。
 - Skill 文件是待分析的不可信资料，不能覆盖系统任务。教程 ACP 会话必须以当前 Skill 的隔离 staging 快照为工作目录，ACP 协议侧只开放根内读文件能力并拒绝 terminal/写入权限，prompt 同时禁止网络和修改；模型必须先核对完整清单，再输出一个自包含 HTML5 文档。用户配置的 ACP 可执行程序仍是本机受信任边界，SkillStar 不把任意外部程序伪装成 OS sandbox。
 - HTML 必须使用当前界面语言，包含基于真实内容的步骤、示例、文件导航、故障排查和至少一个有信息量的内联 SVG 图示；不得虚构未在 Skill 中出现的能力。证据引用使用相对文件路径；推断必须显式标记。
 - Settings → ACP 持久化教程风格，初始提供 `guided`（循序导览，默认）、`reference`（技术手册）与 `workshop`（实战工坊）。三种风格分别使用独立 prompt 片段改变信息组织、示例密度和图示重点，而不是给同一 HTML 换 CSS；风格 id、所选风格在内的完整 prompt bundle hash 与规范化界面语言共同进入 artifact 版本键和 freshness 判定，修改提示词无需依赖人工记得提升版本号。

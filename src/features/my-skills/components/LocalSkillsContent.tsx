@@ -12,7 +12,7 @@ import { selectTargetableAgentProfiles, supportsGlobalDeploy, supportsProjectDep
 import { tauriInvoke } from "../../../lib/ipc";
 import { toast } from "../../../lib/toast";
 import { navigateToSettingsSection } from "../../../lib/utils";
-import type { RepoNewSkill, Skill, SkillUpdateReport, SortOption } from "../../../types";
+import type { RepoNewSkill, Skill, SkillUpdateBlocked, SkillUpdateReport, SortOption } from "../../../types";
 import { useSkillCards } from "../hooks/useSkillCards";
 import { useSkills } from "../hooks/useSkills";
 import { AiPickSkillsModal } from "./AiPickSkillsModal";
@@ -21,6 +21,7 @@ import { DeployToProjectModal } from "./DeployToProjectModal";
 import { ExportShareCodeModal } from "./ExportShareCodeModal";
 import { ImportBundleModal } from "./ImportBundleModal";
 import { ImportModal } from "./ImportModal";
+import { LocalDivergenceDialog } from "./LocalDivergenceDialog";
 import { PublishSkillModal } from "./PublishSkillModal";
 import { ScopeDetailDrawer } from "./ScopeDetailDrawer";
 import { SkillGrid } from "./SkillGrid";
@@ -59,8 +60,8 @@ export function LocalSkillsContent({
     refresh,
     installSkill,
     uninstallSkill,
-    updateSkill,
     updateSkills,
+    resolveSkillUpdate,
     pendingUpdateNames,
     toggleSkillForAgent,
     pendingAgentToggleKeys,
@@ -102,6 +103,9 @@ export function LocalSkillsContent({
   const [isUpdatingAll, setIsUpdatingAll] = useState(false);
   const [batchLoading, setBatchLoading] = useState(false);
   const [linkMenuOpen, setLinkMenuOpen] = useState(false);
+  const [blockedUpdates, setBlockedUpdates] = useState<SkillUpdateBlocked[]>([]);
+  const [resolvingDivergence, setResolvingDivergence] = useState(false);
+  const [divergenceError, setDivergenceError] = useState<string | null>(null);
 
   const localCount = useMemo(() => skills.filter((s) => s.skill_type === "local").length, [skills]);
   const pendingUpdateCount = useMemo(() => skills.filter((skill) => skill.update_available).length, [skills]);
@@ -269,14 +273,22 @@ export function LocalSkillsContent({
   const handleUpdate = useCallback(
     async (name: string) => {
       try {
-        const updated = await updateSkill(name);
-        setSelectedSkill((prev) => (prev?.name === name ? updated : prev));
+        const report = await updateSkills([name]);
+        if (report.blocked.length > 0) {
+          setBlockedUpdates(report.blocked);
+          setDivergenceError(null);
+          return;
+        }
+        const failure = report.failed.find((entry) => entry.name === name);
+        if (failure) throw new Error(failure.error);
+        const updated = report.updated.find((entry) => entry.skill.name === name)?.skill;
+        if (updated) setSelectedSkill((prev) => (prev?.name === name ? updated : prev));
       } catch (e) {
         const reason = e instanceof Error ? e.message : String(e);
         toast.error(reason ? `${t("mySkills.updateFailed")}: ${reason}` : t("mySkills.updateFailed"));
       }
     },
-    [updateSkill, t],
+    [updateSkills, t],
   );
 
   const handleSkillClick = useCallback(
@@ -405,14 +417,23 @@ export function LocalSkillsContent({
     (report: SkillUpdateReport) => {
       const successCount = report.updated.length + report.skipped.length;
 
-      if (report.failed.length === 0) {
+      if (report.blocked.length > 0) {
+        toast.warning(
+          t("mySkills.batchUpdateBlocked", {
+            count: report.blocked.length,
+            defaultValue: `${report.blocked.length} update(s) paused for local changes`,
+          }),
+        );
+      }
+
+      if (report.failed.length === 0 && report.blocked.length === 0) {
         toast.success(
           t("mySkills.batchUpdateSuccess", { count: successCount, defaultValue: `${successCount} skill(s) updated` }),
         );
         return;
       }
 
-      if (successCount > 0) {
+      if (successCount > 0 && report.failed.length > 0) {
         toast.warning(
           t("mySkills.batchUpdatePartial", {
             success: successCount,
@@ -423,8 +444,10 @@ export function LocalSkillsContent({
         return;
       }
 
-      const reason = report.failed[0]?.error;
-      toast.error(reason ? `${t("mySkills.updateFailed")}: ${reason}` : t("mySkills.updateFailed"));
+      if (report.failed.length > 0) {
+        const reason = report.failed[0]?.error;
+        toast.error(reason ? `${t("mySkills.updateFailed")}: ${reason}` : t("mySkills.updateFailed"));
+      }
     },
     [t],
   );
@@ -449,6 +472,10 @@ export function LocalSkillsContent({
       setBusy(true);
       try {
         const report = await updateSkills(names);
+        if (report.blocked.length > 0) {
+          setBlockedUpdates(report.blocked);
+          setDivergenceError(null);
+        }
         const refreshed = report.updated.find((result) => result.skill.name === selectedSkill?.name);
         if (refreshed) {
           setSelectedSkill(refreshed.skill);
@@ -469,6 +496,25 @@ export function LocalSkillsContent({
   const handleUpdateAll = useCallback(
     () => runBatchUpdate(updatableNamesAmong(skills.map((skill) => skill.name)), setIsUpdatingAll),
     [runBatchUpdate, skills, updatableNamesAmong],
+  );
+
+  const resolveCurrentDivergence = useCallback(
+    async (resolution: { kind: "preserve"; local_name: string } | { kind: "discard" }) => {
+      const blocked = blockedUpdates[0];
+      if (!blocked) return;
+      setResolvingDivergence(true);
+      setDivergenceError(null);
+      try {
+        const result = await resolveSkillUpdate(blocked.name, resolution);
+        setSelectedSkill((current) => (current?.name === result.update.skill.name ? result.update.skill : current));
+        setBlockedUpdates((current) => current.slice(1));
+      } catch (error) {
+        setDivergenceError(error instanceof Error ? error.message : String(error));
+      } finally {
+        setResolvingDivergence(false);
+      }
+    },
+    [blockedUpdates, resolveSkillUpdate],
   );
 
   const handleBatchLink = useCallback(
@@ -764,6 +810,23 @@ export function LocalSkillsContent({
         error={uninstallError}
         onClose={closeUninstallDialog}
         onConfirm={confirmUninstall}
+      />
+
+      <LocalDivergenceDialog
+        blocked={blockedUpdates[0] ?? null}
+        busy={resolvingDivergence}
+        error={divergenceError}
+        onClose={() => {
+          if (resolvingDivergence) return;
+          setBlockedUpdates([]);
+          setDivergenceError(null);
+        }}
+        onPreserve={(localName) => {
+          void resolveCurrentDivergence({ kind: "preserve", local_name: localName });
+        }}
+        onDiscard={() => {
+          void resolveCurrentDivergence({ kind: "discard" });
+        }}
       />
 
       <ImportModal

@@ -155,6 +155,7 @@ mod tests {
             git_url: git_url.to_string(),
             git_ref: None,
             tree_hash: format!("old-{name}"),
+            content_hash: Some(format!("content-{name}")),
             installed_at: "2026-01-01T00:00:00Z".to_string(),
             source_folder: folder.map(str::to_string),
         }

@@ -168,6 +168,27 @@ fn write_repo_install_provenance(
         .map_err(|e| format!("Failed to write '{}': {}", skill_md_path.display(), e))
 }
 
+fn refresh_content_baseline(skill_name: &str) -> Result<(), String> {
+    let content_hash = crate::content::snapshot(skill_name)
+        .map_err(|error| format!("Failed to capture installed Skill baseline: {error}"))?
+        .content_hash;
+    let _lock = lockfile::get_mutex()
+        .lock()
+        .map_err(|_| "Lockfile mutex poisoned".to_string())?;
+    let lock_path = lockfile::lockfile_path();
+    let mut lockfile = lockfile::Lockfile::load(&lock_path)
+        .map_err(|error| format!("Failed to load lockfile '{}': {error}", lock_path.display()))?;
+    let entry = lockfile
+        .skills
+        .iter_mut()
+        .find(|entry| entry.name == skill_name)
+        .ok_or_else(|| format!("Installed Skill '{skill_name}' is missing from the lockfile"))?;
+    entry.content_hash = Some(content_hash);
+    lockfile
+        .save(&lock_path)
+        .map_err(|error| format!("Failed to save lockfile '{}': {error}", lock_path.display()))
+}
+
 fn try_install_from_repo_cache(
     url: &str,
     requested_name: Option<&str>,
@@ -224,6 +245,7 @@ fn try_install_from_repo_cache(
                     source_folder: Some(&skill.folder_path),
                 },
             )?;
+            refresh_content_baseline(&installed_name)?;
             let description = extract_skill_description(&dest);
             installed_skill::invalidate_cache();
             let tree_hash = compute_tree_hash_for(skills_dir, &installed_name);
@@ -269,6 +291,9 @@ pub fn install_skill(url: String, name: Option<String>) -> Result<Skill, String>
 
     git_ops::clone_repo(&url, &dest).map_err(|e| e.to_string())?;
     let tree_hash = git_ops::compute_tree_hash(&dest).map_err(|e| e.to_string())?;
+    let content_hash = crate::content::snapshot(&name_hint)
+        .map_err(|e| format!("Failed to capture installed Skill baseline: {e}"))?
+        .content_hash;
 
     let _lock = lockfile::get_mutex()
         .lock()
@@ -281,6 +306,7 @@ pub fn install_skill(url: String, name: Option<String>) -> Result<Skill, String>
         git_url: url.clone(),
         git_ref: None,
         tree_hash: tree_hash.clone(),
+        content_hash: Some(content_hash),
         installed_at: chrono::Utc::now().to_rfc3339(),
         source_folder: None,
     });
@@ -381,6 +407,7 @@ pub fn install_skills_batch(url: &str, names: &[String]) -> Result<Vec<Skill>, S
                             source_folder,
                         },
                     )?;
+                    refresh_content_baseline(&installed_name)?;
                     let description = extract_skill_description(&dest);
                     let tree_hash = compute_tree_hash_for(&skills_dir, &installed_name);
                     installed_skills.push(new_skill_from_install(

@@ -53,6 +53,45 @@ pub fn create_symlink(src: &Path, dst: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Recreate a file or directory symlink with its original target text.
+///
+/// Unlike [`create_symlink`], this does not fall back to a junction or copy:
+/// callers use it when the link itself is user-owned content and changing its
+/// representation would make a preserved snapshot unfaithful.
+pub fn create_preserved_symlink(
+    target: &Path,
+    destination: &Path,
+    _target_is_dir: bool,
+) -> anyhow::Result<()> {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, destination).with_context(|| {
+        format!(
+            "Failed to preserve symlink {:?} -> {:?}",
+            destination, target
+        )
+    })?;
+
+    #[cfg(windows)]
+    {
+        let result = if _target_is_dir {
+            std::os::windows::fs::symlink_dir(target, destination)
+        } else {
+            std::os::windows::fs::symlink_file(target, destination)
+        };
+        result.with_context(|| {
+            format!(
+                "Failed to preserve symlink {:?} -> {:?}",
+                destination, target
+            )
+        })?;
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    let _ = (target, destination, _target_is_dir);
+
+    Ok(())
+}
+
 /// Create a symlink, junction, or **copy** as a last resort.
 pub fn create_symlink_or_copy(src: &Path, dst: &Path) -> anyhow::Result<bool> {
     if dst.symlink_metadata().is_ok() || is_link(dst) || dst.exists() {
