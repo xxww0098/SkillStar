@@ -1,6 +1,7 @@
 import {
   Bot,
   Cloud,
+  CircleUserRound,
   EyeOff,
   Globe,
   HardDrive,
@@ -19,6 +20,7 @@ import type { SettingsFocusTarget } from "../../lib/utils";
 export const SETTINGS_SECTIONS: { id: string; labelKey: string; icon: LucideIcon }[] = [
   { id: "settings-agents", labelKey: "settings.agentConnections", icon: Unlink },
   { id: "settings-proxy", labelKey: "settings.networkProxy", icon: Globe },
+  { id: "settings-github-account", labelKey: "settings.githubAccount", icon: CircleUserRound },
   { id: "settings-mirror", labelKey: "settings.githubMirror", icon: Zap },
   { id: "settings-s3", labelKey: "settings.s3Sync", icon: Cloud },
   { id: "settings-ai", labelKey: "settings.aiProvider", icon: Sparkles },

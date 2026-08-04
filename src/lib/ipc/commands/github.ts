@@ -1,4 +1,7 @@
 import type {
+  GitHubConnectionStatus,
+  GitHubDeviceAuthorization,
+  GitHubDeviceFlowPoll,
   GhStatus,
   PublishResult,
   RepoHistoryEntry,
@@ -9,6 +12,12 @@ import type {
 
 /** GitHub CLI status, repo scan/import, and skill publish. */
 export interface GitHubCommands {
+  github_auth_status: { args: Record<string, never>; result: GitHubConnectionStatus };
+  github_auth_start: { args: Record<string, never>; result: GitHubDeviceAuthorization };
+  github_auth_poll: { args: Record<string, never>; result: GitHubDeviceFlowPoll };
+  github_auth_cancel: { args: Record<string, never>; result: boolean };
+  github_auth_refresh: { args: Record<string, never>; result: GitHubConnectionStatus };
+  github_auth_logout: { args: Record<string, never>; result: void };
   check_gh_installed: { args: Record<string, never>; result: boolean };
   check_gh_status: { args: Record<string, never>; result: GhStatus };
   check_git_status: {

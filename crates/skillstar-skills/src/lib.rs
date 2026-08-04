@@ -17,6 +17,7 @@ mod content_copy;
 mod discovery;
 mod frontmatter;
 pub mod git;
+pub mod github_auth;
 pub mod lockfile;
 mod shared;
 pub mod source_resolver;

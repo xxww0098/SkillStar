@@ -9,3 +9,4 @@ export * from "./mcp";
 export * from "./models";
 export * from "./share";
 export * from "./config";
+export * from "./github";

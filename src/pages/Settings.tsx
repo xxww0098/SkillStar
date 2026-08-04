@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { AiProviderSection } from "../features/models/components/settings/AiProviderSection";
 import { S3SyncSection } from "../features/s3/components/S3SyncSection";
 import { DevModeBanner } from "../features/settings/components/DevModeBanner";
+import { GitHubAuthSection } from "../features/settings/github/GitHubAuthSection";
 import { AboutSection } from "../features/settings/sections/AboutSection";
 import { AcpSection } from "../features/settings/sections/AcpSection";
 import { AgentConnectionsSection } from "../features/settings/sections/AgentConnectionsSection";
@@ -561,6 +562,10 @@ export function Settings({
                   onToggleExpanded={handleToggleProxyExpanded}
                   onConfigChange={handleProxyConfigChange}
                 />
+              </section>
+
+              <section id="settings-github-account" className="scroll-mt-3">
+                <GitHubAuthSection />
               </section>
 
               <section id="settings-mirror" className="scroll-mt-3">

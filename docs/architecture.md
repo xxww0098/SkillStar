@@ -53,6 +53,7 @@ flowchart LR
 | Usage 订阅和 OAuth/token 状态 | `~/.skillstar/config/usage/` | `skillstar-usage`；跨域 CLI 激活由 `skillstar-app` 编排 |
 | SSH 主机元数据 | `~/.skillstar/config/ssh_hosts.toml` | `skillstar-sync::ssh` |
 | S3 目标元数据和设备状态 | `~/.skillstar/config/s3_targets.toml`、`state/sync_device.json` | `skillstar-sync` |
+| GitHub 用户登录凭据 | OS 系统凭据存储（service `skillstar-github-auth`，account `github.com`） | `skillstar-skills::github_auth`；普通配置只保存非敏感共享频道状态 |
 
 敏感凭证不得明文写入普通配置：SSH 兼容服务名保持 `skillstar-ssh`；S3 使用 `skillstar-sync`；Usage token 使用域内加密存储或系统凭证设施。具体行为见对应功能文档。
 
@@ -81,6 +82,7 @@ flowchart LR
 ### 网络
 
 - HTTP 统一通过 `probe_http_client`，确保代理配置和探测策略一致。
+- `github.com` GitHub App 用户登录使用设备授权流；access/refresh token 只经系统凭据抽象读写，设备码和已解析身份只保存在进程内。到期时间必须来自 GitHub 响应元数据，登出同时清除钥匙串凭据、待处理授权与内存身份。
 - GitHub mirror 只影响单次 Git 命令，不修改用户全局 Git 配置；传输失败允许直接 GitHub fallback 和熔断。
 - SSH 在发送认证材料前完成 host-key gate；远端命令检查退出码并设置超时，SFTP 路径显式解析为绝对路径。
 

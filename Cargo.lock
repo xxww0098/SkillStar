@@ -8055,13 +8055,16 @@ name = "skillstar-skills"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "base64 0.22.1",
  "chrono",
  "dirs",
  "flate2",
  "gix",
  "junction",
+ "keyring",
  "regex",
+ "reqwest 0.13.3",
  "scraper",
  "serde",
  "serde_json",

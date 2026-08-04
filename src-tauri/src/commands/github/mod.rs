@@ -9,10 +9,12 @@
 //! - [`storage`] — Settings storage overview + cache/force-delete maintenance.
 //! - [`packs`] — skill-pack (`.agd`) install / list / remove / doctor.
 
+mod auth;
 mod packs;
 mod repo;
 mod storage;
 
+pub use auth::*;
 pub use packs::*;
 pub use repo::*;
 pub use storage::*;

@@ -139,6 +139,7 @@ pub fn run() {
 
     builder
         .manage(core::patrol::PatrolManager::new())
+        .manage(core::github_auth::GitHubAuthState::new())
         .manage(core::app_shell::TrayState::new(
             core::app_shell::detect_system_lang(),
         ))
@@ -252,6 +253,12 @@ pub fn run() {
             commands::mcp_marketplace::get_mcp_market_sync_states,
             commands::mcp_marketplace::mcp_market_entry_to_draft,
             commands::github::check_gh_installed,
+            commands::github::github_auth_status,
+            commands::github::github_auth_start,
+            commands::github::github_auth_poll,
+            commands::github::github_auth_cancel,
+            commands::github::github_auth_refresh,
+            commands::github::github_auth_logout,
             commands::github::check_gh_status,
             commands::github::check_git_status,
             commands::github::check_developer_mode,

@@ -18,6 +18,15 @@
 - `skillstar-skills::repo_link` 拥有「hub 条目是否为 repo cache 链接、其 repo root 在哪」的判定；update 检测与 update 应用不得各自解析 symlink/junction。
 - 本地目录 adoption、share-code 安装和 deploy-status 检查同样由 Skills 域公开 use case 完成；command 只保留 blocking 调度与 `AppError` 适配。
 
+## GitHub 身份与共享频道认证
+
+- 第一版只连接 `github.com`，使用已注册 SkillStar GitHub App 的设备授权流，不要求用户粘贴 PAT，也不复用用户全局 `gh` 登录。
+- `skillstar-skills::github_auth` 提供公开认证 facade；GitHub gateway、凭据仓库和时钟是可替换接缝。生产 gateway 的所有请求必须通过 `probe_http_client`，生产凭据仓库只使用系统钥匙串。
+- 设备授权的公开状态只包含用户码、GitHub 验证地址、轮询间隔和到期时间。device code、access token、refresh token 不得进入 IPC DTO、日志、错误、普通配置或 Git remote URL。
+- 登录状态按 GitHub 返回的 `expires_in` / `refresh_token_expires_in` 元数据计算，不硬编码 token 寿命。显式刷新会轮换钥匙串凭据并重新读取当前用户；过期且无法刷新的状态要求重新登录。
+- Settings 展示登录指导、等待授权、成功身份、过期/拒绝/代理失败和登出。取消或过期会清除进程内待处理设备授权；登出还会清除钥匙串凭据和缓存身份。
+- GitHub App 由仓库所有者安装到明确选择的仓库。界面说明后续共享频道需要 `Administration: write`（直接成员邀请/移除）和 `Contents: write`（发布不可变频道版本），不请求 `Workflows: write`；有效操作权限仍受当前 GitHub 用户权限限制。
+
 ## 安装与更新
 
 - 已安装列表先从本地快照返回，远程 update check 在有界后台任务中执行。

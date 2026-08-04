@@ -5,6 +5,7 @@
 pub mod acp_client;
 pub mod app_shell;
 pub mod dock_menu;
+pub mod github_auth;
 pub mod marketplace_snapshot;
 pub mod path_env;
 pub mod patrol;
