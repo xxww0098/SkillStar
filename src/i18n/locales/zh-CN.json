@@ -401,7 +401,8 @@
     "spotlightTitle": "搜索技能",
     "spotlightResults": "搜索结果",
     "spotlightEmpty": "输入关键词筛选技能",
-    "spotlightMatchCount": "显示 {{shown}} / 共 {{total}}"
+    "spotlightMatchCount": "显示 {{shown}} / 共 {{total}}",
+    "updateAllCount": "更新 {{count}} 项"
   },
   "detailPanel": {
     "installs": "{{count}} 次安装",
