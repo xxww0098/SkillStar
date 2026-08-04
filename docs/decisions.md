@@ -112,6 +112,15 @@
 - 后果：JSON 型 multi Agent 的写盘语义修一处即全修，新 JSON 型 Agent 只写 build_block + 指针落点；Codex 的写盘语义变化仍需单独维护；未来若出现第二个 TOML 型 multi Agent，再评估 TOML 骨架（届时有两个 adapter 证明 seam）。
 - 证据：`crates/skillstar-models/src/tool_sync/multi_provider.rs`（`sync_json_blocks_inner` 及两个调用方），`tool_sync/tests/part4.rs` 的逐字节断言测试在重构前后原样通过。
 
+## D-013：私有共享身份采用 GitHub App 设备流与系统凭据存储
+
+- 日期：2026-08-05
+- 状态：accepted
+- 背景：私有共享频道需要用户身份和可撤销的 GitHub 权限，但要求用户粘贴 PAT、共享仓库凭据或依赖机器上预先配置的 `gh` 都会扩大秘密暴露面，并让 GUI、CLI 与 Git 传输使用不同身份来源。
+- 决策：第一版只支持 `github.com`，使用注册的 SkillStar GitHub App 设备授权流获取用户 access/refresh token。公开的 App client ID 由构建配置提供；桌面应用不携带 client secret、App private key 或 PAT。token 与 GitHub 返回的到期元数据只写入 OS 系统凭据存储，设备码和解析后的用户身份只存在进程内。认证 facade 以 GitHub gateway、credential store 和 clock 为测试接缝；生产 HTTP 每次通过 `probe_http_client` 获取当前代理配置。
+- 后果：发布构建必须配置已启用 Device Flow 的 GitHub App client ID；缺失时登录动作明确不可用，但已有凭据仍可登出。GitHub App 安装范围与仓库权限继续由 GitHub 控制，SkillStar 不建立第二套身份或 ACL。GitHub Enterprise Server、PAT 和全局 `gh` credential 不进入第一版认证路径。
+- 证据：issue #20、`crates/skillstar-skills/src/github_auth/`、`src-tauri/src/commands/github/auth.rs`、Settings GitHub 登录测试。
+
 ## 新增记录格式
 
 ```text

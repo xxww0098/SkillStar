@@ -61,8 +61,14 @@ describe("GitHubAuthSection", () => {
     expired.unmount();
 
     mockedInvoke.mockReset();
-    mockedInvoke.mockRejectedValueOnce({ code: "proxy", message: "proxy failed" });
+    mockedInvoke
+      .mockRejectedValueOnce({ code: "proxy", message: "proxy failed" })
+      .mockResolvedValueOnce({ state: "signed_out" });
     render(<GitHubAuthSection />);
     expect(await screen.findByText("无法连接 GitHub，请检查 SkillStar 代理设置。")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    await waitFor(() => {
+      expect(screen.queryByText("无法连接 GitHub，请检查 SkillStar 代理设置。")).not.toBeInTheDocument();
+    });
   });
 });

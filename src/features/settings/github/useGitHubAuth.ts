@@ -27,6 +27,7 @@ export function useGitHubAuth() {
   const [error, setError] = useState<GitHubAuthError | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [lastFailure, setLastFailure] = useState<"load" | "start" | "poll" | "refresh" | "logout" | null>(null);
   const attemptRef = useRef(0);
 
   const loadStatus = useCallback(async () => {
@@ -34,8 +35,10 @@ export function useGitHubAuth() {
     setError(null);
     try {
       setStatus(await tauriInvoke("github_auth_status"));
+      setLastFailure(null);
     } catch (cause) {
       setError(normalizeError(cause));
+      setLastFailure("load");
     } finally {
       setLoading(false);
     }
@@ -56,9 +59,15 @@ export function useGitHubAuth() {
     setFlow(null);
     try {
       const next = await tauriInvoke("github_auth_start");
-      if (attemptRef.current === attempt) setAuthorization(next);
+      if (attemptRef.current === attempt) {
+        setAuthorization(next);
+        setLastFailure(null);
+      }
     } catch (cause) {
-      if (attemptRef.current === attempt) setError(normalizeError(cause));
+      if (attemptRef.current === attempt) {
+        setError(normalizeError(cause));
+        setLastFailure("start");
+      }
     } finally {
       if (attemptRef.current === attempt) setBusy(false);
     }
@@ -67,10 +76,12 @@ export function useGitHubAuth() {
   const pollNow = useCallback(async () => {
     const attempt = attemptRef.current;
     if (!authorization) return;
+    setError(null);
     try {
       const outcome = await tauriInvoke("github_auth_poll");
       if (attemptRef.current !== attempt) return;
       setFlow(outcome);
+      setLastFailure(null);
       if (outcome.state === "connected") {
         setStatus(outcome.connection);
         setAuthorization(null);
@@ -78,7 +89,10 @@ export function useGitHubAuth() {
         setAuthorization(null);
       }
     } catch (cause) {
-      if (attemptRef.current === attempt) setError(normalizeError(cause));
+      if (attemptRef.current === attempt) {
+        setError(normalizeError(cause));
+        setLastFailure("poll");
+      }
     }
   }, [authorization]);
 
@@ -98,6 +112,7 @@ export function useGitHubAuth() {
     setAuthorization(null);
     setFlow(null);
     setError(null);
+    setLastFailure(null);
     await tauriInvoke("github_auth_cancel").catch(() => false);
   }, []);
 
@@ -106,8 +121,10 @@ export function useGitHubAuth() {
     setError(null);
     try {
       setStatus(await tauriInvoke("github_auth_refresh"));
+      setLastFailure(null);
     } catch (cause) {
       setError(normalizeError(cause));
+      setLastFailure("refresh");
     } finally {
       setBusy(false);
     }
@@ -122,12 +139,22 @@ export function useGitHubAuth() {
       setAuthorization(null);
       setFlow(null);
       setStatus({ state: "signed_out" });
+      setLastFailure(null);
     } catch (cause) {
       setError(normalizeError(cause));
+      setLastFailure("logout");
     } finally {
       setBusy(false);
     }
   }, []);
+
+  const retry = useCallback(async () => {
+    if (lastFailure === "load") return loadStatus();
+    if (lastFailure === "poll") return pollNow();
+    if (lastFailure === "refresh") return refresh();
+    if (lastFailure === "logout") return logout();
+    return start();
+  }, [lastFailure, loadStatus, logout, pollNow, refresh, start]);
 
   return {
     status,
@@ -141,7 +168,7 @@ export function useGitHubAuth() {
     cancel,
     refresh,
     logout,
-    retry: start,
+    retry,
     reload: loadStatus,
   };
 }

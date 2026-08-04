@@ -191,6 +191,7 @@ pub enum DeviceFlowPoll {
 }
 
 struct PendingAuthorization {
+    generation: u64,
     device_code: String,
     expires_at: DateTime<Utc>,
     interval_seconds: u64,
@@ -198,6 +199,7 @@ struct PendingAuthorization {
 
 #[derive(Default)]
 struct RuntimeState {
+    generation: u64,
     pending: Option<PendingAuthorization>,
     identity: Option<GitHubIdentity>,
 }
@@ -225,6 +227,12 @@ where
     }
 
     pub async fn start_device_flow(&self) -> Result<DeviceAuthorization, GitHubAuthError> {
+        let generation = {
+            let mut runtime = self.runtime.lock().expect("github auth runtime lock");
+            runtime.generation = runtime.generation.wrapping_add(1);
+            runtime.pending = None;
+            runtime.generation
+        };
         let grant = self.gateway.start_device_authorization().await?;
         let expires_at = add_seconds(self.clock.now(), grant.expires_in_seconds);
         let guidance = DeviceAuthorization {
@@ -233,10 +241,12 @@ where
             expires_at,
             interval_seconds: grant.interval_seconds,
         };
-        self.runtime
-            .lock()
-            .expect("github auth runtime lock")
-            .pending = Some(PendingAuthorization {
+        let mut runtime = self.runtime.lock().expect("github auth runtime lock");
+        if runtime.generation != generation {
+            return Err(no_pending_authorization());
+        }
+        runtime.pending = Some(PendingAuthorization {
+            generation,
             device_code: grant.device_code,
             expires_at,
             interval_seconds: grant.interval_seconds,
@@ -245,7 +255,7 @@ where
     }
 
     pub async fn poll_device_flow(&self) -> Result<DeviceFlowPoll, GitHubAuthError> {
-        let (device_code, expires_at, interval_seconds) = {
+        let (generation, device_code, expires_at, interval_seconds) = {
             let runtime = self.runtime.lock().expect("github auth runtime lock");
             let pending = runtime.pending.as_ref().ok_or_else(|| {
                 GitHubAuthError::new(
@@ -254,6 +264,7 @@ where
                 )
             })?;
             (
+                pending.generation,
                 pending.device_code.clone(),
                 pending.expires_at,
                 pending.interval_seconds,
@@ -261,44 +272,43 @@ where
         };
 
         if self.clock.now() >= expires_at {
-            self.clear_pending();
+            self.clear_pending(generation);
             return Ok(DeviceFlowPoll::Expired);
         }
 
         match self.gateway.poll_device_authorization(&device_code).await? {
-            GatewayDevicePoll::Pending => Ok(DeviceFlowPoll::Pending {
-                retry_after_seconds: interval_seconds,
-            }),
+            GatewayDevicePoll::Pending => {
+                self.ensure_pending(generation)?;
+                Ok(DeviceFlowPoll::Pending {
+                    retry_after_seconds: interval_seconds,
+                })
+            }
             GatewayDevicePoll::SlowDown => {
                 let retry_after_seconds = interval_seconds.saturating_add(5);
-                if let Some(pending) = self
-                    .runtime
-                    .lock()
-                    .expect("github auth runtime lock")
-                    .pending
-                    .as_mut()
-                {
-                    pending.interval_seconds = retry_after_seconds;
-                }
+                let mut runtime = self.runtime.lock().expect("github auth runtime lock");
+                let pending = pending_for_generation(&mut runtime, generation)?;
+                pending.interval_seconds = retry_after_seconds;
                 Ok(DeviceFlowPoll::SlowDown {
                     retry_after_seconds,
                 })
             }
             GatewayDevicePoll::Denied => {
-                self.clear_pending();
+                self.clear_pending(generation);
                 Ok(DeviceFlowPoll::Denied)
             }
             GatewayDevicePoll::Expired => {
-                self.clear_pending();
+                self.clear_pending(generation);
                 Ok(DeviceFlowPoll::Expired)
             }
             GatewayDevicePoll::Authorized(grant) => {
+                self.ensure_pending(generation)?;
                 let identity = self.gateway.current_user(&grant.access_token).await?;
                 let credential = credential_from_grant(grant, self.clock.now());
-                self.credentials.save(&credential)?;
                 let connection =
                     connection_from_credential(&credential, identity.clone(), self.clock.now());
                 let mut runtime = self.runtime.lock().expect("github auth runtime lock");
+                pending_for_generation(&mut runtime, generation)?;
+                self.credentials.save(&credential)?;
                 runtime.pending = None;
                 runtime.identity = Some(identity);
                 Ok(DeviceFlowPoll::Connected { connection })
@@ -307,15 +317,17 @@ where
     }
 
     pub fn cancel_device_flow(&self) -> bool {
-        self.runtime
-            .lock()
-            .expect("github auth runtime lock")
-            .pending
-            .take()
-            .is_some()
+        let mut runtime = self.runtime.lock().expect("github auth runtime lock");
+        runtime.generation = runtime.generation.wrapping_add(1);
+        runtime.pending.take().is_some()
     }
 
     pub async fn status(&self) -> Result<GitHubConnectionStatus, GitHubAuthError> {
+        let generation = self
+            .runtime
+            .lock()
+            .expect("github auth runtime lock")
+            .generation;
         let Some(credential) = self.credentials.load()? else {
             return Ok(GitHubConnectionStatus::SignedOut);
         };
@@ -330,6 +342,9 @@ where
             .access_expires_at
             .is_some_and(|expires_at| now >= expires_at)
         {
+            if !self.is_generation_current(generation) {
+                return Ok(GitHubConnectionStatus::SignedOut);
+            }
             return Ok(GitHubConnectionStatus::Expired {
                 identity: cached_identity,
             });
@@ -338,14 +353,20 @@ where
             Some(identity) => identity,
             None => self.gateway.current_user(&credential.access_token).await?,
         };
-        self.runtime
-            .lock()
-            .expect("github auth runtime lock")
-            .identity = Some(identity.clone());
+        let mut runtime = self.runtime.lock().expect("github auth runtime lock");
+        if runtime.generation != generation {
+            return Ok(GitHubConnectionStatus::SignedOut);
+        }
+        runtime.identity = Some(identity.clone());
         Ok(connection_from_credential(&credential, identity, now))
     }
 
     pub async fn refresh(&self) -> Result<GitHubConnectionStatus, GitHubAuthError> {
+        let generation = self
+            .runtime
+            .lock()
+            .expect("github auth runtime lock")
+            .generation;
         let existing = self.credentials.load()?.ok_or_else(|| {
             GitHubAuthError::new(
                 GitHubAuthErrorCode::NotAuthenticated,
@@ -388,26 +409,66 @@ where
                 existing.refresh_expires_at
             },
         };
+        let mut runtime = self.runtime.lock().expect("github auth runtime lock");
+        if runtime.generation != generation {
+            return Err(GitHubAuthError::new(
+                GitHubAuthErrorCode::NotAuthenticated,
+                "The GitHub session changed while it was being refreshed",
+            ));
+        }
         self.credentials.save(&credential)?;
-        self.runtime
-            .lock()
-            .expect("github auth runtime lock")
-            .identity = Some(identity.clone());
+        runtime.identity = Some(identity.clone());
         Ok(connection_from_credential(&credential, identity, now))
     }
 
     pub fn logout(&self) -> Result<(), GitHubAuthError> {
-        let deleted = self.credentials.delete();
-        *self.runtime.lock().expect("github auth runtime lock") = RuntimeState::default();
-        deleted
+        let mut runtime = self.runtime.lock().expect("github auth runtime lock");
+        runtime.generation = runtime.generation.wrapping_add(1);
+        runtime.pending = None;
+        runtime.identity = None;
+        self.credentials.delete()
     }
 
-    fn clear_pending(&self) {
+    fn clear_pending(&self, generation: u64) {
+        let mut runtime = self.runtime.lock().expect("github auth runtime lock");
+        if runtime.generation == generation {
+            runtime.pending = None;
+        }
+    }
+
+    fn ensure_pending(&self, generation: u64) -> Result<(), GitHubAuthError> {
+        let mut runtime = self.runtime.lock().expect("github auth runtime lock");
+        pending_for_generation(&mut runtime, generation).map(|_| ())
+    }
+
+    fn is_generation_current(&self, generation: u64) -> bool {
         self.runtime
             .lock()
             .expect("github auth runtime lock")
-            .pending = None;
+            .generation
+            == generation
     }
+}
+
+fn pending_for_generation(
+    runtime: &mut RuntimeState,
+    generation: u64,
+) -> Result<&mut PendingAuthorization, GitHubAuthError> {
+    if runtime.generation != generation {
+        return Err(no_pending_authorization());
+    }
+    runtime
+        .pending
+        .as_mut()
+        .filter(|pending| pending.generation == generation)
+        .ok_or_else(no_pending_authorization)
+}
+
+fn no_pending_authorization() -> GitHubAuthError {
+    GitHubAuthError::new(
+        GitHubAuthErrorCode::NoPendingAuthorization,
+        "No GitHub device authorization is pending",
+    )
 }
 
 fn add_seconds(now: DateTime<Utc>, seconds: u64) -> DateTime<Utc> {

@@ -113,8 +113,14 @@ export function GitHubAuthSection() {
         )}
 
         {errorMessage && (
-          <div role="alert" className="rounded-lg border border-red-500/30 bg-red-500/5 p-3 text-xs text-red-500">
-            {errorMessage}
+          <div
+            role="alert"
+            className="flex items-center justify-between gap-3 rounded-lg border border-red-500/30 bg-red-500/5 p-3 text-xs text-red-500"
+          >
+            <span>{errorMessage}</span>
+            <button type="button" className="shrink-0 underline" onClick={() => void auth.retry()}>
+              {t("common.retry")}
+            </button>
           </div>
         )}
       </div>

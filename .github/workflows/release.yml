@@ -35,6 +35,11 @@ name: Release
 # 4. Matrix is `fail-fast: false` on purpose so one platform's failure still
 #    surfaces the others (v0.0.1 junction was Windows-only; without fail-fast
 #    we still learned macOS/Linux were fine).
+#
+# 5. GitHub App device login needs the public repository variable
+#    `SKILLSTAR_GITHUB_APP_CLIENT_ID`. It is not a secret, but it must be in the
+#    Tauri build environment so Rust can embed it with `option_env!`. Fail before
+#    the platform matrix spends time compiling if the variable is absent.
 on:
   push:
     tags:
@@ -46,6 +51,8 @@ permissions:
 
 jobs:
   release:
+    env:
+      SKILLSTAR_GITHUB_APP_CLIENT_ID: ${{ vars.SKILLSTAR_GITHUB_APP_CLIENT_ID }}
     strategy:
       fail-fast: false
       matrix:
@@ -85,6 +92,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Verify GitHub App client ID
+        run: bun -e 'if (!process.env.SKILLSTAR_GITHUB_APP_CLIENT_ID?.trim()) throw new Error("Missing repository variable SKILLSTAR_GITHUB_APP_CLIENT_ID")'
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2

@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use tokio::sync::Notify;
 
 use super::{
     Clock, CredentialStore, DeviceAuthorizationGrant, GatewayDevicePoll, GitHubAuthError,
@@ -132,6 +133,75 @@ impl GitHubGateway for FakeGateway {
             id: 42,
             login: "octocat".into(),
             avatar_url: Some("https://avatars.example/octocat".into()),
+        })
+    }
+}
+
+#[derive(Clone)]
+struct BlockingGateway {
+    poll_entered: Arc<Notify>,
+    poll_release: Arc<Notify>,
+    refresh_entered: Arc<Notify>,
+    refresh_release: Arc<Notify>,
+}
+
+impl BlockingGateway {
+    fn new() -> Self {
+        Self {
+            poll_entered: Arc::new(Notify::new()),
+            poll_release: Arc::new(Notify::new()),
+            refresh_entered: Arc::new(Notify::new()),
+            refresh_release: Arc::new(Notify::new()),
+        }
+    }
+
+    fn token(access_token: &str) -> TokenGrant {
+        TokenGrant {
+            access_token: access_token.into(),
+            refresh_token: Some("refresh-secret".into()),
+            access_expires_in_seconds: Some(3_600),
+            refresh_expires_in_seconds: Some(86_400),
+        }
+    }
+}
+
+#[async_trait]
+impl GitHubGateway for BlockingGateway {
+    async fn start_device_authorization(
+        &self,
+    ) -> Result<DeviceAuthorizationGrant, GitHubAuthError> {
+        Ok(DeviceAuthorizationGrant {
+            device_code: "device-secret".into(),
+            user_code: "ABCD-EFGH".into(),
+            verification_uri: "https://github.com/login/device".into(),
+            expires_in_seconds: 900,
+            interval_seconds: 5,
+        })
+    }
+
+    async fn poll_device_authorization(
+        &self,
+        _device_code: &str,
+    ) -> Result<GatewayDevicePoll, GitHubAuthError> {
+        self.poll_entered.notify_one();
+        self.poll_release.notified().await;
+        Ok(GatewayDevicePoll::Authorized(Self::token("access-secret")))
+    }
+
+    async fn refresh_access_token(
+        &self,
+        _refresh_token: &str,
+    ) -> Result<TokenGrant, GitHubAuthError> {
+        self.refresh_entered.notify_one();
+        self.refresh_release.notified().await;
+        Ok(Self::token("refreshed-access"))
+    }
+
+    async fn current_user(&self, _access_token: &str) -> Result<GitHubIdentity, GitHubAuthError> {
+        Ok(GitHubIdentity {
+            id: 42,
+            login: "octocat".into(),
+            avatar_url: None,
         })
     }
 }
@@ -270,6 +340,73 @@ async fn device_flow_expires_from_provider_metadata_before_another_poll() {
             .expect_err("pending flow cleared")
             .code,
         super::GitHubAuthErrorCode::NoPendingAuthorization
+    );
+}
+
+#[tokio::test]
+async fn cancelling_an_in_flight_poll_prevents_credentials_from_being_saved() {
+    let gateway = BlockingGateway::new();
+    let credentials = MemoryCredentials::default();
+    let facade = Arc::new(GitHubAuthFacade::new(
+        gateway.clone(),
+        credentials.clone(),
+        TestClock::at("2026-08-05T10:00:00Z"),
+    ));
+    facade.start_device_flow().await.expect("start");
+
+    let polling_facade = Arc::clone(&facade);
+    let poll = tokio::spawn(async move { polling_facade.poll_device_flow().await });
+    gateway.poll_entered.notified().await;
+    assert!(facade.cancel_device_flow());
+    gateway.poll_release.notify_one();
+
+    let error = poll.await.expect("poll task").expect_err("cancelled poll");
+    assert_eq!(
+        error.code,
+        super::GitHubAuthErrorCode::NoPendingAuthorization
+    );
+    assert!(
+        credentials
+            .load()
+            .expect("credentials remain readable")
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn logout_during_refresh_prevents_credentials_from_being_restored() {
+    let credentials = MemoryCredentials::default();
+    let clock = TestClock::at("2026-08-05T10:00:00Z");
+    let login = GitHubAuthFacade::new(
+        FakeGateway::authorized(),
+        credentials.clone(),
+        clock.clone(),
+    );
+    login.start_device_flow().await.expect("start");
+    login.poll_device_flow().await.expect("authorize");
+
+    let gateway = BlockingGateway::new();
+    let facade = Arc::new(GitHubAuthFacade::new(
+        gateway.clone(),
+        credentials.clone(),
+        clock,
+    ));
+    let refreshing_facade = Arc::clone(&facade);
+    let refresh = tokio::spawn(async move { refreshing_facade.refresh().await });
+    gateway.refresh_entered.notified().await;
+    facade.logout().expect("logout");
+    gateway.refresh_release.notify_one();
+
+    let error = refresh
+        .await
+        .expect("refresh task")
+        .expect_err("logged out refresh");
+    assert_eq!(error.code, super::GitHubAuthErrorCode::NotAuthenticated);
+    assert!(
+        credentials
+            .load()
+            .expect("credentials remain readable")
+            .is_none()
     );
 }
 
