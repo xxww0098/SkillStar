@@ -13,10 +13,12 @@ import {
 import { useTauriEvent } from "../../../hooks/useTauriEvent";
 import { tauriInvoke } from "../../../lib/ipc";
 import { toast } from "../../../lib/toast";
+import { LocalDivergenceDialog } from "../components/LocalDivergenceDialog";
 import type {
   LocalDivergenceResolution,
   RepoNewSkill,
   Skill,
+  SkillUpdateBlocked,
   SkillUpdateReport,
   SkillUpdateState,
 } from "../../../types";
@@ -50,6 +52,38 @@ function useSkillsState() {
   const [pendingAgentToggleKeys, setPendingAgentToggleKeys] = useState<Set<string>>(new Set());
   const pendingAgentToggleRef = useRef<Set<string>>(new Set());
   const [isTogglingAgent, setIsTogglingAgent] = useState(false);
+  const [resolutionRequest, setResolutionRequest] = useState<SkillUpdateBlocked | null>(null);
+  const resolutionPromiseRef = useRef<{
+    resolve: (resolution: LocalDivergenceResolution) => void;
+    reject: (error: Error) => void;
+  } | null>(null);
+
+  const requestLocalDivergenceResolution = useCallback(
+    (blocked: SkillUpdateBlocked): Promise<LocalDivergenceResolution> => {
+      if (resolutionPromiseRef.current) {
+        return Promise.reject(new Error("Another local divergence is already waiting for a decision"));
+      }
+      setResolutionRequest(blocked);
+      return new Promise((resolve, reject) => {
+        resolutionPromiseRef.current = { resolve, reject };
+      });
+    },
+    [],
+  );
+
+  const answerLocalDivergence = useCallback((resolution: LocalDivergenceResolution) => {
+    const pending = resolutionPromiseRef.current;
+    resolutionPromiseRef.current = null;
+    setResolutionRequest(null);
+    pending?.resolve(resolution);
+  }, []);
+
+  const cancelLocalDivergence = useCallback(() => {
+    const pending = resolutionPromiseRef.current;
+    resolutionPromiseRef.current = null;
+    setResolutionRequest(null);
+    pending?.reject(new Error("Skill update cancelled"));
+  }, []);
 
   const updateCheckIntervalMs = getSkillUpdateRefreshIntervalMs();
 
@@ -299,14 +333,15 @@ function useSkillsState() {
       try {
         const report = await tauriInvoke("update_skills", { names: toUpdate });
 
+        // Skipped names rode along on a sibling's pull; siblings_cleared are
+        // installed skills from the same repo that were not even requested.
+        const movedWithTheirRepo = new Set([
+          ...report.skipped,
+          ...report.updated.flatMap((result) => result.siblings_cleared),
+        ]);
+
         queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) => {
           const refreshed = new Map(report.updated.map((result) => [result.skill.name, result.skill]));
-          // Skipped names rode along on a sibling's pull; siblings_cleared are
-          // installed skills from the same repo that were not even requested.
-          const movedWithTheirRepo = new Set([
-            ...report.skipped,
-            ...report.updated.flatMap((result) => result.siblings_cleared),
-          ]);
 
           return prev.map((item) => {
             const fresh = refreshed.get(item.name);
@@ -317,6 +352,9 @@ function useSkillsState() {
             return item;
           });
         });
+        if (movedWithTheirRepo.size > 0) {
+          await queryClient.refetchQueries({ queryKey: SKILLS_QUERY_KEY, exact: true });
+        }
 
         // The updates succeeded but some agent deployments could not be
         // refreshed (e.g. symlink privileges revoked) — surface it so the user
@@ -338,24 +376,6 @@ function useSkillsState() {
     [queryClient, refetchUpdates],
   );
 
-  /** Single-skill convenience over {@link updateSkills}; throws so existing
-   *  call sites keep their try/catch shape. */
-  const updateSkill = useCallback(
-    async (name: string): Promise<Skill> => {
-      const report = await updateSkills([name]);
-      const failure = report.failed.find((entry) => entry.name === name);
-      if (failure) {
-        throw new Error(failure.error);
-      }
-      const updated = report.updated.find((result) => result.skill.name === name);
-      if (!updated) {
-        throw new Error("Update already in progress");
-      }
-      return updated.skill;
-    },
-    [updateSkills],
-  );
-
   const resolveSkillUpdate = useCallback(
     async (name: string, resolution: LocalDivergenceResolution) => {
       if (pendingUpdateRef.current.has(name)) {
@@ -367,9 +387,9 @@ function useSkillsState() {
       try {
         const result = await tauriInvoke("resolve_skill_update", { name, resolution });
         queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) => {
-          const movedWithRepo = new Set(result.update.siblings_cleared);
+          const movedWithRepo = new Set(result.update?.siblings_cleared ?? []);
           const next = prev.map((item) => {
-            if (item.name === result.update.skill.name) return result.update.skill;
+            if (item.name === result.update?.skill.name) return result.update.skill;
             if (movedWithRepo.has(item.name)) return { ...item, update_available: false };
             return item;
           });
@@ -379,10 +399,18 @@ function useSkillsState() {
           return next;
         });
 
-        if (result.update.agent_link_failures.length > 0) {
+        if (result.update && result.update.agent_link_failures.length > 0) {
           toast.warning(`${i18n.t("mySkills.agentRelinkFailed")}\n${result.update.agent_link_failures.join("\n")}`);
         }
-        void refetchUpdates();
+        if (result.update) {
+          // A blocked sibling can be the representative that finally pulls a
+          // shared checkout. Refresh the full Skill objects so the originally
+          // requested sibling does not retain stale description/tree data.
+          if (result.update.siblings_cleared.length > 0) {
+            await queryClient.refetchQueries({ queryKey: SKILLS_QUERY_KEY, exact: true });
+          }
+          void refetchUpdates();
+        }
         return result;
       } finally {
         pendingUpdateRef.current.delete(name);
@@ -390,6 +418,44 @@ function useSkillsState() {
       }
     },
     [queryClient, refetchUpdates],
+  );
+
+  /** Single-skill convenience over {@link updateSkills}. Every page uses this
+   *  path, so a divergent subscription always gets the same explicit choice. */
+  const updateSkill = useCallback(
+    async (name: string): Promise<Skill> => {
+      try {
+        const report = await updateSkills([name]);
+        const failure = report.failed.find((entry) => entry.name === name);
+        if (failure) throw new Error(failure.error);
+
+        const updated = report.updated.find((result) => result.skill.name === name);
+        if (updated) return updated.skill;
+
+        let remaining = report.blocked;
+        let resolvedSkill: Skill | null = null;
+        while (remaining.length > 0) {
+          const blocked = remaining[0];
+          const resolution = await requestLocalDivergenceResolution(blocked);
+          const result = await resolveSkillUpdate(blocked.name, resolution);
+          if (result.update) resolvedSkill = result.update.skill;
+          remaining = result.remaining_blocked;
+        }
+        if (resolvedSkill) {
+          return (
+            queryClient.getQueryData<Skill[]>(SKILLS_QUERY_KEY)?.find((skill) => skill.name === name) ?? resolvedSkill
+          );
+        }
+        throw new Error("Update already in progress");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message !== "Skill update cancelled") toast.error(message);
+        const normalized = error instanceof Error ? error : new Error(message);
+        Object.assign(normalized, { skillstarToastShown: true });
+        throw normalized;
+      }
+    },
+    [queryClient, requestLocalDivergenceResolution, resolveSkillUpdate, updateSkills],
   );
 
   const toggleSkillForAgent = useCallback(
@@ -514,6 +580,14 @@ function useSkillsState() {
       dismissGhostSkill,
       dismissGhostRepo,
       installGhostSkill,
+      localDivergenceDialog: createElement(LocalDivergenceDialog, {
+        blocked: resolutionRequest,
+        busy: false,
+        error: resolutionRequest?.error ?? null,
+        onClose: cancelLocalDivergence,
+        onPreserve: (localName: string) => answerLocalDivergence({ kind: "preserve", local_name: localName }),
+        onDiscard: () => answerLocalDivergence({ kind: "discard" }),
+      }),
     }),
     [
       skills,
@@ -536,13 +610,16 @@ function useSkillsState() {
       dismissGhostSkill,
       dismissGhostRepo,
       installGhostSkill,
+      resolutionRequest,
+      cancelLocalDivergence,
+      answerLocalDivergence,
     ],
   );
 }
 
 export function SkillsProvider({ children }: { children: ReactNode }) {
   const value = useSkillsState();
-  return createElement(SkillsContext.Provider, { value }, children);
+  return createElement(SkillsContext.Provider, { value }, children, value.localDivergenceDialog);
 }
 
 export function useSkills() {

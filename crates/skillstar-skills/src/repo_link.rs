@@ -57,13 +57,22 @@ where
         return None;
     }
     let target = fs_ops::read_link_resolved(skill_path).ok()?;
+    let target = std::fs::canonicalize(&target).unwrap_or(target);
     find_repo_root(&target)
 }
 
 /// Containment test that survives Windows separators and case folding.
 fn is_inside(target: &Path, repo_cache_dir: &Path) -> bool {
-    let target = normalize(target);
-    let cache = normalize(repo_cache_dir);
+    // macOS may expose the same temporary directory through both `/var/...`
+    // and `/private/var/...`.  Repo installs canonicalize their link targets,
+    // while the configured cache path can retain the shorter spelling.  Compare
+    // canonical spellings when both paths exist so those links still classify
+    // as belonging to the shared checkout.
+    let target = std::fs::canonicalize(target).unwrap_or_else(|_| target.to_path_buf());
+    let repo_cache_dir =
+        std::fs::canonicalize(repo_cache_dir).unwrap_or_else(|_| repo_cache_dir.to_path_buf());
+    let target = normalize(&target);
+    let cache = normalize(&repo_cache_dir);
     target == cache || target.starts_with(&(cache + "/"))
 }
 
@@ -97,6 +106,21 @@ mod tests {
         assert!(!is_inside(Path::new("/tmp/elsewhere"), cache));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn cache_containment_accepts_an_equivalent_symlinked_prefix() {
+        let physical = tempfile::tempdir().unwrap();
+        let cache = physical.path().join("repos");
+        let target = cache.join("acme--demo/skill");
+        fs::create_dir_all(&target).unwrap();
+
+        let alias_parent = tempfile::tempdir().unwrap();
+        let alias = alias_parent.path().join("cache-alias");
+        std::os::unix::fs::symlink(&cache, &alias).unwrap();
+
+        assert!(is_inside(&target, &alias));
+    }
+
     // Unix-only: fixtures use std::os::unix::fs::symlink.
     #[cfg(unix)]
     #[test]
@@ -113,7 +137,7 @@ mod tests {
         let root = repo_root_of_with(&link, repo_cache.path(), |path| {
             Some(path.parent()?.to_path_buf())
         });
-        assert_eq!(root.as_deref(), Some(repo.as_path()));
+        assert_eq!(root, Some(std::fs::canonicalize(repo.as_path()).unwrap()));
     }
 
     // Unix-only: fixtures use std::os::unix::fs::symlink.

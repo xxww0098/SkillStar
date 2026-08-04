@@ -1,11 +1,12 @@
 //! Lockfile persistence for installed skills.
 //!
-//! Owns the v4 lockfile schema and mutex. Callers must use this module —
+//! Owns the v5 lockfile schema and mutex. Callers must use this module —
 //! `skillstar-core` no longer exports lockfile implementation.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::collections::BTreeSet;
+use std::path::{Component, Path};
 use std::sync::{Mutex, OnceLock};
 
 static LOCKFILE_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
@@ -15,7 +16,7 @@ pub fn get_mutex() -> &'static Mutex<()> {
 }
 
 /// LockEntry is the skill entry stored in the lockfile.
-/// Version 4 adds a hash of the complete managed on-disk content. Unlike the
+/// Version 5 records the complete-content hash algorithm version. Unlike the
 /// Git tree hash, this changes when the user edits or adds a local file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LockEntry {
@@ -26,28 +27,30 @@ pub struct LockEntry {
     pub tree_hash: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_hash_version: Option<u32>,
     pub installed_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_folder: Option<String>,
 }
 
-/// Versioned lockfile model for v4.
+/// Versioned lockfile model for v5.
 #[derive(Debug, Serialize, Deserialize)]
-pub struct LockfileV3 {
+pub struct LockfileV5 {
     pub version: u32,
     pub skills: Vec<LockEntry>,
 }
 
-impl Default for LockfileV3 {
+impl Default for LockfileV5 {
     fn default() -> Self {
         Self {
-            version: 4,
+            version: 5,
             skills: Vec::new(),
         }
     }
 }
 
-impl LockfileV3 {
+impl LockfileV5 {
     /// Load a lockfile from disk, upgrading any older version in memory.
     ///
     /// Legacy entries have no content baseline and therefore fail closed on
@@ -59,14 +62,59 @@ impl LockfileV3 {
         let content = std::fs::read_to_string(path).context("Failed to read lockfile")?;
         // Older payloads remain field-compatible because newly-added fields
         // default during deserialization.
-        let mut lockfile: LockfileV3 =
+        let mut lockfile: LockfileV5 =
             serde_json::from_str(&content).context("Failed to parse lockfile")?;
 
-        lockfile.version = 4;
+        if !(1..=5).contains(&lockfile.version) {
+            anyhow::bail!("Unsupported lockfile version: {}", lockfile.version);
+        }
+        let mut names = BTreeSet::new();
+        for entry in &mut lockfile.skills {
+            let valid_name = crate::content::validate_skill_name(&entry.name).is_ok();
+            let uniqueness_key = if cfg!(windows) {
+                entry.name.to_ascii_lowercase()
+            } else {
+                entry.name.clone()
+            };
+            if !valid_name || !names.insert(uniqueness_key) {
+                anyhow::bail!("Invalid or duplicate Skill lock entry: {:?}", entry.name);
+            }
+            if entry.source_folder.as_deref() == Some("") {
+                entry.source_folder = None;
+            }
+            if let Some(folder) = entry.source_folder.as_deref()
+                && (Path::new(folder).is_absolute()
+                    || folder.contains(['\\', '\0'])
+                    || !Path::new(folder)
+                        .components()
+                        .all(|component| matches!(component, Component::Normal(_))))
+            {
+                anyhow::bail!(
+                    "Invalid source folder for Skill '{}': {:?}",
+                    entry.name,
+                    folder
+                );
+            }
+            if entry.content_hash_version.is_some() && entry.content_hash.is_none() {
+                anyhow::bail!("Content hash version without hash for '{}'", entry.name);
+            }
+            if entry
+                .content_hash_version
+                .is_some_and(|version| version > crate::content::SNAPSHOT_HASH_VERSION)
+            {
+                anyhow::bail!(
+                    "Unsupported content hash version for '{}': {:?}",
+                    entry.name,
+                    entry.content_hash_version
+                );
+            }
+        }
+
+        lockfile.version = 5;
         Ok(lockfile)
     }
 
-    /// Save this lockfile as version 4.
+    /// Save this lockfile as version 5.
     pub fn save(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -78,7 +126,11 @@ impl LockfileV3 {
     }
 
     pub fn upsert(&mut self, entry: LockEntry) {
-        if let Some(existing) = self.skills.iter_mut().find(|s| s.name == entry.name) {
+        if let Some(existing) = self
+            .skills
+            .iter_mut()
+            .find(|skill| skill_names_equal(&skill.name, &entry.name))
+        {
             *existing = entry;
         } else {
             self.skills.push(entry);
@@ -87,13 +139,22 @@ impl LockfileV3 {
 
     pub fn remove(&mut self, name: &str) -> bool {
         let len_before = self.skills.len();
-        self.skills.retain(|s| s.name != name);
+        self.skills
+            .retain(|skill| !skill_names_equal(&skill.name, name));
         self.skills.len() < len_before
     }
 }
 
-/// Alias Lockfile to LockfileV3 for backward compatibility with existing call sites.
-pub type Lockfile = LockfileV3;
+fn skill_names_equal(left: &str, right: &str) -> bool {
+    if cfg!(windows) {
+        left.eq_ignore_ascii_case(right)
+    } else {
+        left == right
+    }
+}
+
+/// Stable call-site name for the current persisted schema.
+pub type Lockfile = LockfileV5;
 
 /// App-specific lockfile path under the SkillStar data root.
 pub fn lockfile_path() -> std::path::PathBuf {
@@ -111,22 +172,23 @@ mod tests {
             git_ref: None,
             tree_hash: "abc123".to_string(),
             content_hash: Some("managed-content".to_string()),
+            content_hash_version: Some(crate::content::SNAPSHOT_HASH_VERSION),
             installed_at: "2026-01-01T00:00:00Z".to_string(),
             source_folder: None,
         }
     }
 
     #[test]
-    fn missing_file_returns_version_4() {
+    fn missing_file_returns_version_5() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("lock.json");
         let lf = Lockfile::load(&path).unwrap();
-        assert_eq!(lf.version, 4);
+        assert_eq!(lf.version, 5);
         assert!(lf.skills.is_empty());
     }
 
     #[test]
-    fn v4_roundtrip_save_load() {
+    fn v5_roundtrip_save_load() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("lock.json");
 
@@ -136,14 +198,14 @@ mod tests {
         lf.save(&path).unwrap();
 
         let loaded = Lockfile::load(&path).unwrap();
-        assert_eq!(loaded.version, 4);
+        assert_eq!(loaded.version, 5);
         assert_eq!(loaded.skills.len(), 2);
         assert_eq!(loaded.skills[0].name, "skill-a");
         assert_eq!(loaded.skills[1].name, "skill-b");
     }
 
     #[test]
-    fn v1_style_payload_upgrades_to_v4_without_inventing_a_baseline() {
+    fn v1_style_payload_upgrades_to_v5_without_inventing_a_baseline() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("lock.json");
 
@@ -152,7 +214,7 @@ mod tests {
         std::fs::write(&path, v1_json).unwrap();
 
         let loaded = Lockfile::load(&path).unwrap();
-        assert_eq!(loaded.version, 4);
+        assert_eq!(loaded.version, 5);
         assert_eq!(loaded.skills.len(), 1);
         assert_eq!(loaded.skills[0].name, "legacy-skill");
         assert_eq!(loaded.skills[0].tree_hash, "old-hash");

@@ -72,6 +72,7 @@ export const SKILLS_HANDLERS: DevMockHandlers = {
             source: undefined,
           }
         : null,
+    remaining_blocked: [],
   }),
   refresh_skill_updates: () =>
     SAMPLE_SKILLS.filter((s) => s.update_available).map((s) => ({

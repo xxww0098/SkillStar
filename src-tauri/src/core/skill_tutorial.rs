@@ -96,7 +96,7 @@ pub async fn load_for_skill(
     let style = StylePrompt::for_style(load_config().tutorial_style);
     let prompt_version = style.prompt_version(normalize_locale(locale));
     tokio::task::spawn_blocking(move || {
-        let snapshot = content::snapshot(&name)?;
+        let snapshot = content::snapshot_materialized(&name)?;
         tutorial::load(&snapshot, &prompt_version, TUTORIAL_SCHEMA_VERSION)
     })
     .await?
@@ -131,7 +131,7 @@ pub async fn generate_for_skill(
     let name_owned = name.to_string();
     let prompt_version_for_snapshot = prompt_version.clone();
     let (snapshot, cached) = tokio::task::spawn_blocking(move || {
-        let snapshot = content::snapshot(&name_owned)?;
+        let snapshot = content::snapshot_materialized(&name_owned)?;
         let cached = if force_refresh {
             None
         } else {
@@ -196,7 +196,9 @@ pub async fn generate_for_skill(
     // A tutorial is only committed if it still describes the current Skill
     // and the user has not switched the configured style during generation.
     let name_for_after = snapshot.name.clone();
-    let after = tokio::task::spawn_blocking(move || content::snapshot(&name_for_after)).await??;
+    let after =
+        tokio::task::spawn_blocking(move || content::snapshot_materialized(&name_for_after))
+            .await??;
     if after.content_hash != snapshot.content_hash {
         return Err(AppError::Other(
             "The Skill changed while its tutorial was being generated. No artifact was replaced; generate again for the current version."
@@ -420,6 +422,7 @@ mod tests {
             files: vec![SkillSnapshotFile {
                 relative_path: path.to_string(),
                 kind: SnapshotFileKind::Regular,
+                executable: false,
                 content: b"demo".to_vec(),
             }],
             total_bytes: 4,

@@ -66,12 +66,9 @@ where
             .push((name.to_string(), pulled_hash.to_string()));
     }
 
-    if is_repo_skill && let Some(target) = target {
+    if is_repo_skill && target.is_some() {
         let mut siblings: Vec<String> = Vec::new();
-        for entry in entries
-            .iter()
-            .filter(|entry| entry.git_url == target.git_url && entry.name != name)
-        {
+        for entry in entries.iter().filter(|entry| entry.name != name) {
             let SiblingState::Present(hash) = sibling_state(entry) else {
                 continue;
             };
@@ -107,7 +104,14 @@ pub(crate) struct RepoGroup {
 ///
 /// Request order is preserved, and the first requested member of a repository
 /// becomes its representative.
-pub(crate) fn group_by_repo(entries: &[LockEntry], names: &[String]) -> Vec<RepoGroup> {
+pub(crate) fn group_by_repo<F>(
+    entries: &[LockEntry],
+    names: &[String],
+    checkout_key: F,
+) -> Vec<RepoGroup>
+where
+    F: Fn(&LockEntry) -> Option<String>,
+{
     let mut groups: Vec<RepoGroup> = Vec::new();
     let mut keys: Vec<String> = Vec::new();
     let mut seen: Vec<&str> = Vec::new();
@@ -121,9 +125,8 @@ pub(crate) fn group_by_repo(entries: &[LockEntry], names: &[String]) -> Vec<Repo
         let key = entries
             .iter()
             .find(|entry| entry.name == *name)
-            .map(|entry| entry.git_url.trim())
-            .filter(|git_url| !git_url.is_empty())
-            .map(|git_url| format!("repo:{git_url}"))
+            .and_then(&checkout_key)
+            .map(|checkout| format!("checkout:{checkout}"))
             .unwrap_or_else(|| format!("standalone:{name}"));
 
         match keys.iter().position(|existing| *existing == key) {
@@ -156,6 +159,7 @@ mod tests {
             git_ref: None,
             tree_hash: format!("old-{name}"),
             content_hash: Some(format!("content-{name}")),
+            content_hash_version: Some(crate::content::SNAPSHOT_HASH_VERSION),
             installed_at: "2026-01-01T00:00:00Z".to_string(),
             source_folder: folder.map(str::to_string),
         }
@@ -204,7 +208,13 @@ mod tests {
             entry("stranger", "https://github.com/other/pack", None),
         ];
 
-        let plan = plan_update(&entries, "alpha", "pulled-hash", true, all_present);
+        let plan = plan_update(&entries, "alpha", "pulled-hash", true, |entry| {
+            if entry.name == "stranger" {
+                SiblingState::Absent
+            } else {
+                all_present(entry)
+            }
+        });
 
         assert_eq!(plan.siblings_cleared, Vec::<String>::new());
         assert_eq!(plan.affected, vec!["alpha"]);
@@ -291,7 +301,9 @@ mod tests {
             entry("solo", "https://github.com/other/solo", None),
         ];
 
-        let groups = group_by_repo(&entries, &names(&["alpha", "beta", "solo"]));
+        let groups = group_by_repo(&entries, &names(&["alpha", "beta", "solo"]), |entry| {
+            (!entry.git_url.is_empty()).then(|| entry.git_url.clone())
+        });
 
         assert_eq!(
             groups,
@@ -315,7 +327,9 @@ mod tests {
             entry("beta", "https://github.com/acme/pack", None),
         ];
 
-        let groups = group_by_repo(&entries, &names(&["beta", "alpha"]));
+        let groups = group_by_repo(&entries, &names(&["beta", "alpha"]), |entry| {
+            (!entry.git_url.is_empty()).then(|| entry.git_url.clone())
+        });
 
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].representative, "beta");
@@ -326,7 +340,11 @@ mod tests {
     fn skills_without_a_recorded_remote_never_share_a_group() {
         let entries = vec![entry("tracked", "https://github.com/acme/pack", None)];
 
-        let groups = group_by_repo(&entries, &names(&["loose-a", "loose-b", "tracked"]));
+        let groups = group_by_repo(
+            &entries,
+            &names(&["loose-a", "loose-b", "tracked"]),
+            |entry| (!entry.git_url.is_empty()).then(|| entry.git_url.clone()),
+        );
 
         assert_eq!(
             groups.iter().map(|g| &g.representative).collect::<Vec<_>>(),
@@ -340,7 +358,9 @@ mod tests {
     fn a_name_requested_twice_is_updated_once() {
         let entries = vec![entry("alpha", "https://github.com/acme/pack", None)];
 
-        let groups = group_by_repo(&entries, &names(&["alpha", "alpha"]));
+        let groups = group_by_repo(&entries, &names(&["alpha", "alpha"]), |entry| {
+            (!entry.git_url.is_empty()).then(|| entry.git_url.clone())
+        });
 
         assert_eq!(groups.len(), 1);
         assert!(groups[0].covered.is_empty());

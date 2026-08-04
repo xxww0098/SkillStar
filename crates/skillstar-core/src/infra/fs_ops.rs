@@ -55,9 +55,9 @@ pub fn create_symlink(src: &Path, dst: &Path) -> anyhow::Result<()> {
 
 /// Recreate a file or directory symlink with its original target text.
 ///
-/// Unlike [`create_symlink`], this does not fall back to a junction or copy:
-/// callers use it when the link itself is user-owned content and changing its
-/// representation would make a preserved snapshot unfaithful.
+/// File links must remain file links. On Windows, directory links fall back to
+/// a junction when symlink privileges are unavailable so preserving a local
+/// copy still works without Developer Mode.
 pub fn create_preserved_symlink(
     target: &Path,
     destination: &Path,
@@ -74,7 +74,21 @@ pub fn create_preserved_symlink(
     #[cfg(windows)]
     {
         let result = if _target_is_dir {
-            std::os::windows::fs::symlink_dir(target, destination)
+            match std::os::windows::fs::symlink_dir(target, destination) {
+                Ok(()) => Ok(()),
+                Err(error) if error.raw_os_error() == Some(1314) => {
+                    let junction_target = if target.is_absolute() {
+                        target.to_path_buf()
+                    } else {
+                        destination
+                            .parent()
+                            .unwrap_or_else(|| Path::new("."))
+                            .join(target)
+                    };
+                    junction::create(&junction_target, destination)
+                }
+                Err(error) => Err(error),
+            }
         } else {
             std::os::windows::fs::symlink_file(target, destination)
         };
@@ -295,6 +309,16 @@ fn same_drive(a: &Path, b: &Path) -> bool {
 
 pub fn remove_dir_all_retry(path: &Path) -> std::io::Result<()> {
     retry_io(|| std::fs::remove_dir_all(path))
+}
+
+/// Remove one regular file with the same Windows transient-lock retry policy.
+pub fn remove_file_retry(path: &Path) -> std::io::Result<()> {
+    retry_io(|| std::fs::remove_file(path))
+}
+
+/// Remove one empty directory with the same Windows transient-lock retry policy.
+pub fn remove_dir_retry(path: &Path) -> std::io::Result<()> {
+    retry_io(|| std::fs::remove_dir(path))
 }
 
 fn retry_io<F>(op: F) -> std::io::Result<()>

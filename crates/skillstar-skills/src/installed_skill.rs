@@ -59,6 +59,9 @@ pub fn installed_snapshot_markers() -> HashSet<String> {
                 continue;
             }
             if let Some(name) = entry.file_name().to_str() {
+                if name.starts_with('.') {
+                    continue;
+                }
                 markers.insert(name.to_ascii_lowercase());
             }
         }
@@ -115,6 +118,9 @@ pub async fn list_installed_skills() -> Result<Vec<Skill>> {
         let Some(name) = skill_name_from_path(&path) else {
             continue;
         };
+        if name.starts_with('.') {
+            continue;
+        }
         let lock_entry = lock_map.get(&name).cloned();
         let profiles = Arc::clone(&profiles);
         let permit = semaphore

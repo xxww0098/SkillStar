@@ -49,4 +49,19 @@ describe("LocalDivergenceDialog", () => {
 
     expect(onDiscard).toHaveBeenCalledOnce();
   });
+
+  it("shows the concrete snapshot failure that blocked the update", () => {
+    render(
+      <LocalDivergenceDialog
+        blocked={{ ...BLOCKED, reason: "snapshot_failed", error: "Skill content exceeds the snapshot limit" }}
+        busy={false}
+        error="Skill content exceeds the snapshot limit"
+        onClose={vi.fn()}
+        onPreserve={vi.fn()}
+        onDiscard={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Skill content exceeds the snapshot limit")).toBeInTheDocument();
+  });
 });

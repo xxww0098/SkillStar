@@ -148,6 +148,7 @@ fn merge_provenance_value(existing: Option<Value>, provenance: RepoInstallProven
     Value::Mapping(merged)
 }
 
+#[cfg(test)]
 fn write_repo_install_provenance(
     skill_dir: &Path,
     provenance: RepoInstallProvenance<'_>,
@@ -155,7 +156,13 @@ fn write_repo_install_provenance(
     let skill_md_path = skill_markdown_path(skill_dir);
     let existing = std::fs::read_to_string(&skill_md_path)
         .map_err(|e| format!("Failed to read '{}': {}", skill_md_path.display(), e))?;
-    let split = split_front_matter(&existing);
+    let rendered = render_repo_install_provenance(&existing, provenance);
+    skillstar_core::infra::fs_ops::atomic_write(&skill_md_path, rendered.as_bytes())
+        .map_err(|e| format!("Failed to write '{}': {}", skill_md_path.display(), e))
+}
+
+fn render_repo_install_provenance(existing: &str, provenance: RepoInstallProvenance<'_>) -> String {
+    let split = split_front_matter(existing);
     let mut front_matter = split.data;
     let existing_provenance = front_matter.remove("provenance");
     front_matter.insert(
@@ -163,30 +170,133 @@ fn write_repo_install_provenance(
         merge_provenance_value(existing_provenance, provenance),
     );
 
-    let rendered = render_with_front_matter(Some(&front_matter), &split.body);
-    std::fs::write(&skill_md_path, rendered)
-        .map_err(|e| format!("Failed to write '{}': {}", skill_md_path.display(), e))
+    render_with_front_matter(Some(&front_matter), &split.body)
 }
 
-fn refresh_content_baseline(skill_name: &str) -> Result<(), String> {
-    let content_hash = crate::content::snapshot(skill_name)
-        .map_err(|error| format!("Failed to capture installed Skill baseline: {error}"))?
-        .content_hash;
-    let _lock = lockfile::get_mutex()
-        .lock()
-        .map_err(|_| "Lockfile mutex poisoned".to_string())?;
-    let lock_path = lockfile::lockfile_path();
-    let mut lockfile = lockfile::Lockfile::load(&lock_path)
-        .map_err(|error| format!("Failed to load lockfile '{}': {error}", lock_path.display()))?;
-    let entry = lockfile
-        .skills
-        .iter_mut()
-        .find(|entry| entry.name == skill_name)
-        .ok_or_else(|| format!("Installed Skill '{skill_name}' is missing from the lockfile"))?;
-    entry.content_hash = Some(content_hash);
-    lockfile
-        .save(&lock_path)
-        .map_err(|error| format!("Failed to save lockfile '{}': {error}", lock_path.display()))
+struct ProvenanceEdit {
+    path: PathBuf,
+    original: Vec<u8>,
+    rendered: Vec<u8>,
+}
+
+fn rollback_repo_cache_installs(skills_dir: &Path, names: &[String], edits: &[ProvenanceEdit]) {
+    for edit in edits {
+        let _ = fs_ops::atomic_write(&edit.path, &edit.original);
+    }
+    for name in names {
+        let path = skills_dir.join(name);
+        if path.symlink_metadata().is_ok() {
+            let _ = fs_ops::remove_link_or_copy(&path);
+        }
+    }
+
+    if let Ok(_lock) = lockfile::get_mutex().lock() {
+        let lock_path = lockfile::lockfile_path();
+        if let Ok(mut lockfile) = lockfile::Lockfile::load(&lock_path) {
+            for name in names {
+                lockfile.remove(name);
+            }
+            let _ = lockfile.save(&lock_path);
+        }
+    }
+    installed_skill::invalidate_cache();
+}
+
+fn finalize_repo_cache_installs(
+    skills_dir: &Path,
+    repo_url: &str,
+    installed: &[String],
+    targets: &[repo_scanner::SkillInstallTarget],
+) -> Result<Vec<Skill>, String> {
+    let mut edits = Vec::with_capacity(installed.len());
+    let result = (|| {
+        // Render every edit before the first write. This keeps malformed or
+        // unreadable Skill metadata from producing a partially finalized batch.
+        for name in installed {
+            let source_folder = targets
+                .iter()
+                .find(|target| target.id == *name)
+                .map(|target| target.folder_path.as_str());
+            let path = skill_markdown_path(&skills_dir.join(name));
+            let original = std::fs::read(&path)
+                .map_err(|error| format!("Failed to read '{}': {error}", path.display()))?;
+            let existing = std::str::from_utf8(&original).map_err(|error| {
+                format!("Skill metadata '{}' is not UTF-8: {error}", path.display())
+            })?;
+            let rendered = render_repo_install_provenance(
+                existing,
+                RepoInstallProvenance {
+                    git_url: repo_url,
+                    source_folder,
+                },
+            )
+            .into_bytes();
+            edits.push(ProvenanceEdit {
+                path,
+                original,
+                rendered,
+            });
+        }
+
+        for edit in &edits {
+            fs_ops::atomic_write(&edit.path, &edit.rendered)
+                .map_err(|error| format!("Failed to write '{}': {error}", edit.path.display()))?;
+        }
+
+        let baselines = installed
+            .iter()
+            .map(|name| {
+                crate::content::snapshot(name)
+                    .map(|snapshot| (name.clone(), snapshot.content_hash))
+                    .map_err(|error| {
+                        format!("Failed to capture installed Skill '{name}' baseline: {error}")
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        {
+            let _lock = lockfile::get_mutex()
+                .lock()
+                .map_err(|_| "Lockfile mutex poisoned".to_string())?;
+            let lock_path = lockfile::lockfile_path();
+            let mut lockfile = lockfile::Lockfile::load(&lock_path).map_err(|error| {
+                format!("Failed to load lockfile '{}': {error}", lock_path.display())
+            })?;
+            for (name, content_hash) in &baselines {
+                let entry = lockfile
+                    .skills
+                    .iter_mut()
+                    .find(|entry| entry.name == *name)
+                    .ok_or_else(|| {
+                        format!("Installed Skill '{name}' is missing from the lockfile")
+                    })?;
+                entry.content_hash = Some(content_hash.clone());
+                entry.content_hash_version = Some(crate::content::SNAPSHOT_HASH_VERSION);
+            }
+            lockfile.save(&lock_path).map_err(|error| {
+                format!("Failed to save lockfile '{}': {error}", lock_path.display())
+            })?;
+        }
+
+        let skills = installed
+            .iter()
+            .map(|name| {
+                let dest = skills_dir.join(name);
+                new_skill_from_install(
+                    name.clone(),
+                    extract_skill_description(&dest),
+                    repo_url.to_string(),
+                    compute_tree_hash_for(skills_dir, name),
+                )
+            })
+            .collect();
+        Ok(skills)
+    })();
+
+    if result.is_err() {
+        rollback_repo_cache_installs(skills_dir, installed, &edits);
+    }
+    result
 }
 
 fn try_install_from_repo_cache(
@@ -224,6 +334,14 @@ fn try_install_from_repo_cache(
         return Ok(None);
     };
 
+    // This install path owns only new hub entries. In particular, do not let
+    // the scanner replace a same-source link: finalization rollback is allowed
+    // to remove the entries it just created, never a pre-existing install.
+    let existing_path = skills_dir.join(&skill.id);
+    if existing_path.symlink_metadata().is_ok() {
+        return Err(format!("Skill '{}' is already installed", skill.id));
+    }
+
     let targets = vec![repo_scanner::SkillInstallTarget {
         id: skill.id.clone(),
         folder_path: skill.folder_path.clone(),
@@ -236,25 +354,10 @@ fn try_install_from_repo_cache(
         &targets,
     ) {
         Ok(installed) if !installed.is_empty() => {
-            let installed_name = installed[0].clone();
-            let dest = skills_dir.join(&installed_name);
-            write_repo_install_provenance(
-                &dest,
-                RepoInstallProvenance {
-                    git_url: &repo_url,
-                    source_folder: Some(&skill.folder_path),
-                },
-            )?;
-            refresh_content_baseline(&installed_name)?;
-            let description = extract_skill_description(&dest);
+            let mut installed_skills =
+                finalize_repo_cache_installs(skills_dir, &repo_url, &installed, &targets)?;
             installed_skill::invalidate_cache();
-            let tree_hash = compute_tree_hash_for(skills_dir, &installed_name);
-            Ok(Some(new_skill_from_install(
-                installed_name,
-                description,
-                repo_url,
-                tree_hash,
-            )))
+            Ok(installed_skills.pop())
         }
         Ok(_) => Ok(None),
         Err(err) => {
@@ -267,8 +370,10 @@ fn try_install_from_repo_cache(
 pub fn install_skill(url: String, name: Option<String>) -> Result<Skill, String> {
     let skills_dir = paths::hub_skills_dir();
     let name_hint = derive_name_hint(&url, name.as_deref());
+    crate::content::validate_skill_name(&name_hint)
+        .map_err(|error| format!("Invalid Skill name: {error}"))?;
 
-    if skills_dir.join(&name_hint).exists() {
+    if skills_dir.join(&name_hint).symlink_metadata().is_ok() {
         return Err(format!("Skill '{}' is already installed", name_hint));
     }
     if local_skill_blocks_repo_install(&name_hint) {
@@ -285,43 +390,53 @@ pub fn install_skill(url: String, name: Option<String>) -> Result<Skill, String>
     }
 
     let dest = skills_dir.join(&name_hint);
-    if dest.exists() {
+    if dest.symlink_metadata().is_ok() {
         return Err(format!("Skill '{}' is already installed", name_hint));
     }
 
-    git_ops::clone_repo(&url, &dest).map_err(|e| e.to_string())?;
-    let tree_hash = git_ops::compute_tree_hash(&dest).map_err(|e| e.to_string())?;
-    let content_hash = crate::content::snapshot(&name_hint)
-        .map_err(|e| format!("Failed to capture installed Skill baseline: {e}"))?
-        .content_hash;
+    if let Err(error) = git_ops::clone_repo(&url, &dest) {
+        let _ = fs_ops::remove_dir_all_retry(&dest);
+        return Err(error.to_string());
+    }
+    let result = (|| -> Result<Skill, String> {
+        let tree_hash = git_ops::compute_tree_hash(&dest).map_err(|e| e.to_string())?;
+        let content_hash = crate::content::snapshot(&name_hint)
+            .map_err(|e| format!("Failed to capture installed Skill baseline: {e}"))?
+            .content_hash;
 
-    let _lock = lockfile::get_mutex()
-        .lock()
-        .map_err(|_| "Lockfile mutex poisoned".to_string())?;
-    let lock_path = lockfile::lockfile_path();
-    let mut lockfile = lockfile::Lockfile::load(&lock_path)
-        .map_err(|e| format!("Failed to load lockfile '{}': {}", lock_path.display(), e))?;
-    lockfile.upsert(crate::lockfile::LockEntry {
-        name: name_hint.clone(),
-        git_url: url.clone(),
-        git_ref: None,
-        tree_hash: tree_hash.clone(),
-        content_hash: Some(content_hash),
-        installed_at: chrono::Utc::now().to_rfc3339(),
-        source_folder: None,
-    });
-    lockfile
-        .save(&lock_path)
-        .map_err(|e| format!("Failed to save lockfile '{}': {}", lock_path.display(), e))?;
-    installed_skill::invalidate_cache();
+        let _lock = lockfile::get_mutex()
+            .lock()
+            .map_err(|_| "Lockfile mutex poisoned".to_string())?;
+        let lock_path = lockfile::lockfile_path();
+        let mut lockfile = lockfile::Lockfile::load(&lock_path)
+            .map_err(|e| format!("Failed to load lockfile '{}': {}", lock_path.display(), e))?;
+        lockfile.upsert(crate::lockfile::LockEntry {
+            name: name_hint.clone(),
+            git_url: url.clone(),
+            git_ref: None,
+            tree_hash: tree_hash.clone(),
+            content_hash: Some(content_hash),
+            content_hash_version: Some(crate::content::SNAPSHOT_HASH_VERSION),
+            installed_at: chrono::Utc::now().to_rfc3339(),
+            source_folder: None,
+        });
+        lockfile
+            .save(&lock_path)
+            .map_err(|e| format!("Failed to save lockfile '{}': {}", lock_path.display(), e))?;
+        installed_skill::invalidate_cache();
 
-    let description = extract_skill_description(&dest);
-    Ok(new_skill_from_install(
-        name_hint,
-        description,
-        url,
-        Some(tree_hash),
-    ))
+        let description = extract_skill_description(&dest);
+        Ok(new_skill_from_install(
+            name_hint.clone(),
+            description,
+            url.clone(),
+            Some(tree_hash),
+        ))
+    })();
+    if result.is_err() {
+        let _ = skillstar_core::infra::fs_ops::remove_dir_all_retry(&dest);
+    }
+    result
 }
 
 /// Install multiple skills from the same repository URL in a single batch.
@@ -336,7 +451,8 @@ pub fn install_skills_batch(url: &str, names: &[String]) -> Result<Vec<Skill>, S
     let (repo_url, _source, repo_dir, skills_found) = fetch_repo_scanned(url, false)?;
     let parsed =
         crate::source_resolver::Source::parse(url).map_err(|e| format!("Invalid source: {e}"))?;
-    let existing_lock = lockfile::Lockfile::load(&lockfile::lockfile_path()).unwrap_or_default();
+    let existing_lock = lockfile::Lockfile::load(&lockfile::lockfile_path())
+        .map_err(|error| format!("Failed to load Skill lockfile: {error}"))?;
 
     let mut targets = Vec::new();
     let mut fallback_names = Vec::new();
@@ -354,7 +470,7 @@ pub fn install_skills_batch(url: &str, names: &[String]) -> Result<Vec<Skill>, S
                 );
                 continue;
             }
-            if skills_dir.join(&skill.id).exists() {
+            if skills_dir.join(&skill.id).symlink_metadata().is_ok() {
                 let same_source = existing_lock.skills.iter().any(|entry| {
                     entry.name == skill.id
                         && crate::source_resolver::same_remote_url(&entry.git_url, &repo_url)
@@ -393,30 +509,13 @@ pub fn install_skills_batch(url: &str, names: &[String]) -> Result<Vec<Skill>, S
             &targets,
         ) {
             Ok(installed) => {
+                installed_skills.extend(finalize_repo_cache_installs(
+                    &skills_dir,
+                    &repo_url,
+                    &installed,
+                    &targets,
+                )?);
                 installed_skill::invalidate_cache();
-                for installed_name in installed {
-                    let dest = skills_dir.join(&installed_name);
-                    let source_folder = targets
-                        .iter()
-                        .find(|target| target.id == installed_name)
-                        .map(|target| target.folder_path.as_str());
-                    write_repo_install_provenance(
-                        &dest,
-                        RepoInstallProvenance {
-                            git_url: &repo_url,
-                            source_folder,
-                        },
-                    )?;
-                    refresh_content_baseline(&installed_name)?;
-                    let description = extract_skill_description(&dest);
-                    let tree_hash = compute_tree_hash_for(&skills_dir, &installed_name);
-                    installed_skills.push(new_skill_from_install(
-                        installed_name,
-                        description,
-                        repo_url.clone(),
-                        tree_hash,
-                    ));
-                }
             }
             Err(e) => {
                 warn!(target: "install_skills_batch", error = %e, "batch repo install failed");
@@ -429,10 +528,27 @@ pub fn install_skills_batch(url: &str, names: &[String]) -> Result<Vec<Skill>, S
     }
 
     // Process fallbacks one by one
+    let mut fallback_installed = Vec::new();
     for name in fallback_names {
         match install_skill(url.to_string(), Some(name)) {
-            Ok(skill) => installed_skills.push(skill),
-            Err(e) => warn!(target: "install_skills_batch", error = %e, "fallback install failed"),
+            Ok(skill) => {
+                fallback_installed.push(skill.name.clone());
+                installed_skills.push(skill);
+            }
+            Err(error) => {
+                let mut rollback_errors = Vec::new();
+                for installed_name in fallback_installed.iter().rev() {
+                    if let Err(rollback_error) = uninstall_skill(installed_name) {
+                        rollback_errors.push(format!("{installed_name}: {rollback_error}"));
+                    }
+                }
+                let rollback = if rollback_errors.is_empty() {
+                    String::new()
+                } else {
+                    format!("; rollback also failed: {}", rollback_errors.join(", "))
+                };
+                return Err(format!("Fallback install failed: {error}{rollback}"));
+            }
         }
     }
 
@@ -455,33 +571,56 @@ pub fn install_skill_pack(url: String) -> Result<Vec<String>, String> {
 }
 
 pub fn uninstall_skill(name: &str) -> Result<(), String> {
+    crate::content::validate_skill_name(name)
+        .map_err(|error| format!("Invalid Skill name: {error}"))?;
     if local_skill::is_local_skill(name) {
         local_skill::delete(name).map_err(|e| e.to_string())?;
         installed_skill::invalidate_cache();
         return Ok(());
     }
 
-    let _ = deployment::remove_skill_from_all_agents(name);
-
     let skills_dir = paths::hub_skills_dir();
     let path = skills_dir.join(name);
-
-    if fs_ops::is_link(&path) {
-        fs_ops::remove_symlink(&path).map_err(|e| e.to_string())?;
-    } else if path.exists() {
-        fs_ops::remove_dir_all_retry(&path).map_err(|e| e.to_string())?;
-    }
-
     let _lock = lockfile::get_mutex()
         .lock()
         .map_err(|_| "Lockfile mutex poisoned".to_string())?;
     let lock_path = lockfile::lockfile_path();
     let mut lf = lockfile::Lockfile::load(&lock_path)
         .map_err(|e| format!("Failed to load lockfile '{}': {}", lock_path.display(), e))?;
+    let staging = skills_dir.join(format!(".skillstar-remove-{name}-{}", std::process::id()));
+    if staging.symlink_metadata().is_ok() {
+        return Err(format!(
+            "A previous removal staging path still exists: '{}'",
+            staging.display()
+        ));
+    }
+    let moved = path.symlink_metadata().is_ok();
+    if moved {
+        std::fs::rename(&path, &staging)
+            .map_err(|error| format!("Failed to stage Skill '{name}' for removal: {error}"))?;
+    }
     lf.remove(name);
-    lf.save(&lock_path)
-        .map_err(|e| format!("Failed to save lockfile '{}': {}", lock_path.display(), e))?;
+    if let Err(error) = lf.save(&lock_path) {
+        if moved {
+            let _ = std::fs::rename(&staging, &path);
+        }
+        return Err(format!(
+            "Failed to save lockfile '{}': {error}",
+            lock_path.display()
+        ));
+    }
+    drop(_lock);
 
+    if moved && let Err(error) = fs_ops::remove_link_or_copy(&staging) {
+        warn!(
+            target: "uninstall_skill",
+            path = %staging.display(),
+            error = %error,
+            "Skill was removed but its staging path could not be cleaned"
+        );
+    }
+
+    let _ = deployment::remove_skill_from_all_agents(name);
     let _ = projects::remove_skill_from_all_projects(name);
     installed_skill::invalidate_cache();
 

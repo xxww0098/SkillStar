@@ -377,6 +377,20 @@ pub fn publish_skill(
     folder_name: &str,
     lockfile_path: &Path,
 ) -> Result<PublishResult> {
+    crate::content::validate_skill_name(skill_name).map_err(anyhow::Error::from)?;
+    crate::content::validate_skill_name(folder_name).map_err(anyhow::Error::from)?;
+    // Validate persisted state before any remote commit/push. Reload again for
+    // the final write so a concurrent install is not overwritten.
+    {
+        let _lock = crate::lockfile::get_mutex()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Lockfile mutex poisoned"))?;
+        let lockfile = crate::lockfile::Lockfile::load(lockfile_path)
+            .context("Failed to validate Skill lockfile before publishing")?;
+        lockfile
+            .save(lockfile_path)
+            .context("Skill lockfile is not writable; publish was not started")?;
+    }
     let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
     let skill_source = hub_dir.join(skill_name);
 
@@ -401,6 +415,9 @@ pub fn publish_skill(
     } else {
         skill_source.clone()
     };
+    let content_hash = crate::content::snapshot(skill_name)
+        .with_context(|| format!("Failed to capture content baseline for '{skill_name}'"))?
+        .content_hash;
 
     // Determine repo URL: either use existing or create new
     let (repo_url, cache_dir) = if let Some(url) = existing_repo_url {
@@ -508,19 +525,21 @@ pub fn publish_skill(
     // Update lockfile
     use crate::lockfile::{LockEntry, Lockfile};
     let tree_hash = super::ops::compute_tree_hash(&skill_source_resolved).unwrap_or_default();
-    let mut lf = Lockfile::load(lockfile_path).unwrap_or_default();
+    let _lock = crate::lockfile::get_mutex()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Lockfile mutex poisoned"))?;
+    let mut lf = Lockfile::load(lockfile_path)?;
     lf.upsert(LockEntry {
         name: skill_name.to_string(),
         git_url: git_url.clone(),
         git_ref: None,
         tree_hash,
-        content_hash: crate::content::snapshot(skill_name)
-            .ok()
-            .map(|snapshot| snapshot.content_hash),
+        content_hash: Some(content_hash),
+        content_hash_version: Some(crate::content::SNAPSHOT_HASH_VERSION),
         installed_at: chrono::Utc::now().to_rfc3339(),
         source_folder: Some(repo_rel_path.clone()),
     });
-    let _ = lf.save(lockfile_path);
+    lf.save(lockfile_path)?;
 
     Ok(PublishResult {
         url: clean_url,

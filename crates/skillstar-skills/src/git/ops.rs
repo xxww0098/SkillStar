@@ -375,6 +375,120 @@ pub fn pull_repo(repo_path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Return the exact commit currently checked out by a managed repository.
+pub fn head_revision(repo_path: &Path) -> Result<String> {
+    run_git(repo_path, &["rev-parse", "HEAD"])
+}
+
+/// Read the configured origin URL without mutating the repository.
+pub fn remote_origin_url(repo_path: &Path) -> Result<String> {
+    run_git(repo_path, &["remote", "get-url", "origin"])
+}
+
+/// Restore a repository to a previously captured commit after a failed update.
+pub fn reset_to_revision(repo_path: &Path, revision: &str) -> Result<()> {
+    run_git(repo_path, &["reset", "--hard", revision]).map(|_| ())
+}
+
+/// Capture cone-mode sparse paths so a failed update can restore its old view.
+pub fn sparse_checkout_paths(repo_path: &Path) -> Option<Vec<String>> {
+    run_git(repo_path, &["sparse-checkout", "list"])
+        .ok()
+        .map(|output| {
+            output
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+}
+
+pub fn restore_sparse_checkout_paths(repo_path: &Path, paths: &[String]) -> Result<()> {
+    if paths.is_empty() {
+        run_git(repo_path, &["sparse-checkout", "disable"]).map(|_| ())
+    } else {
+        let refs: Vec<&str> = paths.iter().map(String::as_str).collect();
+        apply_sparse_checkout(repo_path, &refs)
+    }
+}
+
+/// Discard every local change in one managed Skill subtree without moving HEAD.
+///
+/// A repo-cached Skill supplies its source folder so siblings in the same
+/// checkout remain untouched until the user resolves them too. A standalone
+/// clone supplies `None`, which restores the complete checkout.
+pub fn restore_worktree_to_head(repo_path: &Path, pathspec: Option<&str>) -> Result<()> {
+    let clean_args = |pathspec: Option<&str>| {
+        let mut args: Vec<String> = vec![
+            "clean",
+            "-fdx",
+            "-e",
+            ".skillstar/",
+            "-e",
+            ".DS_Store",
+            "-e",
+            "Thumbs.db",
+            "-e",
+            "desktop.ini",
+            "-e",
+            "._*",
+            "-e",
+            "*~",
+            "-e",
+            "*.swp",
+            "-e",
+            "*.swo",
+            "-e",
+            "*.tmp",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+        if let Some(pathspec) = pathspec {
+            args.extend(["--".to_string(), pathspec.to_string()]);
+        }
+        args
+    };
+    match pathspec.filter(|value| !value.is_empty()) {
+        Some(pathspec) => {
+            validate_relative_pathspec(pathspec)?;
+            let literal_pathspec = format!(":(literal){pathspec}");
+            run_git(
+                repo_path,
+                &["checkout", "-f", "HEAD", "--", &literal_pathspec],
+            )?;
+            let clean_args = clean_args(Some(&literal_pathspec));
+            let clean_refs: Vec<&str> = clean_args.iter().map(String::as_str).collect();
+            run_git(repo_path, &clean_refs)?;
+        }
+        None => {
+            run_git(repo_path, &["reset", "--hard", "HEAD"])?;
+            let clean_args = clean_args(None);
+            let clean_refs: Vec<&str> = clean_args.iter().map(String::as_str).collect();
+            run_git(repo_path, &clean_refs)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_relative_pathspec(pathspec: &str) -> Result<()> {
+    let path = Path::new(pathspec);
+    if path.is_absolute()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        anyhow::bail!("Unsafe Git pathspec: {pathspec:?}");
+    }
+    Ok(())
+}
+
 /// Run a git fetch with retry logic for the shallow-file race condition.
 ///
 /// When multiple processes or threads run `git fetch --depth 1` on the same

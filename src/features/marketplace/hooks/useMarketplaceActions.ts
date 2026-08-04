@@ -110,7 +110,11 @@ export function useMarketplaceActions({
       } catch (e) {
         if (import.meta.env.DEV) console.error("Update failed:", e);
         const reason = e instanceof Error ? e.message : String(e);
-        toast.error(reason ? `${t("marketplace.updateFailed")}: ${reason}` : t("marketplace.updateFailed"));
+        const alreadyShown =
+          e instanceof Error && (e as Error & { skillstarToastShown?: boolean }).skillstarToastShown === true;
+        if (!alreadyShown) {
+          toast.error(reason ? `${t("marketplace.updateFailed")}: ${reason}` : t("marketplace.updateFailed"));
+        }
       }
     },
     [patchSkill, setSelectedSkill, t, updateSkill],

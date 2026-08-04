@@ -7,6 +7,15 @@ use tracing::warn;
 
 use super::SkillInstallTarget;
 
+struct PreparedRepoInstall {
+    name: String,
+    source: std::path::PathBuf,
+    destination: std::path::PathBuf,
+    staging: std::path::PathBuf,
+    previous_target: Option<std::path::PathBuf>,
+    lock_entry: crate::lockfile::LockEntry,
+}
+
 /// Backward-compatible scan/install facade for callers that identify the
 /// default-branch cache by source. Ref-pinned installs use
 /// [`install_from_repo_at`] so they retain their isolated cache and lock data.
@@ -33,42 +42,25 @@ pub fn install_from_repo_at(
             "Repo cache not found. Please scan the repository first."
         ));
     }
+    let repo_root = std::fs::canonicalize(repo_dir)
+        .with_context(|| format!("Failed to resolve repo cache '{}'", repo_dir.display()))?;
 
     let _lock = lockfile::get_mutex()
         .lock()
         .map_err(|_| anyhow!("Lockfile mutex poisoned"))?;
     let lock_path = lockfile::lockfile_path();
-    let mut lf = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
+    let mut lf = lockfile::Lockfile::load(&lock_path)?;
 
-    let mut installed_names = Vec::new();
-
-    for target in targets {
+    let mut prepared = Vec::new();
+    for (index, target) in targets.iter().enumerate() {
+        content::validate_skill_name(&target.id)
+            .with_context(|| format!("Invalid Skill id '{}'", target.id))?;
         let dest = hub_skills_dir.join(&target.id);
         let existing_entry = lf.skills.iter().find(|entry| entry.name == target.id);
-
-        if dest.symlink_metadata().is_ok()
-            && !can_replace_existing_skill(&target.id, repo_url, existing_entry)
-        {
-            warn!(
-                target: "repo_scanner",
-                skill = %target.id,
-                "refusing to replace existing skill from a different source"
-            );
-            continue;
-        }
-
-        if let Ok(_meta) = dest.symlink_metadata() {
-            if fs_ops::is_link(&dest) {
-                let _ = fs_ops::remove_symlink(&dest);
-            } else {
-                let _ = std::fs::remove_dir_all(&dest);
-            }
-        }
-
         let source_path = if target.folder_path.is_empty() {
-            repo_dir.to_path_buf()
+            repo_root.clone()
         } else {
-            repo_dir.join(&target.folder_path)
+            repo_root.join(&target.folder_path)
         };
 
         if !source_path.exists() {
@@ -79,41 +71,139 @@ pub fn install_from_repo_at(
             );
             continue;
         }
+        let source_path = std::fs::canonicalize(&source_path).with_context(|| {
+            format!("Failed to resolve Skill source '{}'", source_path.display())
+        })?;
+        if !source_path.starts_with(&repo_root) {
+            anyhow::bail!(
+                "Skill source escapes repo cache '{}': '{}'",
+                repo_root.display(),
+                source_path.display()
+            );
+        }
+        let content_hash = content::snapshot_path(&target.id, &source_path)
+            .with_context(|| format!("Failed to capture content baseline for '{}'", target.id))?
+            .content_hash;
 
-        fs_ops::create_symlink(&source_path, &dest)
-            .with_context(|| format!("Failed to symlink {:?} → {:?}", source_path, dest))?;
+        if dest.symlink_metadata().is_ok()
+            && (!fs_ops::is_link(&dest)
+                || !can_replace_existing_skill(&target.id, repo_url, existing_entry))
+        {
+            warn!(
+                target: "repo_scanner",
+                skill = %target.id,
+                "refusing to replace existing skill from a different source"
+            );
+            continue;
+        }
 
-        let tree_hash = if target.folder_path.is_empty() {
-            git_ops::compute_tree_hash(repo_dir).unwrap_or_default()
-        } else {
-            git_ops::compute_subtree_hash(repo_dir, &target.folder_path).unwrap_or_default()
+        let relative_source = source_path
+            .strip_prefix(&repo_root)
+            .expect("contained source has a relative path")
+            .to_string_lossy()
+            .replace('\\', "/");
+        let source_folder = (!relative_source.is_empty()).then_some(relative_source);
+        let tree_hash = match source_folder.as_deref() {
+            Some(folder) => git_ops::compute_subtree_hash(&repo_root, folder).unwrap_or_default(),
+            None => git_ops::compute_tree_hash(&repo_root).unwrap_or_default(),
         };
-
-        let source_folder = if target.folder_path.is_empty() {
+        let previous_target = if fs_ops::is_link(&dest) {
+            Some(fs_ops::read_link_resolved(&dest).with_context(|| {
+                format!("Failed to record existing Skill link '{}'", dest.display())
+            })?)
+        } else {
             None
-        } else {
-            Some(target.folder_path.clone())
         };
 
-        lf.upsert(crate::lockfile::LockEntry {
+        prepared.push(PreparedRepoInstall {
             name: target.id.clone(),
-            git_url: repo_url.to_string(),
-            git_ref: git_ref.map(str::to_string),
-            tree_hash,
-            content_hash: content::snapshot(&target.id)
-                .ok()
-                .map(|snapshot| snapshot.content_hash),
-            installed_at: chrono::Utc::now().to_rfc3339(),
-            source_folder,
+            source: source_path,
+            destination: dest.clone(),
+            staging: hub_skills_dir.join(format!(".skillstar-install-{index}")),
+            previous_target,
+            lock_entry: crate::lockfile::LockEntry {
+                name: target.id.clone(),
+                git_url: repo_url.to_string(),
+                git_ref: git_ref.map(str::to_string),
+                tree_hash,
+                content_hash: Some(content_hash),
+                content_hash_version: Some(content::SNAPSHOT_HASH_VERSION),
+                installed_at: chrono::Utc::now().to_rfc3339(),
+                source_folder,
+            },
         });
-
-        installed_names.push(target.id.clone());
     }
 
-    lf.save(&lock_path)
-        .context("Failed to save lockfile after batch install")?;
+    for item in &prepared {
+        if item.staging.symlink_metadata().is_ok()
+            && let Err(error) = fs_ops::remove_link_or_copy(&item.staging)
+        {
+            cleanup_staging(&prepared);
+            return Err(error).with_context(|| {
+                format!(
+                    "Failed to clear stale install staging '{}'",
+                    item.staging.display()
+                )
+            });
+        }
+        if let Err(error) = fs_ops::create_symlink(&item.source, &item.staging) {
+            cleanup_staging(&prepared);
+            return Err(error).with_context(|| {
+                format!(
+                    "Failed to stage symlink {:?} → {:?}",
+                    item.source, item.destination
+                )
+            });
+        }
+    }
 
-    Ok(installed_names)
+    let mut applied = 0usize;
+    for item in &prepared {
+        if fs_ops::is_link(&item.destination)
+            && let Err(error) = fs_ops::remove_symlink(&item.destination)
+        {
+            rollback_repo_installs(&prepared, applied);
+            return Err(error).with_context(|| format!("Failed to replace Skill '{}'", item.name));
+        }
+        if let Err(error) = std::fs::rename(&item.staging, &item.destination) {
+            rollback_repo_installs(&prepared, applied + 1);
+            return Err(error).with_context(|| format!("Failed to install Skill '{}'", item.name));
+        }
+        applied += 1;
+    }
+
+    for item in &prepared {
+        lf.upsert(item.lock_entry.clone());
+    }
+    if let Err(error) = lf
+        .save(&lock_path)
+        .context("Failed to save lockfile after batch install")
+    {
+        rollback_repo_installs(&prepared, applied);
+        return Err(error);
+    }
+
+    Ok(prepared.into_iter().map(|item| item.name).collect())
+}
+
+fn cleanup_staging(prepared: &[PreparedRepoInstall]) {
+    for item in prepared {
+        if item.staging.symlink_metadata().is_ok() {
+            let _ = fs_ops::remove_link_or_copy(&item.staging);
+        }
+    }
+}
+
+fn rollback_repo_installs(prepared: &[PreparedRepoInstall], applied: usize) {
+    for item in prepared.iter().take(applied).rev() {
+        if item.destination.symlink_metadata().is_ok() {
+            let _ = fs_ops::remove_link_or_copy(&item.destination);
+        }
+        if let Some(previous) = &item.previous_target {
+            let _ = fs_ops::create_symlink(previous, &item.destination);
+        }
+    }
+    cleanup_staging(prepared);
 }
 
 fn can_replace_existing_skill(

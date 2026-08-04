@@ -102,7 +102,7 @@ pub struct PostInstallResult {
     pub last_run_at: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct PackStore {
     version: u32,
     packs: Vec<PackEntry>,
@@ -125,12 +125,63 @@ fn store_path() -> PathBuf {
 // ── Store I/O ────────────────────────────────────────────────────────
 
 fn load_store() -> PackStore {
+    load_store_strict().unwrap_or_default()
+}
+
+fn load_store_strict() -> Result<PackStore> {
     let path = store_path();
     if !path.exists() {
-        return PackStore::default();
+        return Ok(PackStore::default());
     }
-    let content = std::fs::read_to_string(&path).unwrap_or_default();
-    serde_json::from_str(&content).unwrap_or_default()
+    let content = std::fs::read_to_string(&path)
+        .with_context(|| format!("Failed to read pack registry '{}'", path.display()))?;
+    let store: PackStore = serde_json::from_str(&content)
+        .with_context(|| format!("Failed to parse pack registry '{}'", path.display()))?;
+    for pack in &store.packs {
+        let mut names = std::collections::BTreeSet::new();
+        for skill in &pack.skills {
+            crate::content::validate_skill_name(&skill.name).with_context(|| {
+                format!(
+                    "Pack registry contains an unsafe Skill name in '{}': {:?}",
+                    pack.name, skill.name
+                )
+            })?;
+            let key = if cfg!(windows) {
+                skill.name.to_ascii_lowercase()
+            } else {
+                skill.name.clone()
+            };
+            if !names.insert(key) {
+                bail!(
+                    "Pack registry contains duplicate Skill name in '{}': {:?}",
+                    pack.name,
+                    skill.name
+                );
+            }
+            validate_pack_relative_path(&skill.path).with_context(|| {
+                format!(
+                    "Pack registry contains an unsafe Skill path in '{}': {:?}",
+                    pack.name, skill.path
+                )
+            })?;
+        }
+    }
+    Ok(store)
+}
+
+fn validate_pack_relative_path(value: &str) -> Result<()> {
+    let path = Path::new(value);
+    if value.is_empty()
+        || (value != "."
+            && (path.is_absolute()
+                || value.contains(['\\', '\0'])
+                || !path
+                    .components()
+                    .all(|component| matches!(component, std::path::Component::Normal(_)))))
+    {
+        bail!("unsafe pack-relative path: {value:?}");
+    }
+    Ok(())
 }
 
 fn save_store(store: &PackStore) -> Result<()> {
@@ -139,8 +190,21 @@ fn save_store(store: &PackStore) -> Result<()> {
         std::fs::create_dir_all(parent)?;
     }
     let content = serde_json::to_string_pretty(store)?;
-    std::fs::write(&path, content).context("Failed to write packs.json")?;
+    skillstar_core::infra::fs_ops::atomic_write(&path, content.as_bytes())
+        .context("Failed to write packs.json atomically")?;
     Ok(())
+}
+
+fn restore_persisted_file(path: &Path, previous: Option<&[u8]>) {
+    match previous {
+        Some(content) => {
+            let _ = skillstar_core::infra::fs_ops::atomic_write(path, content);
+        }
+        None if path.symlink_metadata().is_ok() => {
+            let _ = skillstar_core::infra::fs_ops::remove_link_or_copy(path);
+        }
+        None => {}
+    }
 }
 
 // ── Manifest Parsing ─────────────────────────────────────────────────
@@ -171,21 +235,33 @@ pub fn detect_pack(repo_dir: &Path) -> Result<Option<SkillPackManifest>> {
     }
 
     // Validate skill paths exist
+    let mut skill_names = std::collections::BTreeSet::new();
     for skill in &manifest.skills {
         if skill.name.is_empty() {
             bail!("skillpack.toml: each [[skills]] entry must have a 'name'");
         }
+        crate::content::validate_skill_name(&skill.name)
+            .with_context(|| format!("skillpack.toml: invalid Skill name '{}'", skill.name))?;
+        let uniqueness_key = if cfg!(windows) {
+            skill.name.to_ascii_lowercase()
+        } else {
+            skill.name.clone()
+        };
+        if !skill_names.insert(uniqueness_key) {
+            bail!(
+                "skillpack.toml: duplicate Skill name '{}' is not allowed",
+                skill.name
+            );
+        }
         if skill.path.is_empty() {
             bail!("skillpack.toml: each [[skills]] entry must have a 'path'");
         }
-        let skill_dir = repo_dir.join(&skill.path);
-        if !skill_dir.exists() {
-            bail!(
-                "skillpack.toml: skill '{}' path '{}' does not exist in repo",
-                skill.name,
-                skill.path
-            );
-        }
+        let skill_dir = resolve_pack_skill_source(repo_dir, &skill.path).with_context(|| {
+            format!(
+                "skillpack.toml: invalid path '{}' for Skill '{}'",
+                skill.path, skill.name
+            )
+        })?;
         let skill_md = skill_dir.join("SKILL.md");
         if !skill_md.exists() {
             bail!(
@@ -195,8 +271,43 @@ pub fn detect_pack(repo_dir: &Path) -> Result<Option<SkillPackManifest>> {
             );
         }
     }
+    if let Some(post_install) = &manifest.post_install {
+        validate_pack_relative_path(&post_install.script).with_context(|| {
+            format!(
+                "skillpack.toml: unsafe post_install script path {:?}",
+                post_install.script
+            )
+        })?;
+        let repo_root = std::fs::canonicalize(repo_dir)
+            .with_context(|| format!("Failed to resolve pack repo '{}'", repo_dir.display()))?;
+        let script = repo_root.join(&post_install.script);
+        if script.exists() {
+            let script = std::fs::canonicalize(&script).with_context(|| {
+                format!(
+                    "Failed to resolve post_install script '{}'",
+                    script.display()
+                )
+            })?;
+            if !script.starts_with(&repo_root) {
+                bail!("skillpack.toml: post_install script escapes the repository");
+            }
+        }
+    }
 
     Ok(Some(manifest))
+}
+
+fn resolve_pack_skill_source(repo_dir: &Path, relative: &str) -> Result<PathBuf> {
+    validate_pack_relative_path(relative)
+        .with_context(|| format!("unsafe pack Skill path: {relative:?}"))?;
+    let repo_root = std::fs::canonicalize(repo_dir)
+        .with_context(|| format!("Failed to resolve pack repo '{}'", repo_dir.display()))?;
+    let source = std::fs::canonicalize(repo_root.join(relative))
+        .with_context(|| format!("Pack Skill path does not exist: {relative:?}"))?;
+    if !source.starts_with(&repo_root) {
+        bail!("pack Skill path escapes its repository: {relative:?}");
+    }
+    Ok(source)
 }
 
 // ── Install ──────────────────────────────────────────────────────────
@@ -215,7 +326,7 @@ pub fn install_pack(repo_dir: &Path, source: &str, repo_url: &str) -> Result<Vec
     std::fs::create_dir_all(&hub).context("Failed to create hub skills directory")?;
 
     // Check for existing pack with same name
-    let mut store = load_store();
+    let mut store = load_store_strict()?;
     if store.packs.iter().any(|p| p.name == manifest.name) {
         bail!(
             "Pack '{}' is already installed. Remove it first with 'skillstar pack remove {}'",
@@ -224,34 +335,81 @@ pub fn install_pack(repo_dir: &Path, source: &str, repo_url: &str) -> Result<Vec
         );
     }
 
+    // Validate complete baselines before any hub entry is replaced. A snapshot
+    // failure must leave every previously usable Skill untouched.
+    let baselines: Vec<(String, String)> = manifest
+        .skills
+        .iter()
+        .map(|skill| {
+            let source = resolve_pack_skill_source(repo_dir, &skill.path)?;
+            let hash = crate::content::snapshot_path(&skill.name, &source)
+                .with_context(|| {
+                    format!("Failed to capture content baseline for '{}'", skill.name)
+                })?
+                .content_hash;
+            Ok((skill.name.clone(), hash))
+        })
+        .collect::<Result<_>>()?;
+
+    // Load every persisted input before changing hub links. A malformed or
+    // unreadable lockfile must fail closed without a partial pack install.
+    let _lock2 = crate::lockfile::get_mutex()
+        .lock()
+        .map_err(|_| anyhow!("Lockfile mutex poisoned"))?;
+    let lf_path = crate::lockfile::lockfile_path();
+    let previous_lockfile = std::fs::read(&lf_path).ok();
+    let mut lf = crate::lockfile::Lockfile::load(&lf_path)?;
+
     // Stage all skills to temp dirs
-    let mut staged: Vec<(String, PathBuf, PathBuf)> = Vec::new(); // (name, temp_dir, target_dir)
+    // (name, temp_dir, target_dir, previous symlink target)
+    let mut staged: Vec<(String, PathBuf, PathBuf, Option<PathBuf>)> = Vec::new();
     let mut installed_names = Vec::new();
 
-    for skill in &manifest.skills {
-        let src_path = repo_dir.join(&skill.path);
+    for (index, skill) in manifest.skills.iter().enumerate() {
+        let src_path = resolve_pack_skill_source(repo_dir, &skill.path)?;
         let target_dir = hub.join(&skill.name);
-        let temp_dir = hub.join(format!(".importing-pack-{}-{}", manifest.name, skill.name));
+        let temp_dir = hub.join(format!(".importing-pack-{index}"));
 
         // Clean stale temp dir if exists
-        if temp_dir.exists() {
-            let _ = std::fs::remove_dir_all(&temp_dir);
+        if temp_dir.symlink_metadata().is_ok()
+            && let Err(error) = skillstar_core::infra::fs_ops::remove_link_or_copy(&temp_dir)
+        {
+            rollback_pack_links(&staged, 0);
+            return Err(error).with_context(|| {
+                format!(
+                    "Failed to clear stale pack staging '{}'",
+                    temp_dir.display()
+                )
+            });
         }
 
         // Stage: symlink temp_dir → src_path (same pattern as repo_scanner.rs:710)
-        skillstar_core::infra::fs_ops::create_symlink(&src_path, &temp_dir)
-            .with_context(|| format!("Failed to stage skill '{}' for pack", skill.name))?;
+        if let Err(error) = skillstar_core::infra::fs_ops::create_symlink(&src_path, &temp_dir) {
+            rollback_pack_links(&staged, 0);
+            return Err(error)
+                .with_context(|| format!("Failed to stage skill '{}' for pack", skill.name));
+        }
 
-        staged.push((skill.name.clone(), temp_dir, target_dir));
+        let previous_target = if skillstar_core::infra::fs_ops::is_link(&target_dir) {
+            Some(
+                skillstar_core::infra::fs_ops::read_link_resolved(&target_dir).with_context(
+                    || format!("Failed to record existing Skill link '{}'", skill.name),
+                )?,
+            )
+        } else {
+            None
+        };
+
+        staged.push((skill.name.clone(), temp_dir, target_dir, previous_target));
     }
 
     // Validate: check for conflicts with existing skills
-    for (name, _temp_dir, target_dir) in &staged {
+    for (name, _temp_dir, target_dir, _) in &staged {
         if target_dir.exists() && !skillstar_core::infra::fs_ops::is_link(target_dir) {
             // Existing non-symlink skill conflicts — abort
             // Clean up all staged temp dirs
-            for (_, td, _) in &staged {
-                let _ = skillstar_core::infra::fs_ops::remove_symlink(td);
+            for (_, td, _, _) in &staged {
+                let _ = skillstar_core::infra::fs_ops::remove_link_or_copy(td);
             }
             bail!(
                 "Skill '{}' already exists in hub (not a symlink). Remove it before installing pack '{}'.",
@@ -262,8 +420,8 @@ pub fn install_pack(repo_dir: &Path, source: &str, repo_url: &str) -> Result<Vec
     }
 
     // Rename all temp dirs to target dirs (atomic-ish, same as skill_bundle.rs)
-    let mut renamed = Vec::new();
-    for (name, temp_dir, target_dir) in &staged {
+    let mut renamed_count = 0usize;
+    for (name, temp_dir, target_dir, _) in &staged {
         // Remove existing symlink if present
         if skillstar_core::infra::fs_ops::is_link(target_dir) || target_dir.exists() {
             if skillstar_core::infra::fs_ops::is_link(target_dir) {
@@ -275,36 +433,25 @@ pub fn install_pack(repo_dir: &Path, source: &str, repo_url: &str) -> Result<Vec
 
         match std::fs::rename(temp_dir, target_dir) {
             Ok(()) => {
-                renamed.push(target_dir.clone());
+                renamed_count += 1;
                 installed_names.push(name.clone());
             }
             Err(e) => {
-                // Best-effort cleanup of already-renamed dirs
-                for dir in &renamed {
-                    let _ = std::fs::remove_dir(dir);
-                }
-                // Clean remaining temp dirs
-                for (_, td, _) in &staged {
-                    let _ = std::fs::remove_dir(td);
-                }
+                // The current target may already have had its previous link
+                // removed, so include it in the restoration set.
+                rollback_pack_links(&staged, renamed_count + 1);
                 bail!(
                     "Failed to install skill '{}' for pack '{}': {}. Rolled back {} skills.",
                     name,
                     manifest.name,
                     e,
-                    renamed.len()
+                    renamed_count
                 );
             }
         }
     }
 
     // Update lockfile for each installed skill
-    let _lock2 = crate::lockfile::get_mutex()
-        .lock()
-        .map_err(|_| anyhow!("Lockfile mutex poisoned"))?;
-    let lf_path = crate::lockfile::lockfile_path();
-    let mut lf = crate::lockfile::Lockfile::load(&lf_path)?;
-
     let cache_dir_name = crate::repo_scanner::cache_dir_name(source);
     let tree_hash = crate::git::ops::compute_tree_hash(repo_dir).unwrap_or_default();
 
@@ -314,19 +461,26 @@ pub fn install_pack(repo_dir: &Path, source: &str, repo_url: &str) -> Result<Vec
         } else {
             Some(skill.path.clone())
         };
+        let content_hash = baselines
+            .iter()
+            .find(|(name, _)| name == &skill.name)
+            .map(|(_, hash)| hash.clone())
+            .expect("every manifest Skill was preflighted");
         lf.upsert(crate::lockfile::LockEntry {
             name: skill.name.clone(),
             git_url: repo_url.to_string(),
             git_ref: None,
             tree_hash: tree_hash.clone(),
-            content_hash: crate::content::snapshot(&skill.name)
-                .ok()
-                .map(|snapshot| snapshot.content_hash),
+            content_hash: Some(content_hash),
+            content_hash_version: Some(crate::content::SNAPSHOT_HASH_VERSION),
             installed_at: chrono::Utc::now().to_rfc3339(),
             source_folder,
         });
     }
-    lf.save(&lf_path)?;
+    if let Err(error) = lf.save(&lf_path) {
+        rollback_pack_links(&staged, renamed_count);
+        return Err(error).context("Failed to save lockfile while installing pack");
+    }
 
     // Write pack entry to packs.json
     let now = chrono::Utc::now().to_rfc3339();
@@ -353,14 +507,29 @@ pub fn install_pack(repo_dir: &Path, source: &str, repo_url: &str) -> Result<Vec
         last_error: None,
     };
     store.packs.push(pack_entry);
-    save_store(&store)?;
+    if let Err(error) = save_store(&store) {
+        restore_persisted_file(&lf_path, previous_lockfile.as_deref());
+        rollback_pack_links(&staged, renamed_count);
+        return Err(error).context("Failed to save pack registry; installation was rolled back");
+    }
 
     // Execute post_install if present
     if let Some(ref post_install) = manifest.post_install {
         let script_path = repo_dir.join(&post_install.script);
         if script_path.exists() {
             let result = execute_post_install(&script_path, repo_dir, post_install.timeout_secs);
-            let mut store = load_store();
+            let mut store = match load_store_strict() {
+                Ok(store) => store,
+                Err(error) => {
+                    tracing::warn!(
+                        pack = %manifest.name,
+                        error = %error,
+                        "pack installed but post-install registry could not be reloaded"
+                    );
+                    crate::installed_skill::invalidate_cache();
+                    return Ok(installed_names);
+                }
+            };
             if let Some(entry) = store.packs.iter_mut().find(|p| p.name == manifest.name) {
                 entry.post_install = Some(PostInstallResult {
                     last_exit_code: result,
@@ -371,7 +540,13 @@ pub fn install_pack(repo_dir: &Path, source: &str, repo_url: &str) -> Result<Vec
                     entry.last_error =
                         Some(format!("post_install script exited with code {}", result));
                 }
-                save_store(&store)?;
+                if let Err(error) = save_store(&store) {
+                    tracing::warn!(
+                        pack = %manifest.name,
+                        error = %error,
+                        "pack installed but post-install result could not be persisted"
+                    );
+                }
             }
         }
     }
@@ -380,6 +555,25 @@ pub fn install_pack(repo_dir: &Path, source: &str, repo_url: &str) -> Result<Vec
     crate::installed_skill::invalidate_cache();
 
     Ok(installed_names)
+}
+
+fn rollback_pack_links(
+    staged: &[(String, PathBuf, PathBuf, Option<PathBuf>)],
+    renamed_count: usize,
+) {
+    for (_, _, target, previous_target) in staged.iter().take(renamed_count).rev() {
+        if target.symlink_metadata().is_ok() {
+            let _ = skillstar_core::infra::fs_ops::remove_link_or_copy(target);
+        }
+        if let Some(previous_target) = previous_target {
+            let _ = skillstar_core::infra::fs_ops::create_symlink(previous_target, target);
+        }
+    }
+    for (_, temp, _, _) in staged {
+        if temp.symlink_metadata().is_ok() {
+            let _ = skillstar_core::infra::fs_ops::remove_link_or_copy(temp);
+        }
+    }
 }
 
 /// Which interpreter `execute_post_install` will use for a given script, given
@@ -486,275 +680,8 @@ fn execute_post_install(script: &Path, working_dir: &Path, _timeout_secs: u64) -
     }
 }
 
-// ── Remove ───────────────────────────────────────────────────────────
-
-/// Remove an installed pack by name.
-/// Cleans symlinks from hub, removes lockfile entries, updates packs.json.
-/// Does NOT delete the repo cache (allows reinstall without re-clone).
-pub fn remove_pack(name: &str) -> Result<Vec<String>> {
-    let _lock = get_mutex()
-        .lock()
-        .map_err(|_| anyhow!("Pack store mutex poisoned"))?;
-
-    let mut store = load_store();
-    let pack_idx = store
-        .packs
-        .iter()
-        .position(|p| p.name == name)
-        .ok_or_else(|| anyhow!("Pack '{}' not found", name))?;
-
-    let pack = &store.packs[pack_idx];
-    let hub = skillstar_core::infra::paths::hub_skills_dir();
-    let mut removed = Vec::new();
-
-    for skill in &pack.skills {
-        let skill_path = hub.join(&skill.name);
-        if skillstar_core::infra::fs_ops::is_link(&skill_path) || skill_path.exists() {
-            if skillstar_core::infra::fs_ops::is_link(&skill_path) {
-                match skillstar_core::infra::fs_ops::remove_symlink(&skill_path) {
-                    Ok(()) => removed.push(skill.name.clone()),
-                    Err(e) => {
-                        tracing::warn!("Failed to remove skill symlink '{}': {}", skill.name, e);
-                    }
-                }
-            } else {
-                match std::fs::remove_dir_all(&skill_path) {
-                    Ok(()) => removed.push(skill.name.clone()),
-                    Err(e) => {
-                        tracing::warn!("Failed to remove skill dir '{}': {}", skill.name, e);
-                    }
-                }
-            }
-        }
-    }
-
-    // Remove from lockfile
-    let _lock2 = crate::lockfile::get_mutex()
-        .lock()
-        .map_err(|_| anyhow!("Lockfile mutex poisoned"))?;
-    let lf_path = crate::lockfile::lockfile_path();
-    let mut lf = crate::lockfile::Lockfile::load(&lf_path)?;
-    for skill in &pack.skills {
-        lf.remove(&skill.name);
-    }
-    lf.save(&lf_path)?;
-
-    // Remove from packs.json
-    store.packs.remove(pack_idx);
-    save_store(&store)?;
-
-    // Invalidate cache
-    crate::installed_skill::invalidate_cache();
-
-    Ok(removed)
-}
-
-// ── List ─────────────────────────────────────────────────────────────
-
-/// List all installed packs.
-pub fn list_packs() -> Vec<PackEntry> {
-    load_store().packs
-}
-
-// ── Doctor ───────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DoctorReport {
-    pub pack_name: String,
-    pub version: String,
-    pub overall_healthy: bool,
-    pub checks: Vec<DoctorCheck>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DoctorCheck {
-    pub name: String,
-    pub passed: bool,
-    pub message: Option<String>,
-}
-
-fn resolve_repo_cache_path(pack: &PackEntry) -> PathBuf {
-    let configured = pack.repo_cache_path.trim();
-    let hub_root = skillstar_core::infra::paths::hub_root();
-    let direct = hub_root.join(configured);
-    if direct.exists() {
-        return direct;
-    }
-
-    if let Some(suffix) = configured.strip_prefix(".repos/") {
-        let migrated = skillstar_core::infra::paths::repos_cache_dir().join(suffix);
-        if migrated.exists() {
-            return migrated;
-        }
-    }
-
-    if let Some(suffix) = configured.strip_prefix("repos/") {
-        let current = skillstar_core::infra::paths::repos_cache_dir().join(suffix);
-        if current.exists() {
-            return current;
-        }
-    }
-
-    direct
-}
-
-/// Run health checks on an installed pack.
-pub fn doctor_pack(name: &str) -> Result<DoctorReport> {
-    let store = load_store();
-    let pack = store
-        .packs
-        .iter()
-        .find(|p| p.name == name)
-        .ok_or_else(|| anyhow!("Pack '{}' not found", name))?;
-
-    let hub = skillstar_core::infra::paths::hub_skills_dir();
-    let mut checks = Vec::new();
-    let mut all_healthy = true;
-
-    // Check 1: Every skill has a valid symlink in hub
-    let mut missing_skills = Vec::new();
-    let mut broken_links = Vec::new();
-    for skill in &pack.skills {
-        let skill_path = hub.join(&skill.name);
-        if !skill_path.exists() && !skillstar_core::infra::fs_ops::is_link(&skill_path) {
-            missing_skills.push(skill.name.clone());
-        } else if skillstar_core::infra::fs_ops::is_link(&skill_path) {
-            let broken = match skillstar_core::infra::fs_ops::read_link_resolved(&skill_path) {
-                Ok(p) => !p.exists(),
-                Err(_) => true,
-            };
-            if broken {
-                broken_links.push(skill.name.clone());
-            }
-        }
-    }
-    checks.push(DoctorCheck {
-        name: "skill_symlinks".into(),
-        passed: missing_skills.is_empty() && broken_links.is_empty(),
-        message: if !missing_skills.is_empty() {
-            all_healthy = false;
-            Some(format!("Missing skills: {}", missing_skills.join(", ")))
-        } else if !broken_links.is_empty() {
-            all_healthy = false;
-            Some(format!("Broken symlinks: {}", broken_links.join(", ")))
-        } else {
-            Some(format!("All {} skill symlinks valid", pack.skills.len()))
-        },
-    });
-
-    // Check 2: Repo cache exists and skillpack.toml readable
-    let repo_path = resolve_repo_cache_path(pack);
-    let toml_path = repo_path.join("skillpack.toml");
-    let repo_ok = repo_path.exists() && toml_path.exists();
-    checks.push(DoctorCheck {
-        name: "repo_cache".into(),
-        passed: repo_ok,
-        message: if repo_ok {
-            Some("Repo cache and skillpack.toml accessible".into())
-        } else {
-            all_healthy = false;
-            Some("Repo cache or skillpack.toml missing".into())
-        },
-    });
-
-    // Check 3: post_install last exit code
-    if let Some(ref pi) = pack.post_install {
-        checks.push(DoctorCheck {
-            name: "post_install".into(),
-            passed: pi.last_exit_code == 0,
-            message: Some(format!(
-                "Last exit code: {} (run at {})",
-                pi.last_exit_code, pi.last_run_at
-            )),
-        });
-        if pi.last_exit_code != 0 {
-            all_healthy = false;
-        }
-    }
-
-    // Check 4: Pack status
-    checks.push(DoctorCheck {
-        name: "pack_status".into(),
-        passed: pack.status == PackStatus::Installed,
-        message: Some(format!("Status: {:?}", pack.status)),
-    });
-    if pack.status != PackStatus::Installed {
-        all_healthy = false;
-    }
-
-    // Check 5: Error message if any
-    if let Some(ref err) = pack.last_error {
-        all_healthy = false;
-        checks.push(DoctorCheck {
-            name: "last_error".into(),
-            passed: false,
-            message: Some(err.clone()),
-        });
-    }
-
-    Ok(DoctorReport {
-        pack_name: pack.name.clone(),
-        version: pack.version.clone(),
-        overall_healthy: all_healthy,
-        checks,
-    })
-}
-
-/// Run doctor on all installed packs.
-pub fn doctor_all() -> Vec<DoctorReport> {
-    let store = load_store();
-    store
-        .packs
-        .iter()
-        .filter_map(|p| doctor_pack(&p.name).ok())
-        .collect()
-}
-
+mod management;
+pub use management::{DoctorCheck, DoctorReport, doctor_all, doctor_pack, list_packs, remove_pack};
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// On non-Windows the interpreter is always `sh`, regardless of the script
-    /// extension (matches the historical behaviour). On Windows the extension
-    /// drives the choice so a pack that ships `post_install.ps1` actually runs
-    /// instead of failing on a missing `sh`.
-    #[test]
-    fn post_install_interpreter_matches_platform_and_extension() {
-        #[cfg(not(windows))]
-        {
-            for ext in ["ps1", "bat", "cmd", "sh", ""] {
-                assert_eq!(
-                    post_install_interpreter(ext),
-                    PostInstallInterpreter::Sh,
-                    "extension {ext:?} should map to sh on non-windows"
-                );
-            }
-        }
-
-        #[cfg(windows)]
-        {
-            assert_eq!(
-                post_install_interpreter("ps1"),
-                PostInstallInterpreter::PowerShell
-            );
-            assert_eq!(post_install_interpreter("bat"), PostInstallInterpreter::Cmd);
-            assert_eq!(post_install_interpreter("cmd"), PostInstallInterpreter::Cmd);
-            // Extensionless / `.sh` falls back to sh so Git Bash can run it.
-            assert_eq!(post_install_interpreter("sh"), PostInstallInterpreter::Sh);
-            assert_eq!(post_install_interpreter(""), PostInstallInterpreter::Sh);
-        }
-    }
-
-    /// The chosen interpreter must advertise a concrete program name so
-    /// `command_with_path` has something to launch.
-    #[test]
-    fn every_interpreter_has_a_program() {
-        for interp in [
-            PostInstallInterpreter::Sh,
-            PostInstallInterpreter::PowerShell,
-            PostInstallInterpreter::Cmd,
-        ] {
-            assert!(!interp.program().is_empty());
-        }
-    }
-}
+#[path = "skill_pack/tests.rs"]
+mod tests;

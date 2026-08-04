@@ -9,7 +9,12 @@ use skillstar_skills::lockfile;
 use skillstar_skills::skill_install;
 use skillstar_skills::skill_pack;
 use skillstar_skills::skill_update;
+use std::collections::{BTreeSet, VecDeque};
 use std::io::{self, IsTerminal, Write};
+
+fn is_user_hub_entry(name: &str) -> bool {
+    !name.starts_with('.')
+}
 
 pub fn cmd_update(name: Option<&str>) {
     let lock_path = lockfile::lockfile_path();
@@ -21,18 +26,35 @@ pub fn cmd_update(name: Option<&str>) {
         }
     };
 
+    let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
     let names: Vec<String> = match name {
-        Some(name) => lockfile
-            .skills
-            .iter()
-            .filter(|entry| entry.name == name)
-            .map(|entry| entry.name.clone())
-            .collect(),
-        None => lockfile
-            .skills
-            .iter()
-            .map(|entry| entry.name.clone())
-            .collect(),
+        Some(name)
+            if is_user_hub_entry(name)
+                && (lockfile.skills.iter().any(|entry| entry.name == name)
+                    || (hub_dir.join(name).symlink_metadata().is_ok()
+                        && !local_skill::is_local_skill(name))) =>
+        {
+            vec![name.to_string()]
+        }
+        Some(_) => Vec::new(),
+        None => {
+            let mut names: BTreeSet<String> = lockfile
+                .skills
+                .iter()
+                .map(|entry| entry.name.clone())
+                .collect();
+            if let Ok(entries) = std::fs::read_dir(&hub_dir) {
+                for entry in entries.flatten() {
+                    let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+                        continue;
+                    };
+                    if is_user_hub_entry(&name) && !local_skill::is_local_skill(&name) {
+                        names.insert(name);
+                    }
+                }
+            }
+            names.into_iter().collect()
+        }
     };
 
     if names.is_empty() {
@@ -40,24 +62,140 @@ pub fn cmd_update(name: Option<&str>) {
         return;
     }
 
-    // Goes through the same transaction the GUI uses. Pulling the checkout by
-    // hand — as this used to — skips the lockfile hash write, the sibling
-    // fan-out, the agent relink and the project cascade, so a CLI update left
-    // the install in a different state than a GUI update of the same skill.
-    for name in &names {
-        print!("Updating '{}'... ", name);
-        let _ = io::stdout().flush();
-        match skill_update::update_skill(name) {
+    // Goes through the same batch transaction and divergence contract as the
+    // GUI. A terminal can resolve blocked Skills interactively; redirected
+    // automation remains fail-closed and never guesses whether to discard.
+    let report = skill_update::update_skills(&names);
+    let mut had_failure = !report.failed.is_empty();
+    for result in &report.updated {
+        print_update_result(result);
+    }
+    for failure in &report.failed {
+        eprintln!("✗ Failed to update '{}': {}", failure.name, failure.error);
+    }
+
+    if report.blocked.is_empty() {
+        if had_failure {
+            std::process::exit(1);
+        }
+        return;
+    }
+    if !io::stdin().is_terminal() {
+        for blocked in &report.blocked {
+            eprintln!(
+                "✗ '{}' has local changes; rerun in an interactive terminal to preserve them as '{}' or explicitly discard them.",
+                blocked.name, blocked.suggested_local_name
+            );
+            if let Some(error) = &blocked.error {
+                eprintln!("  Cause: {error}");
+            }
+        }
+        std::process::exit(1);
+    }
+
+    let mut pending: VecDeque<_> = report.blocked.into();
+    let mut moved = BTreeSet::new();
+    while let Some(original) = pending.pop_front() {
+        if moved.contains(&original.name) {
+            continue;
+        }
+
+        let current = skill_update::update_skills(std::slice::from_ref(&original.name));
+        if let Some(result) = current.updated.first() {
+            record_update_result(result, &mut moved);
+            continue;
+        }
+        if let Some(failure) = current.failed.first() {
+            had_failure = true;
+            eprintln!("✗ Failed to update '{}': {}", failure.name, failure.error);
+            continue;
+        }
+        let Some(blocked) = current.blocked.first().cloned() else {
+            continue;
+        };
+        let Some(resolution) = prompt_divergence_resolution(&blocked) else {
+            println!("Cancelled update for '{}'.", blocked.name);
+            had_failure = true;
+            moved.extend(current.blocked.iter().map(|item| item.name.clone()));
+            continue;
+        };
+
+        match skill_update::resolve_skill_update(&blocked.name, resolution) {
             Ok(result) => {
-                println!("✓ updated");
-                for sibling in &result.siblings_cleared {
-                    println!("  ↳ {} refreshed (same repository)", sibling);
+                if let Some(local_copy) = result.local_copy {
+                    println!("✓ Preserved local copy as '{}'", local_copy.name);
                 }
-                for failure in &result.agent_link_failures {
-                    eprintln!("  ! agent relink failed: {}", failure);
+                if let Some(update) = result.update {
+                    record_update_result(&update, &mut moved);
+                } else {
+                    for remaining in result.remaining_blocked {
+                        if !pending.iter().any(|item| item.name == remaining.name) {
+                            pending.push_front(remaining);
+                        }
+                    }
                 }
             }
-            Err(e) => println!("✗ {:#}", e),
+            Err(error) => {
+                had_failure = true;
+                eprintln!("✗ Failed to resolve '{}': {error:#}", blocked.name);
+            }
+        }
+    }
+    if had_failure {
+        std::process::exit(1);
+    }
+}
+
+fn print_update_result(result: &skill_update::UpdateResult) {
+    println!("✓ Updated '{}'", result.skill.name);
+    for sibling in &result.siblings_cleared {
+        println!("  ↳ {} refreshed (same checkout)", sibling);
+    }
+    for failure in &result.agent_link_failures {
+        eprintln!("  ! agent relink failed: {}", failure);
+    }
+}
+
+fn record_update_result(result: &skill_update::UpdateResult, moved: &mut BTreeSet<String>) {
+    print_update_result(result);
+    moved.insert(result.skill.name.clone());
+    moved.extend(result.siblings_cleared.iter().cloned());
+}
+
+fn prompt_divergence_resolution(
+    blocked: &skill_update::SkillUpdateBlocked,
+) -> Option<skill_update::LocalDivergenceResolution> {
+    println!("'{}' has local changes; update is paused.", blocked.name);
+    if let Some(error) = &blocked.error {
+        println!("Cause: {error}");
+    }
+    loop {
+        print!("Preserve as local copy, discard changes, or cancel? [p/d/c] ");
+        let _ = io::stdout().flush();
+        let mut choice = String::new();
+        if io::stdin().read_line(&mut choice).ok()? == 0 {
+            return None;
+        }
+        match choice.trim().to_ascii_lowercase().as_str() {
+            "p" | "preserve" => {
+                print!("Local copy name [{}]: ", blocked.suggested_local_name);
+                let _ = io::stdout().flush();
+                let mut name = String::new();
+                io::stdin().read_line(&mut name).ok()?;
+                let name = name.trim();
+                return Some(skill_update::LocalDivergenceResolution::Preserve {
+                    local_name: if name.is_empty() {
+                        blocked.suggested_local_name.clone()
+                    } else {
+                        name.to_string()
+                    },
+                });
+            }
+            "d" | "discard" => {
+                return Some(skill_update::LocalDivergenceResolution::Discard);
+            }
+            "c" | "cancel" => return None,
+            _ => println!("Enter p, d, or c."),
         }
     }
 }
@@ -65,7 +203,13 @@ pub fn cmd_update(name: Option<&str>) {
 pub fn cmd_remove(opts: RemoveOpts<'_>) {
     let targets: Vec<String> = if opts.all {
         let lock_path = lockfile::lockfile_path();
-        let lockfile = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
+        let lockfile = match lockfile::Lockfile::load(&lock_path) {
+            Ok(lockfile) => lockfile,
+            Err(error) => {
+                eprintln!("✗ Error reading lockfile: {error}");
+                std::process::exit(1);
+            }
+        };
         let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
         let mut names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         for entry in &lockfile.skills {
@@ -74,7 +218,9 @@ pub fn cmd_remove(opts: RemoveOpts<'_>) {
         if let Ok(dir_entries) = std::fs::read_dir(&hub_dir) {
             for entry in dir_entries.flatten() {
                 if let Some(name) = entry.file_name().to_str() {
-                    names.insert(name.to_string());
+                    if is_user_hub_entry(name) {
+                        names.insert(name.to_string());
+                    }
                 }
             }
         }

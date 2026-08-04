@@ -15,6 +15,7 @@ import { navigateToSettingsSection } from "../../../lib/utils";
 import type { RepoNewSkill, Skill, SkillUpdateBlocked, SkillUpdateReport, SortOption } from "../../../types";
 import { useSkillCards } from "../hooks/useSkillCards";
 import { useSkills } from "../hooks/useSkills";
+import { reconcileBlockedUpdates } from "../lib/localDivergenceQueue";
 import { AiPickSkillsModal } from "./AiPickSkillsModal";
 import { CreateGroupModal } from "./CreateGroupModal";
 import { DeployToProjectModal } from "./DeployToProjectModal";
@@ -106,6 +107,13 @@ export function LocalSkillsContent({
   const [blockedUpdates, setBlockedUpdates] = useState<SkillUpdateBlocked[]>([]);
   const [resolvingDivergence, setResolvingDivergence] = useState(false);
   const [divergenceError, setDivergenceError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSelectedSkill((current) => {
+      if (!current) return null;
+      return skills.find((skill) => skill.name === current.name) ?? current;
+    });
+  }, [skills]);
 
   const localCount = useMemo(() => skills.filter((s) => s.skill_type === "local").length, [skills]);
   const pendingUpdateCount = useMemo(() => skills.filter((skill) => skill.update_available).length, [skills]);
@@ -466,7 +474,7 @@ export function LocalSkillsContent({
     async (names: string[], setBusy: (busy: boolean) => void) => {
       if (names.length === 0) {
         toast.info(t("mySkills.noUpdates"));
-        return;
+        return true;
       }
 
       setBusy(true);
@@ -481,6 +489,11 @@ export function LocalSkillsContent({
           setSelectedSkill(refreshed.skill);
         }
         reportBatchUpdate(report);
+        return true;
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        toast.error(reason ? `${t("mySkills.updateFailed")}: ${reason}` : t("mySkills.updateFailed"));
+        return false;
       } finally {
         setBusy(false);
       }
@@ -489,8 +502,9 @@ export function LocalSkillsContent({
   );
 
   const handleBatchUpdate = useCallback(async () => {
-    await runBatchUpdate(updatableNamesAmong(selectedSkillNames), setBatchLoading);
-    clearSelection();
+    if (await runBatchUpdate(updatableNamesAmong(selectedSkillNames), setBatchLoading)) {
+      clearSelection();
+    }
   }, [clearSelection, runBatchUpdate, selectedSkillNames, updatableNamesAmong]);
 
   const handleUpdateAll = useCallback(
@@ -506,8 +520,11 @@ export function LocalSkillsContent({
       setDivergenceError(null);
       try {
         const result = await resolveSkillUpdate(blocked.name, resolution);
-        setSelectedSkill((current) => (current?.name === result.update.skill.name ? result.update.skill : current));
-        setBlockedUpdates((current) => current.slice(1));
+        const update = result.update;
+        if (update) {
+          setSelectedSkill((current) => (current?.name === update.skill.name ? update.skill : current));
+        }
+        setBlockedUpdates((current) => reconcileBlockedUpdates(current, blocked.name, result));
       } catch (error) {
         setDivergenceError(error instanceof Error ? error.message : String(error));
       } finally {

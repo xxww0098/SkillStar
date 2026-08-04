@@ -60,8 +60,9 @@ export interface SkillUpdateBlocked {
 export type LocalDivergenceResolution = { kind: "preserve"; local_name: string } | { kind: "discard" };
 
 export interface ResolveSkillUpdateResult {
-  update: UpdateResult;
+  update: UpdateResult | null;
   local_copy: Skill | null;
+  remaining_blocked: SkillUpdateBlocked[];
 }
 
 /** Return type of the `update_skills` batch command. `skipped` names were not

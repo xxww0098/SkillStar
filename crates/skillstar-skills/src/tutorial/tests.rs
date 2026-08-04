@@ -9,6 +9,7 @@ fn snapshot(hash: &str, body: &[u8]) -> SkillSnapshot {
         files: vec![SkillSnapshotFile {
             relative_path: "SKILL.md".to_string(),
             kind: SnapshotFileKind::Regular,
+            executable: false,
             content: body.to_vec(),
         }],
         total_bytes: body.len() as u64,

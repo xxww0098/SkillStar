@@ -34,7 +34,7 @@ interface PublisherDetailProps {
 export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const { installSkill, updateSkill, uninstallSkill, pendingUpdateNames } = useSkills();
+  const { skills: installedSkills, installSkill, updateSkill, uninstallSkill, pendingUpdateNames } = useSkills();
   const [activeRepo, setActiveRepo] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
@@ -46,6 +46,14 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
   // publisher/repo triggers a background sync. Re-arm whenever the key changes.
   const publisherReposStaleTriggeredFor = useRef<string | null>(null);
   const repoSkillsStaleTriggeredFor = useRef<string | null>(null);
+
+  useEffect(() => {
+    setSelectedSkill((current) => {
+      if (!current) return null;
+      const installed = installedSkills.find((skill) => skill.name === current.name);
+      return installed ? { ...current, ...installed } : current;
+    });
+  }, [installedSkills]);
 
   useEffect(() => {
     setActiveRepo(null);

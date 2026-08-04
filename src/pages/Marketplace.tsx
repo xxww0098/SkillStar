@@ -76,7 +76,7 @@ export function Marketplace({
     fetchOfficialPublishers,
     patchSkill,
   } = useMarketplace();
-  const { installSkill, updateSkill, uninstallSkill, pendingUpdateNames } = useSkills();
+  const { skills: installedSkills, installSkill, updateSkill, uninstallSkill, pendingUpdateNames } = useSkills();
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("stars-desc");
   const [viewMode, setViewMode] = useViewMode("grid");
@@ -103,6 +103,14 @@ export function Marketplace({
   const scrollRef = useRef<HTMLDivElement>(null);
   /** Skills currently being installed (for per-card loading state) */
   const [installingNames, setInstallingNames] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    setSelectedSkill((current) => {
+      if (!current) return null;
+      const installed = installedSkills.find((skill) => skill.name === current.name);
+      return installed ? { ...current, ...installed } : current;
+    });
+  }, [installedSkills]);
 
   // Tab change
   useEffect(() => {

@@ -13,7 +13,7 @@
 - 技能组部署的“补全 Marketplace 来源 → 安装缺失技能 → 同步 Project”由 `skillstar-app::skill_group_deploy` 编排，command 与单域 crate 都不复制该事务。
 - `skillstar-skills::content` 是技能内容读取、文件枚举、本地创建/删除和嵌套内容目录解析的 facade；Tauri command 不直接组合 hub path、lockfile、Git checkout 与 cache invalidation。
 - `skillstar-skills::content` 同时产出教程生成使用的只读 Skill 快照：有效内容根、递归文件清单和确定性内容 hash。`skillstar-skills::tutorial` 拥有 HTML 安全/覆盖校验、freshness 和 artifact 持久化；ACP 子进程与会话编排属于 `src-tauri/src/core/` 的桌面胶水，command 只转发 DTO 和事件。
-- `skillstar-skills::skill_update` 拥有 update 事务，`update_skill` 返回完整公开结果，command 不再从底层 update outcome 二次拼装 `Skill` DTO。批量入口 `update_skills` 拥有「同 repo 的技能一次 update 覆盖」这条规则；前端和 CLI 都不重复按 `git_url` 分组。
+- `skillstar-skills::skill_update` 拥有 update 事务，`update_skill` 返回完整公开结果，command 不再从底层 update outcome 二次拼装 `Skill` DTO。批量入口 `update_skills` 按物理 checkout 合并更新；相同 URL 的独立 clone 或不同 ref cache 不得误判为共享 checkout。
 - `skillstar-skills::update_state` 是 `update_available` 的唯一所有者。批量 refresh、patrol 和 update 完成都写穿它；陈旧判定在该 module 内解决，UI 不再自行挡竞态。
 - `skillstar-skills::repo_link` 拥有「hub 条目是否为 repo cache 链接、其 repo root 在哪」的判定；update 检测与 update 应用不得各自解析 symlink/junction。
 - 本地目录 adoption、share-code 安装和 deploy-status 检查同样由 Skills 域公开 use case 完成；command 只保留 blocking 调度与 `AppError` 适配。
@@ -31,10 +31,11 @@
 - 与 `vercel-labs/skills` 兼容的 Agent 共用项目级 `.agents/skills`。共享目录是 universal install surface；Agent 归属只用于 UI/manifest，不得重复部署或让一个 Agent 的移除误删另一个仍在使用的共享目录。
 - update 使用 staged swap；刷新失败不得先删除用户现有可用 link/copy。失败按 Agent 聚合并显式返回。
 - Git-backed Skill 安装或成功更新后记录完整受管内容的 baseline hash。更新开始前必须重新计算当前完整目录 hash；若与 baseline 不同，则将该 Skill 标记为“本地分歧”并在任何 fetch/reset、lockfile 写入或部署变更之前停止。
-- 本地分歧只能由用户显式解决：一是把当前完整内容保留为独立本地副本后继续更新，二是丢弃修改后继续更新。默认副本名为 `<原名>.local`，允许编辑；名称冲突时提出 `.local.2` 等非破坏性候选。是否为本地 Skill 只由存储位置与 provenance/type 决定，不解析名称后缀。
-- 完整内容 hash 与保留副本覆盖 `SKILL.md`、scripts、templates、references、assets 及其他受管文件，同时排除 `.git`、SkillStar 自有状态和操作系统临时文件。共享同一 repo checkout 的任一已安装 Skill 存在本地分歧时，该次 repo pull 必须整体停在写入之前，避免兄弟 Skill 被间接 reset。
+- `lock.json` 当前 schema 为 v5，并显式记录完整内容 hash 算法版本；旧版、缺失、损坏或未来版本的 baseline 一律 fail-closed，不把未知状态推断为“未修改”。
+- 本地分歧只能由用户显式解决：一是把当前完整内容保留为独立本地副本后继续更新，二是清理 tracked、untracked 与 ignored 的受管修改后继续更新。默认副本名为 `<原名>.local`，允许编辑；名称冲突时提出 `.local.2` 等非破坏性候选。是否为本地 Skill 只由存储位置与 provenance/type 决定，不解析名称后缀。所有页面的单 Skill 更新入口共享同一个选择对话框；CLI 在交互终端提供同样的保留/丢弃/跳过选择，非交互输入保持 fail-closed。
+- 完整内容 hash 与保留副本覆盖 `SKILL.md`、scripts、templates、references、assets、Unix executable 状态及其他受管文件，同时排除 `.git`、SkillStar 自有状态和操作系统临时文件。分歧检测严格只读，不得为 lazy worktree 触发 checkout。共享同一 repo checkout 的任一已安装 Skill 存在本地分歧时，该次 repo pull 必须整体停在写入之前；每次只清理用户已确认的 Skill 子树，整组全部解决后才允许移动 checkout。
 - repo check/update 复用 `~/.skillstar/hub/repos/` cache，远程 HTTP/Git 遵循统一 proxy/mirror 规则。
-- 一次 update 是一个事务：pull、lockfile hash 写入、同 repo 兄弟技能的 hash 扇出、Agent relink、项目 cascade 和 update state 清除必须一起发生。GUI 与 CLI 走同一入口，任何调用方都不得只做 pull。
+- 一次 update 是一个事务：pull、lockfile hash 写入、同 checkout 兄弟技能的 hash 扇出、Agent relink、项目 cascade 和 update state 清除必须走同一入口。pull 后若完整 baseline 或 lockfile 原子保存失败，先恢复旧 Git revision、旧 sparse-checkout 配置与更新前受管内容，再返回失败；`.skillstar`、编辑器临时文件等不属于 baseline 的运行时文件不得被回滚清理。GUI 与 CLI 走同一入口，任何调用方都不得只做 pull。
 - 批量 update 每个 repo 只拉一次；未被拉取但内容随之移动的技能报告为 `skipped`，失败的 repo 把它本会覆盖的全部名字报告为 `failed`，不得计入成功。
 - `update_available` 的判定可能过期：一次扫描开始后若该技能被更新，扫描结果作废。该规则由 `update_state` 按技能名的 revision 裁决，扫描以起始 revision 提交。patrol 事件是通知而非记录，其载荷是已裁决后的状态。
 
@@ -72,7 +73,7 @@
 ## ACP 图文教程
 
 - SKILL.md 翻译入口已移除。已安装 Skill 的详情页提供唯一的“AI 图文教程”入口，阅读器和编辑器只保留原文/编辑与摘要能力；教程只使用 Settings 中显式启用的 ACP Agent。
-- 教程分析对象是当前 Skill 的**整个有效内容目录**，不是只把 `SKILL.md` 文本发给模型。`skillstar-skills::content` 递归枚举目录内的文件，排除不属于 Skill 内容的 `.git`、`.skillstar`、操作系统垃圾和编辑器临时文件，不跟随逃出 Skill 根目录的内部符号链接；确定性 SHA-256 同时覆盖相对路径、文件类型和内容。该文件清单随 prompt 提供，生成结果必须逐项给出覆盖说明。
+- 教程分析对象是当前 Skill 的**整个有效内容目录**，不是只把 `SKILL.md` 文本发给模型。`skillstar-skills::content` 递归枚举目录内的文件，排除不属于 Skill 内容的 `.git`、`.skillstar`、操作系统垃圾和编辑器临时文件，不跟随逃出 Skill 根目录的内部符号链接；确定性 SHA-256 同时覆盖相对路径、文件类型、Unix executable 状态和内容。该文件清单随 prompt 提供，生成结果必须逐项给出覆盖说明。
 - Skill 文件是待分析的不可信资料，不能覆盖系统任务。教程 ACP 会话必须以当前 Skill 的隔离 staging 快照为工作目录，ACP 协议侧只开放根内读文件能力并拒绝 terminal/写入权限，prompt 同时禁止网络和修改；模型必须先核对完整清单，再输出一个自包含 HTML5 文档。用户配置的 ACP 可执行程序仍是本机受信任边界，SkillStar 不把任意外部程序伪装成 OS sandbox。
 - HTML 必须使用当前界面语言，包含基于真实内容的步骤、示例、文件导航、故障排查和至少一个有信息量的内联 SVG 图示；不得虚构未在 Skill 中出现的能力。证据引用使用相对文件路径；推断必须显式标记。
 - Settings → ACP 持久化教程风格，初始提供 `guided`（循序导览，默认）、`reference`（技术手册）与 `workshop`（实战工坊）。三种风格分别使用独立 prompt 片段改变信息组织、示例密度和图示重点，而不是给同一 HTML 换 CSS；风格 id、所选风格在内的完整 prompt bundle hash 与规范化界面语言共同进入 artifact 版本键和 freshness 判定，修改提示词无需依赖人工记得提升版本号。

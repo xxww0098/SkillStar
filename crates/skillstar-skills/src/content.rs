@@ -13,7 +13,8 @@ use skillstar_core::types::{SkillContent, parse_skill_content};
 use crate::git::ops as git_ops;
 use crate::{installed_skill, local_skill, lockfile};
 
-const SNAPSHOT_HASH_DOMAIN: &[u8] = b"skillstar.skill-snapshot.v1\0";
+const SNAPSHOT_HASH_DOMAIN: &[u8] = b"skillstar.skill-snapshot.v2\0";
+pub(crate) const SNAPSHOT_HASH_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SnapshotLimits {
@@ -60,6 +61,8 @@ impl SnapshotFileKind {
 pub struct SkillSnapshotFile {
     pub relative_path: String,
     pub kind: SnapshotFileKind,
+    /// Unix executable state. False on platforms without Unix mode bits.
+    pub executable: bool,
     /// Regular-file bytes, or the UTF-8 link target for a symlink entry.
     pub content: Vec<u8>,
 }
@@ -145,9 +148,60 @@ pub fn snapshot(name: &str) -> Result<SkillSnapshot, AppError> {
     snapshot_with_limits(name, SnapshotLimits::default())
 }
 
+/// Snapshot for an explicit read/generation action that may materialize a
+/// legacy lazy Git worktree. Divergence detection must keep using [`snapshot`].
+pub fn snapshot_materialized(name: &str) -> Result<SkillSnapshot, AppError> {
+    validate_skill_name(name)?;
+    let skill_entry = skillstar_core::infra::paths::hub_skills_dir().join(name);
+    materialize_managed_worktree(&skill_entry)?;
+    snapshot(name)
+}
+
+fn materialize_managed_worktree(skill_entry: &Path) -> Result<(), AppError> {
+    // Repo-cache Skills are often links to a nested directory. In a historical
+    // lazy checkout that target does not exist yet, so looking for `.git` at
+    // the link target itself is insufficient; walk to the physical repo root
+    // first and materialize the checkout there.
+    let repo_root = if skillstar_core::infra::fs_ops::is_link(skill_entry) {
+        crate::repo_link::repo_root_of(skill_entry)
+    } else {
+        git_ops::find_repo_root(skill_entry)
+    };
+    if let Some(repo_root) = repo_root {
+        git_ops::ensure_worktree_checked_out(&repo_root).map_err(AppError::Anyhow)?;
+    }
+    Ok(())
+}
+
 pub fn snapshot_with_limits(name: &str, limits: SnapshotLimits) -> Result<SkillSnapshot, AppError> {
     validate_skill_name(name)?;
     let root = resolve_snapshot_root(name)?;
+    snapshot_resolved_root(name, root, limits)
+}
+
+/// Capture an already-resolved managed source before an install mutates hub links.
+pub(crate) fn snapshot_path(name: &str, root: &Path) -> Result<SkillSnapshot, AppError> {
+    validate_skill_name(name)?;
+    let root = std::fs::canonicalize(root).map_err(|error| {
+        AppError::Other(format!(
+            "Failed to resolve Skill source {}: {error}",
+            root.display()
+        ))
+    })?;
+    if !is_skill_content_root(&root) {
+        return Err(AppError::Other(format!(
+            "Skill source has no SKILL.md: {}",
+            root.display()
+        )));
+    }
+    snapshot_resolved_root(name, root, SnapshotLimits::default())
+}
+
+fn snapshot_resolved_root(
+    name: &str,
+    root: PathBuf,
+    limits: SnapshotLimits,
+) -> Result<SkillSnapshot, AppError> {
     let mut files = Vec::new();
     let mut total_bytes = 0u64;
     collect_snapshot_files(&root, &root, 0, limits, &mut files, &mut total_bytes)?;
@@ -163,9 +217,13 @@ pub fn snapshot_with_limits(name: &str, limits: SnapshotLimits) -> Result<SkillS
     })
 }
 
-fn validate_skill_name(name: &str) -> Result<(), AppError> {
+pub(crate) fn validate_skill_name(name: &str) -> Result<(), AppError> {
     if name.is_empty()
         || name.contains(['/', '\\', '\0'])
+        || name.contains(['<', '>', ':', '"', '|', '?', '*'])
+        || name.chars().any(char::is_control)
+        || name.ends_with(['.', ' '])
+        || is_windows_reserved_name(name)
         || name == "."
         || name == ".."
         || !matches!(
@@ -178,16 +236,23 @@ fn validate_skill_name(name: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+fn is_windows_reserved_name(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or(name).to_ascii_uppercase();
+    matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CLOCK$")
+        || stem.strip_prefix("COM").is_some_and(|suffix| {
+            matches!(suffix, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9")
+        })
+        || stem.strip_prefix("LPT").is_some_and(|suffix| {
+            matches!(suffix, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9")
+        })
+}
+
 fn resolve_snapshot_root(name: &str) -> Result<PathBuf, AppError> {
     let hub_root = skillstar_core::infra::paths::hub_root();
     let skill_entry = skillstar_core::infra::paths::hub_skills_dir().join(name);
     if skill_entry.symlink_metadata().is_err() {
         return Err(not_found(name));
     }
-
-    // A lazily checked-out Git worktree can otherwise look empty. This is best
-    // effort for parity with `read`; canonicalization below remains authoritative.
-    let _ = git_ops::ensure_worktree_checked_out(&skill_entry);
 
     let canonical_hub = std::fs::canonicalize(&hub_root).map_err(|error| {
         AppError::Other(format!(
@@ -335,6 +400,7 @@ fn collect_snapshot_files(
                 SkillSnapshotFile {
                     relative_path: relative_path_string(root, &path)?,
                     kind: SnapshotFileKind::Symlink,
+                    executable: false,
                     content: target.as_bytes().to_vec(),
                 },
             )?;
@@ -359,6 +425,7 @@ fn collect_snapshot_files(
                 SkillSnapshotFile {
                     relative_path: relative_path_string(root, &path)?,
                     kind: SnapshotFileKind::Regular,
+                    executable: is_executable(&metadata),
                     content: std::fs::read(&path)?,
                 },
             )?;
@@ -372,7 +439,18 @@ fn collect_snapshot_files(
     Ok(())
 }
 
-fn snapshot_entry_is_ignored(name: &std::ffi::OsStr) -> bool {
+#[cfg(unix)]
+fn is_executable(metadata: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt as _;
+    metadata.permissions().mode() & 0o111 != 0
+}
+
+#[cfg(not(unix))]
+fn is_executable(_metadata: &std::fs::Metadata) -> bool {
+    false
+}
+
+pub(crate) fn snapshot_entry_is_ignored(name: &std::ffi::OsStr) -> bool {
     let Some(name) = name.to_str() else {
         return false;
     };
@@ -491,6 +569,7 @@ fn snapshot_hash(files: &[SkillSnapshotFile]) -> String {
         hasher.update((path.len() as u64).to_be_bytes());
         hasher.update(path);
         hasher.update([file.kind.hash_tag()]);
+        hasher.update([u8::from(file.executable)]);
         hasher.update((file.content.len() as u64).to_be_bytes());
         hasher.update(&file.content);
     }
@@ -508,6 +587,7 @@ fn format_sha256(digest: &[u8]) -> String {
 }
 
 pub fn read_raw(name: &str) -> Result<String, AppError> {
+    validate_skill_name(name)?;
     let skill_dir = skillstar_core::infra::paths::hub_skills_dir().join(name);
     let effective_dir = resolve_content_dir(name).unwrap_or_else(|| resolve_skill_dir(&skill_dir));
     let skill_md = effective_dir.join("SKILL.md");
@@ -518,6 +598,7 @@ pub fn read_raw(name: &str) -> Result<String, AppError> {
 }
 
 pub fn delete_local(name: &str) -> Result<(), AppError> {
+    validate_skill_name(name)?;
     local_skill::delete(name).map_err(AppError::Anyhow)?;
     installed_skill::invalidate_cache();
     Ok(())
@@ -528,6 +609,7 @@ pub fn migrate_local_skills() -> Result<u32, AppError> {
 }
 
 pub fn list_files(name: &str) -> Result<Vec<String>, AppError> {
+    validate_skill_name(name)?;
     let skill_dir = skillstar_core::infra::paths::hub_skills_dir().join(name);
     if !skill_dir.exists() {
         return Err(not_found(name));
@@ -541,12 +623,13 @@ pub fn list_files(name: &str) -> Result<Vec<String>, AppError> {
 }
 
 pub fn read(name: &str) -> Result<SkillContent, AppError> {
+    validate_skill_name(name)?;
     let skill_dir = skillstar_core::infra::paths::hub_skills_dir().join(name);
     if !skill_dir.exists() {
         return Err(not_found(name));
     }
 
-    let _ = git_ops::ensure_worktree_checked_out(&skill_dir);
+    materialize_managed_worktree(&skill_dir)?;
     let effective_dir = resolve_content_dir(name).unwrap_or(skill_dir);
     let skill_path = effective_dir.join("SKILL.md");
     if !skill_path.exists() {
@@ -558,6 +641,7 @@ pub fn read(name: &str) -> Result<SkillContent, AppError> {
 }
 
 pub fn update(name: &str, content: &str) -> Result<(), AppError> {
+    validate_skill_name(name)?;
     let skill_dir = skillstar_core::infra::paths::hub_skills_dir().join(name);
     if !skill_dir.exists() {
         return Err(not_found(name));
@@ -671,201 +755,5 @@ fn not_found(name: &str) -> AppError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct TestHub {
-        previous: Option<std::ffi::OsString>,
-        temp: tempfile::TempDir,
-    }
-
-    impl TestHub {
-        fn new() -> Self {
-            let previous = std::env::var_os("SKILLSTAR_HUB_DIR");
-            let temp = tempfile::tempdir().unwrap();
-            unsafe {
-                std::env::set_var("SKILLSTAR_HUB_DIR", temp.path());
-            }
-            Self { previous, temp }
-        }
-
-        fn skill_dir(&self, name: &str) -> PathBuf {
-            self.temp.path().join("skills").join(name)
-        }
-    }
-
-    impl Drop for TestHub {
-        fn drop(&mut self) {
-            unsafe {
-                match self.previous.take() {
-                    Some(value) => std::env::set_var("SKILLSTAR_HUB_DIR", value),
-                    None => std::env::remove_var("SKILLSTAR_HUB_DIR"),
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn content_facade_reads_lists_and_updates_a_skill() {
-        let _guard = crate::lock_test_env();
-        let previous_hub = std::env::var_os("SKILLSTAR_HUB_DIR");
-        let temp = tempfile::tempdir().unwrap();
-        unsafe {
-            std::env::set_var("SKILLSTAR_HUB_DIR", temp.path());
-        }
-
-        let skill_dir = skillstar_core::infra::paths::hub_skills_dir().join("demo");
-        std::fs::create_dir_all(skill_dir.join("scripts")).unwrap();
-        std::fs::create_dir_all(skill_dir.join(".git")).unwrap();
-        std::fs::write(
-            skill_dir.join("SKILL.md"),
-            "---\ndescription: old\n---\n\nBody",
-        )
-        .unwrap();
-        std::fs::write(skill_dir.join("scripts/run.sh"), "echo ok").unwrap();
-        std::fs::write(skill_dir.join(".git/config"), "ignored").unwrap();
-
-        assert_eq!(
-            read_raw("demo").unwrap(),
-            "---\ndescription: old\n---\n\nBody"
-        );
-        assert_eq!(
-            list_files("demo").unwrap(),
-            vec!["SKILL.md", "scripts/run.sh"]
-        );
-
-        update("demo", "---\ndescription: new\n---\n\nUpdated").unwrap();
-        let parsed = read("demo").unwrap();
-        assert_eq!(parsed.description.as_deref(), Some("new"));
-        assert!(parsed.content.ends_with("Updated"));
-
-        unsafe {
-            match previous_hub {
-                Some(value) => std::env::set_var("SKILLSTAR_HUB_DIR", value),
-                None => std::env::remove_var("SKILLSTAR_HUB_DIR"),
-            }
-        }
-    }
-
-    #[test]
-    fn content_facade_preserves_typed_not_found_error() {
-        let _guard = crate::lock_test_env();
-        let previous_hub = std::env::var_os("SKILLSTAR_HUB_DIR");
-        let temp = tempfile::tempdir().unwrap();
-        unsafe {
-            std::env::set_var("SKILLSTAR_HUB_DIR", temp.path());
-        }
-
-        assert!(matches!(
-            read_raw("missing"),
-            Err(AppError::SkillNotFound { name }) if name == "missing"
-        ));
-
-        unsafe {
-            match previous_hub {
-                Some(value) => std::env::set_var("SKILLSTAR_HUB_DIR", value),
-                None => std::env::remove_var("SKILLSTAR_HUB_DIR"),
-            }
-        }
-    }
-
-    #[test]
-    fn snapshot_is_deterministic_sorted_and_excludes_git_metadata() {
-        let _guard = crate::lock_test_env();
-        let hub = TestHub::new();
-        let skill_dir = hub.skill_dir("demo");
-        std::fs::create_dir_all(skill_dir.join("z-dir")).unwrap();
-        std::fs::create_dir_all(skill_dir.join("a-dir")).unwrap();
-        std::fs::create_dir_all(skill_dir.join(".git/objects")).unwrap();
-        std::fs::write(skill_dir.join("z-dir/z.txt"), b"z").unwrap();
-        std::fs::write(skill_dir.join("SKILL.md"), b"# Demo").unwrap();
-        std::fs::write(skill_dir.join("a-dir/a.txt"), b"a").unwrap();
-        std::fs::write(skill_dir.join(".git/config"), b"secret metadata").unwrap();
-
-        let first = snapshot("demo").unwrap();
-        let second = snapshot("demo").unwrap();
-        let paths = first
-            .files
-            .iter()
-            .map(|file| file.relative_path.as_str())
-            .collect::<Vec<_>>();
-
-        assert_eq!(paths, vec!["SKILL.md", "a-dir/a.txt", "z-dir/z.txt"]);
-        assert_eq!(first, second);
-        assert_eq!(first.total_bytes, 8);
-        assert!(first.content_hash.starts_with("sha256:"));
-    }
-
-    #[test]
-    fn snapshot_hash_changes_when_a_nested_file_changes() {
-        let _guard = crate::lock_test_env();
-        let hub = TestHub::new();
-        let skill_dir = hub.skill_dir("demo");
-        std::fs::create_dir_all(skill_dir.join("references/nested")).unwrap();
-        std::fs::write(skill_dir.join("SKILL.md"), b"# Demo").unwrap();
-        let nested = skill_dir.join("references/nested/guide.md");
-        std::fs::write(&nested, b"version one").unwrap();
-
-        let before = snapshot("demo").unwrap();
-        std::fs::write(&nested, b"version two").unwrap();
-        let after = snapshot("demo").unwrap();
-
-        assert_ne!(before.content_hash, after.content_hash);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn snapshot_records_internal_symlinks_without_following_them() {
-        use std::os::unix::fs::symlink;
-
-        let _guard = crate::lock_test_env();
-        let hub = TestHub::new();
-        let skill_dir = hub.skill_dir("demo");
-        let outside = hub.temp.path().join("outside");
-        std::fs::create_dir_all(&skill_dir).unwrap();
-        std::fs::create_dir_all(&outside).unwrap();
-        std::fs::write(skill_dir.join("SKILL.md"), b"# Demo").unwrap();
-        std::fs::write(outside.join("secret.txt"), b"must not be read").unwrap();
-        symlink(&outside, skill_dir.join("linked-dir")).unwrap();
-
-        let captured = snapshot("demo").unwrap();
-        let link = captured
-            .files
-            .iter()
-            .find(|file| file.relative_path == "linked-dir")
-            .unwrap();
-
-        assert_eq!(link.kind, SnapshotFileKind::Symlink);
-        assert_eq!(link.symlink_target(), outside.to_str());
-        assert!(
-            captured
-                .files
-                .iter()
-                .all(|file| file.relative_path != "linked-dir/secret.txt")
-        );
-    }
-
-    #[test]
-    fn snapshot_rejects_traversal_names() {
-        let _guard = crate::lock_test_env();
-        let _hub = TestHub::new();
-
-        assert!(matches!(snapshot("../demo"), Err(AppError::Other(_))));
-        assert!(matches!(snapshot("demo/other"), Err(AppError::Other(_))));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn snapshot_rejects_a_hub_entry_that_resolves_outside_the_hub() {
-        use std::os::unix::fs::symlink;
-
-        let _guard = crate::lock_test_env();
-        let hub = TestHub::new();
-        let outside = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(hub.temp.path().join("skills")).unwrap();
-        std::fs::write(outside.path().join("SKILL.md"), b"# Outside").unwrap();
-        symlink(outside.path(), hub.skill_dir("escape")).unwrap();
-
-        assert!(matches!(snapshot("escape"), Err(AppError::Other(_))));
-    }
-}
+#[path = "content/tests.rs"]
+mod tests;

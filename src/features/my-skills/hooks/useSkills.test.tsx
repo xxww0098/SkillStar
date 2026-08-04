@@ -1,12 +1,21 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, fireEvent, renderHook, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Skill, SkillUpdateReport } from "../../../types";
+import { toast } from "../../../lib/toast";
 import { SkillsProvider, useSkills } from "./useSkills";
 
+vi.mock("../../../lib/toast", () => ({
+  toast: {
+    error: vi.fn(),
+    warning: vi.fn(),
+  },
+}));
+
 const mockedInvoke = vi.mocked(invoke);
+let defaultUpdateApplied = false;
 
 const INITIAL_SKILLS: Skill[] = [
   {
@@ -82,11 +91,18 @@ function createWrapper() {
 describe("useSkills", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    defaultUpdateApplied = false;
 
     mockedInvoke.mockImplementation(async (command, args) => {
       switch (command) {
         case "list_skills":
-          return INITIAL_SKILLS;
+          return defaultUpdateApplied
+            ? INITIAL_SKILLS.map((skill, index) => ({
+                ...skill,
+                description: index === 1 ? "Search adapters after shared pull" : skill.description,
+                update_available: false,
+              }))
+            : INITIAL_SKILLS;
         case "refresh_skill_updates":
           return [];
         case "check_new_repo_skills":
@@ -98,6 +114,7 @@ describe("useSkills", () => {
           // rest as skipped — the UI does not group by git_url itself.
           expect(args).toEqual({ names: INITIAL_SKILLS.map((skill) => skill.name) });
 
+          defaultUpdateApplied = true;
           const report: SkillUpdateReport = {
             updated: [
               {
@@ -139,6 +156,7 @@ describe("useSkills", () => {
     await waitFor(() => {
       expect(result.current.skills.every((skill) => !skill.update_available)).toBe(true);
     });
+    expect(result.current.skills[1].description).toBe("Search adapters after shared pull");
   });
 
   it("keeps a divergent card unchanged until the user resolves the blocked update", async () => {
@@ -177,6 +195,7 @@ describe("useSkills", () => {
               agent_link_failures: [],
             },
             local_copy: { ...INITIAL_SKILLS[0], name: "opencli-repair.local", skill_type: "local" },
+            remaining_blocked: [],
           };
         default:
           return undefined;
@@ -205,5 +224,112 @@ describe("useSkills", () => {
       resolution: { kind: "preserve", local_name: "opencli-repair.local" },
     });
     expect(result.current.skills[0].update_available).toBe(false);
+
+    let updatePromise!: Promise<Skill>;
+    act(() => {
+      updatePromise = result.current.updateSkill("opencli-repair");
+    });
+    await screen.findByRole("alertdialog");
+    fireEvent.click(screen.getByRole("button", { name: "丢弃修改并更新" }));
+    await act(async () => {
+      await updatePromise;
+    });
+    expect(mockedInvoke).toHaveBeenCalledWith("resolve_skill_update", {
+      name: "opencli-repair",
+      resolution: { kind: "discard" },
+    });
+  });
+
+  it("surfaces update failures for every page using the shared hook", async () => {
+    mockedInvoke.mockImplementation(async (command) => {
+      switch (command) {
+        case "list_skills":
+          return INITIAL_SKILLS;
+        case "refresh_skill_updates":
+        case "check_new_repo_skills":
+          return [];
+        case "migrate_local_skills":
+          return 0;
+        case "update_skills":
+          return {
+            updated: [],
+            blocked: [],
+            failed: [{ name: "opencli-repair", error: "remote authentication failed" }],
+            skipped: [],
+          };
+        default:
+          return undefined;
+      }
+    });
+
+    const { result } = renderHook(() => useSkills(), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await expect(result.current.updateSkill("opencli-repair")).rejects.toThrow("remote authentication failed");
+    expect(toast.error).toHaveBeenCalledWith("remote authentication failed");
+  });
+
+  it("returns a freshly listed requested sibling after resolving the checkout blocker", async () => {
+    let resolved = false;
+    const refreshedSkills = INITIAL_SKILLS.map((skill) =>
+      skill.name === "opencli-repair"
+        ? { ...skill, description: "Updated repair", tree_hash: "hash-after-pull", update_available: false }
+        : { ...skill, update_available: false },
+    );
+    mockedInvoke.mockImplementation(async (command) => {
+      switch (command) {
+        case "list_skills":
+          return resolved ? refreshedSkills : INITIAL_SKILLS;
+        case "refresh_skill_updates":
+        case "check_new_repo_skills":
+          return [];
+        case "migrate_local_skills":
+          return 0;
+        case "update_skills":
+          return {
+            updated: [],
+            blocked: [
+              {
+                name: "opencli-search",
+                reason: "content_changed",
+                suggested_local_name: "opencli-search.local",
+                error: null,
+              },
+            ],
+            failed: [],
+            skipped: [],
+          };
+        case "resolve_skill_update":
+          resolved = true;
+          return {
+            update: {
+              skill: { ...refreshedSkills[1] },
+              siblings_cleared: ["opencli-repair", "opencli-usage"],
+              agent_link_failures: [],
+            },
+            local_copy: null,
+            remaining_blocked: [],
+          };
+        default:
+          return undefined;
+      }
+    });
+
+    const { result } = renderHook(() => useSkills(), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let updatePromise!: Promise<Skill>;
+    act(() => {
+      updatePromise = result.current.updateSkill("opencli-repair");
+    });
+    await screen.findByRole("alertdialog");
+    fireEvent.click(screen.getByRole("button", { name: "丢弃修改并更新" }));
+
+    let updated!: Skill;
+    await act(async () => {
+      updated = await updatePromise;
+    });
+    expect(updated.description).toBe("Updated repair");
+    expect(updated.tree_hash).toBe("hash-after-pull");
   });
 });

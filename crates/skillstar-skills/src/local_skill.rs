@@ -125,16 +125,8 @@ pub fn is_local_skill(name: &str) -> bool {
 }
 
 fn prepare_new_local_skill_paths(name: &str) -> Result<(PathBuf, PathBuf)> {
-    if name.is_empty()
-        || name.contains(['/', '\\', '\0'])
-        || matches!(name, "." | "..")
-        || !matches!(
-            Path::new(name).components().collect::<Vec<_>>().as_slice(),
-            [std::path::Component::Normal(_)]
-        )
-    {
-        anyhow::bail!("Invalid local Skill name: {name:?}");
-    }
+    crate::content::validate_skill_name(name)
+        .map_err(|error| anyhow::anyhow!("Invalid local Skill name: {error}"))?;
 
     let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
     let local_dir = skillstar_core::infra::paths::local_skills_dir();
@@ -229,7 +221,7 @@ pub fn create_from_snapshot(name: &str, snapshot: &crate::content::SkillSnapshot
         skillstar_core::infra::fs_ops::create_symlink(&skill_local_path, &skill_hub_path)
             .with_context(|| format!("Failed to create hub symlink for '{name}'"))
     {
-        let _ = std::fs::remove_dir_all(&skill_local_path);
+        let _ = skillstar_core::infra::fs_ops::remove_dir_all_retry(&skill_local_path);
         return Err(error);
     }
 

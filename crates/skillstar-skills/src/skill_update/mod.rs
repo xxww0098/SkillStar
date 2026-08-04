@@ -16,6 +16,46 @@ use crate::{
 };
 use plan::{SiblingState, UpdatePlan};
 
+static UPDATE_TRANSACTION_MUTEX: Mutex<()> = Mutex::new(());
+
+struct UpdateTransactionGuard {
+    _process_guard: std::sync::MutexGuard<'static, ()>,
+    file: std::fs::File,
+}
+
+impl Drop for UpdateTransactionGuard {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
+}
+
+fn acquire_update_transaction_lock() -> Result<UpdateTransactionGuard> {
+    let process_guard = UPDATE_TRANSACTION_MUTEX
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Skill update transaction mutex poisoned"))?;
+    let lock_path = skillstar_core::infra::paths::state_dir().join("skill-update.lock");
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        .with_context(|| format!("Failed to open update lock '{}'", lock_path.display()))?;
+    file.lock().with_context(|| {
+        format!(
+            "Failed to lock update transaction '{}'",
+            lock_path.display()
+        )
+    })?;
+    Ok(UpdateTransactionGuard {
+        _process_guard: process_guard,
+        file,
+    })
+}
+
 /// Result of a hub skill update, including any project-level cascade work.
 #[derive(Debug, Clone)]
 struct UpdateOutcome {
@@ -66,8 +106,9 @@ pub enum LocalDivergenceResolution {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ResolveSkillUpdateResult {
-    pub update: UpdateResult,
+    pub update: Option<UpdateResult>,
     pub local_copy: Option<Skill>,
+    pub remaining_blocked: Vec<SkillUpdateBlocked>,
 }
 
 /// Outcome of a batch update.
@@ -89,12 +130,38 @@ pub struct SkillUpdateReport {
 /// lives. It used to live in the UI, alongside a second copy of the sibling
 /// fan-out it was mirroring.
 pub fn update_skills(names: &[String]) -> SkillUpdateReport {
-    let entries = lockfile::Lockfile::load(&lockfile::lockfile_path())
-        .map(|lockfile| lockfile.skills)
-        .unwrap_or_default();
-    let groups = plan::group_by_repo(&entries, names);
-
     let mut report = SkillUpdateReport::default();
+    let valid_names: Vec<String> = names
+        .iter()
+        .filter_map(|name| match content::validate_skill_name(name) {
+            Ok(()) => Some(name.clone()),
+            Err(error) => {
+                report.failed.push(SkillUpdateFailure {
+                    name: name.clone(),
+                    error: format!("Invalid Skill name: {error}"),
+                });
+                None
+            }
+        })
+        .collect();
+    if valid_names.is_empty() {
+        return report;
+    }
+    let entries = match lockfile::Lockfile::load(&lockfile::lockfile_path()) {
+        Ok(lockfile) => lockfile.skills,
+        Err(error) => {
+            let error = format!("failed to load the Skill lockfile before update: {error:#}");
+            report
+                .failed
+                .extend(valid_names.iter().map(|name| SkillUpdateFailure {
+                    name: name.clone(),
+                    error: error.clone(),
+                }));
+            return report;
+        }
+    };
+    let groups = plan::group_by_repo(&entries, &valid_names, checkout_key);
+
     let mut runnable = Vec::new();
     for group in groups {
         let blocked = local_divergences_for_group(&entries, &group);
@@ -134,30 +201,42 @@ fn local_divergences_for_group(
     entries: &[LockEntry],
     group: &plan::RepoGroup,
 ) -> Vec<SkillUpdateBlocked> {
+    let hub = skillstar_core::infra::paths::hub_skills_dir();
+    let representative_path = hub.join(&group.representative);
     let representative = entries
         .iter()
         .find(|entry| entry.name == group.representative);
+    let shared_root = repo_link::repo_root_of(&representative_path);
 
-    let candidates: Vec<&LockEntry> = match representative {
-        Some(entry) if !entry.git_url.trim().is_empty() => entries
+    let candidates: Vec<&LockEntry> = match shared_root {
+        Some(_) => entries
             .iter()
-            .filter(|candidate| candidate.git_url == entry.git_url)
+            .filter(|candidate| {
+                let path = hub.join(&candidate.name);
+                repo_link::repo_root_of(&path) == shared_root
+            })
             .collect(),
-        Some(entry) => vec![entry],
-        None => return Vec::new(),
+        None => representative.into_iter().collect(),
     };
 
-    candidates
+    let mut blocked: Vec<_> = candidates
         .into_iter()
         .filter(|entry| {
             let path = skillstar_core::infra::paths::hub_skills_dir().join(&entry.name);
             path.symlink_metadata().is_ok()
         })
         .filter_map(|entry| match content::snapshot(&entry.name) {
-            Ok(snapshot) if entry.content_hash.as_deref() == Some(&snapshot.content_hash) => None,
+            Ok(snapshot)
+                if entry.content_hash_version == Some(content::SNAPSHOT_HASH_VERSION)
+                    && entry.content_hash.as_deref() == Some(&snapshot.content_hash) =>
+            {
+                None
+            }
             Ok(_) => Some(SkillUpdateBlocked {
                 name: entry.name.clone(),
-                reason: if entry.content_hash.is_some() {
+                reason: if entry.content_hash.is_some()
+                    && entry.content_hash_version == Some(content::SNAPSHOT_HASH_VERSION)
+                {
                     LocalDivergenceReason::ContentChanged
                 } else {
                     LocalDivergenceReason::BaselineMissing
@@ -172,7 +251,102 @@ fn local_divergences_for_group(
                 error: Some(error.to_string()),
             }),
         })
-        .collect()
+        .collect();
+
+    if let Some(shared_root) = shared_root
+        && let Ok(installed) = std::fs::read_dir(&hub)
+    {
+        for installed in installed.flatten() {
+            let Some(name) = installed.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            if name.starts_with('.') {
+                continue;
+            }
+            if entries.iter().any(|entry| entry.name == name) {
+                continue;
+            }
+            let valid_skill_target =
+                skillstar_core::infra::fs_ops::read_link_resolved(&installed.path())
+                    .is_ok_and(|target| target.join("SKILL.md").is_file());
+            if valid_skill_target
+                && repo_link::repo_root_of(&installed.path()).as_deref()
+                    == Some(shared_root.as_path())
+            {
+                blocked.push(missing_baseline(&name));
+            }
+        }
+    }
+    if representative.is_none() && representative_path.symlink_metadata().is_ok() {
+        blocked.push(missing_baseline(&group.representative));
+    }
+
+    blocked.sort_by(|left, right| {
+        is_checkout_root_skill(&left.name)
+            .cmp(&is_checkout_root_skill(&right.name))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    blocked.dedup_by(|left, right| left.name == right.name);
+    blocked
+}
+
+fn is_checkout_root_skill(name: &str) -> bool {
+    let path = skillstar_core::infra::paths::hub_skills_dir().join(name);
+    let Some(repo_root) = repo_link::repo_root_of(&path) else {
+        return false;
+    };
+    skillstar_core::infra::fs_ops::read_link_resolved(&path)
+        .is_ok_and(|target| same_physical_path(&target, &repo_root))
+}
+
+fn same_physical_path(left: &Path, right: &Path) -> bool {
+    let left = std::fs::canonicalize(left).unwrap_or_else(|_| left.to_path_buf());
+    let right = std::fs::canonicalize(right).unwrap_or_else(|_| right.to_path_buf());
+    left == right
+}
+
+fn missing_baseline(name: &str) -> SkillUpdateBlocked {
+    SkillUpdateBlocked {
+        name: name.to_string(),
+        reason: LocalDivergenceReason::BaselineMissing,
+        suggested_local_name: suggested_local_name(name),
+        error: Some("No lockfile entry exists for this managed Skill".to_string()),
+    }
+}
+
+fn checkout_key(entry: &LockEntry) -> Option<String> {
+    let path = skillstar_core::infra::paths::hub_skills_dir().join(&entry.name);
+    repo_link::repo_root_of(&path).map(|root| root.to_string_lossy().into_owned())
+}
+
+fn reconstruct_lock_entry(name: &str) -> Result<LockEntry> {
+    let skill_path = skillstar_core::infra::paths::hub_skills_dir().join(name);
+    let cached_root = repo_link::repo_root_of(&skill_path);
+    let repo_root = cached_root
+        .clone()
+        .or_else(|| git_ops::find_repo_root(&skill_path));
+    let repo_root = repo_root
+        .with_context(|| format!("Cannot reconstruct the managed Git checkout for '{name}'"))?;
+    let source_folder = if cached_root.is_some() {
+        actual_repo_pathspec(&skill_path, &repo_root)?
+    } else {
+        None
+    };
+    let tree_hash = match source_folder.as_deref() {
+        Some(folder) => git_ops::compute_subtree_hash(&repo_root, folder)?,
+        None => git_ops::compute_tree_hash(&repo_root)?,
+    };
+
+    Ok(LockEntry {
+        name: name.to_string(),
+        git_url: git_ops::remote_origin_url(&repo_root)?,
+        git_ref: crate::update_checker::configured_git_ref(&repo_root),
+        tree_hash,
+        content_hash: None,
+        content_hash_version: None,
+        installed_at: chrono::Utc::now().to_rfc3339(),
+        source_folder,
+    })
 }
 
 fn suggested_local_name(name: &str) -> String {
@@ -265,9 +439,10 @@ fn compute_hash_for_skill_entry(skill_path: &Path, source_folder: Option<&str>) 
 }
 
 pub fn update_skill(name: &str) -> Result<UpdateResult> {
+    content::validate_skill_name(name).map_err(anyhow::Error::from)?;
     let entries = lockfile::Lockfile::load(&lockfile::lockfile_path())
-        .map(|lockfile| lockfile.skills)
-        .unwrap_or_default();
+        .context("failed to load the Skill lockfile before update")?
+        .skills;
     let group = plan::RepoGroup {
         representative: name.to_string(),
         covered: Vec::new(),
@@ -292,6 +467,46 @@ pub fn resolve_skill_update(
     name: &str,
     resolution: LocalDivergenceResolution,
 ) -> Result<ResolveSkillUpdateResult> {
+    content::validate_skill_name(name).map_err(anyhow::Error::from)?;
+    let _transaction_guard = acquire_update_transaction_lock()?;
+    let lock_path = lockfile::lockfile_path();
+    let entry = lockfile::Lockfile::load(&lock_path)
+        .context("failed to load the Skill lockfile before resolving divergence")?
+        .skills
+        .into_iter()
+        .find(|entry| entry.name == name)
+        .map(Ok)
+        .unwrap_or_else(|| reconstruct_lock_entry(name))?;
+
+    let skill_path = skillstar_core::infra::paths::hub_skills_dir().join(name);
+    let repo_location = repo_link::repo_root_of(&skill_path)
+        .map(|repo_root| {
+            actual_repo_pathspec(&skill_path, &repo_root).map(|pathspec| (repo_root, pathspec))
+        })
+        .transpose()?;
+    if repo_location
+        .as_ref()
+        .is_some_and(|(_, pathspec)| pathspec.is_none())
+    {
+        let entries = lockfile::Lockfile::load(&lock_path)?.skills;
+        let group = plan::RepoGroup {
+            representative: name.to_string(),
+            covered: Vec::new(),
+        };
+        let unresolved_nested: Vec<_> = local_divergences_for_group(&entries, &group)
+            .into_iter()
+            .filter(|blocked| blocked.name != name)
+            .map(|blocked| blocked.name)
+            .collect();
+        if !unresolved_nested.is_empty() {
+            anyhow::bail!(
+                "Resolve nested Skill changes before the checkout-root Skill '{}': {}",
+                name,
+                unresolved_nested.join(", ")
+            );
+        }
+    }
+
     let local_copy = match resolution {
         LocalDivergenceResolution::Preserve { local_name } => {
             let snapshot = content::snapshot(name)
@@ -302,14 +517,132 @@ pub fn resolve_skill_update(
         }
         LocalDivergenceResolution::Discard => None,
     };
+
+    let (repo_root, pathspec) = match repo_location {
+        Some((repo_root, pathspec)) => (repo_root, pathspec),
+        None => (
+            git_ops::find_repo_root(&skill_path)
+                .with_context(|| format!("Cannot find the managed Git checkout for '{name}'"))?,
+            None,
+        ),
+    };
+    git_ops::restore_worktree_to_head(&repo_root, pathspec.as_deref())
+        .with_context(|| format!("failed to discard local divergence for '{name}'"))?;
+
+    {
+        let _lock = lockfile::get_mutex()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Lockfile mutex poisoned"))?;
+        let mut lockfile = lockfile::Lockfile::load(&lock_path)?;
+        let baseline = content::snapshot(name)
+            .with_context(|| format!("failed to capture clean baseline for '{name}'"))?;
+        if let Some(current) = lockfile
+            .skills
+            .iter_mut()
+            .find(|candidate| candidate.name == name)
+        {
+            current.content_hash = Some(baseline.content_hash);
+            current.content_hash_version = Some(content::SNAPSHOT_HASH_VERSION);
+        } else {
+            let mut reconstructed = entry.clone();
+            reconstructed.content_hash = Some(baseline.content_hash);
+            reconstructed.content_hash_version = Some(content::SNAPSHOT_HASH_VERSION);
+            lockfile.upsert(reconstructed);
+        }
+        lockfile.save(&lock_path)?;
+    }
+
+    let entries = lockfile::Lockfile::load(&lock_path)?.skills;
+    let group = plan::RepoGroup {
+        representative: name.to_string(),
+        covered: Vec::new(),
+    };
+    let remaining_blocked = local_divergences_for_group(&entries, &group);
+    if !remaining_blocked.is_empty() {
+        return Ok(ResolveSkillUpdateResult {
+            update: None,
+            local_copy,
+            remaining_blocked,
+        });
+    }
+
     Ok(ResolveSkillUpdateResult {
-        update: update_skill_unchecked(name)?,
+        update: Some(update_skill_unchecked_locked(name)?),
         local_copy,
+        remaining_blocked: Vec::new(),
     })
 }
 
+fn actual_repo_pathspec(skill_path: &Path, repo_root: &Path) -> Result<Option<String>> {
+    let target =
+        skillstar_core::infra::fs_ops::read_link_resolved(skill_path).with_context(|| {
+            format!(
+                "failed to resolve managed Skill link '{}'",
+                skill_path.display()
+            )
+        })?;
+    let target = canonicalize_with_missing_tail(&target).with_context(|| {
+        format!(
+            "failed to resolve managed Skill target '{}'",
+            target.display()
+        )
+    })?;
+    let repo_root = std::fs::canonicalize(repo_root).with_context(|| {
+        format!(
+            "failed to resolve managed repository '{}'",
+            repo_root.display()
+        )
+    })?;
+    let relative = target.strip_prefix(&repo_root).with_context(|| {
+        format!(
+            "managed Skill target '{}' escapes repository '{}'",
+            target.display(),
+            repo_root.display()
+        )
+    })?;
+    if relative.as_os_str().is_empty() {
+        return Ok(None);
+    }
+    if !relative
+        .components()
+        .all(|component| matches!(component, std::path::Component::Normal(_)))
+    {
+        anyhow::bail!("managed Skill path is not a safe repository-relative path");
+    }
+    Ok(Some(relative.to_string_lossy().replace('\\', "/")))
+}
+
+fn canonicalize_with_missing_tail(path: &Path) -> Result<std::path::PathBuf> {
+    let mut existing = path.to_path_buf();
+    let mut tail = Vec::new();
+    loop {
+        match std::fs::canonicalize(&existing) {
+            Ok(mut canonical) => {
+                for component in tail.iter().rev() {
+                    canonical.push(component);
+                }
+                return Ok(canonical);
+            }
+            Err(error) => {
+                let Some(name) = existing.file_name().map(|name| name.to_os_string()) else {
+                    return Err(error.into());
+                };
+                tail.push(name);
+                if !existing.pop() {
+                    return Err(error.into());
+                }
+            }
+        }
+    }
+}
+
 fn update_skill_unchecked(name: &str) -> Result<UpdateResult> {
-    let outcome = apply_update(name)?;
+    let _transaction_guard = acquire_update_transaction_lock()?;
+    update_skill_unchecked_locked(name)
+}
+
+fn update_skill_unchecked_locked(name: &str) -> Result<UpdateResult> {
+    let outcome = apply_update_locked(name)?;
     let path = skillstar_core::infra::paths::hub_skills_dir().join(name);
     let description = content::resolve_content_dir(name)
         .map(|dir| extract_skill_description(&dir))
@@ -350,9 +683,18 @@ fn update_skill_unchecked(name: &str) -> Result<UpdateResult> {
 /// This is the one thing [`plan::plan_update`] cannot decide on its own, so it
 /// is injected — which is also what lets the planning tests run without a hub
 /// directory or a git remote.
-fn sibling_state_on_disk(skills_dir: &Path, entry: &LockEntry) -> SiblingState {
+fn sibling_state_on_disk(
+    skills_dir: &Path,
+    target_repo_root: Option<&Path>,
+    entry: &LockEntry,
+) -> SiblingState {
     let sibling_path = skills_dir.join(&entry.name);
     if !sibling_path.exists() {
+        return SiblingState::Absent;
+    }
+    if target_repo_root.is_some()
+        && repo_link::repo_root_of(&sibling_path).as_deref() != target_repo_root
+    {
         return SiblingState::Absent;
     }
     SiblingState::Present(compute_hash_for_skill_entry(
@@ -375,12 +717,47 @@ fn refresh_content_baselines(lockfile: &mut lockfile::Lockfile, names: &[String]
             .with_context(|| format!("failed to capture updated content baseline for '{name}'"))?;
         if let Some(entry) = lockfile.skills.iter_mut().find(|entry| entry.name == *name) {
             entry.content_hash = Some(snapshot.content_hash);
+            entry.content_hash_version = Some(content::SNAPSHOT_HASH_VERSION);
         }
     }
     Ok(())
 }
 
-fn apply_update(name: &str) -> Result<UpdateOutcome> {
+fn capture_checkout_for_rollback(
+    skills_dir: &Path,
+    target_repo_root: Option<&Path>,
+    name: &str,
+    entries: &[LockEntry],
+) -> Result<Vec<content::SkillSnapshot>> {
+    let names = if let Some(target_repo_root) = target_repo_root {
+        entries
+            .iter()
+            .filter_map(|entry| {
+                let path = skills_dir.join(&entry.name);
+                (path.exists()
+                    && repo_link::repo_root_of(&path).as_deref() == Some(target_repo_root))
+                .then(|| entry.name.clone())
+            })
+            .collect::<Vec<_>>()
+    } else {
+        vec![name.to_string()]
+    };
+
+    let mut snapshots = names
+        .into_iter()
+        .map(|skill_name| {
+            content::snapshot(&skill_name).with_context(|| {
+                format!("failed to capture '{skill_name}' before updating its checkout")
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    // A checkout-root Skill can contain nested Skills. Restore the outer tree
+    // first, then let the more specific snapshots win.
+    snapshots.sort_by_key(|snapshot| snapshot.root.components().count());
+    Ok(snapshots)
+}
+
+fn apply_update_locked(name: &str) -> Result<UpdateOutcome> {
     let skills_dir = skillstar_core::infra::paths::hub_skills_dir();
     let path = skills_dir.join(name);
 
@@ -389,41 +766,100 @@ fn apply_update(name: &str) -> Result<UpdateOutcome> {
     }
 
     let is_repo_skill = repo_link::is_repo_cached(&path);
+    let target_repo_root = repo_link::repo_root_of(&path);
     let lock_path = lockfile::lockfile_path();
 
     // Read unlocked to learn which subfolder to pull. The planning read below
     // happens again under the mutex: holding it across a network fetch would
     // serialise every concurrent update, and another update may land meanwhile.
-    let source_folder = lockfile::Lockfile::load(&lock_path)
-        .ok()
-        .and_then(|lf| lf.skills.into_iter().find(|entry| entry.name == name))
-        .and_then(|entry| entry.source_folder);
-
-    let tree_hash = if is_repo_skill {
-        repo_scanner::pull_repo_skill_update(&path, source_folder.as_deref())
-            .context("failed to pull repo-cached skill update")?
-    } else {
-        git_ops::pull_repo(&path).context("failed to pull hub skill update")?;
-        git_ops::compute_tree_hash(&path).context("failed to compute updated tree hash")?
+    let pre_update_lockfile = lockfile::Lockfile::load(&lock_path)
+        .with_context(|| format!("Failed to load lockfile '{}'", lock_path.display()))?;
+    let group = plan::RepoGroup {
+        representative: name.to_string(),
+        covered: Vec::new(),
     };
+    if let Some(blocked) = local_divergences_for_group(&pre_update_lockfile.skills, &group)
+        .into_iter()
+        .next()
+    {
+        anyhow::bail!(
+            "Skill '{}' changed while waiting to update; retry to preserve it as '{}' or explicitly discard it",
+            blocked.name,
+            blocked.suggested_local_name
+        );
+    }
+    let source_folder = pre_update_lockfile
+        .skills
+        .iter()
+        .find(|entry| entry.name == name)
+        .and_then(|entry| entry.source_folder.clone());
 
-    let plan: UpdatePlan = {
-        let _lock = lockfile::get_mutex()
-            .lock()
-            .map_err(|_| anyhow::anyhow!("Lockfile mutex poisoned"))?;
-        let mut lockfile = lockfile::Lockfile::load(&lock_path)
-            .with_context(|| format!("Failed to load lockfile '{}'", lock_path.display()))?;
+    let checkout_root = target_repo_root.as_deref().unwrap_or(&path);
+    let previous_revision = git_ops::head_revision(checkout_root)
+        .context("failed to capture the pre-update Git revision")?;
+    let previous_sparse_paths = is_repo_skill
+        .then(|| git_ops::sparse_checkout_paths(checkout_root))
+        .flatten();
+    let rollback_snapshots = capture_checkout_for_rollback(
+        &skills_dir,
+        target_repo_root.as_deref(),
+        name,
+        &pre_update_lockfile.skills,
+    )?;
 
-        let plan = plan::plan_update(&lockfile.skills, name, &tree_hash, is_repo_skill, |entry| {
-            sibling_state_on_disk(&skills_dir, entry)
-        });
+    let transaction = (|| -> Result<(String, UpdatePlan)> {
+        let tree_hash = if is_repo_skill {
+            repo_scanner::pull_repo_skill_update(&path, source_folder.as_deref())
+                .context("failed to pull repo-cached skill update")?
+        } else {
+            git_ops::pull_repo(&path).context("failed to pull hub skill update")?;
+            git_ops::compute_tree_hash(&path).context("failed to compute updated tree hash")?
+        };
 
-        apply_hash_writes(&mut lockfile, &plan.hash_writes);
-        refresh_content_baselines(&mut lockfile, &plan.affected)?;
-        lockfile
-            .save(&lock_path)
-            .with_context(|| format!("Failed to save lockfile '{}'", lock_path.display()))?;
-        plan
+        let plan = {
+            let _lock = lockfile::get_mutex()
+                .lock()
+                .map_err(|_| anyhow::anyhow!("Lockfile mutex poisoned"))?;
+            let mut lockfile = lockfile::Lockfile::load(&lock_path)
+                .with_context(|| format!("Failed to load lockfile '{}'", lock_path.display()))?;
+
+            let plan =
+                plan::plan_update(&lockfile.skills, name, &tree_hash, is_repo_skill, |entry| {
+                    sibling_state_on_disk(&skills_dir, target_repo_root.as_deref(), entry)
+                });
+
+            apply_hash_writes(&mut lockfile, &plan.hash_writes);
+            refresh_content_baselines(&mut lockfile, &plan.affected)?;
+            lockfile
+                .save(&lock_path)
+                .with_context(|| format!("Failed to save lockfile '{}'", lock_path.display()))?;
+            plan
+        };
+        Ok((tree_hash, plan))
+    })();
+
+    let (tree_hash, plan) = match transaction {
+        Ok(result) => result,
+        Err(error) => {
+            git_ops::reset_to_revision(checkout_root, &previous_revision).with_context(|| {
+                format!(
+                    "update failed ({error:#}) and the previous Skill revision could not be restored"
+                )
+            })?;
+            if let Some(paths) = previous_sparse_paths {
+                git_ops::restore_sparse_checkout_paths(checkout_root, &paths)
+                    .context("failed to restore the pre-update sparse checkout")?;
+            }
+            for snapshot in &rollback_snapshots {
+                snapshot.restore_owned_at(&snapshot.root).with_context(|| {
+                    format!(
+                        "failed to restore pre-update Skill content at '{}'",
+                        snapshot.root.display()
+                    )
+                })?;
+            }
+            return Err(error.context("update was rolled back to the previous Skill revision"));
+        }
     };
 
     installed_skill::invalidate_cache();
@@ -468,348 +904,4 @@ fn apply_update(name: &str) -> Result<UpdateOutcome> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::process::Command;
-
-    struct TestHub {
-        previous_hub: Option<std::ffi::OsString>,
-        _temp: tempfile::TempDir,
-    }
-
-    impl TestHub {
-        fn new() -> Self {
-            let previous_hub = std::env::var_os("SKILLSTAR_HUB_DIR");
-            let temp = tempfile::tempdir().unwrap();
-            unsafe {
-                std::env::set_var("SKILLSTAR_HUB_DIR", temp.path());
-            }
-            Self {
-                previous_hub,
-                _temp: temp,
-            }
-        }
-    }
-
-    impl Drop for TestHub {
-        fn drop(&mut self) {
-            unsafe {
-                match self.previous_hub.take() {
-                    Some(value) => std::env::set_var("SKILLSTAR_HUB_DIR", value),
-                    None => std::env::remove_var("SKILLSTAR_HUB_DIR"),
-                }
-            }
-        }
-    }
-
-    fn run_git(repo: &Path, args: &[&str]) {
-        let output = Command::new("git")
-            .current_dir(repo)
-            .args(args)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "git {args:?} failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    fn committed_remote() -> tempfile::TempDir {
-        let remote = tempfile::tempdir().unwrap();
-        run_git(remote.path(), &["init", "--initial-branch=main"]);
-        run_git(remote.path(), &["config", "user.email", "test@example.com"]);
-        run_git(remote.path(), &["config", "user.name", "SkillStar Tests"]);
-        std::fs::create_dir_all(remote.path().join("scripts")).unwrap();
-        std::fs::write(
-            remote.path().join("SKILL.md"),
-            "---\ndescription: v1\n---\n",
-        )
-        .unwrap();
-        std::fs::write(remote.path().join("scripts/run.sh"), "echo remote-v1\n").unwrap();
-        run_git(remote.path(), &["add", "."]);
-        run_git(remote.path(), &["commit", "-m", "v1"]);
-        remote
-    }
-
-    fn committed_multi_skill_remote() -> tempfile::TempDir {
-        let remote = tempfile::tempdir().unwrap();
-        run_git(remote.path(), &["init", "--initial-branch=main"]);
-        run_git(remote.path(), &["config", "user.email", "test@example.com"]);
-        run_git(remote.path(), &["config", "user.name", "SkillStar Tests"]);
-        for name in ["alpha", "beta"] {
-            let directory = remote.path().join("skills").join(name);
-            std::fs::create_dir_all(&directory).unwrap();
-            std::fs::write(
-                directory.join("SKILL.md"),
-                format!("---\nname: {name}\ndescription: {name} v1\n---\n"),
-            )
-            .unwrap();
-        }
-        run_git(remote.path(), &["add", "."]);
-        run_git(remote.path(), &["commit", "-m", "v1"]);
-        remote
-    }
-
-    #[test]
-    fn local_divergence_blocks_update_before_any_file_changes() {
-        let _guard = crate::lock_test_env();
-        let _hub = TestHub::new();
-        let remote = committed_remote();
-
-        crate::skill_install::install_skill(
-            remote.path().to_string_lossy().into_owned(),
-            Some("demo".to_string()),
-        )
-        .unwrap();
-
-        let installed = skillstar_core::infra::paths::hub_skills_dir().join("demo");
-        std::fs::write(installed.join("scripts/run.sh"), "echo local-change\n").unwrap();
-
-        std::fs::write(remote.path().join("scripts/run.sh"), "echo remote-v2\n").unwrap();
-        run_git(remote.path(), &["add", "."]);
-        run_git(remote.path(), &["commit", "-m", "v2"]);
-
-        let report = update_skills(&["demo".to_string()]);
-
-        assert!(report.updated.is_empty());
-        assert!(report.failed.is_empty());
-        assert_eq!(report.blocked.len(), 1);
-        assert_eq!(report.blocked[0].name, "demo");
-        assert_eq!(report.blocked[0].suggested_local_name, "demo.local");
-        assert_eq!(
-            std::fs::read_to_string(installed.join("scripts/run.sh")).unwrap(),
-            "echo local-change\n",
-            "detecting divergence must not fetch/reset or rewrite the Skill"
-        );
-    }
-
-    #[test]
-    fn skillstar_state_and_temporary_files_do_not_block_a_clean_update() {
-        let _guard = crate::lock_test_env();
-        let _hub = TestHub::new();
-        let remote = committed_remote();
-
-        crate::skill_install::install_skill(
-            remote.path().to_string_lossy().into_owned(),
-            Some("demo".to_string()),
-        )
-        .unwrap();
-
-        let installed = skillstar_core::infra::paths::hub_skills_dir().join("demo");
-        std::fs::create_dir_all(installed.join(".skillstar")).unwrap();
-        std::fs::write(installed.join(".skillstar/update.json"), "transient").unwrap();
-        std::fs::write(installed.join(".DS_Store"), "finder").unwrap();
-        std::fs::write(installed.join("notes.md~"), "editor backup").unwrap();
-
-        std::fs::write(remote.path().join("scripts/run.sh"), "echo remote-v2\n").unwrap();
-        run_git(remote.path(), &["add", "."]);
-        run_git(remote.path(), &["commit", "-m", "v2"]);
-
-        let report = update_skills(&["demo".to_string()]);
-
-        assert!(report.blocked.is_empty());
-        assert!(report.failed.is_empty());
-        assert_eq!(report.updated.len(), 1);
-        assert_eq!(
-            std::fs::read_to_string(installed.join("scripts/run.sh")).unwrap(),
-            "echo remote-v2\n"
-        );
-    }
-
-    #[test]
-    fn preserving_divergence_copies_the_full_tree_then_updates_the_subscription() {
-        let _guard = crate::lock_test_env();
-        let _hub = TestHub::new();
-        let remote = committed_remote();
-
-        crate::skill_install::install_skill(
-            remote.path().to_string_lossy().into_owned(),
-            Some("demo".to_string()),
-        )
-        .unwrap();
-
-        let installed = skillstar_core::infra::paths::hub_skills_dir().join("demo");
-        std::fs::write(installed.join("SKILL.md"), "---\ndescription: local\n---\n").unwrap();
-        std::fs::write(installed.join("scripts/run.sh"), "echo local-change\n").unwrap();
-        std::fs::create_dir_all(installed.join("assets")).unwrap();
-        std::fs::write(installed.join("assets/prompt.txt"), "local asset\n").unwrap();
-        #[cfg(unix)]
-        std::os::unix::fs::symlink("assets/prompt.txt", installed.join("prompt-link")).unwrap();
-
-        std::fs::write(remote.path().join("scripts/run.sh"), "echo remote-v2\n").unwrap();
-        run_git(remote.path(), &["add", "."]);
-        run_git(remote.path(), &["commit", "-m", "v2"]);
-
-        let result = resolve_skill_update(
-            "demo",
-            LocalDivergenceResolution::Preserve {
-                local_name: "custom-demo".to_string(),
-            },
-        )
-        .unwrap();
-
-        assert_eq!(result.update.skill.name, "demo");
-        assert_eq!(
-            result.local_copy.as_ref().map(|skill| skill.name.as_str()),
-            Some("custom-demo")
-        );
-        assert_eq!(
-            std::fs::read_to_string(installed.join("scripts/run.sh")).unwrap(),
-            "echo remote-v2\n"
-        );
-
-        let local = skillstar_core::infra::paths::hub_skills_dir().join("custom-demo");
-        assert!(crate::local_skill::is_local_skill("custom-demo"));
-        assert_eq!(
-            std::fs::read_to_string(local.join("scripts/run.sh")).unwrap(),
-            "echo local-change\n"
-        );
-        assert_eq!(
-            std::fs::read_to_string(local.join("assets/prompt.txt")).unwrap(),
-            "local asset\n"
-        );
-        #[cfg(unix)]
-        assert_eq!(
-            std::fs::read_link(local.join("prompt-link")).unwrap(),
-            Path::new("assets/prompt.txt")
-        );
-    }
-
-    #[test]
-    fn discarding_divergence_updates_without_creating_a_local_copy() {
-        let _guard = crate::lock_test_env();
-        let _hub = TestHub::new();
-        let remote = committed_remote();
-
-        crate::skill_install::install_skill(
-            remote.path().to_string_lossy().into_owned(),
-            Some("demo".to_string()),
-        )
-        .unwrap();
-        let installed = skillstar_core::infra::paths::hub_skills_dir().join("demo");
-        std::fs::write(installed.join("scripts/run.sh"), "echo throw-away\n").unwrap();
-        std::fs::write(remote.path().join("scripts/run.sh"), "echo remote-v2\n").unwrap();
-        run_git(remote.path(), &["add", "."]);
-        run_git(remote.path(), &["commit", "-m", "v2"]);
-
-        resolve_skill_update("demo", LocalDivergenceResolution::Discard).unwrap();
-
-        assert_eq!(
-            std::fs::read_to_string(installed.join("scripts/run.sh")).unwrap(),
-            "echo remote-v2\n"
-        );
-        assert!(!skillstar_core::infra::paths::local_skills_dir().exists());
-    }
-
-    #[test]
-    fn blocked_update_suggests_a_non_destructive_local_copy_name() {
-        let _guard = crate::lock_test_env();
-        let _hub = TestHub::new();
-        let remote = committed_remote();
-
-        crate::skill_install::install_skill(
-            remote.path().to_string_lossy().into_owned(),
-            Some("demo".to_string()),
-        )
-        .unwrap();
-        crate::local_skill::create("demo.local", None).unwrap();
-        let installed = skillstar_core::infra::paths::hub_skills_dir().join("demo");
-        std::fs::write(installed.join("scripts/run.sh"), "echo local-change\n").unwrap();
-
-        let report = update_skills(&["demo".to_string()]);
-
-        assert_eq!(report.blocked[0].suggested_local_name, "demo.local.2");
-        assert!(crate::local_skill::is_local_skill("demo.local"));
-    }
-
-    #[test]
-    fn editable_local_copy_name_cannot_escape_the_managed_local_root() {
-        let _guard = crate::lock_test_env();
-        let _hub = TestHub::new();
-        let remote = committed_remote();
-
-        crate::skill_install::install_skill(
-            remote.path().to_string_lossy().into_owned(),
-            Some("demo".to_string()),
-        )
-        .unwrap();
-        let installed = skillstar_core::infra::paths::hub_skills_dir().join("demo");
-        std::fs::write(installed.join("scripts/run.sh"), "echo local-change\n").unwrap();
-
-        let error = resolve_skill_update(
-            "demo",
-            LocalDivergenceResolution::Preserve {
-                local_name: "../escape".to_string(),
-            },
-        )
-        .unwrap_err();
-
-        assert!(error.to_string().contains("Invalid local Skill name"));
-        assert_eq!(
-            std::fs::read_to_string(installed.join("scripts/run.sh")).unwrap(),
-            "echo local-change\n"
-        );
-    }
-
-    #[test]
-    fn divergence_in_a_repo_sibling_blocks_the_shared_checkout_before_reset() {
-        let _guard = crate::lock_test_env();
-        let _hub = TestHub::new();
-        let remote = committed_multi_skill_remote();
-        let repos = skillstar_core::infra::paths::repos_cache_dir();
-        std::fs::create_dir_all(&repos).unwrap();
-        let cache = repos.join("multi");
-        run_git(
-            &repos,
-            &[
-                "clone",
-                remote.path().to_str().unwrap(),
-                cache.to_str().unwrap(),
-            ],
-        );
-        let targets = ["alpha", "beta"].map(|name| crate::repo_scanner::SkillInstallTarget {
-            id: name.to_string(),
-            folder_path: format!("skills/{name}"),
-        });
-        crate::repo_scanner::install_from_repo_at(
-            &cache,
-            &remote.path().to_string_lossy(),
-            None,
-            &targets,
-        )
-        .unwrap();
-
-        let skills = skillstar_core::infra::paths::hub_skills_dir();
-        std::fs::write(
-            skills.join("alpha/SKILL.md"),
-            "---\nname: alpha\ndescription: locally edited\n---\n",
-        )
-        .unwrap();
-        std::fs::write(
-            remote.path().join("skills/beta/SKILL.md"),
-            "---\nname: beta\ndescription: beta v2\n---\n",
-        )
-        .unwrap();
-        run_git(remote.path(), &["add", "."]);
-        run_git(remote.path(), &["commit", "-m", "v2"]);
-
-        let report = update_skills(&["beta".to_string()]);
-
-        assert!(report.updated.is_empty());
-        assert_eq!(
-            report
-                .blocked
-                .iter()
-                .map(|blocked| blocked.name.as_str())
-                .collect::<Vec<_>>(),
-            vec!["alpha"]
-        );
-        assert!(
-            std::fs::read_to_string(skills.join("beta/SKILL.md"))
-                .unwrap()
-                .contains("beta v1"),
-            "a clean sibling cannot move when that would overwrite a divergent shared checkout"
-        );
-    }
-}
+mod tests;
