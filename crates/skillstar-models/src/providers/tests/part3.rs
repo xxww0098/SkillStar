@@ -585,3 +585,14 @@ fn every_preset_id_resolves_to_a_provider_identity() {
         );
     }
 }
+
+#[test]
+fn every_preset_id_maps_through_skillstar_providers() {
+    for preset in get_all_presets_flat() {
+        assert!(
+            skillstar_providers::identity::identity_for_preset(&preset.id).is_some(),
+            "preset `{}` missing from skillstar_providers::PROVIDER_IDENTITIES",
+            preset.id
+        );
+    }
+}

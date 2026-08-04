@@ -13,6 +13,8 @@ export default defineConfig(async () => ({
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
+    // Keep a single React / context identity across eager App and lazy Models chunks.
+    dedupe: ["react", "react-dom"],
   },
   optimizeDeps: {
     // Explicitly pre-bundle these so that deep subpath imports (icons) and the

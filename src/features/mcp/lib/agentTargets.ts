@@ -5,7 +5,6 @@ import type { AgentProfile, McpToolId } from "../../../types";
 const MCP_TOOL_BY_AGENT_ID: Readonly<Partial<Record<string, McpToolId>>> = {
   claude: "claude-code",
   codex: "codex",
-  gemini: "gemini",
   grok: "grok",
   opencode: "opencode",
   zcode: "zcode",

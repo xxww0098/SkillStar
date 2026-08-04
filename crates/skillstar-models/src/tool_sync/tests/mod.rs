@@ -17,7 +17,7 @@ use tempfile::TempDir;
 ///
 /// Initialised exactly once under `LazyLock`, whose synchronization sets
 /// [`TOOL_SYNC_HOME_ENV`] before any test observes it — so the real
-/// `~/.claude`, `~/.codex`, `~/.gemini`, … are NEVER touched by the suite.
+/// `~/.claude`, `~/.codex`, `~/.config/opencode`, … are NEVER touched by the suite.
 /// Any future test that drives a real sync MUST call [`use_sandbox_home`]
 /// first, or it will write to the developer's live tool configs.
 static TOOL_SYNC_SANDBOX: std::sync::LazyLock<TempDir> = std::sync::LazyLock::new(|| {

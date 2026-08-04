@@ -61,7 +61,7 @@ const fn unsupported() -> GlobalDirDef {
     }
 }
 
-// The four legacy SkillStar ids (`claude`, `gemini`, `kiro`, `hermes`) retain
+// The three legacy SkillStar ids (`claude`, `kiro`, `hermes`) retain
 // their persisted identity. CLI/API normalization accepts the corresponding
 // upstream ids. Every other row uses the upstream id verbatim. `grok` is a
 // SkillStar extension kept after the synchronized upstream block.
@@ -218,12 +218,6 @@ const BUILTIN_AGENT_DEFS: &[BuiltinAgentDef] = &[
         "ForgeCode",
         home(&[".forge", "skills"]),
         ".forge/skills",
-    ),
-    (
-        "gemini",
-        "Gemini CLI",
-        home(&[".gemini", "skills"]),
-        ".agents/skills",
     ),
     (
         "github-copilot",
@@ -563,7 +557,6 @@ mod tests {
         "eve",
         "firebender",
         "forgecode",
-        "gemini-cli",
         "github-copilot",
         "goose",
         "hermes-agent",
@@ -613,7 +606,6 @@ mod tests {
     fn skillstar_id(upstream: &str) -> &str {
         match upstream {
             "claude-code" => "claude",
-            "gemini-cli" => "gemini",
             "kiro-cli" => "kiro",
             "hermes-agent" => "hermes",
             id => id,

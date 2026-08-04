@@ -6,29 +6,17 @@
 # entirely once it hits 0); the guard will flag stale entries that already
 # read 0.
 #
-# Generated from an actual scan on 2026-07-03 (100 hits across 17 files),
-# after the 2026-07 i18n cleanup pass. usage / settings/sections carry most
-# of the remaining debt (both mid-migration in parallel sessions);
-# AppAiModelsPicker, models/lib + models/api/presets.ts, and
-# CommandPalette / InfoTip / mcp / my-skills / projects / lib/ipc & shareCode
-# (2026-07 cleanups) have already been cleaned up and carry no baseline
-# entry (or a reduced one — see CommandPalette.tsx, whose 9 remaining hits
-# are intentional bilingual `keywords:` search-matching arrays, not
-# user-facing copy).
+# Updated 2026-08-04: cleared migrated usage/settings AI strings; baseline
+# now tracks remaining intentional bilingual keywords + sharded devMock
+# sample content (Chinese fixture copy for browser-dev).
 src/components/layout/CommandPalette.tsx:9
 src/components/shared/ProviderBrandIcon.tsx:3
-src/features/settings/sections/AiProviderSection.tsx:5
 src/features/settings/sections/BackgroundRunSection.tsx:2
-src/features/settings/sections/FingerprintsSection.tsx:3
-src/features/usage/components/SubscriptionCard.tsx:7
 src/features/usage/components/SubscriptionEditDialog.tsx:3
-src/features/usage/components/UsageCardWindow.tsx:10
 src/features/usage/components/UsageGrid.tsx:2
-src/features/usage/components/UsagePanel.tsx:5
-src/features/usage/components/VendorPlaceholderCard.tsx:1
-src/features/usage/components/subscriptionEdit/AutoImportBanner.tsx:6
-src/features/usage/components/subscriptionEdit/CookieField.tsx:6
-src/features/usage/components/subscriptionEdit/cookieHelp.ts:14
-src/features/usage/hooks/useUsageData.ts:2
 src/features/usage/lib/usageLabels.ts:3
-src/lib/ipc/devMockData.ts:19
+src/lib/ipc/devMock/marketplace.ts:2
+src/lib/ipc/devMock/mcpData.ts:2
+src/lib/ipc/devMock/modelsData.ts:1
+src/lib/ipc/devMock/skillsData.ts:4
+src/lib/ipc/devMock/usageData.ts:8

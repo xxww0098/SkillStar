@@ -20,7 +20,7 @@ describe("selectMcpAgentTargets", () => {
     const targets = selectMcpAgentTargets([
       profile("claude"),
       profile("codex"),
-      profile("gemini", true, false),
+      profile("pi"),
       profile("cursor", false, true),
       profile("custom-agent"),
     ]);
@@ -56,5 +56,6 @@ describe("selectMcpAgentTargets", () => {
     expect(MCP_TOOL_IDS.filter((toolId) => toolId.startsWith("claude"))).toEqual(["claude-code"]);
     expect(isMcpToolId("claude-code")).toBe(true);
     expect(isMcpToolId("claude-desktop")).toBe(false);
+    expect(isMcpToolId("gemini")).toBe(false);
   });
 });

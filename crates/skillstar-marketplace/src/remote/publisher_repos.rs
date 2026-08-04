@@ -322,9 +322,7 @@ pub(crate) fn parse_publisher_repos_from_official_payload(
     }
     #[derive(Deserialize)]
     struct SkillEntry {
-        #[allow(dead_code)]
         name: String,
-        #[allow(dead_code)]
         installs: u32,
     }
 

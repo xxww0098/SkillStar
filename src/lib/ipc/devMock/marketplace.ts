@@ -8,6 +8,67 @@
 import { type DevMockHandlers, iso } from "./shared";
 import { SAMPLE_SKILLS } from "./skillsData";
 
+const PUBLISHER_REPOS: Record<
+  string,
+  Array<{
+    repo: string;
+    source: string;
+    skill_count: number;
+    installs_label: string;
+    installs: number;
+    url: string;
+    skills: Array<{ name: string; installs: number }>;
+  }>
+> = {
+  anthropics: [
+    {
+      repo: "skills",
+      source: "anthropics/skills",
+      skill_count: 3,
+      installs_label: "4.4K",
+      installs: 4400,
+      url: "https://github.com/anthropics/skills",
+      skills: [
+        { name: "pdf-tools", installs: 1300 },
+        { name: "xlsx", installs: 982 },
+        { name: "deep-research", installs: 2100 },
+      ],
+    },
+    {
+      repo: "computer-use",
+      source: "anthropics/computer-use",
+      skill_count: 0,
+      installs_label: "120",
+      installs: 120,
+      url: "https://github.com/anthropics/computer-use",
+      skills: [],
+    },
+    {
+      repo: "examples",
+      source: "anthropics/examples",
+      skill_count: 0,
+      installs_label: "80",
+      installs: 80,
+      url: "https://github.com/anthropics/examples",
+      skills: [],
+    },
+  ],
+  community: [
+    {
+      repo: "skills",
+      source: "community/skills",
+      skill_count: 2,
+      installs_label: "1.2K",
+      installs: 1200,
+      url: "https://github.com/community/skills",
+      skills: [
+        { name: "svg2icon", installs: 433 },
+        { name: "git-flow", installs: 766 },
+      ],
+    },
+  ],
+};
+
 export const MARKET_SKILLS = [
   ...SAMPLE_SKILLS.map((s, i) => ({ ...s, installed: false, rank: i + 1 })),
   {
@@ -86,4 +147,23 @@ export const MARKETPLACE_HANDLERS: DevMockHandlers = {
       snapshot_updated_at: iso(0),
     };
   },
+  get_publisher_repos_local: (args) => {
+    const name = String((args?.publisherName as string) ?? "").toLowerCase();
+    const repos = PUBLISHER_REPOS[name] ?? [];
+    return {
+      data: repos,
+      snapshot_status: "fresh",
+      snapshot_updated_at: iso(0),
+    };
+  },
+  get_repo_skills_local: (args) => {
+    const source = String((args?.source as string) ?? "").toLowerCase();
+    const data = MARKET_SKILLS.filter((s) => (s.source ?? "").toLowerCase() === source);
+    return {
+      data,
+      snapshot_status: "fresh",
+      snapshot_updated_at: iso(0),
+    };
+  },
+  sync_marketplace_scope: () => undefined,
 };

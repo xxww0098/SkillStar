@@ -5,11 +5,11 @@
 
 use chrono::Utc;
 
+use crate::UsageResult;
 use crate::storage;
 use crate::subscription::{
     AlertKind, AlertSeverity, Subscription, SubscriptionAlert, SubscriptionUsage,
 };
-use crate::{UsageError, UsageResult};
 
 const SECONDS_PER_DAY: i64 = 86_400;
 
@@ -111,9 +111,6 @@ fn alerts_for(
 
     out
 }
-
-#[allow(dead_code)]
-fn _unused_marker(_: UsageError) {}
 
 #[cfg(test)]
 mod tests {

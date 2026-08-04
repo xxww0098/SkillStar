@@ -1,12 +1,12 @@
 use crate::agents::{self as agent_profile, AgentProfile};
 use crate::git::ops as git_ops;
 use crate::lockfile::LockEntry;
+pub use crate::update_state::SkillUpdateState;
 use crate::{
     local_skill,
     lockfile::{self},
     repo_link, update_checker, update_state,
 };
-pub use crate::update_state::SkillUpdateState;
 use anyhow::{Context, Result, anyhow};
 use skillstar_core::types::{
     Skill, SkillCategory, extract_github_source_from_url, extract_skill_description,
@@ -442,6 +442,9 @@ mod tests {
             apply_cached_update_states(vec![test_skill("recorded-update"), test_skill("unknown")]);
 
         assert!(skills[0].update_available);
-        assert!(!skills[1].update_available, "unscanned skills stay as built");
+        assert!(
+            !skills[1].update_available,
+            "unscanned skills stay as built"
+        );
     }
 }

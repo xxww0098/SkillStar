@@ -9,8 +9,8 @@
 //!
 //! This is a wider, independent domain table from `tool_sync::agents`
 //! (`AgentSpec`): MCP additionally targets grok / zcode / kiro / cursor,
-//! and the hidden legacy `claude-desktop` cleanup id deliberately stays
-//! outside it (not a public target).
+//! and the hidden legacy `claude-desktop` / `gemini` cleanup ids deliberately
+//! stay outside it (not public targets).
 
 use anyhow::Result;
 use std::path::{Path, PathBuf};
@@ -59,16 +59,6 @@ static MCP_TOOL_SPECS: &[McpToolSpec] = &[
         read_servers: read_toml_mcp_servers_entries,
         upsert: |path, entry| codex_upsert(path, &entry.name, codex_toml_table(entry)),
         remove: codex_remove,
-    },
-    McpToolSpec {
-        id: "gemini",
-        label: "Gemini CLI",
-        resolve_config_path: resolve_gemini_settings_path,
-        installed: |home| home.join(".gemini").exists(),
-        count_live: count_json_mcpservers,
-        read_servers: read_json_mcpservers_entries,
-        upsert: |path, entry| json_mcpservers_upsert(path, &entry.name, gemini_spec(entry)),
-        remove: json_mcpservers_remove,
     },
     McpToolSpec {
         id: "grok",
@@ -167,8 +157,9 @@ mod tests {
     }
 
     #[test]
-    fn legacy_desktop_chat_stays_out_of_the_registry() {
+    fn legacy_cleanup_ids_stay_out_of_the_registry() {
         assert!(mcp_tool_spec(LEGACY_CLAUDE_DESKTOP_TOOL_ID).is_none());
+        assert!(mcp_tool_spec(LEGACY_GEMINI_TOOL_ID).is_none());
         assert!(mcp_tool_spec("unknown").is_none());
     }
 

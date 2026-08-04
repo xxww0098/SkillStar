@@ -12,7 +12,6 @@ tokio = { workspace = true, features = ["full"] }
 reqwest = { workspace = true, features = ["rustls", "json", "stream"] }
 tracing = { workspace = true }
 chrono = { workspace = true }
-lazy_static = { workspace = true }
 dirs = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true }
@@ -30,7 +29,6 @@ sha2 = { workspace = true }
 rand = { workspace = true }
 async-openai = { version = "0.27", features = ["rustls"] }
 futures-util = "0.3.32"
-futures = { workspace = true }
 reqwest_012 = { package = "reqwest", version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
 
 [dev-dependencies]

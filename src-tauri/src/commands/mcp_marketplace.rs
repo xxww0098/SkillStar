@@ -5,7 +5,7 @@
 //! registry server into a prefilled [`McpServerEntry`] draft — the frontend
 //! opens it in the existing MCP server form (highlighting secret env/headers the
 //! user must fill) and then calls the existing `create_mcp_server` command,
-//! which projects it into Codex/Claude/Gemini/OpenCode via the established sync
+//! which projects it into Codex/Claude/OpenCode and other supported tools via the established sync
 //! machinery. No new install/clone path is introduced.
 
 use std::collections::BTreeMap;

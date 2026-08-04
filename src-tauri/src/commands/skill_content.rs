@@ -1,23 +1,10 @@
 use skillstar_core::infra::error::AppError;
+use skillstar_skills::SkillContent;
 use skillstar_skills::content as skill_content;
-use skillstar_skills::{Skill, SkillContent};
 
 #[tauri::command]
 pub async fn read_skill_file_raw(name: String) -> Result<String, AppError> {
     skill_content::read_raw(&name)
-}
-
-#[tauri::command]
-pub async fn create_local_skill_from_content(
-    name: String,
-    content: String,
-) -> Result<(), AppError> {
-    skill_content::create_from_content(&name, &content)
-}
-
-#[tauri::command]
-pub async fn create_local_skill(name: String, content: Option<String>) -> Result<Skill, AppError> {
-    skill_content::create_local(&name, content.as_deref())
 }
 
 #[tauri::command]

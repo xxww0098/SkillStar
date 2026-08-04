@@ -3,7 +3,6 @@
 //! Each submodule is a building block; the per-provider `fetchers/oauth/*.rs`
 //! compose them.
 
-pub mod device_flow;
 pub mod local_server;
 pub mod manual_callback;
 pub mod pending_state;

@@ -133,9 +133,7 @@ pub fn is_mirror_transport_error(stderr: &str) -> bool {
 }
 
 pub async fn test_mirror(url: &str) -> Result<u64> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()?;
+    let client = crate::infra::http_client::probe_http_client(std::time::Duration::from_secs(10))?;
 
     let normalised = if url.ends_with('/') {
         url.to_string()

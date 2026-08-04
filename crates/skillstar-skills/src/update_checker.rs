@@ -228,9 +228,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let repo = dir.path().join("repo");
         let failed = HashSet::from([repo.clone()]);
-        let result = check_update_local_with(&dir.path().join("skill"), &failed, |_| {
-            Some(repo.clone())
-        });
+        let result =
+            check_update_local_with(&dir.path().join("skill"), &failed, |_| Some(repo.clone()));
         assert_eq!(result, None, "failed fetch must not clear the badge");
     }
 
@@ -264,11 +263,8 @@ mod tests {
             }
         };
 
-        let failed = prefetch_unique_repos_with(
-            &[skill_a1, skill_a2, skill_b],
-            repo_root_of,
-            fetch_repo,
-        );
+        let failed =
+            prefetch_unique_repos_with(&[skill_a1, skill_a2, skill_b], repo_root_of, fetch_repo);
 
         assert_eq!(
             fetch_calls.borrow().len(),

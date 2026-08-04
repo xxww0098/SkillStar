@@ -74,6 +74,8 @@ pub(crate) struct ProvidersStore {
     pub codex: AppProviders,
     #[serde(default)]
     pub opencode: AppProviders,
+    /// Legacy v1 bucket retained only so migration preserves provider data.
+    /// It never creates a current tool binding.
     #[serde(default)]
     pub gemini: AppProviders,
 }
@@ -87,7 +89,7 @@ pub(crate) struct ProvidersStore {
 /// - v2 stored one `Option<ToolActivation>` per tool (single provider per agent).
 /// - v3 stores a [`ToolBinding`] per tool — an ordered list of provider+model
 ///   entries with an `active_index` pointer. Single-provider agents
-///   (claude-code, gemini) keep 0 or 1 entry; multi-provider agents
+///   (currently claude-code) keep 0 or 1 entry; multi-provider agents
 ///   (codex, opencode) may hold several.
 pub const FLAT_STORE_VERSION: u32 = 3;
 
@@ -207,7 +209,7 @@ pub struct ModelCatalogFetchResult {
 ///
 /// One entry = one provider the agent can use, plus the model selected for it
 /// and any per-entry tool settings (e.g. Codex `wire_api` / `auth_mode`).
-/// Single-provider agents (claude-code, gemini) only ever hold one of these;
+/// Single-provider agents (currently claude-code) only ever hold one of these;
 /// multi-provider agents (codex, opencode) may hold several, all written to the
 /// agent's config file as parallel managed entries.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -308,4 +310,3 @@ pub struct ProviderPatchFlat {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codex_auth_mode: Option<String>,
 }
-

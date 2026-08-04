@@ -72,11 +72,18 @@ pub async fn clear_app_ai_provider_ref() -> Result<(), AppError> {
 
 /// Returns the full flat provider store (version + providers + tool_activations).
 ///
-/// Performs v1→v2 migration on first access if needed.
+/// Performs v1→v2 migration on first access if needed, then ensures Claude /
+/// Codex Official seed rows exist (stable ids; insert-only).
 #[tauri::command]
-pub async fn get_providers_flat() -> Result<FlatProvidersResponse, AppError> {
+pub async fn get_providers_flat(
+    lock: State<'_, ProvidersWriteLock>,
+) -> Result<FlatProvidersResponse, AppError> {
+    let _guard = lock.0.lock().await;
     let path = providers::flat_store_path();
-    let store = providers::migrate_store_if_needed(&path)?;
+    let mut store = providers::migrate_store_if_needed(&path)?;
+    if providers::ensure_official_providers(&mut store) {
+        providers::write_flat_store(&store, &path)?;
+    }
     Ok(FlatProvidersResponse {
         version: store.version,
         providers: store.providers,

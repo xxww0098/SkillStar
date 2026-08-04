@@ -7,6 +7,7 @@
 import type { ConnectionTestResult, ProviderEntryFlat, ToolActivation } from "../../../types";
 import type { AgentDescriptor } from "./agentRegistry";
 import { providerCompatibleWithAgent } from "./agentRegistry";
+import { isNativeOfficialProvider } from "./officialProviders";
 
 export type AgentStatus =
   | { kind: "not_installed" }
@@ -41,7 +42,12 @@ export function computeAgentStatus(input: AgentStatusInput): AgentStatus {
   if (!installLoading && !installed) return { kind: "not_installed" };
   if (isSyncing) return { kind: "syncing" };
   if (!activation || !boundProvider) return { kind: "inactive" };
-  if (!providerCompatibleWithAgent(agent, boundProvider)) {
+  // Official seeds intentionally have empty endpoints; Rust activate_tool
+  // skips the URL gate for them — keep the UI status aligned.
+  if (
+    !isNativeOfficialProvider(boundProvider) &&
+    !providerCompatibleWithAgent(agent, boundProvider)
+  ) {
     return { kind: "misconfigured", requiredUrlField: agent.requiredUrlField };
   }
   if (probing) return { kind: "unverified" };

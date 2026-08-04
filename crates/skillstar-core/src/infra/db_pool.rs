@@ -5,8 +5,6 @@ use r2d2::Pool;
 #[cfg(not(test))]
 use r2d2_sqlite::SqliteConnectionManager;
 #[cfg(not(test))]
-use rusqlite::Connection;
-#[cfg(not(test))]
 use std::path::Path;
 
 #[cfg(not(test))]
@@ -30,22 +28,4 @@ pub fn create_pool(db_path: &Path, max_size: u32) -> Result<DbPool> {
         .max_size(max_size)
         .build(manager)
         .context("Failed to build r2d2 connection pool")
-}
-
-#[cfg(not(test))]
-#[allow(dead_code)]
-pub async fn run_blocking<F, T>(pool: &'static DbPool, f: F) -> Result<T>
-where
-    F: FnOnce(&Connection) -> Result<T> + Send + 'static,
-    T: Send + 'static,
-{
-    let pool = pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let conn = pool
-            .get()
-            .context("Failed to get DB connection from pool")?;
-        f(&conn)
-    })
-    .await
-    .context("spawn_blocking join error")?
 }

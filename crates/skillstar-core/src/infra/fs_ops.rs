@@ -222,31 +222,6 @@ pub fn remove_link_or_copy(path: &Path) -> anyhow::Result<()> {
     anyhow::bail!("Not a symlink, junction, or directory: {:?}", path);
 }
 
-#[allow(dead_code)]
-pub fn check_symlink_support() -> bool {
-    #[cfg(unix)]
-    {
-        true
-    }
-
-    #[cfg(windows)]
-    {
-        let tmp = std::env::temp_dir();
-        let test_src = tmp.join(".skillstar_symlink_test_src");
-        let test_dst = tmp.join(".skillstar_symlink_test_dst");
-
-        let _ = std::fs::create_dir_all(&test_src);
-
-        let result = std::os::windows::fs::symlink_dir(&test_src, &test_dst).is_ok()
-            || junction::create(&test_src, &test_dst).is_ok();
-
-        let _ = std::fs::remove_dir(&test_dst);
-        let _ = std::fs::remove_dir(&test_src);
-
-        result
-    }
-}
-
 pub fn check_developer_mode() -> bool {
     #[cfg(unix)]
     {
@@ -381,7 +356,10 @@ mod tests {
             .filter_map(|e| e.ok())
             .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
             .collect();
-        assert!(leftovers.is_empty(), "temp files must not survive: {leftovers:?}");
+        assert!(
+            leftovers.is_empty(),
+            "temp files must not survive: {leftovers:?}"
+        );
     }
 
     #[test]

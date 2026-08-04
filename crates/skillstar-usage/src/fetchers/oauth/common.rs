@@ -71,7 +71,6 @@ pub fn apply_email_title(
     }
 }
 
-
 /// Builds a fresh OAuth [`Subscription`], applying every default every
 /// provider's literal used to repeat: `plan_tier`/`monthly_price`: `None`,
 /// `billing_cycle`: `Monthly`, `start_date`/`renew_date`: `0`, `auto_renew`:

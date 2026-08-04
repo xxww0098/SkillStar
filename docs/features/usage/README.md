@@ -6,8 +6,9 @@
 
 ## 所有权与存储
 
-- `skillstar-usage` 拥有 catalog、OAuth/API-key fetcher、token 加密、subscription storage 和 refresh guard。
+- `skillstar-usage` 拥有 catalog、OAuth/API-key/Cookie fetcher、token 加密、subscription storage 和 refresh guard。
 - subscription/usage snapshot 位于 `~/.skillstar/config/usage/`。catalog 和条目数量以 `crates/skillstar-usage/src/catalog.rs` 及其测试为准。
+- Auth 模式含 `AuthMode::Cookie`（用户粘贴浏览器 `Cookie:`）；fetcher 入口在 `fetchers/cookie/`，解析见 `cookie_jar.rs`。
 - 不支持的旧 auth-mode 行在 load migration 中清理；文档不保留已删除 catalog 清单。
 - 远程请求统一使用 `skillstar_core::infra::http_client::probe_http_client`。
 - 除非用户明确要求，不修改完成态的 `fetchers/oauth/cursor.rs`。

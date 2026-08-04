@@ -210,13 +210,18 @@ pub async fn update_tool_settings(
 pub async fn detect_tool_installation(tool_id: String) -> Result<serde_json::Value, AppError> {
     let spec = tool_sync::agent_spec(&tool_id).ok_or_else(|| {
         AppError::Other(format!(
-            "Unknown tool_id: '{}'. Supported: claude-code, codex, opencode, gemini, pi.",
+            "Unknown tool_id: '{}'. Supported: claude-code, claude-desktop, codex, opencode, pi.",
             tool_id
         ))
     })?;
 
-    let binary_found =
-        skillstar_core::infra::path_env::which_in_enriched(spec.binary_name).is_some();
+    // Claude Desktop is a GUI app binding — never treat the `claude` CLI as
+    // evidence that Desktop itself is installed (Windows + macOS).
+    let binary_found = if tool_id == "claude-desktop" {
+        false
+    } else {
+        skillstar_core::infra::path_env::which_in_enriched(spec.binary_name).is_some()
+    };
 
     let config_dir_found = dirs::home_dir()
         .map(|home| {
@@ -229,10 +234,14 @@ pub async fn detect_tool_installation(tool_id: String) -> Result<serde_json::Val
         })
         .unwrap_or(false);
 
-    // Desktop Code and the CLI are two surfaces of the same Claude Code Agent.
-    let desktop_code_found = tool_id == "claude-code"
+    let desktop_app_found = matches!(tool_id.as_str(), "claude-code" | "claude-desktop")
         && skillstar_core::infra::path_env::desktop_app_installed("Claude");
-    let installed = agent_tool_installed_from_signals(&tool_id, binary_found, desktop_code_found);
+    let installed = agent_tool_installed_from_signals(
+        &tool_id,
+        binary_found,
+        desktop_app_found,
+        config_dir_found,
+    );
 
     Ok(serde_json::json!({
         "installed": installed,
@@ -244,9 +253,16 @@ pub async fn detect_tool_installation(tool_id: String) -> Result<serde_json::Val
 fn agent_tool_installed_from_signals(
     tool_id: &str,
     binary_found: bool,
-    desktop_code_found: bool,
+    desktop_app_found: bool,
+    _config_dir_found: bool,
 ) -> bool {
-    binary_found || (tool_id == "claude-code" && desktop_code_found)
+    match tool_id {
+        "claude-code" => binary_found || desktop_app_found,
+        // Desktop = Anthropic Claude.app only. Never treat SkillStar's own
+        // `~/.claude-desktop` marker (created on sync) as install evidence.
+        "claude-desktop" => desktop_app_found,
+        _ => binary_found,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -398,22 +414,51 @@ mod tests {
     use super::agent_tool_installed_from_signals;
 
     #[test]
-    fn claude_code_installation_accepts_cli_or_desktop_code() {
+    fn claude_code_installation_accepts_cli_or_desktop_app() {
         assert!(agent_tool_installed_from_signals(
             "claude-code",
             true,
+            false,
             false
         ));
         assert!(agent_tool_installed_from_signals(
             "claude-code",
             false,
-            true
+            true,
+            false
         ));
         assert!(!agent_tool_installed_from_signals(
             "claude-code",
             false,
+            false,
             false
         ));
-        assert!(!agent_tool_installed_from_signals("codex", false, true));
+        assert!(!agent_tool_installed_from_signals(
+            "codex", false, true, false
+        ));
+    }
+
+    #[test]
+    fn claude_desktop_requires_desktop_app_not_cli_or_marker() {
+        // CLI-on-PATH must not unlock Desktop bind/resync flows.
+        assert!(!agent_tool_installed_from_signals(
+            "claude-desktop",
+            true,
+            false,
+            false
+        ));
+        // SkillStar's own binding dir is not install evidence.
+        assert!(!agent_tool_installed_from_signals(
+            "claude-desktop",
+            false,
+            false,
+            true
+        ));
+        assert!(agent_tool_installed_from_signals(
+            "claude-desktop",
+            false,
+            true,
+            false
+        ));
     }
 }

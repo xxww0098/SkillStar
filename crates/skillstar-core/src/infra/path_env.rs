@@ -148,7 +148,8 @@ pub fn command_with_path(program: &str) -> Command {
 /// - macOS: `/Applications/{name}.app` and `~/Applications/{name}.app`
 /// - Windows: `%LOCALAPPDATA%\Programs\{name}\{name}.exe`,
 ///   `%LOCALAPPDATA%\Programs\{name-lower}\{name}.exe`,
-///   `%ProgramFiles%\{name}\{name}.exe`
+///   `%ProgramFiles%\{name}\{name}.exe`, plus Claude-specific MSIX /
+///   WindowsApps probes (Store installs land under `Packages\Claude_*`)
 /// - Linux: no stable official paths for these IDEs — returns false.
 pub fn desktop_app_installed(app_name: &str) -> bool {
     desktop_app_path(app_name).is_some()
@@ -173,33 +174,72 @@ pub fn desktop_app_path(app_name: &str) -> Option<PathBuf> {
     }
     #[cfg(target_os = "windows")]
     {
-        use std::path::Path;
-        let exe = format!("{app_name}.exe");
-        let lower = app_name.to_ascii_lowercase();
-        if let Some(local) = dirs::data_local_dir() {
-            let candidates = [
-                local.join("Programs").join(app_name).join(&exe),
-                local.join("Programs").join(&lower).join(&exe),
-            ];
-            for c in candidates {
-                if c.is_file() {
-                    return Some(c);
-                }
-            }
-        }
-        if let Ok(pf) = std::env::var("ProgramFiles") {
-            let c = Path::new(&pf).join(app_name).join(&exe);
-            if c.is_file() {
-                return Some(c);
-            }
-        }
-        None
+        windows_desktop_app_path(app_name)
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = app_name;
         None
     }
+}
+
+/// Windows install probes, including Claude Desktop MSIX/Store layouts.
+#[cfg(target_os = "windows")]
+fn windows_desktop_app_path(app_name: &str) -> Option<PathBuf> {
+    use std::path::Path;
+    let exe = format!("{app_name}.exe");
+    let lower = app_name.to_ascii_lowercase();
+    if let Some(local) = dirs::data_local_dir() {
+        let candidates = [
+            local.join("Programs").join(app_name).join(&exe),
+            local.join("Programs").join(&lower).join(&exe),
+        ];
+        for c in candidates {
+            if c.is_file() {
+                return Some(c);
+            }
+        }
+        // Claude Desktop ships as MSIX / Store package: Packages\Claude_<publisher>.
+        if app_name.eq_ignore_ascii_case("Claude") {
+            if let Some(pkg) = windows_claude_msix_package_dir(&local) {
+                return Some(pkg);
+            }
+            let alias = local
+                .join("Microsoft")
+                .join("WindowsApps")
+                .join("Claude.exe");
+            if alias.is_file() {
+                return Some(alias);
+            }
+        }
+    }
+    if let Ok(pf) = std::env::var("ProgramFiles") {
+        let c = Path::new(&pf).join(app_name).join(&exe);
+        if c.is_file() {
+            return Some(c);
+        }
+    }
+    None
+}
+
+/// First `%LOCALAPPDATA%\Packages\Claude_*` directory, if any.
+#[cfg(target_os = "windows")]
+fn windows_claude_msix_package_dir(local_data: &std::path::Path) -> Option<PathBuf> {
+    windows_claude_msix_package_dir_in(&local_data.join("Packages"))
+}
+
+/// Testable Packages-dir scanner for Claude MSIX family names.
+#[cfg(any(test, target_os = "windows"))]
+fn windows_claude_msix_package_dir_in(packages_dir: &std::path::Path) -> Option<PathBuf> {
+    let entries = std::fs::read_dir(packages_dir).ok()?;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with("Claude_") && entry.path().is_dir() {
+            return Some(entry.path());
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -249,6 +289,17 @@ mod tests {
                 "enriched PATH must include .opencode\\bin; got {path}"
             );
         }
+    }
+
+    #[test]
+    fn windows_claude_msix_package_dir_matches_family_prefix() {
+        let root = tempfile::tempdir().unwrap();
+        let packages = root.path().join("Packages");
+        std::fs::create_dir_all(packages.join("Claude_pzs8sxrjxfjjc")).unwrap();
+        std::fs::create_dir_all(packages.join("OtherApp_abc")).unwrap();
+        let found = windows_claude_msix_package_dir_in(&packages).unwrap();
+        assert!(found.ends_with("Claude_pzs8sxrjxfjjc"));
+        assert!(windows_claude_msix_package_dir_in(&root.path().join("missing")).is_none());
     }
 
     #[test]

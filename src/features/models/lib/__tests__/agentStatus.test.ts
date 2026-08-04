@@ -8,10 +8,12 @@ import {
   isProblem,
   summarizeAgentStatuses,
 } from "../agentStatus";
+import { CLAUDE_OFFICIAL_ID, makeOfficialProviderSeed } from "../officialProviders";
 
 const claude = PROVIDER_AGENTS.find((a) => a.toolId === "claude-code");
+const claudeDesktop = PROVIDER_AGENTS.find((a) => a.toolId === "claude-desktop");
 const codex = PROVIDER_AGENTS.find((a) => a.toolId === "codex");
-if (!claude || !codex) throw new Error("registry missing agents");
+if (!claude || !claudeDesktop || !codex) throw new Error("registry missing agents");
 
 const provider = {
   id: "p1",
@@ -38,9 +40,13 @@ function input(overrides: Partial<AgentStatusInput> = {}): AgentStatusInput {
 }
 
 describe("agent registry", () => {
-  it("exposes exactly one Claude Code provider Agent", () => {
-    expect(PROVIDER_AGENTS.filter((agent) => agent.toolId.startsWith("claude"))).toEqual([claude]);
-    expect(claude.displayName).toBe("Claude Code");
+  it("exposes separate Claude CLI and Claude Desktop provider Agents", () => {
+    expect(PROVIDER_AGENTS.filter((agent) => agent.toolId.startsWith("claude"))).toEqual([
+      claude,
+      claudeDesktop,
+    ]);
+    expect(claude.displayName).toBe("Claude CLI");
+    expect(claudeDesktop.displayName).toBe("Claude Desktop");
   });
 });
 
@@ -62,6 +68,17 @@ describe("computeAgentStatus", () => {
     expect(status).toEqual({ kind: "misconfigured", requiredUrlField: "anthropic" });
     // codex needs the openai URL instead — same provider is fine for codex? no: openai URL present
     expect(computeAgentStatus(input({ agent: codex!, boundProvider: noAnthropic })).kind).toBe("unverified");
+  });
+
+  it("treats Native Official seeds as configured despite empty endpoints", () => {
+    const official = makeOfficialProviderSeed(CLAUDE_OFFICIAL_ID, 0);
+    const status = computeAgentStatus(
+      input({
+        activation: { provider_id: CLAUDE_OFFICIAL_ID, model: "" },
+        boundProvider: official,
+      }),
+    );
+    expect(status.kind).toBe("unverified");
   });
 
   it("syncing wins over probe results; unverified until a probe lands", () => {

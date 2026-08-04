@@ -34,8 +34,6 @@ use thiserror::Error;
 pub enum Method {
     Get,
     Post,
-    Put,
-    Delete,
 }
 
 #[derive(Debug, Clone)]
@@ -80,14 +78,6 @@ impl<'c> Req<'c> {
         Self::new(client, Method::Post, url)
     }
 
-    pub fn put(client: &'c reqwest::Client, url: impl Into<String>) -> Self {
-        Self::new(client, Method::Put, url)
-    }
-
-    pub fn delete(client: &'c reqwest::Client, url: impl Into<String>) -> Self {
-        Self::new(client, Method::Delete, url)
-    }
-
     pub fn header(mut self, name: &str, value: impl Into<String>) -> Self {
         self.headers.push((name.to_string(), value.into()));
         self
@@ -129,8 +119,6 @@ impl<'c> Req<'c> {
         let m = match self.method {
             Method::Get => M::GET,
             Method::Post => M::POST,
-            Method::Put => M::PUT,
-            Method::Delete => M::DELETE,
         };
         let mut req = self.client.request(m, &self.url);
         for (k, v) in &self.headers {

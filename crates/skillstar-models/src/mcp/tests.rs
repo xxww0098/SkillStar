@@ -45,6 +45,7 @@ fn canonical_stdio_has_type_command_args_env() {
 fn supported_tool_ids_have_one_claude_code_target() {
     assert!(MCP_TOOL_IDS.contains(&"claude-code"));
     assert!(!MCP_TOOL_IDS.contains(&"claude-desktop"));
+    assert!(!MCP_TOOL_IDS.contains(&"gemini"));
     assert_eq!(
         MCP_TOOL_IDS
             .iter()
@@ -139,26 +140,6 @@ fn kiro_projects_specific_auto_approve_tools_when_not_all() {
         v["autoApprove"],
         serde_json::json!(["read_file", "list_dir"])
     );
-}
-
-#[test]
-fn gemini_projects_trust_exclude_tools_and_timeout() {
-    let mut e = stdio("fs");
-    e.auto_approve_all = true;
-    e.disabled_tools = vec!["dangerous_tool".into()];
-    e.timeout_ms = Some(15_000);
-    let v = gemini_spec(&e);
-    assert_eq!(v["trust"], true);
-    assert_eq!(v["excludeTools"], serde_json::json!(["dangerous_tool"]));
-    assert_eq!(v["timeout"], 15_000);
-}
-
-#[test]
-fn gemini_omits_trust_and_timeout_when_unset() {
-    let v = gemini_spec(&stdio("fs"));
-    assert!(v.get("trust").is_none());
-    assert!(v.get("timeout").is_none());
-    assert!(v.get("excludeTools").is_none());
 }
 
 #[test]
@@ -564,6 +545,21 @@ fn sync_all_keeps_legacy_cleanup_internal_and_only_for_existing_entries() {
     );
     assert_eq!(
         legacy.enabled.get(LEGACY_CLAUDE_DESKTOP_TOOL_ID),
+        Some(&false)
+    );
+
+    let mut gemini_legacy = stdio("gemini-managed");
+    gemini_legacy
+        .enabled
+        .insert(LEGACY_GEMINI_TOOL_ID.into(), true);
+    let gemini_results = sync_server_all_tools(&mut gemini_legacy, false);
+    assert_eq!(gemini_results.len(), MCP_TOOL_IDS.len() + 1);
+    assert_eq!(
+        gemini_results.last().map(|result| result.tool_id.as_str()),
+        Some(LEGACY_GEMINI_TOOL_ID)
+    );
+    assert_eq!(
+        gemini_legacy.enabled.get(LEGACY_GEMINI_TOOL_ID),
         Some(&false)
     );
     std::fs::remove_file(path).ok();

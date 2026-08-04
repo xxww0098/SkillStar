@@ -87,13 +87,23 @@ export function PresetPicker({ onProviderCreated, initialPreset = null }: Preset
   }, []);
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return grouped;
+    // Native Official (claude-official / codex-official) is a matrix header
+    // switch, not a creatable preset row.
+    const dropNativeOfficial = <T extends { id: string }>(list: T[]) =>
+      list.filter((p) => p.id !== "claude-official" && p.id !== "codex-official");
+    const base = {
+      official: dropNativeOfficial(grouped.official),
+      domestic: dropNativeOfficial(grouped.domestic),
+      relay: dropNativeOfficial(grouped.relay),
+      openai_compatible: dropNativeOfficial(grouped.openai_compatible),
+    };
+    if (!search.trim()) return base;
     const q = search.toLowerCase();
     return {
-      official: grouped.official.filter((p) => p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q)),
-      domestic: grouped.domestic.filter((p) => p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q)),
-      relay: grouped.relay.filter((p) => p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q)),
-      openai_compatible: grouped.openai_compatible.filter(
+      official: base.official.filter((p) => p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q)),
+      domestic: base.domestic.filter((p) => p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q)),
+      relay: base.relay.filter((p) => p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q)),
+      openai_compatible: base.openai_compatible.filter(
         (p) => p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q),
       ),
     } as typeof grouped;

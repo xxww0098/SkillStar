@@ -118,18 +118,16 @@ export function UsagePanel({ filter, usageCreateRequest, clearUsageCreateRequest
                 const updated = await data.setActive(id);
                 const outcome = updated.switch_result ?? null;
                 if (outcome && !outcome.success && outcome.error) {
-                  const message = updated.is_active
-                    ? t("usage.switchCliFailed", "已切为当前账号，但同步到 CLI 失败")
-                    : t("usage.switchNotApplied", "切换未生效，已保留原当前账号");
+                  const message = updated.is_active ? t("usage.switchCliFailed") : t("usage.switchNotApplied");
                   toast.error(message, {
                     description: outcome.error,
                   });
                 } else if (outcome && outcome.success) {
-                  toast.success(t("usage.switchCliSuccess", "已切为当前账号并同步到 CLI"), {
-                    description: `${updated.display_name} → ${outcome.toolId} · ${t("usage.switchCliRestartHint", "请重启 CLI 后生效")}`,
+                  toast.success(t("usage.switchCliSuccess"), {
+                    description: `${updated.display_name} → ${outcome.toolId} · ${t("usage.switchCliRestartHint")}`,
                   });
                 } else {
-                  toast.success(t("usage.activeAccountSet", "已切为当前账号"), {
+                  toast.success(t("usage.activeAccountSet"), {
                     description: updated.display_name,
                   });
                 }
@@ -141,11 +139,11 @@ export function UsagePanel({ filter, usageCreateRequest, clearUsageCreateRequest
               try {
                 const outcome = await data.switchActiveToCli(catalogId);
                 if (outcome.success) {
-                  toast.success(t("usage.switchCliSuccess", "已同步到 CLI"), {
-                    description: `${outcome.toolId}: ${outcome.configPath} · ${t("usage.switchCliRestartHint", "请重启 CLI 后生效")}`,
+                  toast.success(t("usage.switchCliSynced"), {
+                    description: `${outcome.toolId}: ${outcome.configPath} · ${t("usage.switchCliRestartHint")}`,
                   });
                 } else if (outcome.error) {
-                  toast.error(t("usage.switchCliFailed", "同步到 CLI 失败"), {
+                  toast.error(t("usage.switchCliSyncFailed"), {
                     description: outcome.error,
                   });
                 }

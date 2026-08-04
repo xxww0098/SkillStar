@@ -27,7 +27,7 @@ fn test_resolve_tool_config_path_unknown() {
 }
 
 #[test]
-fn test_get_tool_config_targets_returns_both_tools() {
+fn test_get_tool_config_targets_returns_all_tools() {
     let targets = get_tool_config_targets().unwrap();
     assert_eq!(targets.len(), 5);
 
@@ -35,13 +35,16 @@ fn test_get_tool_config_targets_returns_both_tools() {
     assert_eq!(claude_target.display_name, "Claude Code");
     assert!(claude_target.config_path.contains(".claude"));
 
+    let desktop_target = targets
+        .iter()
+        .find(|t| t.tool_id == "claude-desktop")
+        .unwrap();
+    assert_eq!(desktop_target.display_name, "Claude Desktop");
+    assert!(desktop_target.config_path.contains(".claude-desktop"));
+
     let codex_target = targets.iter().find(|t| t.tool_id == "codex").unwrap();
     assert_eq!(codex_target.display_name, "Codex");
     assert!(codex_target.config_path.contains(".codex"));
-
-    let gemini_target = targets.iter().find(|t| t.tool_id == "gemini").unwrap();
-    assert_eq!(gemini_target.display_name, "Gemini CLI");
-    assert!(gemini_target.config_path.contains(".gemini"));
 
     let pi_target = targets.iter().find(|t| t.tool_id == "pi").unwrap();
     assert_eq!(pi_target.display_name, "Pi");
@@ -51,76 +54,6 @@ fn test_get_tool_config_targets_returns_both_tools() {
 // =========================================================================
 // Flat store sync tests (v2 architecture)
 // =========================================================================
-
-#[test]
-fn test_sync_to_gemini_inner_new_file() {
-    let tmp = TempDir::new().unwrap();
-    let config_path = tmp.path().join(".gemini").join(".env");
-    let provider = make_test_provider_flat();
-
-    let result = sync_to_gemini_inner(&provider, "model-b", &config_path).unwrap();
-    assert!(result.is_none(), "no backup when file is new");
-
-    let pairs = parse_env_file(&std::fs::read_to_string(&config_path).unwrap());
-    let get = |k: &str| {
-        pairs
-            .iter()
-            .find(|(key, _)| key == k)
-            .map(|(_, v)| v.clone())
-    };
-    assert_eq!(
-        get("GOOGLE_GEMINI_BASE_URL").as_deref(),
-        Some("https://api.example.com/v1")
-    );
-    assert_eq!(
-        get("GEMINI_API_KEY").as_deref(),
-        Some("sk-test-key-flat-12345")
-    );
-    assert_eq!(get("GEMINI_MODEL").as_deref(), Some("model-b"));
-}
-
-#[test]
-fn test_sync_to_gemini_inner_preserves_user_keys_and_backs_up() {
-    let tmp = TempDir::new().unwrap();
-    let dir = tmp.path().join(".gemini");
-    std::fs::create_dir_all(&dir).unwrap();
-    let config_path = dir.join(".env");
-    std::fs::write(
-        &config_path,
-        "# comment\nMY_CUSTOM=keepme\nGEMINI_API_KEY=old\n",
-    )
-    .unwrap();
-
-    let provider = make_test_provider_flat();
-    let backup = sync_to_gemini_inner(&provider, "", &config_path).unwrap();
-    assert!(backup.is_some(), "existing file should be backed up");
-
-    let pairs = parse_env_file(&std::fs::read_to_string(&config_path).unwrap());
-    let get = |k: &str| {
-        pairs
-            .iter()
-            .find(|(key, _)| key == k)
-            .map(|(_, v)| v.clone())
-    };
-    // Unmanaged key preserved
-    assert_eq!(get("MY_CUSTOM").as_deref(), Some("keepme"));
-    // Managed key overwritten
-    assert_eq!(
-        get("GEMINI_API_KEY").as_deref(),
-        Some("sk-test-key-flat-12345")
-    );
-    // Empty model falls back to provider default_model ("model-a")
-    assert_eq!(get("GEMINI_MODEL").as_deref(), Some("model-a"));
-}
-
-#[test]
-fn test_sync_to_gemini_inner_fails_without_base_url() {
-    let tmp = TempDir::new().unwrap();
-    let config_path = tmp.path().join(".gemini").join(".env");
-    let mut provider = make_test_provider_flat();
-    provider.base_url_openai = String::new();
-    assert!(sync_to_gemini_inner(&provider, "model-a", &config_path).is_err());
-}
 
 #[test]
 fn test_build_opencode_provider_block_uses_model_catalog_metadata() {
@@ -312,7 +245,6 @@ fn test_sync_to_claude_code_inner_empty_model_skips_key() {
     );
 }
 
-
 // ---------------------------------------------------------------------------
 // Three-state auth_mode (api_key / oauth / third_party)
 // ---------------------------------------------------------------------------
@@ -477,4 +409,111 @@ fn test_codex_env_key_rule_is_stable_and_shell_safe() {
     p.id = "".to_string();
     let fallback = codex_env_key_for(&p);
     assert!(fallback.starts_with("SKILLSTAR_") && fallback.ends_with("_KEY"));
+}
+
+#[test]
+fn test_claude_official_sync_clears_managed_env_without_writing_key() {
+    let tmp = TempDir::new().unwrap();
+    let config_path = tmp.path().join("settings.json");
+    std::fs::write(
+        &config_path,
+        r#"{
+          "env": {
+            "ANTHROPIC_BASE_URL": "https://proxy.example/anthropic",
+            "ANTHROPIC_AUTH_TOKEN": "sk-managed",
+            "ANTHROPIC_MODEL": "claude-sonnet",
+            "MY_CUSTOM": "keep-me"
+          },
+          "other": true
+        }"#,
+    )
+    .unwrap();
+
+    let official = crate::providers::create_from_preset_flat(
+        crate::providers::CLAUDE_OFFICIAL_ID,
+        "",
+    )
+    .unwrap();
+    sync_to_claude_code_inner(&official, "", &config_path).unwrap();
+
+    let parsed: Value =
+        serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    let env = parsed.get("env").unwrap().as_object().unwrap();
+    assert!(!env.contains_key("ANTHROPIC_BASE_URL"));
+    assert!(!env.contains_key("ANTHROPIC_AUTH_TOKEN"));
+    assert!(!env.contains_key("ANTHROPIC_MODEL"));
+    assert_eq!(env.get("MY_CUSTOM").and_then(|v| v.as_str()), Some("keep-me"));
+    assert_eq!(parsed.get("other").and_then(|v| v.as_bool()), Some(true));
+}
+
+#[test]
+fn test_codex_official_sync_oauth_preserves_auth_json() {
+    use_sandbox_home();
+    let codex_dir = resolve_codex_auth_path()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    std::fs::create_dir_all(&codex_dir).unwrap();
+    let auth_path = codex_dir.join("auth.json");
+    let config_path = codex_dir.join("config.toml");
+
+    let oauth_blob = serde_json::json!({
+        "OPENAI_API_KEY": null,
+        "tokens": {
+            "access_token": "eyJchatgpt-access-official",
+            "refresh_token": "eyJchatgpt-refresh-official",
+            "id_token": "eyJchatgpt-id",
+            "account_id": "acct_official"
+        }
+    });
+    std::fs::write(&auth_path, oauth_blob.to_string()).unwrap();
+    // Prior third-party pointer that Official activation must clear.
+    std::fs::write(
+        &config_path,
+        r#"
+model_provider = "skillstar_old-provider"
+model = "gpt-4"
+
+[model_providers.skillstar_old-provider]
+name = "SkillStar"
+base_url = "https://api.example.com/v1"
+wire_api = "chat"
+requires_openai_auth = false
+"#,
+    )
+    .unwrap();
+
+    let official =
+        crate::providers::create_from_preset_flat(crate::providers::CODEX_OFFICIAL_ID, "").unwrap();
+    let settings = CodexSettings {
+        wire_api: "responses".to_string(),
+        auth_mode: CODEX_AUTH_MODE_OAUTH.to_string(),
+    };
+    let binding = ToolBinding {
+        entries: vec![make_codex_activation(&official, settings)],
+        active_index: 0,
+    };
+
+    sync_codex_binding_inner(&binding, std::slice::from_ref(&official), &config_path).unwrap();
+
+    let auth_after: Value =
+        serde_json::from_str(&std::fs::read_to_string(&auth_path).unwrap()).unwrap();
+    assert_eq!(
+        auth_after
+            .pointer("/tokens/access_token")
+            .and_then(|v| v.as_str()),
+        Some("eyJchatgpt-access-official")
+    );
+
+    let toml_after: toml::Table =
+        toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    assert!(toml_after.get("model_provider").is_none());
+    assert!(
+        toml_after
+            .get("model_providers")
+            .and_then(|v| v.as_table())
+            .map(|t| t.is_empty())
+            .unwrap_or(true)
+    );
 }

@@ -43,8 +43,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
   const [installStatus, setInstallStatus] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   // One-shot-per-key guards: only the first stale snapshot for a given
-  // publisher/repo triggers a background sync (mirrors useMcpMarketplace's
-  // staleRefreshTriggered ref). Re-arm whenever the key changes.
+  // publisher/repo triggers a background sync. Re-arm whenever the key changes.
   const publisherReposStaleTriggeredFor = useRef<string | null>(null);
   const repoSkillsStaleTriggeredFor = useRef<string | null>(null);
 
@@ -430,8 +429,8 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
               visiblePublisherRepos.length === 0 ? (
                 <EmptyState
                   icon={<Folder className="w-6 h-6 text-muted-foreground" />}
-                  title="No repos match your search"
-                  description="Try a different repo keyword."
+                  title={t("publisherDetail.noReposMatch")}
+                  description={t("publisherDetail.tryDifferentRepo")}
                 />
               ) : (
                 <div className="ss-decks-grid">
@@ -468,7 +467,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
                         {repo.installs_label && (
                           <span className="inline-flex items-center gap-1.5">
                             <ArrowUp className="w-3.5 h-3.5" />
-                            {repo.installs_label} installs
+                            {t("publisherDetail.repoInstalls", { count: repo.installs_label })}
                           </span>
                         )}
                       </div>
@@ -490,7 +489,7 @@ export function PublisherDetail({ publisher, onBack }: PublisherDetailProps) {
                     className="gap-1.5 -ml-2"
                   >
                     <ArrowLeft className="w-4 h-4" />
-                    Repos
+                    {t("publisherDetail.backToRepos")}
                   </Button>
                   <div className="w-px h-4 bg-border" />
                   <GitBranch className="w-3.5 h-3.5 text-muted-foreground" />

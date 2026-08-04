@@ -35,8 +35,6 @@ export interface SkillCommands {
   };
 
   // Local-authored skills
-  create_local_skill_from_content: { args: { name: string; content: string }; result: void };
-  create_local_skill: { args: { name: string; content?: string }; result: Skill };
   delete_local_skill: { args: { name: string }; result: void };
   migrate_local_skills: { args: Record<string, never>; result: number };
 

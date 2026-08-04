@@ -20,9 +20,9 @@ transport: string, command?: string | null, args?: Array<string>, env?: { [key i
 enabled: { [key in string]: boolean }, 
 /**
  * Auto-approve every tool call for this server without prompting ("YOLO").
- * Maps to Kiro's `autoApprove: ["*"]` and Gemini's `trust: true`. There is
- * no verified native equivalent for Claude Code, OpenCode, Grok,
- * or ZCode, so this flag has no effect when projected to those tools.
+ * Maps to Kiro's `autoApprove: ["*"]`. There is no verified native
+ * equivalent for Claude Code, OpenCode, Grok, or ZCode, so this flag has
+ * no effect when projected to those tools.
  */
 autoApproveAll: boolean, 
 /**
@@ -32,13 +32,13 @@ autoApproveAll: boolean,
  */
 autoApproveTools?: Array<string>, 
 /**
- * Tool names to hide from the agent entirely (Kiro `disabledTools`,
- * Gemini `excludeTools`, Codex `disabled_tools`).
+ * Tool names to hide from the agent entirely (Kiro `disabledTools`, Codex
+ * `disabled_tools`).
  */
 disabledTools?: Array<string>, 
 /**
- * Request/startup timeout in milliseconds (Gemini `timeout`, OpenCode
- * `timeout`). Converted to whole seconds for Codex's
+ * Request/startup timeout in milliseconds (OpenCode `timeout`). Converted
+ * to whole seconds for Codex's
  * `startup_timeout_sec` / `tool_timeout_sec`. `None`/`0` means "use the
  * tool's own default".
  */

@@ -1,7 +1,8 @@
 import { Plug, Server, Sparkles } from "lucide-react";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { ProviderBrandIcon } from "@/components/shared/ProviderBrandIcon";
-import { useProvidersFlat } from "@/features/models";
+import { matrixProviders, useProvidersFlat } from "@/features/models";
 import { cn } from "@/lib/utils";
 
 export interface ModelsSidebarProps {
@@ -20,8 +21,8 @@ export interface ModelsSidebarProps {
 export function ModelsSidebar({ collapsed, selectedProviderId, onSelectProvider, onAddProvider }: ModelsSidebarProps) {
   const { providers } = useProvidersFlat();
   const { t } = useTranslation();
-  const recent = providers.slice(0, 6);
-
+  // Official seeds are column-header switches, not Recent shortcuts.
+  const recent = useMemo(() => matrixProviders(providers).slice(0, 6), [providers]);
   if (collapsed) {
     return (
       <div className="flex flex-col items-center gap-1.5 py-2">

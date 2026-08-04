@@ -12,6 +12,12 @@
  */
 export { useAppAiProvider, type AppAiAppId } from "./api/appAi";
 export { buildModelCatalog, CLAUDE_MODEL_META_KEYS, getMetaString } from "./lib/providerPatch";
+export {
+  isNativeOfficialProvider,
+  matrixProviders,
+  CLAUDE_OFFICIAL_ID,
+  CODEX_OFFICIAL_ID,
+} from "./lib/officialProviders";
 export { useModelFetch } from "./api/modelCatalog";
 export { AgentToolIcon } from "./components/shared/AgentToolIcon";
 export { useProvidersFlat } from "./hooks/useProvidersFlat";

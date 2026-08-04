@@ -98,7 +98,7 @@ export interface CodexSettings {
 
 /**
  * One provider+model binding entry for an Agent tool. Mirrors the backend
- * `ToolActivation`. Single-provider agents (claude-code, gemini) hold at most
+ * `ToolActivation`. Single-provider agents (currently claude-code) hold at most
  * one; multi-provider agents (codex, opencode) may hold several.
  */
 export interface ToolActivation {

@@ -36,10 +36,7 @@ struct BalanceInfo {
     topped_up_balance: String,
 }
 
-pub async fn fetch(
-    subscription: &Subscription,
-    api_key: &str,
-) -> UsageResult<SubscriptionUsage> {
+pub async fn fetch(subscription: &Subscription, api_key: &str) -> UsageResult<SubscriptionUsage> {
     let body: BalanceResponse = super::fetch_spec(&balance::DEEPSEEK, api_key).await?;
     let (balance, credits, error) = map_balance_response(&body);
 

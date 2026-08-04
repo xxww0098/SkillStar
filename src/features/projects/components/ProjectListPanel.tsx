@@ -65,7 +65,9 @@ export function ProjectListPanel({
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium truncate">{project.name}</div>
-                  <div className="text-micro text-muted-foreground truncate font-mono">{project.path}</div>
+                  <div className="text-micro text-muted-foreground truncate font-mono" title={project.path}>
+                    {project.path}
+                  </div>
                 </div>
                 <div className="shrink-0">
                   <button

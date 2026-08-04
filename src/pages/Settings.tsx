@@ -351,7 +351,7 @@ export function Settings({
       await fetchStorageOverview();
     } catch (e) {
       if (import.meta.env.DEV) console.error("Cache clean failed:", e);
-      toast.error("Cleanup failed");
+      toast.error(t("settings.cacheCleanFailed"));
     } finally {
       setCleaningCaches(false);
     }

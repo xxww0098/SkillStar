@@ -269,38 +269,6 @@ fn sanitize_subpath(input: &str) -> Result<String> {
     Ok(normalized.to_string())
 }
 
-// ── Input Classification ────────────────────────────────────────────
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum InputKind {
-    Url(String),
-    OwnerRepo { owner: String, repo: String },
-    SkillName(String),
-}
-
-pub fn classify_input(input: &str) -> InputKind {
-    let trimmed = input.trim();
-
-    if trimmed.to_lowercase().starts_with("https://")
-        || trimmed.to_lowercase().starts_with("http://")
-    {
-        return InputKind::Url(trimmed.to_string());
-    }
-
-    if trimmed.contains('/') {
-        let parts: Vec<&str> = trimmed.split('/').collect();
-        if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
-            return InputKind::OwnerRepo {
-                owner: parts[0].to_string(),
-                repo: parts[1].trim_end_matches(".git").to_string(),
-            };
-        }
-        return InputKind::Url(trimmed.to_string());
-    }
-
-    InputKind::SkillName(trimmed.to_string())
-}
-
 // ── URL Normalization ───────────────────────────────────────────────
 
 /// Normalize a repository URL or owner/repo shorthand.

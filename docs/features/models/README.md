@@ -21,20 +21,34 @@
 - tool-sync 只改自己管理的字段，保留用户已有配置；写入前备份并使用原子替换。
 - JSON 型 multi Agent（OpenCode / Pi）的写盘共享 `multi_provider` 内部骨架（备份 → retain 托管键 → 写块 → active 指针），各自只提供 build_block 与指针落点；Codex（TOML + auth.json 副通道）独立维护，理由见 decisions.md D-012。
 - 所有测试设置 `SKILLSTAR_TOOL_SYNC_HOME` 到临时目录，绝不写真实 Agent 配置。
-- Claude Code CLI 与 Desktop Code 共用 `claude-code`；Codex CLI、桌面体验和官方编辑器扩展共用一份 Codex binding。
+- Claude CLI（`claude-code`）与 Claude Desktop（`claude-desktop`）是**独立绑定**：各自有 `tool_activations` 条目、Official 开关和角色映射状态；共用同一条 Claude Official 种子 Provider（不拆 `claude-desktop-official`）。CLI 写 `~/.claude/settings.json`；Desktop 目前写 SkillStar 绑定标记 `~/.claude-desktop/skillstar-binding.json`（原生 Desktop 配置投影后续接入）。Codex CLI、桌面体验和官方编辑器扩展仍共用一份 Codex binding。
 - Codex third-party key 只有用户明确点击时才写 `~/.zshrc`；autosave 不得产生该副作用。
 - Pi 是 multi Agent：绑定写 `~/.pi/agent/models.json` 的 `providers.skillstar_*` 块（`openai-completions`，模型条目只写 `id`，其余交给 Pi 默认值），激活条目同时把 `~/.pi/agent/settings.json` 的 `defaultProvider`/`defaultModel` 指过去；停用只清理托管块，且仅当 default 指针指向托管块时才连带清除。
+
+## Native Official（原生登录）
+
+- `claude-official` / `codex-official` 是固定种子 Provider（稳定 store `id` + `preset_id`），不是 UUID 新建行。判定靠这些 id，不靠空 URL 启发式。
+- 与 Grok 等 `category: "official"`（带 API Key 的官方大厂）不同：Native Official **无 API Key、无余额探测、空双端点**；文案上对应「原生登录 / Official」。
+- `ensure_official_providers` 在缺失时插入种子行；已存在同 `id`/`preset_id` 则跳过（不覆盖用户改名）。`get_providers_flat` 会调用它并在变更时写盘。
+- `create_from_preset_flat` / `create_provider_flat` 对这两个种子保留稳定 id（不发 UUID）；允许空 Key。
+- 激活时跳过「必须有 anthropic/openai URL」校验。
+- Claude Official 种子可分别绑定到 `claude-code` 或 `claude-desktop`：激活 CLI 时清除 SkillStar 托管 env（`ANTHROPIC_*`），让 Claude 走浏览器/客户端原生登录；不写第三方 Base URL/Key。两条绑定共用同一 Official 种子 id（不拆 `claude-desktop-official`），但开关互不影响。
+- Codex Official 绑定 `codex`：`activate_tool` 强制 `auth_mode = oauth`，不写 `OPENAI_API_KEY`、不触碰用户 ChatGPT token；清除指向 SkillStar 托管表的 `model_provider`/`model` 指针。
+- 停用 Official 与普通 unbind 一致（清 binding；Claude 不额外清用户自有配置）。
+- Official **不是**矩阵交叉引用行：前端 `matrixProviders` 过滤种子行；Claude CLI、Claude Desktop、Codex 列表头各自提供「切回官方」开关（分别走 `claude-code` / `claude-desktop` / `codex` binding）。仅当 store 缺失时客户端注入同 id 种子作 activate fallback。开关走生产用的 `activate_tool` / `deactivate_tool`。PresetPicker 不展示这两个原生 Official 预设。
+- 本轮不做 proxy takeover /「官方账号路由」例外。
 
 ## Models 工作台
 
 - `pages/Models.tsx` 只组合一个 `ModelsHub`，不恢复旧的多子页信息架构。
-- Agent cards 是激活/停用/重同步的唯一日常入口；provider drawer 只编辑 provider 数据。
-- single Agent 使用 hero card；multi Agent 展示全部绑定、active 单选、模型选择和增删。
-- Agent settings dialog 处理当前 binding 的深配置、配置文件和同步。provider 切换/关闭前 flush 草稿；未保存的原始配置禁止被重载、同步或重绑覆盖。
-- Provider editor 使用 tabbed drawer。autosave 600ms debounce、validation-aware re-arm、close 前 best-effort flush；X、Esc、scrim 和“完成”不能因校验/网络错误把用户困在抽屉里。
+- 生产主界面是 **Provider × Agent 矩阵**（原 D1 IA）：行是第三方 Provider，列是 Agent（Claude CLI / Desktop 分列且**独立绑定**）；顶部 icon carousel 控制可见列。
+- Claude / Codex 列表头提供 Official（原生登录）开关；矩阵单元格负责第三方 Bind / 模型选择 / Claude mapping。
+- 侧栏「添加 Provider」与 Recent 只服务第三方 Provider；Official 种子不进 Recent。
+- Provider 编辑使用既有 tabbed drawer（autosave 600ms debounce、validation-aware re-arm、close 前 best-effort flush）。创建是主栏表单，创建后打开 editor drawer。
+- Claude mapping UI 仍是前端本地状态（Agent 加法）；解绑/绑定走真实 `activate_tool` / `deactivate_tool`。「一键设置」把当前/默认模型广播到全部角色；「获取模型列表」走 `fetch_provider_model_catalog` 并写回该 Provider 的 `models` / `meta.model_catalog`。
+- DEV 仅保留 `?variant=D2|D3` 交替 IA 原型；默认 `#models` 即生产矩阵。
 - `ProviderConfigPrimitives.tsx` 是 Models 表单视觉 SSOT：标准控件 40px、dense 控件 36px，并统一 border、focus、disabled 和 invalid 状态。
-- Provider/Model picker 和 editable model combobox 复用 feature-local shared primitives，不在各卡片、drawer tab 中重造 popover/select 行为。
-- 创建流程先选择 preset，再创建并进入 editor；删除必须确认并展示会断开的 Agent。
+- 删除必须确认并展示会断开的 Agent。
 
 ## 前端状态与诊断
 

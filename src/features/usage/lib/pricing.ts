@@ -1,10 +1,5 @@
 import type { Subscription } from "../types";
 
-export interface SpendEntry {
-  currency: string;
-  amount: number;
-}
-
 /** Normalized monthly cost; mirrors `get_usage_summary` in usage_commands.rs. */
 export function monthlyEquivalentPrice(sub: Pick<Subscription, "monthly_price" | "billing_cycle">): number | null {
   const price = sub.monthly_price;
@@ -65,31 +60,9 @@ function billingPeriodsElapsed(sub: Subscription, nowSec: number, cycle: "monthl
   return Math.max(1, years + 1);
 }
 
-function foldSpendByCurrency(subs: Subscription[], amountFor: (sub: Subscription) => number): SpendEntry[] {
-  const totals = new Map<string, number>();
-  for (const sub of subs) {
-    const amount = amountFor(sub);
-    if (amount <= 0) continue;
-    totals.set(sub.currency, (totals.get(sub.currency) ?? 0) + amount);
-  }
-  return Array.from(totals.entries()).map(([currency, amount]) => ({ currency, amount }));
-}
-
-export function aggregateMonthlySpend(subs: Subscription[]): SpendEntry[] {
-  return foldSpendByCurrency(subs, (sub) => monthlyEquivalentPrice(sub) ?? 0);
-}
-
-export function aggregateTotalSpend(subs: Subscription[]): SpendEntry[] {
-  return foldSpendByCurrency(subs, totalSpendForSubscription);
-}
-
 export function formatCurrencyAmount(amount: number, currency: string): string {
   const symbol = currency === "CNY" ? "¥" : currency === "USD" ? "$" : "";
   return `${symbol}${amount.toFixed(2)}`;
-}
-
-export function formatSpendEntries(entries: SpendEntry[]): string {
-  return entries.map((entry) => formatCurrencyAmount(entry.amount, entry.currency)).join(" · ");
 }
 
 /** Reorder a movable subset within a full id list (preserves immovable positions). */

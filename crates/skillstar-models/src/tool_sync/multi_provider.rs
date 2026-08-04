@@ -1,7 +1,7 @@
 //! Multi-provider tool sync (Codex, OpenCode, Pi).
 //!
-//! Single-provider agents (Claude Code, Gemini) write one global env block, so
-//! their writers live in `sync.rs` and take a single provider+model. The agents
+//! The single-provider agent (Claude Code) writes one global env block, so its
+//! writer lives in `sync.rs` and takes a single provider+model. The agents
 //! handled here — Codex, OpenCode and Pi — natively support several providers
 //! coexisting in one config file (Codex `[model_providers.*]`, OpenCode
 //! `provider.*`, Pi `providers.*` in `models.json`), with a pointer selecting
@@ -236,7 +236,10 @@ pub fn sync_codex_binding_inner(
             auth_mode: active_provider.codex_auth_mode.clone(),
         });
 
-    if active_provider.base_url_openai.trim().is_empty() {
+    let official_active = crate::providers::is_native_official_provider(active_provider);
+
+    // Official (ChatGPT OAuth): never require a Base URL and never touch auth.json.
+    if !official_active && active_provider.base_url_openai.trim().is_empty() {
         bail!(
             "Provider '{}' has no OpenAI-compatible endpoint (base_url_openai is empty)",
             active_provider.name
@@ -246,8 +249,8 @@ pub fn sync_codex_binding_inner(
     let auth_path = resolve_codex_auth_path()?;
     let mut first_backup: Option<PathBuf> = None;
 
-    // --- auth.json (active entry only) ---
-    if !active_settings.preserves_oauth_token() {
+    // --- auth.json (active entry only; Official / oauth / third_party skip) ---
+    if !official_active && !active_settings.preserves_oauth_token() {
         if auth_path.exists() {
             let backup = create_rolling_backup(&auth_path)?;
             first_backup.get_or_insert(backup);
@@ -281,18 +284,32 @@ pub fn sync_codex_binding_inner(
         toml::Table::new()
     };
 
-    let active_key = skillstar_managed_key(&active_id);
-    table.insert(
-        "model_provider".to_string(),
-        toml::Value::String(active_key.clone()),
-    );
-    table.insert(
-        "model".to_string(),
-        toml::Value::String(active_entry.model.clone()),
-    );
+    // Official active → clear SkillStar top-level pointers so Codex uses native
+    // ChatGPT login. Other bound (non-Official) providers keep their tables for
+    // later switching.
+    if official_active {
+        if table
+            .get("model_provider")
+            .and_then(|v| v.as_str())
+            .is_some_and(is_skillstar_managed_key)
+        {
+            table.remove("model_provider");
+            table.remove("model");
+        }
+    } else {
+        let active_key = skillstar_managed_key(&active_id);
+        table.insert(
+            "model_provider".to_string(),
+            toml::Value::String(active_key.clone()),
+        );
+        table.insert(
+            "model".to_string(),
+            toml::Value::String(active_entry.model.clone()),
+        );
+    }
 
     // Rebuild the managed provider tables: drop every stale skillstar* table,
-    // then write one per current entry.
+    // then write one per current non-Official entry (empty Official URLs skip).
     let mp = table
         .entry("model_providers")
         .or_insert_with(|| toml::Value::Table(toml::Table::new()));
@@ -303,7 +320,9 @@ pub fn sync_codex_binding_inner(
     mp_table.retain(|k, _| !is_skillstar_managed_key(k));
 
     for (provider, entry) in &entries {
-        if provider.base_url_openai.trim().is_empty() {
+        if provider.base_url_openai.trim().is_empty()
+            || crate::providers::is_native_official_provider(provider)
+        {
             continue;
         }
         let settings = entry
@@ -319,6 +338,10 @@ pub fn sync_codex_binding_inner(
             skillstar_managed_key(&provider.id),
             toml::Value::Table(section),
         );
+    }
+
+    if mp_table.is_empty() {
+        table.remove("model_providers");
     }
 
     let output = toml::to_string_pretty(&table).context("Failed to serialize Codex config.toml")?;
@@ -369,7 +392,10 @@ pub(crate) fn sync_opencode_binding_inner(
             // The active entry sets the top-level `model` selector; when no
             // model resolved, any pre-existing selector is left untouched.
             if let Some((key, model_id)) = active {
-                root.insert("model".to_string(), Value::String(format!("{key}/{model_id}")));
+                root.insert(
+                    "model".to_string(),
+                    Value::String(format!("{key}/{model_id}")),
+                );
             }
         },
     )?;

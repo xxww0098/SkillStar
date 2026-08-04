@@ -29,8 +29,6 @@ export { default as CodexColor } from "@lobehub/icons/es/Codex/components/Color"
 export { default as CursorMono } from "@lobehub/icons/es/Cursor/components/Mono";
 export { default as DeepSeekColor } from "@lobehub/icons/es/DeepSeek/components/Color";
 export { default as DevinColor } from "@lobehub/icons/es/Devin/components/Color";
-export { default as GeminiColor } from "@lobehub/icons/es/Gemini/components/Color";
-export { default as GeminiCLIColor } from "@lobehub/icons/es/GeminiCLI/components/Color";
 export { default as GithubCopilotMono } from "@lobehub/icons/es/GithubCopilot/components/Mono";
 export { default as GooseMono } from "@lobehub/icons/es/Goose/components/Mono";
 export { default as GrokMono } from "@lobehub/icons/es/Grok/components/Mono";
@@ -51,14 +49,14 @@ export { default as OpenCodeMono } from "@lobehub/icons/es/OpenCode/components/M
 export { default as OpenClawColor } from "@lobehub/icons/es/OpenClaw/components/Color";
 export { default as OpenHandsColor } from "@lobehub/icons/es/OpenHands/components/Color";
 export { default as OpenRouterMono } from "@lobehub/icons/es/OpenRouter/components/Mono";
+// Pi has no Color variant upstream; only Mono ships.
+export { default as PiMono } from "@lobehub/icons/es/Pi/components/Mono";
 export { default as QoderColor } from "@lobehub/icons/es/Qoder/components/Color";
 export { default as QwenColor } from "@lobehub/icons/es/Qwen/components/Color";
 export { default as ReplitColor } from "@lobehub/icons/es/Replit/components/Color";
 export { default as RooCodeMono } from "@lobehub/icons/es/RooCode/components/Mono";
 export { default as SiliconCloudColor } from "@lobehub/icons/es/SiliconCloud/components/Color";
 export { default as SnowflakeColor } from "@lobehub/icons/es/Snowflake/components/Color";
-// Stepfun dropped its Color variant upstream in @lobehub/icons 5.9+; only Mono ships now.
-export { default as StepfunMono } from "@lobehub/icons/es/Stepfun/components/Mono";
 export { default as TraeColor } from "@lobehub/icons/es/Trae/components/Color";
 export { default as WindsurfMono } from "@lobehub/icons/es/Windsurf/components/Mono";
 export { default as XiaomiMiMoMono } from "@lobehub/icons/es/XiaomiMiMo/components/Mono";

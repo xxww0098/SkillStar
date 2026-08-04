@@ -181,8 +181,7 @@ pub fn merge_json_env_write(path: &Path, managed_fields: &[(&str, Value)]) -> Re
 /// [`AgentKind`] drives the affectedness rule: multi-provider agents rewrite
 /// their whole binding when *any* entry references the provider (every managed
 /// table must stay consistent), single-provider agents only when the *active*
-/// entry does. Unknown tool ids that reference the provider surface as failed
-/// results via `sync_tool_binding`.
+/// entry does. Retired / unknown tool ids (e.g. removed `gemini`) are skipped.
 pub fn resync_active_tools(
     store: &FlatProvidersStore,
     provider_id: &str,
@@ -205,13 +204,18 @@ pub fn resync_active_tools(
         if !binding.entries.iter().any(|e| e.provider_id == provider_id) {
             continue;
         }
+        // Skip retired / unknown tool ids left behind by older SkillStar versions
+        // (e.g. removed `gemini`) so provider saves do not fail on leftovers.
+        let Some(spec) = agent_spec(tool_id) else {
+            continue;
+        };
         // Single-provider agents only resync when the active entry matches;
-        // multi-provider (and unknown → error result) always do.
-        let affected = match agent_spec(tool_id).map(|spec| spec.kind) {
-            Some(AgentKind::Single) => binding
+        // multi-provider agents always rewrite their whole binding.
+        let affected = match spec.kind {
+            AgentKind::Single => binding
                 .active()
                 .is_some_and(|a| a.provider_id == provider_id),
-            Some(AgentKind::Multi) | None => true,
+            AgentKind::Multi => true,
         };
         if !affected {
             continue;

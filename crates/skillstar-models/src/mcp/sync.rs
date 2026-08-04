@@ -45,7 +45,8 @@ pub fn sync_server_to_tool(entry: &McpServerEntry, tool_id: &str, force: bool) -
 
 fn sync_server_to_tool_inner(entry: &McpServerEntry, tool_id: &str) -> Result<Option<PathBuf>> {
     validate_entry(entry)?;
-    let spec = mcp_tool_spec(tool_id).ok_or_else(|| anyhow::anyhow!("Unsupported tool '{tool_id}'"))?;
+    let spec =
+        mcp_tool_spec(tool_id).ok_or_else(|| anyhow::anyhow!("Unsupported tool '{tool_id}'"))?;
     let path = (spec.resolve_config_path)()?;
     let backup = backup_if_exists(&path)?;
     (spec.upsert)(&path, entry)?;
@@ -81,24 +82,33 @@ fn remove_server_from_tool_inner(name: &str, tool_id: &str) -> Result<Option<Pat
         return Ok(None);
     }
     let backup = backup_if_exists(&path)?;
-    // The hidden legacy Desktop Chat projection is not a registry row; it only
-    // supports the strict removal used by the cleanup tombstone.
+    // Hidden legacy projections are not registry rows; they only support the
+    // removal used by cleanup tombstones.
     if tool_id == LEGACY_CLAUDE_DESKTOP_TOOL_ID {
         json_mcpservers_remove_strict(&path, name)?;
         return Ok(backup);
     }
-    let spec = mcp_tool_spec(tool_id).ok_or_else(|| anyhow::anyhow!("Unsupported tool '{tool_id}'"))?;
+    if tool_id == LEGACY_GEMINI_TOOL_ID {
+        json_mcpservers_remove(&path, name)?;
+        return Ok(backup);
+    }
+    let spec =
+        mcp_tool_spec(tool_id).ok_or_else(|| anyhow::anyhow!("Unsupported tool '{tool_id}'"))?;
     (spec.remove)(&path, name)?;
     Ok(backup)
 }
 
 /// Project a server to every public Agent target. Entries created by older
-/// SkillStar releases may additionally carry the hidden Desktop Chat key; that
-/// cleanup tombstone removes the old projection instead of updating it.
+/// SkillStar releases may additionally carry hidden legacy keys (`claude-desktop`,
+/// `gemini`); those cleanup tombstones remove the old projection instead of
+/// updating it.
 pub fn sync_server_all_tools(entry: &mut McpServerEntry, force: bool) -> Vec<McpSyncResult> {
     let mut results = sync_server_public_tools(entry, force);
 
     if let Some(cleanup) = cleanup_legacy_desktop_chat(entry) {
+        results.push(cleanup);
+    }
+    if let Some(cleanup) = cleanup_legacy_gemini(entry) {
         results.push(cleanup);
     }
     results
@@ -151,6 +161,25 @@ pub fn mark_legacy_desktop_chat_clean(entry: &mut McpServerEntry) {
     }
 }
 
+/// Remove the old Gemini CLI projection when this entry still has `enabled.gemini`.
+pub fn cleanup_legacy_gemini(entry: &mut McpServerEntry) -> Option<McpSyncResult> {
+    if entry.enabled.get(LEGACY_GEMINI_TOOL_ID) != Some(&true) {
+        return None;
+    }
+    let result = remove_server_from_tool(&entry.name, LEGACY_GEMINI_TOOL_ID);
+    if result.success {
+        mark_legacy_gemini_clean(entry);
+    }
+    Some(result)
+}
+
+/// Consume a successful Gemini cleanup tombstone.
+pub fn mark_legacy_gemini_clean(entry: &mut McpServerEntry) {
+    if entry.enabled.get(LEGACY_GEMINI_TOOL_ID) == Some(&true) {
+        entry.enabled.insert(LEGACY_GEMINI_TOOL_ID.into(), false);
+    }
+}
+
 fn cleanup_legacy_desktop_chat_or_bail(
     entry: &mut McpServerEntry,
 ) -> Result<Option<McpSyncResult>> {
@@ -160,6 +189,20 @@ fn cleanup_legacy_desktop_chat_or_bail(
     {
         bail!(
             "Failed to clean legacy Claude Desktop Chat MCP '{}': {}",
+            entry.name,
+            cleanup.error.as_deref().unwrap_or("unknown error")
+        );
+    }
+    Ok(result)
+}
+
+fn cleanup_legacy_gemini_or_bail(entry: &mut McpServerEntry) -> Result<Option<McpSyncResult>> {
+    let result = cleanup_legacy_gemini(entry);
+    if let Some(cleanup) = &result
+        && !cleanup.success
+    {
+        bail!(
+            "Failed to clean legacy Gemini CLI MCP '{}': {}",
             entry.name,
             cleanup.error.as_deref().unwrap_or("unknown error")
         );
@@ -198,22 +241,35 @@ pub fn update_server_and_sync(
         .with_context(|| format!("MCP server '{id}' not found"))?;
     let preview = update_server(&mut next, id, patch)?;
     let renamed = old_entry.name != preview.name;
-    let legacy_rename_cleanup = if renamed {
+    let legacy_desktop_rename = if renamed {
         cleanup_legacy_desktop_chat_or_bail(&mut old_entry)?
     } else {
         None
     };
+    let legacy_gemini_rename = if renamed {
+        cleanup_legacy_gemini_or_bail(&mut old_entry)?
+    } else {
+        None
+    };
 
-    if legacy_rename_cleanup.is_some() {
+    if legacy_desktop_rename.is_some() || legacy_gemini_rename.is_some() {
         let stored = next
             .servers
             .iter_mut()
             .find(|server| server.id == id)
             .with_context(|| format!("MCP server '{id}' not found"))?;
-        mark_legacy_desktop_chat_clean(stored);
+        if legacy_desktop_rename.is_some() {
+            mark_legacy_desktop_chat_clean(stored);
+        }
+        if legacy_gemini_rename.is_some() {
+            mark_legacy_gemini_clean(stored);
+        }
     }
 
-    let mut results = legacy_rename_cleanup.into_iter().collect::<Vec<_>>();
+    let mut results = legacy_desktop_rename
+        .into_iter()
+        .chain(legacy_gemini_rename)
+        .collect::<Vec<_>>();
     if renamed {
         let old_name_cleanup = remove_server_from_public_tools(&old_entry.name);
         ensure_cleanup_succeeded(&old_name_cleanup, "Removing renamed MCP server")?;
@@ -232,7 +288,7 @@ pub fn update_server_and_sync(
     Ok((updated, results))
 }
 
-/// Delete an entry only after any pending Desktop Chat cleanup succeeds.
+/// Delete an entry only after any pending legacy cleanup succeeds.
 pub fn delete_server_and_sync(
     store: &mut McpStore,
     id: &str,
@@ -244,11 +300,13 @@ pub fn delete_server_and_sync(
         .find(|server| server.id == id)
         .cloned()
         .with_context(|| format!("MCP server '{id}' not found"))?;
-    let legacy_cleanup = cleanup_legacy_desktop_chat_or_bail(&mut existing)?;
+    let legacy_desktop = cleanup_legacy_desktop_chat_or_bail(&mut existing)?;
+    let legacy_gemini = cleanup_legacy_gemini_or_bail(&mut existing)?;
     let removed = delete_server(&mut next, id)?;
     let mut results = remove_server_from_public_tools(&removed.name);
     ensure_cleanup_succeeded(&results, "Removing deleted MCP server")?;
-    results.extend(legacy_cleanup);
+    results.extend(legacy_desktop);
+    results.extend(legacy_gemini);
     *store = next;
     Ok((removed, results))
 }
@@ -269,6 +327,7 @@ pub fn set_tool_enabled_and_sync(
         .find(|server| server.id == id)
         .with_context(|| format!("MCP server '{id}' not found"))?;
     cleanup_legacy_desktop_chat_or_bail(entry)?;
+    cleanup_legacy_gemini_or_bail(entry)?;
     let result = if enabled {
         sync_server_to_tool(entry, tool_id, force)
     } else {

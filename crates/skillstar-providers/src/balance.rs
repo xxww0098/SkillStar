@@ -72,13 +72,6 @@ pub const MINIMAX: BalanceSpec = BalanceSpec {
 /// All API-key balance specs, in catalog order.
 pub const API_KEY_BALANCE_SPECS: &[BalanceSpec] = &[DEEPSEEK, KIMI, GLM, MINIMAX];
 
-/// Look up a balance spec by catalog id.
-pub fn find(catalog_id: &str) -> Option<&'static BalanceSpec> {
-    API_KEY_BALANCE_SPECS
-        .iter()
-        .find(|s| s.catalog_id == catalog_id)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -89,15 +82,6 @@ mod tests {
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), API_KEY_BALANCE_SPECS.len());
-    }
-
-    #[test]
-    fn find_resolves_known_and_rejects_unknown() {
-        assert_eq!(
-            find("deepseek").map(|s| s.endpoint),
-            Some(DEEPSEEK.endpoint)
-        );
-        assert!(find("not-a-provider").is_none());
     }
 
     #[test]

@@ -99,10 +99,6 @@ fn remote_parent_dirs(remote_path: &str) -> Vec<String> {
 }
 
 /// `mkdir -p` over SFTP — ignore "already exists" failures.
-pub async fn ensure_remote_dir_pub(sftp: &SftpSession, remote_path: &str) -> Result<()> {
-    ensure_remote_dir(sftp, remote_path).await
-}
-
 pub(crate) async fn ensure_remote_dir(sftp: &SftpSession, remote_path: &str) -> Result<()> {
     for dir in remote_parent_dirs(remote_path) {
         // SFTP returns Failure for existing dirs — treat as success either way.

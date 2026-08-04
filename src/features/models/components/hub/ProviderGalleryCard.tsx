@@ -7,15 +7,9 @@ import { ProviderBrandIcon } from "../../../../components/shared/ProviderBrandIc
 import { cn } from "../../../../lib/utils";
 import type { ProviderEntryFlat, ToolActivationsMap } from "../../../../types";
 import { getProviderToolBadges } from "../../hooks/useProvidersFlat";
+import { getAgent } from "../../lib/agentRegistry";
 import { getLatencyColor } from "../../lib/latencyColor";
-import { AgentToolIcon, type AgentToolIconId } from "../shared/AgentToolIcon";
-
-const TOOL_ID_TO_ICON: Record<string, AgentToolIconId> = {
-  "claude-code": "claude-code",
-  codex: "codex",
-  opencode: "opencode",
-  gemini: "gemini",
-};
+import { AgentToolIcon } from "../shared/AgentToolIcon";
 
 export interface ProviderGalleryCardProps {
   provider: ProviderEntryFlat;
@@ -88,7 +82,7 @@ export function ProviderGalleryCard({
                 />
               ) : null}
             </h3>
-            <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+            <p className="mt-0.5 truncate text-[11px] text-foreground/65">
               {provider.default_model || provider.models?.[0] || t("models.gallery.noDefaultModel")}
             </p>
           </div>
@@ -97,7 +91,7 @@ export function ProviderGalleryCard({
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
           {keySet ? (
             <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-400">
-              Key
+              {t("models.gallery.keyReady")}
             </span>
           ) : (
             <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive">
@@ -129,11 +123,11 @@ export function ProviderGalleryCard({
               </span>
               <span className="flex items-center gap-1">
                 {activeBadges.map((toolId) => {
-                  const iconId = TOOL_ID_TO_ICON[toolId];
-                  if (!iconId) return null;
+                  const agent = getAgent(toolId);
+                  if (!agent) return null;
                   return (
-                    <span key={toolId} className="inline-flex" title={toolId}>
-                      <AgentToolIcon toolId={iconId} size="sm" />
+                    <span key={toolId} className="inline-flex" title={agent.displayName}>
+                      <AgentToolIcon toolId={agent.iconId} size="sm" />
                     </span>
                   );
                 })}

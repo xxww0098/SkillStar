@@ -78,6 +78,25 @@ pub const PROVIDER_IDENTITIES: &[ProviderIdentity] = &[
         catalog_id: Some("xai"),
         preset_ids: &["grok"],
     },
+    ProviderIdentity {
+        canonical_id: "longcat",
+        display_name: "LongCat",
+        catalog_id: None,
+        preset_ids: &["longcat"],
+    },
+    ProviderIdentity {
+        canonical_id: "xiaomi-mimo",
+        display_name: "Xiaomi MiMo",
+        catalog_id: None,
+        preset_ids: &["xiaomi-mimo"],
+    },
+    // Native Official seeds (Models routing; empty endpoints, no API key).
+    ProviderIdentity {
+        canonical_id: "claude-official",
+        display_name: "Claude Official",
+        catalog_id: None,
+        preset_ids: &["claude-official"],
+    },
     // ── Subscription-only providers (OAuth / Cookie / Manual; no routing preset) ──
     ProviderIdentity {
         canonical_id: "cursor",
@@ -86,27 +105,16 @@ pub const PROVIDER_IDENTITIES: &[ProviderIdentity] = &[
         preset_ids: &[],
     },
     ProviderIdentity {
+        // Usage catalog `codex` + Models native Official seed share one identity.
         canonical_id: "codex",
         display_name: "Codex",
         catalog_id: Some("codex"),
-        preset_ids: &[],
+        preset_ids: &["codex-official"],
     },
     ProviderIdentity {
         canonical_id: "antigravity",
         display_name: "Antigravity",
         catalog_id: Some("antigravity"),
-        preset_ids: &[],
-    },
-    ProviderIdentity {
-        canonical_id: "trae",
-        display_name: "Trae",
-        catalog_id: None,
-        preset_ids: &[],
-    },
-    ProviderIdentity {
-        canonical_id: "qoder",
-        display_name: "Qoder",
-        catalog_id: None,
         preset_ids: &[],
     },
     ProviderIdentity {
@@ -135,13 +143,6 @@ pub fn identity_for_preset(preset_id: &str) -> Option<&'static ProviderIdentity>
     PROVIDER_IDENTITIES
         .iter()
         .find(|p| p.preset_ids.contains(&preset_id))
-}
-
-/// Resolve by canonical id.
-pub fn identity(canonical_id: &str) -> Option<&'static ProviderIdentity> {
-    PROVIDER_IDENTITIES
-        .iter()
-        .find(|p| p.canonical_id == canonical_id)
 }
 
 #[cfg(test)]
@@ -200,5 +201,23 @@ mod tests {
                 spec.catalog_id
             );
         }
+    }
+
+    #[test]
+    fn native_official_preset_ids_resolve() {
+        assert_eq!(
+            identity_for_preset("claude-official")
+                .unwrap()
+                .canonical_id,
+            "claude-official"
+        );
+        assert_eq!(
+            identity_for_preset("codex-official").unwrap().canonical_id,
+            "codex"
+        );
+        assert_eq!(
+            identity_for_catalog("codex").unwrap().preset_ids,
+            &["codex-official"]
+        );
     }
 }

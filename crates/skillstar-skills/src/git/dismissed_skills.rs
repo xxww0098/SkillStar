@@ -61,15 +61,3 @@ pub fn dismiss_batch(keys: &[String]) -> Result<()> {
     }
     save_store(&store)
 }
-
-/// Remove dismissed entries that are no longer valid (the skill was installed
-/// or the repo was removed). Call with the set of currently valid keys.
-#[allow(dead_code)]
-pub fn prune_stale(valid_keys: &HashSet<String>) {
-    let mut store = load_store();
-    let before = store.dismissed.len();
-    store.dismissed.retain(|k| valid_keys.contains(k));
-    if store.dismissed.len() != before {
-        let _ = save_store(&store);
-    }
-}

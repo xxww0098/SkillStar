@@ -2,7 +2,7 @@
 //!
 //! SkillStar owns a single unified MCP store (`~/.skillstar/config/mcp_servers.json`)
 //! and projects each server into the native config of every supported agent tool
-//! (Claude Code, Codex, Gemini CLI, OpenCode). The heavy lifting
+//! (Claude Code, Codex, OpenCode, and others). The heavy lifting
 //! lives in [`skillstar_models::mcp`]; this module is the thin, write-serialized
 //! Tauri surface over it.
 //!

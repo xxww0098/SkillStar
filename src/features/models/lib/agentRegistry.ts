@@ -8,7 +8,7 @@
  */
 
 /** Tools that bind a provider (model sync). */
-export type ProviderToolId = "claude-code" | "codex" | "opencode" | "gemini" | "pi";
+export type ProviderToolId = "claude-code" | "claude-desktop" | "codex" | "opencode" | "pi";
 
 /** All tools with on-disk config files the app can read/write. */
 export type AgentToolId = ProviderToolId;
@@ -16,7 +16,7 @@ export type AgentToolId = ProviderToolId;
 /**
  * How an agent loads providers.
  * - `single`: one global env block — exactly one active provider+model
- *   (Claude Code's `~/.claude/settings.json` env, Gemini's `~/.gemini/.env`).
+ *   (Claude Code's `~/.claude/settings.json` env).
  * - `multi`: the config format holds several providers at once with a pointer
  *   selecting the active one (Codex `[model_providers.*]` + `model_provider`,
  *   OpenCode `provider.*` + top-level `model`).
@@ -46,13 +46,23 @@ export interface AgentDescriptor {
 export const PROVIDER_AGENTS: AgentDescriptor[] = [
   {
     toolId: "claude-code",
-    displayName: "Claude Code",
+    displayName: "Claude CLI",
     iconId: "claude-code",
     requiredUrlField: "anthropic",
     kind: "single",
     installDocsUrl: "https://docs.anthropic.com/en/docs/claude-code/overview",
     taglineKey: "models.card.taglines.claudeCode",
     configPathDisplay: "~/.claude/settings.json",
+  },
+  {
+    toolId: "claude-desktop",
+    displayName: "Claude Desktop",
+    iconId: "claude-desktop",
+    requiredUrlField: "anthropic",
+    kind: "single",
+    installDocsUrl: "https://docs.anthropic.com/en/docs/claude-code/desktop",
+    taglineKey: "models.card.taglines.claudeDesktop",
+    configPathDisplay: "~/.claude-desktop/skillstar-binding.json",
   },
   {
     toolId: "codex",
@@ -73,16 +83,6 @@ export const PROVIDER_AGENTS: AgentDescriptor[] = [
     installDocsUrl: "https://opencode.ai/docs",
     taglineKey: "models.card.taglines.opencode",
     configPathDisplay: "~/.config/opencode/opencode.json",
-  },
-  {
-    toolId: "gemini",
-    displayName: "Gemini CLI",
-    iconId: "gemini",
-    requiredUrlField: "openai",
-    kind: "single",
-    installDocsUrl: "https://github.com/google-gemini/gemini-cli",
-    taglineKey: "models.card.taglines.gemini",
-    configPathDisplay: "~/.gemini/.env",
   },
   {
     toolId: "pi",
@@ -117,9 +117,9 @@ export function providerCompatibleWithAgent(
 
 /** Tools listed in the on-disk config file editor. */
 export const CONFIG_FILE_TOOLS: { toolId: AgentToolId; label: string }[] = [
-  { toolId: "claude-code", label: "Claude Code" },
+  { toolId: "claude-code", label: "Claude CLI" },
+  { toolId: "claude-desktop", label: "Claude Desktop" },
   { toolId: "codex", label: "Codex" },
   { toolId: "opencode", label: "OpenCode" },
-  { toolId: "gemini", label: "Gemini CLI" },
   { toolId: "pi", label: "Pi" },
 ];

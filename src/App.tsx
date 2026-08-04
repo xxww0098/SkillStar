@@ -195,9 +195,17 @@ function AppContent() {
       );
     }
 
-    // Models mode (single hub page)
+    // Models mode (single hub page). Pass nav fields from this (eager) tree so
+    // the lazy Models chunk never calls useNavigation / NavContext itself.
     if (nav.appMode === "models") {
-      return <ModelsPage />;
+      return (
+        <ModelsPage
+          selectedProviderId={nav.selectedProviderId}
+          setSelectedProviderId={nav.setSelectedProviderId}
+          modelsDrawerRequest={nav.modelsDrawerRequest}
+          clearModelsDrawerRequest={nav.clearModelsDrawerRequest}
+        />
+      );
     }
 
     // Skills mode pages

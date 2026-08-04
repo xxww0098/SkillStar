@@ -66,11 +66,6 @@ pub fn decrypt(encoded: &str) -> String {
     }
 }
 
-/// Convenience: encrypt only if `Some(value)`. Pass-through for `None`.
-pub fn encrypt_opt(plaintext: Option<&str>) -> Option<String> {
-    plaintext.map(encrypt)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

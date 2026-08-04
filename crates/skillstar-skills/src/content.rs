@@ -8,7 +8,7 @@ use std::path::{Component, Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 use skillstar_core::infra::error::AppError;
-use skillstar_core::types::{Skill, SkillContent, parse_skill_content};
+use skillstar_core::types::{SkillContent, parse_skill_content};
 
 use crate::git::ops as git_ops;
 use crate::{installed_skill, local_skill, lockfile};
@@ -501,23 +501,6 @@ pub fn read_raw(name: &str) -> Result<String, AppError> {
         return Err(not_found(name));
     }
     Ok(std::fs::read_to_string(skill_md)?)
-}
-
-pub fn create_from_content(name: &str, content: &str) -> Result<(), AppError> {
-    let hub_path = skillstar_core::infra::paths::hub_skills_dir().join(name);
-    if hub_path.symlink_metadata().is_ok() {
-        return Ok(());
-    }
-
-    local_skill::create(name, Some(content)).map_err(AppError::Anyhow)?;
-    installed_skill::invalidate_cache();
-    Ok(())
-}
-
-pub fn create_local(name: &str, content: Option<&str>) -> Result<Skill, AppError> {
-    let skill = local_skill::create(name, content).map_err(AppError::Anyhow)?;
-    installed_skill::invalidate_cache();
-    Ok(skill)
 }
 
 pub fn delete_local(name: &str) -> Result<(), AppError> {

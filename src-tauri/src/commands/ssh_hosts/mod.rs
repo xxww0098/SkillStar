@@ -214,7 +214,10 @@ mod tests {
         std::fs::write(&cfg, content).unwrap();
         // SAFETY: env_lock serialises override mutations across crate tests.
         unsafe {
-            std::env::set_var(skillstar_sync::ssh::system_config::SSH_CONFIG_PATH_ENV, &cfg);
+            std::env::set_var(
+                skillstar_sync::ssh::system_config::SSH_CONFIG_PATH_ENV,
+                &cfg,
+            );
         }
         SshHomeGuard {
             _lock: lock,

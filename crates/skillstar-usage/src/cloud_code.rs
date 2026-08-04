@@ -2,7 +2,6 @@
 
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::time::Duration;
 
 use crate::subscription::{CreditInfo, UsageWindow};
 use crate::{UsageError, UsageResult};
@@ -557,9 +556,6 @@ fn pick_plan_name(v: &Value) -> Option<String> {
     }
     None
 }
-
-#[allow(dead_code)]
-const _TIMEOUT: Duration = Duration::from_secs(30);
 
 #[cfg(test)]
 mod tests {

@@ -302,7 +302,3 @@ pub(crate) const CLAUDE_MANAGED_ENV_KEYS: &[&str] = &[
     "ANTHROPIC_DEFAULT_SONNET_MODEL",
     "ANTHROPIC_DEFAULT_OPUS_MODEL",
 ];
-
-/// Fields managed by SkillStar in Gemini CLI's `~/.gemini/.env` file.
-pub(crate) const GEMINI_MANAGED_ENV_KEYS: &[&str] =
-    &["GOOGLE_GEMINI_BASE_URL", "GEMINI_API_KEY", "GEMINI_MODEL"];

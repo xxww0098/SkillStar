@@ -1,13 +1,13 @@
-//! Per-provider OAuth client credential resolution (codex / xai / opencode).
+//! Per-provider OAuth `client_id` resolution (codex / xai / opencode).
 //!
-//! Each provider ships a built-in default `client_id` (and `client_secret` where
-//! applicable) so the app works out of the box. Deployers can override them
-//! without touching source — useful when a built-in client gets rotated or a
-//! self-hosted proxy registers its own client. Resolution order (first hit wins):
+//! Each provider ships a built-in default `client_id` so the app works out of
+//! the box. Deployers can override it without touching source — useful when a
+//! built-in client gets rotated or a self-hosted proxy registers its own
+//! client. Resolution order (first hit wins):
 //!
-//! 1. `SKILLSTAR_<PROVIDER>_CLIENT_ID` / `_CLIENT_SECRET` env vars
+//! 1. `SKILLSTAR_<PROVIDER>_CLIENT_ID` env var
 //! 2. Compile-time `option_env!` (release CI / `cargo build` with env set)
-//! 3. `~/.skillstar/config/oauth_clients.json` (`{ "<provider>": { "client_id", "client_secret" } }`)
+//! 3. `~/.skillstar/config/oauth_clients.json` (`{ "<provider>": { "client_id" } }`)
 //! 4. Built-in hard-coded default
 //!
 //! Antigravity is intentionally *not* here — its Google client is required (no
@@ -21,8 +21,6 @@ use std::sync::OnceLock;
 struct ClientEntry {
     #[serde(default)]
     client_id: Option<String>,
-    #[serde(default)]
-    client_secret: Option<String>,
 }
 
 static FILE_CONFIG: OnceLock<HashMap<String, ClientEntry>> = OnceLock::new();
@@ -50,19 +48,12 @@ fn from_env(var: &str) -> Option<String> {
     std::env::var(var).ok().and_then(non_empty)
 }
 
-fn from_file(provider: &str, field: ClientField) -> Option<String> {
-    let entry = file_config().get(provider)?;
-    let raw = match field {
-        ClientField::Id => entry.client_id.clone(),
-        ClientField::Secret => entry.client_secret.clone(),
-    };
-    raw.and_then(non_empty)
-}
-
-#[derive(Clone, Copy)]
-enum ClientField {
-    Id,
-    Secret,
+fn from_file(provider: &str) -> Option<String> {
+    file_config()
+        .get(provider)?
+        .client_id
+        .clone()
+        .and_then(non_empty)
 }
 
 /// Resolve `client_id` for a provider: env → compile-time → file → built-in default.
@@ -73,12 +64,11 @@ fn resolve(
     provider: &str,
     env_var: &str,
     compile_time: Option<&'static str>,
-    field: ClientField,
     default: &'static str,
 ) -> String {
     from_env(env_var)
         .or_else(|| compile_time.map(str::to_string).and_then(non_empty))
-        .or_else(|| from_file(provider, field))
+        .or_else(|| from_file(provider))
         .unwrap_or_else(|| default.to_string())
 }
 
@@ -105,27 +95,7 @@ pub fn resolve_client_id(
     compile_time: Option<&'static str>,
     default: &'static str,
 ) -> String {
-    resolve(provider, env_var, compile_time, ClientField::Id, default)
-}
-
-/// Resolve `client_secret` with the same env → compile-time → file → default
-/// order as [`resolve_client_id`]. Kept for config/file overrides even when no
-/// catalog currently needs a secret at call sites.
-#[doc(hidden)]
-#[allow(dead_code)]
-pub fn resolve_client_secret(
-    provider: &str,
-    env_var: &str,
-    compile_time: Option<&'static str>,
-    default: &'static str,
-) -> String {
-    resolve(
-        provider,
-        env_var,
-        compile_time,
-        ClientField::Secret,
-        default,
-    )
+    resolve(provider, env_var, compile_time, default)
 }
 
 #[cfg(test)]

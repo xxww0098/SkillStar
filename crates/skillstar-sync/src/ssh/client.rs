@@ -335,7 +335,6 @@ async fn authenticate<S: SecretStore>(
 /// authenticates against unverified hosts on purpose, to validate credentials
 /// the user just typed). **Never use this for the production [`connect`] path**
 /// — production connections must verify the host key between dial and auth.
-#[allow(dead_code)]
 async fn dial_and_authenticate<S: SecretStore>(
     host: &SshHostDef,
     secrets: &S,

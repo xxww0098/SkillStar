@@ -35,6 +35,18 @@ export const MCP_HANDLERS: DevMockHandlers = {
       snapshot_updated_at: iso(0),
     };
   },
+  list_mcp_servers_by_publisher_local: (args) => {
+    const publisherId = String((args?.publisherId as string) ?? "").toLowerCase();
+    const data =
+      publisherId === "github" || publisherId === ""
+        ? MCP_MARKET
+        : MCP_MARKET.filter((m) => (m.source ?? "").toLowerCase() === publisherId);
+    return {
+      data,
+      snapshot_status: "fresh",
+      snapshot_updated_at: iso(0),
+    };
+  },
   sync_mcp_market_scope: () => undefined,
   get_mcp_market_sync_states: () => [
     {

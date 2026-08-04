@@ -186,7 +186,7 @@ pub(crate) fn read_zcode_cli_entries(content: &str) -> Result<Vec<McpServerEntry
     Ok(out)
 }
 
-/// Top-level `mcpServers` JSON map (Claude Code, Gemini, Kiro, Cursor).
+/// Top-level `mcpServers` JSON map (Claude Code, Kiro, Cursor).
 pub(crate) fn read_json_mcpservers_entries(content: &str) -> Result<Vec<McpServerEntry>> {
     let root: Value = serde_json::from_str(content)?;
     let mut out = Vec::new();

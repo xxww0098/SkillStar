@@ -5,7 +5,7 @@
  * `get_tool_activations` fetch anymore, so cards, panels and the gallery can
  * never disagree.
  */
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { toast } from "sonner";
 import i18n from "../../../i18n";
@@ -24,16 +24,6 @@ export function getProviderToolBadges(providerId: string, toolActivations: ToolA
 
 function toolDisplayName(toolId: string): string {
   return getAgent(toolId)?.displayName ?? toolId;
-}
-
-/** Activation map selected straight from the providers-flat cache. */
-export function useToolActivationsMap() {
-  return useQuery<FlatProvidersResponse, Error, ToolActivationsMap>({
-    queryKey: modelsKeys.providersFlat(),
-    queryFn: () => tauriInvoke("get_providers_flat"),
-    staleTime: 30_000,
-    select: (data) => data.tool_activations ?? {},
-  });
 }
 
 export function useActivationMutations() {

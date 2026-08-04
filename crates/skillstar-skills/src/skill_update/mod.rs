@@ -255,13 +255,9 @@ fn apply_update(name: &str) -> Result<UpdateOutcome> {
         let mut lockfile = lockfile::Lockfile::load(&lock_path)
             .with_context(|| format!("Failed to load lockfile '{}'", lock_path.display()))?;
 
-        let plan = plan::plan_update(
-            &lockfile.skills,
-            name,
-            &tree_hash,
-            is_repo_skill,
-            |entry| sibling_state_on_disk(&skills_dir, entry),
-        );
+        let plan = plan::plan_update(&lockfile.skills, name, &tree_hash, is_repo_skill, |entry| {
+            sibling_state_on_disk(&skills_dir, entry)
+        });
 
         apply_hash_writes(&mut lockfile, &plan.hash_writes);
         lockfile

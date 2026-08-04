@@ -10,7 +10,6 @@ export {
   useRemoteSkillsQuery,
   useTestConnection,
 } from "./api/remote";
-export { SshHostsList } from "./components/SshHostsList";
 export { SshHostForm } from "./components/SshHostForm";
 export type { SshHostFormValues } from "./components/SshHostForm";
 export { useConnectStream } from "./hooks/useConnectStream";

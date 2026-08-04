@@ -68,7 +68,6 @@ impl ProgressSink for NoopSink {
 }
 
 /// Helper to build an event with a fresh timestamp.
-#[allow(dead_code)]
 pub fn event(
     session_id: &str,
     phase: Phase,
@@ -86,7 +85,6 @@ pub fn event(
 }
 
 /// Helper for an event carrying structured detail (e.g. a host-key fingerprint).
-#[allow(dead_code)]
 pub fn event_with_detail(
     session_id: &str,
     phase: Phase,

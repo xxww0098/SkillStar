@@ -205,7 +205,9 @@ async fn create_fills_catalog_defaults_and_pins_only_the_first_account() {
 
     // The plaintext key never appears in the DTO but survives a round trip.
     assert_eq!(
-        get_subscription_api_key(first.id.clone()).unwrap().as_deref(),
+        get_subscription_api_key(first.id.clone())
+            .unwrap()
+            .as_deref(),
         Some("sk-live-1")
     );
 
@@ -262,7 +264,9 @@ async fn rotating_api_key_clears_reauth_latch_and_blank_name_is_ignored() {
     assert_eq!(dto.display_name, "账号一", "blank rename must be ignored");
     assert_eq!(dto.note.as_deref(), Some("换了新 key"));
     assert_eq!(
-        get_subscription_api_key("kimi-1".into()).unwrap().as_deref(),
+        get_subscription_api_key("kimi-1".into())
+            .unwrap()
+            .as_deref(),
         Some("sk-rotated")
     );
 }
@@ -340,7 +344,10 @@ async fn dock_menu_lines_order_most_urgent_first_with_catalog_fallback() {
 
     assert_eq!(
         dock_menu_lines(),
-        vec!["kimi · 剩余 10%".to_string(), "Alpha · 剩余 70%".to_string()],
+        vec![
+            "kimi · 剩余 10%".to_string(),
+            "Alpha · 剩余 70%".to_string()
+        ],
         "least remaining first; blank names fall back to catalog id; \
          rows without a percent quota are hidden"
     );

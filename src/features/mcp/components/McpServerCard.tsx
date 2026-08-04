@@ -47,8 +47,12 @@ export function McpServerCard({ server, agentTargets, onOpen, onToggleTool }: Mc
             <TransportIcon className={cn("h-4 w-4", isRemote ? "text-sky-500" : "text-emerald-500")} />
           </div>
           <div className="min-w-0">
-            <CardTitle className="truncate ss-card-title">{server.name}</CardTitle>
-            <span className="block truncate font-mono ss-card-meta">{summary || "—"}</span>
+            <CardTitle className="truncate ss-card-title" title={server.name}>
+              {server.name}
+            </CardTitle>
+            <span className="block truncate font-mono ss-card-meta" title={summary || undefined}>
+              {summary || "—"}
+            </span>
           </div>
         </div>
       }

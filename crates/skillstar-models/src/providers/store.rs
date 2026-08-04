@@ -226,16 +226,11 @@ fn convert_v1_to_v2(old: &ProvidersStore) -> FlatProvidersStore {
         models: Vec<String>,
     }
 
-    let apps: &[(&str, &AppProviders)] = &[
-        ("claude", &old.claude),
-        ("codex", &old.codex),
-        ("opencode", &old.opencode),
-        ("gemini", &old.gemini),
-    ];
+    let apps: &[&AppProviders] = &[&old.claude, &old.codex, &old.opencode, &old.gemini];
 
     let mut collected: Vec<CollectedProvider> = Vec::new();
 
-    for (_app_id, app) in apps {
+    for app in apps {
         for entry in app.providers.values() {
             // Try to extract settings from settings_config
             let (base_url, api_key, models) = extract_v1_settings(&entry.settings_config);

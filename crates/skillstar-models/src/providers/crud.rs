@@ -69,8 +69,14 @@ pub fn create_provider_flat(
     validate_url(&entry.base_url_anthropic)?;
     validate_url(&entry.models_url)?;
 
-    // Generate new UUID (overwrite any provided id)
-    entry.id = Uuid::new_v4().to_string();
+    // Native Official seeds keep their stable id; everything else gets a UUID.
+    if is_native_official_preset_id(&entry.id) {
+        if store.providers.iter().any(|p| p.id == entry.id) {
+            bail!("Official provider '{}' already exists", entry.id);
+        }
+    } else {
+        entry.id = Uuid::new_v4().to_string();
+    }
 
     // Infer Codex defaults from the base URL when the caller didn't set them
     // explicitly. PresetPicker (and most callers) omit these fields, so serde's
@@ -281,30 +287,34 @@ pub fn activate_tool(
         .with_context(|| format!("Provider '{}' not found", provider_id))?;
 
     // 2. Validate the required URL is non-empty, per the agent registry's
-    //    RequiredUrl column. Unknown tool ids keep the safe default of
-    //    requiring an OpenAI-compatible URL.
-    let required = crate::tool_sync::agent_spec(tool_id)
-        .map(|spec| spec.required_url)
-        .unwrap_or(crate::tool_sync::RequiredUrl::Openai);
-    match required {
-        crate::tool_sync::RequiredUrl::Anthropic => {
-            if provider.base_url_anthropic.trim().is_empty() {
-                bail!(
-                    "Provider '{}' has no Anthropic-compatible endpoint (base_url_anthropic is empty). \
-                     {} requires an Anthropic-compatible URL.",
-                    provider.name,
-                    tool_id
-                );
+    //    RequiredUrl column. Native Official seeds skip this gate (empty
+    //    endpoints are intentional — they restore agent-native login).
+    //    Unknown tool ids keep the safe default of requiring an OpenAI URL.
+    let native_official = is_native_official_provider(provider);
+    if !native_official {
+        let required = crate::tool_sync::agent_spec(tool_id)
+            .map(|spec| spec.required_url)
+            .unwrap_or(crate::tool_sync::RequiredUrl::Openai);
+        match required {
+            crate::tool_sync::RequiredUrl::Anthropic => {
+                if provider.base_url_anthropic.trim().is_empty() {
+                    bail!(
+                        "Provider '{}' has no Anthropic-compatible endpoint (base_url_anthropic is empty). \
+                         {} requires an Anthropic-compatible URL.",
+                        provider.name,
+                        tool_id
+                    );
+                }
             }
-        }
-        crate::tool_sync::RequiredUrl::Openai => {
-            if provider.base_url_openai.trim().is_empty() {
-                bail!(
-                    "Provider '{}' has no OpenAI-compatible endpoint (base_url_openai is empty). \
-                     {} requires an OpenAI-compatible URL.",
-                    provider.name,
-                    tool_id
-                );
+            crate::tool_sync::RequiredUrl::Openai => {
+                if provider.base_url_openai.trim().is_empty() {
+                    bail!(
+                        "Provider '{}' has no OpenAI-compatible endpoint (base_url_openai is empty). \
+                         {} requires an OpenAI-compatible URL.",
+                        provider.name,
+                        tool_id
+                    );
+                }
             }
         }
     }
@@ -316,8 +326,9 @@ pub fn activate_tool(
     };
 
     // 4. Determine settings: use provided, or preserve the existing entry's
-    //    settings for this provider if re-activating it.
-    let resolved_settings = settings.or_else(|| {
+    //    settings for this provider if re-activating it. Codex Official always
+    //    forces auth_mode=oauth so sync never writes OPENAI_API_KEY.
+    let mut resolved_settings = settings.or_else(|| {
         store
             .tool_activations
             .get(tool_id)
@@ -329,6 +340,19 @@ pub fn activate_tool(
             })
             .and_then(|e| e.settings.clone())
     });
+    if provider.id == CODEX_OFFICIAL_ID
+        || provider.preset_id.as_deref() == Some(CODEX_OFFICIAL_ID)
+    {
+        let mut codex = resolved_settings
+            .as_ref()
+            .map(crate::tool_sync::CodexSettings::from_value)
+            .unwrap_or_else(|| crate::tool_sync::CodexSettings {
+                wire_api: provider.codex_wire_api.clone(),
+                auth_mode: crate::tool_sync::CODEX_AUTH_MODE_OAUTH.to_string(),
+            });
+        codex.auth_mode = crate::tool_sync::CODEX_AUTH_MODE_OAUTH.to_string();
+        resolved_settings = serde_json::to_value(&codex).ok();
+    }
 
     // 5. Create the entry
     let entry = ToolActivation {
@@ -342,7 +366,7 @@ pub fn activate_tool(
     //    - Multi-provider agents (codex, opencode): upsert the entry (update the
     //      model/settings if this provider is already bound, else append) and
     //      point `active_index` at it.
-    //    - Single-provider agents (claude-code, gemini): the binding holds at
+    //    - Single-provider agents (currently claude-code): the binding holds at
     //      most one entry, so activating replaces it wholesale.
     let binding = store
         .tool_activations
@@ -371,7 +395,7 @@ pub fn activate_tool(
 
 /// Whether a tool's config format natively supports several providers coexisting
 /// (Codex `[model_providers.*]`, OpenCode `provider.*`, Pi `providers.*`).
-/// Single-provider agents (claude-code, gemini) write a single global env block
+/// Single-provider agents (currently claude-code) write a single global env block
 /// and hold one entry.
 ///
 /// This is the store layer's single kind decision point; the answer itself
@@ -493,4 +517,3 @@ pub fn deactivate_tool(
 
     Ok(previous)
 }
-

@@ -31,8 +31,9 @@ pub(crate) fn resolve_legacy_claude_desktop_config_path() -> Result<PathBuf> {
         .join("claude_desktop_config.json"))
 }
 
-/// `~/.gemini/settings.json`
-pub fn resolve_gemini_settings_path() -> Result<PathBuf> {
+/// Legacy Gemini CLI MCP config (`~/.gemini/settings.json`). Cleanup-only —
+/// Gemini is no longer a public MCP target.
+pub(crate) fn resolve_legacy_gemini_settings_path() -> Result<PathBuf> {
     let home = sync_home_dir()?;
     Ok(home.join(".gemini").join("settings.json"))
 }
@@ -57,11 +58,14 @@ pub fn resolve_cursor_config_path() -> Result<PathBuf> {
 
 /// Resolve the live MCP config file for a tool.
 ///
-/// Registry-driven; the hidden legacy Desktop Chat id resolves separately so
-/// old projections stay cleanable without becoming a public target.
+/// Registry-driven; hidden legacy ids (`claude-desktop`, `gemini`) resolve
+/// separately so old projections stay cleanable without becoming public targets.
 pub fn resolve_mcp_config_path(tool_id: &str) -> Result<PathBuf> {
     if tool_id == LEGACY_CLAUDE_DESKTOP_TOOL_ID {
         return resolve_legacy_claude_desktop_config_path();
+    }
+    if tool_id == LEGACY_GEMINI_TOOL_ID {
+        return resolve_legacy_gemini_settings_path();
     }
     match mcp_tool_spec(tool_id) {
         Some(spec) => (spec.resolve_config_path)(),
@@ -115,8 +119,8 @@ pub(crate) fn claude_code_installed_from_signals(
 // Per-format live-server counters (registry `count_live` column)
 // ---------------------------------------------------------------------------
 
-/// Count entries in a top-level `mcpServers` JSON map (Claude Code, Gemini,
-/// Kiro, Cursor).
+/// Count entries in a top-level `mcpServers` JSON map (Claude Code, Kiro,
+/// Cursor).
 pub(crate) fn count_json_mcpservers(content: &str) -> usize {
     serde_json::from_str::<Value>(content)
         .ok()

@@ -1,4 +1,4 @@
-//! Single-provider sync writers (Claude Code, Gemini) and unsync/deactivation.
+//! Single-provider sync writer (Claude Code) and unsync/deactivation.
 //!
 //! Multi-provider binding writers (Codex, OpenCode, Pi) live in
 //! `multi_provider.rs`; this module keeps the single-env-block writers plus
@@ -47,6 +47,11 @@ pub(crate) fn sync_to_claude_code_inner(
     model: &str,
     config_path: &Path,
 ) -> Result<Option<PathBuf>> {
+    // Native Official: clear SkillStar-managed env so Claude uses browser/client login.
+    if crate::providers::is_native_official_provider(provider) {
+        return clear_claude_managed_env_at(config_path);
+    }
+
     // Validate that base_url_anthropic is non-empty
     if provider.base_url_anthropic.is_empty() {
         bail!(
@@ -101,6 +106,38 @@ pub(crate) fn sync_to_claude_code_inner(
 
     // Merge write into the env block
     merge_json_env_write(config_path, &managed_fields)?;
+
+    Ok(backup_path)
+}
+
+/// Remove SkillStar-managed Claude env keys (Official / unsync shared path).
+fn clear_claude_managed_env_at(config_path: &Path) -> Result<Option<PathBuf>> {
+    if !config_path.exists() {
+        return Ok(None);
+    }
+
+    let backup_path = Some(create_rolling_backup(config_path)?);
+
+    let content = std::fs::read_to_string(config_path)
+        .with_context(|| format!("Failed to read {}", config_path.display()))?;
+    let mut json: Value = serde_json::from_str(&content)
+        .with_context(|| format!("Failed to parse JSON in {}", config_path.display()))?;
+
+    if let Some(env_obj) = json.get_mut("env").and_then(|v| v.as_object_mut()) {
+        for key in CLAUDE_MANAGED_ENV_KEYS {
+            env_obj.remove(*key);
+        }
+        if env_obj.is_empty()
+            && let Some(root_obj) = json.as_object_mut()
+        {
+            root_obj.remove("env");
+        }
+    }
+
+    let output =
+        serde_json::to_string_pretty(&json).context("Failed to serialize Claude Code config")?;
+    std::fs::write(config_path, output)
+        .with_context(|| format!("Failed to write {}", config_path.display()))?;
 
     Ok(backup_path)
 }
@@ -223,60 +260,6 @@ fn build_opencode_model_entry(model_id: &str, catalog_entry: Option<&ModelCatalo
     Value::Object(model)
 }
 
-/// Sync a provider's credentials to Gemini CLI's `~/.gemini/.env`.
-///
-/// Writes `GOOGLE_GEMINI_BASE_URL`, `GEMINI_API_KEY`, and `GEMINI_MODEL`,
-/// preserving any other user-defined env entries. Creates a rolling backup
-/// before writing (keeps last 5).
-pub fn sync_to_gemini(provider: &ProviderEntryFlat, model: &str) -> Result<ToolSyncResultFlat> {
-    // Path resolution failure is reported without a config path (the one
-    // agent whose resolver can fail before any write is attempted).
-    let config_path = match resolve_gemini_env_path() {
-        Ok(p) => p,
-        Err(e) => return Ok(ToolSyncResultFlat::failed_without_path("gemini", e)),
-    };
-    Ok(ToolSyncResultFlat::from_write_outcome(
-        "gemini",
-        &config_path,
-        sync_to_gemini_inner(provider, model, &config_path),
-    ))
-}
-
-pub(crate) fn sync_to_gemini_inner(
-    provider: &ProviderEntryFlat,
-    model: &str,
-    config_path: &Path,
-) -> Result<Option<PathBuf>> {
-    let base_url = provider.base_url_openai.trim().trim_end_matches('/');
-    if base_url.is_empty() {
-        bail!(
-            "Provider '{}' has no OpenAI-compatible endpoint (base_url_openai is empty); Gemini CLI needs a base URL",
-            provider.name
-        );
-    }
-
-    let model_id = if model.trim().is_empty() {
-        provider.default_model.trim().to_string()
-    } else {
-        model.trim().to_string()
-    };
-
-    let managed: Vec<(&str, Option<String>)> = vec![
-        ("GOOGLE_GEMINI_BASE_URL", Some(base_url.to_string())),
-        ("GEMINI_API_KEY", Some(provider.api_key.clone())),
-        (
-            "GEMINI_MODEL",
-            if model_id.is_empty() {
-                None
-            } else {
-                Some(model_id)
-            },
-        ),
-    ];
-
-    merge_env_write(config_path, &managed)
-}
-
 /// Registry adapter: write a Claude Code binding by resolving its active
 /// entry (single-provider agents only ever project the active entry).
 pub(crate) fn sync_claude_code_binding(
@@ -287,13 +270,71 @@ pub(crate) fn sync_claude_code_binding(
     sync_to_claude_code(provider, model)
 }
 
-/// Registry adapter: write a Gemini binding by resolving its active entry.
-pub(crate) fn sync_gemini_binding(
+/// Persist the Claude Desktop store binding to a local marker file.
+///
+/// Does not write Claude Desktop's native profile/proxy config yet. The marker
+/// (`resolve_claude_desktop_binding_path`) keeps CLI / Desktop store bindings
+/// independently inspectable under `SKILLSTAR_TOOL_SYNC_HOME`.
+pub(crate) fn sync_claude_desktop_binding(
     binding: &crate::providers::ToolBinding,
     providers: &[ProviderEntryFlat],
 ) -> Result<ToolSyncResultFlat> {
+    let path = resolve_claude_desktop_binding_path()?;
+    Ok(ToolSyncResultFlat::from_write_outcome(
+        "claude-desktop",
+        &path,
+        sync_claude_desktop_binding_inner(binding, providers, &path),
+    ))
+}
+
+fn sync_claude_desktop_binding_inner(
+    binding: &crate::providers::ToolBinding,
+    providers: &[ProviderEntryFlat],
+    path: &Path,
+) -> Result<Option<PathBuf>> {
     let (provider, model) = resolve_single_active(binding, providers)?;
-    sync_to_gemini(provider, model)
+    let mut first_backup: Option<PathBuf> = None;
+    if path.exists() {
+        first_backup = Some(create_rolling_backup(path)?);
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
+    }
+    let body = serde_json::json!({
+        "provider_id": provider.id,
+        "provider_name": provider.name,
+        "model": model,
+        "note": "SkillStar binding marker; Claude Desktop native write-path TBD",
+    });
+    std::fs::write(path, serde_json::to_string_pretty(&body)?)
+        .with_context(|| format!("Failed to write {}", path.display()))?;
+    Ok(first_backup)
+}
+
+/// Remove the Claude Desktop SkillStar binding marker (deactivation).
+pub fn unsync_claude_desktop() -> Result<()> {
+    let path = resolve_claude_desktop_binding_path()?;
+    if path.exists() {
+        let _ = create_rolling_backup(&path)?;
+        std::fs::remove_file(&path)
+            .with_context(|| format!("Failed to remove {}", path.display()))?;
+    }
+    Ok(())
+}
+
+/// Marker-file detect: report bound provider name when the marker exists.
+pub(crate) fn detect_claude_desktop_provider(path: &Path) -> Result<Option<String>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read {}", path.display()))?;
+    let value: serde_json::Value = serde_json::from_str(&content).unwrap_or_default();
+    Ok(value
+        .get("provider_name")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string()))
 }
 
 /// Resolve the active entry of a single-provider binding to `(provider, model)`.
@@ -321,18 +362,6 @@ pub fn unsync_tool(tool_id: &str) -> Result<()> {
     }
 }
 
-/// Remove managed Gemini env keys from `~/.gemini/.env` (deactivation).
-pub fn unsync_gemini() -> Result<()> {
-    let config_path = resolve_gemini_env_path()?;
-    if !config_path.exists() {
-        return Ok(());
-    }
-    let managed: Vec<(&str, Option<String>)> =
-        GEMINI_MANAGED_ENV_KEYS.iter().map(|k| (*k, None)).collect();
-    merge_env_write(&config_path, &managed)?;
-    Ok(())
-}
-
 /// Remove managed fields from Claude Code's config (deactivation).
 ///
 /// Removes `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, and `ANTHROPIC_MODEL`
@@ -340,39 +369,6 @@ pub fn unsync_gemini() -> Result<()> {
 /// Preserves all other user-added fields in the env block and top-level.
 pub fn unsync_claude_code() -> Result<()> {
     let config_path = resolve_tool_config_path("claude-code")?;
-
-    if !config_path.exists() {
-        // Nothing to unsync
-        return Ok(());
-    }
-
-    // Create rolling backup before modifying
-    create_rolling_backup(&config_path)?;
-
-    // Read existing JSON
-    let content = std::fs::read_to_string(&config_path)
-        .with_context(|| format!("Failed to read {}", config_path.display()))?;
-    let mut json: Value = serde_json::from_str(&content)
-        .with_context(|| format!("Failed to parse JSON in {}", config_path.display()))?;
-
-    // Remove managed keys from the env block
-    if let Some(env_obj) = json.get_mut("env").and_then(|v| v.as_object_mut()) {
-        for key in CLAUDE_MANAGED_ENV_KEYS {
-            env_obj.remove(*key);
-        }
-        // If env block is now empty, remove it entirely
-        if env_obj.is_empty()
-            && let Some(root_obj) = json.as_object_mut()
-        {
-            root_obj.remove("env");
-        }
-    }
-
-    // Write back
-    let output =
-        serde_json::to_string_pretty(&json).context("Failed to serialize Claude Code config")?;
-    std::fs::write(&config_path, output)
-        .with_context(|| format!("Failed to write {}", config_path.display()))?;
-
+    let _ = clear_claude_managed_env_at(&config_path)?;
     Ok(())
 }

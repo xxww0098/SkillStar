@@ -33,10 +33,7 @@ struct BalanceData {
     cash_balance: f64,
 }
 
-pub async fn fetch(
-    subscription_id: &str,
-    api_key: &str,
-) -> UsageResult<SubscriptionUsage> {
+pub async fn fetch(subscription_id: &str, api_key: &str) -> UsageResult<SubscriptionUsage> {
     let env: Envelope = super::fetch_spec(&balance::KIMI, api_key).await?;
 
     if !env.status && env.code != 0 {

@@ -20,16 +20,16 @@
 //! |------------------|----------------------------------------|-------------------|
 //! | `claude-code`    | `~/.claude.json`                       | `mcpServers.<name>` (community JSON, keeps `type`) |
 //! | `codex`          | `~/.codex/config.toml`                 | `[mcp_servers.<name>]` TOML table |
-//! | `gemini`         | `~/.gemini/settings.json`              | `mcpServers.<name>` (community JSON) |
 //! | `grok`           | `~/.grok/config.toml`                  | `[mcp_servers.<name>]` TOML (`headers` for HTTP) |
 //! | `opencode`       | `~/.config/opencode/opencode.json`     | `mcp.<name>` (`local`/`remote` form) |
 //! | `zcode`          | `~/.zcode/cli/config.json`             | `mcp.servers.<name>` (community JSON) |
 //! | `kiro`           | `~/.kiro/settings/mcp.json`            | `mcpServers.<name>` (community JSON, keeps `type`) |
 //! | `cursor`         | `~/.cursor/mcp.json`                   | `mcpServers.<name>` (community JSON, keeps `type`) |
 //!
-//! Older stores may contain a `claude-desktop` tombstone. It is not a target:
-//! it only authorizes cleanup of the named entry from Desktop Chat's separate
-//! `claude_desktop_config.json`; no new values are projected there.
+//! Older stores may contain `claude-desktop` or `gemini` tombstones. They are
+//! not public targets: they only authorize cleanup of the named entry from
+//! Desktop Chat's `claude_desktop_config.json` or Gemini CLI's
+//! `~/.gemini/settings.json`; no new values are projected there.
 //!
 //! All live writes create a rolling backup (last 5) and use merge semantics:
 //! only the single managed server key is touched, every other field is left
@@ -80,8 +80,8 @@ pub use store::*;
 
 mod specs;
 pub(crate) use specs::{
-    claude_code_spec, codex_toml_table, cursor_spec, gemini_spec, grok_toml_table, kiro_spec,
-    opencode_spec, zcode_cli_spec,
+    claude_code_spec, codex_toml_table, cursor_spec, grok_toml_table, kiro_spec, opencode_spec,
+    zcode_cli_spec,
 };
 
 // ---------------------------------------------------------------------------

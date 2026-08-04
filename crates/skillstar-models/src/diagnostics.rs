@@ -53,7 +53,8 @@ pub async fn test_provider_connection(
 ) -> Result<ConnectionTestResult> {
     let timeout = Duration::from_secs(10);
 
-    let client = probe_http_client(timeout).map_err(|e| anyhow!("Failed to build HTTP client: {e}"))?;
+    let client =
+        probe_http_client(timeout).map_err(|e| anyhow!("Failed to build HTTP client: {e}"))?;
 
     let base = base_url.trim_end_matches('/');
 
@@ -171,7 +172,8 @@ pub async fn fetch_provider_models(
         ));
     }
 
-    let client = probe_http_client(timeout).map_err(|e| anyhow!("Failed to create HTTP client: {e}"))?;
+    let client =
+        probe_http_client(timeout).map_err(|e| anyhow!("Failed to create HTTP client: {e}"))?;
 
     let body = fetch_json_with_auth(&client, trimmed, api_key).await?;
 
@@ -210,7 +212,8 @@ pub async fn fetch_provider_model_catalog(
         ));
     }
 
-    let client = probe_http_client(timeout).map_err(|e| anyhow!("Failed to create HTTP client: {e}"))?;
+    let client =
+        probe_http_client(timeout).map_err(|e| anyhow!("Failed to create HTTP client: {e}"))?;
 
     let provider_body = fetch_json_with_auth(&client, trimmed, api_key).await?;
     let provider_catalog = providers::catalog_from_provider_models(&provider_body);

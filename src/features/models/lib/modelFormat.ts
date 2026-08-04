@@ -5,22 +5,10 @@
  * `formatModelMetadata` and `formatSyncTime` render UI-facing text, so they
  * take a `TFunction` param (same pattern as
  * ConnectionStatusPanel.getConnectionStatus) instead of hardcoding locale
- * strings. `formatModelOptionLabel` and `formatCost` are locale-independent
- * (fixed "K ctx" / "$x/$y / 1M" formatting) and stay plain.
+ * strings. `formatCost` is locale-independent (fixed "$x/$y / 1M" formatting).
  */
 import type { TFunction } from "i18next";
 import type { ModelCatalogEntry } from "../../../types";
-
-export function formatModelOptionLabel(modelId: string, metadata?: ModelCatalogEntry): string {
-  if (!metadata) return modelId;
-  const name = metadata.display_name || modelId;
-  const details = [
-    metadata.context_length ? `${Math.round(metadata.context_length / 1000)}K ctx` : null,
-    metadata.max_completion_tokens ? `${Math.round(metadata.max_completion_tokens / 1000)}K out` : null,
-    formatCost(metadata.cost),
-  ].filter(Boolean);
-  return details.length > 0 ? `${name} (${modelId}) · ${details.join(" · ")}` : `${name} (${modelId})`;
-}
 
 export function formatModelMetadata(metadata: ModelCatalogEntry, t: TFunction): string {
   const details = [

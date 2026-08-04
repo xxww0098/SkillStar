@@ -78,5 +78,3 @@ pub struct ProviderUpdateFlatResult {
     pub provider: ProviderEntryFlat,
     pub tool_sync_results: Vec<ToolSyncResultFlat>,
 }
-
-

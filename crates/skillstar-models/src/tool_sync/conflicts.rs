@@ -188,4 +188,3 @@ fn check_legacy_claude_config() -> Option<ConfigConflict> {
 
     None
 }
-

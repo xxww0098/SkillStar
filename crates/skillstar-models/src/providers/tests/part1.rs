@@ -247,7 +247,7 @@ fn test_atomic_write_creates_parent_dirs() {
 #[test]
 fn test_get_all_presets_flat_count() {
     let presets = get_all_presets_flat();
-    assert_eq!(presets.len(), 11);
+    assert_eq!(presets.len(), 13);
 }
 #[test]
 fn test_get_all_presets_flat_unique_ids() {
@@ -328,4 +328,92 @@ fn test_create_from_preset_flat_deepseek() {
     assert!(result.created_at.is_some());
     // ID should be a valid UUID
     assert!(uuid::Uuid::parse_str(&result.id).is_ok());
+}
+
+#[test]
+fn test_native_official_presets_empty_endpoints_no_key_url() {
+    let presets = get_all_presets_flat();
+    for id in [CLAUDE_OFFICIAL_ID, CODEX_OFFICIAL_ID] {
+        let p = presets.iter().find(|p| p.id == id).unwrap();
+        assert_eq!(p.category, "official");
+        assert!(p.base_url_openai.is_empty());
+        assert!(p.base_url_anthropic.is_empty());
+        assert!(p.models_url.is_empty());
+        assert!(p.api_key_url.is_none());
+        assert!(p.balance_endpoint.is_none());
+    }
+}
+
+#[test]
+fn test_create_from_preset_flat_official_stable_ids() {
+    let claude = create_from_preset_flat(CLAUDE_OFFICIAL_ID, "").unwrap();
+    assert_eq!(claude.id, CLAUDE_OFFICIAL_ID);
+    assert_eq!(claude.preset_id.as_deref(), Some(CLAUDE_OFFICIAL_ID));
+    assert!(claude.api_key.is_empty());
+    assert!(claude.base_url_anthropic.is_empty());
+
+    let codex = create_from_preset_flat(CODEX_OFFICIAL_ID, "").unwrap();
+    assert_eq!(codex.id, CODEX_OFFICIAL_ID);
+    assert_eq!(codex.preset_id.as_deref(), Some(CODEX_OFFICIAL_ID));
+    assert_eq!(codex.codex_auth_mode, "oauth");
+    assert!(codex.base_url_openai.is_empty());
+}
+
+#[test]
+fn test_ensure_official_providers_idempotent() {
+    let mut store = FlatProvidersStore::default();
+    assert!(ensure_official_providers(&mut store));
+    assert_eq!(store.providers.len(), 2);
+    assert!(store.providers.iter().any(|p| p.id == CLAUDE_OFFICIAL_ID));
+    assert!(store.providers.iter().any(|p| p.id == CODEX_OFFICIAL_ID));
+
+    // Second call is a no-op (does not duplicate or overwrite).
+    assert!(!ensure_official_providers(&mut store));
+    assert_eq!(store.providers.len(), 2);
+
+    // Renamed Official row still counts as present.
+    store
+        .providers
+        .iter_mut()
+        .find(|p| p.id == CLAUDE_OFFICIAL_ID)
+        .unwrap()
+        .name = "My Claude Login".to_string();
+    assert!(!ensure_official_providers(&mut store));
+    assert_eq!(
+        store
+            .providers
+            .iter()
+            .find(|p| p.id == CLAUDE_OFFICIAL_ID)
+            .unwrap()
+            .name,
+        "My Claude Login"
+    );
+}
+
+#[test]
+fn test_activate_claude_official_skips_url_gate() {
+    let mut store = FlatProvidersStore::default();
+    assert!(ensure_official_providers(&mut store));
+    let activation = activate_tool(
+        &mut store,
+        CLAUDE_OFFICIAL_ID,
+        "claude-code",
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!(activation.provider_id, CLAUDE_OFFICIAL_ID);
+}
+
+#[test]
+fn test_activate_codex_official_forces_oauth_settings() {
+    let mut store = FlatProvidersStore::default();
+    assert!(ensure_official_providers(&mut store));
+    let activation = activate_tool(&mut store, CODEX_OFFICIAL_ID, "codex", None, None).unwrap();
+    assert_eq!(activation.provider_id, CODEX_OFFICIAL_ID);
+    let settings = activation.settings.expect("oauth settings");
+    assert_eq!(
+        settings.get("auth_mode").and_then(|v| v.as_str()),
+        Some("oauth")
+    );
 }

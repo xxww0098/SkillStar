@@ -7,8 +7,7 @@ export const mcpKeys = {
   // Unified MCP server store (`useMcpServers`).
   servers: () => ["mcp-servers"] as const,
 
-  // Local-first GitHub MCP registry browse (`useMcpMarketplace`,
-  // `McpMarketBrowser`).
+  // Local-first GitHub MCP registry browse (`McpMarketBrowser`).
   market: () => ["mcp-market"] as const,
   marketList: () => [...mcpKeys.market(), "list"] as const,
   marketSearch: (query: string) => [...mcpKeys.market(), "search", query] as const,

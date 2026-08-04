@@ -13,7 +13,6 @@ use ts_rs::TS;
 pub const MCP_TOOL_IDS: &[&str] = &[
     "claude-code",
     "codex",
-    "gemini",
     "grok",
     "opencode",
     "zcode",
@@ -24,6 +23,11 @@ pub const MCP_TOOL_IDS: &[&str] = &[
 /// Legacy Desktop Chat projection retained only so existing SkillStar-managed
 /// entries can still be located and removed. It is not a public Agent target.
 pub(crate) const LEGACY_CLAUDE_DESKTOP_TOOL_ID: &str = "claude-desktop";
+
+/// Legacy Gemini CLI MCP projection retained only so existing SkillStar-managed
+/// entries can still be located and removed after Gemini was dropped as a
+/// public Agent target.
+pub(crate) const LEGACY_GEMINI_TOOL_ID: &str = "gemini";
 
 /// Human-readable label for a tool id (registry-driven).
 pub fn mcp_tool_label(tool_id: &str) -> &'static str {
@@ -81,9 +85,9 @@ pub struct McpServerEntry {
 
     // --- tool-call approval / exposure (best-effort per tool, see `specs.rs`) ---
     /// Auto-approve every tool call for this server without prompting ("YOLO").
-    /// Maps to Kiro's `autoApprove: ["*"]` and Gemini's `trust: true`. There is
-    /// no verified native equivalent for Claude Code, OpenCode, Grok,
-    /// or ZCode, so this flag has no effect when projected to those tools.
+    /// Maps to Kiro's `autoApprove: ["*"]`. There is no verified native
+    /// equivalent for Claude Code, OpenCode, Grok, or ZCode, so this flag has
+    /// no effect when projected to those tools.
     #[serde(default)]
     pub auto_approve_all: bool,
     /// Specific tool names to auto-approve without prompting (Kiro
@@ -91,12 +95,12 @@ pub struct McpServerEntry {
     /// approves everything).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub auto_approve_tools: Vec<String>,
-    /// Tool names to hide from the agent entirely (Kiro `disabledTools`,
-    /// Gemini `excludeTools`, Codex `disabled_tools`).
+    /// Tool names to hide from the agent entirely (Kiro `disabledTools`, Codex
+    /// `disabled_tools`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub disabled_tools: Vec<String>,
-    /// Request/startup timeout in milliseconds (Gemini `timeout`, OpenCode
-    /// `timeout`). Converted to whole seconds for Codex's
+    /// Request/startup timeout in milliseconds (OpenCode `timeout`). Converted
+    /// to whole seconds for Codex's
     /// `startup_timeout_sec` / `tool_timeout_sec`. `None`/`0` means "use the
     /// tool's own default".
     #[serde(default, skip_serializing_if = "Option::is_none")]

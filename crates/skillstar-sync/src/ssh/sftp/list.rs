@@ -25,7 +25,6 @@ use crate::ssh::types::{RemoteSkill, RemoteSkillLayout};
 pub const KNOWN_AGENT_SKILL_DIRS: &[(&str, &str)] = &[
     ("claude", "~/.claude/skills"),
     ("codex", "~/.codex/skills"),
-    ("gemini", "~/.gemini/skills"),
     ("opencode", "~/.opencode/skills"),
     ("cursor", "~/.cursor/skills"),
     ("qoder", "~/.qoder/skills"),

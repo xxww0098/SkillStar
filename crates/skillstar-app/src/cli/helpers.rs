@@ -108,7 +108,6 @@ pub fn normalize_agent_ids(agent_ids: &[String]) -> Vec<String> {
             // Accept the canonical ids documented by vercel-labs/skills while
             // preserving SkillStar's existing persisted profile ids.
             "claude-code" => "claude".to_string(),
-            "gemini-cli" => "gemini".to_string(),
             "kiro-cli" => "kiro".to_string(),
             "hermes-agent" => "hermes".to_string(),
             normalized => normalized.to_string(),
@@ -147,11 +146,6 @@ pub fn supported_agent_ids(global: bool) -> Vec<String> {
     supported.sort();
     supported.dedup();
     supported
-}
-
-/// Prompt the user to select agent IDs interactively.
-pub fn prompt_for_agent_selection(enabled_agent_ids: &[String]) -> Vec<String> {
-    prompt_for_agent_selection_for_scope(enabled_agent_ids, false)
 }
 
 pub fn prompt_for_agent_selection_for_scope(
@@ -301,11 +295,6 @@ pub fn resolve_enabled_agents(global: bool) -> Vec<String> {
     agent_ids
 }
 
-/// Project-scoped wrapper used by install call sites.
-pub fn resolve_enabled_project_agents(_project_path: &Path) -> Vec<String> {
-    resolve_enabled_agents(false)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -376,14 +365,13 @@ mod tests {
     fn test_normalize_agent_ids_accepts_upstream_names() {
         let ids = vec![
             "claude-code".to_string(),
-            "gemini-cli".to_string(),
             "kiro-cli".to_string(),
             "hermes-agent".to_string(),
             "antigravity-cli".to_string(),
         ];
         assert_eq!(
             normalize_agent_ids(&ids),
-            vec!["antigravity-cli", "claude", "gemini", "hermes", "kiro"]
+            vec!["antigravity-cli", "claude", "hermes", "kiro"]
         );
     }
 }

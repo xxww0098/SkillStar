@@ -54,7 +54,9 @@ where
     let target = entries.iter().find(|entry| entry.name == name);
 
     let mut plan = UpdatePlan {
-        git_url: target.map(|entry| entry.git_url.clone()).unwrap_or_default(),
+        git_url: target
+            .map(|entry| entry.git_url.clone())
+            .unwrap_or_default(),
         ..Default::default()
     };
 
@@ -64,9 +66,7 @@ where
             .push((name.to_string(), pulled_hash.to_string()));
     }
 
-    if is_repo_skill
-        && let Some(target) = target
-    {
+    if is_repo_skill && let Some(target) = target {
         let mut siblings: Vec<String> = Vec::new();
         for entry in entries
             .iter()
@@ -168,9 +168,17 @@ mod tests {
     #[test]
     fn repo_siblings_each_take_their_own_subtree_hash() {
         let entries = vec![
-            entry("alpha", "https://github.com/acme/pack", Some("skills/alpha")),
+            entry(
+                "alpha",
+                "https://github.com/acme/pack",
+                Some("skills/alpha"),
+            ),
             entry("beta", "https://github.com/acme/pack", Some("skills/beta")),
-            entry("gamma", "https://github.com/acme/pack", Some("skills/gamma")),
+            entry(
+                "gamma",
+                "https://github.com/acme/pack",
+                Some("skills/gamma"),
+            ),
         ];
 
         let plan = plan_update(&entries, "alpha", "pulled-hash", true, all_present);
@@ -200,9 +208,7 @@ mod tests {
         assert_eq!(plan.siblings_cleared, Vec::<String>::new());
         assert_eq!(plan.affected, vec!["alpha"]);
         assert!(
-            plan.hash_writes
-                .iter()
-                .all(|(name, _)| name != "stranger"),
+            plan.hash_writes.iter().all(|(name, _)| name != "stranger"),
             "a different remote must never be rehashed"
         );
     }

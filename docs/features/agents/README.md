@@ -11,6 +11,10 @@ SkillStar 里"支持一个 Agent"其实是 **三条互相独立的轴**，按需
 分发注册表以 `vercel-labs/skills/src/agents.ts` 为兼容基线；同步上游时必须同时核对
 Agent id、显示名和全局/项目技能目录。SkillStar 自有目标可以作为扩展保留，
 但不能改变同名上游 Agent 的目录语义。
+**刻意不支持**：`gemini-cli` / `gemini`（Skills 分发、Models 工具同步、MCP 写入均已移除）；
+Antigravity 仍可使用 `~/.gemini/` 路径；Usage/Cloud Code 中的 Gemini **模型名**与
+Marketplace 的 google-gemini 技能仓库不受影响。旧 v1 provider store 的 `gemini`
+字段仅用于迁移读取。
 
 | 轴 | 作用 | 必做？ |
 |---|---|---|
@@ -44,17 +48,18 @@ Agent id、显示名和全局/项目技能目录。SkillStar 自有目标可以�
     "myagent",                    // 唯一 id，全小写
     "My Agent",                   // UI 显示名
     home(&[".myagent", "skills"]), // 全局目录；也可用 config/env_or_home/openclaw/unsupported
-    ".agents/skills",             // 项目级相对路径
+    ".agents/skills",             // 项目级相对路径（builtin 禁止空串）
 ),
 ```
 
-设计约束（违反会被现有测试拦截，见 `agents/mod.rs` 的测试区）：
+设计约束（违反会被现有测试拦截，见 `builtin.rs` / `agents/mod.rs` 的测试区）：
 
 - 兼容 open agent skills 的 Agent 应使用共享项目路径 `.agents/skills`；只有上游要求专属目录时才填 `.claude/skills`、`.qoder/skills` 等专属值。
 - 多个 Agent 共享 `project_skills_rel` 是正常情况。Project detector 会返回 ambiguous group，manifest 只选择一个 owner；sync/cleanup 必须按路径去重。
-- 上游没有 `globalSkillsDir` 的 Agent 使用 `none`，并由 `has_global_skills()` 统一从全局
-  选择和部署中排除；项目路径仍按上游填写。
-- 两个 Agent 可以共享 home 根目录（如 Antigravity 与 Gemini 共用 `~/.gemini/`）；注册表只表达各自真实技能目标，不从共享根推断安装状态。
+- 上游没有全局技能目录的 Agent 使用 `unsupported()`（非 `none`），`has_global_skills()` /
+  `supports_global()` 会把它从全局选择和部署中排除；**builtin 的项目路径仍须按上游填写且非空**
+  （见 `builtin_agent_fields_are_well_formed`）。
+- 两个 Agent 可以共享 home 根目录（如 Antigravity 与 Antigravity CLI 共用 `~/.gemini/`）；注册表只表达各自真实技能目标，不从共享根推断安装状态。
 - 路径一律正斜杠；Windows 反斜杠输入由后端归一化。
 
 其余全部自动生效：默认关闭与手动启用/禁用持久化（`profile_storage.rs`）、
@@ -74,20 +79,22 @@ Lobe Icons 有对应品牌时使用品牌 `Color`/`Mono` 组件；没有时使�
 通用图标。不要为内置 Agent 新增 `public/agents/*.svg`。自定义 Agent 的 data URI 和
 历史静态资源 fallback 仍由 `AgentIcon.tsx` 处理。
 
-### 3. 检查共享路径或"仅全局"语义（如适用）
+### 3. 检查共享路径或无全局目录语义（如适用）
 
-项目部署选择器按 `project_skills_rel` 是否为空过滤仅全局 Agent
-（`src/lib/agentProfiles.ts` 的 `supportsProjectDeploy`，被
-`ProjectDeployAgentDialog` / `DeployToProjectModal` / `Projects.tsx` 共用）。
-新的仅全局 Agent **不需要**改前端 —— 填 `""` 即可。共享 `.agents/skills` 的 Agent 同样不需要新增前端分支；现有 disambiguation 与 canonicalization 会按路径处理。
+- **Builtin**：`project_skills_rel` 必须非空；无全局目录用 `unsupported()`（如 eve /
+  promptscript），不是填 `""`。
+- **自定义 Agent**：空 `project_skills_rel` 表示仅全局；前端
+  `supportsProjectDeploy`（`src/lib/agentProfiles.ts`）按空串过滤，无需新分支。
+- 共享 `.agents/skills` 同样不需要新增前端分支；现有 disambiguation 与
+  canonicalization 会按路径处理。
 
 ### 4. 测试与文档
 
-- 若 Agent 有特殊性质（仅全局 / 共享 home 根 / 非 universal 项目路径），在
-  `crates/skillstar-skills/src/agents/mod.rs` 测试区加一条守卫测试
-  （参考共享路径和专属路径的现有测试）。
-- 跑 `cargo test -p skillstar-skills`（`validate_project_skills_rel_rules`
-  会自动校验新行的路径规则）。
+- 若 Agent 有特殊性质（无全局目录 / 共享 home 根 / 非 universal 项目路径），在
+  `crates/skillstar-skills/src/agents/mod.rs` 或 `builtin.rs` 测试区加一条守卫测试
+  （参考 `project_only_agents_have_no_global_path` 与共享/专属路径测试）。
+- 跑 `cargo test -p skillstar-skills`（`validate_project_skills_rel_rules` 与
+  builtin 字段守卫会自动校验新行）。
 - 若用户可见能力变化，更新根 README 的描述，但不要复制完整 Agent 清单或数量；
   特殊行为写入本文件或 [Skills 行为文档](../skills/README.md)。
 - 检索 `src/i18n/locales/en.json` / `zh-CN.json` 中枚举 Agent 名字的提示文案
@@ -103,9 +110,10 @@ Lobe Icons 有对应品牌时使用品牌 `Color`/`Mono` 组件；没有时使�
 ## 轴②：Models 工具同步（可选）
 
 仅当该 Agent 有自己的磁盘配置文件、且希望在 Models 工作台一键写入
-Provider（Base URL / API Key / 模型）时才做。现有目标：`claude-code`、`codex`、
-`opencode`、`gemini`、`pi`。Claude Code CLI 与 Desktop Code 共用 `claude-code`，不能因运行
-入口不同再增加一个 Agent 或 tool id。
+Provider（Base URL / API Key / 模型）时才做。现有目标：`claude-code`、`claude-desktop`、`codex`、
+`opencode`、`pi`。Claude CLI 与 Claude Desktop 是独立 tool id / 独立绑定
+（矩阵分列、Official 开关与映射互不影响）；Desktop 原生应用配置投影可后续
+增强，但不要再合并回单一 `claude-code`。
 
 全部改动在 `crates/skillstar-models/src/tool_sync/` + 少量前端：
 
@@ -118,9 +126,10 @@ Provider（Base URL / API Key / 模型）时才做。现有目标：`claude-code
    per-agent `match` 需要接线。表驱动一致性测试（`agents.rs` 内联）会
    自动覆盖新行。
 2. **写入/卸载** `sync.rs`（single 型）或 `multi_provider.rs`（multi 型）：
-   实现 writer 与对应的 unsync 函数，返回 `ToolSyncResultFlat`，并在
-   `sync_tool_binding` / `resync_active_tools` / `unsync_tool` 的写盘
-   dispatch 各加一个分支。必须遵守的语义：
+   实现 writer 与对应的 unsync，返回 `ToolSyncResultFlat`，并作为
+   `AgentSpec.sync_binding` / `unsync` 函数指针挂进上一步的注册表行——
+   `sync_tool_binding` / `resync_active_tools` / `unsync_tool` 已表驱动，
+   **不要**再加 per-agent `match` 分支。必须遵守的语义：
    - 只增删**自己管理的字段**，保留用户已有配置（参考各 `*_MANAGED_*` 常量，
      定义在 `types.rs`；multi 型使用 `skillstar_<id8>` 托管键约定）；
    - 写前备份（backup_path 语义与现有实现一致）。
@@ -132,14 +141,15 @@ Provider（Base URL / API Key / 模型）时才做。现有目标：`claude-code
      `AgentDescriptor`（toolId / displayName / requiredUrlField / **kind** /
      installDocsUrl / tagline / disabledTooltip / configPathDisplay），并视情况
      扩展 `CONFIG_FILE_TOOLS`。**`kind` 决定卡片形态与绑定语义**：
-     `"single"`（全局 env，仅一个激活供应商，如 Claude Code / Gemini）渲染
+     `"single"`（全局 env，仅一个激活供应商，如 Claude Code）渲染
      `AgentHeroCard`；`"multi"`（配置文件原生并存多个供应商 + 指针，如 Codex /
      OpenCode / Pi）渲染 `MultiProviderCard`（供应商列表 + 激活单选 + 增删）。
      前后端注册表各自钉住同一份 toolId 字面量清单
      （`agentRegistry.test.ts` ↔ `agents.rs` 一致性测试），加行时两侧同步；
      Agent 卡片、接入设置对话框、状态汇总和工具配置检查全部由该注册表驱动，无需新组件；
-   - `src/features/models/components/shared/AgentToolIcon.tsx` 的
-     `AgentToolIconId` 联合类型 + 图标分支；
+   - `src/features/models/components/shared/AgentToolIcon.tsx`：
+     `AgentToolIconId` 对齐 `ProviderToolId`，并为每个 tool 挂 `@lobehub/icons` 字形
+     （经 `lobe.ts`）；gallery 徽章经 `getAgent(toolId).iconId` 渲染，勿再维护身份映射表；
    - 如支持 MCP 配置同步，除扩展 `src/types/mcp.ts` / Rust 侧对应的 `MCP_TOOL_IDS`
      外，还要在 `src/features/mcp/lib/agentTargets.ts` 登记 Settings Agent id → MCP
      tool id 的能力映射。MCP 卡片轮播会用这张映射与当前手动 `enabled` profiles 取交集；
@@ -157,8 +167,10 @@ Provider（Base URL / API Key / 模型）时才做。现有目标：`claude-code
    （id、显示名、auth 模式、计费周期等）。
 2. 按 auth 模式实现 fetcher 并在对应 `dispatch` 注册：
    - API Key 型 → `fetchers/api_key/myvendor.rs`；
-   - OAuth 型 → `fetchers/oauth/myvendor.rs`（PKCE / Device Flow / 轮询基建在
-     `oauth/` 子模块）；
+   - OAuth 型 → `fetchers/oauth/myvendor.rs`（PKCE / `poll_flow` 轮询 /
+     `start_info` 等基建在 `oauth/` 与 `fetchers/oauth/`；无独立 Device Flow 模块）；
+   - Cookie 型 → `fetchers/cookie/myvendor.rs`（`AuthMode::Cookie`，用户粘贴
+     `Cookie:` header；解析与加密见 `cookie_jar.rs`）；
    - 纯手动录入 → 不需要 fetcher。
 3. 所有 HTTP 必须用 `skillstar_core::infra::http_client::probe_http_client`
    （自动走 `config/proxy.json` 代理）。
@@ -180,13 +192,13 @@ Provider（Base URL / API Key / 模型）时才做。现有目标：`claude-code
   [ ] 特殊性质 → mod.rs 守卫测试 + Agents/Skills 功能文档
 
 轴②（可选）
-  [ ] paths_files.rs 三处 match 分支
-  [ ] sync.rs 的 sync_to_* / unsync_*（含备份 + managed-keys 语义）
-  [ ] lib/agentRegistry.ts +1 AgentDescriptor + shared/AgentToolIcon.tsx 图标分支
+  [ ] agents.rs AGENT_SPECS +1 AgentSpec（含 sync_binding / unsync，勿加 match）
+  [ ] sync.rs 或 multi_provider.rs 的 writer / unsync（含备份 + managed-keys 语义）
+  [ ] lib/agentRegistry.ts +1 AgentDescriptor + shared/AgentToolIcon.tsx 品牌字形
   [ ] cargo test -p skillstar-models 全绿（测试必须走 SKILLSTAR_TOOL_SYNC_HOME）
 
 轴③（可选）
-  [ ] catalog.rs +1 entry
+  [ ] catalog.rs +1 entry（含 AuthMode，Cookie 见 fetchers/cookie/）
   [ ] fetchers/<auth_mode>/<vendor>.rs + dispatch 注册
   [ ] cargo test -p skillstar-usage 全绿
 ```

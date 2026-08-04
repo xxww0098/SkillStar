@@ -21,7 +21,6 @@ export const MCP_STORE = {
       enabled: {
         "claude-code": true,
         codex: true,
-        gemini: false,
         grok: false,
         opencode: false,
         zcode: false,
@@ -39,7 +38,6 @@ export const MCP_STORE = {
       enabled: {
         "claude-code": true,
         codex: false,
-        gemini: false,
         grok: false,
         opencode: false,
         zcode: false,
@@ -63,13 +61,6 @@ export const MCP_TOOL_STATUSES = [
     configPath: "~/.codex/config.toml",
     installed: true,
     serverCount: 1,
-  },
-  {
-    toolId: "gemini",
-    label: "Gemini CLI",
-    configPath: "~/.gemini/settings.json",
-    installed: false,
-    serverCount: 0,
   },
   {
     toolId: "grok",

@@ -18,7 +18,7 @@ use super::spec::AgentSpec;
 /// retype, or remove fields.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentProfile {
-    /// Internal identifier. Four legacy ids remain aliases of upstream names.
+    /// Internal identifier. Three legacy ids remain aliases of upstream names.
     pub id: String,
     /// Human-readable name shown in UI
     pub display_name: String,
@@ -62,11 +62,10 @@ pub fn find_profile<'a>(profiles: &'a [AgentProfile], agent_id: &str) -> Result<
         .ok_or_else(|| anyhow::anyhow!("Agent profile '{}' not found", agent_id))
 }
 
-/// Map upstream canonical ids onto SkillStar's four legacy persisted ids.
+/// Map upstream canonical ids onto SkillStar's three legacy persisted ids.
 pub fn compatible_profile_id(agent_id: &str) -> &str {
     match agent_id {
         "claude-code" => "claude",
-        "gemini-cli" => "gemini",
         "kiro-cli" => "kiro",
         "hermes-agent" => "hermes",
         id => id,

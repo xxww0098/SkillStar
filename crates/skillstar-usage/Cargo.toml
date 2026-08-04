@@ -6,7 +6,6 @@ rust-version = "1.94.1"
 
 [dependencies]
 anyhow = { workspace = true }
-async-trait = { workspace = true }
 base64 = { workspace = true }
 chrono = { workspace = true }
 machine-uid = { workspace = true }

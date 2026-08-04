@@ -59,11 +59,11 @@ export const AiProviderSection = memo(function AiProviderSection({
       const proto =
         localAiConfig.provider_ref?.app_id === "codex" || localAiConfig.api_format === "openai" ? "OpenAI" : "Claude";
       if (!localAiConfig.provider_ref) {
-        return `${t("settings.modelsProvider", { defaultValue: "Models 供应商" })} · ${t("common.none")}`;
+        return `${t("settings.modelsProvider")} · ${t("common.none")}`;
       }
-      return `${t("settings.modelsProvider", { defaultValue: "Models 供应商" })} · ${proto}`;
+      return `${t("settings.modelsProvider")} · ${proto}`;
     }
-    return `${t("settings.localOllama", { defaultValue: "本地 Ollama" })} · ${localAiConfig.model}`;
+    return `${t("settings.localOllama")} · ${localAiConfig.model}`;
   }, [aiSource, localAiConfig, t]);
 
   const setSource = (source: AiSourceMode) => {
@@ -151,9 +151,7 @@ export const AiProviderSection = memo(function AiProviderSection({
                       : "border-border/60 text-muted-foreground hover:border-border hover:text-foreground",
                   )}
                 >
-                  {source === "models"
-                    ? t("settings.aiSourceModels", { defaultValue: "Models 供应商" })
-                    : t("settings.aiSourceLocal", { defaultValue: "本地 Ollama" })}
+                  {source === "models" ? t("settings.aiSourceModels") : t("settings.aiSourceLocal")}
                 </button>
               ))}
             </div>

@@ -104,6 +104,26 @@ static AGENT_SPECS: &[AgentSpec] = &[
         detect_provider: detect_claude_code_provider,
     },
     AgentSpec {
+        id: "claude-desktop",
+        display_name: "Claude Desktop",
+        // Not probed as a CLI — `detect_tool_installation` uses the Desktop
+        // app only (never the `claude` binary, never SkillStar's own marker).
+        binary_name: "claude-desktop",
+        config_dir_probes: &[".claude-desktop"],
+        kind: AgentKind::Single,
+        required_url: RequiredUrl::Anthropic,
+        files: &[AgentConfigFileSpec {
+            file_id: "binding",
+            label: "skillstar-binding.json",
+            format: "json",
+            resolve: resolve_claude_desktop_binding_path,
+            default_content: "{\n  \"provider_id\": \"\",\n  \"provider_name\": \"\",\n  \"model\": \"\",\n  \"note\": \"SkillStar binding marker; Claude Desktop native write-path TBD\"\n}\n",
+        }],
+        sync_binding: sync_claude_desktop_binding,
+        unsync: unsync_claude_desktop,
+        detect_provider: detect_claude_desktop_provider,
+    },
+    AgentSpec {
         id: "codex",
         display_name: "Codex",
         binary_name: "codex",
@@ -147,24 +167,6 @@ static AGENT_SPECS: &[AgentSpec] = &[
         sync_binding: sync_opencode_binding,
         unsync: unsync_opencode_all,
         detect_provider: detect_opencode_provider,
-    },
-    AgentSpec {
-        id: "gemini",
-        display_name: "Gemini CLI",
-        binary_name: "gemini",
-        config_dir_probes: &[".gemini"],
-        kind: AgentKind::Single,
-        required_url: RequiredUrl::Openai,
-        files: &[AgentConfigFileSpec {
-            file_id: "env",
-            label: ".env",
-            format: "env",
-            resolve: resolve_gemini_env_path,
-            default_content: "GOOGLE_GEMINI_BASE_URL=\nGEMINI_API_KEY=[密钥]",
-        }],
-        sync_binding: sync_gemini_binding,
-        unsync: unsync_gemini,
-        detect_provider: detect_gemini_provider,
     },
     AgentSpec {
         id: "pi",
@@ -221,7 +223,10 @@ mod tests {
     fn registry_covers_exactly_the_known_agents_in_order() {
         let ids: Vec<&str> = agent_specs().iter().map(|s| s.id).collect();
         // Same literal set the frontend agentRegistry test pins.
-        assert_eq!(ids, ["claude-code", "codex", "opencode", "gemini", "pi"]);
+        assert_eq!(
+            ids,
+            ["claude-code", "claude-desktop", "codex", "opencode", "pi"]
+        );
     }
 
     #[test]
@@ -319,9 +324,9 @@ mod tests {
         // its tool table hardcodes instead of invoking it here.
         let expected = [
             ("claude-code", "Claude Code"),
+            ("claude-desktop", "Claude Desktop"),
             ("codex", "Codex"),
             ("opencode", "OpenCode"),
-            ("gemini", "Gemini CLI"),
             ("pi", "Pi"),
         ];
         for (id, name) in expected {
@@ -332,11 +337,13 @@ mod tests {
     #[test]
     fn required_url_pins_activation_validation_rules() {
         // Mirrors the match in providers::crud::activate_tool.
-        assert_eq!(
-            agent_spec("claude-code").unwrap().required_url,
-            RequiredUrl::Anthropic
-        );
-        for id in ["codex", "opencode", "gemini", "pi"] {
+        for id in ["claude-code", "claude-desktop"] {
+            assert_eq!(
+                agent_spec(id).unwrap().required_url,
+                RequiredUrl::Anthropic
+            );
+        }
+        for id in ["codex", "opencode", "pi"] {
             assert_eq!(agent_spec(id).unwrap().required_url, RequiredUrl::Openai);
         }
     }

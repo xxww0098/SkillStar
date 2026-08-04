@@ -95,7 +95,10 @@ function SubscriptionSpendChip({ sub, catalog, total, monthly, showLabel }: Subs
   const title = sub.display_name || catalog?.display_name || sub.catalog_id;
 
   return (
-    <div className="flex min-w-[188px] select-none items-center gap-2.5 rounded-2xl border border-border/55 bg-card/55 px-3 py-2 shadow-sm backdrop-blur-sm">
+    <div
+      className="flex min-w-[188px] max-w-[240px] select-none items-center gap-2.5 rounded-2xl border border-border/55 bg-card/55 px-3 py-2 shadow-sm backdrop-blur-sm"
+      title={title}
+    >
       <ProviderLogo
         catalogId={sub.catalog_id}
         displayName={title}
@@ -103,28 +106,29 @@ function SubscriptionSpendChip({ sub, catalog, total, monthly, showLabel }: Subs
         size="md"
       />
 
-      <div className="flex min-w-0 flex-1 items-stretch">
-        {total > 0 && (
-          <SpendStat
-            label={t("usage.totalSpendShort")}
-            value={formatCurrencyAmount(total, sub.currency)}
-            className={monthly == null || monthly <= 0 ? "flex-1" : undefined}
-          />
-        )}
-        {monthly != null && monthly > 0 && (
-          <>
-            {total > 0 && <div className="my-1 w-px shrink-0 bg-border/45" aria-hidden />}
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        {showLabel && <span className="truncate text-[11px] font-medium leading-none text-foreground/80">{title}</span>}
+        <div className="flex min-w-0 items-stretch">
+          {total > 0 && (
             <SpendStat
-              label={t("usage.monthlySpendShort")}
-              value={formatCurrencyAmount(monthly, sub.currency)}
-              accent
-              className="flex-1"
+              label={t("usage.totalSpendShort")}
+              value={formatCurrencyAmount(total, sub.currency)}
+              className={monthly == null || monthly <= 0 ? "flex-1" : undefined}
             />
-          </>
-        )}
+          )}
+          {monthly != null && monthly > 0 && (
+            <>
+              {total > 0 && <div className="my-1 w-px shrink-0 bg-border/45" aria-hidden />}
+              <SpendStat
+                label={t("usage.monthlySpendShort")}
+                value={formatCurrencyAmount(monthly, sub.currency)}
+                accent
+                className="flex-1"
+              />
+            </>
+          )}
+        </div>
       </div>
-
-      {showLabel && <span className="sr-only">{title}</span>}
     </div>
   );
 }

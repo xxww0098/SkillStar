@@ -308,7 +308,7 @@ export function Marketplace({
                 className="flex min-w-max items-center gap-2 rounded-full border border-border/60 bg-background/20 p-1"
                 role="presentation"
               >
-                <span className="shrink-0 px-2 text-[11px] font-medium text-muted-foreground/70">
+                <span className="shrink-0 px-2 text-[11px] font-medium text-foreground/65">
                   {t("marketplace.skillGroup")}
                 </span>
                 <div className="flex items-center gap-1">{skillTabIds.map((id) => renderTabButton(id))}</div>
@@ -318,7 +318,7 @@ export function Marketplace({
                 className="flex min-w-max items-center gap-2 rounded-full border border-border/60 bg-background/35 p-1"
                 role="presentation"
               >
-                <span className="px-2 text-[11px] font-medium text-muted-foreground/70">
+                <span className="px-2 text-[11px] font-medium text-foreground/65">
                   {t("marketplace.mcpSourceGithub")}
                 </span>
                 <div className="flex items-center gap-1">{mcpTabIds.map((id) => renderTabButton(id))}</div>

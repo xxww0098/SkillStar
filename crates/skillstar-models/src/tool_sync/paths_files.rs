@@ -14,7 +14,7 @@ pub fn resolve_tool_config_path(tool_id: &str) -> Result<PathBuf> {
     match agent_spec(tool_id) {
         Some(spec) => (spec.files[0].resolve)(),
         None => bail!(
-            "Unknown tool_id: '{}'. Supported: claude-code, codex, opencode, gemini, pi.",
+            "Unknown tool_id: '{}'. Supported: claude-code, claude-desktop, codex, opencode, pi.",
             tool_id
         ),
     }
@@ -24,6 +24,13 @@ pub fn resolve_tool_config_path(tool_id: &str) -> Result<PathBuf> {
 pub fn resolve_opencode_config_path() -> Result<PathBuf> {
     let home = sync_home_dir()?;
     Ok(home.join(".config").join("opencode").join("opencode.json"))
+}
+
+/// `~/.claude-desktop/skillstar-binding.json` — SkillStar binding marker for
+/// Claude Desktop (native Desktop app projection is a follow-up).
+pub fn resolve_claude_desktop_binding_path() -> Result<PathBuf> {
+    let home = sync_home_dir()?;
+    Ok(home.join(".claude-desktop").join("skillstar-binding.json"))
 }
 
 /// `~/.zcode/v2/config.json` — ZCode desktop config (OpenCode schema).
@@ -37,12 +44,6 @@ pub fn resolve_opencode_config_path() -> Result<PathBuf> {
 pub fn resolve_zcode_config_path() -> Result<PathBuf> {
     let home = sync_home_dir()?;
     Ok(home.join(".zcode").join("v2").join("config.json"))
-}
-
-/// `~/.gemini/.env` — Gemini CLI reads provider credentials from this dotenv file.
-pub fn resolve_gemini_env_path() -> Result<PathBuf> {
-    let home = sync_home_dir()?;
-    Ok(home.join(".gemini").join(".env"))
 }
 
 /// `~/.pi/agent/models.json` — Pi's custom provider/model registry
@@ -178,7 +179,7 @@ fn write_tool_config_file_inner(
             let table: toml::Table = toml::from_str(content)?;
             toml::to_string_pretty(&table).context("Failed to format TOML")?
         }
-        // dotenv files (Gemini): preserve as-is so user comments/ordering survive.
+        // Unknown future text formats are preserved as-is.
         _ => content.to_string(),
     };
 
@@ -203,94 +204,8 @@ pub fn format_tool_config_file(tool_id: &str, file_id: &str) -> Result<String> {
             let table: toml::Table = toml::from_str(&content).context("Invalid TOML")?;
             Ok(toml::to_string_pretty(&table)?)
         }
-        // dotenv: normalize by re-serializing parsed key/value pairs (sorted, comments dropped).
-        _ => Ok(serialize_env_file(&parse_env_file(&content))),
+        _ => Ok(content),
     }
-}
-
-// ---------------------------------------------------------------------------
-// dotenv (.env) helpers — used by the Gemini CLI integration
-// ---------------------------------------------------------------------------
-
-/// Parse a `.env` file into an ordered list of `(key, value)` pairs, skipping
-/// blank lines and comments. Order is preserved so a merge write keeps the
-/// user's existing layout stable.
-pub(crate) fn parse_env_file(content: &str) -> Vec<(String, String)> {
-    let mut pairs = Vec::new();
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-        if let Some((key, value)) = trimmed.split_once('=') {
-            let key = key.trim();
-            if !key.is_empty() && key.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                pairs.push((key.to_string(), value.trim().to_string()));
-            }
-        }
-    }
-    pairs
-}
-
-/// Serialize ordered `(key, value)` pairs back into `.env` text.
-fn serialize_env_file(pairs: &[(String, String)]) -> String {
-    let mut out: String = pairs
-        .iter()
-        .map(|(k, v)| format!("{k}={v}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    if !out.is_empty() {
-        out.push('\n');
-    }
-    out
-}
-
-/// Merge managed key/value pairs into a `.env` file, preserving unmanaged keys
-/// and creating a rolling backup when the file already exists.
-///
-/// A `None` value removes the key (used on deactivation). Existing keys keep
-/// their position; new keys are appended in the supplied order.
-pub(crate) fn merge_env_write(
-    path: &Path,
-    managed: &[(&str, Option<String>)],
-) -> Result<Option<PathBuf>> {
-    let backup = if path.exists() {
-        Some(create_rolling_backup(path)?)
-    } else {
-        None
-    };
-
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
-    }
-
-    let existing = if path.exists() {
-        std::fs::read_to_string(path)
-            .with_context(|| format!("Failed to read {}", path.display()))?
-    } else {
-        String::new()
-    };
-
-    let mut pairs = parse_env_file(&existing);
-
-    for (key, value) in managed {
-        match value {
-            Some(v) => {
-                if let Some(slot) = pairs.iter_mut().find(|(k, _)| k == key) {
-                    slot.1 = v.clone();
-                } else {
-                    pairs.push(((*key).to_string(), v.clone()));
-                }
-            }
-            None => pairs.retain(|(k, _)| k != key),
-        }
-    }
-
-    std::fs::write(path, serialize_env_file(&pairs))
-        .with_context(|| format!("Failed to write {}", path.display()))?;
-
-    Ok(backup)
 }
 
 // ---------------------------------------------------------------------------
@@ -388,16 +303,6 @@ pub(crate) fn detect_opencode_provider(path: &Path) -> Result<Option<String>> {
         }
     }
     Ok(None)
-}
-
-/// Gemini: report `GOOGLE_GEMINI_BASE_URL` from `~/.gemini/.env`.
-pub(crate) fn detect_gemini_provider(path: &Path) -> Result<Option<String>> {
-    let content = std::fs::read_to_string(path)?;
-    let pairs = parse_env_file(&content);
-    Ok(pairs
-        .into_iter()
-        .find(|(k, _)| k == "GOOGLE_GEMINI_BASE_URL")
-        .map(|(_, v)| v))
 }
 
 /// Pi: report the base URL of any skillstar* managed block in `models.json`.

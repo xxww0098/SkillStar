@@ -35,7 +35,11 @@ fn test_create_from_preset_flat_all_presets_succeed() {
         assert_eq!(entry.icon_color, Some(preset.icon_color.clone()));
         assert_eq!(entry.preset_id, Some(preset.id.clone()));
         assert!(entry.created_at.is_some());
-        assert!(uuid::Uuid::parse_str(&entry.id).is_ok());
+        if is_native_official_preset_id(&preset.id) {
+            assert_eq!(entry.id, preset.id);
+        } else {
+            assert!(uuid::Uuid::parse_str(&entry.id).is_ok());
+        }
     }
 }
 #[test]

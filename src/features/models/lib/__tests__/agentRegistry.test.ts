@@ -10,7 +10,7 @@ import { CONFIG_FILE_TOOLS, PROVIDER_AGENTS } from "../agentRegistry";
  * removes or reorders an agent without the other, exactly one of the two
  * tests goes red.
  */
-const CANONICAL_TOOL_IDS = ["claude-code", "codex", "opencode", "gemini", "pi"] as const;
+const CANONICAL_TOOL_IDS = ["claude-code", "claude-desktop", "codex", "opencode", "pi"] as const;
 
 describe("agentRegistry", () => {
   it("covers exactly the canonical agents, in canonical order", () => {
@@ -26,9 +26,9 @@ describe("agentRegistry", () => {
     const kinds = Object.fromEntries(PROVIDER_AGENTS.map((a) => [a.toolId, a.kind]));
     expect(kinds).toEqual({
       "claude-code": "single",
+      "claude-desktop": "single",
       codex: "multi",
       opencode: "multi",
-      gemini: "single",
       pi: "multi",
     });
   });
@@ -36,7 +36,8 @@ describe("agentRegistry", () => {
   it("requiredUrlField matches the backend activation validation", () => {
     // Mirrors the RequiredUrl column of the Rust registry.
     for (const agent of PROVIDER_AGENTS) {
-      expect(agent.requiredUrlField).toBe(agent.toolId === "claude-code" ? "anthropic" : "openai");
+      const anthropic = agent.toolId === "claude-code" || agent.toolId === "claude-desktop";
+      expect(agent.requiredUrlField).toBe(anthropic ? "anthropic" : "openai");
     }
   });
 });

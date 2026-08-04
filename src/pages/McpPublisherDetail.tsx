@@ -58,8 +58,7 @@ export function McpPublisherDetail({ publisher, onBack }: McpPublisherDetailProp
   const [viewMode] = useState<ViewMode>("grid");
   const scrollRef = useRef<HTMLDivElement>(null);
   // One-shot-per-publisher guard: only the first stale snapshot for a given
-  // publisher triggers a background sync (mirrors useMcpMarketplace's
-  // staleRefreshTriggered ref). Re-arms when the publisher changes.
+  // publisher triggers a background sync. Re-arms when the publisher changes.
   const staleRefreshTriggeredFor = useRef<string | null>(null);
 
   const isGithub = publisher.id === "github";
@@ -72,7 +71,7 @@ export function McpPublisherDetail({ publisher, onBack }: McpPublisherDetailProp
     setShowBackToTop(false);
   }, [publisher.id]);
 
-  // Local-first load (mirrors useMcpMarketplace but scoped to one publisher).
+  // Local-first load scoped to one publisher.
   const entriesQuery = useQuery<LocalFirstResult<McpMarketEntry[]>>({
     queryKey: mcpKeys.marketByPublisher(publisher.id),
     queryFn: () =>

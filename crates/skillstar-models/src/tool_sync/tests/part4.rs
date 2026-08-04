@@ -218,7 +218,10 @@ fn pi_unsync_removes_managed_blocks_and_managed_pointer_only() {
         .unwrap()
         .as_object_mut()
         .unwrap()
-        .insert("mine".to_string(), serde_json::json!({ "baseUrl": "https://mine" }));
+        .insert(
+            "mine".to_string(),
+            serde_json::json!({ "baseUrl": "https://mine" }),
+        );
     std::fs::write(&models_path, serde_json::to_string_pretty(&json).unwrap()).unwrap();
 
     unsync_pi_all_at(&models_path, &settings_path).unwrap();

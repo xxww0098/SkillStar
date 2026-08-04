@@ -3,6 +3,64 @@
 use super::*;
 
 // ---------------------------------------------------------------------------
+// Native Official seeds (Claude / Codex browser/client login — no API key)
+// ---------------------------------------------------------------------------
+
+/// Stable store/preset id for Claude Code native (Official) login.
+pub const CLAUDE_OFFICIAL_ID: &str = "claude-official";
+/// Stable store/preset id for Codex ChatGPT OAuth (Official) login.
+pub const CODEX_OFFICIAL_ID: &str = "codex-official";
+
+/// Whether `preset_id` is a native Official seed (no API key / empty endpoints).
+///
+/// Distinct from Grok-style `category: "official"` presets that still use keys.
+pub fn is_native_official_preset_id(preset_id: &str) -> bool {
+    matches!(preset_id, CLAUDE_OFFICIAL_ID | CODEX_OFFICIAL_ID)
+}
+
+/// Whether a flat provider row is a native Official seed.
+///
+/// Matches stable `id` or `preset_id` so renamed display names still qualify.
+pub fn is_native_official_provider(provider: &ProviderEntryFlat) -> bool {
+    is_native_official_preset_id(&provider.id)
+        || provider
+            .preset_id
+            .as_deref()
+            .is_some_and(is_native_official_preset_id)
+}
+
+/// Ensure Claude / Codex Official seed rows exist in the store.
+///
+/// Inserts missing seeds with stable ids (`claude-official` / `codex-official`).
+/// Skips when a row with the same `id` or `preset_id` already exists (does not
+/// overwrite a user-renamed Official row). Returns `true` when the store was
+/// mutated.
+pub fn ensure_official_providers(store: &mut FlatProvidersStore) -> bool {
+    let mut changed = false;
+    for preset_id in [CLAUDE_OFFICIAL_ID, CODEX_OFFICIAL_ID] {
+        let exists = store.providers.iter().any(|p| {
+            p.id == preset_id || p.preset_id.as_deref() == Some(preset_id)
+        });
+        if exists {
+            continue;
+        }
+        let Ok(mut entry) = create_from_preset_flat(preset_id, "") else {
+            continue;
+        };
+        // Assign sort_index at the front-ish of the list without reshuffling.
+        let max_sort = store.providers.iter().map(|p| p.sort_index).max().unwrap_or(0);
+        entry.sort_index = if store.providers.is_empty() {
+            0
+        } else {
+            max_sort + 1
+        };
+        store.providers.push(entry);
+        changed = true;
+    }
+    changed
+}
+
+// ---------------------------------------------------------------------------
 // Flat provider preset types (v2 architecture)
 // ---------------------------------------------------------------------------
 
@@ -15,7 +73,7 @@ use super::*;
 pub struct ProviderPresetFlat {
     pub id: String,
     pub name: String,
-    /// Category: "domestic", "relay", or "openai_compatible"
+    /// Category: "domestic", "relay", "official", or "openai_compatible"
     pub category: String,
     pub base_url_openai: String,
     pub base_url_anthropic: String,
@@ -199,7 +257,38 @@ pub fn get_all_presets_flat() -> Vec<ProviderPresetFlat> {
             balance_parser: Some("siliconflow".to_string()),
             endpoint_candidates: vec!["https://api.siliconflow.cn/v1".to_string()],
         },
-        // ── 官方大厂 (Official) ──
+        // ── Native Official (browser/client login; no API key) ──
+        // Distinct from Grok below: these seeds use fixed ids and empty
+        // endpoints. Identity is by preset/store id, not empty-URL heuristics.
+        ProviderPresetFlat {
+            id: CLAUDE_OFFICIAL_ID.to_string(),
+            name: "Claude Official".to_string(),
+            category: "official".to_string(),
+            base_url_openai: String::new(),
+            base_url_anthropic: String::new(),
+            models_url: String::new(),
+            models: vec![],
+            icon_color: "#D97757".to_string(),
+            api_key_url: None,
+            balance_endpoint: None,
+            balance_parser: None,
+            endpoint_candidates: vec![],
+        },
+        ProviderPresetFlat {
+            id: CODEX_OFFICIAL_ID.to_string(),
+            name: "Codex Official".to_string(),
+            category: "official".to_string(),
+            base_url_openai: String::new(),
+            base_url_anthropic: String::new(),
+            models_url: String::new(),
+            models: vec![],
+            icon_color: "#10A37F".to_string(),
+            api_key_url: None,
+            balance_endpoint: None,
+            balance_parser: None,
+            endpoint_candidates: vec![],
+        },
+        // ── 官方大厂 (API-key Official vendors) ──
         ProviderPresetFlat {
             id: "grok".to_string(),
             name: "Grok (xAI)".to_string(),
@@ -219,12 +308,14 @@ pub fn get_all_presets_flat() -> Vec<ProviderPresetFlat> {
 
 /// Create a new flat provider entry from a built-in preset.
 ///
-/// Looks up the preset by ID, generates a UUID, sets the current timestamp,
-/// and copies all relevant fields from the preset template.
+/// Looks up the preset by ID, sets the current timestamp, and copies all
+/// relevant fields from the preset template. Most presets get a fresh UUID;
+/// native Official seeds (`claude-official` / `codex-official`) use a stable
+/// id matching the preset id and allow an empty API key.
 ///
 /// # Arguments
 /// * `preset_id` - The ID of the preset to use (e.g., "deepseek", "kimi")
-/// * `api_key` - The user's API key for this provider
+/// * `api_key` - The user's API key for this provider (may be empty for Official)
 ///
 /// # Returns
 /// A fully populated `ProviderEntryFlat` ready to be inserted into the store.
@@ -243,8 +334,21 @@ pub fn create_from_preset_flat(preset_id: &str, api_key: &str) -> Result<Provide
         .unwrap_or_default()
         .as_millis() as u64;
 
+    let native_official = is_native_official_preset_id(preset_id);
+    let id = if native_official {
+        preset_id.to_string()
+    } else {
+        Uuid::new_v4().to_string()
+    };
+    // Codex Official binds ChatGPT OAuth — never write OPENAI_API_KEY.
+    let codex_auth_mode = if preset_id == CODEX_OFFICIAL_ID {
+        "oauth".to_string()
+    } else {
+        default_codex_auth_mode()
+    };
+
     Ok(ProviderEntryFlat {
-        id: Uuid::new_v4().to_string(),
+        id,
         name: preset.name,
         base_url_openai: preset.base_url_openai,
         base_url_anthropic: preset.base_url_anthropic,
@@ -259,6 +363,6 @@ pub fn create_from_preset_flat(preset_id: &str, api_key: &str) -> Result<Provide
         created_at: Some(now),
         meta: None,
         codex_wire_api: default_codex_wire_api(),
-        codex_auth_mode: default_codex_auth_mode(),
+        codex_auth_mode,
     })
 }

@@ -141,7 +141,6 @@ fn resolve_install_destination(opts: &InstallOpts<'_>) -> Result<InstallDestinat
     })
 }
 
-
 fn deploy_installed_skills(
     skill_names: &[String],
     destination: &InstallDestination,

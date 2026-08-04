@@ -435,19 +435,6 @@ function useSkillsState() {
     }
   }, []);
 
-  const createLocalSkill = useCallback(
-    async (name: string, content?: string) => {
-      try {
-        const skill = await tauriInvoke("create_local_skill", { name, content });
-        queryClient.setQueryData<Skill[]>(SKILLS_QUERY_KEY, (prev = []) => [...prev, skill]);
-        return skill;
-      } catch (e) {
-        throw new Error(String(e));
-      }
-    },
-    [queryClient],
-  );
-
   const deleteLocalSkill = useCallback(
     async (name: string) => {
       try {
@@ -479,7 +466,6 @@ function useSkillsState() {
       pendingAgentToggleKeys,
       readSkillContent,
       updateSkillContent,
-      createLocalSkill,
       deleteLocalSkill,
       ghostSkills,
       dismissGhostSkill,
@@ -501,7 +487,6 @@ function useSkillsState() {
       pendingAgentToggleKeys,
       readSkillContent,
       updateSkillContent,
-      createLocalSkill,
       deleteLocalSkill,
       ghostSkills,
       dismissGhostSkill,

@@ -45,7 +45,7 @@ pub use multi_provider::*;
 /// Env var that re-roots every tool-config path under a sandbox directory.
 ///
 /// When set to a non-empty path, resolution of `~/.claude`, `~/.codex`,
-/// `~/.gemini`, `~/.config/opencode`, etc. happens *inside that directory*
+/// `~/.config/opencode`, etc. happens *inside that directory*
 /// instead of the user's real home. Tests MUST set this so the suite never
 /// overwrites a developer's live tool configuration (a real bug we hit:
 /// `resync_active_tools` tests clobbered `~/.codex/config.toml` and

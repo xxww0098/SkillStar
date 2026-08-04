@@ -6,7 +6,6 @@
  */
 import type { ModelCatalogEntry, ProviderEntryFlat, ProviderPatchFlat } from "../../../types";
 
-export type ModelFetchTarget = "claude" | "codex";
 export type CodexWireApi = "chat" | "responses";
 export type CodexAuthMode = "api_key" | "oauth" | "third_party";
 
@@ -27,8 +26,6 @@ export const LATEST_CLAUDE_MODELS = {
   sonnet: "claude-sonnet-4-6",
   opus: "claude-opus-4-7",
 } as const;
-
-export const LATEST_CODEX_MODELS = ["gpt-5.5", "gpt-5.4-mini", "gpt-5.3-codex-spark", "gpt-5.4"] as const;
 
 export function getMetaString(meta: Record<string, unknown> | undefined, key: string): string {
   const value = meta?.[key];

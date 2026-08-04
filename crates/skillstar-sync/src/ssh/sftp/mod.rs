@@ -13,7 +13,7 @@ mod delete;
 mod list;
 mod push;
 
-pub use common::{ensure_remote_dir_pub, open_sftp, read_remote_file, write_remote_file};
+pub use common::{open_sftp, read_remote_file, write_remote_file};
 pub use delete::delete_remote_skill;
 pub use list::{
     DiscoveryResult, KNOWN_AGENT_SKILL_DIRS, RemoteAgentDir, RemoteAgentSkills,

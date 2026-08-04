@@ -12,7 +12,6 @@
 
 use chrono::Utc;
 use serde::Deserialize;
-use serde_json::Value;
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -402,9 +401,6 @@ fn urlencoding(s: &str) -> String {
     }
     out
 }
-
-#[allow(dead_code)]
-fn _unused(_: Value) {}
 
 #[cfg(test)]
 mod tests {

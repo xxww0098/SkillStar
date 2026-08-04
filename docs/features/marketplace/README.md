@@ -19,6 +19,7 @@
 - publisher/detail 页面与主列表复用同一 local-first flow；缺 description 时不在浏览器临时 hydrate 另一份数据。
 - DB 操作优先短生命周期 WAL connection，避免进程级单 connection lock 阻塞并发读。
 - 所有远程 HTTP 使用 `probe_http_client`，GitHub repo 操作遵循 mirror/fallback。
+- taxonomy/pack command surface 未挂前端，crate API 与 SQLite 表保留。
 
 ## 技能搜索与导入
 

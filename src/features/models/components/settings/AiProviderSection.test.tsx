@@ -5,7 +5,8 @@ import { AiProviderSection } from "./AiProviderSection";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (_key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? _key,
+    t: (key: string, options?: { defaultValue?: string }) =>
+      key === "settings.aiSourceModels" ? "Models 供应商" : (options?.defaultValue ?? key),
   }),
 }));
 

@@ -10,7 +10,6 @@ export const AGENTS = [
   ["claude", "Claude Code", "lobe:claude", ".claude/skills", false, false, 4],
   ["codex", "Codex", "lobe:codex", ".agents/skills", false, false, 2],
   ["cursor", "Cursor", "lobe:cursor", ".agents/skills", false, false, 1],
-  ["gemini", "Gemini CLI", "lobe:gemini", ".agents/skills", false, false, 0],
   ["antigravity", "Antigravity", "lobe:antigravity", ".agents/skills", false, false, 0],
   ["opencode", "OpenCode", "lobe:opencode", ".agents/skills", false, false, 3],
   ["qoder", "Qoder", "lobe:qoder", ".qoder/skills", false, false, 0],

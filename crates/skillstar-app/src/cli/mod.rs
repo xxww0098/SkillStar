@@ -255,7 +255,6 @@ pub fn is_gui_force_arg(first_arg: &str) -> bool {
     first_arg == "gui"
 }
 
-
 // ── Input classification (install/add routing) ───────────────────────
 
 /// Classify a raw `install`/`add` argument to route to the right installer.

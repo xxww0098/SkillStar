@@ -120,8 +120,12 @@ export function ProjectDetailPanel({
             <FolderKanban className="w-5 h-5 text-primary/60" />
           </div>
           <div className="min-w-0 flex-1">
-            <h2 className="text-heading-sm truncate">{selectedProject.name}</h2>
-            <p className="text-caption font-mono truncate">{selectedProject.path}</p>
+            <h2 className="text-heading-sm truncate" title={selectedProject.name}>
+              {selectedProject.name}
+            </h2>
+            <p className="text-caption font-mono truncate" title={selectedProject.path}>
+              {selectedProject.path}
+            </p>
           </div>
           <Button
             variant="outline"

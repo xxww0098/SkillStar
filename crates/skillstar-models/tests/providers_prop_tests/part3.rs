@@ -217,22 +217,25 @@ proptest! {
         );
         let entry = result.unwrap();
 
-        // 1. The returned ProviderEntryFlat has a valid UUID as id (non-empty, contains hyphens)
-        prop_assert!(
-            !entry.id.is_empty(),
-            "id should be non-empty"
-        );
-        prop_assert!(
-            entry.id.contains('-'),
-            "id '{}' should contain hyphens (UUID format)",
-            entry.id
-        );
-        // Verify it's a valid UUID by parsing
-        prop_assert!(
-            uuid::Uuid::parse_str(&entry.id).is_ok(),
-            "id '{}' should be a valid UUID",
-            entry.id
-        );
+        // 1. Native Official seeds use a stable id; others get a UUID.
+        prop_assert!(!entry.id.is_empty(), "id should be non-empty");
+        if matches!(
+            preset_id.as_str(),
+            "claude-official" | "codex-official"
+        ) {
+            prop_assert_eq!(&entry.id, &preset_id, "Official seed id must be stable");
+        } else {
+            prop_assert!(
+                entry.id.contains('-'),
+                "id '{}' should contain hyphens (UUID format)",
+                entry.id
+            );
+            prop_assert!(
+                uuid::Uuid::parse_str(&entry.id).is_ok(),
+                "id '{}' should be a valid UUID",
+                entry.id
+            );
+        }
 
         // 2. api_key matches the input
         prop_assert_eq!(

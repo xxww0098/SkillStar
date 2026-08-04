@@ -7,13 +7,10 @@ pub mod constants;
 pub mod http_client;
 pub mod openai_client;
 pub mod resolve;
-pub mod scan_params;
 pub mod skill_pick;
 
 #[allow(unused_imports)]
 pub use config::{AiConfig, AiProviderRef, ApiFormat, FormatPreset};
-#[allow(unused_imports)]
-pub use scan_params::{ResolvedScanParams, resolve_scan_params};
 
 // Config load/save, concurrency limiting, crypto, and legacy TOML/meta parsing.
 pub use config_io::*;

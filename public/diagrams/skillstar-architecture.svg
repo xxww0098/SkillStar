@@ -177,15 +177,12 @@
   <line x1="725" y1="735" x2="985" y2="735" stroke="#3f3f46" stroke-width="1"/>
   <text x="735" y="758" font-size="13" fill="#a1a1aa">每个项目独立选择目标 Agent：</text>
 
-  <!-- Row 1: Gemini / Claude Code / Codex -->
+  <!-- Row 1: Claude Code / Codex -->
   <rect x="735" y="768" width="80" height="34" rx="6" fill="#1e1b4b" stroke="#6366f1" stroke-width="0.8"/>
-  <text x="777" y="791" text-anchor="middle" font-size="10" fill="#a5b4fc">Gemini</text>
+  <text x="777" y="791" text-anchor="middle" font-size="8" fill="#a5b4fc">Claude Code</text>
 
   <rect x="822" y="768" width="80" height="34" rx="6" fill="#1e1b4b" stroke="#6366f1" stroke-width="0.8"/>
-  <text x="871" y="791" text-anchor="middle" font-size="8" fill="#a5b4fc">Claude Code</text>
-
-  <rect x="909" y="768" width="72" height="34" rx="6" fill="#1e1b4b" stroke="#6366f1" stroke-width="0.8"/>
-  <text x="947" y="791" text-anchor="middle" font-size="10" fill="#a5b4fc">Codex</text>
+  <text x="864" y="791" text-anchor="middle" font-size="10" fill="#a5b4fc">Codex</text>
 
   <!-- Row 2: Antigravity / OpenCode / OpenClaw -->
   <rect x="735" y="810" width="80" height="34" rx="6" fill="#1e1b4b" stroke="#6366f1" stroke-width="0.8"/>

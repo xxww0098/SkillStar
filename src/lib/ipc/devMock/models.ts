@@ -27,13 +27,45 @@ interface MockBinding {
 /** Tools whose config natively holds several providers (mirrors agentRegistry). */
 const MULTI_PROVIDER_TOOLS = new Set(["codex", "opencode"]);
 
+const NATIVE_OFFICIAL_IDS = new Set(["claude-official", "codex-official"]);
+
+/** Mirror backend `ensure_official_providers` so the D1 hub can prefer store rows. */
+function ensureOfficialInMockStore() {
+  for (const id of ["claude-official", "codex-official"] as const) {
+    const exists = FLAT_PROVIDERS.providers.some(
+      (p) => p.id === id || (p as { preset_id?: string }).preset_id === id,
+    );
+    if (exists) continue;
+    FLAT_PROVIDERS.providers.push({
+      id,
+      name: id === "claude-official" ? "Claude Official" : "Codex Official",
+      base_url_openai: "",
+      base_url_anthropic: "",
+      models_url: "",
+      api_key: "",
+      models: [],
+      default_model: "",
+      sort_index: FLAT_PROVIDERS.providers.length,
+      preset_id: id,
+      icon_color: id === "claude-official" ? "#D97757" : "#10A37F",
+      notes: "原生登录 · Official",
+      ...(id === "codex-official" ? { codex_auth_mode: "oauth" } : {}),
+    } as never);
+  }
+}
+
 export const MODELS_HANDLERS: DevMockHandlers = {
-  get_providers_flat: () => FLAT_PROVIDERS,
+  get_providers_flat: () => {
+    ensureOfficialInMockStore();
+    return FLAT_PROVIDERS;
+  },
   create_provider_flat: (args) => {
     const entry = (args?.entry ?? {}) as Record<string, unknown>;
+    const requestedId = typeof entry.id === "string" ? entry.id : "";
+    const keepOfficialId = NATIVE_OFFICIAL_IDS.has(requestedId);
     const created = {
       ...entry,
-      id: `p-dev-${++devProviderSeq}`,
+      id: keepOfficialId ? requestedId : `p-dev-${++devProviderSeq}`,
       sort_index: FLAT_PROVIDERS.providers.length,
       created_at: Date.now(),
     };
@@ -85,10 +117,19 @@ export const MODELS_HANDLERS: DevMockHandlers = {
     const providerId = String(args?.providerId ?? "");
     const provider = FLAT_PROVIDERS.providers.find((p) => p.id === providerId);
     const acts = FLAT_PROVIDERS.tool_activations as Record<string, MockBinding | null>;
+    const presetId = (provider as { preset_id?: string } | undefined)?.preset_id;
+    const isCodexOfficial =
+      providerId === "codex-official" || presetId === "codex-official";
+    let settings = (args?.settings ?? null) as unknown;
+    if (isCodexOfficial) {
+      const prev =
+        settings && typeof settings === "object" ? (settings as Record<string, unknown>) : {};
+      settings = { ...prev, auth_mode: "oauth" };
+    }
     const entry = {
       provider_id: providerId,
       model: (args?.model as string) || provider?.default_model || "",
-      settings: (args?.settings ?? null) as unknown,
+      settings,
       last_sync_at: Math.floor(Date.now() / 1000),
     };
     const prev = acts[toolId];

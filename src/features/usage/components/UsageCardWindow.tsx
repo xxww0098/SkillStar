@@ -130,21 +130,19 @@ export function UsageCardWindow() {
   const reportSwitchOutcome = useCallback(
     (outcome: SwitchOutcome | null | undefined, displayName: string, isActive: boolean) => {
       if (!outcome) {
-        toast.success(t("usage.activeAccountSet", "已切为当前账号"), {
+        toast.success(t("usage.activeAccountSet"), {
           description: displayName,
         });
         return;
       }
       if (outcome.success) {
-        toast.success(t("usage.switchCliSuccess", "已切为当前账号并同步到 CLI"), {
-          description: `${displayName} → ${outcome.toolId} · ${t("usage.switchCliRestartHint", "请重启 CLI 后生效")}`,
+        toast.success(t("usage.switchCliSuccess"), {
+          description: `${displayName} → ${outcome.toolId} · ${t("usage.switchCliRestartHint")}`,
         });
         return;
       }
       if (outcome.error) {
-        const message = isActive
-          ? t("usage.switchCliFailed", "已切为当前账号，但同步到 CLI 失败")
-          : t("usage.switchNotApplied", "切换未生效，已保留原当前账号");
+        const message = isActive ? t("usage.switchCliFailed") : t("usage.switchNotApplied");
         toast.error(message, {
           description: outcome.error,
         });
@@ -165,7 +163,7 @@ export function UsageCardWindow() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
-      toast.error(t("usage.switchCliFailed", "切换账号失败"), { description: msg });
+      toast.error(t("usage.switchAccountFailed"), { description: msg });
     } finally {
       setSwitching(false);
     }
@@ -177,11 +175,11 @@ export function UsageCardWindow() {
     try {
       const outcome = await usageApi.switchActiveSubscriptionToCli(subscription.catalog_id);
       if (outcome.success) {
-        toast.success(t("usage.switchCliSuccess", "已同步到 CLI"), {
-          description: `${outcome.toolId}: ${outcome.configPath} · ${t("usage.switchCliRestartHint", "请重启 CLI 后生效")}`,
+        toast.success(t("usage.switchCliSynced"), {
+          description: `${outcome.toolId}: ${outcome.configPath} · ${t("usage.switchCliRestartHint")}`,
         });
       } else if (outcome.error) {
-        toast.error(t("usage.switchCliFailed", "同步到 CLI 失败"), {
+        toast.error(t("usage.switchCliSyncFailed"), {
           description: outcome.error,
         });
       }
@@ -190,7 +188,7 @@ export function UsageCardWindow() {
       await loadData(subscriptionId ?? "");
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      toast.error(t("usage.switchCliFailed", "同步到 CLI 失败"), { description: msg });
+      toast.error(t("usage.switchCliSyncFailed"), { description: msg });
     } finally {
       setSyncing(false);
     }
@@ -227,7 +225,7 @@ export function UsageCardWindow() {
   if (!subscriptionId) {
     return (
       <div className="usage-card-root flex h-screen items-center justify-center p-4 text-sm text-muted-foreground">
-        {t("usage.cardMissingId", "缺少订阅 id")}
+        {t("usage.cardMissingId")}
       </div>
     );
   }
@@ -235,7 +233,7 @@ export function UsageCardWindow() {
   if (!subscription) {
     return (
       <div className="usage-card-root flex h-screen items-center justify-center p-4 text-sm text-muted-foreground">
-        {error ?? t("common.loading", "加载中...")}
+        {error ?? t("common.loading")}
       </div>
     );
   }
@@ -286,14 +284,14 @@ export function UsageCardWindow() {
         </span>
         {subscription.is_active && (
           <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-500">
-            {t("usage.cardActive", "当前")}
+            {t("usage.cardActive")}
           </span>
         )}
         <button
           type="button"
           onClick={() => void handleTogglePin()}
           className="rounded p-1 text-muted-foreground hover:bg-foreground/10"
-          title={alwaysOnTop ? t("usage.cardUnpin", "取消置顶") : t("usage.cardPin", "置顶")}
+          title={alwaysOnTop ? t("usage.cardUnpin") : t("usage.cardPin")}
         >
           {alwaysOnTop ? <PinOff size={13} /> : <Pin size={13} />}
         </button>
@@ -301,7 +299,7 @@ export function UsageCardWindow() {
           type="button"
           onClick={() => void handleClose()}
           className="rounded p-1 text-muted-foreground hover:bg-foreground/10"
-          title={t("common.close", "关闭")}
+          title={t("common.close")}
         >
           <X size={13} />
         </button>
@@ -360,7 +358,7 @@ export function UsageCardWindow() {
             className="flex flex-1 items-center justify-center gap-1 rounded-md bg-emerald-600/90 px-2 py-1.5 text-xs font-medium text-white hover:bg-emerald-600 disabled:opacity-50"
           >
             {switching ? <RefreshCw size={12} className="animate-spin" /> : <BadgeCheck size={12} />}
-            {t("usage.setActive", "切为当前账号")}
+            {t("usage.setActive")}
           </button>
         )}
         {/* Always offer CLI re-sync for active CLI-backed accounts (not only after a
@@ -379,7 +377,7 @@ export function UsageCardWindow() {
             )}
           >
             {syncing ? <RefreshCw size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-            {t("usage.resyncCli", "重新同步到 CLI")}
+            {t("usage.resyncCli")}
           </button>
         )}
         <button
@@ -387,7 +385,7 @@ export function UsageCardWindow() {
           onClick={() => void handleRefresh()}
           disabled={refreshing}
           className="rounded-md border border-border/50 p-1.5 text-muted-foreground hover:bg-foreground/10 disabled:opacity-50"
-          title={t("common.refresh", "刷新")}
+          title={t("common.refresh")}
         >
           <RefreshCw size={13} className={refreshing ? "animate-spin" : undefined} />
         </button>

@@ -77,10 +77,9 @@ mod tests {
     fn universal_agents_share_the_open_skills_project_dir() {
         let data = builtin_agent_data();
         let ag = data.iter().find(|d| d.id == "antigravity").unwrap();
-        let gm = data.iter().find(|d| d.id == "gemini").unwrap();
         let codex = data.iter().find(|d| d.id == "codex").unwrap();
         let cursor = data.iter().find(|d| d.id == "cursor").unwrap();
-        for agent in [ag, gm, codex, cursor] {
+        for agent in [ag, codex, cursor] {
             assert_eq!(
                 BuiltinSpec(agent).project_skills_rel(),
                 Some(".agents/skills")

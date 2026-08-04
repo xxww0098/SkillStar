@@ -6,10 +6,10 @@ use std::collections::BTreeMap;
 use super::*;
 
 /// Canonical "community" mcpServers value (base shape shared by Claude Code,
-/// Gemini, Kiro, ZCode). stdio keeps `type`; http/sse carry `url` and
+/// Kiro, Cursor, and ZCode). stdio keeps `type`; http/sse carry `url` and
 /// optional `headers`. Does **not** include any tool-specific
 /// approval/exposure/timeout fields — callers layer those on top per tool
-/// (see [`claude_code_spec`], [`gemini_spec`], [`kiro_spec`]).
+/// (see [`claude_code_spec`] and [`kiro_spec`]).
 pub(crate) fn canonical_spec(entry: &McpServerEntry) -> Value {
     let mut obj = Map::new();
     match entry.transport.as_str() {
@@ -55,28 +55,6 @@ pub(crate) fn claude_code_spec(entry: &McpServerEntry) -> Value {
 /// is projected here.
 pub(crate) fn cursor_spec(entry: &McpServerEntry) -> Value {
     canonical_spec(entry)
-}
-
-/// Gemini CLI value (`~/.gemini/settings.json` `mcpServers.<name>`): canonical
-/// shape plus `trust` (bypass all confirmations), `excludeTools`, and
-/// `timeout` (ms) — all verified fields from Gemini's own docs.
-/// `auto_approve_tools` (a partial allowlist) has no Gemini equivalent
-/// (`trust` is all-or-nothing) and is not projected.
-pub(crate) fn gemini_spec(entry: &McpServerEntry) -> Value {
-    let mut obj = match canonical_spec(entry) {
-        Value::Object(m) => m,
-        _ => Map::new(),
-    };
-    if entry.auto_approve_all {
-        obj.insert("trust".into(), json!(true));
-    }
-    if !entry.disabled_tools.is_empty() {
-        obj.insert("excludeTools".into(), json!(entry.disabled_tools));
-    }
-    if let Some(ms) = entry.timeout_ms.filter(|&ms| ms > 0) {
-        obj.insert("timeout".into(), json!(ms));
-    }
-    Value::Object(obj)
 }
 
 /// Kiro value (`~/.kiro/settings/mcp.json` `mcpServers.<name>`): canonical

@@ -380,10 +380,6 @@ export function isPriorityResetUrgency(urgency: ResetUrgency): boolean {
   return urgency === "soon" || urgency === "urgent" || urgency === "critical";
 }
 
-export function isPriorityReset(resetAt: number, usedPercent = 0, mode: ResetUrgencyMode = "billing"): boolean {
-  return isPriorityResetUrgency(getResetState(resetAt, { usedPercent, mode }).urgency);
-}
-
 export function pickResetTone(urgency: ResetUrgency): { badge: string; text: string } {
   switch (urgency) {
     case "now":

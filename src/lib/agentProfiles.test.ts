@@ -20,11 +20,11 @@ describe("selectTargetableAgentProfiles", () => {
     const profiles = [
       profile("active", true, true),
       profile("disabled", true, false),
-      profile("gemini", false, true),
+      profile("manual", false, true),
       profile("missing", false, false),
     ];
 
-    expect(selectTargetableAgentProfiles(profiles).map(({ id }) => id)).toEqual(["active", "gemini"]);
+    expect(selectTargetableAgentProfiles(profiles).map(({ id }) => id)).toEqual(["active", "manual"]);
   });
 
   it("preserves profile order and objects without mutating the Settings list", () => {

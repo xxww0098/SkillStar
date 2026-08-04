@@ -23,10 +23,7 @@ struct Envelope {
     data: Value,
 }
 
-pub async fn fetch(
-    subscription_id: &str,
-    api_key: &str,
-) -> UsageResult<SubscriptionUsage> {
+pub async fn fetch(subscription_id: &str, api_key: &str) -> UsageResult<SubscriptionUsage> {
     let env: Envelope = super::fetch_spec(&balance::MINIMAX, api_key).await?;
 
     if env.code != 0 && env.code != 200 {
