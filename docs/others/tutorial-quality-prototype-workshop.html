@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:">
+<title>实战工坊教程原型</title>
+<style>
+:root{color-scheme:dark;--bg:#0d1017;--panel:#151b27;--line:#2c3548;--ink:#f4f6fd;--muted:#a3adbf;--accent:#a58bff;--ok:#70d8b2;--warn:#ffd078}*{box-sizing:border-box}body{margin:0;background:linear-gradient(160deg,#0d1017,#161229);color:var(--ink);font:15px/1.62 ui-sans-serif,system-ui,sans-serif}main{max-width:1000px;margin:auto;padding:52px 28px 72px}h1{font-size:clamp(36px,6vw,58px);line-height:1.05;letter-spacing:-.04em;margin:7px 0 14px}h2{margin-top:38px}h3{margin:0 0 8px}p{color:var(--muted)}code{background:#090b10;border:1px solid var(--line);border-radius:6px;padding:2px 6px;color:#e2dbff}.eyebrow{color:#b7a5ff;font-size:12px;letter-spacing:.17em;text-transform:uppercase}.route{width:100%;height:auto;background:#0b0e15;border:1px solid var(--line);border-radius:16px;margin:24px 0}.labs{display:grid;grid-template-columns:1fr 1fr;gap:15px}.lab,.challenge,.checkpoint{border:1px solid var(--line);border-radius:15px;background:var(--panel);padding:19px}.lab{border-left:4px solid var(--accent)}.challenge{margin-top:15px;border-left:4px solid var(--warn)}.checklist{list-style:none;padding:0}.checklist li{margin:7px 0}.checklist li:before{content:'□';color:var(--ok);margin-right:10px}.checkpoint{margin-top:14px;background:#10211e}.checkpoint strong{color:var(--ok)}table{width:100%;border-collapse:collapse;margin-top:16px;font-size:14px}th,td{text-align:left;border-bottom:1px solid var(--line);padding:11px;vertical-align:top}th{color:#d4dcef;background:#111620}@media(max-width:720px){.labs{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+<div class="eyebrow">C · Workshop · 教程质量基准原型</div>
+<h1>Lab：把一个 Skill 检查到可用</h1>
+<p>通过一个由真实文件清单支持的任务掌握“建立证据、执行检查、恢复失败”流程。所有结果都要求用户实际观察，不伪造运行截图或成功状态。</p>
+<svg class="route" role="img" aria-label="Workshop 从文件地图到首次检查再到恢复验证的路线" viewBox="0 0 900 210"><title>Workshop 路线图</title><path d="M120 100H780" stroke="#30384a" stroke-width="12" stroke-linecap="round"/><circle cx="160" cy="100" r="31" fill="#30265a" stroke="#a58bff"/><circle cx="450" cy="100" r="31" fill="#30265a" stroke="#a58bff"/><circle cx="740" cy="100" r="31" fill="#1c3a32" stroke="#70d8b2"/><text x="160" y="108" text-anchor="middle" fill="#f4f6fd" font-size="19">1</text><text x="450" y="108" text-anchor="middle" fill="#f4f6fd" font-size="19">2</text><text x="740" y="108" text-anchor="middle" fill="#f4f6fd" font-size="19">3</text><text x="160" y="160" text-anchor="middle" fill="#a3adbf">文件地图</text><text x="450" y="160" text-anchor="middle" fill="#a3adbf">首次检查</text><text x="740" y="160" text-anchor="middle" fill="#a3adbf">恢复验证</text></svg>
+<section class="labs">
+<article class="lab"><h2>Lab 1 · 建立证据地图</h2><p>阅读 <code>SKILL.md</code>，只按它的明确引用找出配置文件和检查脚本。</p><ul class="checklist"><li>入口文件已确认</li><li>引用路径来自原文</li><li>未添加推测能力</li></ul><div class="checkpoint"><strong>暂停检查</strong><p>地图必须正好覆盖清单中的三个文件；缺少引用时停止。</p></div></article>
+<article class="lab"><h2>Lab 2 · 完成首次检查</h2><p>读取 <code>references/config.md</code> 后，按核心指令调用 <code>scripts/check.sh</code>。</p><ul class="checklist"><li>配置符合显式约束</li><li>记录命令退出码</li><li>保留终端输出</li></ul><div class="checkpoint"><strong>可观察信号</strong><p>退出码为 0 才算通过；教程不预设实际结果。</p></div></article>
+</section>
+<article class="challenge"><h2>Lab 3 · 失败恢复挑战</h2><p>如果源文件明确说明某项配置为必需，可暂时移除它后再次运行检查，观察失败信息，再恢复配置。若没有这项证据，跳过故障注入。</p><ol><li>保存原配置。</li><li>制造文件明确支持的最小失败条件。</li><li>运行检查并记录差异。</li><li>还原配置，再次检查。</li></ol><div class="checkpoint"><strong>验收清单</strong><p>原配置已恢复；第二次结果已观察；结论能追溯到配置与脚本输出。</p></div></article>
+<h2>遇到问题时</h2>
+<table><thead><tr><th>观察</th><th>下一步</th><th>不要做</th></tr></thead><tbody><tr><td>引用文件不存在</td><td>报告缺失的相对路径</td><td>猜测替代文件</td></tr><tr><td>检查返回非零</td><td>按配置参考逐项核对并保留输出</td><td>宣称任务已完成</td></tr><tr><td>文件未支持故障注入</td><td>跳过 Lab 3</td><td>杜撰可恢复行为</td></tr></tbody></table>
+<h2>源文件覆盖</h2>
+<table><thead><tr><th>源文件</th><th>作用</th><th>教程位置</th><th>证据</th></tr></thead><tbody><tr data-skillstar-file="SKILL.md"><td>SKILL.md</td><td>任务说明</td><td>Lab 1</td><td>文件地图入口</td></tr><tr data-skillstar-file="references/config.md"><td>references/config.md</td><td>准备条件</td><td>Lab 2 / Lab 3</td><td>配置检查点</td></tr><tr data-skillstar-file="scripts/check.sh"><td>scripts/check.sh</td><td>验证动作</td><td>Lab 2 / Lab 3</td><td>结果与恢复</td></tr></tbody></table>
+</main>
+</body>
+</html>
