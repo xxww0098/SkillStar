@@ -6,6 +6,10 @@ import {
   useMySkillsRemoteHosts,
   useMySkillsScope,
 } from "../features/my-skills";
+import {
+  isUpdateAllPrototypeActive,
+  UpdateAllPrototype,
+} from "../features/my-skills/components/prototype/update-all/UpdateAllPrototype";
 import { CloudSkillsContent } from "../features/s3";
 import { SshHostForm } from "../features/ssh";
 
@@ -33,6 +37,11 @@ export function MySkills({
 }: MySkillsProps = {}) {
   const { scope, setScope } = useMySkillsScope();
   const remoteHosts = useMySkillsRemoteHosts();
+
+  // DEV-only Update-All CTA prototype (wayfinder): ?variant=UA1|UA2|UA3
+  if (isUpdateAllPrototypeActive()) {
+    return <UpdateAllPrototype />;
+  }
 
   const scopeSwitch = <MySkillsScopeSwitch scope={scope} onScopeChange={setScope} />;
 
