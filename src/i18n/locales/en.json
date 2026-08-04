@@ -401,7 +401,8 @@
     "spotlightTitle": "Search skills",
     "spotlightResults": "Search results",
     "spotlightEmpty": "Type to filter skills",
-    "spotlightMatchCount": "Showing {{shown}} of {{total}}"
+    "spotlightMatchCount": "Showing {{shown}} of {{total}}",
+    "updateAllCount": "Update {{count}}"
   },
   "detailPanel": {
     "installs": "{{count}} installs",

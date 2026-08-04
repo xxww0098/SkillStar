@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prototype:models": "vite --open '/#models'",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",

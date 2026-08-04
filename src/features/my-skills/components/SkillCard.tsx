@@ -135,11 +135,12 @@ function SkillCardInner({
     );
   } else if (skill.installed) {
     if (skill.update_available && !isLocalSkill) {
+      // Secondary to Toolbar「更新 N 项」— quiet ghost text, no warning chrome.
       statusAction = (
         <Button
           size="sm"
-          variant="outline"
-          className="h-7 px-2.5 text-xs bg-card hover:bg-muted font-medium border-warning text-warning-foreground transition-colors"
+          variant="ghost"
+          className="h-7 px-2 text-xs font-medium text-muted-foreground underline-offset-2 hover:bg-muted/60 hover:text-foreground hover:underline"
           disabled={updating}
           onClick={(e) => {
             e.stopPropagation();
@@ -149,14 +150,7 @@ function SkillCardInner({
             e.stopPropagation();
           }}
         >
-          {updating ? (
-            <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
-          ) : (
-            <span className="relative flex h-2 w-2 mr-1.5">
-              <span className="animate-ping-limited absolute inline-flex h-full w-full rounded-full bg-warning opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-warning"></span>
-            </span>
-          )}
+          {updating ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : null}
           {updating ? t("common.updating", { defaultValue: "Updating..." }) : t("common.update")}
         </Button>
       );
@@ -235,9 +229,11 @@ function SkillCardInner({
             <div className="min-w-0">
               <CardTitle className="truncate ss-card-title">{skill.name}</CardTitle>
 
-              {!isRemoteCard && isLocalSkill && <span className="ss-card-meta">local</span>}
+              {!isRemoteCard && isLocalSkill && <span className="ss-card-meta">{t("toolbar.local")}</span>}
               {!isRemoteCard && !isLocalSkill && skill.source && skill.source !== "remote" && (
-                <span className="ss-card-meta">{skill.source}</span>
+                <span className="ss-card-meta" title={skill.source}>
+                  {skill.source}
+                </span>
               )}
               {!isRemoteCard && !isLocalSkill && skill.source !== "remote" && !skill.source && skill.author && (
                 <span className="ss-card-meta">{skill.author}</span>
@@ -317,9 +313,12 @@ function SkillCardInner({
                   }}
                 />
               ) : skill.source ? (
-                <span className="text-micro text-muted-foreground/60 font-mono flex items-center gap-1">
-                  <ExternalLink className="w-3 h-3" />
-                  skills.sh
+                <span
+                  className="text-micro text-muted-foreground/60 font-mono flex min-w-0 items-center gap-1"
+                  title="skills.sh"
+                >
+                  <ExternalLink className="w-3 h-3 shrink-0" />
+                  <span className="truncate">skills.sh</span>
                 </span>
               ) : (
                 skill.agent_links &&

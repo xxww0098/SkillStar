@@ -192,9 +192,9 @@ export function Toolbar({
   const originLabel = repoFilter
     ? repoFilter
     : effectiveSource === "hub"
-      ? "Hub"
+      ? t("toolbar.hub")
       : effectiveSource === "local"
-        ? "Local"
+        ? t("toolbar.local")
         : t("toolbar.source");
   const clearOrigin = () => {
     onSourceFilterChange?.("all");
@@ -380,7 +380,8 @@ export function Toolbar({
                   >
                     {(["all", "hub", "local"] as const).map((f) => {
                       const isActive = effectiveSource === f;
-                      const label = f === "all" ? t("toolbar.all") : f === "hub" ? "Hub" : "Local";
+                      const label =
+                        f === "all" ? t("toolbar.all") : f === "hub" ? t("toolbar.hub") : t("toolbar.local");
                       return (
                         <button
                           key={f}
@@ -567,75 +568,64 @@ export function Toolbar({
         </div>
       )}
 
-      {/* Compound update button */}
+      {/* Update-only filter (filter-only; batch action is a separate primary CTA) */}
       {onToggleUpdateOnly && (
-        <div
+        <button
+          type="button"
+          onClick={onToggleUpdateOnly}
+          aria-pressed={isUpdateOnlyActive}
           className={cn(
-            "flex items-center h-8 rounded-lg border overflow-hidden shrink-0 transition-all duration-200",
+            "flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium cursor-pointer whitespace-nowrap shrink-0 transition-all duration-200 focus-ring",
             isUpdateOnlyActive
-              ? "border-accent/50 bg-accent/5"
+              ? "border-accent/50 bg-accent text-accent-foreground"
               : hasPendingUpdates
-                ? "border-warning/40 shadow-[0_0_10px_rgba(var(--color-warning-rgb),0.12)]"
-                : "border-border bg-sidebar/30",
+                ? "border-warning/40 bg-warning/8 text-warning-foreground hover:bg-warning/15"
+                : "border-border bg-sidebar/30 text-muted-foreground hover:text-foreground hover:bg-sidebar-hover",
           )}
         >
-          <button
-            onClick={onToggleUpdateOnly}
-            aria-pressed={isUpdateOnlyActive}
-            className={cn(
-              "flex items-center h-full px-3 gap-1.5 text-xs font-medium cursor-pointer whitespace-nowrap transition-all duration-200 focus-ring",
-              isUpdateOnlyActive
-                ? "bg-accent text-accent-foreground"
-                : hasPendingUpdates
-                  ? "bg-warning/8 text-warning-foreground hover:bg-warning/15"
-                  : "text-muted-foreground hover:text-foreground hover:bg-sidebar-hover",
-            )}
-          >
-            {shouldAnimateUpdateOnly && (
-              <span className="relative flex h-2 w-2 shrink-0">
-                <span className="animate-ping-limited absolute inline-flex h-full w-full rounded-full bg-warning opacity-75" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-warning" />
-              </span>
-            )}
-            {t("toolbar.updateOnly")}
-            {hasPendingUpdates && (
-              <span
-                className={cn(
-                  "min-w-[1.2rem] h-[1.1rem] px-1 rounded-full text-[10px] leading-[1.1rem] text-center tabular-nums",
-                  shouldAnimateUpdateOnly && !isUpdateOnlyActive
-                    ? "bg-warning/20 text-warning-foreground"
-                    : "bg-muted text-muted-foreground",
-                )}
-              >
-                {pendingUpdateCount}
-              </span>
-            )}
-          </button>
-
-          {onUpdateAll && hasPendingUpdates && (
-            <>
-              <div className={cn("w-px h-4 shrink-0", isUpdateOnlyActive ? "bg-accent-foreground/20" : "bg-border")} />
-              <button
-                onClick={onUpdateAll}
-                disabled={isUpdatingAll}
-                className={cn(
-                  "flex items-center h-full px-2.5 gap-1 text-xs font-semibold cursor-pointer whitespace-nowrap transition-all duration-200 focus-ring",
-                  isUpdateOnlyActive
-                    ? "bg-accent text-accent-foreground hover:brightness-110"
-                    : "bg-accent/90 text-accent-foreground hover:bg-accent",
-                  isUpdatingAll && "opacity-60 cursor-not-allowed",
-                )}
-                title={t("toolbar.updateAll", { defaultValue: "Update All" })}
-              >
-                {isUpdatingAll ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <ArrowUpCircle className="w-3.5 h-3.5" />
-                )}
-              </button>
-            </>
+          {shouldAnimateUpdateOnly && (
+            <span className="relative flex h-2 w-2 shrink-0">
+              <span className="animate-ping-limited absolute inline-flex h-full w-full rounded-full bg-warning opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-warning" />
+            </span>
           )}
-        </div>
+          {t("toolbar.updateOnly")}
+          {hasPendingUpdates && (
+            <span
+              className={cn(
+                "min-w-[1.2rem] h-[1.1rem] px-1 rounded-full text-[10px] leading-[1.1rem] text-center tabular-nums",
+                shouldAnimateUpdateOnly && !isUpdateOnlyActive
+                  ? "bg-warning/20 text-warning-foreground"
+                  : "bg-muted text-muted-foreground",
+              )}
+            >
+              {pendingUpdateCount}
+            </span>
+          )}
+        </button>
+      )}
+
+      {/* Independent primary: update all pending hub skills (click-time snapshot) */}
+      {onUpdateAll && hasPendingUpdates && (
+        <button
+          type="button"
+          onClick={onUpdateAll}
+          disabled={isUpdatingAll}
+          className={cn(
+            "flex h-8 items-center gap-1.5 rounded-lg bg-accent px-3 text-xs font-semibold text-accent-foreground shadow-sm cursor-pointer whitespace-nowrap shrink-0 transition-all duration-200 focus-ring hover:brightness-110",
+            isUpdatingAll && "opacity-60 cursor-not-allowed",
+          )}
+        >
+          {isUpdatingAll ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <ArrowUpCircle className="w-3.5 h-3.5" />
+          )}
+          {t("toolbar.updateAllCount", {
+            count: pendingUpdateCount,
+            defaultValue: `Update ${pendingUpdateCount}`,
+          })}
+        </button>
       )}
 
       {/* View toggle */}
