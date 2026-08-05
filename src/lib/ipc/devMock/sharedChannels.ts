@@ -7,6 +7,7 @@ import type {
   ChannelPublishResult,
   ChannelSubscription,
   ChannelSubscriptionReview,
+  ChannelUpdateSnapshot,
   ExistingChannelScanPreview,
   SharedChannelDescriptor,
 } from "../../../types";
@@ -402,7 +403,7 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
     const selected = request.selected_skill_ids ?? [];
     const now = new Date().toISOString();
     const subscription: ChannelSubscription = {
-      descriptor_version: 1,
+      descriptor_version: 2,
       repository_id: repositoryId,
       organization_id: channel.organization_id,
       target: {
@@ -415,7 +416,7 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
         content_root: `skills/${id}`,
         release_content_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         release_content_hash_version: 2,
-        baseline_hash: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        baseline_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         baseline_hash_version: 2,
         provenance: {
           repository_id: repositoryId,
@@ -424,6 +425,8 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
           source_folder: `skills/${id}`,
         },
       })),
+      known_skill_ids: selected,
+      last_update: null,
       created_at: now,
       updated_at: now,
     };
@@ -432,5 +435,77 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
       ...channelSubscriptions.filter((item) => item.repository_id !== repositoryId),
     ];
     return subscription;
+  },
+  get_shared_channel_update_state: (args) => {
+    const repositoryId = Number(args?.repositoryId ?? 0);
+    return channelSubscriptions.find((item) => item.repository_id === repositoryId)?.last_update ?? null;
+  },
+  check_shared_channel_update: (args) => {
+    const repositoryId = Number(args?.repositoryId ?? 0);
+    const subscription = channelSubscriptions.find((item) => item.repository_id === repositoryId);
+    if (!subscription) throw new Error("subscription_not_found: Subscribe to this channel first");
+    const revision = subscription.target.revision + 1;
+    const snapshot: ChannelUpdateSnapshot = {
+      target: {
+        revision,
+        tag_name: `channel-v${String(revision).padStart(6, "0")}`,
+        commit_sha: "fedcba9876543210fedcba9876543210fedcba98",
+      },
+      title: `Shared Skills ${revision}`,
+      notes: "A reviewed channel update is ready.",
+      publisher: { id: 99, login: "demo-user" },
+      published_at: new Date().toISOString(),
+      checked_at: new Date().toISOString(),
+      status: "update_available",
+      acknowledgement_required: true,
+      items: [
+        ...subscription.skills.map((skill) => ({
+          id: skill.id,
+          change: "updated" as const,
+          state: "available" as const,
+          selected: true,
+          from_content_hash: skill.release_content_hash,
+          to_content_hash: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          block_reason: null,
+          suggested_local_name: null,
+          error: null,
+        })),
+        {
+          id: "new-in-release",
+          change: "added",
+          state: "notification",
+          selected: false,
+          from_content_hash: null,
+          to_content_hash: "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          block_reason: null,
+          suggested_local_name: null,
+          error: null,
+        },
+      ],
+      check_error: null,
+    };
+    subscription.last_update = snapshot;
+    return snapshot;
+  },
+  apply_shared_channel_update: (args) => {
+    const request = (args?.request ?? {}) as {
+      repository_id?: number;
+      target?: ChannelSubscription["target"];
+    };
+    const subscription = channelSubscriptions.find((item) => item.repository_id === Number(request.repository_id));
+    if (!subscription?.last_update) throw new Error("release_conflict: Check updates again");
+    const applied = subscription.last_update.items.filter((item) => item.state === "available").map((item) => item.id);
+    const snapshot: ChannelUpdateSnapshot = {
+      ...subscription.last_update,
+      status: "up_to_date",
+      acknowledgement_required: false,
+      checked_at: new Date().toISOString(),
+      items: subscription.last_update.items
+        .filter((item) => item.state !== "notification")
+        .map((item) => (applied.includes(item.id) ? { ...item, state: "applied" as const } : item)),
+    };
+    subscription.target = request.target ?? snapshot.target;
+    subscription.last_update = snapshot;
+    return { snapshot, applied_skill_ids: applied };
   },
 };

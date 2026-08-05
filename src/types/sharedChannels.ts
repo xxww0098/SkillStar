@@ -1,3 +1,5 @@
+import type { LocalDivergenceResolution } from "./skill";
+
 export type SharedChannelRole = "owner" | "publisher" | "subscriber";
 export type SharedChannelStatus = "awaiting_app_installation" | "awaiting_invitation_acceptance" | "active";
 
@@ -198,6 +200,8 @@ export interface ChannelSubscription {
   organization_id: number;
   target: ChannelReleaseTarget;
   skills: ChannelSubscribedSkill[];
+  known_skill_ids: string[];
+  last_update?: ChannelUpdateSnapshot | null;
   created_at: string;
   updated_at: string;
 }
@@ -242,4 +246,54 @@ export interface SubscribeChannelRequest {
   repository_id: number;
   target: ChannelReleaseTarget;
   selected_skill_ids: string[];
+}
+
+export type ChannelUpdateStatus = "up_to_date" | "update_available" | "partially_upgraded" | "blocked";
+export type ChannelUpdateChange = "added" | "updated" | "removed" | "unchanged";
+export type ChannelUpdateItemState = "current" | "available" | "applied" | "blocked" | "failed" | "notification";
+export type ChannelUpdateBlockReason =
+  | "local_content_changed"
+  | "baseline_missing"
+  | "snapshot_failed"
+  | "removed_upstream";
+
+export interface ChannelUpdateItem {
+  id: string;
+  change: ChannelUpdateChange;
+  state: ChannelUpdateItemState;
+  selected: boolean;
+  from_content_hash: string | null;
+  to_content_hash: string | null;
+  block_reason: ChannelUpdateBlockReason | null;
+  suggested_local_name: string | null;
+  error: string | null;
+}
+
+export interface ChannelUpdateSnapshot {
+  target: ChannelReleaseTarget;
+  title: string;
+  notes: string;
+  publisher: ChannelPublisherIdentity;
+  published_at: string;
+  checked_at: string;
+  status: ChannelUpdateStatus;
+  acknowledgement_required: boolean;
+  items: ChannelUpdateItem[];
+  check_error?: string | null;
+}
+
+export interface ChannelSkillUpdateResolution {
+  skill_id: string;
+  resolution: LocalDivergenceResolution;
+}
+
+export interface ApplyChannelUpdateRequest {
+  repository_id: number;
+  target: ChannelReleaseTarget;
+  resolutions: ChannelSkillUpdateResolution[];
+}
+
+export interface ApplyChannelUpdateResult {
+  snapshot: ChannelUpdateSnapshot;
+  applied_skill_ids: string[];
 }

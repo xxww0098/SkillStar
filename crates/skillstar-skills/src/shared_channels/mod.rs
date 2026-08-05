@@ -3,6 +3,8 @@
 //! The facade owns the recoverable create/bind transaction. Presentation
 //! layers never infer repository identity from mutable owner/name routing data.
 
+mod channel_update;
+mod channel_update_installer;
 mod existing;
 mod github;
 mod github_membership;
@@ -15,6 +17,8 @@ mod subscription_installer;
 mod subscription_store;
 
 #[cfg(test)]
+mod channel_update_tests;
+#[cfg(test)]
 mod subscription_tests;
 
 use async_trait::async_trait;
@@ -22,6 +26,12 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+pub use channel_update::{
+    ApplyChannelUpdateRequest, ApplyChannelUpdateResult, ChannelSkillUpdateReceipt,
+    ChannelSkillUpdateRequest, ChannelSkillUpdateResolution, ChannelSubscriptionUpdater,
+    ChannelUpdateBlockReason, ChannelUpdateChange, ChannelUpdateInspection, ChannelUpdateItem,
+    ChannelUpdateItemState, ChannelUpdateSnapshot, ChannelUpdateStatus,
+};
 pub use existing::{
     ExistingChannelExposure, ExistingChannelRegistrationFacade,
     ExistingChannelRegistrationSessions, ExistingChannelRepositoryCandidate,
@@ -198,9 +208,11 @@ pub enum SharedChannelErrorCode {
     InvitationRateLimited,
     InvitationLimit,
     SubscriptionAlreadyExists,
+    SubscriptionNotFound,
     SubscriptionSchemaUnsupported,
     SubscriptionSelectionInvalid,
     SubscriptionInstallFailed,
+    SubscriptionUpdateFailed,
     Network,
     Protocol,
     Storage,

@@ -60,7 +60,11 @@ pub fn stamp() -> u64 {
 /// Used when an update has actually been applied — that answer is authoritative
 /// by construction, not a measurement that can go stale.
 pub fn set(name: &str, available: bool) {
-    let snapshot = with_store_mut(|store| {
+    set_stamped(name, available);
+}
+
+pub(crate) fn set_stamped(name: &str, available: bool) -> u64 {
+    let (revision, snapshot) = with_store_mut(|store| {
         store.revision += 1;
         let revision = store.revision;
         store.states.insert(
@@ -70,9 +74,42 @@ pub fn set(name: &str, available: bool) {
                 revision,
             },
         );
-        flat(store)
+        (revision, flat(store))
     });
     persist(&snapshot);
+    revision
+}
+
+pub(crate) fn get(name: &str) -> Option<bool> {
+    with_store(|store| store.states.get(name).map(|stored| stored.available))
+}
+
+pub(crate) fn restore_if_revision(name: &str, expected_revision: u64, available: Option<bool>) {
+    let snapshot = with_store_mut(|store| {
+        if store.states.get(name).map(|stored| stored.revision) != Some(expected_revision) {
+            return None;
+        }
+        store.revision += 1;
+        let revision = store.revision;
+        match available {
+            Some(available) => {
+                store.states.insert(
+                    name.to_string(),
+                    Stamped {
+                        available,
+                        revision,
+                    },
+                );
+            }
+            None => {
+                store.states.remove(name);
+            }
+        }
+        Some(flat(store))
+    });
+    if let Some(snapshot) = snapshot {
+        persist(&snapshot);
+    }
 }
 
 /// Commit the findings of a scan that started at `since`.
@@ -285,6 +322,20 @@ mod tests {
         let mut skills = [skill("alpha")];
         apply_to(&mut skills);
         assert!(skills[0].update_available);
+    }
+
+    #[test]
+    fn rollback_restore_only_replaces_the_transaction_revision() {
+        let (_guard, _temp) = sandbox();
+        set("alpha", true);
+        let transaction_revision = set_stamped("alpha", false);
+        restore_if_revision("alpha", transaction_revision, Some(true));
+        assert_eq!(get("alpha"), Some(true));
+
+        let later_revision = set_stamped("alpha", false);
+        set("alpha", true);
+        restore_if_revision("alpha", later_revision, Some(false));
+        assert_eq!(get("alpha"), Some(true));
     }
 
     #[test]

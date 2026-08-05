@@ -1,13 +1,14 @@
 //! Thin Tauri adapters for organization-private shared channels.
 
 use skillstar_skills::shared_channels::{
-    ChannelInvitation, ChannelInvitationAction, ChannelMembershipSnapshot, ChannelPublishPreview,
+    ApplyChannelUpdateRequest, ApplyChannelUpdateResult, ChannelInvitation,
+    ChannelInvitationAction, ChannelMembershipSnapshot, ChannelPublishPreview,
     ChannelPublishResult, ChannelSubscription, ChannelSubscriptionRegistry,
-    ChannelSubscriptionReview, ChannelSubscriptionView, CreateChannelInvitationRequest,
-    CreateSharedChannelRequest, DiskChannelSubscriptionRegistry, DiskSharedChannelRegistry,
-    ExistingChannelRepositoryCandidate, ExistingChannelScanPreview, ExistingChannelScanRequest,
-    GitHubOrganization, SharedChannelDescriptor, SharedChannelError, SharedChannelRegistry,
-    SubscribeChannelRequest,
+    ChannelSubscriptionReview, ChannelSubscriptionView, ChannelUpdateSnapshot,
+    CreateChannelInvitationRequest, CreateSharedChannelRequest, DiskChannelSubscriptionRegistry,
+    DiskSharedChannelRegistry, ExistingChannelRepositoryCandidate, ExistingChannelScanPreview,
+    ExistingChannelScanRequest, GitHubOrganization, SharedChannelDescriptor, SharedChannelError,
+    SharedChannelRegistry, SubscribeChannelRequest,
 };
 use tauri::{AppHandle, State};
 
@@ -250,6 +251,48 @@ pub async fn subscribe_shared_channel(
     let registered_session_id = git_facade.session().id().to_string();
     let result = match state.channel_subscription_facade(git_facade) {
         Ok(facade) => facade.subscribe(request).await,
+        Err(error) => Err(error),
+    };
+    state.finish_git_operation(&registered_session_id);
+    result
+}
+
+#[tauri::command]
+pub fn get_shared_channel_update_state(
+    repository_id: u64,
+) -> Result<Option<ChannelUpdateSnapshot>, SharedChannelError> {
+    Ok(DiskChannelSubscriptionRegistry
+        .load_mutable()?
+        .subscriptions
+        .into_iter()
+        .find(|subscription| subscription.repository_id == repository_id)
+        .and_then(|subscription| subscription.last_update))
+}
+
+#[tauri::command]
+pub async fn check_shared_channel_update(
+    repository_id: u64,
+    state: State<'_, GitHubAuthState>,
+) -> Result<ChannelUpdateSnapshot, SharedChannelError> {
+    state
+        .channel_subscription_facade(skillstar_skills::git_skill::GitSkillFacade::from_keyring())?
+        .check_update(repository_id)
+        .await
+}
+
+#[tauri::command]
+pub async fn apply_shared_channel_update(
+    request: ApplyChannelUpdateRequest,
+    session_id: String,
+    app: AppHandle,
+    state: State<'_, GitHubAuthState>,
+) -> Result<ApplyChannelUpdateResult, SharedChannelError> {
+    let git_facade = state
+        .begin_git_operation(app, Some(session_id))
+        .map_err(SharedChannelError::from)?;
+    let registered_session_id = git_facade.session().id().to_string();
+    let result = match state.channel_subscription_facade(git_facade) {
+        Ok(facade) => facade.apply_update(request).await,
         Err(error) => Err(error),
     };
     state.finish_git_operation(&registered_session_id);

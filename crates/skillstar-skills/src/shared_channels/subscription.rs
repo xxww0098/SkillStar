@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const CHANNEL_SUBSCRIPTION_STORE_VERSION: u32 = 1;
-pub const CHANNEL_SUBSCRIPTION_DESCRIPTOR_VERSION: u32 = 1;
+pub const CHANNEL_SUBSCRIPTION_DESCRIPTOR_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -49,6 +49,10 @@ pub struct ChannelSubscription {
     pub organization_id: u64,
     pub target: ChannelReleaseTarget,
     pub skills: Vec<ChannelSubscribedSkill>,
+    #[serde(default)]
+    pub known_skill_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_update: Option<super::ChannelUpdateSnapshot>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -199,10 +203,10 @@ pub trait ChannelSubscriptionInstaller: Send + Sync {
 }
 
 pub struct ChannelSubscriptionFacade<G, C, S, I> {
-    gateway: G,
-    channels: C,
-    subscriptions: S,
-    installer: I,
+    pub(super) gateway: G,
+    pub(super) channels: C,
+    pub(super) subscriptions: S,
+    pub(super) installer: I,
 }
 
 impl<G, C, S, I> ChannelSubscriptionFacade<G, C, S, I>
@@ -345,6 +349,13 @@ where
             organization_id: manifest.organization_id,
             target: release_target(&manifest),
             skills: receipt.skills.clone(),
+            known_skill_ids: manifest
+                .skills
+                .iter()
+                .filter(|skill| skill.status != ChannelSkillReleaseStatus::Removed)
+                .map(|skill| skill.id.clone())
+                .collect(),
+            last_update: None,
             created_at: now.clone(),
             updated_at: now,
         };
@@ -365,7 +376,7 @@ where
         Ok(subscription)
     }
 
-    fn active_channel(
+    pub(super) fn active_channel(
         &self,
         repository_id: u64,
     ) -> Result<SharedChannelDescriptor, SharedChannelError> {
@@ -390,7 +401,7 @@ where
         Ok(channel)
     }
 
-    async fn validated_repository(
+    pub(super) async fn validated_repository(
         &self,
         channel: &SharedChannelDescriptor,
     ) -> Result<RemoteRepository, SharedChannelError> {
@@ -414,7 +425,7 @@ where
         Ok(repository)
     }
 
-    async fn latest_manifest(
+    pub(super) async fn latest_manifest(
         &self,
         repository: &RemoteRepository,
         channel: &SharedChannelDescriptor,
@@ -523,7 +534,7 @@ fn install_integrity_error() -> SharedChannelError {
     )
 }
 
-fn release_target(manifest: &ChannelReleaseManifest) -> ChannelReleaseTarget {
+pub(super) fn release_target(manifest: &ChannelReleaseManifest) -> ChannelReleaseTarget {
     ChannelReleaseTarget {
         revision: manifest.revision,
         tag_name: manifest.tag_name.clone(),

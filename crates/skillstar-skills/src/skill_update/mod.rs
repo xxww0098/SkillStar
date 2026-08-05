@@ -18,7 +18,7 @@ use plan::{SiblingState, UpdatePlan};
 
 static UPDATE_TRANSACTION_MUTEX: Mutex<()> = Mutex::new(());
 
-struct UpdateTransactionGuard {
+pub(crate) struct UpdateTransactionGuard {
     _process_guard: std::sync::MutexGuard<'static, ()>,
     file: std::fs::File,
 }
@@ -29,7 +29,7 @@ impl Drop for UpdateTransactionGuard {
     }
 }
 
-fn acquire_update_transaction_lock() -> Result<UpdateTransactionGuard> {
+pub(crate) fn acquire_update_transaction_lock() -> Result<UpdateTransactionGuard> {
     let process_guard = UPDATE_TRANSACTION_MUTEX
         .lock()
         .map_err(|_| anyhow::anyhow!("Skill update transaction mutex poisoned"))?;
@@ -81,7 +81,7 @@ pub struct SkillUpdateFailure {
     pub error: String,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum LocalDivergenceReason {
     ContentChanged,
@@ -98,7 +98,7 @@ pub struct SkillUpdateBlocked {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum LocalDivergenceResolution {
     Preserve { local_name: String },
     Discard,
@@ -297,6 +297,20 @@ fn local_divergences_for_group(
     blocked
 }
 
+pub(crate) fn inspect_skill_local_divergence(name: &str) -> Result<Option<SkillUpdateBlocked>> {
+    content::validate_skill_name(name).map_err(anyhow::Error::from)?;
+    let entries = lockfile::Lockfile::load(&lockfile::lockfile_path())
+        .context("failed to load the Skill lockfile before inspecting divergence")?
+        .skills;
+    let group = plan::RepoGroup {
+        representative: name.to_string(),
+        covered: Vec::new(),
+    };
+    Ok(local_divergences_for_group(&entries, &group)
+        .into_iter()
+        .find(|blocked| blocked.name == name))
+}
+
 fn is_checkout_root_skill(name: &str) -> bool {
     let path = skillstar_core::infra::paths::hub_skills_dir().join(name);
     let Some(repo_root) = repo_link::repo_root_of(&path) else {
@@ -326,7 +340,7 @@ fn checkout_key(entry: &LockEntry) -> Option<String> {
     repo_link::repo_root_of(&path).map(|root| root.to_string_lossy().into_owned())
 }
 
-fn reconstruct_lock_entry(name: &str) -> Result<LockEntry> {
+pub(crate) fn reconstruct_lock_entry(name: &str) -> Result<LockEntry> {
     let skill_path = skillstar_core::infra::paths::hub_skills_dir().join(name);
     let cached_root = repo_link::repo_root_of(&skill_path);
     let repo_root = cached_root
@@ -356,7 +370,7 @@ fn reconstruct_lock_entry(name: &str) -> Result<LockEntry> {
     })
 }
 
-fn suggested_local_name(name: &str) -> String {
+pub(crate) fn suggested_local_name(name: &str) -> String {
     let hub = skillstar_core::infra::paths::hub_skills_dir();
     let local = skillstar_core::infra::paths::local_skills_dir();
     let base = format!("{name}.local");
@@ -496,8 +510,29 @@ pub fn resolve_skill_update_in_session(
     resolution: LocalDivergenceResolution,
     session: &crate::git::transport::GitOperationSession,
 ) -> Result<ResolveSkillUpdateResult> {
-    content::validate_skill_name(name).map_err(anyhow::Error::from)?;
     let _transaction_guard = acquire_update_transaction_lock()?;
+    resolve_skill_local_divergence_locked_inner(name, resolution, session, true)
+}
+
+/// Resolve local divergence while the caller owns the cross-process update
+/// transaction. Channel subscriptions use this without continuing through the
+/// ordinary branch/ref updater; their next write must come from the reviewed,
+/// immutable channel release commit.
+pub(crate) fn resolve_skill_local_divergence_locked(
+    name: &str,
+    resolution: LocalDivergenceResolution,
+    session: &crate::git::transport::GitOperationSession,
+) -> Result<ResolveSkillUpdateResult> {
+    resolve_skill_local_divergence_locked_inner(name, resolution, session, false)
+}
+
+fn resolve_skill_local_divergence_locked_inner(
+    name: &str,
+    resolution: LocalDivergenceResolution,
+    session: &crate::git::transport::GitOperationSession,
+    continue_with_ordinary_update: bool,
+) -> Result<ResolveSkillUpdateResult> {
+    content::validate_skill_name(name).map_err(anyhow::Error::from)?;
     let lock_path = lockfile::lockfile_path();
     let entry = lockfile::Lockfile::load(&lock_path)
         .context("failed to load the Skill lockfile before resolving divergence")?
@@ -538,11 +573,7 @@ pub fn resolve_skill_update_in_session(
 
     let local_copy = match resolution {
         LocalDivergenceResolution::Preserve { local_name } => {
-            let snapshot = content::snapshot(name)
-                .with_context(|| format!("failed to capture local divergence for '{name}'"))?;
-            let local_copy = local_skill::create_from_snapshot(&local_name, &snapshot)?;
-            installed_skill::invalidate_cache();
-            Some(local_copy)
+            Some(local_skill::preserve_installed_copy(name, &local_name)?)
         }
         LocalDivergenceResolution::Discard => None,
     };
@@ -586,8 +617,11 @@ pub fn resolve_skill_update_in_session(
         representative: name.to_string(),
         covered: Vec::new(),
     };
-    let remaining_blocked = local_divergences_for_group(&entries, &group);
-    if !remaining_blocked.is_empty() {
+    let mut remaining_blocked = local_divergences_for_group(&entries, &group);
+    if !continue_with_ordinary_update && pathspec.is_some() {
+        remaining_blocked.retain(|blocked| blocked.name == name);
+    }
+    if !remaining_blocked.is_empty() || !continue_with_ordinary_update {
         return Ok(ResolveSkillUpdateResult {
             update: None,
             local_copy,

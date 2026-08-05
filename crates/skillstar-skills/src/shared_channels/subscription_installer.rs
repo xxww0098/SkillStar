@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone)]
 pub struct GitChannelSubscriptionInstaller {
-    git: GitSkillFacade,
+    pub(super) git: GitSkillFacade,
 }
 
 impl GitChannelSubscriptionInstaller {

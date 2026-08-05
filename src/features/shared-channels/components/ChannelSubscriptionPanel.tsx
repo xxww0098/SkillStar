@@ -12,6 +12,7 @@ import {
   reviewSharedChannelSubscription,
   subscribeSharedChannel,
 } from "../api/channels";
+import { ChannelUpdatePanel } from "./ChannelUpdatePanel";
 
 export function ChannelSubscriptionPanel({ channel }: { channel: SharedChannelDescriptor }) {
   const [review, setReview] = useState<ChannelSubscriptionReview | null>(null);
@@ -25,13 +26,22 @@ export function ChannelSubscriptionPanel({ channel }: { channel: SharedChannelDe
     setLoading(true);
     setError("");
     try {
-      const [nextReview, subscriptions] = await Promise.all([
+      const [reviewResult, subscriptionsResult] = await Promise.allSettled([
         reviewSharedChannelSubscription(channel.repository_id),
         listSharedChannelSubscriptions(),
       ]);
+      if (subscriptionsResult.status === "rejected") throw subscriptionsResult.reason;
+      const subscriptions = subscriptionsResult.value;
+      setSubscription(subscriptions.find((item) => item.repository_id === channel.repository_id) ?? null);
+      if (reviewResult.status === "rejected") {
+        setReview(null);
+        setSelected(new Set());
+        setError(subscriptionError(reviewResult.reason));
+        return;
+      }
+      const nextReview = reviewResult.value;
       setReview(nextReview);
       setSelected(new Set(nextReview.skills.filter((skill) => skill.selected).map((skill) => skill.id)));
-      setSubscription(subscriptions.find((item) => item.repository_id === channel.repository_id) ?? null);
     } catch (cause) {
       setError(subscriptionError(cause));
     } finally {
@@ -93,15 +103,25 @@ export function ChannelSubscriptionPanel({ channel }: { channel: SharedChannelDe
 
   if (!review) {
     return (
-      <section className="rounded-xl border border-border p-4" aria-label="Channel release review">
-        <p className="text-sm font-medium">No installable release</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {error || "Ask a publisher to create the first channel release."}
-        </p>
-        <Button size="sm" variant="outline" className="mt-3" onClick={() => void refresh()}>
-          Retry
-        </Button>
-      </section>
+      <div className="space-y-5">
+        <section className="rounded-xl border border-border p-4" aria-label="Channel release review">
+          <p className="text-sm font-medium">No installable release</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {error || "Ask a publisher to create the first channel release."}
+          </p>
+          {alreadySubscribed && (
+            <p className="mt-2 text-xs text-emerald-600">
+              The local subscription is still available with {subscribedSkillCount} selected Skills.
+            </p>
+          )}
+          <Button size="sm" variant="outline" className="mt-3" onClick={() => void refresh()}>
+            Retry release review
+          </Button>
+        </section>
+        {alreadySubscribed && !readOnly && (
+          <ChannelUpdatePanel key={channel.repository_id} repositoryId={channel.repository_id} />
+        )}
+      </div>
     );
   }
 
@@ -207,6 +227,9 @@ export function ChannelSubscriptionPanel({ channel }: { channel: SharedChannelDe
             Install selected & subscribe
           </Button>
         </div>
+      )}
+      {alreadySubscribed && !readOnly && (
+        <ChannelUpdatePanel key={channel.repository_id} repositoryId={channel.repository_id} />
       )}
     </section>
   );

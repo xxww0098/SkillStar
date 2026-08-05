@@ -138,6 +138,7 @@
 - 扩展：频道发布以 `channel-vNNNNNN` annotated tag message 中的版本化 canonical manifest 和同名 GitHub Release 为唯一远端版本边界；branch commits 永远只是草稿。manifest 绑定 stable repository ID、精确 commit、发布者、时间和全量 Skill snapshot hash，并显式携带 added/updated/unchanged/removed。revision 只从已验证的远端 tags 单调派生；本地不预增计数。发布预览用短生命周期 session 固定 commit，确认时 HEAD 漂移、权限变化、schema/identity 不符或远端拒绝均 fail-closed。
 - 扩展：成员资格与 open invitation 继续完全采用 GitHub collaborator/invitation API，不建立 SkillStar ACL、share code 或邀请历史。管理动作以当前 GitHub 有效 Admin 为门槛；subscriber/publisher 分别使用 GitHub read/write，已有直接、继承或 pending 权限时不重复邀请。接受邀请前仅以 repository ID、路由和目标角色写入 `awaiting_invitation_acceptance` 恢复 descriptor，GitHub 接受后转 active；最终落盘失败，或网络/5xx 令接受结果不确定时保留 marker，并从当前身份可见的私有仓库库存按 repository ID 恢复，避免远端 invitation 已消费而本地入口丢失。GitHub invitation 不支持自定义来源 metadata，因此 inbox 公开事实是“组织私有 GitHub 仓库邀请”，用户显式确认是否导入为 SkillStar 频道；GitHub REST 无独立 resend，重邀是明确的 cancel-and-create 非原子序列。
 - 扩展：接受 invitation 与订阅/安装是两个独立同意边界。订阅 facade 以最新已验证 Release manifest 为评审 SSOT，并在确认时再次校验 stable repository ID 与精确 revision/tag/commit；Git scanner 固定到 commit，逐项验证 content root/hash 后才复用 staged batch installer。选择、release target、安装 baseline 与无凭据 provenance 保存到独立版本化本地 store，新增 Skill 不自动扩展选择；未知 schema 只读展示并 fail-closed。这样 GitHub 继续独占访问控制，SkillStar 只拥有本机消费意图和可回滚安装事务。
+- 扩展：频道升级默认自动检查、手动应用，并按 Skill 独立提交而非整包原子覆盖。最新 Release 只提供目标事实；每个已选择 Skill 以自身 baseline、release hash 与 provenance 决定能否前进，因此干净项可成功、分歧或失败项仍留在旧 commit，频道状态由各项推导。新增项只通知，removed 项不静默删除；分歧复用统一 `.local` 保留/丢弃动作。最近已验证的检查与结果保存在本地订阅 descriptor 中，网络失败不能抹掉旧可用状态。
 
 ## 新增记录格式
 

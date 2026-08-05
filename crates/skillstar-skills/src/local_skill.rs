@@ -229,6 +229,14 @@ pub fn create_from_snapshot(name: &str, snapshot: &crate::content::SkillSnapshot
     installed_local_skill(name, description)
 }
 
+pub(crate) fn preserve_installed_copy(name: &str, local_name: &str) -> Result<Skill> {
+    let snapshot = crate::content::snapshot(name)
+        .with_context(|| format!("failed to capture local divergence for '{name}'"))?;
+    let local_copy = create_from_snapshot(local_name, &snapshot)?;
+    crate::installed_skill::invalidate_cache();
+    Ok(local_copy)
+}
+
 fn installed_local_skill(name: &str, description: String) -> Result<Skill> {
     Ok(Skill {
         name: name.to_string(),

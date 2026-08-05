@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SharedChannelDescriptor } from "../../../types";
+import type { ChannelUpdateSnapshot, SharedChannelDescriptor } from "../../../types";
 import { SharedChannelsContent } from "./SharedChannelsContent";
 
 const api = vi.hoisted(() => ({
@@ -26,6 +26,9 @@ const api = vi.hoisted(() => ({
   listSubscriptions: vi.fn(),
   reviewSubscription: vi.fn(),
   subscribe: vi.fn(),
+  getUpdateState: vi.fn(),
+  checkUpdate: vi.fn(),
+  applyUpdate: vi.fn(),
 }));
 
 vi.mock("../api/channels", () => ({
@@ -51,6 +54,9 @@ vi.mock("../api/channels", () => ({
   listSharedChannelSubscriptions: api.listSubscriptions,
   reviewSharedChannelSubscription: api.reviewSubscription,
   subscribeSharedChannel: api.subscribe,
+  getSharedChannelUpdateState: api.getUpdateState,
+  checkSharedChannelUpdate: api.checkUpdate,
+  applySharedChannelUpdate: api.applyUpdate,
 }));
 
 function channel(status: SharedChannelDescriptor["status"] = "active"): SharedChannelDescriptor {
@@ -176,6 +182,49 @@ function subscriptionReview() {
   };
 }
 
+function updateSnapshot(overrides: Partial<ChannelUpdateSnapshot> = {}): ChannelUpdateSnapshot {
+  return {
+    target: {
+      revision: 2,
+      tag_name: "channel-v000002",
+      commit_sha: "dddddddddddddddddddddddddddddddddddddddd",
+    },
+    title: "Second release",
+    notes: "Safer prompts and a new optional Skill.",
+    publisher: { id: 99, login: "alice" },
+    published_at: "2026-08-06T00:00:00Z",
+    checked_at: "2026-08-06T01:00:00Z",
+    status: "update_available",
+    acknowledgement_required: true,
+    items: [
+      {
+        id: "newcomer",
+        change: "added",
+        state: "notification",
+        selected: false,
+        from_content_hash: null,
+        to_content_hash: "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        block_reason: null,
+        suggested_local_name: null,
+        error: null,
+      },
+      {
+        id: "writer",
+        change: "updated",
+        state: "available",
+        selected: true,
+        from_content_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        to_content_hash: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        block_reason: null,
+        suggested_local_name: null,
+        error: null,
+      },
+    ],
+    check_error: null,
+    ...overrides,
+  };
+}
+
 describe("SharedChannelsContent", () => {
   beforeEach(() => {
     api.listOrganizations
@@ -273,7 +322,7 @@ describe("SharedChannelsContent", () => {
     api.reviewSubscription.mockReset().mockResolvedValue(subscriptionReview());
     api.subscribe.mockReset().mockImplementation((request) =>
       Promise.resolve({
-        descriptor_version: 1,
+        descriptor_version: 2,
         repository_id: request.repository_id,
         organization_id: 7,
         target: subscriptionReview().target,
@@ -282,7 +331,7 @@ describe("SharedChannelsContent", () => {
           content_root: `skills/${id}`,
           release_content_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           release_content_hash_version: 2,
-          baseline_hash: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          baseline_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           baseline_hash_version: 2,
           provenance: {
             repository_id: 42,
@@ -291,10 +340,35 @@ describe("SharedChannelsContent", () => {
             source_folder: `skills/${id}`,
           },
         })),
+        known_skill_ids: subscriptionReview().skills.map((skill) => skill.id),
+        last_update: null,
         created_at: "2026-08-05T00:00:00Z",
         updated_at: "2026-08-05T00:00:00Z",
       }),
     );
+    api.getUpdateState.mockReset().mockResolvedValue(null);
+    api.checkUpdate.mockReset().mockResolvedValue(
+      updateSnapshot({
+        status: "up_to_date",
+        items: [
+          {
+            id: "writer",
+            change: "unchanged",
+            state: "current",
+            selected: true,
+            from_content_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            to_content_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            block_reason: null,
+            suggested_local_name: null,
+            error: null,
+          },
+        ],
+      }),
+    );
+    api.applyUpdate.mockReset().mockResolvedValue({
+      snapshot: updateSnapshot(),
+      applied_skill_ids: ["writer"],
+    });
   });
 
   it("moves from the create wizard into an empty channel detail with role and scope", async () => {
@@ -789,5 +863,215 @@ describe("SharedChannelsContent", () => {
     expect(screen.getByRole("checkbox", { name: /reader/ })).not.toBeChecked();
     expect(screen.getByRole("checkbox", { name: /writer/ })).toBeChecked();
     expect(api.listSubscriptions).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows release diffs and never applies a channel update without an explicit click", async () => {
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.listSubscriptions.mockResolvedValue([
+      {
+        schema_version: 1,
+        descriptor_version: 2,
+        repository_id: 42,
+        organization_id: 7,
+        target: subscriptionReview().target,
+        selected_skill_ids: ["writer"],
+        read_only: false,
+      },
+    ]);
+    api.checkUpdate.mockResolvedValue(updateSnapshot());
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    expect(await screen.findByText(/Second release · published by @alice/)).toBeInTheDocument();
+    expect(screen.getByText("2026-08-06 00:00:00 UTC")).toBeInTheDocument();
+    expect(screen.getByText("Safer prompts and a new optional Skill.")).toBeInTheDocument();
+    expect(screen.getByText("1 added")).toBeInTheDocument();
+    expect(screen.getByText("1 updated")).toBeInTheDocument();
+    expect(screen.getByText(/was not selected or installed/)).toBeInTheDocument();
+    expect(api.applyUpdate).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply safe updates" }));
+    await waitFor(() =>
+      expect(api.applyUpdate).toHaveBeenCalledWith(
+        {
+          repository_id: 42,
+          target: updateSnapshot().target,
+          resolutions: [],
+        },
+        expect.any(String),
+      ),
+    );
+  });
+
+  it("allows an unchanged release to be acknowledged explicitly", async () => {
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.listSubscriptions.mockResolvedValue([
+      {
+        schema_version: 1,
+        descriptor_version: 2,
+        repository_id: 42,
+        organization_id: 7,
+        target: subscriptionReview().target,
+        selected_skill_ids: [],
+        read_only: false,
+      },
+    ]);
+    api.checkUpdate.mockResolvedValue(
+      updateSnapshot({
+        status: "update_available",
+        acknowledgement_required: true,
+        items: [],
+      }),
+    );
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    expect(await screen.findByText(/This release has no Skill content changes/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Acknowledge release" }));
+
+    await waitFor(() => expect(api.applyUpdate).toHaveBeenCalled());
+  });
+
+  it("offers preserve-as-local and discard choices for a divergent subscribed Skill", async () => {
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.listSubscriptions.mockResolvedValue([
+      {
+        schema_version: 1,
+        descriptor_version: 2,
+        repository_id: 42,
+        organization_id: 7,
+        target: subscriptionReview().target,
+        selected_skill_ids: ["writer"],
+        read_only: false,
+      },
+    ]);
+    api.checkUpdate.mockResolvedValue(
+      updateSnapshot({
+        status: "blocked",
+        items: [
+          {
+            ...updateSnapshot().items[1],
+            state: "blocked",
+            block_reason: "local_content_changed",
+            suggested_local_name: "writer.local",
+          },
+        ],
+      }),
+    );
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    const name = await screen.findByRole("textbox", { name: "Local copy name for writer" });
+    expect(screen.getByRole("button", { name: "Apply safe updates" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Preserve as .local" }));
+    fireEvent.change(name, { target: { value: "writer.notes.local" } });
+    expect(screen.getByRole("button", { name: "Discard changes" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Apply safe updates" }));
+
+    await waitFor(() =>
+      expect(api.applyUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          resolutions: [
+            {
+              skill_id: "writer",
+              resolution: { kind: "preserve", local_name: "writer.notes.local" },
+            },
+          ],
+        }),
+        expect.any(String),
+      ),
+    );
+  });
+
+  it("clears a stale local resolution after checking the channel again", async () => {
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.listSubscriptions.mockResolvedValue([
+      {
+        schema_version: 1,
+        descriptor_version: 2,
+        repository_id: 42,
+        organization_id: 7,
+        target: subscriptionReview().target,
+        selected_skill_ids: ["writer"],
+        read_only: false,
+      },
+    ]);
+    api.checkUpdate
+      .mockResolvedValueOnce(
+        updateSnapshot({
+          status: "blocked",
+          items: [
+            {
+              ...updateSnapshot().items[1],
+              state: "blocked",
+              block_reason: "local_content_changed",
+              suggested_local_name: "writer.local",
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(updateSnapshot());
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Preserve as .local" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    await waitFor(() => expect(api.checkUpdate).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", { name: "Apply safe updates" }));
+
+    await waitFor(() =>
+      expect(api.applyUpdate).toHaveBeenCalledWith(expect.objectContaining({ resolutions: [] }), expect.any(String)),
+    );
+  });
+
+  it("keeps the last verified update visible while offline and supports retry", async () => {
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.listSubscriptions.mockResolvedValue([
+      {
+        schema_version: 1,
+        descriptor_version: 2,
+        repository_id: 42,
+        organization_id: 7,
+        target: subscriptionReview().target,
+        selected_skill_ids: ["writer"],
+        read_only: false,
+      },
+    ]);
+    api.getUpdateState.mockResolvedValue(updateSnapshot());
+    api.checkUpdate
+      .mockResolvedValueOnce(updateSnapshot({ check_error: "offline" }))
+      .mockResolvedValueOnce(updateSnapshot({ check_error: null }));
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    expect(
+      await screen.findByText(/Showing the last verified result because this check failed: offline/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    await waitFor(() => expect(api.checkUpdate).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.queryByText(/Showing the last verified result because this check failed/)).not.toBeInTheDocument(),
+    );
+  });
+
+  it("shows persisted subscription updates when release review is offline after restart", async () => {
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.listSubscriptions.mockResolvedValue([
+      {
+        schema_version: 1,
+        descriptor_version: 2,
+        repository_id: 42,
+        organization_id: 7,
+        target: subscriptionReview().target,
+        selected_skill_ids: ["writer"],
+        read_only: false,
+      },
+    ]);
+    api.reviewSubscription.mockRejectedValue(new Error("offline release review"));
+    api.getUpdateState.mockResolvedValue(updateSnapshot());
+    api.checkUpdate.mockResolvedValue(updateSnapshot({ check_error: "offline" }));
+
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    expect(await screen.findByText(/The local subscription is still available with 1 selected Skills/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Retry release review" })).toBeEnabled();
+    expect(
+      await screen.findByText(/Showing the last verified result because this check failed: offline/),
+    ).toBeVisible();
   });
 });

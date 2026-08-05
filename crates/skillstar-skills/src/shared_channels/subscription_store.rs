@@ -75,7 +75,7 @@ impl ChannelSubscriptionRegistry for DiskChannelSubscriptionRegistry {
                 subscription
                     .get("descriptor_version")
                     .and_then(Value::as_u64)
-                    != Some(u64::from(CHANNEL_SUBSCRIPTION_DESCRIPTOR_VERSION))
+                    .is_none_or(|version| !supported_descriptor_version(version))
             })
         {
             return Err(SharedChannelError::new(
@@ -83,8 +83,11 @@ impl ChannelSubscriptionRegistry for DiskChannelSubscriptionRegistry {
                 "One or more shared channel subscriptions use a newer descriptor schema; they are available read-only",
             ));
         }
-        let store: ChannelSubscriptionStore =
+        let mut store: ChannelSubscriptionStore =
             serde_json::from_value(value).map_err(|_| storage_error("parse"))?;
+        for subscription in &mut store.subscriptions {
+            normalize_subscription(subscription);
+        }
         validate_store(&store)?;
         Ok(store)
     }
@@ -141,9 +144,11 @@ fn current_schema_views(
             .and_then(Value::as_u64)
             .and_then(|version| u32::try_from(version).ok())
             .ok_or_else(|| storage_error("parse descriptor version"))?;
-        if descriptor_version == CHANNEL_SUBSCRIPTION_DESCRIPTOR_VERSION {
-            current
-                .push(serde_json::from_value(value.clone()).map_err(|_| storage_error("parse"))?);
+        if supported_descriptor_version(u64::from(descriptor_version)) {
+            let mut subscription: super::ChannelSubscription =
+                serde_json::from_value(value.clone()).map_err(|_| storage_error("parse"))?;
+            normalize_subscription(&mut subscription);
+            current.push(subscription);
         }
     }
     validate_store(&ChannelSubscriptionStore {
@@ -158,14 +163,15 @@ fn current_schema_views(
             .and_then(Value::as_u64)
             .and_then(|version| u32::try_from(version).ok())
             .ok_or_else(|| storage_error("parse descriptor version"))?;
-        if descriptor_version != CHANNEL_SUBSCRIPTION_DESCRIPTOR_VERSION {
+        if !supported_descriptor_version(u64::from(descriptor_version)) {
             let view = read_only_view(schema_version, value)
                 .ok_or_else(|| storage_error("parse read-only subscription"))?;
             views.push(view);
             continue;
         }
-        let subscription: super::ChannelSubscription =
+        let mut subscription: super::ChannelSubscription =
             serde_json::from_value(value.clone()).map_err(|_| storage_error("parse"))?;
+        normalize_subscription(&mut subscription);
         views.push(ChannelSubscriptionView::from_subscription(&subscription));
     }
     Ok(views)
@@ -207,8 +213,27 @@ fn validate_store(store: &ChannelSubscriptionStore) -> Result<(), SharedChannelE
                 || skill.baseline_hash_version != crate::content::SNAPSHOT_HASH_VERSION
                 || skill.provenance.repository_id != subscription.repository_id
                 || !valid_repository_url(&skill.provenance.repository_url)
-                || skill.provenance.git_ref != subscription.target.commit_sha
+                || !valid_commit(&skill.provenance.git_ref)
                 || skill.provenance.source_folder != skill.content_root
+            {
+                return Err(storage_error("validate"));
+            }
+        }
+        let mut known = std::collections::BTreeSet::new();
+        if subscription.known_skill_ids.iter().any(|id| {
+            crate::content::validate_skill_name(id).is_err()
+                || !known.insert(id.to_ascii_lowercase())
+        }) || !skills.is_subset(&known)
+        {
+            return Err(storage_error("validate"));
+        }
+        if let Some(snapshot) = &subscription.last_update {
+            super::channel_update::validate_update_snapshot(snapshot)?;
+            if snapshot.target.revision < subscription.target.revision
+                || (snapshot.target.revision == subscription.target.revision
+                    && snapshot.target != subscription.target)
+                || snapshot.acknowledgement_required
+                    != (snapshot.target.revision > subscription.target.revision)
             {
                 return Err(storage_error("validate"));
             }
@@ -217,8 +242,23 @@ fn validate_store(store: &ChannelSubscriptionStore) -> Result<(), SharedChannelE
     Ok(())
 }
 
+fn normalize_subscription(subscription: &mut super::ChannelSubscription) {
+    subscription.descriptor_version = CHANNEL_SUBSCRIPTION_DESCRIPTOR_VERSION;
+    if subscription.known_skill_ids.is_empty() && !subscription.skills.is_empty() {
+        subscription.known_skill_ids = subscription
+            .skills
+            .iter()
+            .map(|skill| skill.id.clone())
+            .collect();
+    }
+}
+
 fn valid_commit(value: &str) -> bool {
     value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn supported_descriptor_version(version: u64) -> bool {
+    version == 1 || version == u64::from(CHANNEL_SUBSCRIPTION_DESCRIPTOR_VERSION)
 }
 
 fn valid_hash(value: &str) -> bool {
@@ -339,6 +379,8 @@ mod tests {
                     source_folder: "skills/writer".into(),
                 },
             }],
+            known_skill_ids: vec!["writer".into()],
+            last_update: None,
             created_at: "2026-08-05T00:00:00Z".into(),
             updated_at: "2026-08-05T00:00:00Z".into(),
         }
@@ -459,6 +501,71 @@ mod tests {
             restarted.list_views().unwrap()[0].selected_skill_ids,
             vec!["writer"]
         );
+        match previous {
+            Some(value) => unsafe { std::env::set_var("SKILLSTAR_DATA_DIR", value) },
+            None => unsafe { std::env::remove_var("SKILLSTAR_DATA_DIR") },
+        }
+    }
+
+    #[test]
+    fn partially_upgraded_skill_provenance_round_trips_independently() {
+        let _guard = crate::lock_test_env();
+        let temp = tempfile::tempdir().unwrap();
+        let previous = std::env::var_os("SKILLSTAR_DATA_DIR");
+        unsafe { std::env::set_var("SKILLSTAR_DATA_DIR", temp.path()) };
+        let mut partial = subscription();
+        partial.skills[0].provenance.git_ref = "b".repeat(40);
+        let store = ChannelSubscriptionStore {
+            schema_version: CHANNEL_SUBSCRIPTION_STORE_VERSION,
+            subscriptions: vec![partial],
+        };
+
+        let registry = DiskChannelSubscriptionRegistry;
+        registry.save(&store).unwrap();
+        assert_eq!(registry.load_mutable().unwrap(), store);
+
+        match previous {
+            Some(value) => unsafe { std::env::set_var("SKILLSTAR_DATA_DIR", value) },
+            None => unsafe { std::env::remove_var("SKILLSTAR_DATA_DIR") },
+        }
+    }
+
+    #[test]
+    fn previous_descriptor_is_migrated_without_becoming_read_only() {
+        let _guard = crate::lock_test_env();
+        let temp = tempfile::tempdir().unwrap();
+        let previous = std::env::var_os("SKILLSTAR_DATA_DIR");
+        unsafe { std::env::set_var("SKILLSTAR_DATA_DIR", temp.path()) };
+        let mut value = serde_json::to_value(ChannelSubscriptionStore {
+            schema_version: CHANNEL_SUBSCRIPTION_STORE_VERSION,
+            subscriptions: vec![subscription()],
+        })
+        .unwrap();
+        value["subscriptions"][0]["descriptor_version"] = Value::from(1);
+        value["subscriptions"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("last_update");
+        skillstar_core::infra::fs_ops::atomic_write(
+            &DiskChannelSubscriptionRegistry::path(),
+            &serde_json::to_vec(&value).unwrap(),
+        )
+        .unwrap();
+
+        let registry = DiskChannelSubscriptionRegistry;
+        let view = registry.list_views().unwrap().remove(0);
+        assert!(!view.read_only);
+        assert_eq!(
+            view.descriptor_version,
+            CHANNEL_SUBSCRIPTION_DESCRIPTOR_VERSION
+        );
+        let migrated = registry.load_mutable().unwrap();
+        assert_eq!(
+            migrated.subscriptions[0].descriptor_version,
+            CHANNEL_SUBSCRIPTION_DESCRIPTOR_VERSION
+        );
+        assert!(migrated.subscriptions[0].last_update.is_none());
+
         match previous {
             Some(value) => unsafe { std::env::set_var("SKILLSTAR_DATA_DIR", value) },
             None => unsafe { std::env::remove_var("SKILLSTAR_DATA_DIR") },

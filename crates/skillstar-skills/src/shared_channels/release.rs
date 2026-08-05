@@ -724,7 +724,9 @@ pub(super) fn validate_commit_sha(value: &str) -> Result<(), SharedChannelError>
     }
 }
 
-fn validate_publisher(identity: &ChannelPublisherIdentity) -> Result<(), SharedChannelError> {
+pub(super) fn validate_publisher(
+    identity: &ChannelPublisherIdentity,
+) -> Result<(), SharedChannelError> {
     let valid = identity.id > 0
         && !identity.login.is_empty()
         && identity.login.len() <= 39
@@ -739,7 +741,7 @@ fn validate_publisher(identity: &ChannelPublisherIdentity) -> Result<(), SharedC
     }
 }
 
-fn validate_release_text(title: &str, notes: &str) -> Result<(), SharedChannelError> {
+pub(super) fn validate_release_text(title: &str, notes: &str) -> Result<(), SharedChannelError> {
     if title.trim().is_empty()
         || title.len() > MAX_RELEASE_TITLE_BYTES
         || notes.len() > MAX_RELEASE_NOTES_BYTES

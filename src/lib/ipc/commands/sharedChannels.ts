@@ -15,6 +15,9 @@ import type {
   ChannelSubscriptionReview,
   ChannelSubscriptionView,
   SubscribeChannelRequest,
+  ApplyChannelUpdateRequest,
+  ApplyChannelUpdateResult,
+  ChannelUpdateSnapshot,
 } from "../../../types";
 
 export interface SharedChannelCommands {
@@ -105,5 +108,17 @@ export interface SharedChannelCommands {
   subscribe_shared_channel: {
     args: { request: SubscribeChannelRequest; sessionId: string };
     result: ChannelSubscription;
+  };
+  get_shared_channel_update_state: {
+    args: { repositoryId: number };
+    result: ChannelUpdateSnapshot | null;
+  };
+  check_shared_channel_update: {
+    args: { repositoryId: number };
+    result: ChannelUpdateSnapshot;
+  };
+  apply_shared_channel_update: {
+    args: { request: ApplyChannelUpdateRequest; sessionId: string };
+    result: ApplyChannelUpdateResult;
   };
 }

@@ -408,6 +408,8 @@ fn serialized_subscription_provenance_never_contains_credentials() {
             commit_sha: "a".repeat(40),
         },
         skills: vec![installed_skill(&request, &manifest().skills[1])],
+        known_skill_ids: vec!["writer".into()],
+        last_update: None,
         created_at: "now".into(),
         updated_at: "now".into(),
     };

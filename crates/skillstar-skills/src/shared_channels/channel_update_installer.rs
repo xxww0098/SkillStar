@@ -1,0 +1,915 @@
+use super::{
+    CHANNEL_CONTENT_HASH_VERSION, ChannelSkillProvenance, ChannelSkillUpdateReceipt,
+    ChannelSkillUpdateRequest, ChannelSubscribedSkill, ChannelSubscriptionUpdater,
+    ChannelUpdateInspection, GitChannelSubscriptionInstaller, SharedChannelError,
+    SharedChannelErrorCode,
+};
+use async_trait::async_trait;
+use std::collections::BTreeMap;
+use std::path::Path;
+
+#[async_trait]
+impl ChannelSubscriptionUpdater for GitChannelSubscriptionInstaller {
+    async fn inspect(
+        &self,
+        skill: &ChannelSubscribedSkill,
+    ) -> Result<ChannelUpdateInspection, SharedChannelError> {
+        let skill = skill.clone();
+        tokio::task::spawn_blocking(move || inspect_blocking(&skill))
+            .await
+            .map_err(|_| update_error("The channel update inspection task stopped unexpectedly"))?
+    }
+
+    async fn apply(
+        &self,
+        request: ChannelSkillUpdateRequest,
+    ) -> Result<ChannelSkillUpdateReceipt, SharedChannelError> {
+        let git = self.git.clone();
+        tokio::task::spawn_blocking(move || apply_blocking(&git, request))
+            .await
+            .map_err(|_| update_error("The channel update task stopped unexpectedly"))?
+    }
+
+    async fn verify(&self, receipt: &ChannelSkillUpdateReceipt) -> Result<(), SharedChannelError> {
+        let receipt = receipt.clone();
+        tokio::task::spawn_blocking(move || {
+            let _guard =
+                crate::skill_update::acquire_update_transaction_lock().map_err(|error| {
+                    update_error(format!("Unable to lock channel verification: {error}"))
+                })?;
+            verify_exact_current(&receipt)
+        })
+        .await
+        .map_err(|_| update_error("The channel update verification task stopped unexpectedly"))?
+    }
+
+    async fn rollback(
+        &self,
+        receipt: &ChannelSkillUpdateReceipt,
+    ) -> Result<(), SharedChannelError> {
+        let receipt = receipt.clone();
+        tokio::task::spawn_blocking(move || {
+            let _guard =
+                crate::skill_update::acquire_update_transaction_lock().map_err(|error| {
+                    update_error(format!("Unable to lock channel rollback: {error}"))
+                })?;
+            rollback_preserving_current(&receipt)
+        })
+        .await
+        .map_err(|_| update_error("The channel update rollback task stopped unexpectedly"))?
+    }
+}
+
+fn verify_exact_current(receipt: &ChannelSkillUpdateReceipt) -> Result<(), SharedChannelError> {
+    if inspect_blocking(&receipt.installed)? != ChannelUpdateInspection::Clean {
+        return Err(update_error(format!(
+            "Skill '{}' changed after its channel update was staged",
+            receipt.installed.id
+        )));
+    }
+    let hub_path = skillstar_core::infra::paths::hub_skills_dir().join(&receipt.installed.id);
+    let checkout = crate::repo_link::repo_root_of(&hub_path)
+        .ok_or_else(|| update_error("The updated Skill checkout is missing"))?;
+    let head = crate::git::ops::rev_parse(&checkout, "HEAD")
+        .map_err(|error| update_error(format!("Unable to verify updated checkout: {error}")))?;
+    if !head.eq_ignore_ascii_case(&receipt.installed.provenance.git_ref) {
+        return Err(update_error(
+            "The updated Skill checkout moved unexpectedly",
+        ));
+    }
+    let entry = crate::lockfile::Lockfile::load(&crate::lockfile::lockfile_path())
+        .map_err(|error| update_error(format!("Unable to verify updated provenance: {error}")))?
+        .skills
+        .into_iter()
+        .find(|entry| entry.name.eq_ignore_ascii_case(&receipt.installed.id))
+        .ok_or_else(|| update_error("The updated Skill provenance is missing"))?;
+    validate_previous(&receipt.installed, &entry, false)
+}
+
+fn rollback_preserving_current(
+    receipt: &ChannelSkillUpdateReceipt,
+) -> Result<(), SharedChannelError> {
+    let current = crate::content::snapshot(&receipt.previous.id).map_err(|error| {
+        update_error(format!(
+            "Unable to inspect current content before channel rollback: {error}"
+        ))
+    })?;
+    if current.content_hash == receipt.previous.baseline_hash {
+        return rollback_exact(receipt);
+    }
+    match inspect_blocking(&receipt.installed)? {
+        ChannelUpdateInspection::Clean => rollback_exact(receipt),
+        ChannelUpdateInspection::Divergent {
+            suggested_local_name,
+            ..
+        } => {
+            crate::local_skill::preserve_installed_copy(
+                &receipt.installed.id,
+                &suggested_local_name,
+            )
+            .map_err(|error| {
+                update_error(format!(
+                    "Unable to preserve content changed during channel rollback: {error:#}"
+                ))
+            })?;
+            rollback_exact(receipt)
+        }
+    }
+}
+
+fn inspect_blocking(
+    skill: &ChannelSubscribedSkill,
+) -> Result<ChannelUpdateInspection, SharedChannelError> {
+    if let Some(blocked) = crate::skill_update::inspect_skill_local_divergence(&skill.id)
+        .map_err(|error| update_error(format!("Unable to inspect '{}': {error:#}", skill.id)))?
+    {
+        return Ok(ChannelUpdateInspection::Divergent {
+            reason: blocked.reason,
+            suggested_local_name: blocked.suggested_local_name,
+            error: blocked.error,
+        });
+    }
+    let snapshot = crate::content::snapshot(&skill.id).map_err(|error| {
+        update_error(format!(
+            "Unable to capture the installed channel Skill '{}': {error}",
+            skill.id
+        ))
+    })?;
+    if snapshot.content_hash != skill.baseline_hash
+        || skill.baseline_hash_version != CHANNEL_CONTENT_HASH_VERSION
+    {
+        return Ok(ChannelUpdateInspection::Divergent {
+            reason: crate::skill_update::LocalDivergenceReason::ContentChanged,
+            suggested_local_name: crate::skill_update::suggested_local_name(&skill.id),
+            error: None,
+        });
+    }
+    Ok(ChannelUpdateInspection::Clean)
+}
+
+fn apply_blocking(
+    git: &crate::git_skill::GitSkillFacade,
+    request: ChannelSkillUpdateRequest,
+) -> Result<ChannelSkillUpdateReceipt, SharedChannelError> {
+    let _guard = crate::skill_update::acquire_update_transaction_lock()
+        .map_err(|error| update_error(format!("Unable to lock channel update: {error}")))?;
+    let inspection = inspect_blocking(&request.installed)?;
+    if inspection != ChannelUpdateInspection::Clean && request.resolution.is_none() {
+        return Err(update_error(format!(
+            "Skill '{}' changed while waiting to update",
+            request.installed.id
+        )));
+    }
+    let hub_path = skillstar_core::infra::paths::hub_skills_dir().join(&request.installed.id);
+    let previous_checkout = crate::repo_link::repo_root_of(&hub_path).ok_or_else(|| {
+        update_error(format!(
+            "Skill '{}' is not linked to its managed repository cache",
+            request.installed.id
+        ))
+    })?;
+    let mut previous_lock_entry =
+        crate::lockfile::Lockfile::load(&crate::lockfile::lockfile_path())
+            .map_err(|error| update_error(format!("Unable to read Skill provenance: {error}")))?
+            .skills
+            .into_iter()
+            .find(|entry| entry.name.eq_ignore_ascii_case(&request.installed.id))
+            .map(Ok)
+            .unwrap_or_else(|| {
+                if inspection != ChannelUpdateInspection::Clean && request.resolution.is_some() {
+                    crate::skill_update::reconstruct_lock_entry(&request.installed.id).map_err(
+                        |error| {
+                            update_error(format!(
+                                "Unable to reconstruct Skill provenance: {error:#}"
+                            ))
+                        },
+                    )
+                } else {
+                    Err(update_error("The installed Skill provenance is missing"))
+                }
+            })?;
+    if inspection != ChannelUpdateInspection::Clean && request.resolution.is_some() {
+        previous_lock_entry.content_hash = Some(request.installed.baseline_hash.clone());
+        previous_lock_entry.content_hash_version = Some(request.installed.baseline_hash_version);
+    }
+    validate_previous(
+        &request.installed,
+        &previous_lock_entry,
+        inspection != ChannelUpdateInspection::Clean,
+    )?;
+    let previous_head = crate::git::ops::rev_parse(&previous_checkout, "HEAD")
+        .map_err(|error| update_error(format!("Unable to verify current checkout: {error}")))?;
+    if !previous_head.eq_ignore_ascii_case(&request.installed.provenance.git_ref) {
+        return Err(update_error(format!(
+            "Skill '{}' checkout moved away from its subscribed commit",
+            request.installed.id
+        )));
+    }
+    let mut receipt = ChannelSkillUpdateReceipt {
+        previous: request.installed.clone(),
+        installed: request.installed.clone(),
+        previous_checkout: previous_checkout.to_string_lossy().into_owned(),
+        previous_lock_entry,
+        previous_update_available: crate::update_state::get(&request.installed.id),
+        update_state_revision_after_apply: None,
+    };
+    let mut resolved_divergence = false;
+    if inspection != ChannelUpdateInspection::Clean {
+        let resolution = request
+            .resolution
+            .clone()
+            .expect("resolution checked above");
+        if let crate::skill_update::LocalDivergenceResolution::Preserve { local_name } = &resolution
+        {
+            crate::local_skill::preserve_installed_copy(&request.installed.id, local_name)
+                .map_err(|error| {
+                    update_error(format!(
+                        "Unable to preserve local changes for '{}': {error:#}",
+                        request.installed.id
+                    ))
+                })?;
+        }
+        let resolved = crate::skill_update::resolve_skill_local_divergence_locked(
+            &request.installed.id,
+            crate::skill_update::LocalDivergenceResolution::Discard,
+            git.session(),
+        )
+        .map_err(|error| {
+            rollback_after_apply_failure(
+                &receipt,
+                update_error(format!(
+                    "Unable to resolve local changes for '{}': {error:#}",
+                    request.installed.id
+                )),
+            )
+        })?;
+        resolved_divergence = true;
+        if !resolved.remaining_blocked.is_empty() {
+            return Err(rollback_after_apply_failure(
+                &receipt,
+                update_error(format!(
+                    "Skill '{}' still has local changes and was not updated",
+                    request.installed.id
+                )),
+            ));
+        }
+        match inspect_blocking(&request.installed) {
+            Ok(ChannelUpdateInspection::Clean) => {}
+            Ok(_) => {
+                return Err(rollback_after_apply_failure(
+                    &receipt,
+                    update_error(format!(
+                        "Skill '{}' still has local changes and was not updated",
+                        request.installed.id
+                    )),
+                ));
+            }
+            Err(error) => return Err(rollback_after_apply_failure(&receipt, error)),
+        }
+    }
+
+    let source = format!(
+        "{}#{}",
+        request.repository.clone_url, request.manifest.commit_sha
+    );
+    let (_url, _source, repo_dir, discovered) =
+        git.fetch_repo_scanned(&source, true).map_err(|error| {
+            rollback_if_resolved(
+                &receipt,
+                resolved_divergence,
+                update_error(format!("Unable to read channel update: {error}")),
+            )
+        })?;
+    let discovered = discovered
+        .into_iter()
+        .map(|skill| (skill.id.to_ascii_lowercase(), skill))
+        .collect::<BTreeMap<_, _>>();
+    let target = discovered
+        .get(&request.released.id.to_ascii_lowercase())
+        .ok_or_else(|| {
+            rollback_if_resolved(&receipt, resolved_divergence, content_integrity_error())
+        })?;
+    if target.folder_path != request.released.content_root
+        || request.released.content_hash_version != CHANNEL_CONTENT_HASH_VERSION
+    {
+        return Err(rollback_if_resolved(
+            &receipt,
+            resolved_divergence,
+            content_integrity_error(),
+        ));
+    }
+    let target_root = if request.released.content_root.is_empty() {
+        repo_dir.clone()
+    } else {
+        repo_dir.join(&request.released.content_root)
+    };
+    let target_snapshot = crate::content::snapshot_path(&request.released.id, &target_root)
+        .map_err(|_| {
+            rollback_if_resolved(&receipt, resolved_divergence, content_integrity_error())
+        })?;
+    if target_snapshot.content_hash != request.released.content_hash {
+        return Err(rollback_if_resolved(
+            &receipt,
+            resolved_divergence,
+            content_integrity_error(),
+        ));
+    }
+    match inspect_blocking(&request.installed) {
+        Ok(ChannelUpdateInspection::Clean) => {}
+        Ok(_) => {
+            return Err(update_error(format!(
+                "Skill '{}' changed while fetching the reviewed release and was not updated",
+                request.installed.id
+            )));
+        }
+        Err(error) => return Err(error),
+    }
+    let target = crate::repo_scanner::SkillInstallTarget {
+        id: request.released.id.clone(),
+        folder_path: request.released.content_root.clone(),
+    };
+    if let Err(error) = git.install_verified_checkout(
+        &repo_dir,
+        &request.repository.clone_url,
+        &request.manifest.commit_sha,
+        &[target],
+    ) {
+        return Err(rollback_after_apply_failure(
+            &receipt,
+            update_error(format!(
+                "Unable to stage channel Skill update '{}': {error:#}",
+                request.installed.id
+            )),
+        ));
+    }
+    receipt.installed = match subscribed_skill_from_lock(&request) {
+        Ok(installed) => installed,
+        Err(error) => return Err(rollback_after_apply_failure(&receipt, error)),
+    };
+    if let Err(error) = reconcile(&request.installed.id) {
+        return Err(rollback_after_apply_failure(&receipt, error));
+    }
+    receipt.update_state_revision_after_apply = Some(crate::update_state::set_stamped(
+        &request.installed.id,
+        false,
+    ));
+    Ok(receipt)
+}
+
+fn subscribed_skill_from_lock(
+    request: &ChannelSkillUpdateRequest,
+) -> Result<ChannelSubscribedSkill, SharedChannelError> {
+    let lockfile =
+        crate::lockfile::Lockfile::load(&crate::lockfile::lockfile_path()).map_err(|error| {
+            update_error(format!("Unable to read updated Skill provenance: {error}"))
+        })?;
+    let entry = lockfile
+        .skills
+        .iter()
+        .find(|entry| entry.name.eq_ignore_ascii_case(&request.released.id))
+        .ok_or_else(content_integrity_error)?;
+    let baseline_hash = entry
+        .content_hash
+        .clone()
+        .ok_or_else(content_integrity_error)?;
+    let baseline_hash_version = entry
+        .content_hash_version
+        .ok_or_else(content_integrity_error)?;
+    let current = crate::content::snapshot(&entry.name)
+        .map_err(|_| content_integrity_error())?
+        .content_hash;
+    if !crate::source_resolver::same_remote_url(&entry.git_url, &request.repository.clone_url)
+        || entry.git_ref.as_deref() != Some(request.manifest.commit_sha.as_str())
+        || entry.source_folder.as_deref().unwrap_or_default() != request.released.content_root
+        || baseline_hash_version != CHANNEL_CONTENT_HASH_VERSION
+        || baseline_hash != request.released.content_hash
+        || current != request.released.content_hash
+    {
+        return Err(content_integrity_error());
+    }
+    Ok(ChannelSubscribedSkill {
+        id: request.released.id.clone(),
+        content_root: request.released.content_root.clone(),
+        release_content_hash: request.released.content_hash.clone(),
+        release_content_hash_version: request.released.content_hash_version,
+        baseline_hash,
+        baseline_hash_version,
+        provenance: ChannelSkillProvenance {
+            repository_id: request.repository.id,
+            repository_url: entry.git_url.clone(),
+            git_ref: request.manifest.commit_sha.clone(),
+            source_folder: request.released.content_root.clone(),
+        },
+    })
+}
+
+fn validate_previous(
+    skill: &ChannelSubscribedSkill,
+    entry: &crate::lockfile::LockEntry,
+    allow_baseline_repair: bool,
+) -> Result<(), SharedChannelError> {
+    if !crate::source_resolver::same_remote_url(&entry.git_url, &skill.provenance.repository_url)
+        || entry.git_ref.as_deref() != Some(skill.provenance.git_ref.as_str())
+        || entry.source_folder.as_deref().unwrap_or_default() != skill.content_root
+        || (!allow_baseline_repair
+            && (entry.content_hash.as_deref() != Some(skill.baseline_hash.as_str())
+                || entry.content_hash_version != Some(skill.baseline_hash_version)))
+    {
+        return Err(update_error(format!(
+            "Skill '{}' provenance changed after the channel update check",
+            skill.id
+        )));
+    }
+    Ok(())
+}
+
+fn rollback_if_resolved(
+    receipt: &ChannelSkillUpdateReceipt,
+    resolved_divergence: bool,
+    mut error: SharedChannelError,
+) -> SharedChannelError {
+    if !resolved_divergence {
+        return error;
+    }
+    match inspect_blocking(&receipt.previous) {
+        Ok(ChannelUpdateInspection::Clean) => rollback_after_apply_failure(receipt, error),
+        Ok(ChannelUpdateInspection::Divergent {
+            suggested_local_name,
+            ..
+        }) => match crate::local_skill::preserve_installed_copy(
+            &receipt.previous.id,
+            &suggested_local_name,
+        ) {
+            Ok(_) => {
+                error.message = format!(
+                    "{}; edits made during the channel fetch were preserved as '{}'",
+                    error.message, suggested_local_name
+                );
+                rollback_after_apply_failure(receipt, error)
+            }
+            Err(preserve) => update_error(format!(
+                "{}; rollback was skipped to avoid discarding edits made during the channel fetch, and those edits could not be copied: {preserve:#}",
+                error.message
+            )),
+        },
+        Err(inspect) => update_error(format!(
+            "{}; rollback was skipped because newly changed local content could not be verified safely: {}",
+            error.message, inspect.message
+        )),
+    }
+}
+
+fn rollback_after_apply_failure(
+    receipt: &ChannelSkillUpdateReceipt,
+    original: SharedChannelError,
+) -> SharedChannelError {
+    match rollback_preserving_current(receipt) {
+        Ok(()) => original,
+        Err(rollback) => update_error(format!(
+            "{}; rollback is incomplete and manual cleanup may be required: {}",
+            original.message, rollback.message
+        )),
+    }
+}
+
+fn rollback_exact(receipt: &ChannelSkillUpdateReceipt) -> Result<(), SharedChannelError> {
+    let checkout = Path::new(&receipt.previous_checkout);
+    let head = crate::git::ops::rev_parse(checkout, "HEAD")
+        .map_err(|error| update_error(format!("Unable to verify rollback checkout: {error}")))?;
+    if !head.eq_ignore_ascii_case(&receipt.previous.provenance.git_ref) {
+        return Err(update_error(format!(
+            "Rollback checkout is at {head}, expected {}",
+            receipt.previous.provenance.git_ref
+        )));
+    }
+    crate::repo_scanner::install_from_repo_at(
+        checkout,
+        &receipt.previous.provenance.repository_url,
+        Some(&receipt.previous.provenance.git_ref),
+        &[crate::repo_scanner::SkillInstallTarget {
+            id: receipt.previous.id.clone(),
+            folder_path: receipt.previous.content_root.clone(),
+        }],
+    )
+    .map_err(|error| update_error(format!("Unable to restore previous Skill content: {error}")))?;
+    crate::installed_skill::invalidate_cache();
+    {
+        let _lock = crate::lockfile::get_mutex()
+            .lock()
+            .map_err(|_| update_error("Lockfile mutex poisoned during channel rollback"))?;
+        let path = crate::lockfile::lockfile_path();
+        let mut lockfile = crate::lockfile::Lockfile::load(&path).map_err(|error| {
+            update_error(format!("Unable to read rollback provenance: {error}"))
+        })?;
+        lockfile.upsert(receipt.previous_lock_entry.clone());
+        lockfile.save(&path).map_err(|error| {
+            update_error(format!("Unable to restore rollback provenance: {error}"))
+        })?;
+    }
+    let snapshot = crate::content::snapshot(&receipt.previous.id)
+        .map_err(|error| update_error(format!("Unable to verify restored Skill: {error}")))?;
+    if snapshot.content_hash != receipt.previous.baseline_hash {
+        return Err(update_error(
+            "Restored Skill content does not match its previous baseline",
+        ));
+    }
+    if let Some(revision) = receipt.update_state_revision_after_apply {
+        crate::update_state::restore_if_revision(
+            &receipt.previous.id,
+            revision,
+            receipt.previous_update_available,
+        );
+    }
+    reconcile(&receipt.previous.id)?;
+    Ok(())
+}
+
+fn reconcile(skill_id: &str) -> Result<(), SharedChannelError> {
+    let mut failures = Vec::new();
+    match crate::deployment::resync_existing_links(skill_id) {
+        Ok(report) => failures.extend(report.failures),
+        Err(error) => failures.push(format!("Agent reconciliation: {error:#}")),
+    }
+    let project = crate::projects::cascade_skill_update_to_projects(&[skill_id.to_string()]);
+    failures.extend(
+        project
+            .failures
+            .into_iter()
+            .map(|failure| format!("Project {failure}")),
+    );
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(update_error(format!(
+            "Skill '{skill_id}' could not be reconciled everywhere: {}",
+            failures.join(", ")
+        )))
+    }
+}
+
+fn content_integrity_error() -> SharedChannelError {
+    SharedChannelError::new(
+        SharedChannelErrorCode::Integrity,
+        "The channel update content does not match the published manifest",
+    )
+}
+
+fn update_error(message: impl Into<String>) -> SharedChannelError {
+    SharedChannelError::new(SharedChannelErrorCode::SubscriptionUpdateFailed, message)
+}
+
+#[cfg(all(test, not(windows)))]
+mod tests {
+    use super::*;
+    use crate::git::transport::GitOperationSession;
+    use crate::shared_channels::{
+        CHANNEL_RELEASE_MANIFEST_VERSION, ChannelPublisherIdentity, ChannelReleaseManifest,
+        ChannelReleaseSkill, ChannelSkillReleaseStatus, RemoteRepository, RepositoryPermissions,
+    };
+    use std::collections::HashMap;
+    use std::ffi::OsStr;
+    use std::fs;
+
+    #[test]
+    fn exact_update_and_rollback_reconcile_hub_agent_project_provenance_and_state() {
+        let _guard = crate::lock_test_env();
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        let data = temp.path().join("data");
+        let tool_home = temp.path().join("tool-home");
+        let repository = temp.path().join("channel.git");
+        let project = temp.path().join("project");
+        fs::create_dir_all(&home).unwrap();
+        fs::create_dir_all(&project).unwrap();
+        let previous_home = std::env::var_os("HOME");
+        let previous_data = std::env::var_os("SKILLSTAR_DATA_DIR");
+        let previous_codex = std::env::var_os("CODEX_HOME");
+        let previous_tool_home = std::env::var_os("SKILLSTAR_TOOL_SYNC_HOME");
+        set_env("HOME", &home);
+        set_env("SKILLSTAR_DATA_DIR", &data);
+        set_env("SKILLSTAR_TOOL_SYNC_HOME", &tool_home);
+        remove_env("CODEX_HOME");
+        crate::deployment::invalidate_profile_cache();
+        crate::update_state::reset_for_test();
+
+        let result = (|| {
+            let skill_root = repository.join("skills/writer");
+            fs::create_dir_all(&skill_root)?;
+            fs::write(
+                skill_root.join("SKILL.md"),
+                "---\nname: writer\ndescription: Shared writer\n---\n# version one\n",
+            )?;
+            git(&repository, &["init", "-q"])?;
+            git(&repository, &["config", "user.email", "test@example.com"])?;
+            git(&repository, &["config", "user.name", "SkillStar Test"])?;
+            git(&repository, &["add", "."])?;
+            git(&repository, &["commit", "-qm", "release one"])?;
+            let commit_one = git_output(&repository, &["rev-parse", "HEAD"])?;
+            let hash_one = crate::content::snapshot_path("writer", &skill_root)?.content_hash;
+
+            fs::write(
+                skill_root.join("SKILL.md"),
+                "---\nname: writer\ndescription: Shared writer\n---\n# version two\n",
+            )?;
+            git(&repository, &["add", "."])?;
+            git(&repository, &["commit", "-qm", "release two"])?;
+            let commit_two = git_output(&repository, &["rev-parse", "HEAD"])?;
+            let hash_two = crate::content::snapshot_path("writer", &skill_root)?.content_hash;
+
+            let cache_one = exact_cache(&commit_one);
+            let cache_two = exact_cache(&commit_two);
+            fs::create_dir_all(cache_one.parent().unwrap())?;
+            git_clone(&repository, &cache_one)?;
+            git(&cache_one, &["checkout", "-q", &commit_one])?;
+            git_clone(&repository, &cache_two)?;
+            git(&cache_two, &["checkout", "-q", &commit_two])?;
+
+            let repository_url = "https://github.com/acme/channel.git";
+            crate::repo_scanner::install_from_repo_at(
+                &cache_one,
+                repository_url,
+                Some(&commit_one),
+                &[crate::repo_scanner::SkillInstallTarget {
+                    id: "writer".into(),
+                    folder_path: "skills/writer".into(),
+                }],
+            )?;
+            let previous_lock_entry = lock_entry("writer")?;
+            let previous = ChannelSubscribedSkill {
+                id: "writer".into(),
+                content_root: "skills/writer".into(),
+                release_content_hash: hash_one.clone(),
+                release_content_hash_version: CHANNEL_CONTENT_HASH_VERSION,
+                baseline_hash: previous_lock_entry.content_hash.clone().unwrap(),
+                baseline_hash_version: previous_lock_entry.content_hash_version.unwrap(),
+                provenance: ChannelSkillProvenance {
+                    repository_id: 42,
+                    repository_url: repository_url.into(),
+                    git_ref: commit_one.clone(),
+                    source_folder: "skills/writer".into(),
+                },
+            };
+            fs::write(
+                skillstar_core::infra::paths::hub_skills_dir().join("writer/SKILL.md"),
+                "---\nname: writer\ndescription: Local writer notes\n---\n# local edits\n",
+            )?;
+
+            assert!(crate::agents::toggle_profile("codex")?);
+            let agent_copy = home.join(".codex/skills/writer");
+            fs::create_dir_all(&agent_copy)?;
+            fs::write(agent_copy.join("SKILL.md"), "# stale agent copy\n")?;
+
+            let project_entry = crate::projects::register_project(project.to_str().unwrap())?;
+            let mut agents = HashMap::new();
+            agents.insert("codex".to_string(), vec!["writer".to_string()]);
+            let mut deploy_modes = HashMap::new();
+            deploy_modes.insert(
+                ".agents/skills".to_string(),
+                crate::projects::ProjectDeployMode::Copy,
+            );
+            crate::projects::save_skills_list(
+                &project_entry.name,
+                &crate::projects::SkillsList {
+                    agents,
+                    deploy_modes,
+                    updated_at: chrono::Utc::now().to_rfc3339(),
+                },
+            )?;
+            let project_copy = project.join(".agents/skills/writer");
+            fs::create_dir_all(&project_copy)?;
+            fs::write(project_copy.join("SKILL.md"), "# stale project copy\n")?;
+
+            crate::update_state::set("writer", true);
+            let request = ChannelSkillUpdateRequest {
+                repository: remote_repository(),
+                manifest: manifest(&commit_two, &hash_two),
+                released: released_skill(&hash_two),
+                installed: previous.clone(),
+                resolution: Some(crate::skill_update::LocalDivergenceResolution::Preserve {
+                    local_name: "writer.local".into(),
+                }),
+            };
+            let git = crate::git_skill::GitSkillFacade::new(GitOperationSession::public());
+            let receipt = apply_blocking(&git, request)?;
+
+            assert_eq!(receipt.installed.baseline_hash, hash_two);
+            assert_eq!(receipt.installed.provenance.git_ref, commit_two);
+            assert_content(&agent_copy, "# version two")?;
+            assert_content(&project_copy, "# version two")?;
+            assert_content(
+                &skillstar_core::infra::paths::hub_skills_dir().join("writer"),
+                "# version two",
+            )?;
+            assert_content(
+                &skillstar_core::infra::paths::hub_skills_dir().join("writer.local"),
+                "# local edits",
+            )?;
+            let updated_lock = lock_entry("writer")?;
+            assert_eq!(updated_lock.git_ref.as_deref(), Some(commit_two.as_str()));
+            assert_eq!(
+                updated_lock.content_hash.as_deref(),
+                Some(hash_two.as_str())
+            );
+            assert_eq!(persisted_update_state("writer")?, Some(false));
+
+            rollback_exact(&receipt)?;
+            assert_content(&agent_copy, "# version one")?;
+            assert_content(&project_copy, "# version one")?;
+            assert_content(
+                &skillstar_core::infra::paths::hub_skills_dir().join("writer"),
+                "# version one",
+            )?;
+            assert_content(
+                &skillstar_core::infra::paths::hub_skills_dir().join("writer.local"),
+                "# local edits",
+            )?;
+            let rolled_back_lock = lock_entry("writer")?;
+            assert_eq!(
+                rolled_back_lock.git_ref.as_deref(),
+                Some(commit_one.as_str())
+            );
+            assert_eq!(
+                rolled_back_lock.content_hash.as_deref(),
+                Some(hash_one.as_str())
+            );
+            assert_eq!(persisted_update_state("writer")?, Some(true));
+
+            let lock_path = crate::lockfile::lockfile_path();
+            let mut missing_baseline = crate::lockfile::Lockfile::load(&lock_path)?;
+            let entry = missing_baseline
+                .skills
+                .iter_mut()
+                .find(|entry| entry.name == "writer")
+                .unwrap();
+            entry.content_hash = None;
+            entry.content_hash_version = None;
+            missing_baseline.save(&lock_path)?;
+            let invalid_hash = format!("sha256:{}", "0".repeat(64));
+            let error = apply_blocking(
+                &git,
+                ChannelSkillUpdateRequest {
+                    repository: remote_repository(),
+                    manifest: manifest(&commit_two, &invalid_hash),
+                    released: released_skill(&invalid_hash),
+                    installed: previous,
+                    resolution: Some(crate::skill_update::LocalDivergenceResolution::Discard),
+                },
+            )
+            .unwrap_err();
+            assert_eq!(error.code, SharedChannelErrorCode::Integrity);
+            let repaired_lock = lock_entry("writer")?;
+            assert_eq!(
+                repaired_lock.content_hash.as_deref(),
+                Some(hash_one.as_str())
+            );
+            assert_eq!(
+                repaired_lock.content_hash_version,
+                Some(CHANNEL_CONTENT_HASH_VERSION)
+            );
+            assert_content(
+                &skillstar_core::infra::paths::hub_skills_dir().join("writer"),
+                "# version one",
+            )?;
+            Ok::<(), anyhow::Error>(())
+        })();
+
+        restore_env("HOME", previous_home);
+        restore_env("SKILLSTAR_DATA_DIR", previous_data);
+        restore_env("CODEX_HOME", previous_codex);
+        restore_env("SKILLSTAR_TOOL_SYNC_HOME", previous_tool_home);
+        crate::deployment::invalidate_profile_cache();
+        crate::update_state::reset_for_test();
+        result.unwrap();
+    }
+
+    fn exact_cache(commit: &str) -> std::path::PathBuf {
+        skillstar_core::infra::paths::repos_cache_dir().join(format!(
+            "{}--ref--{}",
+            crate::source_resolver::cache_dir_name("acme/channel"),
+            crate::source_resolver::cache_dir_name(commit)
+        ))
+    }
+
+    fn remote_repository() -> RemoteRepository {
+        RemoteRepository {
+            id: 42,
+            owner_id: 7,
+            owner_login: "acme".into(),
+            owner_type: "Organization".into(),
+            name: "channel".into(),
+            default_branch: "main".into(),
+            html_url: "https://github.com/acme/channel".into(),
+            clone_url: "https://github.com/acme/channel.git".into(),
+            private: true,
+            permissions: RepositoryPermissions {
+                admin: false,
+                maintain: false,
+                push: false,
+                pull: true,
+            },
+        }
+    }
+
+    fn released_skill(content_hash: &str) -> ChannelReleaseSkill {
+        ChannelReleaseSkill {
+            id: "writer".into(),
+            content_root: "skills/writer".into(),
+            content_hash: content_hash.into(),
+            content_hash_version: CHANNEL_CONTENT_HASH_VERSION,
+            status: ChannelSkillReleaseStatus::Updated,
+        }
+    }
+
+    fn manifest(commit: &str, content_hash: &str) -> ChannelReleaseManifest {
+        ChannelReleaseManifest {
+            schema_version: CHANNEL_RELEASE_MANIFEST_VERSION,
+            repository_id: 42,
+            organization_id: 7,
+            revision: 2,
+            tag_name: "channel-v000002".into(),
+            commit_sha: commit.into(),
+            publisher: ChannelPublisherIdentity {
+                id: 9,
+                login: "alice".into(),
+            },
+            published_at: "2026-08-05T01:00:00Z".into(),
+            title: "Release two".into(),
+            notes: "Upgrade writer".into(),
+            skills: vec![released_skill(content_hash)],
+        }
+    }
+
+    fn lock_entry(name: &str) -> anyhow::Result<crate::lockfile::LockEntry> {
+        crate::lockfile::Lockfile::load(&crate::lockfile::lockfile_path())?
+            .skills
+            .into_iter()
+            .find(|entry| entry.name == name)
+            .ok_or_else(|| anyhow::anyhow!("missing lock entry for {name}"))
+    }
+
+    fn persisted_update_state(name: &str) -> anyhow::Result<Option<bool>> {
+        let path = skillstar_core::infra::paths::state_dir().join("skill_update_states.json");
+        let states = serde_json::from_str::<HashMap<String, bool>>(&fs::read_to_string(path)?)?;
+        Ok(states.get(name).copied())
+    }
+
+    fn assert_content(path: &Path, expected: &str) -> anyhow::Result<()> {
+        let content = fs::read_to_string(path.join("SKILL.md"))?;
+        anyhow::ensure!(content.contains(expected), "unexpected content: {content}");
+        Ok(())
+    }
+
+    fn git(repository: &Path, args: &[&str]) -> anyhow::Result<()> {
+        let output = skillstar_core::infra::path_env::command_with_path("git")
+            .current_dir(repository)
+            .args(args)
+            .output()?;
+        anyhow::ensure!(
+            output.status.success(),
+            "git failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(())
+    }
+
+    fn git_output(repository: &Path, args: &[&str]) -> anyhow::Result<String> {
+        let output = skillstar_core::infra::path_env::command_with_path("git")
+            .current_dir(repository)
+            .args(args)
+            .output()?;
+        anyhow::ensure!(
+            output.status.success(),
+            "git failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(String::from_utf8(output.stdout)?.trim().to_string())
+    }
+
+    fn git_clone(source: &Path, destination: &Path) -> anyhow::Result<()> {
+        let output = skillstar_core::infra::path_env::command_with_path("git")
+            .args(["clone", "-q"])
+            .arg(source)
+            .arg(destination)
+            .output()?;
+        anyhow::ensure!(
+            output.status.success(),
+            "git clone failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(())
+    }
+
+    fn set_env<K: AsRef<OsStr>, V: AsRef<OsStr>>(key: K, value: V) {
+        unsafe { std::env::set_var(key, value) }
+    }
+
+    fn remove_env<K: AsRef<OsStr>>(key: K) {
+        unsafe { std::env::remove_var(key) }
+    }
+
+    fn restore_env<K: AsRef<OsStr>>(key: K, value: Option<std::ffi::OsString>) {
+        match value {
+            Some(value) => set_env(key, value),
+            None => remove_env(key),
+        }
+    }
+}

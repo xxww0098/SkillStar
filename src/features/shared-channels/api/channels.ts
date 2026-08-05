@@ -1,5 +1,6 @@
 import { tauriInvoke } from "../../../lib/ipc";
 import type {
+  ApplyChannelUpdateRequest,
   CreateChannelInvitationRequest,
   CreateSharedChannelRequest,
   ExistingChannelScanRequest,
@@ -103,4 +104,16 @@ export function reviewSharedChannelSubscription(repositoryId: number) {
 
 export function subscribeSharedChannel(request: SubscribeChannelRequest, sessionId: string) {
   return tauriInvoke("subscribe_shared_channel", { request, sessionId });
+}
+
+export function getSharedChannelUpdateState(repositoryId: number) {
+  return tauriInvoke("get_shared_channel_update_state", { repositoryId });
+}
+
+export function checkSharedChannelUpdate(repositoryId: number) {
+  return tauriInvoke("check_shared_channel_update", { repositoryId });
+}
+
+export function applySharedChannelUpdate(request: ApplyChannelUpdateRequest, sessionId: string) {
+  return tauriInvoke("apply_shared_channel_update", { request, sessionId });
 }
