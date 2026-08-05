@@ -637,37 +637,117 @@ pub fn uninstall_skill(name: &str) -> Result<(), String> {
         return Ok(());
     }
 
+    uninstall_hub_skill_with_commit(name, || Ok::<(), std::convert::Infallible>(()))
+        .map_err(|failure| failure.message)
+}
+
+#[derive(Debug)]
+pub(crate) struct UninstallSkillFailure {
+    pub message: String,
+    pub committed: bool,
+    pub rollback_complete: bool,
+}
+
+pub(crate) fn uninstall_hub_skill_with_commit<E>(
+    name: &str,
+    commit: impl FnOnce() -> Result<(), E>,
+) -> Result<(), UninstallSkillFailure>
+where
+    E: std::fmt::Display,
+{
+    crate::content::validate_skill_name(name).map_err(|error| UninstallSkillFailure {
+        message: format!("Invalid Skill name: {error}"),
+        committed: false,
+        rollback_complete: true,
+    })?;
+    if local_skill::is_local_skill(name) {
+        return Err(UninstallSkillFailure {
+            message: format!("Skill '{name}' is local and cannot use the Hub removal transaction"),
+            committed: false,
+            rollback_complete: true,
+        });
+    }
+
     let skills_dir = paths::hub_skills_dir();
     let path = skills_dir.join(name);
     let _lock = lockfile::get_mutex()
         .lock()
-        .map_err(|_| "Lockfile mutex poisoned".to_string())?;
+        .map_err(|_| UninstallSkillFailure {
+            message: "Lockfile mutex poisoned".to_string(),
+            committed: false,
+            rollback_complete: true,
+        })?;
     let lock_path = lockfile::lockfile_path();
-    let mut lf = lockfile::Lockfile::load(&lock_path)
-        .map_err(|e| format!("Failed to load lockfile '{}': {}", lock_path.display(), e))?;
+    let mut lf = lockfile::Lockfile::load(&lock_path).map_err(|error| UninstallSkillFailure {
+        message: format!("Failed to load lockfile '{}': {error}", lock_path.display()),
+        committed: false,
+        rollback_complete: true,
+    })?;
+    let previous_entry = lf
+        .skills
+        .iter()
+        .find(|entry| entry.name.eq_ignore_ascii_case(name))
+        .cloned();
     let staging = skills_dir.join(format!(".skillstar-remove-{name}-{}", std::process::id()));
     if staging.symlink_metadata().is_ok() {
-        return Err(format!(
-            "A previous removal staging path still exists: '{}'",
-            staging.display()
-        ));
+        return Err(UninstallSkillFailure {
+            message: format!(
+                "A previous removal staging path still exists: '{}'",
+                staging.display()
+            ),
+            committed: false,
+            rollback_complete: true,
+        });
     }
     let moved = path.symlink_metadata().is_ok();
     if moved {
-        std::fs::rename(&path, &staging)
-            .map_err(|error| format!("Failed to stage Skill '{name}' for removal: {error}"))?;
+        std::fs::rename(&path, &staging).map_err(|error| UninstallSkillFailure {
+            message: format!("Failed to stage Skill '{name}' for removal: {error}"),
+            committed: false,
+            rollback_complete: true,
+        })?;
     }
     lf.remove(name);
     if let Err(error) = lf.save(&lock_path) {
-        let restore_error = moved
+        let restore_failure = moved
             .then(|| std::fs::rename(&staging, &path).err())
-            .flatten()
+            .flatten();
+        let restore_error = restore_failure
+            .as_ref()
             .map(|restore| format!("; restoring the Skill also failed: {restore}"))
             .unwrap_or_default();
-        return Err(format!(
-            "Failed to save lockfile '{}': {error}{restore_error}",
-            lock_path.display(),
-        ));
+        return Err(UninstallSkillFailure {
+            message: format!(
+                "Failed to save lockfile '{}': {error}{restore_error}",
+                lock_path.display(),
+            ),
+            committed: false,
+            rollback_complete: restore_failure.is_none(),
+        });
+    }
+    if let Err(error) = commit() {
+        if let Some(entry) = previous_entry {
+            lf.upsert(entry);
+        }
+        let lock_restore_failure = lf.save(&lock_path).err();
+        let lock_restore = lock_restore_failure
+            .as_ref()
+            .map(|restore| format!("; restoring the lockfile also failed: {restore}"))
+            .unwrap_or_default();
+        let content_restore_failure = moved
+            .then(|| std::fs::rename(&staging, &path).err())
+            .flatten();
+        let content_restore = content_restore_failure
+            .as_ref()
+            .map(|restore| format!("; restoring the Skill also failed: {restore}"))
+            .unwrap_or_default();
+        return Err(UninstallSkillFailure {
+            message: format!(
+                "Unable to commit removed Skill metadata: {error}{lock_restore}{content_restore}"
+            ),
+            committed: false,
+            rollback_complete: lock_restore_failure.is_none() && content_restore_failure.is_none(),
+        });
     }
     drop(_lock);
 
@@ -696,10 +776,14 @@ pub fn uninstall_skill(name: &str) -> Result<(), String> {
     if cleanup_failures.is_empty() {
         Ok(())
     } else {
-        Err(format!(
-            "Skill '{name}' was removed from the hub, but cleanup is incomplete: {}",
-            cleanup_failures.join(", ")
-        ))
+        Err(UninstallSkillFailure {
+            message: format!(
+                "Skill '{name}' was removed from the hub, but cleanup is incomplete: {}",
+                cleanup_failures.join(", ")
+            ),
+            committed: true,
+            rollback_complete: false,
+        })
     }
 }
 

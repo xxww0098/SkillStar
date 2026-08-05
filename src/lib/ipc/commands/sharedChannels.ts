@@ -23,6 +23,9 @@ import type {
   ChannelSkillRollbackResult,
   ChannelSkillRollbackTarget,
   RollbackChannelSkillRequest,
+  ConvertRemovedChannelSkillRequest,
+  HandleRemovedChannelSkillResult,
+  InstallChannelSkillResult,
 } from "../../../types";
 
 export interface SharedChannelCommands {
@@ -137,6 +140,18 @@ export interface SharedChannelCommands {
   resume_shared_channel_skill_following: {
     args: { repositoryId: number; skillId: string };
     result: ChannelUpdateSnapshot;
+  };
+  uninstall_removed_shared_channel_skill: {
+    args: { repositoryId: number; skillId: string };
+    result: HandleRemovedChannelSkillResult;
+  };
+  convert_removed_shared_channel_skill_to_local: {
+    args: { request: ConvertRemovedChannelSkillRequest };
+    result: HandleRemovedChannelSkillResult;
+  };
+  install_shared_channel_skill: {
+    args: { repositoryId: number; skillId: string; sessionId: string };
+    result: InstallChannelSkillResult;
   };
   get_shared_channel_auto_update_state: {
     args: { repositoryId: number };

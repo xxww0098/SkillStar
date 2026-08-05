@@ -25,18 +25,61 @@ impl ChannelSubscriptionInstaller for GitChannelSubscriptionInstaller {
         request: ChannelInstallRequest,
     ) -> Result<ChannelInstallReceipt, SharedChannelError> {
         let git = self.git.clone();
-        tokio::task::spawn_blocking(move || install_blocking(&git, request))
-            .await
-            .map_err(|_| install_error("The channel installation task stopped unexpectedly"))?
+        tokio::task::spawn_blocking(move || {
+            let _guard =
+                crate::skill_update::acquire_update_transaction_lock().map_err(|error| {
+                    install_error(format!("Unable to lock channel installation: {error}"))
+                })?;
+            install_blocking(&git, request)
+        })
+        .await
+        .map_err(|_| install_error("The channel installation task stopped unexpectedly"))?
     }
 
     async fn rollback(&self, receipt: &ChannelInstallReceipt) -> Result<(), SharedChannelError> {
         let names = receipt.newly_installed_skill_ids.clone();
-        tokio::task::spawn_blocking(move || rollback_new_installs(&names))
-            .await
-            .map_err(|_| {
-                install_error("The channel installation rollback task stopped unexpectedly")
-            })?
+        tokio::task::spawn_blocking(move || {
+            let _guard =
+                crate::skill_update::acquire_update_transaction_lock().map_err(|error| {
+                    install_error(format!(
+                        "Unable to lock channel installation rollback: {error}"
+                    ))
+                })?;
+            rollback_new_installs(&names)
+        })
+        .await
+        .map_err(|_| install_error("The channel installation rollback task stopped unexpectedly"))?
+    }
+
+    async fn verify_and_commit_install(
+        &self,
+        receipt: &ChannelInstallReceipt,
+        commit: Box<dyn FnOnce() -> Result<(), SharedChannelError> + Send>,
+    ) -> Result<(), SharedChannelError> {
+        let receipt = receipt.clone();
+        tokio::task::spawn_blocking(move || {
+            let _guard =
+                crate::skill_update::acquire_update_transaction_lock().map_err(|error| {
+                    install_error(format!(
+                        "Unable to lock channel installation commit: {error}"
+                    ))
+                })?;
+            if let Err(error) = verify_install_receipt(&receipt) {
+                return Err(with_install_rollback(
+                    error,
+                    rollback_install_receipt_preserving_changes(&receipt),
+                ));
+            }
+            if let Err(error) = commit() {
+                return Err(with_install_rollback(
+                    error,
+                    rollback_install_receipt_preserving_changes(&receipt),
+                ));
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|_| install_error("The channel installation commit task stopped unexpectedly"))?
     }
 }
 
@@ -235,6 +278,100 @@ fn installed_receipt(
         skills,
         newly_installed_skill_ids: newly_installed_skill_ids.to_vec(),
     })
+}
+
+fn verify_install_receipt(receipt: &ChannelInstallReceipt) -> Result<(), SharedChannelError> {
+    let lockfile =
+        crate::lockfile::Lockfile::load(&crate::lockfile::lockfile_path()).map_err(|error| {
+            install_error(format!(
+                "Unable to verify installed Skill provenance: {error}"
+            ))
+        })?;
+    for skill in &receipt.skills {
+        verify_installed_skill(skill, &lockfile)?;
+    }
+    Ok(())
+}
+
+fn verify_installed_skill(
+    skill: &ChannelSubscribedSkill,
+    lockfile: &crate::lockfile::Lockfile,
+) -> Result<(), SharedChannelError> {
+    let entry = lockfile
+        .skills
+        .iter()
+        .find(|entry| entry.name.eq_ignore_ascii_case(&skill.id))
+        .ok_or_else(content_integrity_error)?;
+    let hub_path = skillstar_core::infra::paths::hub_skills_dir().join(&skill.id);
+    let checkout = crate::repo_link::repo_root_of(&hub_path).ok_or_else(content_integrity_error)?;
+    let head =
+        crate::git::ops::rev_parse(&checkout, "HEAD").map_err(|_| content_integrity_error())?;
+    let current = crate::content::snapshot(&skill.id).map_err(|_| content_integrity_error())?;
+    if current.content_hash != skill.release_content_hash
+        || skill.baseline_hash != skill.release_content_hash
+        || !head.eq_ignore_ascii_case(&skill.provenance.git_ref)
+        || entry.content_hash.as_deref() != Some(skill.release_content_hash.as_str())
+        || entry.content_hash_version != Some(skill.release_content_hash_version)
+        || entry.git_ref.as_deref() != Some(skill.provenance.git_ref.as_str())
+        || entry.source_folder.as_deref().unwrap_or_default() != skill.provenance.source_folder
+        || !crate::source_resolver::same_remote_url(
+            &entry.git_url,
+            &skill.provenance.repository_url,
+        )
+    {
+        return Err(content_integrity_error());
+    }
+    Ok(())
+}
+
+fn rollback_install_receipt_preserving_changes(
+    receipt: &ChannelInstallReceipt,
+) -> Result<(), SharedChannelError> {
+    let lockfile =
+        crate::lockfile::Lockfile::load(&crate::lockfile::lockfile_path()).map_err(|error| {
+            install_error(format!(
+                "Unable to inspect staged install rollback: {error}"
+            ))
+        })?;
+    let mut failures = Vec::new();
+    for name in receipt.newly_installed_skill_ids.iter().rev() {
+        let Some(skill) = receipt
+            .skills
+            .iter()
+            .find(|skill| skill.id.eq_ignore_ascii_case(name))
+        else {
+            failures.push(format!("{name}: staged receipt is missing"));
+            continue;
+        };
+        if verify_installed_skill(skill, &lockfile).is_err() {
+            failures.push(format!("{name}: current content changed and was preserved"));
+            continue;
+        }
+        if let Err(error) = crate::skill_install::uninstall_skill(name) {
+            failures.push(format!("{name}: {error}"));
+        }
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(install_error(failures.join(", ")))
+    }
+}
+
+fn with_install_rollback(
+    error: SharedChannelError,
+    rollback: Result<(), SharedChannelError>,
+) -> SharedChannelError {
+    match rollback {
+        Ok(()) => error,
+        Err(rollback) => SharedChannelError::new(
+            error.code,
+            format!(
+                "{}; the staged channel Skill could not be rolled back: {}",
+                error.message, rollback.message
+            ),
+        ),
+    }
 }
 
 fn subscribed_skill_from_lock(

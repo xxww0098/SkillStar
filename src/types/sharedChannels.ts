@@ -258,7 +258,14 @@ export interface SubscribeChannelRequest {
 
 export type ChannelUpdateStatus = "up_to_date" | "update_available" | "partially_upgraded" | "blocked";
 export type ChannelUpdateChange = "added" | "updated" | "removed" | "unchanged";
-export type ChannelUpdateItemState = "current" | "available" | "applied" | "blocked" | "failed" | "notification";
+export type ChannelUpdateItemState =
+  | "current"
+  | "available"
+  | "applied"
+  | "blocked"
+  | "failed"
+  | "notification"
+  | "removed_from_channel";
 export type ChannelUpdateBlockReason =
   | "local_content_changed"
   | "baseline_missing"
@@ -375,4 +382,21 @@ export interface ApplyChannelUpdateRequest {
 export interface ApplyChannelUpdateResult {
   snapshot: ChannelUpdateSnapshot;
   applied_skill_ids: string[];
+}
+
+export interface ConvertRemovedChannelSkillRequest {
+  repository_id: number;
+  skill_id: string;
+  local_name: string;
+}
+
+export interface HandleRemovedChannelSkillResult {
+  skill_id: string;
+  local_name: string | null;
+  snapshot: ChannelUpdateSnapshot;
+}
+
+export interface InstallChannelSkillResult {
+  subscription: ChannelSubscription;
+  snapshot: ChannelUpdateSnapshot;
 }

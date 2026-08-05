@@ -277,7 +277,7 @@ fn validate_store(store: &ChannelSubscriptionStore) -> Result<(), SharedChannelE
             return Err(storage_error("validate"));
         }
         if let Some(snapshot) = &subscription.last_update {
-            super::channel_update::validate_update_snapshot(snapshot)?;
+            super::channel_update_validation::validate_update_snapshot(snapshot)?;
             if snapshot.target.revision < subscription.target.revision
                 || (snapshot.target.revision == subscription.target.revision
                     && snapshot.target != subscription.target)

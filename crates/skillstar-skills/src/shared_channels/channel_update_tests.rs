@@ -109,6 +109,12 @@ pub(super) struct UpdateInstaller {
     pub(super) rollback_failures: Arc<Mutex<BTreeSet<String>>>,
     pub(super) applied: Arc<Mutex<Vec<ChannelSkillUpdateRequest>>>,
     pub(super) metadata_commits: Arc<Mutex<usize>>,
+    pub(super) install_requests: Arc<Mutex<Vec<ChannelInstallRequest>>>,
+    pub(super) install_rollbacks: Arc<Mutex<usize>>,
+    pub(super) uninstalled: Arc<Mutex<Vec<String>>>,
+    pub(super) converted: Arc<Mutex<Vec<(String, String)>>>,
+    pub(super) local_name_conflicts: Arc<Mutex<BTreeSet<String>>>,
+    pub(super) removal_cleanup_failures: Arc<Mutex<BTreeSet<String>>>,
     rollbacks: Arc<Mutex<Vec<String>>>,
 }
 
@@ -116,13 +122,30 @@ pub(super) struct UpdateInstaller {
 impl ChannelSubscriptionInstaller for UpdateInstaller {
     async fn install(
         &self,
-        _request: ChannelInstallRequest,
+        request: ChannelInstallRequest,
     ) -> Result<ChannelInstallReceipt, SharedChannelError> {
-        unreachable!("update tests do not install a new subscription")
+        self.install_requests.lock().unwrap().push(request.clone());
+        let selected = request
+            .manifest
+            .skills
+            .iter()
+            .filter(|skill| {
+                request
+                    .selected_skill_ids
+                    .iter()
+                    .any(|id| id.eq_ignore_ascii_case(&skill.id))
+            })
+            .map(|skill| subscribed_skill(skill, &request.manifest))
+            .collect::<Vec<_>>();
+        Ok(ChannelInstallReceipt {
+            newly_installed_skill_ids: selected.iter().map(|skill| skill.id.clone()).collect(),
+            skills: selected,
+        })
     }
 
     async fn rollback(&self, _receipt: &ChannelInstallReceipt) -> Result<(), SharedChannelError> {
-        unreachable!("update tests use update rollback receipts")
+        *self.install_rollbacks.lock().unwrap() += 1;
+        Ok(())
     }
 }
 
@@ -255,6 +278,66 @@ impl ChannelSubscriptionUpdater for UpdateInstaller {
             return Err(SharedChannelError::new(
                 SharedChannelErrorCode::SubscriptionUpdateFailed,
                 format!("{} rollback failed", receipt.previous.id),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl ChannelRemovedSkillHandler for UpdateInstaller {
+    async fn uninstall_and_commit(
+        &self,
+        skill: &ChannelSubscribedSkill,
+        commit: Box<dyn FnOnce() -> Result<(), SharedChannelError> + Send>,
+    ) -> Result<(), SharedChannelError> {
+        commit()?;
+        self.uninstalled.lock().unwrap().push(skill.id.clone());
+        if self
+            .removal_cleanup_failures
+            .lock()
+            .unwrap()
+            .contains(&skill.id)
+        {
+            return Err(SharedChannelError::new(
+                SharedChannelErrorCode::SubscriptionUpdateFailed,
+                "deployment cleanup failed after removal committed",
+            ));
+        }
+        Ok(())
+    }
+
+    async fn convert_to_local_and_commit(
+        &self,
+        skill: &ChannelSubscribedSkill,
+        local_name: &str,
+        commit: Box<dyn FnOnce() -> Result<(), SharedChannelError> + Send>,
+    ) -> Result<(), SharedChannelError> {
+        if self
+            .local_name_conflicts
+            .lock()
+            .unwrap()
+            .contains(local_name)
+        {
+            return Err(SharedChannelError::new(
+                SharedChannelErrorCode::SubscriptionUpdateFailed,
+                "local name conflict",
+            ));
+        }
+        commit()?;
+        self.converted
+            .lock()
+            .unwrap()
+            .push((skill.id.clone(), local_name.to_string()));
+        if self
+            .removal_cleanup_failures
+            .lock()
+            .unwrap()
+            .contains(&skill.id)
+        {
+            return Err(SharedChannelError::new(
+                SharedChannelErrorCode::SubscriptionUpdateFailed,
+                "deployment cleanup failed after conversion committed",
             ));
         }
         Ok(())
@@ -606,7 +689,7 @@ async fn offline_check_keeps_last_verified_target_and_persists_retryable_error()
 }
 
 #[tokio::test]
-async fn removed_upstream_skill_is_blocked_and_kept_installed() {
+async fn removed_upstream_skill_enters_removed_state_and_stays_installed() {
     let (gateway, subscriptions, installer) = fixtures();
     let without_writer = manifest(
         2,
@@ -626,7 +709,7 @@ async fn removed_upstream_skill_is_blocked_and_kept_installed() {
         .unwrap();
 
     assert_eq!(writer.change, ChannelUpdateChange::Removed);
-    assert_eq!(writer.state, ChannelUpdateItemState::Blocked);
+    assert_eq!(writer.state, ChannelUpdateItemState::RemovedFromChannel);
     assert_eq!(
         writer.block_reason,
         Some(ChannelUpdateBlockReason::RemovedUpstream)
@@ -638,6 +721,28 @@ async fn removed_upstream_skill_is_blocked_and_kept_installed() {
             .iter()
             .any(|skill| skill.id == "writer")
     );
+}
+
+#[tokio::test]
+async fn legacy_removed_snapshot_remains_readable_after_the_state_upgrade() {
+    let (gateway, subscriptions, installer) = fixtures();
+    *gateway.manifests.lock().unwrap() = vec![
+        manifest_v1(),
+        manifest(2, 'd', vec![release_skill("reader", 'e')]),
+    ];
+    let mut snapshot = service(gateway, subscriptions, installer)
+        .check_update(42)
+        .await
+        .unwrap();
+    let writer = snapshot
+        .items
+        .iter_mut()
+        .find(|item| item.id == "writer")
+        .unwrap();
+    writer.state = ChannelUpdateItemState::Blocked;
+    writer.suggested_local_name = None;
+
+    super::channel_update_validation::validate_update_snapshot(&snapshot).unwrap();
 }
 
 #[tokio::test]
@@ -974,7 +1079,7 @@ fn subscription_v1() -> ChannelSubscription {
     }
 }
 
-fn subscribed_skill(
+pub(super) fn subscribed_skill(
     skill: &ChannelReleaseSkill,
     manifest: &ChannelReleaseManifest,
 ) -> ChannelSubscribedSkill {
@@ -1016,7 +1121,7 @@ pub(super) fn manifest_v2() -> ChannelReleaseManifest {
     )
 }
 
-fn manifest(
+pub(super) fn manifest(
     revision: u64,
     commit: char,
     skills: Vec<ChannelReleaseSkill>,
@@ -1039,7 +1144,7 @@ fn manifest(
     }
 }
 
-fn release_skill(id: &str, digest: char) -> ChannelReleaseSkill {
+pub(super) fn release_skill(id: &str, digest: char) -> ChannelReleaseSkill {
     ChannelReleaseSkill {
         id: id.into(),
         content_root: format!("skills/{id}"),

@@ -6,9 +6,10 @@ use skillstar_skills::shared_channels::{
     ChannelPublishPreview, ChannelPublishResult, ChannelSkillRollbackResult,
     ChannelSkillRollbackTarget, ChannelSubscription, ChannelSubscriptionRegistry,
     ChannelSubscriptionReview, ChannelSubscriptionView, ChannelUpdateSnapshot,
-    CreateChannelInvitationRequest, CreateSharedChannelRequest, DiskChannelSubscriptionRegistry,
-    DiskSharedChannelRegistry, ExistingChannelRepositoryCandidate, ExistingChannelScanPreview,
-    ExistingChannelScanRequest, GitHubOrganization, RollbackChannelSkillRequest,
+    ConvertRemovedChannelSkillRequest, CreateChannelInvitationRequest, CreateSharedChannelRequest,
+    DiskChannelSubscriptionRegistry, DiskSharedChannelRegistry, ExistingChannelRepositoryCandidate,
+    ExistingChannelScanPreview, ExistingChannelScanRequest, GitHubOrganization,
+    HandleRemovedChannelSkillResult, InstallChannelSkillResult, RollbackChannelSkillRequest,
     SharedChannelDescriptor, SharedChannelError, SharedChannelRegistry, SubscribeChannelRequest,
 };
 use tauri::{AppHandle, State};
@@ -341,6 +342,49 @@ pub async fn resume_shared_channel_skill_following(
         .channel_subscription_facade(skillstar_skills::git_skill::GitSkillFacade::from_keyring())?
         .resume_following_skill(repository_id, &skill_id)
         .await
+}
+
+#[tauri::command]
+pub async fn uninstall_removed_shared_channel_skill(
+    repository_id: u64,
+    skill_id: String,
+    state: State<'_, GitHubAuthState>,
+) -> Result<HandleRemovedChannelSkillResult, SharedChannelError> {
+    state
+        .channel_subscription_facade(skillstar_skills::git_skill::GitSkillFacade::from_keyring())?
+        .uninstall_removed_skill(repository_id, &skill_id)
+        .await
+}
+
+#[tauri::command]
+pub async fn convert_removed_shared_channel_skill_to_local(
+    request: ConvertRemovedChannelSkillRequest,
+    state: State<'_, GitHubAuthState>,
+) -> Result<HandleRemovedChannelSkillResult, SharedChannelError> {
+    state
+        .channel_subscription_facade(skillstar_skills::git_skill::GitSkillFacade::from_keyring())?
+        .convert_removed_skill_to_local(request)
+        .await
+}
+
+#[tauri::command]
+pub async fn install_shared_channel_skill(
+    repository_id: u64,
+    skill_id: String,
+    session_id: String,
+    app: AppHandle,
+    state: State<'_, GitHubAuthState>,
+) -> Result<InstallChannelSkillResult, SharedChannelError> {
+    let git_facade = state
+        .begin_git_operation(app, Some(session_id))
+        .map_err(SharedChannelError::from)?;
+    let registered_session_id = git_facade.session().id().to_string();
+    let result = match state.channel_subscription_facade(git_facade) {
+        Ok(facade) => facade.install_channel_skill(repository_id, &skill_id).await,
+        Err(error) => Err(error),
+    };
+    state.finish_git_operation(&registered_session_id);
+    result
 }
 
 #[tauri::command]

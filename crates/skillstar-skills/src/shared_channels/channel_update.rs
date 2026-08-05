@@ -1,10 +1,10 @@
 use super::subscription::release_target;
 use super::{
-    CHANNEL_CONTENT_HASH_VERSION, ChannelPublisherIdentity, ChannelReleaseManifest,
-    ChannelReleaseSkill, ChannelReleaseTarget, ChannelSubscribedSkill, ChannelSubscription,
-    ChannelSubscriptionFacade, ChannelSubscriptionGateway, ChannelSubscriptionInstaller,
-    ChannelSubscriptionRegistry, RemoteRepository, SHARED_CHANNEL_MUTATION_GATE,
-    SharedChannelError, SharedChannelErrorCode, SharedChannelRegistry,
+    ChannelPublisherIdentity, ChannelReleaseManifest, ChannelReleaseSkill, ChannelReleaseTarget,
+    ChannelSubscribedSkill, ChannelSubscription, ChannelSubscriptionFacade,
+    ChannelSubscriptionGateway, ChannelSubscriptionInstaller, ChannelSubscriptionRegistry,
+    RemoteRepository, SHARED_CHANNEL_MUTATION_GATE, SharedChannelError, SharedChannelErrorCode,
+    SharedChannelRegistry,
 };
 use crate::skill_update::{LocalDivergenceReason, LocalDivergenceResolution};
 use async_trait::async_trait;
@@ -39,6 +39,7 @@ pub enum ChannelUpdateItemState {
     Blocked,
     Failed,
     Notification,
+    RemovedFromChannel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -534,20 +535,12 @@ where
         for installed in &subscription.skills {
             let key = installed.id.to_ascii_lowercase();
             tracked.insert(key.clone());
+            if has_pending_removal(subscription, &installed.id) {
+                items.push(removed_item(installed));
+                continue;
+            }
             let Some(target) = released.get(&key) else {
-                items.push(ChannelUpdateItem {
-                    id: installed.id.clone(),
-                    change: ChannelUpdateChange::Removed,
-                    state: ChannelUpdateItemState::Blocked,
-                    selected: true,
-                    from_content_hash: Some(installed.release_content_hash.clone()),
-                    to_content_hash: None,
-                    block_reason: Some(ChannelUpdateBlockReason::RemovedUpstream),
-                    suggested_local_name: None,
-                    error: None,
-                    pinned_target: None,
-                    error_code: None,
-                });
+                items.push(removed_item(installed));
                 continue;
             };
             if target.id != installed.id {
@@ -619,6 +612,34 @@ where
             check_error: None,
             check_error_code: None,
         })
+    }
+}
+
+pub(super) fn has_pending_removal(subscription: &ChannelSubscription, skill_id: &str) -> bool {
+    subscription.last_update.as_ref().is_some_and(|snapshot| {
+        snapshot.items.iter().any(|item| {
+            item.id.eq_ignore_ascii_case(skill_id)
+                && item.change == ChannelUpdateChange::Removed
+                && (item.state == ChannelUpdateItemState::RemovedFromChannel
+                    || (item.state == ChannelUpdateItemState::Blocked
+                        && item.block_reason == Some(ChannelUpdateBlockReason::RemovedUpstream)))
+        })
+    })
+}
+
+fn removed_item(installed: &ChannelSubscribedSkill) -> ChannelUpdateItem {
+    ChannelUpdateItem {
+        id: installed.id.clone(),
+        change: ChannelUpdateChange::Removed,
+        state: ChannelUpdateItemState::RemovedFromChannel,
+        selected: true,
+        from_content_hash: Some(installed.release_content_hash.clone()),
+        to_content_hash: None,
+        block_reason: Some(ChannelUpdateBlockReason::RemovedUpstream),
+        suggested_local_name: Some(crate::skill_update::suggested_local_name(&installed.id)),
+        error: None,
+        pinned_target: None,
+        error_code: None,
     }
 }
 
@@ -726,6 +747,7 @@ fn derive_status(
             ChannelUpdateItemState::Available
                 | ChannelUpdateItemState::Blocked
                 | ChannelUpdateItemState::Failed
+                | ChannelUpdateItemState::RemovedFromChannel
         )
     });
     let has_notification = items
@@ -818,162 +840,4 @@ fn validate_resolutions(
         }
     }
     Ok(())
-}
-
-pub(super) fn validate_update_snapshot(
-    snapshot: &ChannelUpdateSnapshot,
-) -> Result<(), SharedChannelError> {
-    if snapshot.target.revision == 0
-        || snapshot.target.tag_name != super::revision_tag(snapshot.target.revision)
-        || snapshot.target.commit_sha.len() != 40
-        || snapshot
-            .target
-            .commit_sha
-            .bytes()
-            .any(|byte| !byte.is_ascii_hexdigit())
-        || chrono::DateTime::parse_from_rfc3339(&snapshot.published_at).is_err()
-        || chrono::DateTime::parse_from_rfc3339(&snapshot.checked_at).is_err()
-        || super::release::validate_publisher(&snapshot.publisher).is_err()
-        || super::release::validate_release_text(&snapshot.title, &snapshot.notes).is_err()
-        || snapshot.items.len() > 4_096
-        || snapshot
-            .check_error
-            .as_ref()
-            .is_some_and(|error| error.is_empty() || error.contains('\0'))
-        || snapshot.check_error.is_some() != snapshot.check_error_code.is_some()
-    {
-        return Err(SharedChannelError::new(
-            SharedChannelErrorCode::Storage,
-            "Unable to validate the shared channel update snapshot",
-        ));
-    }
-    let mut skills = BTreeSet::new();
-    for item in &snapshot.items {
-        if crate::content::validate_skill_name(&item.id).is_err()
-            || !skills.insert(item.id.to_ascii_lowercase())
-            || item
-                .from_content_hash
-                .as_deref()
-                .is_some_and(|hash| !valid_content_hash(hash))
-            || item
-                .to_content_hash
-                .as_deref()
-                .is_some_and(|hash| !valid_content_hash(hash))
-            || !valid_update_item(item)
-        {
-            return Err(SharedChannelError::new(
-                SharedChannelErrorCode::Storage,
-                "Unable to validate the shared channel update snapshot",
-            ));
-        }
-    }
-    let has_pending = snapshot.items.iter().any(|item| {
-        matches!(
-            item.state,
-            ChannelUpdateItemState::Available
-                | ChannelUpdateItemState::Blocked
-                | ChannelUpdateItemState::Failed
-        )
-    });
-    let has_available = snapshot
-        .items
-        .iter()
-        .any(|item| item.state == ChannelUpdateItemState::Available);
-    let has_notification = snapshot
-        .items
-        .iter()
-        .any(|item| item.state == ChannelUpdateItemState::Notification);
-    let has_advanced = snapshot.items.iter().any(|item| {
-        matches!(
-            item.state,
-            ChannelUpdateItemState::Current | ChannelUpdateItemState::Applied
-        )
-    });
-    let valid_status = match snapshot.status {
-        ChannelUpdateStatus::UpToDate => {
-            !has_pending && !has_notification && !snapshot.acknowledgement_required
-        }
-        ChannelUpdateStatus::UpdateAvailable => {
-            has_available || has_notification || snapshot.acknowledgement_required
-        }
-        ChannelUpdateStatus::PartiallyUpgraded => has_pending && has_advanced,
-        ChannelUpdateStatus::Blocked => has_pending && !has_available,
-    };
-    if !valid_status {
-        return Err(SharedChannelError::new(
-            SharedChannelErrorCode::Storage,
-            "Unable to validate the shared channel update snapshot",
-        ));
-    }
-    Ok(())
-}
-
-fn valid_update_item(item: &ChannelUpdateItem) -> bool {
-    let no_resolution_metadata = item.block_reason.is_none()
-        && item.suggested_local_name.is_none()
-        && item.error.is_none()
-        && item.error_code.is_none();
-    match (item.change, item.state) {
-        (ChannelUpdateChange::Added, ChannelUpdateItemState::Notification) => {
-            !item.selected
-                && item.from_content_hash.is_none()
-                && item.to_content_hash.is_some()
-                && no_resolution_metadata
-        }
-        (ChannelUpdateChange::Removed, ChannelUpdateItemState::Blocked) => {
-            item.selected
-                && item.from_content_hash.is_some()
-                && item.to_content_hash.is_none()
-                && item.block_reason == Some(ChannelUpdateBlockReason::RemovedUpstream)
-                && item.suggested_local_name.is_none()
-                && item.error.is_none()
-        }
-        (ChannelUpdateChange::Unchanged, ChannelUpdateItemState::Current) => {
-            item.selected
-                && item.from_content_hash.is_some()
-                && item.from_content_hash == item.to_content_hash
-                && no_resolution_metadata
-        }
-        (ChannelUpdateChange::Updated, ChannelUpdateItemState::Available)
-        | (ChannelUpdateChange::Updated, ChannelUpdateItemState::Applied) => {
-            item.selected
-                && item.from_content_hash.is_some()
-                && item.to_content_hash.is_some()
-                && no_resolution_metadata
-        }
-        (ChannelUpdateChange::Updated, ChannelUpdateItemState::Blocked) => {
-            item.selected
-                && item.from_content_hash.is_some()
-                && item.to_content_hash.is_some()
-                && item
-                    .block_reason
-                    .is_some_and(|reason| reason != ChannelUpdateBlockReason::RemovedUpstream)
-                && item.suggested_local_name.is_some()
-                && item
-                    .error
-                    .as_ref()
-                    .is_none_or(|error| !error.contains('\0'))
-                && item.error_code.is_none()
-        }
-        (ChannelUpdateChange::Updated, ChannelUpdateItemState::Failed) => {
-            item.selected
-                && item.from_content_hash.is_some()
-                && item.to_content_hash.is_some()
-                && item
-                    .error
-                    .as_ref()
-                    .is_some_and(|error| !error.is_empty() && !error.contains('\0'))
-                && item.error_code.is_some()
-                && item
-                    .block_reason
-                    .is_none_or(|reason| reason != ChannelUpdateBlockReason::RemovedUpstream)
-        }
-        _ => false,
-    }
-}
-
-fn valid_content_hash(value: &str) -> bool {
-    value.strip_prefix("sha256:").is_some_and(|digest| {
-        digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
-    }) && CHANNEL_CONTENT_HASH_VERSION == crate::content::SNAPSHOT_HASH_VERSION
 }

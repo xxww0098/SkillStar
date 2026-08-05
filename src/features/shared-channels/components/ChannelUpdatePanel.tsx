@@ -14,13 +14,16 @@ import type {
 import {
   applySharedChannelUpdate,
   checkSharedChannelUpdate,
+  convertRemovedSharedChannelSkillToLocal,
   getSharedChannelAutoUpdateState,
   getSharedChannelUpdateState,
+  installSharedChannelSkill,
   listSharedChannelSkillRollbackTargets,
   resumeSharedChannelSkillFollowing,
   rollbackSharedChannelSkill,
   runSharedChannelAutoUpdates,
   setSharedChannelAutoUpdateEnabled,
+  uninstallRemovedSharedChannelSkill,
 } from "../api/channels";
 
 export function ChannelUpdatePanel({ repositoryId }: { repositoryId: number }) {
@@ -211,6 +214,8 @@ export function ChannelUpdatePanel({ repositoryId }: { repositoryId: number }) {
       setHistorySelections((current) => withoutKey(current, skillId));
     } catch (cause) {
       setError(updateError(cause));
+      const stored = await getSharedChannelUpdateState(repositoryId).catch(() => null);
+      if (stored) setSnapshot(stored);
     } finally {
       setSkillAction(null);
     }
@@ -226,6 +231,50 @@ export function ChannelUpdatePanel({ repositoryId }: { repositoryId: number }) {
       setHistorySelections((current) => withoutKey(current, skillId));
     } catch (cause) {
       setError(updateError(cause));
+    } finally {
+      setSkillAction(null);
+    }
+  };
+
+  const resolveRemovedSkill = async (skillId: string, action: "convert" | "uninstall") => {
+    if (skillAction) return;
+    const localName = (localNames[skillId] ?? `${skillId}.local`).trim();
+    if (action === "convert" && !localName) return;
+    setSkillAction(skillId);
+    setError("");
+    try {
+      const result =
+        action === "convert"
+          ? await convertRemovedSharedChannelSkillToLocal({
+              repository_id: repositoryId,
+              skill_id: skillId,
+              local_name: localName,
+            })
+          : await uninstallRemovedSharedChannelSkill(repositoryId, skillId);
+      setSnapshot(result.snapshot);
+      setLocalNames((current) => withoutKey(current, skillId));
+      setHistories((current) => ({ ...current, [skillId]: undefined }));
+      setHistorySelections((current) => withoutKey(current, skillId));
+    } catch (cause) {
+      setError(updateError(cause));
+      const stored = await getSharedChannelUpdateState(repositoryId).catch(() => null);
+      if (stored) setSnapshot(stored);
+    } finally {
+      setSkillAction(null);
+    }
+  };
+
+  const installAddedSkill = async (skillId: string) => {
+    if (skillAction) return;
+    setSkillAction(skillId);
+    setError("");
+    try {
+      const result = await installSharedChannelSkill(repositoryId, skillId, crypto.randomUUID());
+      setSnapshot(result.snapshot);
+    } catch (cause) {
+      setError(updateError(cause));
+      const stored = await getSharedChannelUpdateState(repositoryId).catch(() => null);
+      if (stored) setSnapshot(stored);
     } finally {
       setSkillAction(null);
     }
@@ -315,7 +364,9 @@ export function ChannelUpdatePanel({ repositoryId }: { repositoryId: number }) {
       </div>
 
       {snapshot.acknowledgement_required &&
-        !snapshot.items.some((item) => ["available", "notification", "blocked", "failed"].includes(item.state)) && (
+        !snapshot.items.some((item) =>
+          ["available", "notification", "blocked", "failed", "removed_from_channel"].includes(item.state),
+        ) && (
           <p className="rounded-lg border border-border bg-muted/40 p-2 text-xs text-muted-foreground">
             This release has no Skill content changes. Acknowledge it to advance the subscribed revision.
           </p>
@@ -326,7 +377,7 @@ export function ChannelUpdatePanel({ repositoryId }: { repositoryId: number }) {
           <UpdateItem
             key={item.id}
             item={item}
-            disabled={applying}
+            disabled={applying || Boolean(skillAction)}
             history={histories[item.id]}
             historyLoading={historyBusy === item.id}
             historySelection={historySelections[item.id]}
@@ -348,6 +399,9 @@ export function ChannelUpdatePanel({ repositoryId }: { repositoryId: number }) {
             onHistorySelection={(revision) => setHistorySelections((current) => ({ ...current, [item.id]: revision }))}
             onRollback={() => void rollbackSkill(item.id)}
             onResume={() => void resumeFollowing(item.id)}
+            onConvertRemoved={() => void resolveRemovedSkill(item.id, "convert")}
+            onUninstallRemoved={() => void resolveRemovedSkill(item.id, "uninstall")}
+            onInstallAdded={() => void installAddedSkill(item.id)}
           />
         ))}
       </div>
@@ -361,7 +415,9 @@ export function ChannelUpdatePanel({ repositoryId }: { repositoryId: number }) {
         <Button size="sm" onClick={() => void apply()} disabled={!actionable || applying || checking}>
           {applying && <Loader2 className="mr-1.5 size-4 animate-spin" />}
           {snapshot.acknowledgement_required &&
-          !snapshot.items.some((item) => ["available", "notification", "blocked", "failed"].includes(item.state))
+          !snapshot.items.some((item) =>
+            ["available", "notification", "blocked", "failed", "removed_from_channel"].includes(item.state),
+          )
             ? "Acknowledge release"
             : "Apply safe updates"}
         </Button>
@@ -432,6 +488,9 @@ function UpdateItem({
   onHistorySelection,
   onRollback,
   onResume,
+  onConvertRemoved,
+  onUninstallRemoved,
+  onInstallAdded,
 }: {
   item: ChannelUpdateItem;
   disabled: boolean;
@@ -447,8 +506,14 @@ function UpdateItem({
   onHistorySelection: (revision: number) => void;
   onRollback: () => void;
   onResume: () => void;
+  onConvertRemoved: () => void;
+  onUninstallRemoved: () => void;
+  onInstallAdded: () => void;
 }) {
   const locallyBlocked = !item.pinned_target && item.state === "blocked" && item.block_reason !== "removed_upstream";
+  const removedFromChannel =
+    item.state === "removed_from_channel" ||
+    (item.change === "removed" && item.state === "blocked" && item.block_reason === "removed_upstream");
   return (
     <div className="rounded-lg border border-border px-3 py-2.5">
       <div className="flex items-start justify-between gap-3">
@@ -460,13 +525,27 @@ function UpdateItem({
         </div>
         {item.state === "applied" || item.state === "current" ? (
           <CheckCircle2 className="size-4 text-emerald-600" />
-        ) : item.state === "blocked" || item.state === "failed" ? (
+        ) : item.state === "blocked" || item.state === "failed" || removedFromChannel ? (
           <AlertTriangle className="size-4 text-amber-500" />
         ) : null}
       </div>
 
       {item.change === "added" && (
-        <p className="mt-2 text-[11px] text-muted-foreground">New in this release; it was not selected or installed.</p>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[11px] text-muted-foreground">New in this release; it was not selected or installed.</p>
+          {item.state === "notification" && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={disabled || skillAction}
+              aria-label={`Install and track ${item.id}`}
+              onClick={onInstallAdded}
+            >
+              {skillAction && <Loader2 className="mr-1.5 size-3.5 animate-spin" />}
+              Install & track
+            </Button>
+          )}
+        </div>
       )}
       {item.pinned_target ? (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/25 bg-amber-500/5 p-2">
@@ -526,11 +605,41 @@ function UpdateItem({
           )}
         </div>
       ) : null}
-      {item.block_reason === "removed_upstream" && (
-        <p className="mt-2 flex items-center gap-1.5 text-[11px] text-amber-700">
-          <ShieldAlert className="size-3.5" /> Removed upstream; your installed copy is kept until you remove it
-          explicitly.
-        </p>
+      {removedFromChannel && (
+        <div className="mt-3 space-y-2 rounded-md border border-amber-500/25 bg-amber-500/5 p-2">
+          <p className="flex items-center gap-1.5 text-[11px] text-amber-700">
+            <ShieldAlert className="size-3.5" /> This Skill is no longer in the channel. Its installed copy is unchanged
+            until you convert it to local or uninstall it.
+          </p>
+          <input
+            aria-label={`Local copy name for ${item.id}`}
+            value={localName}
+            disabled={disabled || skillAction}
+            onChange={(event) => onLocalName(event.target.value)}
+            className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+          />
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={disabled || skillAction || !localName.trim()}
+              aria-label={`Convert ${item.id} to local`}
+              onClick={onConvertRemoved}
+            >
+              {skillAction && <Loader2 className="mr-1.5 size-3.5 animate-spin" />}
+              Convert to local
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={disabled || skillAction}
+              aria-label={`Uninstall ${item.id}`}
+              onClick={onUninstallRemoved}
+            >
+              Uninstall
+            </Button>
+          </div>
+        </div>
       )}
       {locallyBlocked && (
         <div className="mt-3 space-y-2 rounded-md bg-muted/50 p-2">

@@ -6,6 +6,7 @@ import type {
   ExistingChannelScanRequest,
   SubscribeChannelRequest,
   RollbackChannelSkillRequest,
+  ConvertRemovedChannelSkillRequest,
 } from "../../../types";
 
 export function listSharedChannelOrganizations() {
@@ -129,6 +130,18 @@ export function rollbackSharedChannelSkill(request: RollbackChannelSkillRequest,
 
 export function resumeSharedChannelSkillFollowing(repositoryId: number, skillId: string) {
   return tauriInvoke("resume_shared_channel_skill_following", { repositoryId, skillId });
+}
+
+export function uninstallRemovedSharedChannelSkill(repositoryId: number, skillId: string) {
+  return tauriInvoke("uninstall_removed_shared_channel_skill", { repositoryId, skillId });
+}
+
+export function convertRemovedSharedChannelSkillToLocal(request: ConvertRemovedChannelSkillRequest) {
+  return tauriInvoke("convert_removed_shared_channel_skill_to_local", { request });
+}
+
+export function installSharedChannelSkill(repositoryId: number, skillId: string, sessionId: string) {
+  return tauriInvoke("install_shared_channel_skill", { repositoryId, skillId, sessionId });
 }
 
 export function getSharedChannelAutoUpdateState(repositoryId: number) {

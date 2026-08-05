@@ -224,6 +224,26 @@ pub trait ChannelSubscriptionInstaller: Send + Sync {
     ) -> Result<ChannelInstallReceipt, SharedChannelError>;
 
     async fn rollback(&self, receipt: &ChannelInstallReceipt) -> Result<(), SharedChannelError>;
+
+    async fn verify_and_commit_install(
+        &self,
+        receipt: &ChannelInstallReceipt,
+        commit: Box<dyn FnOnce() -> Result<(), SharedChannelError> + Send>,
+    ) -> Result<(), SharedChannelError> {
+        if let Err(error) = commit() {
+            return Err(match self.rollback(receipt).await {
+                Ok(()) => error,
+                Err(rollback) => SharedChannelError::new(
+                    error.code,
+                    format!(
+                        "{}; the staged channel Skill could not be rolled back: {}",
+                        error.message, rollback.message
+                    ),
+                ),
+            });
+        }
+        Ok(())
+    }
 }
 
 pub struct ChannelSubscriptionFacade<G, C, S, I> {
@@ -514,7 +534,7 @@ fn validate_selection(selected: &[String]) -> Result<(), SharedChannelError> {
     Ok(())
 }
 
-fn validate_receipt(
+pub(super) fn validate_receipt(
     receipt: &ChannelInstallReceipt,
     repository: &RemoteRepository,
     manifest: &ChannelReleaseManifest,

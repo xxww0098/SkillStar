@@ -35,6 +35,9 @@ const api = vi.hoisted(() => ({
   listRollbackTargets: vi.fn(),
   rollbackSkill: vi.fn(),
   resumeFollowing: vi.fn(),
+  uninstallRemoved: vi.fn(),
+  convertRemoved: vi.fn(),
+  installChannelSkill: vi.fn(),
 }));
 
 vi.mock("../api/channels", () => ({
@@ -69,6 +72,9 @@ vi.mock("../api/channels", () => ({
   listSharedChannelSkillRollbackTargets: api.listRollbackTargets,
   rollbackSharedChannelSkill: api.rollbackSkill,
   resumeSharedChannelSkillFollowing: api.resumeFollowing,
+  uninstallRemovedSharedChannelSkill: api.uninstallRemoved,
+  convertRemovedSharedChannelSkillToLocal: api.convertRemoved,
+  installSharedChannelSkill: api.installChannelSkill,
 }));
 
 function channel(status: SharedChannelDescriptor["status"] = "active"): SharedChannelDescriptor {
@@ -416,6 +422,20 @@ describe("SharedChannelsContent", () => {
       });
     });
     api.resumeFollowing.mockReset().mockResolvedValue(updateSnapshot());
+    api.uninstallRemoved.mockReset().mockResolvedValue({
+      skill_id: "writer",
+      local_name: null,
+      snapshot: updateSnapshot({ status: "up_to_date", acknowledgement_required: false, items: [] }),
+    });
+    api.convertRemoved.mockReset().mockResolvedValue({
+      skill_id: "writer",
+      local_name: "writer.local",
+      snapshot: updateSnapshot({ status: "up_to_date", acknowledgement_required: false, items: [] }),
+    });
+    api.installChannelSkill.mockReset().mockResolvedValue({
+      subscription: {},
+      snapshot: updateSnapshot(),
+    });
   });
 
   it("moves from the create wizard into an empty channel detail with role and scope", async () => {
@@ -1017,6 +1037,112 @@ describe("SharedChannelsContent", () => {
     expect(await screen.findByText("Pinned to revision 1")).toBeVisible();
   });
 
+  it("keeps a removed channel Skill installed and converts it to an editable local copy", async () => {
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.listSubscriptions.mockResolvedValue([
+      {
+        schema_version: 1,
+        descriptor_version: 3,
+        repository_id: 42,
+        organization_id: 7,
+        target: subscriptionReview().target,
+        selected_skill_ids: ["writer"],
+        auto_update: { enabled: false, next_check_at: null, last_run: null },
+        read_only: false,
+      },
+    ]);
+    api.checkUpdate.mockResolvedValue(
+      updateSnapshot({
+        status: "blocked",
+        items: [
+          {
+            ...updateSnapshot().items[1],
+            change: "removed",
+            state: "removed_from_channel",
+            to_content_hash: null,
+            block_reason: "removed_upstream",
+            suggested_local_name: "writer.local",
+          },
+        ],
+      }),
+    );
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    expect(await screen.findByText(/no longer in the channel.*installed copy is unchanged/i)).toBeVisible();
+    const localName = screen.getByRole("textbox", { name: "Local copy name for writer" });
+    expect(localName).toHaveValue("writer.local");
+    fireEvent.change(localName, { target: { value: "writer.notes.local" } });
+    fireEvent.click(screen.getByRole("button", { name: "Convert writer to local" }));
+
+    await waitFor(() =>
+      expect(api.convertRemoved).toHaveBeenCalledWith({
+        repository_id: 42,
+        skill_id: "writer",
+        local_name: "writer.notes.local",
+      }),
+    );
+  });
+
+  it("uninstalls a removed channel Skill only after an explicit choice", async () => {
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.listSubscriptions.mockResolvedValue([
+      {
+        schema_version: 1,
+        descriptor_version: 3,
+        repository_id: 42,
+        organization_id: 7,
+        target: subscriptionReview().target,
+        selected_skill_ids: ["writer"],
+        auto_update: { enabled: false, next_check_at: null, last_run: null },
+        read_only: false,
+      },
+    ]);
+    api.checkUpdate.mockResolvedValue(
+      updateSnapshot({
+        status: "blocked",
+        items: [
+          {
+            ...updateSnapshot().items[1],
+            change: "removed",
+            state: "removed_from_channel",
+            to_content_hash: null,
+            block_reason: "removed_upstream",
+            suggested_local_name: "writer.local",
+          },
+        ],
+      }),
+    );
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    expect(await screen.findByRole("button", { name: "Uninstall writer" })).toBeEnabled();
+    expect(api.uninstallRemoved).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Uninstall writer" }));
+    await waitFor(() => expect(api.uninstallRemoved).toHaveBeenCalledWith(42, "writer"));
+  });
+
+  it("requires an explicit install before tracking a reintroduced channel Skill", async () => {
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.listSubscriptions.mockResolvedValue([
+      {
+        schema_version: 1,
+        descriptor_version: 3,
+        repository_id: 42,
+        organization_id: 7,
+        target: subscriptionReview().target,
+        selected_skill_ids: ["writer"],
+        auto_update: { enabled: false, next_check_at: null, last_run: null },
+        read_only: false,
+      },
+    ]);
+    api.checkUpdate.mockResolvedValue(updateSnapshot());
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    const install = await screen.findByRole("button", { name: "Install and track newcomer" });
+    expect(api.installChannelSkill).not.toHaveBeenCalled();
+    fireEvent.click(install);
+    await waitFor(() => expect(api.installChannelSkill).toHaveBeenCalledWith(42, "newcomer", expect.any(String)));
+  });
+
   it("offers verified history when a subscribed Skill was removed upstream", async () => {
     api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
     api.listSubscriptions.mockResolvedValue([
@@ -1038,7 +1164,7 @@ describe("SharedChannelsContent", () => {
           {
             ...updateSnapshot().items[1],
             change: "removed",
-            state: "blocked",
+            state: "removed_from_channel",
             to_content_hash: null,
             block_reason: "removed_upstream",
           },

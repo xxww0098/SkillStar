@@ -512,7 +512,9 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
       .every((item) => item.state === "current" || item.state === "applied");
     const acknowledgementRequired = subscription.last_update.acknowledgement_required && !allSelectedAtTarget;
     if (allSelectedAtTarget) items = items.filter((item) => item.state !== "notification");
-    const hasPending = items.some((item) => ["available", "blocked", "failed"].includes(item.state));
+    const hasPending = items.some((item) =>
+      ["available", "blocked", "failed", "removed_from_channel"].includes(item.state),
+    );
     const hasAvailable = items.some((item) => item.state === "available");
     const hasNotification = items.some((item) => item.state === "notification");
     const hasAdvanced = applied.length > 0;
@@ -591,6 +593,61 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
     subscription.last_update = snapshot;
     return snapshot;
   },
+  uninstall_removed_shared_channel_skill: (args) => {
+    const repositoryId = Number(args?.repositoryId ?? 0);
+    const skillId = String(args?.skillId ?? "");
+    const subscription = channelSubscriptions.find((item) => item.repository_id === repositoryId);
+    if (!subscription) throw new Error("subscription_not_found: Subscribe first");
+    const snapshot = resolveRemovedMockSkill(subscription, skillId);
+    return { skill_id: skillId, local_name: null, snapshot };
+  },
+  convert_removed_shared_channel_skill_to_local: (args) => {
+    const request = (args?.request ?? {}) as { repository_id?: number; skill_id?: string; local_name?: string };
+    const repositoryId = Number(request.repository_id ?? 0);
+    const skillId = String(request.skill_id ?? "");
+    const localName = String(request.local_name ?? "").trim();
+    if (!localName) throw new Error("subscription_selection_invalid: Choose a local copy name");
+    const subscription = channelSubscriptions.find((item) => item.repository_id === repositoryId);
+    if (!subscription) throw new Error("subscription_not_found: Subscribe first");
+    const snapshot = resolveRemovedMockSkill(subscription, skillId);
+    return { skill_id: skillId, local_name: localName, snapshot };
+  },
+  install_shared_channel_skill: (args) => {
+    const repositoryId = Number(args?.repositoryId ?? 0);
+    const skillId = String(args?.skillId ?? "");
+    const subscription = channelSubscriptions.find((item) => item.repository_id === repositoryId);
+    const channel = channels.find((item) => item.repository_id === repositoryId);
+    const current = subscription?.last_update;
+    const released = current?.items.find(
+      (item) => item.id === skillId && item.change === "added" && item.state === "notification",
+    );
+    if (!subscription || !channel || !current || !released?.to_content_hash) {
+      throw new Error("release_conflict: Refresh the channel before installing this Skill");
+    }
+    subscription.skills.push({
+      id: skillId,
+      content_root: `skills/${skillId}`,
+      release_content_hash: released.to_content_hash,
+      release_content_hash_version: 2,
+      baseline_hash: released.to_content_hash,
+      baseline_hash_version: 2,
+      provenance: {
+        repository_id: repositoryId,
+        repository_url: channel.clone_url,
+        git_ref: current.target.commit_sha,
+        source_folder: `skills/${skillId}`,
+      },
+    });
+    subscription.known_skill_ids = [...new Set([...subscription.known_skill_ids, skillId])].sort();
+    const snapshot: ChannelUpdateSnapshot = {
+      ...current,
+      items: current.items.map((item) =>
+        item.id === skillId ? { ...item, change: "unchanged", state: "current", selected: true } : item,
+      ),
+    };
+    subscription.last_update = snapshot;
+    return { subscription, snapshot };
+  },
   get_shared_channel_auto_update_state: (args) => {
     const repositoryId = Number(args?.repositoryId ?? 0);
     const subscription = channelSubscriptions.find((item) => item.repository_id === repositoryId);
@@ -636,7 +693,8 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
               Boolean(pinFor(subscription, item.id)) ||
               item.state === "notification" ||
               item.state === "blocked" ||
-              item.state === "failed",
+              item.state === "failed" ||
+              item.state === "removed_from_channel",
           )
           .map((item) => ({
             skill_id: item.id,
@@ -697,4 +755,26 @@ function pinFor(subscription: ChannelSubscription, skillId: string) {
     subscription.pins.find((pin) => pin.skill_id.localeCompare(skillId, undefined, { sensitivity: "accent" }) === 0)
       ?.target ?? null
   );
+}
+
+function resolveRemovedMockSkill(subscription: ChannelSubscription, skillId: string): ChannelUpdateSnapshot {
+  const removed = subscription.last_update?.items.find(
+    (item) => item.id === skillId && item.state === "removed_from_channel",
+  );
+  if (!subscription.last_update || !removed) {
+    throw new Error("release_conflict: Refresh the channel before resolving this Skill");
+  }
+  subscription.skills = subscription.skills.filter((skill) => skill.id !== skillId);
+  subscription.known_skill_ids = subscription.known_skill_ids.filter((id) => id !== skillId);
+  subscription.pins = subscription.pins.filter((pin) => pin.skill_id !== skillId);
+  const items = subscription.last_update.items.filter((item) => item.id !== skillId);
+  const pending = items.some((item) => ["available", "blocked", "failed", "removed_from_channel"].includes(item.state));
+  const snapshot: ChannelUpdateSnapshot = {
+    ...subscription.last_update,
+    status: pending ? "update_available" : "up_to_date",
+    acknowledgement_required: pending,
+    items,
+  };
+  subscription.last_update = snapshot;
+  return snapshot;
 }
