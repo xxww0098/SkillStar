@@ -365,7 +365,7 @@ fn refresh_single_skill_update(
     if repo_link::is_repo_cached(path) {
         return update_checker::check_update_local(path, failed_fetch_roots);
     }
-    let _ = git_ops::ensure_worktree_checked_out(path);
+    let _ = git_ops::ensure_worktree_checked_out_in_session(path, session);
     Some(git_ops::check_update_in_session(path, session).unwrap_or(false))
 }
 

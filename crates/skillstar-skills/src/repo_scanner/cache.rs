@@ -1,7 +1,6 @@
 use crate::discovery as skill_discover;
 use crate::git::ops as git_ops;
 use anyhow::{Context, Result};
-use skillstar_core::config::github_mirror;
 use skillstar_core::infra::{path_env::command_with_path, paths};
 use std::path::{Path, PathBuf};
 use tracing::warn;
@@ -72,21 +71,18 @@ pub fn clone_or_fetch_repo_at_in_session(
         )
         .context("Failed to execute git fetch")?;
 
-        let mut reset_cmd = command_with_path("git");
-        github_mirror::apply_mirror_args(&mut reset_cmd);
-        let _ = reset_cmd
-            .current_dir(&repo_dir)
-            .args(["reset", "--hard", "origin/HEAD"])
-            .output();
+        git_ops::checkout_in_session(&repo_dir, &["reset", "--hard", "origin/HEAD"], session)
+            .context("Failed to reset cached repository")?;
 
         if is_sparse_checkout(&repo_dir)
             && let Ok(dirs) = discover_skill_dirs_from_tree(&repo_dir)
         {
             if dirs.is_empty() {
-                let _ = command_with_path("git")
-                    .current_dir(&repo_dir)
-                    .args(["sparse-checkout", "disable"])
-                    .output();
+                let _ = git_ops::checkout_in_session(
+                    &repo_dir,
+                    &["sparse-checkout", "disable"],
+                    session,
+                );
                 let _ = git_ops::checkout_in_session(&repo_dir, &["checkout"], session);
             } else {
                 let dir_refs: Vec<&str> = dirs.iter().map(|s| s.as_str()).collect();
@@ -149,17 +145,8 @@ fn fetch_and_reset_ref(
     )
     .with_context(|| format!("git fetch for ref '{git_ref}' failed"))?;
 
-    let mut reset_cmd = command_with_path("git");
-    github_mirror::apply_mirror_args(&mut reset_cmd);
-    let output = reset_cmd
-        .current_dir(repo_dir)
-        .args(["reset", "--hard", "FETCH_HEAD"])
-        .output()
-        .context("Failed to checkout requested Git ref")?;
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("git checkout for ref '{git_ref}' failed: {}", err.trim());
-    }
+    git_ops::checkout_in_session(repo_dir, &["reset", "--hard", "FETCH_HEAD"], session)
+        .with_context(|| format!("git checkout for ref '{git_ref}' failed"))?;
 
     let output = command_with_path("git")
         .current_dir(repo_dir)

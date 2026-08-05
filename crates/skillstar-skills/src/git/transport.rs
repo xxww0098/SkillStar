@@ -181,6 +181,27 @@ impl GitOperationSession {
     pub fn has_credential(&self) -> bool {
         self.auth.token().is_some()
     }
+
+    pub(super) fn unauthenticated_view(&self) -> Self {
+        Self {
+            id: self.id.clone(),
+            auth: GitAuthMaterial::missing(),
+            cancelled: self.cancelled.clone(),
+            progress: self.progress.clone(),
+        }
+    }
+
+    /// Recovery runs after an operation has already failed or been cancelled.
+    /// It retains the operation credential but must not inherit the sticky
+    /// cancellation bit, otherwise rollback cannot restore a partial checkout.
+    pub(crate) fn recovery_view(&self) -> Self {
+        Self {
+            id: self.id.clone(),
+            auth: self.auth.clone(),
+            cancelled: Arc::new(AtomicBool::new(false)),
+            progress: Arc::new(NoopGitProgressSink),
+        }
+    }
 }
 
 impl fmt::Debug for GitOperationSession {
@@ -300,6 +321,75 @@ pub fn configure_remote_command(
 }
 
 pub fn execute_remote_git(
+    repo_path: Option<&Path>,
+    args: &[&str],
+    remote: &str,
+    session: &GitOperationSession,
+    allow_mirror: bool,
+) -> Result<GitCommandOutput, GitTransportError> {
+    // Keep public GitHub traffic credential-free even while the user is signed
+    // in. Only retry the exact operation with askpass after GitHub challenges
+    // the anonymous attempt; the authenticated retry never uses a mirror.
+    if is_github_https_remote(remote) && session.has_credential() {
+        let anonymous = session.unauthenticated_view();
+        let anonymous_result = execute_anonymous_with_mirror_fallback(
+            repo_path,
+            args,
+            remote,
+            &anonymous,
+            allow_mirror,
+        );
+        match anonymous_result {
+            Ok(output) => return Ok(output),
+            Err(error)
+                if matches!(
+                    error.code,
+                    GitTransportErrorCode::NotAuthenticated
+                        | GitTransportErrorCode::Unauthorized
+                        | GitTransportErrorCode::AppNotInstalled
+                ) => {}
+            Err(error) => return Err(error),
+        }
+        return execute_remote_git_once(repo_path, args, remote, session, false);
+    }
+    if is_github_https_remote(remote) && !session.has_credential() {
+        return execute_anonymous_with_mirror_fallback(
+            repo_path,
+            args,
+            remote,
+            session,
+            allow_mirror,
+        );
+    }
+    execute_remote_git_once(repo_path, args, remote, session, allow_mirror)
+}
+
+fn execute_anonymous_with_mirror_fallback(
+    repo_path: Option<&Path>,
+    args: &[&str],
+    remote: &str,
+    session: &GitOperationSession,
+    allow_mirror: bool,
+) -> Result<GitCommandOutput, GitTransportError> {
+    match execute_remote_git_once(repo_path, args, remote, session, allow_mirror) {
+        Err(error)
+            if allow_mirror
+                && github_mirror::effective_mirror_url().is_some()
+                && !matches!(
+                    error.code,
+                    GitTransportErrorCode::Cancelled | GitTransportErrorCode::UnsafeRemote
+                ) =>
+        {
+            // A mirror can turn a valid public repository into a 404 or another
+            // auth-looking response. Always prove the same request anonymously
+            // against GitHub before considering credentials or surfacing error.
+            execute_remote_git_once(repo_path, args, remote, session, false)
+        }
+        result => result,
+    }
+}
+
+fn execute_remote_git_once(
     repo_path: Option<&Path>,
     args: &[&str],
     remote: &str,
@@ -518,6 +608,21 @@ pub fn handle_internal_askpass(args: &[String]) -> bool {
 }
 
 fn apply_proxy_environment(command: &mut Command) {
+    // The desktop process can inherit proxy variables from its launcher. Keep
+    // Git aligned with SkillStar's single proxy setting instead of silently
+    // merging two sources of truth (including lowercase curl aliases).
+    for key in [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+    ] {
+        command.env_remove(key);
+    }
     let Ok(config) = proxy::load_config() else {
         return;
     };

@@ -282,30 +282,16 @@ pub fn apply_sparse_checkout_in_session(
     dirs: &[&str],
     session: &GitOperationSession,
 ) -> Result<()> {
-    // Init sparse-checkout in cone mode
-    let output = command_with_path("git")
-        .current_dir(repo_path)
-        .args(["sparse-checkout", "init", "--cone"])
-        .output()
+    // Both init/set may update the worktree and lazily fetch promisor blobs.
+    checkout_in_session(repo_path, &["sparse-checkout", "init", "--cone"], session)
         .context("Failed to init sparse-checkout")?;
 
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!("git sparse-checkout init failed: {}", err.trim()));
-    }
-
     // Set the directories to materialize
-    let mut cmd = command_with_path("git");
-    cmd.current_dir(repo_path).args(["sparse-checkout", "set"]);
+    let mut args = vec!["sparse-checkout", "set"];
     for dir in dirs {
-        cmd.arg(dir);
+        args.push(dir);
     }
-    let output = cmd.output().context("Failed to set sparse-checkout")?;
-
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!("git sparse-checkout set failed: {}", err.trim()));
-    }
+    checkout_in_session(repo_path, &args, session).context("Failed to set sparse-checkout")?;
 
     // Checkout materialized files — this is where blob:none clones actually
     // fetch file content from the remote.  A failure here (e.g. HTTP/2 framing
@@ -341,6 +327,13 @@ pub fn apply_sparse_checkout_in_session(
 /// Some historical installs were fetched without checkout and ended up with only `.git`.
 /// This function detects that state and materializes files via `git checkout -f HEAD`.
 pub fn ensure_worktree_checked_out(repo_path: &Path) -> Result<bool> {
+    ensure_worktree_checked_out_in_session(repo_path, &GitOperationSession::public())
+}
+
+pub fn ensure_worktree_checked_out_in_session(
+    repo_path: &Path,
+    session: &GitOperationSession,
+) -> Result<bool> {
     if !repo_path.exists() || !repo_path.is_dir() {
         return Ok(false);
     }
@@ -362,7 +355,13 @@ pub fn ensure_worktree_checked_out(repo_path: &Path) -> Result<bool> {
         return Ok(false);
     }
 
-    run_git(repo_path, &["checkout", "-f", "HEAD"])?;
+    if remote_origin_url(repo_path).is_ok() {
+        checkout_in_session(repo_path, &["checkout", "-f", "HEAD"], session)?;
+    } else {
+        // Historical/local test repositories can have no remote at all; such a
+        // checkout cannot lazily fetch and remains a purely local operation.
+        run_git(repo_path, &["checkout", "-f", "HEAD"])?;
+    }
     Ok(true)
 }
 
@@ -408,7 +407,7 @@ pub fn pull_repo_in_session(repo_path: &Path, session: &GitOperationSession) -> 
         .or_else(|_| run_git(repo_path, &["rev-parse", "FETCH_HEAD"]))
         .unwrap_or_else(|_| "FETCH_HEAD".to_string());
 
-    run_git(repo_path, &["reset", "--hard", &target])?;
+    checkout_in_session(repo_path, &["reset", "--hard", &target], session)?;
     Ok(())
 }
 
@@ -434,7 +433,15 @@ pub fn checkout_in_session(
 
 /// Restore a repository to a previously captured commit after a failed update.
 pub fn reset_to_revision(repo_path: &Path, revision: &str) -> Result<()> {
-    run_git(repo_path, &["reset", "--hard", revision]).map(|_| ())
+    reset_to_revision_in_session(repo_path, revision, &GitOperationSession::public())
+}
+
+pub fn reset_to_revision_in_session(
+    repo_path: &Path,
+    revision: &str,
+    session: &GitOperationSession,
+) -> Result<()> {
+    checkout_in_session(repo_path, &["reset", "--hard", revision], session).map(|_| ())
 }
 
 /// Capture cone-mode sparse paths so a failed update can restore its old view.
@@ -452,11 +459,19 @@ pub fn sparse_checkout_paths(repo_path: &Path) -> Option<Vec<String>> {
 }
 
 pub fn restore_sparse_checkout_paths(repo_path: &Path, paths: &[String]) -> Result<()> {
+    restore_sparse_checkout_paths_in_session(repo_path, paths, &GitOperationSession::public())
+}
+
+pub fn restore_sparse_checkout_paths_in_session(
+    repo_path: &Path,
+    paths: &[String],
+    session: &GitOperationSession,
+) -> Result<()> {
     if paths.is_empty() {
-        run_git(repo_path, &["sparse-checkout", "disable"]).map(|_| ())
+        checkout_in_session(repo_path, &["sparse-checkout", "disable"], session).map(|_| ())
     } else {
         let refs: Vec<&str> = paths.iter().map(String::as_str).collect();
-        apply_sparse_checkout(repo_path, &refs)
+        apply_sparse_checkout_in_session(repo_path, &refs, session)
     }
 }
 
@@ -466,6 +481,14 @@ pub fn restore_sparse_checkout_paths(repo_path: &Path, paths: &[String]) -> Resu
 /// checkout remain untouched until the user resolves them too. A standalone
 /// clone supplies `None`, which restores the complete checkout.
 pub fn restore_worktree_to_head(repo_path: &Path, pathspec: Option<&str>) -> Result<()> {
+    restore_worktree_to_head_in_session(repo_path, pathspec, &GitOperationSession::public())
+}
+
+pub fn restore_worktree_to_head_in_session(
+    repo_path: &Path,
+    pathspec: Option<&str>,
+    session: &GitOperationSession,
+) -> Result<()> {
     let clean_args = |pathspec: Option<&str>| {
         let mut args: Vec<String> = vec![
             "clean",
@@ -501,16 +524,17 @@ pub fn restore_worktree_to_head(repo_path: &Path, pathspec: Option<&str>) -> Res
         Some(pathspec) => {
             validate_relative_pathspec(pathspec)?;
             let literal_pathspec = format!(":(literal){pathspec}");
-            run_git(
+            checkout_in_session(
                 repo_path,
                 &["checkout", "-f", "HEAD", "--", &literal_pathspec],
+                session,
             )?;
             let clean_args = clean_args(Some(&literal_pathspec));
             let clean_refs: Vec<&str> = clean_args.iter().map(String::as_str).collect();
             run_git(repo_path, &clean_refs)?;
         }
         None => {
-            run_git(repo_path, &["reset", "--hard", "HEAD"])?;
+            checkout_in_session(repo_path, &["reset", "--hard", "HEAD"], session)?;
             let clean_args = clean_args(None);
             let clean_refs: Vec<&str> = clean_args.iter().map(String::as_str).collect();
             run_git(repo_path, &clean_refs)?;

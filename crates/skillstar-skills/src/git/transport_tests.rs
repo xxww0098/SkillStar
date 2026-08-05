@@ -98,6 +98,55 @@ fn credential_is_not_attached_to_non_github_or_public_sessions() {
 }
 
 #[test]
+fn signed_in_public_probe_uses_the_same_session_without_credential() {
+    let authenticated = GitOperationSession::new(
+        "public-probe",
+        GitAuthMaterial::available(TOKEN),
+        Arc::new(RecordingSink::default()),
+    );
+    let anonymous = authenticated.unauthenticated_view();
+    let mut command = Command::new("git");
+
+    configure_remote_command(
+        &mut command,
+        "https://github.com/acme/public-skills.git",
+        &anonymous,
+    )
+    .unwrap();
+    let env = command
+        .get_envs()
+        .map(|(key, value)| {
+            (
+                key.to_string_lossy().into_owned(),
+                value.map(|value| value.to_string_lossy().into_owned()),
+            )
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+
+    assert_eq!(anonymous.id(), authenticated.id());
+    assert!(!anonymous.has_credential());
+    assert_eq!(env.get("SKILLSTAR_GIT_ASKPASS_TOKEN"), Some(&None));
+}
+
+#[test]
+fn recovery_view_retains_auth_without_inheriting_sticky_cancellation() {
+    let session = GitOperationSession::new(
+        "cancelled-update",
+        GitAuthMaterial::available(TOKEN),
+        Arc::new(RecordingSink::default()),
+    );
+    session.cancel();
+
+    let recovery = session.recovery_view();
+
+    assert!(session.is_cancelled());
+    assert!(!recovery.is_cancelled());
+    assert!(recovery.has_credential());
+    assert_eq!(recovery.id(), session.id());
+    assert!(!format!("{recovery:?}").contains(TOKEN));
+}
+
+#[test]
 fn credential_bearing_remote_is_rejected_before_git_can_persist_or_log_it() {
     let session = GitOperationSession::new(
         "unsafe-url",
@@ -167,6 +216,13 @@ fn configured_proxy_is_operation_local_and_its_password_is_redacted() {
         ))
     );
     assert_eq!(env.get("NO_PROXY"), Some(&Some("localhost".into())));
+    for inherited_key in ["http_proxy", "https_proxy", "all_proxy", "no_proxy"] {
+        assert_eq!(
+            env.get(inherited_key),
+            Some(&None),
+            "operation must block inherited {inherited_key}"
+        );
+    }
     let redacted = redact_git_output(
         "fatal: unable to access http://alice:proxy-password-canary@127.0.0.1:7890/",
         &session,

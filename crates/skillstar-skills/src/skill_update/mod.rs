@@ -555,7 +555,7 @@ pub fn resolve_skill_update_in_session(
             None,
         ),
     };
-    git_ops::restore_worktree_to_head(&repo_root, pathspec.as_deref())
+    git_ops::restore_worktree_to_head_in_session(&repo_root, pathspec.as_deref(), session)
         .with_context(|| format!("failed to discard local divergence for '{name}'"))?;
 
     {
@@ -884,14 +884,24 @@ fn apply_update_locked(
     let (tree_hash, plan) = match transaction {
         Ok(result) => result,
         Err(error) => {
-            git_ops::reset_to_revision(checkout_root, &previous_revision).with_context(|| {
-                format!(
-                    "update failed ({error:#}) and the previous Skill revision could not be restored"
+            let recovery_session = session.recovery_view();
+            git_ops::reset_to_revision_in_session(
+                checkout_root,
+                &previous_revision,
+                &recovery_session,
+            )
+                .with_context(|| {
+                    format!(
+                        "update failed ({error:#}) and the previous Skill revision could not be restored"
                 )
             })?;
             if let Some(paths) = previous_sparse_paths {
-                git_ops::restore_sparse_checkout_paths(checkout_root, &paths)
-                    .context("failed to restore the pre-update sparse checkout")?;
+                git_ops::restore_sparse_checkout_paths_in_session(
+                    checkout_root,
+                    &paths,
+                    &recovery_session,
+                )
+                .context("failed to restore the pre-update sparse checkout")?;
             }
             for snapshot in &rollback_snapshots {
                 snapshot.restore_owned_at(&snapshot.root).with_context(|| {

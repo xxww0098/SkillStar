@@ -22,6 +22,7 @@ pub use skillstar_skills::patrol::{PatrolCheckEvent, PatrolConfig, PatrolStatus}
 // ── Patrol Manager ──────────────────────────────────────────────────────
 
 struct PatrolInner {
+    generation: u64,
     enabled: bool,
     running: bool,
     cancel_tx: Option<watch::Sender<bool>>,
@@ -41,6 +42,7 @@ impl PatrolManager {
         let config = load_config();
         Self {
             inner: Arc::new(Mutex::new(PatrolInner {
+                generation: 0,
                 enabled: config.enabled,
                 running: false,
                 cancel_tx: None,
@@ -63,6 +65,8 @@ impl PatrolManager {
         if let Some(session) = inner.git_session.take() {
             session.cancel();
         }
+        inner.generation = inner.generation.wrapping_add(1);
+        let generation = inner.generation;
 
         inner.enabled = true;
         inner.interval_secs = interval_secs;
@@ -80,7 +84,13 @@ impl PatrolManager {
         inner.cancel_tx = Some(cancel_tx);
 
         let state = Arc::clone(&self.inner);
-        tokio::spawn(patrol_loop(app, state, cancel_rx, interval_secs));
+        tokio::spawn(patrol_loop(
+            app,
+            state,
+            cancel_rx,
+            interval_secs,
+            generation,
+        ));
 
         Ok(())
     }
@@ -93,6 +103,7 @@ impl PatrolManager {
         if let Some(session) = inner.git_session.take() {
             session.cancel();
         }
+        inner.generation = inner.generation.wrapping_add(1);
         inner.enabled = false;
         inner.running = false;
         inner.current_skill.clear();
@@ -133,6 +144,7 @@ async fn patrol_loop(
     state: Arc<Mutex<PatrolInner>>,
     mut cancel_rx: watch::Receiver<bool>,
     interval_secs: u64,
+    generation: u64,
 ) {
     let interval = std::time::Duration::from_secs(interval_secs);
     let per_skill_delay = std::time::Duration::from_millis(10);
@@ -182,9 +194,21 @@ async fn patrol_loop(
             }
         };
         let git_session = git_facade.session().clone();
-        {
+        let owns_generation = {
             let mut inner = state.lock().unwrap_or_else(|p| p.into_inner());
-            inner.git_session = Some(git_session.clone());
+            if inner.generation == generation {
+                inner.git_session = Some(git_session.clone());
+                true
+            } else {
+                false
+            }
+        };
+        if !owns_generation {
+            git_session.cancel();
+            if let Some(session_id) = registered_session_id.as_deref() {
+                auth_state.finish_git_operation(session_id);
+            }
+            break;
         }
 
         let skill_paths: Vec<PathBuf> = skills.iter().map(|entry| entry.path.clone()).collect();
@@ -207,9 +231,17 @@ async fn patrol_loop(
                 break;
             }
 
-            {
+            let owns_generation = {
                 let mut inner = state.lock().unwrap_or_else(|p| p.into_inner());
-                inner.current_skill = entry.name.clone();
+                if inner.generation == generation {
+                    inner.current_skill = entry.name.clone();
+                    true
+                } else {
+                    false
+                }
+            };
+            if !owns_generation {
+                break;
             }
 
             let skill_name = entry.name.clone();
@@ -262,16 +294,23 @@ async fn patrol_loop(
 
             let event = {
                 let mut inner = state.lock().unwrap_or_else(|p| p.into_inner());
-                inner.skills_checked += 1;
-                if update_available {
-                    inner.updates_found += 1;
+                if inner.generation != generation {
+                    None
+                } else {
+                    inner.skills_checked += 1;
+                    if update_available {
+                        inner.updates_found += 1;
+                    }
+                    Some(PatrolCheckEvent {
+                        name: entry.name.clone(),
+                        update_available,
+                        skills_checked: inner.skills_checked,
+                        updates_found: inner.updates_found,
+                    })
                 }
-                PatrolCheckEvent {
-                    name: entry.name.clone(),
-                    update_available,
-                    skills_checked: inner.skills_checked,
-                    updates_found: inner.updates_found,
-                }
+            };
+            let Some(event) = event else {
+                break;
             };
 
             let _ = app.emit("patrol://skill-checked", &event);
@@ -311,13 +350,7 @@ async fn patrol_loop(
         }
     }
 
-    let mut inner = state.lock().unwrap_or_else(|p| p.into_inner());
-    inner.running = false;
-    inner.current_skill.clear();
-    inner.cancel_tx = None;
-    if let Some(session) = inner.git_session.take() {
-        session.cancel();
-    }
+    finish_patrol_loop(&state, generation);
 }
 
 fn clear_git_session(state: &Arc<Mutex<PatrolInner>>, session_id: &str) {
@@ -328,5 +361,47 @@ fn clear_git_session(state: &Arc<Mutex<PatrolInner>>, session_id: &str) {
         .is_some_and(|session| session.id() == session_id)
     {
         inner.git_session = None;
+    }
+}
+
+fn finish_patrol_loop(state: &Arc<Mutex<PatrolInner>>, generation: u64) {
+    let mut inner = state.lock().unwrap_or_else(|p| p.into_inner());
+    if inner.generation != generation {
+        return;
+    }
+    inner.running = false;
+    inner.current_skill.clear();
+    inner.cancel_tx = None;
+    if let Some(session) = inner.git_session.take() {
+        session.cancel();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stale_loop_cannot_clear_or_cancel_the_replacement_generation() {
+        let replacement_session = GitOperationSession::public();
+        let state = Arc::new(Mutex::new(PatrolInner {
+            generation: 2,
+            enabled: true,
+            running: true,
+            cancel_tx: Some(watch::channel(false).0),
+            skills_checked: 0,
+            updates_found: 0,
+            current_skill: "replacement".to_string(),
+            interval_secs: 60,
+            git_session: Some(replacement_session.clone()),
+        }));
+
+        finish_patrol_loop(&state, 1);
+
+        let inner = state.lock().unwrap();
+        assert!(inner.running);
+        assert!(inner.cancel_tx.is_some());
+        assert_eq!(inner.current_skill, "replacement");
+        assert!(!replacement_session.is_cancelled());
     }
 }

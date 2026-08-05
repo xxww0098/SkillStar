@@ -1,8 +1,7 @@
 use crate::git::ops as git_ops;
 use crate::update_checker;
 use anyhow::{Context, Result, anyhow};
-use skillstar_core::config::github_mirror;
-use skillstar_core::infra::{fs_ops, path_env::command_with_path};
+use skillstar_core::infra::fs_ops;
 use std::path::Path;
 
 use super::cache::{discover_skill_dirs_from_tree, is_sparse_checkout};
@@ -33,31 +32,20 @@ pub fn pull_repo_skill_update_in_session(
     update_checker::fetch_tracked_ref_in_session(&repo_root, session)
         .context("Failed to fetch repo-cached update")?;
 
-    let mut reset_cmd = command_with_path("git");
-    github_mirror::apply_mirror_args(&mut reset_cmd);
     let reset_target = if update_checker::configured_git_ref(&repo_root).is_some() {
         "FETCH_HEAD"
     } else {
         "origin/HEAD"
     };
-    let output = reset_cmd
-        .current_dir(&repo_root)
-        .args(["reset", "--hard", reset_target])
-        .output()
+    git_ops::checkout_in_session(&repo_root, &["reset", "--hard", reset_target], session)
         .context("Failed to execute git reset for repo-cached update")?;
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!("git reset failed: {}", err.trim()));
-    }
 
     if is_sparse_checkout(&repo_root)
         && let Ok(dirs) = discover_skill_dirs_from_tree(&repo_root)
     {
         if dirs.is_empty() {
-            let _ = command_with_path("git")
-                .current_dir(&repo_root)
-                .args(["sparse-checkout", "disable"])
-                .output();
+            let _ =
+                git_ops::checkout_in_session(&repo_root, &["sparse-checkout", "disable"], session);
             let _ = git_ops::checkout_in_session(&repo_root, &["checkout"], session);
         } else {
             let dir_refs: Vec<&str> = dirs.iter().map(|s| s.as_str()).collect();

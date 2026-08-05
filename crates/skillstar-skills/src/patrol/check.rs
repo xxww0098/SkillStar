@@ -40,7 +40,7 @@ pub fn check_skill_update_local_in_session(
     }
 
     // Fallback for non-repo-cached hub skills.
-    let _ = crate::git::ops::ensure_worktree_checked_out(skill_path);
+    let _ = crate::git::ops::ensure_worktree_checked_out_in_session(skill_path, session);
     match crate::git::ops::check_update_in_session(skill_path, session) {
         Ok(update_available) => Some(update_available),
         Err(err) => {
