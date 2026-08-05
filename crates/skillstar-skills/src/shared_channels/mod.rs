@@ -4,6 +4,7 @@
 //! layers never infer repository identity from mutable owner/name routing data.
 
 mod channel_auto_update;
+mod channel_rollback;
 mod channel_update;
 mod channel_update_installer;
 mod existing;
@@ -20,6 +21,8 @@ mod subscription_store;
 #[cfg(test)]
 mod channel_auto_update_tests;
 #[cfg(test)]
+mod channel_rollback_tests;
+#[cfg(test)]
 mod channel_update_tests;
 #[cfg(test)]
 mod subscription_tests;
@@ -33,6 +36,9 @@ pub use channel_auto_update::{
     CHANNEL_AUTO_UPDATE_INTERVAL_SECS, ChannelAutoUpdateExecution, ChannelAutoUpdatePause,
     ChannelAutoUpdatePauseReason, ChannelAutoUpdateRun, ChannelAutoUpdateRunStatus,
     ChannelAutoUpdateState, channel_auto_update_state, set_channel_auto_update_enabled,
+};
+pub use channel_rollback::{
+    ChannelSkillRollbackResult, ChannelSkillRollbackTarget, RollbackChannelSkillRequest,
 };
 pub use channel_update::{
     ApplyChannelUpdateRequest, ApplyChannelUpdateResult, ChannelSkillUpdateReceipt,

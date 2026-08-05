@@ -6,6 +6,7 @@ import type {
   ChannelAutoUpdateExecution,
   ChannelAutoUpdatePauseReason,
   ChannelAutoUpdateState,
+  ChannelSkillRollbackTarget,
   ChannelUpdateItem,
   ChannelUpdateSnapshot,
   LocalDivergenceResolution,
@@ -15,6 +16,9 @@ import {
   checkSharedChannelUpdate,
   getSharedChannelAutoUpdateState,
   getSharedChannelUpdateState,
+  listSharedChannelSkillRollbackTargets,
+  resumeSharedChannelSkillFollowing,
+  rollbackSharedChannelSkill,
   runSharedChannelAutoUpdates,
   setSharedChannelAutoUpdateEnabled,
 } from "../api/channels";
@@ -28,6 +32,10 @@ export function ChannelUpdatePanel({ repositoryId }: { repositoryId: number }) {
   const [error, setError] = useState("");
   const [resolutions, setResolutions] = useState<Record<string, LocalDivergenceResolution>>({});
   const [localNames, setLocalNames] = useState<Record<string, string>>({});
+  const [histories, setHistories] = useState<Record<string, ChannelSkillRollbackTarget[] | undefined>>({});
+  const [historySelections, setHistorySelections] = useState<Record<string, number>>({});
+  const [historyBusy, setHistoryBusy] = useState<string | null>(null);
+  const [skillAction, setSkillAction] = useState<string | null>(null);
 
   const check = useCallback(async () => {
     setChecking(true);
@@ -36,6 +44,8 @@ export function ChannelUpdatePanel({ repositoryId }: { repositoryId: number }) {
       const next = await checkSharedChannelUpdate(repositoryId);
       setSnapshot(next);
       setResolutions({});
+      setHistories({});
+      setHistorySelections({});
       setLocalNames((current) => suggestedNames(next.items, current));
     } catch (cause) {
       setError(updateError(cause));
@@ -124,19 +134,20 @@ export function ChannelUpdatePanel({ repositoryId }: { repositoryId: number }) {
     }
   };
 
-  const actionable = useMemo(
-    () =>
-      (snapshot?.acknowledgement_required &&
-        !snapshot.items.some((item) => item.state === "blocked" || item.state === "failed")) ||
-      snapshot?.items.some(
+  const actionable = useMemo(() => {
+    if (!snapshot) return false;
+    const selectedAtTarget = snapshot.items
+      .filter((item) => item.selected)
+      .every((item) => item.state === "current" || item.state === "applied");
+    return (
+      (snapshot.acknowledgement_required && selectedAtTarget) ||
+      snapshot.items.some(
         (item) =>
-          item.state === "available" ||
-          item.state === "notification" ||
-          (item.state === "blocked" && resolutions[item.id]),
-      ) ||
-      false,
-    [resolutions, snapshot],
-  );
+          (item.state === "available" && !item.pinned_target) ||
+          (item.state === "blocked" && !item.pinned_target && resolutions[item.id]),
+      )
+    );
+  }, [resolutions, snapshot]);
 
   const apply = async () => {
     if (!snapshot || !actionable || applying) return;
@@ -159,6 +170,64 @@ export function ChannelUpdatePanel({ repositoryId }: { repositoryId: number }) {
       if (stored) setSnapshot(stored);
     } finally {
       setApplying(false);
+    }
+  };
+
+  const loadHistory = async (skillId: string) => {
+    if (historyBusy || skillAction) return;
+    setHistoryBusy(skillId);
+    setError("");
+    try {
+      const targets = await listSharedChannelSkillRollbackTargets(repositoryId, skillId);
+      setHistories((current) => ({ ...current, [skillId]: targets }));
+      if (targets[0]) {
+        setHistorySelections((current) => ({ ...current, [skillId]: targets[0].target.revision }));
+      }
+    } catch (cause) {
+      setError(updateError(cause));
+    } finally {
+      setHistoryBusy(null);
+    }
+  };
+
+  const rollbackSkill = async (skillId: string) => {
+    const target = histories[skillId]?.find((item) => item.target.revision === historySelections[skillId]);
+    if (!target || skillAction) return;
+    setSkillAction(skillId);
+    setError("");
+    try {
+      const result = await rollbackSharedChannelSkill(
+        {
+          repository_id: repositoryId,
+          skill_id: skillId,
+          target: target.target,
+          resolution: resolutions[skillId] ?? null,
+        },
+        crypto.randomUUID(),
+      );
+      setSnapshot(result.snapshot);
+      setResolutions((current) => withoutKey(current, skillId));
+      setHistories((current) => ({ ...current, [skillId]: undefined }));
+      setHistorySelections((current) => withoutKey(current, skillId));
+    } catch (cause) {
+      setError(updateError(cause));
+    } finally {
+      setSkillAction(null);
+    }
+  };
+
+  const resumeFollowing = async (skillId: string) => {
+    if (skillAction) return;
+    setSkillAction(skillId);
+    setError("");
+    try {
+      setSnapshot(await resumeSharedChannelSkillFollowing(repositoryId, skillId));
+      setResolutions((current) => withoutKey(current, skillId));
+      setHistorySelections((current) => withoutKey(current, skillId));
+    } catch (cause) {
+      setError(updateError(cause));
+    } finally {
+      setSkillAction(null);
     }
   };
 
@@ -258,6 +327,10 @@ export function ChannelUpdatePanel({ repositoryId }: { repositoryId: number }) {
             key={item.id}
             item={item}
             disabled={applying}
+            history={histories[item.id]}
+            historyLoading={historyBusy === item.id}
+            historySelection={historySelections[item.id]}
+            skillAction={skillAction === item.id}
             localName={localNames[item.id] ?? item.suggested_local_name ?? `${item.id}.local`}
             resolution={resolutions[item.id]}
             onLocalName={(value) => {
@@ -271,6 +344,10 @@ export function ChannelUpdatePanel({ repositoryId }: { repositoryId: number }) {
               });
             }}
             onResolution={(resolution) => setResolutions((current) => ({ ...current, [item.id]: resolution }))}
+            onLoadHistory={() => void loadHistory(item.id)}
+            onHistorySelection={(revision) => setHistorySelections((current) => ({ ...current, [item.id]: revision }))}
+            onRollback={() => void rollbackSkill(item.id)}
+            onResume={() => void resumeFollowing(item.id)}
           />
         ))}
       </div>
@@ -344,18 +421,34 @@ function UpdateItem({
   item,
   disabled,
   localName,
+  history,
+  historyLoading,
+  historySelection,
+  skillAction,
   resolution,
   onLocalName,
   onResolution,
+  onLoadHistory,
+  onHistorySelection,
+  onRollback,
+  onResume,
 }: {
   item: ChannelUpdateItem;
   disabled: boolean;
   localName: string;
+  history?: ChannelSkillRollbackTarget[];
+  historyLoading: boolean;
+  historySelection?: number;
+  skillAction: boolean;
   resolution?: LocalDivergenceResolution;
   onLocalName: (value: string) => void;
   onResolution: (resolution: LocalDivergenceResolution) => void;
+  onLoadHistory: () => void;
+  onHistorySelection: (revision: number) => void;
+  onRollback: () => void;
+  onResume: () => void;
 }) {
-  const locallyBlocked = item.state === "blocked" && item.block_reason !== "removed_upstream";
+  const locallyBlocked = !item.pinned_target && item.state === "blocked" && item.block_reason !== "removed_upstream";
   return (
     <div className="rounded-lg border border-border px-3 py-2.5">
       <div className="flex items-start justify-between gap-3">
@@ -375,6 +468,64 @@ function UpdateItem({
       {item.change === "added" && (
         <p className="mt-2 text-[11px] text-muted-foreground">New in this release; it was not selected or installed.</p>
       )}
+      {item.pinned_target ? (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/25 bg-amber-500/5 p-2">
+          <p className="text-[11px] text-amber-700">Pinned to revision {item.pinned_target.revision}</p>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={disabled || skillAction}
+            aria-label={`Resume following ${item.id}`}
+            onClick={onResume}
+          >
+            {skillAction && <Loader2 className="mr-1.5 size-3.5 animate-spin" />}
+            Resume following
+          </Button>
+        </div>
+      ) : item.selected && item.change !== "added" ? (
+        <div className="mt-3 space-y-2 rounded-md border border-border/70 p-2">
+          {history === undefined ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={disabled || historyLoading || skillAction}
+              aria-label={`View history for ${item.id}`}
+              onClick={onLoadHistory}
+            >
+              {historyLoading && <Loader2 className="mr-1.5 size-3.5 animate-spin" />}
+              View release history
+            </Button>
+          ) : history.length === 0 ? (
+            <p className="text-[11px] text-muted-foreground">No earlier verified release contains this Skill.</p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                aria-label={`Historical release for ${item.id}`}
+                value={historySelection ?? history[0].target.revision}
+                disabled={disabled || skillAction}
+                onChange={(event) => onHistorySelection(Number(event.target.value))}
+                className="h-8 min-w-44 rounded-md border border-border bg-background px-2 text-xs"
+              >
+                {history.map((target) => (
+                  <option key={target.target.revision} value={target.target.revision}>
+                    Revision {target.target.revision} · {target.title}
+                  </option>
+                ))}
+              </select>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={disabled || skillAction}
+                aria-label={`Roll back ${item.id}`}
+                onClick={onRollback}
+              >
+                {skillAction && <Loader2 className="mr-1.5 size-3.5 animate-spin" />}
+                Roll back & pin
+              </Button>
+            </div>
+          )}
+        </div>
+      ) : null}
       {item.block_reason === "removed_upstream" && (
         <p className="mt-2 flex items-center gap-1.5 text-[11px] text-amber-700">
           <ShieldAlert className="size-3.5" /> Removed upstream; your installed copy is kept until you remove it
@@ -421,6 +572,12 @@ function suggestedNames(items: ChannelUpdateItem[], current: Record<string, stri
   for (const item of items) {
     if (item.suggested_local_name && !next[item.id]) next[item.id] = item.suggested_local_name;
   }
+  return next;
+}
+
+function withoutKey<T>(current: Record<string, T>, key: string): Record<string, T> {
+  const next = { ...current };
+  delete next[key];
   return next;
 }
 

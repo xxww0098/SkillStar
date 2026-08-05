@@ -268,6 +268,10 @@ fn validate_store(store: &ChannelSubscriptionStore) -> Result<(), SharedChannelE
                 || !pins.insert(pin.skill_id.to_ascii_lowercase())
                 || !valid_target(&pin.target)
                 || pin.target.revision > subscription.target.revision
+                || !subscription.skills.iter().any(|skill| {
+                    skill.id.eq_ignore_ascii_case(&pin.skill_id)
+                        && skill.provenance.git_ref == pin.target.commit_sha
+                })
         }) || !valid_auto_update_state(&subscription.auto_update)
         {
             return Err(storage_error("validate"));
@@ -280,6 +284,24 @@ fn validate_store(store: &ChannelSubscriptionStore) -> Result<(), SharedChannelE
                 || snapshot.acknowledgement_required
                     != (snapshot.target.revision > subscription.target.revision)
             {
+                return Err(storage_error("validate"));
+            }
+            for item in &snapshot.items {
+                let expected = subscription
+                    .pins
+                    .iter()
+                    .find(|pin| pin.skill_id.eq_ignore_ascii_case(&item.id))
+                    .map(|pin| &pin.target);
+                if item.pinned_target.as_ref() != expected {
+                    return Err(storage_error("validate"));
+                }
+            }
+            if subscription.pins.iter().any(|pin| {
+                !snapshot
+                    .items
+                    .iter()
+                    .any(|item| item.id.eq_ignore_ascii_case(&pin.skill_id))
+            }) {
                 return Err(storage_error("validate"));
             }
         }
@@ -598,6 +620,29 @@ mod tests {
     }
 
     #[test]
+    fn pin_target_must_match_the_installed_skill_provenance() {
+        let mut subscription = subscription();
+        subscription
+            .pins
+            .push(crate::shared_channels::ChannelSkillPin {
+                skill_id: subscription.skills[0].id.clone(),
+                target: ChannelReleaseTarget {
+                    revision: subscription.target.revision,
+                    tag_name: subscription.target.tag_name.clone(),
+                    commit_sha: "f".repeat(40),
+                },
+            });
+
+        let error = validate_store(&ChannelSubscriptionStore {
+            schema_version: CHANNEL_SUBSCRIPTION_STORE_VERSION,
+            subscriptions: vec![subscription],
+        })
+        .unwrap_err();
+
+        assert_eq!(error.code, SharedChannelErrorCode::Storage);
+    }
+
+    #[test]
     fn known_store_round_trips_after_restart() {
         let _guard = crate::lock_test_env();
         let temp = tempfile::tempdir().unwrap();
@@ -767,6 +812,7 @@ mod tests {
                 block_reason: None,
                 suggested_local_name: None,
                 error: Some("legacy apply failure".into()),
+                pinned_target: None,
                 error_code: Some(SharedChannelErrorCode::SubscriptionUpdateFailed),
             }],
             check_error: Some("legacy check failure".into()),

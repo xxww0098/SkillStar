@@ -20,6 +20,9 @@ import type {
   ChannelUpdateSnapshot,
   ChannelAutoUpdateExecution,
   ChannelAutoUpdateState,
+  ChannelSkillRollbackResult,
+  ChannelSkillRollbackTarget,
+  RollbackChannelSkillRequest,
 } from "../../../types";
 
 export interface SharedChannelCommands {
@@ -122,6 +125,18 @@ export interface SharedChannelCommands {
   apply_shared_channel_update: {
     args: { request: ApplyChannelUpdateRequest; sessionId: string };
     result: ApplyChannelUpdateResult;
+  };
+  list_shared_channel_skill_rollback_targets: {
+    args: { repositoryId: number; skillId: string };
+    result: ChannelSkillRollbackTarget[];
+  };
+  rollback_shared_channel_skill: {
+    args: { request: RollbackChannelSkillRequest; sessionId: string };
+    result: ChannelSkillRollbackResult;
+  };
+  resume_shared_channel_skill_following: {
+    args: { repositoryId: number; skillId: string };
+    result: ChannelUpdateSnapshot;
   };
   get_shared_channel_auto_update_state: {
     args: { repositoryId: number };

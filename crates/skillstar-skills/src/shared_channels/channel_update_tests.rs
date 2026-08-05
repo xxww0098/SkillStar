@@ -108,6 +108,7 @@ pub(super) struct UpdateInstaller {
     pub(super) verification_failures: Arc<Mutex<BTreeSet<String>>>,
     pub(super) rollback_failures: Arc<Mutex<BTreeSet<String>>>,
     pub(super) applied: Arc<Mutex<Vec<ChannelSkillUpdateRequest>>>,
+    pub(super) metadata_commits: Arc<Mutex<usize>>,
     rollbacks: Arc<Mutex<Vec<String>>>,
 }
 
@@ -225,6 +226,16 @@ impl ChannelSubscriptionUpdater for UpdateInstaller {
         } else {
             Ok(())
         }
+    }
+
+    async fn verify_and_commit(
+        &self,
+        receipt: &ChannelSkillUpdateReceipt,
+        commit: Box<dyn FnOnce() -> Result<(), SharedChannelError> + Send>,
+    ) -> Result<(), SharedChannelError> {
+        self.verify(receipt).await?;
+        *self.metadata_commits.lock().unwrap() += 1;
+        commit()
     }
 
     async fn rollback(
@@ -983,7 +994,7 @@ fn subscribed_skill(
     }
 }
 
-fn manifest_v1() -> ChannelReleaseManifest {
+pub(super) fn manifest_v1() -> ChannelReleaseManifest {
     manifest(
         1,
         'a',

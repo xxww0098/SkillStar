@@ -43,6 +43,24 @@ impl ChannelSubscriptionUpdater for GitChannelSubscriptionInstaller {
         .map_err(|_| update_error("The channel update verification task stopped unexpectedly"))?
     }
 
+    async fn verify_and_commit(
+        &self,
+        receipt: &ChannelSkillUpdateReceipt,
+        commit: Box<dyn FnOnce() -> Result<(), SharedChannelError> + Send>,
+    ) -> Result<(), SharedChannelError> {
+        let receipt = receipt.clone();
+        tokio::task::spawn_blocking(move || {
+            let _guard =
+                crate::skill_update::acquire_update_transaction_lock().map_err(|error| {
+                    update_error(format!("Unable to lock channel metadata commit: {error}"))
+                })?;
+            verify_exact_current(&receipt)?;
+            commit()
+        })
+        .await
+        .map_err(|_| update_error("The channel metadata commit task stopped unexpectedly"))?
+    }
+
     async fn rollback(
         &self,
         receipt: &ChannelSkillUpdateReceipt,

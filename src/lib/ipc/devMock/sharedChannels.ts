@@ -8,6 +8,7 @@ import type {
   ChannelSubscription,
   ChannelSubscriptionReview,
   ChannelAutoUpdateRun,
+  ChannelSkillRollbackTarget,
   ChannelUpdateSnapshot,
   ExistingChannelScanPreview,
   SharedChannelDescriptor,
@@ -473,6 +474,7 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
           block_reason: null,
           suggested_local_name: null,
           error: null,
+          pinned_target: pinFor(subscription, skill.id),
         })),
         {
           id: "new-in-release",
@@ -499,19 +501,95 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
     };
     const subscription = channelSubscriptions.find((item) => item.repository_id === Number(request.repository_id));
     if (!subscription?.last_update) throw new Error("release_conflict: Check updates again");
-    const applied = subscription.last_update.items.filter((item) => item.state === "available").map((item) => item.id);
+    const applied = subscription.last_update.items
+      .filter((item) => item.state === "available" && !pinFor(subscription, item.id))
+      .map((item) => item.id);
+    let items = subscription.last_update.items.map((item) =>
+      applied.includes(item.id) ? { ...item, state: "applied" as const } : item,
+    );
+    const allSelectedAtTarget = items
+      .filter((item) => item.selected)
+      .every((item) => item.state === "current" || item.state === "applied");
+    const acknowledgementRequired = subscription.last_update.acknowledgement_required && !allSelectedAtTarget;
+    if (allSelectedAtTarget) items = items.filter((item) => item.state !== "notification");
+    const hasPending = items.some((item) => ["available", "blocked", "failed"].includes(item.state));
+    const hasAvailable = items.some((item) => item.state === "available");
+    const hasNotification = items.some((item) => item.state === "notification");
+    const hasAdvanced = applied.length > 0;
+    const status: ChannelUpdateSnapshot["status"] =
+      !hasPending && !hasNotification && !acknowledgementRequired
+        ? "up_to_date"
+        : hasPending && hasAdvanced
+          ? "partially_upgraded"
+          : hasPending && !hasAvailable
+            ? "blocked"
+            : "update_available";
     const snapshot: ChannelUpdateSnapshot = {
       ...subscription.last_update,
-      status: "up_to_date",
-      acknowledgement_required: false,
+      status,
+      acknowledgement_required: acknowledgementRequired,
       checked_at: new Date().toISOString(),
-      items: subscription.last_update.items
-        .filter((item) => item.state !== "notification")
-        .map((item) => (applied.includes(item.id) ? { ...item, state: "applied" as const } : item)),
+      items,
     };
-    subscription.target = request.target ?? snapshot.target;
+    if (allSelectedAtTarget) subscription.target = request.target ?? snapshot.target;
     subscription.last_update = snapshot;
     return { snapshot, applied_skill_ids: applied };
+  },
+  list_shared_channel_skill_rollback_targets: (args) => {
+    const repositoryId = Number(args?.repositoryId ?? 0);
+    const skillId = String(args?.skillId ?? "");
+    const subscription = channelSubscriptions.find((item) => item.repository_id === repositoryId);
+    if (!subscription?.skills.some((skill) => skill.id === skillId)) {
+      throw new Error("subscription_selection_invalid: Choose a subscribed Skill");
+    }
+    if (subscription.target.revision <= 1) return [];
+    return [
+      {
+        target: {
+          revision: 1,
+          tag_name: "channel-v000001",
+          commit_sha: "0123456789abcdef0123456789abcdef01234567",
+        },
+        title: "Shared Skills 1",
+        published_at: new Date(Date.now() - 86_400_000).toISOString(),
+        content_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      },
+    ] satisfies ChannelSkillRollbackTarget[];
+  },
+  rollback_shared_channel_skill: (args) => {
+    const request = (args?.request ?? {}) as {
+      repository_id?: number;
+      skill_id?: string;
+      target?: ChannelSubscription["target"];
+    };
+    const subscription = channelSubscriptions.find((item) => item.repository_id === Number(request.repository_id));
+    const skillId = String(request.skill_id ?? "");
+    if (!subscription?.last_update || !request.target) throw new Error("release_conflict: Refresh history");
+    const pin = { skill_id: skillId, target: request.target };
+    subscription.pins = [...subscription.pins.filter((item) => item.skill_id !== skillId), pin];
+    const snapshot = {
+      ...subscription.last_update,
+      items: subscription.last_update.items.map((item) =>
+        item.id === skillId ? { ...item, pinned_target: request.target } : item,
+      ),
+    };
+    subscription.last_update = snapshot;
+    return { snapshot, pin };
+  },
+  resume_shared_channel_skill_following: (args) => {
+    const repositoryId = Number(args?.repositoryId ?? 0);
+    const skillId = String(args?.skillId ?? "");
+    const subscription = channelSubscriptions.find((item) => item.repository_id === repositoryId);
+    if (!subscription?.last_update) throw new Error("subscription_not_found: Subscribe first");
+    subscription.pins = subscription.pins.filter((item) => item.skill_id !== skillId);
+    const snapshot = {
+      ...subscription.last_update,
+      items: subscription.last_update.items.map((item) =>
+        item.id === skillId ? { ...item, pinned_target: null } : item,
+      ),
+    };
+    subscription.last_update = snapshot;
+    return snapshot;
   },
   get_shared_channel_auto_update_state: (args) => {
     const repositoryId = Number(args?.repositoryId ?? 0);
@@ -547,15 +625,24 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
       const enabled = subscription.auto_update.enabled;
       const snapshot = subscription.last_update;
       const applied = enabled
-        ? (snapshot?.items.filter((item) => item.state === "available").map((item) => item.id) ?? [])
+        ? (snapshot?.items
+            .filter((item) => item.state === "available" && !pinFor(subscription, item.id))
+            .map((item) => item.id) ?? [])
         : [];
       const pauses =
         snapshot?.items
-          .filter((item) => item.state === "notification" || item.state === "blocked" || item.state === "failed")
+          .filter(
+            (item) =>
+              Boolean(pinFor(subscription, item.id)) ||
+              item.state === "notification" ||
+              item.state === "blocked" ||
+              item.state === "failed",
+          )
           .map((item) => ({
             skill_id: item.id,
-            reason:
-              item.state === "notification"
+            reason: pinFor(subscription, item.id)
+              ? ("pinned" as const)
+              : item.state === "notification"
                 ? ("new_skill_requires_review" as const)
                 : item.state === "failed"
                   ? ("unresolved_failure" as const)
@@ -604,3 +691,10 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
     });
   },
 };
+
+function pinFor(subscription: ChannelSubscription, skillId: string) {
+  return (
+    subscription.pins.find((pin) => pin.skill_id.localeCompare(skillId, undefined, { sensitivity: "accent" }) === 0)
+      ?.target ?? null
+  );
+}

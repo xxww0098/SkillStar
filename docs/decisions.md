@@ -140,6 +140,7 @@
 - 扩展：接受 invitation 与订阅/安装是两个独立同意边界。订阅 facade 以最新已验证 Release manifest 为评审 SSOT，并在确认时再次校验 stable repository ID 与精确 revision/tag/commit；Git scanner 固定到 commit，逐项验证 content root/hash 后才复用 staged batch installer。选择、release target、安装 baseline 与无凭据 provenance 保存到独立版本化本地 store，新增 Skill 不自动扩展选择；未知 schema 只读展示并 fail-closed。这样 GitHub 继续独占访问控制，SkillStar 只拥有本机消费意图和可回滚安装事务。
 - 扩展：频道升级默认自动检查、手动应用，并按 Skill 独立提交而非整包原子覆盖。最新 Release 只提供目标事实；每个已选择 Skill 以自身 baseline、release hash 与 provenance 决定能否前进，因此干净项可成功、分歧或失败项仍留在旧 commit，频道状态由各项推导。新增项只通知，removed 项不静默删除；分歧复用统一 `.local` 保留/丢弃动作。最近已验证的检查与结果保存在本地订阅 descriptor 中，网络失败不能抹掉旧可用状态。
 - 扩展：后台检查采用固定一小时到期窗口并覆盖所有订阅；自动应用则采用“按频道显式开启 + 复用手动事务”的保护模式。调度器只为已开启频道筛选可证明未修改的已订阅项，不通过自动提供分歧 resolution；pinned、removed、权限/完整性异常和未解决失败均形成持久暂停证据。新增项不会被自动确认掉。到期判断与执行结果属于版本化 subscription descriptor，Tauri 后台任务只是可替换的唤醒器，这让 fake gateway 与固定时间可以验证策略，也避免 UI 生命周期成为自动升级的数据真相。
+- 扩展：历史回滚是逐 Skill 安装事实的反向移动，不是频道 release target 的整体倒退。候选历史必须来自同一 stable repository ID 的已验证 manifest，并将当前和目标都绑定到精确 commit/content root/hash；应用复用现有 staged transaction 与部署补偿。成功后的 per-Skill pin 是本机消费意图，与订阅一起持久化，同时排除手动和自动批量升级；“恢复跟随”只清 pin 并重算最新计划，不隐式改写安装内容。
 
 ## 新增记录格式
 

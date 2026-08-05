@@ -275,7 +275,27 @@ export interface ChannelUpdateItem {
   block_reason: ChannelUpdateBlockReason | null;
   suggested_local_name: string | null;
   error: string | null;
+  pinned_target?: ChannelReleaseTarget | null;
   error_code?: string | null;
+}
+
+export interface ChannelSkillRollbackTarget {
+  target: ChannelReleaseTarget;
+  title: string;
+  published_at: string;
+  content_hash: string;
+}
+
+export interface RollbackChannelSkillRequest {
+  repository_id: number;
+  skill_id: string;
+  target: ChannelReleaseTarget;
+  resolution?: LocalDivergenceResolution | null;
+}
+
+export interface ChannelSkillRollbackResult {
+  snapshot: ChannelUpdateSnapshot;
+  pin: ChannelSkillPin;
 }
 
 export interface ChannelUpdateSnapshot {

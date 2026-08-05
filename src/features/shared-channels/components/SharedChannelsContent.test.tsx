@@ -32,6 +32,9 @@ const api = vi.hoisted(() => ({
   getAutoUpdateState: vi.fn(),
   setAutoUpdateEnabled: vi.fn(),
   runAutoUpdates: vi.fn(),
+  listRollbackTargets: vi.fn(),
+  rollbackSkill: vi.fn(),
+  resumeFollowing: vi.fn(),
 }));
 
 vi.mock("../api/channels", () => ({
@@ -63,6 +66,9 @@ vi.mock("../api/channels", () => ({
   getSharedChannelAutoUpdateState: api.getAutoUpdateState,
   setSharedChannelAutoUpdateEnabled: api.setAutoUpdateEnabled,
   runSharedChannelAutoUpdates: api.runAutoUpdates,
+  listSharedChannelSkillRollbackTargets: api.listRollbackTargets,
+  rollbackSharedChannelSkill: api.rollbackSkill,
+  resumeSharedChannelSkillFollowing: api.resumeFollowing,
 }));
 
 function channel(status: SharedChannelDescriptor["status"] = "active"): SharedChannelDescriptor {
@@ -386,6 +392,30 @@ describe("SharedChannelsContent", () => {
       }),
     );
     api.runAutoUpdates.mockReset().mockResolvedValue([]);
+    api.listRollbackTargets.mockReset().mockResolvedValue([
+      {
+        target: {
+          revision: 1,
+          tag_name: "channel-v000001",
+          commit_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        },
+        title: "First release",
+        published_at: "2026-08-05T00:00:00Z",
+        content_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      },
+    ]);
+    api.rollbackSkill.mockReset().mockImplementation((request) => {
+      const pinned = updateSnapshot({
+        items: updateSnapshot().items.map((item) =>
+          item.id === request.skill_id ? { ...item, pinned_target: request.target } : item,
+        ),
+      });
+      return Promise.resolve({
+        snapshot: pinned,
+        pin: { skill_id: request.skill_id, target: request.target },
+      });
+    });
+    api.resumeFollowing.mockReset().mockResolvedValue(updateSnapshot());
   });
 
   it("moves from the create wizard into an empty channel detail with role and scope", async () => {
@@ -946,6 +976,198 @@ describe("SharedChannelsContent", () => {
     fireEvent.click(screen.getByRole("button", { name: "Acknowledge release" }));
 
     await waitFor(() => expect(api.applyUpdate).toHaveBeenCalled());
+  });
+
+  it("lets a subscriber select a verified historical release and pin the rolled-back Skill", async () => {
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.listSubscriptions.mockResolvedValue([
+      {
+        schema_version: 1,
+        descriptor_version: 3,
+        repository_id: 42,
+        organization_id: 7,
+        target: subscriptionReview().target,
+        selected_skill_ids: ["writer"],
+        auto_update: { enabled: false, next_check_at: null, last_run: null },
+        read_only: false,
+      },
+    ]);
+    api.checkUpdate.mockResolvedValue(updateSnapshot());
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "View history for writer" }));
+    expect(await screen.findByRole("combobox", { name: "Historical release for writer" })).toHaveValue("1");
+    fireEvent.click(screen.getByRole("button", { name: "Roll back writer" }));
+
+    await waitFor(() =>
+      expect(api.rollbackSkill).toHaveBeenCalledWith(
+        {
+          repository_id: 42,
+          skill_id: "writer",
+          target: {
+            revision: 1,
+            tag_name: "channel-v000001",
+            commit_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          },
+          resolution: null,
+        },
+        expect.any(String),
+      ),
+    );
+    expect(await screen.findByText("Pinned to revision 1")).toBeVisible();
+  });
+
+  it("offers verified history when a subscribed Skill was removed upstream", async () => {
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.listSubscriptions.mockResolvedValue([
+      {
+        schema_version: 1,
+        descriptor_version: 3,
+        repository_id: 42,
+        organization_id: 7,
+        target: subscriptionReview().target,
+        selected_skill_ids: ["writer"],
+        auto_update: { enabled: false, next_check_at: null, last_run: null },
+        read_only: false,
+      },
+    ]);
+    api.checkUpdate.mockResolvedValue(
+      updateSnapshot({
+        status: "blocked",
+        items: [
+          {
+            ...updateSnapshot().items[1],
+            change: "removed",
+            state: "blocked",
+            to_content_hash: null,
+            block_reason: "removed_upstream",
+          },
+        ],
+      }),
+    );
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "View history for writer" }));
+    expect(await screen.findByRole("combobox", { name: "Historical release for writer" })).toHaveValue("1");
+    expect(api.listRollbackTargets).toHaveBeenCalledWith(42, "writer");
+  });
+
+  it("shows a persisted pin and resumes following the newest channel release", async () => {
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.listSubscriptions.mockResolvedValue([
+      {
+        schema_version: 1,
+        descriptor_version: 3,
+        repository_id: 42,
+        organization_id: 7,
+        target: subscriptionReview().target,
+        selected_skill_ids: ["writer"],
+        auto_update: { enabled: false, next_check_at: null, last_run: null },
+        read_only: false,
+      },
+    ]);
+    api.checkUpdate.mockResolvedValue(
+      updateSnapshot({
+        items: [
+          {
+            ...updateSnapshot().items[1],
+            pinned_target: {
+              revision: 1,
+              tag_name: "channel-v000001",
+              commit_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            },
+          },
+        ],
+      }),
+    );
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    expect(await screen.findByText("Pinned to revision 1")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Apply safe updates" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Resume following writer" }));
+
+    await waitFor(() => expect(api.resumeFollowing).toHaveBeenCalledWith(42, "writer"));
+    await waitFor(() => expect(screen.queryByText("Pinned to revision 1")).not.toBeInTheDocument());
+  });
+
+  it("requires resume before resolving or applying a pinned divergent Skill", async () => {
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.listSubscriptions.mockResolvedValue([
+      {
+        schema_version: 1,
+        descriptor_version: 3,
+        repository_id: 42,
+        organization_id: 7,
+        target: subscriptionReview().target,
+        selected_skill_ids: ["writer"],
+        auto_update: { enabled: false, next_check_at: null, last_run: null },
+        read_only: false,
+      },
+    ]);
+    api.checkUpdate.mockResolvedValue(
+      updateSnapshot({
+        status: "blocked",
+        items: [
+          {
+            ...updateSnapshot().items[1],
+            state: "blocked",
+            block_reason: "local_content_changed",
+            suggested_local_name: "writer.local",
+            pinned_target: {
+              revision: 1,
+              tag_name: "channel-v000001",
+              commit_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            },
+          },
+        ],
+      }),
+    );
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    expect(await screen.findByText("Pinned to revision 1")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Preserve as .local" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Discard changes" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apply safe updates" })).toBeDisabled();
+  });
+
+  it("clears a local divergence choice after rollback and resume", async () => {
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.listSubscriptions.mockResolvedValue([
+      {
+        schema_version: 1,
+        descriptor_version: 3,
+        repository_id: 42,
+        organization_id: 7,
+        target: subscriptionReview().target,
+        selected_skill_ids: ["writer"],
+        auto_update: { enabled: false, next_check_at: null, last_run: null },
+        read_only: false,
+      },
+    ]);
+    api.checkUpdate.mockResolvedValue(
+      updateSnapshot({
+        status: "blocked",
+        items: [
+          {
+            ...updateSnapshot().items[1],
+            state: "blocked",
+            block_reason: "local_content_changed",
+            suggested_local_name: "writer.local",
+          },
+        ],
+      }),
+    );
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Discard changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "View history for writer" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Roll back writer" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Resume following writer" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Apply safe updates" }));
+
+    await waitFor(() =>
+      expect(api.applyUpdate).toHaveBeenCalledWith(expect.objectContaining({ resolutions: [] }), expect.any(String)),
+    );
   });
 
   it("offers preserve-as-local and discard choices for a divergent subscribed Skill", async () => {

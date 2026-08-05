@@ -63,6 +63,8 @@ pub struct ChannelUpdateItem {
     pub suggested_local_name: Option<String>,
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned_target: Option<ChannelReleaseTarget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_code: Option<SharedChannelErrorCode>,
 }
 
@@ -148,6 +150,15 @@ pub trait ChannelSubscriptionUpdater: Send + Sync {
     ) -> Result<ChannelSkillUpdateReceipt, SharedChannelError>;
 
     async fn verify(&self, receipt: &ChannelSkillUpdateReceipt) -> Result<(), SharedChannelError>;
+
+    async fn verify_and_commit(
+        &self,
+        receipt: &ChannelSkillUpdateReceipt,
+        commit: Box<dyn FnOnce() -> Result<(), SharedChannelError> + Send>,
+    ) -> Result<(), SharedChannelError> {
+        self.verify(receipt).await?;
+        commit()
+    }
 
     async fn rollback(&self, receipt: &ChannelSkillUpdateReceipt)
     -> Result<(), SharedChannelError>;
@@ -340,8 +351,8 @@ where
                 continue;
             }
             let key = item.id.to_ascii_lowercase();
-            if allowed_skill_ids
-                .is_some_and(|allowed| !allowed.contains(&key) || pinned.contains(&key))
+            if pinned.contains(&key)
+                || allowed_skill_ids.is_some_and(|allowed| !allowed.contains(&key))
             {
                 continue;
             }
@@ -507,7 +518,7 @@ where
         failures
     }
 
-    async fn build_update_snapshot(
+    pub(super) async fn build_update_snapshot(
         &self,
         subscription: &ChannelSubscription,
         manifest: &ChannelReleaseManifest,
@@ -534,6 +545,7 @@ where
                     block_reason: Some(ChannelUpdateBlockReason::RemovedUpstream),
                     suggested_local_name: None,
                     error: None,
+                    pinned_target: None,
                     error_code: None,
                 });
                 continue;
@@ -580,10 +592,18 @@ where
                 block_reason: None,
                 suggested_local_name: None,
                 error: None,
+                pinned_target: None,
                 error_code: None,
             });
         }
         items.sort_by(|left, right| left.id.cmp(&right.id));
+        for item in &mut items {
+            item.pinned_target = subscription
+                .pins
+                .iter()
+                .find(|pin| pin.skill_id.eq_ignore_ascii_case(&item.id))
+                .map(|pin| pin.target.clone());
+        }
         let has_advanced = subscription_has_advanced_skill(subscription, manifest);
         let acknowledgement_required = manifest.revision > subscription.target.revision;
         Ok(ChannelUpdateSnapshot {
@@ -646,6 +666,7 @@ fn current_item(
         block_reason: None,
         suggested_local_name: None,
         error: None,
+        pinned_target: None,
         error_code: None,
     }
 }
@@ -678,6 +699,7 @@ fn update_item(
         block_reason,
         suggested_local_name,
         error,
+        pinned_target: None,
         error_code: None,
     }
 }
@@ -731,7 +753,7 @@ fn subscription_has_advanced_skill(
             .any(|skill| skill.provenance.git_ref == manifest.commit_sha)
 }
 
-fn validate_manifest_progress(
+pub(super) fn validate_manifest_progress(
     subscription: &ChannelSubscription,
     manifest: &ChannelReleaseManifest,
 ) -> Result<(), SharedChannelError> {

@@ -3,12 +3,13 @@
 use skillstar_skills::shared_channels::{
     ApplyChannelUpdateRequest, ApplyChannelUpdateResult, ChannelAutoUpdateExecution,
     ChannelAutoUpdateState, ChannelInvitation, ChannelInvitationAction, ChannelMembershipSnapshot,
-    ChannelPublishPreview, ChannelPublishResult, ChannelSubscription, ChannelSubscriptionRegistry,
+    ChannelPublishPreview, ChannelPublishResult, ChannelSkillRollbackResult,
+    ChannelSkillRollbackTarget, ChannelSubscription, ChannelSubscriptionRegistry,
     ChannelSubscriptionReview, ChannelSubscriptionView, ChannelUpdateSnapshot,
     CreateChannelInvitationRequest, CreateSharedChannelRequest, DiskChannelSubscriptionRegistry,
     DiskSharedChannelRegistry, ExistingChannelRepositoryCandidate, ExistingChannelScanPreview,
-    ExistingChannelScanRequest, GitHubOrganization, SharedChannelDescriptor, SharedChannelError,
-    SharedChannelRegistry, SubscribeChannelRequest,
+    ExistingChannelScanRequest, GitHubOrganization, RollbackChannelSkillRequest,
+    SharedChannelDescriptor, SharedChannelError, SharedChannelRegistry, SubscribeChannelRequest,
 };
 use tauri::{AppHandle, State};
 
@@ -297,6 +298,49 @@ pub async fn apply_shared_channel_update(
     };
     state.finish_git_operation(&registered_session_id);
     result
+}
+
+#[tauri::command]
+pub async fn list_shared_channel_skill_rollback_targets(
+    repository_id: u64,
+    skill_id: String,
+    state: State<'_, GitHubAuthState>,
+) -> Result<Vec<ChannelSkillRollbackTarget>, SharedChannelError> {
+    state
+        .channel_subscription_facade(skillstar_skills::git_skill::GitSkillFacade::from_keyring())?
+        .list_skill_rollback_targets(repository_id, &skill_id)
+        .await
+}
+
+#[tauri::command]
+pub async fn rollback_shared_channel_skill(
+    request: RollbackChannelSkillRequest,
+    session_id: String,
+    app: AppHandle,
+    state: State<'_, GitHubAuthState>,
+) -> Result<ChannelSkillRollbackResult, SharedChannelError> {
+    let git_facade = state
+        .begin_git_operation(app, Some(session_id))
+        .map_err(SharedChannelError::from)?;
+    let registered_session_id = git_facade.session().id().to_string();
+    let result = match state.channel_subscription_facade(git_facade) {
+        Ok(facade) => facade.rollback_skill(request).await,
+        Err(error) => Err(error),
+    };
+    state.finish_git_operation(&registered_session_id);
+    result
+}
+
+#[tauri::command]
+pub async fn resume_shared_channel_skill_following(
+    repository_id: u64,
+    skill_id: String,
+    state: State<'_, GitHubAuthState>,
+) -> Result<ChannelUpdateSnapshot, SharedChannelError> {
+    state
+        .channel_subscription_facade(skillstar_skills::git_skill::GitSkillFacade::from_keyring())?
+        .resume_following_skill(repository_id, &skill_id)
+        .await
 }
 
 #[tauri::command]
