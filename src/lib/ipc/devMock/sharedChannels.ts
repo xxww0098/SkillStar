@@ -259,6 +259,13 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
     };
     return action;
   },
+  revoke_shared_channel_member: (args) => ({
+    repository_id: Number(args?.repositoryId ?? 0),
+    username: String(args?.username ?? ""),
+    status: "revoked" as const,
+    effective_role: null,
+    access_source: null,
+  }),
   cancel_shared_channel_invitation: (args) => {
     const invitationId = Number(args?.invitationId ?? 0);
     const invitation = repositoryInvitations.find((item) => item.id === invitationId);
@@ -348,6 +355,7 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
       target: subscription.target,
       selected_skill_ids: subscription.skills.map((skill) => skill.id),
       auto_update: subscription.auto_update,
+      remote_state: subscription.remote_state,
       read_only: false,
     })),
   review_shared_channel_subscription: (args) => {
@@ -355,6 +363,10 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
     const channel = channels.find((item) => item.repository_id === repositoryId);
     if (!channel) throw new Error("repository_not_found: Shared channel not found");
     const existing = channelSubscriptions.find((item) => item.repository_id === repositoryId);
+    if (existing) {
+      existing.remote_state = { status: "active", checked_at: new Date().toISOString(), message: null };
+      existing.updated_at = new Date().toISOString();
+    }
     const revision = Math.max(publishedRevision, 1);
     const selected = new Set(existing?.skills.map((skill) => skill.id) ?? ["reader", "writer"]);
     return {
@@ -406,7 +418,7 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
     const selected = request.selected_skill_ids ?? [];
     const now = new Date().toISOString();
     const subscription: ChannelSubscription = {
-      descriptor_version: 3,
+      descriptor_version: 4,
       repository_id: repositoryId,
       organization_id: channel.organization_id,
       target: {
@@ -432,6 +444,7 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
       pins: [],
       last_update: null,
       auto_update: { enabled: false, next_check_at: null, last_run: null },
+      remote_state: { status: "active", checked_at: null, message: null },
       created_at: now,
       updated_at: now,
     };
@@ -449,6 +462,8 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
     const repositoryId = Number(args?.repositoryId ?? 0);
     const subscription = channelSubscriptions.find((item) => item.repository_id === repositoryId);
     if (!subscription) throw new Error("subscription_not_found: Subscribe to this channel first");
+    subscription.remote_state = { status: "active", checked_at: new Date().toISOString(), message: null };
+    subscription.updated_at = new Date().toISOString();
     const revision = subscription.target.revision + 1;
     const snapshot: ChannelUpdateSnapshot = {
       target: {
@@ -501,6 +516,7 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
     };
     const subscription = channelSubscriptions.find((item) => item.repository_id === Number(request.repository_id));
     if (!subscription?.last_update) throw new Error("release_conflict: Check updates again");
+    requireMockRemoteAccess(subscription);
     const applied = subscription.last_update.items
       .filter((item) => item.state === "available" && !pinFor(subscription, item.id))
       .map((item) => item.id);
@@ -541,6 +557,7 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
     const repositoryId = Number(args?.repositoryId ?? 0);
     const skillId = String(args?.skillId ?? "");
     const subscription = channelSubscriptions.find((item) => item.repository_id === repositoryId);
+    if (subscription) requireMockRemoteAccess(subscription);
     if (!subscription?.skills.some((skill) => skill.id === skillId)) {
       throw new Error("subscription_selection_invalid: Choose a subscribed Skill");
     }
@@ -567,6 +584,7 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
     const subscription = channelSubscriptions.find((item) => item.repository_id === Number(request.repository_id));
     const skillId = String(request.skill_id ?? "");
     if (!subscription?.last_update || !request.target) throw new Error("release_conflict: Refresh history");
+    requireMockRemoteAccess(subscription);
     const pin = { skill_id: skillId, target: request.target };
     subscription.pins = [...subscription.pins.filter((item) => item.skill_id !== skillId), pin];
     const snapshot = {
@@ -583,6 +601,7 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
     const skillId = String(args?.skillId ?? "");
     const subscription = channelSubscriptions.find((item) => item.repository_id === repositoryId);
     if (!subscription?.last_update) throw new Error("subscription_not_found: Subscribe first");
+    requireMockRemoteAccess(subscription);
     subscription.pins = subscription.pins.filter((item) => item.skill_id !== skillId);
     const snapshot = {
       ...subscription.last_update,
@@ -598,6 +617,7 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
     const skillId = String(args?.skillId ?? "");
     const subscription = channelSubscriptions.find((item) => item.repository_id === repositoryId);
     if (!subscription) throw new Error("subscription_not_found: Subscribe first");
+    requireMockRemoteAccess(subscription);
     const snapshot = resolveRemovedMockSkill(subscription, skillId);
     return { skill_id: skillId, local_name: null, snapshot };
   },
@@ -609,8 +629,38 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
     if (!localName) throw new Error("subscription_selection_invalid: Choose a local copy name");
     const subscription = channelSubscriptions.find((item) => item.repository_id === repositoryId);
     if (!subscription) throw new Error("subscription_not_found: Subscribe first");
+    requireMockRemoteAccess(subscription);
     const snapshot = resolveRemovedMockSkill(subscription, skillId);
     return { skill_id: skillId, local_name: localName, snapshot };
+  },
+  uninstall_revoked_shared_channel_skill: (args) => {
+    const repositoryId = Number(args?.repositoryId ?? 0);
+    const skillId = String(args?.skillId ?? "");
+    const subscription = channelSubscriptions.find((item) => item.repository_id === repositoryId);
+    if (!subscription) throw new Error("subscription_not_found: Subscribe first");
+    requireMockRevokedAccess(subscription);
+    untrackMockSkill(subscription, skillId);
+    if (subscription.last_update) {
+      subscription.last_update.items = subscription.last_update.items.filter((item) => item.id !== skillId);
+      if (subscription.last_update.items.length === 0) subscription.last_update = null;
+    }
+    return { skill_id: skillId, local_name: null, subscription };
+  },
+  convert_revoked_shared_channel_skill_to_local: (args) => {
+    const request = (args?.request ?? {}) as { repository_id?: number; skill_id?: string; local_name?: string };
+    const repositoryId = Number(request.repository_id ?? 0);
+    const skillId = String(request.skill_id ?? "");
+    const localName = String(request.local_name ?? "").trim();
+    if (!localName) throw new Error("subscription_selection_invalid: Choose a local copy name");
+    const subscription = channelSubscriptions.find((item) => item.repository_id === repositoryId);
+    if (!subscription) throw new Error("subscription_not_found: Subscribe first");
+    requireMockRevokedAccess(subscription);
+    untrackMockSkill(subscription, skillId);
+    if (subscription.last_update) {
+      subscription.last_update.items = subscription.last_update.items.filter((item) => item.id !== skillId);
+      if (subscription.last_update.items.length === 0) subscription.last_update = null;
+    }
+    return { skill_id: skillId, local_name: localName, subscription };
   },
   install_shared_channel_skill: (args) => {
     const repositoryId = Number(args?.repositoryId ?? 0);
@@ -624,6 +674,7 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
     if (!subscription || !channel || !current || !released?.to_content_hash) {
       throw new Error("release_conflict: Refresh the channel before installing this Skill");
     }
+    requireMockRemoteAccess(subscription);
     subscription.skills.push({
       id: skillId,
       content_root: `skills/${skillId}`,
@@ -750,6 +801,18 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
   },
 };
 
+function requireMockRemoteAccess(subscription: ChannelSubscription) {
+  if (subscription.remote_state.status === "revoked") {
+    throw new Error("subscription_access_revoked: GitHub repository access was revoked");
+  }
+}
+
+function requireMockRevokedAccess(subscription: ChannelSubscription) {
+  if (subscription.remote_state.status !== "revoked") {
+    throw new Error("subscription_selection_invalid: This subscription is not frozen by revoked GitHub access");
+  }
+}
+
 function pinFor(subscription: ChannelSubscription, skillId: string) {
   return (
     subscription.pins.find((pin) => pin.skill_id.localeCompare(skillId, undefined, { sensitivity: "accent" }) === 0)
@@ -764,9 +827,7 @@ function resolveRemovedMockSkill(subscription: ChannelSubscription, skillId: str
   if (!subscription.last_update || !removed) {
     throw new Error("release_conflict: Refresh the channel before resolving this Skill");
   }
-  subscription.skills = subscription.skills.filter((skill) => skill.id !== skillId);
-  subscription.known_skill_ids = subscription.known_skill_ids.filter((id) => id !== skillId);
-  subscription.pins = subscription.pins.filter((pin) => pin.skill_id !== skillId);
+  untrackMockSkill(subscription, skillId);
   const items = subscription.last_update.items.filter((item) => item.id !== skillId);
   const pending = items.some((item) => ["available", "blocked", "failed", "removed_from_channel"].includes(item.state));
   const snapshot: ChannelUpdateSnapshot = {
@@ -777,4 +838,10 @@ function resolveRemovedMockSkill(subscription: ChannelSubscription, skillId: str
   };
   subscription.last_update = snapshot;
   return snapshot;
+}
+
+function untrackMockSkill(subscription: ChannelSubscription, skillId: string) {
+  subscription.skills = subscription.skills.filter((skill) => skill.id !== skillId);
+  subscription.known_skill_ids = subscription.known_skill_ids.filter((id) => id !== skillId);
+  subscription.pins = subscription.pins.filter((pin) => pin.skill_id !== skillId);
 }

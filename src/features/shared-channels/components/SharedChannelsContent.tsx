@@ -474,8 +474,12 @@ function ChannelDetail({
             <p className="mt-1 text-xs text-muted-foreground">GitHub App scope: selected repository only.</p>
           </div>
           {(channel.role === "owner" || channel.role === "publisher") && <ChannelPublishPanel channel={channel} />}
-          {channel.role === "owner" && <ChannelMembershipPanel channel={channel} />}
-          {channel.role === "subscriber" && <ChannelSubscriptionPanel channel={channel} />}
+          {channel.role === "owner" && (
+            <ChannelMembershipPanel key={`members-${channel.repository_id}`} channel={channel} />
+          )}
+          {channel.role === "subscriber" && (
+            <ChannelSubscriptionPanel key={`subscription-${channel.repository_id}`} channel={channel} />
+          )}
         </>
       ) : channel.status === "awaiting_invitation_acceptance" ? (
         <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-5">

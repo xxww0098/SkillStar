@@ -52,15 +52,33 @@ where
         let _mutation_guard = SHARED_CHANNEL_MUTATION_GATE.lock().await;
         let _registry_lease = self.channels.acquire_mutation_lease().await?;
         let _subscription_lease = self.subscriptions.acquire_mutation_lease().await?;
-        let store = self.subscriptions.load_mutable()?;
-        let subscription = subscription(&store.subscriptions, repository_id)?;
-        let installed = installed_skill(subscription, skill_id)?;
+        let mut store = self.subscriptions.load_mutable()?;
+        let index = subscription_index(&store.subscriptions, repository_id)?;
+        super::subscription_remote::ensure_remote_access(&store.subscriptions[index])?;
+        let installed = installed_skill(&store.subscriptions[index], skill_id)?.clone();
         let channel = self.active_channel(repository_id)?;
-        let repository = self.validated_repository(&channel).await?;
-        let manifests = self
-            .verified_manifests(&repository, channel.repository_id, channel.organization_id)
-            .await?;
-        let current = installed_release_target(subscription, installed, &manifests)?;
+        let remote = async {
+            let repository = self.validated_repository(&channel).await?;
+            let manifests = self
+                .verified_manifests(&repository, channel.repository_id, channel.organization_id)
+                .await?;
+            Ok::<_, SharedChannelError>(manifests)
+        }
+        .await;
+        let manifests = match remote {
+            Ok(manifests) => manifests,
+            Err(error) => {
+                super::subscription_remote::persist_definitive_remote_failure(
+                    &self.subscriptions,
+                    &mut store,
+                    index,
+                    &error,
+                )?;
+                return Err(error);
+            }
+        };
+        let current =
+            installed_release_target(&store.subscriptions[index], &installed, &manifests)?;
 
         let mut targets = manifests
             .into_values()
@@ -88,11 +106,28 @@ where
         let _subscription_lease = self.subscriptions.acquire_mutation_lease().await?;
         let mut store = self.subscriptions.load_mutable()?;
         let index = subscription_index(&store.subscriptions, request.repository_id)?;
+        super::subscription_remote::ensure_remote_access(&store.subscriptions[index])?;
         let channel = self.active_channel(request.repository_id)?;
-        let repository = self.validated_repository(&channel).await?;
-        let manifests = self
-            .verified_manifests(&repository, channel.repository_id, channel.organization_id)
-            .await?;
+        let remote = async {
+            let repository = self.validated_repository(&channel).await?;
+            let manifests = self
+                .verified_manifests(&repository, channel.repository_id, channel.organization_id)
+                .await?;
+            Ok::<_, SharedChannelError>((repository, manifests))
+        }
+        .await;
+        let (repository, manifests) = match remote {
+            Ok(value) => value,
+            Err(error) => {
+                super::subscription_remote::persist_definitive_remote_failure(
+                    &self.subscriptions,
+                    &mut store,
+                    index,
+                    &error,
+                )?;
+                return Err(error);
+            }
+        };
         let latest = manifests
             .last_key_value()
             .map(|(_, manifest)| manifest.clone())
@@ -136,7 +171,19 @@ where
                 installed,
                 resolution: request.resolution,
             })
-            .await?;
+            .await;
+        let receipt = match receipt {
+            Ok(receipt) => receipt,
+            Err(error) => {
+                super::subscription_remote::persist_definitive_remote_failure(
+                    &self.subscriptions,
+                    &mut store,
+                    index,
+                    &error,
+                )?;
+                return Err(error);
+            }
+        };
         if let Err(error) = self.installer.verify(&receipt).await {
             return Err(rollback_after_error(&self.installer, &receipt, error).await);
         }
@@ -190,12 +237,29 @@ where
         let _subscription_lease = self.subscriptions.acquire_mutation_lease().await?;
         let mut store = self.subscriptions.load_mutable()?;
         let index = subscription_index(&store.subscriptions, repository_id)?;
+        super::subscription_remote::ensure_remote_access(&store.subscriptions[index])?;
         installed_skill(&store.subscriptions[index], skill_id)?;
         let channel = self.active_channel(repository_id)?;
-        let repository = self.validated_repository(&channel).await?;
-        let manifests = self
-            .verified_manifests(&repository, channel.repository_id, channel.organization_id)
-            .await?;
+        let remote = async {
+            let repository = self.validated_repository(&channel).await?;
+            let manifests = self
+                .verified_manifests(&repository, channel.repository_id, channel.organization_id)
+                .await?;
+            Ok::<_, SharedChannelError>(manifests)
+        }
+        .await;
+        let manifests = match remote {
+            Ok(manifests) => manifests,
+            Err(error) => {
+                super::subscription_remote::persist_definitive_remote_failure(
+                    &self.subscriptions,
+                    &mut store,
+                    index,
+                    &error,
+                )?;
+                return Err(error);
+            }
+        };
         let latest = manifests
             .last_key_value()
             .map(|(_, manifest)| manifest)
@@ -296,16 +360,6 @@ fn active_skill<'a>(
         skill.id.eq_ignore_ascii_case(skill_id)
             && skill.status != ChannelSkillReleaseStatus::Removed
     })
-}
-
-fn subscription(
-    subscriptions: &[ChannelSubscription],
-    repository_id: u64,
-) -> Result<&ChannelSubscription, SharedChannelError> {
-    subscriptions
-        .iter()
-        .find(|subscription| subscription.repository_id == repository_id)
-        .ok_or_else(subscription_not_found)
 }
 
 fn subscription_index(

@@ -17,6 +17,7 @@ const api = vi.hoisted(() => ({
   cancelPublish: vi.fn(),
   listMembership: vi.fn(),
   inviteMember: vi.fn(),
+  revokeMember: vi.fn(),
   cancelInvitation: vi.fn(),
   resendInvitation: vi.fn(),
   listInbox: vi.fn(),
@@ -38,6 +39,8 @@ const api = vi.hoisted(() => ({
   uninstallRemoved: vi.fn(),
   convertRemoved: vi.fn(),
   installChannelSkill: vi.fn(),
+  uninstallRevoked: vi.fn(),
+  convertRevoked: vi.fn(),
 }));
 
 vi.mock("../api/channels", () => ({
@@ -54,6 +57,7 @@ vi.mock("../api/channels", () => ({
   cancelSharedChannelPublish: api.cancelPublish,
   listSharedChannelMembership: api.listMembership,
   inviteSharedChannelMember: api.inviteMember,
+  revokeSharedChannelMember: api.revokeMember,
   cancelSharedChannelInvitation: api.cancelInvitation,
   resendSharedChannelInvitation: api.resendInvitation,
   listSharedChannelInvitationInbox: api.listInbox,
@@ -75,6 +79,8 @@ vi.mock("../api/channels", () => ({
   uninstallRemovedSharedChannelSkill: api.uninstallRemoved,
   convertRemovedSharedChannelSkillToLocal: api.convertRemoved,
   installSharedChannelSkill: api.installChannelSkill,
+  uninstallRevokedSharedChannelSkill: api.uninstallRevoked,
+  convertRevokedSharedChannelSkillToLocal: api.convertRevoked,
 }));
 
 function channel(status: SharedChannelDescriptor["status"] = "active"): SharedChannelDescriptor {
@@ -200,6 +206,24 @@ function subscriptionReview() {
   };
 }
 
+function revokedSubscriptionView() {
+  return {
+    schema_version: 1,
+    descriptor_version: 4,
+    repository_id: 42,
+    organization_id: 7,
+    target: subscriptionReview().target,
+    selected_skill_ids: ["writer"],
+    auto_update: { enabled: false, next_check_at: null, last_run: null },
+    remote_state: {
+      status: "revoked" as const,
+      checked_at: "2026-08-06T00:00:00Z",
+      message: "GitHub repository access was revoked",
+    },
+    read_only: false,
+  };
+}
+
 function updateSnapshot(overrides: Partial<ChannelUpdateSnapshot> = {}): ChannelUpdateSnapshot {
   return {
     target: {
@@ -312,6 +336,13 @@ describe("SharedChannelsContent", () => {
       role: "subscriber",
       status: "pending",
     });
+    api.revokeMember.mockReset().mockResolvedValue({
+      repository_id: 42,
+      username: "bob",
+      status: "revoked",
+      effective_role: null,
+      access_source: null,
+    });
     api.cancelInvitation.mockReset().mockResolvedValue({
       repository_id: 42,
       invitation_id: 91,
@@ -340,7 +371,7 @@ describe("SharedChannelsContent", () => {
     api.reviewSubscription.mockReset().mockResolvedValue(subscriptionReview());
     api.subscribe.mockReset().mockImplementation((request) =>
       Promise.resolve({
-        descriptor_version: 3,
+        descriptor_version: 4,
         repository_id: request.repository_id,
         organization_id: 7,
         target: subscriptionReview().target,
@@ -362,6 +393,7 @@ describe("SharedChannelsContent", () => {
         pins: [],
         last_update: null,
         auto_update: { enabled: false, next_check_at: null, last_run: null },
+        remote_state: { status: "active", checked_at: null, message: null },
         created_at: "2026-08-05T00:00:00Z",
         updated_at: "2026-08-05T00:00:00Z",
       }),
@@ -436,6 +468,8 @@ describe("SharedChannelsContent", () => {
       subscription: {},
       snapshot: updateSnapshot(),
     });
+    api.uninstallRevoked.mockReset();
+    api.convertRevoked.mockReset();
   });
 
   it("moves from the create wizard into an empty channel detail with role and scope", async () => {
@@ -629,6 +663,144 @@ describe("SharedChannelsContent", () => {
     expect(await screen.findByText("bob: failed")).toBeInTheDocument();
     expect(screen.getByText("Organization policy blocks this collaborator")).toBeInTheDocument();
     expect(screen.getByLabelText("GitHub username")).toHaveValue("bob");
+  });
+
+  it("removes only direct access and explains inherited GitHub access that remains", async () => {
+    api.listChannels.mockResolvedValue([channel()]);
+    api.listMembership.mockResolvedValue({
+      repository_id: 42,
+      members: [
+        {
+          user: { id: 8, login: "bob" },
+          role: "subscriber",
+          github_role_name: "read",
+          status: "accepted",
+        },
+      ],
+      invitations: [],
+    });
+    api.revokeMember.mockResolvedValueOnce({
+      repository_id: 42,
+      username: "bob",
+      status: "access_remains",
+      effective_role: "subscriber",
+      access_source: "inherited",
+    });
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Remove direct access for @bob" }));
+
+    await waitFor(() => expect(api.revokeMember).toHaveBeenCalledWith(42, "bob"));
+    expect(await screen.findByText(/still has effective subscriber access through GitHub/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Review effective access on GitHub" })).toHaveAttribute(
+      "href",
+      "https://github.com/acme/skillstar-shared/settings/access",
+    );
+  });
+
+  it("confirms when a removed direct member has no effective GitHub access left", async () => {
+    api.listChannels.mockResolvedValue([channel()]);
+    api.listMembership.mockResolvedValue({
+      repository_id: 42,
+      members: [
+        {
+          user: { id: 8, login: "bob" },
+          role: "subscriber",
+          github_role_name: "read",
+          status: "accepted",
+        },
+      ],
+      invitations: [],
+    });
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Remove direct access for @bob" }));
+
+    expect(await screen.findByText("@bob no longer has effective GitHub access.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Review effective access on GitHub" })).not.toBeInTheDocument();
+  });
+
+  it("freezes a revoked subscription while keeping uninstall and convert-to-local actions", async () => {
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.reviewSubscription.mockRejectedValueOnce({
+      code: "subscription_access_revoked",
+      message: "GitHub repository access was revoked",
+    });
+    api.listSubscriptions.mockResolvedValue([revokedSubscriptionView()]);
+    api.convertRevoked.mockResolvedValue({
+      skill_id: "writer",
+      local_name: "writer.archive.local",
+      subscription: null,
+    });
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    expect(await screen.findByText("Remote access revoked; installed Skills are preserved.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Uninstall writer" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Local copy name for writer"), {
+      target: { value: "writer.archive.local" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Keep writer as local copy" }));
+
+    await waitFor(() =>
+      expect(api.convertRevoked).toHaveBeenCalledWith({
+        repository_id: 42,
+        skill_id: "writer",
+        local_name: "writer.archive.local",
+      }),
+    );
+  });
+
+  it("uninstalls a frozen channel Skill only after the subscriber chooses it", async () => {
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.reviewSubscription.mockRejectedValue({
+      code: "subscription_access_revoked",
+      message: "GitHub repository access was revoked",
+    });
+    api.listSubscriptions.mockResolvedValue([revokedSubscriptionView()]);
+    api.uninstallRevoked.mockResolvedValue({ skill_id: "writer", local_name: null, subscription: null });
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Uninstall writer" }));
+
+    await waitFor(() => expect(api.uninstallRevoked).toHaveBeenCalledWith(42, "writer"));
+    expect(screen.getByText("No channel Skills remain tracked.")).toBeInTheDocument();
+  });
+
+  it("lets a frozen subscriber explicitly recheck restored repository access", async () => {
+    const restored = {
+      ...revokedSubscriptionView(),
+      remote_state: { status: "active" as const, checked_at: "2026-08-05T03:00:00Z", message: null },
+    };
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.reviewSubscription.mockRejectedValueOnce({
+      code: "subscription_access_revoked",
+      message: "GitHub repository access was revoked",
+    });
+    api.listSubscriptions.mockResolvedValueOnce([revokedSubscriptionView()]).mockResolvedValue([restored]);
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Check restored GitHub access" }));
+
+    await waitFor(() => expect(api.checkUpdate).toHaveBeenCalledWith(42));
+    await waitFor(() =>
+      expect(screen.queryByText("Remote access revoked; installed Skills are preserved.")).not.toBeInTheDocument(),
+    );
+    expect(await screen.findByText("Review published release")).toBeInTheDocument();
+    expect(screen.queryByText("GitHub repository access was revoked")).not.toBeInTheDocument();
+  });
+
+  it("refreshes stale local revoked state after release review proves access is restored", async () => {
+    const restored = {
+      ...revokedSubscriptionView(),
+      remote_state: { status: "active" as const, checked_at: "2026-08-05T03:00:00Z", message: null },
+    };
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.listSubscriptions.mockResolvedValueOnce([revokedSubscriptionView()]).mockResolvedValue([restored]);
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    expect(await screen.findByText("Review published release")).toBeInTheDocument();
+    await waitFor(() => expect(api.listSubscriptions.mock.calls.length).toBeGreaterThanOrEqual(2));
+    expect(screen.queryByText("Remote access revoked; installed Skills are preserved.")).not.toBeInTheDocument();
   });
 
   it("supports the explicit non-atomic re-invite flow and cancellation", async () => {

@@ -2,14 +2,15 @@
 
 use skillstar_skills::shared_channels::{
     ApplyChannelUpdateRequest, ApplyChannelUpdateResult, ChannelAutoUpdateExecution,
-    ChannelAutoUpdateState, ChannelInvitation, ChannelInvitationAction, ChannelMembershipSnapshot,
-    ChannelPublishPreview, ChannelPublishResult, ChannelSkillRollbackResult,
-    ChannelSkillRollbackTarget, ChannelSubscription, ChannelSubscriptionRegistry,
-    ChannelSubscriptionReview, ChannelSubscriptionView, ChannelUpdateSnapshot,
-    ConvertRemovedChannelSkillRequest, CreateChannelInvitationRequest, CreateSharedChannelRequest,
-    DiskChannelSubscriptionRegistry, DiskSharedChannelRegistry, ExistingChannelRepositoryCandidate,
-    ExistingChannelScanPreview, ExistingChannelScanRequest, GitHubOrganization,
-    HandleRemovedChannelSkillResult, InstallChannelSkillResult, RollbackChannelSkillRequest,
+    ChannelAutoUpdateState, ChannelInvitation, ChannelInvitationAction,
+    ChannelMemberRevocationResult, ChannelMembershipSnapshot, ChannelPublishPreview,
+    ChannelPublishResult, ChannelSkillRollbackResult, ChannelSkillRollbackTarget,
+    ChannelSubscription, ChannelSubscriptionRegistry, ChannelSubscriptionReview,
+    ChannelSubscriptionView, ChannelUpdateSnapshot, ConvertRemovedChannelSkillRequest,
+    CreateChannelInvitationRequest, CreateSharedChannelRequest, DiskChannelSubscriptionRegistry,
+    DiskSharedChannelRegistry, ExistingChannelRepositoryCandidate, ExistingChannelScanPreview,
+    ExistingChannelScanRequest, GitHubOrganization, HandleRemovedChannelSkillResult,
+    HandleRevokedChannelSkillResult, InstallChannelSkillResult, RollbackChannelSkillRequest,
     SharedChannelDescriptor, SharedChannelError, SharedChannelRegistry, SubscribeChannelRequest,
 };
 use tauri::{AppHandle, State};
@@ -157,6 +158,18 @@ pub async fn invite_shared_channel_member(
     state: State<'_, GitHubAuthState>,
 ) -> Result<ChannelInvitationAction, SharedChannelError> {
     state.channel_membership_facade()?.invite(request).await
+}
+
+#[tauri::command]
+pub async fn revoke_shared_channel_member(
+    repository_id: u64,
+    username: String,
+    state: State<'_, GitHubAuthState>,
+) -> Result<ChannelMemberRevocationResult, SharedChannelError> {
+    state
+        .channel_membership_facade()?
+        .revoke_member(repository_id, &username)
+        .await
 }
 
 #[tauri::command]
@@ -364,6 +377,29 @@ pub async fn convert_removed_shared_channel_skill_to_local(
     state
         .channel_subscription_facade(skillstar_skills::git_skill::GitSkillFacade::from_keyring())?
         .convert_removed_skill_to_local(request)
+        .await
+}
+
+#[tauri::command]
+pub async fn uninstall_revoked_shared_channel_skill(
+    repository_id: u64,
+    skill_id: String,
+    state: State<'_, GitHubAuthState>,
+) -> Result<HandleRevokedChannelSkillResult, SharedChannelError> {
+    state
+        .channel_subscription_facade(skillstar_skills::git_skill::GitSkillFacade::from_keyring())?
+        .uninstall_revoked_skill(repository_id, &skill_id)
+        .await
+}
+
+#[tauri::command]
+pub async fn convert_revoked_shared_channel_skill_to_local(
+    request: ConvertRemovedChannelSkillRequest,
+    state: State<'_, GitHubAuthState>,
+) -> Result<HandleRevokedChannelSkillResult, SharedChannelError> {
+    state
+        .channel_subscription_facade(skillstar_skills::git_skill::GitSkillFacade::from_keyring())?
+        .convert_revoked_skill_to_local(request)
         .await
 }
 

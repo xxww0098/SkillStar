@@ -26,7 +26,13 @@ import {
   uninstallRemovedSharedChannelSkill,
 } from "../api/channels";
 
-export function ChannelUpdatePanel({ repositoryId }: { repositoryId: number }) {
+export function ChannelUpdatePanel({
+  repositoryId,
+  onChecked,
+}: {
+  repositoryId: number;
+  onChecked?: () => Promise<void> | void;
+}) {
   const [snapshot, setSnapshot] = useState<ChannelUpdateSnapshot | null>(null);
   const [checking, setChecking] = useState(true);
   const [applying, setApplying] = useState(false);
@@ -50,12 +56,14 @@ export function ChannelUpdatePanel({ repositoryId }: { repositoryId: number }) {
       setHistories({});
       setHistorySelections({});
       setLocalNames((current) => suggestedNames(next.items, current));
+      await onChecked?.();
     } catch (cause) {
       setError(updateError(cause));
+      await onChecked?.();
     } finally {
       setChecking(false);
     }
-  }, [repositoryId]);
+  }, [onChecked, repositoryId]);
 
   useEffect(() => {
     let active = true;
@@ -98,6 +106,7 @@ export function ChannelUpdatePanel({ repositoryId }: { repositoryId: number }) {
               if (!active) return;
               if (stored) setSnapshot(stored);
               setAutoUpdate(autoState);
+              return onChecked?.();
             })
             .catch(() => undefined);
         }),
@@ -111,7 +120,7 @@ export function ChannelUpdatePanel({ repositoryId }: { repositoryId: number }) {
       active = false;
       unlisten?.();
     };
-  }, [repositoryId]);
+  }, [onChecked, repositoryId]);
 
   const toggleAutoUpdate = async (enabled: boolean) => {
     if (autoSaving) return;

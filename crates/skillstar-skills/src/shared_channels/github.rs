@@ -91,7 +91,7 @@ impl ProductionSharedChannelGateway {
             let (status, body) = self
                 .response(self.request(reqwest::Method::GET, &user_installations_url(page))?)
                 .await?;
-            ensure_status(status, &[200])?;
+            ensure_status(status, &body, &[200])?;
             let response: InstallationsResponse = parse_json(&body)?;
             let count = response.installations.len();
             if let Some(installation) = response.installations.into_iter().find(|installation| {
@@ -133,7 +133,7 @@ impl ProductionSharedChannelGateway {
                     "The SkillStar GitHub App installation is no longer accessible; reinstall it for the organization, then retry",
                 ));
             }
-            ensure_status(status, &[200])?;
+            ensure_status(status, &body, &[200])?;
             let response: AccessibleRepositoriesResponse = parse_json(&body)?;
             let count = response.repositories.len();
             repositories.extend(
@@ -297,7 +297,7 @@ impl SharedChannelGateway for ProductionSharedChannelGateway {
                     ),
                 )?)
                 .await?;
-            ensure_status(status, &[200])?;
+            ensure_status(status, &body, &[200])?;
             let memberships: Vec<OrganizationMembership> = parse_json(&body)?;
             let count = memberships.len();
             organizations.extend(
@@ -394,7 +394,7 @@ impl ChannelPublicationGateway for ProductionSharedChannelGateway {
         let (status, body) = self
             .response(self.request(reqwest::Method::GET, &format!("{API_ROOT}/user"))?)
             .await?;
-        ensure_status(status, &[200])?;
+        ensure_status(status, &body, &[200])?;
         let user: GitHubUserResponse = parse_json(&body)?;
         Ok(ChannelPublisherIdentity {
             id: user.id,
@@ -414,7 +414,7 @@ impl ChannelPublicationGateway for ProductionSharedChannelGateway {
         let (status, body) = self
             .response(self.request(reqwest::Method::GET, &url)?)
             .await?;
-        ensure_status(status, &[200])?;
+        ensure_status(status, &body, &[200])?;
         let reference: GitReferenceResponse = parse_json(&body)?;
         if reference.object.kind != "commit" {
             return Err(publication_integrity_error(
@@ -441,7 +441,7 @@ impl ChannelPublicationGateway for ProductionSharedChannelGateway {
             let (status, body) = self
                 .response(self.request(reqwest::Method::GET, &url)?)
                 .await?;
-            ensure_status(status, &[200])?;
+            ensure_status(status, &body, &[200])?;
             let releases: Vec<GitHubReleaseListItem> = parse_json(&body)?;
             let count = releases.len();
             for release in releases {
@@ -463,7 +463,7 @@ impl ChannelPublicationGateway for ProductionSharedChannelGateway {
                 let (status, body) = self
                     .response(self.request(reqwest::Method::GET, &ref_url)?)
                     .await?;
-                ensure_publication_object_status(status)?;
+                ensure_publication_object_status(status, &body)?;
                 let reference: GitReferenceResponse = parse_json(&body)?;
                 if reference.object.kind != "tag" {
                     return Err(publication_integrity_error(
@@ -474,7 +474,7 @@ impl ChannelPublicationGateway for ProductionSharedChannelGateway {
                 let (status, body) = self
                     .response(self.request(reqwest::Method::GET, &tag_url)?)
                     .await?;
-                ensure_publication_object_status(status)?;
+                ensure_publication_object_status(status, &body)?;
                 let tag: GitTagResponse = parse_json(&body)?;
                 if tag.object.kind != "commit" {
                     return Err(publication_integrity_error(
@@ -537,7 +537,7 @@ impl ChannelPublicationGateway for ProductionSharedChannelGateway {
             let (status, body) = self
                 .response(self.request(reqwest::Method::GET, &url)?)
                 .await?;
-            ensure_status(status, &[200])?;
+            ensure_status(status, &body, &[200])?;
             let references: Vec<GitReferenceResponse> = parse_json(&body)?;
             let count = references.len();
             for reference in references {
@@ -680,9 +680,14 @@ pub(super) fn parse_json<T: serde::de::DeserializeOwned>(
     })
 }
 
-fn ensure_status(status: u16, expected: &[u16]) -> Result<(), SharedChannelError> {
+fn ensure_status(status: u16, body: &str, expected: &[u16]) -> Result<(), SharedChannelError> {
     if expected.contains(&status) {
         Ok(())
+    } else if status == 429 || super::github_status::is_rate_limited_response(body) {
+        Err(SharedChannelError::new(
+            SharedChannelErrorCode::Network,
+            "GitHub temporarily rate-limited shared-channel access; wait and retry",
+        ))
     } else {
         match status {
             401 => Err(not_authenticated()),
@@ -809,13 +814,13 @@ fn publication_integrity_error(message: &str) -> SharedChannelError {
     SharedChannelError::new(SharedChannelErrorCode::Integrity, message)
 }
 
-fn ensure_publication_object_status(status: u16) -> Result<(), SharedChannelError> {
+fn ensure_publication_object_status(status: u16, body: &str) -> Result<(), SharedChannelError> {
     if status == 404 {
         Err(publication_integrity_error(
             "A published channel Release references a deleted tag or tag object",
         ))
     } else {
-        ensure_status(status, &[200])
+        ensure_status(status, body, &[200])
     }
 }
 
@@ -940,7 +945,7 @@ mod tests {
 
     #[test]
     fn deleted_release_tag_is_classified_as_integrity_failure() {
-        let error = ensure_publication_object_status(404).unwrap_err();
+        let error = ensure_publication_object_status(404, "not found").unwrap_err();
         assert_eq!(error.code, SharedChannelErrorCode::Integrity);
         assert!(error.message.contains("deleted tag"));
     }

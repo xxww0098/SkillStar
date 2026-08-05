@@ -35,7 +35,7 @@ SkillStar 面向同时使用多个 Agent CLI、模型供应商和订阅账号的
 - 部署优先使用 symlink；平台不允许时自动回退 junction/copy，而不会假装“纯 symlink”。
 - 本地创作位于 SkillStar hub，可编辑、打包并通过 GitHub 发布。
 - 可将 GitHub App 已选中的组织私有仓库注册为共享频道；确认前会列出全部 Skill 和仓库文件，并明确提示成员可读取完整仓库历史。普通提交保持草稿，owner/publisher 可在 SkillStar 显式发布绑定精确 commit 与完整 Skill hash 的不可变频道版本；订阅者接受仓库邀请后还需单独评审发布、选择要安装的 Skill，选择会跨重启保留且不会自动纳入未来新增项。订阅默认检查新发布、由用户手动应用，也可按频道开启每小时受保护自动升级；只有未修改的已订阅 Skill 会自动前进，新增、移除、分歧或失败项会停下并显示原因，本地修改仍提供 `.local` 保留或明确丢弃选择。单个订阅 Skill 还可从已验证历史发布回滚并固定；固定后仍能看到新版本，但在显式恢复跟随前不会被手动批量或自动升级覆盖。上游移除 Skill 时本地内容和部署保留，用户可选择卸载或以冲突安全名称转为本地副本；未来同名重加也必须再次显式安装并跟踪。
-- 频道 owner 可在 SkillStar 用 GitHub 用户名邀请 subscriber 或 publisher；受邀者可在邀请 inbox 接受并自动导入频道，或直接拒绝。成员、继承权限与待处理邀请始终以 GitHub 为准，不使用分享码或额外成员表。
+- 频道 owner 可在 SkillStar 用 GitHub 用户名邀请 subscriber 或 publisher，也可移除直接 collaborator；移除后 SkillStar 会重新检查有效 GitHub 权限，Team、组织或 base permission 仍存在时明确提示需前往 GitHub 继续管理。受邀者可在邀请 inbox 接受并自动导入频道，或直接拒绝。成员、继承权限与待处理邀请始终以 GitHub 为准，不使用分享码或额外成员表。订阅者被确认撤权后停止未来下载，但已安装内容保留并可卸载或转为 `.local` 本地副本。
 - 更新 Git-backed Skill 前会检查完整目录；发现本地修改时先停止，让用户选择保留为可改名的 `.local` 本地副本，或明确丢弃修改后继续。
 - 可让已配置的 ACP Agent 阅读当前 Skill 的全部文件，按“循序导览 / 技术手册 / 实战工坊”风格和当前界面语言生成带流程图、示例和排错说明的本地持久化 `tutorial.html`；不依赖在线链接，Skill、语言或风格更新后会明确提醒重新生成。
 - My Skills 可切换本机、SSH 远端与 S3 云同步工作流。

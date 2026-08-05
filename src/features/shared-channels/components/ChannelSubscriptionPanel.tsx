@@ -13,6 +13,7 @@ import {
   subscribeSharedChannel,
 } from "../api/channels";
 import { ChannelUpdatePanel } from "./ChannelUpdatePanel";
+import { RevokedSubscriptionPanel } from "./RevokedSubscriptionPanel";
 
 export function ChannelSubscriptionPanel({ channel }: { channel: SharedChannelDescriptor }) {
   const [review, setReview] = useState<ChannelSubscriptionReview | null>(null);
@@ -21,6 +22,11 @@ export function ChannelSubscriptionPanel({ channel }: { channel: SharedChannelDe
   const [loading, setLoading] = useState(true);
   const [installing, setInstalling] = useState(false);
   const [error, setError] = useState("");
+
+  const reloadSubscription = useCallback(async () => {
+    const subscriptions = await listSharedChannelSubscriptions();
+    setSubscription(subscriptions.find((item) => item.repository_id === channel.repository_id) ?? null);
+  }, [channel.repository_id]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -32,7 +38,8 @@ export function ChannelSubscriptionPanel({ channel }: { channel: SharedChannelDe
       ]);
       if (subscriptionsResult.status === "rejected") throw subscriptionsResult.reason;
       const subscriptions = subscriptionsResult.value;
-      setSubscription(subscriptions.find((item) => item.repository_id === channel.repository_id) ?? null);
+      const storedSubscription = subscriptions.find((item) => item.repository_id === channel.repository_id) ?? null;
+      setSubscription(storedSubscription);
       if (reviewResult.status === "rejected") {
         setReview(null);
         setSelected(new Set());
@@ -42,12 +49,23 @@ export function ChannelSubscriptionPanel({ channel }: { channel: SharedChannelDe
       const nextReview = reviewResult.value;
       setReview(nextReview);
       setSelected(new Set(nextReview.skills.filter((skill) => skill.selected).map((skill) => skill.id)));
+      if (storedSubscription?.remote_state?.status === "revoked") {
+        await reloadSubscription().catch(() => undefined);
+      }
     } catch (cause) {
       setError(subscriptionError(cause));
     } finally {
       setLoading(false);
     }
-  }, [channel.repository_id]);
+  }, [channel.repository_id, reloadSubscription]);
+
+  const handleSubscriptionChanged = useCallback(
+    (next: ChannelSubscription | ChannelSubscriptionView) => {
+      setSubscription(next);
+      if (next.remote_state?.status === "active") void refresh();
+    },
+    [refresh],
+  );
 
   useEffect(() => {
     void refresh();
@@ -57,6 +75,7 @@ export function ChannelSubscriptionPanel({ channel }: { channel: SharedChannelDe
   const alreadySubscribed = subscription !== null;
   const subscriptionView = subscription && "read_only" in subscription ? subscription : null;
   const readOnly = Boolean(review?.read_only || subscriptionView?.read_only);
+  const revoked = subscription?.remote_state?.status === "revoked";
   const subscribedSkillCount = subscription
     ? "skills" in subscription
       ? subscription.skills.length
@@ -118,8 +137,15 @@ export function ChannelSubscriptionPanel({ channel }: { channel: SharedChannelDe
             Retry release review
           </Button>
         </section>
-        {alreadySubscribed && !readOnly && (
-          <ChannelUpdatePanel key={channel.repository_id} repositoryId={channel.repository_id} />
+        {alreadySubscribed && !readOnly && revoked && subscription && (
+          <RevokedSubscriptionPanel subscription={subscription} onSubscriptionChanged={handleSubscriptionChanged} />
+        )}
+        {alreadySubscribed && !readOnly && !revoked && (
+          <ChannelUpdatePanel
+            key={channel.repository_id}
+            repositoryId={channel.repository_id}
+            onChecked={reloadSubscription}
+          />
         )}
       </div>
     );
@@ -228,8 +254,15 @@ export function ChannelSubscriptionPanel({ channel }: { channel: SharedChannelDe
           </Button>
         </div>
       )}
-      {alreadySubscribed && !readOnly && (
-        <ChannelUpdatePanel key={channel.repository_id} repositoryId={channel.repository_id} />
+      {alreadySubscribed && !readOnly && revoked && subscription && (
+        <RevokedSubscriptionPanel subscription={subscription} onSubscriptionChanged={handleSubscriptionChanged} />
+      )}
+      {alreadySubscribed && !readOnly && !revoked && (
+        <ChannelUpdatePanel
+          key={channel.repository_id}
+          repositoryId={channel.repository_id}
+          onChecked={reloadSubscription}
+        />
       )}
     </section>
   );

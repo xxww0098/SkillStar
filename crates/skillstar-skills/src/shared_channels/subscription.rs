@@ -10,7 +10,56 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const CHANNEL_SUBSCRIPTION_STORE_VERSION: u32 = 1;
-pub const CHANNEL_SUBSCRIPTION_DESCRIPTOR_VERSION: u32 = 3;
+pub const CHANNEL_SUBSCRIPTION_DESCRIPTOR_VERSION: u32 = 4;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelSubscriptionRemoteStatus {
+    #[default]
+    Active,
+    Revoked,
+    Offline,
+    IntegrityError,
+    RecoverableFailure,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChannelSubscriptionRemoteState {
+    pub status: ChannelSubscriptionRemoteStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checked_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+impl Default for ChannelSubscriptionRemoteState {
+    fn default() -> Self {
+        Self {
+            status: ChannelSubscriptionRemoteStatus::Active,
+            checked_at: None,
+            message: None,
+        }
+    }
+}
+
+impl ChannelSubscriptionRemoteState {
+    pub fn active() -> Self {
+        Self {
+            status: ChannelSubscriptionRemoteStatus::Active,
+            checked_at: Some(Utc::now().to_rfc3339()),
+            message: None,
+        }
+    }
+
+    pub fn revoked(message: impl Into<String>) -> Self {
+        Self {
+            status: ChannelSubscriptionRemoteStatus::Revoked,
+            checked_at: Some(Utc::now().to_rfc3339()),
+            message: Some(message.into()),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -64,6 +113,8 @@ pub struct ChannelSubscription {
     pub last_update: Option<super::ChannelUpdateSnapshot>,
     #[serde(default)]
     pub auto_update: super::ChannelAutoUpdateState,
+    #[serde(default)]
+    pub remote_state: ChannelSubscriptionRemoteState,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -107,6 +158,7 @@ pub struct ChannelSubscriptionView {
     pub target: Option<ChannelReleaseTarget>,
     pub selected_skill_ids: Vec<String>,
     pub auto_update: super::ChannelAutoUpdateState,
+    pub remote_state: ChannelSubscriptionRemoteState,
     pub read_only: bool,
 }
 
@@ -124,6 +176,7 @@ impl ChannelSubscriptionView {
                 .map(|skill| skill.id.clone())
                 .collect(),
             auto_update: subscription.auto_update.clone(),
+            remote_state: subscription.remote_state.clone(),
             read_only: false,
         }
     }
@@ -277,14 +330,58 @@ where
         &self,
         repository_id: u64,
     ) -> Result<ChannelSubscriptionReview, SharedChannelError> {
-        let channel = self.active_channel(repository_id)?;
-        let repository = self.validated_repository(&channel).await?;
-        let manifest = self.latest_manifest(&repository, &channel).await?;
         let existing = self
             .subscriptions
             .list_views()?
             .into_iter()
             .find(|subscription| subscription.repository_id == repository_id);
+        let channel = self.active_channel(repository_id)?;
+        let repository = match self.validated_repository(&channel).await {
+            Ok(repository) => {
+                if existing.as_ref().is_some_and(|subscription| {
+                    subscription.remote_state.status == ChannelSubscriptionRemoteStatus::Revoked
+                }) {
+                    let _mutation_guard = SHARED_CHANNEL_MUTATION_GATE.lock().await;
+                    let _registry_lease = self.channels.acquire_mutation_lease().await?;
+                    let _subscription_lease = self.subscriptions.acquire_mutation_lease().await?;
+                    let mut store = self.subscriptions.load_mutable()?;
+                    if let Some(subscription) = store
+                        .subscriptions
+                        .iter_mut()
+                        .find(|subscription| subscription.repository_id == repository_id)
+                    {
+                        super::subscription_remote::mark_remote_active(subscription);
+                        self.subscriptions.save(&store)?;
+                    }
+                }
+                repository
+            }
+            Err(error) => {
+                if existing
+                    .as_ref()
+                    .is_some_and(|subscription| !subscription.read_only)
+                {
+                    let _mutation_guard = SHARED_CHANNEL_MUTATION_GATE.lock().await;
+                    let _registry_lease = self.channels.acquire_mutation_lease().await?;
+                    let _subscription_lease = self.subscriptions.acquire_mutation_lease().await?;
+                    let mut store = self.subscriptions.load_mutable()?;
+                    if let Some(index) = store
+                        .subscriptions
+                        .iter()
+                        .position(|subscription| subscription.repository_id == repository_id)
+                    {
+                        super::subscription_remote::persist_definitive_remote_failure(
+                            &self.subscriptions,
+                            &mut store,
+                            index,
+                            &error,
+                        )?;
+                    }
+                }
+                return Err(error);
+            }
+        };
+        let manifest = self.latest_manifest(&repository, &channel).await?;
         let selected = existing
             .as_ref()
             .map(|subscription| {
@@ -350,15 +447,18 @@ where
             ));
         }
         let selected = selected_manifest_skills(&manifest, &request.selected_skill_ids)?;
-        if let Some(existing) = store
+        if let Some(index) = store
             .subscriptions
             .iter()
-            .find(|subscription| subscription.repository_id == request.repository_id)
+            .position(|subscription| subscription.repository_id == request.repository_id)
         {
+            let existing = &store.subscriptions[index];
             if existing.target == release_target(&manifest)
                 && selected_ids(&existing.skills) == selected_ids_from_manifest(&selected)
             {
-                return Ok(existing.clone());
+                super::subscription_remote::mark_remote_active(&mut store.subscriptions[index]);
+                self.subscriptions.save(&store)?;
+                return Ok(store.subscriptions[index].clone());
             }
             return Err(SharedChannelError::new(
                 SharedChannelErrorCode::SubscriptionAlreadyExists,
@@ -402,6 +502,7 @@ where
             pins: Vec::new(),
             last_update: None,
             auto_update: super::ChannelAutoUpdateState::default(),
+            remote_state: ChannelSubscriptionRemoteState::default(),
             created_at: now.clone(),
             updated_at: now,
         };
@@ -464,7 +565,7 @@ where
         validate_remote_repository(&repository, &organization, channel.repository_id)?;
         if project_role(&repository.permissions).is_none() {
             return Err(SharedChannelError::new(
-                SharedChannelErrorCode::PermissionDenied,
+                SharedChannelErrorCode::AppRepositoryAccessRequired,
                 "The current GitHub identity no longer has repository read access",
             ));
         }

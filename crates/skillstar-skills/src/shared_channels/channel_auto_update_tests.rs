@@ -570,6 +570,11 @@ async fn fake_gateway_distinguishes_permission_integrity_and_retryable_network_f
             ChannelAutoUpdateRunStatus::RetryableFailure,
             None,
         ),
+        (
+            SharedChannelErrorCode::InvitationRateLimited,
+            ChannelAutoUpdateRunStatus::RetryableFailure,
+            None,
+        ),
     ] {
         let now = instant("2026-08-06T01:00:00Z");
         let (gateway, subscriptions, installer) = fixtures();
@@ -585,7 +590,10 @@ async fn fake_gateway_distinguishes_permission_integrity_and_retryable_network_f
             execution.run.pauses.first().map(|pause| pause.reason),
             reason
         );
-        if code == SharedChannelErrorCode::Network {
+        if matches!(
+            code,
+            SharedChannelErrorCode::Network | SharedChannelErrorCode::InvitationRateLimited
+        ) {
             assert_eq!(
                 subscriptions.store.lock().unwrap().subscriptions[0]
                     .auto_update
@@ -615,5 +623,37 @@ async fn fake_gateway_distinguishes_permission_integrity_and_retryable_network_f
     assert_eq!(
         stored.check_error_code,
         Some(SharedChannelErrorCode::ReleaseConflict)
+    );
+}
+
+#[tokio::test]
+async fn revoked_access_is_rechecked_in_the_background_and_recovers() {
+    let now = instant("2026-08-06T01:00:00Z");
+    let (gateway, subscriptions, installer) = fixtures();
+    *gateway.repository_error.lock().unwrap() = Some(SharedChannelErrorCode::RepositoryNotFound);
+    make_due(&subscriptions, now);
+    let app = service(gateway.clone(), subscriptions.clone(), installer);
+
+    let failed = app.run_due_auto_updates_at(now).await.unwrap().remove(0);
+
+    assert_eq!(failed.run.status, ChannelAutoUpdateRunStatus::Paused);
+    assert_eq!(
+        subscriptions.store.lock().unwrap().subscriptions[0]
+            .auto_update
+            .next_check_at
+            .as_deref(),
+        Some("2026-08-06T02:00:00+00:00")
+    );
+    *gateway.repository_error.lock().unwrap() = None;
+
+    app.run_due_auto_updates_at(now + Duration::hours(1))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        subscriptions.store.lock().unwrap().subscriptions[0]
+            .remote_state
+            .status,
+        ChannelSubscriptionRemoteStatus::Active
     );
 }

@@ -8,6 +8,7 @@ pub(super) struct UpdateGateway {
     pub(super) manifests: Arc<Mutex<Vec<ChannelReleaseManifest>>>,
     pub(super) offline: Arc<Mutex<bool>>,
     pub(super) repository_error: Arc<Mutex<Option<SharedChannelErrorCode>>>,
+    pub(super) has_read_access: Arc<Mutex<bool>>,
 }
 
 #[async_trait]
@@ -26,7 +27,16 @@ impl ChannelSubscriptionGateway for UpdateGateway {
             return Err(SharedChannelError::new(code, "repository unavailable"));
         }
         if repository_id == 42 {
-            Ok(repository())
+            let mut repository = repository();
+            if !*self.has_read_access.lock().unwrap() {
+                repository.permissions = RepositoryPermissions {
+                    admin: false,
+                    maintain: false,
+                    push: false,
+                    pull: false,
+                };
+            }
+            Ok(repository)
         } else {
             Err(SharedChannelError::new(
                 SharedChannelErrorCode::RepositoryNotFound,
@@ -115,7 +125,7 @@ pub(super) struct UpdateInstaller {
     pub(super) converted: Arc<Mutex<Vec<(String, String)>>>,
     pub(super) local_name_conflicts: Arc<Mutex<BTreeSet<String>>>,
     pub(super) removal_cleanup_failures: Arc<Mutex<BTreeSet<String>>>,
-    rollbacks: Arc<Mutex<Vec<String>>>,
+    pub(super) rollbacks: Arc<Mutex<Vec<String>>>,
 }
 
 #[async_trait]
@@ -366,6 +376,7 @@ pub(super) fn fixtures() -> (UpdateGateway, UpdateSubscriptions, UpdateInstaller
         manifests: Arc::new(Mutex::new(vec![manifest_v1(), manifest_v2()])),
         offline: Arc::new(Mutex::new(false)),
         repository_error: Arc::new(Mutex::new(None)),
+        has_read_access: Arc::new(Mutex::new(true)),
     };
     let subscriptions = UpdateSubscriptions {
         store: Arc::new(Mutex::new(ChannelSubscriptionStore {
@@ -443,6 +454,7 @@ async fn clean_skills_advance_independently_and_restart_keeps_the_result() {
             manifests: Arc::new(Mutex::new(vec![manifest_v2()])),
             offline: Arc::new(Mutex::new(false)),
             repository_error: Arc::new(Mutex::new(None)),
+            has_read_access: Arc::new(Mutex::new(true)),
         },
         subscriptions,
         UpdateInstaller::default(),
@@ -1074,6 +1086,7 @@ fn subscription_v1() -> ChannelSubscription {
         pins: Vec::new(),
         last_update: None,
         auto_update: ChannelAutoUpdateState::default(),
+        remote_state: ChannelSubscriptionRemoteState::default(),
         created_at: "2026-08-05T00:00:00Z".into(),
         updated_at: "2026-08-05T00:00:00Z".into(),
     }

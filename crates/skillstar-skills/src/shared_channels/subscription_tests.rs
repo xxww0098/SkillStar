@@ -160,9 +160,17 @@ fn facade(
     subscriptions: FakeSubscriptions,
     installer: FakeInstaller,
 ) -> ChannelSubscriptionFacade<FakeGateway, FakeChannels, FakeSubscriptions, FakeInstaller> {
+    facade_with_repository(subscriptions, installer, repository())
+}
+
+fn facade_with_repository(
+    subscriptions: FakeSubscriptions,
+    installer: FakeInstaller,
+    repository: RemoteRepository,
+) -> ChannelSubscriptionFacade<FakeGateway, FakeChannels, FakeSubscriptions, FakeInstaller> {
     ChannelSubscriptionFacade::new(
         FakeGateway {
-            repository: repository(),
+            repository,
             manifests: Arc::new(Mutex::new(vec![manifest()])),
         },
         FakeChannels(Arc::new(Mutex::new(SharedChannelStore {
@@ -235,6 +243,29 @@ async fn subscribe_installs_only_selected_skills_and_persists_target_baseline_an
             (&"writer".to_string(), true)
         ]
     );
+}
+
+#[tokio::test]
+async fn idempotent_subscribe_clears_a_stale_revoked_state_after_remote_validation() {
+    let subscriptions = FakeSubscriptions::default();
+    let installer = FakeInstaller::default();
+    let service = facade(subscriptions.clone(), installer.clone());
+    let request = SubscribeChannelRequest {
+        repository_id: 42,
+        target: release_target(),
+        selected_skill_ids: vec!["writer".into()],
+    };
+    service.subscribe(request.clone()).await.unwrap();
+    subscriptions.store.lock().unwrap().subscriptions[0].remote_state =
+        ChannelSubscriptionRemoteState::revoked("stale");
+
+    let result = service.subscribe(request).await.unwrap();
+
+    assert_eq!(
+        result.remote_state.status,
+        ChannelSubscriptionRemoteStatus::Active
+    );
+    assert_eq!(installer.requests.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -338,7 +369,7 @@ async fn unknown_store_schema_is_reviewable_but_rejects_subscription_changes() {
     let subscriptions = FakeSubscriptions::default();
     *subscriptions.read_only.lock().unwrap() = Some(vec![ChannelSubscriptionView {
         schema_version: 99,
-        descriptor_version: 4,
+        descriptor_version: 5,
         repository_id: 42,
         organization_id: Some(7),
         target: Some(ChannelReleaseTarget {
@@ -348,6 +379,7 @@ async fn unknown_store_schema_is_reviewable_but_rejects_subscription_changes() {
         }),
         selected_skill_ids: vec!["writer".into()],
         auto_update: ChannelAutoUpdateState::default(),
+        remote_state: ChannelSubscriptionRemoteState::default(),
         read_only: true,
     }]);
     let installer = FakeInstaller::default();
@@ -370,6 +402,39 @@ async fn unknown_store_schema_is_reviewable_but_rejects_subscription_changes() {
         SharedChannelErrorCode::SubscriptionSchemaUnsupported
     );
     assert!(installer.requests.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn remote_access_errors_do_not_get_hidden_by_a_read_only_future_schema() {
+    let subscriptions = FakeSubscriptions::default();
+    *subscriptions.read_only.lock().unwrap() = Some(vec![ChannelSubscriptionView {
+        schema_version: 99,
+        descriptor_version: 5,
+        repository_id: 42,
+        organization_id: Some(7),
+        target: Some(release_target()),
+        selected_skill_ids: vec!["writer".into()],
+        auto_update: ChannelAutoUpdateState::default(),
+        remote_state: ChannelSubscriptionRemoteState::default(),
+        read_only: true,
+    }]);
+    let mut inaccessible = repository();
+    inaccessible.permissions = RepositoryPermissions {
+        admin: false,
+        maintain: false,
+        push: false,
+        pull: false,
+    };
+
+    let error = facade_with_repository(subscriptions, FakeInstaller::default(), inaccessible)
+        .review(42)
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        error.code,
+        SharedChannelErrorCode::AppRepositoryAccessRequired
+    );
 }
 
 #[tokio::test]
@@ -413,6 +478,7 @@ fn serialized_subscription_provenance_never_contains_credentials() {
         pins: Vec::new(),
         last_update: None,
         auto_update: ChannelAutoUpdateState::default(),
+        remote_state: ChannelSubscriptionRemoteState::default(),
         created_at: "now".into(),
         updated_at: "now".into(),
     };

@@ -1,9 +1,10 @@
-import { Loader2, RefreshCw, RotateCw, UserPlus, UsersRound, X } from "lucide-react";
+import { Loader2, RefreshCw, RotateCw, Trash2, UserPlus, UsersRound, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "../../../components/ui/button";
 import type {
   ChannelInvitationAction,
   ChannelInviteRole,
+  ChannelMemberRevocationResult,
   ChannelMembershipSnapshot,
   SharedChannelDescriptor,
 } from "../../../types";
@@ -11,6 +12,7 @@ import {
   cancelSharedChannelInvitation,
   inviteSharedChannelMember,
   listSharedChannelMembership,
+  revokeSharedChannelMember,
   resendSharedChannelInvitation,
 } from "../api/channels";
 
@@ -26,6 +28,8 @@ export function ChannelMembershipPanel({ channel }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [lastAction, setLastAction] = useState<ChannelInvitationAction | null>(null);
+  const [revocation, setRevocation] = useState<ChannelMemberRevocationResult | null>(null);
+  const [revoking, setRevoking] = useState<string | null>(null);
   const [denied, setDenied] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -46,10 +50,14 @@ export function ChannelMembershipPanel({ channel }: Props) {
   }, [channel.repository_id]);
 
   useEffect(() => {
+    setRevocation(null);
     void refresh();
-  }, [refresh]);
+  }, [channel.repository_id, refresh]);
+
+  const mutating = saving || revoking !== null;
 
   const run = async (operation: () => Promise<ChannelInvitationAction>) => {
+    if (mutating) return false;
     setSaving(true);
     setError("");
     try {
@@ -89,6 +97,24 @@ export function ChannelMembershipPanel({ channel }: Props) {
     if (succeeded) setUsername("");
   };
 
+  const revoke = async (login: string) => {
+    if (mutating) return;
+    setRevoking(login);
+    setError("");
+    setRevocation(null);
+    try {
+      const result = await revokeSharedChannelMember(channel.repository_id, login);
+      setRevocation(result);
+      await refresh();
+    } catch (cause) {
+      const operationError = messageFrom(cause);
+      await refresh();
+      setError(operationError);
+    } finally {
+      setRevoking(null);
+    }
+  };
+
   if (denied || (loading && snapshot === null && !error)) return null;
 
   return (
@@ -108,7 +134,7 @@ export function ChannelMembershipPanel({ channel }: Props) {
           variant="ghost"
           aria-label="Refresh members"
           onClick={() => void refresh()}
-          disabled={loading}
+          disabled={loading || mutating}
         >
           {loading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
         </Button>
@@ -123,6 +149,7 @@ export function ChannelMembershipPanel({ channel }: Props) {
             onChange={(event) => setUsername(event.target.value)}
             className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
             placeholder="octocat"
+            disabled={mutating}
           />
         </label>
         <label className="space-y-1 text-xs font-medium">
@@ -132,12 +159,13 @@ export function ChannelMembershipPanel({ channel }: Props) {
             value={role}
             onChange={(event) => setRole(event.target.value as ChannelInviteRole)}
             className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
+            disabled={mutating}
           >
             <option value="subscriber">Subscriber</option>
             <option value="publisher">Publisher</option>
           </select>
         </label>
-        <Button className="self-end" onClick={() => void invite()} disabled={saving || !username.trim()}>
+        <Button className="self-end" onClick={() => void invite()} disabled={mutating || !username.trim()}>
           {saving ? <Loader2 className="mr-1.5 size-4 animate-spin" /> : <UserPlus className="mr-1.5 size-4" />}
           Invite
         </Button>
@@ -149,6 +177,28 @@ export function ChannelMembershipPanel({ channel }: Props) {
         </p>
       )}
       {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+      {revocation && (
+        <div className="mt-3 rounded-lg border border-border bg-muted/25 p-3 text-xs">
+          {revocation.status === "revoked" ? (
+            <p>@{revocation.username} no longer has effective GitHub access.</p>
+          ) : (
+            <div className="space-y-1.5">
+              <p>
+                @{revocation.username} still has effective {revocation.effective_role} access through GitHub. The direct
+                grant is absent; inherited access may remain, or GitHub permission propagation may still be settling.
+              </p>
+              <a
+                href={`${channel.html_url}/settings/access`}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-primary hover:underline"
+              >
+                Review effective access on GitHub
+              </a>
+            </div>
+          )}
+        </div>
+      )}
 
       {!loading && snapshot && (
         <div className="mt-4 space-y-4">
@@ -161,8 +211,23 @@ export function ChannelMembershipPanel({ channel }: Props) {
                   className="flex items-center justify-between rounded-md bg-muted/35 px-3 py-2 text-xs"
                 >
                   <span className="font-medium">@{member.user.login}</span>
-                  <span className="text-muted-foreground">
-                    {member.role} · GitHub {member.github_role_name}
+                  <span className="flex items-center gap-2">
+                    <span className="text-muted-foreground">
+                      {member.role} · GitHub {member.github_role_name}
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      aria-label={`Remove direct access for @${member.user.login}`}
+                      disabled={mutating}
+                      onClick={() => void revoke(member.user.login)}
+                    >
+                      {revoking === member.user.login ? (
+                        <Loader2 className="size-3 animate-spin" />
+                      ) : (
+                        <Trash2 className="size-3" />
+                      )}
+                    </Button>
                   </span>
                 </div>
               ))}
@@ -189,7 +254,7 @@ export function ChannelMembershipPanel({ channel }: Props) {
                       <Button
                         size="sm"
                         variant="ghost"
-                        disabled={saving}
+                        disabled={mutating}
                         onClick={() =>
                           void run(() => resendSharedChannelInvitation(channel.repository_id, invitation.id))
                         }
@@ -200,7 +265,7 @@ export function ChannelMembershipPanel({ channel }: Props) {
                     <Button
                       size="sm"
                       variant="ghost"
-                      disabled={saving}
+                      disabled={mutating}
                       onClick={() =>
                         void run(() => cancelSharedChannelInvitation(channel.repository_id, invitation.id))
                       }

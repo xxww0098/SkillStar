@@ -32,6 +32,13 @@ pub struct InstallChannelSkillResult {
     pub snapshot: ChannelUpdateSnapshot,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct HandleRevokedChannelSkillResult {
+    pub skill_id: String,
+    pub local_name: Option<String>,
+    pub subscription: ChannelSubscription,
+}
+
 #[async_trait]
 pub trait ChannelRemovedSkillHandler: Send + Sync {
     async fn uninstall_and_commit(
@@ -73,19 +80,30 @@ where
         &self,
         request: ConvertRemovedChannelSkillRequest,
     ) -> Result<HandleRemovedChannelSkillResult, SharedChannelError> {
-        crate::content::validate_skill_name(&request.local_name).map_err(|_| {
-            SharedChannelError::new(
-                SharedChannelErrorCode::SubscriptionSelectionInvalid,
-                "Choose a valid conflict-safe name for the local Skill copy",
-            )
-        })?;
-        if request.skill_id.eq_ignore_ascii_case(&request.local_name) {
-            return Err(SharedChannelError::new(
-                SharedChannelErrorCode::SubscriptionSelectionInvalid,
-                "The local copy needs a distinct name so it cannot overwrite the channel Skill",
-            ));
-        }
+        validate_local_copy_name(&request.skill_id, &request.local_name)?;
         self.handle_removed_skill(
+            request.repository_id,
+            &request.skill_id,
+            RemovedSkillAction::ConvertToLocal(request.local_name),
+        )
+        .await
+    }
+
+    pub async fn uninstall_revoked_skill(
+        &self,
+        repository_id: u64,
+        skill_id: &str,
+    ) -> Result<HandleRevokedChannelSkillResult, SharedChannelError> {
+        self.handle_revoked_skill(repository_id, skill_id, RemovedSkillAction::Uninstall)
+            .await
+    }
+
+    pub async fn convert_revoked_skill_to_local(
+        &self,
+        request: ConvertRemovedChannelSkillRequest,
+    ) -> Result<HandleRevokedChannelSkillResult, SharedChannelError> {
+        validate_local_copy_name(&request.skill_id, &request.local_name)?;
+        self.handle_revoked_skill(
             request.repository_id,
             &request.skill_id,
             RemovedSkillAction::ConvertToLocal(request.local_name),
@@ -104,6 +122,7 @@ where
         let _subscription_lease = self.subscriptions.acquire_mutation_lease().await?;
         let mut store = self.subscriptions.load_mutable()?;
         let index = subscription_index(&store.subscriptions, repository_id)?;
+        super::subscription_remote::ensure_remote_access(&store.subscriptions[index])?;
         if store.subscriptions[index]
             .skills
             .iter()
@@ -115,8 +134,24 @@ where
             ));
         }
         let channel = self.active_channel(repository_id)?;
-        let repository = self.validated_repository(&channel).await?;
-        let manifest = self.latest_manifest(&repository, &channel).await?;
+        let remote = async {
+            let repository = self.validated_repository(&channel).await?;
+            let manifest = self.latest_manifest(&repository, &channel).await?;
+            Ok::<_, SharedChannelError>((repository, manifest))
+        }
+        .await;
+        let (repository, manifest) = match remote {
+            Ok(value) => value,
+            Err(error) => {
+                super::subscription_remote::persist_definitive_remote_failure(
+                    &self.subscriptions,
+                    &mut store,
+                    index,
+                    &error,
+                )?;
+                return Err(error);
+            }
+        };
         super::channel_update::validate_manifest_progress(&store.subscriptions[index], &manifest)?;
         let released = active_skill(&manifest, skill_id).ok_or_else(|| {
             SharedChannelError::new(
@@ -137,7 +172,19 @@ where
                 manifest: manifest.clone(),
                 selected_skill_ids: vec![released.id.clone()],
             })
-            .await?;
+            .await;
+        let receipt = match receipt {
+            Ok(receipt) => receipt,
+            Err(error) => {
+                super::subscription_remote::persist_definitive_remote_failure(
+                    &self.subscriptions,
+                    &mut store,
+                    index,
+                    &error,
+                )?;
+                return Err(error);
+            }
+        };
         if let Err(error) = validate_receipt(&receipt, &repository, &manifest, &[released]) {
             return Err(rollback_install(&self.installer, &receipt, error).await);
         }
@@ -187,6 +234,7 @@ where
         let _subscription_lease = self.subscriptions.acquire_mutation_lease().await?;
         let mut store = self.subscriptions.load_mutable()?;
         let index = subscription_index(&store.subscriptions, repository_id)?;
+        super::subscription_remote::ensure_remote_access(&store.subscriptions[index])?;
         let installed = store.subscriptions[index]
             .skills
             .iter()
@@ -199,8 +247,24 @@ where
                 )
             })?;
         let channel = self.active_channel(repository_id)?;
-        let repository = self.validated_repository(&channel).await?;
-        let manifest = self.latest_manifest(&repository, &channel).await?;
+        let remote = async {
+            let repository = self.validated_repository(&channel).await?;
+            let manifest = self.latest_manifest(&repository, &channel).await?;
+            Ok::<_, SharedChannelError>(manifest)
+        }
+        .await;
+        let manifest = match remote {
+            Ok(value) => value,
+            Err(error) => {
+                super::subscription_remote::persist_definitive_remote_failure(
+                    &self.subscriptions,
+                    &mut store,
+                    index,
+                    &error,
+                )?;
+                return Err(error);
+            }
+        };
         super::channel_update::validate_manifest_progress(&store.subscriptions[index], &manifest)?;
         if active_skill(&manifest, &installed.id).is_some()
             && !super::channel_update::has_pending_removal(
@@ -247,6 +311,86 @@ where
             skill_id: installed.id,
             local_name,
             snapshot,
+        })
+    }
+
+    async fn handle_revoked_skill(
+        &self,
+        repository_id: u64,
+        skill_id: &str,
+        action: RemovedSkillAction,
+    ) -> Result<HandleRevokedChannelSkillResult, SharedChannelError> {
+        validate_skill_id(skill_id)?;
+        let _mutation_guard = SHARED_CHANNEL_MUTATION_GATE.lock().await;
+        let _registry_lease = self.channels.acquire_mutation_lease().await?;
+        let _subscription_lease = self.subscriptions.acquire_mutation_lease().await?;
+        let mut store = self.subscriptions.load_mutable()?;
+        let index = subscription_index(&store.subscriptions, repository_id)?;
+        if store.subscriptions[index].remote_state.status
+            != super::ChannelSubscriptionRemoteStatus::Revoked
+        {
+            return Err(SharedChannelError::new(
+                SharedChannelErrorCode::SubscriptionSelectionInvalid,
+                "This subscription is not frozen by revoked GitHub access",
+            ));
+        }
+        let installed = store.subscriptions[index]
+            .skills
+            .iter()
+            .find(|skill| skill.id.eq_ignore_ascii_case(skill_id))
+            .cloned()
+            .ok_or_else(|| {
+                SharedChannelError::new(
+                    SharedChannelErrorCode::SubscriptionSelectionInvalid,
+                    "This Skill is no longer tracked by the channel subscription",
+                )
+            })?;
+        untrack_skill(&mut store.subscriptions[index], &installed.id);
+        if let Some(snapshot) = &mut store.subscriptions[index].last_update {
+            snapshot
+                .items
+                .retain(|item| !item.id.eq_ignore_ascii_case(&installed.id));
+        }
+        if store.subscriptions[index]
+            .last_update
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.items.is_empty())
+        {
+            store.subscriptions[index].last_update = None;
+        } else if let Some(snapshot) = &mut store.subscriptions[index].last_update {
+            super::channel_update::refresh_snapshot_status(snapshot);
+        }
+        store.subscriptions[index].updated_at = Utc::now().to_rfc3339();
+        let local_name = match action {
+            RemovedSkillAction::Uninstall => {
+                let subscriptions = self.subscriptions.clone();
+                let committed_store = store.clone();
+                self.installer
+                    .uninstall_and_commit(
+                        &installed,
+                        Box::new(move || subscriptions.save(&committed_store)),
+                    )
+                    .await?;
+                None
+            }
+            RemovedSkillAction::ConvertToLocal(local_name) => {
+                let result_name = local_name.clone();
+                let subscriptions = self.subscriptions.clone();
+                let committed_store = store.clone();
+                self.installer
+                    .convert_to_local_and_commit(
+                        &installed,
+                        &local_name,
+                        Box::new(move || subscriptions.save(&committed_store)),
+                    )
+                    .await?;
+                Some(result_name)
+            }
+        };
+        Ok(HandleRevokedChannelSkillResult {
+            skill_id: installed.id,
+            local_name,
+            subscription: store.subscriptions[index].clone(),
         })
     }
 
@@ -336,6 +480,22 @@ fn validate_skill_id(skill_id: &str) -> Result<(), SharedChannelError> {
             "Choose a valid subscribed Skill",
         )
     })
+}
+
+fn validate_local_copy_name(skill_id: &str, local_name: &str) -> Result<(), SharedChannelError> {
+    crate::content::validate_skill_name(local_name).map_err(|_| {
+        SharedChannelError::new(
+            SharedChannelErrorCode::SubscriptionSelectionInvalid,
+            "Choose a valid conflict-safe name for the local Skill copy",
+        )
+    })?;
+    if skill_id.eq_ignore_ascii_case(local_name) {
+        return Err(SharedChannelError::new(
+            SharedChannelErrorCode::SubscriptionSelectionInvalid,
+            "The local copy needs a distinct name so it cannot overwrite the channel Skill",
+        ));
+    }
+    Ok(())
 }
 
 async fn rollback_install<I: ChannelSubscriptionInstaller>(

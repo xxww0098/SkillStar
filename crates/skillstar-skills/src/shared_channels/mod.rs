@@ -11,16 +11,21 @@ mod channel_update;
 mod channel_update_installer;
 mod channel_update_validation;
 mod existing;
+mod git_read;
 mod github;
 mod github_membership;
+mod github_status;
 mod membership;
 mod release;
 mod release_scanner;
 mod store;
 mod subscription;
 mod subscription_installer;
+mod subscription_remote;
 mod subscription_store;
 
+#[cfg(test)]
+mod channel_access_tests;
 #[cfg(test)]
 mod channel_auto_update_tests;
 #[cfg(test)]
@@ -46,7 +51,7 @@ pub use channel_auto_update::{
 };
 pub use channel_removal::{
     ChannelRemovedSkillHandler, ConvertRemovedChannelSkillRequest, HandleRemovedChannelSkillResult,
-    InstallChannelSkillResult,
+    HandleRevokedChannelSkillResult, InstallChannelSkillResult,
 };
 pub use channel_rollback::{
     ChannelSkillRollbackResult, ChannelSkillRollbackTarget, RollbackChannelSkillRequest,
@@ -66,10 +71,10 @@ pub use existing::{
 pub use github::ProductionSharedChannelGateway;
 pub use membership::{
     ChannelInvitation, ChannelInvitationAction, ChannelInviteRole, ChannelMember,
-    ChannelMemberIdentity, ChannelMembershipFacade, ChannelMembershipGateway,
-    ChannelMembershipSnapshot, ChannelMembershipStatus, CreateChannelInvitationRequest,
-    EffectiveRepositoryAccess, RemoteChannelInvitation, RemoteInvitationOutcome,
-    RepositoryAccessSource,
+    ChannelMemberIdentity, ChannelMemberRevocationResult, ChannelMemberRevocationStatus,
+    ChannelMembershipFacade, ChannelMembershipGateway, ChannelMembershipSnapshot,
+    ChannelMembershipStatus, CreateChannelInvitationRequest, EffectiveRepositoryAccess,
+    RemoteChannelInvitation, RemoteInvitationOutcome, RepositoryAccessSource,
 };
 pub use release::{
     CHANNEL_CONTENT_HASH_VERSION, CHANNEL_RELEASE_MANIFEST_VERSION, ChannelDraftScanner,
@@ -85,8 +90,9 @@ pub use subscription::{
     ChannelInstallReceipt, ChannelInstallRequest, ChannelReleaseTarget, ChannelRepositoryExposure,
     ChannelSkillPin, ChannelSkillProvenance, ChannelSubscribedSkill, ChannelSubscription,
     ChannelSubscriptionFacade, ChannelSubscriptionGateway, ChannelSubscriptionInstaller,
-    ChannelSubscriptionRegistry, ChannelSubscriptionReview, ChannelSubscriptionReviewSkill,
-    ChannelSubscriptionStore, ChannelSubscriptionView, SubscribeChannelRequest,
+    ChannelSubscriptionRegistry, ChannelSubscriptionRemoteState, ChannelSubscriptionRemoteStatus,
+    ChannelSubscriptionReview, ChannelSubscriptionReviewSkill, ChannelSubscriptionStore,
+    ChannelSubscriptionView, SubscribeChannelRequest,
 };
 pub use subscription_installer::GitChannelSubscriptionInstaller;
 pub use subscription_store::DiskChannelSubscriptionRegistry;
@@ -233,6 +239,7 @@ pub enum SharedChannelErrorCode {
     InvitationRateLimited,
     InvitationLimit,
     SubscriptionAlreadyExists,
+    SubscriptionAccessRevoked,
     SubscriptionNotFound,
     SubscriptionSchemaUnsupported,
     SubscriptionSelectionInvalid,

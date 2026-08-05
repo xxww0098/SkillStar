@@ -5,10 +5,12 @@ use std::sync::{Arc, Mutex};
 #[derive(Clone)]
 struct FakeGateway {
     access: Arc<Mutex<VecDeque<Option<EffectiveRepositoryAccess>>>>,
+    effective_access_error: Arc<Mutex<Option<SharedChannelErrorCode>>>,
     create_outcomes: Arc<Mutex<VecDeque<Result<RemoteInvitationOutcome, SharedChannelError>>>>,
     invitations: Arc<Mutex<Vec<RemoteChannelInvitation>>>,
     invite_calls: Arc<Mutex<Vec<(String, ChannelInviteRole)>>>,
     cancel_calls: Arc<Mutex<Vec<u64>>>,
+    remove_calls: Arc<Mutex<Vec<String>>>,
     accept_calls: Arc<Mutex<Vec<u64>>>,
     accept_outcomes: Arc<Mutex<VecDeque<Result<(), SharedChannelError>>>>,
     repository: RemoteRepository,
@@ -18,10 +20,12 @@ impl FakeGateway {
     fn new() -> Self {
         Self {
             access: Arc::new(Mutex::new(VecDeque::new())),
+            effective_access_error: Arc::new(Mutex::new(None)),
             create_outcomes: Arc::new(Mutex::new(VecDeque::new())),
             invitations: Arc::new(Mutex::new(Vec::new())),
             invite_calls: Arc::new(Mutex::new(Vec::new())),
             cancel_calls: Arc::new(Mutex::new(Vec::new())),
+            remove_calls: Arc::new(Mutex::new(Vec::new())),
             accept_calls: Arc::new(Mutex::new(Vec::new())),
             accept_outcomes: Arc::new(Mutex::new(VecDeque::new())),
             repository: repository(SharedChannelRole::Owner),
@@ -79,6 +83,12 @@ impl ChannelMembershipGateway for FakeGateway {
         _repository: &RemoteRepository,
         _username: &str,
     ) -> Result<Option<EffectiveRepositoryAccess>, SharedChannelError> {
+        if let Some(code) = *self.effective_access_error.lock().unwrap() {
+            return Err(SharedChannelError::new(
+                code,
+                "effective access unavailable",
+            ));
+        }
         Ok(self.access.lock().unwrap().pop_front().flatten())
     }
 
@@ -117,6 +127,15 @@ impl ChannelMembershipGateway for FakeGateway {
             })
     }
 
+    async fn remove_direct_collaborator(
+        &self,
+        _repository: &RemoteRepository,
+        username: &str,
+    ) -> Result<(), SharedChannelError> {
+        self.remove_calls.lock().unwrap().push(username.to_string());
+        Ok(())
+    }
+
     async fn cancel_invitation(
         &self,
         _repository: &RemoteRepository,
@@ -151,6 +170,55 @@ impl ChannelMembershipGateway for FakeGateway {
     ) -> Result<RemoteRepository, SharedChannelError> {
         Ok(self.repository.clone())
     }
+}
+
+#[tokio::test]
+async fn removing_a_direct_member_reports_fully_revoked_after_effective_access_disappears() {
+    let (facade, gateway, _) = fixture();
+
+    let result = facade.revoke_member(42, "bob").await.unwrap();
+
+    assert_eq!(gateway.remove_calls.lock().unwrap().as_slice(), &["bob"]);
+    assert_eq!(result.status, ChannelMemberRevocationStatus::Revoked);
+    assert_eq!(result.effective_role, None);
+}
+
+#[tokio::test]
+async fn removing_a_direct_member_reports_access_that_remains_through_github() {
+    let (facade, gateway, _) = fixture();
+    gateway
+        .access
+        .lock()
+        .unwrap()
+        .push_back(Some(EffectiveRepositoryAccess {
+            role: SharedChannelRole::Subscriber,
+            source: RepositoryAccessSource::Inherited,
+        }));
+
+    let result = facade.revoke_member(42, "bob").await.unwrap();
+
+    assert_eq!(result.status, ChannelMemberRevocationStatus::AccessRemains);
+    assert_eq!(result.effective_role, Some(SharedChannelRole::Subscriber));
+    assert_eq!(
+        result.access_source,
+        Some(RepositoryAccessSource::Inherited)
+    );
+}
+
+#[tokio::test]
+async fn temporary_effective_access_errors_never_claim_that_revocation_completed() {
+    let (facade, gateway, _) = fixture();
+    *gateway.effective_access_error.lock().unwrap() = Some(SharedChannelErrorCode::Network);
+
+    let error = facade.revoke_member(42, "bob").await.unwrap_err();
+
+    assert_eq!(error.code, SharedChannelErrorCode::Network);
+    assert!(
+        error
+            .message
+            .contains("could not verify effective GitHub access")
+    );
+    assert_eq!(gateway.remove_calls.lock().unwrap().as_slice(), &["bob"]);
 }
 
 #[derive(Clone)]

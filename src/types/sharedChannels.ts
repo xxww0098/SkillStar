@@ -157,6 +157,17 @@ export interface ChannelMembershipSnapshot {
   invitations: ChannelInvitation[];
 }
 
+export type RepositoryAccessSource = "direct" | "inherited" | "unknown";
+export type ChannelMemberRevocationStatus = "revoked" | "access_remains";
+
+export interface ChannelMemberRevocationResult {
+  repository_id: number;
+  username: string;
+  status: ChannelMemberRevocationStatus;
+  effective_role: SharedChannelRole | null;
+  access_source: RepositoryAccessSource | null;
+}
+
 export interface CreateChannelInvitationRequest {
   repository_id: number;
   username: string;
@@ -199,6 +210,19 @@ export interface ChannelSkillPin {
   target: ChannelReleaseTarget;
 }
 
+export type ChannelSubscriptionRemoteStatus =
+  | "active"
+  | "revoked"
+  | "offline"
+  | "integrity_error"
+  | "recoverable_failure";
+
+export interface ChannelSubscriptionRemoteState {
+  status: ChannelSubscriptionRemoteStatus;
+  checked_at: string | null;
+  message: string | null;
+}
+
 export interface ChannelSubscription {
   descriptor_version: number;
   repository_id: number;
@@ -209,6 +233,7 @@ export interface ChannelSubscription {
   pins: ChannelSkillPin[];
   last_update?: ChannelUpdateSnapshot | null;
   auto_update: ChannelAutoUpdateState;
+  remote_state: ChannelSubscriptionRemoteState;
   created_at: string;
   updated_at: string;
 }
@@ -221,6 +246,7 @@ export interface ChannelSubscriptionView {
   target: ChannelReleaseTarget | null;
   selected_skill_ids: string[];
   auto_update: ChannelAutoUpdateState;
+  remote_state: ChannelSubscriptionRemoteState;
   read_only: boolean;
 }
 
@@ -399,4 +425,10 @@ export interface HandleRemovedChannelSkillResult {
 export interface InstallChannelSkillResult {
   subscription: ChannelSubscription;
   snapshot: ChannelUpdateSnapshot;
+}
+
+export interface HandleRevokedChannelSkillResult {
+  skill_id: string;
+  local_name: string | null;
+  subscription: ChannelSubscription;
 }

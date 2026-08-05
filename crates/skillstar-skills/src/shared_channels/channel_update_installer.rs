@@ -1,3 +1,4 @@
+use super::git_read::git_read_error;
 use super::{
     CHANNEL_CONTENT_HASH_VERSION, ChannelSkillProvenance, ChannelSkillUpdateReceipt,
     ChannelSkillUpdateRequest, ChannelSubscribedSkill, ChannelSubscriptionUpdater,
@@ -292,7 +293,11 @@ fn apply_blocking(
     let (_url, _source, repo_dir, discovered) = git
         .fetch_repo_scanned_detailed(&source, true)
         .map_err(|error| {
-            rollback_if_resolved(&receipt, resolved_divergence, git_read_error(error))
+            rollback_if_resolved(
+                &receipt,
+                resolved_divergence,
+                git_read_error(error, "Unable to read channel update"),
+            )
         })?;
     let discovered = discovered
         .into_iter()
@@ -572,26 +577,6 @@ fn update_error(message: impl Into<String>) -> SharedChannelError {
     SharedChannelError::new(SharedChannelErrorCode::SubscriptionUpdateFailed, message)
 }
 
-fn git_read_error(error: anyhow::Error) -> SharedChannelError {
-    use crate::git::transport::GitTransportErrorCode as GitCode;
-    let code = error
-        .chain()
-        .find_map(|cause| cause.downcast_ref::<crate::git::transport::GitTransportError>())
-        .map(|transport| match transport.code {
-            GitCode::Network => SharedChannelErrorCode::Network,
-            GitCode::NotAuthenticated | GitCode::TokenExpired | GitCode::CredentialUnavailable => {
-                SharedChannelErrorCode::NotAuthenticated
-            }
-            GitCode::Unauthorized => SharedChannelErrorCode::PermissionDenied,
-            GitCode::AppNotInstalled => SharedChannelErrorCode::AppNotInstalled,
-            GitCode::Cancelled => SharedChannelErrorCode::Cancelled,
-            GitCode::UnsafeRemote => SharedChannelErrorCode::Integrity,
-            GitCode::Other => SharedChannelErrorCode::SubscriptionUpdateFailed,
-        })
-        .unwrap_or(SharedChannelErrorCode::SubscriptionUpdateFailed);
-    SharedChannelError::new(code, format!("Unable to read channel update: {error:#}"))
-}
-
 #[cfg(all(test, not(windows)))]
 mod tests {
     use super::*;
@@ -613,7 +598,7 @@ mod tests {
             ),
             (
                 GitTransportErrorCode::Unauthorized,
-                SharedChannelErrorCode::PermissionDenied,
+                SharedChannelErrorCode::AppRepositoryAccessRequired,
             ),
             (
                 GitTransportErrorCode::UnsafeRemote,
@@ -626,7 +611,10 @@ mod tests {
                 session_id: "session".into(),
             })
             .context("fetching exact release");
-            assert_eq!(git_read_error(error).code, expected);
+            assert_eq!(
+                git_read_error(error, "Unable to read channel update").code,
+                expected
+            );
         }
     }
 

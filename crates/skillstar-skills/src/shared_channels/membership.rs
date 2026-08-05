@@ -93,11 +93,28 @@ pub struct ChannelInvitationAction {
     pub status: ChannelMembershipStatus,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RepositoryAccessSource {
     Direct,
     Inherited,
     Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelMemberRevocationStatus {
+    Revoked,
+    AccessRemains,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ChannelMemberRevocationResult {
+    pub repository_id: u64,
+    pub username: String,
+    pub status: ChannelMemberRevocationStatus,
+    pub effective_role: Option<SharedChannelRole>,
+    pub access_source: Option<RepositoryAccessSource>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,6 +156,11 @@ pub trait ChannelMembershipGateway: Send + Sync {
         username: &str,
         role: ChannelInviteRole,
     ) -> Result<RemoteInvitationOutcome, SharedChannelError>;
+    async fn remove_direct_collaborator(
+        &self,
+        repository: &RemoteRepository,
+        username: &str,
+    ) -> Result<(), SharedChannelError>;
     async fn cancel_invitation(
         &self,
         repository: &RemoteRepository,
@@ -247,6 +269,49 @@ where
             invitation,
             ChannelMembershipStatus::Cancelled,
         ))
+    }
+
+    pub async fn revoke_member(
+        &self,
+        repository_id: u64,
+        username: &str,
+    ) -> Result<ChannelMemberRevocationResult, SharedChannelError> {
+        validate_username(username)?;
+        let _mutation_guard = SHARED_CHANNEL_MUTATION_GATE.lock().await;
+        let _registry_lease = self.registry.acquire_mutation_lease().await?;
+        let repository = self.admin_repository(repository_id).await?;
+        self.gateway
+            .remove_direct_collaborator(&repository, username)
+            .await?;
+        let access = self
+            .gateway
+            .effective_access(&repository, username)
+            .await
+            .map_err(|error| {
+                SharedChannelError::new(
+                    error.code,
+                    format!(
+                        "The direct collaborator grant was removed, but SkillStar could not verify effective GitHub access: {}",
+                        error.message
+                    ),
+                )
+            })?;
+        Ok(match access {
+            Some(access) => ChannelMemberRevocationResult {
+                repository_id,
+                username: username.to_string(),
+                status: ChannelMemberRevocationStatus::AccessRemains,
+                effective_role: Some(access.role),
+                access_source: Some(access.source),
+            },
+            None => ChannelMemberRevocationResult {
+                repository_id,
+                username: username.to_string(),
+                status: ChannelMemberRevocationStatus::Revoked,
+                effective_role: None,
+                access_source: None,
+            },
+        })
     }
 
     pub async fn resend(

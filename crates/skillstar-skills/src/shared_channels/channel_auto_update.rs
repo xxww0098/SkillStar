@@ -635,6 +635,7 @@ fn pause_reason(item: &ChannelUpdateItem) -> Option<ChannelAutoUpdatePauseReason
         return match item.error_code {
             Some(
                 SharedChannelErrorCode::Network
+                | SharedChannelErrorCode::InvitationRateLimited
                 | SharedChannelErrorCode::NotAuthenticated
                 | SharedChannelErrorCode::Protocol
                 | SharedChannelErrorCode::Cancelled,
@@ -699,8 +700,7 @@ fn run_is_hard_paused(run: &ChannelAutoUpdateRun) -> bool {
             pause.skill_id.is_none()
                 && matches!(
                     pause.reason,
-                    ChannelAutoUpdatePauseReason::PermissionChanged
-                        | ChannelAutoUpdatePauseReason::IntegrityError
+                    ChannelAutoUpdatePauseReason::IntegrityError
                         | ChannelAutoUpdatePauseReason::UnresolvedFailure
                 )
         })
@@ -726,11 +726,13 @@ fn failure_run(
     let (status, pauses) = match error.code {
         SharedChannelErrorCode::Cancelled => (ChannelAutoUpdateRunStatus::Cancelled, Vec::new()),
         SharedChannelErrorCode::Network
+        | SharedChannelErrorCode::InvitationRateLimited
         | SharedChannelErrorCode::NotAuthenticated
         | SharedChannelErrorCode::Protocol => {
             (ChannelAutoUpdateRunStatus::RetryableFailure, Vec::new())
         }
         SharedChannelErrorCode::PermissionDenied
+        | SharedChannelErrorCode::SubscriptionAccessRevoked
         | SharedChannelErrorCode::AppNotInstalled
         | SharedChannelErrorCode::AppRepositorySelectionRequired
         | SharedChannelErrorCode::AppRepositoryAccessRequired
@@ -778,6 +780,7 @@ fn is_retryable_error_code(code: Option<SharedChannelErrorCode>) -> bool {
         code,
         Some(
             SharedChannelErrorCode::Network
+                | SharedChannelErrorCode::InvitationRateLimited
                 | SharedChannelErrorCode::NotAuthenticated
                 | SharedChannelErrorCode::Protocol
                 | SharedChannelErrorCode::Cancelled
@@ -861,5 +864,20 @@ mod tests {
         );
         assert_eq!(network.status, ChannelAutoUpdateRunStatus::RetryableFailure);
         assert!(network.pauses.is_empty());
+
+        let rate_limited = failure_run(
+            "2026-08-05T00:00:00Z",
+            now,
+            None,
+            SharedChannelError::new(
+                SharedChannelErrorCode::InvitationRateLimited,
+                "rate limited",
+            ),
+        );
+        assert_eq!(
+            rate_limited.status,
+            ChannelAutoUpdateRunStatus::RetryableFailure
+        );
+        assert!(rate_limited.retryable);
     }
 }

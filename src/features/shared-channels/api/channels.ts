@@ -66,6 +66,10 @@ export function inviteSharedChannelMember(request: CreateChannelInvitationReques
   return tauriInvoke("invite_shared_channel_member", { request });
 }
 
+export function revokeSharedChannelMember(repositoryId: number, username: string) {
+  return tauriInvoke("revoke_shared_channel_member", { repositoryId, username });
+}
+
 export function cancelSharedChannelInvitation(repositoryId: number, invitationId: number) {
   return tauriInvoke("cancel_shared_channel_invitation", {
     repositoryId,
@@ -142,6 +146,14 @@ export function convertRemovedSharedChannelSkillToLocal(request: ConvertRemovedC
 
 export function installSharedChannelSkill(repositoryId: number, skillId: string, sessionId: string) {
   return tauriInvoke("install_shared_channel_skill", { repositoryId, skillId, sessionId });
+}
+
+export function uninstallRevokedSharedChannelSkill(repositoryId: number, skillId: string) {
+  return tauriInvoke("uninstall_revoked_shared_channel_skill", { repositoryId, skillId });
+}
+
+export function convertRevokedSharedChannelSkillToLocal(request: ConvertRemovedChannelSkillRequest) {
+  return tauriInvoke("convert_revoked_shared_channel_skill_to_local", { request });
 }
 
 export function getSharedChannelAutoUpdateState(repositoryId: number) {

@@ -5,6 +5,7 @@ import type {
   ChannelInvitation,
   ChannelInvitationAction,
   ChannelMembershipSnapshot,
+  ChannelMemberRevocationResult,
   CreateChannelInvitationRequest,
   ExistingChannelRepositoryCandidate,
   ExistingChannelScanPreview,
@@ -26,6 +27,7 @@ import type {
   ConvertRemovedChannelSkillRequest,
   HandleRemovedChannelSkillResult,
   InstallChannelSkillResult,
+  HandleRevokedChannelSkillResult,
 } from "../../../types";
 
 export interface SharedChannelCommands {
@@ -80,6 +82,10 @@ export interface SharedChannelCommands {
   invite_shared_channel_member: {
     args: { request: CreateChannelInvitationRequest };
     result: ChannelInvitationAction;
+  };
+  revoke_shared_channel_member: {
+    args: { repositoryId: number; username: string };
+    result: ChannelMemberRevocationResult;
   };
   cancel_shared_channel_invitation: {
     args: { repositoryId: number; invitationId: number };
@@ -152,6 +158,14 @@ export interface SharedChannelCommands {
   install_shared_channel_skill: {
     args: { repositoryId: number; skillId: string; sessionId: string };
     result: InstallChannelSkillResult;
+  };
+  uninstall_revoked_shared_channel_skill: {
+    args: { repositoryId: number; skillId: string };
+    result: HandleRevokedChannelSkillResult;
+  };
+  convert_revoked_shared_channel_skill_to_local: {
+    args: { request: ConvertRemovedChannelSkillRequest };
+    result: HandleRevokedChannelSkillResult;
   };
   get_shared_channel_auto_update_state: {
     args: { repositoryId: number };

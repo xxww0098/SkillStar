@@ -273,6 +273,7 @@ fn validate_store(store: &ChannelSubscriptionStore) -> Result<(), SharedChannelE
                         && skill.provenance.git_ref == pin.target.commit_sha
                 })
         }) || !valid_auto_update_state(&subscription.auto_update)
+            || !valid_remote_state(&subscription.remote_state)
         {
             return Err(storage_error("validate"));
         }
@@ -335,7 +336,7 @@ fn valid_commit(value: &str) -> bool {
 }
 
 fn supported_descriptor_version(version: u64) -> bool {
-    matches!(version, 1 | 2) || version == u64::from(CHANNEL_SUBSCRIPTION_DESCRIPTOR_VERSION)
+    matches!(version, 1..=3) || version == u64::from(CHANNEL_SUBSCRIPTION_DESCRIPTOR_VERSION)
 }
 
 fn valid_target(target: &ChannelReleaseTarget) -> bool {
@@ -391,6 +392,24 @@ fn valid_auto_update_state(state: &super::ChannelAutoUpdateState) -> bool {
                     || !pauses.insert(id.to_ascii_lowercase())
             })
     }) && run.error.as_ref().is_none_or(|error| !error.contains('\0'))
+}
+
+fn valid_remote_state(state: &super::ChannelSubscriptionRemoteState) -> bool {
+    let valid_fields = state
+        .checked_at
+        .as_ref()
+        .is_none_or(|value| chrono::DateTime::parse_from_rfc3339(value).is_ok())
+        && state
+            .message
+            .as_ref()
+            .is_none_or(|message| !message.contains('\0'));
+    valid_fields
+        && (state.status == super::ChannelSubscriptionRemoteStatus::Active
+            || state.checked_at.is_some()
+                && state
+                    .message
+                    .as_ref()
+                    .is_some_and(|message| !message.is_empty()))
 }
 
 fn valid_hash(value: &str) -> bool {
@@ -462,6 +481,7 @@ fn read_only_view(schema_version: u32, subscription: &Value) -> Option<ChannelSu
         target,
         selected_skill_ids,
         auto_update: super::ChannelAutoUpdateState::default(),
+        remote_state: super::ChannelSubscriptionRemoteState::default(),
         read_only: true,
     })
 }
@@ -486,7 +506,8 @@ mod tests {
     use super::*;
     use crate::shared_channels::{
         ChannelAutoUpdateState, ChannelPublisherIdentity, ChannelSkillProvenance,
-        ChannelSubscribedSkill, ChannelSubscription, ChannelUpdateChange, ChannelUpdateItem,
+        ChannelSubscribedSkill, ChannelSubscription, ChannelSubscriptionRemoteState,
+        ChannelSubscriptionRemoteStatus, ChannelUpdateChange, ChannelUpdateItem,
         ChannelUpdateItemState, ChannelUpdateSnapshot, ChannelUpdateStatus,
     };
 
@@ -518,6 +539,7 @@ mod tests {
             pins: Vec::new(),
             last_update: None,
             auto_update: ChannelAutoUpdateState::default(),
+            remote_state: ChannelSubscriptionRemoteState::default(),
             created_at: "2026-08-05T00:00:00Z".into(),
             updated_at: "2026-08-05T00:00:00Z".into(),
         }
@@ -581,6 +603,44 @@ mod tests {
         assert_eq!(
             registry.load_mutable().unwrap_err().code,
             SharedChannelErrorCode::SubscriptionSchemaUnsupported
+        );
+
+        match previous {
+            Some(value) => unsafe { std::env::set_var("SKILLSTAR_DATA_DIR", value) },
+            None => unsafe { std::env::remove_var("SKILLSTAR_DATA_DIR") },
+        }
+    }
+
+    #[test]
+    fn version_three_subscriptions_default_to_active_remote_access_and_upgrade_in_memory() {
+        let _guard = crate::lock_test_env();
+        let temp = tempfile::tempdir().unwrap();
+        let previous = std::env::var_os("SKILLSTAR_DATA_DIR");
+        unsafe { std::env::set_var("SKILLSTAR_DATA_DIR", temp.path()) };
+        let mut value = serde_json::to_value(ChannelSubscriptionStore {
+            schema_version: CHANNEL_SUBSCRIPTION_STORE_VERSION,
+            subscriptions: vec![subscription()],
+        })
+        .unwrap();
+        value["subscriptions"][0]["descriptor_version"] = Value::from(3);
+        value["subscriptions"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("remote_state");
+        skillstar_core::infra::fs_ops::atomic_write(
+            &DiskChannelSubscriptionRegistry::path(),
+            &serde_json::to_vec(&value).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = DiskChannelSubscriptionRegistry.load_mutable().unwrap();
+        assert_eq!(
+            loaded.subscriptions[0].descriptor_version,
+            CHANNEL_SUBSCRIPTION_DESCRIPTOR_VERSION
+        );
+        assert_eq!(
+            loaded.subscriptions[0].remote_state.status,
+            ChannelSubscriptionRemoteStatus::Active
         );
 
         match previous {

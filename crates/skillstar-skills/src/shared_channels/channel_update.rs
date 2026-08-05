@@ -195,16 +195,34 @@ where
         let mut store = self.subscriptions.load_mutable()?;
         let index = subscription_index(&store.subscriptions, repository_id)?;
         let previous = store.subscriptions[index].last_update.clone();
-        let remote = async {
-            let channel = self.active_channel(repository_id)?;
-            let repository = self.validated_repository(&channel).await?;
-            let manifest = self.latest_manifest(&repository, &channel).await?;
-            Ok::<_, SharedChannelError>((repository, manifest))
-        }
-        .await;
+        let (remote, access_probe_failed) = match self.active_channel(repository_id) {
+            Ok(channel) => match self.validated_repository(&channel).await {
+                Ok(repository) => {
+                    let recovered = store.subscriptions[index].remote_state.status
+                        == super::ChannelSubscriptionRemoteStatus::Revoked;
+                    super::subscription_remote::mark_remote_active(&mut store.subscriptions[index]);
+                    if recovered {
+                        self.subscriptions.save(&store)?;
+                    }
+                    (
+                        self.latest_manifest(&repository, &channel)
+                            .await
+                            .map(|manifest| (repository, manifest)),
+                        false,
+                    )
+                }
+                Err(error) => (Err(error), true),
+            },
+            Err(error) => (Err(error), false),
+        };
         let (_repository, manifest) = match remote {
             Ok(value) => value,
             Err(error) => {
+                let revoked = access_probe_failed
+                    && super::subscription_remote::mark_definitive_remote_failure(
+                        &mut store.subscriptions[index],
+                        &error,
+                    );
                 if let Some(mut snapshot) = previous {
                     snapshot.checked_at = Utc::now().to_rfc3339();
                     snapshot.check_error = Some(error.message);
@@ -213,6 +231,9 @@ where
                     store.subscriptions[index].updated_at = snapshot.checked_at.clone();
                     self.subscriptions.save(&store)?;
                     return Ok(snapshot);
+                }
+                if revoked {
+                    self.subscriptions.save(&store)?;
                 }
                 return Err(error);
             }
@@ -273,6 +294,7 @@ where
         let _subscription_lease = self.subscriptions.acquire_mutation_lease().await?;
         let mut store = self.subscriptions.load_mutable()?;
         let index = subscription_index(&store.subscriptions, request.repository_id)?;
+        super::subscription_remote::ensure_remote_access(&store.subscriptions[index])?;
         if let Some(expected_started_at) = auto_claim_started_at {
             let claim = store.subscriptions[index].auto_update.last_run.as_ref();
             if !store.subscriptions[index].auto_update.enabled
@@ -293,8 +315,24 @@ where
             .map(|pin| pin.skill_id.to_ascii_lowercase())
             .collect::<BTreeSet<_>>();
         let channel = self.active_channel(request.repository_id)?;
-        let repository = self.validated_repository(&channel).await?;
-        let manifest = self.latest_manifest(&repository, &channel).await?;
+        let remote = async {
+            let repository = self.validated_repository(&channel).await?;
+            let manifest = self.latest_manifest(&repository, &channel).await?;
+            Ok::<_, SharedChannelError>((repository, manifest))
+        }
+        .await;
+        let (repository, manifest) = match remote {
+            Ok(value) => value,
+            Err(error) => {
+                super::subscription_remote::persist_definitive_remote_failure(
+                    &self.subscriptions,
+                    &mut store,
+                    index,
+                    &error,
+                )?;
+                return Err(error);
+            }
+        };
         validate_manifest_progress(&store.subscriptions[index], &manifest)?;
         if release_target(&manifest) != request.target {
             return Err(SharedChannelError::new(
@@ -340,6 +378,7 @@ where
         let mut receipts = Vec::new();
         let mut applied = BTreeSet::new();
         let mut failures = BTreeMap::new();
+        let subscription_before_apply = store.subscriptions[index].clone();
 
         for item in &initial.items {
             if item.change != ChannelUpdateChange::Updated
@@ -410,6 +449,19 @@ where
                     receipts.push(receipt);
                 }
                 Err(error) => {
+                    if super::subscription_remote::mark_definitive_remote_failure(
+                        &mut store.subscriptions[index],
+                        &error,
+                    ) {
+                        let rollback_failures = self.rollback_applied(&receipts).await;
+                        store.subscriptions[index] = subscription_before_apply;
+                        super::subscription_remote::mark_definitive_remote_failure(
+                            &mut store.subscriptions[index],
+                            &error,
+                        );
+                        self.subscriptions.save(&store)?;
+                        return Err(with_rollback_failures(error, rollback_failures));
+                    }
                     failures.insert(key, error);
                 }
             }
@@ -762,6 +814,20 @@ fn derive_status(
     } else {
         ChannelUpdateStatus::UpdateAvailable
     }
+}
+
+pub(super) fn refresh_snapshot_status(snapshot: &mut ChannelUpdateSnapshot) {
+    let has_advanced = snapshot.items.iter().any(|item| {
+        matches!(
+            item.state,
+            ChannelUpdateItemState::Current | ChannelUpdateItemState::Applied
+        )
+    });
+    snapshot.status = derive_status(
+        &snapshot.items,
+        has_advanced,
+        snapshot.acknowledgement_required,
+    );
 }
 
 fn subscription_has_advanced_skill(

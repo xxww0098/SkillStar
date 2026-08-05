@@ -190,6 +190,18 @@ impl ChannelMembershipGateway for ProductionSharedChannelGateway {
         }
     }
 
+    async fn remove_direct_collaborator(
+        &self,
+        repository: &RemoteRepository,
+        username: &str,
+    ) -> Result<(), SharedChannelError> {
+        let url = collaborator_url(repository, username)?;
+        let (status, body) = self
+            .response(self.request(reqwest::Method::DELETE, &url)?)
+            .await?;
+        ensure_collaborator_removal_status(status, &body)
+    }
+
     async fn cancel_invitation(
         &self,
         repository: &RemoteRepository,
@@ -488,6 +500,10 @@ fn ensure_membership_status(
     }
 }
 
+fn ensure_collaborator_removal_status(status: u16, body: &str) -> Result<(), SharedChannelError> {
+    ensure_membership_status(status, body, &[204, 404])
+}
+
 fn membership_status_error(status: u16, body: &str) -> SharedChannelError {
     if (500..=599).contains(&status) {
         return SharedChannelError::new(
@@ -591,6 +607,11 @@ mod tests {
             invitation_body(ChannelInviteRole::Publisher),
             serde_json::json!({"permission": "push"})
         );
+    }
+
+    #[test]
+    fn missing_direct_grant_is_an_idempotent_collaborator_removal() {
+        ensure_collaborator_removal_status(404, r#"{"message":"Not Found"}"#).unwrap();
     }
 
     #[test]

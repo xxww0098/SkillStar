@@ -1,3 +1,4 @@
+use super::git_read::git_read_error;
 use super::{
     CHANNEL_CONTENT_HASH_VERSION, ChannelInstallReceipt, ChannelInstallRequest,
     ChannelSkillProvenance, ChannelSubscribedSkill, ChannelSubscriptionInstaller,
@@ -97,12 +98,9 @@ fn install_blocking(
         "{}#{}",
         request.repository.clone_url, request.manifest.commit_sha
     );
-    let (_repo_url, _short, repo_dir, discovered) =
-        git.fetch_repo_scanned(&source, true).map_err(|error| {
-            install_error(format!(
-                "Unable to read the selected channel release: {error}"
-            ))
-        })?;
+    let (_repo_url, _short, repo_dir, discovered) = git
+        .fetch_repo_scanned_detailed(&source, true)
+        .map_err(|error| git_read_error(error, "Unable to read the selected channel release"))?;
     let discovered = discovered
         .into_iter()
         .map(|skill| (skill.id.to_ascii_lowercase(), skill))
