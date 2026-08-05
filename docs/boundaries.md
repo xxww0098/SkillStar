@@ -47,7 +47,7 @@ SkillStar/
 | --- | --- | --- |
 | `skillstar-core` | 路径、文件操作、DB pool/migration、共享错误和配置、HTTP client、共享 `Skill` 契约 | 任一产品域的业务流程 |
 | `skillstar-providers` | Provider identity、鉴权和余额端点元数据 | Provider 持久化、Usage 抓取或 UI preset |
-| `skillstar-skills` | 安装、更新、bundle、本地创作、repo scan、lockfile、repo-link 判定、update 状态、GitHub App 用户认证、Agent registry、项目 manifest、deployment、patrol | Marketplace 搜索、Usage 或 Models |
+| `skillstar-skills` | 安装、更新、bundle、本地创作、repo scan、lockfile、repo-link 判定、update 状态、GitHub App 用户认证、操作级 Git 传输与统一 `GitSkillFacade`、Agent registry、项目 manifest、deployment、patrol | Marketplace 搜索、Usage 或 Models |
 | `skillstar-marketplace` | SQLite 快照、FTS、技能市场和 MCP registry/curated 数据 | 技能安装实现、MCP 本地配置 |
 | `skillstar-models` | Provider store/preset、tool sync、AI 推理、MCP store | Usage 订阅或 Marketplace 快照 |
 | `skillstar-usage` | catalog、OAuth/API-key fetcher、加密 token、请求构建器 | Models provider store、CLI 凭证文件编排 |
@@ -110,6 +110,7 @@ Cargo 只使用仓库根 `Cargo.lock`；workspace member 下出现嵌套 lockfil
 - 无产品语义的 UI primitive 放 `src/components/ui/`；跨域展示组件放 `src/components/shared/`；纯工具放 `src/lib/`。
 - Settings 可以组合各域的公开设置入口，但不复制域逻辑。
 - Settings 内的 `github/` 子模块拥有 GitHub 登录 hook 与展示；它只消费 typed IPC，设备授权、凭据和网络状态机仍由 `skillstar-skills::github_auth` 拥有。
+- `skillstar-skills::git_skill` 是扫描、安装、更新检查和升级的展示无关入口；`skillstar-skills::git::transport` 独占远程 Git 子进程的认证、代理、取消、进度和脱敏策略。`src-tauri::core::github_auth` 只管理 facade/session 生命周期并把结构化进度适配为事件，commands 与 CLI 不得另起带网络的 Git 命令。
 - `scripts/internal/check_feature_imports.sh` 允许通过目标 feature 根 `index.ts` 的显式依赖，对新跨 feature 深层导入直接失败；既有基线只能缩减。
 
 ## 关键接缝

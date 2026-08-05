@@ -10,6 +10,7 @@ mod store;
 use std::fmt;
 use std::sync::Mutex;
 
+use crate::git::transport::GitAuthMaterial;
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -224,6 +225,23 @@ where
             clock,
             runtime: Mutex::new(RuntimeState::default()),
         }
+    }
+
+    /// Return non-serializable authentication material for one Git operation.
+    ///
+    /// The transport owns the only token-exposing boundary; callers can pass
+    /// this value into a session but cannot serialize or format the secret.
+    pub fn git_auth_material(&self) -> Result<GitAuthMaterial, GitHubAuthError> {
+        let Some(credential) = self.credentials.load()? else {
+            return Ok(GitAuthMaterial::missing());
+        };
+        if credential
+            .access_expires_at
+            .is_some_and(|expires_at| self.clock.now() >= expires_at)
+        {
+            return Ok(GitAuthMaterial::expired());
+        }
+        Ok(GitAuthMaterial::available(credential.access_token))
     }
 
     pub async fn start_device_flow(&self) -> Result<DeviceAuthorization, GitHubAuthError> {

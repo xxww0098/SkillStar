@@ -41,3 +41,23 @@ export interface GitHubAuthError {
   code: GitHubAuthErrorCode;
   message: string;
 }
+
+export type GitTransportErrorCode =
+  | "not_authenticated"
+  | "token_expired"
+  | "unauthorized"
+  | "app_not_installed"
+  | "network"
+  | "cancelled"
+  | "credential_unavailable"
+  | "unsafe_remote"
+  | "other";
+
+export type GitOperationPhase = "preparing" | "running" | "completed" | "failed" | "cancelled";
+
+/** Payload of the `skillstar://git-progress` event. It intentionally contains no URL credentials. */
+export interface GitOperationProgress {
+  session_id: string;
+  phase: GitOperationPhase;
+  repository: string;
+}

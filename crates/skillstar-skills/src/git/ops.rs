@@ -8,6 +8,8 @@ use skillstar_core::config::github_mirror;
 use skillstar_core::infra::path_env::command_with_path;
 use tracing::{debug, warn};
 
+use super::transport::{self, GitOperationSession, GitTransportErrorCode};
+
 /// Maximum number of retries for shallow fetch operations that hit the
 /// `shallow file has changed since we read it` race condition.
 const SHALLOW_FETCH_MAX_RETRIES: u32 = 3;
@@ -127,7 +129,11 @@ pub fn compute_subtree_hash(repo_path: &Path, folder_path: &str) -> Result<Strin
 /// Always uses `--depth 1 --single-branch` to minimise network transfer
 /// and disk usage. Skills only need the latest snapshot, not full history.
 pub fn clone_repo(url: &str, dest: &Path) -> Result<()> {
-    clone_repo_shallow_inner(url, dest, true)
+    clone_repo_in_session(url, dest, &GitOperationSession::public())
+}
+
+pub fn clone_repo_in_session(url: &str, dest: &Path, session: &GitOperationSession) -> Result<()> {
+    clone_repo_shallow_inner(url, dest, true, session)
 }
 
 /// Shallow-clone a repository (depth=1) for fast scanning.
@@ -136,20 +142,38 @@ pub fn clone_repo(url: &str, dest: &Path) -> Result<()> {
 /// history is unnecessary.  Unlike `clone_repo`, does *not* pass
 /// `--single-branch` so remote tracking refs are created for update checks.
 pub fn clone_repo_shallow(url: &str, dest: &Path) -> Result<()> {
-    clone_repo_shallow_inner(url, dest, false)
+    clone_repo_shallow_in_session(url, dest, &GitOperationSession::public())
+}
+
+pub fn clone_repo_shallow_in_session(
+    url: &str,
+    dest: &Path,
+    session: &GitOperationSession,
+) -> Result<()> {
+    clone_repo_shallow_inner(url, dest, false, session)
 }
 
 /// Shared implementation for shallow clones.
-fn clone_repo_shallow_inner(url: &str, dest: &Path, single_branch: bool) -> Result<()> {
-    run_git_clone(url, dest, single_branch)
+fn clone_repo_shallow_inner(
+    url: &str,
+    dest: &Path,
+    single_branch: bool,
+    session: &GitOperationSession,
+) -> Result<()> {
+    run_git_clone(url, dest, single_branch, session)
 }
 
-fn run_git_clone(url: &str, dest: &Path, single_branch: bool) -> Result<()> {
+fn run_git_clone(
+    url: &str,
+    dest: &Path,
+    single_branch: bool,
+    session: &GitOperationSession,
+) -> Result<()> {
     let mut args = vec!["clone", "--depth", "1"];
     if single_branch {
         args.push("--single-branch");
     }
-    match run_git_clone_attempt(url, dest, &args, true) {
+    match run_git_clone_attempt(url, dest, &args, true, session) {
         Ok(()) => Ok(()),
         Err(e)
             if github_mirror::effective_mirror_url().is_some()
@@ -160,30 +184,26 @@ fn run_git_clone(url: &str, dest: &Path, single_branch: bool) -> Result<()> {
                 url = url,
                 "mirror git clone failed, retrying direct GitHub"
             );
-            run_git_clone_attempt(url, dest, &args, false)
+            run_git_clone_attempt(url, dest, &args, false, session)
         }
         Err(e) => Err(e),
     }
 }
 
-fn run_git_clone_attempt(url: &str, dest: &Path, args: &[&str], use_mirror: bool) -> Result<()> {
-    let mut cmd = command_with_path("git");
-    if use_mirror {
-        github_mirror::apply_mirror_args(&mut cmd);
-    }
-    let output = cmd
-        .args(args)
-        .arg(url)
-        .arg(dest)
-        .output()
-        .context("Failed to execute git clone")?;
-
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!("git clone failed: {}", err.trim()));
-    }
-
-    Ok(())
+fn run_git_clone_attempt(
+    url: &str,
+    dest: &Path,
+    args: &[&str],
+    use_mirror: bool,
+    session: &GitOperationSession,
+) -> Result<()> {
+    let destination = dest.to_string_lossy();
+    let mut command_args = args.to_vec();
+    command_args.push(url);
+    command_args.push(&destination);
+    transport::execute_remote_git(None, &command_args, url, session, use_mirror)
+        .map(|_| ())
+        .map_err(anyhow::Error::from)
 }
 
 /// Sparse treeless clone: only downloads tree objects, no file blobs.
@@ -193,6 +213,14 @@ fn run_git_clone_attempt(url: &str, dest: &Path, args: &[&str], use_mirror: bool
 /// must follow up with `git sparse-checkout set <dirs>` + `git checkout` to
 /// materialize only the directories they need.
 pub fn clone_repo_sparse(url: &str, dest: &Path) -> Result<()> {
+    clone_repo_sparse_in_session(url, dest, &GitOperationSession::public())
+}
+
+pub fn clone_repo_sparse_in_session(
+    url: &str,
+    dest: &Path,
+    session: &GitOperationSession,
+) -> Result<()> {
     let args = [
         "clone",
         "--filter=blob:none",
@@ -201,7 +229,7 @@ pub fn clone_repo_sparse(url: &str, dest: &Path) -> Result<()> {
         "--no-checkout",
         "--sparse",
     ];
-    match run_git_clone_attempt(url, dest, &args, true) {
+    match run_git_clone_attempt(url, dest, &args, true, session) {
         Ok(()) => Ok(()),
         Err(e)
             if github_mirror::effective_mirror_url().is_some()
@@ -212,7 +240,7 @@ pub fn clone_repo_sparse(url: &str, dest: &Path) -> Result<()> {
                 url = url,
                 "mirror sparse git clone failed, retrying direct GitHub"
             );
-            run_git_clone_attempt(url, dest, &args, false)
+            run_git_clone_attempt(url, dest, &args, false, session)
         }
         Err(e) => Err(e),
     }
@@ -246,6 +274,14 @@ pub fn list_tree_paths(repo_path: &Path) -> Result<Vec<String>> {
 /// Expects the repo to have been cloned with `clone_repo_sparse`. Sets cone-mode
 /// sparse-checkout to the given directory patterns then runs `git checkout`.
 pub fn apply_sparse_checkout(repo_path: &Path, dirs: &[&str]) -> Result<()> {
+    apply_sparse_checkout_in_session(repo_path, dirs, &GitOperationSession::public())
+}
+
+pub fn apply_sparse_checkout_in_session(
+    repo_path: &Path,
+    dirs: &[&str],
+    session: &GitOperationSession,
+) -> Result<()> {
     // Init sparse-checkout in cone mode
     let output = command_with_path("git")
         .current_dir(repo_path)
@@ -275,16 +311,9 @@ pub fn apply_sparse_checkout(repo_path: &Path, dirs: &[&str]) -> Result<()> {
     // fetch file content from the remote.  A failure here (e.g. HTTP/2 framing
     // error, promisor remote offline) means nothing was materialised; treating
     // it as non-fatal would leave a broken cache that blocks future retries.
-    let mut checkout_cmd = command_with_path("git");
-    github_mirror::apply_mirror_args(&mut checkout_cmd);
-    let output = checkout_cmd
-        .current_dir(repo_path)
-        .arg("checkout")
-        .output()
-        .context("Failed to execute git checkout after sparse-checkout")?;
-
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
+    let remote = remote_origin_url(repo_path)?;
+    if let Err(error) = run_remote_git(repo_path, &["checkout"], &remote, session) {
+        let err = error.to_string();
         let err_lower = err.to_lowercase();
 
         // Hard failures: promisor-remote fetch errors, RPC/HTTP failures,
@@ -342,9 +371,13 @@ pub fn ensure_worktree_checked_out(repo_path: &Path) -> Result<bool> {
 /// Uses `--depth 1` to keep network transfer minimal — we only need the
 /// tip commit hash, not additional history.
 pub fn check_update(repo_path: &Path) -> Result<bool> {
+    check_update_in_session(repo_path, &GitOperationSession::public())
+}
+
+pub fn check_update_in_session(repo_path: &Path, session: &GitOperationSession) -> Result<bool> {
     // Depth-1 fetch: updates remote refs without downloading extra history.
     // Retry on shallow-file race condition.
-    run_git_shallow_fetch(repo_path, &["fetch", "--depth", "1", "--quiet"])?;
+    run_git_shallow_fetch_in_session(repo_path, &["fetch", "--depth", "1", "--quiet"], session)?;
 
     // For shallow repos, rev-list --left-right can be unreliable.
     // Compare HEAD vs FETCH_HEAD / @{upstream} via rev-parse instead.
@@ -362,7 +395,11 @@ pub fn check_update(repo_path: &Path) -> Result<bool> {
 /// - The result is always exactly at origin HEAD (no merge conflicts).
 /// - Network transfer is bounded to a single commit.
 pub fn pull_repo(repo_path: &Path) -> Result<()> {
-    run_git_shallow_fetch(repo_path, &["fetch", "--depth", "1", "--quiet"])?;
+    pull_repo_in_session(repo_path, &GitOperationSession::public())
+}
+
+pub fn pull_repo_in_session(repo_path: &Path, session: &GitOperationSession) -> Result<()> {
+    run_git_shallow_fetch_in_session(repo_path, &["fetch", "--depth", "1", "--quiet"], session)?;
 
     // Determine the correct reset target.
     // Try origin/HEAD first, then the tracking upstream, then FETCH_HEAD.
@@ -383,6 +420,16 @@ pub fn head_revision(repo_path: &Path) -> Result<String> {
 /// Read the configured origin URL without mutating the repository.
 pub fn remote_origin_url(repo_path: &Path) -> Result<String> {
     run_git(repo_path, &["remote", "get-url", "origin"])
+}
+
+/// Run a checkout that may lazily download blobs from a promisor remote.
+pub fn checkout_in_session(
+    repo_path: &Path,
+    args: &[&str],
+    session: &GitOperationSession,
+) -> Result<String> {
+    let remote = remote_origin_url(repo_path)?;
+    run_remote_git(repo_path, args, &remote, session)
 }
 
 /// Restore a repository to a previously captured commit after a failed update.
@@ -496,6 +543,14 @@ fn validate_relative_pathspec(pathspec: &str) -> Result<()> {
 ///   `fatal: shallow file has changed since we read it`
 /// This is a transient condition — retrying after a short backoff resolves it.
 pub fn run_git_shallow_fetch(repo_path: &Path, args: &[&str]) -> Result<String> {
+    run_git_shallow_fetch_in_session(repo_path, args, &GitOperationSession::public())
+}
+
+pub fn run_git_shallow_fetch_in_session(
+    repo_path: &Path,
+    args: &[&str],
+    session: &GitOperationSession,
+) -> Result<String> {
     let repo_lock = shallow_fetch_lock(repo_path);
     // Poisoned mutex: another thread panicked while holding the lock (e.g. antivirus
     // injection). `into_inner()` recovers the guard safely — the HashMap inside holds
@@ -506,7 +561,8 @@ pub fn run_git_shallow_fetch(repo_path: &Path, args: &[&str]) -> Result<String> 
 
     let mut last_err = None;
     for attempt in 0..SHALLOW_FETCH_MAX_RETRIES {
-        match run_git(repo_path, args) {
+        let remote = remote_origin_url(repo_path)?;
+        match run_remote_git(repo_path, args, &remote, session) {
             Ok(output) => return Ok(output),
             Err(e) => {
                 let err_msg = e.to_string();
@@ -582,6 +638,34 @@ fn run_git_with_mirror(repo_path: &Path, args: &[&str], use_mirror: bool) -> Res
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn run_remote_git(
+    repo_path: &Path,
+    args: &[&str],
+    remote: &str,
+    session: &GitOperationSession,
+) -> Result<String> {
+    match transport::execute_remote_git(Some(repo_path), args, remote, session, true) {
+        Ok(output) => Ok(output.stdout.trim().to_string()),
+        Err(error)
+            if !session.has_credential()
+                && github_mirror::effective_mirror_url().is_some()
+                && (error.code == GitTransportErrorCode::Network
+                    || github_mirror::is_mirror_transport_error(&error.to_string())) =>
+        {
+            warn!(
+                target: "git_ops",
+                path = %repo_path.display(),
+                command = args.join(" "),
+                "mirror git command failed, retrying direct GitHub"
+            );
+            transport::execute_remote_git(Some(repo_path), args, remote, session, false)
+                .map(|output| output.stdout.trim().to_string())
+                .map_err(anyhow::Error::from)
+        }
+        Err(error) => Err(anyhow::Error::from(error)),
+    }
 }
 
 #[cfg(test)]

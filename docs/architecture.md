@@ -83,6 +83,8 @@ flowchart LR
 
 - HTTP 统一通过 `probe_http_client`，确保代理配置和探测策略一致。
 - `github.com` GitHub App 用户登录使用设备授权流；access/refresh token 只经系统凭据抽象读写，设备码和已解析身份只保存在进程内。到期时间必须来自 GitHub 响应元数据，登出同时清除钥匙串凭据、待处理授权与内存身份。
+- 私有 GitHub 仓库的扫描、克隆、检查和更新由 `skillstar-skills` 的统一 Git operation session 执行。session 在开始时从认证 facade 取得短期 access token，只向规范化的 `github.com` HTTPS 操作注入临时 askpass 环境；它不得持久化凭据，并负责非交互、代理、取消、进度和敏感信息清洗。Tauri 和未来 CLI 只适配该域入口。
+- 认证 Git 操作绕过第三方 GitHub 镜像，防止凭据转发；公开操作可以继续使用镜像回退。Git 子进程使用当前 SkillStar 代理配置，不读取或修改用户的全局 Git 凭据状态。
 - GitHub mirror 只影响单次 Git 命令，不修改用户全局 Git 配置；传输失败允许直接 GitHub fallback 和熔断。
 - SSH 在发送认证材料前完成 host-key gate；远端命令检查退出码并设置超时，SFTP 路径显式解析为绝对路径。
 

@@ -21,13 +21,27 @@ pub fn check_skill_update_local(
     skill_path: &Path,
     failed_fetch_roots: &HashSet<PathBuf>,
 ) -> Option<bool> {
+    check_skill_update_local_in_session(
+        skill_name,
+        skill_path,
+        failed_fetch_roots,
+        &crate::git::transport::GitOperationSession::public(),
+    )
+}
+
+pub fn check_skill_update_local_in_session(
+    skill_name: &str,
+    skill_path: &Path,
+    failed_fetch_roots: &HashSet<PathBuf>,
+    session: &crate::git::transport::GitOperationSession,
+) -> Option<bool> {
     if repo_link::is_repo_cached(skill_path) {
         return update_checker::check_update_local(skill_path, failed_fetch_roots);
     }
 
     // Fallback for non-repo-cached hub skills.
     let _ = crate::git::ops::ensure_worktree_checked_out(skill_path);
-    match crate::git::ops::check_update(skill_path) {
+    match crate::git::ops::check_update_in_session(skill_path, session) {
         Ok(update_available) => Some(update_available),
         Err(err) => {
             warn!(
@@ -75,7 +89,17 @@ pub fn collect_hub_skills() -> Result<Vec<HubSkillEntry>> {
 
 /// Prefetch unique repos for a skill path batch; returns failed roots.
 pub fn prefetch_failed_repos(skill_paths: &[PathBuf]) -> HashSet<PathBuf> {
-    update_checker::prefetch_unique_repos(skill_paths)
+    prefetch_failed_repos_in_session(
+        skill_paths,
+        &crate::git::transport::GitOperationSession::public(),
+    )
+}
+
+pub fn prefetch_failed_repos_in_session(
+    skill_paths: &[PathBuf],
+    session: &crate::git::transport::GitOperationSession,
+) -> HashSet<PathBuf> {
+    update_checker::prefetch_unique_repos_in_session(skill_paths, session)
 }
 
 /// Detect newly available skills in already-fetched repo caches.

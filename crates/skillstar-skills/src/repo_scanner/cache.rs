@@ -9,13 +9,39 @@ use tracing::warn;
 pub use crate::source_resolver::cache_dir_name;
 
 pub fn clone_or_fetch_repo(repo_url: &str, source: &str) -> Result<PathBuf> {
-    clone_or_fetch_repo_at(repo_url, source, None)
+    clone_or_fetch_repo_in_session(
+        repo_url,
+        source,
+        &crate::git::transport::GitOperationSession::public(),
+    )
+}
+
+pub fn clone_or_fetch_repo_in_session(
+    repo_url: &str,
+    source: &str,
+    session: &crate::git::transport::GitOperationSession,
+) -> Result<PathBuf> {
+    clone_or_fetch_repo_at_in_session(repo_url, source, None, session)
 }
 
 pub fn clone_or_fetch_repo_at(
     repo_url: &str,
     source: &str,
     git_ref: Option<&str>,
+) -> Result<PathBuf> {
+    clone_or_fetch_repo_at_in_session(
+        repo_url,
+        source,
+        git_ref,
+        &crate::git::transport::GitOperationSession::public(),
+    )
+}
+
+pub fn clone_or_fetch_repo_at_in_session(
+    repo_url: &str,
+    source: &str,
+    git_ref: Option<&str>,
+    session: &crate::git::transport::GitOperationSession,
 ) -> Result<PathBuf> {
     let cache_dir = paths::repos_cache_dir();
     std::fs::create_dir_all(&cache_dir).context("Failed to create repo cache directory")?;
@@ -35,22 +61,16 @@ pub fn clone_or_fetch_repo_at(
 
     if repo_dir.join(".git").exists() {
         if let Some(git_ref) = git_ref {
-            fetch_and_reset_ref(&repo_dir, git_ref)?;
+            fetch_and_reset_ref(&repo_dir, git_ref, session)?;
             return Ok(repo_dir);
         }
 
-        let mut fetch_cmd = command_with_path("git");
-        github_mirror::apply_mirror_args(&mut fetch_cmd);
-        let output = fetch_cmd
-            .current_dir(&repo_dir)
-            .args(["fetch", "--depth", "1", "--quiet"])
-            .output()
-            .context("Failed to execute git fetch")?;
-
-        if !output.status.success() {
-            let err = String::from_utf8_lossy(&output.stderr);
-            warn!(target: "repo_scanner", warning = err.trim(), "git fetch warning");
-        }
+        git_ops::run_git_shallow_fetch_in_session(
+            &repo_dir,
+            &["fetch", "--depth", "1", "--quiet"],
+            session,
+        )
+        .context("Failed to execute git fetch")?;
 
         let mut reset_cmd = command_with_path("git");
         github_mirror::apply_mirror_args(&mut reset_cmd);
@@ -67,12 +87,10 @@ pub fn clone_or_fetch_repo_at(
                     .current_dir(&repo_dir)
                     .args(["sparse-checkout", "disable"])
                     .output();
-                let mut co_cmd = command_with_path("git");
-                github_mirror::apply_mirror_args(&mut co_cmd);
-                let _ = co_cmd.current_dir(&repo_dir).arg("checkout").output();
+                let _ = git_ops::checkout_in_session(&repo_dir, &["checkout"], session);
             } else {
                 let dir_refs: Vec<&str> = dirs.iter().map(|s| s.as_str()).collect();
-                let _ = git_ops::apply_sparse_checkout(&repo_dir, &dir_refs);
+                let _ = git_ops::apply_sparse_checkout_in_session(&repo_dir, &dir_refs, session);
             }
         }
 
@@ -81,17 +99,17 @@ pub fn clone_or_fetch_repo_at(
         // Ref-pinned sources use an isolated cache entry. A shallow worktree is
         // intentionally preferred here: after fetching an arbitrary ref we
         // need its files available before applying any subpath filter.
-        git_ops::clone_repo_shallow(repo_url, &repo_dir)
+        git_ops::clone_repo_shallow_in_session(repo_url, &repo_dir, session)
             .with_context(|| format!("Failed to shallow-clone {}", repo_url))?;
-        fetch_and_reset_ref(&repo_dir, git_ref)?;
+        fetch_and_reset_ref(&repo_dir, git_ref, session)?;
         Ok(repo_dir)
     } else {
-        match clone_sparse_with_skills(repo_url, &repo_dir) {
+        match clone_sparse_with_skills(repo_url, &repo_dir, session) {
             Ok(()) => Ok(repo_dir),
             Err(sparse_err) => {
                 warn!(target: "repo_scanner", error = %sparse_err, "sparse clone failed, falling back to shallow");
                 let _ = std::fs::remove_dir_all(&repo_dir);
-                git_ops::clone_repo_shallow(repo_url, &repo_dir)
+                git_ops::clone_repo_shallow_in_session(repo_url, &repo_dir, session)
                     .with_context(|| format!("Failed to shallow-clone {}", repo_url))?;
                 Ok(repo_dir)
             }
@@ -117,20 +135,19 @@ fn validate_git_ref(git_ref: &str) -> Result<()> {
     Ok(())
 }
 
-fn fetch_and_reset_ref(repo_dir: &Path, git_ref: &str) -> Result<()> {
+fn fetch_and_reset_ref(
+    repo_dir: &Path,
+    git_ref: &str,
+    session: &crate::git::transport::GitOperationSession,
+) -> Result<()> {
     validate_git_ref(git_ref)?;
 
-    let mut fetch_cmd = command_with_path("git");
-    github_mirror::apply_mirror_args(&mut fetch_cmd);
-    let output = fetch_cmd
-        .current_dir(repo_dir)
-        .args(["fetch", "--depth", "1", "--quiet", "origin", git_ref])
-        .output()
-        .context("Failed to fetch requested Git ref")?;
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("git fetch for ref '{git_ref}' failed: {}", err.trim());
-    }
+    git_ops::run_git_shallow_fetch_in_session(
+        repo_dir,
+        &["fetch", "--depth", "1", "--quiet", "origin", git_ref],
+        session,
+    )
+    .with_context(|| format!("git fetch for ref '{git_ref}' failed"))?;
 
     let mut reset_cmd = command_with_path("git");
     github_mirror::apply_mirror_args(&mut reset_cmd);
@@ -156,20 +173,22 @@ fn fetch_and_reset_ref(repo_dir: &Path, git_ref: &str) -> Result<()> {
     Ok(())
 }
 
-fn clone_sparse_with_skills(repo_url: &str, dest: &Path) -> Result<()> {
-    git_ops::clone_repo_sparse(repo_url, dest)?;
+fn clone_sparse_with_skills(
+    repo_url: &str,
+    dest: &Path,
+    session: &crate::git::transport::GitOperationSession,
+) -> Result<()> {
+    git_ops::clone_repo_sparse_in_session(repo_url, dest, session)?;
 
     let skill_dirs = discover_skill_dirs_from_tree(dest)?;
 
     if skill_dirs.is_empty() {
-        let mut co_cmd = command_with_path("git");
-        github_mirror::apply_mirror_args(&mut co_cmd);
-        let _ = co_cmd.current_dir(dest).arg("checkout").output();
+        let _ = git_ops::checkout_in_session(dest, &["checkout"], session);
         return Ok(());
     }
 
     let dir_refs: Vec<&str> = skill_dirs.iter().map(|s| s.as_str()).collect();
-    git_ops::apply_sparse_checkout(dest, &dir_refs)?;
+    git_ops::apply_sparse_checkout_in_session(dest, &dir_refs, session)?;
 
     Ok(())
 }

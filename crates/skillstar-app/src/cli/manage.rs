@@ -4,6 +4,7 @@
 use super::RemoveOpts;
 
 use skillstar_skills::git::gh_manager;
+use skillstar_skills::git_skill::GitSkillFacade;
 use skillstar_skills::local_skill;
 use skillstar_skills::lockfile;
 use skillstar_skills::skill_install;
@@ -62,10 +63,12 @@ pub fn cmd_update(name: Option<&str>) {
         return;
     }
 
+    let git = GitSkillFacade::from_keyring();
+
     // Goes through the same batch transaction and divergence contract as the
     // GUI. A terminal can resolve blocked Skills interactively; redirected
     // automation remains fail-closed and never guesses whether to discard.
-    let report = skill_update::update_skills(&names);
+    let report = git.update_skills(&names);
     let mut had_failure = !report.failed.is_empty();
     for result in &report.updated {
         print_update_result(result);
@@ -100,7 +103,7 @@ pub fn cmd_update(name: Option<&str>) {
             continue;
         }
 
-        let current = skill_update::update_skills(std::slice::from_ref(&original.name));
+        let current = git.update_skills(std::slice::from_ref(&original.name));
         if let Some(result) = current.updated.first() {
             record_update_result(result, &mut moved);
             continue;
@@ -120,7 +123,7 @@ pub fn cmd_update(name: Option<&str>) {
             continue;
         };
 
-        match skill_update::resolve_skill_update(&blocked.name, resolution) {
+        match git.resolve_skill_update(&blocked.name, resolution) {
             Ok(result) => {
                 if let Some(local_copy) = result.local_copy {
                     println!("✓ Preserved local copy as '{}'", local_copy.name);

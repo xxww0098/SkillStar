@@ -1,5 +1,11 @@
 use super::*;
 use std::process::Command;
+use std::sync::{Arc, Mutex};
+
+use crate::git::transport::{
+    GitAuthMaterial, GitOperationProgress, GitOperationSession, GitProgressSink,
+};
+use crate::git_skill::GitSkillFacade;
 
 struct TestHub {
     previous_env: Vec<(&'static str, Option<std::ffi::OsString>)>,
@@ -15,6 +21,7 @@ impl TestHub {
             ("SKILLSTAR_TOOL_SYNC_HOME", temp.path().join("tool-home")),
             ("HOME", temp.path().join("home")),
             ("USERPROFILE", temp.path().join("home")),
+            ("GIT_CONFIG_GLOBAL", temp.path().join("gitconfig")),
         ];
         let previous_env = overrides
             .iter()
@@ -29,6 +36,15 @@ impl TestHub {
             previous_env,
             _temp: temp,
         }
+    }
+}
+
+#[derive(Default)]
+struct RecordingGitProgress(Mutex<Vec<GitOperationProgress>>);
+
+impl GitProgressSink for RecordingGitProgress {
+    fn emit(&self, progress: GitOperationProgress) {
+        self.0.lock().unwrap().push(progress);
     }
 }
 
@@ -104,6 +120,98 @@ fn committed_root_and_nested_remote() -> tempfile::TempDir {
     run_git(remote.path(), &["add", "."]);
     run_git(remote.path(), &["commit", "-m", "root skill"]);
     remote
+}
+
+#[test]
+fn high_level_facade_scans_installs_and_updates_private_github_without_persisting_token() {
+    const TOKEN: &str = "github_pat_high_level_private_canary";
+    let _guard = crate::lock_test_env();
+    let _hub = TestHub::new();
+    let remote = committed_remote();
+    let global_config = std::env::var_os("GIT_CONFIG_GLOBAL").unwrap();
+    let remote_url = "https://github.com/acme/private-skills.git";
+    std::fs::write(
+        &global_config,
+        format!(
+            "[url \"file://{}\"]\n\tinsteadOf = {remote_url}\n",
+            remote.path().display()
+        ),
+    )
+    .unwrap();
+
+    let progress = Arc::new(RecordingGitProgress::default());
+    let session = GitOperationSession::new(
+        "private-facade",
+        GitAuthMaterial::available(TOKEN),
+        progress.clone(),
+    );
+    let facade = GitSkillFacade::new(session.clone());
+
+    let scan = facade.scan_repo(remote_url, true).unwrap();
+    assert_eq!(scan.source_url, remote_url);
+    assert_eq!(scan.skills.len(), 1);
+    let target = crate::repo_scanner::SkillInstallTarget {
+        id: scan.skills[0].id.clone(),
+        folder_path: scan.skills[0].folder_path.clone(),
+    };
+    let installed = facade
+        .install_from_scan(
+            &scan.source,
+            &scan.source_url,
+            std::slice::from_ref(&target),
+        )
+        .unwrap();
+    assert_eq!(installed.as_slice(), std::slice::from_ref(&target.id));
+
+    std::fs::write(remote.path().join("scripts/run.sh"), "echo private-v2\n").unwrap();
+    run_git(remote.path(), &["add", "."]);
+    run_git(remote.path(), &["commit", "-m", "private-v2"]);
+    facade.update_skill(&target.id).unwrap();
+
+    let installed_path = skillstar_core::infra::paths::hub_skills_dir().join(&target.id);
+    assert_eq!(
+        std::fs::read_to_string(installed_path.join("scripts/run.sh")).unwrap(),
+        "echo private-v2\n"
+    );
+
+    std::fs::write(
+        remote.path().join("scripts/run.sh"),
+        "echo unreachable-v3\n",
+    )
+    .unwrap();
+    run_git(remote.path(), &["add", "."]);
+    run_git(remote.path(), &["commit", "-m", "unreachable-v3"]);
+    std::fs::write(
+        &global_config,
+        format!(
+            "[url \"file://{}/missing.git\"]\n\tinsteadOf = {remote_url}\n",
+            remote.path().display()
+        ),
+    )
+    .unwrap();
+    let failed_update = facade
+        .update_skill(&target.id)
+        .expect_err("unreachable private remote must fail");
+    assert!(!format!("{failed_update:#}").contains(TOKEN));
+    assert_eq!(
+        std::fs::read_to_string(installed_path.join("scripts/run.sh")).unwrap(),
+        "echo private-v2\n",
+        "a failed private update must preserve the last usable version"
+    );
+
+    let repo_root = crate::repo_link::repo_root_of(&installed_path).unwrap();
+    let repository_config = std::fs::read_to_string(repo_root.join(".git/config")).unwrap();
+    let lockfile = std::fs::read_to_string(crate::lockfile::lockfile_path()).unwrap();
+    let progress_debug = format!("{:?}", progress.0.lock().unwrap());
+    assert!(!repository_config.contains(TOKEN));
+    assert!(
+        !std::fs::read_to_string(global_config)
+            .unwrap()
+            .contains(TOKEN)
+    );
+    assert!(!lockfile.contains(TOKEN));
+    assert!(!progress_debug.contains(TOKEN));
+    assert!(!format!("{session:?}").contains(TOKEN));
 }
 
 #[test]

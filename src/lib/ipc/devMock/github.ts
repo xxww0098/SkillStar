@@ -25,6 +25,7 @@ export const GITHUB_HANDLERS: DevMockHandlers = {
     access_expires_at: null,
   }),
   github_auth_logout: () => undefined,
+  cancel_git_operation: () => true,
   check_gh_installed: () => true,
   check_gh_status: () => ({ status: "Ready", username: "dev-user" }),
   check_git_status: () => ({ status: "Installed", version: "2.45.0" }),

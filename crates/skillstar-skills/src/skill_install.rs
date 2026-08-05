@@ -45,12 +45,25 @@ pub fn fetch_repo_scanned(
     url: &str,
     full_depth: bool,
 ) -> Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>), String> {
+    fetch_repo_scanned_in_session(
+        url,
+        full_depth,
+        &crate::git::transport::GitOperationSession::public(),
+    )
+}
+
+pub fn fetch_repo_scanned_in_session(
+    url: &str,
+    full_depth: bool,
+    session: &crate::git::transport::GitOperationSession,
+) -> Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>), String> {
     let parsed =
         crate::source_resolver::Source::parse(url).map_err(|e| format!("Invalid source: {}", e))?;
-    let repo_dir = repo_scanner::clone_or_fetch_repo_at(
+    let repo_dir = repo_scanner::clone_or_fetch_repo_at_in_session(
         &parsed.repo_url,
         &parsed.short,
         parsed.git_ref.as_deref(),
+        session,
     )
     .map_err(|e| format!("Failed to fetch repo: {}", e))?;
     let mut skills_found = match parsed.subpath.as_deref() {
@@ -304,8 +317,11 @@ fn try_install_from_repo_cache(
     requested_name: Option<&str>,
     name_hint: &str,
     skills_dir: &Path,
+    session: &crate::git::transport::GitOperationSession,
 ) -> Result<Option<Skill>, String> {
-    let Ok((repo_url, _source, repo_dir, skills_found)) = fetch_repo_scanned(url, false) else {
+    let Ok((repo_url, _source, repo_dir, skills_found)) =
+        fetch_repo_scanned_in_session(url, false, session)
+    else {
         return Ok(None);
     };
     let parsed =
@@ -368,6 +384,18 @@ fn try_install_from_repo_cache(
 }
 
 pub fn install_skill(url: String, name: Option<String>) -> Result<Skill, String> {
+    install_skill_in_session(
+        url,
+        name,
+        &crate::git::transport::GitOperationSession::public(),
+    )
+}
+
+pub fn install_skill_in_session(
+    url: String,
+    name: Option<String>,
+    session: &crate::git::transport::GitOperationSession,
+) -> Result<Skill, String> {
     let skills_dir = paths::hub_skills_dir();
     let name_hint = derive_name_hint(&url, name.as_deref());
     crate::content::validate_skill_name(&name_hint)
@@ -384,7 +412,7 @@ pub fn install_skill(url: String, name: Option<String>) -> Result<Skill, String>
     }
 
     if let Some(skill) =
-        try_install_from_repo_cache(&url, name.as_deref(), &name_hint, &skills_dir)?
+        try_install_from_repo_cache(&url, name.as_deref(), &name_hint, &skills_dir, session)?
     {
         return Ok(skill);
     }
@@ -394,7 +422,7 @@ pub fn install_skill(url: String, name: Option<String>) -> Result<Skill, String>
         return Err(format!("Skill '{}' is already installed", name_hint));
     }
 
-    if let Err(error) = git_ops::clone_repo(&url, &dest) {
+    if let Err(error) = git_ops::clone_repo_in_session(&url, &dest, session) {
         let _ = fs_ops::remove_dir_all_retry(&dest);
         return Err(error.to_string());
     }
@@ -443,12 +471,25 @@ pub fn install_skill(url: String, name: Option<String>) -> Result<Skill, String>
 /// This prevents git clone/fetch overlap and lockfile serialization issues when
 /// multiple skills share the same repository.
 pub fn install_skills_batch(url: &str, names: &[String]) -> Result<Vec<Skill>, String> {
+    install_skills_batch_in_session(
+        url,
+        names,
+        &crate::git::transport::GitOperationSession::public(),
+    )
+}
+
+pub fn install_skills_batch_in_session(
+    url: &str,
+    names: &[String],
+    session: &crate::git::transport::GitOperationSession,
+) -> Result<Vec<Skill>, String> {
     if names.is_empty() {
         return Ok(Vec::new());
     }
 
     let skills_dir = paths::hub_skills_dir();
-    let (repo_url, _source, repo_dir, skills_found) = fetch_repo_scanned(url, false)?;
+    let (repo_url, _source, repo_dir, skills_found) =
+        fetch_repo_scanned_in_session(url, false, session)?;
     let parsed =
         crate::source_resolver::Source::parse(url).map_err(|e| format!("Invalid source: {e}"))?;
     let existing_lock = lockfile::Lockfile::load(&lockfile::lockfile_path())
@@ -530,7 +571,7 @@ pub fn install_skills_batch(url: &str, names: &[String]) -> Result<Vec<Skill>, S
     // Process fallbacks one by one
     let mut fallback_installed = Vec::new();
     for name in fallback_names {
-        match install_skill(url.to_string(), Some(name)) {
+        match install_skill_in_session(url.to_string(), Some(name), session) {
             Ok(skill) => {
                 fallback_installed.push(skill.name.clone());
                 installed_skills.push(skill);
@@ -558,7 +599,14 @@ pub fn install_skills_batch(url: &str, names: &[String]) -> Result<Vec<Skill>, S
 /// Install all skills from a repo that contains a skillpack.toml manifest.
 /// Returns the list of installed skill names.
 pub fn install_skill_pack(url: String) -> Result<Vec<String>, String> {
-    let (_repo_url, source, repo_dir, _) = fetch_repo_scanned(&url, false)?;
+    install_skill_pack_in_session(url, &crate::git::transport::GitOperationSession::public())
+}
+
+pub fn install_skill_pack_in_session(
+    url: String,
+    session: &crate::git::transport::GitOperationSession,
+) -> Result<Vec<String>, String> {
+    let (_repo_url, source, repo_dir, _) = fetch_repo_scanned_in_session(&url, false, session)?;
 
     // Detect pack manifest
     crate::skill_pack::detect_pack(&repo_dir)

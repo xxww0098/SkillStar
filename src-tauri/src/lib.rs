@@ -259,6 +259,7 @@ pub fn run() {
             commands::github::github_auth_cancel,
             commands::github::github_auth_refresh,
             commands::github::github_auth_logout,
+            commands::github::cancel_git_operation,
             commands::github::check_gh_status,
             commands::github::check_git_status,
             commands::github::check_developer_mode,

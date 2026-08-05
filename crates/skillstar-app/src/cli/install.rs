@@ -9,10 +9,10 @@ use super::{
 };
 
 use skillstar_skills::deployment;
+use skillstar_skills::git_skill::GitSkillFacade;
 use skillstar_skills::local_skill;
 use skillstar_skills::repo_scanner;
 use skillstar_skills::skill_bundle;
-use skillstar_skills::skill_install;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
@@ -22,6 +22,10 @@ use super::{AddKind, classify_add_input};
 enum InstallScope {
     Project(PathBuf),
     Global,
+}
+
+fn git_skill_facade() -> Result<GitSkillFacade, String> {
+    Ok(GitSkillFacade::from_keyring())
 }
 
 #[derive(Debug)]
@@ -424,7 +428,8 @@ fn install_or_reuse_skill(
         return Err("--name cannot be combined with --skill".to_string());
     }
 
-    let (_, _, _, skills_found) = skill_install::fetch_repo_scanned(url, false)?;
+    let git = git_skill_facade()?;
+    let (_, _, _, skills_found) = git.fetch_repo_scanned(url, false)?;
     if skills_found.is_empty() {
         return Err("No valid SKILL.md found in the selected source".to_string());
     }
@@ -483,7 +488,7 @@ fn install_or_reuse_skill(
             prompt_for_skill_selection(&skills_found)?
         };
 
-    let installed = skill_install::install_skills_batch(url, &selected_names)?;
+    let installed = git.install_skills_batch(url, &selected_names)?;
     Ok((selected_names, !installed.is_empty()))
 }
 
@@ -549,7 +554,7 @@ fn prompt_for_skill_selection(
 /// `skillstar install --list` — scan the source without mutating anything.
 fn list_skills_in_source(url: &str) {
     println!("Scanning {}...\n", url);
-    match skill_install::fetch_repo_scanned(url, false) {
+    match git_skill_facade().and_then(|git| git.fetch_repo_scanned(url, false)) {
         Ok((repo_url, source, _, skills_found)) => {
             if skills_found.is_empty() {
                 println!(
@@ -621,7 +626,7 @@ fn preview_install(url: &str, explicit_name: Option<&str>, skill_filter: &[Strin
         println!("  Mode: install every skill (--all)");
         println!("  URL: {}\n", url);
         let Ok((_repo_url, _source, _, skills_found)) =
-            skill_install::fetch_repo_scanned(url, false)
+            git_skill_facade().and_then(|git| git.fetch_repo_scanned(url, false))
         else {
             eprintln!("✗ Failed to scan repository: check URL or network access");
             std::process::exit(1);
@@ -643,7 +648,7 @@ fn preview_install(url: &str, explicit_name: Option<&str>, skill_filter: &[Strin
         println!("  Skill filter: {}\n", skill_filter.join(", "));
 
         let Ok((_repo_url, _source, _, skills_found)) =
-            skill_install::fetch_repo_scanned(url, false)
+            git_skill_facade().and_then(|git| git.fetch_repo_scanned(url, false))
         else {
             eprintln!("✗ Failed to scan repository: check URL or network access");
             std::process::exit(1);
@@ -681,7 +686,9 @@ fn preview_install(url: &str, explicit_name: Option<&str>, skill_filter: &[Strin
     if existing_in_hub || existing_in_lockfile {
         println!("  • {} (already installed — would be reused)", name_hint);
     } else {
-        let Ok((_, _, _, skills_found)) = skill_install::fetch_repo_scanned(url, false) else {
+        let Ok((_, _, _, skills_found)) =
+            git_skill_facade().and_then(|git| git.fetch_repo_scanned(url, false))
+        else {
             println!("  • {} (would be cloned and installed to hub)", name_hint);
             return;
         };

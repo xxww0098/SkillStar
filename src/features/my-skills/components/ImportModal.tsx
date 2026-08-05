@@ -1,4 +1,5 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { listen } from "@tauri-apps/api/event";
 import { Download } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -11,7 +12,13 @@ import {
   type ShareCodeData,
   type ShareCodeType,
 } from "../../../lib/shareCode";
-import type { RepoHistoryEntry, ScanResult, ShareCodeSkillInput, SkillInstallTarget } from "../../../types";
+import type {
+  GitOperationProgress,
+  RepoHistoryEntry,
+  ScanResult,
+  ShareCodeSkillInput,
+  SkillInstallTarget,
+} from "../../../types";
 import {
   CompletedPhase,
   ErrorPhase,
@@ -48,6 +55,25 @@ interface ShareCodeInstallSummary {
 
 function normalizeSkillName(name: string): string {
   return name.trim().toLowerCase();
+}
+
+function gitOperationErrorMessage(
+  error: unknown,
+  t: (key: string, options?: { defaultValue: string }) => string,
+): string {
+  const raw = String(error);
+  const messages: Array<[string, string]> = [
+    ["token_expired:", "Your GitHub session expired. Refresh it in Settings, then retry."],
+    ["not_authenticated:", "Sign in to GitHub in Settings, then retry this private repository."],
+    ["credential_unavailable:", "Unlock the system credential store, then retry."],
+    ["unauthorized:", "The signed-in GitHub user does not have access to this repository."],
+    ["app_not_installed:", "Install or authorize the SkillStar GitHub App for this repository, then retry."],
+    ["network:", "GitHub could not be reached. Check the SkillStar proxy and your network, then retry."],
+    ["cancelled:", "The repository operation was cancelled."],
+    ["unsafe_remote:", "Remove credentials from the repository URL and use SkillStar GitHub login instead."],
+  ];
+  const match = messages.find(([code]) => raw.includes(code));
+  return match ? t(`githubImportModal.gitError.${match[0].slice(0, -1)}`, { defaultValue: match[1] }) : raw;
 }
 
 export interface ImportModalProps {
@@ -87,6 +113,7 @@ export function ImportModal({
   // (avoids stale closure when called from setTimeout)
   const preSelectedSkillRef = useRef(preSelectedSkill);
   preSelectedSkillRef.current = preSelectedSkill;
+  const activeGitSessionRef = useRef<string | null>(null);
 
   // ── State ──────────────────────────────────────────────────────
   const [phase, setPhase] = useState<Phase>("inputURL");
@@ -106,6 +133,48 @@ export function ImportModal({
   const [shareCodeExistingNames, setShareCodeExistingNames] = useState<string[]>([]);
   const [shareCodeSummary, setShareCodeSummary] = useState<ShareCodeInstallSummary | null>(null);
   const [shareCodeType, setShareCodeType] = useState<ShareCodeType>("skills");
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let disposed = false;
+    let stopListening: (() => void) | undefined;
+    void listen<GitOperationProgress>("skillstar://git-progress", ({ payload }) => {
+      if (payload.session_id !== activeGitSessionRef.current) return;
+      const message =
+        payload.phase === "preparing"
+          ? t("githubImportModal.gitPreparing", { defaultValue: "Preparing secure repository access..." })
+          : payload.phase === "running"
+            ? t("githubImportModal.gitRunning", { defaultValue: "Downloading repository data..." })
+            : payload.phase === "cancelled"
+              ? t("githubImportModal.gitCancelled", { defaultValue: "Cancelling repository operation..." })
+              : null;
+      if (message) setProgressMsg(message);
+    })
+      .then((unlisten) => {
+        if (disposed) unlisten();
+        else stopListening = unlisten;
+      })
+      .catch(() => {
+        // Browser development mode has no native event bus; command mocks still
+        // provide deterministic scan/install behavior.
+      });
+    return () => {
+      disposed = true;
+      stopListening?.();
+    };
+  }, [isOpen, t]);
+
+  const cancelActiveGitOperation = useCallback(() => {
+    const sessionId = activeGitSessionRef.current;
+    if (!sessionId) return;
+    activeGitSessionRef.current = null;
+    void tauriInvoke("cancel_git_operation", { sessionId });
+  }, []);
+
+  const handleClose = useCallback(() => {
+    cancelActiveGitOperation();
+    onClose();
+  }, [cancelActiveGitOperation, onClose]);
 
   // ── Reset on open ──────────────────────────────────────────────
   useEffect(() => {
@@ -290,6 +359,8 @@ export function ImportModal({
       const input = (url || urlInput).trim();
       if (!input) return;
       const useFullDepth = scanDepthOverride ?? fullDepthScan;
+      const sessionId = crypto.randomUUID();
+      activeGitSessionRef.current = sessionId;
 
       setPhase("scanning");
       setProgressMsg(t("githubImportModal.cloning"));
@@ -298,6 +369,7 @@ export function ImportModal({
         const result = await tauriInvoke("scan_github_repo", {
           url: input,
           fullDepth: useFullDepth,
+          sessionId,
         });
 
         if (result.skills.length === 0) {
@@ -321,8 +393,10 @@ export function ImportModal({
 
         setPhase("selectSkills");
       } catch (e) {
-        setErrorMsg(String(e));
+        setErrorMsg(gitOperationErrorMessage(e, t));
         setPhase("error");
+      } finally {
+        if (activeGitSessionRef.current === sessionId) activeGitSessionRef.current = null;
       }
     },
     [fullDepthScan, t, urlInput],
@@ -379,12 +453,15 @@ export function ImportModal({
       const targets: SkillInstallTarget[] = scanResult.skills
         .filter((s) => selectedSkills.has(s.id))
         .map((s) => ({ id: s.id, folder_path: s.folder_path }));
+      const sessionId = crypto.randomUUID();
+      activeGitSessionRef.current = sessionId;
 
       try {
         const installed = await tauriInvoke("install_from_scan", {
           repoUrl: scanResult.source_url,
           source: scanResult.source,
           skills: targets,
+          sessionId,
         });
 
         setInstalledCount(installed.length);
@@ -395,11 +472,13 @@ export function ImportModal({
           onPackGroup(installed);
         }
       } catch (e) {
-        setErrorMsg(String(e));
+        setErrorMsg(gitOperationErrorMessage(e, t));
         setPhase("error");
+      } finally {
+        if (activeGitSessionRef.current === sessionId) activeGitSessionRef.current = null;
       }
     },
-    [scanResult, selectedSkills, onInstalled, onPackGroup],
+    [scanResult, selectedSkills, onInstalled, onPackGroup, t],
   );
 
   // ── Helpers ────────────────────────────────────────────────────
@@ -459,7 +538,7 @@ export function ImportModal({
   return (
     <ModalShell
       open={isOpen}
-      onClose={onClose}
+      onClose={handleClose}
       ariaLabel={t("common.import", { defaultValue: "Import" })}
       panelClassName="max-w-lg"
     >
@@ -467,7 +546,7 @@ export function ImportModal({
       <ModalHeader
         icon={<Download className="w-4 h-4 text-primary" />}
         title={t("common.import", { defaultValue: "Import" })}
-        onClose={onClose}
+        onClose={handleClose}
       />
 
       {/* Body — phase content */}
@@ -488,7 +567,7 @@ export function ImportModal({
           />
         )}
 
-        {phase === "scanning" && <LoadingPhase message={progressMsg} />}
+        {phase === "scanning" && <LoadingPhase message={progressMsg} onCancel={cancelActiveGitOperation} />}
 
         {phase === "selectSkills" && scanResult && (
           <SelectSkillsPhase
@@ -505,9 +584,11 @@ export function ImportModal({
           />
         )}
 
-        {phase === "installing" && <LoadingPhase message={progressMsg} />}
+        {phase === "installing" && <LoadingPhase message={progressMsg} onCancel={cancelActiveGitOperation} />}
 
-        {phase === "completed" && <CompletedPhase count={installedCount} summary={shareCodeSummary} onDone={onClose} />}
+        {phase === "completed" && (
+          <CompletedPhase count={installedCount} summary={shareCodeSummary} onDone={handleClose} />
+        )}
 
         {phase === "error" && <ErrorPhase message={errorMsg} onRetry={reset} />}
 

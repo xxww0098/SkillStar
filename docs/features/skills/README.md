@@ -26,6 +26,10 @@
 - 登录状态按 GitHub 返回的 `expires_in` / `refresh_token_expires_in` 元数据计算，不硬编码 token 寿命。显式刷新会轮换钥匙串凭据并重新读取当前用户；过期且无法刷新的状态要求重新登录。
 - Settings 展示登录指导、等待授权、成功身份、过期/拒绝/代理失败和登出。取消或过期会清除进程内待处理设备授权；登出还会清除钥匙串凭据和缓存身份。
 - GitHub App 由仓库所有者安装到明确选择的仓库。界面说明后续共享频道需要 `Administration: write`（直接成员邀请/移除）和 `Contents: write`（发布不可变频道版本），不请求 `Workflows: write`；有效操作权限仍受当前 GitHub 用户权限限制。
+- 已登录身份也是私有 `github.com` 仓库扫描、安装、更新检查和升级的唯一 Git 认证来源；这些动作不依赖全局 `gh` 登录、Git credential helper 或预先改写过的 remote。
+- 每次远程 Git 操作创建独立 session。access token 只通过该子进程继承的临时 askpass 环境提供，操作结束即不可见；token 不得进入 remote URL、持久 Git config、命令参数、普通配置、IPC DTO、进度事件、错误或日志。所有 Git 子进程强制非交互，取消时终止当前子进程，进度只公开 session、阶段和无敏感信息的仓库标识。
+- 私有认证只发送给规范化后的 `https://github.com/` 远端。带认证的操作不经过 GitHub 镜像，避免向第三方转发凭据；仍读取 SkillStar 当前代理设置并通过进程环境临时应用。公开仓库沿用无凭据路径，并同样不得弹出终端或系统凭据提示。
+- Git 失败按可行动状态区分：未登录、token 已过期、当前用户无仓库权限、GitHub App 未安装/无该仓库授权、网络/代理失败、用户取消。已有缓存和已安装 Skill 在认证或网络失败时保持不变，重试复用同一 Skills 域入口。
 
 ## 安装与更新
 

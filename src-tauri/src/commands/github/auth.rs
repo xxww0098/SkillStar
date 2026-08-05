@@ -44,5 +44,13 @@ pub async fn github_auth_refresh(
 
 #[tauri::command]
 pub async fn github_auth_logout(state: State<'_, GitHubAuthState>) -> Result<(), GitHubAuthError> {
-    state.facade().logout()
+    state.logout()
+}
+
+#[tauri::command]
+pub async fn cancel_git_operation(
+    session_id: String,
+    state: State<'_, GitHubAuthState>,
+) -> Result<bool, GitHubAuthError> {
+    Ok(state.cancel_git_operation(&session_id))
 }

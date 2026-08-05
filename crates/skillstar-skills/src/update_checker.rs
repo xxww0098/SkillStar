@@ -22,17 +22,16 @@ use tracing::warn;
 
 use crate::git::ops as git_ops;
 use crate::repo_link;
-use skillstar_core::config::github_mirror;
 use skillstar_core::infra::path_env::command_with_path;
 
 // ── Batch Prefetch ──────────────────────────────────────────────────
 
-/// Pre-fetch unique repo roots for a batch of skill paths.
-///
-/// Returns the set of repo roots where the fetch **failed**.
-pub fn prefetch_unique_repos(skill_paths: &[PathBuf]) -> HashSet<PathBuf> {
+pub fn prefetch_unique_repos_in_session(
+    skill_paths: &[PathBuf],
+    session: &crate::git::transport::GitOperationSession,
+) -> HashSet<PathBuf> {
     prefetch_unique_repos_with(skill_paths, repo_link::repo_root_of, |root| {
-        fetch_tracked_ref(root).map_err(|e| {
+        fetch_tracked_ref_in_session(root, session).map_err(|e| {
             warn!(
                 target: "update_checker",
                 path = %root.display(),
@@ -125,21 +124,16 @@ pub(crate) fn configured_git_ref(repo_root: &Path) -> Option<String> {
     (!value.is_empty()).then_some(value)
 }
 
-pub(crate) fn fetch_tracked_ref(repo_root: &Path) -> Result<()> {
-    let mut fetch_cmd = command_with_path("git");
-    github_mirror::apply_mirror_args(&mut fetch_cmd);
-    fetch_cmd
-        .current_dir(repo_root)
-        .args(["fetch", "--depth", "1", "--quiet"]);
-    if let Some(git_ref) = configured_git_ref(repo_root) {
-        fetch_cmd.args(["origin", git_ref.as_str()]);
+pub(crate) fn fetch_tracked_ref_in_session(
+    repo_root: &Path,
+    session: &crate::git::transport::GitOperationSession,
+) -> Result<()> {
+    let mut args = vec!["fetch", "--depth", "1", "--quiet"];
+    let git_ref = configured_git_ref(repo_root);
+    if let Some(git_ref) = git_ref.as_deref() {
+        args.extend(["origin", git_ref]);
     }
-    let output = fetch_cmd.output().map_err(anyhow::Error::from)?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        anyhow::bail!(String::from_utf8_lossy(&output.stderr).trim().to_string())
-    }
+    git_ops::run_git_shallow_fetch_in_session(repo_root, &args, session).map(|_| ())
 }
 
 #[cfg(test)]

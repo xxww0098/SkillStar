@@ -1,6 +1,9 @@
 use skillstar_core::infra::error::AppError;
 use skillstar_skills::deployment;
-use skillstar_skills::{Skill, installed_skill, skill_install, skill_update};
+use skillstar_skills::{Skill, installed_skill, skill_install};
+use tauri::{AppHandle, State};
+
+use crate::core::github_auth::GitHubAuthState;
 
 pub use skillstar_skills::skill_update::{
     LocalDivergenceResolution, ResolveSkillUpdateResult, SkillUpdateReport, UpdateResult,
@@ -14,16 +17,33 @@ pub async fn list_skills() -> Result<Vec<Skill>, AppError> {
 }
 
 #[tauri::command]
-pub async fn refresh_skill_updates() -> Result<Vec<installed_skill::SkillUpdateState>, AppError> {
-    installed_skill::refresh_skill_updates()
-        .await
-        .map_err(AppError::Anyhow)
+pub async fn refresh_skill_updates(
+    app: AppHandle,
+    auth_state: State<'_, GitHubAuthState>,
+) -> Result<Vec<installed_skill::SkillUpdateState>, AppError> {
+    let facade = auth_state
+        .begin_git_operation(app, None)
+        .map_err(|error| AppError::Git(error.to_string()))?;
+    let session_id = facade.session().id().to_string();
+    let result = facade.refresh_skill_updates().await;
+    auth_state.finish_git_operation(&session_id);
+    result.map_err(AppError::Anyhow)
 }
 
 #[tauri::command]
-pub async fn install_skill(url: String, name: Option<String>) -> Result<Skill, AppError> {
-    tokio::task::spawn_blocking(move || skill_install::install_skill(url, name))
-        .await
+pub async fn install_skill(
+    url: String,
+    name: Option<String>,
+    app: AppHandle,
+    auth_state: State<'_, GitHubAuthState>,
+) -> Result<Skill, AppError> {
+    let facade = auth_state
+        .begin_git_operation(app, None)
+        .map_err(|error| AppError::Git(error.to_string()))?;
+    let session_id = facade.session().id().to_string();
+    let result = tokio::task::spawn_blocking(move || facade.install_skill(url, name)).await;
+    auth_state.finish_git_operation(&session_id);
+    result
         .map_err(|e| AppError::Other(format!("install task panicked: {e}")))?
         .map_err(AppError::Other)
 }
@@ -62,9 +82,18 @@ pub async fn toggle_skill_for_agent(
 }
 
 #[tauri::command]
-pub async fn update_skill(name: String) -> Result<UpdateResult, AppError> {
-    tokio::task::spawn_blocking(move || skill_update::update_skill(&name))
-        .await
+pub async fn update_skill(
+    name: String,
+    app: AppHandle,
+    auth_state: State<'_, GitHubAuthState>,
+) -> Result<UpdateResult, AppError> {
+    let facade = auth_state
+        .begin_git_operation(app, None)
+        .map_err(|error| AppError::Git(error.to_string()))?;
+    let session_id = facade.session().id().to_string();
+    let result = tokio::task::spawn_blocking(move || facade.update_skill(&name)).await;
+    auth_state.finish_git_operation(&session_id);
+    result
         .map_err(|e| AppError::Other(format!("update task panicked: {e}")))?
         .map_err(AppError::Anyhow)
 }
@@ -73,19 +102,35 @@ pub async fn update_skill(name: String) -> Result<UpdateResult, AppError> {
 ///
 /// Per-skill failures ride in the report rather than failing the batch.
 #[tauri::command]
-pub async fn update_skills(names: Vec<String>) -> Result<SkillUpdateReport, AppError> {
-    tokio::task::spawn_blocking(move || skill_update::update_skills(&names))
-        .await
-        .map_err(|e| AppError::Other(format!("update task panicked: {e}")))
+pub async fn update_skills(
+    names: Vec<String>,
+    app: AppHandle,
+    auth_state: State<'_, GitHubAuthState>,
+) -> Result<SkillUpdateReport, AppError> {
+    let facade = auth_state
+        .begin_git_operation(app, None)
+        .map_err(|error| AppError::Git(error.to_string()))?;
+    let session_id = facade.session().id().to_string();
+    let result = tokio::task::spawn_blocking(move || facade.update_skills(&names)).await;
+    auth_state.finish_git_operation(&session_id);
+    result.map_err(|e| AppError::Other(format!("update task panicked: {e}")))
 }
 
 #[tauri::command]
 pub async fn resolve_skill_update(
     name: String,
     resolution: LocalDivergenceResolution,
+    app: AppHandle,
+    auth_state: State<'_, GitHubAuthState>,
 ) -> Result<ResolveSkillUpdateResult, AppError> {
-    tokio::task::spawn_blocking(move || skill_update::resolve_skill_update(&name, resolution))
-        .await
+    let facade = auth_state
+        .begin_git_operation(app, None)
+        .map_err(|error| AppError::Git(error.to_string()))?;
+    let session_id = facade.session().id().to_string();
+    let result =
+        tokio::task::spawn_blocking(move || facade.resolve_skill_update(&name, resolution)).await;
+    auth_state.finish_git_operation(&session_id);
+    result
         .map_err(|e| AppError::Other(format!("update resolution task panicked: {e}")))?
         .map_err(AppError::Anyhow)
 }

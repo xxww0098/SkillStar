@@ -13,12 +13,25 @@ use super::cache::{discover_skill_dirs_from_tree, is_sparse_checkout};
 /// When the skill declares a `folder_path`, the hash covers only that subtree,
 /// so siblings sharing the repo keep their own hashes.
 pub fn pull_repo_skill_update(skill_path: &Path, folder_path: Option<&str>) -> Result<String> {
+    pull_repo_skill_update_in_session(
+        skill_path,
+        folder_path,
+        &crate::git::transport::GitOperationSession::public(),
+    )
+}
+
+pub fn pull_repo_skill_update_in_session(
+    skill_path: &Path,
+    folder_path: Option<&str>,
+    session: &crate::git::transport::GitOperationSession,
+) -> Result<String> {
     let absolute_path = fs_ops::read_link_resolved(skill_path).context("Skill is not a symlink")?;
 
     let repo_root = git_ops::find_repo_root(&absolute_path)
         .ok_or_else(|| anyhow!("Cannot find git repo root for symlinked skill"))?;
 
-    update_checker::fetch_tracked_ref(&repo_root).context("Failed to fetch repo-cached update")?;
+    update_checker::fetch_tracked_ref_in_session(&repo_root, session)
+        .context("Failed to fetch repo-cached update")?;
 
     let mut reset_cmd = command_with_path("git");
     github_mirror::apply_mirror_args(&mut reset_cmd);
@@ -45,12 +58,10 @@ pub fn pull_repo_skill_update(skill_path: &Path, folder_path: Option<&str>) -> R
                 .current_dir(&repo_root)
                 .args(["sparse-checkout", "disable"])
                 .output();
-            let mut co_cmd = command_with_path("git");
-            github_mirror::apply_mirror_args(&mut co_cmd);
-            let _ = co_cmd.current_dir(&repo_root).arg("checkout").output();
+            let _ = git_ops::checkout_in_session(&repo_root, &["checkout"], session);
         } else {
             let dir_refs: Vec<&str> = dirs.iter().map(|s| s.as_str()).collect();
-            let _ = git_ops::apply_sparse_checkout(&repo_root, &dir_refs);
+            let _ = git_ops::apply_sparse_checkout_in_session(&repo_root, &dir_refs, session);
         }
     }
 

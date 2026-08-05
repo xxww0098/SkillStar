@@ -7,3 +7,7 @@ pub mod dismissed_skills;
 pub mod gh_manager;
 pub mod ops;
 pub mod repo_history;
+pub mod transport;
+
+#[cfg(test)]
+mod transport_tests;

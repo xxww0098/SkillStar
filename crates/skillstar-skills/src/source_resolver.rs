@@ -59,8 +59,15 @@ impl Source {
             || source_without_fragment.starts_with("ssh://")
         {
             let short = short_from_ssh(&source_without_fragment)?;
+            let repo_url = if ssh_host(&source_without_fragment)
+                .is_some_and(|host| host.eq_ignore_ascii_case("github.com"))
+            {
+                format!("https://github.com/{short}.git")
+            } else {
+                source_without_fragment
+            };
             return Ok(Source {
-                repo_url: source_without_fragment,
+                repo_url,
                 short,
                 git_ref: fragment_ref,
                 subpath: None,
@@ -249,6 +256,19 @@ fn short_from_ssh(input: &str) -> Result<String> {
         return Err(anyhow!("SSH URL must contain owner/repo"));
     }
     Ok(short.to_string())
+}
+
+fn ssh_host(input: &str) -> Option<&str> {
+    let authority = input
+        .strip_prefix("ssh://")
+        .and_then(|rest| rest.split_once('/').map(|(authority, _)| authority))
+        .or_else(|| input.split_once(':').map(|(authority, _)| authority))?;
+    Some(
+        authority
+            .rsplit_once('@')
+            .map(|(_, host)| host)
+            .unwrap_or(authority),
+    )
 }
 
 fn sanitize_subpath(input: &str) -> Result<String> {
@@ -443,7 +463,7 @@ mod tests {
         assert_eq!(gitlab.subpath.as_deref(), Some("skills/demo"));
 
         let ssh = Source::parse("git@github.com:owner/repo.git#v2@demo").unwrap();
-        assert_eq!(ssh.repo_url, "git@github.com:owner/repo.git");
+        assert_eq!(ssh.repo_url, "https://github.com/owner/repo.git");
         assert_eq!(ssh.short, "owner/repo");
         assert_eq!(ssh.git_ref.as_deref(), Some("v2"));
         assert_eq!(ssh.skill_filter.as_deref(), Some("demo"));

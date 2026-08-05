@@ -8,7 +8,10 @@ use skillstar_skills::git::{dismissed_skills, gh_manager, repo_history};
 use skillstar_skills::local_skill;
 use skillstar_skills::lockfile;
 use skillstar_skills::repo_scanner;
+use tauri::{AppHandle, Manager, State};
 use tracing::error;
+
+use crate::core::github_auth::GitHubAuthState;
 
 #[tauri::command]
 pub async fn check_gh_installed() -> Result<bool, AppError> {
@@ -38,6 +41,7 @@ pub async fn publish_skill_to_github(
     existing_repo_url: Option<String>,
     folder_name: String,
     repo_name: String,
+    app: AppHandle,
 ) -> Result<gh_manager::PublishResult, AppError> {
     let was_local = local_skill::is_local_skill(&skill_name);
 
@@ -60,10 +64,15 @@ pub async fn publish_skill_to_github(
 
     // Post-publish graduation: local → hub
     if was_local {
+        let auth_state = app.state::<GitHubAuthState>();
+        let git_facade = auth_state
+            .begin_git_operation(app.clone(), None)
+            .map_err(|error| AppError::Git(error.to_string()))?;
+        let session_id = git_facade.session().id().to_string();
         let git_url = result.git_url.clone();
         let source_folder = folder_name_clone.clone();
 
-        tokio::task::spawn_blocking(move || {
+        let graduation = tokio::task::spawn_blocking(move || {
             // 1. Delete from skills-local/ and remove hub symlink
             if let Err(e) = local_skill::graduate(&skill_name_clone) {
                 error!(target: "publish", "failed to graduate local skill: {e}");
@@ -71,7 +80,7 @@ pub async fn publish_skill_to_github(
             }
 
             // 2. Re-clone from GitHub into .repos/ and symlink to skills/
-            let scan = match repo_scanner::scan_repo_with_mode(&git_url, true) {
+            let scan = match git_facade.scan_repo(&git_url, true) {
                 Ok(s) => s,
                 Err(e) => {
                     error!(target: "publish", "failed to scan repo after publish: {e}");
@@ -90,13 +99,15 @@ pub async fn publish_skill_to_github(
                     id: target.id,
                     folder_path: target.folder_path,
                 };
-                match repo_scanner::install_from_repo(&scan.source, &git_url, &[install_target]) {
+                match git_facade.install_from_scan(&scan.source, &git_url, &[install_target]) {
                     Ok(_) => skillstar_skills::installed_skill::invalidate_cache(),
                     Err(e) => error!(target: "publish", "failed to re-install from repo: {e}"),
                 }
             }
         })
-        .await?;
+        .await;
+        auth_state.finish_git_operation(&session_id);
+        graduation?;
     }
 
     Ok(result)
@@ -121,11 +132,18 @@ pub async fn inspect_repo_folders(repo_full_name: String) -> Result<Vec<String>,
 pub async fn scan_github_repo(
     url: String,
     full_depth: Option<bool>,
+    session_id: Option<String>,
+    app: AppHandle,
+    auth_state: State<'_, GitHubAuthState>,
 ) -> Result<repo_scanner::ScanResult, AppError> {
     let use_full_depth = full_depth.unwrap_or(false);
-    tokio::task::spawn_blocking(move || repo_scanner::scan_repo_with_mode(&url, use_full_depth))
-        .await?
-        .map_err(|e| AppError::Git(e.to_string()))
+    let facade = auth_state
+        .begin_git_operation(app, session_id)
+        .map_err(|error| AppError::Git(error.to_string()))?;
+    let session_id = facade.session().id().to_string();
+    let result = tokio::task::spawn_blocking(move || facade.scan_repo(&url, use_full_depth)).await;
+    auth_state.finish_git_operation(&session_id);
+    result?.map_err(|e| AppError::Git(e.to_string()))
 }
 
 #[tauri::command]
@@ -133,14 +151,22 @@ pub async fn install_from_scan(
     repo_url: String,
     source: String,
     skills: Vec<repo_scanner::SkillInstallTarget>,
+    session_id: Option<String>,
+    app: AppHandle,
+    auth_state: State<'_, GitHubAuthState>,
 ) -> Result<Vec<String>, AppError> {
-    tokio::task::spawn_blocking(move || {
-        let install_result = repo_scanner::install_from_repo(&source, &repo_url, &skills);
+    let facade = auth_state
+        .begin_git_operation(app, session_id)
+        .map_err(|error| AppError::Git(error.to_string()))?;
+    let session_id = facade.session().id().to_string();
+    let result = tokio::task::spawn_blocking(move || {
+        let install_result = facade.install_from_scan(&source, &repo_url, &skills);
         skillstar_skills::installed_skill::invalidate_cache();
         install_result
     })
-    .await?
-    .map_err(|e| AppError::Git(e.to_string()))
+    .await;
+    auth_state.finish_git_operation(&session_id);
+    result?.map_err(|e| AppError::Git(e.to_string()))
 }
 
 #[tauri::command]

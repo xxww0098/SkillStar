@@ -6,12 +6,15 @@
 use anyhow::Result;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::watch;
 use tracing::{error, warn};
 
+use skillstar_skills::git::transport::GitOperationSession;
 use skillstar_skills::patrol::{self, load_config, save_config};
 use skillstar_skills::update_state;
+
+use crate::core::github_auth::GitHubAuthState;
 
 // Re-export types used by commands
 pub use skillstar_skills::patrol::{PatrolCheckEvent, PatrolConfig, PatrolStatus};
@@ -26,6 +29,7 @@ struct PatrolInner {
     updates_found: u64,
     current_skill: String,
     interval_secs: u64,
+    git_session: Option<GitOperationSession>,
 }
 
 pub struct PatrolManager {
@@ -44,6 +48,7 @@ impl PatrolManager {
                 updates_found: 0,
                 current_skill: String::new(),
                 interval_secs: config.interval_secs,
+                git_session: None,
             })),
         }
     }
@@ -54,6 +59,9 @@ impl PatrolManager {
 
         if let Some(tx) = inner.cancel_tx.take() {
             let _ = tx.send(true);
+        }
+        if let Some(session) = inner.git_session.take() {
+            session.cancel();
         }
 
         inner.enabled = true;
@@ -81,6 +89,9 @@ impl PatrolManager {
         let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(tx) = inner.cancel_tx.take() {
             let _ = tx.send(true);
+        }
+        if let Some(session) = inner.git_session.take() {
+            session.cancel();
         }
         inner.enabled = false;
         inner.running = false;
@@ -152,10 +163,37 @@ async fn patrol_loop(
             }
         }
 
+        let auth_state = app.state::<GitHubAuthState>();
+        let (git_facade, registered_session_id) = match auth_state
+            .begin_git_operation(app.clone(), None)
+        {
+            Ok(facade) => {
+                let id = Some(facade.session().id().to_string());
+                (facade, id)
+            }
+            Err(error) => {
+                warn!(target: "patrol", error = %error, "GitHub credential unavailable; using public Git transport");
+                (
+                    skillstar_skills::git_skill::GitSkillFacade::new(
+                        skillstar_skills::git::transport::GitOperationSession::public(),
+                    ),
+                    None,
+                )
+            }
+        };
+        let git_session = git_facade.session().clone();
+        {
+            let mut inner = state.lock().unwrap_or_else(|p| p.into_inner());
+            inner.git_session = Some(git_session.clone());
+        }
+
         let skill_paths: Vec<PathBuf> = skills.iter().map(|entry| entry.path.clone()).collect();
+        let prefetch_session = git_session.clone();
         let failed_fetch_roots: Arc<std::collections::HashSet<PathBuf>> =
-            match tokio::task::spawn_blocking(move || patrol::prefetch_failed_repos(&skill_paths))
-                .await
+            match tokio::task::spawn_blocking(move || {
+                patrol::prefetch_failed_repos_in_session(&skill_paths, &prefetch_session)
+            })
+            .await
             {
                 Ok(failed) => Arc::new(failed),
                 Err(err) => {
@@ -177,11 +215,17 @@ async fn patrol_loop(
             let skill_name = entry.name.clone();
             let skill_path = entry.path.clone();
             let failed_roots = Arc::clone(&failed_fetch_roots);
+            let check_session = git_session.clone();
             // Stamped before the check so a finding overtaken by an update
             // applied mid-check is dropped rather than re-asserting the badge.
             let checked_from = update_state::stamp();
             let update_result = tokio::task::spawn_blocking(move || {
-                patrol::check_skill_update_local(&skill_name, &skill_path, &failed_roots)
+                patrol::check_skill_update_local_in_session(
+                    &skill_name,
+                    &skill_path,
+                    &failed_roots,
+                    &check_session,
+                )
             })
             .await
             .unwrap_or_else(|err| {
@@ -239,6 +283,11 @@ async fn patrol_loop(
         }
 
         if *cancel_rx.borrow() {
+            git_session.cancel();
+            if let Some(session_id) = registered_session_id.as_deref() {
+                auth_state.finish_git_operation(session_id);
+            }
+            clear_git_session(&state, git_session.id());
             break;
         }
 
@@ -251,6 +300,11 @@ async fn patrol_loop(
             let _ = app.emit("patrol://new-skills-detected", &new_skills);
         }
 
+        if let Some(session_id) = registered_session_id.as_deref() {
+            auth_state.finish_git_operation(session_id);
+        }
+        clear_git_session(&state, git_session.id());
+
         tokio::select! {
             _ = tokio::time::sleep(interval) => {},
             _ = cancel_rx.changed() => break,
@@ -261,4 +315,18 @@ async fn patrol_loop(
     inner.running = false;
     inner.current_skill.clear();
     inner.cancel_tx = None;
+    if let Some(session) = inner.git_session.take() {
+        session.cancel();
+    }
+}
+
+fn clear_git_session(state: &Arc<Mutex<PatrolInner>>, session_id: &str) {
+    let mut inner = state.lock().unwrap_or_else(|p| p.into_inner());
+    if inner
+        .git_session
+        .as_ref()
+        .is_some_and(|session| session.id() == session_id)
+    {
+        inner.git_session = None;
+    }
 }

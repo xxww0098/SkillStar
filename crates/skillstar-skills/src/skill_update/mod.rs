@@ -130,6 +130,13 @@ pub struct SkillUpdateReport {
 /// lives. It used to live in the UI, alongside a second copy of the sibling
 /// fan-out it was mirroring.
 pub fn update_skills(names: &[String]) -> SkillUpdateReport {
+    update_skills_in_session(names, &crate::git::transport::GitOperationSession::public())
+}
+
+pub fn update_skills_in_session(
+    names: &[String],
+    session: &crate::git::transport::GitOperationSession,
+) -> SkillUpdateReport {
     let mut report = SkillUpdateReport::default();
     let valid_names: Vec<String> = names
         .iter()
@@ -172,7 +179,7 @@ pub fn update_skills(names: &[String]) -> SkillUpdateReport {
         }
     }
 
-    for (group, outcome) in run_groups(runnable) {
+    for (group, outcome) in run_groups(runnable, session) {
         match outcome {
             Ok(result) => {
                 report.updated.push(result);
@@ -373,12 +380,15 @@ fn suggested_local_name(name: &str) -> String {
 /// Separate repositories are separate checkouts, so they pull independently;
 /// the bound keeps a large "update all" from opening a fetch per repository at
 /// once.
-fn run_groups(groups: Vec<plan::RepoGroup>) -> Vec<(plan::RepoGroup, Result<UpdateResult>)> {
+fn run_groups(
+    groups: Vec<plan::RepoGroup>,
+    session: &crate::git::transport::GitOperationSession,
+) -> Vec<(plan::RepoGroup, Result<UpdateResult>)> {
     if groups.len() <= 1 {
         return groups
             .into_iter()
             .map(|group| {
-                let outcome = update_skill(&group.representative);
+                let outcome = update_skill_in_session(&group.representative, session);
                 (group, outcome)
             })
             .collect();
@@ -396,7 +406,7 @@ fn run_groups(groups: Vec<plan::RepoGroup>) -> Vec<(plan::RepoGroup, Result<Upda
                     let Some((index, group)) = lock(&queue).pop_front() else {
                         return;
                     };
-                    let outcome = update_skill(&group.representative);
+                    let outcome = update_skill_in_session(&group.representative, session);
                     lock(&done).push((index, group, outcome));
                 }
             });
@@ -439,6 +449,13 @@ fn compute_hash_for_skill_entry(skill_path: &Path, source_folder: Option<&str>) 
 }
 
 pub fn update_skill(name: &str) -> Result<UpdateResult> {
+    update_skill_in_session(name, &crate::git::transport::GitOperationSession::public())
+}
+
+pub fn update_skill_in_session(
+    name: &str,
+    session: &crate::git::transport::GitOperationSession,
+) -> Result<UpdateResult> {
     content::validate_skill_name(name).map_err(anyhow::Error::from)?;
     let entries = lockfile::Lockfile::load(&lockfile::lockfile_path())
         .context("failed to load the Skill lockfile before update")?
@@ -457,7 +474,7 @@ pub fn update_skill(name: &str) -> Result<UpdateResult> {
             blocked.suggested_local_name
         );
     }
-    update_skill_unchecked(name)
+    update_skill_unchecked(name, session)
 }
 
 /// Resolve a previously reported local divergence and continue through the
@@ -466,6 +483,18 @@ pub fn update_skill(name: &str) -> Result<UpdateResult> {
 pub fn resolve_skill_update(
     name: &str,
     resolution: LocalDivergenceResolution,
+) -> Result<ResolveSkillUpdateResult> {
+    resolve_skill_update_in_session(
+        name,
+        resolution,
+        &crate::git::transport::GitOperationSession::public(),
+    )
+}
+
+pub fn resolve_skill_update_in_session(
+    name: &str,
+    resolution: LocalDivergenceResolution,
+    session: &crate::git::transport::GitOperationSession,
 ) -> Result<ResolveSkillUpdateResult> {
     content::validate_skill_name(name).map_err(anyhow::Error::from)?;
     let _transaction_guard = acquire_update_transaction_lock()?;
@@ -567,7 +596,7 @@ pub fn resolve_skill_update(
     }
 
     Ok(ResolveSkillUpdateResult {
-        update: Some(update_skill_unchecked_locked(name)?),
+        update: Some(update_skill_unchecked_locked(name, session)?),
         local_copy,
         remaining_blocked: Vec::new(),
     })
@@ -636,13 +665,19 @@ fn canonicalize_with_missing_tail(path: &Path) -> Result<std::path::PathBuf> {
     }
 }
 
-fn update_skill_unchecked(name: &str) -> Result<UpdateResult> {
+fn update_skill_unchecked(
+    name: &str,
+    session: &crate::git::transport::GitOperationSession,
+) -> Result<UpdateResult> {
     let _transaction_guard = acquire_update_transaction_lock()?;
-    update_skill_unchecked_locked(name)
+    update_skill_unchecked_locked(name, session)
 }
 
-fn update_skill_unchecked_locked(name: &str) -> Result<UpdateResult> {
-    let outcome = apply_update_locked(name)?;
+fn update_skill_unchecked_locked(
+    name: &str,
+    session: &crate::git::transport::GitOperationSession,
+) -> Result<UpdateResult> {
+    let outcome = apply_update_locked(name, session)?;
     let path = skillstar_core::infra::paths::hub_skills_dir().join(name);
     let description = content::resolve_content_dir(name)
         .map(|dir| extract_skill_description(&dir))
@@ -757,7 +792,10 @@ fn capture_checkout_for_rollback(
     Ok(snapshots)
 }
 
-fn apply_update_locked(name: &str) -> Result<UpdateOutcome> {
+fn apply_update_locked(
+    name: &str,
+    session: &crate::git::transport::GitOperationSession,
+) -> Result<UpdateOutcome> {
     let skills_dir = skillstar_core::infra::paths::hub_skills_dir();
     let path = skills_dir.join(name);
 
@@ -809,10 +847,15 @@ fn apply_update_locked(name: &str) -> Result<UpdateOutcome> {
 
     let transaction = (|| -> Result<(String, UpdatePlan)> {
         let tree_hash = if is_repo_skill {
-            repo_scanner::pull_repo_skill_update(&path, source_folder.as_deref())
-                .context("failed to pull repo-cached skill update")?
+            repo_scanner::pull_repo_skill_update_in_session(
+                &path,
+                source_folder.as_deref(),
+                session,
+            )
+            .context("failed to pull repo-cached skill update")?
         } else {
-            git_ops::pull_repo(&path).context("failed to pull hub skill update")?;
+            git_ops::pull_repo_in_session(&path, session)
+                .context("failed to pull hub skill update")?;
             git_ops::compute_tree_hash(&path).context("failed to compute updated tree hash")?
         };
 

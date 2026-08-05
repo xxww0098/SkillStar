@@ -3,13 +3,26 @@
 
 use skillstar_core::infra::error::AppError;
 use skillstar_skills::skill_pack;
+use tauri::{AppHandle, State};
+
+use crate::core::github_auth::GitHubAuthState;
 
 #[tauri::command]
-pub async fn install_pack_from_url(url: String) -> Result<Vec<String>, AppError> {
-    tokio::task::spawn_blocking(move || {
-        skillstar_skills::skill_install::install_skill_pack(url).map_err(AppError::Other)
+pub async fn install_pack_from_url(
+    url: String,
+    app: AppHandle,
+    auth_state: State<'_, GitHubAuthState>,
+) -> Result<Vec<String>, AppError> {
+    let facade = auth_state
+        .begin_git_operation(app, None)
+        .map_err(|error| AppError::Git(error.to_string()))?;
+    let session_id = facade.session().id().to_string();
+    let result = tokio::task::spawn_blocking(move || {
+        facade.install_skill_pack(url).map_err(AppError::Other)
     })
-    .await?
+    .await;
+    auth_state.finish_git_operation(&session_id);
+    result?
 }
 
 #[tauri::command]

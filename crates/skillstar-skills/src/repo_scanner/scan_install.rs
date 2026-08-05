@@ -24,7 +24,21 @@ pub fn install_from_repo(
     repo_url: &str,
     targets: &[SkillInstallTarget],
 ) -> Result<Vec<String>> {
-    let repo_dir = super::clone_or_fetch_repo(repo_url, source)?;
+    install_from_repo_in_session(
+        source,
+        repo_url,
+        targets,
+        &crate::git::transport::GitOperationSession::public(),
+    )
+}
+
+pub fn install_from_repo_in_session(
+    source: &str,
+    repo_url: &str,
+    targets: &[SkillInstallTarget],
+    session: &crate::git::transport::GitOperationSession,
+) -> Result<Vec<String>> {
+    let repo_dir = super::clone_or_fetch_repo_in_session(repo_url, source, session)?;
     install_from_repo_at(&repo_dir, repo_url, None, targets)
 }
 

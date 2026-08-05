@@ -7,13 +7,16 @@ unsafe extern "system" {
 }
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if skillstar_skills::git::transport::handle_internal_askpass(&args) {
+        return;
+    }
+
     #[cfg(windows)]
     unsafe {
         // SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX
         SetErrorMode(0x0001 | 0x0002 | 0x8000);
     }
-
-    let args: Vec<String> = std::env::args().collect();
 
     // CLI mode: first arg is a known subcommand owned by skillstar-app's Clap surface.
     // Unknown args fall through to GUI so deep-links / OS launchers still work.

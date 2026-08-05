@@ -26,6 +26,7 @@ scraper = "0.27.0"
 async-trait.workspace = true
 keyring.workspace = true
 reqwest = { workspace = true, features = ["form"] }
+url.workspace = true
 
 [dev-dependencies]
 tempfile = { workspace = true }

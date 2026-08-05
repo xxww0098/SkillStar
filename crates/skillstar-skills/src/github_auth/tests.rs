@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
+use crate::git::transport::{GitOperationSession, NoopGitProgressSink, classify_git_failure};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use tokio::sync::Notify;
@@ -257,6 +258,50 @@ async fn provider_expiry_drives_status_refresh_and_logout() {
         super::GitHubConnectionStatus::SignedOut
     ));
     assert!(credentials.load().expect("load after logout").is_none());
+}
+
+#[tokio::test]
+async fn git_auth_material_tracks_keyring_presence_and_provider_expiry_without_a_dto() {
+    let gateway = FakeGateway::authorized();
+    let credentials = MemoryCredentials::default();
+    let clock = TestClock::at("2026-08-05T10:00:00Z");
+    let facade = GitHubAuthFacade::new(gateway, credentials, clock.clone());
+
+    let signed_out = GitOperationSession::new(
+        "signed-out",
+        facade.git_auth_material().expect("signed out material"),
+        Arc::new(NoopGitProgressSink),
+    );
+    assert!(!signed_out.has_credential());
+    assert_eq!(
+        classify_git_failure("Authentication failed", &signed_out)
+            .code
+            .as_str(),
+        "not_authenticated"
+    );
+
+    facade.start_device_flow().await.expect("start");
+    facade.poll_device_flow().await.expect("authorize");
+    let connected = GitOperationSession::new(
+        "connected",
+        facade.git_auth_material().expect("connected material"),
+        Arc::new(NoopGitProgressSink),
+    );
+    assert!(connected.has_credential());
+
+    clock.set("2026-08-05T11:00:00Z");
+    let expired = GitOperationSession::new(
+        "expired",
+        facade.git_auth_material().expect("expired material"),
+        Arc::new(NoopGitProgressSink),
+    );
+    assert!(!expired.has_credential());
+    assert_eq!(
+        classify_git_failure("Authentication failed", &expired)
+            .code
+            .as_str(),
+        "token_expired"
+    );
 }
 
 #[tokio::test]

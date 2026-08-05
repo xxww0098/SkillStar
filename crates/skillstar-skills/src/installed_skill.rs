@@ -153,6 +153,13 @@ pub async fn list_installed_skills() -> Result<Vec<Skill>> {
 }
 
 pub async fn refresh_skill_updates() -> Result<Vec<SkillUpdateState>> {
+    let session = crate::git::transport::GitOperationSession::public();
+    refresh_skill_updates_in_session(&session).await
+}
+
+pub async fn refresh_skill_updates_in_session(
+    session: &crate::git::transport::GitOperationSession,
+) -> Result<Vec<SkillUpdateState>> {
     // Taken before any checking starts: findings overtaken by an update that
     // lands while this scan runs are dropped when it commits.
     let scan_started = update_state::stamp();
@@ -170,10 +177,12 @@ pub async fn refresh_skill_updates() -> Result<Vec<SkillUpdateState>> {
     // race). Skills in failed repos will preserve their existing update state.
     let failed_fetch_roots: Arc<std::collections::HashSet<std::path::PathBuf>> = {
         let dirs = skill_dirs.clone();
-        let result =
-            tokio::task::spawn_blocking(move || update_checker::prefetch_unique_repos(&dirs))
-                .await
-                .unwrap_or_default();
+        let session = session.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            update_checker::prefetch_unique_repos_in_session(&dirs, &session)
+        })
+        .await
+        .unwrap_or_default();
         Arc::new(result)
     };
 
@@ -198,9 +207,10 @@ pub async fn refresh_skill_updates() -> Result<Vec<SkillUpdateState>> {
             .context("Failed to acquire update-check permit")?;
 
         let failed_roots = Arc::clone(&failed_fetch_roots);
+        let session = session.clone();
         tasks.spawn_blocking(move || {
             let _permit = permit;
-            let update_available = refresh_single_skill_update(&path, &failed_roots);
+            let update_available = refresh_single_skill_update(&path, &failed_roots, &session);
             (name, update_available)
         });
     }
@@ -347,6 +357,7 @@ fn build_installed_skill(
 fn refresh_single_skill_update(
     path: &Path,
     failed_fetch_roots: &std::collections::HashSet<std::path::PathBuf>,
+    session: &crate::git::transport::GitOperationSession,
 ) -> Option<bool> {
     // For repo-cached skills, the repo has already been fetched by
     // prefetch_unique_repos; only compare local HEAD vs origin/HEAD.
@@ -355,7 +366,7 @@ fn refresh_single_skill_update(
         return update_checker::check_update_local(path, failed_fetch_roots);
     }
     let _ = git_ops::ensure_worktree_checked_out(path);
-    Some(git_ops::check_update(path).unwrap_or(false))
+    Some(git_ops::check_update_in_session(path, session).unwrap_or(false))
 }
 
 fn detect_agent_links(skill_name: &str, profiles: &[AgentProfile]) -> Vec<String> {

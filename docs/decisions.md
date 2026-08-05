@@ -119,6 +119,13 @@
 - 背景：私有共享频道需要用户身份和可撤销的 GitHub 权限，但要求用户粘贴 PAT、共享仓库凭据或依赖机器上预先配置的 `gh` 都会扩大秘密暴露面，并让 GUI、CLI 与 Git 传输使用不同身份来源。
 - 决策：第一版只支持 `github.com`，使用注册的 SkillStar GitHub App 设备授权流获取用户 access/refresh token。公开的 App client ID 由构建配置提供；桌面应用不携带 client secret、App private key 或 PAT。token 与 GitHub 返回的到期元数据只写入 OS 系统凭据存储，设备码和解析后的用户身份只存在进程内。认证 facade 以 GitHub gateway、credential store 和 clock 为测试接缝；生产 HTTP 每次通过 `probe_http_client` 获取当前代理配置。
 - 后果：发布构建必须配置已启用 Device Flow 的 GitHub App client ID；缺失时登录动作明确不可用，但已有凭据仍可登出。GitHub App 安装范围与仓库权限继续由 GitHub 控制，SkillStar 不建立第二套身份或 ACL。GitHub Enterprise Server、PAT 和全局 `gh` credential 不进入第一版认证路径。
+
+## D-014：私有 Git 认证采用操作级 askpass session
+
+- 状态：已接受（2026-08-05）
+- 背景：私有仓库需要让现有 Git 扫描、安装和升级复用 GitHub App 用户身份，同时不能把 token 写进 remote URL、Git config、命令参数、日志或 IPC。直接复用全局 credential helper 会让 GUI/CLI 身份漂移；将认证 header 写入 `git -c` 或 `GIT_CONFIG_*` 仍会把秘密放进 Git 配置通道；通过第三方镜像转发认证则扩大信任边界。
+- 决策：`skillstar-skills` 为每次远程 Git 动作建立唯一 operation session，并以当前 SkillStar 可执行文件作为临时 `GIT_ASKPASS`。token 只存在于该 Git 进程及 askpass 子进程继承的专用环境变量，永不进入 argv 或持久文件；Git 强制关闭终端和 credential-manager 交互，操作完成或取消后随进程环境销毁。认证仅适用于规范化的 `https://github.com/` 远端，认证操作禁用 GitHub 镜像但临时注入当前 SkillStar 代理。session 的进度、错误和调试表示统一脱敏。
+- 后果：同一 Skills 域 facade 可供 GUI 与未来 CLI 使用，并可用 fake credential/transport 验证凭据生命周期。SkillStar 可执行文件必须保留内部 askpass 入口；所有新增远程 Git 动作必须通过 operation session，不能直接启动裸 Git 网络命令。进程环境本身属于敏感边界，崩溃报告和诊断不得采集该专用变量。
 - 证据：issue #20、`crates/skillstar-skills/src/github_auth/`、`src-tauri/src/commands/github/auth.rs`、Settings GitHub 登录测试。
 
 ## 新增记录格式
