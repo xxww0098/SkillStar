@@ -3,6 +3,7 @@
 //! The facade owns the recoverable create/bind transaction. Presentation
 //! layers never infer repository identity from mutable owner/name routing data.
 
+mod existing;
 mod github;
 mod store;
 
@@ -11,13 +12,20 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+pub use existing::{
+    ExistingChannelExposure, ExistingChannelRegistrationFacade,
+    ExistingChannelRegistrationSessions, ExistingChannelRepositoryCandidate,
+    ExistingChannelScanPreview, ExistingChannelScanRequest, ExistingChannelSkillPreview,
+    ExistingRepositoryInventory, ExistingRepositoryScanner, GitExistingRepositoryScanner,
+};
 pub use github::ProductionSharedChannelGateway;
 pub use store::DiskSharedChannelRegistry;
 
 pub const CHANNEL_DESCRIPTOR_VERSION: u32 = 1;
 pub const SHARED_CHANNEL_STORE_VERSION: u32 = 1;
 
-static SHARED_CHANNEL_MUTATION_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+pub(super) static SHARED_CHANNEL_MUTATION_GATE: tokio::sync::Mutex<()> =
+    tokio::sync::Mutex::const_new(());
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -129,6 +137,10 @@ pub enum SharedChannelErrorCode {
     AppNotInstalled,
     AppRepositorySelectionRequired,
     AppRepositoryAccessRequired,
+    RepositoryAlreadyBound,
+    RegistrationSessionNotFound,
+    RegistrationSessionConflict,
+    Cancelled,
     PersonalOwnerRejected,
     PublicRepositoryRejected,
     UnsupportedHost,
@@ -180,6 +192,10 @@ impl From<crate::github_auth::GitHubAuthError> for SharedChannelError {
 #[async_trait]
 pub trait SharedChannelGateway: Send + Sync {
     async fn list_organizations(&self) -> Result<Vec<GitHubOrganization>, SharedChannelError>;
+    async fn list_selected_repositories(
+        &self,
+        organization_id: u64,
+    ) -> Result<Vec<RemoteRepository>, SharedChannelError>;
     async fn create_private_repository(
         &self,
         organization: &str,
@@ -446,7 +462,7 @@ fn validate_repository_name(name: &str) -> Result<(), SharedChannelError> {
     }
 }
 
-fn validate_remote_repository(
+pub(super) fn validate_remote_repository(
     remote: &RemoteRepository,
     organization: &GitHubOrganization,
     expected_repository_id: u64,

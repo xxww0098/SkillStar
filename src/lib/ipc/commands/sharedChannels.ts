@@ -1,4 +1,11 @@
-import type { CreateSharedChannelRequest, GitHubOrganization, SharedChannelDescriptor } from "../../../types";
+import type {
+  CreateSharedChannelRequest,
+  ExistingChannelRepositoryCandidate,
+  ExistingChannelScanPreview,
+  ExistingChannelScanRequest,
+  GitHubOrganization,
+  SharedChannelDescriptor,
+} from "../../../types";
 
 export interface SharedChannelCommands {
   list_shared_channel_organizations: { args: Record<string, never>; result: GitHubOrganization[] };
@@ -10,5 +17,21 @@ export interface SharedChannelCommands {
   resume_shared_channel: {
     args: { repositoryId: number };
     result: SharedChannelDescriptor;
+  };
+  list_existing_channel_repositories: {
+    args: { organizationId: number };
+    result: ExistingChannelRepositoryCandidate[];
+  };
+  scan_existing_shared_channel: {
+    args: { request: ExistingChannelScanRequest; sessionId: string };
+    result: ExistingChannelScanPreview;
+  };
+  confirm_existing_shared_channel: {
+    args: { sessionId: string };
+    result: SharedChannelDescriptor;
+  };
+  cancel_existing_shared_channel_registration: {
+    args: { sessionId: string };
+    result: boolean;
   };
 }

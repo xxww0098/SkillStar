@@ -1,10 +1,11 @@
 //! Thin Tauri adapters for organization-private shared channels.
 
 use skillstar_skills::shared_channels::{
-    CreateSharedChannelRequest, DiskSharedChannelRegistry, GitHubOrganization,
+    CreateSharedChannelRequest, DiskSharedChannelRegistry, ExistingChannelRepositoryCandidate,
+    ExistingChannelScanPreview, ExistingChannelScanRequest, GitHubOrganization,
     SharedChannelDescriptor, SharedChannelError, SharedChannelRegistry,
 };
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::core::github_auth::GitHubAuthState;
 
@@ -37,4 +38,53 @@ pub async fn resume_shared_channel(
         .shared_channel_facade()?
         .resume_channel(repository_id)
         .await
+}
+
+#[tauri::command]
+pub async fn list_existing_channel_repositories(
+    organization_id: u64,
+    state: State<'_, GitHubAuthState>,
+) -> Result<Vec<ExistingChannelRepositoryCandidate>, SharedChannelError> {
+    state
+        .existing_channel_registration_facade()?
+        .list_candidates(organization_id)
+        .await
+}
+
+#[tauri::command]
+pub async fn scan_existing_shared_channel(
+    request: ExistingChannelScanRequest,
+    session_id: String,
+    app: AppHandle,
+    state: State<'_, GitHubAuthState>,
+) -> Result<ExistingChannelScanPreview, SharedChannelError> {
+    let git_facade = state
+        .begin_git_operation(app, Some(session_id.clone()))
+        .map_err(SharedChannelError::from)?;
+    let registered_session_id = git_facade.session().id().to_string();
+    let result = match state.existing_channel_scan_facade(git_facade) {
+        Ok(facade) => facade.scan(request, registered_session_id.clone()).await,
+        Err(error) => Err(error),
+    };
+    state.finish_git_operation(&registered_session_id);
+    result
+}
+
+#[tauri::command]
+pub async fn confirm_existing_shared_channel(
+    session_id: String,
+    state: State<'_, GitHubAuthState>,
+) -> Result<SharedChannelDescriptor, SharedChannelError> {
+    state
+        .existing_channel_registration_facade()?
+        .confirm(&session_id)
+        .await
+}
+
+#[tauri::command]
+pub fn cancel_existing_shared_channel_registration(
+    session_id: String,
+    state: State<'_, GitHubAuthState>,
+) -> bool {
+    state.cancel_existing_channel_registration(&session_id)
 }

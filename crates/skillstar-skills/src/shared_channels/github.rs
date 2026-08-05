@@ -85,11 +85,11 @@ impl ProductionSharedChannelGateway {
         ))
     }
 
-    async fn selected_repository(
+    async fn selected_repositories(
         &self,
         installation_id: u64,
-        repository_id: u64,
-    ) -> Result<Option<RemoteRepository>, SharedChannelError> {
+    ) -> Result<Vec<RemoteRepository>, SharedChannelError> {
+        let mut repositories = Vec::new();
         let mut page = 1usize;
         loop {
             let (status, body) = self
@@ -107,15 +107,15 @@ impl ProductionSharedChannelGateway {
             ensure_status(status, &[200])?;
             let response: AccessibleRepositoriesResponse = parse_json(&body)?;
             let count = response.repositories.len();
-            if let Some(repository) = response
-                .repositories
-                .into_iter()
-                .find(|repository| repository.id == repository_id)
-            {
-                return map_repository(repository).map(Some);
-            }
+            repositories.extend(
+                response
+                    .repositories
+                    .into_iter()
+                    .map(map_repository)
+                    .collect::<Result<Vec<_>, _>>()?,
+            );
             if page.saturating_mul(100) >= response.total_count || count == 0 {
-                return Ok(None);
+                return Ok(repositories);
             }
             page += 1;
         }
@@ -237,6 +237,15 @@ impl SharedChannelGateway for ProductionSharedChannelGateway {
         }
     }
 
+    async fn list_selected_repositories(
+        &self,
+        organization_id: u64,
+    ) -> Result<Vec<RemoteRepository>, SharedChannelError> {
+        let installation = self.organization_installation(organization_id).await?;
+        validate_installation_contract(&installation)?;
+        self.selected_repositories(installation.id).await
+    }
+
     async fn create_private_repository(
         &self,
         organization: &str,
@@ -285,8 +294,10 @@ impl SharedChannelGateway for ProductionSharedChannelGateway {
     ) -> Result<RemoteRepository, SharedChannelError> {
         let installation = self.organization_installation(organization_id).await?;
         validate_installation_contract(&installation)?;
-        self.selected_repository(installation.id, repository_id)
+        self.selected_repositories(installation.id)
             .await?
+            .into_iter()
+            .find(|repository| repository.id == repository_id)
             .ok_or_else(|| {
                 SharedChannelError::new(
                     SharedChannelErrorCode::AppRepositoryAccessRequired,

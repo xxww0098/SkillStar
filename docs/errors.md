@@ -2,6 +2,14 @@
 
 状态：active
 
+## 2026-08-05 - 已有仓库扫描把稀疏工作树误当完整远端树，并跟随 Skill symlink
+
+- Symptom: 已有私有仓库的注册预览可能漏掉 Skill 目录外的嵌套文件、漏掉根 Skill 之外的嵌套 Skill，且恶意仓库可用 symlink 让发现器读取 checkout 外的 `SKILL.md`。
+- Root cause: 通用 Skill 安装缓存为了性能使用 shallow sparse checkout；注册预览却遍历物化后的工作树来代表完整远端库存。与此同时，递归发现使用会跟随 symlink 的 `Path::is_dir` / `read_to_string`，没有文件类型和大小边界。
+- Fix: 注册预览以 `git ls-tree` 的 tracked tree 作为文件清单，忽略 cache untracked 文件，再按 tree 中的全部 `SKILL.md` 目录物化并重新发现；发现器只接受不超过 1 MiB 的普通 `SKILL.md` 文件，递归 entry 与优先目录的每一级父路径都用 `symlink_metadata` 拒绝 symlink。
+- Files: `crates/skillstar-skills/src/{shared_channels/existing.rs,discovery.rs}`。
+- Self-check: sparse fixture 必须同时看见 `.github/workflows/ci.yml`、根 Skill 和嵌套 Skill，且不包含 cache untracked 文件；外部目录 symlink、`SKILL.md` symlink 和超大 manifest 均不得被发现。
+
 ## 2026-07-29 - Skill update 链路上的三处静默分叉
 
 - Symptom: 三个互相独立、都不报错的现象 —— (a) 从 Finder 启动的 GUI 永远显示"无更新"，而同一台机器上 CLI 正常；(b) patrol 发现的更新在重启后消失；(c) `skillstar update` 跑完后技能仍显示可更新，且 Agent 侧内容没变。

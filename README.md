@@ -34,6 +34,7 @@ SkillStar 面向同时使用多个 Agent CLI、模型供应商和订阅账号的
 - 项目级 reconciliation 同时处理新增与移除，并识别共享 Agent 路径冲突。
 - 部署优先使用 symlink；平台不允许时自动回退 junction/copy，而不会假装“纯 symlink”。
 - 本地创作位于 SkillStar hub，可编辑、打包并通过 GitHub 发布。
+- 可将 GitHub App 已选中的组织私有仓库注册为共享频道；确认前会列出全部 Skill 和仓库文件，并明确提示成员可读取完整仓库历史。
 - 更新 Git-backed Skill 前会检查完整目录；发现本地修改时先停止，让用户选择保留为可改名的 `.local` 本地副本，或明确丢弃修改后继续。
 - 可让已配置的 ACP Agent 阅读当前 Skill 的全部文件，按“循序导览 / 技术手册 / 实战工坊”风格和当前界面语言生成带流程图、示例和排错说明的本地持久化 `tutorial.html`；不依赖在线链接，Skill、语言或风格更新后会明确提醒重新生成。
 - My Skills 可切换本机、SSH 远端与 S3 云同步工作流。

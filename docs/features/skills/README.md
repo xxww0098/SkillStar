@@ -49,6 +49,9 @@
 - 共享仓库创建成功后先原子写入非敏感本地登记，状态为 `awaiting_app_installation`，再只读校验 App 可访问该数字 repository ID；若 GitHub 授权尚未生效，用户在安装设置中选择仓库后按 ID 续接，不能重建或凭 owner/name 猜测身份。校验完成后状态变为 `active`，空频道详情显示角色和授权范围。
 - 两阶段恢复从 pending descriptor 成功落盘后成立。GitHub 返回创建成功到首次本地落盘之间无法与本地磁盘组成原子事务；若此时进程终止或落盘失败，SkillStar 不猜测同名仓库身份、也不自动删除远端仓库，而是保留它供组织所有者在 GitHub 手动处理。
 - 频道描述符与本地 registry 各自显式携带 schema version。registry 不保存 token、邀请秘密或 GitHub credential；所有 GitHub REST 请求复用统一代理客户端和当前登录身份。前端位于独立 `src/features/shared-channels/`，由 My Skills 组合。
+- 高级注册流程只列出当前组织 owner 通过 SkillStar GitHub App selected-repository 安装可访问的组织私有仓库。扫描与确认绑定到同一个随机 session 和数字 repository ID；预览未确认前不写频道 registry，确认时重新按 ID 校验 App 访问、Admin、私有性与重复绑定，并刷新改名后的路由元数据。
+- 已有仓库扫描通过操作级 Git session 读取当前 revision 的完整 tracked tree，不把稀疏 checkout 或 cache untracked 文件当作远端库存；tree 中的全部 Skill 目录按需物化后再发现。确认页逐项展示发现的全部 Skill 与不属于任何 Skill 的 tracked 文件，并在提交前明确警告：频道成员将能读取整个仓库内容和完整 Git 历史，而不只读取列出的 Skill。扫描支持结构化进度和取消；取消使用 generation tombstone 丢弃晚到结果，确认先原子 claim 预览。session 只保存在当前 GitHub 登录生命周期内，取消、成功确认、登出或进程退出即销毁；确认失败保留原 session 供重试。
+- 同一数字 repository ID 最多绑定一个本地共享频道；owner/name/URL 改名后只刷新显示，不能产生第二个频道。扫描、预览和 registry 均不保存 GitHub token、askpass 环境或仓库凭据。
 - Git-backed Skill 安装或成功更新后记录完整受管内容的 baseline hash。更新开始前必须重新计算当前完整目录 hash；若与 baseline 不同，则将该 Skill 标记为“本地分歧”并在任何 fetch/reset、lockfile 写入或部署变更之前停止。
 - `lock.json` 当前 schema 为 v5，并显式记录完整内容 hash 算法版本；旧版、缺失、损坏或未来版本的 baseline 一律 fail-closed，不把未知状态推断为“未修改”。
 - 本地分歧只能由用户显式解决：一是把当前完整内容保留为独立本地副本后继续更新，二是清理 tracked、untracked 与 ignored 的受管修改后继续更新。默认副本名为 `<原名>.local`，允许编辑；名称冲突时提出 `.local.2` 等非破坏性候选。是否为本地 Skill 只由存储位置与 provenance/type 决定，不解析名称后缀。所有页面的单 Skill 更新入口共享同一个选择对话框；CLI 在交互终端提供同样的保留/丢弃/跳过选择，非交互输入保持 fail-closed。

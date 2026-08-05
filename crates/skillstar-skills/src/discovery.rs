@@ -252,7 +252,7 @@ fn scan_priority_skill_dirs(base_dir: &Path) -> Vec<PathBuf> {
     let mut results = Vec::new();
 
     let root_skill_md = base_dir.join("SKILL.md");
-    if root_skill_md.is_file() {
+    if is_safe_skill_manifest(&root_skill_md) {
         results.push(root_skill_md);
     }
 
@@ -261,22 +261,45 @@ fn scan_priority_skill_dirs(base_dir: &Path) -> Vec<PathBuf> {
             continue;
         }
         let skill_dir = base_dir.join(dir);
+        if !is_safe_repository_directory(base_dir, &skill_dir) {
+            continue;
+        }
         let Ok(entries) = std::fs::read_dir(&skill_dir) else {
             continue;
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if !path.is_dir() {
+            if !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
                 continue;
             }
             let skill_md = path.join("SKILL.md");
-            if skill_md.is_file() {
+            if is_safe_skill_manifest(&skill_md) {
                 results.push(skill_md);
             }
         }
     }
 
     results
+}
+
+fn is_safe_repository_directory(base_dir: &Path, directory: &Path) -> bool {
+    let Ok(relative) = directory.strip_prefix(base_dir) else {
+        return false;
+    };
+    let mut current = base_dir.to_path_buf();
+    for component in relative.components() {
+        let std::path::Component::Normal(component) = component else {
+            return false;
+        };
+        current.push(component);
+        let Ok(metadata) = std::fs::symlink_metadata(&current) else {
+            return false;
+        };
+        if !metadata.file_type().is_dir() {
+            return false;
+        }
+    }
+    true
 }
 
 // ── Discovery ───────────────────────────────────────────────────────
@@ -392,18 +415,30 @@ pub fn find_all_skill_md_files(dir: &Path) -> Vec<PathBuf> {
             let path = entry.path();
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
 
-            if path.is_dir() {
+            if file_type.is_dir() {
                 if !SKIP_DIRS.iter().any(|skip| *skip == &*name_str) {
                     stack.push(path);
                 }
-            } else if name_str == "SKILL.md" {
+            } else if file_type.is_file() && name_str == "SKILL.md" && is_safe_skill_manifest(&path)
+            {
                 results.push(path);
             }
         }
     }
 
     results
+}
+
+const MAX_SKILL_MANIFEST_BYTES: u64 = 1024 * 1024;
+
+fn is_safe_skill_manifest(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|metadata| {
+        metadata.file_type().is_file() && metadata.len() <= MAX_SKILL_MANIFEST_BYTES
+    })
 }
 
 // ── Frontmatter Extraction ──────────────────────────────────────────
@@ -415,6 +450,12 @@ struct SkillFrontmatter {
 }
 
 fn extract_frontmatter(skill_md_path: &Path) -> SkillFrontmatter {
+    if !is_safe_skill_manifest(skill_md_path) {
+        return SkillFrontmatter {
+            name: None,
+            description: String::new(),
+        };
+    }
     let content = match std::fs::read_to_string(skill_md_path) {
         Ok(c) => c,
         Err(_) => {
@@ -672,6 +713,52 @@ mod tests {
                 .iter()
                 .any(|s| s.id == "antigravity" && s.folder_path == "clis/antigravity")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn discovery_never_follows_repository_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        let outside = dir.path().join("outside");
+        write_skill_md(&outside.join("nested/SKILL.md"), "secret", "outside").unwrap();
+        std::fs::create_dir_all(repo.join("skills")).unwrap();
+        symlink(outside.join("nested"), repo.join("skills/leak")).unwrap();
+        symlink(outside.join("nested/SKILL.md"), repo.join("SKILL.md")).unwrap();
+
+        assert!(discover_skills(&repo, true).is_empty());
+        assert!(discover_skills(&repo, false).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn priority_discovery_rejects_symlinked_parent_directories() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        let outside = dir.path().join("outside");
+        write_skill_md(&outside.join("skills/secret/SKILL.md"), "secret", "outside").unwrap();
+        std::fs::create_dir_all(repo.join(".agents")).unwrap();
+        symlink(outside.join("skills"), repo.join(".agents/skills")).unwrap();
+
+        assert!(discover_skills(&repo, false).is_empty());
+
+        let repo_with_symlinked_root = dir.path().join("repo-parent");
+        std::fs::create_dir_all(&repo_with_symlinked_root).unwrap();
+        symlink(&outside, repo_with_symlinked_root.join(".agents")).unwrap();
+        assert!(discover_skills(&repo_with_symlinked_root, false).is_empty());
+    }
+
+    #[test]
+    fn discovery_rejects_oversized_skill_manifests() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill_md = dir.path().join("SKILL.md");
+        std::fs::write(&skill_md, vec![b'x'; 1_048_577]).unwrap();
+
+        assert!(discover_skills(dir.path(), true).is_empty());
     }
 
     #[test]

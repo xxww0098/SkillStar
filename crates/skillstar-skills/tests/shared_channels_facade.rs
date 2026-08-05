@@ -76,6 +76,18 @@ impl SharedChannelGateway for FakeGateway {
         self.state.lock().unwrap().organizations.clone()
     }
 
+    async fn list_selected_repositories(
+        &self,
+        _organization_id: u64,
+    ) -> Result<Vec<RemoteRepository>, SharedChannelError> {
+        self.state
+            .lock()
+            .unwrap()
+            .repository
+            .clone()
+            .map(|repository| vec![repository])
+    }
+
     async fn create_private_repository(
         &self,
         _organization: &str,

@@ -9,6 +9,7 @@ import {
   listSharedChannels,
   resumeSharedChannel,
 } from "../api/channels";
+import { ExistingChannelRegistration } from "./ExistingChannelRegistration";
 
 interface Props {
   scopeSwitch: React.ReactNode;
@@ -23,6 +24,7 @@ export function SharedChannelsContent({ scopeSwitch }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const [createKind, setCreateKind] = useState<"new" | "existing">("new");
   const [organization, setOrganization] = useState("");
   const [repositoryName, setRepositoryName] = useState("skillstar-shared");
   const [description, setDescription] = useState("Shared SkillStar channel");
@@ -103,6 +105,13 @@ export function SharedChannelsContent({ scopeSwitch }: Props) {
     }
   };
 
+  const handleRegistered = (channel: SharedChannelDescriptor) => {
+    setChannels((current) => [channel, ...current.filter((item) => item.repository_id !== channel.repository_id)]);
+    setSelectedRepositoryId(channel.repository_id);
+    setShowCreate(false);
+    setError("");
+  };
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center justify-between border-b border-border px-4 py-2">
@@ -122,7 +131,14 @@ export function SharedChannelsContent({ scopeSwitch }: Props) {
       ) : (
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <aside className="w-64 shrink-0 border-r border-border p-3">
-            <Button className="mb-3 w-full" size="sm" onClick={() => setShowCreate(true)}>
+            <Button
+              className="mb-3 w-full"
+              size="sm"
+              onClick={() => {
+                setCreateKind("new");
+                setShowCreate(true);
+              }}
+            >
               <Plus className="mr-1.5 size-4" />
               {t("sharedChannels.create", { defaultValue: "Create channel" })}
             </Button>
@@ -161,17 +177,47 @@ export function SharedChannelsContent({ scopeSwitch }: Props) {
               </div>
             )}
             {showCreate ? (
-              <CreateChannelForm
-                organizations={organizations}
-                organization={organization}
-                setOrganization={setOrganization}
-                repositoryName={repositoryName}
-                setRepositoryName={setRepositoryName}
-                description={description}
-                setDescription={setDescription}
-                saving={saving}
-                onCreate={handleCreate}
-              />
+              <div className="mx-auto max-w-xl space-y-5">
+                <div className="inline-flex rounded-lg border border-border bg-muted/30 p-0.5" role="tablist">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={createKind === "new"}
+                    onClick={() => setCreateKind("new")}
+                    className={`rounded-md px-3 py-1.5 text-xs ${
+                      createKind === "new" ? "bg-background font-medium shadow-sm" : "text-muted-foreground"
+                    }`}
+                  >
+                    {t("sharedChannels.newRepository", { defaultValue: "New repository" })}
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={createKind === "existing"}
+                    onClick={() => setCreateKind("existing")}
+                    className={`rounded-md px-3 py-1.5 text-xs ${
+                      createKind === "existing" ? "bg-background font-medium shadow-sm" : "text-muted-foreground"
+                    }`}
+                  >
+                    {t("sharedChannels.existingRepository", { defaultValue: "Existing repository" })}
+                  </button>
+                </div>
+                {createKind === "new" ? (
+                  <CreateChannelForm
+                    organizations={organizations}
+                    organization={organization}
+                    setOrganization={setOrganization}
+                    repositoryName={repositoryName}
+                    setRepositoryName={setRepositoryName}
+                    description={description}
+                    setDescription={setDescription}
+                    saving={saving}
+                    onCreate={handleCreate}
+                  />
+                ) : (
+                  <ExistingChannelRegistration organizations={organizations} onRegistered={handleRegistered} />
+                )}
+              </div>
             ) : selected ? (
               <ChannelDetail channel={selected} saving={saving} onResume={handleResume} />
             ) : (

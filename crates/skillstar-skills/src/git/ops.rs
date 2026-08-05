@@ -253,7 +253,7 @@ pub fn clone_repo_sparse_in_session(
 pub fn list_tree_paths(repo_path: &Path) -> Result<Vec<String>> {
     let output = command_with_path("git")
         .current_dir(repo_path)
-        .args(["ls-tree", "-r", "--name-only", "HEAD"])
+        .args(["ls-tree", "-r", "--name-only", "-z", "HEAD"])
         .output()
         .context("Failed to execute git ls-tree")?;
 
@@ -262,9 +262,10 @@ pub fn list_tree_paths(repo_path: &Path) -> Result<Vec<String>> {
         return Err(anyhow!("git ls-tree failed: {}", err.trim()));
     }
 
-    let paths = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(|l| l.to_string())
+    let paths = String::from_utf8(output.stdout)
+        .context("git ls-tree returned a non-UTF-8 repository path")?
+        .split_terminator('\0')
+        .map(str::to_string)
         .collect();
     Ok(paths)
 }
@@ -846,6 +847,8 @@ mod tests {
         fs::write(repo.join("top.txt"), "top")?;
         fs::create_dir_all(repo.join("sub"))?;
         fs::write(repo.join("sub").join("nested.txt"), "nested")?;
+        #[cfg(unix)]
+        fs::write(repo.join("line\nbreak.txt"), "odd")?;
         run_git(&repo, &["add", "."])?;
         run_git(
             &repo,
@@ -863,6 +866,8 @@ mod tests {
         let paths = list_tree_paths(&repo)?;
         assert!(paths.contains(&"top.txt".to_string()));
         assert!(paths.contains(&"sub/nested.txt".to_string()));
+        #[cfg(unix)]
+        assert!(paths.contains(&"line\nbreak.txt".to_string()));
 
         let _ = fs::remove_dir_all(temp_root);
         Ok(())
