@@ -5,9 +5,10 @@ use super::github::{
 use super::membership::permissions_for_role;
 use super::{
     ChannelInvitation, ChannelInviteRole, ChannelMember, ChannelMemberIdentity,
-    ChannelMembershipGateway, ChannelMembershipStatus, EffectiveRepositoryAccess,
-    RemoteChannelInvitation, RemoteInvitationOutcome, RemoteRepository, RepositoryAccessSource,
-    SharedChannelError, SharedChannelErrorCode, SharedChannelRole, project_role,
+    ChannelMembershipGateway, ChannelMembershipStatus, ChannelPublicationGateway,
+    ChannelSubscriptionGateway, EffectiveRepositoryAccess, RemoteChannelInvitation,
+    RemoteInvitationOutcome, RemoteRepository, RepositoryAccessSource, SharedChannelError,
+    SharedChannelErrorCode, SharedChannelRole, project_role,
 };
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -252,6 +253,23 @@ impl ChannelMembershipGateway for ProductionSharedChannelGateway {
             }
         }
         Err(membership_page_limit())
+    }
+}
+
+#[async_trait]
+impl ChannelSubscriptionGateway for ProductionSharedChannelGateway {
+    async fn accessible_repository(
+        &self,
+        repository_id: u64,
+    ) -> Result<RemoteRepository, SharedChannelError> {
+        ChannelMembershipGateway::get_repository_by_id(self, repository_id).await
+    }
+
+    async fn published_manifests(
+        &self,
+        repository: &RemoteRepository,
+    ) -> Result<Vec<super::ChannelReleaseManifest>, SharedChannelError> {
+        ChannelPublicationGateway::published_manifests(self, repository).await
     }
 }
 

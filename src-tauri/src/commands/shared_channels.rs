@@ -2,10 +2,12 @@
 
 use skillstar_skills::shared_channels::{
     ChannelInvitation, ChannelInvitationAction, ChannelMembershipSnapshot, ChannelPublishPreview,
-    ChannelPublishResult, CreateChannelInvitationRequest, CreateSharedChannelRequest,
-    DiskSharedChannelRegistry, ExistingChannelRepositoryCandidate, ExistingChannelScanPreview,
-    ExistingChannelScanRequest, GitHubOrganization, SharedChannelDescriptor, SharedChannelError,
-    SharedChannelRegistry,
+    ChannelPublishResult, ChannelSubscription, ChannelSubscriptionRegistry,
+    ChannelSubscriptionReview, ChannelSubscriptionView, CreateChannelInvitationRequest,
+    CreateSharedChannelRequest, DiskChannelSubscriptionRegistry, DiskSharedChannelRegistry,
+    ExistingChannelRepositoryCandidate, ExistingChannelScanPreview, ExistingChannelScanRequest,
+    GitHubOrganization, SharedChannelDescriptor, SharedChannelError, SharedChannelRegistry,
+    SubscribeChannelRequest,
 };
 use tauri::{AppHandle, State};
 
@@ -216,4 +218,40 @@ pub async fn resume_accepted_shared_channel(
         .channel_membership_facade()?
         .resume_accepted_channel(repository_id)
         .await
+}
+
+#[tauri::command]
+pub fn list_shared_channel_subscriptions()
+-> Result<Vec<ChannelSubscriptionView>, SharedChannelError> {
+    DiskChannelSubscriptionRegistry.list_views()
+}
+
+#[tauri::command]
+pub async fn review_shared_channel_subscription(
+    repository_id: u64,
+    state: State<'_, GitHubAuthState>,
+) -> Result<ChannelSubscriptionReview, SharedChannelError> {
+    state
+        .channel_subscription_facade(skillstar_skills::git_skill::GitSkillFacade::from_keyring())?
+        .review(repository_id)
+        .await
+}
+
+#[tauri::command]
+pub async fn subscribe_shared_channel(
+    request: SubscribeChannelRequest,
+    session_id: String,
+    app: AppHandle,
+    state: State<'_, GitHubAuthState>,
+) -> Result<ChannelSubscription, SharedChannelError> {
+    let git_facade = state
+        .begin_git_operation(app, Some(session_id))
+        .map_err(SharedChannelError::from)?;
+    let registered_session_id = git_facade.session().id().to_string();
+    let result = match state.channel_subscription_facade(git_facade) {
+        Ok(facade) => facade.subscribe(request).await,
+        Err(error) => Err(error),
+    };
+    state.finish_git_operation(&registered_session_id);
+    result
 }

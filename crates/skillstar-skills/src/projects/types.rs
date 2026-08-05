@@ -194,4 +194,5 @@ pub struct ImportResult {
 #[derive(Debug, Clone, Default)]
 pub struct CascadeUpdateSummary {
     pub projects_updated: Vec<String>,
+    pub failures: Vec<String>,
 }

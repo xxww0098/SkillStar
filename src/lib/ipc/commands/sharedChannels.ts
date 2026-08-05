@@ -11,6 +11,10 @@ import type {
   ExistingChannelScanRequest,
   GitHubOrganization,
   SharedChannelDescriptor,
+  ChannelSubscription,
+  ChannelSubscriptionReview,
+  ChannelSubscriptionView,
+  SubscribeChannelRequest,
 } from "../../../types";
 
 export interface SharedChannelCommands {
@@ -89,5 +93,17 @@ export interface SharedChannelCommands {
   resume_accepted_shared_channel: {
     args: { repositoryId: number };
     result: SharedChannelDescriptor;
+  };
+  list_shared_channel_subscriptions: {
+    args: Record<string, never>;
+    result: ChannelSubscriptionView[];
+  };
+  review_shared_channel_subscription: {
+    args: { repositoryId: number };
+    result: ChannelSubscriptionReview;
+  };
+  subscribe_shared_channel: {
+    args: { request: SubscribeChannelRequest; sessionId: string };
+    result: ChannelSubscription;
   };
 }

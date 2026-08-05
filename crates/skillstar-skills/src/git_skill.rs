@@ -14,7 +14,7 @@ use crate::skill_update::{
     LocalDivergenceResolution, ResolveSkillUpdateResult, SkillUpdateReport, UpdateResult,
 };
 use crate::{Skill, skill_install, skill_update};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
@@ -78,6 +78,34 @@ impl GitSkillFacade {
         targets: &[SkillInstallTarget],
     ) -> anyhow::Result<Vec<String>> {
         repo_scanner::install_from_repo_in_session(source, repo_url, targets, &self.session)
+    }
+
+    /// Apply the ordinary staged repository installer to an already fetched,
+    /// immutable checkout. Both sides of the transaction verify HEAD so a
+    /// caller cannot record a requested commit that was not actually installed.
+    pub(crate) fn install_verified_checkout(
+        &self,
+        repo_dir: &Path,
+        repo_url: &str,
+        expected_commit: &str,
+        targets: &[SkillInstallTarget],
+    ) -> anyhow::Result<Vec<String>> {
+        let before = crate::git::ops::rev_parse(repo_dir, "HEAD")?;
+        if !before.eq_ignore_ascii_case(expected_commit) {
+            anyhow::bail!(
+                "repository checkout is at {before}, expected immutable commit {expected_commit}"
+            );
+        }
+        let installed =
+            repo_scanner::install_from_repo_at(repo_dir, repo_url, Some(expected_commit), targets)?;
+        let after = crate::git::ops::rev_parse(repo_dir, "HEAD")?;
+        if !after.eq_ignore_ascii_case(expected_commit) {
+            anyhow::bail!(
+                "repository checkout changed to {after} while installing immutable commit {expected_commit}"
+            );
+        }
+        installed_skill::invalidate_cache();
+        Ok(installed)
     }
 
     pub fn install_skill(&self, url: String, name: Option<String>) -> Result<Skill, String> {

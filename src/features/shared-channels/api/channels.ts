@@ -3,6 +3,7 @@ import type {
   CreateChannelInvitationRequest,
   CreateSharedChannelRequest,
   ExistingChannelScanRequest,
+  SubscribeChannelRequest,
 } from "../../../types";
 
 export function listSharedChannelOrganizations() {
@@ -90,4 +91,16 @@ export function declineSharedChannelInvitation(invitationId: number) {
 
 export function resumeAcceptedSharedChannel(repositoryId: number) {
   return tauriInvoke("resume_accepted_shared_channel", { repositoryId });
+}
+
+export function listSharedChannelSubscriptions() {
+  return tauriInvoke("list_shared_channel_subscriptions");
+}
+
+export function reviewSharedChannelSubscription(repositoryId: number) {
+  return tauriInvoke("review_shared_channel_subscription", { repositoryId });
+}
+
+export function subscribeSharedChannel(request: SubscribeChannelRequest, sessionId: string) {
+  return tauriInvoke("subscribe_shared_channel", { request, sessionId });
 }

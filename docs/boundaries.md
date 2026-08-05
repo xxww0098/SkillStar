@@ -111,7 +111,7 @@ Cargo 只使用仓库根 `Cargo.lock`；workspace member 下出现嵌套 lockfil
 - Settings 可以组合各域的公开设置入口，但不复制域逻辑。
 - Settings 内的 `github/` 子模块拥有 GitHub 登录 hook 与展示；它只消费 typed IPC，设备授权、凭据和网络状态机仍由 `skillstar-skills::github_auth` 拥有。
 - `skillstar-skills::git_skill` 是扫描、安装、更新检查和升级的展示无关入口；`skillstar-skills::git::transport` 独占远程 Git 子进程的认证、代理、取消、进度和脱敏策略，私有 `git::tree` 对 tracked tree 元数据执行有界读取。`src-tauri::core::github_auth` 只管理 facade/session 生命周期并把结构化进度适配为事件，commands 与 CLI 不得另起带网络的 Git 命令。
-- `skillstar-skills::shared_channels` 独占共享频道 GitHub REST 编排、权限投影、版本化 descriptor、本地登记、成员/邀请 facade、已有仓库 registration session 与不可变 release manifest/publish session；仓库库存与发布快照扫描只能经注入的操作级 Git scanner 接缝，生产 REST gateway 必须使用 `probe_http_client`。成员与 invitation 不得另建持久 ACL，Tauri command 只适配当前认证 state。`src/features/shared-channels/` 是独立前端 feature，只通过 typed IPC 暴露给 My Skills 组合。
+- `skillstar-skills::shared_channels` 独占共享频道 GitHub REST 编排、权限投影、版本化 descriptor、本地登记、成员/邀请 facade、已有仓库 registration session、不可变 release manifest/publish session，以及版本化 subscription store 与精确发布安装事务；仓库库存、发布快照和订阅内容扫描只能经注入的操作级 Git scanner/installer 接缝，生产 REST gateway 必须使用 `probe_http_client`。成员与 invitation 不得另建持久 ACL，订阅选择不得写入 GitHub；Tauri command 只适配当前认证 state。`src/features/shared-channels/` 是独立前端 feature，只通过 typed IPC 暴露给 My Skills 组合。
 - `scripts/internal/check_feature_imports.sh` 允许通过目标 feature 根 `index.ts` 的显式依赖，对新跨 feature 深层导入直接失败；既有基线只能缩减。
 
 ## 关键接缝

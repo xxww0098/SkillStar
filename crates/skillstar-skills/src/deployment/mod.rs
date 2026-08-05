@@ -176,6 +176,7 @@ pub fn toggle_skill_for_agent(skill_name: &str, agent_id: &str, enable: bool) ->
 pub fn remove_skill_from_all_agents(skill_name: &str) -> Result<Vec<String>> {
     let profiles = cached_profiles();
     let mut removed_from = Vec::with_capacity(profiles.len());
+    let mut failures = Vec::new();
 
     for profile in &profiles {
         if !profile.has_global_skills() {
@@ -188,6 +189,7 @@ pub fn remove_skill_from_all_agents(skill_name: &str) -> Result<Vec<String>> {
             }
             Ok(false) => {}
             Err(err) => {
+                failures.push(format!("{}: {err:#}", profile.display_name));
                 warn!(
                     target: "sync",
                     path = ?target,
@@ -200,7 +202,15 @@ pub fn remove_skill_from_all_agents(skill_name: &str) -> Result<Vec<String>> {
         }
     }
 
-    Ok(removed_from)
+    if failures.is_empty() {
+        Ok(removed_from)
+    } else {
+        anyhow::bail!(
+            "Failed to remove Skill '{}' from every Agent: {}",
+            skill_name,
+            failures.join(", ")
+        )
+    }
 }
 
 /// Remove all skill symlinks from a specific agent profile.

@@ -10,6 +10,12 @@ mod membership;
 mod release;
 mod release_scanner;
 mod store;
+mod subscription;
+mod subscription_installer;
+mod subscription_store;
+
+#[cfg(test)]
+mod subscription_tests;
 
 use async_trait::async_trait;
 use chrono::Utc;
@@ -39,6 +45,16 @@ pub use release::{
 };
 pub use release_scanner::GitChannelDraftScanner;
 pub use store::DiskSharedChannelRegistry;
+pub use subscription::{
+    CHANNEL_SUBSCRIPTION_DESCRIPTOR_VERSION, CHANNEL_SUBSCRIPTION_STORE_VERSION,
+    ChannelInstallReceipt, ChannelInstallRequest, ChannelReleaseTarget, ChannelRepositoryExposure,
+    ChannelSkillProvenance, ChannelSubscribedSkill, ChannelSubscription, ChannelSubscriptionFacade,
+    ChannelSubscriptionGateway, ChannelSubscriptionInstaller, ChannelSubscriptionRegistry,
+    ChannelSubscriptionReview, ChannelSubscriptionReviewSkill, ChannelSubscriptionStore,
+    ChannelSubscriptionView, SubscribeChannelRequest,
+};
+pub use subscription_installer::GitChannelSubscriptionInstaller;
+pub use subscription_store::DiskChannelSubscriptionRegistry;
 
 pub const CHANNEL_DESCRIPTOR_VERSION: u32 = 1;
 pub const SHARED_CHANNEL_STORE_VERSION: u32 = 1;
@@ -164,6 +180,7 @@ pub enum SharedChannelErrorCode {
     Cancelled,
     DraftChanged,
     ReleaseConflict,
+    ReleaseNotFound,
     WorkflowPermissionRequired,
     Integrity,
     PersonalOwnerRejected,
@@ -180,6 +197,10 @@ pub enum SharedChannelErrorCode {
     InvitationValidation,
     InvitationRateLimited,
     InvitationLimit,
+    SubscriptionAlreadyExists,
+    SubscriptionSchemaUnsupported,
+    SubscriptionSelectionInvalid,
+    SubscriptionInstallFailed,
     Network,
     Protocol,
     Storage,

@@ -23,6 +23,9 @@ const api = vi.hoisted(() => ({
   acceptInvitation: vi.fn(),
   declineInvitation: vi.fn(),
   resumeAccepted: vi.fn(),
+  listSubscriptions: vi.fn(),
+  reviewSubscription: vi.fn(),
+  subscribe: vi.fn(),
 }));
 
 vi.mock("../api/channels", () => ({
@@ -45,6 +48,9 @@ vi.mock("../api/channels", () => ({
   acceptSharedChannelInvitation: api.acceptInvitation,
   declineSharedChannelInvitation: api.declineInvitation,
   resumeAcceptedSharedChannel: api.resumeAccepted,
+  listSharedChannelSubscriptions: api.listSubscriptions,
+  reviewSharedChannelSubscription: api.reviewSubscription,
+  subscribeSharedChannel: api.subscribe,
 }));
 
 function channel(status: SharedChannelDescriptor["status"] = "active"): SharedChannelDescriptor {
@@ -130,6 +136,43 @@ function publicationPreview(sessionId: string) {
         status: "removed" as const,
       },
     ],
+  };
+}
+
+function subscriptionReview() {
+  return {
+    channel: { ...channel(), role: "subscriber" as const },
+    target: {
+      revision: 1,
+      tag_name: "channel-v000001",
+      commit_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    },
+    title: "First release",
+    notes: "Choose what belongs on this device.",
+    publisher: { id: 99, login: "alice" },
+    published_at: "2026-08-05T00:00:00Z",
+    exposure: {
+      private_repository: true,
+      full_repository_contents_readable: true,
+      full_history_readable: true,
+    },
+    skills: [
+      {
+        id: "reader",
+        content_root: "skills/reader",
+        content_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        content_hash_version: 2,
+        selected: true,
+      },
+      {
+        id: "writer",
+        content_root: "skills/writer",
+        content_hash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        content_hash_version: 2,
+        selected: true,
+      },
+    ],
+    read_only: false,
   };
 }
 
@@ -226,6 +269,32 @@ describe("SharedChannelsContent", () => {
       status: "cancelled",
     });
     api.resumeAccepted.mockReset();
+    api.listSubscriptions.mockReset().mockResolvedValue([]);
+    api.reviewSubscription.mockReset().mockResolvedValue(subscriptionReview());
+    api.subscribe.mockReset().mockImplementation((request) =>
+      Promise.resolve({
+        descriptor_version: 1,
+        repository_id: request.repository_id,
+        organization_id: 7,
+        target: subscriptionReview().target,
+        skills: request.selected_skill_ids.map((id: string) => ({
+          id,
+          content_root: `skills/${id}`,
+          release_content_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          release_content_hash_version: 2,
+          baseline_hash: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          baseline_hash_version: 2,
+          provenance: {
+            repository_id: 42,
+            repository_url: "https://github.com/acme/skillstar-shared.git",
+            git_ref: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            source_folder: `skills/${id}`,
+          },
+        })),
+        created_at: "2026-08-05T00:00:00Z",
+        updated_at: "2026-08-05T00:00:00Z",
+      }),
+    );
   });
 
   it("moves from the create wizard into an empty channel detail with role and scope", async () => {
@@ -614,5 +683,111 @@ describe("SharedChannelsContent", () => {
 
     await waitFor(() => expect(api.resumeAccepted).toHaveBeenCalledWith(42));
     expect(await screen.findByText("Channel ready — normal commits remain drafts.")).toBeInTheDocument();
+  });
+
+  it("reviews a subscriber release with every Skill selected and installs only the retained selection", async () => {
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.reviewSubscription.mockResolvedValue({
+      ...subscriptionReview(),
+      channel: {
+        ...subscriptionReview().channel,
+        owner: "renamed-acme",
+        name: "renamed-channel",
+        html_url: "https://github.com/renamed-acme/renamed-channel",
+      },
+    });
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    expect(await screen.findByText("First release")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "renamed-acme/renamed-channel" })).toHaveAttribute(
+      "href",
+      "https://github.com/renamed-acme/renamed-channel",
+    );
+    expect(screen.getByText("Choose what belongs on this device.")).toBeInTheDocument();
+    expect(screen.getByText(/2026-08-05 00:00:00 UTC/)).toBeInTheDocument();
+    expect(screen.getByText(/complete contents and full Git history/)).toBeInTheDocument();
+    const reader = screen.getByRole("checkbox", { name: /reader/ });
+    const writer = screen.getByRole("checkbox", { name: /writer/ });
+    expect(reader).toBeChecked();
+    expect(writer).toBeChecked();
+    fireEvent.click(reader);
+    fireEvent.click(screen.getByRole("button", { name: "Install selected & subscribe" }));
+    expect(writer).toBeDisabled();
+
+    await waitFor(() =>
+      expect(api.subscribe).toHaveBeenCalledWith(
+        {
+          repository_id: 42,
+          target: subscriptionReview().target,
+          selected_skill_ids: ["writer"],
+        },
+        expect.any(String),
+      ),
+    );
+    expect(await screen.findByText(/Subscribed to revision 1 with 1 selected Skills/)).toBeInTheDocument();
+  });
+
+  it("restores a persisted subscription without silently selecting a newly published Skill", async () => {
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.reviewSubscription.mockResolvedValue({
+      ...subscriptionReview(),
+      skills: subscriptionReview().skills.map((skill) => ({
+        ...skill,
+        selected: skill.id === "writer",
+      })),
+    });
+    api.listSubscriptions.mockResolvedValue([
+      {
+        schema_version: 1,
+        descriptor_version: 1,
+        repository_id: 42,
+        organization_id: 7,
+        target: subscriptionReview().target,
+        selected_skill_ids: ["writer"],
+        read_only: false,
+      },
+    ]);
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    expect(await screen.findByText(/Subscribed to revision 1 with 1 selected Skills/)).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /reader/ })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /writer/ })).toBeChecked();
+    expect(screen.queryByRole("button", { name: "Install selected & subscribe" })).not.toBeInTheDocument();
+  });
+
+  it("shows an unknown subscription schema read-only and never attempts installation", async () => {
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.reviewSubscription.mockResolvedValue({ ...subscriptionReview(), read_only: true });
+    api.listSubscriptions.mockResolvedValue([
+      {
+        schema_version: 99,
+        descriptor_version: 4,
+        repository_id: 42,
+        organization_id: 7,
+        target: subscriptionReview().target,
+        selected_skill_ids: ["reader", "writer"],
+        read_only: true,
+      },
+    ]);
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    expect(await screen.findByText(/created by a newer SkillStar schema/)).toBeInTheDocument();
+    expect(screen.getAllByRole("checkbox").every((checkbox) => checkbox.hasAttribute("disabled"))).toBe(true);
+    expect(api.subscribe).not.toHaveBeenCalled();
+  });
+
+  it("keeps the reviewed selection and actionable error when installation rolls back", async () => {
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.subscribe.mockRejectedValue(new Error("Installed Skills were rolled back"));
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    const reader = await screen.findByRole("checkbox", { name: /reader/ });
+    fireEvent.click(reader);
+    fireEvent.click(screen.getByRole("button", { name: "Install selected & subscribe" }));
+
+    expect(await screen.findByText("Installed Skills were rolled back")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /reader/ })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /writer/ })).toBeChecked();
+    expect(api.listSubscriptions).toHaveBeenCalledTimes(2);
   });
 });

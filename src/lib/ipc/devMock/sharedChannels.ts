@@ -5,6 +5,8 @@ import type {
   ChannelMembershipSnapshot,
   ChannelPublishPreview,
   ChannelPublishResult,
+  ChannelSubscription,
+  ChannelSubscriptionReview,
   ExistingChannelScanPreview,
   SharedChannelDescriptor,
 } from "../../../types";
@@ -32,6 +34,7 @@ let inboxInvitations: ChannelInvitation[] = [
     created_at: new Date().toISOString(),
   },
 ];
+let channelSubscriptions: ChannelSubscription[] = [];
 
 export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
   list_shared_channel_organizations: () => [
@@ -332,5 +335,102 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
     const active = { ...pending, status: "active" as const, updated_at: new Date().toISOString() };
     channels = channels.map((item) => (item.repository_id === repositoryId ? active : item));
     return active;
+  },
+  list_shared_channel_subscriptions: () =>
+    channelSubscriptions.map((subscription) => ({
+      schema_version: 1,
+      descriptor_version: subscription.descriptor_version,
+      repository_id: subscription.repository_id,
+      organization_id: subscription.organization_id,
+      target: subscription.target,
+      selected_skill_ids: subscription.skills.map((skill) => skill.id),
+      read_only: false,
+    })),
+  review_shared_channel_subscription: (args) => {
+    const repositoryId = Number(args?.repositoryId ?? 0);
+    const channel = channels.find((item) => item.repository_id === repositoryId);
+    if (!channel) throw new Error("repository_not_found: Shared channel not found");
+    const existing = channelSubscriptions.find((item) => item.repository_id === repositoryId);
+    const revision = Math.max(publishedRevision, 1);
+    const selected = new Set(existing?.skills.map((skill) => skill.id) ?? ["reader", "writer"]);
+    return {
+      channel,
+      target: {
+        revision,
+        tag_name: `channel-v${String(revision).padStart(6, "0")}`,
+        commit_sha: "0123456789abcdef0123456789abcdef01234567",
+      },
+      title: "Shared Skills",
+      notes: "Review this immutable release before installing it.",
+      publisher: { id: 99, login: "demo-user" },
+      published_at: new Date().toISOString(),
+      exposure: {
+        private_repository: true,
+        full_repository_contents_readable: true,
+        full_history_readable: true,
+      },
+      skills: [
+        {
+          id: "reader",
+          content_root: "skills/reader",
+          content_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          content_hash_version: 2,
+          selected: selected.has("reader"),
+        },
+        {
+          id: "writer",
+          content_root: "skills/writer",
+          content_hash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          content_hash_version: 2,
+          selected: selected.has("writer"),
+        },
+      ],
+      read_only: false,
+    } satisfies ChannelSubscriptionReview;
+  },
+  subscribe_shared_channel: (args) => {
+    const request = (args?.request ?? {}) as {
+      repository_id?: number;
+      target?: ChannelSubscription["target"];
+      selected_skill_ids?: string[];
+    };
+    const repositoryId = Number(request.repository_id ?? 0);
+    const channel = channels.find((item) => item.repository_id === repositoryId);
+    if (!channel) throw new Error("repository_not_found: Shared channel not found");
+    const revision = Number(request.target?.revision ?? 1);
+    const commit = "0123456789abcdef0123456789abcdef01234567";
+    const selected = request.selected_skill_ids ?? [];
+    const now = new Date().toISOString();
+    const subscription: ChannelSubscription = {
+      descriptor_version: 1,
+      repository_id: repositoryId,
+      organization_id: channel.organization_id,
+      target: {
+        revision,
+        tag_name: `channel-v${String(revision).padStart(6, "0")}`,
+        commit_sha: request.target?.commit_sha ?? commit,
+      },
+      skills: selected.map((id) => ({
+        id,
+        content_root: `skills/${id}`,
+        release_content_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        release_content_hash_version: 2,
+        baseline_hash: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        baseline_hash_version: 2,
+        provenance: {
+          repository_id: repositoryId,
+          repository_url: channel.clone_url,
+          git_ref: commit,
+          source_folder: `skills/${id}`,
+        },
+      })),
+      created_at: now,
+      updated_at: now,
+    };
+    channelSubscriptions = [
+      subscription,
+      ...channelSubscriptions.filter((item) => item.repository_id !== repositoryId),
+    ];
+    return subscription;
   },
 };

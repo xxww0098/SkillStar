@@ -168,3 +168,78 @@ export interface ChannelInvitationAction {
   role: ChannelInviteRole;
   status: ChannelMembershipStatus;
 }
+
+export interface ChannelReleaseTarget {
+  revision: number;
+  tag_name: string;
+  commit_sha: string;
+}
+
+export interface ChannelSkillProvenance {
+  repository_id: number;
+  repository_url: string;
+  git_ref: string;
+  source_folder: string;
+}
+
+export interface ChannelSubscribedSkill {
+  id: string;
+  content_root: string;
+  release_content_hash: string;
+  release_content_hash_version: number;
+  baseline_hash: string;
+  baseline_hash_version: number;
+  provenance: ChannelSkillProvenance;
+}
+
+export interface ChannelSubscription {
+  descriptor_version: number;
+  repository_id: number;
+  organization_id: number;
+  target: ChannelReleaseTarget;
+  skills: ChannelSubscribedSkill[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChannelSubscriptionView {
+  schema_version: number;
+  descriptor_version: number;
+  repository_id: number;
+  organization_id: number | null;
+  target: ChannelReleaseTarget | null;
+  selected_skill_ids: string[];
+  read_only: boolean;
+}
+
+export interface ChannelRepositoryExposure {
+  private_repository: boolean;
+  full_repository_contents_readable: boolean;
+  full_history_readable: boolean;
+}
+
+export interface ChannelSubscriptionReviewSkill {
+  id: string;
+  content_root: string;
+  content_hash: string;
+  content_hash_version: number;
+  selected: boolean;
+}
+
+export interface ChannelSubscriptionReview {
+  channel: SharedChannelDescriptor;
+  target: ChannelReleaseTarget;
+  title: string;
+  notes: string;
+  publisher: ChannelPublisherIdentity;
+  published_at: string;
+  exposure: ChannelRepositoryExposure;
+  skills: ChannelSubscriptionReviewSkill[];
+  read_only: boolean;
+}
+
+export interface SubscribeChannelRequest {
+  repository_id: number;
+  target: ChannelReleaseTarget;
+  selected_skill_ids: string[];
+}

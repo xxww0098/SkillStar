@@ -14,6 +14,7 @@ import { ExistingChannelRegistration } from "./ExistingChannelRegistration";
 import { ChannelPublishPanel } from "./ChannelPublishPanel";
 import { ChannelInvitationInbox } from "./ChannelInvitationInbox";
 import { ChannelMembershipPanel } from "./ChannelMembershipPanel";
+import { ChannelSubscriptionPanel } from "./ChannelSubscriptionPanel";
 
 interface Props {
   scopeSwitch: React.ReactNode;
@@ -474,6 +475,7 @@ function ChannelDetail({
           </div>
           {(channel.role === "owner" || channel.role === "publisher") && <ChannelPublishPanel channel={channel} />}
           {channel.role === "owner" && <ChannelMembershipPanel channel={channel} />}
+          {channel.role === "subscriber" && <ChannelSubscriptionPanel channel={channel} />}
         </>
       ) : channel.status === "awaiting_invitation_acceptance" ? (
         <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-5">

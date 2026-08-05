@@ -9,9 +9,10 @@ use skillstar_skills::github_auth::{
 };
 use skillstar_skills::shared_channels::{
     ChannelMembershipFacade, ChannelPublicationFacade, ChannelPublishSessions,
-    DiskSharedChannelRegistry, ExistingChannelRegistrationFacade,
-    ExistingChannelRegistrationSessions, GitChannelDraftScanner, GitExistingRepositoryScanner,
-    ProductionSharedChannelGateway, SharedChannelError, SharedChannelFacade,
+    ChannelSubscriptionFacade, DiskChannelSubscriptionRegistry, DiskSharedChannelRegistry,
+    ExistingChannelRegistrationFacade, ExistingChannelRegistrationSessions, GitChannelDraftScanner,
+    GitChannelSubscriptionInstaller, GitExistingRepositoryScanner, ProductionSharedChannelGateway,
+    SharedChannelError, SharedChannelFacade,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -127,6 +128,27 @@ impl GitHubAuthState {
         Ok(ChannelMembershipFacade::new(
             ProductionSharedChannelGateway::new(credential),
             DiskSharedChannelRegistry,
+        ))
+    }
+
+    pub fn channel_subscription_facade(
+        &self,
+        git_facade: GitSkillFacade,
+    ) -> Result<
+        ChannelSubscriptionFacade<
+            ProductionSharedChannelGateway,
+            DiskSharedChannelRegistry,
+            DiskChannelSubscriptionRegistry,
+            GitChannelSubscriptionInstaller,
+        >,
+        SharedChannelError,
+    > {
+        let credential = self.facade.api_credential()?;
+        Ok(ChannelSubscriptionFacade::new(
+            ProductionSharedChannelGateway::new(credential),
+            DiskSharedChannelRegistry,
+            DiskChannelSubscriptionRegistry,
+            GitChannelSubscriptionInstaller::new(git_facade),
         ))
     }
 

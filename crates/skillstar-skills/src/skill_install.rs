@@ -649,17 +649,24 @@ pub fn uninstall_skill(name: &str) -> Result<(), String> {
     }
     lf.remove(name);
     if let Err(error) = lf.save(&lock_path) {
-        if moved {
-            let _ = std::fs::rename(&staging, &path);
-        }
+        let restore_error = moved
+            .then(|| std::fs::rename(&staging, &path).err())
+            .flatten()
+            .map(|restore| format!("; restoring the Skill also failed: {restore}"))
+            .unwrap_or_default();
         return Err(format!(
-            "Failed to save lockfile '{}': {error}",
-            lock_path.display()
+            "Failed to save lockfile '{}': {error}{restore_error}",
+            lock_path.display(),
         ));
     }
     drop(_lock);
 
+    let mut cleanup_failures = Vec::new();
     if moved && let Err(error) = fs_ops::remove_link_or_copy(&staging) {
+        cleanup_failures.push(format!(
+            "remove staged hub content '{}': {error}",
+            staging.display()
+        ));
         warn!(
             target: "uninstall_skill",
             path = %staging.display(),
@@ -668,11 +675,22 @@ pub fn uninstall_skill(name: &str) -> Result<(), String> {
         );
     }
 
-    let _ = deployment::remove_skill_from_all_agents(name);
-    let _ = projects::remove_skill_from_all_projects(name);
+    if let Err(error) = deployment::remove_skill_from_all_agents(name) {
+        cleanup_failures.push(format!("remove Agent deployments: {error:#}"));
+    }
+    if let Err(error) = projects::remove_skill_from_all_projects(name) {
+        cleanup_failures.push(format!("remove Project deployments: {error:#}"));
+    }
     installed_skill::invalidate_cache();
 
-    Ok(())
+    if cleanup_failures.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Skill '{name}' was removed from the hub, but cleanup is incomplete: {}",
+            cleanup_failures.join(", ")
+        ))
+    }
 }
 
 #[cfg(test)]

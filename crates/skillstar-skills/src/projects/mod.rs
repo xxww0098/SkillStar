@@ -46,7 +46,7 @@ pub use sync::{
 ///
 /// Only projects whose `skills-list.json` references at least one of the
 /// updated skills are touched. Returns the names of projects that actually had
-/// a copy refreshed.
+/// a copy refreshed plus any projects that could not be reconciled.
 pub fn cascade_skill_update_to_projects(skills: &[String]) -> CascadeUpdateSummary {
     let mut summary = CascadeUpdateSummary::default();
     if skills.is_empty() {
@@ -67,10 +67,20 @@ pub fn cascade_skill_update_to_projects(skills: &[String]) -> CascadeUpdateSumma
             continue;
         }
 
-        match refresh_stale_copies(&project.path) {
-            Ok(0) => {}
-            Ok(_) => summary.projects_updated.push(project.name.clone()),
+        match refresh::refresh_stale_copies_strict(&project.path, skills) {
+            Ok(report) => {
+                if report.refreshed > 0 {
+                    summary.projects_updated.push(project.name.clone());
+                }
+                summary.failures.extend(
+                    report
+                        .failures
+                        .into_iter()
+                        .map(|failure| format!("{}: {failure}", project.name)),
+                );
+            }
             Err(err) => {
+                summary.failures.push(format!("{}: {err:#}", project.name));
                 tracing::warn!(
                     target: "sync",
                     project = %project.name,
@@ -611,6 +621,32 @@ mod tests {
                     .iter()
                     .any(|name| name.contains("other-project")),
                 "projects not using the skill must not be reported"
+            );
+            assert!(summary.failures.is_empty());
+
+            // Strict cascades must surface a referenced copy whose hub source
+            // vanished instead of silently accepting a stale deployment.
+            let mut missing_source_list = skills_list.clone();
+            missing_source_list
+                .agents
+                .get_mut("claude")
+                .unwrap()
+                .push("missing-hub".to_string());
+            save_skills_list(&project_name, &missing_source_list)?;
+            let missing_copy = project_path
+                .join(&claude_profile.project_skills_rel)
+                .join("missing-hub");
+            std::fs::create_dir_all(&missing_copy)?;
+            std::fs::write(missing_copy.join("SKILL.md"), "description: stale")?;
+
+            let failed = cascade_skill_update_to_projects(&["missing-hub".to_string()]);
+            assert!(
+                failed
+                    .failures
+                    .iter()
+                    .any(|failure| failure.contains("hub source is missing")),
+                "strict cascade must expose copy reconciliation failures: {:?}",
+                failed.failures
             );
 
             Ok(())
