@@ -48,6 +48,10 @@ describe("SharedChannelsContent", () => {
     render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
 
     expect(await screen.findByText("Authorization boundary")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Review GitHub App installation" })).toHaveAttribute(
+      "href",
+      "https://github.com/organizations/acme/settings/installations",
+    );
     fireEvent.click(screen.getByRole("button", { name: "Create private repository" }));
 
     await waitFor(() => expect(api.create).toHaveBeenCalled());
@@ -60,6 +64,10 @@ describe("SharedChannelsContent", () => {
     api.listChannels.mockResolvedValue([channel("awaiting_app_installation")]);
     render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
 
+    expect(await screen.findByRole("link", { name: "Open GitHub App settings" })).toHaveAttribute(
+      "href",
+      "https://github.com/organizations/acme/settings/installations",
+    );
     fireEvent.click(await screen.findByRole("button", { name: "Retry authorization" }));
 
     await waitFor(() => expect(api.resume).toHaveBeenCalledWith(42));

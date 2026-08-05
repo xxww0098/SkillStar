@@ -232,6 +232,17 @@ function CreateChannelForm({
           <li>• Contents: write — publish immutable channel versions.</li>
           <li>• The GitHub App receives access to the complete selected repository.</li>
         </ul>
+        {organization && (
+          <a
+            href={githubAppSettingsUrl(organization)}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-3 inline-flex items-center gap-1 text-xs text-primary hover:underline"
+          >
+            {t("sharedChannels.reviewInstallation", { defaultValue: "Review GitHub App installation" })}
+            <ExternalLink className="size-3" />
+          </a>
+        )}
       </div>
 
       {adminOrganizations.length === 0 ? (
@@ -342,10 +353,21 @@ function ChannelDetail({
           <p className="mt-1 text-xs text-muted-foreground">
             Install the SkillStar GitHub App for this organization, select this repository, then retry.
           </p>
-          <Button className="mt-4" size="sm" onClick={() => onResume(channel.repository_id)} disabled={saving}>
-            {saving && <Loader2 className="mr-1.5 size-4 animate-spin" />}
-            {t("sharedChannels.retryAuthorization", { defaultValue: "Retry authorization" })}
-          </Button>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <a
+              href={githubAppSettingsUrl(channel.owner)}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+            >
+              {t("sharedChannels.openInstallation", { defaultValue: "Open GitHub App settings" })}
+              <ExternalLink className="size-3" />
+            </a>
+            <Button size="sm" onClick={() => onResume(channel.repository_id)} disabled={saving}>
+              {saving && <Loader2 className="mr-1.5 size-4 animate-spin" />}
+              {t("sharedChannels.retryAuthorization", { defaultValue: "Retry authorization" })}
+            </Button>
+          </div>
         </div>
       )}
     </div>
@@ -366,4 +388,8 @@ function sharedChannelError(error: unknown): string {
     return String((error as { message: unknown }).message);
   }
   return String(error);
+}
+
+function githubAppSettingsUrl(organization: string): string {
+  return `https://github.com/organizations/${encodeURIComponent(organization)}/settings/installations`;
 }

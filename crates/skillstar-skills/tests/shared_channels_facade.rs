@@ -23,6 +23,22 @@ impl SharedChannelRegistry for MemoryRegistry {
     }
 }
 
+#[derive(Clone, Default)]
+struct FailingSaveRegistry(MemoryRegistry);
+
+impl SharedChannelRegistry for FailingSaveRegistry {
+    fn load(&self) -> Result<SharedChannelStore, SharedChannelError> {
+        self.0.load()
+    }
+
+    fn save(&self, _store: &SharedChannelStore) -> Result<(), SharedChannelError> {
+        Err(SharedChannelError::new(
+            SharedChannelErrorCode::Storage,
+            "disk full",
+        ))
+    }
+}
+
 #[derive(Clone)]
 struct FakeGateway {
     state: Arc<Mutex<FakeState>>,
@@ -31,9 +47,11 @@ struct FakeGateway {
 struct FakeState {
     organizations: Result<Vec<GitHubOrganization>, SharedChannelError>,
     repository: Result<RemoteRepository, SharedChannelError>,
-    authorizations: VecDeque<Result<(), SharedChannelError>>,
+    installation_checks: VecDeque<Result<(), SharedChannelError>>,
+    access_checks: VecDeque<Result<(), SharedChannelError>>,
     create_calls: usize,
-    authorize_calls: usize,
+    installation_check_calls: usize,
+    access_check_calls: usize,
 }
 
 impl FakeGateway {
@@ -42,9 +60,11 @@ impl FakeGateway {
             state: Arc::new(Mutex::new(FakeState {
                 organizations: Ok(vec![organization()]),
                 repository: Ok(repository()),
-                authorizations: VecDeque::from([Ok(())]),
+                installation_checks: VecDeque::from([Ok(())]),
+                access_checks: VecDeque::from([Ok(())]),
                 create_calls: 0,
-                authorize_calls: 0,
+                installation_check_calls: 0,
+                access_check_calls: 0,
             })),
         }
     }
@@ -67,21 +87,24 @@ impl SharedChannelGateway for FakeGateway {
         state.repository.clone()
     }
 
-    async fn get_repository(
+    async fn validate_selected_installation(
         &self,
-        _repository_id: u64,
-    ) -> Result<RemoteRepository, SharedChannelError> {
-        self.state.lock().unwrap().repository.clone()
+        _organization_id: u64,
+    ) -> Result<(), SharedChannelError> {
+        let mut state = self.state.lock().unwrap();
+        state.installation_check_calls += 1;
+        state.installation_checks.pop_front().unwrap_or(Ok(()))
     }
 
-    async fn authorize_selected_repository(
+    async fn get_selected_repository(
         &self,
         _organization_id: u64,
         _repository_id: u64,
-    ) -> Result<(), SharedChannelError> {
+    ) -> Result<RemoteRepository, SharedChannelError> {
         let mut state = self.state.lock().unwrap();
-        state.authorize_calls += 1;
-        state.authorizations.pop_front().unwrap_or(Ok(()))
+        state.access_check_calls += 1;
+        state.access_checks.pop_front().unwrap_or(Ok(()))?;
+        state.repository.clone()
     }
 }
 
@@ -163,21 +186,50 @@ async fn preserves_permission_denied_as_an_actionable_error() {
 }
 
 #[tokio::test]
-async fn app_not_installed_leaves_a_resumable_pending_channel() {
+async fn missing_app_permissions_stop_before_repository_creation() {
     let gateway = FakeGateway::ready();
-    gateway.state.lock().unwrap().authorizations = VecDeque::from([Err(SharedChannelError::new(
-        SharedChannelErrorCode::AppNotInstalled,
-        "Install the SkillStar GitHub App for acme",
-    ))]);
+    gateway.state.lock().unwrap().installation_checks =
+        VecDeque::from([Err(SharedChannelError::new(
+            SharedChannelErrorCode::PermissionDenied,
+            "Administration write and Contents write are required",
+        ))]);
+    let facade = SharedChannelFacade::new(gateway.clone(), MemoryRegistry::default());
+
+    let error = facade.create_channel(request()).await.unwrap_err();
+
+    assert_eq!(error.code, SharedChannelErrorCode::PermissionDenied);
+    assert_eq!(gateway.state.lock().unwrap().create_calls, 0);
+}
+
+#[tokio::test]
+async fn app_not_installed_stops_before_repository_creation() {
+    let gateway = FakeGateway::ready();
+    gateway.state.lock().unwrap().installation_checks =
+        VecDeque::from([Err(SharedChannelError::new(
+            SharedChannelErrorCode::AppNotInstalled,
+            "Install the SkillStar GitHub App for acme",
+        ))]);
     let registry = MemoryRegistry::default();
-    let facade = SharedChannelFacade::new(gateway, registry.clone());
+    let facade = SharedChannelFacade::new(gateway.clone(), registry.clone());
 
     let error = facade.create_channel(request()).await.unwrap_err();
 
     assert_eq!(error.code, SharedChannelErrorCode::AppNotInstalled);
-    let pending = &registry.load().unwrap().channels[0];
-    assert_eq!(pending.repository_id, 42);
-    assert_eq!(pending.status, SharedChannelStatus::AwaitingAppInstallation);
+    assert!(registry.load().unwrap().channels.is_empty());
+    assert_eq!(gateway.state.lock().unwrap().create_calls, 0);
+}
+
+#[tokio::test]
+async fn registry_write_failure_reports_the_created_repository_for_manual_recovery() {
+    let gateway = FakeGateway::ready();
+    let facade = SharedChannelFacade::new(gateway.clone(), FailingSaveRegistry::default());
+
+    let error = facade.create_channel(request()).await.unwrap_err();
+
+    assert_eq!(error.code, SharedChannelErrorCode::Storage);
+    assert!(error.message.contains("acme/skillstar-team"));
+    assert!(error.message.contains("repository ID 42"));
+    assert_eq!(gateway.state.lock().unwrap().create_calls, 1);
 }
 
 #[tokio::test]
@@ -222,6 +274,24 @@ async fn rejects_non_github_repository_routes() {
     assert_eq!(error.code, SharedChannelErrorCode::UnsupportedHost);
 }
 
+#[tokio::test]
+async fn rejects_repository_urls_with_mismatched_paths_or_query_data() {
+    for html_url in [
+        "https://github.com/acme/another-repository",
+        "https://github.com/acme/skillstar-team?token=secret",
+    ] {
+        let gateway = FakeGateway::ready();
+        let mut remote = repository();
+        remote.html_url = html_url.into();
+        gateway.state.lock().unwrap().repository = Ok(remote);
+        let facade = SharedChannelFacade::new(gateway, MemoryRegistry::default());
+
+        let error = facade.create_channel(request()).await.unwrap_err();
+
+        assert_eq!(error.code, SharedChannelErrorCode::UnsupportedHost);
+    }
+}
+
 #[test]
 fn projects_repository_permissions_to_channel_roles() {
     assert_eq!(
@@ -245,12 +315,12 @@ fn projects_repository_permissions_to_channel_roles() {
 }
 
 #[tokio::test]
-async fn retries_pending_authorization_without_creating_a_second_repository() {
+async fn retries_pending_app_access_validation_without_creating_a_second_repository() {
     let gateway = FakeGateway::ready();
-    gateway.state.lock().unwrap().authorizations = VecDeque::from([
+    gateway.state.lock().unwrap().access_checks = VecDeque::from([
         Err(SharedChannelError::new(
-            SharedChannelErrorCode::AppNotInstalled,
-            "install app",
+            SharedChannelErrorCode::AppRepositoryAccessRequired,
+            "select repository",
         )),
         Ok(()),
     ]);
@@ -270,5 +340,83 @@ async fn retries_pending_authorization_without_creating_a_second_repository() {
     assert_eq!(resumed.name, "renamed-channel");
     let state = gateway.state.lock().unwrap();
     assert_eq!(state.create_calls, 1);
-    assert_eq!(state.authorize_calls, 2);
+    assert_eq!(state.access_check_calls, 2);
+}
+
+#[tokio::test]
+async fn create_never_uses_mutable_owner_and_name_to_resume_pending_identity() {
+    let gateway = FakeGateway::ready();
+    gateway.state.lock().unwrap().access_checks = VecDeque::from([Err(SharedChannelError::new(
+        SharedChannelErrorCode::AppRepositoryAccessRequired,
+        "select repository",
+    ))]);
+    let registry = MemoryRegistry::default();
+    let facade = SharedChannelFacade::new(gateway.clone(), registry);
+
+    assert!(facade.create_channel(request()).await.is_err());
+    gateway.state.lock().unwrap().repository = Err(SharedChannelError::new(
+        SharedChannelErrorCode::RepositoryConflict,
+        "already exists",
+    ));
+
+    let error = facade.create_channel(request()).await.unwrap_err();
+
+    assert_eq!(error.code, SharedChannelErrorCode::RepositoryConflict);
+    let state = gateway.state.lock().unwrap();
+    assert_eq!(state.create_calls, 2);
+    assert_eq!(state.access_check_calls, 1);
+}
+
+#[tokio::test]
+async fn resume_rejects_a_repository_response_with_a_different_numeric_id() {
+    let gateway = FakeGateway::ready();
+    gateway.state.lock().unwrap().access_checks = VecDeque::from([Err(SharedChannelError::new(
+        SharedChannelErrorCode::AppRepositoryAccessRequired,
+        "select repository",
+    ))]);
+    let registry = MemoryRegistry::default();
+    let facade = SharedChannelFacade::new(gateway.clone(), registry);
+    assert!(facade.create_channel(request()).await.is_err());
+
+    let mut wrong_repository = repository();
+    wrong_repository.id = 43;
+    gateway.state.lock().unwrap().repository = Ok(wrong_repository);
+
+    let error = facade.resume_channel(42).await.unwrap_err();
+
+    assert_eq!(error.code, SharedChannelErrorCode::RepositoryNotFound);
+}
+
+#[tokio::test]
+async fn concurrent_facades_preserve_both_registry_updates() {
+    let first_gateway = FakeGateway::ready();
+    let second_gateway = FakeGateway::ready();
+    let mut second_repository = repository();
+    second_repository.id = 43;
+    second_repository.name = "second-channel".into();
+    second_repository.html_url = "https://github.com/acme/second-channel".into();
+    second_repository.clone_url = "https://github.com/acme/second-channel.git".into();
+    second_gateway.state.lock().unwrap().repository = Ok(second_repository);
+    let registry = MemoryRegistry::default();
+    let first = SharedChannelFacade::new(first_gateway, registry.clone());
+    let second = SharedChannelFacade::new(second_gateway, registry.clone());
+    let mut second_request = request();
+    second_request.repository_name = "second-channel".into();
+
+    let (first_result, second_result) = tokio::join!(
+        first.create_channel(request()),
+        second.create_channel(second_request)
+    );
+
+    first_result.unwrap();
+    second_result.unwrap();
+    let mut ids = registry
+        .load()
+        .unwrap()
+        .channels
+        .into_iter()
+        .map(|channel| channel.repository_id)
+        .collect::<Vec<_>>();
+    ids.sort_unstable();
+    assert_eq!(ids, vec![42, 43]);
 }

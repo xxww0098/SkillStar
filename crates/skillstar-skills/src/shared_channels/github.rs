@@ -52,6 +52,74 @@ impl ProductionSharedChannelGateway {
         let body = response.text().await.map_err(|_| network_error())?;
         Ok((status, body))
     }
+
+    async fn organization_installation(
+        &self,
+        organization_id: u64,
+    ) -> Result<UserInstallation, SharedChannelError> {
+        let mut page = 1usize;
+        loop {
+            let (status, body) = self
+                .response(self.request(reqwest::Method::GET, &user_installations_url(page))?)
+                .await?;
+            ensure_status(status, &[200])?;
+            let response: InstallationsResponse = parse_json(&body)?;
+            let count = response.installations.len();
+            if let Some(installation) = response.installations.into_iter().find(|installation| {
+                installation.account.id == organization_id
+                    && installation
+                        .account
+                        .kind
+                        .eq_ignore_ascii_case("organization")
+            }) {
+                return Ok(installation);
+            }
+            if page.saturating_mul(100) >= response.total_count || count == 0 {
+                break;
+            }
+            page += 1;
+        }
+        Err(SharedChannelError::new(
+            SharedChannelErrorCode::AppNotInstalled,
+            "Install the SkillStar GitHub App for the selected organization, then retry",
+        ))
+    }
+
+    async fn selected_repository(
+        &self,
+        installation_id: u64,
+        repository_id: u64,
+    ) -> Result<Option<RemoteRepository>, SharedChannelError> {
+        let mut page = 1usize;
+        loop {
+            let (status, body) = self
+                .response(self.request(
+                    reqwest::Method::GET,
+                    &installation_repositories_url(installation_id, page),
+                )?)
+                .await?;
+            if status == 404 {
+                return Err(SharedChannelError::new(
+                    SharedChannelErrorCode::AppNotInstalled,
+                    "The SkillStar GitHub App installation is no longer accessible; reinstall it for the organization, then retry",
+                ));
+            }
+            ensure_status(status, &[200])?;
+            let response: AccessibleRepositoriesResponse = parse_json(&body)?;
+            let count = response.repositories.len();
+            if let Some(repository) = response
+                .repositories
+                .into_iter()
+                .find(|repository| repository.id == repository_id)
+            {
+                return map_repository(repository).map(Some);
+            }
+            if page.saturating_mul(100) >= response.total_count || count == 0 {
+                return Ok(None);
+            }
+            page += 1;
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -102,6 +170,7 @@ struct RepositoryPermissionResponse {
 
 #[derive(Deserialize)]
 struct InstallationsResponse {
+    total_count: usize,
     installations: Vec<UserInstallation>,
 }
 
@@ -110,6 +179,14 @@ struct UserInstallation {
     id: u64,
     repository_selection: String,
     account: InstallationAccount,
+    #[serde(default)]
+    permissions: InstallationPermissions,
+}
+
+#[derive(Default, Deserialize)]
+struct InstallationPermissions {
+    administration: Option<String>,
+    contents: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -119,27 +196,45 @@ struct InstallationAccount {
     kind: String,
 }
 
+#[derive(Deserialize)]
+struct AccessibleRepositoriesResponse {
+    total_count: usize,
+    repositories: Vec<RepositoryResponse>,
+}
+
 #[async_trait]
 impl SharedChannelGateway for ProductionSharedChannelGateway {
     async fn list_organizations(&self) -> Result<Vec<GitHubOrganization>, SharedChannelError> {
-        let (status, body) = self
-            .response(self.request(
-                reqwest::Method::GET,
-                &format!("{API_ROOT}/user/memberships/orgs?state=active&per_page=100"),
-            )?)
-            .await?;
-        ensure_status(status, &[200])?;
-        let memberships: Vec<OrganizationMembership> = parse_json(&body)?;
-        Ok(memberships
-            .into_iter()
-            .filter(|membership| membership.state == "active")
-            .map(|membership| GitHubOrganization {
-                id: membership.organization.id,
-                login: membership.organization.login,
-                avatar_url: membership.organization.avatar_url,
-                viewer_is_admin: membership.role == "admin",
-            })
-            .collect())
+        let mut organizations = Vec::new();
+        let mut page = 1usize;
+        loop {
+            let (status, body) = self
+                .response(self.request(
+                    reqwest::Method::GET,
+                    &format!(
+                        "{API_ROOT}/user/memberships/orgs?state=active&per_page=100&page={page}"
+                    ),
+                )?)
+                .await?;
+            ensure_status(status, &[200])?;
+            let memberships: Vec<OrganizationMembership> = parse_json(&body)?;
+            let count = memberships.len();
+            organizations.extend(
+                memberships
+                    .into_iter()
+                    .filter(|membership| membership.state == "active")
+                    .map(|membership| GitHubOrganization {
+                        id: membership.organization.id,
+                        login: membership.organization.login,
+                        avatar_url: membership.organization.avatar_url,
+                        viewer_is_admin: membership.role == "admin",
+                    }),
+            );
+            if count < 100 {
+                return Ok(organizations);
+            }
+            page += 1;
+        }
     }
 
     async fn create_private_repository(
@@ -175,89 +270,58 @@ impl SharedChannelGateway for ProductionSharedChannelGateway {
         }
     }
 
-    async fn get_repository(
+    async fn validate_selected_installation(
         &self,
-        repository_id: u64,
-    ) -> Result<RemoteRepository, SharedChannelError> {
-        let (status, body) = self
-            .response(self.request(
-                reqwest::Method::GET,
-                &format!("{API_ROOT}/repositories/{repository_id}"),
-            )?)
-            .await?;
-        match status {
-            200 => map_repository(parse_json(&body)?),
-            401 => Err(not_authenticated()),
-            403 => Err(permission_denied()),
-            404 => Err(SharedChannelError::new(
-                SharedChannelErrorCode::RepositoryNotFound,
-                "The shared channel repository no longer exists or is inaccessible",
-            )),
-            _ => Err(protocol_status(status)),
-        }
+        organization_id: u64,
+    ) -> Result<(), SharedChannelError> {
+        let installation = self.organization_installation(organization_id).await?;
+        validate_installation_contract(&installation)
     }
 
-    async fn authorize_selected_repository(
+    async fn get_selected_repository(
         &self,
         organization_id: u64,
         repository_id: u64,
-    ) -> Result<(), SharedChannelError> {
-        let (status, body) = self
-            .response(self.request(
-                reqwest::Method::GET,
-                &format!("{API_ROOT}/user/installations?per_page=100"),
-            )?)
-            .await?;
-        ensure_status(status, &[200])?;
-        let installations: InstallationsResponse = parse_json(&body)?;
-        let installation = installations
-            .installations
-            .into_iter()
-            .find(|installation| {
-                installation.account.id == organization_id
-                    && installation
-                        .account
-                        .kind
-                        .eq_ignore_ascii_case("organization")
-            })
+    ) -> Result<RemoteRepository, SharedChannelError> {
+        let installation = self.organization_installation(organization_id).await?;
+        validate_installation_contract(&installation)?;
+        self.selected_repository(installation.id, repository_id)
+            .await?
             .ok_or_else(|| {
                 SharedChannelError::new(
-                    SharedChannelErrorCode::AppNotInstalled,
-                    "Install the SkillStar GitHub App for the selected organization, then retry",
+                    SharedChannelErrorCode::AppRepositoryAccessRequired,
+                    "Select this repository in the SkillStar GitHub App installation, then retry",
                 )
-            })?;
-        if installation.repository_selection != "selected" {
-            return Err(SharedChannelError::new(
-                SharedChannelErrorCode::AppRepositorySelectionRequired,
-                "Configure the SkillStar GitHub App for selected repositories, then retry",
-            ));
-        }
-
-        let endpoint = format!(
-            "{API_ROOT}/user/installations/{}/repositories/{repository_id}",
-            installation.id
-        );
-        let (status, _) = self
-            .response(self.request(reqwest::Method::PUT, &endpoint)?)
-            .await?;
-        match status {
-            204 => {}
-            401 => return Err(not_authenticated()),
-            403 => return Err(permission_denied()),
-            404 => {
-                return Err(SharedChannelError::new(
-                    SharedChannelErrorCode::AppNotInstalled,
-                    "Authorize the SkillStar GitHub App for this repository, then retry",
-                ));
-            }
-            _ => return Err(protocol_status(status)),
-        }
-
-        let (status, _) = self
-            .response(self.request(reqwest::Method::GET, &endpoint)?)
-            .await?;
-        ensure_status(status, &[200])
+            })
     }
+}
+
+fn validate_installation_contract(
+    installation: &UserInstallation,
+) -> Result<(), SharedChannelError> {
+    if installation.repository_selection != "selected" {
+        return Err(SharedChannelError::new(
+            SharedChannelErrorCode::AppRepositorySelectionRequired,
+            "Configure the SkillStar GitHub App for selected repositories, then retry",
+        ));
+    }
+    if installation.permissions.administration.as_deref() != Some("write")
+        || installation.permissions.contents.as_deref() != Some("write")
+    {
+        return Err(SharedChannelError::new(
+            SharedChannelErrorCode::PermissionDenied,
+            "The SkillStar GitHub App installation requires Administration write and Contents write",
+        ));
+    }
+    Ok(())
+}
+
+fn user_installations_url(page: usize) -> String {
+    format!("{API_ROOT}/user/installations?per_page=100&page={page}")
+}
+
+fn installation_repositories_url(installation_id: u64, page: usize) -> String {
+    format!("{API_ROOT}/user/installations/{installation_id}/repositories?per_page=100&page={page}")
 }
 
 fn map_repository(response: RepositoryResponse) -> Result<RemoteRepository, SharedChannelError> {
@@ -340,4 +404,53 @@ fn protocol_status(status: u16) -> SharedChannelError {
         SharedChannelErrorCode::Protocol,
         format!("GitHub shared-channel request failed with status {status}"),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn installation(
+        repository_selection: &str,
+        administration: Option<&str>,
+        contents: Option<&str>,
+    ) -> UserInstallation {
+        UserInstallation {
+            id: 9,
+            repository_selection: repository_selection.into(),
+            account: InstallationAccount {
+                id: 7,
+                kind: "Organization".into(),
+            },
+            permissions: InstallationPermissions {
+                administration: administration.map(str::to_owned),
+                contents: contents.map(str::to_owned),
+            },
+        }
+    }
+
+    #[test]
+    fn selected_installation_requires_both_write_permissions() {
+        assert!(
+            validate_installation_contract(&installation("selected", Some("write"), Some("write")))
+                .is_ok()
+        );
+
+        for candidate in [
+            installation("all", Some("write"), Some("write")),
+            installation("selected", Some("read"), Some("write")),
+            installation("selected", Some("write"), None),
+        ] {
+            assert!(validate_installation_contract(&candidate).is_err());
+        }
+    }
+
+    #[test]
+    fn repository_verification_uses_the_supported_paginated_list_endpoint() {
+        assert_eq!(
+            installation_repositories_url(9, 2),
+            "https://api.github.com/user/installations/9/repositories?per_page=100&page=2"
+        );
+        assert!(!installation_repositories_url(9, 2).contains("repositories/"));
+    }
 }

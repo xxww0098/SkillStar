@@ -17,6 +17,8 @@ pub use store::DiskSharedChannelRegistry;
 pub const CHANNEL_DESCRIPTOR_VERSION: u32 = 1;
 pub const SHARED_CHANNEL_STORE_VERSION: u32 = 1;
 
+static SHARED_CHANNEL_MUTATION_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SharedChannelRole {
@@ -126,6 +128,7 @@ pub enum SharedChannelErrorCode {
     PermissionDenied,
     AppNotInstalled,
     AppRepositorySelectionRequired,
+    AppRepositoryAccessRequired,
     PersonalOwnerRejected,
     PublicRepositoryRejected,
     UnsupportedHost,
@@ -183,18 +186,29 @@ pub trait SharedChannelGateway: Send + Sync {
         name: &str,
         description: &str,
     ) -> Result<RemoteRepository, SharedChannelError>;
-    async fn get_repository(
+    async fn validate_selected_installation(
         &self,
-        repository_id: u64,
-    ) -> Result<RemoteRepository, SharedChannelError>;
-    async fn authorize_selected_repository(
+        organization_id: u64,
+    ) -> Result<(), SharedChannelError>;
+    async fn get_selected_repository(
         &self,
         organization_id: u64,
         repository_id: u64,
-    ) -> Result<(), SharedChannelError>;
+    ) -> Result<RemoteRepository, SharedChannelError>;
 }
 
+pub trait SharedChannelMutationLease: Send {}
+
+impl<T: Send> SharedChannelMutationLease for T {}
+
+#[async_trait]
 pub trait SharedChannelRegistry: Send + Sync {
+    async fn acquire_mutation_lease(
+        &self,
+    ) -> Result<Box<dyn SharedChannelMutationLease>, SharedChannelError> {
+        Ok(Box::new(()))
+    }
+
     fn load(&self) -> Result<SharedChannelStore, SharedChannelError>;
     fn save(&self, store: &SharedChannelStore) -> Result<(), SharedChannelError>;
 }
@@ -225,6 +239,8 @@ where
         &self,
         request: CreateSharedChannelRequest,
     ) -> Result<SharedChannelDescriptor, SharedChannelError> {
+        let _mutation_guard = SHARED_CHANNEL_MUTATION_GATE.lock().await;
+        let _registry_lease = self.registry.acquire_mutation_lease().await?;
         validate_repository_name(&request.repository_name)?;
         let organizations = self.gateway.list_organizations().await?;
         if organizations.is_empty() {
@@ -248,23 +264,11 @@ where
                 "Organization owner access is required to create and authorize a shared channel",
             ));
         }
+        self.gateway
+            .validate_selected_installation(organization.id)
+            .await?;
 
         let mut store = self.registry.load()?;
-        if let Some(existing) = store.channels.iter().find(|channel| {
-            channel.owner.eq_ignore_ascii_case(&organization.login)
-                && channel.name.eq_ignore_ascii_case(&request.repository_name)
-        }) {
-            return match existing.status {
-                SharedChannelStatus::AwaitingAppInstallation => {
-                    self.resume_channel(existing.repository_id).await
-                }
-                SharedChannelStatus::Active => Err(SharedChannelError::new(
-                    SharedChannelErrorCode::RepositoryConflict,
-                    "A shared channel already uses this organization repository name",
-                )),
-            };
-        }
-
         let remote = self
             .gateway
             .create_private_repository(
@@ -273,7 +277,7 @@ where
                 &request.description,
             )
             .await?;
-        validate_remote_repository(&remote, &organization)?;
+        validate_remote_repository(&remote, &organization, remote.id)?;
         let role = project_role(&remote.permissions).ok_or_else(|| {
             SharedChannelError::new(
                 SharedChannelErrorCode::PermissionDenied,
@@ -303,7 +307,15 @@ where
             updated_at: now,
         };
         store.channels.push(pending.clone());
-        self.registry.save(&store)?;
+        self.registry.save(&store).map_err(|_| {
+            SharedChannelError::new(
+                SharedChannelErrorCode::Storage,
+                format!(
+                    "GitHub created {}/{} (repository ID {}), but SkillStar could not register it locally; manage the repository in GitHub before retrying",
+                    pending.owner, pending.name, pending.repository_id
+                ),
+            )
+        })?;
 
         self.activate_pending(pending, store).await
     }
@@ -312,6 +324,8 @@ where
         &self,
         repository_id: u64,
     ) -> Result<SharedChannelDescriptor, SharedChannelError> {
+        let _mutation_guard = SHARED_CHANNEL_MUTATION_GATE.lock().await;
+        let _registry_lease = self.registry.acquire_mutation_lease().await?;
         let store = self.registry.load()?;
         let channel = store
             .channels
@@ -347,8 +361,11 @@ where
                     "The channel organization is no longer available to this GitHub identity",
                 )
             })?;
-        let remote = self.gateway.get_repository(channel.repository_id).await?;
-        validate_remote_repository(&remote, &organization)?;
+        let remote = self
+            .gateway
+            .get_selected_repository(channel.organization_id, channel.repository_id)
+            .await?;
+        validate_remote_repository(&remote, &organization, channel.repository_id)?;
         let role = project_role(&remote.permissions).ok_or_else(|| {
             SharedChannelError::new(
                 SharedChannelErrorCode::PermissionDenied,
@@ -361,8 +378,8 @@ where
                 "Administration write access is required to authorize this shared channel",
             ));
         }
-        // The ID is stable; refresh mutable routing metadata before granting
-        // the App access so a renamed/transferred repository stays accurate.
+        // The ID is stable; refresh mutable routing metadata before validating
+        // App access so a renamed repository stays accurate.
         channel.owner = remote.owner_login;
         channel.name = remote.name;
         channel.html_url = remote.html_url;
@@ -376,15 +393,12 @@ where
             .ok_or_else(|| {
                 SharedChannelError::new(
                     SharedChannelErrorCode::RepositoryNotFound,
-                    "The pending shared channel disappeared before authorization",
+                    "The pending shared channel disappeared before App access validation",
                 )
             })?;
         *pending = channel.clone();
         self.registry.save(&store)?;
 
-        self.gateway
-            .authorize_selected_repository(channel.organization_id, channel.repository_id)
-            .await?;
         let active = store
             .channels
             .iter_mut()
@@ -392,7 +406,7 @@ where
             .ok_or_else(|| {
                 SharedChannelError::new(
                     SharedChannelErrorCode::RepositoryNotFound,
-                    "The pending shared channel disappeared during authorization",
+                    "The pending shared channel disappeared during App access validation",
                 )
             })?;
         active.status = SharedChannelStatus::Active;
@@ -435,7 +449,14 @@ fn validate_repository_name(name: &str) -> Result<(), SharedChannelError> {
 fn validate_remote_repository(
     remote: &RemoteRepository,
     organization: &GitHubOrganization,
+    expected_repository_id: u64,
 ) -> Result<(), SharedChannelError> {
+    if remote.id != expected_repository_id {
+        return Err(SharedChannelError::new(
+            SharedChannelErrorCode::RepositoryNotFound,
+            "GitHub returned a different repository than the requested repository ID",
+        ));
+    }
     if !remote.owner_type.eq_ignore_ascii_case("organization") {
         return Err(SharedChannelError::new(
             SharedChannelErrorCode::PersonalOwnerRejected,
@@ -462,8 +483,11 @@ fn validate_remote_repository(
                 && url
                     .host_str()
                     .is_some_and(|host| host.eq_ignore_ascii_case("github.com"))
+                && url.port().is_none()
                 && url.username().is_empty()
                 && url.password().is_none()
+                && url.query().is_none()
+                && url.fragment().is_none()
         });
         if !valid {
             return Err(SharedChannelError::new(
@@ -471,6 +495,16 @@ fn validate_remote_repository(
                 "Shared channels only support credential-free github.com HTTPS URLs",
             ));
         }
+    }
+    let expected_html_url = format!("https://github.com/{}/{}", remote.owner_login, remote.name);
+    let expected_clone_url = format!("{expected_html_url}.git");
+    if !remote.html_url.eq_ignore_ascii_case(&expected_html_url)
+        || !remote.clone_url.eq_ignore_ascii_case(&expected_clone_url)
+    {
+        return Err(SharedChannelError::new(
+            SharedChannelErrorCode::UnsupportedHost,
+            "GitHub repository URLs do not match the validated owner and repository name",
+        ));
     }
     Ok(())
 }
