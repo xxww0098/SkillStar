@@ -20,9 +20,9 @@ describe("useMySkillsScope", () => {
   });
 
   it("restores the persisted scope", () => {
-    localStorage.setItem(KEY, "remote");
+    localStorage.setItem(KEY, "shared");
     const { result } = renderHook(() => useMySkillsScope());
-    expect(result.current.scope).toBe("remote");
+    expect(result.current.scope).toBe("shared");
   });
 
   it("setScope updates state and persists", () => {

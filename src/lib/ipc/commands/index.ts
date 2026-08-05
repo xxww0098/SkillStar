@@ -12,6 +12,7 @@ import type { McpMarketplaceCommands } from "./mcpMarketplace";
 import type { ModelsCommands } from "./models";
 import type { ProjectCommands } from "./projects";
 import type { S3Commands } from "./s3";
+import type { SharedChannelCommands } from "./sharedChannels";
 import type { SkillCommands } from "./skills";
 import type { SshCommands } from "./ssh";
 import type { StorageCommands } from "./storage";
@@ -29,6 +30,7 @@ export type TauriCommands = SkillCommands &
   McpMarketplaceCommands &
   SshCommands &
   S3Commands &
+  SharedChannelCommands &
   SystemCommands;
 
 export type {
@@ -41,6 +43,7 @@ export type {
   ModelsCommands,
   ProjectCommands,
   S3Commands,
+  SharedChannelCommands,
   SkillCommands,
   SshCommands,
   StorageCommands,

@@ -1,8 +1,8 @@
-import { Cloud, Laptop, Server } from "lucide-react";
+import { Cloud, Laptop, Server, UsersRound } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../../../lib/utils";
 
-export type MySkillsScope = "local" | "remote" | "cloud";
+export type MySkillsScope = "local" | "remote" | "cloud" | "shared";
 
 interface Props {
   scope: MySkillsScope;
@@ -34,6 +34,22 @@ export function MySkillsScopeSwitch({ scope, onScopeChange, className }: Props) 
         onClick={() => onScopeChange("local")}
       >
         <Laptop className="size-3.5" />
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={scope === "shared"}
+        title={t("mySkills.scopeShared", { defaultValue: "Shared" })}
+        aria-label={t("mySkills.scopeShared", { defaultValue: "Shared" })}
+        className={cn(
+          "inline-flex items-center justify-center rounded-md px-2 py-1 transition-colors",
+          scope === "shared"
+            ? "bg-background text-foreground shadow-sm"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+        onClick={() => onScopeChange("shared")}
+      >
+        <UsersRound className="size-3.5" />
       </button>
       <button
         type="button"

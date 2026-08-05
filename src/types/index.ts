@@ -10,3 +10,4 @@ export * from "./models";
 export * from "./share";
 export * from "./config";
 export * from "./github";
+export * from "./sharedChannels";

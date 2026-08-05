@@ -8,7 +8,7 @@ mod gateway;
 mod store;
 
 use std::fmt;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use crate::git::transport::GitAuthMaterial;
 use async_trait::async_trait;
@@ -128,6 +128,25 @@ pub struct GitHubIdentity {
     pub avatar_url: Option<String>,
 }
 
+/// Opaque GitHub REST credential for in-crate domain gateways.
+///
+/// It intentionally implements neither serialization nor secret-revealing
+/// formatting, so Tauri DTOs cannot accidentally expose the token.
+#[derive(Clone)]
+pub struct GitHubApiCredential(Arc<str>);
+
+impl GitHubApiCredential {
+    pub(crate) fn expose_secret(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for GitHubApiCredential {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("GitHubApiCredential([REDACTED])")
+    }
+}
+
 #[derive(Clone)]
 pub struct StoredCredential {
     access_token: String,
@@ -242,6 +261,25 @@ where
             return Ok(GitAuthMaterial::expired());
         }
         Ok(GitAuthMaterial::available(credential.access_token))
+    }
+
+    pub fn api_credential(&self) -> Result<GitHubApiCredential, GitHubAuthError> {
+        let credential = self.credentials.load()?.ok_or_else(|| {
+            GitHubAuthError::new(
+                GitHubAuthErrorCode::NotAuthenticated,
+                "Sign in to GitHub before managing shared channels",
+            )
+        })?;
+        if credential
+            .access_expires_at
+            .is_some_and(|expires_at| self.clock.now() >= expires_at)
+        {
+            return Err(GitHubAuthError::new(
+                GitHubAuthErrorCode::NotAuthenticated,
+                "The GitHub session expired; refresh it before managing shared channels",
+            ));
+        }
+        Ok(GitHubApiCredential(Arc::from(credential.access_token)))
     }
 
     pub async fn start_device_flow(&self) -> Result<DeviceAuthorization, GitHubAuthError> {

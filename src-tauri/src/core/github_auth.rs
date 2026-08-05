@@ -7,6 +7,10 @@ use skillstar_skills::git_skill::GitSkillFacade;
 use skillstar_skills::github_auth::{
     GitHubAuthError, GitHubAuthFacade, KeyringCredentialStore, ProductionGitHubGateway, SystemClock,
 };
+use skillstar_skills::shared_channels::{
+    DiskSharedChannelRegistry, ProductionSharedChannelGateway, SharedChannelError,
+    SharedChannelFacade,
+};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
@@ -42,6 +46,19 @@ impl GitHubAuthState {
 
     pub fn facade(&self) -> &ProductionGitHubAuth {
         &self.facade
+    }
+
+    pub fn shared_channel_facade(
+        &self,
+    ) -> Result<
+        SharedChannelFacade<ProductionSharedChannelGateway, DiskSharedChannelRegistry>,
+        SharedChannelError,
+    > {
+        let credential = self.facade.api_credential()?;
+        Ok(SharedChannelFacade::new(
+            ProductionSharedChannelGateway::new(credential),
+            DiskSharedChannelRegistry,
+        ))
     }
 
     pub fn begin_git_operation(

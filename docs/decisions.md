@@ -128,6 +128,13 @@
 - 后果：同一 Skills 域 facade 可供 GUI 与未来 CLI 使用，并可用 fake credential/transport 验证凭据生命周期。SkillStar 可执行文件必须保留内部 askpass 入口；所有新增远程 Git 动作必须通过 operation session，不能直接启动裸 Git 网络命令。进程环境本身属于敏感边界，崩溃报告和诊断不得采集该专用变量。
 - 证据：issue #20、`crates/skillstar-skills/src/github_auth/`、`src-tauri/src/commands/github/auth.rs`、Settings GitHub 登录测试。
 
+## D-015：组织私有共享频道采用 repository ID 与可恢复两阶段绑定
+
+- 状态：已接受（2026-08-05）
+- 背景：共享频道需要先创建组织私有仓库，再把它加入 GitHub App 的 selected-repository 授权范围。owner/name/URL 会随仓库转移或重命名变化；远端创建与 App 授权又无法成为单个 GitHub 原子事务。若只在全部成功后登记，授权中断会留下无法识别的孤儿仓库；若按名称重试创建，则可能重复建仓或误绑同名仓库。
+- 决策：数字 repository ID 是频道稳定远程键，owner/name/URL 只作可刷新路由元数据。创建成功后立即原子持久化版本化 pending descriptor，再执行并校验 selected-repository 授权，最后转 active；恢复只接受 registry 中的 repository ID。仅允许组织私有 `github.com` 仓库，权限按 Admin→owner、Maintain/Write→publisher、Read→subscriber 投影。本地 registry 不含凭据，REST 访问复用当前 GitHub App 用户身份和统一代理 client。
+- 后果：创建流程允许安全续接但不会自动删除已经创建的 GitHub 仓库；用户能在 pending 详情中完成 App 安装/授权后重试。仓库重命名不会改变频道身份，后续同步必须先按 ID 校验并刷新路由元数据。
+
 ## 新增记录格式
 
 ```text

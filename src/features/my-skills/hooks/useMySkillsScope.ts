@@ -12,7 +12,8 @@ const SCOPE_STORAGE_KEY = "skillstar.mySkills.scope";
 export function useMySkillsScope() {
   const [scope, setScopeState] = useState<MySkillsScope>(() => {
     if (typeof localStorage === "undefined") return "local";
-    return localStorage.getItem(SCOPE_STORAGE_KEY) === "remote" ? "remote" : "local";
+    const stored = localStorage.getItem(SCOPE_STORAGE_KEY);
+    return stored === "remote" || stored === "cloud" || stored === "shared" ? stored : "local";
   });
 
   const setScope = useCallback((next: MySkillsScope) => {
@@ -20,13 +21,13 @@ export function useMySkillsScope() {
     if (typeof localStorage !== "undefined") localStorage.setItem(SCOPE_STORAGE_KEY, next);
   }, []);
 
-  // Legacy deep-link: `#ssh` (remote) or `#cloud` opens the matching scope,
+  // Legacy deep-link: `#ssh` (remote), `#cloud`, or `#shared` opens the matching scope,
   // then normalises the hash.
   useEffect(() => {
     if (typeof window === "undefined") return;
     const hash = window.location.hash.slice(1);
-    if (hash === "ssh" || hash === "cloud") {
-      const target: MySkillsScope = hash === "cloud" ? "cloud" : "remote";
+    if (hash === "ssh" || hash === "cloud" || hash === "shared") {
+      const target: MySkillsScope = hash === "cloud" ? "cloud" : hash === "shared" ? "shared" : "remote";
       setScopeState(target);
       if (typeof localStorage !== "undefined") localStorage.setItem(SCOPE_STORAGE_KEY, target);
       window.location.hash = "skills";

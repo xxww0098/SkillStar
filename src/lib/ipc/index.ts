@@ -20,6 +20,7 @@ export type {
   ProjectCommands,
   RepoCacheInfo,
   SkillCommands,
+  SharedChannelCommands,
   StorageCommands,
   SystemCommands,
   TauriCommands,

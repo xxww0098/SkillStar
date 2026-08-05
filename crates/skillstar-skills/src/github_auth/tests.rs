@@ -288,6 +288,8 @@ async fn git_auth_material_tracks_keyring_presence_and_provider_expiry_without_a
         Arc::new(NoopGitProgressSink),
     );
     assert!(connected.has_credential());
+    let api_credential = facade.api_credential().expect("opaque API credential");
+    assert!(!format!("{api_credential:?}").contains("access-secret"));
 
     clock.set("2026-08-05T11:00:00Z");
     let expired = GitOperationSession::new(

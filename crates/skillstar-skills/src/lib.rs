@@ -29,6 +29,7 @@ pub mod local_skill;
 pub(crate) mod repo_link;
 pub mod repo_scanner;
 pub mod share_install;
+pub mod shared_channels;
 pub mod skill_bundle;
 pub mod skill_group;
 pub mod skill_install;
