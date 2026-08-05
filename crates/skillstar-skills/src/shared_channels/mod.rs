@@ -5,6 +5,8 @@
 
 mod existing;
 mod github;
+mod github_membership;
+mod membership;
 mod release;
 mod release_scanner;
 mod store;
@@ -21,6 +23,13 @@ pub use existing::{
     ExistingRepositoryInventory, ExistingRepositoryScanner, GitExistingRepositoryScanner,
 };
 pub use github::ProductionSharedChannelGateway;
+pub use membership::{
+    ChannelInvitation, ChannelInvitationAction, ChannelInviteRole, ChannelMember,
+    ChannelMemberIdentity, ChannelMembershipFacade, ChannelMembershipGateway,
+    ChannelMembershipSnapshot, ChannelMembershipStatus, CreateChannelInvitationRequest,
+    EffectiveRepositoryAccess, RemoteChannelInvitation, RemoteInvitationOutcome,
+    RepositoryAccessSource,
+};
 pub use release::{
     CHANNEL_CONTENT_HASH_VERSION, CHANNEL_RELEASE_MANIFEST_VERSION, ChannelDraftScanner,
     ChannelDraftSkill, ChannelDraftSnapshot, ChannelPublicationFacade, ChannelPublicationGateway,
@@ -49,6 +58,7 @@ pub enum SharedChannelRole {
 #[serde(rename_all = "snake_case")]
 pub enum SharedChannelStatus {
     AwaitingAppInstallation,
+    AwaitingInvitationAcceptance,
     Active,
 }
 
@@ -162,6 +172,14 @@ pub enum SharedChannelErrorCode {
     InvalidRepositoryName,
     RepositoryConflict,
     RepositoryNotFound,
+    InvitationNotFound,
+    InvitationOrganizationPolicy,
+    InvitationSsoRequired,
+    InvitationTwoFactorRequired,
+    InvitationSeatUnavailable,
+    InvitationValidation,
+    InvitationRateLimited,
+    InvitationLimit,
     Network,
     Protocol,
     Storage,

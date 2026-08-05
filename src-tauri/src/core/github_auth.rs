@@ -8,10 +8,10 @@ use skillstar_skills::github_auth::{
     GitHubAuthError, GitHubAuthFacade, KeyringCredentialStore, ProductionGitHubGateway, SystemClock,
 };
 use skillstar_skills::shared_channels::{
-    ChannelPublicationFacade, ChannelPublishSessions, DiskSharedChannelRegistry,
-    ExistingChannelRegistrationFacade, ExistingChannelRegistrationSessions, GitChannelDraftScanner,
-    GitExistingRepositoryScanner, ProductionSharedChannelGateway, SharedChannelError,
-    SharedChannelFacade,
+    ChannelMembershipFacade, ChannelPublicationFacade, ChannelPublishSessions,
+    DiskSharedChannelRegistry, ExistingChannelRegistrationFacade,
+    ExistingChannelRegistrationSessions, GitChannelDraftScanner, GitExistingRepositoryScanner,
+    ProductionSharedChannelGateway, SharedChannelError, SharedChannelFacade,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -114,6 +114,19 @@ impl GitHubAuthState {
             ProductionSharedChannelGateway::new(credential),
             DiskSharedChannelRegistry,
             self.channel_publish_sessions.clone(),
+        ))
+    }
+
+    pub fn channel_membership_facade(
+        &self,
+    ) -> Result<
+        ChannelMembershipFacade<ProductionSharedChannelGateway, DiskSharedChannelRegistry>,
+        SharedChannelError,
+    > {
+        let credential = self.facade.api_credential()?;
+        Ok(ChannelMembershipFacade::new(
+            ProductionSharedChannelGateway::new(credential),
+            DiskSharedChannelRegistry,
         ))
     }
 

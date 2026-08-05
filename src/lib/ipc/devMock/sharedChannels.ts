@@ -1,4 +1,8 @@
 import type {
+  ChannelInvitation,
+  ChannelInvitationAction,
+  ChannelInviteRole,
+  ChannelMembershipSnapshot,
   ChannelPublishPreview,
   ChannelPublishResult,
   ExistingChannelScanPreview,
@@ -10,6 +14,24 @@ let channels: SharedChannelDescriptor[] = [];
 const registrationPreviews = new Map<string, ExistingChannelScanPreview>();
 const publicationPreviews = new Map<string, ChannelPublishPreview>();
 let publishedRevision = 0;
+let nextInvitationId = 902;
+let repositoryInvitations: ChannelInvitation[] = [];
+let inboxInvitations: ChannelInvitation[] = [
+  {
+    id: 901,
+    repository_id: 84,
+    organization_id: 7,
+    owner: "acme",
+    repository_name: "design-skills",
+    html_url: "https://github.com/acme/design-skills",
+    invitee: { id: 99, login: "demo-user" },
+    inviter: { id: 7, login: "alice" },
+    role: "subscriber",
+    effective_role: "subscriber",
+    status: "pending",
+    created_at: new Date().toISOString(),
+  },
+];
 
 export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
   list_shared_channel_organizations: () => [
@@ -18,7 +40,10 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
   ],
   list_shared_channels: () => channels,
   create_shared_channel: (args) => {
-    const request = (args?.request ?? {}) as { organization?: string; repository_name?: string };
+    const request = (args?.request ?? {}) as {
+      organization?: string;
+      repository_name?: string;
+    };
     const owner = request.organization || "acme";
     const name = request.repository_name || "skillstar-team";
     const now = new Date().toISOString();
@@ -32,7 +57,11 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
       clone_url: `https://github.com/${owner}/${name}.git`,
       role: "owner",
       status: "active",
-      authorization: { repository_selection: "selected", administration: "write", contents: "write" },
+      authorization: {
+        repository_selection: "selected",
+        administration: "write",
+        contents: "write",
+      },
       created_at: now,
       updated_at: now,
     };
@@ -43,7 +72,11 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
     const repositoryId = Number(args?.repositoryId ?? 0);
     const current = channels.find((channel) => channel.repository_id === repositoryId);
     if (!current) throw new Error("repository_not_found: Pending shared channel not found");
-    const active = { ...current, status: "active" as const, updated_at: new Date().toISOString() };
+    const active = {
+      ...current,
+      status: "active" as const,
+      updated_at: new Date().toISOString(),
+    };
     channels = channels.map((channel) => (channel.repository_id === repositoryId ? active : channel));
     return active;
   },
@@ -73,10 +106,19 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
         role: "owner",
         already_registered: false,
       },
-      skills: [{ id: "writer", folder_path: "skills/writer", description: "Write clearly" }],
+      skills: [
+        {
+          id: "writer",
+          folder_path: "skills/writer",
+          description: "Write clearly",
+        },
+      ],
       non_skill_files: ["README.md", ".github/workflows/ci.yml"],
       total_files: 5,
-      exposure: { full_repository_contents_readable: true, full_history_readable: true },
+      exposure: {
+        full_repository_contents_readable: true,
+        full_history_readable: true,
+      },
     };
     registrationPreviews.set(sessionId, preview);
     return preview;
@@ -96,7 +138,11 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
       clone_url: preview.repository.clone_url,
       role: "owner",
       status: "active",
-      authorization: { repository_selection: "selected", administration: "write", contents: "write" },
+      authorization: {
+        repository_selection: "selected",
+        administration: "write",
+        contents: "write",
+      },
       created_at: now,
       updated_at: now,
     };
@@ -157,4 +203,134 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
     return result;
   },
   cancel_shared_channel_publish: (args) => publicationPreviews.delete(String(args?.sessionId ?? "")),
+  list_shared_channel_membership: (args) => {
+    const repositoryId = Number(args?.repositoryId ?? 0);
+    const snapshot: ChannelMembershipSnapshot = {
+      repository_id: repositoryId,
+      members: [
+        {
+          user: { id: 7, login: "alice" },
+          role: "owner",
+          github_role_name: "admin",
+          status: "accepted",
+        },
+      ],
+      invitations: repositoryInvitations.filter((invitation) => invitation.repository_id === repositoryId),
+    };
+    return snapshot;
+  },
+  invite_shared_channel_member: (args) => {
+    const request = (args?.request ?? {}) as {
+      repository_id?: number;
+      username?: string;
+      role?: ChannelInviteRole;
+    };
+    const channel = channels.find((item) => item.repository_id === Number(request.repository_id));
+    const invitation: ChannelInvitation = {
+      id: nextInvitationId++,
+      repository_id: channel?.repository_id ?? 42,
+      organization_id: channel?.organization_id ?? 7,
+      owner: channel?.owner ?? "acme",
+      repository_name: channel?.name ?? "skillstar-shared",
+      html_url: channel?.html_url ?? "https://github.com/acme/skillstar-shared",
+      invitee: {
+        id: nextInvitationId,
+        login: request.username || "collaborator",
+      },
+      inviter: { id: 7, login: "alice" },
+      role: request.role ?? "subscriber",
+      effective_role: request.role ?? "subscriber",
+      status: "pending",
+      created_at: new Date().toISOString(),
+    };
+    repositoryInvitations = [invitation, ...repositoryInvitations];
+    const action: ChannelInvitationAction = {
+      repository_id: invitation.repository_id,
+      invitation_id: invitation.id,
+      username: invitation.invitee?.login ?? "",
+      role: invitation.role,
+      status: "pending",
+    };
+    return action;
+  },
+  cancel_shared_channel_invitation: (args) => {
+    const invitationId = Number(args?.invitationId ?? 0);
+    const invitation = repositoryInvitations.find((item) => item.id === invitationId);
+    repositoryInvitations = repositoryInvitations.filter((item) => item.id !== invitationId);
+    return {
+      repository_id: invitation?.repository_id ?? Number(args?.repositoryId ?? 0),
+      invitation_id: invitationId,
+      username: invitation?.invitee?.login ?? "",
+      role: invitation?.role ?? "subscriber",
+      status: "cancelled",
+    } satisfies ChannelInvitationAction;
+  },
+  resend_shared_channel_invitation: (args) => {
+    const invitationId = Number(args?.invitationId ?? 0);
+    const previous = repositoryInvitations.find((item) => item.id === invitationId);
+    if (!previous) throw new Error("invitation_not_found: Refresh and try again");
+    repositoryInvitations = repositoryInvitations.filter((item) => item.id !== invitationId);
+    const replacement = {
+      ...previous,
+      id: nextInvitationId++,
+      created_at: new Date().toISOString(),
+    };
+    repositoryInvitations = [replacement, ...repositoryInvitations];
+    return {
+      repository_id: replacement.repository_id,
+      invitation_id: replacement.id,
+      username: replacement.invitee?.login ?? "",
+      role: replacement.role,
+      status: "pending",
+    } satisfies ChannelInvitationAction;
+  },
+  list_shared_channel_invitation_inbox: () => inboxInvitations,
+  accept_shared_channel_invitation: (args) => {
+    const invitationId = Number(args?.invitationId ?? 0);
+    const invitation = inboxInvitations.find((item) => item.id === invitationId);
+    if (!invitation) throw new Error("invitation_not_found: Refresh and try again");
+    const now = new Date().toISOString();
+    const descriptor: SharedChannelDescriptor = {
+      descriptor_version: 1,
+      repository_id: invitation.repository_id,
+      organization_id: invitation.organization_id,
+      owner: invitation.owner,
+      name: invitation.repository_name,
+      html_url: invitation.html_url,
+      clone_url: `${invitation.html_url}.git`,
+      role: invitation.role,
+      status: "active",
+      authorization: {
+        repository_selection: "selected",
+        administration: "write",
+        contents: "write",
+      },
+      created_at: now,
+      updated_at: now,
+    };
+    channels = [descriptor, ...channels.filter((item) => item.repository_id !== descriptor.repository_id)];
+    inboxInvitations = inboxInvitations.filter((item) => item.id !== invitationId);
+    return descriptor;
+  },
+  decline_shared_channel_invitation: (args) => {
+    const invitationId = Number(args?.invitationId ?? 0);
+    const invitation = inboxInvitations.find((item) => item.id === invitationId);
+    if (!invitation) throw new Error("invitation_not_found: Refresh and try again");
+    inboxInvitations = inboxInvitations.filter((item) => item.id !== invitationId);
+    return {
+      repository_id: invitation.repository_id,
+      invitation_id: invitation.id,
+      username: invitation.invitee?.login ?? "",
+      role: invitation.role,
+      status: "cancelled",
+    } satisfies ChannelInvitationAction;
+  },
+  resume_accepted_shared_channel: (args) => {
+    const repositoryId = Number(args?.repositoryId ?? 0);
+    const pending = channels.find((item) => item.repository_id === repositoryId);
+    if (!pending) throw new Error("repository_not_found: Accepted invitation recovery marker not found");
+    const active = { ...pending, status: "active" as const, updated_at: new Date().toISOString() };
+    channels = channels.map((item) => (item.repository_id === repositoryId ? active : item));
+    return active;
+  },
 };

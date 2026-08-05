@@ -2,6 +2,10 @@ import type {
   CreateSharedChannelRequest,
   ChannelPublishPreview,
   ChannelPublishResult,
+  ChannelInvitation,
+  ChannelInvitationAction,
+  ChannelMembershipSnapshot,
+  CreateChannelInvitationRequest,
   ExistingChannelRepositoryCandidate,
   ExistingChannelScanPreview,
   ExistingChannelScanRequest,
@@ -10,8 +14,14 @@ import type {
 } from "../../../types";
 
 export interface SharedChannelCommands {
-  list_shared_channel_organizations: { args: Record<string, never>; result: GitHubOrganization[] };
-  list_shared_channels: { args: Record<string, never>; result: SharedChannelDescriptor[] };
+  list_shared_channel_organizations: {
+    args: Record<string, never>;
+    result: GitHubOrganization[];
+  };
+  list_shared_channels: {
+    args: Record<string, never>;
+    result: SharedChannelDescriptor[];
+  };
   create_shared_channel: {
     args: { request: CreateSharedChannelRequest };
     result: SharedChannelDescriptor;
@@ -47,5 +57,37 @@ export interface SharedChannelCommands {
   cancel_shared_channel_publish: {
     args: { sessionId: string };
     result: boolean;
+  };
+  list_shared_channel_membership: {
+    args: { repositoryId: number };
+    result: ChannelMembershipSnapshot;
+  };
+  invite_shared_channel_member: {
+    args: { request: CreateChannelInvitationRequest };
+    result: ChannelInvitationAction;
+  };
+  cancel_shared_channel_invitation: {
+    args: { repositoryId: number; invitationId: number };
+    result: ChannelInvitationAction;
+  };
+  resend_shared_channel_invitation: {
+    args: { repositoryId: number; invitationId: number };
+    result: ChannelInvitationAction;
+  };
+  list_shared_channel_invitation_inbox: {
+    args: Record<string, never>;
+    result: ChannelInvitation[];
+  };
+  accept_shared_channel_invitation: {
+    args: { invitationId: number };
+    result: SharedChannelDescriptor;
+  };
+  decline_shared_channel_invitation: {
+    args: { invitationId: number };
+    result: ChannelInvitationAction;
+  };
+  resume_accepted_shared_channel: {
+    args: { repositoryId: number };
+    result: SharedChannelDescriptor;
   };
 }

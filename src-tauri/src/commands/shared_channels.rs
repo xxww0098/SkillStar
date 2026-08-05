@@ -1,7 +1,8 @@
 //! Thin Tauri adapters for organization-private shared channels.
 
 use skillstar_skills::shared_channels::{
-    ChannelPublishPreview, ChannelPublishResult, CreateSharedChannelRequest,
+    ChannelInvitation, ChannelInvitationAction, ChannelMembershipSnapshot, ChannelPublishPreview,
+    ChannelPublishResult, CreateChannelInvitationRequest, CreateSharedChannelRequest,
     DiskSharedChannelRegistry, ExistingChannelRepositoryCandidate, ExistingChannelScanPreview,
     ExistingChannelScanRequest, GitHubOrganization, SharedChannelDescriptor, SharedChannelError,
     SharedChannelRegistry,
@@ -132,4 +133,87 @@ pub fn cancel_shared_channel_publish(
     state: State<'_, GitHubAuthState>,
 ) -> bool {
     state.cancel_channel_publication(&session_id)
+}
+
+#[tauri::command]
+pub async fn list_shared_channel_membership(
+    repository_id: u64,
+    state: State<'_, GitHubAuthState>,
+) -> Result<ChannelMembershipSnapshot, SharedChannelError> {
+    state
+        .channel_membership_facade()?
+        .list_membership(repository_id)
+        .await
+}
+
+#[tauri::command]
+pub async fn invite_shared_channel_member(
+    request: CreateChannelInvitationRequest,
+    state: State<'_, GitHubAuthState>,
+) -> Result<ChannelInvitationAction, SharedChannelError> {
+    state.channel_membership_facade()?.invite(request).await
+}
+
+#[tauri::command]
+pub async fn cancel_shared_channel_invitation(
+    repository_id: u64,
+    invitation_id: u64,
+    state: State<'_, GitHubAuthState>,
+) -> Result<ChannelInvitationAction, SharedChannelError> {
+    state
+        .channel_membership_facade()?
+        .cancel(repository_id, invitation_id)
+        .await
+}
+
+#[tauri::command]
+pub async fn resend_shared_channel_invitation(
+    repository_id: u64,
+    invitation_id: u64,
+    state: State<'_, GitHubAuthState>,
+) -> Result<ChannelInvitationAction, SharedChannelError> {
+    state
+        .channel_membership_facade()?
+        .resend(repository_id, invitation_id)
+        .await
+}
+
+#[tauri::command]
+pub async fn list_shared_channel_invitation_inbox(
+    state: State<'_, GitHubAuthState>,
+) -> Result<Vec<ChannelInvitation>, SharedChannelError> {
+    state.channel_membership_facade()?.list_inbox().await
+}
+
+#[tauri::command]
+pub async fn accept_shared_channel_invitation(
+    invitation_id: u64,
+    state: State<'_, GitHubAuthState>,
+) -> Result<SharedChannelDescriptor, SharedChannelError> {
+    state
+        .channel_membership_facade()?
+        .accept(invitation_id)
+        .await
+}
+
+#[tauri::command]
+pub async fn decline_shared_channel_invitation(
+    invitation_id: u64,
+    state: State<'_, GitHubAuthState>,
+) -> Result<ChannelInvitationAction, SharedChannelError> {
+    state
+        .channel_membership_facade()?
+        .decline(invitation_id)
+        .await
+}
+
+#[tauri::command]
+pub async fn resume_accepted_shared_channel(
+    repository_id: u64,
+    state: State<'_, GitHubAuthState>,
+) -> Result<SharedChannelDescriptor, SharedChannelError> {
+    state
+        .channel_membership_facade()?
+        .resume_accepted_channel(repository_id)
+        .await
 }

@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use std::time::Duration;
 
-const API_ROOT: &str = "https://api.github.com";
+pub(super) const API_ROOT: &str = "https://api.github.com";
 const MAX_GITHUB_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_PUBLICATION_PAGES: usize = 50;
 const MAX_CHANNEL_RELEASES: usize = 4_096;
@@ -34,7 +34,7 @@ impl ProductionSharedChannelGateway {
         )
     }
 
-    fn request(
+    pub(super) fn request(
         &self,
         method: reqwest::Method,
         url: &str,
@@ -48,7 +48,7 @@ impl ProductionSharedChannelGateway {
             .bearer_auth(self.credential.expose_secret()))
     }
 
-    async fn response(
+    pub(super) async fn response(
         &self,
         request: reqwest::RequestBuilder,
     ) -> Result<(u16, String), SharedChannelError> {
@@ -166,7 +166,7 @@ struct OrganizationAccount {
 }
 
 #[derive(Deserialize)]
-struct RepositoryResponse {
+pub(super) struct RepositoryResponse {
     id: u64,
     name: String,
     default_branch: String,
@@ -647,7 +647,9 @@ fn installation_repositories_url(installation_id: u64, page: usize) -> String {
     format!("{API_ROOT}/user/installations/{installation_id}/repositories?per_page=100&page={page}")
 }
 
-fn map_repository(response: RepositoryResponse) -> Result<RemoteRepository, SharedChannelError> {
+pub(super) fn map_repository(
+    response: RepositoryResponse,
+) -> Result<RemoteRepository, SharedChannelError> {
     Ok(RemoteRepository {
         id: response.id,
         owner_id: response.owner.id,
@@ -667,7 +669,9 @@ fn map_repository(response: RepositoryResponse) -> Result<RemoteRepository, Shar
     })
 }
 
-fn parse_json<T: serde::de::DeserializeOwned>(body: &str) -> Result<T, SharedChannelError> {
+pub(super) fn parse_json<T: serde::de::DeserializeOwned>(
+    body: &str,
+) -> Result<T, SharedChannelError> {
     serde_json::from_str(body).map_err(|_| {
         SharedChannelError::new(
             SharedChannelErrorCode::Protocol,
@@ -702,7 +706,9 @@ fn encode_path_segment(value: &str) -> Result<String, SharedChannelError> {
     Ok(value.to_string())
 }
 
-fn repository_api_base(repository: &RemoteRepository) -> Result<String, SharedChannelError> {
+pub(super) fn repository_api_base(
+    repository: &RemoteRepository,
+) -> Result<String, SharedChannelError> {
     Ok(format!(
         "{API_ROOT}/repos/{}/{}",
         encode_path_segment(&repository.owner_login)?,

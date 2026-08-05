@@ -1,5 +1,5 @@
 export type SharedChannelRole = "owner" | "publisher" | "subscriber";
-export type SharedChannelStatus = "awaiting_app_installation" | "active";
+export type SharedChannelStatus = "awaiting_app_installation" | "awaiting_invitation_acceptance" | "active";
 
 export interface GitHubOrganization {
   id: number;
@@ -117,4 +117,54 @@ export interface RemoteChannelRelease {
 export interface ChannelPublishResult {
   manifest: ChannelReleaseManifest;
   release: RemoteChannelRelease;
+}
+
+export type ChannelInviteRole = "subscriber" | "publisher";
+export type ChannelMembershipStatus = "pending" | "accepted" | "failed" | "cancelled";
+
+export interface ChannelMemberIdentity {
+  id: number;
+  login: string;
+}
+
+export interface ChannelMember {
+  user: ChannelMemberIdentity;
+  role: SharedChannelRole;
+  github_role_name: string;
+  status: ChannelMembershipStatus;
+}
+
+export interface ChannelInvitation {
+  id: number;
+  repository_id: number;
+  organization_id: number;
+  owner: string;
+  repository_name: string;
+  html_url: string;
+  invitee: ChannelMemberIdentity | null;
+  inviter: ChannelMemberIdentity | null;
+  role: ChannelInviteRole;
+  effective_role: SharedChannelRole;
+  status: ChannelMembershipStatus;
+  created_at: string;
+}
+
+export interface ChannelMembershipSnapshot {
+  repository_id: number;
+  members: ChannelMember[];
+  invitations: ChannelInvitation[];
+}
+
+export interface CreateChannelInvitationRequest {
+  repository_id: number;
+  username: string;
+  role: ChannelInviteRole;
+}
+
+export interface ChannelInvitationAction {
+  repository_id: number;
+  invitation_id: number | null;
+  username: string;
+  role: ChannelInviteRole;
+  status: ChannelMembershipStatus;
 }

@@ -136,6 +136,7 @@
 - 后果：pending descriptor 落盘后，用户能在详情中完成 App 安装/授权并安全续接；仓库重命名不会改变频道身份，后续同步必须先按 ID 校验并刷新路由元数据。GitHub `201 Created` 与首次本地原子写之间仍是不可消除的跨系统故障窗口：若进程终止或磁盘写入失败，SkillStar 不按名称猜测、不自动删除仓库，组织所有者需在 GitHub 手动处理该孤儿仓库。
 - 扩展：已有组织私有仓库不直接绑定，而先建立进程内、ID-bound 的 registration session。扫描以当前 revision 的完整 tracked tree 披露全部 Skill、非 Skill 文件以及整段历史可读边界，不以稀疏工作树代表远端库存；generation tombstone 丢弃取消后的晚到结果，确认原子 claim 预览并在落 registry 前重新按 numeric ID 校验远端与重复绑定。确认失败保留 session 以便恢复；GitHub 登出、进程重启、取消或成功后清除，且不持久化 checkout 路径或任何凭据。
 - 扩展：频道发布以 `channel-vNNNNNN` annotated tag message 中的版本化 canonical manifest 和同名 GitHub Release 为唯一远端版本边界；branch commits 永远只是草稿。manifest 绑定 stable repository ID、精确 commit、发布者、时间和全量 Skill snapshot hash，并显式携带 added/updated/unchanged/removed。revision 只从已验证的远端 tags 单调派生；本地不预增计数。发布预览用短生命周期 session 固定 commit，确认时 HEAD 漂移、权限变化、schema/identity 不符或远端拒绝均 fail-closed。
+- 扩展：成员资格与 open invitation 继续完全采用 GitHub collaborator/invitation API，不建立 SkillStar ACL、share code 或邀请历史。管理动作以当前 GitHub 有效 Admin 为门槛；subscriber/publisher 分别使用 GitHub read/write，已有直接、继承或 pending 权限时不重复邀请。接受邀请前仅以 repository ID、路由和目标角色写入 `awaiting_invitation_acceptance` 恢复 descriptor，GitHub 接受后转 active；最终落盘失败，或网络/5xx 令接受结果不确定时保留 marker，并从当前身份可见的私有仓库库存按 repository ID 恢复，避免远端 invitation 已消费而本地入口丢失。GitHub invitation 不支持自定义来源 metadata，因此 inbox 公开事实是“组织私有 GitHub 仓库邀请”，用户显式确认是否导入为 SkillStar 频道；GitHub REST 无独立 resend，重邀是明确的 cancel-and-create 非原子序列。
 
 ## 新增记录格式
 

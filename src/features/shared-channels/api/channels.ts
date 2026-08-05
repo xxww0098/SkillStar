@@ -1,5 +1,9 @@
 import { tauriInvoke } from "../../../lib/ipc";
-import type { CreateSharedChannelRequest, ExistingChannelScanRequest } from "../../../types";
+import type {
+  CreateChannelInvitationRequest,
+  CreateSharedChannelRequest,
+  ExistingChannelScanRequest,
+} from "../../../types";
 
 export function listSharedChannelOrganizations() {
   return tauriInvoke("list_shared_channel_organizations");
@@ -30,11 +34,16 @@ export function confirmExistingSharedChannel(sessionId: string) {
 }
 
 export function cancelExistingSharedChannelRegistration(sessionId: string) {
-  return tauriInvoke("cancel_existing_shared_channel_registration", { sessionId });
+  return tauriInvoke("cancel_existing_shared_channel_registration", {
+    sessionId,
+  });
 }
 
 export function previewSharedChannelPublish(repositoryId: number, sessionId: string) {
-  return tauriInvoke("preview_shared_channel_publish", { repositoryId, sessionId });
+  return tauriInvoke("preview_shared_channel_publish", {
+    repositoryId,
+    sessionId,
+  });
 }
 
 export function publishSharedChannel(sessionId: string, title: string, notes: string) {
@@ -43,4 +52,42 @@ export function publishSharedChannel(sessionId: string, title: string, notes: st
 
 export function cancelSharedChannelPublish(sessionId: string) {
   return tauriInvoke("cancel_shared_channel_publish", { sessionId });
+}
+
+export function listSharedChannelMembership(repositoryId: number) {
+  return tauriInvoke("list_shared_channel_membership", { repositoryId });
+}
+
+export function inviteSharedChannelMember(request: CreateChannelInvitationRequest) {
+  return tauriInvoke("invite_shared_channel_member", { request });
+}
+
+export function cancelSharedChannelInvitation(repositoryId: number, invitationId: number) {
+  return tauriInvoke("cancel_shared_channel_invitation", {
+    repositoryId,
+    invitationId,
+  });
+}
+
+export function resendSharedChannelInvitation(repositoryId: number, invitationId: number) {
+  return tauriInvoke("resend_shared_channel_invitation", {
+    repositoryId,
+    invitationId,
+  });
+}
+
+export function listSharedChannelInvitationInbox() {
+  return tauriInvoke("list_shared_channel_invitation_inbox");
+}
+
+export function acceptSharedChannelInvitation(invitationId: number) {
+  return tauriInvoke("accept_shared_channel_invitation", { invitationId });
+}
+
+export function declineSharedChannelInvitation(invitationId: number) {
+  return tauriInvoke("decline_shared_channel_invitation", { invitationId });
+}
+
+export function resumeAcceptedSharedChannel(repositoryId: number) {
+  return tauriInvoke("resume_accepted_shared_channel", { repositoryId });
 }
