@@ -51,7 +51,7 @@
 - 频道描述符与本地 registry 各自显式携带 schema version。registry 不保存 token、邀请秘密或 GitHub credential；所有 GitHub REST 请求复用统一代理客户端和当前登录身份。前端位于独立 `src/features/shared-channels/`，由 My Skills 组合。
 - 高级注册流程只列出当前组织 owner 通过 SkillStar GitHub App selected-repository 安装可访问的组织私有仓库。扫描与确认绑定到同一个随机 session 和数字 repository ID；预览未确认前不写频道 registry，确认时重新按 ID 校验 App 访问、Admin、私有性与重复绑定，并刷新改名后的路由元数据。
 - 已有仓库扫描通过操作级 Git session 读取当前 revision 的完整 tracked tree，不把稀疏 checkout 或 cache untracked 文件当作远端库存；tree 中的全部 Skill 目录按需物化后再发现。确认页逐项展示发现的全部 Skill 与不属于任何 Skill 的 tracked 文件，并在提交前明确警告：频道成员将能读取整个仓库内容和完整 Git 历史，而不只读取列出的 Skill。扫描支持结构化进度和取消；取消使用 generation tombstone 丢弃晚到结果，确认先原子 claim 预览。session 只保存在当前 GitHub 登录生命周期内，取消、成功确认、登出或进程退出即销毁；确认失败保留原 session 供重试。
-- 同一数字 repository ID 最多绑定一个本地共享频道；owner/name/URL 改名后只刷新显示，不能产生第二个频道。扫描、预览和 registry 均不保存 GitHub token、askpass 环境或仓库凭据。
+- 同一数字 repository ID 最多绑定一个本地共享频道；所有订阅读取先按该 ID 验证远端身份，同一组织内的 owner/name/URL 改名会原子写回频道 registry，不能产生第二个频道。仓库转移到不同组织、ID 被替换或路由指向另一仓库属于完整性错误，不能跟随新位置。扫描、预览和 registry 均不保存 GitHub token、askpass 环境或仓库凭据。
 - 共享频道的普通默认分支提交都是草稿；只有 owner/publisher 在 SkillStar 完成发布确认后，订阅者才看见新版本。发布预览绑定当时的精确 commit，若确认前默认分支前进则停止并要求重新预览。
 - 发布 revision 由远端不可变 `channel-vNNNNNN` tag 单调生成。annotated tag message 保存 canonical、版本化 release manifest；GitHub Release 保存用户填写的标题与说明。manifest 包含稳定 repository/channel 身份、精确 commit、发布者、时间，以及每个 Skill 的相对内容根、完整 snapshot hash、hash 算法版本和 added/updated/unchanged/removed 状态。removed 项保留上一版路径与 hash 作为审计证据。
 - 发布预览用独立的无工作树 partial clone 精确跟随 GitHub API 返回的默认分支，不读取或重置共享 repo cache；归档时显式禁用 `export-ignore`/`export-subst`，从 commit 的完整 tracked tree 发现全部 Skill，并使用与安装/本地分歧相同的有界完整目录 hash。预览 session 空闲 30 分钟后回收；响应体、Skill 数量、相对路径、重复 Skill 身份、未知 manifest 字段/schema、tag/commit 不一致都 fail-closed。发布只允许当前 GitHub 有 Admin/Maintain/Write 的用户；App Contents write 不得提升 Read 用户。
@@ -63,7 +63,7 @@
 - GitHub 是 pending invitation、接受与拒绝的唯一状态真相；刷新后 cancelled/failed 只保留为当前操作反馈，不伪造远端历史。组织外部协作者策略、SAML SSO、2FA、seat、校验、主/次速率限制和每仓库邀请限额必须映射为独立可行动错误，不能归并成模糊的网络失败。
 - 接受 GitHub 仓库邀请只建立读取频道的能力，不代表同意把其中的 Skill 安装到本机。active 频道必须先读取并验证最新不可变 Release，再展示稳定频道身份、完整私有仓库暴露、revision、发布者、发布时间、发布说明及全部未移除 Skill；首次评审默认全选，用户可以逐项取消后再确认订阅。
 - 订阅确认重新读取最新 Release 并要求 repository ID、organization ID、revision、tag 与 commit 仍和评审目标一致；随后从精确 commit 的独立 ref cache 校验每个选中 Skill 的 content root 与完整内容 hash，只有全部通过才调用既有 staged batch install。只安装明确选中的 Skill，并记录固定 release target、选中集合、安装后的完整 baseline hash 与不含凭据的 Git URL/ref/source-folder provenance；Agent link/copy 与 Project copy 通过现有 reconciliation 刷新。
-- 频道订阅选择独立持久化在版本化的非敏感本地 store 中，GitHub 仍只负责访问控制和远端发布事实。首次允许选择为空，并记录该发布已评审的 Skill identity 集合；后续即使跳过多个发布，也以该集合识别真正新增项，只作为未选择通知，不能静默扩大已持久化选择。用户明确应用或确认新 revision 后同步推进已评审集合。安装或本地持久化任一步失败时，新安装项必须回滚，旧订阅保持不变。重启后评审从该 store 恢复选择与目标；未来未知 store schema 只做宽容只读投影，并拒绝任何订阅变更，不能猜测迁移。
+- 频道注册表与订阅选择独立持久化在版本化的非敏感本地 store 中，GitHub 仍只负责访问控制和远端发布事实。首次允许选择为空，并记录该发布已评审的 Skill identity 集合；后续即使跳过多个发布，也以该集合识别真正新增项，只作为未选择通知，不能静默扩大已持久化选择。用户明确应用或确认新 revision 后同步推进已评审集合。安装或本地持久化任一步失败时，新安装项必须回滚，旧订阅保持不变。重启后评审从该 store 恢复选择与目标；未来未知 registry、descriptor 或 subscription schema 只做宽容只读投影，并拒绝任何频道或订阅变更，不能猜测迁移；任一未来订阅若无法安全投影 repository 与受管 Skill identity，则整个 ownership 查询 fail-closed，不能把该条静默丢弃后放行通用写入。
 - 订阅频道默认由应用后台任务每小时自动检查最新不可变 Release，但升级偏好按频道保存且默认保持手动；关闭应用进程时不承诺继续运行。订阅者显式开启受保护自动升级后，会立即检查并自动应用其中的安全项。检查结果展示 revision、发布者、发布时间、说明，以及 added/updated/removed/unchanged 差异。
 - 自动升级只应用检查与写入前都仍等于 baseline 的已订阅 Skill，并复用手动升级的精确 Release、staged transaction、最终验证与逐项回滚。pinned、本地分歧、权限变化、removed、完整性错误和上次未解决失败均暂停自动处理；一个暂停项不阻止同频道其他干净项。新增 Skill 永远不自动选择、安装或确认消失，仍需用户显式评审。
 - 每个频道持久化自动升级开关、最近尝试/完成时间、目标、已应用项、逐项暂停原因与可重试错误。网络、代理、未登录和临时协议错误保留最近已验证频道状态并等待下次到期重试，不得推断为撤权。手动检查或升级与后台任务共享频道 mutation lease 和统一 Skill 更新事务锁；重启、并发扫描及普通 Skill 更新不能让较旧结果覆盖较新状态。
@@ -71,15 +71,18 @@
 - 历史回滚成功后只固定该 Skill 的精确 release target，频道整体已评审 target 不倒退。固定项继续展示最新版本与差异，但手动“应用安全更新”和自动升级都跳过它，直到用户显式“恢复跟随频道”。恢复动作原子清除 pin 并重新产生最新升级计划，不在同一步骤隐式覆盖本地内容；之后仍按手动或受保护自动策略应用。pin 和最近计划持久化，重启后不得丢失。
 - 当最新已验证 Release 不再包含某个已安装 Skill 时，该项进入独立的 `removed_from_channel` 状态；SkillStar 不删文件、不清 Agent/Project 部署，也不让它阻止同频道其他干净 Skill 升级。用户可显式选择“卸载”，复用既有 Hub、lockfile、Agent 与 Project 清理语义；或“转为本地副本”，先按完整内容快照创建可编辑、冲突安全的本地 Skill，再解除原项的频道 provenance/跟踪。默认本地名为 `<name>.local`，冲突时使用 `.local.2` 等候选，且允许用户编辑。
 - 卸载或转为本地副本成功后，该 Skill 从订阅的 tracked/known/pin 集合中移除，其他逐项升级事实不变。若发布者以后重新加入同名 Skill，它只作为未选中的新安装通知；即便重加发生在用户尚未处理移除时，既有 removal tombstone 也继续阻止普通更新，必须先完成卸载或转本地，再由用户显式“安装并跟踪”。重新安装会验证精确 manifest/commit/hash 并走 staged install，不得覆盖已转换的本地副本。
+- 仍被订阅跟踪的频道 Skill 由频道事务独占所有权；通用 My Skills 的默认分支扫描/重装、普通更新、本地分歧继续更新、内容编辑/删除、本地创建/收养/旧版迁移、bundle/pack 导入移除、项目扫描导入和普通卸载入口必须在任何 fetch/reset 或文件写入前拒绝这些名称及其受管仓库，不能绕过频道 remote state、不可变 Release 与 tracked/known/pin 元数据。通用更新徽标也不得投影频道 Skill。用户只能在频道面板按升级、removed 或 revoked 流程处理；解除跟踪或转为本地副本后才恢复通用操作。
 - 频道 owner 的成员撤销只调用 GitHub 的直接 collaborator 删除接口，不修改 Team、组织 membership 或 base permission；删除后必须重新查询该用户的 effective permission。无剩余权限时显示已撤销；继承权限仍存在时显示“未完全撤销”及 GitHub 管理指引；删除后的复查遇到网络、代理或暂时 API 错误时只报告未确认结果，不得声称权限已撤销。
-- 订阅端在 GitHub 明确返回无仓库读取权限时持久化 `revoked` 远程状态并冻结安装、升级、回滚和自动下载；下一次显式或后台检查只允许重新探测访问，恢复后才重新开放变更。冻结不会删除 Hub 内容、lockfile 或 Agent/Project 部署，也不声称能擦除成员已下载的副本；用户仍可逐项卸载，或用可编辑、冲突安全的 `<name>.local` 名称转为本地 Skill。网络、代理及暂时 API 错误保留上次已知访问状态和本地内容，允许重试，不得升级为 `revoked`。
-- 频道升级以 Skill 为独立应用单元：当前完整内容仍等于订阅 baseline、旧 checkout HEAD 仍等于逐项 provenance 的 updated Skill 才能进入精确 commit 的 staged update transaction；本地分歧项在任何 checkout、lockfile 或部署写入前停止，并复用统一的 `<name>.local` 保留或显式丢弃流程。目标 Release 不得低于订阅 target 或最近已验证 target；远端发布暂时回退时 fail-closed，不能降级已经前进的 Skill。一个 Skill 被阻塞或失败不妨碍其他干净项前进。
+- 订阅远程生命周期显式区分 `active`、`revoked`、`offline`、`recoverable_failure` 与 `integrity_error`。仓库删除、GitHub App 仓库授权撤销或当前用户明确失去读取权限进入 `revoked`；网络/代理不可达进入 `offline`；未登录、限流及暂时协议/API 失败进入 `recoverable_failure`；repository/organization 身份漂移、未知 manifest schema、tag/commit 解绑、非法或重复 Skill 身份、越界路径、内容根缺失以及完整内容 hash 不一致进入 `integrity_error`。除 `active` 外均冻结频道发起的安装、升级、回滚、历史读取和自动下载，不修改或删除 Hub 内容、lockfile、Agent/Project 部署及最近一次已验证升级快照；用户纯本地启停既有 Agent/Project 部署不读取或覆盖 Hub 内容，仍属于独立的本机配置操作。
+- 显式检查和后台到期检查在冻结状态下只执行只读恢复探测；频道注册表/descriptor 查找失败也必须记录对应冻结状态并禁用旧快照上的升级动作，仓库身份、读取权限和最新 Release 完整性全部重新验证成功后才回到 `active`。`offline` 与 `recoverable_failure` 保留可重试性，不能升级为撤权；`integrity_error` 也必须由新的完整验证清除，不能靠用户忽略告警继续写入。`revoked` 状态仍允许用户逐项卸载，或用可编辑、冲突安全的 `<name>.local` 名称转为本地 Skill；其他冻结状态只保留本地内容和恢复入口，避免把暂时故障或可疑远端解释为删除授权。
+- 每次消费 Release 都先验证 descriptor/store schema、stable repository/organization ID、manifest schema、revision/tag/commit 绑定、Skill identity 唯一性、规范化相对 content root 与完整 snapshot hash。精确 Release 验证使用与 Hub 安装内容隔离的 ref cache，绝不为验证而 reset 用户正在编辑的安装 checkout。未知 registry、descriptor 或 subscription schema 只读展示；任何 `..`、绝对路径、反斜杠逃逸、重复 identity、manifest 指向但精确 commit 中不存在的内容根或 hash 不符都在本地 mutation 之前 fail-closed。
+- 频道升级以 Skill 为独立应用单元：当前完整内容仍等于订阅 baseline、旧 checkout HEAD 仍等于逐项 provenance 的 updated Skill 才能进入精确 commit 的 staged update transaction；即使目标内容 hash 未变化也必须重新检查本地 baseline，本地分歧项在任何 checkout、lockfile 或部署写入前停止，并复用统一的 `<name>.local` 保留或显式丢弃流程。同组织仓库改名只有在目标 Release 的身份、manifest 与完整内容验证通过后，才以 stable repository ID 授权一次受控路由迁移；成功的可恢复事务把频道 descriptor、lock 与 subscription provenance URL 刷新为新 clone URL并使 My Skills 来源缓存失效，任一写入失败立即补偿旧值，进程在文件间被强杀留下的中间态由下一次完整验证按 stable repository ID 自愈，不能全局放宽不同仓库覆盖。目标 Release 不得低于订阅 target 或最近已验证 target；远端发布暂时回退时 fail-closed，不能降级已经前进的 Skill。一个 Skill 被阻塞或失败不妨碍其他干净项前进。
 - 每项成功后同时更新文件、baseline、release hash、无凭据 provenance、update state、Agent 与 Project 部署；任一步失败恢复该 Skill 的旧 checkout、lockfile 与部署。精确 Release 读取完成后、替换 Hub 前必须再次检查本地内容；读取期间出现的新编辑一律中止替换并原地保留，补偿回滚需要覆盖这些编辑时先保存为冲突安全的本地副本。订阅状态由逐项事实派生为 `up_to_date`、`update_available`、`partially_upgraded` 或 `blocked`，最近一次已验证检查与逐项结果持久化，离线或未登录时直接从本地 store 展示此前可用状态并允许重试。
 - Git-backed Skill 安装或成功更新后记录完整受管内容的 baseline hash。更新开始前必须重新计算当前完整目录 hash；若与 baseline 不同，则将该 Skill 标记为“本地分歧”并在任何 fetch/reset、lockfile 写入或部署变更之前停止。
 - `lock.json` 当前 schema 为 v5，并显式记录完整内容 hash 算法版本；旧版、缺失、损坏或未来版本的 baseline 一律 fail-closed，不把未知状态推断为“未修改”。
 - 本地分歧只能由用户显式解决：一是把当前完整内容保留为独立本地副本后继续更新，二是清理 tracked、untracked 与 ignored 的受管修改后继续更新。默认副本名为 `<原名>.local`，允许编辑；名称冲突时提出 `.local.2` 等非破坏性候选。是否为本地 Skill 只由存储位置与 provenance/type 决定，不解析名称后缀。所有页面的单 Skill 更新入口共享同一个选择对话框；CLI 在交互终端提供同样的保留/丢弃/跳过选择，非交互输入保持 fail-closed。
 - 完整内容 hash 与保留副本覆盖 `SKILL.md`、scripts、templates、references、assets、Unix executable 状态及其他受管文件，同时排除 `.git`、SkillStar 自有状态和操作系统临时文件。分歧检测严格只读，不得为 lazy worktree 触发 checkout。共享同一 repo checkout 的任一已安装 Skill 存在本地分歧时，该次 repo pull 必须整体停在写入之前；每次只清理用户已确认的 Skill 子树，整组全部解决后才允许移动 checkout。
-- repo check/update 复用 `~/.skillstar/hub/repos/` cache，远程 HTTP/Git 遵循统一 proxy/mirror 规则。
+- repo check/update 复用 `~/.skillstar/hub/repos/` cache，远程 HTTP/Git 遵循统一 proxy/mirror 规则；任何既有 cache 在 fetch/reset 前都必须从 Hub 实际链接枚举其全部已安装 Skill 并逐项核对 lock 与完整 baseline，缺少 lock、发现修改或 baseline 未知时停止并要求用户先保留或显式丢弃。
 - 一次 update 是一个事务：pull、lockfile hash 写入、同 checkout 兄弟技能的 hash 扇出、Agent relink、项目 cascade 和 update state 清除必须走同一入口。pull 后若完整 baseline 或 lockfile 原子保存失败，先恢复旧 Git revision、旧 sparse-checkout 配置与更新前受管内容，再返回失败；`.skillstar`、编辑器临时文件等不属于 baseline 的运行时文件不得被回滚清理。GUI 与 CLI 走同一入口，任何调用方都不得只做 pull。
 - 批量 update 每个 repo 只拉一次；未被拉取但内容随之移动的技能报告为 `skipped`，失败的 repo 把它本会覆盖的全部名字报告为 `failed`，不得计入成功。
 - `update_available` 的判定可能过期：一次扫描开始后若该技能被更新，扫描结果作废。该规则由 `update_state` 按技能名的 revision 裁决，扫描以起始 revision 提交。patrol 事件是通知而非记录，其载荷是已裁决后的状态。
@@ -110,7 +113,7 @@
 ## 本地创作、Bundle 与 Share
 
 - 本地创作位于 `~/.skillstar/hub/local/<name>`，通过 hub link 暴露。
-- 从项目 Agent 目录导入的技能必须先采用到 local，再进入 hub；发布到 GitHub 后可以毕业为 repo-backed install。
+- 从项目 Agent 目录导入的技能必须先采用到 local，再进入 hub；发布到 GitHub 后可以毕业为 repo-backed install，但只有 staged 安装与最终校验成功才提交新的 Git lock provenance，失败时同时恢复本地内容与发布前 lock 状态。
 - `.ags`/`.agd` 是带 manifest 和 checksum 的 tar.gz。
 - Share code 安装由后端 `install_from_share_code` 统一执行“已安装 / git / embedded / skip”决策，前端 modal 不复制循环。
 - 本地目录采用由 `adopt_local_folder` 和标准 discovery pipeline 处理。

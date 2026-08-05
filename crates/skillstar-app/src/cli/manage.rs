@@ -323,6 +323,7 @@ pub fn cmd_publish() {
 
     println!("Publishing '{}' to GitHub...", name);
 
+    let lock_path = lockfile::lockfile_path();
     match gh_manager::publish_skill(
         &name,
         "my-skills",
@@ -330,7 +331,7 @@ pub fn cmd_publish() {
         true,
         None,
         &name,
-        &lockfile::lockfile_path(),
+        gh_manager::PublishLockfileMode::Commit(&lock_path),
     ) {
         Ok(result) => println!("✓ Published to: {}", result.url),
         Err(e) => {

@@ -133,17 +133,20 @@ where
                 "This Skill is already tracked by the channel subscription",
             ));
         }
-        let channel = self.active_channel(repository_id)?;
         let remote = async {
+            let channel = self.active_channel(repository_id)?;
             let repository = self.validated_repository(&channel).await?;
             let manifest = self.latest_manifest(&repository, &channel).await?;
-            Ok::<_, SharedChannelError>((repository, manifest))
+            self.installer
+                .verify_release_content(&repository, &manifest)
+                .await?;
+            Ok::<_, SharedChannelError>((channel, repository, manifest))
         }
         .await;
-        let (repository, manifest) = match remote {
+        let (channel, repository, manifest) = match remote {
             Ok(value) => value,
             Err(error) => {
-                super::subscription_remote::persist_definitive_remote_failure(
+                super::subscription_remote::persist_remote_failure(
                     &self.subscriptions,
                     &mut store,
                     index,
@@ -152,7 +155,20 @@ where
                 return Err(error);
             }
         };
-        super::channel_update::validate_manifest_progress(&store.subscriptions[index], &manifest)?;
+        store = self.subscriptions.load_mutable()?;
+        let index = subscription_index(&store.subscriptions, repository_id)?;
+        if let Err(error) = super::channel_update::validate_manifest_progress(
+            &store.subscriptions[index],
+            &manifest,
+        ) {
+            super::subscription_remote::persist_remote_failure(
+                &self.subscriptions,
+                &mut store,
+                index,
+                &error,
+            )?;
+            return Err(error);
+        }
         let released = active_skill(&manifest, skill_id).ok_or_else(|| {
             SharedChannelError::new(
                 SharedChannelErrorCode::ReleaseConflict,
@@ -160,11 +176,21 @@ where
             )
         })?;
         if released.id != skill_id {
-            return Err(SharedChannelError::new(
+            let error = SharedChannelError::new(
                 SharedChannelErrorCode::Integrity,
                 "The reintroduced channel Skill changed identity casing",
-            ));
+            );
+            super::subscription_remote::persist_remote_failure(
+                &self.subscriptions,
+                &mut store,
+                index,
+                &error,
+            )?;
+            return Err(error);
         }
+        self.persist_refreshed_channel(&channel, &repository)?;
+        store = self.subscriptions.load_mutable()?;
+        let index = subscription_index(&store.subscriptions, repository_id)?;
         let receipt = self
             .installer
             .install(ChannelInstallRequest {
@@ -176,7 +202,7 @@ where
         let receipt = match receipt {
             Ok(receipt) => receipt,
             Err(error) => {
-                super::subscription_remote::persist_definitive_remote_failure(
+                super::subscription_remote::persist_remote_failure(
                     &self.subscriptions,
                     &mut store,
                     index,
@@ -186,30 +212,61 @@ where
             }
         };
         if let Err(error) = validate_receipt(&receipt, &repository, &manifest, &[released]) {
-            return Err(rollback_install(&self.installer, &receipt, error).await);
+            let error = rollback_install(&self.installer, &receipt, error).await;
+            if let Err(persist_error) = super::subscription_remote::persist_remote_failure(
+                &self.subscriptions,
+                &mut store,
+                index,
+                &error,
+            ) {
+                return Err(SharedChannelError::new(
+                    error.code,
+                    format!(
+                        "{}; the staged install was rolled back, but its frozen remote state could not be saved: {}",
+                        error.message, persist_error.message
+                    ),
+                ));
+            }
+            return Err(error);
         }
-        store.subscriptions[index]
-            .skills
-            .extend(receipt.skills.clone());
-        store.subscriptions[index]
+        let mut next_subscription = store.subscriptions[index].clone();
+        next_subscription.skills.extend(receipt.skills.clone());
+        next_subscription
             .skills
             .sort_by(|left, right| left.id.cmp(&right.id));
-        store.subscriptions[index]
+        next_subscription
             .known_skill_ids
             .retain(|id| !id.eq_ignore_ascii_case(skill_id));
-        store.subscriptions[index]
-            .known_skill_ids
-            .push(released.id.clone());
-        store.subscriptions[index].known_skill_ids.sort();
+        next_subscription.known_skill_ids.push(released.id.clone());
+        next_subscription.known_skill_ids.sort();
         let snapshot = match self
-            .refresh_after_selection_change(&mut store.subscriptions[index], &manifest)
+            .refresh_after_selection_change(&mut next_subscription, &manifest)
             .await
         {
             Ok(snapshot) => snapshot,
-            Err(error) => return Err(rollback_install(&self.installer, &receipt, error).await),
+            Err(error) => {
+                let error = rollback_install(&self.installer, &receipt, error).await;
+                if let Err(persist_error) = super::subscription_remote::persist_remote_failure(
+                    &self.subscriptions,
+                    &mut store,
+                    index,
+                    &error,
+                ) {
+                    return Err(SharedChannelError::new(
+                        error.code,
+                        format!(
+                            "{}; the staged install was rolled back, but its frozen remote state could not be saved: {}",
+                            error.message, persist_error.message
+                        ),
+                    ));
+                }
+                return Err(error);
+            }
         };
+        let mut next_store = store.clone();
+        next_store.subscriptions[index] = next_subscription;
         let subscriptions = self.subscriptions.clone();
-        let committed_store = store.clone();
+        let committed_store = next_store.clone();
         self.installer
             .verify_and_commit_install(
                 &receipt,
@@ -217,7 +274,7 @@ where
             )
             .await?;
         Ok(InstallChannelSkillResult {
-            subscription: store.subscriptions[index].clone(),
+            subscription: next_store.subscriptions[index].clone(),
             snapshot,
         })
     }
@@ -246,17 +303,20 @@ where
                     "This Skill is no longer tracked by the channel subscription",
                 )
             })?;
-        let channel = self.active_channel(repository_id)?;
         let remote = async {
+            let channel = self.active_channel(repository_id)?;
             let repository = self.validated_repository(&channel).await?;
             let manifest = self.latest_manifest(&repository, &channel).await?;
-            Ok::<_, SharedChannelError>(manifest)
+            self.installer
+                .verify_release_content(&repository, &manifest)
+                .await?;
+            Ok::<_, SharedChannelError>((channel, repository, manifest))
         }
         .await;
-        let manifest = match remote {
+        let (channel, repository, manifest) = match remote {
             Ok(value) => value,
             Err(error) => {
-                super::subscription_remote::persist_definitive_remote_failure(
+                super::subscription_remote::persist_remote_failure(
                     &self.subscriptions,
                     &mut store,
                     index,
@@ -265,7 +325,20 @@ where
                 return Err(error);
             }
         };
-        super::channel_update::validate_manifest_progress(&store.subscriptions[index], &manifest)?;
+        store = self.subscriptions.load_mutable()?;
+        let index = subscription_index(&store.subscriptions, repository_id)?;
+        if let Err(error) = super::channel_update::validate_manifest_progress(
+            &store.subscriptions[index],
+            &manifest,
+        ) {
+            super::subscription_remote::persist_remote_failure(
+                &self.subscriptions,
+                &mut store,
+                index,
+                &error,
+            )?;
+            return Err(error);
+        }
         if active_skill(&manifest, &installed.id).is_some()
             && !super::channel_update::has_pending_removal(
                 &store.subscriptions[index],
@@ -277,14 +350,43 @@ where
                 "The latest channel release contains this Skill again; refresh before choosing a removal action",
             ));
         }
-        untrack_skill(&mut store.subscriptions[index], &installed.id);
-        let snapshot = self
-            .refresh_after_selection_change(&mut store.subscriptions[index], &manifest)
-            .await?;
+        self.persist_refreshed_channel(&channel, &repository)?;
+        store = self.subscriptions.load_mutable()?;
+        let index = subscription_index(&store.subscriptions, repository_id)?;
+        let installed = store.subscriptions[index]
+            .skills
+            .iter()
+            .find(|skill| skill.id.eq_ignore_ascii_case(skill_id))
+            .cloned()
+            .ok_or_else(|| {
+                SharedChannelError::new(
+                    SharedChannelErrorCode::SubscriptionSelectionInvalid,
+                    "This Skill is no longer tracked by the channel subscription",
+                )
+            })?;
+        let mut next_subscription = store.subscriptions[index].clone();
+        untrack_skill(&mut next_subscription, &installed.id);
+        let snapshot = match self
+            .refresh_after_selection_change(&mut next_subscription, &manifest)
+            .await
+        {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                super::subscription_remote::persist_remote_failure(
+                    &self.subscriptions,
+                    &mut store,
+                    index,
+                    &error,
+                )?;
+                return Err(error);
+            }
+        };
+        let mut next_store = store.clone();
+        next_store.subscriptions[index] = next_subscription;
         let local_name = match action {
             RemovedSkillAction::Uninstall => {
                 let subscriptions = self.subscriptions.clone();
-                let committed_store = store.clone();
+                let committed_store = next_store.clone();
                 self.installer
                     .uninstall_and_commit(
                         &installed,
@@ -296,7 +398,7 @@ where
             RemovedSkillAction::ConvertToLocal(local_name) => {
                 let result_name = local_name.clone();
                 let subscriptions = self.subscriptions.clone();
-                let committed_store = store.clone();
+                let committed_store = next_store.clone();
                 self.installer
                     .convert_to_local_and_commit(
                         &installed,

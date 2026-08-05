@@ -1,4 +1,5 @@
 mod plan;
+mod transaction;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -15,45 +16,12 @@ use crate::{
     content, deployment, installed_skill, local_skill, lockfile, projects, repo_link, repo_scanner,
 };
 use plan::{SiblingState, UpdatePlan};
+pub(crate) use transaction::acquire_update_transaction_lock;
 
-static UPDATE_TRANSACTION_MUTEX: Mutex<()> = Mutex::new(());
-
-pub(crate) struct UpdateTransactionGuard {
-    _process_guard: std::sync::MutexGuard<'static, ()>,
-    file: std::fs::File,
-}
-
-impl Drop for UpdateTransactionGuard {
-    fn drop(&mut self) {
-        let _ = self.file.unlock();
-    }
-}
-
-pub(crate) fn acquire_update_transaction_lock() -> Result<UpdateTransactionGuard> {
-    let process_guard = UPDATE_TRANSACTION_MUTEX
-        .lock()
-        .map_err(|_| anyhow::anyhow!("Skill update transaction mutex poisoned"))?;
-    let lock_path = skillstar_core::infra::paths::state_dir().join("skill-update.lock");
-    if let Some(parent) = lock_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .read(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)
-        .with_context(|| format!("Failed to open update lock '{}'", lock_path.display()))?;
-    file.lock().with_context(|| {
-        format!(
-            "Failed to lock update transaction '{}'",
-            lock_path.display()
-        )
-    })?;
-    Ok(UpdateTransactionGuard {
-        _process_guard: process_guard,
-        file,
-    })
+/// Hold the process/file mutation lease while an application-level maintenance
+/// operation changes Hub content, lock metadata, or repository caches.
+pub fn acquire_skill_mutation_lease() -> Result<impl Drop> {
+    acquire_update_transaction_lock()
 }
 
 /// Result of a hub skill update, including any project-level cascade work.
@@ -141,7 +109,16 @@ pub fn update_skills_in_session(
     let valid_names: Vec<String> = names
         .iter()
         .filter_map(|name| match content::validate_skill_name(name) {
-            Ok(()) => Some(name.clone()),
+            Ok(()) => match ensure_ordinary_update_allowed(name) {
+                Ok(()) => Some(name.clone()),
+                Err(error) => {
+                    report.failed.push(SkillUpdateFailure {
+                        name: name.clone(),
+                        error: error.to_string(),
+                    });
+                    None
+                }
+            },
             Err(error) => {
                 report.failed.push(SkillUpdateFailure {
                     name: name.clone(),
@@ -470,7 +447,9 @@ pub fn update_skill_in_session(
     name: &str,
     session: &crate::git::transport::GitOperationSession,
 ) -> Result<UpdateResult> {
+    let _transaction_guard = acquire_update_transaction_lock()?;
     content::validate_skill_name(name).map_err(anyhow::Error::from)?;
+    ensure_ordinary_update_allowed(name)?;
     let entries = lockfile::Lockfile::load(&lockfile::lockfile_path())
         .context("failed to load the Skill lockfile before update")?
         .skills;
@@ -488,7 +467,7 @@ pub fn update_skill_in_session(
             blocked.suggested_local_name
         );
     }
-    update_skill_unchecked(name, session)
+    update_skill_unchecked_locked(name, session)
 }
 
 /// Resolve a previously reported local divergence and continue through the
@@ -533,6 +512,9 @@ fn resolve_skill_local_divergence_locked_inner(
     continue_with_ordinary_update: bool,
 ) -> Result<ResolveSkillUpdateResult> {
     content::validate_skill_name(name).map_err(anyhow::Error::from)?;
+    if continue_with_ordinary_update {
+        ensure_ordinary_update_allowed(name)?;
+    }
     let lock_path = lockfile::lockfile_path();
     let entry = lockfile::Lockfile::load(&lock_path)
         .context("failed to load the Skill lockfile before resolving divergence")?
@@ -636,6 +618,25 @@ fn resolve_skill_local_divergence_locked_inner(
     })
 }
 
+fn ensure_ordinary_update_allowed(name: &str) -> Result<()> {
+    crate::shared_channels::ensure_generic_skill_mutation_allowed(name)?;
+    let entries = lockfile::Lockfile::load(&lockfile::lockfile_path())
+        .context("failed to load the Skill lockfile before checking shared-channel ownership")?
+        .skills;
+    let hub = skillstar_core::infra::paths::hub_skills_dir();
+    let requested_root = repo_link::repo_root_of(&hub.join(name));
+    for entry in &entries {
+        let same_checkout = requested_root.as_ref().is_some_and(|root| {
+            repo_link::repo_root_of(&hub.join(&entry.name)).as_ref() == Some(root)
+        });
+        if entry.name.eq_ignore_ascii_case(name) || same_checkout {
+            crate::shared_channels::ensure_generic_skill_mutation_allowed(&entry.name)?;
+            crate::shared_channels::ensure_generic_repository_mutation_allowed(&entry.git_url)?;
+        }
+    }
+    Ok(())
+}
+
 fn actual_repo_pathspec(skill_path: &Path, repo_root: &Path) -> Result<Option<String>> {
     let target =
         skillstar_core::infra::fs_ops::read_link_resolved(skill_path).with_context(|| {
@@ -697,14 +698,6 @@ fn canonicalize_with_missing_tail(path: &Path) -> Result<std::path::PathBuf> {
             }
         }
     }
-}
-
-fn update_skill_unchecked(
-    name: &str,
-    session: &crate::git::transport::GitOperationSession,
-) -> Result<UpdateResult> {
-    let _transaction_guard = acquire_update_transaction_lock()?;
-    update_skill_unchecked_locked(name, session)
 }
 
 fn update_skill_unchecked_locked(

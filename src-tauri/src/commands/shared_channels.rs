@@ -26,7 +26,7 @@ pub async fn list_shared_channel_organizations(
 
 #[tauri::command]
 pub fn list_shared_channels() -> Result<Vec<SharedChannelDescriptor>, SharedChannelError> {
-    Ok(DiskSharedChannelRegistry.load()?.channels)
+    DiskSharedChannelRegistry.list_read_only()
 }
 
 #[tauri::command]

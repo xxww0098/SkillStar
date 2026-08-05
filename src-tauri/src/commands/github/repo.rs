@@ -9,7 +9,6 @@ use skillstar_skills::local_skill;
 use skillstar_skills::lockfile;
 use skillstar_skills::repo_scanner;
 use tauri::{AppHandle, Manager, State};
-use tracing::error;
 
 use crate::core::github_auth::GitHubAuthState;
 
@@ -46,9 +45,14 @@ pub async fn publish_skill_to_github(
     let was_local = local_skill::is_local_skill(&skill_name);
 
     let skill_name_clone = skill_name.clone();
-    let folder_name_clone = folder_name.clone();
 
     let result = tokio::task::spawn_blocking(move || {
+        let lock_path = lockfile::lockfile_path();
+        let lockfile_mode = if was_local {
+            gh_manager::PublishLockfileMode::ValidateOnly(&lock_path)
+        } else {
+            gh_manager::PublishLockfileMode::Commit(&lock_path)
+        };
         gh_manager::publish_skill(
             &skill_name,
             &repo_name,
@@ -56,7 +60,7 @@ pub async fn publish_skill_to_github(
             is_public,
             existing_repo_url.as_deref(),
             &folder_name,
-            &lockfile::lockfile_path(),
+            lockfile_mode,
         )
     })
     .await?
@@ -70,44 +74,39 @@ pub async fn publish_skill_to_github(
             .map_err(|error| AppError::Git(error.to_string()))?;
         let session_id = git_facade.session().id().to_string();
         let git_url = result.git_url.clone();
-        let source_folder = folder_name_clone.clone();
 
-        let graduation = tokio::task::spawn_blocking(move || {
-            // 1. Delete from skills-local/ and remove hub symlink
-            if let Err(e) = local_skill::graduate(&skill_name_clone) {
-                error!(target: "publish", "failed to graduate local skill: {e}");
-                return;
-            }
-
-            // 2. Re-clone from GitHub into .repos/ and symlink to skills/
-            let scan = match git_facade.scan_repo(&git_url, true) {
-                Ok(s) => s,
-                Err(e) => {
-                    error!(target: "publish", "failed to scan repo after publish: {e}");
-                    return;
-                }
-            };
+        let graduation = tokio::task::spawn_blocking(move || -> Result<(), String> {
+            // Keep the local copy intact until the published repository has
+            // passed the same ownership guard as every other generic scan.
+            let scan = git_facade
+                .scan_repo(&git_url, true)
+                .map_err(|error| error.to_string())?;
 
             let target = scan
                 .skills
                 .iter()
-                .find(|s| s.id == skill_name_clone || s.folder_path.ends_with(&source_folder))
-                .cloned();
-
-            if let Some(target) = target {
-                let install_target = repo_scanner::SkillInstallTarget {
-                    id: target.id,
-                    folder_path: target.folder_path,
-                };
-                match git_facade.install_from_scan(&scan.source, &git_url, &[install_target]) {
-                    Ok(_) => skillstar_skills::installed_skill::invalidate_cache(),
-                    Err(e) => error!(target: "publish", "failed to re-install from repo: {e}"),
-                }
-            }
+                .find(|skill| skill.id == skill_name_clone)
+                .cloned()
+                .ok_or_else(|| {
+                    "Published repository does not contain the local Skill that must be graduated"
+                        .to_string()
+                })?;
+            let install_target = repo_scanner::SkillInstallTarget {
+                id: target.id,
+                folder_path: target.folder_path,
+            };
+            git_facade
+                .graduate_local_skill_from_scan(
+                    &skill_name_clone,
+                    &scan.source,
+                    &git_url,
+                    &install_target,
+                )
+                .map_err(|error| error.to_string())
         })
         .await;
         auth_state.finish_git_operation(&session_id);
-        graduation?;
+        graduation?.map_err(AppError::Git)?;
     }
 
     Ok(result)

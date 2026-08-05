@@ -7,15 +7,7 @@ use tracing::warn;
 
 pub use crate::source_resolver::cache_dir_name;
 
-pub fn clone_or_fetch_repo(repo_url: &str, source: &str) -> Result<PathBuf> {
-    clone_or_fetch_repo_in_session(
-        repo_url,
-        source,
-        &crate::git::transport::GitOperationSession::public(),
-    )
-}
-
-pub fn clone_or_fetch_repo_in_session(
+pub(crate) fn clone_or_fetch_repo_in_session(
     repo_url: &str,
     source: &str,
     session: &crate::git::transport::GitOperationSession,
@@ -23,20 +15,7 @@ pub fn clone_or_fetch_repo_in_session(
     clone_or_fetch_repo_at_in_session(repo_url, source, None, session)
 }
 
-pub fn clone_or_fetch_repo_at(
-    repo_url: &str,
-    source: &str,
-    git_ref: Option<&str>,
-) -> Result<PathBuf> {
-    clone_or_fetch_repo_at_in_session(
-        repo_url,
-        source,
-        git_ref,
-        &crate::git::transport::GitOperationSession::public(),
-    )
-}
-
-pub fn clone_or_fetch_repo_at_in_session(
+pub(crate) fn clone_or_fetch_repo_at_in_session(
     repo_url: &str,
     source: &str,
     git_ref: Option<&str>,
@@ -59,6 +38,7 @@ pub fn clone_or_fetch_repo_at_in_session(
     let repo_dir = cache_dir.join(cache_key);
 
     if repo_dir.join(".git").exists() {
+        ensure_installed_checkout_is_clean(&repo_dir)?;
         if let Some(git_ref) = git_ref {
             fetch_and_reset_ref(&repo_dir, git_ref, session)?;
             return Ok(repo_dir);
@@ -111,6 +91,73 @@ pub fn clone_or_fetch_repo_at_in_session(
             }
         }
     }
+}
+
+fn ensure_installed_checkout_is_clean(repo_dir: &Path) -> Result<()> {
+    let canonical_repo = std::fs::canonicalize(repo_dir)
+        .with_context(|| format!("Failed to resolve repo cache '{}'", repo_dir.display()))?;
+    let lockfile = crate::lockfile::Lockfile::load(&crate::lockfile::lockfile_path())
+        .context("Failed to read installed Skill baselines before fetching repository")?;
+    let hub = paths::hub_skills_dir();
+    if !hub.exists() {
+        return Ok(());
+    }
+    for hub_entry in std::fs::read_dir(&hub).with_context(|| {
+        format!(
+            "Failed to enumerate installed Skills in '{}'",
+            hub.display()
+        )
+    })? {
+        let skill_path = hub_entry
+            .context("Failed to inspect an installed Skill entry")?
+            .path();
+        let belongs_to_checkout = crate::repo_link::repo_root_of(&skill_path)
+            .and_then(|root| std::fs::canonicalize(root).ok())
+            .is_some_and(|root| root == canonical_repo);
+        if !belongs_to_checkout {
+            continue;
+        }
+        let name = skill_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .context("Installed Skill name is not valid UTF-8")?;
+        let entry = lockfile
+            .skills
+            .iter()
+            .find(|entry| {
+                if cfg!(windows) {
+                    entry.name.eq_ignore_ascii_case(name)
+                } else {
+                    entry.name == name
+                }
+            })
+            .with_context(|| {
+                format!(
+                    "Skill '{name}' has no trusted lock entry; resolve it before refreshing this repository"
+                )
+            })?;
+        let Some(baseline) = entry.content_hash.as_deref() else {
+            anyhow::bail!(
+                "Skill '{}' has no trusted content baseline; resolve it before refreshing this repository",
+                entry.name
+            );
+        };
+        if entry.content_hash_version != Some(crate::content::SNAPSHOT_HASH_VERSION) {
+            anyhow::bail!(
+                "Skill '{}' uses an unsupported content baseline; resolve it before refreshing this repository",
+                entry.name
+            );
+        }
+        let current = crate::content::snapshot(name)
+            .with_context(|| format!("Failed to inspect local changes for '{name}'"))?;
+        if current.content_hash != baseline {
+            anyhow::bail!(
+                "Skill '{}' has local changes; preserve them as a local copy or explicitly discard them before refreshing this repository",
+                entry.name
+            );
+        }
+    }
+    Ok(())
 }
 
 fn validate_git_ref(git_ref: &str) -> Result<()> {
@@ -300,7 +347,129 @@ pub(super) fn is_sparse_checkout(repo_dir: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::compact_to_common_parents;
+    use super::{
+        cache_dir_name, clone_or_fetch_repo_in_session, compact_to_common_parents,
+        ensure_installed_checkout_is_clean,
+    };
+    use crate::git::transport::{GitAuthMaterial, GitOperationSession, NoopGitProgressSink};
+    use std::sync::Arc;
+
+    #[test]
+    fn generic_scan_never_resets_a_linked_skill_without_a_lock_entry() {
+        let _guard = crate::lock_test_env();
+        let temp = tempfile::tempdir().unwrap();
+        let previous_data = std::env::var_os("SKILLSTAR_DATA_DIR");
+        let previous_hub = std::env::var_os("SKILLSTAR_HUB_DIR");
+        unsafe {
+            std::env::set_var("SKILLSTAR_DATA_DIR", temp.path().join("data"));
+            std::env::set_var("SKILLSTAR_HUB_DIR", temp.path().join("hub"));
+        }
+
+        let result = (|| -> anyhow::Result<()> {
+            let source_url = "https://github.com/acme/channel.git";
+            let repo =
+                skillstar_core::infra::paths::repos_cache_dir().join(cache_dir_name(source_url));
+            let source = repo.join("skills/writer");
+            std::fs::create_dir_all(&source)?;
+            std::fs::write(source.join("SKILL.md"), "# locally edited\n")?;
+            let status = std::process::Command::new("git")
+                .args(["init", "-q"])
+                .current_dir(&repo)
+                .status()?;
+            assert!(status.success());
+            let hub = skillstar_core::infra::paths::hub_skills_dir();
+            std::fs::create_dir_all(&hub)?;
+            skillstar_core::infra::fs_ops::create_symlink(&source, &hub.join("writer"))?;
+            let session = GitOperationSession::new(
+                "missing-lock-scan",
+                GitAuthMaterial::missing(),
+                Arc::new(NoopGitProgressSink),
+            );
+
+            let error = clone_or_fetch_repo_in_session(source_url, source_url, &session)
+                .expect_err("a linked Skill without a lock entry must stop before fetch/reset");
+
+            assert!(error.to_string().contains("no trusted lock entry"));
+            assert_eq!(
+                std::fs::read_to_string(source.join("SKILL.md"))?,
+                "# locally edited\n"
+            );
+            Ok(())
+        })();
+
+        unsafe {
+            match previous_data {
+                Some(value) => std::env::set_var("SKILLSTAR_DATA_DIR", value),
+                None => std::env::remove_var("SKILLSTAR_DATA_DIR"),
+            }
+            match previous_hub {
+                Some(value) => std::env::set_var("SKILLSTAR_HUB_DIR", value),
+                None => std::env::remove_var("SKILLSTAR_HUB_DIR"),
+            }
+        }
+        result.unwrap();
+    }
+
+    #[test]
+    fn installed_checkout_with_local_changes_is_never_reset_by_a_refresh() {
+        let _guard = crate::lock_test_env();
+        let temp = tempfile::tempdir().unwrap();
+        let previous_data = std::env::var_os("SKILLSTAR_DATA_DIR");
+        let previous_hub = std::env::var_os("SKILLSTAR_HUB_DIR");
+        unsafe {
+            std::env::set_var("SKILLSTAR_DATA_DIR", temp.path().join("data"));
+            std::env::set_var("SKILLSTAR_HUB_DIR", temp.path().join("hub"));
+        }
+
+        let result = (|| -> anyhow::Result<()> {
+            let repo = skillstar_core::infra::paths::repos_cache_dir().join("acme--channel");
+            let source = repo.join("skills/writer");
+            std::fs::create_dir_all(&source)?;
+            std::fs::write(source.join("SKILL.md"), "# clean\n")?;
+            let status = std::process::Command::new("git")
+                .args(["init", "-q"])
+                .current_dir(&repo)
+                .status()?;
+            assert!(status.success());
+            let hub = skillstar_core::infra::paths::hub_skills_dir();
+            std::fs::create_dir_all(&hub)?;
+            skillstar_core::infra::fs_ops::create_symlink(&source, &hub.join("writer"))?;
+            let baseline = crate::content::snapshot("writer")?.content_hash;
+            let mut lockfile = crate::lockfile::Lockfile::default();
+            lockfile.upsert(crate::lockfile::LockEntry {
+                name: "writer".into(),
+                git_url: "https://github.com/acme/channel.git".into(),
+                git_ref: None,
+                tree_hash: "tree".into(),
+                content_hash: Some(baseline),
+                content_hash_version: Some(crate::content::SNAPSHOT_HASH_VERSION),
+                installed_at: chrono::Utc::now().to_rfc3339(),
+                source_folder: Some("skills/writer".into()),
+            });
+            lockfile.save(&crate::lockfile::lockfile_path())?;
+
+            std::fs::write(source.join("SKILL.md"), "# locally edited\n")?;
+            let error = ensure_installed_checkout_is_clean(&repo).unwrap_err();
+            assert!(error.to_string().contains("local changes"));
+            assert_eq!(
+                std::fs::read_to_string(source.join("SKILL.md"))?,
+                "# locally edited\n"
+            );
+            Ok(())
+        })();
+
+        unsafe {
+            match previous_data {
+                Some(value) => std::env::set_var("SKILLSTAR_DATA_DIR", value),
+                None => std::env::remove_var("SKILLSTAR_DATA_DIR"),
+            }
+            match previous_hub {
+                Some(value) => std::env::set_var("SKILLSTAR_HUB_DIR", value),
+                None => std::env::remove_var("SKILLSTAR_HUB_DIR"),
+            }
+        }
+        result.unwrap();
+    }
 
     #[test]
     fn compact_parents_groups_siblings() {

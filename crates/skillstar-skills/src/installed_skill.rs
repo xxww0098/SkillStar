@@ -84,6 +84,14 @@ pub fn installed_snapshot_markers() -> HashSet<String> {
 
 fn apply_cached_update_states(mut skills: Vec<Skill>) -> Vec<Skill> {
     update_state::apply_to(&mut skills);
+    for skill in &mut skills {
+        if !matches!(
+            crate::shared_channels::managed_repository_for_skill(&skill.name),
+            Ok(None)
+        ) {
+            skill.update_available = false;
+        }
+    }
     skills
 }
 
@@ -164,7 +172,19 @@ pub async fn refresh_skill_updates_in_session(
     // lands while this scan runs are dropped when it commits.
     let scan_started = update_state::stamp();
 
-    let skill_dirs = collect_skill_dirs(&skillstar_core::infra::paths::hub_skills_dir(), None)?;
+    let skill_dirs = collect_skill_dirs(&skillstar_core::infra::paths::hub_skills_dir(), None)?
+        .into_iter()
+        .filter_map(|path| {
+            let name = skill_name_from_path(&path)?;
+            match crate::shared_channels::generic_installed_skill_is_mutable(&name, &path) {
+                Ok(true) => Some(Ok(path)),
+                Ok(false) => None,
+                Err(error) => Some(Err(anyhow!(
+                    "failed to inspect shared-channel ownership before checking updates: {error:#}"
+                ))),
+            }
+        })
+        .collect::<Result<Vec<_>>>()?;
 
     if skill_dirs.is_empty() {
         return Ok(Vec::new());
@@ -179,9 +199,24 @@ pub async fn refresh_skill_updates_in_session(
         let dirs = skill_dirs.clone();
         let session = session.clone();
         let result = tokio::task::spawn_blocking(move || {
-            update_checker::prefetch_unique_repos_in_session(&dirs, &session)
+            let _guard = crate::skill_update::acquire_update_transaction_lock()?;
+            let safe_dirs = dirs
+                .into_iter()
+                .filter(|path| {
+                    skill_name_from_path(path).is_some_and(|name| {
+                        matches!(
+                            crate::shared_channels::generic_installed_skill_is_mutable(&name, path),
+                            Ok(true)
+                        )
+                    })
+                })
+                .collect::<Vec<_>>();
+            Ok::<_, anyhow::Error>(update_checker::prefetch_unique_repos_in_session(
+                &safe_dirs, &session,
+            ))
         })
         .await
+        .unwrap_or_else(|_| Ok(Default::default()))
         .unwrap_or_default();
         Arc::new(result)
     };
@@ -210,6 +245,15 @@ pub async fn refresh_skill_updates_in_session(
         let session = session.clone();
         tasks.spawn_blocking(move || {
             let _permit = permit;
+            let Ok(_guard) = crate::skill_update::acquire_update_transaction_lock() else {
+                return (name, None);
+            };
+            if !matches!(
+                crate::shared_channels::generic_installed_skill_is_mutable(&name, &path),
+                Ok(true)
+            ) {
+                return (name, None);
+            }
             let update_available = refresh_single_skill_update(&path, &failed_roots, &session);
             (name, update_available)
         });

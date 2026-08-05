@@ -64,6 +64,8 @@ pub struct ImportBundleResult {
 /// The output file is written to the specified path, or defaults to the
 /// downloads directory. Returns the absolute path of the generated file.
 pub fn export_bundle(skill_name: &str, output_path: Option<&str>) -> Result<PathBuf> {
+    crate::content::validate_skill_name(skill_name)
+        .map_err(|error| anyhow::anyhow!("Invalid Skill name: {error}"))?;
     let hub = skillstar_core::infra::paths::hub_skills_dir();
     let skill_dir = hub.join(skill_name);
 
@@ -179,6 +181,10 @@ pub fn preview_bundle(file_path: &str) -> Result<BundleManifest> {
 pub fn import_bundle(file_path: &str, force: bool) -> Result<ImportBundleResult> {
     // First pass: read and validate manifest
     let manifest = preview_bundle(file_path)?;
+    crate::content::validate_skill_name(&manifest.name)
+        .map_err(|error| anyhow::anyhow!("Invalid Skill name in bundle manifest: {error}"))?;
+    let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()?;
+    crate::shared_channels::ensure_generic_skill_mutation_allowed(&manifest.name)?;
 
     if manifest.format_version > FORMAT_VERSION {
         anyhow::bail!(
@@ -285,6 +291,15 @@ pub struct MultiManifest {
 /// A top-level `multi_manifest.json` describes all contained skills.
 pub fn export_multi_bundle(skill_names: &[String], output_path: &str) -> Result<PathBuf> {
     use std::io::Read;
+
+    let mut unique_names = std::collections::HashSet::new();
+    for skill_name in skill_names {
+        crate::content::validate_skill_name(skill_name)
+            .map_err(|error| anyhow::anyhow!("Invalid Skill name: {error}"))?;
+        if !unique_names.insert(skill_name.to_ascii_lowercase()) {
+            anyhow::bail!("Duplicate Skill name in bundle export: {skill_name}");
+        }
+    }
 
     let hub = skillstar_core::infra::paths::hub_skills_dir();
     let out = PathBuf::from(output_path);
@@ -420,6 +435,23 @@ pub fn import_multi_bundle(file_path: &str, force: bool) -> Result<ImportMultiBu
     let manifest = manifest.ok_or_else(|| {
         anyhow::anyhow!("Bundle does not contain multi_manifest.json or manifest.json")
     })?;
+
+    let mut unique_names = std::collections::HashSet::new();
+    for skill in &manifest.skills {
+        crate::content::validate_skill_name(&skill.name).map_err(|error| {
+            anyhow::anyhow!("Invalid Skill name in multi-bundle manifest: {error}")
+        })?;
+        if !unique_names.insert(skill.name.to_ascii_lowercase()) {
+            anyhow::bail!(
+                "Duplicate Skill name in multi-bundle manifest: {}",
+                skill.name
+            );
+        }
+    }
+    let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()?;
+    for skill in &manifest.skills {
+        crate::shared_channels::ensure_generic_skill_mutation_allowed(&skill.name)?;
+    }
 
     let hub = skillstar_core::infra::paths::hub_skills_dir();
     let known_skills: std::collections::HashSet<String> =

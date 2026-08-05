@@ -195,34 +195,20 @@ where
         let mut store = self.subscriptions.load_mutable()?;
         let index = subscription_index(&store.subscriptions, repository_id)?;
         let previous = store.subscriptions[index].last_update.clone();
-        let (remote, access_probe_failed) = match self.active_channel(repository_id) {
-            Ok(channel) => match self.validated_repository(&channel).await {
-                Ok(repository) => {
-                    let recovered = store.subscriptions[index].remote_state.status
-                        == super::ChannelSubscriptionRemoteStatus::Revoked;
-                    super::subscription_remote::mark_remote_active(&mut store.subscriptions[index]);
-                    if recovered {
-                        self.subscriptions.save(&store)?;
-                    }
-                    (
-                        self.latest_manifest(&repository, &channel)
-                            .await
-                            .map(|manifest| (repository, manifest)),
-                        false,
-                    )
-                }
-                Err(error) => (Err(error), true),
-            },
-            Err(error) => (Err(error), false),
-        };
-        let (_repository, manifest) = match remote {
+        let remote = async {
+            let channel = self.active_channel(repository_id)?;
+            let repository = self.validated_repository(&channel).await?;
+            let manifest = self.latest_manifest(&repository, &channel).await?;
+            Ok::<_, SharedChannelError>((channel, repository, manifest))
+        }
+        .await;
+        let (channel, repository, manifest) = match remote {
             Ok(value) => value,
             Err(error) => {
-                let revoked = access_probe_failed
-                    && super::subscription_remote::mark_definitive_remote_failure(
-                        &mut store.subscriptions[index],
-                        &error,
-                    );
+                let remote_state_changed = super::subscription_remote::mark_remote_failure(
+                    &mut store.subscriptions[index],
+                    &error,
+                );
                 if let Some(mut snapshot) = previous {
                     snapshot.checked_at = Utc::now().to_rfc3339();
                     snapshot.check_error = Some(error.message);
@@ -232,13 +218,17 @@ where
                     self.subscriptions.save(&store)?;
                     return Ok(snapshot);
                 }
-                if revoked {
+                if remote_state_changed {
                     self.subscriptions.save(&store)?;
                 }
                 return Err(error);
             }
         };
         if let Err(error) = validate_manifest_progress(&store.subscriptions[index], &manifest) {
+            super::subscription_remote::mark_remote_failure(
+                &mut store.subscriptions[index],
+                &error,
+            );
             if let Some(mut snapshot) = previous {
                 snapshot.checked_at = Utc::now().to_rfc3339();
                 snapshot.check_error = Some(error.message);
@@ -248,6 +238,28 @@ where
                 self.subscriptions.save(&store)?;
                 return Ok(snapshot);
             }
+            self.subscriptions.save(&store)?;
+            return Err(error);
+        }
+        if let Err(error) = self
+            .installer
+            .verify_release_content(&repository, &manifest)
+            .await
+        {
+            super::subscription_remote::mark_remote_failure(
+                &mut store.subscriptions[index],
+                &error,
+            );
+            if let Some(mut snapshot) = previous {
+                snapshot.checked_at = Utc::now().to_rfc3339();
+                snapshot.check_error = Some(error.message);
+                snapshot.check_error_code = Some(error.code);
+                store.subscriptions[index].last_update = Some(snapshot.clone());
+                store.subscriptions[index].updated_at = snapshot.checked_at.clone();
+                self.subscriptions.save(&store)?;
+                return Ok(snapshot);
+            }
+            self.subscriptions.save(&store)?;
             return Err(error);
         }
         let snapshot = self
@@ -256,6 +268,10 @@ where
         let snapshot = match snapshot {
             Ok(snapshot) => snapshot,
             Err(error) => {
+                let remote_state_changed = super::subscription_remote::mark_remote_failure(
+                    &mut store.subscriptions[index],
+                    &error,
+                );
                 if let Some(mut snapshot) = previous {
                     snapshot.checked_at = Utc::now().to_rfc3339();
                     snapshot.check_error = Some(error.message);
@@ -265,9 +281,16 @@ where
                     self.subscriptions.save(&store)?;
                     return Ok(snapshot);
                 }
+                if remote_state_changed {
+                    self.subscriptions.save(&store)?;
+                }
                 return Err(error);
             }
         };
+        self.persist_refreshed_channel(&channel, &repository)?;
+        store = self.subscriptions.load_mutable()?;
+        let index = subscription_index(&store.subscriptions, repository_id)?;
+        super::subscription_remote::mark_remote_active(&mut store.subscriptions[index]);
         store.subscriptions[index].last_update = Some(snapshot.clone());
         store.subscriptions[index].updated_at = Utc::now().to_rfc3339();
         self.subscriptions.save(&store)?;
@@ -314,17 +337,17 @@ where
             .iter()
             .map(|pin| pin.skill_id.to_ascii_lowercase())
             .collect::<BTreeSet<_>>();
-        let channel = self.active_channel(request.repository_id)?;
         let remote = async {
+            let channel = self.active_channel(request.repository_id)?;
             let repository = self.validated_repository(&channel).await?;
             let manifest = self.latest_manifest(&repository, &channel).await?;
-            Ok::<_, SharedChannelError>((repository, manifest))
+            Ok::<_, SharedChannelError>((channel, repository, manifest))
         }
         .await;
-        let (repository, manifest) = match remote {
+        let (channel, repository, manifest) = match remote {
             Ok(value) => value,
             Err(error) => {
-                super::subscription_remote::persist_definitive_remote_failure(
+                super::subscription_remote::persist_remote_failure(
                     &self.subscriptions,
                     &mut store,
                     index,
@@ -333,14 +356,34 @@ where
                 return Err(error);
             }
         };
-        validate_manifest_progress(&store.subscriptions[index], &manifest)?;
+        if let Err(error) = validate_manifest_progress(&store.subscriptions[index], &manifest) {
+            super::subscription_remote::persist_remote_failure(
+                &self.subscriptions,
+                &mut store,
+                index,
+                &error,
+            )?;
+            return Err(error);
+        }
         if release_target(&manifest) != request.target {
             return Err(SharedChannelError::new(
                 SharedChannelErrorCode::ReleaseConflict,
                 "The channel release changed after review; check updates again before applying",
             ));
         }
-
+        if let Err(error) = self
+            .installer
+            .verify_release_content(&repository, &manifest)
+            .await
+        {
+            super::subscription_remote::persist_remote_failure(
+                &self.subscriptions,
+                &mut store,
+                index,
+                &error,
+            )?;
+            return Err(error);
+        }
         let resolutions = request
             .resolutions
             .into_iter()
@@ -348,7 +391,19 @@ where
             .collect::<BTreeMap<_, _>>();
         let initial = self
             .build_update_snapshot(&store.subscriptions[index], &manifest)
-            .await?;
+            .await;
+        let initial = match initial {
+            Ok(initial) => initial,
+            Err(error) => {
+                super::subscription_remote::persist_remote_failure(
+                    &self.subscriptions,
+                    &mut store,
+                    index,
+                    &error,
+                )?;
+                return Err(error);
+            }
+        };
         let initial_items = initial
             .items
             .iter()
@@ -374,6 +429,9 @@ where
                 "Channel update resolutions only apply to currently blocked Skills",
             ));
         }
+        self.persist_refreshed_channel(&channel, &repository)?;
+        store = self.subscriptions.load_mutable()?;
+        let index = subscription_index(&store.subscriptions, request.repository_id)?;
         let released = current_release_skills(&manifest);
         let mut receipts = Vec::new();
         let mut applied = BTreeSet::new();
@@ -449,13 +507,13 @@ where
                     receipts.push(receipt);
                 }
                 Err(error) => {
-                    if super::subscription_remote::mark_definitive_remote_failure(
+                    if super::subscription_remote::mark_remote_failure(
                         &mut store.subscriptions[index],
                         &error,
                     ) {
                         let rollback_failures = self.rollback_applied(&receipts).await;
                         store.subscriptions[index] = subscription_before_apply;
-                        super::subscription_remote::mark_definitive_remote_failure(
+                        super::subscription_remote::mark_remote_failure(
                             &mut store.subscriptions[index],
                             &error,
                         );
@@ -502,6 +560,17 @@ where
             Ok(snapshot) => snapshot,
             Err(error) => {
                 let rollback_failures = self.rollback_applied(&receipts).await;
+                if super::subscription_remote::mark_remote_failure(
+                    &mut store.subscriptions[index],
+                    &error,
+                ) {
+                    store.subscriptions[index] = subscription_before_apply.clone();
+                    super::subscription_remote::mark_remote_failure(
+                        &mut store.subscriptions[index],
+                        &error,
+                    );
+                    self.subscriptions.save(&store)?;
+                }
                 return Err(with_rollback_failures(error, rollback_failures));
             }
         };
@@ -604,12 +673,6 @@ where
                     ),
                 ));
             }
-            if installed.release_content_hash == target.content_hash
-                && installed.content_root == target.content_root
-            {
-                items.push(current_item(installed, target));
-                continue;
-            }
             let inspection = match self.installer.inspect(installed).await {
                 Ok(inspection) => inspection,
                 Err(error) => ChannelUpdateInspection::Divergent {
@@ -618,6 +681,12 @@ where
                     error: Some(error.message),
                 },
             };
+            if installed.release_content_hash == target.content_hash
+                && installed.content_root == target.content_root
+            {
+                items.push(current_item(installed, target, inspection));
+                continue;
+            }
             items.push(update_item(installed, target, inspection));
         }
         for (key, skill) in released {
@@ -728,17 +797,31 @@ fn current_release_skills(
 fn current_item(
     installed: &ChannelSubscribedSkill,
     target: &ChannelReleaseSkill,
+    inspection: ChannelUpdateInspection,
 ) -> ChannelUpdateItem {
+    let (state, block_reason, suggested_local_name, error) = match inspection {
+        ChannelUpdateInspection::Clean => (ChannelUpdateItemState::Current, None, None, None),
+        ChannelUpdateInspection::Divergent {
+            reason,
+            suggested_local_name,
+            error,
+        } => (
+            ChannelUpdateItemState::Blocked,
+            Some(map_divergence_reason(reason)),
+            Some(suggested_local_name),
+            error,
+        ),
+    };
     ChannelUpdateItem {
         id: installed.id.clone(),
         change: ChannelUpdateChange::Unchanged,
-        state: ChannelUpdateItemState::Current,
+        state,
         selected: true,
         from_content_hash: Some(installed.release_content_hash.clone()),
         to_content_hash: Some(target.content_hash.clone()),
-        block_reason: None,
-        suggested_local_name: None,
-        error: None,
+        block_reason,
+        suggested_local_name,
+        error,
         pinned_target: None,
         error_code: None,
     }

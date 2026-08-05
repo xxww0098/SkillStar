@@ -41,6 +41,12 @@ pub fn detect_new_skills_in_cached_repos() -> Vec<RepoNewSkill> {
     let mut new_skills = Vec::new();
 
     for (source, repo_url) in repo_groups.values() {
+        if !matches!(
+            crate::shared_channels::managed_repository_for_url(repo_url),
+            Ok(None)
+        ) {
+            continue;
+        }
         let repo_dir = cache_dir.join(cache_dir_name(source));
         if !repo_dir.join(".git").exists() {
             continue;

@@ -599,6 +599,17 @@ pub fn read_raw(name: &str) -> Result<String, AppError> {
 
 pub fn delete_local(name: &str) -> Result<(), AppError> {
     validate_skill_name(name)?;
+    let _transaction_guard =
+        crate::skill_update::acquire_update_transaction_lock().map_err(|error| {
+            AppError::Other(format!("Unable to lock local Skill deletion: {error}"))
+        })?;
+    crate::shared_channels::ensure_generic_skill_mutation_allowed(name)
+        .map_err(|error| AppError::Other(error.to_string()))?;
+    if !local_skill::is_local_skill(name) {
+        return Err(AppError::Other(format!(
+            "Skill '{name}' is not a local Skill and cannot be deleted through the local authoring flow"
+        )));
+    }
     local_skill::delete(name).map_err(AppError::Anyhow)?;
     installed_skill::invalidate_cache();
     Ok(())
@@ -642,6 +653,12 @@ pub fn read(name: &str) -> Result<SkillContent, AppError> {
 
 pub fn update(name: &str, content: &str) -> Result<(), AppError> {
     validate_skill_name(name)?;
+    let _transaction_guard =
+        crate::skill_update::acquire_update_transaction_lock().map_err(|error| {
+            AppError::Other(format!("Unable to lock Skill content update: {error}"))
+        })?;
+    crate::shared_channels::ensure_generic_skill_mutation_allowed(name)
+        .map_err(|error| AppError::Other(error.to_string()))?;
     let skill_dir = skillstar_core::infra::paths::hub_skills_dir().join(name);
     if !skill_dir.exists() {
         return Err(not_found(name));

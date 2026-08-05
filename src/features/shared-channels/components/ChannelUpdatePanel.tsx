@@ -46,6 +46,14 @@ export function ChannelUpdatePanel({
   const [historyBusy, setHistoryBusy] = useState<string | null>(null);
   const [skillAction, setSkillAction] = useState<string | null>(null);
 
+  const refreshSubscription = useCallback(async () => {
+    try {
+      await onChecked?.();
+    } catch {
+      // The action error remains primary; a later panel refresh can retry the local state read.
+    }
+  }, [onChecked]);
+
   const check = useCallback(async () => {
     setChecking(true);
     setError("");
@@ -56,14 +64,14 @@ export function ChannelUpdatePanel({
       setHistories({});
       setHistorySelections({});
       setLocalNames((current) => suggestedNames(next.items, current));
-      await onChecked?.();
+      await refreshSubscription();
     } catch (cause) {
       setError(updateError(cause));
-      await onChecked?.();
+      await refreshSubscription();
     } finally {
       setChecking(false);
     }
-  }, [onChecked, repositoryId]);
+  }, [refreshSubscription, repositoryId]);
 
   useEffect(() => {
     let active = true;
@@ -141,13 +149,14 @@ export function ChannelUpdatePanel({
       setError(updateError(cause));
       const stored = await getSharedChannelAutoUpdateState(repositoryId).catch(() => null);
       if (stored) setAutoUpdate(stored);
+      await refreshSubscription();
     } finally {
       setAutoSaving(false);
     }
   };
 
   const actionable = useMemo(() => {
-    if (!snapshot) return false;
+    if (!snapshot || snapshot.check_error) return false;
     const selectedAtTarget = snapshot.items
       .filter((item) => item.selected)
       .every((item) => item.state === "current" || item.state === "applied");
@@ -180,6 +189,7 @@ export function ChannelUpdatePanel({
       setError(updateError(cause));
       const stored = await getSharedChannelUpdateState(repositoryId).catch(() => null);
       if (stored) setSnapshot(stored);
+      await refreshSubscription();
     } finally {
       setApplying(false);
     }
@@ -197,6 +207,7 @@ export function ChannelUpdatePanel({
       }
     } catch (cause) {
       setError(updateError(cause));
+      await refreshSubscription();
     } finally {
       setHistoryBusy(null);
     }
@@ -225,6 +236,7 @@ export function ChannelUpdatePanel({
       setError(updateError(cause));
       const stored = await getSharedChannelUpdateState(repositoryId).catch(() => null);
       if (stored) setSnapshot(stored);
+      await refreshSubscription();
     } finally {
       setSkillAction(null);
     }
@@ -240,6 +252,7 @@ export function ChannelUpdatePanel({
       setHistorySelections((current) => withoutKey(current, skillId));
     } catch (cause) {
       setError(updateError(cause));
+      await refreshSubscription();
     } finally {
       setSkillAction(null);
     }
@@ -268,6 +281,7 @@ export function ChannelUpdatePanel({
       setError(updateError(cause));
       const stored = await getSharedChannelUpdateState(repositoryId).catch(() => null);
       if (stored) setSnapshot(stored);
+      await refreshSubscription();
     } finally {
       setSkillAction(null);
     }
@@ -284,6 +298,7 @@ export function ChannelUpdatePanel({
       setError(updateError(cause));
       const stored = await getSharedChannelUpdateState(repositoryId).catch(() => null);
       if (stored) setSnapshot(stored);
+      await refreshSubscription();
     } finally {
       setSkillAction(null);
     }

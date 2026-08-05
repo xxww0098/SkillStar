@@ -227,6 +227,7 @@ export interface ChannelSubscription {
   descriptor_version: number;
   repository_id: number;
   organization_id: number;
+  repository_url_aliases?: string[];
   target: ChannelReleaseTarget;
   skills: ChannelSubscribedSkill[];
   known_skill_ids: string[];

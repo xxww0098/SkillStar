@@ -381,7 +381,7 @@ async fn create_never_uses_mutable_owner_and_name_to_resume_pending_identity() {
 }
 
 #[tokio::test]
-async fn resume_rejects_a_repository_response_with_a_different_numeric_id() {
+async fn resume_treats_a_different_numeric_repository_id_as_an_integrity_error() {
     let gateway = FakeGateway::ready();
     gateway.state.lock().unwrap().access_checks = VecDeque::from([Err(SharedChannelError::new(
         SharedChannelErrorCode::AppRepositoryAccessRequired,
@@ -397,7 +397,7 @@ async fn resume_rejects_a_repository_response_with_a_different_numeric_id() {
 
     let error = facade.resume_channel(42).await.unwrap_err();
 
-    assert_eq!(error.code, SharedChannelErrorCode::RepositoryNotFound);
+    assert_eq!(error.code, SharedChannelErrorCode::Integrity);
 }
 
 #[tokio::test]

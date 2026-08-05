@@ -11,15 +11,7 @@ use super::cache::{discover_skill_dirs_from_tree, is_sparse_checkout};
 ///
 /// When the skill declares a `folder_path`, the hash covers only that subtree,
 /// so siblings sharing the repo keep their own hashes.
-pub fn pull_repo_skill_update(skill_path: &Path, folder_path: Option<&str>) -> Result<String> {
-    pull_repo_skill_update_in_session(
-        skill_path,
-        folder_path,
-        &crate::git::transport::GitOperationSession::public(),
-    )
-}
-
-pub fn pull_repo_skill_update_in_session(
+pub(crate) fn pull_repo_skill_update_in_session(
     skill_path: &Path,
     folder_path: Option<&str>,
     session: &crate::git::transport::GitOperationSession,

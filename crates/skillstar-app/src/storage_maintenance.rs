@@ -131,6 +131,7 @@ pub async fn clear_all_caches() -> Result<CacheCleanResult, AppError> {
 /// Returns the number of skill entries removed.
 pub async fn force_delete_installed_skills() -> Result<usize, AppError> {
     tokio::task::spawn_blocking(|| -> Result<usize, AppError> {
+        let _transaction_guard = skillstar_skills::skill_update::acquire_skill_mutation_lease()?;
         let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
         let removed_count = count_children(&hub_dir);
 
@@ -163,6 +164,7 @@ pub async fn force_delete_installed_skills() -> Result<usize, AppError> {
 /// Returns the number of cached repositories removed.
 pub async fn force_delete_repo_caches() -> Result<usize, AppError> {
     tokio::task::spawn_blocking(|| -> Result<usize, AppError> {
+        let _transaction_guard = skillstar_skills::skill_update::acquire_skill_mutation_lease()?;
         let cache_dir = repos_cache_dir();
         let repos_removed = count_directories(&cache_dir);
         let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
@@ -258,6 +260,7 @@ pub async fn force_delete_app_config() -> Result<usize, AppError> {
 /// Returns the number of issues fixed.
 pub async fn clean_broken_skills() -> Result<usize, AppError> {
     tokio::task::spawn_blocking(|| -> Result<usize, AppError> {
+        let _transaction_guard = skillstar_skills::skill_update::acquire_skill_mutation_lease()?;
         let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
         let mut fixed: usize = 0;
         let mut removed_names: HashSet<String> = HashSet::new();

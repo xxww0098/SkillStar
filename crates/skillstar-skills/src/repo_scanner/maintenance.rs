@@ -62,6 +62,7 @@ pub fn get_cache_info() -> RepoCacheInfo {
 }
 
 pub fn clean_unused_cache() -> anyhow::Result<usize> {
+    let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()?;
     let cache_dir = paths::repos_cache_dir();
     if !cache_dir.exists() {
         return Ok(0);

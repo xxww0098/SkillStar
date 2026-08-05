@@ -127,6 +127,7 @@ pub fn is_local_skill(name: &str) -> bool {
 fn prepare_new_local_skill_paths(name: &str) -> Result<(PathBuf, PathBuf)> {
     crate::content::validate_skill_name(name)
         .map_err(|error| anyhow::anyhow!("Invalid local Skill name: {error}"))?;
+    crate::shared_channels::ensure_generic_skill_mutation_allowed(name)?;
 
     let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
     let local_dir = skillstar_core::infra::paths::local_skills_dir();
@@ -162,6 +163,11 @@ fn prepare_new_local_skill_paths(name: &str) -> Result<(PathBuf, PathBuf)> {
 /// 2. Creates symlink `skills/<name>` → `skills-local/<name>`
 /// 3. Returns the `Skill` struct with `skill_type = "local"`
 pub fn create(name: &str, content: Option<&str>) -> Result<Skill> {
+    let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()?;
+    create_locked(name, content)
+}
+
+fn create_locked(name: &str, content: Option<&str>) -> Result<Skill> {
     let (skill_local_path, skill_hub_path) = prepare_new_local_skill_paths(name)?;
 
     // Create the local skill directory + SKILL.md
@@ -210,7 +216,10 @@ pub fn create(name: &str, content: Option<&str>) -> Result<Skill> {
 /// Preserve a bounded content snapshot as a new independently-owned local
 /// Skill. The snapshot was captured before any source update, so every managed
 /// regular file is copied from one coherent view of disk.
-pub fn create_from_snapshot(name: &str, snapshot: &crate::content::SkillSnapshot) -> Result<Skill> {
+pub(crate) fn create_from_snapshot(
+    name: &str,
+    snapshot: &crate::content::SkillSnapshot,
+) -> Result<Skill> {
     let (skill_local_path, skill_hub_path) = prepare_new_local_skill_paths(name)?;
     snapshot
         .materialize_owned_to(&skill_local_path)
@@ -265,6 +274,11 @@ fn installed_local_skill(name: &str, description: String) -> Result<Skill> {
 /// project-level agent folder and needs to normalize it into local-skill
 /// storage without leaving a real directory behind in the hub.
 pub fn adopt_existing_dir(name: &str, source_dir: &Path) -> Result<PathBuf> {
+    let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()?;
+    adopt_existing_dir_locked(name, source_dir)
+}
+
+pub(crate) fn adopt_existing_dir_locked(name: &str, source_dir: &Path) -> Result<PathBuf> {
     if !source_dir.is_dir() {
         anyhow::bail!(
             "Source skill directory '{}' does not exist or is not a directory",
@@ -339,6 +353,27 @@ pub fn reconcile_hub_symlinks() {
             continue;
         }
 
+        match crate::shared_channels::managed_repository_for_skill(&name) {
+            Ok(None) => {}
+            Ok(Some(_)) => {
+                warn!(
+                    target: "local_skill",
+                    skill = %name,
+                    "skipping local symlink reconciliation for shared-channel-owned Skill"
+                );
+                continue;
+            }
+            Err(error) => {
+                warn!(
+                    target: "local_skill",
+                    skill = %name,
+                    error = %error.message,
+                    "skipping local symlink reconciliation because channel ownership is unknown"
+                );
+                continue;
+            }
+        }
+
         // Create missing hub symlink
         if let Err(e) = skillstar_core::infra::fs_ops::create_symlink(&path, &hub_path) {
             warn!(
@@ -357,6 +392,7 @@ pub fn reconcile_hub_symlinks() {
 /// 2. Remove hub symlink (`skills/<name>`)
 /// 3. Delete `skills-local/<name>/` directory
 pub fn delete(name: &str) -> Result<()> {
+    crate::shared_channels::ensure_generic_skill_mutation_allowed(name)?;
     // Remove symlinks from all agents
     let _ = deployment::remove_skill_from_all_agents(name);
     let _ = projects::remove_skill_from_all_projects(name);
@@ -395,7 +431,7 @@ pub fn delete(name: &str) -> Result<()> {
 /// 2. Delete `skills-local/<name>/` directory
 ///
 /// Agent symlinks are NOT removed — they will be re-pointed by the re-install.
-pub fn graduate(name: &str) -> Result<()> {
+pub(crate) fn graduate(name: &str) -> Result<()> {
     // Remove hub symlink
     let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
     let hub_path = hub_dir.join(name);
@@ -426,6 +462,7 @@ pub fn graduate(name: &str) -> Result<()> {
 /// 1. Move `skills/<name>/` → `skills-local/<name>/`
 /// 2. Create symlink `skills/<name>` → `skills-local/<name>`
 pub fn migrate_existing() -> Result<u32> {
+    let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()?;
     let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
     let local_dir = skillstar_core::infra::paths::local_skills_dir();
 
@@ -434,7 +471,8 @@ pub fn migrate_existing() -> Result<u32> {
 
     // Load lockfile to check for git URLs
     let lock_path = lockfile::lockfile_path();
-    let lockfile = lockfile::Lockfile::load(&lock_path).unwrap_or_default();
+    let lockfile = lockfile::Lockfile::load(&lock_path)
+        .context("Failed to verify Skill ownership before local migration")?;
     let lock_map: std::collections::HashMap<String, &crate::lockfile::LockEntry> = lockfile
         .skills
         .iter()
@@ -465,6 +503,16 @@ pub fn migrate_existing() -> Result<u32> {
         let Some(name) = entry.file_name().to_str().map(|s| s.to_string()) else {
             continue;
         };
+
+        if let Err(error) = crate::shared_channels::ensure_generic_skill_mutation_allowed(&name) {
+            warn!(
+                target: "local_skill",
+                skill = %name,
+                error = %error,
+                "skipped local migration because Skill ownership is managed or unavailable"
+            );
+            continue;
+        }
 
         // Skip if it has a .git directory (it's a git-cloned skill)
         if path.join(".git").exists() {

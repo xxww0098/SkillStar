@@ -1,8 +1,8 @@
 use super::git_read::git_read_error;
 use super::{
     CHANNEL_CONTENT_HASH_VERSION, ChannelInstallReceipt, ChannelInstallRequest,
-    ChannelSkillProvenance, ChannelSubscribedSkill, ChannelSubscriptionInstaller,
-    SharedChannelError, SharedChannelErrorCode,
+    ChannelReleaseManifest, ChannelSkillProvenance, ChannelSubscribedSkill,
+    ChannelSubscriptionInstaller, RemoteRepository, SharedChannelError, SharedChannelErrorCode,
 };
 use crate::git_skill::GitSkillFacade;
 use async_trait::async_trait;
@@ -21,6 +21,30 @@ impl GitChannelSubscriptionInstaller {
 
 #[async_trait]
 impl ChannelSubscriptionInstaller for GitChannelSubscriptionInstaller {
+    async fn verify_release_content(
+        &self,
+        repository: &RemoteRepository,
+        manifest: &ChannelReleaseManifest,
+    ) -> Result<(), SharedChannelError> {
+        let git = self.git.clone();
+        let repository = repository.clone();
+        let manifest = manifest.clone();
+        tokio::task::spawn_blocking(move || {
+            super::release_content_verifier::verify_release_content_blocking(
+                &git,
+                &repository,
+                &manifest,
+            )
+        })
+        .await
+        .map_err(|_| {
+            SharedChannelError::new(
+                SharedChannelErrorCode::SubscriptionUpdateFailed,
+                "The channel release verification task stopped unexpectedly",
+            )
+        })?
+    }
+
     async fn install(
         &self,
         request: ChannelInstallRequest,
@@ -345,7 +369,7 @@ fn rollback_install_receipt_preserving_changes(
             failures.push(format!("{name}: current content changed and was preserved"));
             continue;
         }
-        if let Err(error) = crate::skill_install::uninstall_skill(name) {
+        if let Err(error) = crate::skill_install::uninstall_skill_locked_unchecked(name) {
             failures.push(format!("{name}: {error}"));
         }
     }
@@ -436,7 +460,7 @@ fn selection_conflict(id: &str) -> SharedChannelError {
 fn rollback_new_installs(names: &[String]) -> Result<(), SharedChannelError> {
     let mut failures = Vec::new();
     for name in names.iter().rev() {
-        if let Err(error) = crate::skill_install::uninstall_skill(name) {
+        if let Err(error) = crate::skill_install::uninstall_skill_locked_unchecked(name) {
             failures.push(format!("{name}: {error}"));
         }
     }

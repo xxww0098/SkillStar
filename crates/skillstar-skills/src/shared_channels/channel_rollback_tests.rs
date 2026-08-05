@@ -194,6 +194,34 @@ async fn pin_survives_restart_suppresses_updates_and_resume_replans_latest() {
 }
 
 #[tokio::test]
+async fn exact_release_verification_freezes_rollback_before_local_content_changes() {
+    let (gateway, subscriptions, installer) = fixtures();
+    let app = service(gateway, subscriptions.clone(), installer.clone());
+    advance_to_v2(&app).await;
+    let applied_before = installer.applied.lock().unwrap().len();
+    *installer.release_verification_error.lock().unwrap() = Some(SharedChannelErrorCode::Integrity);
+
+    let error = app
+        .rollback_skill(RollbackChannelSkillRequest {
+            repository_id: 42,
+            skill_id: "reader".into(),
+            target: target_v1(),
+            resolution: None,
+        })
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code, SharedChannelErrorCode::Integrity);
+    assert_eq!(installer.applied.lock().unwrap().len(), applied_before);
+    let store = subscriptions.store.lock().unwrap();
+    assert!(store.subscriptions[0].pins.is_empty());
+    assert_eq!(
+        store.subscriptions[0].remote_state.status,
+        ChannelSubscriptionRemoteStatus::IntegrityError
+    );
+}
+
+#[tokio::test]
 async fn unchanged_releases_use_the_subscription_target_to_resolve_history() {
     let (gateway, subscriptions, installer) = fixtures();
     let app = service(gateway.clone(), subscriptions, installer);

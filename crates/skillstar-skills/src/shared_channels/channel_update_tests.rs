@@ -9,6 +9,7 @@ pub(super) struct UpdateGateway {
     pub(super) offline: Arc<Mutex<bool>>,
     pub(super) repository_error: Arc<Mutex<Option<SharedChannelErrorCode>>>,
     pub(super) has_read_access: Arc<Mutex<bool>>,
+    pub(super) repository: Arc<Mutex<RemoteRepository>>,
 }
 
 #[async_trait]
@@ -27,7 +28,7 @@ impl ChannelSubscriptionGateway for UpdateGateway {
             return Err(SharedChannelError::new(code, "repository unavailable"));
         }
         if repository_id == 42 {
-            let mut repository = repository();
+            let mut repository = self.repository.lock().unwrap().clone();
             if !*self.has_read_access.lock().unwrap() {
                 repository.permissions = RepositoryPermissions {
                     admin: false,
@@ -54,7 +55,7 @@ impl ChannelSubscriptionGateway for UpdateGateway {
 }
 
 #[derive(Clone)]
-pub(super) struct UpdateChannels(Arc<Mutex<SharedChannelStore>>);
+pub(super) struct UpdateChannels(pub(super) Arc<Mutex<SharedChannelStore>>);
 
 #[async_trait]
 impl SharedChannelRegistry for UpdateChannels {
@@ -121,20 +122,46 @@ pub(super) struct UpdateInstaller {
     pub(super) metadata_commits: Arc<Mutex<usize>>,
     pub(super) install_requests: Arc<Mutex<Vec<ChannelInstallRequest>>>,
     pub(super) install_rollbacks: Arc<Mutex<usize>>,
+    pub(super) invalid_install_receipt: Arc<Mutex<bool>>,
+    pub(super) fail_store_after_install: Arc<Mutex<Option<Arc<Mutex<bool>>>>>,
     pub(super) uninstalled: Arc<Mutex<Vec<String>>>,
     pub(super) converted: Arc<Mutex<Vec<(String, String)>>>,
     pub(super) local_name_conflicts: Arc<Mutex<BTreeSet<String>>>,
     pub(super) removal_cleanup_failures: Arc<Mutex<BTreeSet<String>>>,
     pub(super) rollbacks: Arc<Mutex<Vec<String>>>,
+    pub(super) release_verification_error: Arc<Mutex<Option<SharedChannelErrorCode>>>,
+    pub(super) verified_revisions: Arc<Mutex<Vec<u64>>>,
 }
 
 #[async_trait]
 impl ChannelSubscriptionInstaller for UpdateInstaller {
+    async fn verify_release_content(
+        &self,
+        _repository: &RemoteRepository,
+        manifest: &ChannelReleaseManifest,
+    ) -> Result<(), SharedChannelError> {
+        self.verified_revisions
+            .lock()
+            .unwrap()
+            .push(manifest.revision);
+        if let Some(code) = *self.release_verification_error.lock().unwrap() {
+            Err(SharedChannelError::new(
+                code,
+                "release content verification failed",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
     async fn install(
         &self,
         request: ChannelInstallRequest,
     ) -> Result<ChannelInstallReceipt, SharedChannelError> {
         self.install_requests.lock().unwrap().push(request.clone());
+        if let Some(fail_save) = self.fail_store_after_install.lock().unwrap().clone() {
+            *fail_save.lock().unwrap() = true;
+        }
         let selected = request
             .manifest
             .skills
@@ -147,9 +174,19 @@ impl ChannelSubscriptionInstaller for UpdateInstaller {
             })
             .map(|skill| subscribed_skill(skill, &request.manifest))
             .collect::<Vec<_>>();
+        let invalid_receipt = *self.invalid_install_receipt.lock().unwrap();
+        let newly_installed_skill_ids = if invalid_receipt {
+            Vec::new()
+        } else {
+            selected.iter().map(|skill| skill.id.clone()).collect()
+        };
         Ok(ChannelInstallReceipt {
-            newly_installed_skill_ids: selected.iter().map(|skill| skill.id.clone()).collect(),
-            skills: selected,
+            newly_installed_skill_ids,
+            skills: if invalid_receipt {
+                Vec::new()
+            } else {
+                selected
+            },
         })
     }
 
@@ -234,7 +271,8 @@ impl ChannelSubscriptionUpdater for UpdateInstaller {
             ));
         }
         self.divergent.lock().unwrap().remove(&key);
-        let installed = subscribed_skill(&request.released, &request.manifest);
+        let mut installed = subscribed_skill(&request.released, &request.manifest);
+        installed.provenance.repository_url = request.repository.clone_url.clone();
         Ok(ChannelSkillUpdateReceipt {
             previous: request.installed,
             installed,
@@ -360,7 +398,7 @@ pub(super) fn service(
     installer: UpdateInstaller,
 ) -> ChannelSubscriptionFacade<UpdateGateway, UpdateChannels, UpdateSubscriptions, UpdateInstaller>
 {
-    ChannelSubscriptionFacade::new(
+    service_with_channels(
         gateway,
         UpdateChannels(Arc::new(Mutex::new(SharedChannelStore {
             schema_version: SHARED_CHANNEL_STORE_VERSION,
@@ -371,12 +409,23 @@ pub(super) fn service(
     )
 }
 
+pub(super) fn service_with_channels(
+    gateway: UpdateGateway,
+    channels: UpdateChannels,
+    subscriptions: UpdateSubscriptions,
+    installer: UpdateInstaller,
+) -> ChannelSubscriptionFacade<UpdateGateway, UpdateChannels, UpdateSubscriptions, UpdateInstaller>
+{
+    ChannelSubscriptionFacade::new(gateway, channels, subscriptions, installer)
+}
+
 pub(super) fn fixtures() -> (UpdateGateway, UpdateSubscriptions, UpdateInstaller) {
     let gateway = UpdateGateway {
         manifests: Arc::new(Mutex::new(vec![manifest_v1(), manifest_v2()])),
         offline: Arc::new(Mutex::new(false)),
         repository_error: Arc::new(Mutex::new(None)),
         has_read_access: Arc::new(Mutex::new(true)),
+        repository: Arc::new(Mutex::new(repository())),
     };
     let subscriptions = UpdateSubscriptions {
         store: Arc::new(Mutex::new(ChannelSubscriptionStore {
@@ -455,11 +504,35 @@ async fn clean_skills_advance_independently_and_restart_keeps_the_result() {
             offline: Arc::new(Mutex::new(false)),
             repository_error: Arc::new(Mutex::new(None)),
             has_read_access: Arc::new(Mutex::new(true)),
+            repository: Arc::new(Mutex::new(repository())),
         },
         subscriptions,
         UpdateInstaller::default(),
     );
     assert_eq!(restarted.update_state(42).unwrap(), Some(result.snapshot));
+}
+
+#[tokio::test]
+async fn unchanged_release_cannot_advance_without_verifying_its_exact_commit_content() {
+    let (gateway, subscriptions, installer) = fixtures();
+    *gateway.manifests.lock().unwrap() = vec![manifest(
+        2,
+        'd',
+        vec![release_skill("reader", 'b'), release_skill("writer", 'c')],
+    )];
+    *installer.release_verification_error.lock().unwrap() = Some(SharedChannelErrorCode::Integrity);
+    let app = service(gateway, subscriptions.clone(), installer.clone());
+
+    let error = app.check_update(42).await.unwrap_err();
+
+    assert_eq!(error.code, SharedChannelErrorCode::Integrity);
+    let stored = &subscriptions.store.lock().unwrap().subscriptions[0];
+    assert_eq!(stored.target.revision, 1);
+    assert_eq!(
+        stored.remote_state.status,
+        ChannelSubscriptionRemoteStatus::IntegrityError
+    );
+    assert_eq!(*installer.verified_revisions.lock().unwrap(), vec![2]);
 }
 
 #[tokio::test]
@@ -787,6 +860,32 @@ async fn unchanged_skill_does_not_make_an_initial_check_partially_upgraded() {
 }
 
 #[tokio::test]
+async fn unchanged_release_still_reports_local_divergence_as_blocked() {
+    let (gateway, subscriptions, installer) = fixtures();
+    installer.divergent.lock().unwrap().insert("reader".into());
+    *gateway.manifests.lock().unwrap() = vec![manifest_v1()];
+
+    let checked = service(gateway, subscriptions, installer)
+        .check_update(42)
+        .await
+        .unwrap();
+    let reader = checked
+        .items
+        .iter()
+        .find(|item| item.id == "reader")
+        .unwrap();
+
+    assert_eq!(checked.status, ChannelUpdateStatus::Blocked);
+    assert_eq!(reader.change, ChannelUpdateChange::Unchanged);
+    assert_eq!(reader.state, ChannelUpdateItemState::Blocked);
+    assert_eq!(
+        reader.block_reason,
+        Some(ChannelUpdateBlockReason::LocalContentChanged)
+    );
+    assert_eq!(reader.suggested_local_name.as_deref(), Some("reader.local"));
+}
+
+#[tokio::test]
 async fn unchanged_skill_with_a_blocked_peer_persists_as_blocked() {
     let (gateway, subscriptions, installer) = fixtures();
     installer.divergent.lock().unwrap().insert("writer".into());
@@ -966,13 +1065,19 @@ async fn subscribed_skill_identity_casing_cannot_change() {
         ),
     ];
 
-    let error = service(gateway, subscriptions, installer)
+    let error = service(gateway, subscriptions.clone(), installer)
         .check_update(42)
         .await
         .unwrap_err();
 
     assert_eq!(error.code, SharedChannelErrorCode::Integrity);
     assert!(error.message.contains("identity casing changed"));
+    assert_eq!(
+        subscriptions.store.lock().unwrap().subscriptions[0]
+            .remote_state
+            .status,
+        ChannelSubscriptionRemoteStatus::IntegrityError
+    );
 }
 
 #[tokio::test]
@@ -1015,7 +1120,13 @@ async fn a_missing_newer_release_never_downgrades_the_subscription() {
         })
         .await
         .unwrap_err();
-    assert_eq!(error.code, SharedChannelErrorCode::ReleaseConflict);
+    assert_eq!(error.code, SharedChannelErrorCode::Integrity);
+    assert_eq!(
+        subscriptions.store.lock().unwrap().subscriptions[0]
+            .remote_state
+            .status,
+        ChannelSubscriptionRemoteStatus::IntegrityError
+    );
 }
 
 #[tokio::test]
@@ -1063,7 +1174,13 @@ async fn a_partially_upgraded_subscription_never_downgrades_an_advanced_skill() 
         })
         .await
         .unwrap_err();
-    assert_eq!(error.code, SharedChannelErrorCode::ReleaseConflict);
+    assert_eq!(error.code, SharedChannelErrorCode::Integrity);
+    assert_eq!(
+        subscriptions.store.lock().unwrap().subscriptions[0]
+            .remote_state
+            .status,
+        ChannelSubscriptionRemoteStatus::IntegrityError
+    );
 }
 
 fn subscription_v1() -> ChannelSubscription {
@@ -1072,6 +1189,7 @@ fn subscription_v1() -> ChannelSubscription {
         descriptor_version: CHANNEL_SUBSCRIPTION_DESCRIPTOR_VERSION,
         repository_id: 42,
         organization_id: 7,
+        repository_url_aliases: Vec::new(),
         target: ChannelReleaseTarget {
             revision: 1,
             tag_name: "channel-v000001".into(),
@@ -1208,7 +1326,7 @@ fn repository() -> RemoteRepository {
     }
 }
 
-fn channel() -> SharedChannelDescriptor {
+pub(super) fn channel() -> SharedChannelDescriptor {
     SharedChannelDescriptor {
         descriptor_version: CHANNEL_DESCRIPTOR_VERSION,
         repository_id: 42,

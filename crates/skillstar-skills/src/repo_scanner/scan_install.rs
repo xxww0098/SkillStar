@@ -16,37 +16,42 @@ struct PreparedRepoInstall {
     lock_entry: crate::lockfile::LockEntry,
 }
 
-/// Backward-compatible scan/install facade for callers that identify the
-/// default-branch cache by source. Ref-pinned installs use
-/// [`install_from_repo_at`] so they retain their isolated cache and lock data.
-pub fn install_from_repo(
-    source: &str,
-    repo_url: &str,
-    targets: &[SkillInstallTarget],
-) -> Result<Vec<String>> {
-    install_from_repo_in_session(
-        source,
-        repo_url,
-        targets,
-        &crate::git::transport::GitOperationSession::public(),
-    )
-}
-
-pub fn install_from_repo_in_session(
+pub(crate) fn install_from_repo_in_session(
     source: &str,
     repo_url: &str,
     targets: &[SkillInstallTarget],
     session: &crate::git::transport::GitOperationSession,
 ) -> Result<Vec<String>> {
+    ensure_generic_targets_mutable(targets)?;
+    crate::shared_channels::ensure_generic_repository_mutation_allowed(repo_url)?;
     let repo_dir = super::clone_or_fetch_repo_in_session(repo_url, source, session)?;
-    install_from_repo_at(&repo_dir, repo_url, None, targets)
+    install_from_repo_at_with_source_migrations(&repo_dir, repo_url, None, targets, &[])
 }
 
-pub fn install_from_repo_at(
+pub(crate) fn install_from_repo_at(
     repo_dir: &Path,
     repo_url: &str,
     git_ref: Option<&str>,
     targets: &[SkillInstallTarget],
+) -> Result<Vec<String>> {
+    ensure_generic_targets_mutable(targets)?;
+    crate::shared_channels::ensure_generic_repository_mutation_allowed(repo_url)?;
+    install_from_repo_at_with_source_migrations(repo_dir, repo_url, git_ref, targets, &[])
+}
+
+fn ensure_generic_targets_mutable(targets: &[SkillInstallTarget]) -> Result<()> {
+    for target in targets {
+        crate::shared_channels::ensure_generic_skill_mutation_allowed(&target.id)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn install_from_repo_at_with_source_migrations(
+    repo_dir: &Path,
+    repo_url: &str,
+    git_ref: Option<&str>,
+    targets: &[SkillInstallTarget],
+    authorized_previous_sources: &[(String, String)],
 ) -> Result<Vec<String>> {
     let hub_skills_dir = paths::hub_skills_dir();
     std::fs::create_dir_all(&hub_skills_dir).context("Failed to create hub skills directory")?;
@@ -101,7 +106,12 @@ pub fn install_from_repo_at(
 
         if dest.symlink_metadata().is_ok()
             && (!fs_ops::is_link(&dest)
-                || !can_replace_existing_skill(&target.id, repo_url, existing_entry))
+                || !can_replace_existing_skill(
+                    &target.id,
+                    repo_url,
+                    existing_entry,
+                    authorized_previous_sources,
+                ))
         {
             warn!(
                 target: "repo_scanner",
@@ -224,11 +234,16 @@ fn can_replace_existing_skill(
     skill_name: &str,
     repo_url: &str,
     existing_entry: Option<&crate::lockfile::LockEntry>,
+    authorized_previous_sources: &[(String, String)],
 ) -> bool {
     if local_skill::is_local_skill(skill_name) {
         return false;
     }
-    existing_entry
-        .map(|entry| source_resolver::same_remote_url(&entry.git_url, repo_url))
-        .unwrap_or(false)
+    existing_entry.is_some_and(|entry| {
+        source_resolver::same_remote_url(&entry.git_url, repo_url)
+            || authorized_previous_sources.iter().any(|(id, source)| {
+                id.eq_ignore_ascii_case(skill_name)
+                    && source_resolver::same_remote_url(&entry.git_url, source)
+            })
+    })
 }

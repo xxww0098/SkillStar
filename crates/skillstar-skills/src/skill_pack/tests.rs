@@ -183,6 +183,9 @@ fn registry_save_failure_restores_previous_link_and_lockfile() {
     let packs_path = skillstar_core::infra::paths::packs_path();
     let packs_parent = packs_path.parent().unwrap();
     std::fs::create_dir_all(packs_parent).unwrap();
+    let state_dir = skillstar_core::infra::paths::state_dir();
+    std::fs::create_dir_all(&state_dir).unwrap();
+    std::fs::write(state_dir.join("skill-update.lock"), b"").unwrap();
     std::fs::write(&packs_path, b"{\"version\":1,\"packs\":[]}").unwrap();
     use std::os::unix::fs::PermissionsExt as _;
     std::fs::set_permissions(packs_parent, std::fs::Permissions::from_mode(0o555)).unwrap();

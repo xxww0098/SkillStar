@@ -91,9 +91,16 @@ impl ExistingRepositoryScanner for GitExistingRepositoryScanner {
         if session.is_cancelled() {
             return Err(cancelled_error());
         }
+        let _transaction_guard =
+            crate::skill_update::acquire_update_transaction_lock().map_err(|_| {
+                SharedChannelError::new(
+                    SharedChannelErrorCode::Storage,
+                    "Unable to lock the repository cache for channel registration",
+                )
+            })?;
         let (_, _, repository_dir, _) = self
             .facade
-            .fetch_repo_scanned(&repository.clone_url, true)
+            .fetch_repo_scanned_detailed(&repository.clone_url, true)
             .map_err(|_| {
                 if session.is_cancelled() {
                     cancelled_error()

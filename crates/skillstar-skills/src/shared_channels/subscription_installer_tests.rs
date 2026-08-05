@@ -163,6 +163,40 @@ async fn metadata_failure_preserves_content_edited_during_commit() {
 }
 
 #[tokio::test]
+async fn metadata_failure_rolls_back_unchanged_install_without_relocking() {
+    let _guard = crate::lock_test_env();
+    let (_sandbox, receipt, _repo, hub_skill) = install_fixture();
+    let installer =
+        GitChannelSubscriptionInstaller::new(crate::git_skill::GitSkillFacade::from_keyring());
+
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        installer.verify_and_commit_install(
+            &receipt,
+            Box::new(|| {
+                Err(SharedChannelError::new(
+                    SharedChannelErrorCode::Storage,
+                    "subscription save failed",
+                ))
+            }),
+        ),
+    )
+    .await
+    .expect("rollback must not deadlock on the update transaction mutex")
+    .unwrap_err();
+
+    assert_eq!(result.code, SharedChannelErrorCode::Storage);
+    assert!(!hub_skill.exists());
+    assert!(
+        crate::lockfile::Lockfile::load(&crate::lockfile::lockfile_path())
+            .unwrap()
+            .skills
+            .iter()
+            .all(|entry| entry.name != "writer")
+    );
+}
+
+#[tokio::test]
 async fn final_verification_rejects_a_checkout_that_moved_to_another_commit() {
     let _guard = crate::lock_test_env();
     let (_sandbox, receipt, repo, hub_skill) = install_fixture();
@@ -188,4 +222,90 @@ async fn final_verification_rejects_a_checkout_that_moved_to_another_commit() {
     assert_eq!(error.code, SharedChannelErrorCode::Integrity);
     assert!(!committed.load(Ordering::SeqCst));
     assert!(hub_skill.join("SKILL.md").is_file());
+}
+
+#[tokio::test]
+async fn production_installer_verifies_the_exact_release_checkout() {
+    let _guard = crate::lock_test_env();
+    let (_sandbox, _receipt, _installed_repo, _hub_skill) = install_fixture();
+    let origin = skillstar_core::infra::paths::hub_root().join("verifier-origin");
+    let skill_root = origin.join("skills/writer");
+    std::fs::create_dir_all(&skill_root).unwrap();
+    std::fs::write(
+        skill_root.join("SKILL.md"),
+        "---\nname: writer\ndescription: Writer\n---\n# Verified\n",
+    )
+    .unwrap();
+    git(&origin, &["init", "-q"]);
+    git(&origin, &["config", "user.email", "tests@skillstar.local"]);
+    git(&origin, &["config", "user.name", "SkillStar Tests"]);
+    git(&origin, &["add", "."]);
+    git(&origin, &["commit", "-m", "verified release"]);
+    let commit = git(&origin, &["rev-parse", "HEAD"]);
+    let hash = crate::content::snapshot_path("writer", &skill_root)
+        .unwrap()
+        .content_hash;
+    let cache = skillstar_core::infra::paths::repos_cache_dir().join(format!(
+        "{}--ref--{}",
+        crate::repo_scanner::cache_dir_name(&format!(
+            "channel-verify-42-{}",
+            crate::repo_scanner::cache_dir_name("https://github.com/acme/channel.git")
+        )),
+        crate::repo_scanner::cache_dir_name(&commit)
+    ));
+    std::fs::create_dir_all(cache.parent().unwrap()).unwrap();
+    let clone = Command::new("git")
+        .args(["clone", "-q"])
+        .arg(&origin)
+        .arg(&cache)
+        .status()
+        .unwrap();
+    assert!(clone.success());
+
+    let repository = RemoteRepository {
+        id: 42,
+        owner_id: 7,
+        owner_login: "acme".into(),
+        owner_type: "Organization".into(),
+        name: "channel".into(),
+        default_branch: "main".into(),
+        html_url: "https://github.com/acme/channel".into(),
+        clone_url: "https://github.com/acme/channel.git".into(),
+        private: true,
+        permissions: super::RepositoryPermissions {
+            admin: false,
+            maintain: false,
+            push: false,
+            pull: true,
+        },
+    };
+    let manifest = ChannelReleaseManifest {
+        schema_version: CHANNEL_RELEASE_MANIFEST_VERSION,
+        repository_id: 42,
+        organization_id: 7,
+        revision: 1,
+        tag_name: super::revision_tag(1),
+        commit_sha: commit,
+        publisher: super::ChannelPublisherIdentity {
+            id: 9,
+            login: "alice".into(),
+        },
+        published_at: "2026-08-05T00:00:00Z".into(),
+        title: "Release one".into(),
+        notes: "Verified".into(),
+        skills: vec![super::ChannelReleaseSkill {
+            id: "writer".into(),
+            content_root: "skills/writer".into(),
+            content_hash: hash,
+            content_hash_version: CHANNEL_CONTENT_HASH_VERSION,
+            status: super::ChannelSkillReleaseStatus::Added,
+        }],
+    };
+    let installer =
+        GitChannelSubscriptionInstaller::new(crate::git_skill::GitSkillFacade::from_keyring());
+
+    installer
+        .verify_release_content(&repository, &manifest)
+        .await
+        .unwrap();
 }

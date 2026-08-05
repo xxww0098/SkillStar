@@ -175,7 +175,7 @@ fn parse_http_source(
         return Err(anyhow!("Git URL must contain a host and repository path"));
     }
 
-    if authority.eq_ignore_ascii_case("github.com") {
+    if is_github_authority(authority) {
         let parts = path.split('/').collect::<Vec<_>>();
         if parts.len() < 2 {
             return Err(anyhow!("GitHub URL must contain owner/repo"));
@@ -196,7 +196,7 @@ fn parse_http_source(
         }
         let short = format!("{owner}/{repo}");
         return Ok(Source {
-            repo_url: format!("{scheme}://{authority}/{short}.git"),
+            repo_url: format!("https://github.com/{short}.git"),
             short,
             git_ref,
             subpath,
@@ -240,6 +240,19 @@ fn parse_http_source(
     })
 }
 
+fn is_github_authority(authority: &str) -> bool {
+    let authority = authority.to_ascii_lowercase();
+    let authority = authority
+        .rsplit_once('@')
+        .map(|(_, authority)| authority)
+        .unwrap_or(authority.as_str());
+    let (host, port) = authority
+        .rsplit_once(':')
+        .map_or((authority, None), |(host, port)| (host, Some(port)));
+    matches!(host, "github.com" | "www.github.com")
+        && port.is_none_or(|port| matches!(port, "80" | "443"))
+}
+
 fn short_from_ssh(input: &str) -> Result<String> {
     let path = if let Some(rest) = input.strip_prefix("ssh://") {
         rest.split_once('/')
@@ -258,17 +271,21 @@ fn short_from_ssh(input: &str) -> Result<String> {
     Ok(short.to_string())
 }
 
-fn ssh_host(input: &str) -> Option<&str> {
+fn ssh_host(input: &str) -> Option<String> {
     let authority = input
         .strip_prefix("ssh://")
         .and_then(|rest| rest.split_once('/').map(|(authority, _)| authority))
         .or_else(|| input.split_once(':').map(|(authority, _)| authority))?;
-    Some(
-        authority
-            .rsplit_once('@')
-            .map(|(_, host)| host)
-            .unwrap_or(authority),
-    )
+    let host = authority
+        .rsplit_once('@')
+        .map(|(_, host)| host)
+        .unwrap_or(authority);
+    let host = host
+        .rsplit_once(':')
+        .filter(|(_, port)| port.chars().all(|ch| ch.is_ascii_digit()))
+        .map(|(host, _)| host)
+        .unwrap_or(host);
+    Some(host.to_string())
 }
 
 fn sanitize_subpath(input: &str) -> Result<String> {
@@ -376,6 +393,14 @@ mod tests {
         assert!(same_remote_url(
             "https://github.com/Owner/Repo",
             "https://github.com/owner/repo",
+        ));
+        assert!(same_remote_url(
+            "http://www.github.com:80/owner/repo",
+            "https://github.com/owner/repo.git",
+        ));
+        assert!(same_remote_url(
+            "ssh://git@GitHub.com:22/owner/repo",
+            "https://github.com/owner/repo.git",
         ));
     }
 

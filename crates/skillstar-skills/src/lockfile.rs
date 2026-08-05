@@ -35,7 +35,7 @@ pub struct LockEntry {
 }
 
 /// Versioned lockfile model for v5.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LockfileV5 {
     pub version: u32,
     pub skills: Vec<LockEntry>,

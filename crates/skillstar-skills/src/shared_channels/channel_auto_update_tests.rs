@@ -239,7 +239,7 @@ async fn inspection_error_pauses_only_that_skill() {
 }
 
 #[tokio::test]
-async fn retryable_item_failure_retries_without_blocking_clean_skills() {
+async fn network_failure_rolls_back_the_channel_run_and_retries_all_safe_skills() {
     let now = instant("2026-08-06T01:00:00Z");
     let (gateway, subscriptions, installer) = fixtures();
     installer.failures.lock().unwrap().insert("reader".into());
@@ -254,14 +254,20 @@ async fn retryable_item_failure_retries_without_blocking_clean_skills() {
     let first = app.run_due_auto_updates_at(now).await.unwrap().remove(0);
     assert_eq!(
         first.run.status,
-        ChannelAutoUpdateRunStatus::PartiallyApplied
+        ChannelAutoUpdateRunStatus::RetryableFailure
     );
     assert!(first.run.retryable);
-    assert_eq!(first.run.applied_skill_ids, ["writer"]);
+    assert!(first.run.applied_skill_ids.is_empty());
     assert!(!first.run.pauses.iter().any(|pause| {
         pause.skill_id.as_deref() == Some("reader")
             && pause.reason == ChannelAutoUpdatePauseReason::UnresolvedFailure
     }));
+    assert_eq!(
+        subscriptions.store.lock().unwrap().subscriptions[0]
+            .remote_state
+            .status,
+        ChannelSubscriptionRemoteStatus::Offline
+    );
     assert_eq!(
         subscriptions.store.lock().unwrap().subscriptions[0]
             .auto_update
@@ -276,13 +282,7 @@ async fn retryable_item_failure_retries_without_blocking_clean_skills() {
         .await
         .unwrap()
         .remove(0);
-    assert!(
-        retried
-            .run
-            .applied_skill_ids
-            .iter()
-            .any(|id| id == "reader")
-    );
+    assert_eq!(retried.run.applied_skill_ids, ["reader", "writer"]);
 }
 
 #[tokio::test]
@@ -317,7 +317,7 @@ async fn cancelled_item_fetch_is_not_persisted_as_an_unresolved_failure() {
 }
 
 #[tokio::test]
-async fn per_item_permission_reason_survives_later_checks() {
+async fn permission_failure_freezes_the_channel_and_is_rechecked_later() {
     let now = instant("2026-08-06T01:00:00Z");
     let (gateway, subscriptions, installer) = fixtures();
     installer.failures.lock().unwrap().insert("reader".into());
@@ -331,8 +331,7 @@ async fn per_item_permission_reason_survives_later_checks() {
 
     let first = app.run_due_auto_updates_at(now).await.unwrap().remove(0);
     assert!(first.run.pauses.iter().any(|pause| {
-        pause.skill_id.as_deref() == Some("reader")
-            && pause.reason == ChannelAutoUpdatePauseReason::PermissionChanged
+        pause.skill_id.is_none() && pause.reason == ChannelAutoUpdatePauseReason::PermissionChanged
     }));
     make_due(&subscriptions, now + Duration::hours(1));
     let second = app
@@ -341,8 +340,7 @@ async fn per_item_permission_reason_survives_later_checks() {
         .unwrap()
         .remove(0);
     assert!(second.run.pauses.iter().any(|pause| {
-        pause.skill_id.as_deref() == Some("reader")
-            && pause.reason == ChannelAutoUpdatePauseReason::PermissionChanged
+        pause.skill_id.is_none() && pause.reason == ChannelAutoUpdatePauseReason::PermissionChanged
     }));
 }
 

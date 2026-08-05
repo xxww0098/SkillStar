@@ -360,14 +360,32 @@ pub struct PublishResult {
     pub source_folder: String,
 }
 
+pub enum PublishLockfileMode<'a> {
+    Commit(&'a Path),
+    ValidateOnly(&'a Path),
+}
+
+impl PublishLockfileMode<'_> {
+    fn path(&self) -> &Path {
+        match self {
+            Self::Commit(path) | Self::ValidateOnly(path) => path,
+        }
+    }
+
+    fn should_commit(&self) -> bool {
+        matches!(self, Self::Commit(_))
+    }
+}
+
 /// Publish a skill into an existing or new GitHub repository.
 ///
 /// - `existing_repo_url`: If Some, publish into this existing repo.
 ///   If None, create a new repo named `repo_name`.
 /// - `folder_name`: Subfolder name in the repo for this skill.
 ///
-/// The `lockfile_path` and `lockfile_load`/`lockfile_save` closures allow the
-/// caller to supply the app-specific lockfile location and persistence logic.
+/// `lockfile_mode` supplies the app-specific lockfile location and decides
+/// whether publication commits provenance immediately or defers it to a staged
+/// local-to-Git graduation.
 pub fn publish_skill(
     skill_name: &str,
     repo_name: &str,
@@ -375,20 +393,26 @@ pub fn publish_skill(
     is_public: bool,
     existing_repo_url: Option<&str>,
     folder_name: &str,
-    lockfile_path: &Path,
+    lockfile_mode: PublishLockfileMode<'_>,
 ) -> Result<PublishResult> {
     crate::content::validate_skill_name(skill_name).map_err(anyhow::Error::from)?;
     crate::content::validate_skill_name(folder_name).map_err(anyhow::Error::from)?;
+    let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()
+        .context("Unable to lock Skill publication")?;
+    crate::shared_channels::ensure_generic_skill_mutation_allowed(skill_name)?;
+    if let Some(repository_url) = existing_repo_url {
+        crate::shared_channels::ensure_generic_repository_mutation_allowed(repository_url)?;
+    }
     // Validate persisted state before any remote commit/push. Reload again for
     // the final write so a concurrent install is not overwritten.
     {
         let _lock = crate::lockfile::get_mutex()
             .lock()
             .map_err(|_| anyhow::anyhow!("Lockfile mutex poisoned"))?;
-        let lockfile = crate::lockfile::Lockfile::load(lockfile_path)
+        let lockfile = crate::lockfile::Lockfile::load(lockfile_mode.path())
             .context("Failed to validate Skill lockfile before publishing")?;
         lockfile
-            .save(lockfile_path)
+            .save(lockfile_mode.path())
             .context("Skill lockfile is not writable; publish was not started")?;
     }
     let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
@@ -522,24 +546,28 @@ pub fn publish_skill(
         format!("{}.git", clean_url)
     };
 
-    // Update lockfile
-    use crate::lockfile::{LockEntry, Lockfile};
-    let tree_hash = super::ops::compute_tree_hash(&skill_source_resolved).unwrap_or_default();
-    let _lock = crate::lockfile::get_mutex()
-        .lock()
-        .map_err(|_| anyhow::anyhow!("Lockfile mutex poisoned"))?;
-    let mut lf = Lockfile::load(lockfile_path)?;
-    lf.upsert(LockEntry {
-        name: skill_name.to_string(),
-        git_url: git_url.clone(),
-        git_ref: None,
-        tree_hash,
-        content_hash: Some(content_hash),
-        content_hash_version: Some(crate::content::SNAPSHOT_HASH_VERSION),
-        installed_at: chrono::Utc::now().to_rfc3339(),
-        source_folder: Some(repo_rel_path.clone()),
-    });
-    lf.save(lockfile_path)?;
+    // A local Skill is not Git-managed until its staged graduation succeeds.
+    // GUI callers therefore defer this write and let the installer commit the
+    // new provenance atomically with the checkout replacement.
+    if lockfile_mode.should_commit() {
+        use crate::lockfile::{LockEntry, Lockfile};
+        let tree_hash = super::ops::compute_tree_hash(&skill_source_resolved).unwrap_or_default();
+        let _lock = crate::lockfile::get_mutex()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Lockfile mutex poisoned"))?;
+        let mut lf = Lockfile::load(lockfile_mode.path())?;
+        lf.upsert(LockEntry {
+            name: skill_name.to_string(),
+            git_url: git_url.clone(),
+            git_ref: None,
+            tree_hash,
+            content_hash: Some(content_hash),
+            content_hash_version: Some(crate::content::SNAPSHOT_HASH_VERSION),
+            installed_at: chrono::Utc::now().to_rfc3339(),
+            source_folder: Some(repo_rel_path.clone()),
+        });
+        lf.save(lockfile_mode.path())?;
+    }
 
     Ok(PublishResult {
         url: clean_url,

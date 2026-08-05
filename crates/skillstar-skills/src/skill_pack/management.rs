@@ -6,6 +6,7 @@ use super::*;
 /// Cleans symlinks from hub, removes lockfile entries, updates packs.json.
 /// Does NOT delete the repo cache (allows reinstall without re-clone).
 pub fn remove_pack(name: &str) -> Result<Vec<String>> {
+    let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()?;
     let _lock = get_mutex()
         .lock()
         .map_err(|_| anyhow!("Pack store mutex poisoned"))?;
@@ -18,6 +19,9 @@ pub fn remove_pack(name: &str) -> Result<Vec<String>> {
         .ok_or_else(|| anyhow!("Pack '{}' not found", name))?;
 
     let pack = &store.packs[pack_idx];
+    for skill in &pack.skills {
+        crate::shared_channels::ensure_generic_skill_mutation_allowed(&skill.name)?;
+    }
     let hub = skillstar_core::infra::paths::hub_skills_dir();
     let mut removed = Vec::new();
 

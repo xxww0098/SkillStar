@@ -315,6 +315,16 @@ fn resolve_pack_skill_source(repo_dir: &Path, relative: &str) -> Result<PathBuf>
 /// Install a skill pack from a cloned repo directory.
 /// Follows atomic staging pattern from skill_bundle.rs.
 pub fn install_pack(repo_dir: &Path, source: &str, repo_url: &str) -> Result<Vec<String>> {
+    let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()?;
+    install_pack_locked(repo_dir, source, repo_url)
+}
+
+pub(crate) fn install_pack_locked(
+    repo_dir: &Path,
+    source: &str,
+    repo_url: &str,
+) -> Result<Vec<String>> {
+    crate::shared_channels::ensure_generic_repository_mutation_allowed(repo_url)?;
     let manifest =
         detect_pack(repo_dir)?.ok_or_else(|| anyhow::anyhow!("No skillpack.toml found in repo"))?;
 
@@ -333,6 +343,12 @@ pub fn install_pack(repo_dir: &Path, source: &str, repo_url: &str) -> Result<Vec
             manifest.name,
             manifest.name
         );
+    }
+
+    // A generic pack install must never replace content owned by a shared
+    // channel, regardless of that subscription's current remote state.
+    for skill in &manifest.skills {
+        crate::shared_channels::ensure_generic_skill_mutation_allowed(&skill.name)?;
     }
 
     // Validate complete baselines before any hub entry is replaced. A snapshot

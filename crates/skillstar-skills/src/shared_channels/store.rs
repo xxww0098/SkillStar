@@ -45,6 +45,29 @@ impl SharedChannelRegistry for DiskSharedChannelRegistry {
         skillstar_core::infra::fs_ops::atomic_write(&Self::path(), &content)
             .map_err(|_| storage_error("write"))
     }
+
+    fn list_read_only(&self) -> Result<Vec<super::SharedChannelDescriptor>, SharedChannelError> {
+        let path = Self::path();
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let bytes = std::fs::read(&path).map_err(|_| storage_error("read"))?;
+        read_only_channels(&bytes)
+    }
+}
+
+fn read_only_channels(
+    bytes: &[u8],
+) -> Result<Vec<super::SharedChannelDescriptor>, SharedChannelError> {
+    let value: serde_json::Value =
+        serde_json::from_slice(bytes).map_err(|_| storage_error("parse"))?;
+    let Some(channels) = value.get("channels").and_then(serde_json::Value::as_array) else {
+        return Err(storage_error("parse"));
+    };
+    Ok(channels
+        .iter()
+        .filter_map(|channel| serde_json::from_value(channel.clone()).ok())
+        .collect())
 }
 
 async fn acquire_lock_file(path: PathBuf) -> Result<File, SharedChannelError> {
@@ -71,7 +94,7 @@ async fn acquire_lock_file(path: PathBuf) -> Result<File, SharedChannelError> {
 fn validate_versions(store: &SharedChannelStore) -> Result<(), SharedChannelError> {
     if store.schema_version != SHARED_CHANNEL_STORE_VERSION {
         return Err(SharedChannelError::new(
-            SharedChannelErrorCode::Storage,
+            SharedChannelErrorCode::SubscriptionSchemaUnsupported,
             format!(
                 "Unsupported shared channel registry schema {}",
                 store.schema_version
@@ -84,7 +107,7 @@ fn validate_versions(store: &SharedChannelStore) -> Result<(), SharedChannelErro
         .find(|channel| channel.descriptor_version != CHANNEL_DESCRIPTOR_VERSION)
     {
         return Err(SharedChannelError::new(
-            SharedChannelErrorCode::Storage,
+            SharedChannelErrorCode::SubscriptionSchemaUnsupported,
             format!(
                 "Unsupported shared channel descriptor schema {}",
                 channel.descriptor_version
@@ -128,7 +151,37 @@ mod tests {
 
         let error = validate_versions(&store).unwrap_err();
 
-        assert_eq!(error.code, SharedChannelErrorCode::Storage);
+        assert_eq!(
+            error.code,
+            SharedChannelErrorCode::SubscriptionSchemaUnsupported
+        );
+    }
+
+    #[test]
+    fn future_registry_and_descriptor_versions_remain_readable_without_becoming_mutable() {
+        let mut store = SharedChannelStore::default();
+        store.schema_version += 1;
+        store.channels.push(SharedChannelDescriptor {
+            descriptor_version: CHANNEL_DESCRIPTOR_VERSION + 1,
+            repository_id: 42,
+            organization_id: 7,
+            owner: "acme".into(),
+            name: "channel".into(),
+            html_url: "https://github.com/acme/channel".into(),
+            clone_url: "https://github.com/acme/channel.git".into(),
+            role: SharedChannelRole::Subscriber,
+            status: SharedChannelStatus::Active,
+            authorization: SharedChannelAuthorization::default(),
+            created_at: String::new(),
+            updated_at: String::new(),
+        });
+        let bytes = serde_json::to_vec(&store).unwrap();
+
+        let projected = read_only_channels(&bytes).unwrap();
+
+        assert_eq!(projected.len(), 1);
+        assert_eq!(projected[0].repository_id, 42);
+        assert!(validate_versions(&store).is_err());
     }
 
     #[tokio::test]

@@ -1,5 +1,26 @@
-use super::channel_update_tests::{fixtures, manifest, release_skill, service, target_v2};
+use super::channel_update_tests::{
+    UpdateChannels, channel, fixtures, manifest, release_skill, service, service_with_channels,
+    target_v2,
+};
 use super::*;
+use std::sync::{Arc, Mutex};
+
+#[derive(Clone)]
+struct FailingChannels(SharedChannelErrorCode);
+
+#[async_trait::async_trait]
+impl SharedChannelRegistry for FailingChannels {
+    fn load(&self) -> Result<SharedChannelStore, SharedChannelError> {
+        Err(SharedChannelError::new(
+            self.0,
+            "shared channel registry unavailable",
+        ))
+    }
+
+    fn save(&self, _store: &SharedChannelStore) -> Result<(), SharedChannelError> {
+        unreachable!("a failed registry load must never be followed by a save")
+    }
+}
 
 #[tokio::test]
 async fn definitive_access_loss_freezes_downloads_without_deleting_installed_skills() {
@@ -24,7 +45,7 @@ async fn definitive_access_loss_freezes_downloads_without_deleting_installed_ski
 }
 
 #[tokio::test]
-async fn temporary_repository_errors_keep_the_last_known_access_state() {
+async fn network_errors_mark_the_subscription_offline_without_deleting_local_content() {
     let (gateway, subscriptions, installer) = fixtures();
     let app = service(gateway.clone(), subscriptions.clone(), installer);
     *gateway.repository_error.lock().unwrap() = Some(SharedChannelErrorCode::Network);
@@ -36,12 +57,12 @@ async fn temporary_repository_errors_keep_the_last_known_access_state() {
         subscriptions.store.lock().unwrap().subscriptions[0]
             .remote_state
             .status,
-        ChannelSubscriptionRemoteStatus::Active
+        ChannelSubscriptionRemoteStatus::Offline
     );
 }
 
 #[tokio::test]
-async fn generic_permission_errors_do_not_prove_that_repository_access_was_revoked() {
+async fn temporary_permission_errors_are_recoverable_without_claiming_revocation() {
     let (gateway, subscriptions, installer) = fixtures();
     let app = service(gateway.clone(), subscriptions.clone(), installer);
     *gateway.repository_error.lock().unwrap() = Some(SharedChannelErrorCode::PermissionDenied);
@@ -53,8 +74,267 @@ async fn generic_permission_errors_do_not_prove_that_repository_access_was_revok
         subscriptions.store.lock().unwrap().subscriptions[0]
             .remote_state
             .status,
-        ChannelSubscriptionRemoteStatus::Active
+        ChannelSubscriptionRemoteStatus::RecoverableFailure
     );
+}
+
+#[tokio::test]
+async fn missing_channel_descriptor_freezes_the_subscription_and_invalidates_the_old_snapshot() {
+    let (gateway, subscriptions, installer) = fixtures();
+    let channels = UpdateChannels(Arc::new(Mutex::new(SharedChannelStore {
+        schema_version: SHARED_CHANNEL_STORE_VERSION,
+        channels: vec![channel()],
+    })));
+    let app = service_with_channels(gateway, channels.clone(), subscriptions.clone(), installer);
+    app.check_update(42).await.unwrap();
+    channels.0.lock().unwrap().channels.clear();
+
+    let snapshot = app.check_update(42).await.unwrap();
+
+    assert_eq!(
+        snapshot.check_error_code,
+        Some(SharedChannelErrorCode::RepositoryNotFound)
+    );
+    let stored = &subscriptions.store.lock().unwrap().subscriptions[0];
+    assert_eq!(
+        stored.remote_state.status,
+        ChannelSubscriptionRemoteStatus::Revoked
+    );
+    assert!(stored.last_update.as_ref().unwrap().check_error.is_some());
+}
+
+#[tokio::test]
+async fn inactive_channel_descriptor_is_persisted_during_review_and_apply() {
+    let (gateway, subscriptions, installer) = fixtures();
+    let mut pending = channel();
+    pending.status = SharedChannelStatus::AwaitingAppInstallation;
+    let channels = UpdateChannels(Arc::new(Mutex::new(SharedChannelStore {
+        schema_version: SHARED_CHANNEL_STORE_VERSION,
+        channels: vec![pending],
+    })));
+    let app = service_with_channels(gateway, channels, subscriptions.clone(), installer.clone());
+
+    let review_error = app.review(42).await.unwrap_err();
+
+    assert_eq!(review_error.code, SharedChannelErrorCode::PermissionDenied);
+    assert_eq!(
+        subscriptions.store.lock().unwrap().subscriptions[0]
+            .remote_state
+            .status,
+        ChannelSubscriptionRemoteStatus::RecoverableFailure
+    );
+
+    subscriptions.store.lock().unwrap().subscriptions[0].remote_state =
+        ChannelSubscriptionRemoteState::default();
+    let apply_error = app
+        .apply_update(ApplyChannelUpdateRequest {
+            repository_id: 42,
+            target: target_v2(),
+            resolutions: Vec::new(),
+        })
+        .await
+        .unwrap_err();
+
+    assert_eq!(apply_error.code, SharedChannelErrorCode::PermissionDenied);
+    assert_eq!(
+        subscriptions.store.lock().unwrap().subscriptions[0]
+            .remote_state
+            .status,
+        ChannelSubscriptionRemoteStatus::RecoverableFailure
+    );
+    assert!(installer.applied.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn unreadable_or_future_channel_registry_freezes_an_existing_subscription() {
+    for (registry_error, expected_error, expected_status) in [
+        (
+            SharedChannelErrorCode::SubscriptionSchemaUnsupported,
+            SharedChannelErrorCode::SubscriptionSchemaUnsupported,
+            ChannelSubscriptionRemoteStatus::IntegrityError,
+        ),
+        (
+            SharedChannelErrorCode::Storage,
+            SharedChannelErrorCode::Protocol,
+            ChannelSubscriptionRemoteStatus::RecoverableFailure,
+        ),
+    ] {
+        let (gateway, subscriptions, installer) = fixtures();
+        service(gateway.clone(), subscriptions.clone(), installer.clone())
+            .check_update(42)
+            .await
+            .unwrap();
+        let app = ChannelSubscriptionFacade::new(
+            gateway,
+            FailingChannels(registry_error),
+            subscriptions.clone(),
+            installer,
+        );
+
+        let snapshot = app.check_update(42).await.unwrap();
+
+        assert_eq!(snapshot.check_error_code, Some(expected_error));
+        assert_eq!(
+            subscriptions.store.lock().unwrap().subscriptions[0]
+                .remote_state
+                .status,
+            expected_status
+        );
+    }
+}
+
+#[test]
+fn legacy_local_migration_skips_a_channel_owned_hub_directory() {
+    let _guard = crate::lock_test_env();
+    let temp = tempfile::tempdir().unwrap();
+    let previous_data = std::env::var_os("SKILLSTAR_DATA_DIR");
+    let previous_hub = std::env::var_os("SKILLSTAR_HUB_DIR");
+    unsafe {
+        std::env::set_var("SKILLSTAR_DATA_DIR", temp.path().join("data"));
+        std::env::set_var("SKILLSTAR_HUB_DIR", temp.path().join("hub"));
+    }
+
+    let result = (|| -> anyhow::Result<()> {
+        let (_, subscriptions, _) = fixtures();
+        DiskChannelSubscriptionRegistry.save(&subscriptions.store.lock().unwrap().clone())?;
+        let hub_skill = skillstar_core::infra::paths::hub_skills_dir().join("writer");
+        std::fs::create_dir_all(&hub_skill)?;
+        std::fs::write(hub_skill.join("SKILL.md"), "# channel-owned\n")?;
+
+        let migrated = crate::local_skill::migrate_existing()?;
+
+        assert_eq!(migrated, 0);
+        assert!(hub_skill.is_dir());
+        assert!(
+            !skillstar_core::infra::paths::local_skills_dir()
+                .join("writer")
+                .exists()
+        );
+        Ok(())
+    })();
+
+    unsafe {
+        match previous_data {
+            Some(value) => std::env::set_var("SKILLSTAR_DATA_DIR", value),
+            None => std::env::remove_var("SKILLSTAR_DATA_DIR"),
+        }
+        match previous_hub {
+            Some(value) => std::env::set_var("SKILLSTAR_HUB_DIR", value),
+            None => std::env::remove_var("SKILLSTAR_HUB_DIR"),
+        }
+    }
+    result.unwrap();
+}
+
+#[tokio::test]
+async fn protocol_errors_are_persisted_as_recoverable_failures() {
+    let (gateway, subscriptions, installer) = fixtures();
+    let app = service(gateway.clone(), subscriptions.clone(), installer);
+    *gateway.repository_error.lock().unwrap() = Some(SharedChannelErrorCode::Protocol);
+
+    let error = app.check_update(42).await.unwrap_err();
+
+    assert_eq!(error.code, SharedChannelErrorCode::Protocol);
+    assert_eq!(
+        subscriptions.store.lock().unwrap().subscriptions[0]
+            .remote_state
+            .status,
+        ChannelSubscriptionRemoteStatus::RecoverableFailure
+    );
+}
+
+#[tokio::test]
+async fn transferred_repository_identity_is_an_integrity_error() {
+    let (gateway, subscriptions, installer) = fixtures();
+    gateway.repository.lock().unwrap().owner_id = 99;
+    gateway.repository.lock().unwrap().owner_login = "other-org".into();
+    gateway.repository.lock().unwrap().html_url = "https://github.com/other-org/channel".into();
+    gateway.repository.lock().unwrap().clone_url =
+        "https://github.com/other-org/channel.git".into();
+    let before = subscriptions.store.lock().unwrap().subscriptions[0]
+        .skills
+        .clone();
+    let app = service(gateway, subscriptions.clone(), installer.clone());
+
+    let error = app.check_update(42).await.unwrap_err();
+
+    assert_eq!(error.code, SharedChannelErrorCode::OrganizationUnavailable);
+    let stored = &subscriptions.store.lock().unwrap().subscriptions[0];
+    assert_eq!(
+        stored.remote_state.status,
+        ChannelSubscriptionRemoteStatus::IntegrityError
+    );
+    assert_eq!(stored.skills, before);
+    assert!(installer.applied.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn manifest_tamper_matrix_freezes_the_subscription_before_content_changes() {
+    for case in ["schema", "repository", "duplicate", "traversal"] {
+        let (gateway, subscriptions, installer) = fixtures();
+        let mut tampered = manifest(
+            2,
+            'd',
+            vec![release_skill("reader", 'e'), release_skill("writer", 'f')],
+        );
+        match case {
+            "schema" => tampered.schema_version += 1,
+            "repository" => tampered.repository_id = 99,
+            "duplicate" => tampered.skills.push(tampered.skills[0].clone()),
+            "traversal" => tampered.skills[0].content_root = "../reader".into(),
+            _ => unreachable!(),
+        }
+        *gateway.manifests.lock().unwrap() = vec![tampered];
+        let before = subscriptions.store.lock().unwrap().subscriptions[0]
+            .skills
+            .clone();
+        let app = service(gateway, subscriptions.clone(), installer.clone());
+
+        let error = app.check_update(42).await.unwrap_err();
+
+        assert_eq!(error.code, SharedChannelErrorCode::Integrity, "{case}");
+        let stored = &subscriptions.store.lock().unwrap().subscriptions[0];
+        assert_eq!(
+            stored.remote_state.status,
+            ChannelSubscriptionRemoteStatus::IntegrityError,
+            "{case}"
+        );
+        assert_eq!(stored.skills, before, "{case}");
+        assert!(installer.applied.lock().unwrap().is_empty(), "{case}");
+    }
+}
+
+#[tokio::test]
+async fn content_integrity_failure_during_apply_rolls_back_and_freezes_the_subscription() {
+    let (gateway, subscriptions, installer) = fixtures();
+    installer.failures.lock().unwrap().insert("writer".into());
+    installer
+        .failure_codes
+        .lock()
+        .unwrap()
+        .insert("writer".into(), SharedChannelErrorCode::Integrity);
+    let before = subscriptions.store.lock().unwrap().subscriptions[0]
+        .skills
+        .clone();
+    let app = service(gateway, subscriptions.clone(), installer.clone());
+
+    let error = app
+        .apply_update(ApplyChannelUpdateRequest {
+            repository_id: 42,
+            target: target_v2(),
+            resolutions: Vec::new(),
+        })
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code, SharedChannelErrorCode::Integrity);
+    let stored = &subscriptions.store.lock().unwrap().subscriptions[0];
+    assert_eq!(
+        stored.remote_state.status,
+        ChannelSubscriptionRemoteStatus::IntegrityError
+    );
+    assert_eq!(stored.skills, before);
+    assert_eq!(*installer.rollbacks.lock().unwrap(), vec!["reader"]);
 }
 
 #[tokio::test]
@@ -192,7 +472,7 @@ async fn a_successful_access_probe_unfreezes_the_subscription() {
 }
 
 #[tokio::test]
-async fn restored_access_is_persisted_even_when_the_release_is_invalid_after_the_probe() {
+async fn invalid_release_keeps_the_subscription_frozen_as_an_integrity_error() {
     let (gateway, subscriptions, installer) = fixtures();
     {
         let mut store = subscriptions.store.lock().unwrap();
@@ -214,12 +494,12 @@ async fn restored_access_is_persisted_even_when_the_release_is_invalid_after_the
         subscriptions.store.lock().unwrap().subscriptions[0]
             .remote_state
             .status,
-        ChannelSubscriptionRemoteStatus::Active
+        ChannelSubscriptionRemoteStatus::IntegrityError
     );
 }
 
 #[tokio::test]
-async fn restored_access_is_persisted_even_when_no_release_is_available() {
+async fn a_deleted_release_keeps_the_subscription_frozen_as_an_integrity_error() {
     let (gateway, subscriptions, installer) = fixtures();
     {
         let mut store = subscriptions.store.lock().unwrap();
@@ -237,7 +517,135 @@ async fn restored_access_is_persisted_even_when_no_release_is_available() {
         subscriptions.store.lock().unwrap().subscriptions[0]
             .remote_state
             .status,
-        ChannelSubscriptionRemoteStatus::Active
+        ChannelSubscriptionRemoteStatus::IntegrityError
+    );
+}
+
+#[tokio::test]
+async fn successful_full_probe_recovers_offline_and_integrity_states() {
+    for status in [
+        ChannelSubscriptionRemoteStatus::Offline,
+        ChannelSubscriptionRemoteStatus::RecoverableFailure,
+        ChannelSubscriptionRemoteStatus::IntegrityError,
+    ] {
+        let (gateway, subscriptions, installer) = fixtures();
+        subscriptions.store.lock().unwrap().subscriptions[0].remote_state =
+            ChannelSubscriptionRemoteState {
+                status,
+                checked_at: Some("2026-08-05T00:00:00Z".into()),
+                message: Some("frozen".into()),
+            };
+        let app = service(gateway, subscriptions.clone(), installer);
+
+        app.check_update(42).await.unwrap();
+
+        assert_eq!(
+            subscriptions.store.lock().unwrap().subscriptions[0]
+                .remote_state
+                .status,
+            ChannelSubscriptionRemoteStatus::Active
+        );
+    }
+}
+
+#[tokio::test]
+async fn repository_rename_refreshes_registry_routing_by_stable_id() {
+    let (gateway, subscriptions, installer) = fixtures();
+    {
+        let mut repository = gateway.repository.lock().unwrap();
+        repository.name = "renamed-channel".into();
+        repository.html_url = "https://github.com/acme/renamed-channel".into();
+        repository.clone_url = "https://github.com/acme/renamed-channel.git".into();
+    }
+    let channels = UpdateChannels(Arc::new(Mutex::new(SharedChannelStore {
+        schema_version: SHARED_CHANNEL_STORE_VERSION,
+        channels: vec![channel()],
+    })));
+    let app = service_with_channels(gateway, channels.clone(), subscriptions.clone(), installer);
+
+    app.check_update(42).await.unwrap();
+
+    let stored = channels.0.lock().unwrap();
+    assert_eq!(stored.channels[0].repository_id, 42);
+    assert_eq!(stored.channels[0].name, "renamed-channel");
+    assert_eq!(
+        stored.channels[0].clone_url,
+        "https://github.com/acme/renamed-channel.git"
+    );
+    assert!(
+        subscriptions.store.lock().unwrap().subscriptions[0]
+            .skills
+            .iter()
+            .all(|skill| skill.provenance.repository_url
+                == "https://github.com/acme/renamed-channel.git")
+    );
+    assert_eq!(
+        subscriptions.store.lock().unwrap().subscriptions[0].repository_url_aliases,
+        vec!["https://github.com/acme/channel.git"]
+    );
+}
+
+#[tokio::test]
+async fn direct_apply_refreshes_renamed_repository_routing_by_stable_id() {
+    let (gateway, subscriptions, installer) = fixtures();
+    {
+        let mut repository = gateway.repository.lock().unwrap();
+        repository.name = "renamed-channel".into();
+        repository.html_url = "https://github.com/acme/renamed-channel".into();
+        repository.clone_url = "https://github.com/acme/renamed-channel.git".into();
+    }
+    let channels = UpdateChannels(Arc::new(Mutex::new(SharedChannelStore {
+        schema_version: SHARED_CHANNEL_STORE_VERSION,
+        channels: vec![channel()],
+    })));
+    let app = service_with_channels(gateway, channels.clone(), subscriptions.clone(), installer);
+
+    app.apply_update(ApplyChannelUpdateRequest {
+        repository_id: 42,
+        target: target_v2(),
+        resolutions: Vec::new(),
+    })
+    .await
+    .unwrap();
+
+    let stored = channels.0.lock().unwrap();
+    assert_eq!(stored.channels[0].repository_id, 42);
+    assert_eq!(stored.channels[0].name, "renamed-channel");
+    assert_eq!(
+        stored.channels[0].clone_url,
+        "https://github.com/acme/renamed-channel.git"
+    );
+    assert!(
+        subscriptions.store.lock().unwrap().subscriptions[0]
+            .skills
+            .iter()
+            .all(|skill| skill.provenance.repository_url
+                == "https://github.com/acme/renamed-channel.git")
+    );
+    assert_eq!(
+        subscriptions.store.lock().unwrap().subscriptions[0].repository_url_aliases,
+        vec!["https://github.com/acme/channel.git"]
+    );
+}
+
+#[tokio::test]
+async fn duplicate_release_revisions_freeze_the_subscription_as_an_integrity_failure() {
+    let (gateway, subscriptions, installer) = fixtures();
+    gateway
+        .manifests
+        .lock()
+        .unwrap()
+        .push(super::channel_update_tests::manifest_v2());
+    let app = service(gateway, subscriptions.clone(), installer);
+
+    let error = app.check_update(42).await.unwrap_err();
+
+    assert_eq!(error.code, SharedChannelErrorCode::Integrity);
+    assert_eq!(
+        subscriptions.store.lock().unwrap().subscriptions[0]
+            .remote_state
+            .status,
+        ChannelSubscriptionRemoteStatus::IntegrityError
     );
 }
 
@@ -262,6 +670,41 @@ async fn frozen_subscriptions_reject_remote_mutations_before_downloading_content
         SharedChannelErrorCode::SubscriptionAccessRevoked
     );
     assert!(installer.applied.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn every_non_active_remote_state_rejects_remote_mutations() {
+    for status in [
+        ChannelSubscriptionRemoteStatus::Offline,
+        ChannelSubscriptionRemoteStatus::RecoverableFailure,
+        ChannelSubscriptionRemoteStatus::IntegrityError,
+    ] {
+        let (gateway, subscriptions, installer) = fixtures();
+        subscriptions.store.lock().unwrap().subscriptions[0].remote_state =
+            ChannelSubscriptionRemoteState {
+                status,
+                checked_at: Some("2026-08-05T00:00:00Z".into()),
+                message: Some("frozen".into()),
+            };
+        let app = service(gateway, subscriptions, installer.clone());
+
+        let error = app
+            .apply_update(ApplyChannelUpdateRequest {
+                repository_id: 42,
+                target: target_v2(),
+                resolutions: Vec::new(),
+            })
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            error.code,
+            SharedChannelErrorCode::Network
+                | SharedChannelErrorCode::Protocol
+                | SharedChannelErrorCode::Integrity
+        ));
+        assert!(installer.applied.lock().unwrap().is_empty());
+    }
 }
 
 #[tokio::test]
@@ -356,4 +799,15 @@ async fn resolving_one_frozen_skill_preserves_other_pending_removal_tombstones()
             .last_update
             .is_none()
     );
+}
+#[test]
+fn github_rate_limits_are_retryable_without_claiming_the_network_is_offline() {
+    for (status, body) in [
+        (429, r#"{"message":"too many requests"}"#),
+        (403, r#"{"message":"API rate limit exceeded"}"#),
+    ] {
+        let error = super::github::ensure_status(status, body, &[200]).unwrap_err();
+        assert_eq!(error.code, SharedChannelErrorCode::Protocol);
+        assert!(error.message.contains("rate-limited"));
+    }
 }

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "../../../components/ui/button";
 import type {
   ChannelSubscription,
+  ChannelSubscriptionRemoteStatus,
   ChannelSubscriptionReview,
   ChannelSubscriptionView,
   SharedChannelDescriptor,
@@ -13,6 +14,7 @@ import {
   subscribeSharedChannel,
 } from "../api/channels";
 import { ChannelUpdatePanel } from "./ChannelUpdatePanel";
+import { RemoteSubscriptionStatusPanel } from "./RemoteSubscriptionStatusPanel";
 import { RevokedSubscriptionPanel } from "./RevokedSubscriptionPanel";
 
 export function ChannelSubscriptionPanel({ channel }: { channel: SharedChannelDescriptor }) {
@@ -32,27 +34,28 @@ export function ChannelSubscriptionPanel({ channel }: { channel: SharedChannelDe
     setLoading(true);
     setError("");
     try {
-      const [reviewResult, subscriptionsResult] = await Promise.allSettled([
-        reviewSharedChannelSubscription(channel.repository_id),
-        listSharedChannelSubscriptions(),
-      ]);
-      if (subscriptionsResult.status === "rejected") throw subscriptionsResult.reason;
-      const subscriptions = subscriptionsResult.value;
+      const reviewResult = await reviewSharedChannelSubscription(channel.repository_id)
+        .then((value) => ({ status: "fulfilled" as const, value }))
+        .catch((reason: unknown) => ({ status: "rejected" as const, reason }));
+      const subscriptions = await listSharedChannelSubscriptions();
       const storedSubscription = subscriptions.find((item) => item.repository_id === channel.repository_id) ?? null;
-      setSubscription(storedSubscription);
       if (reviewResult.status === "rejected") {
+        setSubscription(freezeAfterReviewFailure(storedSubscription, reviewResult.reason));
         setReview(null);
         setSelected(new Set());
         setError(subscriptionError(reviewResult.reason));
         return;
       }
+      setSubscription(storedSubscription);
       const nextReview = reviewResult.value;
       setReview(nextReview);
       setSelected(new Set(nextReview.skills.filter((skill) => skill.selected).map((skill) => skill.id)));
-      if (storedSubscription?.remote_state?.status === "revoked") {
+      if (storedSubscription && storedSubscription.remote_state?.status !== "active") {
         await reloadSubscription().catch(() => undefined);
       }
     } catch (cause) {
+      setReview(null);
+      setSelected(new Set());
       setError(subscriptionError(cause));
     } finally {
       setLoading(false);
@@ -75,7 +78,9 @@ export function ChannelSubscriptionPanel({ channel }: { channel: SharedChannelDe
   const alreadySubscribed = subscription !== null;
   const subscriptionView = subscription && "read_only" in subscription ? subscription : null;
   const readOnly = Boolean(review?.read_only || subscriptionView?.read_only);
-  const revoked = subscription?.remote_state?.status === "revoked";
+  const remoteStatus = subscription?.remote_state?.status ?? "active";
+  const revoked = remoteStatus === "revoked";
+  const remotelyFrozen = remoteStatus !== "active";
   const subscribedSkillCount = subscription
     ? "skills" in subscription
       ? subscription.skills.length
@@ -140,7 +145,13 @@ export function ChannelSubscriptionPanel({ channel }: { channel: SharedChannelDe
         {alreadySubscribed && !readOnly && revoked && subscription && (
           <RevokedSubscriptionPanel subscription={subscription} onSubscriptionChanged={handleSubscriptionChanged} />
         )}
-        {alreadySubscribed && !readOnly && !revoked && (
+        {alreadySubscribed && !readOnly && remotelyFrozen && !revoked && subscription && (
+          <RemoteSubscriptionStatusPanel
+            subscription={subscription}
+            onSubscriptionChanged={handleSubscriptionChanged}
+          />
+        )}
+        {alreadySubscribed && !readOnly && !remotelyFrozen && !error && (
           <ChannelUpdatePanel
             key={channel.repository_id}
             repositoryId={channel.repository_id}
@@ -257,7 +268,10 @@ export function ChannelSubscriptionPanel({ channel }: { channel: SharedChannelDe
       {alreadySubscribed && !readOnly && revoked && subscription && (
         <RevokedSubscriptionPanel subscription={subscription} onSubscriptionChanged={handleSubscriptionChanged} />
       )}
-      {alreadySubscribed && !readOnly && !revoked && (
+      {alreadySubscribed && !readOnly && remotelyFrozen && !revoked && subscription && (
+        <RemoteSubscriptionStatusPanel subscription={subscription} onSubscriptionChanged={handleSubscriptionChanged} />
+      )}
+      {alreadySubscribed && !readOnly && !remotelyFrozen && !error && (
         <ChannelUpdatePanel
           key={channel.repository_id}
           repositoryId={channel.repository_id}
@@ -279,4 +293,47 @@ function subscriptionError(error: unknown): string {
     return String((error as { message: unknown }).message);
   }
   return String(error);
+}
+
+function freezeAfterReviewFailure<T extends ChannelSubscription | ChannelSubscriptionView>(
+  subscription: T | null,
+  error: unknown,
+): T | null {
+  if (!subscription || (subscription.remote_state && subscription.remote_state.status !== "active"))
+    return subscription;
+  const code =
+    typeof error === "object" && error !== null && "code" in error ? String((error as { code: unknown }).code) : "";
+  const message = subscriptionError(error);
+  let status: ChannelSubscriptionRemoteStatus;
+  if (
+    [
+      "repository_not_found",
+      "app_not_installed",
+      "app_repository_selection_required",
+      "app_repository_access_required",
+      "subscription_access_revoked",
+    ].includes(code)
+  ) {
+    status = "revoked";
+  } else if (code === "network" || (!code && /offline|network|proxy|unable to reach/i.test(message))) {
+    status = "offline";
+  } else if (
+    [
+      "integrity",
+      "release_conflict",
+      "release_not_found",
+      "organization_unavailable",
+      "personal_owner_rejected",
+      "public_repository_rejected",
+      "unsupported_host",
+    ].includes(code)
+  ) {
+    status = "integrity_error";
+  } else {
+    status = "recoverable_failure";
+  }
+  return {
+    ...subscription,
+    remote_state: { status, checked_at: new Date().toISOString(), message },
+  };
 }

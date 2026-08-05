@@ -115,6 +115,30 @@ async fn uninstall_uses_existing_cleanup_and_stops_tracking_the_removed_skill() 
 }
 
 #[tokio::test]
+async fn exact_release_verification_freezes_removal_before_local_content_changes() {
+    let (gateway, subscriptions, installer) = fixtures();
+    let app = service(gateway.clone(), subscriptions.clone(), installer.clone());
+    prepare_removed_release(&gateway, &app).await;
+    *installer.release_verification_error.lock().unwrap() = Some(SharedChannelErrorCode::Integrity);
+
+    let error = app.uninstall_removed_skill(42, "writer").await.unwrap_err();
+
+    assert_eq!(error.code, SharedChannelErrorCode::Integrity);
+    assert!(installer.uninstalled.lock().unwrap().is_empty());
+    let store = subscriptions.store.lock().unwrap();
+    assert!(
+        store.subscriptions[0]
+            .skills
+            .iter()
+            .any(|skill| skill.id == "writer")
+    );
+    assert_eq!(
+        store.subscriptions[0].remote_state.status,
+        ChannelSubscriptionRemoteStatus::IntegrityError
+    );
+}
+
+#[tokio::test]
 async fn convert_to_local_uses_complete_copy_and_rejects_name_conflicts_without_untracking() {
     let (gateway, subscriptions, installer) = fixtures();
     let app = service(gateway.clone(), subscriptions.clone(), installer.clone());
@@ -212,6 +236,32 @@ async fn reintroduced_skill_requires_explicit_install_and_does_not_replace_the_l
         *installer.converted.lock().unwrap(),
         vec![("writer".into(), "writer.local".into())]
     );
+}
+
+#[tokio::test]
+async fn invalid_reintroduced_install_rolls_back_before_a_frozen_state_save_failure() {
+    let (gateway, subscriptions, installer) = fixtures();
+    let app = service(gateway.clone(), subscriptions.clone(), installer.clone());
+    prepare_removed_release(&gateway, &app).await;
+    app.convert_removed_skill_to_local(ConvertRemovedChannelSkillRequest {
+        repository_id: 42,
+        skill_id: "writer".into(),
+        local_name: "writer.local".into(),
+    })
+    .await
+    .unwrap();
+    *gateway.manifests.lock().unwrap() =
+        vec![manifest_v1(), removed_manifest(), reintroduced_manifest()];
+    let before = subscriptions.store.lock().unwrap().clone();
+    *installer.invalid_install_receipt.lock().unwrap() = true;
+    *installer.fail_store_after_install.lock().unwrap() = Some(subscriptions.fail_save.clone());
+
+    let error = app.install_channel_skill(42, "writer").await.unwrap_err();
+
+    assert_eq!(error.code, SharedChannelErrorCode::Integrity);
+    assert!(error.message.contains("staged install was rolled back"));
+    assert_eq!(*installer.install_rollbacks.lock().unwrap(), 1);
+    assert_eq!(*subscriptions.store.lock().unwrap(), before);
 }
 
 #[tokio::test]

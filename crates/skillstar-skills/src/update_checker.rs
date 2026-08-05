@@ -26,7 +26,7 @@ use skillstar_core::infra::path_env::command_with_path;
 
 // ── Batch Prefetch ──────────────────────────────────────────────────
 
-pub fn prefetch_unique_repos_in_session(
+pub(crate) fn prefetch_unique_repos_in_session(
     skill_paths: &[PathBuf],
     session: &crate::git::transport::GitOperationSession,
 ) -> HashSet<PathBuf> {
@@ -43,7 +43,7 @@ pub fn prefetch_unique_repos_in_session(
     })
 }
 
-pub fn prefetch_unique_repos_with<F, G>(
+pub(crate) fn prefetch_unique_repos_with<F, G>(
     skill_paths: &[PathBuf],
     repo_root_of: F,
     fetch_repo: G,

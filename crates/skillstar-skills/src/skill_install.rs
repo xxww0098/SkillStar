@@ -57,6 +57,9 @@ pub fn fetch_repo_scanned_in_session(
     full_depth: bool,
     session: &crate::git::transport::GitOperationSession,
 ) -> Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>), String> {
+    let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()
+        .map_err(|error| format!("Unable to lock repository scan: {error}"))?;
+    ensure_generic_repository_input_mutable(url)?;
     fetch_repo_scanned_detailed_in_session(url, full_depth, session)
         .map_err(|error| format!("{error:#}"))
 }
@@ -330,7 +333,7 @@ fn try_install_from_repo_cache(
     session: &crate::git::transport::GitOperationSession,
 ) -> Result<Option<Skill>, String> {
     let Ok((repo_url, _source, repo_dir, skills_found)) =
-        fetch_repo_scanned_in_session(url, false, session)
+        fetch_repo_scanned_detailed_in_session(url, false, session)
     else {
         return Ok(None);
     };
@@ -406,10 +409,23 @@ pub fn install_skill_in_session(
     name: Option<String>,
     session: &crate::git::transport::GitOperationSession,
 ) -> Result<Skill, String> {
+    let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()
+        .map_err(|error| format!("Unable to lock Skill installation: {error}"))?;
+    install_skill_in_session_locked(url, name, session)
+}
+
+fn install_skill_in_session_locked(
+    url: String,
+    name: Option<String>,
+    session: &crate::git::transport::GitOperationSession,
+) -> Result<Skill, String> {
     let skills_dir = paths::hub_skills_dir();
     let name_hint = derive_name_hint(&url, name.as_deref());
     crate::content::validate_skill_name(&name_hint)
         .map_err(|error| format!("Invalid Skill name: {error}"))?;
+    crate::shared_channels::ensure_generic_skill_mutation_allowed(&name_hint)
+        .map_err(|error| error.to_string())?;
+    ensure_generic_repository_input_mutable(&url)?;
 
     if skills_dir.join(&name_hint).symlink_metadata().is_ok() {
         return Err(format!("Skill '{}' is already installed", name_hint));
@@ -493,15 +509,25 @@ pub fn install_skills_batch_in_session(
     names: &[String],
     session: &crate::git::transport::GitOperationSession,
 ) -> Result<Vec<Skill>, String> {
+    let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()
+        .map_err(|error| format!("Unable to lock Skill batch installation: {error}"))?;
     if names.is_empty() {
         return Ok(Vec::new());
     }
 
-    let skills_dir = paths::hub_skills_dir();
-    let (repo_url, _source, repo_dir, skills_found) =
-        fetch_repo_scanned_in_session(url, false, session)?;
+    for name in names {
+        crate::shared_channels::ensure_generic_skill_mutation_allowed(name)
+            .map_err(|error| error.to_string())?;
+    }
+
     let parsed =
         crate::source_resolver::Source::parse(url).map_err(|e| format!("Invalid source: {e}"))?;
+    crate::shared_channels::ensure_generic_repository_mutation_allowed(&parsed.repo_url)
+        .map_err(|error| error.to_string())?;
+    let skills_dir = paths::hub_skills_dir();
+    let (repo_url, _source, repo_dir, skills_found) =
+        fetch_repo_scanned_detailed_in_session(url, false, session)
+            .map_err(|error| format!("{error:#}"))?;
     let existing_lock = lockfile::Lockfile::load(&lockfile::lockfile_path())
         .map_err(|error| format!("Failed to load Skill lockfile: {error}"))?;
 
@@ -581,7 +607,7 @@ pub fn install_skills_batch_in_session(
     // Process fallbacks one by one
     let mut fallback_installed = Vec::new();
     for name in fallback_names {
-        match install_skill_in_session(url.to_string(), Some(name), session) {
+        match install_skill_in_session_locked(url.to_string(), Some(name), session) {
             Ok(skill) => {
                 fallback_installed.push(skill.name.clone());
                 installed_skills.push(skill);
@@ -589,7 +615,7 @@ pub fn install_skills_batch_in_session(
             Err(error) => {
                 let mut rollback_errors = Vec::new();
                 for installed_name in fallback_installed.iter().rev() {
-                    if let Err(rollback_error) = uninstall_skill(installed_name) {
+                    if let Err(rollback_error) = uninstall_skill_locked_unchecked(installed_name) {
                         rollback_errors.push(format!("{installed_name}: {rollback_error}"));
                     }
                 }
@@ -616,7 +642,15 @@ pub fn install_skill_pack_in_session(
     url: String,
     session: &crate::git::transport::GitOperationSession,
 ) -> Result<Vec<String>, String> {
-    let (_repo_url, source, repo_dir, _) = fetch_repo_scanned_in_session(&url, false, session)?;
+    let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()
+        .map_err(|error| format!("Unable to lock Skill pack installation: {error}"))?;
+    let parsed = crate::source_resolver::Source::parse(&url)
+        .map_err(|error| format!("Invalid source: {error}"))?;
+    crate::shared_channels::ensure_generic_repository_mutation_allowed(&parsed.repo_url)
+        .map_err(|error| error.to_string())?;
+    let (_repo_url, source, repo_dir, _) =
+        fetch_repo_scanned_detailed_in_session(&url, false, session)
+            .map_err(|error| format!("{error:#}"))?;
 
     // Detect pack manifest
     crate::skill_pack::detect_pack(&repo_dir)
@@ -624,13 +658,26 @@ pub fn install_skill_pack_in_session(
         .ok_or_else(|| "No skillpack.toml found in repository".to_string())?;
 
     // Install via skill_pack module
-    crate::skill_pack::install_pack(&repo_dir, &source, &url)
+    crate::skill_pack::install_pack_locked(&repo_dir, &source, &url)
         .map_err(|e| format!("Pack install failed: {}", e))
 }
 
 pub fn uninstall_skill(name: &str) -> Result<(), String> {
     crate::content::validate_skill_name(name)
         .map_err(|error| format!("Invalid Skill name: {error}"))?;
+    let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()
+        .map_err(|error| format!("Unable to lock Skill removal: {error}"))?;
+    crate::shared_channels::ensure_generic_skill_mutation_allowed(name)
+        .map_err(|error| error.to_string())?;
+    uninstall_skill_locked_unchecked(name)
+}
+
+/// Remove a Skill while the caller holds the global update transaction lock.
+///
+/// Shared-channel install compensation uses this only for Skills it staged in
+/// the current transaction. Generic entry points must use [`uninstall_skill`]
+/// so ownership is checked before content is removed.
+pub(crate) fn uninstall_skill_locked_unchecked(name: &str) -> Result<(), String> {
     if local_skill::is_local_skill(name) {
         local_skill::delete(name).map_err(|e| e.to_string())?;
         installed_skill::invalidate_cache();
@@ -639,6 +686,37 @@ pub fn uninstall_skill(name: &str) -> Result<(), String> {
 
     uninstall_hub_skill_with_commit(name, || Ok::<(), std::convert::Infallible>(()))
         .map_err(|failure| failure.message)
+}
+
+fn ensure_generic_repository_input_mutable(input: &str) -> Result<(), String> {
+    if let Ok(source) = crate::source_resolver::Source::parse(input) {
+        return crate::shared_channels::ensure_generic_repository_mutation_allowed(
+            &source.repo_url,
+        )
+        .map_err(|error| error.to_string());
+    }
+    let path = std::path::Path::new(input);
+    if !path.exists() {
+        return Ok(());
+    }
+    if let Ok(remote) = crate::git::ops::remote_origin_url(path) {
+        crate::shared_channels::ensure_generic_repository_mutation_allowed(&remote)
+            .map_err(|error| error.to_string())?;
+    }
+    let canonical = std::fs::canonicalize(path).map_err(|error| error.to_string())?;
+    let hub = paths::hub_skills_dir();
+    let lockfile =
+        lockfile::Lockfile::load(&lockfile::lockfile_path()).map_err(|error| error.to_string())?;
+    for entry in lockfile.skills {
+        let same_checkout = crate::repo_link::repo_root_of(&hub.join(&entry.name))
+            .and_then(|root| std::fs::canonicalize(root).ok())
+            .is_some_and(|root| root == canonical);
+        if same_checkout {
+            crate::shared_channels::ensure_generic_skill_mutation_allowed(&entry.name)
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -788,184 +866,5 @@ where
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        RepoInstallProvenance, derive_name_hint, find_target_skill, write_repo_install_provenance,
-    };
-    use crate::frontmatter::split_front_matter;
-    use crate::repo_scanner::DiscoveredSkill;
-    use serde_yaml::Value;
-
-    fn discovered(id: &str) -> DiscoveredSkill {
-        DiscoveredSkill {
-            id: id.to_string(),
-            folder_path: format!("skills/{id}"),
-            description: String::new(),
-            already_installed: false,
-        }
-    }
-
-    #[test]
-    fn derive_name_hint_prefers_explicit_name() {
-        let hint = derive_name_hint(
-            "https://github.com/example/skills.git",
-            Some("explicit-name"),
-        );
-        assert_eq!(hint, "explicit-name");
-    }
-
-    #[test]
-    fn derive_name_hint_falls_back_to_repo_tail() {
-        let hint = derive_name_hint("https://github.com/example/awesome-skill.git", None);
-        assert_eq!(hint, "awesome-skill");
-    }
-
-    #[test]
-    fn find_target_skill_prefers_requested_name_case_insensitive() {
-        let skills = vec![discovered("frontend-ui"), discovered("security-review")];
-        let target = find_target_skill(&skills, Some("FRONTEND-UI"), "unused-name-hint");
-        assert_eq!(target.map(|skill| skill.id.as_str()), Some("frontend-ui"));
-    }
-
-    #[test]
-    fn find_target_skill_uses_single_skill_fallback() {
-        let skills = vec![discovered("only-one")];
-        let target = find_target_skill(&skills, None, "no-match-hint");
-        assert_eq!(target.map(|skill| skill.id.as_str()), Some("only-one"));
-    }
-
-    fn write_skill_md(dir: &std::path::Path, content: &str) {
-        std::fs::write(dir.join("SKILL.md"), content).unwrap();
-    }
-
-    fn read_skill_md(dir: &std::path::Path) -> String {
-        std::fs::read_to_string(dir.join("SKILL.md")).unwrap()
-    }
-
-    #[test]
-    fn provenance_writer_adds_frontmatter_when_absent() {
-        let dir = tempfile::tempdir().unwrap();
-        write_skill_md(dir.path(), "# Skill\n\nBody\n");
-
-        write_repo_install_provenance(
-            dir.path(),
-            RepoInstallProvenance {
-                git_url: "https://github.com/example/skill-repo",
-                source_folder: None,
-            },
-        )
-        .unwrap();
-
-        let rendered = read_skill_md(dir.path());
-        let split = split_front_matter(&rendered);
-        assert_eq!(split.body, "# Skill\n\nBody\n");
-        assert_eq!(
-            split
-                .data
-                .get("provenance")
-                .and_then(Value::as_mapping)
-                .and_then(|mapping| mapping.get(Value::String("repository_url".to_string())))
-                .and_then(Value::as_str),
-            Some("https://github.com/example/skill-repo")
-        );
-    }
-
-    #[test]
-    fn provenance_writer_preserves_existing_frontmatter_keys_and_body() {
-        let dir = tempfile::tempdir().unwrap();
-        write_skill_md(
-            dir.path(),
-            "---\ntitle: Existing\ntags:\n  - rust\n---\n# Heading\n\nOriginal body\n",
-        );
-
-        write_repo_install_provenance(
-            dir.path(),
-            RepoInstallProvenance {
-                git_url: "https://github.com/example/skill-repo",
-                source_folder: Some("skills/rust"),
-            },
-        )
-        .unwrap();
-
-        let rendered = read_skill_md(dir.path());
-        let split = split_front_matter(&rendered);
-
-        assert_eq!(split.body, "# Heading\n\nOriginal body\n");
-        assert_eq!(
-            split.data.get("title").and_then(Value::as_str),
-            Some("Existing")
-        );
-        assert_eq!(
-            split
-                .data
-                .get("tags")
-                .and_then(Value::as_sequence)
-                .and_then(|tags| tags.first())
-                .and_then(Value::as_str),
-            Some("rust")
-        );
-
-        let provenance = split
-            .data
-            .get("provenance")
-            .and_then(Value::as_mapping)
-            .unwrap();
-        assert_eq!(
-            provenance
-                .get(Value::String("repository_url".to_string()))
-                .and_then(Value::as_str),
-            Some("https://github.com/example/skill-repo")
-        );
-        assert_eq!(
-            provenance
-                .get(Value::String("source_folder".to_string()))
-                .and_then(Value::as_str),
-            Some("skills/rust")
-        );
-    }
-
-    #[test]
-    fn provenance_writer_merges_existing_provenance_mapping() {
-        let dir = tempfile::tempdir().unwrap();
-        write_skill_md(
-            dir.path(),
-            "---\nprovenance:\n  imported_by: skillstar\n  repository_url: stale\n---\n# Heading\n",
-        );
-
-        write_repo_install_provenance(
-            dir.path(),
-            RepoInstallProvenance {
-                git_url: "https://github.com/example/skill-repo",
-                source_folder: Some("nested/skill"),
-            },
-        )
-        .unwrap();
-
-        let rendered = read_skill_md(dir.path());
-        let split = split_front_matter(&rendered);
-        let provenance = split
-            .data
-            .get("provenance")
-            .and_then(Value::as_mapping)
-            .unwrap();
-
-        assert_eq!(
-            provenance
-                .get(Value::String("imported_by".to_string()))
-                .and_then(Value::as_str),
-            Some("skillstar")
-        );
-        assert_eq!(
-            provenance
-                .get(Value::String("repository_url".to_string()))
-                .and_then(Value::as_str),
-            Some("https://github.com/example/skill-repo")
-        );
-        assert_eq!(
-            provenance
-                .get(Value::String("source_folder".to_string()))
-                .and_then(Value::as_str),
-            Some("nested/skill")
-        );
-    }
-}
+#[path = "skill_install_tests.rs"]
+mod tests;

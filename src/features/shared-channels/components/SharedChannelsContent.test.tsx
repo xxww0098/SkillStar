@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ChannelUpdateSnapshot, SharedChannelDescriptor } from "../../../types";
+import type { ChannelSubscriptionRemoteStatus, ChannelUpdateSnapshot, SharedChannelDescriptor } from "../../../types";
 import { SharedChannelsContent } from "./SharedChannelsContent";
 
 const api = vi.hoisted(() => ({
@@ -221,6 +221,17 @@ function revokedSubscriptionView() {
       message: "GitHub repository access was revoked",
     },
     read_only: false,
+  };
+}
+
+function frozenSubscriptionView(status: Exclude<ChannelSubscriptionRemoteStatus, "active" | "revoked">) {
+  return {
+    ...revokedSubscriptionView(),
+    remote_state: {
+      status,
+      checked_at: "2026-08-06T00:00:00Z",
+      message: `${status} detail`,
+    },
   };
 }
 
@@ -803,6 +814,56 @@ describe("SharedChannelsContent", () => {
     expect(screen.queryByText("Remote access revoked; installed Skills are preserved.")).not.toBeInTheDocument();
   });
 
+  it.each([
+    ["offline", "Shared channel is offline"],
+    ["recoverable_failure", "Shared channel check needs attention"],
+    ["integrity_error", "Shared channel integrity check failed"],
+  ] as const)("freezes %s subscriptions while retaining local content and only offering retry", async (status, title) => {
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.listSubscriptions.mockResolvedValue([frozenSubscriptionView(status)]);
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    expect(await screen.findByText(title)).toBeInTheDocument();
+    expect(screen.getByText(/installed Skills and deployments remain unchanged/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry remote validation" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Apply safe updates" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Uninstall writer" })).not.toBeInTheDocument();
+    expect(api.getUpdateState).not.toHaveBeenCalled();
+  });
+
+  it("reloads the persisted frozen state when review fails after a stale active list response", async () => {
+    const staleActive = {
+      ...frozenSubscriptionView("offline"),
+      remote_state: { status: "active" as const, checked_at: null, message: null },
+    };
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.listSubscriptions.mockResolvedValueOnce([staleActive]).mockResolvedValue([frozenSubscriptionView("offline")]);
+    api.reviewSubscription.mockRejectedValueOnce({ code: "network", message: "offline release review" });
+
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    expect(await screen.findByText("Shared channel is offline")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Apply safe updates" })).not.toBeInTheDocument();
+    expect(api.getUpdateState).not.toHaveBeenCalled();
+  });
+
+  it("returns an offline subscription to the normal update flow after validation recovers", async () => {
+    const frozen = frozenSubscriptionView("offline");
+    const restored = {
+      ...frozen,
+      remote_state: { status: "active" as const, checked_at: "2026-08-06T01:00:00Z", message: null },
+    };
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.listSubscriptions.mockResolvedValueOnce([frozen]).mockResolvedValueOnce([frozen]).mockResolvedValue([restored]);
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Retry remote validation" }));
+
+    await waitFor(() => expect(api.checkUpdate).toHaveBeenCalledWith(42));
+    await waitFor(() => expect(screen.queryByText("Shared channel is offline")).not.toBeInTheDocument());
+    expect(await screen.findByRole("region", { name: "Channel updates" })).toBeInTheDocument();
+  });
+
   it("supports the explicit non-atomic re-invite flow and cancellation", async () => {
     api.listChannels.mockResolvedValue([channel()]);
     api.listMembership.mockResolvedValue({
@@ -1140,6 +1201,27 @@ describe("SharedChannelsContent", () => {
         expect.any(String),
       ),
     );
+  });
+
+  it("replaces update actions with the persisted freeze state when apply detects tampering", async () => {
+    const active = {
+      ...frozenSubscriptionView("integrity_error"),
+      remote_state: { status: "active" as const, checked_at: null, message: null },
+    };
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.listSubscriptions
+      .mockResolvedValueOnce([active])
+      .mockResolvedValueOnce([active])
+      .mockResolvedValue([frozenSubscriptionView("integrity_error")]);
+    api.checkUpdate.mockResolvedValue(updateSnapshot());
+    api.applyUpdate.mockRejectedValueOnce({ code: "integrity", message: "release content was tampered" });
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Apply safe updates" }));
+
+    expect(await screen.findByText("Shared channel integrity check failed")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Apply safe updates" })).not.toBeInTheDocument();
+    expect(screen.getByText(/installed Skills and deployments remain unchanged/i)).toBeInTheDocument();
   });
 
   it("allows an unchanged release to be acknowledged explicitly", async () => {
@@ -1580,6 +1662,7 @@ describe("SharedChannelsContent", () => {
     expect(
       await screen.findByText(/Showing the last verified result because this check failed: offline/),
     ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apply safe updates" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Check again" }));
     await waitFor(() => expect(api.checkUpdate).toHaveBeenCalledTimes(2));
     await waitFor(() =>
@@ -1600,17 +1683,17 @@ describe("SharedChannelsContent", () => {
         read_only: false,
       },
     ]);
-    api.reviewSubscription.mockRejectedValue(new Error("offline release review"));
+    api.reviewSubscription.mockRejectedValue({ code: "network", message: "offline release review" });
     api.getUpdateState.mockResolvedValue(updateSnapshot());
     api.checkUpdate.mockResolvedValue(updateSnapshot({ check_error: "offline" }));
 
     render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
 
     expect(await screen.findByText(/The local subscription is still available with 1 selected Skills/)).toBeVisible();
-    expect(screen.getByRole("button", { name: "Retry release review" })).toBeEnabled();
-    expect(
-      await screen.findByText(/Showing the last verified result because this check failed: offline/),
-    ).toBeVisible();
+    expect(await screen.findByText("Shared channel is offline")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Retry remote validation" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Apply safe updates" })).not.toBeInTheDocument();
+    expect(api.getUpdateState).not.toHaveBeenCalled();
   });
 
   it("opts into protected automatic upgrades and shows partial results with pause reasons", async () => {

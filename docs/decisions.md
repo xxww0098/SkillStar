@@ -143,6 +143,7 @@
 - 扩展：历史回滚是逐 Skill 安装事实的反向移动，不是频道 release target 的整体倒退。候选历史必须来自同一 stable repository ID 的已验证 manifest，并将当前和目标都绑定到精确 commit/content root/hash；应用复用现有 staged transaction 与部署补偿。成功后的 per-Skill pin 是本机消费意图，与订阅一起持久化，同时排除手动和自动批量升级；“恢复跟随”只清 pin 并重算最新计划，不隐式改写安装内容。
 - 扩展：发布者移除 Skill 只改变频道可跟踪集合，不授权订阅端自动删除。本地项进入 `removed_from_channel` 并保留内容/部署；卸载或转本地必须是用户动作，后者以完整快照和冲突安全名称建立新的本地所有权。未处理的 removal tombstone 不会因远端同名重加而退回普通更新；处理后从 tracked/known/pin 移除身份，因此未来重加只会产生显式安装选择，不把远端同名解释为可覆盖本地副本的恢复授权。移除事务在共享 update lock 下把 Hub/lockfile staging 与 subscription metadata 绑定：metadata 失败回滚，metadata 成功后的清理失败不得重新跟踪。
 - 扩展：成员撤销不维护 SkillStar 成员表，也不尝试修改 GitHub 的 Team、组织 membership 或 base permission。owner 端删除 direct collaborator 后必须以 effective permission 复查结果作为结论；subscriber 端把明确失权持久化为远程状态并 fail closed，停止后续内容 mutation，但本地已下载内容继续归用户控制。暂时网络/代理/API 错误只保留上次已知状态；权限恢复必须先通过新的仓库身份与读取权限验证。
+- 扩展：订阅远程状态采用五态投影而不是一个 revoked 布尔值：明确删除/失权为 `revoked`，网络/代理为 `offline`，未登录/限流/暂时协议错误为 `recoverable_failure`，stable ID 或组织漂移、未知 schema、tag/commit/path/hash 解绑为 `integrity_error`，全链验证通过才为 `active`。所有非 active 状态都冻结远端 mutation 并保留本地内容与最后快照；恢复探测不能跳过任何完整性校验。仓库同组织改名只按数字 repository ID 刷新本地路由，跨组织转移绝不自动跟随。
 
 ## 新增记录格式
 

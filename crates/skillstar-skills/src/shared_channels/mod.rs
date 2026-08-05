@@ -17,12 +17,14 @@ mod github_membership;
 mod github_status;
 mod membership;
 mod release;
+mod release_content_verifier;
 mod release_scanner;
 mod store;
 mod subscription;
 mod subscription_installer;
 mod subscription_remote;
 mod subscription_store;
+mod subscription_validation;
 
 #[cfg(test)]
 mod channel_access_tests;
@@ -96,6 +98,90 @@ pub use subscription::{
 };
 pub use subscription_installer::GitChannelSubscriptionInstaller;
 pub use subscription_store::DiskChannelSubscriptionRegistry;
+pub(crate) use subscription_store::{managed_repository_for_skill, managed_repository_for_url};
+
+pub(crate) fn ensure_generic_skill_mutation_allowed(skill_id: &str) -> anyhow::Result<()> {
+    if let Some(repository_id) = managed_repository_for_skill(skill_id)? {
+        anyhow::bail!(
+            "Skill '{skill_id}' is managed by shared channel repository {repository_id}; use the shared channel controls to update, remove, or convert it"
+        );
+    }
+    Ok(())
+}
+
+pub(crate) fn ensure_generic_repository_mutation_allowed(
+    repository_url: &str,
+) -> anyhow::Result<()> {
+    if let Some(repository_id) = managed_repository_for_url(repository_url)? {
+        anyhow::bail!(
+            "Repository is owned by shared channel {repository_id}; use the shared-channel update flow"
+        );
+    }
+    Ok(())
+}
+
+fn generic_checkout_is_mutable(skill_path: &std::path::Path) -> anyhow::Result<bool> {
+    let Some(requested_root) = crate::repo_link::repo_root_of(skill_path) else {
+        return Ok(true);
+    };
+    let hub = skillstar_core::infra::paths::hub_skills_dir();
+    let entries = match std::fs::read_dir(&hub) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(true),
+        Err(error) => return Err(error.into()),
+    };
+    for entry in entries {
+        let entry = entry?;
+        let sibling_path = entry.path();
+        if crate::repo_link::repo_root_of(&sibling_path).as_ref() != Some(&requested_root) {
+            continue;
+        }
+        let sibling = entry.file_name().to_string_lossy().into_owned();
+        if managed_repository_for_skill(&sibling)?.is_some() {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+pub(crate) fn generic_installed_skill_is_mutable(
+    skill_id: &str,
+    skill_path: &std::path::Path,
+) -> anyhow::Result<bool> {
+    if managed_repository_for_skill(skill_id)?.is_some() {
+        return Ok(false);
+    }
+    let lockfile = crate::lockfile::Lockfile::load(&crate::lockfile::lockfile_path())?;
+    let entry = lockfile
+        .skills
+        .iter()
+        .find(|entry| entry.name.eq_ignore_ascii_case(skill_id));
+    let is_repo_backed = crate::repo_link::repo_root_of(skill_path).is_some()
+        || crate::git::ops::find_repo_root(skill_path).is_some();
+    if is_repo_backed {
+        let Some(entry) = entry else {
+            return Ok(false);
+        };
+        let Some(baseline) = entry.content_hash.as_deref() else {
+            return Ok(false);
+        };
+        if entry.content_hash_version != Some(crate::content::SNAPSHOT_HASH_VERSION) {
+            return Ok(false);
+        }
+        let Ok(current) = crate::content::snapshot(skill_id) else {
+            return Ok(false);
+        };
+        if current.content_hash != baseline {
+            return Ok(false);
+        }
+    }
+    if let Some(entry) = entry
+        && managed_repository_for_url(&entry.git_url)?.is_some()
+    {
+        return Ok(false);
+    }
+    generic_checkout_is_mutable(skill_path)
+}
 
 pub const CHANNEL_DESCRIPTOR_VERSION: u32 = 1;
 pub const SHARED_CHANNEL_STORE_VERSION: u32 = 1;
@@ -325,6 +411,10 @@ pub trait SharedChannelRegistry: Send + Sync {
 
     fn load(&self) -> Result<SharedChannelStore, SharedChannelError>;
     fn save(&self, store: &SharedChannelStore) -> Result<(), SharedChannelError>;
+
+    fn list_read_only(&self) -> Result<Vec<SharedChannelDescriptor>, SharedChannelError> {
+        Ok(self.load()?.channels)
+    }
 }
 
 pub struct SharedChannelFacade<G, R> {
@@ -346,7 +436,7 @@ where
     }
 
     pub fn list_channels(&self) -> Result<Vec<SharedChannelDescriptor>, SharedChannelError> {
-        Ok(self.registry.load()?.channels)
+        self.registry.list_read_only()
     }
 
     pub async fn create_channel(
@@ -567,7 +657,7 @@ pub(super) fn validate_remote_repository(
 ) -> Result<(), SharedChannelError> {
     if remote.id != expected_repository_id {
         return Err(SharedChannelError::new(
-            SharedChannelErrorCode::RepositoryNotFound,
+            SharedChannelErrorCode::Integrity,
             "GitHub returned a different repository than the requested repository ID",
         ));
     }

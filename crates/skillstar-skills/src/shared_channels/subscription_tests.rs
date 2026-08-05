@@ -95,7 +95,9 @@ impl ChannelSubscriptionRegistry for FakeSubscriptions {
 struct FakeInstaller {
     requests: Arc<Mutex<Vec<ChannelInstallRequest>>>,
     rollbacks: Arc<Mutex<Vec<ChannelInstallReceipt>>>,
+    final_commits: Arc<Mutex<usize>>,
     fail: Arc<Mutex<bool>>,
+    verify_error: Arc<Mutex<Option<SharedChannelErrorCode>>>,
     invalid_receipt: Arc<Mutex<bool>>,
     fail_rollback: Arc<Mutex<bool>>,
 }
@@ -105,7 +107,9 @@ impl Default for FakeInstaller {
         Self {
             requests: Arc::new(Mutex::new(Vec::new())),
             rollbacks: Arc::new(Mutex::new(Vec::new())),
+            final_commits: Arc::new(Mutex::new(0)),
             fail: Arc::new(Mutex::new(false)),
+            verify_error: Arc::new(Mutex::new(None)),
             invalid_receipt: Arc::new(Mutex::new(false)),
             fail_rollback: Arc::new(Mutex::new(false)),
         }
@@ -114,6 +118,21 @@ impl Default for FakeInstaller {
 
 #[async_trait]
 impl ChannelSubscriptionInstaller for FakeInstaller {
+    async fn verify_release_content(
+        &self,
+        _repository: &RemoteRepository,
+        _manifest: &ChannelReleaseManifest,
+    ) -> Result<(), SharedChannelError> {
+        if let Some(code) = *self.verify_error.lock().unwrap() {
+            Err(SharedChannelError::new(
+                code,
+                "release content verification failed",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
     async fn install(
         &self,
         request: ChannelInstallRequest,
@@ -153,6 +172,24 @@ impl ChannelSubscriptionInstaller for FakeInstaller {
         } else {
             Ok(())
         }
+    }
+
+    async fn verify_and_commit_install(
+        &self,
+        receipt: &ChannelInstallReceipt,
+        commit: Box<dyn FnOnce() -> Result<(), SharedChannelError> + Send>,
+    ) -> Result<(), SharedChannelError> {
+        *self.final_commits.lock().unwrap() += 1;
+        if let Err(error) = commit() {
+            return Err(match self.rollback(receipt).await {
+                Ok(()) => error,
+                Err(rollback) => SharedChannelError::new(
+                    error.code,
+                    format!("{}; rollback failed: {}", error.message, rollback.message),
+                ),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -229,6 +266,7 @@ async fn subscribe_installs_only_selected_skills_and_persists_target_baseline_an
         installer.requests.lock().unwrap()[0].selected_skill_ids,
         vec!["writer"]
     );
+    assert_eq!(*installer.final_commits.lock().unwrap(), 1);
 
     let restarted = facade(subscriptions, FakeInstaller::default());
     let review = restarted.review(42).await.unwrap();
@@ -457,6 +495,38 @@ async fn stale_review_revision_is_rejected_before_install() {
     assert!(installer.requests.lock().unwrap().is_empty());
 }
 
+#[tokio::test]
+async fn repeated_subscribe_persists_integrity_failure_for_the_existing_subscription() {
+    let subscriptions = FakeSubscriptions::default();
+    let installer = FakeInstaller::default();
+    let app = facade(subscriptions.clone(), installer.clone());
+    app.subscribe(SubscribeChannelRequest {
+        repository_id: 42,
+        target: release_target(),
+        selected_skill_ids: vec!["writer".into()],
+    })
+    .await
+    .unwrap();
+    *installer.verify_error.lock().unwrap() = Some(SharedChannelErrorCode::Integrity);
+
+    let error = app
+        .subscribe(SubscribeChannelRequest {
+            repository_id: 42,
+            target: release_target(),
+            selected_skill_ids: vec!["writer".into()],
+        })
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code, SharedChannelErrorCode::Integrity);
+    assert_eq!(
+        subscriptions.store.lock().unwrap().subscriptions[0]
+            .remote_state
+            .status,
+        ChannelSubscriptionRemoteStatus::IntegrityError
+    );
+}
+
 #[test]
 fn serialized_subscription_provenance_never_contains_credentials() {
     let request = ChannelInstallRequest {
@@ -468,6 +538,7 @@ fn serialized_subscription_provenance_never_contains_credentials() {
         descriptor_version: CHANNEL_SUBSCRIPTION_DESCRIPTOR_VERSION,
         repository_id: 42,
         organization_id: 7,
+        repository_url_aliases: Vec::new(),
         target: ChannelReleaseTarget {
             revision: 1,
             tag_name: "channel-v000001".into(),

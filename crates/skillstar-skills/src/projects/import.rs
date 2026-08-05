@@ -20,6 +20,10 @@ pub fn import_scanned_skills(
     project_name: &str,
     targets: &[ImportTarget],
 ) -> Result<ImportResult> {
+    let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()?;
+    for target in targets {
+        crate::shared_channels::ensure_generic_skill_mutation_allowed(&target.name)?;
+    }
     let entry = register_project(project_path)?;
     let canonical_project_name = entry.name;
 
@@ -92,12 +96,14 @@ pub fn import_scanned_skills(
         let hub_skill_dir = hub_dir.join(&target.name);
 
         if !hub_skill_dir.exists() {
-            local_skill::adopt_existing_dir(&target.name, &source_dir).with_context(|| {
-                format!(
-                    "failed to adopt discovered project skill '{}' into skills-local",
-                    target.name
-                )
-            })?;
+            local_skill::adopt_existing_dir_locked(&target.name, &source_dir).with_context(
+                || {
+                    format!(
+                        "failed to adopt discovered project skill '{}' into skills-local",
+                        target.name
+                    )
+                },
+            )?;
             imported_to_hub.push(target.name.clone());
         } else {
             std::fs::remove_dir_all(&source_dir)

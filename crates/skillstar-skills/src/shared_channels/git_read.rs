@@ -16,8 +16,8 @@ pub(super) fn git_read_error(error: anyhow::Error, action: &str) -> SharedChanne
             }
             GitCode::Cancelled => SharedChannelErrorCode::Cancelled,
             GitCode::UnsafeRemote => SharedChannelErrorCode::Integrity,
-            GitCode::Other => SharedChannelErrorCode::SubscriptionUpdateFailed,
+            GitCode::Other => SharedChannelErrorCode::Protocol,
         })
-        .unwrap_or(SharedChannelErrorCode::SubscriptionUpdateFailed);
+        .unwrap_or(SharedChannelErrorCode::Protocol);
     SharedChannelError::new(code, format!("{action}: {error:#}"))
 }

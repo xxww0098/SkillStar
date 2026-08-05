@@ -680,12 +680,16 @@ pub(super) fn parse_json<T: serde::de::DeserializeOwned>(
     })
 }
 
-fn ensure_status(status: u16, body: &str, expected: &[u16]) -> Result<(), SharedChannelError> {
+pub(super) fn ensure_status(
+    status: u16,
+    body: &str,
+    expected: &[u16],
+) -> Result<(), SharedChannelError> {
     if expected.contains(&status) {
         Ok(())
     } else if status == 429 || super::github_status::is_rate_limited_response(body) {
         Err(SharedChannelError::new(
-            SharedChannelErrorCode::Network,
+            SharedChannelErrorCode::Protocol,
             "GitHub temporarily rate-limited shared-channel access; wait and retry",
         ))
     } else {
