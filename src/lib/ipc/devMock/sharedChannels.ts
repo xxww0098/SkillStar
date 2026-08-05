@@ -7,6 +7,7 @@ import type {
   ChannelPublishResult,
   ChannelSubscription,
   ChannelSubscriptionReview,
+  ChannelAutoUpdateRun,
   ChannelUpdateSnapshot,
   ExistingChannelScanPreview,
   SharedChannelDescriptor,
@@ -345,6 +346,7 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
       organization_id: subscription.organization_id,
       target: subscription.target,
       selected_skill_ids: subscription.skills.map((skill) => skill.id),
+      auto_update: subscription.auto_update,
       read_only: false,
     })),
   review_shared_channel_subscription: (args) => {
@@ -403,7 +405,7 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
     const selected = request.selected_skill_ids ?? [];
     const now = new Date().toISOString();
     const subscription: ChannelSubscription = {
-      descriptor_version: 2,
+      descriptor_version: 3,
       repository_id: repositoryId,
       organization_id: channel.organization_id,
       target: {
@@ -426,7 +428,9 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
         },
       })),
       known_skill_ids: selected,
+      pins: [],
       last_update: null,
+      auto_update: { enabled: false, next_check_at: null, last_run: null },
       created_at: now,
       updated_at: now,
     };
@@ -483,6 +487,7 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
         },
       ],
       check_error: null,
+      check_error_code: null,
     };
     subscription.last_update = snapshot;
     return snapshot;
@@ -507,5 +512,95 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
     subscription.target = request.target ?? snapshot.target;
     subscription.last_update = snapshot;
     return { snapshot, applied_skill_ids: applied };
+  },
+  get_shared_channel_auto_update_state: (args) => {
+    const repositoryId = Number(args?.repositoryId ?? 0);
+    const subscription = channelSubscriptions.find((item) => item.repository_id === repositoryId);
+    if (!subscription) throw new Error("subscription_not_found: Subscribe to this channel first");
+    return subscription.auto_update;
+  },
+  set_shared_channel_auto_update_enabled: (args) => {
+    const repositoryId = Number(args?.repositoryId ?? 0);
+    const subscription = channelSubscriptions.find((item) => item.repository_id === repositoryId);
+    if (!subscription) throw new Error("subscription_not_found: Subscribe to this channel first");
+    const enabled = Boolean(args?.enabled);
+    const hardPaused =
+      subscription.auto_update.last_run?.status === "paused" &&
+      subscription.auto_update.last_run.pauses.some(
+        (pause) =>
+          !pause.skill_id && ["permission_changed", "integrity_error", "unresolved_failure"].includes(pause.reason),
+      );
+    subscription.auto_update = {
+      ...subscription.auto_update,
+      enabled,
+      next_check_at: enabled
+        ? new Date().toISOString()
+        : hardPaused
+          ? null
+          : new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    };
+    return subscription.auto_update;
+  },
+  run_shared_channel_auto_updates: () => {
+    const now = new Date().toISOString();
+    return channelSubscriptions.flatMap((subscription) => {
+      const enabled = subscription.auto_update.enabled;
+      const snapshot = subscription.last_update;
+      const applied = enabled
+        ? (snapshot?.items.filter((item) => item.state === "available").map((item) => item.id) ?? [])
+        : [];
+      const pauses =
+        snapshot?.items
+          .filter((item) => item.state === "notification" || item.state === "blocked" || item.state === "failed")
+          .map((item) => ({
+            skill_id: item.id,
+            reason:
+              item.state === "notification"
+                ? ("new_skill_requires_review" as const)
+                : item.state === "failed"
+                  ? ("unresolved_failure" as const)
+                  : item.block_reason === "removed_upstream"
+                    ? ("removed_upstream" as const)
+                    : (item.block_reason ?? "unresolved_failure"),
+            detail: item.error,
+          })) ?? [];
+      const run: ChannelAutoUpdateRun = {
+        started_at: now,
+        completed_at: now,
+        status: !enabled
+          ? "checked"
+          : applied.length > 0
+            ? pauses.length > 0
+              ? "partially_applied"
+              : "applied"
+            : pauses.length > 0
+              ? "paused"
+              : "up_to_date",
+        target: snapshot?.target ?? subscription.target,
+        applied_skill_ids: applied,
+        pauses,
+        error: null,
+        retryable: false,
+      };
+      if (enabled && snapshot && applied.length > 0) {
+        const fullyApplied = pauses.length === 0;
+        subscription.last_update = {
+          ...snapshot,
+          status: fullyApplied ? "up_to_date" : "partially_upgraded",
+          acknowledgement_required: !fullyApplied,
+          checked_at: now,
+          items: snapshot.items
+            .filter((item) => !fullyApplied || item.state !== "notification")
+            .map((item) => (applied.includes(item.id) ? { ...item, state: "applied" as const } : item)),
+        };
+        if (fullyApplied) subscription.target = snapshot.target;
+      }
+      subscription.auto_update = {
+        enabled,
+        next_check_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        last_run: run,
+      };
+      return [{ repository_id: subscription.repository_id, run }];
+    });
   },
 };

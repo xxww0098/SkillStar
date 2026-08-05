@@ -155,6 +155,7 @@ pub fn run() {
                 error!(target: "marketplace_snapshot", "init failed: {err}");
             }
             setup_deep_links(app);
+            core::channel_auto_update::start(app.handle());
 
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -285,6 +286,9 @@ pub fn run() {
             commands::get_shared_channel_update_state,
             commands::check_shared_channel_update,
             commands::apply_shared_channel_update,
+            commands::get_shared_channel_auto_update_state,
+            commands::set_shared_channel_auto_update_enabled,
+            commands::run_shared_channel_auto_updates,
             commands::github::check_gh_status,
             commands::github::check_git_status,
             commands::github::check_developer_mode,

@@ -3,6 +3,7 @@
 //! The facade owns the recoverable create/bind transaction. Presentation
 //! layers never infer repository identity from mutable owner/name routing data.
 
+mod channel_auto_update;
 mod channel_update;
 mod channel_update_installer;
 mod existing;
@@ -17,6 +18,8 @@ mod subscription_installer;
 mod subscription_store;
 
 #[cfg(test)]
+mod channel_auto_update_tests;
+#[cfg(test)]
 mod channel_update_tests;
 #[cfg(test)]
 mod subscription_tests;
@@ -26,6 +29,11 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+pub use channel_auto_update::{
+    CHANNEL_AUTO_UPDATE_INTERVAL_SECS, ChannelAutoUpdateExecution, ChannelAutoUpdatePause,
+    ChannelAutoUpdatePauseReason, ChannelAutoUpdateRun, ChannelAutoUpdateRunStatus,
+    ChannelAutoUpdateState, channel_auto_update_state, set_channel_auto_update_enabled,
+};
 pub use channel_update::{
     ApplyChannelUpdateRequest, ApplyChannelUpdateResult, ChannelSkillUpdateReceipt,
     ChannelSkillUpdateRequest, ChannelSkillUpdateResolution, ChannelSubscriptionUpdater,
@@ -58,10 +66,10 @@ pub use store::DiskSharedChannelRegistry;
 pub use subscription::{
     CHANNEL_SUBSCRIPTION_DESCRIPTOR_VERSION, CHANNEL_SUBSCRIPTION_STORE_VERSION,
     ChannelInstallReceipt, ChannelInstallRequest, ChannelReleaseTarget, ChannelRepositoryExposure,
-    ChannelSkillProvenance, ChannelSubscribedSkill, ChannelSubscription, ChannelSubscriptionFacade,
-    ChannelSubscriptionGateway, ChannelSubscriptionInstaller, ChannelSubscriptionRegistry,
-    ChannelSubscriptionReview, ChannelSubscriptionReviewSkill, ChannelSubscriptionStore,
-    ChannelSubscriptionView, SubscribeChannelRequest,
+    ChannelSkillPin, ChannelSkillProvenance, ChannelSubscribedSkill, ChannelSubscription,
+    ChannelSubscriptionFacade, ChannelSubscriptionGateway, ChannelSubscriptionInstaller,
+    ChannelSubscriptionRegistry, ChannelSubscriptionReview, ChannelSubscriptionReviewSkill,
+    ChannelSubscriptionStore, ChannelSubscriptionView, SubscribeChannelRequest,
 };
 pub use subscription_installer::GitChannelSubscriptionInstaller;
 pub use subscription_store::DiskChannelSubscriptionRegistry;
@@ -174,7 +182,7 @@ pub struct CreateSharedChannelRequest {
     pub description: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SharedChannelErrorCode {
     NotAuthenticated,

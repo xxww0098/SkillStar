@@ -1,9 +1,9 @@
 //! Thin Tauri adapters for organization-private shared channels.
 
 use skillstar_skills::shared_channels::{
-    ApplyChannelUpdateRequest, ApplyChannelUpdateResult, ChannelInvitation,
-    ChannelInvitationAction, ChannelMembershipSnapshot, ChannelPublishPreview,
-    ChannelPublishResult, ChannelSubscription, ChannelSubscriptionRegistry,
+    ApplyChannelUpdateRequest, ApplyChannelUpdateResult, ChannelAutoUpdateExecution,
+    ChannelAutoUpdateState, ChannelInvitation, ChannelInvitationAction, ChannelMembershipSnapshot,
+    ChannelPublishPreview, ChannelPublishResult, ChannelSubscription, ChannelSubscriptionRegistry,
     ChannelSubscriptionReview, ChannelSubscriptionView, ChannelUpdateSnapshot,
     CreateChannelInvitationRequest, CreateSharedChannelRequest, DiskChannelSubscriptionRegistry,
     DiskSharedChannelRegistry, ExistingChannelRepositoryCandidate, ExistingChannelScanPreview,
@@ -293,6 +293,55 @@ pub async fn apply_shared_channel_update(
     let registered_session_id = git_facade.session().id().to_string();
     let result = match state.channel_subscription_facade(git_facade) {
         Ok(facade) => facade.apply_update(request).await,
+        Err(error) => Err(error),
+    };
+    state.finish_git_operation(&registered_session_id);
+    result
+}
+
+#[tauri::command]
+pub fn get_shared_channel_auto_update_state(
+    repository_id: u64,
+) -> Result<ChannelAutoUpdateState, SharedChannelError> {
+    let store = DiskChannelSubscriptionRegistry.load_mutable()?;
+    store
+        .subscriptions
+        .into_iter()
+        .find(|subscription| subscription.repository_id == repository_id)
+        .map(|subscription| subscription.auto_update)
+        .ok_or_else(|| {
+            SharedChannelError::new(
+                skillstar_skills::shared_channels::SharedChannelErrorCode::SubscriptionNotFound,
+                "This channel has not been subscribed on this device",
+            )
+        })
+}
+
+#[tauri::command]
+pub async fn set_shared_channel_auto_update_enabled(
+    repository_id: u64,
+    enabled: bool,
+) -> Result<ChannelAutoUpdateState, SharedChannelError> {
+    skillstar_skills::shared_channels::set_channel_auto_update_enabled(
+        &DiskChannelSubscriptionRegistry,
+        repository_id,
+        enabled,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn run_shared_channel_auto_updates(
+    app: AppHandle,
+    session_id: String,
+    state: State<'_, GitHubAuthState>,
+) -> Result<Vec<ChannelAutoUpdateExecution>, SharedChannelError> {
+    let git_facade = state
+        .begin_git_operation(app, Some(session_id))
+        .map_err(SharedChannelError::from)?;
+    let registered_session_id = git_facade.session().id().to_string();
+    let result = match state.channel_subscription_facade(git_facade) {
+        Ok(facade) => facade.run_due_auto_updates().await,
         Err(error) => Err(error),
     };
     state.finish_git_operation(&registered_session_id);

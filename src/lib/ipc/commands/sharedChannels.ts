@@ -18,6 +18,8 @@ import type {
   ApplyChannelUpdateRequest,
   ApplyChannelUpdateResult,
   ChannelUpdateSnapshot,
+  ChannelAutoUpdateExecution,
+  ChannelAutoUpdateState,
 } from "../../../types";
 
 export interface SharedChannelCommands {
@@ -120,5 +122,17 @@ export interface SharedChannelCommands {
   apply_shared_channel_update: {
     args: { request: ApplyChannelUpdateRequest; sessionId: string };
     result: ApplyChannelUpdateResult;
+  };
+  get_shared_channel_auto_update_state: {
+    args: { repositoryId: number };
+    result: ChannelAutoUpdateState;
+  };
+  set_shared_channel_auto_update_enabled: {
+    args: { repositoryId: number; enabled: boolean };
+    result: ChannelAutoUpdateState;
+  };
+  run_shared_channel_auto_updates: {
+    args: { sessionId: string };
+    result: ChannelAutoUpdateExecution[];
   };
 }

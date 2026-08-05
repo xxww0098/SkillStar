@@ -1,13 +1,30 @@
 import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, ShieldAlert } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "../../../components/ui/button";
-import type { ChannelUpdateItem, ChannelUpdateSnapshot, LocalDivergenceResolution } from "../../../types";
-import { applySharedChannelUpdate, checkSharedChannelUpdate, getSharedChannelUpdateState } from "../api/channels";
+import { Switch } from "../../../components/ui/switch";
+import type {
+  ChannelAutoUpdateExecution,
+  ChannelAutoUpdatePauseReason,
+  ChannelAutoUpdateState,
+  ChannelUpdateItem,
+  ChannelUpdateSnapshot,
+  LocalDivergenceResolution,
+} from "../../../types";
+import {
+  applySharedChannelUpdate,
+  checkSharedChannelUpdate,
+  getSharedChannelAutoUpdateState,
+  getSharedChannelUpdateState,
+  runSharedChannelAutoUpdates,
+  setSharedChannelAutoUpdateEnabled,
+} from "../api/channels";
 
 export function ChannelUpdatePanel({ repositoryId }: { repositoryId: number }) {
   const [snapshot, setSnapshot] = useState<ChannelUpdateSnapshot | null>(null);
   const [checking, setChecking] = useState(true);
   const [applying, setApplying] = useState(false);
+  const [autoSaving, setAutoSaving] = useState(false);
+  const [autoUpdate, setAutoUpdate] = useState<ChannelAutoUpdateState | null>(null);
   const [error, setError] = useState("");
   const [resolutions, setResolutions] = useState<Record<string, LocalDivergenceResolution>>({});
   const [localNames, setLocalNames] = useState<Record<string, string>>({});
@@ -44,6 +61,68 @@ export function ChannelUpdatePanel({ repositoryId }: { repositoryId: number }) {
       active = false;
     };
   }, [check, repositoryId]);
+
+  useEffect(() => {
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    void getSharedChannelAutoUpdateState(repositoryId)
+      .then((state) => {
+        if (active) setAutoUpdate(state);
+      })
+      .catch(() => undefined);
+    void import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        listen<ChannelAutoUpdateExecution[]>("shared-channels://auto-update-completed", (event) => {
+          const execution = event.payload.find((item) => item.repository_id === repositoryId);
+          if (!active || !execution) return;
+          setAutoUpdate((current) =>
+            current
+              ? { ...current, last_run: execution.run }
+              : { enabled: true, next_check_at: null, last_run: execution.run },
+          );
+          void Promise.all([getSharedChannelUpdateState(repositoryId), getSharedChannelAutoUpdateState(repositoryId)])
+            .then(([stored, autoState]) => {
+              if (!active) return;
+              if (stored) setSnapshot(stored);
+              setAutoUpdate(autoState);
+            })
+            .catch(() => undefined);
+        }),
+      )
+      .then((stop) => {
+        if (active) unlisten = stop;
+        else stop();
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, [repositoryId]);
+
+  const toggleAutoUpdate = async (enabled: boolean) => {
+    if (autoSaving) return;
+    setAutoSaving(true);
+    setError("");
+    try {
+      const state = await setSharedChannelAutoUpdateEnabled(repositoryId, enabled);
+      setAutoUpdate(state);
+      if (enabled) {
+        const executions = await runSharedChannelAutoUpdates(crypto.randomUUID());
+        const execution = executions.find((item) => item.repository_id === repositoryId);
+        if (execution) setAutoUpdate({ ...state, last_run: execution.run });
+        const stored = await getSharedChannelUpdateState(repositoryId);
+        if (stored) setSnapshot(stored);
+        setAutoUpdate(await getSharedChannelAutoUpdateState(repositoryId));
+      }
+    } catch (cause) {
+      setError(updateError(cause));
+      const stored = await getSharedChannelAutoUpdateState(repositoryId).catch(() => null);
+      if (stored) setAutoUpdate(stored);
+    } finally {
+      setAutoSaving(false);
+    }
+  };
 
   const actionable = useMemo(
     () =>
@@ -95,9 +174,15 @@ export function ChannelUpdatePanel({ repositoryId }: { repositoryId: number }) {
 
   if (!snapshot) {
     return (
-      <section className="rounded-xl border border-border p-4" aria-label="Channel updates">
+      <section className="space-y-3 rounded-xl border border-border p-4" aria-label="Channel updates">
         <p className="text-sm font-medium">Channel update check unavailable</p>
         <p className="mt-1 text-xs text-destructive">{error}</p>
+        {autoUpdate?.last_run && (
+          <div className="rounded-lg border border-border bg-muted/20 p-3">
+            <p className="text-xs font-medium">Most recent background check</p>
+            <AutoUpdateResult state={autoUpdate} />
+          </div>
+        )}
         <Button size="sm" variant="outline" className="mt-3" onClick={() => void check()}>
           Retry check
         </Button>
@@ -129,6 +214,9 @@ export function ChannelUpdatePanel({ repositoryId }: { repositoryId: number }) {
         <span>{counts.updated ?? 0} updated</span>
         <span>{counts.removed ?? 0} removed</span>
         <span>{counts.unchanged ?? 0} unchanged</span>
+        <span>
+          Last checked: <time dateTime={snapshot.checked_at}>{formatPublishedAt(snapshot.checked_at)}</time>
+        </span>
       </div>
 
       {snapshot.check_error && (
@@ -136,6 +224,26 @@ export function ChannelUpdatePanel({ repositoryId }: { repositoryId: number }) {
           Showing the last verified result because this check failed: {snapshot.check_error}
         </p>
       )}
+
+      <div className="rounded-lg border border-border bg-muted/20 p-3">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-medium">Protected automatic upgrades</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Automatic application is off by default; background checks still run hourly. When enabled, SkillStar
+              updates only unchanged subscribed Skills. New, removed, pinned, locally modified, permission-blocked,
+              integrity-failed, or otherwise failed items stay paused for review.
+            </p>
+          </div>
+          <Switch
+            aria-label="Protected automatic upgrades"
+            checked={autoUpdate?.enabled ?? false}
+            disabled={!autoUpdate || autoSaving || applying}
+            onCheckedChange={(enabled) => void toggleAutoUpdate(enabled)}
+          />
+        </div>
+        {autoUpdate?.last_run && <AutoUpdateResult state={autoUpdate} />}
+      </div>
 
       {snapshot.acknowledgement_required &&
         !snapshot.items.some((item) => ["available", "notification", "blocked", "failed"].includes(item.state)) && (
@@ -183,6 +291,53 @@ export function ChannelUpdatePanel({ repositoryId }: { repositoryId: number }) {
       </div>
     </section>
   );
+}
+
+function AutoUpdateResult({ state }: { state: ChannelAutoUpdateState }) {
+  const run = state.last_run;
+  if (!run) return null;
+  const timestamp = run.completed_at ?? run.started_at;
+  return (
+    <div className="mt-3 space-y-2 border-t border-border/70 pt-3 text-[11px] text-muted-foreground">
+      <p>
+        Last automatic run: <span className="font-medium text-foreground">{run.status.replaceAll("_", " ")}</span> ·{" "}
+        <time dateTime={timestamp}>{formatPublishedAt(timestamp)}</time>
+      </p>
+      {run.applied_skill_ids.length > 0 && <p>Applied: {run.applied_skill_ids.join(", ")}</p>}
+      {run.pauses.length > 0 && (
+        <ul className="space-y-1" aria-label="Automatic upgrade pauses">
+          {run.pauses.map((pause, index) => (
+            <li key={`${pause.skill_id ?? "channel"}-${pause.reason}-${index}`}>
+              {pause.skill_id ?? "Channel"}: {autoPauseLabel(pause.reason)}
+              {pause.detail ? ` — ${pause.detail}` : ""}
+            </li>
+          ))}
+        </ul>
+      )}
+      {run.error && <p className="text-amber-700">{run.error}</p>}
+      {run.retryable && <p>Temporary failure; SkillStar will retry automatically.</p>}
+      {state.enabled && state.next_check_at && (
+        <p>
+          Next check: <time dateTime={state.next_check_at}>{formatPublishedAt(state.next_check_at)}</time>
+        </p>
+      )}
+    </div>
+  );
+}
+
+function autoPauseLabel(reason: ChannelAutoUpdatePauseReason): string {
+  const labels: Record<ChannelAutoUpdatePauseReason, string> = {
+    pinned: "pinned to a historical release",
+    local_content_changed: "local content changed",
+    baseline_missing: "trusted baseline missing",
+    snapshot_failed: "local snapshot failed",
+    permission_changed: "channel permission changed",
+    removed_upstream: "removed from the channel",
+    integrity_error: "release integrity check failed",
+    unresolved_failure: "previous failure needs manual retry",
+    new_skill_requires_review: "new Skill requires review",
+  };
+  return labels[reason];
 }
 
 function UpdateItem({

@@ -71,6 +71,14 @@ impl GitSkillFacade {
         skill_install::fetch_repo_scanned_in_session(input, full_depth, &self.session)
     }
 
+    pub(crate) fn fetch_repo_scanned_detailed(
+        &self,
+        input: &str,
+        full_depth: bool,
+    ) -> anyhow::Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>)> {
+        skill_install::fetch_repo_scanned_detailed_in_session(input, full_depth, &self.session)
+    }
+
     pub fn install_from_scan(
         &self,
         source: &str,

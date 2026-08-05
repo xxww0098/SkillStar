@@ -271,13 +271,10 @@ fn apply_blocking(
         "{}#{}",
         request.repository.clone_url, request.manifest.commit_sha
     );
-    let (_url, _source, repo_dir, discovered) =
-        git.fetch_repo_scanned(&source, true).map_err(|error| {
-            rollback_if_resolved(
-                &receipt,
-                resolved_divergence,
-                update_error(format!("Unable to read channel update: {error}")),
-            )
+    let (_url, _source, repo_dir, discovered) = git
+        .fetch_repo_scanned_detailed(&source, true)
+        .map_err(|error| {
+            rollback_if_resolved(&receipt, resolved_divergence, git_read_error(error))
         })?;
     let discovered = discovered
         .into_iter()
@@ -557,10 +554,30 @@ fn update_error(message: impl Into<String>) -> SharedChannelError {
     SharedChannelError::new(SharedChannelErrorCode::SubscriptionUpdateFailed, message)
 }
 
+fn git_read_error(error: anyhow::Error) -> SharedChannelError {
+    use crate::git::transport::GitTransportErrorCode as GitCode;
+    let code = error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<crate::git::transport::GitTransportError>())
+        .map(|transport| match transport.code {
+            GitCode::Network => SharedChannelErrorCode::Network,
+            GitCode::NotAuthenticated | GitCode::TokenExpired | GitCode::CredentialUnavailable => {
+                SharedChannelErrorCode::NotAuthenticated
+            }
+            GitCode::Unauthorized => SharedChannelErrorCode::PermissionDenied,
+            GitCode::AppNotInstalled => SharedChannelErrorCode::AppNotInstalled,
+            GitCode::Cancelled => SharedChannelErrorCode::Cancelled,
+            GitCode::UnsafeRemote => SharedChannelErrorCode::Integrity,
+            GitCode::Other => SharedChannelErrorCode::SubscriptionUpdateFailed,
+        })
+        .unwrap_or(SharedChannelErrorCode::SubscriptionUpdateFailed);
+    SharedChannelError::new(code, format!("Unable to read channel update: {error:#}"))
+}
+
 #[cfg(all(test, not(windows)))]
 mod tests {
     use super::*;
-    use crate::git::transport::GitOperationSession;
+    use crate::git::transport::{GitOperationSession, GitTransportError, GitTransportErrorCode};
     use crate::shared_channels::{
         CHANNEL_RELEASE_MANIFEST_VERSION, ChannelPublisherIdentity, ChannelReleaseManifest,
         ChannelReleaseSkill, ChannelSkillReleaseStatus, RemoteRepository, RepositoryPermissions,
@@ -568,6 +585,32 @@ mod tests {
     use std::collections::HashMap;
     use std::ffi::OsStr;
     use std::fs;
+
+    #[test]
+    fn structured_git_transport_errors_survive_context_mapping() {
+        for (git_code, expected) in [
+            (
+                GitTransportErrorCode::Network,
+                SharedChannelErrorCode::Network,
+            ),
+            (
+                GitTransportErrorCode::Unauthorized,
+                SharedChannelErrorCode::PermissionDenied,
+            ),
+            (
+                GitTransportErrorCode::UnsafeRemote,
+                SharedChannelErrorCode::Integrity,
+            ),
+        ] {
+            let error = anyhow::Error::new(GitTransportError {
+                code: git_code,
+                message: "transport failed".into(),
+                session_id: "session".into(),
+            })
+            .context("fetching exact release");
+            assert_eq!(git_read_error(error).code, expected);
+        }
+    }
 
     #[test]
     fn exact_update_and_rollback_reconcile_hub_agent_project_provenance_and_state() {

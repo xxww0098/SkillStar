@@ -57,15 +57,25 @@ pub fn fetch_repo_scanned_in_session(
     full_depth: bool,
     session: &crate::git::transport::GitOperationSession,
 ) -> Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>), String> {
-    let parsed =
-        crate::source_resolver::Source::parse(url).map_err(|e| format!("Invalid source: {}", e))?;
+    fetch_repo_scanned_detailed_in_session(url, full_depth, session)
+        .map_err(|error| format!("{error:#}"))
+}
+
+pub(crate) fn fetch_repo_scanned_detailed_in_session(
+    url: &str,
+    full_depth: bool,
+    session: &crate::git::transport::GitOperationSession,
+) -> anyhow::Result<(String, String, PathBuf, Vec<repo_scanner::DiscoveredSkill>)> {
+    use anyhow::Context as _;
+    let parsed = crate::source_resolver::Source::parse(url)
+        .map_err(|error| anyhow::anyhow!("Invalid source: {error}"))?;
     let repo_dir = repo_scanner::clone_or_fetch_repo_at_in_session(
         &parsed.repo_url,
         &parsed.short,
         parsed.git_ref.as_deref(),
         session,
     )
-    .map_err(|e| format!("Failed to fetch repo: {}", e))?;
+    .context("Failed to fetch repo")?;
     let mut skills_found = match parsed.subpath.as_deref() {
         Some(subpath) => {
             repo_scanner::scan_skills_in_repo_at(&repo_dir, &parsed.repo_url, subpath, full_depth)

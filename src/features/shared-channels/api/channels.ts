@@ -117,3 +117,15 @@ export function checkSharedChannelUpdate(repositoryId: number) {
 export function applySharedChannelUpdate(request: ApplyChannelUpdateRequest, sessionId: string) {
   return tauriInvoke("apply_shared_channel_update", { request, sessionId });
 }
+
+export function getSharedChannelAutoUpdateState(repositoryId: number) {
+  return tauriInvoke("get_shared_channel_auto_update_state", { repositoryId });
+}
+
+export function setSharedChannelAutoUpdateEnabled(repositoryId: number, enabled: boolean) {
+  return tauriInvoke("set_shared_channel_auto_update_enabled", { repositoryId, enabled });
+}
+
+export function runSharedChannelAutoUpdates(sessionId: string) {
+  return tauriInvoke("run_shared_channel_auto_updates", { sessionId });
+}

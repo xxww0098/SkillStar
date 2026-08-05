@@ -64,7 +64,9 @@
 - 接受 GitHub 仓库邀请只建立读取频道的能力，不代表同意把其中的 Skill 安装到本机。active 频道必须先读取并验证最新不可变 Release，再展示稳定频道身份、完整私有仓库暴露、revision、发布者、发布时间、发布说明及全部未移除 Skill；首次评审默认全选，用户可以逐项取消后再确认订阅。
 - 订阅确认重新读取最新 Release 并要求 repository ID、organization ID、revision、tag 与 commit 仍和评审目标一致；随后从精确 commit 的独立 ref cache 校验每个选中 Skill 的 content root 与完整内容 hash，只有全部通过才调用既有 staged batch install。只安装明确选中的 Skill，并记录固定 release target、选中集合、安装后的完整 baseline hash 与不含凭据的 Git URL/ref/source-folder provenance；Agent link/copy 与 Project copy 通过现有 reconciliation 刷新。
 - 频道订阅选择独立持久化在版本化的非敏感本地 store 中，GitHub 仍只负责访问控制和远端发布事实。首次允许选择为空，并记录该发布已评审的 Skill identity 集合；后续即使跳过多个发布，也以该集合识别真正新增项，只作为未选择通知，不能静默扩大已持久化选择。用户明确应用或确认新 revision 后同步推进已评审集合。安装或本地持久化任一步失败时，新安装项必须回滚，旧订阅保持不变。重启后评审从该 store 恢复选择与目标；未来未知 store schema 只做宽容只读投影，并拒绝任何订阅变更，不能猜测迁移。
-- 订阅频道默认自动检查最新不可变 Release，但只在用户明确点击应用后升级。检查结果展示 revision、发布者、发布时间、说明，以及 added/updated/removed/unchanged 差异；新增 Skill 永远只是未选择通知，removed Skill 保留当前可用副本并要求独立确认删除，不能由频道升级静默移除。
+- 订阅频道默认由应用后台任务每小时自动检查最新不可变 Release，但升级偏好按频道保存且默认保持手动；关闭应用进程时不承诺继续运行。订阅者显式开启受保护自动升级后，会立即检查并自动应用其中的安全项。检查结果展示 revision、发布者、发布时间、说明，以及 added/updated/removed/unchanged 差异。
+- 自动升级只应用检查与写入前都仍等于 baseline 的已订阅 Skill，并复用手动升级的精确 Release、staged transaction、最终验证与逐项回滚。pinned、本地分歧、权限变化、removed、完整性错误和上次未解决失败均暂停自动处理；一个暂停项不阻止同频道其他干净项。新增 Skill 永远不自动选择、安装或确认消失，仍需用户显式评审。
+- 每个频道持久化自动升级开关、最近尝试/完成时间、目标、已应用项、逐项暂停原因与可重试错误。网络、代理、未登录和临时协议错误保留最近已验证频道状态并等待下次到期重试，不得推断为撤权。手动检查或升级与后台任务共享频道 mutation lease 和统一 Skill 更新事务锁；重启、并发扫描及普通 Skill 更新不能让较旧结果覆盖较新状态。
 - 频道升级以 Skill 为独立应用单元：当前完整内容仍等于订阅 baseline、旧 checkout HEAD 仍等于逐项 provenance 的 updated Skill 才能进入精确 commit 的 staged update transaction；本地分歧项在任何 checkout、lockfile 或部署写入前停止，并复用统一的 `<name>.local` 保留或显式丢弃流程。目标 Release 不得低于订阅 target 或最近已验证 target；远端发布暂时回退时 fail-closed，不能降级已经前进的 Skill。一个 Skill 被阻塞或失败不妨碍其他干净项前进。
 - 每项成功后同时更新文件、baseline、release hash、无凭据 provenance、update state、Agent 与 Project 部署；任一步失败恢复该 Skill 的旧 checkout、lockfile 与部署。精确 Release 读取完成后、替换 Hub 前必须再次检查本地内容；读取期间出现的新编辑一律中止替换并原地保留，补偿回滚需要覆盖这些编辑时先保存为冲突安全的本地副本。订阅状态由逐项事实派生为 `up_to_date`、`update_available`、`partially_upgraded` 或 `blocked`，最近一次已验证检查与逐项结果持久化，离线或未登录时直接从本地 store 展示此前可用状态并允许重试。
 - Git-backed Skill 安装或成功更新后记录完整受管内容的 baseline hash。更新开始前必须重新计算当前完整目录 hash；若与 baseline 不同，则将该 Skill 标记为“本地分歧”并在任何 fetch/reset、lockfile 写入或部署变更之前停止。
@@ -126,6 +128,7 @@
 - 开启后台运行时关闭窗口转为隐藏；关闭后台运行时，窗口关闭应退出进程并移除 tray。
 - My Skills 管理本地 hub，也组合 remote/cloud scope；scope 共享卡片数据形状和展示面，不伪造一个能力完全一致的数据接口。
 - My Skills 本地 scope 的「来源」筛选除按 Hub/Local 类型与仓库过滤外，每个仓库来源行提供移除入口：确认后批量卸载该 `source` 下全部已安装技能（走既有 uninstall + 确认对话框），并在当前筛选指向该来源时清空筛选。
+- 每个 GitHub 仓库来源行在移除按钮左侧提供「重新安装」入口：重新扫描当前仓库的全深度 Skill 清单，并只将这一仓库发现的全部 Skill 重新安装；执行期间该行的重新安装按钮显示加载状态，不影响其他仓库。
 - 本地 scope 工具栏把「来源」筛选与当前列表数量合成同一 pill：左侧为来源标签与下拉/清除，右侧为 `countText`（层叠图标 + 数量）；无来源筛选时数量仍单独成 pill（远端 scope 等同）。
 - 本地 scope 处理待更新的默认路径是独立主 CTA「更新 N 项」（与「待更新」筛选分离）：一点即更新 Hub 内全部已标记 `update_available` 的技能（不受当前筛选影响），名单以点击瞬间快照为准，无确认框；结束用既有汇总 toast。单卡「更新」保留为次要 ghost 入口。决策见 [Wayfinder: 更新全部成为默认更新路径](https://github.com/xxww0098/SkillStar/issues/16)。
 - 工具栏搜索为 Spotlight 弹层（`SpotlightSearch`）：常驻仅为紧凑搜索按钮；⌘F / `/` 打开，Esc 关闭但保留 query；结果列表 ↑↓ 选择、Enter 打开详情；query 与背后列表过滤同步。⌘K 仍为全局 Command Palette，不混用。

@@ -62,6 +62,8 @@ pub struct ChannelUpdateItem {
     pub block_reason: Option<ChannelUpdateBlockReason>,
     pub suggested_local_name: Option<String>,
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<SharedChannelErrorCode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,6 +80,8 @@ pub struct ChannelUpdateSnapshot {
     pub items: Vec<ChannelUpdateItem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub check_error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check_error_code: Option<SharedChannelErrorCode>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -190,7 +194,12 @@ where
             Ok(value) => value,
             Err(error) => {
                 if let Some(mut snapshot) = previous {
+                    snapshot.checked_at = Utc::now().to_rfc3339();
                     snapshot.check_error = Some(error.message);
+                    snapshot.check_error_code = Some(error.code);
+                    store.subscriptions[index].last_update = Some(snapshot.clone());
+                    store.subscriptions[index].updated_at = snapshot.checked_at.clone();
+                    self.subscriptions.save(&store)?;
                     return Ok(snapshot);
                 }
                 return Err(error);
@@ -198,7 +207,12 @@ where
         };
         if let Err(error) = validate_manifest_progress(&store.subscriptions[index], &manifest) {
             if let Some(mut snapshot) = previous {
+                snapshot.checked_at = Utc::now().to_rfc3339();
                 snapshot.check_error = Some(error.message);
+                snapshot.check_error_code = Some(error.code);
+                store.subscriptions[index].last_update = Some(snapshot.clone());
+                store.subscriptions[index].updated_at = snapshot.checked_at.clone();
+                self.subscriptions.save(&store)?;
                 return Ok(snapshot);
             }
             return Err(error);
@@ -210,7 +224,12 @@ where
             Ok(snapshot) => snapshot,
             Err(error) => {
                 if let Some(mut snapshot) = previous {
+                    snapshot.checked_at = Utc::now().to_rfc3339();
                     snapshot.check_error = Some(error.message);
+                    snapshot.check_error_code = Some(error.code);
+                    store.subscriptions[index].last_update = Some(snapshot.clone());
+                    store.subscriptions[index].updated_at = snapshot.checked_at.clone();
+                    self.subscriptions.save(&store)?;
                     return Ok(snapshot);
                 }
                 return Err(error);
@@ -226,12 +245,41 @@ where
         &self,
         request: ApplyChannelUpdateRequest,
     ) -> Result<ApplyChannelUpdateResult, SharedChannelError> {
+        self.apply_update_selected(request, None, true, None).await
+    }
+
+    pub(super) async fn apply_update_selected(
+        &self,
+        request: ApplyChannelUpdateRequest,
+        allowed_skill_ids: Option<&BTreeSet<String>>,
+        acknowledge_release: bool,
+        auto_claim_started_at: Option<&str>,
+    ) -> Result<ApplyChannelUpdateResult, SharedChannelError> {
         validate_resolutions(&request.resolutions)?;
         let _mutation_guard = SHARED_CHANNEL_MUTATION_GATE.lock().await;
         let _registry_lease = self.channels.acquire_mutation_lease().await?;
         let _subscription_lease = self.subscriptions.acquire_mutation_lease().await?;
         let mut store = self.subscriptions.load_mutable()?;
         let index = subscription_index(&store.subscriptions, request.repository_id)?;
+        if let Some(expected_started_at) = auto_claim_started_at {
+            let claim = store.subscriptions[index].auto_update.last_run.as_ref();
+            if !store.subscriptions[index].auto_update.enabled
+                || !claim.is_some_and(|run| {
+                    run.status == super::ChannelAutoUpdateRunStatus::Checking
+                        && run.started_at == expected_started_at
+                })
+            {
+                return Err(SharedChannelError::new(
+                    SharedChannelErrorCode::Cancelled,
+                    "Protected automatic upgrade ownership changed before this update could apply",
+                ));
+            }
+        }
+        let pinned = store.subscriptions[index]
+            .pins
+            .iter()
+            .map(|pin| pin.skill_id.to_ascii_lowercase())
+            .collect::<BTreeSet<_>>();
         let channel = self.active_channel(request.repository_id)?;
         let repository = self.validated_repository(&channel).await?;
         let manifest = self.latest_manifest(&repository, &channel).await?;
@@ -292,17 +340,34 @@ where
                 continue;
             }
             let key = item.id.to_ascii_lowercase();
+            if allowed_skill_ids
+                .is_some_and(|allowed| !allowed.contains(&key) || pinned.contains(&key))
+            {
+                continue;
+            }
             let Some(installed) = store.subscriptions[index]
                 .skills
                 .iter()
                 .find(|skill| skill.id.eq_ignore_ascii_case(&item.id))
                 .cloned()
             else {
-                failures.insert(key, "The subscribed Skill record is missing".into());
+                failures.insert(
+                    key,
+                    SharedChannelError::new(
+                        SharedChannelErrorCode::SubscriptionUpdateFailed,
+                        "The subscribed Skill record is missing",
+                    ),
+                );
                 continue;
             };
             let Some(target) = released.get(&key).cloned() else {
-                failures.insert(key, "The target release Skill is missing".into());
+                failures.insert(
+                    key,
+                    SharedChannelError::new(
+                        SharedChannelErrorCode::Integrity,
+                        "The target release Skill is missing",
+                    ),
+                );
                 continue;
             };
             if item.state == ChannelUpdateItemState::Blocked && !resolutions.contains_key(&key) {
@@ -333,7 +398,7 @@ where
                     receipts.push(receipt);
                 }
                 Err(error) => {
-                    failures.insert(key, error.message);
+                    failures.insert(key, error);
                 }
             }
         }
@@ -360,7 +425,7 @@ where
                     }
                     let key = receipt.previous.id.to_ascii_lowercase();
                     applied.remove(&key);
-                    failures.insert(key, error.message);
+                    failures.insert(key, error);
                 }
             }
         }
@@ -397,10 +462,11 @@ where
                     item.suggested_local_name = initial.suggested_local_name.clone();
                 }
                 item.state = ChannelUpdateItemState::Failed;
-                item.error = Some(error.clone());
+                item.error = Some(error.message.clone());
+                item.error_code = Some(error.code);
             }
         }
-        if all_selected_at_target(&snapshot.items) {
+        if acknowledge_release && all_selected_at_target(&snapshot.items) {
             store.subscriptions[index].target = release_target(&manifest);
             store.subscriptions[index].known_skill_ids = current_release_skills(&manifest)
                 .into_values()
@@ -468,6 +534,7 @@ where
                     block_reason: Some(ChannelUpdateBlockReason::RemovedUpstream),
                     suggested_local_name: None,
                     error: None,
+                    error_code: None,
                 });
                 continue;
             };
@@ -486,7 +553,14 @@ where
                 items.push(current_item(installed, target));
                 continue;
             }
-            let inspection = self.installer.inspect(installed).await?;
+            let inspection = match self.installer.inspect(installed).await {
+                Ok(inspection) => inspection,
+                Err(error) => ChannelUpdateInspection::Divergent {
+                    reason: LocalDivergenceReason::SnapshotFailed,
+                    suggested_local_name: crate::skill_update::suggested_local_name(&installed.id),
+                    error: Some(error.message),
+                },
+            };
             items.push(update_item(installed, target, inspection));
         }
         for (key, skill) in released {
@@ -506,6 +580,7 @@ where
                 block_reason: None,
                 suggested_local_name: None,
                 error: None,
+                error_code: None,
             });
         }
         items.sort_by(|left, right| left.id.cmp(&right.id));
@@ -522,6 +597,7 @@ where
             acknowledgement_required,
             items,
             check_error: None,
+            check_error_code: None,
         })
     }
 }
@@ -570,6 +646,7 @@ fn current_item(
         block_reason: None,
         suggested_local_name: None,
         error: None,
+        error_code: None,
     }
 }
 
@@ -601,6 +678,7 @@ fn update_item(
         block_reason,
         suggested_local_name,
         error,
+        error_code: None,
     }
 }
 
@@ -736,7 +814,11 @@ pub(super) fn validate_update_snapshot(
         || super::release::validate_publisher(&snapshot.publisher).is_err()
         || super::release::validate_release_text(&snapshot.title, &snapshot.notes).is_err()
         || snapshot.items.len() > 4_096
-        || snapshot.check_error.is_some()
+        || snapshot
+            .check_error
+            .as_ref()
+            .is_some_and(|error| error.is_empty() || error.contains('\0'))
+        || snapshot.check_error.is_some() != snapshot.check_error_code.is_some()
     {
         return Err(SharedChannelError::new(
             SharedChannelErrorCode::Storage,
@@ -805,8 +887,10 @@ pub(super) fn validate_update_snapshot(
 }
 
 fn valid_update_item(item: &ChannelUpdateItem) -> bool {
-    let no_resolution_metadata =
-        item.block_reason.is_none() && item.suggested_local_name.is_none() && item.error.is_none();
+    let no_resolution_metadata = item.block_reason.is_none()
+        && item.suggested_local_name.is_none()
+        && item.error.is_none()
+        && item.error_code.is_none();
     match (item.change, item.state) {
         (ChannelUpdateChange::Added, ChannelUpdateItemState::Notification) => {
             !item.selected
@@ -847,6 +931,7 @@ fn valid_update_item(item: &ChannelUpdateItem) -> bool {
                     .error
                     .as_ref()
                     .is_none_or(|error| !error.contains('\0'))
+                && item.error_code.is_none()
         }
         (ChannelUpdateChange::Updated, ChannelUpdateItemState::Failed) => {
             item.selected
@@ -856,6 +941,7 @@ fn valid_update_item(item: &ChannelUpdateItem) -> bool {
                     .error
                     .as_ref()
                     .is_some_and(|error| !error.is_empty() && !error.contains('\0'))
+                && item.error_code.is_some()
                 && item
                     .block_reason
                     .is_none_or(|reason| reason != ChannelUpdateBlockReason::RemovedUpstream)

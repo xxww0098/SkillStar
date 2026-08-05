@@ -4,6 +4,7 @@
 
 pub mod acp_client;
 pub mod app_shell;
+pub mod channel_auto_update;
 pub mod dock_menu;
 pub mod github_auth;
 pub mod marketplace_snapshot;

@@ -1,12 +1,13 @@
 use super::*;
 use async_trait::async_trait;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
-struct UpdateGateway {
-    manifests: Arc<Mutex<Vec<ChannelReleaseManifest>>>,
-    offline: Arc<Mutex<bool>>,
+pub(super) struct UpdateGateway {
+    pub(super) manifests: Arc<Mutex<Vec<ChannelReleaseManifest>>>,
+    pub(super) offline: Arc<Mutex<bool>>,
+    pub(super) repository_error: Arc<Mutex<Option<SharedChannelErrorCode>>>,
 }
 
 #[async_trait]
@@ -20,6 +21,9 @@ impl ChannelSubscriptionGateway for UpdateGateway {
                 SharedChannelErrorCode::Network,
                 "offline",
             ));
+        }
+        if let Some(code) = *self.repository_error.lock().unwrap() {
+            return Err(SharedChannelError::new(code, "repository unavailable"));
         }
         if repository_id == 42 {
             Ok(repository())
@@ -40,7 +44,7 @@ impl ChannelSubscriptionGateway for UpdateGateway {
 }
 
 #[derive(Clone)]
-struct UpdateChannels(Arc<Mutex<SharedChannelStore>>);
+pub(super) struct UpdateChannels(Arc<Mutex<SharedChannelStore>>);
 
 #[async_trait]
 impl SharedChannelRegistry for UpdateChannels {
@@ -55,12 +59,16 @@ impl SharedChannelRegistry for UpdateChannels {
 }
 
 #[derive(Clone)]
-struct UpdateSubscriptions {
-    store: Arc<Mutex<ChannelSubscriptionStore>>,
-    fail_save: Arc<Mutex<bool>>,
+pub(super) struct UpdateSubscriptions {
+    pub(super) store: Arc<Mutex<ChannelSubscriptionStore>>,
+    pub(super) fail_save: Arc<Mutex<bool>>,
 }
 
 impl ChannelSubscriptionRegistry for UpdateSubscriptions {
+    fn auto_update_scope_key(&self) -> String {
+        format!("update-test:{:p}", Arc::as_ptr(&self.store))
+    }
+
     fn list_views(&self) -> Result<Vec<ChannelSubscriptionView>, SharedChannelError> {
         Ok(self
             .store
@@ -89,12 +97,17 @@ impl ChannelSubscriptionRegistry for UpdateSubscriptions {
 }
 
 #[derive(Clone, Default)]
-struct UpdateInstaller {
-    divergent: Arc<Mutex<BTreeSet<String>>>,
-    failures: Arc<Mutex<BTreeSet<String>>>,
+pub(super) struct UpdateInstaller {
+    pub(super) divergent: Arc<Mutex<BTreeSet<String>>>,
+    pub(super) divergence_reasons:
+        Arc<Mutex<BTreeMap<String, crate::skill_update::LocalDivergenceReason>>>,
+    pub(super) failures: Arc<Mutex<BTreeSet<String>>>,
+    pub(super) failure_codes: Arc<Mutex<BTreeMap<String, SharedChannelErrorCode>>>,
+    pub(super) inspection_failures: Arc<Mutex<BTreeSet<String>>>,
     inspection_failures_after_apply: Arc<Mutex<BTreeSet<String>>>,
-    verification_failures: Arc<Mutex<BTreeSet<String>>>,
-    applied: Arc<Mutex<Vec<ChannelSkillUpdateRequest>>>,
+    pub(super) verification_failures: Arc<Mutex<BTreeSet<String>>>,
+    pub(super) rollback_failures: Arc<Mutex<BTreeSet<String>>>,
+    pub(super) applied: Arc<Mutex<Vec<ChannelSkillUpdateRequest>>>,
     rollbacks: Arc<Mutex<Vec<String>>>,
 }
 
@@ -118,6 +131,17 @@ impl ChannelSubscriptionUpdater for UpdateInstaller {
         &self,
         skill: &ChannelSubscribedSkill,
     ) -> Result<ChannelUpdateInspection, SharedChannelError> {
+        if self
+            .inspection_failures
+            .lock()
+            .unwrap()
+            .contains(&skill.id.to_ascii_lowercase())
+        {
+            return Err(SharedChannelError::new(
+                SharedChannelErrorCode::SubscriptionUpdateFailed,
+                format!("{} snapshot failed", skill.id),
+            ));
+        }
         if !self.applied.lock().unwrap().is_empty()
             && self
                 .inspection_failures_after_apply
@@ -137,7 +161,13 @@ impl ChannelSubscriptionUpdater for UpdateInstaller {
             .contains(&skill.id.to_ascii_lowercase())
         {
             Ok(ChannelUpdateInspection::Divergent {
-                reason: crate::skill_update::LocalDivergenceReason::ContentChanged,
+                reason: self
+                    .divergence_reasons
+                    .lock()
+                    .unwrap()
+                    .get(&skill.id.to_ascii_lowercase())
+                    .copied()
+                    .unwrap_or(crate::skill_update::LocalDivergenceReason::ContentChanged),
                 suggested_local_name: format!("{}.local", skill.id),
                 error: None,
             })
@@ -154,7 +184,12 @@ impl ChannelSubscriptionUpdater for UpdateInstaller {
         self.applied.lock().unwrap().push(request.clone());
         if self.failures.lock().unwrap().contains(&key) {
             return Err(SharedChannelError::new(
-                SharedChannelErrorCode::SubscriptionUpdateFailed,
+                self.failure_codes
+                    .lock()
+                    .unwrap()
+                    .get(&key)
+                    .copied()
+                    .unwrap_or(SharedChannelErrorCode::SubscriptionUpdateFailed),
                 format!("{key} failed"),
             ));
         }
@@ -200,11 +235,22 @@ impl ChannelSubscriptionUpdater for UpdateInstaller {
             .lock()
             .unwrap()
             .push(receipt.previous.id.clone());
+        if self
+            .rollback_failures
+            .lock()
+            .unwrap()
+            .contains(&receipt.previous.id.to_ascii_lowercase())
+        {
+            return Err(SharedChannelError::new(
+                SharedChannelErrorCode::SubscriptionUpdateFailed,
+                format!("{} rollback failed", receipt.previous.id),
+            ));
+        }
         Ok(())
     }
 }
 
-fn service(
+pub(super) fn service(
     gateway: UpdateGateway,
     subscriptions: UpdateSubscriptions,
     installer: UpdateInstaller,
@@ -221,10 +267,11 @@ fn service(
     )
 }
 
-fn fixtures() -> (UpdateGateway, UpdateSubscriptions, UpdateInstaller) {
+pub(super) fn fixtures() -> (UpdateGateway, UpdateSubscriptions, UpdateInstaller) {
     let gateway = UpdateGateway {
         manifests: Arc::new(Mutex::new(vec![manifest_v1(), manifest_v2()])),
         offline: Arc::new(Mutex::new(false)),
+        repository_error: Arc::new(Mutex::new(None)),
     };
     let subscriptions = UpdateSubscriptions {
         store: Arc::new(Mutex::new(ChannelSubscriptionStore {
@@ -301,6 +348,7 @@ async fn clean_skills_advance_independently_and_restart_keeps_the_result() {
         UpdateGateway {
             manifests: Arc::new(Mutex::new(vec![manifest_v2()])),
             offline: Arc::new(Mutex::new(false)),
+            repository_error: Arc::new(Mutex::new(None)),
         },
         subscriptions,
         UpdateInstaller::default(),
@@ -495,7 +543,7 @@ async fn storage_failure_rolls_back_every_skill_that_advanced() {
 }
 
 #[tokio::test]
-async fn post_apply_inspection_failure_rolls_back_successful_skills() {
+async fn post_apply_inspection_failure_does_not_roll_back_successful_skills() {
     let (gateway, subscriptions, installer) = fixtures();
     installer.failures.lock().unwrap().insert("writer".into());
     installer
@@ -503,21 +551,29 @@ async fn post_apply_inspection_failure_rolls_back_successful_skills() {
         .lock()
         .unwrap()
         .insert("writer".into());
-    let error = service(gateway, subscriptions, installer.clone())
+    let result = service(gateway, subscriptions, installer.clone())
         .apply_update(ApplyChannelUpdateRequest {
             repository_id: 42,
             target: target_v2(),
             resolutions: Vec::new(),
         })
         .await
-        .unwrap_err();
+        .unwrap();
 
-    assert_eq!(error.message, "writer inspection failed");
-    assert_eq!(installer.rollbacks.lock().unwrap().as_slice(), ["reader"]);
+    assert_eq!(result.applied_skill_ids, ["reader"]);
+    let writer = result
+        .snapshot
+        .items
+        .iter()
+        .find(|item| item.id == "writer")
+        .unwrap();
+    assert_eq!(writer.state, ChannelUpdateItemState::Failed);
+    assert_eq!(writer.error.as_deref(), Some("writer failed"));
+    assert!(installer.rollbacks.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
-async fn offline_check_returns_last_verified_state_without_overwriting_it() {
+async fn offline_check_keeps_last_verified_target_and_persists_retryable_error() {
     let (gateway, subscriptions, installer) = fixtures();
     let app = service(gateway.clone(), subscriptions.clone(), installer);
     let verified = app.check_update(42).await.unwrap();
@@ -526,13 +582,15 @@ async fn offline_check_returns_last_verified_state_without_overwriting_it() {
     let offline = app.check_update(42).await.unwrap();
     assert_eq!(offline.target, verified.target);
     assert_eq!(offline.check_error.as_deref(), Some("offline"));
+    let stored = subscriptions.store.lock().unwrap().subscriptions[0]
+        .last_update
+        .clone()
+        .unwrap();
+    assert_eq!(stored.target, verified.target);
+    assert_eq!(stored.check_error.as_deref(), Some("offline"));
     assert_eq!(
-        subscriptions.store.lock().unwrap().subscriptions[0]
-            .last_update
-            .as_ref()
-            .unwrap()
-            .check_error,
-        None
+        stored.check_error_code,
+        Some(SharedChannelErrorCode::Network)
     );
 }
 
@@ -897,7 +955,9 @@ fn subscription_v1() -> ChannelSubscription {
             .map(|skill| subscribed_skill(skill, &manifest))
             .collect(),
         known_skill_ids: vec!["reader".into(), "writer".into()],
+        pins: Vec::new(),
         last_update: None,
+        auto_update: ChannelAutoUpdateState::default(),
         created_at: "2026-08-05T00:00:00Z".into(),
         updated_at: "2026-08-05T00:00:00Z".into(),
     }
@@ -931,7 +991,7 @@ fn manifest_v1() -> ChannelReleaseManifest {
     )
 }
 
-fn manifest_v2() -> ChannelReleaseManifest {
+pub(super) fn manifest_v2() -> ChannelReleaseManifest {
     let mut newcomer = release_skill("newcomer", '9');
     newcomer.status = ChannelSkillReleaseStatus::Added;
     manifest(
@@ -978,7 +1038,7 @@ fn release_skill(id: &str, digest: char) -> ChannelReleaseSkill {
     }
 }
 
-fn target_v2() -> ChannelReleaseTarget {
+pub(super) fn target_v2() -> ChannelReleaseTarget {
     ChannelReleaseTarget {
         revision: 2,
         tag_name: "channel-v000002".into(),

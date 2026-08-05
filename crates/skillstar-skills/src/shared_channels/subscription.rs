@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const CHANNEL_SUBSCRIPTION_STORE_VERSION: u32 = 1;
-pub const CHANNEL_SUBSCRIPTION_DESCRIPTOR_VERSION: u32 = 2;
+pub const CHANNEL_SUBSCRIPTION_DESCRIPTOR_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -43,6 +43,13 @@ pub struct ChannelSubscribedSkill {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ChannelSkillPin {
+    pub skill_id: String,
+    pub target: ChannelReleaseTarget,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ChannelSubscription {
     pub descriptor_version: u32,
     pub repository_id: u64,
@@ -51,8 +58,12 @@ pub struct ChannelSubscription {
     pub skills: Vec<ChannelSubscribedSkill>,
     #[serde(default)]
     pub known_skill_ids: Vec<String>,
+    #[serde(default)]
+    pub pins: Vec<ChannelSkillPin>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_update: Option<super::ChannelUpdateSnapshot>,
+    #[serde(default)]
+    pub auto_update: super::ChannelAutoUpdateState,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -95,6 +106,7 @@ pub struct ChannelSubscriptionView {
     pub organization_id: Option<u64>,
     pub target: Option<ChannelReleaseTarget>,
     pub selected_skill_ids: Vec<String>,
+    pub auto_update: super::ChannelAutoUpdateState,
     pub read_only: bool,
 }
 
@@ -111,6 +123,7 @@ impl ChannelSubscriptionView {
                 .iter()
                 .map(|skill| skill.id.clone())
                 .collect(),
+            auto_update: subscription.auto_update.clone(),
             read_only: false,
         }
     }
@@ -181,6 +194,17 @@ pub trait ChannelSubscriptionGateway: Send + Sync {
 
 #[async_trait]
 pub trait ChannelSubscriptionRegistry: Send + Sync {
+    fn auto_update_scope_key(&self) -> String {
+        std::any::type_name::<Self>().to_string()
+    }
+
+    fn try_acquire_auto_update_run_lease(
+        &self,
+        _repository_id: u64,
+    ) -> Result<Option<Box<dyn super::SharedChannelMutationLease>>, SharedChannelError> {
+        Ok(Some(Box::new(())))
+    }
+
     async fn acquire_mutation_lease(
         &self,
     ) -> Result<Box<dyn super::SharedChannelMutationLease>, SharedChannelError> {
@@ -355,7 +379,9 @@ where
                 .filter(|skill| skill.status != ChannelSkillReleaseStatus::Removed)
                 .map(|skill| skill.id.clone())
                 .collect(),
+            pins: Vec::new(),
             last_update: None,
+            auto_update: super::ChannelAutoUpdateState::default(),
             created_at: now.clone(),
             updated_at: now,
         };

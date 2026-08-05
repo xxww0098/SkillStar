@@ -18,10 +18,45 @@ impl DiskChannelSubscriptionRegistry {
     fn lock_path() -> PathBuf {
         skillstar_core::infra::paths::config_dir().join("shared_channel_subscriptions.lock")
     }
+
+    fn auto_update_lock_path(repository_id: u64) -> PathBuf {
+        skillstar_core::infra::paths::config_dir()
+            .join(format!("shared_channel_auto_update_{repository_id}.lock"))
+    }
 }
 
 #[async_trait::async_trait]
 impl ChannelSubscriptionRegistry for DiskChannelSubscriptionRegistry {
+    fn auto_update_scope_key(&self) -> String {
+        Self::path().to_string_lossy().into_owned()
+    }
+
+    fn try_acquire_auto_update_run_lease(
+        &self,
+        repository_id: u64,
+    ) -> Result<Option<Box<dyn super::SharedChannelMutationLease>>, SharedChannelError> {
+        let path = Self::auto_update_lock_path(repository_id);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|_| storage_error("create automatic update lock directory"))?;
+        }
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options
+            .open(path)
+            .map_err(|_| storage_error("open automatic update lock"))?;
+        match file.try_lock() {
+            Ok(()) => Ok(Some(Box::new(file))),
+            Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+            Err(std::fs::TryLockError::Error(_)) => Err(storage_error("lock automatic update run")),
+        }
+    }
+
     async fn acquire_mutation_lease(
         &self,
     ) -> Result<Box<dyn super::SharedChannelMutationLease>, SharedChannelError> {
@@ -227,6 +262,16 @@ fn validate_store(store: &ChannelSubscriptionStore) -> Result<(), SharedChannelE
         {
             return Err(storage_error("validate"));
         }
+        let mut pins = std::collections::BTreeSet::new();
+        if subscription.pins.iter().any(|pin| {
+            !skills.contains(&pin.skill_id.to_ascii_lowercase())
+                || !pins.insert(pin.skill_id.to_ascii_lowercase())
+                || !valid_target(&pin.target)
+                || pin.target.revision > subscription.target.revision
+        }) || !valid_auto_update_state(&subscription.auto_update)
+        {
+            return Err(storage_error("validate"));
+        }
         if let Some(snapshot) = &subscription.last_update {
             super::channel_update::validate_update_snapshot(snapshot)?;
             if snapshot.target.revision < subscription.target.revision
@@ -251,6 +296,16 @@ fn normalize_subscription(subscription: &mut super::ChannelSubscription) {
             .map(|skill| skill.id.clone())
             .collect();
     }
+    if let Some(snapshot) = &mut subscription.last_update {
+        if snapshot.check_error.is_some() && snapshot.check_error_code.is_none() {
+            snapshot.check_error_code = Some(SharedChannelErrorCode::Protocol);
+        }
+        for item in &mut snapshot.items {
+            if item.state == super::ChannelUpdateItemState::Failed && item.error_code.is_none() {
+                item.error_code = Some(SharedChannelErrorCode::SubscriptionUpdateFailed);
+            }
+        }
+    }
 }
 
 fn valid_commit(value: &str) -> bool {
@@ -258,7 +313,62 @@ fn valid_commit(value: &str) -> bool {
 }
 
 fn supported_descriptor_version(version: u64) -> bool {
-    version == 1 || version == u64::from(CHANNEL_SUBSCRIPTION_DESCRIPTOR_VERSION)
+    matches!(version, 1 | 2) || version == u64::from(CHANNEL_SUBSCRIPTION_DESCRIPTOR_VERSION)
+}
+
+fn valid_target(target: &ChannelReleaseTarget) -> bool {
+    target.revision > 0
+        && target.tag_name == super::revision_tag(target.revision)
+        && valid_commit(&target.commit_sha)
+}
+
+fn valid_auto_update_state(state: &super::ChannelAutoUpdateState) -> bool {
+    if state
+        .next_check_at
+        .as_ref()
+        .is_some_and(|value| chrono::DateTime::parse_from_rfc3339(value).is_err())
+    {
+        return false;
+    }
+    let Some(run) = &state.last_run else {
+        return true;
+    };
+    if chrono::DateTime::parse_from_rfc3339(&run.started_at).is_err()
+        || run
+            .completed_at
+            .as_ref()
+            .is_some_and(|value| chrono::DateTime::parse_from_rfc3339(value).is_err())
+        || (run.status == super::ChannelAutoUpdateRunStatus::Checking) != run.completed_at.is_none()
+        || run.retryable
+            && !matches!(
+                run.status,
+                super::ChannelAutoUpdateRunStatus::RetryableFailure
+                    | super::ChannelAutoUpdateRunStatus::PartiallyApplied
+            )
+        || run
+            .target
+            .as_ref()
+            .is_some_and(|target| !valid_target(target))
+    {
+        return false;
+    }
+    let mut applied = std::collections::BTreeSet::new();
+    if run.applied_skill_ids.iter().any(|id| {
+        crate::content::validate_skill_name(id).is_err() || !applied.insert(id.to_ascii_lowercase())
+    }) {
+        return false;
+    }
+    let mut pauses = std::collections::BTreeSet::new();
+    !run.pauses.iter().any(|pause| {
+        pause
+            .detail
+            .as_ref()
+            .is_some_and(|detail| detail.contains('\0'))
+            || pause.skill_id.as_ref().is_some_and(|id| {
+                crate::content::validate_skill_name(id).is_err()
+                    || !pauses.insert(id.to_ascii_lowercase())
+            })
+    }) && run.error.as_ref().is_none_or(|error| !error.contains('\0'))
 }
 
 fn valid_hash(value: &str) -> bool {
@@ -329,6 +439,7 @@ fn read_only_view(schema_version: u32, subscription: &Value) -> Option<ChannelSu
         organization_id,
         target,
         selected_skill_ids,
+        auto_update: super::ChannelAutoUpdateState::default(),
         read_only: true,
     })
 }
@@ -352,7 +463,9 @@ fn storage_error(action: &str) -> SharedChannelError {
 mod tests {
     use super::*;
     use crate::shared_channels::{
-        ChannelSkillProvenance, ChannelSubscribedSkill, ChannelSubscription,
+        ChannelAutoUpdateState, ChannelPublisherIdentity, ChannelSkillProvenance,
+        ChannelSubscribedSkill, ChannelSubscription, ChannelUpdateChange, ChannelUpdateItem,
+        ChannelUpdateItemState, ChannelUpdateSnapshot, ChannelUpdateStatus,
     };
 
     fn subscription() -> ChannelSubscription {
@@ -380,7 +493,9 @@ mod tests {
                 },
             }],
             known_skill_ids: vec!["writer".into()],
+            pins: Vec::new(),
             last_update: None,
+            auto_update: ChannelAutoUpdateState::default(),
             created_at: "2026-08-05T00:00:00Z".into(),
             updated_at: "2026-08-05T00:00:00Z".into(),
         }
@@ -508,6 +623,39 @@ mod tests {
     }
 
     #[test]
+    fn automatic_update_run_lease_is_exclusive_across_registry_handles() {
+        let _guard = crate::lock_test_env();
+        let temp = tempfile::tempdir().unwrap();
+        let previous = std::env::var_os("SKILLSTAR_DATA_DIR");
+        unsafe { std::env::set_var("SKILLSTAR_DATA_DIR", temp.path()) };
+
+        let first = DiskChannelSubscriptionRegistry;
+        let second = DiskChannelSubscriptionRegistry;
+        let lease = first
+            .try_acquire_auto_update_run_lease(42)
+            .unwrap()
+            .expect("first registry should acquire the channel run lease");
+        assert!(
+            second
+                .try_acquire_auto_update_run_lease(42)
+                .unwrap()
+                .is_none()
+        );
+        drop(lease);
+        assert!(
+            second
+                .try_acquire_auto_update_run_lease(42)
+                .unwrap()
+                .is_some()
+        );
+
+        match previous {
+            Some(value) => unsafe { std::env::set_var("SKILLSTAR_DATA_DIR", value) },
+            None => unsafe { std::env::remove_var("SKILLSTAR_DATA_DIR") },
+        }
+    }
+
+    #[test]
     fn partially_upgraded_skill_provenance_round_trips_independently() {
         let _guard = crate::lock_test_env();
         let temp = tempfile::tempdir().unwrap();
@@ -546,6 +694,14 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("last_update");
+        value["subscriptions"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("pins");
+        value["subscriptions"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("auto_update");
         skillstar_core::infra::fs_ops::atomic_write(
             &DiskChannelSubscriptionRegistry::path(),
             &serde_json::to_vec(&value).unwrap(),
@@ -565,6 +721,99 @@ mod tests {
             CHANNEL_SUBSCRIPTION_DESCRIPTOR_VERSION
         );
         assert!(migrated.subscriptions[0].last_update.is_none());
+        assert!(migrated.subscriptions[0].pins.is_empty());
+        assert_eq!(
+            migrated.subscriptions[0].auto_update,
+            ChannelAutoUpdateState::default()
+        );
+
+        match previous {
+            Some(value) => unsafe { std::env::set_var("SKILLSTAR_DATA_DIR", value) },
+            None => unsafe { std::env::remove_var("SKILLSTAR_DATA_DIR") },
+        }
+    }
+
+    #[test]
+    fn previous_descriptor_backfills_structured_update_error_codes() {
+        let _guard = crate::lock_test_env();
+        let temp = tempfile::tempdir().unwrap();
+        let previous = std::env::var_os("SKILLSTAR_DATA_DIR");
+        unsafe { std::env::set_var("SKILLSTAR_DATA_DIR", temp.path()) };
+        let mut prior = subscription();
+        prior.descriptor_version = 2;
+        prior.last_update = Some(ChannelUpdateSnapshot {
+            target: ChannelReleaseTarget {
+                revision: 2,
+                tag_name: "channel-v000002".into(),
+                commit_sha: "c".repeat(40),
+            },
+            title: "Second release".into(),
+            notes: "Upgrade writer".into(),
+            publisher: ChannelPublisherIdentity {
+                id: 9,
+                login: "alice".into(),
+            },
+            published_at: "2026-08-06T00:00:00Z".into(),
+            checked_at: "2026-08-06T01:00:00Z".into(),
+            status: ChannelUpdateStatus::Blocked,
+            acknowledgement_required: true,
+            items: vec![ChannelUpdateItem {
+                id: "writer".into(),
+                change: ChannelUpdateChange::Updated,
+                state: ChannelUpdateItemState::Failed,
+                selected: true,
+                from_content_hash: Some(format!("sha256:{}", "b".repeat(64))),
+                to_content_hash: Some(format!("sha256:{}", "c".repeat(64))),
+                block_reason: None,
+                suggested_local_name: None,
+                error: Some("legacy apply failure".into()),
+                error_code: Some(SharedChannelErrorCode::SubscriptionUpdateFailed),
+            }],
+            check_error: Some("legacy check failure".into()),
+            check_error_code: Some(SharedChannelErrorCode::Network),
+        });
+        let mut value = serde_json::to_value(ChannelSubscriptionStore {
+            schema_version: CHANNEL_SUBSCRIPTION_STORE_VERSION,
+            subscriptions: vec![prior],
+        })
+        .unwrap();
+        value["subscriptions"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("pins");
+        value["subscriptions"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("auto_update");
+        value["subscriptions"][0]["last_update"]
+            .as_object_mut()
+            .unwrap()
+            .remove("check_error_code");
+        value["subscriptions"][0]["last_update"]["items"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("error_code");
+        skillstar_core::infra::fs_ops::atomic_write(
+            &DiskChannelSubscriptionRegistry::path(),
+            &serde_json::to_vec(&value).unwrap(),
+        )
+        .unwrap();
+
+        let migrated = DiskChannelSubscriptionRegistry.load_mutable().unwrap();
+        let subscription = &migrated.subscriptions[0];
+        let snapshot = subscription.last_update.as_ref().unwrap();
+        assert_eq!(
+            snapshot.check_error_code,
+            Some(SharedChannelErrorCode::Protocol)
+        );
+        assert_eq!(
+            snapshot.items[0].error_code,
+            Some(SharedChannelErrorCode::SubscriptionUpdateFailed)
+        );
+        assert_eq!(
+            subscription.descriptor_version,
+            CHANNEL_SUBSCRIPTION_DESCRIPTOR_VERSION
+        );
 
         match previous {
             Some(value) => unsafe { std::env::set_var("SKILLSTAR_DATA_DIR", value) },

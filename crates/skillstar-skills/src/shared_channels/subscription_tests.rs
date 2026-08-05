@@ -347,6 +347,7 @@ async fn unknown_store_schema_is_reviewable_but_rejects_subscription_changes() {
             commit_sha: "a".repeat(40),
         }),
         selected_skill_ids: vec!["writer".into()],
+        auto_update: ChannelAutoUpdateState::default(),
         read_only: true,
     }]);
     let installer = FakeInstaller::default();
@@ -409,7 +410,9 @@ fn serialized_subscription_provenance_never_contains_credentials() {
         },
         skills: vec![installed_skill(&request, &manifest().skills[1])],
         known_skill_ids: vec!["writer".into()],
+        pins: Vec::new(),
         last_update: None,
+        auto_update: ChannelAutoUpdateState::default(),
         created_at: "now".into(),
         updated_at: "now".into(),
     };

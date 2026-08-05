@@ -194,6 +194,11 @@ export interface ChannelSubscribedSkill {
   provenance: ChannelSkillProvenance;
 }
 
+export interface ChannelSkillPin {
+  skill_id: string;
+  target: ChannelReleaseTarget;
+}
+
 export interface ChannelSubscription {
   descriptor_version: number;
   repository_id: number;
@@ -201,7 +206,9 @@ export interface ChannelSubscription {
   target: ChannelReleaseTarget;
   skills: ChannelSubscribedSkill[];
   known_skill_ids: string[];
+  pins: ChannelSkillPin[];
   last_update?: ChannelUpdateSnapshot | null;
+  auto_update: ChannelAutoUpdateState;
   created_at: string;
   updated_at: string;
 }
@@ -213,6 +220,7 @@ export interface ChannelSubscriptionView {
   organization_id: number | null;
   target: ChannelReleaseTarget | null;
   selected_skill_ids: string[];
+  auto_update: ChannelAutoUpdateState;
   read_only: boolean;
 }
 
@@ -267,6 +275,7 @@ export interface ChannelUpdateItem {
   block_reason: ChannelUpdateBlockReason | null;
   suggested_local_name: string | null;
   error: string | null;
+  error_code?: string | null;
 }
 
 export interface ChannelUpdateSnapshot {
@@ -280,6 +289,56 @@ export interface ChannelUpdateSnapshot {
   acknowledgement_required: boolean;
   items: ChannelUpdateItem[];
   check_error?: string | null;
+  check_error_code?: string | null;
+}
+
+export type ChannelAutoUpdateRunStatus =
+  | "checking"
+  | "checked"
+  | "up_to_date"
+  | "applied"
+  | "partially_applied"
+  | "paused"
+  | "retryable_failure"
+  | "cancelled";
+
+export type ChannelAutoUpdatePauseReason =
+  | "pinned"
+  | "local_content_changed"
+  | "baseline_missing"
+  | "snapshot_failed"
+  | "permission_changed"
+  | "removed_upstream"
+  | "integrity_error"
+  | "unresolved_failure"
+  | "new_skill_requires_review";
+
+export interface ChannelAutoUpdatePause {
+  skill_id?: string | null;
+  reason: ChannelAutoUpdatePauseReason;
+  detail?: string | null;
+}
+
+export interface ChannelAutoUpdateRun {
+  started_at: string;
+  completed_at?: string | null;
+  status: ChannelAutoUpdateRunStatus;
+  target?: ChannelReleaseTarget | null;
+  applied_skill_ids: string[];
+  pauses: ChannelAutoUpdatePause[];
+  error?: string | null;
+  retryable: boolean;
+}
+
+export interface ChannelAutoUpdateState {
+  enabled: boolean;
+  next_check_at?: string | null;
+  last_run?: ChannelAutoUpdateRun | null;
+}
+
+export interface ChannelAutoUpdateExecution {
+  repository_id: number;
+  run: ChannelAutoUpdateRun;
 }
 
 export interface ChannelSkillUpdateResolution {

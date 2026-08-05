@@ -29,6 +29,9 @@ const api = vi.hoisted(() => ({
   getUpdateState: vi.fn(),
   checkUpdate: vi.fn(),
   applyUpdate: vi.fn(),
+  getAutoUpdateState: vi.fn(),
+  setAutoUpdateEnabled: vi.fn(),
+  runAutoUpdates: vi.fn(),
 }));
 
 vi.mock("../api/channels", () => ({
@@ -57,6 +60,9 @@ vi.mock("../api/channels", () => ({
   getSharedChannelUpdateState: api.getUpdateState,
   checkSharedChannelUpdate: api.checkUpdate,
   applySharedChannelUpdate: api.applyUpdate,
+  getSharedChannelAutoUpdateState: api.getAutoUpdateState,
+  setSharedChannelAutoUpdateEnabled: api.setAutoUpdateEnabled,
+  runSharedChannelAutoUpdates: api.runAutoUpdates,
 }));
 
 function channel(status: SharedChannelDescriptor["status"] = "active"): SharedChannelDescriptor {
@@ -322,7 +328,7 @@ describe("SharedChannelsContent", () => {
     api.reviewSubscription.mockReset().mockResolvedValue(subscriptionReview());
     api.subscribe.mockReset().mockImplementation((request) =>
       Promise.resolve({
-        descriptor_version: 2,
+        descriptor_version: 3,
         repository_id: request.repository_id,
         organization_id: 7,
         target: subscriptionReview().target,
@@ -341,7 +347,9 @@ describe("SharedChannelsContent", () => {
           },
         })),
         known_skill_ids: subscriptionReview().skills.map((skill) => skill.id),
+        pins: [],
         last_update: null,
+        auto_update: { enabled: false, next_check_at: null, last_run: null },
         created_at: "2026-08-05T00:00:00Z",
         updated_at: "2026-08-05T00:00:00Z",
       }),
@@ -369,6 +377,15 @@ describe("SharedChannelsContent", () => {
       snapshot: updateSnapshot(),
       applied_skill_ids: ["writer"],
     });
+    api.getAutoUpdateState.mockReset().mockResolvedValue({ enabled: false, next_check_at: null, last_run: null });
+    api.setAutoUpdateEnabled.mockReset().mockImplementation((_repositoryId, enabled) =>
+      Promise.resolve({
+        enabled,
+        next_check_at: enabled ? "2026-08-06T02:00:00Z" : null,
+        last_run: null,
+      }),
+    );
+    api.runAutoUpdates.mockReset().mockResolvedValue([]);
   });
 
   it("moves from the create wizard into an empty channel detail with role and scope", async () => {
@@ -870,7 +887,7 @@ describe("SharedChannelsContent", () => {
     api.listSubscriptions.mockResolvedValue([
       {
         schema_version: 1,
-        descriptor_version: 2,
+        descriptor_version: 3,
         repository_id: 42,
         organization_id: 7,
         target: subscriptionReview().target,
@@ -886,6 +903,7 @@ describe("SharedChannelsContent", () => {
     expect(screen.getByText("Safer prompts and a new optional Skill.")).toBeInTheDocument();
     expect(screen.getByText("1 added")).toBeInTheDocument();
     expect(screen.getByText("1 updated")).toBeInTheDocument();
+    expect(screen.getByText(/Last checked:/)).toBeInTheDocument();
     expect(screen.getByText(/was not selected or installed/)).toBeInTheDocument();
     expect(api.applyUpdate).not.toHaveBeenCalled();
 
@@ -907,7 +925,7 @@ describe("SharedChannelsContent", () => {
     api.listSubscriptions.mockResolvedValue([
       {
         schema_version: 1,
-        descriptor_version: 2,
+        descriptor_version: 3,
         repository_id: 42,
         organization_id: 7,
         target: subscriptionReview().target,
@@ -935,7 +953,7 @@ describe("SharedChannelsContent", () => {
     api.listSubscriptions.mockResolvedValue([
       {
         schema_version: 1,
-        descriptor_version: 2,
+        descriptor_version: 3,
         repository_id: 42,
         organization_id: 7,
         target: subscriptionReview().target,
@@ -985,7 +1003,7 @@ describe("SharedChannelsContent", () => {
     api.listSubscriptions.mockResolvedValue([
       {
         schema_version: 1,
-        descriptor_version: 2,
+        descriptor_version: 3,
         repository_id: 42,
         organization_id: 7,
         target: subscriptionReview().target,
@@ -1025,7 +1043,7 @@ describe("SharedChannelsContent", () => {
     api.listSubscriptions.mockResolvedValue([
       {
         schema_version: 1,
-        descriptor_version: 2,
+        descriptor_version: 3,
         repository_id: 42,
         organization_id: 7,
         target: subscriptionReview().target,
@@ -1054,7 +1072,7 @@ describe("SharedChannelsContent", () => {
     api.listSubscriptions.mockResolvedValue([
       {
         schema_version: 1,
-        descriptor_version: 2,
+        descriptor_version: 3,
         repository_id: 42,
         organization_id: 7,
         target: subscriptionReview().target,
@@ -1073,5 +1091,89 @@ describe("SharedChannelsContent", () => {
     expect(
       await screen.findByText(/Showing the last verified result because this check failed: offline/),
     ).toBeVisible();
+  });
+
+  it("opts into protected automatic upgrades and shows partial results with pause reasons", async () => {
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.listSubscriptions.mockResolvedValue([
+      {
+        schema_version: 1,
+        descriptor_version: 3,
+        repository_id: 42,
+        organization_id: 7,
+        target: subscriptionReview().target,
+        selected_skill_ids: ["writer"],
+        auto_update: { enabled: false, next_check_at: null, last_run: null },
+        read_only: false,
+      },
+    ]);
+    const run = {
+      started_at: "2026-08-06T02:00:00Z",
+      completed_at: "2026-08-06T02:00:01Z",
+      status: "partially_applied" as const,
+      target: updateSnapshot().target,
+      applied_skill_ids: ["writer"],
+      pauses: [{ skill_id: "newcomer", reason: "new_skill_requires_review" as const, detail: null }],
+      error: null,
+      retryable: false,
+    };
+    api.runAutoUpdates.mockResolvedValue([{ repository_id: 42, run }]);
+    api.getAutoUpdateState
+      .mockResolvedValueOnce({ enabled: false, next_check_at: null, last_run: null })
+      .mockResolvedValueOnce({ enabled: true, next_check_at: "2026-08-06T03:00:00Z", last_run: run });
+    api.getUpdateState.mockResolvedValue(updateSnapshot());
+
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    const toggle = await screen.findByRole("switch", { name: "Protected automatic upgrades" });
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(api.setAutoUpdateEnabled).toHaveBeenCalledWith(42, true));
+    await waitFor(() => expect(api.runAutoUpdates).toHaveBeenCalledWith(expect.any(String)));
+    expect(await screen.findByText(/partially applied/)).toBeVisible();
+    expect(screen.getByText("Applied: writer")).toBeVisible();
+    expect(screen.getByText(/newcomer: new Skill requires review/)).toBeVisible();
+  });
+
+  it("shows a persisted automatic pause and allows the channel preference to be disabled", async () => {
+    api.listChannels.mockResolvedValue([{ ...channel(), role: "subscriber" }]);
+    api.listSubscriptions.mockResolvedValue([
+      {
+        schema_version: 1,
+        descriptor_version: 3,
+        repository_id: 42,
+        organization_id: 7,
+        target: subscriptionReview().target,
+        selected_skill_ids: ["writer"],
+        auto_update: { enabled: true, next_check_at: "2026-08-06T03:00:00Z", last_run: null },
+        read_only: false,
+      },
+    ]);
+    api.getAutoUpdateState.mockResolvedValue({
+      enabled: true,
+      next_check_at: "2026-08-06T03:00:00Z",
+      last_run: {
+        started_at: "2026-08-06T02:00:00Z",
+        completed_at: "2026-08-06T02:00:01Z",
+        status: "paused",
+        target: updateSnapshot().target,
+        applied_skill_ids: [],
+        pauses: [{ skill_id: "writer", reason: "unresolved_failure", detail: "retry manually" }],
+        error: null,
+        retryable: false,
+      },
+    });
+    api.setAutoUpdateEnabled.mockResolvedValue({
+      enabled: false,
+      next_check_at: null,
+      last_run: null,
+    });
+
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    expect(await screen.findByText(/writer: previous failure needs manual retry/)).toBeVisible();
+    fireEvent.click(screen.getByRole("switch", { name: "Protected automatic upgrades" }));
+    await waitFor(() => expect(api.setAutoUpdateEnabled).toHaveBeenCalledWith(42, false));
+    expect(api.runAutoUpdates).not.toHaveBeenCalled();
   });
 });

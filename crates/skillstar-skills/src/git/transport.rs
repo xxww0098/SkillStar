@@ -694,8 +694,12 @@ fn safe_repository_label(remote: &str) -> String {
 fn is_network_failure(lower: &str) -> bool {
     [
         "could not resolve host",
+        "could not resolve proxy",
         "failed to connect",
+        "failed to connect to proxy",
         "connection timed out",
+        "operation timed out",
+        "timeout was reached",
         "connection reset",
         "network is unreachable",
         "proxy connect aborted",

@@ -301,6 +301,17 @@ fn expired_missing_unauthorized_app_and_network_failures_are_distinct() {
             .as_str(),
         "network"
     );
+    for message in [
+        "Could not resolve proxy: proxy.example",
+        "Failed to connect to proxy.example port 8080",
+        "Operation timed out after 300001 milliseconds",
+        "Timeout was reached",
+    ] {
+        assert_eq!(
+            classify_git_failure(message, &available).code.as_str(),
+            "network"
+        );
+    }
 }
 
 #[test]
