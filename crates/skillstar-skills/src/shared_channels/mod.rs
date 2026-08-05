@@ -5,6 +5,8 @@
 
 mod existing;
 mod github;
+mod release;
+mod release_scanner;
 mod store;
 
 use async_trait::async_trait;
@@ -19,6 +21,14 @@ pub use existing::{
     ExistingRepositoryInventory, ExistingRepositoryScanner, GitExistingRepositoryScanner,
 };
 pub use github::ProductionSharedChannelGateway;
+pub use release::{
+    CHANNEL_CONTENT_HASH_VERSION, CHANNEL_RELEASE_MANIFEST_VERSION, ChannelDraftScanner,
+    ChannelDraftSkill, ChannelDraftSnapshot, ChannelPublicationFacade, ChannelPublicationGateway,
+    ChannelPublishPreview, ChannelPublishResult, ChannelPublishSessions, ChannelPublisherIdentity,
+    ChannelReleaseManifest, ChannelReleaseSkill, ChannelSkillReleaseStatus, RemoteChannelRelease,
+    revision_tag, validate_manifest,
+};
+pub use release_scanner::GitChannelDraftScanner;
 pub use store::DiskSharedChannelRegistry;
 
 pub const CHANNEL_DESCRIPTOR_VERSION: u32 = 1;
@@ -113,6 +123,7 @@ pub struct RemoteRepository {
     pub owner_login: String,
     pub owner_type: String,
     pub name: String,
+    pub default_branch: String,
     pub html_url: String,
     pub clone_url: String,
     pub private: bool,
@@ -141,6 +152,10 @@ pub enum SharedChannelErrorCode {
     RegistrationSessionNotFound,
     RegistrationSessionConflict,
     Cancelled,
+    DraftChanged,
+    ReleaseConflict,
+    WorkflowPermissionRequired,
+    Integrity,
     PersonalOwnerRejected,
     PublicRepositoryRejected,
     UnsupportedHost,

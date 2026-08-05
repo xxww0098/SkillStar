@@ -136,6 +136,7 @@ fn repository() -> RemoteRepository {
         owner_login: "acme".into(),
         owner_type: "Organization".into(),
         name: "skillstar-team".into(),
+        default_branch: "main".into(),
         html_url: "https://github.com/acme/skillstar-team".into(),
         clone_url: "https://github.com/acme/skillstar-team.git".into(),
         private: true,

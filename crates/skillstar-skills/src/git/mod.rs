@@ -8,6 +8,7 @@ pub mod gh_manager;
 pub mod ops;
 pub mod repo_history;
 pub mod transport;
+mod tree;
 
 #[cfg(test)]
 mod transport_tests;

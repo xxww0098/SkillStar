@@ -1,5 +1,7 @@
 import type {
   CreateSharedChannelRequest,
+  ChannelPublishPreview,
+  ChannelPublishResult,
   ExistingChannelRepositoryCandidate,
   ExistingChannelScanPreview,
   ExistingChannelScanRequest,
@@ -31,6 +33,18 @@ export interface SharedChannelCommands {
     result: SharedChannelDescriptor;
   };
   cancel_existing_shared_channel_registration: {
+    args: { sessionId: string };
+    result: boolean;
+  };
+  preview_shared_channel_publish: {
+    args: { repositoryId: number; sessionId: string };
+    result: ChannelPublishPreview;
+  };
+  publish_shared_channel: {
+    args: { sessionId: string; title: string; notes: string };
+    result: ChannelPublishResult;
+  };
+  cancel_shared_channel_publish: {
     args: { sessionId: string };
     result: boolean;
   };

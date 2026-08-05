@@ -1,6 +1,8 @@
+use super::release::parse_revision_tag;
 use super::{
-    GitHubOrganization, RemoteRepository, RepositoryPermissions, SharedChannelError,
-    SharedChannelErrorCode, SharedChannelGateway,
+    ChannelPublicationGateway, ChannelPublisherIdentity, ChannelReleaseManifest,
+    GitHubOrganization, RemoteChannelRelease, RemoteRepository, RepositoryPermissions,
+    SharedChannelError, SharedChannelErrorCode, SharedChannelGateway, validate_manifest,
 };
 use crate::github_auth::GitHubApiCredential;
 use async_trait::async_trait;
@@ -8,6 +10,9 @@ use serde::Deserialize;
 use std::time::Duration;
 
 const API_ROOT: &str = "https://api.github.com";
+const MAX_GITHUB_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+const MAX_PUBLICATION_PAGES: usize = 50;
+const MAX_CHANNEL_RELEASES: usize = 4_096;
 
 pub struct ProductionSharedChannelGateway {
     credential: GitHubApiCredential,
@@ -47,9 +52,33 @@ impl ProductionSharedChannelGateway {
         &self,
         request: reqwest::RequestBuilder,
     ) -> Result<(u16, String), SharedChannelError> {
-        let response = request.send().await.map_err(|_| network_error())?;
+        let mut response = request.send().await.map_err(|_| network_error())?;
         let status = response.status().as_u16();
-        let body = response.text().await.map_err(|_| network_error())?;
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAX_GITHUB_RESPONSE_BYTES as u64)
+        {
+            return Err(SharedChannelError::new(
+                SharedChannelErrorCode::Protocol,
+                "GitHub returned a shared-channel response above the supported size limit",
+            ));
+        }
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|_| network_error())? {
+            if bytes.len().saturating_add(chunk.len()) > MAX_GITHUB_RESPONSE_BYTES {
+                return Err(SharedChannelError::new(
+                    SharedChannelErrorCode::Protocol,
+                    "GitHub returned a shared-channel response above the supported size limit",
+                ));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        let body = String::from_utf8(bytes).map_err(|_| {
+            SharedChannelError::new(
+                SharedChannelErrorCode::Protocol,
+                "GitHub returned a non-UTF-8 shared-channel response",
+            )
+        })?;
         Ok((status, body))
     }
 
@@ -140,6 +169,7 @@ struct OrganizationAccount {
 struct RepositoryResponse {
     id: u64,
     name: String,
+    default_branch: String,
     html_url: String,
     clone_url: String,
     private: bool,
@@ -200,6 +230,57 @@ struct InstallationAccount {
 struct AccessibleRepositoriesResponse {
     total_count: usize,
     repositories: Vec<RepositoryResponse>,
+}
+
+#[derive(Deserialize)]
+struct GitHubUserResponse {
+    id: u64,
+    login: String,
+}
+
+#[derive(Deserialize)]
+struct GitObjectReference {
+    sha: String,
+    #[serde(rename = "type")]
+    kind: String,
+}
+
+#[derive(Deserialize)]
+struct GitReferenceResponse {
+    #[serde(rename = "ref")]
+    reference: String,
+    object: GitObjectReference,
+}
+
+#[derive(Deserialize)]
+struct GitTagResponse {
+    tag: String,
+    message: String,
+    object: GitObjectReference,
+}
+
+#[derive(Deserialize)]
+struct CreatedGitTagResponse {
+    sha: String,
+}
+
+#[derive(Deserialize)]
+struct GitHubReleaseResponse {
+    id: u64,
+    html_url: String,
+    target_commitish: String,
+}
+
+#[derive(Deserialize)]
+struct GitHubReleaseListItem {
+    id: u64,
+    html_url: String,
+    tag_name: String,
+    target_commitish: String,
+    name: Option<String>,
+    body: Option<String>,
+    draft: bool,
+    prerelease: bool,
 }
 
 #[async_trait]
@@ -307,6 +388,237 @@ impl SharedChannelGateway for ProductionSharedChannelGateway {
     }
 }
 
+#[async_trait]
+impl ChannelPublicationGateway for ProductionSharedChannelGateway {
+    async fn publisher_identity(&self) -> Result<ChannelPublisherIdentity, SharedChannelError> {
+        let (status, body) = self
+            .response(self.request(reqwest::Method::GET, &format!("{API_ROOT}/user"))?)
+            .await?;
+        ensure_status(status, &[200])?;
+        let user: GitHubUserResponse = parse_json(&body)?;
+        Ok(ChannelPublisherIdentity {
+            id: user.id,
+            login: user.login,
+        })
+    }
+
+    async fn head_commit(
+        &self,
+        repository: &RemoteRepository,
+    ) -> Result<String, SharedChannelError> {
+        let url = format!(
+            "{}/git/ref/heads/{}",
+            repository_api_base(repository)?,
+            encode_ref_segment(&repository.default_branch)?
+        );
+        let (status, body) = self
+            .response(self.request(reqwest::Method::GET, &url)?)
+            .await?;
+        ensure_status(status, &[200])?;
+        let reference: GitReferenceResponse = parse_json(&body)?;
+        if reference.object.kind != "commit" {
+            return Err(publication_integrity_error(
+                "GitHub default branch did not resolve to a commit",
+            ));
+        }
+        Ok(reference.object.sha)
+    }
+
+    async fn published_manifests(
+        &self,
+        repository: &RemoteRepository,
+    ) -> Result<Vec<ChannelReleaseManifest>, SharedChannelError> {
+        let api_base = repository_api_base(repository)?;
+        let mut manifests = Vec::new();
+        let mut page = 1usize;
+        loop {
+            if page > MAX_PUBLICATION_PAGES {
+                return Err(publication_integrity_error(
+                    "The channel release history exceeds the supported page limit",
+                ));
+            }
+            let url = format!("{api_base}/releases?per_page=100&page={page}");
+            let (status, body) = self
+                .response(self.request(reqwest::Method::GET, &url)?)
+                .await?;
+            ensure_status(status, &[200])?;
+            let releases: Vec<GitHubReleaseListItem> = parse_json(&body)?;
+            let count = releases.len();
+            for release in releases {
+                if !release.tag_name.starts_with("channel-v") {
+                    continue;
+                }
+                if release.draft
+                    || release.prerelease
+                    || parse_revision_tag(&release.tag_name).is_none()
+                {
+                    return Err(publication_integrity_error(
+                        "A channel Release has an invalid immutable publication identity",
+                    ));
+                }
+                let ref_url = format!(
+                    "{api_base}/git/ref/tags/{}",
+                    encode_ref_segment(&release.tag_name)?
+                );
+                let (status, body) = self
+                    .response(self.request(reqwest::Method::GET, &ref_url)?)
+                    .await?;
+                ensure_publication_object_status(status)?;
+                let reference: GitReferenceResponse = parse_json(&body)?;
+                if reference.object.kind != "tag" {
+                    return Err(publication_integrity_error(
+                        "A channel revision tag is not an immutable annotated tag",
+                    ));
+                }
+                let tag_url = format!("{api_base}/git/tags/{}", reference.object.sha);
+                let (status, body) = self
+                    .response(self.request(reqwest::Method::GET, &tag_url)?)
+                    .await?;
+                ensure_publication_object_status(status)?;
+                let tag: GitTagResponse = parse_json(&body)?;
+                if tag.object.kind != "commit" {
+                    return Err(publication_integrity_error(
+                        "A channel revision tag does not target a commit",
+                    ));
+                }
+                let manifest: ChannelReleaseManifest =
+                    serde_json::from_str(&tag.message).map_err(|_| {
+                        publication_integrity_error(
+                            "A channel revision tag contains an invalid release manifest",
+                        )
+                    })?;
+                validate_manifest(&manifest, repository.id, repository.owner_id)?;
+                if tag.tag != manifest.tag_name
+                    || reference.reference != format!("refs/tags/{}", manifest.tag_name)
+                    || tag.object.sha != manifest.commit_sha
+                    || release.tag_name != manifest.tag_name
+                    || release.name.as_deref() != Some(manifest.title.as_str())
+                    || release.body.as_deref().unwrap_or_default() != manifest.notes
+                    || release.target_commitish != manifest.commit_sha
+                    || release.id == 0
+                    || release.html_url
+                        != format!("{}/releases/tag/{}", repository.html_url, manifest.tag_name)
+                {
+                    return Err(publication_integrity_error(
+                        "A channel Release does not match its immutable release manifest",
+                    ));
+                }
+                manifests.push(manifest);
+                if manifests.len() > MAX_CHANNEL_RELEASES {
+                    return Err(publication_integrity_error(
+                        "The channel release history exceeds the supported revision limit",
+                    ));
+                }
+            }
+            if count < 100 {
+                manifests.sort_by_key(|manifest| manifest.revision);
+                return Ok(manifests);
+            }
+            page += 1;
+        }
+    }
+
+    async fn highest_reserved_revision(
+        &self,
+        repository: &RemoteRepository,
+    ) -> Result<u64, SharedChannelError> {
+        let api_base = repository_api_base(repository)?;
+        let mut highest = 0;
+        let mut seen = 0usize;
+        let mut page = 1usize;
+        loop {
+            if page > MAX_PUBLICATION_PAGES {
+                return Err(publication_integrity_error(
+                    "The reserved channel revision history exceeds the supported page limit",
+                ));
+            }
+            let url =
+                format!("{api_base}/git/matching-refs/tags/channel-v?per_page=100&page={page}");
+            let (status, body) = self
+                .response(self.request(reqwest::Method::GET, &url)?)
+                .await?;
+            ensure_status(status, &[200])?;
+            let references: Vec<GitReferenceResponse> = parse_json(&body)?;
+            let count = references.len();
+            for reference in references {
+                seen = seen.saturating_add(1);
+                if seen > MAX_CHANNEL_RELEASES {
+                    return Err(publication_integrity_error(
+                        "The reserved channel revision history exceeds the supported limit",
+                    ));
+                }
+                let tag = reference
+                    .reference
+                    .strip_prefix("refs/tags/")
+                    .and_then(parse_revision_tag)
+                    .ok_or_else(|| {
+                        publication_integrity_error(
+                            "A reserved channel revision tag has an invalid identity",
+                        )
+                    })?;
+                highest = highest.max(tag);
+            }
+            if count < 100 {
+                return Ok(highest);
+            }
+            page += 1;
+        }
+    }
+
+    async fn publish_immutable(
+        &self,
+        repository: &RemoteRepository,
+        manifest: &ChannelReleaseManifest,
+    ) -> Result<RemoteChannelRelease, SharedChannelError> {
+        validate_manifest(manifest, repository.id, repository.owner_id)?;
+        let api_base = repository_api_base(repository)?;
+        let tag_request = self
+            .request(reqwest::Method::POST, &format!("{api_base}/git/tags"))?
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(create_tag_body(manifest)?.to_string());
+        let (status, body) = self.response(tag_request).await?;
+        if status != 201 {
+            return Err(publication_status_error(status, &body));
+        }
+        let tag: CreatedGitTagResponse = parse_json(&body)?;
+
+        let ref_request = self
+            .request(reqwest::Method::POST, &format!("{api_base}/git/refs"))?
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(create_ref_body(manifest, &tag.sha).to_string());
+        let (status, body) = self.response(ref_request).await?;
+        if status != 201 {
+            return Err(publication_status_error(status, &body));
+        }
+
+        let release_request = self
+            .request(reqwest::Method::POST, &format!("{api_base}/releases"))?
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(create_release_body(manifest).to_string());
+        let (status, body) = self.response(release_request).await?;
+        if status != 201 {
+            // Keep the tag as a reserved revision. A concurrent publisher may
+            // have created a Release from this exact ref before GitHub returned
+            // a conflict, so deleting it here could corrupt a valid release.
+            return Err(publication_status_error(status, &body));
+        }
+        let release: GitHubReleaseResponse = parse_json(&body)?;
+        let expected_url = format!("{}/releases/tag/{}", repository.html_url, manifest.tag_name);
+        if release.id == 0
+            || release.html_url != expected_url
+            || release.target_commitish != manifest.commit_sha
+        {
+            return Err(publication_integrity_error(
+                "GitHub returned an unexpected channel Release identity",
+            ));
+        }
+        Ok(RemoteChannelRelease {
+            id: release.id,
+            html_url: release.html_url,
+        })
+    }
+}
+
 fn validate_installation_contract(
     installation: &UserInstallation,
 ) -> Result<(), SharedChannelError> {
@@ -342,6 +654,7 @@ fn map_repository(response: RepositoryResponse) -> Result<RemoteRepository, Shar
         owner_login: response.owner.login,
         owner_type: response.owner.kind,
         name: response.name,
+        default_branch: response.default_branch,
         html_url: response.html_url,
         clone_url: response.clone_url,
         private: response.private,
@@ -389,6 +702,117 @@ fn encode_path_segment(value: &str) -> Result<String, SharedChannelError> {
     Ok(value.to_string())
 }
 
+fn repository_api_base(repository: &RemoteRepository) -> Result<String, SharedChannelError> {
+    Ok(format!(
+        "{API_ROOT}/repos/{}/{}",
+        encode_path_segment(&repository.owner_login)?,
+        encode_repository_segment(&repository.name)?
+    ))
+}
+
+fn encode_repository_segment(value: &str) -> Result<String, SharedChannelError> {
+    if value.is_empty()
+        || !value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_')
+        })
+    {
+        return Err(SharedChannelError::new(
+            SharedChannelErrorCode::Protocol,
+            "GitHub repository name contains unsupported characters",
+        ));
+    }
+    Ok(value.to_string())
+}
+
+fn encode_ref_segment(value: &str) -> Result<String, SharedChannelError> {
+    if value.is_empty()
+        || value.starts_with('-')
+        || value.contains("..")
+        || value.chars().any(char::is_control)
+    {
+        return Err(SharedChannelError::new(
+            SharedChannelErrorCode::Protocol,
+            "GitHub ref contains unsupported characters",
+        ));
+    }
+    Ok(url::form_urlencoded::byte_serialize(value.as_bytes()).collect())
+}
+
+fn create_tag_body(
+    manifest: &ChannelReleaseManifest,
+) -> Result<serde_json::Value, SharedChannelError> {
+    let message = serde_json::to_string(manifest).map_err(|_| {
+        SharedChannelError::new(
+            SharedChannelErrorCode::Protocol,
+            "Unable to serialize the channel release manifest",
+        )
+    })?;
+    Ok(serde_json::json!({
+        "tag": manifest.tag_name,
+        "message": message,
+        "object": manifest.commit_sha,
+        "type": "commit",
+    }))
+}
+
+fn create_ref_body(manifest: &ChannelReleaseManifest, tag_object_sha: &str) -> serde_json::Value {
+    serde_json::json!({
+        "ref": format!("refs/tags/{}", manifest.tag_name),
+        "sha": tag_object_sha,
+    })
+}
+
+fn create_release_body(manifest: &ChannelReleaseManifest) -> serde_json::Value {
+    serde_json::json!({
+        "tag_name": manifest.tag_name,
+        "target_commitish": manifest.commit_sha,
+        "name": manifest.title,
+        "body": manifest.notes,
+        "draft": false,
+        "prerelease": false,
+    })
+}
+
+fn publication_status_error(status: u16, body: &str) -> SharedChannelError {
+    let lower = body.to_ascii_lowercase();
+    if matches!(status, 403 | 422) && lower.contains("workflow") {
+        return SharedChannelError::new(
+            SharedChannelErrorCode::WorkflowPermissionRequired,
+            "GitHub refused the channel release because workflow authorization is not granted; SkillStar does not request Workflows write",
+        );
+    }
+    match status {
+        401 => not_authenticated(),
+        403 => SharedChannelError::new(
+            SharedChannelErrorCode::PermissionDenied,
+            "GitHub refused channel publishing for the current repository permission",
+        ),
+        404 => SharedChannelError::new(
+            SharedChannelErrorCode::RepositoryNotFound,
+            "GitHub could not find the channel repository while publishing",
+        ),
+        409 | 422 => SharedChannelError::new(
+            SharedChannelErrorCode::ReleaseConflict,
+            "The channel revision already exists or conflicts with another publisher; scan again",
+        ),
+        _ => protocol_status(status),
+    }
+}
+
+fn publication_integrity_error(message: &str) -> SharedChannelError {
+    SharedChannelError::new(SharedChannelErrorCode::Integrity, message)
+}
+
+fn ensure_publication_object_status(status: u16) -> Result<(), SharedChannelError> {
+    if status == 404 {
+        Err(publication_integrity_error(
+            "A published channel Release references a deleted tag or tag object",
+        ))
+    } else {
+        ensure_status(status, &[200])
+    }
+}
+
 fn network_error() -> SharedChannelError {
     SharedChannelError::new(
         SharedChannelErrorCode::Network,
@@ -420,6 +844,9 @@ fn protocol_status(status: u16) -> SharedChannelError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared_channels::{
+        ChannelPublisherIdentity, ChannelReleaseSkill, ChannelSkillReleaseStatus,
+    };
 
     fn installation(
         repository_selection: &str,
@@ -463,5 +890,90 @@ mod tests {
             "https://api.github.com/user/installations/9/repositories?per_page=100&page=2"
         );
         assert!(!installation_repositories_url(9, 2).contains("repositories/"));
+    }
+
+    #[test]
+    fn publication_request_contracts_bind_ref_release_and_manifest_without_workflows() {
+        let manifest = fixture_manifest();
+        let tag = create_tag_body(&manifest).unwrap();
+        assert_eq!(tag["tag"], "channel-v000001");
+        assert_eq!(tag["object"], manifest.commit_sha);
+        assert_eq!(tag["type"], "commit");
+        let decoded: ChannelReleaseManifest =
+            serde_json::from_str(tag["message"].as_str().unwrap()).unwrap();
+        assert_eq!(decoded, manifest);
+
+        let reference = create_ref_body(&manifest, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        assert_eq!(reference["ref"], "refs/tags/channel-v000001");
+        assert_eq!(reference["sha"], "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+
+        let release = create_release_body(&manifest);
+        assert_eq!(release["tag_name"], "channel-v000001");
+        assert_eq!(release["target_commitish"], manifest.commit_sha);
+        assert_eq!(release["name"], "Writing tools");
+        assert_eq!(release["body"], "Initial release");
+        assert!(release.get("workflows").is_none());
+        assert_eq!(
+            encode_ref_segment("feature/draft").unwrap(),
+            "feature%2Fdraft"
+        );
+    }
+
+    #[test]
+    fn workflow_rejection_has_a_dedicated_error_contract() {
+        let error = publication_status_error(
+            422,
+            r#"{"message":"refusing to update workflow without workflows permission"}"#,
+        );
+        assert_eq!(
+            error.code,
+            SharedChannelErrorCode::WorkflowPermissionRequired
+        );
+        assert!(error.message.contains("does not request Workflows write"));
+    }
+
+    #[test]
+    fn deleted_release_tag_is_classified_as_integrity_failure() {
+        let error = ensure_publication_object_status(404).unwrap_err();
+        assert_eq!(error.code, SharedChannelErrorCode::Integrity);
+        assert!(error.message.contains("deleted tag"));
+    }
+
+    #[test]
+    fn release_response_contract_preserves_the_exact_target_commit() {
+        let response: GitHubReleaseResponse = parse_json(
+            r#"{"id":501,"html_url":"https://github.com/acme/shared/releases/tag/channel-v000001","target_commitish":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            response.target_commitish,
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+    }
+
+    fn fixture_manifest() -> ChannelReleaseManifest {
+        ChannelReleaseManifest {
+            schema_version: 1,
+            repository_id: 42,
+            organization_id: 7,
+            revision: 1,
+            tag_name: "channel-v000001".into(),
+            commit_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            publisher: ChannelPublisherIdentity {
+                id: 99,
+                login: "alice".into(),
+            },
+            published_at: "2026-08-05T00:00:00Z".into(),
+            title: "Writing tools".into(),
+            notes: "Initial release".into(),
+            skills: vec![ChannelReleaseSkill {
+                id: "writer".into(),
+                content_root: "skills/writer".into(),
+                content_hash:
+                    "sha256:6e8b30c29c269c5375c2149f4834f8f6d289e5842b6d75f0f912749605a537f7".into(),
+                content_hash_version: 2,
+                status: ChannelSkillReleaseStatus::Added,
+            }],
+        }
     }
 }

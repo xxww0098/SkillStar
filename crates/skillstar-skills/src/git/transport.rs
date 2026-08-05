@@ -730,16 +730,16 @@ fn read_pipe<R: Read>(pipe: Option<R>) -> Vec<u8> {
 }
 
 #[cfg(unix)]
-fn configure_process_group(command: &mut Command) {
+pub(crate) fn configure_process_group(command: &mut Command) {
     use std::os::unix::process::CommandExt;
     command.process_group(0);
 }
 
 #[cfg(not(unix))]
-fn configure_process_group(_command: &mut Command) {}
+pub(crate) fn configure_process_group(_command: &mut Command) {}
 
 #[cfg(unix)]
-fn terminate_child_tree(child: &mut std::process::Child) {
+pub(crate) fn terminate_child_tree(child: &mut std::process::Child) {
     let process_group = format!("-{}", child.id());
     let _ = command_with_path("kill")
         .args(["-TERM", process_group.as_str()])
@@ -748,7 +748,7 @@ fn terminate_child_tree(child: &mut std::process::Child) {
 }
 
 #[cfg(windows)]
-fn terminate_child_tree(child: &mut std::process::Child) {
+pub(crate) fn terminate_child_tree(child: &mut std::process::Child) {
     let pid = child.id().to_string();
     let _ = command_with_path("taskkill")
         .args(["/PID", pid.as_str(), "/T", "/F"])
@@ -757,7 +757,7 @@ fn terminate_child_tree(child: &mut std::process::Child) {
 }
 
 #[cfg(not(any(unix, windows)))]
-fn terminate_child_tree(child: &mut std::process::Child) {
+pub(crate) fn terminate_child_tree(child: &mut std::process::Child) {
     let _ = child.kill();
 }
 

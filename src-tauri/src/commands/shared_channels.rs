@@ -1,9 +1,10 @@
 //! Thin Tauri adapters for organization-private shared channels.
 
 use skillstar_skills::shared_channels::{
-    CreateSharedChannelRequest, DiskSharedChannelRegistry, ExistingChannelRepositoryCandidate,
-    ExistingChannelScanPreview, ExistingChannelScanRequest, GitHubOrganization,
-    SharedChannelDescriptor, SharedChannelError, SharedChannelRegistry,
+    ChannelPublishPreview, ChannelPublishResult, CreateSharedChannelRequest,
+    DiskSharedChannelRegistry, ExistingChannelRepositoryCandidate, ExistingChannelScanPreview,
+    ExistingChannelScanRequest, GitHubOrganization, SharedChannelDescriptor, SharedChannelError,
+    SharedChannelRegistry,
 };
 use tauri::{AppHandle, State};
 
@@ -87,4 +88,48 @@ pub fn cancel_existing_shared_channel_registration(
     state: State<'_, GitHubAuthState>,
 ) -> bool {
     state.cancel_existing_channel_registration(&session_id)
+}
+
+#[tauri::command]
+pub async fn preview_shared_channel_publish(
+    repository_id: u64,
+    session_id: String,
+    app: AppHandle,
+    state: State<'_, GitHubAuthState>,
+) -> Result<ChannelPublishPreview, SharedChannelError> {
+    let git_facade = state
+        .begin_git_operation(app, Some(session_id))
+        .map_err(SharedChannelError::from)?;
+    let registered_session_id = git_facade.session().id().to_string();
+    let result = match state.channel_publication_scan_facade(git_facade) {
+        Ok(facade) => {
+            facade
+                .preview(repository_id, registered_session_id.clone())
+                .await
+        }
+        Err(error) => Err(error),
+    };
+    state.finish_git_operation(&registered_session_id);
+    result
+}
+
+#[tauri::command]
+pub async fn publish_shared_channel(
+    session_id: String,
+    title: String,
+    notes: String,
+    state: State<'_, GitHubAuthState>,
+) -> Result<ChannelPublishResult, SharedChannelError> {
+    state
+        .channel_publication_facade()?
+        .publish(&session_id, title, notes)
+        .await
+}
+
+#[tauri::command]
+pub fn cancel_shared_channel_publish(
+    session_id: String,
+    state: State<'_, GitHubAuthState>,
+) -> bool {
+    state.cancel_channel_publication(&session_id)
 }

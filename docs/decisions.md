@@ -135,6 +135,7 @@
 - 决策：数字 repository ID 是频道稳定远程键，owner/name/URL 只作可刷新路由元数据。创建前校验目标组织已采用 selected-repository 安装 SkillStar GitHub App，并授予 Administration/Contents write；随后由 App 用户身份创建私有仓库，依赖 GitHub 将 App 创建的新仓库自动加入该安装范围。创建成功后立即原子持久化版本化 pending descriptor，再以只读 API 校验 App 可访问该 repository ID，最后转 active；绝不使用 GitHub App 用户令牌不支持的安装范围写接口，恢复也只接受 registry 中的 repository ID。仅允许组织私有 `github.com` 仓库，权限按 Admin→owner、Maintain/Write→publisher、Read→subscriber 投影。本地 registry 不含凭据，REST 访问复用当前 GitHub App 用户身份和统一代理 client。
 - 后果：pending descriptor 落盘后，用户能在详情中完成 App 安装/授权并安全续接；仓库重命名不会改变频道身份，后续同步必须先按 ID 校验并刷新路由元数据。GitHub `201 Created` 与首次本地原子写之间仍是不可消除的跨系统故障窗口：若进程终止或磁盘写入失败，SkillStar 不按名称猜测、不自动删除仓库，组织所有者需在 GitHub 手动处理该孤儿仓库。
 - 扩展：已有组织私有仓库不直接绑定，而先建立进程内、ID-bound 的 registration session。扫描以当前 revision 的完整 tracked tree 披露全部 Skill、非 Skill 文件以及整段历史可读边界，不以稀疏工作树代表远端库存；generation tombstone 丢弃取消后的晚到结果，确认原子 claim 预览并在落 registry 前重新按 numeric ID 校验远端与重复绑定。确认失败保留 session 以便恢复；GitHub 登出、进程重启、取消或成功后清除，且不持久化 checkout 路径或任何凭据。
+- 扩展：频道发布以 `channel-vNNNNNN` annotated tag message 中的版本化 canonical manifest 和同名 GitHub Release 为唯一远端版本边界；branch commits 永远只是草稿。manifest 绑定 stable repository ID、精确 commit、发布者、时间和全量 Skill snapshot hash，并显式携带 added/updated/unchanged/removed。revision 只从已验证的远端 tags 单调派生；本地不预增计数。发布预览用短生命周期 session 固定 commit，确认时 HEAD 漂移、权限变化、schema/identity 不符或远端拒绝均 fail-closed。
 
 ## 新增记录格式
 

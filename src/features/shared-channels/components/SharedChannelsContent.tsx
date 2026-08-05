@@ -10,6 +10,7 @@ import {
   resumeSharedChannel,
 } from "../api/channels";
 import { ExistingChannelRegistration } from "./ExistingChannelRegistration";
+import { ChannelPublishPanel } from "./ChannelPublishPanel";
 
 interface Props {
   scopeSwitch: React.ReactNode;
@@ -384,13 +385,16 @@ function ChannelDetail({
       </div>
 
       {channel.status === "active" ? (
-        <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-5 text-center">
-          <ShieldCheck className="mx-auto size-7 text-emerald-500" />
-          <p className="mt-2 text-sm font-medium">
-            {t("sharedChannels.emptyActive", { defaultValue: "Channel ready — no Skills have been published yet." })}
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">GitHub App scope: selected repository only.</p>
-        </div>
+        <>
+          <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-5 text-center">
+            <ShieldCheck className="mx-auto size-7 text-emerald-500" />
+            <p className="mt-2 text-sm font-medium">
+              {t("sharedChannels.emptyActive", { defaultValue: "Channel ready — normal commits remain drafts." })}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">GitHub App scope: selected repository only.</p>
+          </div>
+          {(channel.role === "owner" || channel.role === "publisher") && <ChannelPublishPanel channel={channel} />}
+        </>
       ) : (
         <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-5">
           <p className="text-sm font-medium">

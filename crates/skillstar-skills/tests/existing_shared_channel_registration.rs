@@ -165,6 +165,7 @@ fn repository() -> RemoteRepository {
         owner_login: "acme".into(),
         owner_type: "Organization".into(),
         name: "existing-channel".into(),
+        default_branch: "main".into(),
         html_url: "https://github.com/acme/existing-channel".into(),
         clone_url: "https://github.com/acme/existing-channel.git".into(),
         private: true,

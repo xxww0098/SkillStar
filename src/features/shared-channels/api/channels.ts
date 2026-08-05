@@ -32,3 +32,15 @@ export function confirmExistingSharedChannel(sessionId: string) {
 export function cancelExistingSharedChannelRegistration(sessionId: string) {
   return tauriInvoke("cancel_existing_shared_channel_registration", { sessionId });
 }
+
+export function previewSharedChannelPublish(repositoryId: number, sessionId: string) {
+  return tauriInvoke("preview_shared_channel_publish", { repositoryId, sessionId });
+}
+
+export function publishSharedChannel(sessionId: string, title: string, notes: string) {
+  return tauriInvoke("publish_shared_channel", { sessionId, title, notes });
+}
+
+export function cancelSharedChannelPublish(sessionId: string) {
+  return tauriInvoke("cancel_shared_channel_publish", { sessionId });
+}

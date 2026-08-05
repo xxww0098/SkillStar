@@ -9,6 +9,7 @@ use skillstar_core::infra::path_env::command_with_path;
 use tracing::{debug, warn};
 
 use super::transport::{self, GitOperationSession, GitTransportErrorCode};
+pub use super::tree::{GitTreeEntry, list_tree_entries_at, list_tree_paths, list_tree_paths_at};
 
 /// Maximum number of retries for shallow fetch operations that hit the
 /// `shallow file has changed since we read it` race condition.
@@ -244,30 +245,6 @@ pub fn clone_repo_sparse_in_session(
         }
         Err(e) => Err(e),
     }
-}
-
-/// List all file paths in the repository tree without a checkout.
-///
-/// Requires at least tree objects to be present (works after a treeless clone
-/// with `--filter=blob:none`). Returns paths relative to the repo root.
-pub fn list_tree_paths(repo_path: &Path) -> Result<Vec<String>> {
-    let output = command_with_path("git")
-        .current_dir(repo_path)
-        .args(["ls-tree", "-r", "--name-only", "-z", "HEAD"])
-        .output()
-        .context("Failed to execute git ls-tree")?;
-
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!("git ls-tree failed: {}", err.trim()));
-    }
-
-    let paths = String::from_utf8(output.stdout)
-        .context("git ls-tree returned a non-UTF-8 repository path")?
-        .split_terminator('\0')
-        .map(str::to_string)
-        .collect();
-    Ok(paths)
 }
 
 /// Configure sparse-checkout for a repo and materialize the given directories.

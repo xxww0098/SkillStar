@@ -1,8 +1,15 @@
-import type { ExistingChannelScanPreview, SharedChannelDescriptor } from "../../../types";
+import type {
+  ChannelPublishPreview,
+  ChannelPublishResult,
+  ExistingChannelScanPreview,
+  SharedChannelDescriptor,
+} from "../../../types";
 import type { DevMockHandlers } from "./shared";
 
 let channels: SharedChannelDescriptor[] = [];
 const registrationPreviews = new Map<string, ExistingChannelScanPreview>();
+const publicationPreviews = new Map<string, ChannelPublishPreview>();
+let publishedRevision = 0;
 
 export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
   list_shared_channel_organizations: () => [
@@ -98,4 +105,56 @@ export const SHARED_CHANNEL_HANDLERS: DevMockHandlers = {
     return channel;
   },
   cancel_existing_shared_channel_registration: (args) => registrationPreviews.delete(String(args?.sessionId ?? "")),
+  preview_shared_channel_publish: (args) => {
+    const sessionId = String(args?.sessionId ?? crypto.randomUUID());
+    const repositoryId = Number(args?.repositoryId ?? 42);
+    const nextRevision = publishedRevision + 1;
+    const preview: ChannelPublishPreview = {
+      session_id: sessionId,
+      repository_id: repositoryId,
+      commit_sha: "0123456789abcdef0123456789abcdef01234567",
+      next_revision: nextRevision,
+      tag_name: `channel-v${String(nextRevision).padStart(6, "0")}`,
+      changes: [
+        {
+          id: "writer",
+          content_root: "skills/writer",
+          content_hash: "sha256:6e8b30c29c269c5375c2149f4834f8f6d289e5842b6d75f0f912749605a537f7",
+          content_hash_version: 2,
+          status: publishedRevision === 0 ? "added" : "updated",
+        },
+      ],
+    };
+    publicationPreviews.set(sessionId, preview);
+    return preview;
+  },
+  publish_shared_channel: (args) => {
+    const sessionId = String(args?.sessionId ?? "");
+    const preview = publicationPreviews.get(sessionId);
+    if (!preview) throw new Error("registration_session_not_found: Scan the channel draft again");
+    const channel = channels.find((item) => item.repository_id === preview.repository_id);
+    const result: ChannelPublishResult = {
+      manifest: {
+        schema_version: 1,
+        repository_id: preview.repository_id,
+        organization_id: channel?.organization_id ?? 7,
+        revision: preview.next_revision,
+        tag_name: preview.tag_name,
+        commit_sha: preview.commit_sha,
+        publisher: { id: 99, login: "demo-user" },
+        published_at: new Date().toISOString(),
+        title: String(args?.title ?? "Shared Skills"),
+        notes: String(args?.notes ?? ""),
+        skills: preview.changes,
+      },
+      release: {
+        id: 500 + preview.next_revision,
+        html_url: `${channel?.html_url ?? "https://github.com/acme/shared"}/releases/tag/${preview.tag_name}`,
+      },
+    };
+    publishedRevision = preview.next_revision;
+    publicationPreviews.delete(sessionId);
+    return result;
+  },
+  cancel_shared_channel_publish: (args) => publicationPreviews.delete(String(args?.sessionId ?? "")),
 };

@@ -311,6 +311,33 @@ pub fn discover_skills(repo_dir: &Path, full_depth: bool) -> Vec<DiscoveredSkill
     SkillDiscovery::new(repo_dir, SkillDiscoveryConfig::new(full_depth)).discover()
 }
 
+/// Full discovery without identity deduplication, for integrity-sensitive
+/// callers that must reject collisions instead of selecting one candidate.
+pub(crate) fn discover_skills_without_dedup(
+    repo_dir: &Path,
+    full_depth: bool,
+    root_default_name: Option<&str>,
+) -> Vec<DiscoveredSkill> {
+    let discovery = SkillDiscovery::new(repo_dir, SkillDiscoveryConfig::new(full_depth));
+    let mut candidates = discovery.collect_candidates();
+    if let Some(root_default_name) = root_default_name {
+        for candidate in &mut candidates {
+            if candidate.is_repo_root()
+                && candidate
+                    .frontmatter
+                    .name
+                    .as_deref()
+                    .is_none_or(|name| name.trim().is_empty())
+            {
+                candidate.default_name = root_default_name.to_string();
+            }
+        }
+    }
+    let mut discovered = discovery.normalize_candidates(candidates);
+    discovered.sort_by(|left, right| left.folder_path.cmp(&right.folder_path));
+    discovered
+}
+
 // ── Deduplication ───────────────────────────────────────────────────
 
 pub fn dedupe_discovered_skills(skills: Vec<DiscoveredSkill>) -> Vec<DiscoveredSkill> {

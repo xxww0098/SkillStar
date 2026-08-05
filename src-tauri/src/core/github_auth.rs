@@ -8,9 +8,10 @@ use skillstar_skills::github_auth::{
     GitHubAuthError, GitHubAuthFacade, KeyringCredentialStore, ProductionGitHubGateway, SystemClock,
 };
 use skillstar_skills::shared_channels::{
-    DiskSharedChannelRegistry, ExistingChannelRegistrationFacade,
-    ExistingChannelRegistrationSessions, GitExistingRepositoryScanner,
-    ProductionSharedChannelGateway, SharedChannelError, SharedChannelFacade,
+    ChannelPublicationFacade, ChannelPublishSessions, DiskSharedChannelRegistry,
+    ExistingChannelRegistrationFacade, ExistingChannelRegistrationSessions, GitChannelDraftScanner,
+    GitExistingRepositoryScanner, ProductionSharedChannelGateway, SharedChannelError,
+    SharedChannelFacade,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -23,6 +24,7 @@ pub struct GitHubAuthState {
     facade: ProductionGitHubAuth,
     git_sessions: Mutex<HashMap<String, GitOperationSession>>,
     existing_channel_sessions: ExistingChannelRegistrationSessions,
+    channel_publish_sessions: ChannelPublishSessions,
 }
 
 struct TauriGitProgressSink(AppHandle);
@@ -44,6 +46,7 @@ impl GitHubAuthState {
             facade,
             git_sessions: Mutex::new(HashMap::new()),
             existing_channel_sessions: ExistingChannelRegistrationSessions::default(),
+            channel_publish_sessions: ChannelPublishSessions::default(),
         }
     }
 
@@ -97,6 +100,36 @@ impl GitHubAuthState {
             DiskSharedChannelRegistry,
             GitExistingRepositoryScanner::new(git_facade),
             self.existing_channel_sessions.clone(),
+        ))
+    }
+
+    pub fn channel_publication_facade(
+        &self,
+    ) -> Result<
+        ChannelPublicationFacade<ProductionSharedChannelGateway, DiskSharedChannelRegistry>,
+        SharedChannelError,
+    > {
+        let credential = self.facade.api_credential()?;
+        Ok(ChannelPublicationFacade::without_scanner(
+            ProductionSharedChannelGateway::new(credential),
+            DiskSharedChannelRegistry,
+            self.channel_publish_sessions.clone(),
+        ))
+    }
+
+    pub fn channel_publication_scan_facade(
+        &self,
+        git_facade: GitSkillFacade,
+    ) -> Result<
+        ChannelPublicationFacade<ProductionSharedChannelGateway, DiskSharedChannelRegistry>,
+        SharedChannelError,
+    > {
+        let credential = self.facade.api_credential()?;
+        Ok(ChannelPublicationFacade::new(
+            ProductionSharedChannelGateway::new(credential),
+            DiskSharedChannelRegistry,
+            GitChannelDraftScanner::new(git_facade),
+            self.channel_publish_sessions.clone(),
         ))
     }
 
@@ -167,6 +200,14 @@ impl GitHubAuthState {
             | self.existing_channel_sessions.cancel(&canonical_id)
     }
 
+    pub fn cancel_channel_publication(&self, session_id: &str) -> bool {
+        let Ok(canonical_id) = uuid::Uuid::parse_str(session_id).map(|id| id.to_string()) else {
+            return false;
+        };
+        self.cancel_git_operation(&canonical_id)
+            | self.channel_publish_sessions.cancel(&canonical_id)
+    }
+
     pub fn logout(&self) -> Result<(), GitHubAuthError> {
         let mut sessions = self
             .git_sessions
@@ -177,6 +218,7 @@ impl GitHubAuthState {
         }
         sessions.clear();
         self.existing_channel_sessions.clear();
+        self.channel_publish_sessions.clear();
         self.facade.logout()
     }
 }
