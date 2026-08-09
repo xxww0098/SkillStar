@@ -1,8 +1,6 @@
 use crate::deployment;
-use crate::frontmatter::{render_with_front_matter, split_front_matter};
 use crate::git::ops as git_ops;
 use crate::{installed_skill, local_skill, lockfile, projects, repo_scanner};
-use serde_yaml::{Mapping, Value};
 use skillstar_core::infra::{fs_ops, paths};
 use skillstar_core::types::{
     Skill, SkillCategory, SkillType, extract_github_source_from_url, extract_skill_description,
@@ -134,81 +132,7 @@ fn new_skill_from_install(
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct RepoInstallProvenance<'a> {
-    git_url: &'a str,
-    source_folder: Option<&'a str>,
-}
-
-fn skill_markdown_path(skill_dir: &Path) -> PathBuf {
-    skill_dir.join("SKILL.md")
-}
-
-fn repo_install_provenance_mapping(provenance: RepoInstallProvenance<'_>) -> Mapping {
-    let mut mapping = Mapping::new();
-    mapping.insert(
-        Value::String("repository_url".to_string()),
-        Value::String(provenance.git_url.to_string()),
-    );
-
-    if let Some(source_folder) = provenance.source_folder.filter(|value| !value.is_empty()) {
-        mapping.insert(
-            Value::String("source_folder".to_string()),
-            Value::String(source_folder.to_string()),
-        );
-    }
-
-    mapping
-}
-
-fn merge_provenance_value(existing: Option<Value>, provenance: RepoInstallProvenance<'_>) -> Value {
-    let mut merged = match existing {
-        Some(Value::Mapping(mapping)) => mapping,
-        _ => Mapping::new(),
-    };
-
-    for (key, value) in repo_install_provenance_mapping(provenance) {
-        merged.insert(key, value);
-    }
-
-    Value::Mapping(merged)
-}
-
-#[cfg(test)]
-fn write_repo_install_provenance(
-    skill_dir: &Path,
-    provenance: RepoInstallProvenance<'_>,
-) -> Result<(), String> {
-    let skill_md_path = skill_markdown_path(skill_dir);
-    let existing = std::fs::read_to_string(&skill_md_path)
-        .map_err(|e| format!("Failed to read '{}': {}", skill_md_path.display(), e))?;
-    let rendered = render_repo_install_provenance(&existing, provenance);
-    skillstar_core::infra::fs_ops::atomic_write(&skill_md_path, rendered.as_bytes())
-        .map_err(|e| format!("Failed to write '{}': {}", skill_md_path.display(), e))
-}
-
-fn render_repo_install_provenance(existing: &str, provenance: RepoInstallProvenance<'_>) -> String {
-    let split = split_front_matter(existing);
-    let mut front_matter = split.data;
-    let existing_provenance = front_matter.remove("provenance");
-    front_matter.insert(
-        "provenance".to_string(),
-        merge_provenance_value(existing_provenance, provenance),
-    );
-
-    render_with_front_matter(Some(&front_matter), &split.body)
-}
-
-struct ProvenanceEdit {
-    path: PathBuf,
-    original: Vec<u8>,
-    rendered: Vec<u8>,
-}
-
-fn rollback_repo_cache_installs(skills_dir: &Path, names: &[String], edits: &[ProvenanceEdit]) {
-    for edit in edits {
-        let _ = fs_ops::atomic_write(&edit.path, &edit.original);
-    }
+fn rollback_repo_cache_installs(skills_dir: &Path, names: &[String]) {
     for name in names {
         let path = skills_dir.join(name);
         if path.symlink_metadata().is_ok() {
@@ -228,82 +152,21 @@ fn rollback_repo_cache_installs(skills_dir: &Path, names: &[String], edits: &[Pr
     installed_skill::invalidate_cache();
 }
 
+/// Finalize a batch install from the repo cache.
+///
+/// The lockfile entries (git URL, source folder, tree hash, content baseline)
+/// were already written by [`repo_scanner::install_from_repo_at`]; this step
+/// only builds the public `Skill` results and rolls the batch back if that
+/// fails. Provenance deliberately never touches the checked-out `SKILL.md`:
+/// the shared checkout is read-only for installs, so an update's
+/// `git reset --hard` can never wipe locally injected metadata and produce a
+/// self-inflicted content divergence.
 fn finalize_repo_cache_installs(
     skills_dir: &Path,
     repo_url: &str,
     installed: &[String],
-    targets: &[repo_scanner::SkillInstallTarget],
 ) -> Result<Vec<Skill>, String> {
-    let mut edits = Vec::with_capacity(installed.len());
-    let result = (|| {
-        // Render every edit before the first write. This keeps malformed or
-        // unreadable Skill metadata from producing a partially finalized batch.
-        for name in installed {
-            let source_folder = targets
-                .iter()
-                .find(|target| target.id == *name)
-                .map(|target| target.folder_path.as_str());
-            let path = skill_markdown_path(&skills_dir.join(name));
-            let original = std::fs::read(&path)
-                .map_err(|error| format!("Failed to read '{}': {error}", path.display()))?;
-            let existing = std::str::from_utf8(&original).map_err(|error| {
-                format!("Skill metadata '{}' is not UTF-8: {error}", path.display())
-            })?;
-            let rendered = render_repo_install_provenance(
-                existing,
-                RepoInstallProvenance {
-                    git_url: repo_url,
-                    source_folder,
-                },
-            )
-            .into_bytes();
-            edits.push(ProvenanceEdit {
-                path,
-                original,
-                rendered,
-            });
-        }
-
-        for edit in &edits {
-            fs_ops::atomic_write(&edit.path, &edit.rendered)
-                .map_err(|error| format!("Failed to write '{}': {error}", edit.path.display()))?;
-        }
-
-        let baselines = installed
-            .iter()
-            .map(|name| {
-                crate::content::snapshot(name)
-                    .map(|snapshot| (name.clone(), snapshot.content_hash))
-                    .map_err(|error| {
-                        format!("Failed to capture installed Skill '{name}' baseline: {error}")
-                    })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        {
-            let _lock = lockfile::get_mutex()
-                .lock()
-                .map_err(|_| "Lockfile mutex poisoned".to_string())?;
-            let lock_path = lockfile::lockfile_path();
-            let mut lockfile = lockfile::Lockfile::load(&lock_path).map_err(|error| {
-                format!("Failed to load lockfile '{}': {error}", lock_path.display())
-            })?;
-            for (name, content_hash) in &baselines {
-                let entry = lockfile
-                    .skills
-                    .iter_mut()
-                    .find(|entry| entry.name == *name)
-                    .ok_or_else(|| {
-                        format!("Installed Skill '{name}' is missing from the lockfile")
-                    })?;
-                entry.content_hash = Some(content_hash.clone());
-                entry.content_hash_version = Some(crate::content::SNAPSHOT_HASH_VERSION);
-            }
-            lockfile.save(&lock_path).map_err(|error| {
-                format!("Failed to save lockfile '{}': {error}", lock_path.display())
-            })?;
-        }
-
+    let result: Result<Vec<Skill>, String> = (|| {
         let skills = installed
             .iter()
             .map(|name| {
@@ -315,12 +178,12 @@ fn finalize_repo_cache_installs(
                     compute_tree_hash_for(skills_dir, name),
                 )
             })
-            .collect();
+            .collect::<Vec<_>>();
         Ok(skills)
     })();
 
     if result.is_err() {
-        rollback_repo_cache_installs(skills_dir, installed, &edits);
+        rollback_repo_cache_installs(skills_dir, installed);
     }
     result
 }
@@ -384,7 +247,7 @@ fn try_install_from_repo_cache(
     ) {
         Ok(installed) if !installed.is_empty() => {
             let mut installed_skills =
-                finalize_repo_cache_installs(skills_dir, &repo_url, &installed, &targets)?;
+                finalize_repo_cache_installs(skills_dir, &repo_url, &installed)?;
             installed_skill::invalidate_cache();
             Ok(installed_skills.pop())
         }
@@ -590,7 +453,6 @@ pub fn install_skills_batch_in_session(
                     &skills_dir,
                     &repo_url,
                     &installed,
-                    &targets,
                 )?);
                 installed_skill::invalidate_cache();
             }

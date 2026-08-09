@@ -34,6 +34,7 @@
 ## 安装与更新
 
 - 已安装列表先从本地快照返回，远程 update check 在有界后台任务中执行。
+- repo-cache 安装只创建指向共享 checkout 的 link，**绝不改写 checkout 内被 git 跟踪的文件**：provenance（git_url/source_folder）只存 lockfile，CLI 与 GUI 安装路径产物一致。共享 checkout 对安装只读，保证 update 的 `git reset --hard` 不会抹掉本地注入的元数据而自造内容分歧。
 - repo scan 默认 root-first；仓库根有合法 `SKILL.md` 时首先视作一个技能，也可显式启用全深度 discovery。
 - 技能 id 优先使用 frontmatter `name`，再回退目录名；根技能可回退仓库名。
 - CLI `install` 与 `add` 是同一命令，来源解析兼容 `npx skills add` 的常用形式：`owner/repo`、`owner/repo/path`、`owner/repo@skill`、GitHub/GitLab tree URL、HTTPS/SSH Git URL、本地 `.ags`/`.agd` 和包含 `SKILL.md` 的本地目录。tree URL 的 ref 与 subpath 必须在 clone/scan 阶段生效，不能把网页 URL 直接交给 Git。
