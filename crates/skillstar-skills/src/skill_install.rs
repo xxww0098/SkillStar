@@ -630,14 +630,19 @@ where
         .cloned();
     let staging = skills_dir.join(format!(".skillstar-remove-{name}-{}", std::process::id()));
     if staging.symlink_metadata().is_ok() {
-        return Err(UninstallSkillFailure {
-            message: format!(
-                "A previous removal staging path still exists: '{}'",
-                staging.display()
-            ),
-            committed: false,
-            rollback_complete: true,
-        });
+        // A leftover staging path means a previous removal crashed mid-flight
+        // (the same process cannot hold two live transactions). Clean it up
+        // instead of permanently blocking future uninstalls of this Skill.
+        if let Err(error) = fs_ops::remove_link_or_copy(&staging) {
+            return Err(UninstallSkillFailure {
+                message: format!(
+                    "A previous removal staging path still exists and could not be cleaned: '{}': {error}",
+                    staging.display()
+                ),
+                committed: false,
+                rollback_complete: true,
+            });
+        }
     }
     let moved = path.symlink_metadata().is_ok();
     if moved {
