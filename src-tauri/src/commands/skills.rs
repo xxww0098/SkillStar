@@ -41,7 +41,23 @@ pub async fn install_skill(
         .begin_git_operation(app, None)
         .map_err(|error| AppError::Git(error.to_string()))?;
     let session_id = facade.session().id().to_string();
-    let result = tokio::task::spawn_blocking(move || facade.install_skill(url, name)).await;
+    let result = tokio::task::spawn_blocking(move || {
+        let skill = facade.install_skill(url, name)?;
+        // Match the CLI: after a successful hub install, deploy the skill to
+        // every Agent the user has enabled in Settings.
+        skillstar_app::global_deploy::deploy_to_enabled_global_agents(&[skill.name.clone()])
+            .map_err(|error| {
+                tracing::warn!(
+                    target: "cmd",
+                    skill = %skill.name,
+                    error = %error,
+                    "hub install succeeded but Agent deployment failed"
+                );
+                error
+            })?;
+        Ok(skill)
+    })
+    .await;
     auth_state.finish_git_operation(&session_id);
     result
         .map_err(|e| AppError::Other(format!("install task panicked: {e}")))?

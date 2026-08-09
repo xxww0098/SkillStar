@@ -4,7 +4,8 @@
 
 use skillstar_core::infra::error::AppError;
 use skillstar_skills::deployment;
-use skillstar_skills::git::{dismissed_skills, gh_manager, repo_history};
+use skillstar_git::{dismissed_skills, repo_history};
+use skillstar_skills::git::gh_manager;
 use skillstar_skills::local_skill;
 use skillstar_skills::lockfile;
 use skillstar_skills::repo_scanner;
@@ -158,10 +159,24 @@ pub async fn install_from_scan(
         .begin_git_operation(app, session_id)
         .map_err(|error| AppError::Git(error.to_string()))?;
     let session_id = facade.session().id().to_string();
-    let result = tokio::task::spawn_blocking(move || {
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<String>> {
         let install_result = facade.install_from_scan(&source, &repo_url, &skills);
         skillstar_skills::installed_skill::invalidate_cache();
-        install_result
+        let installed = install_result?;
+        // Match the CLI: after a successful hub install, deploy the skills to
+        // every Agent the user has enabled in Settings.
+        skillstar_app::global_deploy::deploy_to_enabled_global_agents(&installed).map_err(
+            |error| {
+                tracing::warn!(
+                    target: "cmd",
+                    count = installed.len(),
+                    error = %error,
+                    "hub install succeeded but Agent deployment failed"
+                );
+                anyhow::anyhow!(error)
+            },
+        )?;
+        Ok(installed)
     })
     .await;
     auth_state.finish_git_operation(&session_id);
