@@ -45,6 +45,7 @@
 - 默认部署为 link-first；多个目标时交互选择 symlink/copy，`--copy` 必须真实强制目录复制，不能只改变日志。相同目标目录只物化一次。
 - 与 `vercel-labs/skills` 兼容的 Agent 共用项目级 `.agents/skills`。共享目录是 universal install surface；Agent 归属只用于 UI/manifest，不得重复部署或让一个 Agent 的移除误删另一个仍在使用的共享目录。
 - update 使用 staged swap；刷新失败不得先删除用户现有可用 link/copy。失败按 Agent 聚合并显式返回。
+- repo-backed 技能的 update 徽标按 Skill 粒度判定：比较该 Skill 目录在本地 HEAD 与 fetched ref（`origin/HEAD` 或 `FETCH_HEAD`）的 subtree hash，只有目录内容实际变化的 Skill 亮徽标；同 checkout 其他 Skill 不因 repo 级 HEAD 变化误报。subtree 无法解析（来源移动/删除该目录）时保留旧徽标状态。
 - 卸载的 `.skillstar-remove-*` staging 残留（上次卸载崩溃遗留）在下次卸载时自动清理，不阻塞后续卸载；清理失败才报错。
 - 共享频道是绑定到 GitHub 组织专用私有仓库的版本化描述符；数字 `repository_id` 是稳定远程键，`owner`、`name`、HTTPS URL 仅是可变路由元数据。个人账户、公开仓库和非 `github.com` 主机不得绑定。
 - 共享频道创建向导只展示当前 GitHub 身份所属的组织，并在提交前说明需要组织仓库 `Administration: write`、`Contents: write`，以及 GitHub App 对所选仓库的完整内容边界。创建者必须具有 Admin；远程权限投影规则为 Admin→owner、Maintain/Write→publisher、Read→subscriber。

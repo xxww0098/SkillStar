@@ -21,12 +21,13 @@ use std::path::{Path, PathBuf};
 use tracing::warn;
 
 use crate::git::ops as git_ops;
-use crate::repo_link;
+use crate::lockfile::LockEntry;
+use crate::{lockfile, repo_link};
 use skillstar_core::infra::path_env::command_with_path;
 
 // ── Batch Prefetch ──────────────────────────────────────────────────
 
-pub(crate) fn prefetch_unique_repos_in_session(
+pub fn prefetch_unique_repos_in_session(
     skill_paths: &[PathBuf],
     session: &crate::git::transport::GitOperationSession,
 ) -> HashSet<PathBuf> {
@@ -77,13 +78,30 @@ pub fn check_update_local(
     skill_path: &Path,
     failed_fetch_roots: &HashSet<PathBuf>,
 ) -> Option<bool> {
-    check_update_local_with(skill_path, failed_fetch_roots, repo_link::repo_root_of)
+    let entry = lock_entry_for_path(skill_path);
+    check_update_local_with(
+        skill_path,
+        failed_fetch_roots,
+        repo_link::repo_root_of,
+        entry.as_ref(),
+    )
+}
+
+/// Load the lockfile entry backing `skill_path`, if any.
+fn lock_entry_for_path(skill_path: &Path) -> Option<LockEntry> {
+    let name = skill_path.file_name()?.to_string_lossy().to_string();
+    lockfile::Lockfile::load(&lockfile::lockfile_path())
+        .ok()?
+        .skills
+        .into_iter()
+        .find(|entry| entry.name == name)
 }
 
 pub fn check_update_local_with<F>(
     skill_path: &Path,
     failed_fetch_roots: &HashSet<PathBuf>,
     repo_root_of: F,
+    entry: Option<&LockEntry>,
 ) -> Option<bool>
 where
     F: Fn(&Path) -> Option<PathBuf>,
@@ -97,7 +115,52 @@ where
     if failed_fetch_roots.contains(&repo_root) {
         return None;
     }
+
+    // Precise per-skill comparison. The lockfile knows the skill's source
+    // folder inside the shared checkout, so compare the subtree hash at the
+    // local HEAD against the same subtree at the fetched ref. A repo-wide
+    // HEAD change alone no longer lights every badge of a shared checkout;
+    // only Skills whose content actually moved report an update.
+    if let Some(folder) = entry.and_then(|entry| entry.source_folder.clone()) {
+        let remote_ref = if configured_git_ref(&repo_root).is_some() {
+            "FETCH_HEAD"
+        } else {
+            "origin/HEAD"
+        };
+        let local = subtree_hash_at(&repo_root, "HEAD", Some(&folder));
+        let remote = subtree_hash_at(&repo_root, remote_ref, Some(&folder));
+        if let (Some(local), Some(remote)) = (local, remote) {
+            return Some(local != remote);
+        }
+        // Unresolvable subtree (e.g. the source moved or dropped the folder):
+        // preserve the previous badge rather than guessing.
+        return None;
+    }
+
     Some(compare_heads(&repo_root).unwrap_or(false))
+}
+
+/// Tree hash of `source_folder` at `git_ref` in `repo_root`, or the whole
+/// tree when the skill is the checkout root.
+fn subtree_hash_at(
+    repo_root: &Path,
+    git_ref: &str,
+    source_folder: Option<&str>,
+) -> Option<String> {
+    let spec = match source_folder.filter(|folder| !folder.is_empty()) {
+        Some(folder) => format!("{git_ref}:{folder}"),
+        None => format!("{git_ref}^{{tree}}"),
+    };
+    let output = command_with_path("git")
+        .current_dir(repo_root)
+        .args(["rev-parse", "--verify", "--quiet", &spec])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!hash.is_empty()).then_some(hash)
 }
 
 fn compare_heads(repo_root: &Path) -> Option<bool> {
@@ -202,14 +265,112 @@ mod tests {
         let result = check_update_local_with(&skill_link, &HashSet::new(), |path| {
             let real = std::fs::read_link(path).ok()?;
             Some(real.parent()?.parent()?.to_path_buf())
-        });
+        }, None);
+        assert_eq!(result, Some(true));
+    }
+
+    #[test]
+    fn subtree_comparison_ignores_unrelated_repo_changes() {
+        let remote = init_repo();
+        fs::create_dir_all(remote.path().join("skills/demo")).unwrap();
+        fs::write(remote.path().join("skills/demo/SKILL.md"), "v1").unwrap();
+        fs::write(remote.path().join("README.md"), "readme v1").unwrap();
+        run_git(remote.path(), &["add", "."]);
+        run_git(remote.path(), &["commit", "-m", "initial"]);
+
+        let clone_parent = tempfile::tempdir().unwrap();
+        let clone_path = clone_parent.path().join("clone");
+        run_git(
+            clone_parent.path(),
+            &[
+                "clone",
+                remote.path().to_str().unwrap(),
+                clone_path.to_str().unwrap(),
+            ],
+        );
+
+        // The remote moves forward, but only outside the skill's folder.
+        fs::write(remote.path().join("README.md"), "readme v2").unwrap();
+        run_git(remote.path(), &["add", "."]);
+        run_git(remote.path(), &["commit", "-m", "docs only"]);
+
+        run_git(&clone_path, &["fetch", "--depth", "1", "--quiet"]);
+
+        let skill_link_parent = tempfile::tempdir().unwrap();
+        let skill_link = skill_link_parent.path().join("demo");
+        std::os::unix::fs::symlink(clone_path.join("skills/demo"), &skill_link).unwrap();
+
+        let entry = crate::lockfile::LockEntry {
+            name: "demo".to_string(),
+            git_url: String::new(),
+            git_ref: None,
+            tree_hash: String::new(),
+            content_hash: None,
+            content_hash_version: None,
+            installed_at: String::new(),
+            source_folder: Some("skills/demo".to_string()),
+        };
+        let result = check_update_local_with(&skill_link, &HashSet::new(), |path| {
+            let real = std::fs::read_link(path).ok()?;
+            Some(real.parent()?.parent()?.to_path_buf())
+        }, Some(&entry));
+        assert_eq!(
+            result,
+            Some(false),
+            "a repo-wide HEAD change must not badge a Skill whose folder did not move"
+        );
+    }
+
+    #[test]
+    fn subtree_comparison_badges_skills_whose_folder_moved() {
+        let remote = init_repo();
+        fs::create_dir_all(remote.path().join("skills/demo")).unwrap();
+        fs::write(remote.path().join("skills/demo/SKILL.md"), "v1").unwrap();
+        run_git(remote.path(), &["add", "."]);
+        run_git(remote.path(), &["commit", "-m", "initial"]);
+
+        let clone_parent = tempfile::tempdir().unwrap();
+        let clone_path = clone_parent.path().join("clone");
+        run_git(
+            clone_parent.path(),
+            &[
+                "clone",
+                remote.path().to_str().unwrap(),
+                clone_path.to_str().unwrap(),
+            ],
+        );
+
+        fs::write(remote.path().join("skills/demo/SKILL.md"), "v2").unwrap();
+        run_git(remote.path(), &["add", "."]);
+        run_git(remote.path(), &["commit", "-m", "skill changed"]);
+
+        run_git(&clone_path, &["fetch", "--depth", "1", "--quiet"]);
+
+        let skill_link_parent = tempfile::tempdir().unwrap();
+        let skill_link = skill_link_parent.path().join("demo");
+        std::os::unix::fs::symlink(clone_path.join("skills/demo"), &skill_link).unwrap();
+
+        let entry = crate::lockfile::LockEntry {
+            name: "demo".to_string(),
+            git_url: String::new(),
+            git_ref: None,
+            tree_hash: String::new(),
+            content_hash: None,
+            content_hash_version: None,
+            installed_at: String::new(),
+            source_folder: Some("skills/demo".to_string()),
+        };
+        let result = check_update_local_with(&skill_link, &HashSet::new(), |path| {
+            let real = std::fs::read_link(path).ok()?;
+            Some(real.parent()?.parent()?.to_path_buf())
+        }, Some(&entry));
         assert_eq!(result, Some(true));
     }
 
     #[test]
     fn unresolvable_repo_root_reports_no_update() {
         let dir = tempfile::tempdir().unwrap();
-        let result = check_update_local_with(&dir.path().join("nope"), &HashSet::new(), |_| None);
+        let result = check_update_local_with(&dir.path().join("nope"), &HashSet::new(), |_| None, None);
         assert_eq!(
             result,
             Some(false),
@@ -222,8 +383,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let repo = dir.path().join("repo");
         let failed = HashSet::from([repo.clone()]);
-        let result =
-            check_update_local_with(&dir.path().join("skill"), &failed, |_| Some(repo.clone()));
+        let result = check_update_local_with(
+            &dir.path().join("skill"),
+            &failed,
+            |_| Some(repo.clone()),
+            None,
+        );
         assert_eq!(result, None, "failed fetch must not clear the badge");
     }
 
