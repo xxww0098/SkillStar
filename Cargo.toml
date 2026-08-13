@@ -6,6 +6,20 @@ members = [
 ]
 default-members = ["src-tauri"]
 
+# Shared package metadata. Members opt in with `edition.workspace = true` etc.
+# None of the skillstar-* crates are published — they are wired together with
+# path deps — so they share one placeholder `version` instead of each keeping a
+# semver nobody consumes. `src-tauri` is the exception: it keeps its own
+# `version`, which is the product version, and inherits only edition/MSRV.
+[workspace.package]
+edition = "2024"
+rust-version = "1.94.1"
+version = "0.0.0"
+# Matches the Apache-2.0 LICENSE at the repo root. Stating it here is what
+# stops `cargo deny check licenses` reporting every member as `unlicensed`:
+# the root LICENSE file is invisible to per-crate metadata.
+license = "Apache-2.0"
+
 # Shared third-party dependency versions for every member crate that pulls in
 # ≥2 of them. Pin to whatever Cargo.lock already resolved at the time this
 # table was introduced — the goal is convergence, not upgrades. Member crates
@@ -52,7 +66,34 @@ url = "2.5.8"
 uuid = { version = "1.23.1", features = ["v4"] }
 which = "8.0.2"
 
+# Workspace-wide lint table. This is inert for any member that does not also
+# carry `[lints] workspace = true`, so all 13 members opt in explicitly.
+#
+# Ratchet rule: a lint only enters this table at `deny` when its violation count
+# across the workspace is measured to be 0 on the day it lands, so adding it
+# never turns CI red. Lints with real existing volume (`clippy::unwrap_used` at
+# 2744 sites, `clippy::expect_used` at 689) stay out entirely — a table of
+# ignored warnings dilutes the signal from the entries that mean something.
+[workspace.lints.clippy]
+todo = "deny"           # measured 0 occurrences workspace-wide, 2026-08-14
+unimplemented = "deny"  # measured 0 occurrences workspace-wide, 2026-08-14
+dbg_macro = "deny"      # measured 0 occurrences workspace-wide, 2026-08-14
+
 [profile.release]
-lto = "fat"
+# `thin` rather than `fat`: measured on this workspace (2026-08-14, cold build,
+# aarch64-apple-darwin) fat took 425.20s for a 31.1 MiB binary, thin took
+# 299.09s for 33.5 MiB — 29.7% less build time for 7.6% more size. Runtime cost
+# was NOT measured; the heavy work here is file I/O, git transport, HTTP and
+# SQLite rather than compute, so the tradeoff is judged worth it.
+lto = "thin"
 codegen-units = 1
 strip = "symbols"
+
+# Release-shaped build for packaging smoke tests — "does the bundle start?" —
+# where final runtime performance does not matter. Measured 149.42s cold vs the
+# release profile's 299.09s. Artifacts land in target/release-fast/, not
+# target/release/.
+[profile.release-fast]
+inherits = "release"
+lto = false
+codegen-units = 16

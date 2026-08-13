@@ -1,10 +1,116 @@
 # cargo-deny configuration for SkillStar
 # https://embarkstudios.github.io/cargo-deny/
+#
+# Triage state as of 2026-08-14 (cargo-deny 0.20.2, advisory-db of that day):
+#
+#   advisories  PASSES  — 4 findings fixed by upgrade, 20 allowlisted below
+#                         with a per-entry reason and re-evaluation trigger.
+#   bans        PASSES
+#   licenses    FAILS   — on exactly ONE finding: html2md is GPL-3.0+. See the
+#                         block above [[licenses.clarify]]. That is a copyleft
+#                         decision for the repo owner, not a config problem.
+#   sources     PASSES
+#
+# Because `licenses` still fails for real reasons, the CI step that runs this
+# config keeps `continue-on-error: true`. Do not remove that line until
+# `cargo deny check` exits 0 locally — a gate that is red on day one just
+# teaches everyone to ignore red.
+#
+# Fixed by upgrade in this same change (no allowlist entry needed, and none
+# should be added if they come back — they mean a real regression):
+#   RUSTSEC-2026-0190  anyhow 1.0.102 -> 1.0.104   (unsound Error::downcast_mut)
+#   RUSTSEC-2026-0194  quick-xml 0.38.4 -> 0.41.0  (quadratic run time)
+#   RUSTSEC-2026-0195  quick-xml 0.38.4 -> 0.41.0  (unbounded ns allocation)
+#   yanked             crypto-bigint 0.7.4 -> 0.7.5
+# The quick-xml pair needed `cargo update -p plist` (1.8.0 -> 1.10.0), not
+# `cargo update -p quick-xml`: plist's `^0.38` requirement was the thing
+# holding the vulnerable version in the lockfile.
 
 [advisories]
 version = 2
 db-urls = ["https://github.com/rustsec/advisory-db"]
-ignore = []
+
+# Every entry below is a dependency we cannot move off today. `unmaintained`
+# and `vulnerability` are deliberately kept apart: unmaintained is a
+# maintenance-risk note, a live vulnerability is a security decision.
+ignore = [
+  # ---------------------------------------------------------------------
+  # VULNERABILITY — one entry, and it is the only one. Read it before you
+  # add anything to this group.
+  # ---------------------------------------------------------------------
+  { id = "RUSTSEC-2023-0071", reason = """
+rsa 0.10.0-rc.18 — "Marvin Attack": RSA key recovery through a timing
+sidechannel. Reached only via skillstar-sync: russh 0.61 and ssh-key
+0.7.0-rc.10 both depend on it. There is NO fixed version — the advisory's
+own answer is "No safe upgrade is available!", and the rsa crate has not
+shipped a constant-time fix, so this cannot be resolved by upgrading.
+
+Exposure assessment (honest, not a clean bill of health): SkillStar uses
+russh purely as an SSH *client*, connecting to hosts the user configured, to
+sync their own skills. The attack needs an adaptive oracle — many chosen
+ciphertexts against the same private key with precise timing measurement.
+A malicious or MITM'd SSH server the user chose to connect to is the
+plausible attacker here, and it does get to observe signing timings, so the
+correct claim is "narrow and hard to exploit at scale", NOT "unreachable".
+Users who authenticate with Ed25519 keys (russh's and SkillStar's default
+path) never exercise the RSA private-key operation at all.
+
+RE-EVALUATE: whenever russh or ssh-key is upgraded, and unconditionally at
+the next dependency review or if RUSTSEC-2023-0071 ever gains a patched
+version. This entry is a stopgap for an unfixable upstream, not an
+acceptance of the risk in perpetuity — it deserves an explicit owner
+sign-off it has not yet had.
+""" },
+
+  # ---------------------------------------------------------------------
+  # UNMAINTAINED — Tauri v2's Linux GTK3 desktop stack (10 crates).
+  # tauri 2.11.1 -> tray-icon -> libappindicator -> gtk 0.18 and the whole
+  # gtk-rs family. Linux-only: these are not in the macOS or Windows graph.
+  # Nothing in SkillStar names them; they are how Tauri draws a tray icon on
+  # Linux. No safe upgrade exists — gtk-rs archived the GTK3 bindings.
+  # RE-EVALUATE: when Tauri ships a GTK4 / non-GTK Linux backend, or when
+  # SkillStar upgrades past tauri 2.11.x. Drop the whole block at once.
+  # ---------------------------------------------------------------------
+  { id = "RUSTSEC-2024-0413", reason = "atk 0.18.2 — archived gtk-rs GTK3 binding, Linux-only, via tauri -> tray-icon -> libappindicator -> gtk. Re-evaluate on the next tauri upgrade." },
+  { id = "RUSTSEC-2024-0416", reason = "atk-sys 0.18.2 — same GTK3 stack as RUSTSEC-2024-0413." },
+  { id = "RUSTSEC-2024-0412", reason = "gdk 0.18.2 — same GTK3 stack as RUSTSEC-2024-0413." },
+  { id = "RUSTSEC-2024-0418", reason = "gdk-sys 0.18.2 — same GTK3 stack as RUSTSEC-2024-0413." },
+  { id = "RUSTSEC-2024-0411", reason = "gdkwayland-sys 0.18.2 — same GTK3 stack as RUSTSEC-2024-0413." },
+  { id = "RUSTSEC-2024-0417", reason = "gdkx11 0.18.2 — same GTK3 stack as RUSTSEC-2024-0413." },
+  { id = "RUSTSEC-2024-0414", reason = "gdkx11-sys 0.18.2 — same GTK3 stack as RUSTSEC-2024-0413." },
+  { id = "RUSTSEC-2024-0415", reason = "gtk 0.18.2 — same GTK3 stack as RUSTSEC-2024-0413." },
+  { id = "RUSTSEC-2024-0420", reason = "gtk-sys 0.18.2 — same GTK3 stack as RUSTSEC-2024-0413." },
+  { id = "RUSTSEC-2024-0419", reason = "gtk3-macros 0.18.2 — same GTK3 stack as RUSTSEC-2024-0413." },
+  { id = "RUSTSEC-2024-0370", reason = "proc-macro-error 1.0.4 — build-time proc macro reached through glib-macros -> glib -> atk, i.e. the same archived GTK3 stack as RUSTSEC-2024-0413. Compile-time only; no code ships in the binary. Re-evaluate with that block." },
+
+  # ---------------------------------------------------------------------
+  # UNMAINTAINED — async-openai 0.27's retry stack (2 crates).
+  # backoff pulls instant. Reached via skillstar-models -> async-openai.
+  # RE-EVALUATE: on the next async-openai upgrade. Newer async-openai has
+  # dropped backoff, so this pair should disappear on its own — worth a look
+  # whenever the AI provider code is touched. Note that upgrading
+  # async-openai is also what would collapse the reqwest 0.12/0.13 split
+  # documented in docs/decisions.md, so the two are worth doing together.
+  # ---------------------------------------------------------------------
+  { id = "RUSTSEC-2025-0012", reason = "backoff 0.4.0 — unmaintained retry helper, via skillstar-models -> async-openai 0.27. No safe upgrade at this async-openai version. Re-evaluate on the next async-openai upgrade." },
+  { id = "RUSTSEC-2024-0384", reason = "instant 0.1.13 — unmaintained, pulled only by backoff 0.4.0. Disappears with RUSTSEC-2025-0012." },
+
+  # ---------------------------------------------------------------------
+  # UNMAINTAINED — tauri-utils' compile-time parsing helpers (6 crates).
+  # fxhash via selectors -> kuchikiki -> tauri-utils; the unic-* family via
+  # urlpattern -> tauri-utils. tauri-utils is reached through tauri-build
+  # (a build-dependency) and tauri itself, so these are compile-time
+  # parsing helpers, not runtime attack surface.
+  # RE-EVALUATE: when SkillStar upgrades past tauri 2.11.x / tauri-build
+  # 2.6.x. Nothing SkillStar writes can influence these.
+  # ---------------------------------------------------------------------
+  { id = "RUSTSEC-2025-0057", reason = "fxhash 0.2.1 — unmaintained hasher, via selectors -> kuchikiki -> tauri-utils. Compile-time HTML parsing in tauri-build. Re-evaluate on the next tauri upgrade." },
+  { id = "RUSTSEC-2025-0081", reason = "unic-char-property 0.9.0 — unmaintained, via urlpattern -> tauri-utils. Re-evaluate on the next tauri upgrade." },
+  { id = "RUSTSEC-2025-0075", reason = "unic-char-range 0.9.0 — same urlpattern -> tauri-utils path as RUSTSEC-2025-0081." },
+  { id = "RUSTSEC-2025-0080", reason = "unic-common 0.9.0 — same urlpattern -> tauri-utils path as RUSTSEC-2025-0081." },
+  { id = "RUSTSEC-2025-0100", reason = "unic-ucd-ident 0.9.0 — same urlpattern -> tauri-utils path as RUSTSEC-2025-0081." },
+  { id = "RUSTSEC-2025-0098", reason = "unic-ucd-version 0.9.0 — same urlpattern -> tauri-utils path as RUSTSEC-2025-0081." },
+]
 
 [licenses]
 version = 2
@@ -21,8 +127,55 @@ allow = [
   "BSL-1.0",
   "OpenSSL",
   "MPL-2.0",
+  # Public-domain-equivalent dedication; imposes no conditions on a
+  # redistributed binary. Reached via tiny-keccak <- const-random <- rust-ini
+  # <- tauri-plugin-deep-link.
+  "CC0-1.0",
+  # Mozilla's CA root certificate bundle (webpki-roots / webpki-root-certs),
+  # reached through both reqwest 0.12 and 0.13. CDLA-Permissive-2.0 is a
+  # permissive *data* licence with no copyleft and no attribution obligation
+  # beyond keeping the disclaimer. This is certificate data, not code.
+  "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.8
+
+# ---------------------------------------------------------------------------
+# ★ ONE `licenses` FAILURE REMAINS: html2md 0.2.15 is GPL-3.0+ (rejected —
+#   not on the allow list above). It is deliberately NOT allowlisted here.
+#
+#   Path: skillstar-marketplace -> html2md. Used in exactly two places, both
+#   in remote/skill_details.rs (lines 96 and 101), both the same shape:
+#       .map(|inner| html2md::parse_html(&inner))
+#   i.e. one `&str -> String` call turning a scraped prose block into
+#   Markdown. SkillStar ships as an Apache-2.0 desktop binary and Rust links
+#   statically, so a GPL-3.0-or-later dependency is a genuine copyleft
+#   question about the distributed artifact, not a lint to silence. Adding it
+#   to `allow` would be CI wiring silently making a licensing call.
+#
+#   Three options, for whoever owns this decision:
+#
+#   (a) Replace it. Verified against the registry on 2026-08-14:
+#         htmd 0.5.5       license = "Apache-2.0"   <- same licence as this repo
+#         html2text 0.17.1 license = "MIT"
+#       htmd is the real like-for-like swap: it is an HTML-to-Markdown
+#       converter with `htmd::convert(html) -> Result<String, io::Error>`,
+#       so each call site becomes `htmd::convert(&inner).ok()` — the
+#       surrounding `.map(...).filter(...)` chain already discards failures.
+#       html2text is NOT equivalent despite the similar name: its own
+#       description is "Render HTML as plain text", so it would silently drop
+#       the Markdown formatting these two fields exist to preserve.
+#       Output will not be byte-identical to html2md's, so the marketplace
+#       skill-details snapshot tests are the thing to check when swapping.
+#   (b) Accept the copyleft obligation and comply/relicense.
+#   (c) Allowlist it here with a written owner decision recorded alongside.
+#
+#   RESOLVED on 2026-08-14 (was blocker #2 here): all 13 workspace crates
+#   used to report `unlicensed`. Fixed properly in the manifests rather than
+#   in this file — `license = "Apache-2.0"` on [workspace.package] in the root
+#   Cargo.toml plus `license.workspace = true` on every member. Note for
+#   future readers: `[licenses.private] ignore = true` does NOT solve that;
+#   it only skips members marked `publish = false`.
+# ---------------------------------------------------------------------------
 
 [[licenses.clarify]]
 name = "ring"

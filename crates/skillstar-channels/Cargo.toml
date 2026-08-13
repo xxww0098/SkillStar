@@ -1,8 +1,19 @@
 [package]
 name = "skillstar-channels"
-version = "0.1.0"
-edition = "2024"
-rust-version = "1.94.1"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+# Internal path dep, never goes to crates.io.
+publish = false
+
+[lib]
+# No doc tests in this workspace; the crates are internal path deps, not a
+# published API whose examples need to keep compiling.
+doctest = false
+
+[lints]
+workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
@@ -11,10 +22,10 @@ chrono = { workspace = true }
 reqwest = { workspace = true, features = ["form"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-skillstar-core = { version = "0.1.0", path = "../skillstar-core" }
-skillstar-git = { version = "0.1.0", path = "../skillstar-git" }
-skillstar-skills = { version = "0.1.0", path = "../skillstar-skills" }
-skillstar-github-auth = { version = "0.1.0", path = "../skillstar-github-auth" }
+skillstar-core = { path = "../skillstar-core" }
+skillstar-git = { path = "../skillstar-git" }
+skillstar-skills = { path = "../skillstar-skills" }
+skillstar-github-auth = { path = "../skillstar-github-auth" }
 tar = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time", "macros", "rt-multi-thread"] }
@@ -23,5 +34,5 @@ url = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
-skillstar-agents = { version = "0.1.0", path = "../skillstar-agents" }
+skillstar-agents = { path = "../skillstar-agents" }
 sha2 = { workspace = true }
