@@ -460,9 +460,12 @@ function ChannelDetail({
           {channel.role === "owner" && (
             <ChannelMembershipPanel key={`members-${channel.repository_id}`} channel={channel} />
           )}
-          {channel.role === "subscriber" && (
-            <ChannelSubscriptionPanel key={`subscription-${channel.repository_id}`} channel={channel} />
-          )}
+          {/* Every role on an active channel has at least read access, and the
+              backend only requires that — it never checks the role here. Gating
+              this panel on `subscriber` alone meant an owner could not install
+              the Skills they had just published, which is exactly what a second
+              machine looks like: same person, still repo admin, still `owner`. */}
+          <ChannelSubscriptionPanel key={`subscription-${channel.repository_id}`} channel={channel} />
         </>
       ) : channel.status === "awaiting_invitation_acceptance" ? (
         <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-5">
