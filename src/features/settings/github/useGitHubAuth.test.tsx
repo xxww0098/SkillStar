@@ -52,7 +52,7 @@ describe("useGitHubAuth", () => {
     expect(result.current.status?.state).toBe("signed_out");
   });
 
-  it("preserves structured expired and proxy outcomes", async () => {
+  it("preserves structured proxy outcomes", async () => {
     mockedInvoke.mockRejectedValueOnce({
       code: "proxy",
       message: "Unable to create the GitHub client; check proxy settings",
@@ -60,12 +60,43 @@ describe("useGitHubAuth", () => {
     const proxy = renderHook(() => useGitHubAuth());
     await waitFor(() => expect(proxy.result.current.error?.code).toBe("proxy"));
     proxy.unmount();
+  });
 
-    mockedInvoke.mockResolvedValueOnce({
-      state: "expired",
-      identity: { id: 42, login: "octocat", avatar_url: null },
+  it("silently recovers an expired session at mount when a refresh token is still valid", async () => {
+    mockedInvoke.mockImplementation(async (command) => {
+      if (command === "github_auth_status") {
+        return { state: "expired", identity: { id: 42, login: "octocat", avatar_url: null } };
+      }
+      if (command === "github_auth_refresh") {
+        return {
+          state: "connected",
+          identity: { id: 42, login: "octocat", avatar_url: null },
+          access_expires_at: null,
+        };
+      }
+      throw new Error(`Unexpected command: ${command}`);
     });
-    const expired = renderHook(() => useGitHubAuth());
-    await waitFor(() => expect(expired.result.current.status?.state).toBe("expired"));
+
+    const { result } = renderHook(() => useGitHubAuth());
+    await waitFor(() => expect(result.current.status).toMatchObject({ state: "connected" }));
+    expect(result.current.error).toBeNull();
+  });
+
+  it("keeps the expired state when silent recovery cannot refresh", async () => {
+    mockedInvoke.mockImplementation(async (command) => {
+      if (command === "github_auth_status") {
+        return { state: "expired", identity: { id: 42, login: "octocat", avatar_url: null } };
+      }
+      if (command === "github_auth_refresh") {
+        throw { code: "refresh_unavailable", message: "The GitHub session cannot be refreshed; sign in again" };
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    const { result } = renderHook(() => useGitHubAuth());
+    await waitFor(() => expect(result.current.status?.state).toBe("expired"));
+    await waitFor(() => expect(result.current.busy).toBe(false));
+    // A silent background attempt must not surface an error banner.
+    expect(result.current.error).toBeNull();
   });
 });

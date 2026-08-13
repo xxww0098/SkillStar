@@ -9,9 +9,16 @@ import { LoadingLogo } from "../components/ui/LoadingLogo";
 import { McpPublishers } from "../features/mcp/components/McpPublishers";
 import { useMcpPublishers } from "../features/mcp/hooks/useMcpPublishers";
 import { OfficialPublishers } from "../features/marketplace/components/OfficialPublishers";
+import { SnapshotEmptyState, SnapshotErrorBanner } from "../features/marketplace/components/SnapshotState";
 import { useMarketplace } from "../features/marketplace/hooks/useMarketplace";
 import { useMarketplaceActions } from "../features/marketplace/hooks/useMarketplaceActions";
 import { computeDisplaySkills } from "../features/marketplace/lib/skillDisplay";
+import {
+  EMPTY_SNAPSHOT_STATE,
+  isUnpopulatedSnapshot,
+  type MarketplaceScope,
+  snapshotStatusLabelKey,
+} from "../features/marketplace/lib/snapshotState";
 import { SkillGrid } from "../features/my-skills/components/SkillGrid";
 import { useSkills } from "../features/my-skills/hooks/useSkills";
 import { useViewMode } from "../hooks/useViewMode";
@@ -59,9 +66,8 @@ export function Marketplace({
     publishers,
     loading,
     refreshing,
-    error,
-    snapshotStatus,
-    snapshotUpdatedAt,
+    snapshots,
+    retrySnapshot,
     search,
     searchOnline,
     aiSearch,
@@ -72,6 +78,7 @@ export function Marketplace({
     aiActiveKeywords,
     toggleAiKeyword,
     clearAiSearch,
+    notePendingSearchQuery,
     fetchLeaderboard,
     fetchOfficialPublishers,
     patchSkill,
@@ -208,28 +215,50 @@ export function Marketplace({
   const handleToolbarSearchChange = useCallback(
     (value: string) => {
       setSearchQuery(value);
-      if (!value.trim()) clearAiSearch();
+      if (!value.trim()) {
+        clearAiSearch();
+        return;
+      }
+      // Typing past a finished query must not leave that query's freshness
+      // label / error banner attached to the one being typed.
+      notePendingSearchQuery(value);
     },
-    [clearAiSearch],
+    [clearAiSearch, notePendingSearchQuery],
   );
 
   const totalCount = isMcpTab ? mcpPublishers.publishers.length : displaySkills.length;
+
+  // Which local-first dataset the current view actually renders. Snapshot
+  // status/error are per-scope, so publishers can no longer describe (or fail
+  // on behalf of) the skills tab.
+  const snapshotScope: MarketplaceScope =
+    activeTab === "official" ? "publishers" : searchQuery.trim() || aiKeywords ? "search" : "leaderboard";
+  const snapshot = isMcpTab ? EMPTY_SNAPSHOT_STATE : snapshots[snapshotScope];
+
+  // `search` recovers by re-running the online search against the query on
+  // screen. Reaching this scope always means there is one: `aiKeywords` cannot
+  // outlive the input that produced them (clearing the box and switching tabs
+  // both run `clearAiSearch`), so the retry action is never inert and needs no
+  // disabled variant.
+  const handleSnapshotRetry = useCallback(() => {
+    if (snapshotScope === "search") {
+      void searchOnline(searchQuery);
+      return;
+    }
+    void retrySnapshot(snapshotScope);
+  }, [retrySnapshot, searchOnline, searchQuery, snapshotScope]);
+
+  const snapshotStatusKey = snapshotStatusLabelKey(snapshot.status);
   const snapshotLabel = isMcpTab
     ? null
     : refreshing
       ? t("marketplace.refreshingSnapshot", {
           defaultValue: "Refreshing snapshot...",
         })
-      : snapshotStatus === "seeding"
-        ? t("marketplace.seedingSnapshot", {
-            defaultValue: "Seeding local snapshot...",
-          })
-        : snapshotStatus === "stale"
-          ? t("marketplace.snapshotStale", {
-              defaultValue: "Snapshot is stale",
-            })
-          : null;
-  const snapshotTitle = isMcpTab ? undefined : (snapshotUpdatedAt ?? undefined);
+      : snapshotStatusKey
+        ? t(snapshotStatusKey)
+        : null;
+  const snapshotTitle = isMcpTab ? undefined : (snapshot.updatedAt ?? undefined);
   const showOnlineSupplement =
     Boolean(searchQuery.trim()) &&
     !isMcpTab &&
@@ -237,7 +266,10 @@ export function Marketplace({
     !loading &&
     !aiSearching &&
     displaySkills.length === 0 &&
-    snapshotStatus === "miss";
+    snapshot.status === "miss";
+  // Align with the MCP browser: a seeding snapshot is a loading state, not an
+  // empty market. Only take over the viewport while there is nothing to show.
+  const showSeedingLoader = !isMcpTab && snapshot.status === "seeding" && displaySkills.length === 0;
 
   const renderTabButton = (id: TabId) => {
     const index = tabIds.indexOf(id);
@@ -359,10 +391,8 @@ export function Marketplace({
           </div>
         </div>
 
-        {!isMcpTab && error && (
-          <div className="px-6 py-2 border-b border-destructive/20 bg-destructive/5 text-xs text-destructive">
-            {error}
-          </div>
+        {!isMcpTab && snapshot.error && (
+          <SnapshotErrorBanner error={snapshot.error} refreshing={refreshing} onRetry={handleSnapshotRetry} />
         )}
 
         {/* AI Keywords toggle filter bar */}
@@ -430,8 +460,16 @@ export function Marketplace({
           {isMcpTab ? (
             <McpPublishers publishers={mcpPublishers.publishers} onPublisherClick={onNavigateToMcpPublisher} />
           ) : activeTab === "official" ? (
-            <OfficialPublishers publishers={publishers} viewMode={viewMode} onPublisherClick={onNavigateToPublisher} />
-          ) : loading || aiSearching ? (
+            publishers.length === 0 && isUnpopulatedSnapshot(snapshot.status) ? (
+              <SnapshotEmptyState status={snapshot.status} refreshing={refreshing} onRetry={handleSnapshotRetry} />
+            ) : (
+              <OfficialPublishers
+                publishers={publishers}
+                viewMode={viewMode}
+                onPublisherClick={onNavigateToPublisher}
+              />
+            )
+          ) : loading || aiSearching || showSeedingLoader ? (
             <div className="flex flex-col items-center justify-center py-20 gap-4">
               <LoadingLogo
                 size="lg"
@@ -440,7 +478,9 @@ export function Marketplace({
                     ? t("marketplace.aiSearching", {
                         defaultValue: "AI is analyzing your query...",
                       })
-                    : t("marketplace.loading")
+                    : showSeedingLoader && !loading
+                      ? t("marketplace.seedingSnapshot")
+                      : t("marketplace.loading")
                 }
               />
               {aiSearching && (
@@ -524,6 +564,10 @@ export function Marketplace({
               }
               size="lg"
             />
+          ) : displaySkills.length === 0 && isUnpopulatedSnapshot(snapshot.status) ? (
+            // `miss` / `remote_error` with nothing to show means the snapshot never
+            // landed — not "the marketplace is empty". Say so, and offer the action.
+            <SnapshotEmptyState status={snapshot.status} refreshing={refreshing} onRetry={handleSnapshotRetry} />
           ) : (
             <SkillGrid
               skills={displaySkills}

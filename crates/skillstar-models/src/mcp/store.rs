@@ -4,6 +4,8 @@ use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
+use crate::tool_sync::create_rolling_backup;
+
 use super::*;
 
 // ---------------------------------------------------------------------------
@@ -15,39 +17,150 @@ pub fn mcp_store_path() -> PathBuf {
     skillstar_core::infra::paths::config_dir().join("mcp_servers.json")
 }
 
-/// Read the store, returning an empty default on missing/malformed files.
+/// Suffix of the quarantine copy taken when the store cannot be parsed.
+const CORRUPT_SUFFIX: &str = ".corrupt.";
+
+/// Read the store — **fail-closed**.
+///
+/// A missing file is a legitimate empty store. A file that exists but cannot be
+/// read or parsed is *never* downgraded to an empty store: [`write_mcp_store`]
+/// replaces the whole file, so an empty default here would erase every server
+/// the user owns on the next click. Unparseable content is copied aside as
+/// `mcp_servers.json.corrupt.<epoch_ms>` and the error is propagated so the UI
+/// can show it.
 pub fn read_mcp_store(path: &Path) -> Result<McpStore> {
     if !path.exists() {
         return Ok(McpStore::default());
     }
-    let text = match std::fs::read_to_string(path) {
-        Ok(t) => t,
-        Err(e) => {
-            tracing::warn!(
-                "Failed to read MCP store {}: {e}. Using default.",
-                path.display()
-            );
-            return Ok(McpStore::default());
-        }
-    };
+    let text = std::fs::read_to_string(path).with_context(|| {
+        format!(
+            "Failed to read the MCP store {}. Refusing to continue with an empty store — check the file's permissions, then retry.",
+            path.display()
+        )
+    })?;
     let text = text.trim_start_matches('\u{FEFF}');
     match serde_json::from_str::<McpStore>(text) {
-        Ok(store) => Ok(store),
+        Ok(store) => apply_store_version_gate(store, path),
         Err(e) => {
-            tracing::warn!(
-                "Malformed MCP store {}: {e}. Using default.",
-                path.display()
-            );
-            Ok(McpStore::default())
+            let saved = quarantine_corrupt_store(path)
+                .inspect_err(|copy_err| {
+                    tracing::warn!(
+                        "Failed to quarantine the malformed MCP store {}: {copy_err}",
+                        path.display()
+                    );
+                })
+                .ok();
+            match saved {
+                Some(copy) => bail!(
+                    "The MCP store {} is not valid JSON ({e}). Your original file was copied to {} — repair or restore it, then retry. SkillStar will not continue with an empty store, so nothing is overwritten.",
+                    path.display(),
+                    copy.display()
+                ),
+                None => bail!(
+                    "The MCP store {} is not valid JSON ({e}). Repair or move the file, then retry. SkillStar will not continue with an empty store, so nothing is overwritten.",
+                    path.display()
+                ),
+            }
         }
     }
 }
 
-/// Write the store atomically (temp file + rename).
+/// Enforce [`MCP_STORE_VERSION`] on a store that parsed cleanly.
+///
+/// Parsing is not enough to prove a file is safe to work with. `serde` will
+/// happily read a file written by a *newer* SkillStar, silently dropping every
+/// field this build does not know about — and the next
+/// [`write_mcp_store`] would then persist that lossy copy over the user's real
+/// data. So the gate runs in both directions:
+///
+/// - **newer than this build → refuse.** Fail closed, exactly like a malformed
+///   file: better a clear error telling the user to upgrade than an
+///   irreversible downgrade of their store.
+/// - **older than this build → upgrade and persist immediately.** Writing the
+///   upgraded file back at read time (rather than waiting for the user's next
+///   edit) means the on-disk version never lags the running code, so a later
+///   downgrade hits the refuse branch above instead of a version that lies.
+fn apply_store_version_gate(mut store: McpStore, path: &Path) -> Result<McpStore> {
+    if store.version > MCP_STORE_VERSION {
+        bail!(
+            "The MCP store {} was written by a newer version of SkillStar (schema v{}, this build reads v{MCP_STORE_VERSION}). Refusing to open it — an older build would silently drop the newer fields on the next save. Update SkillStar, or move the file aside to start fresh.",
+            path.display(),
+            store.version
+        );
+    }
+    if store.version < MCP_STORE_VERSION {
+        let from = store.version;
+        store.version = MCP_STORE_VERSION;
+        write_mcp_store(&store, path).with_context(|| {
+            format!(
+                "Failed to persist the MCP store {} after upgrading it from schema v{from} to v{MCP_STORE_VERSION}",
+                path.display()
+            )
+        })?;
+        tracing::info!(
+            "Upgraded the MCP store {} from schema v{from} to v{MCP_STORE_VERSION}",
+            path.display()
+        );
+    }
+    Ok(store)
+}
+
+/// Copy an unparseable store aside as `<file>.corrupt.<epoch_ms>` so the data
+/// stays recoverable by hand.
+///
+/// Repeated reads of the same broken file reuse the existing copy — every MCP
+/// screen visit calls this path, and one snapshot per visit would bury the user
+/// in identical files.
+fn quarantine_corrupt_store(path: &Path) -> Result<PathBuf> {
+    let original = std::fs::read(path)
+        .with_context(|| format!("Failed to re-read {} for quarantine", path.display()))?;
+    if let Some(existing) = existing_corrupt_copy(path, &original) {
+        return Ok(existing);
+    }
+    let copy = PathBuf::from(format!(
+        "{}{CORRUPT_SUFFIX}{}",
+        path.to_string_lossy(),
+        now_ms()
+    ));
+    std::fs::write(&copy, &original)
+        .with_context(|| format!("Failed to write {}", copy.display()))?;
+    Ok(copy)
+}
+
+/// Find an already-quarantined sibling holding exactly the same bytes.
+fn existing_corrupt_copy(path: &Path, original: &[u8]) -> Option<PathBuf> {
+    let parent = path.parent()?;
+    let prefix = format!("{}{CORRUPT_SUFFIX}", path.file_name()?.to_str()?);
+    for entry in std::fs::read_dir(parent).ok()?.flatten() {
+        let name = entry.file_name();
+        if !name.to_string_lossy().starts_with(&prefix) {
+            continue;
+        }
+        if std::fs::read(entry.path()).is_ok_and(|bytes| bytes == original) {
+            return Some(entry.path());
+        }
+    }
+    None
+}
+
+/// Write the store atomically (temp file + rename), backing up any file it
+/// replaces.
+///
+/// The rolling backup is the second half of the fail-closed contract in
+/// [`read_mcp_store`]: a write that turns out to be wrong (a bad migration, a
+/// schema change) stays recoverable from `mcp_servers.json.bak.<epoch_ms>`.
 pub fn write_mcp_store(store: &McpStore, path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("Failed to create directory {}", parent.display()))?;
+    }
+    if path.exists() {
+        create_rolling_backup(path).with_context(|| {
+            format!(
+                "Failed to back up the MCP store {} before overwriting it",
+                path.display()
+            )
+        })?;
     }
     let json = serde_json::to_string_pretty(store).context("Failed to serialize McpStore")?;
     let temp_path = path.with_extension("json.tmp");
@@ -68,6 +181,12 @@ pub fn write_mcp_store(store: &McpStore, path: &Path) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 /// Validate an entry's transport-specific required fields.
+///
+/// This is the *invariant* half of validation and runs on every sync, so it
+/// deliberately accepts anything an older SkillStar was willing to store.
+/// New input goes through [`validate_entry_input`], which adds the stricter
+/// name / url / env / header rules — see `validate.rs` for why the two are
+/// kept apart.
 pub fn validate_entry(entry: &McpServerEntry) -> Result<()> {
     if entry.name.trim().is_empty() {
         bail!("MCP server name must not be empty");
@@ -108,7 +227,7 @@ pub fn validate_entry(entry: &McpServerEntry) -> Result<()> {
 
 /// Create a new server: assigns a fresh UUID, timestamps, and sort index.
 pub fn create_server(store: &mut McpStore, mut entry: McpServerEntry) -> Result<McpServerEntry> {
-    validate_entry(&entry)?;
+    validate_entry_input(&entry)?;
     if store.servers.iter().any(|s| s.name == entry.name) {
         bail!("An MCP server named '{}' already exists", entry.name);
     }
@@ -148,6 +267,7 @@ pub fn update_server(
         .iter_mut()
         .find(|s| s.id == id)
         .with_context(|| format!("MCP server '{id}' not found"))?;
+    let previous_name = server.name.clone();
 
     if let Some(v) = patch.name {
         server.name = v;
@@ -197,7 +317,10 @@ pub fn update_server(
     server.updated_at = Some(now_ms());
 
     let updated = server.clone();
-    validate_entry(&updated)?;
+    // Editing is an input path, so the strict policy applies to the result —
+    // except for a name the edit did not touch, which stays grandfathered
+    // (see `validate_entry_edit`).
+    validate_entry_edit(&updated, Some(&previous_name))?;
     Ok(updated)
 }
 

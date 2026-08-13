@@ -148,6 +148,9 @@ pub fn run() {
         .manage(commands::models_commands::ProvidersWriteLock::new())
         .manage(commands::mcp_commands::McpWriteLock::new())
         .setup(|app| {
+            // Channel-aware mutation gate must be active before any skill mutation path runs
+            skillstar_channels::policy::install_global_policy();
+
             // Migrate v1 flat layout → v2 categorised layout (idempotent)
             skillstar_core::infra::migration::migrate_legacy_paths();
 
@@ -246,12 +249,20 @@ pub fn run() {
             commands::marketplace::sync_marketplace_scope,
             commands::marketplace::get_marketplace_sync_states,
             commands::mcp_marketplace::list_mcp_market_servers_local,
+            commands::mcp_marketplace::query_mcp_market_servers_local,
             commands::mcp_marketplace::list_mcp_publishers_local,
             commands::mcp_marketplace::list_mcp_servers_by_publisher_local,
             commands::mcp_marketplace::search_mcp_market_local,
             commands::mcp_marketplace::get_mcp_market_server_detail_local,
             commands::mcp_marketplace::sync_mcp_market_scope,
             commands::mcp_marketplace::get_mcp_market_sync_states,
+            commands::mcp_marketplace::get_mcp_source_sync_states,
+            commands::mcp_marketplace::list_mcp_sources,
+            commands::mcp_marketplace::add_mcp_source,
+            commands::mcp_marketplace::remove_mcp_source,
+            commands::mcp_marketplace::set_mcp_source_enabled,
+            commands::mcp_marketplace::mcp_market_runtime_candidates,
+            commands::mcp_marketplace::mcp_market_install_plan,
             commands::mcp_marketplace::mcp_market_entry_to_draft,
             commands::github::check_gh_installed,
             commands::github::github_auth_status,
@@ -337,6 +348,8 @@ pub fn run() {
             commands::save_github_mirror_config,
             commands::get_github_mirror_presets,
             commands::test_github_mirror,
+            commands::get_marketplace_mirror_config,
+            commands::save_marketplace_mirror_config,
             commands::write_codex_env_to_zshrc,
             commands::read_codex_env_from_zshrc,
             commands::projects::register_project,
@@ -382,8 +395,6 @@ pub fn run() {
             commands::export_multi_skill_bundle,
             commands::preview_multi_skill_bundle,
             commands::import_multi_skill_bundle,
-            commands::write_text_file,
-            commands::read_text_file,
             commands::open_external_url,
             commands::open_folder,
             commands::patrol::start_patrol,
@@ -414,6 +425,7 @@ pub fn run() {
             commands::models_commands::activate_tool,
             commands::models_commands::deactivate_tool,
             commands::models_commands::update_tool_settings,
+            commands::models_commands::update_tool_binding_settings,
             commands::models_commands::set_active_binding,
             commands::models_commands::remove_binding_entry,
             // Model discovery, balance, and tool detection commands
@@ -426,6 +438,7 @@ pub fn run() {
             commands::models_commands::test_provider_connection,
             commands::mcp_commands::list_mcp_servers,
             commands::mcp_commands::mcp_tool_statuses,
+            commands::mcp_commands::probe_mcp_server,
             commands::mcp_commands::create_mcp_server,
             commands::mcp_commands::update_mcp_server,
             commands::mcp_commands::delete_mcp_server,
@@ -484,15 +497,6 @@ pub fn run() {
             commands::toggle_remote_agent_link,
             commands::install_remote_skill,
             commands::check_remote_skill_updates,
-            // S3 cloud sync
-            commands::list_s3_targets,
-            commands::add_s3_target,
-            commands::update_s3_target,
-            commands::delete_s3_target,
-            commands::test_s3_connection,
-            commands::push_skills_to_cloud,
-            commands::pull_cloud_manifest,
-            commands::install_from_cloud_manifest,
             update_tray_language,
         ])
         .build(tauri::generate_context!())

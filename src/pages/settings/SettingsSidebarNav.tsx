@@ -1,7 +1,5 @@
 import {
   Bot,
-  Cloud,
-  CircleUserRound,
   EyeOff,
   Globe,
   HardDrive,
@@ -12,6 +10,7 @@ import {
   Terminal,
   Unlink,
   Zap,
+  Store,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -20,9 +19,8 @@ import type { SettingsFocusTarget } from "../../lib/utils";
 export const SETTINGS_SECTIONS: { id: string; labelKey: string; icon: LucideIcon }[] = [
   { id: "settings-agents", labelKey: "settings.agentConnections", icon: Unlink },
   { id: "settings-proxy", labelKey: "settings.networkProxy", icon: Globe },
-  { id: "settings-github-account", labelKey: "settings.githubAccount", icon: CircleUserRound },
   { id: "settings-mirror", labelKey: "settings.githubMirror", icon: Zap },
-  { id: "settings-s3", labelKey: "settings.s3Sync", icon: Cloud },
+  { id: "settings-marketplace-mirror", labelKey: "settings.marketplaceMirror", icon: Store },
   { id: "settings-ai", labelKey: "settings.aiProvider", icon: Sparkles },
   { id: "settings-acp", labelKey: "settings.acpTitle", icon: Bot },
   { id: "settings-background", labelKey: "settings.backgroundRun", icon: EyeOff },

@@ -211,6 +211,8 @@ pub fn delete_provider_flat(store: &mut FlatProvidersStore, id: &str) -> Result<
                 binding.active_index -= 1;
             }
         }
+        // Role assignments outlive the entry list, so prune them too.
+        prune_binding_roles_for_provider(binding, id);
     }
 
     Ok(())
@@ -340,8 +342,7 @@ pub fn activate_tool(
             })
             .and_then(|e| e.settings.clone())
     });
-    if provider.id == CODEX_OFFICIAL_ID
-        || provider.preset_id.as_deref() == Some(CODEX_OFFICIAL_ID)
+    if provider.id == CODEX_OFFICIAL_ID || provider.preset_id.as_deref() == Some(CODEX_OFFICIAL_ID)
     {
         let mut codex = resolved_settings
             .as_ref()
@@ -469,7 +470,27 @@ pub fn remove_binding_entry(
     if binding.active_index >= pos && binding.active_index > 0 {
         binding.active_index -= 1;
     }
+    prune_binding_roles_for_provider(binding, provider_id);
     Ok(binding.active().cloned())
+}
+
+/// Drop any binding-level role assignment that targets `provider_id`.
+///
+/// Called whenever a provider stops being bound to a tool, so OMP model roles
+/// never keep pointing at a provider the user unbound or deleted. Operates on
+/// the raw `roles` object so any other key in the settings bag survives.
+fn prune_binding_roles_for_provider(binding: &mut ToolBinding, provider_id: &str) {
+    let Some(roles) = binding
+        .settings
+        .as_mut()
+        .and_then(|s| s.get_mut("roles"))
+        .and_then(|r| r.as_object_mut())
+    else {
+        return;
+    };
+    roles.retain(|_, target| {
+        target.get("provider_id").and_then(|v| v.as_str()) != Some(provider_id)
+    });
 }
 
 /// Update only the settings of an active tool without changing provider or model.
@@ -497,6 +518,35 @@ pub fn update_tool_settings(
         .with_context(|| format!("Tool '{}' has no active binding", tool_id))?;
     active.settings = Some(settings);
     Ok(active.clone())
+}
+
+/// Update a tool's **binding-level** settings, the sibling of
+/// [`update_tool_settings`] (which writes the active entry's per-provider bag).
+///
+/// Config that spans several entries belongs here — OMP's model roles are the
+/// first consumer, since a role may point at any bound provider rather than the
+/// active one. Provider and model selections are left untouched.
+///
+/// # Errors
+/// - Tool is not currently active (no entries bound)
+pub fn update_tool_binding_settings(
+    store: &mut FlatProvidersStore,
+    tool_id: &str,
+    settings: serde_json::Value,
+) -> Result<ToolBinding> {
+    let binding = store
+        .tool_activations
+        .get_mut(tool_id)
+        .filter(|b| !b.is_empty())
+        .with_context(|| format!("Tool '{}' is not currently active", tool_id))?;
+
+    // `null` clears the bag rather than storing a JSON null.
+    binding.settings = if settings.is_null() {
+        None
+    } else {
+        Some(settings)
+    };
+    Ok(binding.clone())
 }
 
 /// Deactivate a tool by clearing all of its provider bindings.

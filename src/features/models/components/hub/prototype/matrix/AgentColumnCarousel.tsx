@@ -1,14 +1,11 @@
+import { useTranslation } from "react-i18next";
 import { cn } from "../../../../../../lib/utils";
 import { activeEntry } from "../../../../lib/toolBinding";
 import { AgentToolIcon } from "../../../shared/AgentToolIcon";
 import { isToolOnOfficial } from "../../../../lib/officialProviders";
 import type { PrototypeHubData } from "../types";
 import { ClaudeSurfaceIcon } from "./ClaudeSurfaceIcon";
-import {
-  MATRIX_COLUMNS,
-  type MatrixColumn,
-  type MatrixColumnId,
-} from "./matrixColumns";
+import { MATRIX_COLUMNS, type MatrixColumn, type MatrixColumnId } from "./matrixColumns";
 
 /**
  * PROTOTYPE — SVG icon rail.
@@ -16,6 +13,7 @@ import {
  * others use AgentToolIcon. Click toggles selected ↔ unselected.
  */
 export function AgentColumnCarousel({ data }: { data: PrototypeHubData }) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-wrap items-center gap-2 overflow-visible">
       {MATRIX_COLUMNS.map((column) => {
@@ -25,9 +23,9 @@ export function AgentColumnCarousel({ data }: { data: PrototypeHubData }) {
         const onOfficial = isToolOnOfficial(data.providers, data.toolActivations, column.bindToolId);
         const title = [
           column.displayName,
-          selected ? "显示列" : "隐藏列",
+          selected ? t("models.matrix.columnShown") : t("models.matrix.columnHidden"),
           onOfficial
-            ? "官方 · 原生登录"
+            ? t("models.matrix.officialNativeLogin")
             : provider
               ? `${provider.name}${entry?.model ? ` · ${entry.model}` : ""}`
               : "idle",

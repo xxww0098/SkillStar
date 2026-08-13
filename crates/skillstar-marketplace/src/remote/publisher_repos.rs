@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
@@ -9,7 +9,6 @@ use tracing::{debug, warn};
 use super::*;
 
 // ── Publisher Repos ───────────────────────────────────────────────────
-
 /// A skill entry within a publisher repo (lightweight, for repo drill-down)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PublisherRepoSkill {
@@ -36,38 +35,37 @@ pub struct PublisherRepo {
     pub skills: Vec<PublisherRepoSkill>,
 }
 
-/// Fetch skills for a specific repo by scraping `skills.sh/<publisher>/<repo>`.
+/// Fetch skills for a specific repo by scraping `skills.sh/<publisher>/<repo>`,
+/// with content-addressing metadata.
 ///
 /// Used as fallback when the SSR official payload didn't include skill data.
-pub async fn get_publisher_repo_skills(
+///
+/// No `.0` convenience wrapper by design — see
+/// [`get_skills_sh_leaderboard_with_meta`](super::get_skills_sh_leaderboard_with_meta).
+pub async fn get_publisher_repo_skills_with_meta(
     publisher_name: &str,
     repo_name: &str,
-) -> Result<Vec<PublisherRepoSkill>> {
+    etag: Option<&str>,
+) -> Result<(Vec<PublisherRepoSkill>, FetchMeta)> {
     let publisher_lower = publisher_name.to_lowercase();
     let repo_lower = repo_name.to_lowercase();
-    let url = format!("https://skills.sh/{}/{}", publisher_lower, repo_lower);
+    let path = format!("/{}/{}", publisher_lower, repo_lower);
 
-    let client = marketplace_client()?;
-    let html = client
-        .get(&url)
-        .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        .header("Accept", "text/html,application/xhtml+xml")
-        .send()
-        .await
-        .context("Failed to fetch repo page")?
-        .text()
-        .await
-        .context("Failed to read repo page HTML")?;
+    let (html, meta) = fetch_with_failover(&path, etag).await?;
+    if meta.payload_sha256.is_empty() {
+        return Ok((Vec::new(), meta));
+    }
 
     let skills = parse_repo_skills_html(&html, &publisher_lower, &repo_lower);
     debug!(
         target: "skills_sh",
+        host = %meta.source_host,
         count = skills.len(),
         publisher = %publisher_lower,
         repo = %repo_lower,
         "parsed repo skills"
     );
-    Ok(skills)
+    Ok((skills, meta))
 }
 
 /// Parse skills from a repo detail page HTML.
@@ -189,61 +187,61 @@ fn parse_repo_skills_html(html: &str, publisher: &str, repo: &str) -> Vec<Publis
     skills
 }
 
-/// Fetch all repos for a publisher.
+/// Fetch all repos for a publisher, with content-addressing metadata.
 ///
 /// Strategy:
 /// 1. Try `skills.sh/official` — the SSR payload contains every repo for every publisher
 ///    (the per-publisher page may omit low-traffic repos).
 /// 2. Fall back to `skills.sh/<publisher>` HTML scraping if the official payload fails.
-pub async fn get_publisher_repos(publisher_name: &str) -> Result<Vec<PublisherRepo>> {
-    let client = marketplace_client()?;
+///
+/// No `.0` convenience wrapper by design — see
+/// [`get_skills_sh_leaderboard_with_meta`](super::get_skills_sh_leaderboard_with_meta).
+pub async fn get_publisher_repos_with_meta(
+    publisher_name: &str,
+    etag: Option<&str>,
+) -> Result<(Vec<PublisherRepo>, FetchMeta)> {
     let publisher_lower = publisher_name.to_lowercase();
 
     // Strategy 1: official page SSR payload (complete data)
-    if let Ok(html) = match client
-        .get("https://skills.sh/official")
-        .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        .header("Accept", "text/html,application/xhtml+xml")
-        .send()
-        .await
-    {
-        Ok(official_html) => official_html.text().await,
-        Err(err) => Err(err),
-    } {
+    if let Ok((html, official_meta)) = fetch_with_failover("/official", etag).await {
+        // 304 Not Modified: the body is empty, so parsing yields zero repos.
+        // Without this early return the empty result falls through to Strategy
+        // 2, whose per-publisher page omits low-traffic repos — and because
+        // that page hashes differently, every refresh would rewrite the repo
+        // table back and forth between the complete and the lossy list.
+        if official_meta.payload_sha256.is_empty() {
+            return Ok((Vec::new(), official_meta));
+        }
         let repos = parse_publisher_repos_from_official_payload(&html, &publisher_lower);
         if !repos.is_empty() {
             debug!(
                 target: "skills_sh",
+                host = %official_meta.source_host,
                 count = repos.len(),
                 publisher = %publisher_name,
                 "parsed repos from official payload"
             );
-            return Ok(repos);
+            return Ok((repos, official_meta));
         }
     }
 
     // Strategy 2: fall back to per-publisher page
-    let url = format!("https://skills.sh/{}", publisher_lower);
-    let html = client
-        .get(&url)
-        .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        .header("Accept", "text/html,application/xhtml+xml")
-        .send()
-        .await
-        .context("Failed to fetch publisher page")?
-        .text()
-        .await
-        .context("Failed to read publisher page HTML")?;
+    let path = format!("/{publisher_lower}");
+    let (html, meta) = fetch_with_failover(&path, etag).await?;
+    if meta.payload_sha256.is_empty() {
+        return Ok((Vec::new(), meta));
+    }
 
     let repos = parse_publisher_repos_html(&html, publisher_name);
     debug!(
         target: "skills_sh",
+        host = %meta.source_host,
         count = repos.len(),
         publisher = %publisher_name,
         "parsed repos from detail page"
     );
 
-    Ok(repos)
+    Ok((repos, meta))
 }
 
 /// Parse repos for a specific publisher from the `skills.sh/official` SSR JSON payload.

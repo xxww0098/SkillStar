@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, beforeAll, describe, expect, it, vi } from "vitest";
+import i18n from "../../../i18n";
 import type { ChannelSubscriptionRemoteStatus, ChannelUpdateSnapshot, SharedChannelDescriptor } from "../../../types";
 import { SharedChannelsContent } from "./SharedChannelsContent";
 
@@ -279,6 +280,11 @@ function updateSnapshot(overrides: Partial<ChannelUpdateSnapshot> = {}): Channel
 }
 
 describe("SharedChannelsContent", () => {
+  beforeAll(() => {
+    // The shared-channel suite asserts English UI copy; en.json is the SSOT.
+    i18n.changeLanguage("en");
+  });
+
   beforeEach(() => {
     api.listOrganizations
       .mockReset()
@@ -1778,5 +1784,25 @@ describe("SharedChannelsContent", () => {
     fireEvent.click(screen.getByRole("switch", { name: "Protected automatic upgrades" }));
     await waitFor(() => expect(api.setAutoUpdateEnabled).toHaveBeenCalledWith(42, false));
     expect(api.runAutoUpdates).not.toHaveBeenCalled();
+  });
+
+  it("shows an inline sign-in prompt when GitHub is not authenticated", async () => {
+    api.listOrganizations.mockRejectedValue({
+      code: "not_authenticated",
+      message: "Sign in to GitHub before managing shared channels",
+    });
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    expect(await screen.findByText("Sign in to GitHub to manage shared channels")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign in with GitHub" })).toBeInTheDocument();
+    expect(screen.queryByText("Sign in to GitHub before managing shared channels")).not.toBeInTheDocument();
+  });
+
+  it("still surfaces non-authentication load failures as errors", async () => {
+    api.listOrganizations.mockRejectedValue({ code: "network", message: "offline" });
+    render(<SharedChannelsContent scopeSwitch={<span>scope-switch</span>} />);
+
+    expect(await screen.findByText("offline")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sign in with GitHub" })).not.toBeInTheDocument();
   });
 });

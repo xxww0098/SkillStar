@@ -29,7 +29,7 @@ fn test_resolve_tool_config_path_unknown() {
 #[test]
 fn test_get_tool_config_targets_returns_all_tools() {
     let targets = get_tool_config_targets().unwrap();
-    assert_eq!(targets.len(), 5);
+    assert_eq!(targets.len(), 6);
 
     let claude_target = targets.iter().find(|t| t.tool_id == "claude-code").unwrap();
     assert_eq!(claude_target.display_name, "Claude Code");
@@ -49,6 +49,10 @@ fn test_get_tool_config_targets_returns_all_tools() {
     let pi_target = targets.iter().find(|t| t.tool_id == "pi").unwrap();
     assert_eq!(pi_target.display_name, "Pi");
     assert!(pi_target.config_path.contains(".pi"));
+
+    let omp_target = targets.iter().find(|t| t.tool_id == "omp").unwrap();
+    assert_eq!(omp_target.display_name, "Oh My Pi");
+    assert!(omp_target.config_path.contains(".omp"));
 }
 
 // =========================================================================
@@ -272,6 +276,7 @@ fn test_codex_third_party_writes_env_key_and_disables_openai_auth() {
     let binding = ToolBinding {
         entries: vec![make_codex_activation(&provider, settings)],
         active_index: 0,
+        settings: None,
     };
 
     sync_codex_binding_inner(&binding, std::slice::from_ref(&provider), &config_path).unwrap();
@@ -318,6 +323,7 @@ fn test_codex_oauth_enables_openai_auth_and_no_env_key() {
     let binding = ToolBinding {
         entries: vec![make_codex_activation(&provider, settings)],
         active_index: 0,
+        settings: None,
     };
 
     sync_codex_binding_inner(&binding, std::slice::from_ref(&provider), &config_path).unwrap();
@@ -348,9 +354,9 @@ fn test_codex_oauth_enables_openai_auth_and_no_env_key() {
 fn test_codex_oauth_and_third_party_preserve_existing_auth_json() {
     // Regression guard: oauth AND third_party modes must NEVER touch auth.json.
     // A pre-existing ChatGPT OAuth token object must survive both syncs.
-    // (Both cases are checked in one test to avoid them racing each other on
-    // the shared sandbox's single ~/.codex/auth.json.)
-    use_sandbox_home();
+    // (Both cases share one test body only for brevity — the sandbox HOME is
+    // per-test now, so they no longer race anyone on ~/.codex/auth.json.)
+    let _sandbox = use_sandbox_home();
     let codex_dir = resolve_codex_auth_path()
         .unwrap()
         .parent()
@@ -381,6 +387,7 @@ fn test_codex_oauth_and_third_party_preserve_existing_auth_json() {
         let binding = ToolBinding {
             entries: vec![make_codex_activation(&provider, settings)],
             active_index: 0,
+            settings: None,
         };
 
         let _ = sync_codex_binding(&binding, std::slice::from_ref(&provider));
@@ -429,11 +436,9 @@ fn test_claude_official_sync_clears_managed_env_without_writing_key() {
     )
     .unwrap();
 
-    let official = crate::providers::create_from_preset_flat(
-        crate::providers::CLAUDE_OFFICIAL_ID,
-        "",
-    )
-    .unwrap();
+    let official =
+        crate::providers::create_from_preset_flat(crate::providers::CLAUDE_OFFICIAL_ID, "")
+            .unwrap();
     sync_to_claude_code_inner(&official, "", &config_path).unwrap();
 
     let parsed: Value =
@@ -442,13 +447,16 @@ fn test_claude_official_sync_clears_managed_env_without_writing_key() {
     assert!(!env.contains_key("ANTHROPIC_BASE_URL"));
     assert!(!env.contains_key("ANTHROPIC_AUTH_TOKEN"));
     assert!(!env.contains_key("ANTHROPIC_MODEL"));
-    assert_eq!(env.get("MY_CUSTOM").and_then(|v| v.as_str()), Some("keep-me"));
+    assert_eq!(
+        env.get("MY_CUSTOM").and_then(|v| v.as_str()),
+        Some("keep-me")
+    );
     assert_eq!(parsed.get("other").and_then(|v| v.as_bool()), Some(true));
 }
 
 #[test]
 fn test_codex_official_sync_oauth_preserves_auth_json() {
-    use_sandbox_home();
+    let _sandbox = use_sandbox_home();
     let codex_dir = resolve_codex_auth_path()
         .unwrap()
         .parent()
@@ -493,6 +501,7 @@ requires_openai_auth = false
     let binding = ToolBinding {
         entries: vec![make_codex_activation(&official, settings)],
         active_index: 0,
+        settings: None,
     };
 
     sync_codex_binding_inner(&binding, std::slice::from_ref(&official), &config_path).unwrap();

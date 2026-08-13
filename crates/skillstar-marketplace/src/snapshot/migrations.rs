@@ -125,6 +125,15 @@ pub(crate) fn migrate_schema(conn: &Connection) -> Result<()> {
         if version < 10 {
             migrate_v9_to_v10(conn)?;
         }
+        if version < 11 {
+            migrate_v10_to_v11(conn)?;
+        }
+        if version < 12 {
+            migrate_v11_to_v12(conn)?;
+        }
+        if version < 13 {
+            migrate_v12_to_v13(conn)?;
+        }
         conn.pragma_update(None, "user_version", SNAPSHOT_SCHEMA_VERSION)
             .context("Failed to update marketplace user_version")?;
     }
@@ -465,4 +474,122 @@ pub(crate) fn migrate_v8_to_v9(conn: &Connection) -> Result<()> {
 pub(crate) fn migrate_v9_to_v10(conn: &Connection) -> Result<()> {
     crate::mcp_snapshot::create_mcp_registry_tables(conn)
         .context("Failed to create curated MCP marketplace tables (v10)")
+}
+
+/// v11: content-addressing columns on `marketplace_sync_state`.
+///
+/// Anti-censorship design: the sync layer records which host actually served
+/// each scope (`source_host`), the SHA-256 of the raw payload
+/// (`payload_sha256`), and the server ETag when one is provided. The snapshot
+/// writer then skips a full delete+reinsert when a refresh returns identical
+/// bytes (incremental write), and diagnostics can show where the data came
+/// from when a mirror is in play.
+///
+/// `ALTER TABLE ADD COLUMN` is *not* repeatable — a second run fails with
+/// `duplicate column name`. Since `user_version` is only bumped after the whole
+/// migration chain succeeds, a run interrupted between two bare ALTERs (crash,
+/// `SQLITE_BUSY` on a long writer) would leave the column present at version 10
+/// and brick every later startup. So: one transaction, and each column added
+/// only when `PRAGMA table_info` says it is missing.
+pub(crate) fn migrate_v10_to_v11(conn: &Connection) -> Result<()> {
+    let tx = conn
+        .unchecked_transaction()
+        .context("Failed to start v11 migration transaction")?;
+
+    for column in ["source_host", "payload_sha256", "etag"] {
+        if column_exists(&tx, "marketplace_sync_state", column)? {
+            continue;
+        }
+        tx.execute_batch(&format!(
+            "ALTER TABLE marketplace_sync_state ADD COLUMN {column} TEXT;"
+        ))
+        .with_context(|| {
+            format!(
+                "Failed to add content-addressing column {column} to marketplace sync state (v11)"
+            )
+        })?;
+    }
+
+    tx.commit()
+        .context("Failed to commit v11 migration transaction")
+}
+
+/// v12: `degraded_reason` on `marketplace_sync_state`.
+///
+/// A scope written from a knowingly lossy payload (leaderboard HTML stopped
+/// parsing, the capped `/api/search` result stood in for it) has to stay
+/// distinguishable from a complete one *after* the process restarts. Without a
+/// persisted marker the writer can only ask "are there rows?", which answers
+/// yes for its own fallback rows — so the next refresh refused to replace them
+/// and every retry failed forever. See `docs/errors.md`
+/// ("Marketplace degraded 快照自锁").
+///
+/// The reason lives in its own column rather than in `last_error`: the scope
+/// did succeed, and a row with both `last_success_at` and `last_error` set
+/// reads as a failure to every diagnostics consumer.
+///
+/// Same idempotency contract as v11: one transaction, column added only when
+/// `PRAGMA table_info` says it is missing.
+pub(crate) fn migrate_v11_to_v12(conn: &Connection) -> Result<()> {
+    let tx = conn
+        .unchecked_transaction()
+        .context("Failed to start v12 migration transaction")?;
+
+    if !column_exists(&tx, "marketplace_sync_state", "degraded_reason")? {
+        tx.execute_batch("ALTER TABLE marketplace_sync_state ADD COLUMN degraded_reason TEXT;")
+            .context("Failed to add degraded_reason to marketplace sync state (v12)")?;
+    }
+
+    tx.commit()
+        .context("Failed to commit v12 migration transaction")
+}
+
+/// v13: `server.json` `2025-12-11` columns on both MCP server tables.
+///
+/// `mcp_registry_server` and `mcp_curated_server` are created by
+/// `create_mcp_registry_tables`, which is entirely `CREATE TABLE IF NOT
+/// EXISTS`. For anyone already at `user_version >= 10` that function is a
+/// no-op, so a column added only there exists for fresh installs and nowhere
+/// else — and every `SELECT` in the MCP marketplace fails with
+/// `no such column`. The column list therefore lives in one place
+/// (`mcp_snapshot::MCP_SERVER_COLUMNS_V13`), read by both the `CREATE TABLE`
+/// statements and this migration.
+///
+/// Same idempotency contract as v11/v12: one transaction, each column added
+/// only when `PRAGMA table_info` says it is missing. A bare `ALTER` would
+/// brick startup forever if the process died between two of them, because
+/// `user_version` is only bumped after the whole chain succeeds.
+///
+/// The FTS virtual tables are deliberately untouched: none of the new columns
+/// is searchable, and FTS5 cannot `ALTER` — adding one would mean dropping,
+/// recreating and reloading both indexes.
+pub(crate) fn migrate_v12_to_v13(conn: &Connection) -> Result<()> {
+    let tx = conn
+        .unchecked_transaction()
+        .context("Failed to start v13 migration transaction")?;
+
+    for table in crate::mcp_snapshot::MCP_SERVER_TABLES {
+        // A database that never reached v8/v10 has no MCP tables at all; the
+        // create path will build them complete, so there is nothing to alter.
+        if !table_exists(&tx, table)? {
+            continue;
+        }
+        for (column, definition) in crate::mcp_snapshot::MCP_SERVER_COLUMNS_V13 {
+            if column_exists(&tx, table, column)? {
+                continue;
+            }
+            tx.execute_batch(&format!(
+                "ALTER TABLE {table} ADD COLUMN {column} {definition};"
+            ))
+            .with_context(|| format!("Failed to add {column} to {table} (v13)"))?;
+        }
+        let index = format!("idx_{table}_status");
+        tx.execute_batch(&format!(
+            "CREATE INDEX IF NOT EXISTS {index} ON {table}(status, is_latest);"
+        ))
+        .with_context(|| format!("Failed to create {index} (v13)"))?;
+    }
+
+    tx.commit()
+        .context("Failed to commit v13 migration transaction")
 }

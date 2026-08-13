@@ -7,7 +7,7 @@ import type { ClaudeSurface } from "./ClaudeSurfaceIcon";
  * (separate `tool_activations` keys + Official toggles + mapping state).
  * They share the Claude Official seed provider id, not each other's binding.
  */
-export type MatrixColumnId = "claude-code" | "claude-desktop" | "codex" | "opencode" | "pi";
+export type MatrixColumnId = "claude-code" | "claude-desktop" | "codex" | "opencode" | "pi" | "omp";
 
 export type MatrixColumn = {
   columnId: MatrixColumnId;
@@ -49,6 +49,12 @@ export const MATRIX_COLUMNS: MatrixColumn[] = [
     columnId: "pi",
     bindToolId: "pi",
     displayName: "Pi",
+    kind: "multi",
+  },
+  {
+    columnId: "omp",
+    bindToolId: "omp",
+    displayName: "Oh My Pi",
     kind: "multi",
   },
 ];

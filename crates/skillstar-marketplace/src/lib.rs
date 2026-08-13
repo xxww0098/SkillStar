@@ -1,15 +1,21 @@
 mod db;
 pub mod mcp_models;
-mod mcp_remote;
+pub mod mcp_remote;
 pub mod mcp_snapshot;
 mod models;
 pub mod remote;
 pub mod snapshot;
 
 pub use mcp_models::{
-    McpMarketEntry, McpMarketServerDetail, McpPublisherSummary, McpRegistryPackageSummary,
-    McpRegistryRemoteSummary, McpRegistryServer, McpServerKind,
+    McpArgument, McpArgumentKind, McpIcon, McpInput, McpInputFormat, McpInputVariable,
+    McpKeyValueInput, McpMarketEntry, McpMarketServerDetail, McpPublisherSummary,
+    McpRegistryPackageSummary, McpRegistryRemoteSummary, McpRegistryServer, McpServerKind,
+    McpServerStatus, McpTransportSpec,
 };
+pub use mcp_remote::{
+    McpCustomSource, McpSourceDescriptor, McpSourceKind, McpSourceLicense, McpSourcesConfig,
+};
+pub use mcp_snapshot::{McpServerPage, McpServerQuery, McpSortKey};
 
 pub use models::{
     CuratedRegistryEntry, CuratedRegistryKind, CuratedRegistryUpsert, MarketplaceCategory,

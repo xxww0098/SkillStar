@@ -1,6 +1,6 @@
 use std::sync::OnceLock;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use regex::Regex;
 use tracing::{debug, warn};
 
@@ -9,29 +9,29 @@ use crate::OfficialPublisher;
 
 // ── Official Publishers ────────────────────────────────────────────────
 
-/// Get official publishers from skills.sh/official via HTML scraping
-pub async fn get_official_publishers() -> Result<Vec<OfficialPublisher>> {
-    let client = marketplace_client()?;
-
-    let html = client
-        .get("https://skills.sh/official")
-        .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        .header("Accept", "text/html,application/xhtml+xml")
-        .send()
-        .await
-        .context("Failed to fetch skills.sh/official")?
-        .text()
-        .await
-        .context("Failed to read HTML")?;
+/// Get official publishers from skills.sh/official via HTML scraping, with
+/// content-addressing metadata (source host, payload SHA-256, ETag) for the
+/// snapshot's incremental write path.
+///
+/// No `.0` convenience wrapper by design — see
+/// [`get_skills_sh_leaderboard_with_meta`](super::get_skills_sh_leaderboard_with_meta).
+pub async fn get_official_publishers_with_meta(
+    etag: Option<&str>,
+) -> Result<(Vec<OfficialPublisher>, FetchMeta)> {
+    let (html, meta) = fetch_with_failover("/official", etag).await?;
+    if meta.payload_sha256.is_empty() {
+        return Ok((Vec::new(), meta));
+    }
 
     let publishers = parse_official_publishers_html(&html);
     debug!(
         target: "skills_sh",
+        host = %meta.source_host,
         count = publishers.len(),
         "parsed official publishers"
     );
 
-    Ok(publishers)
+    Ok((publishers, meta))
 }
 
 pub(crate) fn parse_official_publishers_html(html: &str) -> Vec<OfficialPublisher> {

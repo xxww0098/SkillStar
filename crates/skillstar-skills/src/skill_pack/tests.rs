@@ -39,7 +39,11 @@ impl Drop for TestEnv {
 
 fn write_pack(repo: &Path, skill_path: &str) {
     std::fs::create_dir_all(repo.join("skills/demo")).unwrap();
-    std::fs::write(repo.join("skills/demo/SKILL.md"), "# Demo\n").unwrap();
+    std::fs::write(
+        repo.join("skills/demo/SKILL.md"),
+        "---\nname: demo\ndescription: A demo skill for pack tests\n---\n\n# Demo\n",
+    )
+    .unwrap();
     std::fs::write(
         repo.join("skillpack.toml"),
         format!(

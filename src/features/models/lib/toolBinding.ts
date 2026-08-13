@@ -7,7 +7,7 @@
  * clamp/active/upsert logic so components never index `entries[active_index]`
  * raw (a stale pointer would panic-by-undefined).
  */
-import type { ToolActivation, ToolBinding } from "../../../types";
+import type { OmpRoleTarget, ToolActivation, ToolBinding } from "../../../types";
 import { agentSupportsMultipleProviders } from "./agentRegistry";
 
 export const EMPTY_BINDING: ToolBinding = { entries: [], active_index: 0 };
@@ -37,19 +37,23 @@ export function upsertBindingEntry(
 ): ToolBinding {
   const base = prev ?? EMPTY_BINDING;
   if (!agentSupportsMultipleProviders(toolId)) {
-    return { entries: [entry], active_index: 0 };
+    return { entries: [entry], active_index: 0, settings: base.settings };
   }
   const pos = base.entries.findIndex((e) => e.provider_id === entry.provider_id);
   if (pos >= 0) {
     const entries = base.entries.slice();
     entries[pos] = { ...entries[pos], ...entry };
-    return { entries, active_index: pos };
+    return { ...base, entries, active_index: pos };
   }
   const entries = [...base.entries, entry];
-  return { entries, active_index: entries.length - 1 };
+  return { ...base, entries, active_index: entries.length - 1 };
 }
 
-/** Remove the entry for `providerId`, re-clamping the active pointer. */
+/**
+ * Remove the entry for `providerId`, re-clamping the active pointer and
+ * dropping any role that targeted it — mirroring `remove_binding_entry` on the
+ * backend so the optimistic cache matches what actually lands on disk.
+ */
 export function removeBindingEntry(prev: ToolBinding | null | undefined, providerId: string): ToolBinding {
   const base = prev ?? EMPTY_BINDING;
   const pos = base.entries.findIndex((e) => e.provider_id === providerId);
@@ -58,7 +62,20 @@ export function removeBindingEntry(prev: ToolBinding | null | undefined, provide
   let active_index = base.active_index;
   if (active_index >= pos && active_index > 0) active_index -= 1;
   if (active_index >= entries.length) active_index = Math.max(0, entries.length - 1);
-  return { entries, active_index };
+  return { ...base, entries, active_index, settings: pruneRolesForProvider(base.settings, providerId) };
+}
+
+/** The OMP role → provider+model map on a binding (empty when unset). */
+export function bindingRoles(binding: ToolBinding | null | undefined): Record<string, OmpRoleTarget> {
+  return binding?.settings?.roles ?? {};
+}
+
+/** Drop every role assignment pointing at `providerId`. */
+export function pruneRolesForProvider(settings: ToolBinding["settings"], providerId: string): ToolBinding["settings"] {
+  const roles = settings?.roles;
+  if (!roles) return settings;
+  const kept = Object.fromEntries(Object.entries(roles).filter(([, t]) => t.provider_id !== providerId));
+  return { ...settings, roles: kept };
 }
 
 /** Set the active pointer to `providerId` if bound (else unchanged). */

@@ -13,6 +13,26 @@ name: string,
  */
 transport: string, command?: string | null, args?: Array<string>, env?: { [key in string]: string }, cwd?: string | null, url?: string | null, headers?: { [key in string]: string }, description?: string | null, homepage?: string | null, tags?: Array<string>, 
 /**
+ * Which registry the entry was installed from (e.g. `official`,
+ * `github`, or a curated source key). `None` = hand-created or imported.
+ */
+sourceId?: string | null, 
+/**
+ * The registry's own canonical `server.json` name — a reverse-DNS
+ * identifier such as `io.github.owner/repo`. Distinct from [`Self::name`],
+ * which is the sanitized key written into tool configs.
+ */
+registryName?: string | null, 
+/**
+ * Server version recorded at install time, verbatim from the registry.
+ */
+installedVersion?: string | null, 
+/**
+ * Which runtime shape was chosen when installing — see
+ * [`McpRuntimeKind`] for the vocabulary.
+ */
+runtimeKind?: string | null, 
+/**
  * Per-tool enable flags, keyed by tool id (see [`MCP_TOOL_IDS`]). Existing
  * stores may retain a legacy Desktop Chat cleanup tombstone: `true` means
  * cleanup is pending; a successful removal consumes it to `false`.

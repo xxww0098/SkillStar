@@ -10,7 +10,7 @@ import { useCallback } from "react";
 import { toast } from "sonner";
 import i18n from "../../../i18n";
 import { tauriInvoke } from "../../../lib/ipc";
-import type { FlatProvidersResponse, ToolActivationsMap, ToolSyncResult } from "../../../types";
+import type { FlatProvidersResponse, ToolActivationsMap, ToolBindingSettings, ToolSyncResult } from "../../../types";
 import { getAgent } from "../lib/agentRegistry";
 import { removeBindingEntry as removeEntryLocal, setActiveProvider, upsertBindingEntry } from "../lib/toolBinding";
 import { modelsKeys } from "./keys";
@@ -134,6 +134,41 @@ export function useActivationMutations() {
     onSettled: invalidate,
   });
 
+  // Binding-level settings (OMP model roles). Optimistic so the role panel
+  // reflects the new assignment immediately; the single providers cache entry is
+  // the only place binding state lives (see the note at the top of this file).
+  const updateBindingSettingsMutation = useMutation({
+    mutationFn: ({ toolId, settings }: { toolId: string; settings: ToolBindingSettings }) =>
+      tauriInvoke("update_tool_binding_settings", { toolId, settings }),
+    onMutate: async ({ toolId, settings }) => {
+      await queryClient.cancelQueries({ queryKey });
+      const previous = queryClient.getQueryData<FlatProvidersResponse>(queryKey);
+      const binding = previous?.tool_activations[toolId];
+      if (previous && binding) {
+        queryClient.setQueryData<FlatProvidersResponse>(queryKey, {
+          ...previous,
+          tool_activations: {
+            ...previous.tool_activations,
+            [toolId]: { ...binding, settings },
+          },
+        });
+      }
+      return { previous };
+    },
+    onSuccess: (result, { toolId }) => {
+      if (result && !result.success) {
+        toast.error(result.error ?? i18n.t("models.toasts.syncFailed", { name: toolDisplayName(toolId) }));
+      }
+    },
+    onError: (err, { toolId }, context) => {
+      if (context?.previous) queryClient.setQueryData(queryKey, context.previous);
+      toast.error(
+        err instanceof Error ? err.message : i18n.t("models.toasts.syncFailed", { name: toolDisplayName(toolId) }),
+      );
+    },
+    onSettled: invalidate,
+  });
+
   const setActiveBindingMutation = useMutation({
     mutationFn: ({ toolId, providerId }: { toolId: string; providerId: string }) =>
       tauriInvoke("set_active_binding", { toolId, providerId }),
@@ -216,6 +251,12 @@ export function useActivationMutations() {
     [updateSettingsMutation],
   );
 
+  const updateToolBindingSettings = useCallback(
+    (toolId: string, settings: ToolBindingSettings): Promise<ToolSyncResult> =>
+      updateBindingSettingsMutation.mutateAsync({ toolId, settings }),
+    [updateBindingSettingsMutation],
+  );
+
   const setActiveBinding = useCallback(
     (toolId: string, providerId: string): Promise<ToolSyncResult> =>
       setActiveBindingMutation.mutateAsync({ toolId, providerId }),
@@ -228,5 +269,12 @@ export function useActivationMutations() {
     [removeBindingEntryMutation],
   );
 
-  return { activateTool, deactivateTool, updateToolSettings, setActiveBinding, removeBindingEntry };
+  return {
+    activateTool,
+    deactivateTool,
+    updateToolSettings,
+    updateToolBindingSettings,
+    setActiveBinding,
+    removeBindingEntry,
+  };
 }

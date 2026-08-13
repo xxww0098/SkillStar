@@ -41,10 +41,7 @@ function input(overrides: Partial<AgentStatusInput> = {}): AgentStatusInput {
 
 describe("agent registry", () => {
   it("exposes separate Claude CLI and Claude Desktop provider Agents", () => {
-    expect(PROVIDER_AGENTS.filter((agent) => agent.toolId.startsWith("claude"))).toEqual([
-      claude,
-      claudeDesktop,
-    ]);
+    expect(PROVIDER_AGENTS.filter((agent) => agent.toolId.startsWith("claude"))).toEqual([claude, claudeDesktop]);
     expect(claude.displayName).toBe("Claude CLI");
     expect(claudeDesktop.displayName).toBe("Claude Desktop");
   });

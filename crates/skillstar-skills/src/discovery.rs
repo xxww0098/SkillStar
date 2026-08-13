@@ -27,6 +27,11 @@ pub struct DiscoveredSkill {
     pub folder_path: String,
     pub description: String,
     pub already_installed: bool,
+    /// Frontmatter quality issues (stable snake_case codes), empty when the
+    /// SKILL.md is a valid skill. Advisory issues (e.g. missing `name`) are
+    /// listed here too; blocking ones make the skill un-installable.
+    #[serde(default)]
+    pub frontmatter_issues: Vec<String>,
 }
 
 /// Configures how a repository should be scanned for skills.
@@ -88,9 +93,7 @@ impl DiscoveryMode {
 
 /// Internal raw discovery item before it is normalized into a public skill.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 struct SkillCandidate {
-    skill_md_path: PathBuf,
     folder_path: String,
     default_name: String,
     frontmatter: SkillFrontmatter,
@@ -109,6 +112,7 @@ impl SkillCandidate {
             folder_path: self.folder_path,
             description: self.frontmatter.description,
             already_installed: false,
+            frontmatter_issues: self.frontmatter.issues,
         }
     }
 
@@ -164,7 +168,6 @@ impl<'a> SkillDiscovery<'a> {
 
         Some(SkillCandidate {
             frontmatter: extract_frontmatter(&skill_md_path),
-            skill_md_path,
             folder_path,
             default_name,
         })
@@ -233,6 +236,7 @@ pub const PRIORITY_SKILL_DIRS: &[&str] = &[
     ".mcpjam/skills",
     ".mux/skills",
     ".neovate/skills",
+    ".omp/skills",
     ".opencode/skills",
     ".openhands/skills",
     ".pi/skills",
@@ -247,7 +251,21 @@ pub const PRIORITY_SKILL_DIRS: &[&str] = &[
     ".adal/skills",
 ];
 
+/// How deep known skill container directories are walked. Matches `npx skills`
+/// (`DEFAULT_SKILL_CONTAINER_DEPTH`): container dirs cover flat layouts
+/// (`skills/<name>/SKILL.md`) and catalog layouts one or two category levels
+/// deep (`skills/<category>/<name>/SKILL.md`,
+/// `skills/<category>/<category>/<name>/SKILL.md`).
+const SKILL_CONTAINER_MAX_DEPTH: usize = 3;
+
 /// Scan priority skill directories for SKILL.md files.
+///
+/// Container dirs are walked up to [`SKILL_CONTAINER_MAX_DEPTH`] levels; a
+/// directory that is itself a skill shadows anything nested below it. The
+/// repo root (`.` entry in [`PRIORITY_SKILL_DIRS`]) keeps its depth-1
+/// behavior so unrelated `SKILL.md` files (e.g. under `examples/`) are not
+/// surfaced in root-first mode. Plugin-manifest-declared skill dirs are
+/// scanned at their declared depth.
 fn scan_priority_skill_dirs(base_dir: &Path) -> Vec<PathBuf> {
     let mut results = Vec::new();
 
@@ -264,22 +282,48 @@ fn scan_priority_skill_dirs(base_dir: &Path) -> Vec<PathBuf> {
         if !is_safe_repository_directory(base_dir, &skill_dir) {
             continue;
         }
-        let Ok(entries) = std::fs::read_dir(&skill_dir) else {
+        walk_skill_container(&skill_dir, &mut results, 1, SKILL_CONTAINER_MAX_DEPTH);
+    }
+
+    // Claude Code plugin manifests may declare skills outside the standard
+    // container dirs; honor them at their declared depth.
+    for declared in crate::plugin_manifest::declared_skill_dirs(base_dir) {
+        if !is_safe_repository_directory(base_dir, &declared) {
             continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
-                continue;
-            }
-            let skill_md = path.join("SKILL.md");
-            if is_safe_skill_manifest(&skill_md) {
-                results.push(skill_md);
-            }
         }
+        walk_skill_container(&declared, &mut results, 1, 1);
     }
 
     results
+}
+
+/// Walk a skill container directory, collecting `SKILL.md` files.
+///
+/// A child directory that itself contains a `SKILL.md` is a skill; descent
+/// stops below it (shadow semantics) and at `max_depth`. Non-directories and
+/// unreadable entries are skipped silently.
+fn walk_skill_container(dir: &Path, results: &mut Vec<PathBuf>, depth: usize, max_depth: usize) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+        let child = entry.path();
+        let skill_md = child.join("SKILL.md");
+        let is_skill = is_safe_skill_manifest(&skill_md);
+        if is_skill {
+            results.push(skill_md);
+        }
+        if is_skill || depth >= max_depth {
+            continue;
+        }
+        walk_skill_container(&child, results, depth + 1, max_depth);
+    }
 }
 
 fn is_safe_repository_directory(base_dir: &Path, directory: &Path) -> bool {
@@ -313,7 +357,7 @@ pub fn discover_skills(repo_dir: &Path, full_depth: bool) -> Vec<DiscoveredSkill
 
 /// Full discovery without identity deduplication, for integrity-sensitive
 /// callers that must reject collisions instead of selecting one candidate.
-pub(crate) fn discover_skills_without_dedup(
+pub fn discover_skills_without_dedup(
     repo_dir: &Path,
     full_depth: bool,
     root_default_name: Option<&str>,
@@ -460,11 +504,10 @@ pub fn find_all_skill_md_files(dir: &Path) -> Vec<PathBuf> {
     results
 }
 
-const MAX_SKILL_MANIFEST_BYTES: u64 = 1024 * 1024;
-
 fn is_safe_skill_manifest(path: &Path) -> bool {
     std::fs::symlink_metadata(path).is_ok_and(|metadata| {
-        metadata.file_type().is_file() && metadata.len() <= MAX_SKILL_MANIFEST_BYTES
+        metadata.file_type().is_file()
+            && metadata.len() <= crate::validation::MAX_MANIFEST_BYTES
     })
 }
 
@@ -474,57 +517,20 @@ fn is_safe_skill_manifest(path: &Path) -> bool {
 struct SkillFrontmatter {
     name: Option<String>,
     description: String,
+    /// Frontmatter quality issue codes (see `validation`).
+    issues: Vec<String>,
 }
 
 fn extract_frontmatter(skill_md_path: &Path) -> SkillFrontmatter {
-    if !is_safe_skill_manifest(skill_md_path) {
-        return SkillFrontmatter {
-            name: None,
-            description: String::new(),
-        };
-    }
-    let content = match std::fs::read_to_string(skill_md_path) {
-        Ok(c) => c,
-        Err(_) => {
-            return SkillFrontmatter {
-                name: None,
-                description: String::new(),
-            };
-        }
-    };
-
-    if !content.starts_with("---") {
-        return SkillFrontmatter {
-            name: None,
-            description: String::new(),
-        };
-    }
-
-    let parts: Vec<&str> = content.splitn(3, "---").collect();
-    if parts.len() < 3 {
-        return SkillFrontmatter {
-            name: None,
-            description: String::new(),
-        };
-    }
-
-    let yaml_str = parts[1];
-
-    #[derive(Deserialize)]
-    struct Frontmatter {
-        name: Option<String>,
-        description: Option<String>,
-    }
-
-    match serde_yaml::from_str::<Frontmatter>(yaml_str) {
-        Ok(fm) => SkillFrontmatter {
-            name: fm.name.map(|name| name.trim().to_string()),
-            description: fm.description.unwrap_or_default().trim().to_string(),
-        },
-        Err(_) => SkillFrontmatter {
-            name: None,
-            description: String::new(),
-        },
+    // Delegate to the shared validation parser so discovery and the install
+    // gate always agree on what a valid skill is.
+    let report = crate::validation::inspect_skill_frontmatter(
+        skill_md_path.parent().unwrap_or_else(|| Path::new(".")),
+    );
+    SkillFrontmatter {
+        name: report.name,
+        description: report.description.unwrap_or_default(),
+        issues: report.issues.iter().map(|issue| issue.as_code().to_string()).collect(),
     }
 }
 
@@ -662,12 +668,14 @@ mod tests {
                 folder_path: ".claude/skills/my-skill".to_string(),
                 description: "low priority".to_string(),
                 already_installed: false,
+                frontmatter_issues: Vec::new(),
             },
             DiscoveredSkill {
                 id: "my-skill".to_string(),
                 folder_path: "source/skills/my-skill".to_string(),
                 description: "high priority".to_string(),
                 already_installed: false,
+                frontmatter_issues: Vec::new(),
             },
         ];
         let deduped = dedupe_discovered_skills(skills);
@@ -830,9 +838,122 @@ mod tests {
 
         assert_eq!(candidates.len(), 1);
         assert!(candidates[0].is_repo_root());
-        assert!(candidates[0].skill_md_path.ends_with("SKILL.md"));
         assert_eq!(candidates[0].default_name, "repo");
         assert_eq!(candidates[0].frontmatter.name.as_deref(), Some("root-name"));
         assert_eq!(candidates[0].frontmatter.description, "root-desc");
+    }
+}
+
+#[cfg(test)]
+mod frontmatter_issue_tests {
+    use super::*;
+
+    #[test]
+    fn discovery_reports_frontmatter_issues_on_invalid_skills() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("owner--repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        // Valid skill — no issues.
+        std::fs::create_dir_all(repo.join("skills/valid")).unwrap();
+        std::fs::write(
+            repo.join("skills/valid/SKILL.md"),
+            "---\nname: valid\ndescription: A valid skill\n---\n",
+        )
+        .unwrap();
+        // Bare SKILL.md — missing frontmatter/name/description.
+        std::fs::create_dir_all(repo.join("skills/bare")).unwrap();
+        std::fs::write(repo.join("skills/bare/SKILL.md"), "# No frontmatter\n").unwrap();
+
+        let skills = discover_skills(&repo, true);
+        let valid = skills.iter().find(|s| s.id == "valid").unwrap();
+        assert!(valid.frontmatter_issues.is_empty(), "{:?}", valid.frontmatter_issues);
+
+        let bare = skills.iter().find(|s| s.id == "bare").unwrap();
+        assert!(bare.frontmatter_issues.contains(&"missing_description".to_string()));
+        assert!(bare.frontmatter_issues.contains(&"missing_frontmatter".to_string()));
+    }
+}
+
+#[cfg(test)]
+mod depth_and_plugin_tests {
+    use super::*;
+
+    fn write_skill_md(path: &std::path::Path, name: &str) {
+        let dir = path.parent().unwrap();
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(
+            path,
+            format!("---\nname: {name}\ndescription: {name} description\n---\n\n# {name}\n"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn root_first_discovers_catalog_layouts_inside_containers() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("owner--repo");
+
+        // Flat layout and a two-level catalog layout under the same container.
+        write_skill_md(&repo.join("skills/flat/SKILL.md"), "flat");
+        write_skill_md(
+            &repo.join("skills/security/web/reviewer/SKILL.md"),
+            "web-reviewer",
+        );
+
+        let skills = discover_skills(&repo, false);
+        let ids: Vec<&str> = skills.iter().map(|s| s.id.as_str()).collect();
+        assert!(ids.contains(&"flat"), "{ids:?}");
+        assert!(ids.contains(&"web-reviewer"), "{ids:?}");
+    }
+
+    #[test]
+    fn a_skill_shadows_anything_nested_below_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("owner--repo");
+
+        write_skill_md(&repo.join("skills/foo/SKILL.md"), "foo");
+        write_skill_md(&repo.join("skills/foo/bar/SKILL.md"), "bar");
+
+        let skills = discover_skills(&repo, false);
+        let ids: Vec<&str> = skills.iter().map(|s| s.id.as_str()).collect();
+        assert!(ids.contains(&"foo"), "{ids:?}");
+        assert!(!ids.contains(&"bar"), "{ids:?}");
+    }
+
+    #[test]
+    fn full_depth_still_descends_past_shadowing_skills() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("owner--repo");
+
+        write_skill_md(&repo.join("skills/foo/SKILL.md"), "foo");
+        write_skill_md(&repo.join("skills/foo/bar/SKILL.md"), "bar");
+
+        let skills = discover_skills(&repo, true);
+        let ids: Vec<&str> = skills.iter().map(|s| s.id.as_str()).collect();
+        assert!(ids.contains(&"bar"), "{ids:?}");
+    }
+
+    #[test]
+    fn plugin_manifest_declared_skills_are_discovered() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("owner--repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::create_dir_all(repo.join(".claude-plugin")).unwrap();
+
+        std::fs::write(
+            repo.join(".claude-plugin/marketplace.json"),
+            r#"{
+              "metadata": { "pluginRoot": "./plugins" },
+              "plugins": [
+                { "name": "review", "source": "./review", "skills": ["./skills/review"] }
+              ]
+            }"#,
+        )
+        .unwrap();
+        write_skill_md(&repo.join("plugins/review/skills/review/SKILL.md"), "review");
+
+        let skills = discover_skills(&repo, false);
+        let ids: Vec<&str> = skills.iter().map(|s| s.id.as_str()).collect();
+        assert!(ids.contains(&"review"), "{ids:?}");
     }
 }

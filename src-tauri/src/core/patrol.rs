@@ -1,6 +1,6 @@
 //! Tauri adapter for background patrol.
 //!
-//! Domain check/prefetch/collect logic lives in `skillstar_skills::patrol`.
+//! Domain check/prefetch/collect logic lives in `skillstar_channels::patrol`.
 //! This module only owns State, tokio spawn, cancellation, and event emit.
 
 use anyhow::Result;
@@ -10,14 +10,14 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::watch;
 use tracing::{error, warn};
 
-use skillstar_skills::git::transport::GitOperationSession;
-use skillstar_skills::patrol::{self, load_config, save_config};
+use skillstar_channels::patrol::{self, load_config, save_config};
+use skillstar_git::transport::GitOperationSession;
 use skillstar_skills::update_state;
 
 use crate::core::github_auth::GitHubAuthState;
 
 // Re-export types used by commands
-pub use skillstar_skills::patrol::{PatrolCheckEvent, PatrolConfig, PatrolStatus};
+pub use skillstar_channels::patrol::{PatrolCheckEvent, PatrolConfig, PatrolStatus};
 
 // ── Patrol Manager ──────────────────────────────────────────────────────
 
@@ -187,7 +187,7 @@ async fn patrol_loop(
                 warn!(target: "patrol", error = %error, "GitHub credential unavailable; using public Git transport");
                 (
                     skillstar_skills::git_skill::GitSkillFacade::new(
-                        skillstar_skills::git::transport::GitOperationSession::public(),
+                        skillstar_git::transport::GitOperationSession::public(),
                     ),
                     None,
                 )
@@ -267,7 +267,10 @@ async fn patrol_loop(
                     error = %err,
                     "update check task failed"
                 );
-                Some(false)
+                // A panicked or cancelled check knows nothing about the skill.
+                // `None` preserves the previous badge instead of asserting
+                // "up to date" on the strength of a crashed task.
+                None
             });
 
             let Some(update_available) = update_result else {

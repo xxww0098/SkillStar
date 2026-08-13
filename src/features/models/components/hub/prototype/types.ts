@@ -47,16 +47,22 @@ export type PrototypeHubData = {
     settings?: Record<string, unknown> | null,
   ) => Promise<ToolSyncResult>;
   deactivateTool: (toolId: string) => Promise<void>;
+  /**
+   * Unbind a single provider from a multi-provider agent, leaving its other
+   * bindings alone — unlike `deactivateTool`, which clears the whole tool.
+   */
+  removeBindingEntry: (toolId: string, providerId: string) => Promise<ToolSyncResult>;
   createProvider: (entry: Partial<ProviderEntryFlat>) => Promise<ProviderEntryFlat>;
 };
 
-export const VARIANT_META = [
-  { key: "D1", name: "Matrix · Agent 加法" },
-  { key: "D2", name: "App 竖切" },
-  { key: "D3", name: "双栏 · Provider + 绑定" },
-] as const;
+/**
+ * IA variants the hub can render. D1 is the production matrix; D2/D3 are
+ * dev-only alternates reachable through `?variant=`. Display names live in the
+ * dev-only variant switcher, not here — this is just the key set.
+ */
+export const VARIANT_KEYS = ["D1", "D2", "D3"] as const;
 
-export type IaVariantKey = (typeof VARIANT_META)[number]["key"];
+export type IaVariantKey = (typeof VARIANT_KEYS)[number];
 
 /** Map older B2 keys onto the current IA set. */
 export function normalizeIaVariant(raw: string | null): IaVariantKey {

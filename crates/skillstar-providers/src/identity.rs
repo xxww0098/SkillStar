@@ -206,9 +206,7 @@ mod tests {
     #[test]
     fn native_official_preset_ids_resolve() {
         assert_eq!(
-            identity_for_preset("claude-official")
-                .unwrap()
-                .canonical_id,
+            identity_for_preset("claude-official").unwrap().canonical_id,
             "claude-official"
         );
         assert_eq!(

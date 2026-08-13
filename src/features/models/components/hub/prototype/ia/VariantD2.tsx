@@ -40,60 +40,51 @@ export function VariantD2({ data }: { data: PrototypeHubData }) {
   if (!agent) return null;
 
   return (
-    <>
-      <div className="flex h-full min-h-0 flex-col overflow-hidden">
-        <div data-tauri-drag-region className="h-4 shrink-0" aria-hidden />
-        <main className="ss-page-scroll">
-          <div className="mx-auto w-full max-w-3xl space-y-5 px-5 py-6">
-            <header>
-              <h1 className="text-2xl font-bold tracking-tight">Agent 工作台</h1>
-              <p className="mt-1 text-sm text-muted-foreground">
-                D2 · App 竖切 — 先选 Agent，再管它的 Provider 与专属加法（对齐 cc-switch）。
-              </p>
-            </header>
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <div data-tauri-drag-region className="h-4 shrink-0" aria-hidden />
+      <main className="ss-page-scroll">
+        <div className="mx-auto w-full max-w-3xl space-y-5 px-5 py-6">
+          <header>
+            <h1 className="text-2xl font-bold tracking-tight">Agent 工作台</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              D2 · App 竖切 — 先选 Agent，再管它的 Provider 与专属加法（对齐 cc-switch）。
+            </p>
+          </header>
 
-            {/* Primary: Agent switcher */}
-            <div className="flex gap-1.5 rounded-2xl border border-border/55 bg-muted/25 p-1.5">
-              {data.agents.map((a) => {
-                const entry = activeEntry(data.toolActivations[a.toolId]);
-                const active = a.toolId === agent.toolId;
-                return (
-                  <button
-                    key={a.toolId}
-                    type="button"
-                    onClick={() => data.setSelectedAgentId(a.toolId)}
-                    className={cn(
-                      "flex flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-xs font-medium transition-colors",
-                      active
-                        ? "bg-background text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    <AgentToolIcon toolId={a.iconId} size="sm" />
-                    <span className="hidden sm:inline">{a.displayName}</span>
-                    <span
-                      className={cn(
-                        "h-1.5 w-1.5 rounded-full",
-                        entry ? "bg-emerald-400" : "bg-zinc-500",
-                      )}
-                    />
-                  </button>
-                );
-              })}
-            </div>
-
-            <AgentWorkbench
-              data={data}
-              agent={agent}
-              maps={maps}
-              setMap={(providerId, next) => setMaps((prev) => ({ ...prev, [providerId]: next }))}
-            />
-
-            <StateDump state={{ ...data.stateDump, ia: "D2-app-vertical", focusAgent: agent.toolId }} />
+          {/* Primary: Agent switcher */}
+          <div className="flex gap-1.5 rounded-2xl border border-border/55 bg-muted/25 p-1.5">
+            {data.agents.map((a) => {
+              const entry = activeEntry(data.toolActivations[a.toolId]);
+              const active = a.toolId === agent.toolId;
+              return (
+                <button
+                  key={a.toolId}
+                  type="button"
+                  onClick={() => data.setSelectedAgentId(a.toolId)}
+                  className={cn(
+                    "flex flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-xs font-medium transition-colors",
+                    active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <AgentToolIcon toolId={a.iconId} size="sm" />
+                  <span className="hidden sm:inline">{a.displayName}</span>
+                  <span className={cn("h-1.5 w-1.5 rounded-full", entry ? "bg-emerald-400" : "bg-zinc-500")} />
+                </button>
+              );
+            })}
           </div>
-        </main>
-      </div>
-    </>
+
+          <AgentWorkbench
+            data={data}
+            agent={agent}
+            maps={maps}
+            setMap={(providerId, next) => setMaps((prev) => ({ ...prev, [providerId]: next }))}
+          />
+
+          <StateDump state={{ ...data.stateDump, ia: "D2-app-vertical", focusAgent: agent.toolId }} />
+        </div>
+      </main>
+    </div>
   );
 }
 
@@ -164,8 +155,7 @@ function AgentWorkbench({
         </h3>
         {compatible.length === 0 ? (
           <p className="rounded-xl border border-dashed border-border/60 px-4 py-6 text-center text-xs text-muted-foreground">
-            没有兼容端点。先添加带 {agent.requiredUrlField === "anthropic" ? "Anthropic" : "OpenAI"} URL 的
-            Provider。
+            没有兼容端点。先添加带 {agent.requiredUrlField === "anthropic" ? "Anthropic" : "OpenAI"} URL 的 Provider。
           </p>
         ) : (
           compatible.map((provider) => {
@@ -180,7 +170,7 @@ function AgentWorkbench({
                 )}
               >
                 <div className="flex items-center gap-3">
-                  <ProviderBrandIcon name={provider.name} size={28} />
+                  <ProviderBrandIcon providerName={provider.name} size="lg" />
                   <div className="min-w-0 flex-1">
                     <button
                       type="button"

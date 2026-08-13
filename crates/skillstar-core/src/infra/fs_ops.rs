@@ -6,6 +6,9 @@
 use anyhow::Context;
 use std::path::{Path, PathBuf};
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 /// Cross-platform symlink creation (shared utility).
 ///
 /// All modules that need to create symlinks **must** call this function
@@ -386,10 +389,19 @@ pub fn atomic_write(path: &Path, content: &[u8]) -> std::io::Result<()> {
     let tmp = parent.join(format!("{file_name}.skillstar-{}.tmp", std::process::id()));
 
     let result = (|| {
+        #[cfg(unix)]
+        let existing_mode = std::fs::metadata(path).ok().map(|m| m.permissions().mode());
         let mut file = std::fs::File::create(&tmp)?;
         file.write_all(content)?;
         file.sync_all()?;
         drop(file);
+        // Preserve the target's permissions across the rename: File::create
+        // yields 0644 (subject to umask), which would silently widen a 0600
+        // config — e.g. one holding credentials — to world-readable.
+        #[cfg(unix)]
+        if let Some(mode) = existing_mode {
+            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode))?;
+        }
         std::fs::rename(&tmp, path)
     })();
     if result.is_err() {
@@ -415,8 +427,7 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "{\"v\":2}");
 
         let leftovers: Vec<_> = std::fs::read_dir(target.parent().unwrap())
-            .unwrap()
-            .filter_map(|e| e.ok())
+            .unwrap()            .filter_map(|e| e.ok())
             .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
             .collect();
         assert!(
@@ -438,5 +449,25 @@ mod tests {
             remove_link_or_copy(&dst).unwrap();
             assert!(!dst.exists());
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_preserves_target_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = TempDir::new().unwrap();
+        let target = temp.path().join("secret.json");
+        std::fs::write(&target, b"old").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        atomic_write(&target, b"new").unwrap();
+
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "0600 permissions must survive an atomic rewrite"
+        );
     }
 }

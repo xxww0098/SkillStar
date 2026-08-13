@@ -23,6 +23,7 @@ import { useNavigation } from "../../hooks/useNavigation";
 import { UPDATER_MODE, type UpdateStatus } from "../../hooks/useUpdater";
 import { cn, detectPlatform } from "../../lib/utils";
 import type { NavPage } from "../../types";
+import { GitHubAccountMenu } from "@/features/settings";
 import { ModeSwitcher } from "./ModeSwitcher";
 import { SkillsNav } from "./SkillsNav";
 import { ModelsSidebar } from "./ModelsSidebar";
@@ -495,8 +496,9 @@ export function Sidebar({
         )}
       </AnimatePresence>
 
-      {/* ── Bottom: settings + theme + collapse (shared) ── */}
-      <div className={cn("py-2 border-t border-border/40", collapsed ? "px-2" : "px-3")}>
+      {/* ── Bottom: GitHub account, then settings + theme + collapse (shared) ── */}
+      <div className={cn("py-2 border-t border-border/40 space-y-1.5", collapsed ? "px-2" : "px-3")}>
+        <GitHubAccountMenu collapsed={collapsed} />
         <div
           className={cn(
             "flex items-center",

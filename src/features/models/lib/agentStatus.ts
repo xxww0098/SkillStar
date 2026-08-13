@@ -44,10 +44,7 @@ export function computeAgentStatus(input: AgentStatusInput): AgentStatus {
   if (!activation || !boundProvider) return { kind: "inactive" };
   // Official seeds intentionally have empty endpoints; Rust activate_tool
   // skips the URL gate for them — keep the UI status aligned.
-  if (
-    !isNativeOfficialProvider(boundProvider) &&
-    !providerCompatibleWithAgent(agent, boundProvider)
-  ) {
+  if (!isNativeOfficialProvider(boundProvider) && !providerCompatibleWithAgent(agent, boundProvider)) {
     return { kind: "misconfigured", requiredUrlField: agent.requiredUrlField };
   }
   if (probing) return { kind: "unverified" };

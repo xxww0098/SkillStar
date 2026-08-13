@@ -19,6 +19,7 @@ tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
 skillstar-core = { version = "0.1.0", path = "../skillstar-core" }
 ts-rs = { workspace = true, features = ["serde-compat"] }
+sha2.workspace = true
 
 [dev-dependencies]
 tempfile = { workspace = true }

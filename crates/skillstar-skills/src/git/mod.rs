@@ -1,14 +1,10 @@
-//! Reusable Git operations for SkillStar.
+//! Git operations façade.
 //!
-//! Provides clone, fetch, pull, sparse-checkout, tree-hash, and update-check
-//! helpers that are agnostic to the caller's application context.
+//! Transport/tree/ops/history are owned by `skillstar-git` and re-exported
+//! here for callers that already depend on `skillstar-skills`.
+//! [`gh_manager`] stays in this crate because it is coupled to
+//! content and the lockfile.
 
-pub mod dismissed_skills;
+pub use skillstar_git::*;
+
 pub mod gh_manager;
-pub mod ops;
-pub mod repo_history;
-pub mod transport;
-mod tree;
-
-#[cfg(test)]
-mod transport_tests;

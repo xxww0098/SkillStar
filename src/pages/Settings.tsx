@@ -2,9 +2,7 @@ import { motion } from "framer-motion";
 import { useCallback, useEffect, useReducer, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AiProviderSection } from "../features/models/components/settings/AiProviderSection";
-import { S3SyncSection } from "../features/s3/components/S3SyncSection";
 import { DevModeBanner } from "../features/settings/components/DevModeBanner";
-import { GitHubAuthSection } from "../features/settings/github/GitHubAuthSection";
 import { AboutSection } from "../features/settings/sections/AboutSection";
 import { AcpSection } from "../features/settings/sections/AcpSection";
 import { AgentConnectionsSection } from "../features/settings/sections/AgentConnectionsSection";
@@ -17,6 +15,7 @@ import {
 } from "../features/settings/sections/BackgroundRunSection";
 import { GitHubMirrorSection } from "../features/settings/sections/GitHubMirrorSection";
 import { LanguageSection } from "../features/settings/sections/LanguageSection";
+import { MarketplaceMirrorSection } from "../features/settings/sections/MarketplaceMirrorSection";
 import { ProxySection } from "../features/settings/sections/ProxySection";
 import { StorageSection } from "../features/settings/sections/StorageSection";
 import { useAgentProfiles } from "../hooks/useAgentProfiles";
@@ -27,15 +26,17 @@ import { applyBackgroundStyle, type BackgroundStyle, readBackgroundStyle } from 
 import { tauriInvoke } from "../lib/ipc";
 import { toast } from "../lib/toast";
 import type { SettingsFocusTarget } from "../lib/utils";
-import type { AiConfig, GitHubMirrorConfig, ProxyConfig, StorageOverview } from "../types";
+import type { AiConfig, GitHubMirrorConfig, MarketplaceMirrorConfig, ProxyConfig, StorageOverview } from "../types";
 import {
   agentReducer,
   FORCE_DELETE_SLOW_HINT_MS,
   FORCE_DELETE_UI_TIMEOUT_MS,
   type ForceDeleteTarget,
+  initialMarketplaceMirrorConfig,
   initialMirrorConfig,
   initialProxyConfig,
   isSameAiConfig,
+  isSameMarketplaceMirrorConfig,
   isSameMirrorConfig,
   isSameProxyConfig,
 } from "./settings/settingsReducers";
@@ -91,6 +92,25 @@ export function Settings({
       (e: unknown) => {
         if (import.meta.env.DEV) console.error("Failed to save mirror config:", e);
         toast.error(t("settings.saveMirrorFailed"));
+      },
+      [t],
+    ),
+  });
+
+  // Marketplace mirror auto-save
+  const [marketplaceMirrorExpanded, setMarketplaceMirrorExpanded] = useState(false);
+  const marketplaceMirrorAutoSave = useAutoSaveConfig<MarketplaceMirrorConfig>({
+    load: useCallback(() => tauriInvoke("get_marketplace_mirror_config"), []),
+    fallback: initialMarketplaceMirrorConfig,
+    save: useCallback(
+      (config: MarketplaceMirrorConfig) => tauriInvoke("save_marketplace_mirror_config", { config }),
+      [],
+    ),
+    isEqual: isSameMarketplaceMirrorConfig,
+    onSaveError: useCallback(
+      (e: unknown) => {
+        if (import.meta.env.DEV) console.error("Failed to save marketplace mirror config:", e);
+        toast.error(t("settings.saveMarketplaceMirrorFailed"));
       },
       [t],
     ),
@@ -499,10 +519,12 @@ export function Settings({
 
   const handleProxyConfigChange = proxyAutoSave.setConfig;
   const handleMirrorConfigChange = mirrorAutoSave.setConfig;
+  const handleMarketplaceMirrorConfigChange = marketplaceMirrorAutoSave.setConfig;
   const handleAiConfigChange = aiAutoSave.setConfig;
 
   const handleToggleProxyExpanded = useCallback(() => setProxyExpanded((prev) => !prev), []);
   const handleToggleMirrorExpanded = useCallback(() => setMirrorExpanded((prev) => !prev), []);
+  const handleToggleMarketplaceMirrorExpanded = useCallback(() => setMarketplaceMirrorExpanded((prev) => !prev), []);
   const handleToggleAiExpanded = useCallback(() => setAiExpanded((prev) => !prev), []);
 
   const handleForceDeleteHub = useCallback(() => handleForceDelete("hub"), [handleForceDelete]);
@@ -564,10 +586,6 @@ export function Settings({
                 />
               </section>
 
-              <section id="settings-github-account" className="scroll-mt-3">
-                <GitHubAuthSection />
-              </section>
-
               <section id="settings-mirror" className="scroll-mt-3">
                 <GitHubMirrorSection
                   mirrorConfig={mirrorAutoSave.config}
@@ -580,8 +598,16 @@ export function Settings({
                 />
               </section>
 
-              <section id="settings-s3" className="scroll-mt-3">
-                <S3SyncSection />
+              <section id="settings-marketplace-mirror" className="scroll-mt-3">
+                <MarketplaceMirrorSection
+                  mirrorConfig={marketplaceMirrorAutoSave.config}
+                  ready={marketplaceMirrorAutoSave.loaded}
+                  mirrorExpanded={marketplaceMirrorExpanded}
+                  mirrorSaving={marketplaceMirrorAutoSave.saving}
+                  mirrorSaved={marketplaceMirrorAutoSave.showSaved}
+                  onToggleExpanded={handleToggleMarketplaceMirrorExpanded}
+                  onConfigChange={handleMarketplaceMirrorConfigChange}
+                />
               </section>
 
               <section id="settings-ai" className="scroll-mt-3">

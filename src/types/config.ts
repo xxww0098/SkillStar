@@ -26,6 +26,12 @@ export interface GitHubMirrorConfig {
   custom_url: string | null;
 }
 
+/** Marketplace mirror/accelerator hosts (appended after skills.sh). */
+export interface MarketplaceMirrorConfig {
+  enabled: boolean;
+  hosts: string[];
+}
+
 export interface StorageOverview {
   data_root_path: string;
   hub_root_path: string;

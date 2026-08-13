@@ -12,8 +12,6 @@
 //! `capabilities/usage-card.json` capability grants them the same core +
 //! usage permissions the main window has.
 
-use std::collections::HashSet;
-
 use skillstar_core::infra::error::AppError;
 use tauri::{
     AppHandle, Emitter, LogicalPosition, Manager, Position, Runtime, WebviewUrl, WebviewWindow,
@@ -271,16 +269,6 @@ fn urlencoding_minimal(value: &str) -> String {
         }
     }
     out
-}
-
-/// All usage-card window labels currently open (used by tests / diagnostics).
-#[allow(dead_code)]
-fn card_window_labels<R: Runtime>(app: &AppHandle<R>) -> HashSet<String> {
-    app.webview_windows()
-        .keys()
-        .filter(|l| l.starts_with(USAGE_CARD_LABEL_PREFIX))
-        .cloned()
-        .collect()
 }
 
 #[cfg(test)]

@@ -130,6 +130,9 @@ export function formatInstalls(count: number): string {
 
 export type SettingsFocusTarget = "ai-provider" | "acp" | "storage";
 
+/** Event that opens the sidebar's GitHub account panel. */
+export const GITHUB_ACCOUNT_MENU_EVENT = "skillstar:open-github-account";
+
 /** Navigate to Settings and request focus on a specific section. */
 export function navigateToSettingsSection(target: SettingsFocusTarget) {
   try {
@@ -149,6 +152,11 @@ export function navigateToAiSettings() {
 /** Navigate to the ACP agent section used by Skill tutorial generation. */
 export function navigateToAcpSettings() {
   navigateToSettingsSection("acp");
+}
+
+/** Open the sidebar GitHub account panel used by shared-channel sign-in. */
+export function openGithubAccountMenu() {
+  window.dispatchEvent(new CustomEvent(GITHUB_ACCOUNT_MENU_EVENT));
 }
 
 type Translator = (key: string, options?: Record<string, unknown>) => string;

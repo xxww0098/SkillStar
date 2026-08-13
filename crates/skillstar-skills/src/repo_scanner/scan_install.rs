@@ -16,37 +16,37 @@ struct PreparedRepoInstall {
     lock_entry: crate::lockfile::LockEntry,
 }
 
-pub(crate) fn install_from_repo_in_session(
+pub fn install_from_repo_in_session(
     source: &str,
     repo_url: &str,
     targets: &[SkillInstallTarget],
     session: &crate::git::transport::GitOperationSession,
 ) -> Result<Vec<String>> {
     ensure_generic_targets_mutable(targets)?;
-    crate::shared_channels::ensure_generic_repository_mutation_allowed(repo_url)?;
+    crate::skill_mutation::policy().ensure_repository_mutation_allowed(repo_url)?;
     let repo_dir = super::clone_or_fetch_repo_in_session(repo_url, source, session)?;
     install_from_repo_at_with_source_migrations(&repo_dir, repo_url, None, targets, &[])
 }
 
-pub(crate) fn install_from_repo_at(
+pub fn install_from_repo_at(
     repo_dir: &Path,
     repo_url: &str,
     git_ref: Option<&str>,
     targets: &[SkillInstallTarget],
 ) -> Result<Vec<String>> {
     ensure_generic_targets_mutable(targets)?;
-    crate::shared_channels::ensure_generic_repository_mutation_allowed(repo_url)?;
+    crate::skill_mutation::policy().ensure_repository_mutation_allowed(repo_url)?;
     install_from_repo_at_with_source_migrations(repo_dir, repo_url, git_ref, targets, &[])
 }
 
 fn ensure_generic_targets_mutable(targets: &[SkillInstallTarget]) -> Result<()> {
     for target in targets {
-        crate::shared_channels::ensure_generic_skill_mutation_allowed(&target.id)?;
+        crate::skill_mutation::policy().ensure_skill_mutation_allowed(&target.id)?;
     }
     Ok(())
 }
 
-pub(crate) fn install_from_repo_at_with_source_migrations(
+pub fn install_from_repo_at_with_source_migrations(
     repo_dir: &Path,
     repo_url: &str,
     git_ref: Option<&str>,
@@ -71,6 +71,7 @@ pub(crate) fn install_from_repo_at_with_source_migrations(
     let mut lf = lockfile::Lockfile::load(&lock_path)?;
 
     let mut prepared = Vec::new();
+    let mut frontmatter_errors: Vec<String> = Vec::new();
     for (index, target) in targets.iter().enumerate() {
         content::validate_skill_name(&target.id)
             .with_context(|| format!("Invalid Skill id '{}'", target.id))?;
@@ -99,6 +100,14 @@ pub(crate) fn install_from_repo_at_with_source_migrations(
                 repo_root.display(),
                 source_path.display()
             );
+        }
+
+        // Frontmatter quality gate: a skill without a usable `description` is
+        // not installable per the open Agent Skills spec. Collect every
+        // failure so the caller fixes all of them in one pass.
+        if let Err(reason) = crate::validation::ensure_installable(&source_path) {
+            frontmatter_errors.push(format!("'{}': {reason}", target.id));
+            continue;
         }
         let content_hash = content::snapshot_path(&target.id, &source_path)
             .with_context(|| format!("Failed to capture content baseline for '{}'", target.id))?
@@ -156,6 +165,15 @@ pub(crate) fn install_from_repo_at_with_source_migrations(
                 source_folder,
             },
         });
+    }
+
+    // Fail closed before any disk mutation: every requested skill that
+    // produced a frontmatter error is reported, nothing is installed.
+    if !frontmatter_errors.is_empty() {
+        return Err(anyhow!(
+            "Refusing to install invalid skill(s):\n{}",
+            frontmatter_errors.join("\n")
+        ));
     }
 
     for item in &prepared {
@@ -246,4 +264,125 @@ fn can_replace_existing_skill(
                     && source_resolver::same_remote_url(&entry.git_url, source)
             })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsString;
+
+    struct Sandbox {
+        previous: Vec<(&'static str, Option<OsString>)>,
+        _temp: tempfile::TempDir,
+        // Serializes env mutation against other env-mutating tests.
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl Sandbox {
+        fn new() -> Self {
+            let _guard = crate::lock_test_env();
+            let temp = tempfile::tempdir().unwrap();
+            let overrides = [
+                ("SKILLSTAR_HUB_DIR", temp.path().join("hub")),
+                ("SKILLSTAR_DATA_DIR", temp.path().join("data")),
+                ("SKILLSTAR_TOOL_SYNC_HOME", temp.path().join("tool-home")),
+                ("HOME", temp.path().join("home")),
+                ("USERPROFILE", temp.path().join("home")),
+            ];
+            let previous = overrides
+                .iter()
+                .map(|(key, _)| (*key, std::env::var_os(key)))
+                .collect();
+            unsafe {
+                for (key, value) in overrides {
+                    std::env::set_var(key, value);
+                }
+            }
+            Self {
+                previous,
+                _temp: temp,
+                _guard,
+            }
+        }
+    }
+
+    impl Drop for Sandbox {
+        fn drop(&mut self) {
+            unsafe {
+                for (key, previous) in self.previous.drain(..).rev() {
+                    match previous {
+                        Some(value) => std::env::set_var(key, value),
+                        None => std::env::remove_var(key),
+                    }
+                }
+            }
+        }
+    }
+
+    fn target(id: &str) -> SkillInstallTarget {
+        SkillInstallTarget {
+            id: id.to_string(),
+            folder_path: format!("skills/{id}"),
+        }
+    }
+
+    #[test]
+    fn install_fails_closed_when_any_skill_has_blocking_frontmatter_issues() {
+        let _sandbox = Sandbox::new();
+        let repo = tempfile::tempdir().unwrap();
+
+        let valid = repo.path().join("skills/valid");
+        std::fs::create_dir_all(&valid).unwrap();
+        std::fs::write(
+            valid.join("SKILL.md"),
+            "---\nname: valid\ndescription: A valid skill\n---\n\n# Valid\n",
+        )
+        .unwrap();
+
+        let bare = repo.path().join("skills/bare");
+        std::fs::create_dir_all(&bare).unwrap();
+        std::fs::write(bare.join("SKILL.md"), "# No frontmatter\n").unwrap();
+
+        let error = install_from_repo_at(
+            repo.path(),
+            "https://github.com/example/repo",
+            None,
+            &[target("valid"), target("bare")],
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("bare"), "{error}");
+        assert!(error.contains("description"), "{error}");
+        // Fail-closed: the valid skill must not be installed either.
+        let hub = skillstar_core::infra::paths::hub_skills_dir();
+        assert!(!hub.join("valid").symlink_metadata().is_ok(), "{error}");
+        assert!(!hub.join("bare").symlink_metadata().is_ok());
+    }
+
+    #[test]
+    fn install_succeeds_when_all_skills_are_valid() {
+        let _sandbox = Sandbox::new();
+        let repo = tempfile::tempdir().unwrap();
+
+        let valid = repo.path().join("skills/valid");
+        std::fs::create_dir_all(&valid).unwrap();
+        std::fs::write(
+            valid.join("SKILL.md"),
+            "---\nname: valid\ndescription: A valid skill\n---\n\n# Valid\n",
+        )
+        .unwrap();
+
+        let installed = install_from_repo_at(
+            repo.path(),
+            "https://github.com/example/repo",
+            None,
+            &[target("valid")],
+        )
+        .expect("valid skill installs");
+
+        assert_eq!(installed, vec!["valid".to_string()]);
+        let hub = skillstar_core::infra::paths::hub_skills_dir();
+        assert!(hub.join("valid").symlink_metadata().is_ok());
+    }
 }

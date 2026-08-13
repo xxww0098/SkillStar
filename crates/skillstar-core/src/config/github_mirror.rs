@@ -88,32 +88,95 @@ pub fn save_config(config: &GitHubMirrorConfig) -> Result<()> {
     Ok(())
 }
 
-pub fn effective_mirror_url() -> Option<String> {
-    let config = load_config().ok()?;
-    if !config.enabled {
+/// Normalize a mirror URL to a trailing-slash https/http URL, or `None` if
+/// the URL is unusable (empty, non-http scheme).
+fn normalize_mirror_url(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
         return None;
     }
-
-    let url = if let Some(preset_id) = &config.preset_id {
-        builtin_presets()
-            .iter()
-            .find(|preset| &preset.id == preset_id)
-            .map(|preset| preset.url.clone())
+    let with_slash = if trimmed.ends_with('/') {
+        trimmed.to_string()
     } else {
-        config.custom_url.clone()
+        format!("{trimmed}/")
     };
-
-    url.map(|u| if u.ends_with('/') { u } else { format!("{u}/") })
-        .filter(|u| u.starts_with("https://") || u.starts_with("http://"))
+    (with_slash.starts_with("https://") || with_slash.starts_with("http://"))
+        .then_some(with_slash)
 }
 
+/// Preferred mirror URL (first candidate), for compatibility with callers
+/// that need a single value (e.g. the settings UI).
+pub fn effective_mirror_url() -> Option<String> {
+    candidate_mirror_urls().into_iter().next()
+}
+
+/// Ordered mirror candidates, most preferred first.
+///
+/// Anti-censorship design: a single mirror is a single point of failure — if
+/// the chosen mirror is unreachable or rate-limited there is no fallback.
+/// The candidates are:
+///   1. the explicitly configured custom URL (if any),
+///   2. the explicitly selected preset (if any),
+///   3. every other builtin preset, in declaration order,
+///
+/// deduplicated and normalized.
+///
+/// Callers that spawn git subprocesses should try each candidate in order and
+/// fall back to a direct GitHub connection only after every candidate fails.
+pub fn candidate_mirror_urls() -> Vec<String> {
+    let Ok(config) = load_config() else {
+        return Vec::new();
+    };
+    if !config.enabled {
+        return Vec::new();
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    let mut candidates: Vec<String> = Vec::new();
+
+    let mut push = |url: String| {
+        if let Some(normalized) = normalize_mirror_url(&url)
+            && seen.insert(normalized.clone())
+        {
+            candidates.push(normalized);
+        }
+    };
+
+    if let Some(custom) = config.custom_url.clone() {
+        push(custom);
+    }
+    if let Some(preset_id) = &config.preset_id {
+        for preset in builtin_presets() {
+            if &preset.id == preset_id {
+                push(preset.url.clone());
+            }
+        }
+    }
+    for preset in builtin_presets() {
+        push(preset.url.clone());
+    }
+
+    candidates
+}
+
+/// Apply the `insteadOf` rewrite for a single mirror URL to a git command.
+/// `url.<mirror>https://github.com/.insteadOf=https://github.com/`
+pub fn apply_mirror_args_for(cmd: &mut Command, mirror_url: &str) {
+    let Some(normalized) = normalize_mirror_url(mirror_url) else {
+        return;
+    };
+    let key = format!(
+        "url.{}https://github.com/.insteadOf=https://github.com/",
+        normalized
+    );
+    cmd.arg("-c").arg(key);
+}
+
+/// Apply the preferred mirror's `insteadOf` rewrite to a git command.
+/// Prefer [`apply_mirror_args_for`] when trying candidates in a chain.
 pub fn apply_mirror_args(cmd: &mut Command) {
     if let Some(mirror) = effective_mirror_url() {
-        let key = format!(
-            "url.{}https://github.com/.insteadOf=https://github.com/",
-            mirror
-        );
-        cmd.arg("-c").arg(key);
+        apply_mirror_args_for(cmd, &mirror);
     }
 }
 

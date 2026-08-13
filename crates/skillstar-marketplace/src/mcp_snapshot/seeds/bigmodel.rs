@@ -37,6 +37,9 @@ pub(super) fn bigmodel_curated_servers() -> Vec<McpRegistryServer> {
                     identifier: "@z_ai/mcp-server".to_string(),
                     version: None,
                     required_env: vec!["Z_AI_API_KEY".to_string()],
+                    registry_type: Some("npm".to_string()),
+                    runtime_hint: Some("npx".to_string()),
+                    ..Default::default()
                 }]
             } else {
                 Vec::new()
@@ -46,6 +49,8 @@ pub(super) fn bigmodel_curated_servers() -> Vec<McpRegistryServer> {
                     transport: "http".to_string(),
                     url: bigmodel_remote_url(id),
                     required_headers: vec!["Authorization".to_string()],
+                    transport_type: Some("streamable-http".to_string()),
+                    ..Default::default()
                 }]
             } else {
                 Vec::new()
@@ -53,6 +58,7 @@ pub(super) fn bigmodel_curated_servers() -> Vec<McpRegistryServer> {
             raw_server_json: raw.to_string(),
             recommended: false,
             source: Some(bigmodel_source.clone()),
+            ..Default::default()
         }
     };
 

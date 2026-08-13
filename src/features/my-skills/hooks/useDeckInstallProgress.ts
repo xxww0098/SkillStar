@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { tauriInvoke } from "../../../lib/ipc";
 import type { Skill, SkillCardDeck } from "../../../types";
+import { deckInstallFailureDetails, installErrorMessage, type DeckInstallFailure } from "../lib/deckInstallFailures";
 import { normalizeSkillSources, uniqueNormalizedSkillNames } from "../lib/skillNames";
 
 // ── Module-level install progress store ─────────────────────────────
@@ -49,7 +50,7 @@ export interface DeckInstallProgress {
   installProgress: { done: number; total: number } | null;
   /** Union of backend-installed names and the hub skills snapshot. */
   installedNameSet: Set<string>;
-  /** Install every missing skill in a deck (concurrent, source-resolving). */
+  /** Process every missing Skill in a deck (concurrent, source-resolving). */
   handleInstallMissing: (group: SkillCardDeck) => Promise<void>;
 }
 
@@ -164,8 +165,9 @@ export function useDeckInstallProgress({
 
     if (installQueue.length === 0) {
       toast.error(
-        t("skillCards.installNoSource", {
-          defaultValue: "No install source found for missing skills",
+        t("skillCards.installAllFailedDetailed", {
+          names: noSourceNames.join(", "),
+          defaultValue: `Failed to install: ${noSourceNames.join(", ")}`,
         }),
       );
       return;
@@ -175,15 +177,21 @@ export function useDeckInstallProgress({
     const sourcesChanged = namesNeedingSource.some((name) => !!nextSources[name]);
 
     // Register in module-level store.
-    const progressEntry: InstallProgressEntry = { done: 0, total: installQueue.length };
+    const progressEntry: InstallProgressEntry = { done: noSourceNames.length, total: missing.length };
     activeInstalls.set(group.id, progressEntry);
     setInstallingMissing(group.id);
-    setInstallProgress({ done: 0, total: installQueue.length });
+    setInstallProgress({ done: progressEntry.done, total: progressEntry.total });
     installOwnerRef.current = true;
     notifyInstallListeners();
 
     let successCount = 0;
-    const failedNames: string[] = [];
+    const failures: DeckInstallFailure[] = noSourceNames.map((name) => ({
+      name,
+      error: t("skillCards.installNoSourceForSkill", {
+        name,
+        defaultValue: `No install source found for ${name}`,
+      }),
+    }));
 
     // Concurrent install with bounded parallelism (3 at a time).
     const CONCURRENCY = 3;
@@ -197,9 +205,9 @@ export function useDeckInstallProgress({
           successCount++;
         } catch (e) {
           if (import.meta.env.DEV) console.error(`Failed to install ${item.name}:`, e);
-          failedNames.push(item.name);
+          failures.push({ name: item.name, error: installErrorMessage(e) });
         }
-        // Update progress.
+        // Progress counts processed items, regardless of outcome.
         progressEntry.done++;
         activeInstalls.set(group.id, { ...progressEntry });
         // Only update local state if this mount owns the install.
@@ -217,27 +225,27 @@ export function useDeckInstallProgress({
         await updateGroup(group.id, { skillSources: nextSources });
       }
       // Summary toast.
-      if (successCount > 0 && failedNames.length === 0 && noSourceNames.length === 0) {
+      if (successCount > 0 && failures.length === 0) {
         toast.success(
           t("skillCards.installAllSuccess", {
             count: successCount,
             defaultValue: `Successfully installed ${successCount} skill(s)`,
           }),
         );
-      } else if (successCount > 0) {
-        toast.warning(
-          t("skillCards.installPartial", {
-            success: successCount,
-            failed: failedNames.length + noSourceNames.length,
-            defaultValue: `Installed ${successCount}, failed ${failedNames.length + noSourceNames.length}`,
-          }),
-        );
       } else {
-        toast.error(
-          t("skillCards.installAllFailed", {
-            defaultValue: "Failed to install skills",
-          }),
-        );
+        const { names, reason } = deckInstallFailureDetails(failures);
+        const messageKey =
+          successCount > 0 ? "skillCards.installPartialDetailed" : "skillCards.installAllFailedDetailed";
+        const message = t(messageKey, {
+          success: successCount,
+          failed: failures.length,
+          names,
+          defaultValue:
+            successCount > 0 ? `Installed ${successCount}; failed: ${names}` : `Failed to install: ${names}`,
+        });
+        const detailedMessage = reason ? `${message}: ${reason}` : message;
+        if (successCount > 0) toast.warning(detailedMessage);
+        else toast.error(detailedMessage);
       }
     } finally {
       activeInstalls.delete(group.id);

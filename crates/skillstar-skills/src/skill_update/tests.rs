@@ -568,7 +568,7 @@ fn missing_representative_lock_still_protects_locked_checkout_siblings() {
         report
             .blocked
             .iter()
-            .map(|blocked| (blocked.name.clone(), blocked.reason.clone()))
+            .map(|blocked| (blocked.name.clone(), blocked.reason))
             .collect::<Vec<_>>(),
         vec![
             ("alpha".to_string(), LocalDivergenceReason::BaselineMissing),
@@ -589,3 +589,6 @@ fn missing_representative_lock_still_protects_locked_checkout_siblings() {
 
 #[path = "tests/advanced.rs"]
 mod advanced;
+
+#[path = "tests/source_dropped.rs"]
+mod source_dropped;

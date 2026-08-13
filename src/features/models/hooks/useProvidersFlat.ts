@@ -13,7 +13,8 @@ export { getProviderToolBadges } from "../api/activations";
 export function useProvidersFlat() {
   const { data, isLoading, error, refetch } = useProvidersQuery();
   const { createProvider, updateProvider, deleteProvider, reorderProviders } = useProviderMutations();
-  const { activateTool, deactivateTool, updateToolSettings } = useActivationMutations();
+  const { activateTool, deactivateTool, updateToolSettings, updateToolBindingSettings, removeBindingEntry } =
+    useActivationMutations();
 
   const providers = useMemo(() => {
     if (!data) return [];
@@ -36,6 +37,8 @@ export function useProvidersFlat() {
     activateTool,
     deactivateTool,
     updateToolSettings,
+    updateToolBindingSettings,
+    removeBindingEntry,
     refresh: refetch,
   };
 }

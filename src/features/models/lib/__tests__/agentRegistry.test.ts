@@ -10,7 +10,7 @@ import { CONFIG_FILE_TOOLS, PROVIDER_AGENTS } from "../agentRegistry";
  * removes or reorders an agent without the other, exactly one of the two
  * tests goes red.
  */
-const CANONICAL_TOOL_IDS = ["claude-code", "claude-desktop", "codex", "opencode", "pi"] as const;
+const CANONICAL_TOOL_IDS = ["claude-code", "claude-desktop", "codex", "opencode", "pi", "omp"] as const;
 
 describe("agentRegistry", () => {
   it("covers exactly the canonical agents, in canonical order", () => {
@@ -30,6 +30,7 @@ describe("agentRegistry", () => {
       codex: "multi",
       opencode: "multi",
       pi: "multi",
+      omp: "multi",
     });
   });
 

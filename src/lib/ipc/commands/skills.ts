@@ -87,6 +87,7 @@ export interface SkillCommands {
       icon?: string;
       skills?: string[];
       skillSources?: Record<string, string>;
+      agentLinks?: string[];
     };
     result: SkillCardDeck;
   };

@@ -1,5 +1,6 @@
 import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, ShieldAlert } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { Switch } from "../../../components/ui/switch";
 import type {
@@ -33,6 +34,7 @@ export function ChannelUpdatePanel({
   repositoryId: number;
   onChecked?: () => Promise<void> | void;
 }) {
+  const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<ChannelUpdateSnapshot | null>(null);
   const [checking, setChecking] = useState(true);
   const [applying, setApplying] = useState(false);
@@ -306,9 +308,9 @@ export function ChannelUpdatePanel({
 
   if (checking && !snapshot) {
     return (
-      <section className="rounded-xl border border-border p-4" aria-label="Channel updates">
+      <section className="rounded-xl border border-border p-4" aria-label={t("sharedChannels.updatesAria")}>
         <p className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" /> Checking the latest channel release…
+          <Loader2 className="size-4 animate-spin" /> {t("sharedChannels.checkingRelease")}
         </p>
       </section>
     );
@@ -316,17 +318,17 @@ export function ChannelUpdatePanel({
 
   if (!snapshot) {
     return (
-      <section className="space-y-3 rounded-xl border border-border p-4" aria-label="Channel updates">
-        <p className="text-sm font-medium">Channel update check unavailable</p>
+      <section className="space-y-3 rounded-xl border border-border p-4" aria-label={t("sharedChannels.updatesAria")}>
+        <p className="text-sm font-medium">{t("sharedChannels.updateUnavailable")}</p>
         <p className="mt-1 text-xs text-destructive">{error}</p>
         {autoUpdate?.last_run && (
           <div className="rounded-lg border border-border bg-muted/20 p-3">
-            <p className="text-xs font-medium">Most recent background check</p>
+            <p className="text-xs font-medium">{t("sharedChannels.lastBackgroundCheck")}</p>
             <AutoUpdateResult state={autoUpdate} />
           </div>
         )}
         <Button size="sm" variant="outline" className="mt-3" onClick={() => void check()}>
-          Retry check
+          {t("sharedChannels.retryCheck")}
         </Button>
       </section>
     );
@@ -338,47 +340,51 @@ export function ChannelUpdatePanel({
   }, {});
 
   return (
-    <section className="space-y-4 rounded-xl border border-border p-4" aria-label="Channel updates">
+    <section className="space-y-4 rounded-xl border border-border p-4" aria-label={t("sharedChannels.updatesAria")}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold">Channel update · revision {snapshot.target.revision}</p>
+          <p className="text-sm font-semibold">
+            {t("sharedChannels.updateRevisionTitle", { revision: snapshot.target.revision })}
+          </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            {snapshot.title} · published by @{snapshot.publisher.login} ·{" "}
+            {t("sharedChannels.publishedByLine", {
+              title: snapshot.title,
+              login: snapshot.publisher.login,
+            })}{" "}
             <time dateTime={snapshot.published_at}>{formatPublishedAt(snapshot.published_at)}</time>
           </p>
         </div>
         <span className={statusClass(snapshot.status)}>{statusLabel(snapshot.status)}</span>
       </div>
 
-      <p className="whitespace-pre-wrap text-xs text-muted-foreground">{snapshot.notes || "No release notes."}</p>
+      <p className="whitespace-pre-wrap text-xs text-muted-foreground">
+        {snapshot.notes || t("sharedChannels.noReleaseNotes")}
+      </p>
       <div className="flex flex-wrap gap-2 text-[10px] text-muted-foreground">
-        <span>{counts.added ?? 0} added</span>
-        <span>{counts.updated ?? 0} updated</span>
-        <span>{counts.removed ?? 0} removed</span>
-        <span>{counts.unchanged ?? 0} unchanged</span>
+        <span>{t("sharedChannels.countsAdded", { count: counts.added ?? 0 })}</span>
+        <span>{t("sharedChannels.countsUpdated", { count: counts.updated ?? 0 })}</span>
+        <span>{t("sharedChannels.countsRemoved", { count: counts.removed ?? 0 })}</span>
+        <span>{t("sharedChannels.countsUnchanged", { count: counts.unchanged ?? 0 })}</span>
         <span>
-          Last checked: <time dateTime={snapshot.checked_at}>{formatPublishedAt(snapshot.checked_at)}</time>
+          {t("sharedChannels.lastChecked")}{" "}
+          <time dateTime={snapshot.checked_at}>{formatPublishedAt(snapshot.checked_at)}</time>
         </span>
       </div>
 
       {snapshot.check_error && (
         <p className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-2 text-xs text-amber-700">
-          Showing the last verified result because this check failed: {snapshot.check_error}
+          {t("sharedChannels.staleResultHint", { error: snapshot.check_error })}
         </p>
       )}
 
       <div className="rounded-lg border border-border bg-muted/20 p-3">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-medium">Protected automatic upgrades</p>
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              Automatic application is off by default; background checks still run hourly. When enabled, SkillStar
-              updates only unchanged subscribed Skills. New, removed, pinned, locally modified, permission-blocked,
-              integrity-failed, or otherwise failed items stay paused for review.
-            </p>
+            <p className="text-xs font-medium">{t("sharedChannels.protectedAutoUpgrades")}</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">{t("sharedChannels.autoUpgradeHint")}</p>
           </div>
           <Switch
-            aria-label="Protected automatic upgrades"
+            aria-label={t("sharedChannels.autoUpgradeAria")}
             checked={autoUpdate?.enabled ?? false}
             disabled={!autoUpdate || autoSaving || applying}
             onCheckedChange={(enabled) => void toggleAutoUpdate(enabled)}
@@ -392,7 +398,7 @@ export function ChannelUpdatePanel({
           ["available", "notification", "blocked", "failed", "removed_from_channel"].includes(item.state),
         ) && (
           <p className="rounded-lg border border-border bg-muted/40 p-2 text-xs text-muted-foreground">
-            This release has no Skill content changes. Acknowledge it to advance the subscribed revision.
+            {t("sharedChannels.acknowledgeHint")}
           </p>
         )}
 
@@ -434,7 +440,7 @@ export function ChannelUpdatePanel({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Button size="sm" variant="outline" onClick={() => void check()} disabled={checking || applying}>
           {checking ? <Loader2 className="mr-1.5 size-4 animate-spin" /> : <RefreshCw className="mr-1.5 size-4" />}
-          Check again
+          {t("sharedChannels.checkAgain")}
         </Button>
         <Button size="sm" onClick={() => void apply()} disabled={!actionable || applying || checking}>
           {applying && <Loader2 className="mr-1.5 size-4 animate-spin" />}
@@ -442,8 +448,8 @@ export function ChannelUpdatePanel({
           !snapshot.items.some((item) =>
             ["available", "notification", "blocked", "failed", "removed_from_channel"].includes(item.state),
           )
-            ? "Acknowledge release"
-            : "Apply safe updates"}
+            ? t("sharedChannels.acknowledgeRelease")
+            : t("sharedChannels.applySafeUpdates")}
         </Button>
       </div>
     </section>
@@ -451,48 +457,56 @@ export function ChannelUpdatePanel({
 }
 
 function AutoUpdateResult({ state }: { state: ChannelAutoUpdateState }) {
+  const { t } = useTranslation();
   const run = state.last_run;
   if (!run) return null;
   const timestamp = run.completed_at ?? run.started_at;
   return (
     <div className="mt-3 space-y-2 border-t border-border/70 pt-3 text-[11px] text-muted-foreground">
       <p>
-        Last automatic run: <span className="font-medium text-foreground">{run.status.replaceAll("_", " ")}</span> ·{" "}
+        {t("sharedChannels.lastAutoRun")}{" "}
+        <span className="font-medium text-foreground">{run.status.replaceAll("_", " ")}</span> ·{" "}
         <time dateTime={timestamp}>{formatPublishedAt(timestamp)}</time>
       </p>
-      {run.applied_skill_ids.length > 0 && <p>Applied: {run.applied_skill_ids.join(", ")}</p>}
+      {run.applied_skill_ids.length > 0 && (
+        <p>{t("sharedChannels.applied", { ids: run.applied_skill_ids.join(", ") })}</p>
+      )}
       {run.pauses.length > 0 && (
-        <ul className="space-y-1" aria-label="Automatic upgrade pauses">
+        <ul className="space-y-1" aria-label={t("sharedChannels.pauseAria")}>
           {run.pauses.map((pause, index) => (
             <li key={`${pause.skill_id ?? "channel"}-${pause.reason}-${index}`}>
-              {pause.skill_id ?? "Channel"}: {autoPauseLabel(pause.reason)}
+              {pause.skill_id ?? t("sharedChannels.channelLabel")}: {autoPauseLabel(pause.reason, t)}
               {pause.detail ? ` — ${pause.detail}` : ""}
             </li>
           ))}
         </ul>
       )}
       {run.error && <p className="text-amber-700">{run.error}</p>}
-      {run.retryable && <p>Temporary failure; SkillStar will retry automatically.</p>}
+      {run.retryable && <p>{t("sharedChannels.temporaryFailure")}</p>}
       {state.enabled && state.next_check_at && (
         <p>
-          Next check: <time dateTime={state.next_check_at}>{formatPublishedAt(state.next_check_at)}</time>
+          {t("sharedChannels.nextCheck")}{" "}
+          <time dateTime={state.next_check_at}>{formatPublishedAt(state.next_check_at)}</time>
         </p>
       )}
     </div>
   );
 }
 
-function autoPauseLabel(reason: ChannelAutoUpdatePauseReason): string {
+function autoPauseLabel(
+  reason: ChannelAutoUpdatePauseReason,
+  t: (key: string, options?: Record<string, unknown>) => string,
+): string {
   const labels: Record<ChannelAutoUpdatePauseReason, string> = {
-    pinned: "pinned to a historical release",
-    local_content_changed: "local content changed",
-    baseline_missing: "trusted baseline missing",
-    snapshot_failed: "local snapshot failed",
-    permission_changed: "channel permission changed",
-    removed_upstream: "removed from the channel",
-    integrity_error: "release integrity check failed",
-    unresolved_failure: "previous failure needs manual retry",
-    new_skill_requires_review: "new Skill requires review",
+    pinned: t("sharedChannels.pausePinned"),
+    local_content_changed: t("sharedChannels.pauseLocalChanged"),
+    baseline_missing: t("sharedChannels.pauseBaselineMissing"),
+    snapshot_failed: t("sharedChannels.pauseSnapshotFailed"),
+    permission_changed: t("sharedChannels.pausePermissionChanged"),
+    removed_upstream: t("sharedChannels.pauseRemovedUpstream"),
+    integrity_error: t("sharedChannels.pauseIntegrityError"),
+    unresolved_failure: t("sharedChannels.pauseUnresolvedFailure"),
+    new_skill_requires_review: t("sharedChannels.pauseNewSkillReview"),
   };
   return labels[reason];
 }
@@ -534,6 +548,7 @@ function UpdateItem({
   onUninstallRemoved: () => void;
   onInstallAdded: () => void;
 }) {
+  const { t } = useTranslation();
   const locallyBlocked = !item.pinned_target && item.state === "blocked" && item.block_reason !== "removed_upstream";
   const removedFromChannel =
     item.state === "removed_from_channel" ||
@@ -556,33 +571,35 @@ function UpdateItem({
 
       {item.change === "added" && (
         <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-          <p className="text-[11px] text-muted-foreground">New in this release; it was not selected or installed.</p>
+          <p className="text-[11px] text-muted-foreground">{t("sharedChannels.newInRelease")}</p>
           {item.state === "notification" && (
             <Button
               size="sm"
               variant="outline"
               disabled={disabled || skillAction}
-              aria-label={`Install and track ${item.id}`}
+              aria-label={t("sharedChannels.installAndTrackAria", { skillId: item.id })}
               onClick={onInstallAdded}
             >
               {skillAction && <Loader2 className="mr-1.5 size-3.5 animate-spin" />}
-              Install & track
+              {t("sharedChannels.installAndTrack")}
             </Button>
           )}
         </div>
       )}
       {item.pinned_target ? (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/25 bg-amber-500/5 p-2">
-          <p className="text-[11px] text-amber-700">Pinned to revision {item.pinned_target.revision}</p>
+          <p className="text-[11px] text-amber-700">
+            {t("sharedChannels.pinnedToRevision", { revision: item.pinned_target.revision })}
+          </p>
           <Button
             size="sm"
             variant="outline"
             disabled={disabled || skillAction}
-            aria-label={`Resume following ${item.id}`}
+            aria-label={t("sharedChannels.resumeFollowingAria", { skillId: item.id })}
             onClick={onResume}
           >
             {skillAction && <Loader2 className="mr-1.5 size-3.5 animate-spin" />}
-            Resume following
+            {t("sharedChannels.resumeFollowing")}
           </Button>
         </div>
       ) : item.selected && item.change !== "added" ? (
@@ -592,18 +609,18 @@ function UpdateItem({
               size="sm"
               variant="ghost"
               disabled={disabled || historyLoading || skillAction}
-              aria-label={`View history for ${item.id}`}
+              aria-label={t("sharedChannels.viewHistoryAria", { skillId: item.id })}
               onClick={onLoadHistory}
             >
               {historyLoading && <Loader2 className="mr-1.5 size-3.5 animate-spin" />}
-              View release history
+              {t("sharedChannels.viewHistory")}
             </Button>
           ) : history.length === 0 ? (
-            <p className="text-[11px] text-muted-foreground">No earlier verified release contains this Skill.</p>
+            <p className="text-[11px] text-muted-foreground">{t("sharedChannels.noEarlierRelease")}</p>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
               <select
-                aria-label={`Historical release for ${item.id}`}
+                aria-label={t("sharedChannels.historicalReleaseAria", { skillId: item.id })}
                 value={historySelection ?? history[0].target.revision}
                 disabled={disabled || skillAction}
                 onChange={(event) => onHistorySelection(Number(event.target.value))}
@@ -611,7 +628,10 @@ function UpdateItem({
               >
                 {history.map((target) => (
                   <option key={target.target.revision} value={target.target.revision}>
-                    Revision {target.target.revision} · {target.title}
+                    {t("sharedChannels.revisionOption", {
+                      revision: target.target.revision,
+                      title: target.title,
+                    })}
                   </option>
                 ))}
               </select>
@@ -619,11 +639,11 @@ function UpdateItem({
                 size="sm"
                 variant="outline"
                 disabled={disabled || skillAction}
-                aria-label={`Roll back ${item.id}`}
+                aria-label={t("sharedChannels.rollbackAria", { skillId: item.id })}
                 onClick={onRollback}
               >
                 {skillAction && <Loader2 className="mr-1.5 size-3.5 animate-spin" />}
-                Roll back & pin
+                {t("sharedChannels.rollbackAndPin")}
               </Button>
             </div>
           )}
@@ -632,11 +652,10 @@ function UpdateItem({
       {removedFromChannel && (
         <div className="mt-3 space-y-2 rounded-md border border-amber-500/25 bg-amber-500/5 p-2">
           <p className="flex items-center gap-1.5 text-[11px] text-amber-700">
-            <ShieldAlert className="size-3.5" /> This Skill is no longer in the channel. Its installed copy is unchanged
-            until you convert it to local or uninstall it.
+            <ShieldAlert className="size-3.5" /> {t("sharedChannels.removedFromChannelHint")}
           </p>
           <input
-            aria-label={`Local copy name for ${item.id}`}
+            aria-label={t("sharedChannels.localCopyNameAria", { skillId: item.id })}
             value={localName}
             disabled={disabled || skillAction}
             onChange={(event) => onLocalName(event.target.value)}
@@ -647,29 +666,29 @@ function UpdateItem({
               size="sm"
               variant="outline"
               disabled={disabled || skillAction || !localName.trim()}
-              aria-label={`Convert ${item.id} to local`}
+              aria-label={t("sharedChannels.convertToLocalAria", { skillId: item.id })}
               onClick={onConvertRemoved}
             >
               {skillAction && <Loader2 className="mr-1.5 size-3.5 animate-spin" />}
-              Convert to local
+              {t("sharedChannels.convertToLocal")}
             </Button>
             <Button
               size="sm"
               variant="destructive"
               disabled={disabled || skillAction}
-              aria-label={`Uninstall ${item.id}`}
+              aria-label={t("sharedChannels.uninstallAria", { skillId: item.id })}
               onClick={onUninstallRemoved}
             >
-              Uninstall
+              {t("sharedChannels.uninstall")}
             </Button>
           </div>
         </div>
       )}
       {locallyBlocked && (
         <div className="mt-3 space-y-2 rounded-md bg-muted/50 p-2">
-          <p className="text-[11px]">Local changes must be resolved before this Skill can update.</p>
+          <p className="text-[11px]">{t("sharedChannels.localBlockedHint")}</p>
           <input
-            aria-label={`Local copy name for ${item.id}`}
+            aria-label={t("sharedChannels.localCopyNameAria", { skillId: item.id })}
             value={localName}
             disabled={disabled}
             onChange={(event) => onLocalName(event.target.value)}
@@ -682,7 +701,7 @@ function UpdateItem({
               disabled={disabled || !localName.trim()}
               onClick={() => onResolution({ kind: "preserve", local_name: localName.trim() })}
             >
-              Preserve as .local
+              {t("sharedChannels.preserveAsLocal")}
             </Button>
             <Button
               size="sm"
@@ -690,7 +709,7 @@ function UpdateItem({
               disabled={disabled}
               onClick={() => onResolution({ kind: "discard" })}
             >
-              Discard changes
+              {t("sharedChannels.discardChanges")}
             </Button>
           </div>
         </div>

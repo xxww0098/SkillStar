@@ -1,4 +1,4 @@
-use skillstar_core::config::{github_mirror, proxy};
+use skillstar_core::config::{github_mirror, marketplace_mirror, proxy};
 use skillstar_core::infra::error::AppError;
 
 #[tauri::command]
@@ -36,4 +36,19 @@ pub async fn test_github_mirror(url: String) -> Result<u64, AppError> {
     github_mirror::test_mirror(&url)
         .await
         .map_err(|e| AppError::Other(format!("Mirror test failed: {}", e)))
+}
+
+#[tauri::command]
+pub async fn get_marketplace_mirror_config()
+-> Result<marketplace_mirror::MarketplaceMirrorConfig, AppError> {
+    marketplace_mirror::load_config()
+        .map_err(|e| AppError::Other(format!("Failed to read marketplace mirror config: {}", e)))
+}
+
+#[tauri::command]
+pub async fn save_marketplace_mirror_config(
+    config: marketplace_mirror::MarketplaceMirrorConfig,
+) -> Result<(), AppError> {
+    marketplace_mirror::save_config(&config)
+        .map_err(|e| AppError::Other(format!("Failed to write marketplace mirror config: {}", e)))
 }

@@ -196,7 +196,6 @@ const KNOWN_MISSING_MOCKS = new Set([
   "import_multi_skill_bundle",
   "import_project_skills",
   "import_skill_bundle",
-  "install_from_scan",
   "install_from_share_code",
   "install_skill",
   "list_linked_skills",
@@ -207,7 +206,6 @@ const KNOWN_MISSING_MOCKS = new Set([
   "preview_multi_skill_bundle",
   "preview_skill_bundle",
   "read_codex_env_from_zshrc",
-  "read_text_file",
   "refresh_stale_project_copies",
   "register_project",
   "remove_custom_agent_profile",
@@ -221,7 +219,6 @@ const KNOWN_MISSING_MOCKS = new Set([
   "save_github_mirror_config",
   "save_project_skills_list",
   "save_proxy_config",
-  "scan_github_repo",
   "set_dock_visible",
   "set_mcp_tool_enabled",
   "start_patrol",
@@ -241,7 +238,6 @@ const KNOWN_MISSING_MOCKS = new Set([
   "update_skill_group",
   "update_tray_language",
   "write_codex_env_to_zshrc",
-  "write_text_file",
 ]);
 
 describe("devMock coverage", () => {

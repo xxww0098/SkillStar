@@ -3,7 +3,7 @@ use std::sync::Mutex;
 
 static UPDATE_TRANSACTION_MUTEX: Mutex<()> = Mutex::new(());
 
-pub(crate) struct UpdateTransactionGuard {
+pub struct UpdateTransactionGuard {
     _process_guard: std::sync::MutexGuard<'static, ()>,
     file: std::fs::File,
 }
@@ -14,7 +14,7 @@ impl Drop for UpdateTransactionGuard {
     }
 }
 
-pub(crate) fn acquire_update_transaction_lock() -> Result<UpdateTransactionGuard> {
+pub fn acquire_update_transaction_lock() -> Result<UpdateTransactionGuard> {
     let process_guard = UPDATE_TRANSACTION_MUTEX
         .lock()
         .map_err(|_| anyhow::anyhow!("Skill update transaction mutex poisoned"))?;

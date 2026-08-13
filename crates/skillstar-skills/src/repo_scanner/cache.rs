@@ -7,7 +7,7 @@ use tracing::warn;
 
 pub use crate::source_resolver::cache_dir_name;
 
-pub(crate) fn clone_or_fetch_repo_in_session(
+pub fn clone_or_fetch_repo_in_session(
     repo_url: &str,
     source: &str,
     session: &crate::git::transport::GitOperationSession,
@@ -15,7 +15,7 @@ pub(crate) fn clone_or_fetch_repo_in_session(
     clone_or_fetch_repo_at_in_session(repo_url, source, None, session)
 }
 
-pub(crate) fn clone_or_fetch_repo_at_in_session(
+pub fn clone_or_fetch_repo_at_in_session(
     repo_url: &str,
     source: &str,
     git_ref: Option<&str>,
@@ -51,8 +51,24 @@ pub(crate) fn clone_or_fetch_repo_at_in_session(
         )
         .context("Failed to execute git fetch")?;
 
+        // The fetch is a network operation lasting up to seconds; a user edit
+        // landing in that window must not be destroyed by the reset below.
+        // Fail closed instead — the update caller preserves the worktree.
+        if !git_ops::worktree_is_clean(&repo_dir)? {
+            return Err(git_ops::WorktreeDirty.into());
+        }
+
         git_ops::checkout_in_session(&repo_dir, &["reset", "--hard", "origin/HEAD"], session)
             .context("Failed to reset cached repository")?;
+
+        // The reset just moved the files of every other Skill installed from
+        // this checkout. `ensure_installed_checkout_is_clean` and
+        // `worktree_is_clean` above proved none of them had user edits, so the
+        // new content is upstream's and their baselines must follow it —
+        // otherwise they look locally diverged forever and lock this repository
+        // out of further installs, scans and updates.
+        crate::skill_update::refresh_baselines_after_checkout_reset(&repo_dir)
+            .context("Failed to refresh content baselines after resetting the cached repository")?;
 
         if is_sparse_checkout(&repo_dir)
             && let Ok(dirs) = discover_skill_dirs_from_tree(&repo_dir)
@@ -111,6 +127,17 @@ fn ensure_installed_checkout_is_clean(repo_dir: &Path) -> Result<()> {
         let skill_path = hub_entry
             .context("Failed to inspect an installed Skill entry")?
             .path();
+        // Staging residue from an interrupted hub write is a symlink into this
+        // same repo cache, so it would otherwise pass the ownership check below
+        // and then fail the lock-entry check — permanently blocking every
+        // install, scan and update for this repository over a hidden path.
+        if !skill_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(crate::hub_entry::is_managed_hub_entry)
+        {
+            continue;
+        }
         let belongs_to_checkout = crate::repo_link::repo_root_of(&skill_path)
             .and_then(|root| std::fs::canonicalize(root).ok())
             .is_some_and(|root| root == canonical_repo);
@@ -192,8 +219,22 @@ fn fetch_and_reset_ref(
     )
     .with_context(|| format!("git fetch for ref '{git_ref}' failed"))?;
 
+    // Fetch is a network operation (up to seconds) — a user edit landing in
+    // that window must not be destroyed by the reset below. Fail closed and
+    // let the update caller preserve the worktree.
+    if !git_ops::worktree_is_clean(repo_dir)? {
+        return Err(git_ops::WorktreeDirty.into());
+    }
+
     git_ops::checkout_in_session(repo_dir, &["reset", "--hard", "FETCH_HEAD"], session)
         .with_context(|| format!("git checkout for ref '{git_ref}' failed"))?;
+
+    // Same reason as the `origin/HEAD` reset: Skills sharing this checkout just
+    // had their files moved and must not be left looking locally diverged. A
+    // no-op for the fresh-clone caller, which has no installed Skills yet.
+    crate::skill_update::refresh_baselines_after_checkout_reset(repo_dir).with_context(|| {
+        format!("failed to refresh content baselines after resetting to ref '{git_ref}'")
+    })?;
 
     let output = command_with_path("git")
         .current_dir(repo_dir)

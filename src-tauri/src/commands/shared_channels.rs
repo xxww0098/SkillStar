@@ -1,6 +1,6 @@
 //! Thin Tauri adapters for organization-private shared channels.
 
-use skillstar_skills::shared_channels::{
+use skillstar_channels::shared_channels::{
     ApplyChannelUpdateRequest, ApplyChannelUpdateResult, ChannelAutoUpdateExecution,
     ChannelAutoUpdateState, ChannelInvitation, ChannelInvitationAction,
     ChannelMemberRevocationResult, ChannelMembershipSnapshot, ChannelPublishPreview,
@@ -435,7 +435,7 @@ pub fn get_shared_channel_auto_update_state(
         .map(|subscription| subscription.auto_update)
         .ok_or_else(|| {
             SharedChannelError::new(
-                skillstar_skills::shared_channels::SharedChannelErrorCode::SubscriptionNotFound,
+                skillstar_channels::shared_channels::SharedChannelErrorCode::SubscriptionNotFound,
                 "This channel has not been subscribed on this device",
             )
         })
@@ -446,7 +446,7 @@ pub async fn set_shared_channel_auto_update_enabled(
     repository_id: u64,
     enabled: bool,
 ) -> Result<ChannelAutoUpdateState, SharedChannelError> {
-    skillstar_skills::shared_channels::set_channel_auto_update_enabled(
+    skillstar_channels::shared_channels::set_channel_auto_update_enabled(
         &DiskChannelSubscriptionRegistry,
         repository_id,
         enabled,

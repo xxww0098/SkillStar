@@ -19,7 +19,7 @@
 
 SkillStar 面向同时使用多个 Agent CLI、模型供应商和订阅账号的开发者。它是一个 Tauri 桌面应用，也提供同二进制 CLI，围绕三个工作区组织能力：
 
-- **Skills**：发现、安装、创作和组合 Skill；按 Agent 或项目分发；管理本机、SSH 远端和 S3 同步。
+- **Skills**：发现、安装、创作和组合 Skill；按 Agent 或项目分发；管理本机、SSH 远端与 GitHub 共享频道；团队协作走共享频道，个人服务器部署走 SSH。
 - **Usage**：聚合 OAuth/API Key 订阅的额度、余额、重置周期和续费信息，并在支持时切换真实 CLI 账号。
 - **Models**：集中管理 Provider、模型与 Agent binding，检测连接状态并同步目标工具配置。
 
@@ -38,7 +38,18 @@ SkillStar 面向同时使用多个 Agent CLI、模型供应商和订阅账号的
 - 频道 owner 可在 SkillStar 用 GitHub 用户名邀请 subscriber 或 publisher，也可移除直接 collaborator；移除后 SkillStar 会重新检查有效 GitHub 权限，Team、组织或 base permission 仍存在时明确提示需前往 GitHub 继续管理。受邀者可在邀请 inbox 接受并自动导入频道，或直接拒绝。成员、继承权限与待处理邀请始终以 GitHub 为准，不使用分享码或额外成员表。订阅端会区分撤权、离线、可重试故障与完整性异常，并在重新验证稳定仓库身份、不可变发布和内容 hash 前冻结远程变更；已安装内容始终保留，确认撤权后还可卸载或转为 `.local` 本地副本。
 - 更新 Git-backed Skill 前会检查完整目录；发现本地修改时先停止，让用户选择保留为可改名的 `.local` 本地副本，或明确丢弃修改后继续。
 - 可让已配置的 ACP Agent 阅读当前 Skill 的全部文件，按“循序导览 / 技术手册 / 实战工坊”风格和当前界面语言生成带流程图、示例和排错说明的本地持久化 `tutorial.html`；不依赖在线链接，Skill、语言或风格更新后会明确提醒重新生成。
-- My Skills 可切换本机、SSH 远端与 S3 云同步工作流。
+- My Skills 可切换本机、SSH 远端与 GitHub 共享频道工作流。
+
+### MCP 服务器管理
+
+- 一份统一的 MCP server store，投影到每个受支持 Agent 工具各自的原生配置格式；写入前备份、只改 SkillStar 管理的键、失败按目标回滚。
+- 商店的目录来自多个来源的合并结果：官方 MCP Registry 作为主源（也是唯一许可明确允许长期本地镜像的源），GitHub MCP Registry 作为补充 stars / license / readme 的展示镜像。跨源按 `server.json` 的反向域名全名去重，同一个 server 不会重复上架。
+- registry 标记为 deprecated 或已被更新版本取代的 server 仍然列出，但会带标注，不会和健康的 server 一样被推荐。
+- 一个 server 可能同时提供远程端点和多种本地包。SkillStar 优先选远程 streamable-http（零工具链依赖、零本地代码执行），其次才是容器化和各语言包，并且会先检查这些运行时在你的机器上是否真的存在——`npx` 没装就不会把 npm 包推荐给你。
+- 安装本地 server 前，可以看到将要执行的**完整未截断命令**和它在 `PATH` 上解析出的实际二进制路径。命令始终直接执行，不经过 shell。
+- 表单按 registry 声明的语义渲染：必填项、密钥（掩码输入）、下拉可选值、文件路径选择器和默认值。密钥只写入用户级配置，SkillStar 不写任何项目级 MCP 配置文件，因此密钥不会随项目进入版本控制。
+
+> 自定义 registry 源、商店筛选/排序/分页和安装前确认对话框的界面正在接入中；上述能力当前已在后端就绪。
 
 ### Usage 用量面板
 
@@ -46,7 +57,7 @@ SkillStar 面向同时使用多个 Agent CLI、模型供应商和订阅账号的
 - 卡片显示 provider 原生配额窗口、余额、重置时间、套餐和计费周期。
 - OAuth 重新授权会原位更新既有订阅，避免生成重复账号。
 - 支持的 CLI 账号切换以事务方式更新 active 状态和磁盘凭证；失败时保留原可用账号。
-- API key、access token、refresh token 使用域内加密存储；SSH/S3 secret 使用系统 keyring。
+- API key、access token、refresh token 使用域内加密存储；SSH secret 使用系统 keyring。
 
 > Provider 私有接口可能随上游升级变化。SkillStar 会区分“需要重新授权”“暂时无数据”和普通请求失败，不把所有错误伪装成空额度。
 
@@ -54,6 +65,7 @@ SkillStar 面向同时使用多个 Agent CLI、模型供应商和订阅账号的
 
 - Provider gallery、模型目录、连接诊断、余额查询和 Agent binding 集中在一个工作台。
 - 按 Agent 能力支持 single-provider 或 multi-provider binding。
+- Oh My Pi（`omp`）额外支持**模型角色**：把 `default`（正常编码）、`smol`（廉价子代理 fan-out）、`slow`（深度推理）、`plan`（规划模式）等角色分别指到不同 Provider 和模型，可选推理强度，直接写入 omp 的 `modelRoles`，无需手写 YAML。
 - Tool sync 只修改 SkillStar 管理的字段，保留用户已有配置并在写入前备份。
 - 内置摘要和 Skill 推荐共享 Models provider 配置，并以流式事件报告 route/fallback；Skill 图文教程使用独立的 ACP Agent 配置。
 
@@ -63,7 +75,7 @@ SkillStar 面向同时使用多个 Agent CLI、模型供应商和订阅账号的
 - Settings 可通过 GitHub App 设备授权登录 `github.com`，无需粘贴 PAT；access/refresh token 只进入系统凭据存储，代理、刷新、失效与登出状态均可见。该身份用于后续私有共享频道能力，所需 App 权限会在界面中解释。
 - 登录后可直接扫描、安装和更新当前身份有权访问的私有 `github.com` Skill 仓库，无需另外配置 `gh` 或全局 Git 凭据。认证只在单次 Git 操作期间提供；私有操作遵循 SkillStar 代理、支持取消，并且不会把 token 写入仓库 remote 或 Git 配置。
 - SSH 首次连接使用 host-key TOFU，在认证材料发送前完成信任检查。
-- 所有业务 HTTP 统一遵循 SkillStar proxy 配置；GitHub mirror 不修改用户全局 Git 配置。
+- 所有业务 HTTP 统一遵循 SkillStar proxy 配置；GitHub mirror 不修改用户全局 Git 配置。GitHub 加速与商店加速均支持候选链：主源不可达时按序尝试配置的镜像，全部失败才回退直连，且只用于公开仓库。
 - 测试和生成工具有专用临时 home，避免触碰真实 Agent 配置。
 
 ## 安装
@@ -112,7 +124,7 @@ binary、桌面应用或配置目录来自动启用 Agent；内置注册表同�
 典型流程：
 
 1. 在 Marketplace 搜索并安装 Skill。
-2. 在 My Skills 选择本机 Agent，或切换到 SSH/S3 scope。
+2. 在 My Skills 选择本机 Agent，或切换到 SSH 远端 / GitHub 共享频道 scope。
 3. 在 Projects 注册工程并 reconciliation 项目级技能。
 4. 在 Models 创建 Provider，并把 binding 同步到目标 Agent。
 5. 在 Usage 添加订阅，查看额度或切换支持的 CLI 账号。

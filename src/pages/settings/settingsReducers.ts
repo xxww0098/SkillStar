@@ -1,4 +1,4 @@
-import type { AiConfig, GitHubMirrorConfig, ProxyConfig } from "../../types";
+import type { AiConfig, GitHubMirrorConfig, MarketplaceMirrorConfig, ProxyConfig } from "../../types";
 
 export type ForceDeleteTarget = "hub" | "cache" | "config";
 
@@ -21,6 +21,10 @@ export function isSameProxyConfig(a: ProxyConfig, b: ProxyConfig): boolean {
 
 export function isSameMirrorConfig(a: GitHubMirrorConfig, b: GitHubMirrorConfig): boolean {
   return a.enabled === b.enabled && a.preset_id === b.preset_id && a.custom_url === b.custom_url;
+}
+
+export function isSameMarketplaceMirrorConfig(a: MarketplaceMirrorConfig, b: MarketplaceMirrorConfig): boolean {
+  return a.enabled === b.enabled && JSON.stringify(a.hosts ?? []) === JSON.stringify(b.hosts ?? []);
 }
 
 export function isSameAiConfig(a: AiConfig, b: AiConfig): boolean {
@@ -57,6 +61,11 @@ export const initialMirrorConfig: GitHubMirrorConfig = {
   enabled: false,
   preset_id: "ghproxy_vip",
   custom_url: null,
+};
+
+export const initialMarketplaceMirrorConfig: MarketplaceMirrorConfig = {
+  enabled: false,
+  hosts: [],
 };
 
 // ── Agent connections reducer ─────────────────────────────────────────────────

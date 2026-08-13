@@ -84,6 +84,19 @@ export function useMcpServers() {
     onSuccess: invalidate,
   });
 
+  /**
+   * Re-project one server into every tool it is enabled for.
+   *
+   * The command has existed since the beginning and was never wired up (audit
+   * D.3-5); it is what makes a failed projection recoverable without editing
+   * and re-saving the entry. `force` re-writes even when the live config
+   * already matches, which is the point after a rollback.
+   */
+  const syncServerMutation = useMutation({
+    mutationFn: ({ id, force }: { id: string; force: boolean }) => tauriInvoke("sync_mcp_server", { id, force }),
+    onSuccess: invalidate,
+  });
+
   const importMutation = useMutation({
     mutationFn: async () => {
       const statuses = await tauriInvoke("mcp_tool_statuses");
@@ -123,6 +136,10 @@ export function useMcpServers() {
     [toggleMutation],
   );
   const syncAll = useCallback((force = false) => syncAllMutation.mutateAsync(force), [syncAllMutation]);
+  const syncServer = useCallback(
+    (id: string, force = true) => syncServerMutation.mutateAsync({ id, force }),
+    [syncServerMutation],
+  );
   const importFromTools = useCallback(() => importMutation.mutateAsync(), [importMutation]);
   const reorder = useCallback((orderedIds: string[]) => reorderMutation.mutateAsync(orderedIds), [reorderMutation]);
 
@@ -135,9 +152,11 @@ export function useMcpServers() {
     deleteServer,
     toggleTool,
     syncAll,
+    syncServer,
     importFromTools,
     reorder,
     syncing: syncAllMutation.isPending,
+    retrySyncing: syncServerMutation.isPending,
     importing: importMutation.isPending,
   };
 }

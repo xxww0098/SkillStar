@@ -1,5 +1,6 @@
 import { ArrowLeft, ArrowRight, Cable, Check, Eraser, Sparkles, Trash2 } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { ProviderBrandIcon } from "../../../../../components/shared/ProviderBrandIcon";
 import { Button } from "../../../../../components/ui/button";
 import { cn } from "../../../../../lib/utils";
@@ -70,9 +71,11 @@ function PageChrome({
 
 type CreatePreset = {
   id: string;
-  name: string;
+  /** Brand name when it is locale-independent; otherwise resolved from `nameKey`. */
+  name?: string;
+  nameKey?: string;
   color: string;
-  hint: string;
+  hintKey: string;
   openai: string;
   anthropic: string;
 };
@@ -83,7 +86,7 @@ const CREATE_PRESETS: CreatePreset[] = [
     id: "deepseek",
     name: "DeepSeek",
     color: "#4D6BFE",
-    hint: "OpenAI 兼容 · 适合 Codex / OpenCode / Pi",
+    hintKey: "models.editorPage.presetHint.deepseek",
     openai: "https://api.deepseek.com/v1",
     anthropic: "",
   },
@@ -91,15 +94,15 @@ const CREATE_PRESETS: CreatePreset[] = [
     id: "kimi",
     name: "Kimi",
     color: "#5B45E0",
-    hint: "OpenAI 兼容",
+    hintKey: "models.editorPage.presetHint.kimi",
     openai: "https://api.moonshot.cn/v1",
     anthropic: "",
   },
   {
     id: "glm",
-    name: "智谱 GLM",
+    nameKey: "models.editorPage.presetName.glm",
     color: "#3366FF",
-    hint: "OpenAI + Anthropic 双端点",
+    hintKey: "models.editorPage.presetHint.glm",
     openai: "https://open.bigmodel.cn/api/paas/v4",
     anthropic: "https://open.bigmodel.cn/api/anthropic",
   },
@@ -107,21 +110,23 @@ const CREATE_PRESETS: CreatePreset[] = [
     id: "openrouter",
     name: "OpenRouter",
     color: "#6366F1",
-    hint: "聚合路由 · OpenAI 兼容",
+    hintKey: "models.editorPage.presetHint.openrouter",
     openai: "https://openrouter.ai/api/v1",
     anthropic: "",
   },
   {
     id: "custom",
-    name: "自定义 / OpenAI 兼容",
+    nameKey: "models.editorPage.presetName.custom",
     color: "#64748B",
-    hint: "自填 Base URL 与 Key",
+    hintKey: "models.editorPage.presetHint.custom",
     openai: "",
     anthropic: "",
   },
 ];
 
 function CreatePage({ data }: { data: PrototypeHubData }) {
+  const { t } = useTranslation();
+  const presetName = (p: CreatePreset) => p.name ?? t(p.nameKey!);
   const [presetId, setPresetId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -135,7 +140,8 @@ function CreatePage({ data }: { data: PrototypeHubData }) {
   const pickPreset = (id: string) => {
     const next = CREATE_PRESETS.find((p) => p.id === id)!;
     setPresetId(id);
-    setName(next.name === "自定义 / OpenAI 兼容" ? "" : next.name);
+    // "Custom" has no brand name to prefill — the user names it themselves.
+    setName(next.id === "custom" ? "" : presetName(next));
     setOpenaiUrl(next.openai);
     setAnthropicUrl(next.anthropic);
     setDefaultModel("");
@@ -145,16 +151,14 @@ function CreatePage({ data }: { data: PrototypeHubData }) {
   if (!preset) {
     return (
       <PageChrome
-        title="添加 Provider"
-        subtitle="选择预设 → 填写连接 → 回到矩阵绑定 Agent"
+        title={t("models.editorPage.addProvider")}
+        subtitle={t("models.editorPage.createSubtitle")}
         onBack={data.closeOverlay}
       >
-        <p className="text-xs text-muted-foreground">
-          矩阵行仅第三方 Provider。Claude / Codex 官方账号在表头图标上切换，不在此创建。
-        </p>
+        <p className="text-xs text-muted-foreground">{t("models.editorPage.thirdPartyOnly")}</p>
         <div className="space-y-2">
           <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            API Key 预设
+            {t("models.editorPage.presetSection")}
           </p>
           {CREATE_PRESETS.map((p) => (
             <button
@@ -165,8 +169,8 @@ function CreatePage({ data }: { data: PrototypeHubData }) {
             >
               <span className="h-9 w-9 shrink-0 rounded-lg" style={{ background: p.color }} />
               <span className="min-w-0 flex-1">
-                <span className="block text-sm font-medium">{p.name}</span>
-                <span className="block text-[11px] text-muted-foreground">{p.hint}</span>
+                <span className="block text-sm font-medium">{presetName(p)}</span>
+                <span className="block text-[11px] text-muted-foreground">{t(p.hintKey)}</span>
               </span>
               <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             </button>
@@ -180,8 +184,8 @@ function CreatePage({ data }: { data: PrototypeHubData }) {
 
   return (
     <PageChrome
-      title={`新建 · ${preset.name}`}
-      subtitle="填写连接信息后写入 Provider store，再回矩阵绑定 Agent"
+      title={t("models.editorPage.createWithPreset", { name: presetName(preset) })}
+      subtitle={t("models.editorPage.createFormSubtitle")}
       onBack={() => setPresetId(null)}
       trailing={
         <Button
@@ -212,18 +216,20 @@ function CreatePage({ data }: { data: PrototypeHubData }) {
             })();
           }}
         >
-          {saving ? "创建中…" : "创建并继续"}
+          {saving ? t("models.preset.creating") : t("models.preset.createAndContinue")}
         </Button>
       }
     >
       <div className="space-y-4">
         <label className="block space-y-1">
-          <span className="text-[11px] font-medium text-muted-foreground">显示名称</span>
+          <span className="text-[11px] font-medium text-muted-foreground">
+            {t("models.editorPage.fieldDisplayName")}
+          </span>
           <input
             className="h-10 w-full rounded-lg border border-border/60 bg-background px-3 text-sm"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="例如 DeepSeek"
+            placeholder={t("models.editorPage.displayNamePlaceholder")}
           />
         </label>
         <label className="block space-y-1">
@@ -236,36 +242,42 @@ function CreatePage({ data }: { data: PrototypeHubData }) {
           />
         </label>
         <label className="block space-y-1">
-          <span className="text-[11px] font-medium text-muted-foreground">OpenAI 兼容端点</span>
+          <span className="text-[11px] font-medium text-muted-foreground">
+            {t("models.editorPage.fieldOpenaiEndpoint")}
+          </span>
           <input
             className="h-10 w-full rounded-lg border border-border/60 bg-background px-3 font-mono text-xs"
             value={openaiUrl}
             onChange={(e) => setOpenaiUrl(e.target.value)}
             placeholder="https://…/v1"
           />
-          <span className="text-[10px] text-muted-foreground">Codex / OpenCode / Pi 使用</span>
+          <span className="text-[10px] text-muted-foreground">{t("models.editorPage.openaiEndpointHint")}</span>
         </label>
         <label className="block space-y-1">
-          <span className="text-[11px] font-medium text-muted-foreground">Anthropic 兼容端点</span>
+          <span className="text-[11px] font-medium text-muted-foreground">
+            {t("models.editorPage.fieldAnthropicEndpoint")}
+          </span>
           <input
             className="h-10 w-full rounded-lg border border-border/60 bg-background px-3 font-mono text-xs"
             value={anthropicUrl}
             onChange={(e) => setAnthropicUrl(e.target.value)}
-            placeholder="可选 · Claude Code"
+            placeholder={t("models.editorPage.anthropicEndpointPlaceholder")}
           />
-          <span className="text-[10px] text-muted-foreground">Claude Code 使用；可与 OpenAI 端点并存</span>
+          <span className="text-[10px] text-muted-foreground">{t("models.editorPage.anthropicEndpointHint")}</span>
         </label>
         <label className="block space-y-1">
-          <span className="text-[11px] font-medium text-muted-foreground">默认模型</span>
+          <span className="text-[11px] font-medium text-muted-foreground">
+            {t("models.editorPage.fieldDefaultModel")}
+          </span>
           <input
             className="h-10 w-full rounded-lg border border-border/60 bg-background px-3 font-mono text-xs"
             value={defaultModel}
             onChange={(e) => setDefaultModel(e.target.value)}
-            placeholder="可选 · 绑定时代入"
+            placeholder={t("models.editorPage.defaultModelPlaceholder")}
           />
         </label>
         <p className="rounded-lg border border-dashed border-border/55 px-3 py-2 text-[11px] text-muted-foreground">
-          创建后打开编辑抽屉完善模型列表，再回矩阵绑定对应 Agent 列。
+          {t("models.editorPage.createFooterHint")}
         </p>
       </div>
     </PageChrome>
@@ -568,6 +580,7 @@ function AgentSettingsPage({ data, toolId }: { data: PrototypeHubData; toolId: P
  * (or Settings Ollama). Header entry is the D1 home for this consumer.
  */
 function AppAiPage({ data }: { data: PrototypeHubData }) {
+  const { t } = useTranslation();
   const [bound, setBound] = useState<{ providerId: string; protocol: "claude" | "codex" } | null>(() => {
     const first = data.providers[0];
     return first ? { providerId: first.id, protocol: first.base_url_anthropic ? "claude" : "codex" } : null;
@@ -581,8 +594,8 @@ function AppAiPage({ data }: { data: PrototypeHubData }) {
 
   return (
     <PageChrome
-      title="应用内 AI"
-      subtitle="摘要 · 技能推荐（与 CLI Agent 独立）"
+      title={t("models.appAi.title")}
+      subtitle={t("models.appAi.tagline")}
       onBack={data.closeOverlay}
       trailing={
         bound && !ollamaActive ? (
@@ -596,7 +609,7 @@ function AppAiPage({ data }: { data: PrototypeHubData }) {
             }}
           >
             <Eraser className="mr-1.5 h-3.5 w-3.5" />
-            清除绑定
+            {t("models.appAi.clearBinding")}
           </Button>
         ) : null
       }
@@ -607,7 +620,7 @@ function AppAiPage({ data }: { data: PrototypeHubData }) {
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <p className="text-sm font-semibold">当前来源</p>
+            <p className="text-sm font-semibold">{t("models.appAi.currentSource")}</p>
             <span
               className={cn(
                 "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ring-1",
@@ -616,22 +629,24 @@ function AppAiPage({ data }: { data: PrototypeHubData }) {
                   : "bg-muted text-muted-foreground ring-border",
               )}
             >
-              {ollamaActive ? "本地 Ollama" : bound ? "已绑定" : "未绑定"}
+              {ollamaActive
+                ? t("models.appAi.localOllama")
+                : bound
+                  ? t("models.appAi.bound")
+                  : t("models.appAi.unbound")}
             </span>
           </div>
           {ollamaActive ? (
-            <p className="mt-1 text-xs text-muted-foreground">
-              当前由本地 Ollama 提供。Models hub 只绑定供应商；Ollama 在设置里切换。
-            </p>
+            <p className="mt-1 text-xs text-muted-foreground">{t("models.appAi.ollamaActiveDetail")}</p>
           ) : boundProvider ? (
             <p className="mt-1 truncate text-xs">
               <span className="font-medium">{boundProvider.name}</span>
               <span className="ml-1.5 text-muted-foreground">
-                · {bound?.protocol === "claude" ? "Claude 协议" : "OpenAI 协议"}
+                · {bound?.protocol === "claude" ? t("models.appAi.claudeProtocol") : t("models.appAi.openaiProtocol")}
               </span>
             </p>
           ) : (
-            <p className="mt-1 text-xs text-muted-foreground">从下方供应商按协议绑定，供应用内摘要与技能推荐使用。</p>
+            <p className="mt-1 text-xs text-muted-foreground">{t("models.appAi.pickHintLong")}</p>
           )}
         </div>
       </div>
@@ -649,8 +664,8 @@ function AppAiPage({ data }: { data: PrototypeHubData }) {
           )}
         >
           {!ollamaActive ? <Check className="mb-1 h-3.5 w-3.5 text-primary" /> : null}
-          Models 供应商
-          <span className="mt-0.5 block text-[10px] text-muted-foreground">本页配置</span>
+          {t("models.appAi.sourceModels")}
+          <span className="mt-0.5 block text-[10px] text-muted-foreground">{t("models.appAi.sourceModelsHint")}</span>
         </button>
         <button
           type="button"
@@ -664,37 +679,33 @@ function AppAiPage({ data }: { data: PrototypeHubData }) {
           )}
         >
           {ollamaActive ? <Check className="mb-1 h-3.5 w-3.5 text-primary" /> : null}
-          本地 Ollama
-          <span className="mt-0.5 block text-[10px] text-muted-foreground">设置中管理</span>
+          {t("models.appAi.localOllama")}
+          <span className="mt-0.5 block text-[10px] text-muted-foreground">{t("models.appAi.sourceOllamaHint")}</span>
         </button>
       </div>
 
       {ollamaActive ? (
         <div className="rounded-xl border border-border/50 bg-background/40 px-4 py-3 text-xs text-muted-foreground">
-          Ollama 的 host / 模型表单在 Settings → AI。此处只声明「当前走本地」。
+          {t("models.appAi.ollamaSettingsHint")}
           <Button
             size="sm"
             variant="ghost"
             className="mt-2 h-7 gap-1 px-0 text-primary"
             onClick={() => data.stub("openSettingsAi")}
           >
-            打开设置 <ArrowRight className="h-3 w-3" />
+            {t("models.appAi.openSettingsAction")} <ArrowRight className="h-3 w-3" />
           </Button>
         </div>
       ) : (
         <section className="space-y-2">
           <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            按协议绑定供应商
+            {t("models.appAi.bindSectionTitle")}
           </h3>
           {data.providers.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border/55 px-4 py-6 text-center text-xs text-muted-foreground">
-              暂无供应商。
-              <Button
-                size="sm"
-                className="mt-3"
-                onClick={() => data.setOverlay({ type: "create" })}
-              >
-                添加 Provider
+              {t("models.appAi.noProviders")}
+              <Button size="sm" className="mt-3" onClick={() => data.setOverlay({ type: "create" })}>
+                {t("models.editorPage.addProvider")}
               </Button>
             </div>
           ) : (
@@ -710,22 +721,15 @@ function AppAiPage({ data }: { data: PrototypeHubData }) {
                     isBound ? "border-primary/35 bg-primary/[0.06]" : "border-border/45 bg-card/40",
                   )}
                 >
-                  <ProviderBrandIcon
-                    presetId={p.preset_id}
-                    providerName={p.name}
-                    iconColor={p.icon_color}
-                    size="sm"
-                  />
+                  <ProviderBrandIcon presetId={p.preset_id} providerName={p.name} iconColor={p.icon_color} size="sm" />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-xs font-medium">{p.name}</p>
-                    <p className="truncate font-mono text-[10px] text-muted-foreground">
-                      {p.default_model || "—"}
-                    </p>
+                    <p className="truncate font-mono text-[10px] text-muted-foreground">{p.default_model || "—"}</p>
                   </div>
                   <button
                     type="button"
                     disabled={!canClaude}
-                    title="以 Claude 协议绑定"
+                    title={t("models.appAi.bindClaudeTitle")}
                     onClick={() => {
                       setBound({ providerId: p.id, protocol: "claude" });
                       data.stub("bindAppAi", { providerId: p.id, protocol: "claude" });
@@ -743,7 +747,7 @@ function AppAiPage({ data }: { data: PrototypeHubData }) {
                   <button
                     type="button"
                     disabled={!canCodex}
-                    title="以 OpenAI 协议绑定"
+                    title={t("models.appAi.bindOpenaiTitle")}
                     onClick={() => {
                       setBound({ providerId: p.id, protocol: "codex" });
                       data.stub("bindAppAi", { providerId: p.id, protocol: "codex" });
@@ -764,7 +768,6 @@ function AppAiPage({ data }: { data: PrototypeHubData }) {
           )}
         </section>
       )}
-
     </PageChrome>
   );
 }

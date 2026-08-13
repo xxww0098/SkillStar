@@ -1,0 +1,19 @@
+[package]
+name = "skillstar-git"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94.1"
+
+[dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true }
+gix = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+skillstar-core = { version = "0.1.0", path = "../skillstar-core" }
+tracing = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

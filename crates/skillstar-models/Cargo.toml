@@ -30,6 +30,7 @@ rand = { workspace = true }
 async-openai = { version = "0.27", features = ["rustls"] }
 futures-util = "0.3.32"
 reqwest_012 = { package = "reqwest", version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+serde_yaml.workspace = true
 
 [dev-dependencies]
 proptest = "1.11.0"

@@ -70,6 +70,7 @@ export function useSkillCards() {
         icon?: string;
         skills?: string[];
         skillSources?: Record<string, string>;
+        agentLinks?: string[];
       },
     ) => {
       const group = await tauriInvoke("update_skill_group", {

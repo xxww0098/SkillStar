@@ -1,19 +1,19 @@
 //! Tauri-owned lifetime for the GitHub authentication facade.
 
-use skillstar_skills::git::transport::{
-    GitAuthMaterial, GitOperationProgress, GitOperationSession, GitProgressSink,
-};
-use skillstar_skills::git_skill::GitSkillFacade;
-use skillstar_skills::github_auth::{
-    GitHubAuthError, GitHubAuthFacade, KeyringCredentialStore, ProductionGitHubGateway, SystemClock,
-};
-use skillstar_skills::shared_channels::{
+use skillstar_channels::shared_channels::{
     ChannelMembershipFacade, ChannelPublicationFacade, ChannelPublishSessions,
     ChannelSubscriptionFacade, DiskChannelSubscriptionRegistry, DiskSharedChannelRegistry,
     ExistingChannelRegistrationFacade, ExistingChannelRegistrationSessions, GitChannelDraftScanner,
     GitChannelSubscriptionInstaller, GitExistingRepositoryScanner, ProductionSharedChannelGateway,
     SharedChannelError, SharedChannelFacade,
 };
+use skillstar_git::transport::{
+    GitAuthMaterial, GitOperationProgress, GitOperationSession, GitProgressSink,
+};
+use skillstar_github_auth::{
+    GitHubAuthError, GitHubAuthFacade, KeyringCredentialStore, ProductionGitHubGateway, SystemClock,
+};
+use skillstar_skills::git_skill::GitSkillFacade;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
@@ -178,7 +178,7 @@ impl GitHubAuthState {
                 .map(|id| id.to_string())
                 .map_err(|_| {
                     GitHubAuthError::new(
-                        skillstar_skills::github_auth::GitHubAuthErrorCode::Protocol,
+                        skillstar_github_auth::GitHubAuthErrorCode::Protocol,
                         "Git operation session id must be a UUID",
                     )
                 })?,
@@ -197,7 +197,7 @@ impl GitHubAuthState {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if sessions.contains_key(session.id()) {
             return Err(GitHubAuthError::new(
-                skillstar_skills::github_auth::GitHubAuthErrorCode::Protocol,
+                skillstar_github_auth::GitHubAuthErrorCode::Protocol,
                 "Git operation session id is already active",
             ));
         }

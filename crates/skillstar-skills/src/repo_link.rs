@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use crate::git::ops as git_ops;
 
 /// Is this hub entry a link (symlink or Windows junction) into the repo cache?
-pub(crate) fn is_repo_cached(skill_path: &Path) -> bool {
+pub fn is_repo_cached(skill_path: &Path) -> bool {
     is_repo_cached_with(skill_path, &paths::repos_cache_dir())
 }
 
@@ -25,7 +25,7 @@ pub(crate) fn is_repo_cached(skill_path: &Path) -> bool {
 ///
 /// `None` for anything that is not a link into the repo cache — callers use
 /// that to fall back to treating the skill as a standalone clone.
-pub(crate) fn repo_root_of(skill_path: &Path) -> Option<PathBuf> {
+pub fn repo_root_of(skill_path: &Path) -> Option<PathBuf> {
     repo_root_of_with(
         skill_path,
         &paths::repos_cache_dir(),
@@ -35,7 +35,7 @@ pub(crate) fn repo_root_of(skill_path: &Path) -> Option<PathBuf> {
 
 // ── internal seam: tests inject the cache dir and root resolution ────
 
-pub(crate) fn is_repo_cached_with(skill_path: &Path, repo_cache_dir: &Path) -> bool {
+pub fn is_repo_cached_with(skill_path: &Path, repo_cache_dir: &Path) -> bool {
     if !fs_ops::is_link(skill_path) {
         return false;
     }
@@ -45,7 +45,7 @@ pub(crate) fn is_repo_cached_with(skill_path: &Path, repo_cache_dir: &Path) -> b
     is_inside(&target, repo_cache_dir)
 }
 
-pub(crate) fn repo_root_of_with<F>(
+pub fn repo_root_of_with<F>(
     skill_path: &Path,
     repo_cache_dir: &Path,
     find_repo_root: F,

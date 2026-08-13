@@ -1,5 +1,6 @@
 import { Check, Inbox, Loader2, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import type { ChannelInvitation, SharedChannelDescriptor } from "../../../types";
 import {
@@ -14,6 +15,7 @@ interface Props {
 }
 
 export function ChannelInvitationInbox({ onAccepted, onImportFailed }: Props) {
+  const { t } = useTranslation();
   const [invitations, setInvitations] = useState<ChannelInvitation[]>([]);
   const [loading, setLoading] = useState(true);
   const [actingId, setActingId] = useState<number | null>(null);
@@ -58,7 +60,9 @@ export function ChannelInvitationInbox({ onAccepted, onImportFailed }: Props) {
     try {
       await declineSharedChannelInvitation(invitation.id);
       setInvitations((current) => current.filter((item) => item.id !== invitation.id));
-      setNotice(`${invitation.owner}/${invitation.repository_name}: cancelled`);
+      setNotice(
+        t("sharedChannels.declinedNotice", { owner: invitation.owner, repository: invitation.repository_name }),
+      );
     } catch (cause) {
       setError(messageFrom(cause));
     } finally {
@@ -72,16 +76,13 @@ export function ChannelInvitationInbox({ onAccepted, onImportFailed }: Props) {
         <div>
           <div className="flex items-center gap-2">
             <Inbox className="size-5 text-muted-foreground" />
-            <h2 className="text-lg font-semibold">Repository invitation inbox</h2>
+            <h2 className="text-lg font-semibold">{t("sharedChannels.inboxTitle")}</h2>
           </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            GitHub invitations do not carry a SkillStar marker. Confirm the repository and inviter before importing it
-            as a channel.
-          </p>
+          <p className="mt-1 text-xs text-muted-foreground">{t("sharedChannels.inboxHint")}</p>
         </div>
         <Button variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
           {loading ? <Loader2 className="mr-1.5 size-4 animate-spin" /> : <RefreshCw className="mr-1.5 size-4" />}
-          Refresh
+          {t("common.refresh")}
         </Button>
       </div>
 
@@ -94,7 +95,7 @@ export function ChannelInvitationInbox({ onAccepted, onImportFailed }: Props) {
 
       {!loading && invitations.length === 0 && (
         <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-          No pending organization-private repository invitations.
+          {t("sharedChannels.inboxEmpty")}
         </div>
       )}
 
@@ -107,7 +108,10 @@ export function ChannelInvitationInbox({ onAccepted, onImportFailed }: Props) {
                   {invitation.owner}/{invitation.repository_name}
                 </h3>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Invited by @{invitation.inviter?.login ?? "unknown"} · {invitation.effective_role} · pending
+                  {t("sharedChannels.invitedBy", {
+                    login: invitation.inviter?.login ?? "unknown",
+                    role: invitation.effective_role,
+                  })}
                 </p>
               </div>
               <div className="flex gap-2">
@@ -117,7 +121,7 @@ export function ChannelInvitationInbox({ onAccepted, onImportFailed }: Props) {
                   ) : (
                     <Check className="mr-1 size-3" />
                   )}
-                  Accept and import
+                  {t("sharedChannels.acceptAndImport")}
                 </Button>
                 <Button
                   size="sm"
@@ -125,7 +129,7 @@ export function ChannelInvitationInbox({ onAccepted, onImportFailed }: Props) {
                   onClick={() => void decline(invitation)}
                   disabled={actingId !== null}
                 >
-                  <X className="mr-1 size-3" /> Decline
+                  <X className="mr-1 size-3" /> {t("sharedChannels.decline")}
                 </Button>
               </div>
             </div>

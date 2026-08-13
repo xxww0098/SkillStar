@@ -359,6 +359,7 @@ proptest! {
                 last_sync_at: None,
             }],
             active_index: 0,
+            settings: None,
         };
         sync_codex_binding_inner(&binding, std::slice::from_ref(&provider), &config_path)
             .expect("sync_codex_binding_inner should succeed");

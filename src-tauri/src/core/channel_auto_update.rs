@@ -1,5 +1,5 @@
 use super::github_auth::GitHubAuthState;
-use skillstar_skills::shared_channels::{
+use skillstar_channels::shared_channels::{
     ChannelSubscriptionRegistry, DiskChannelSubscriptionRegistry, SharedChannelErrorCode,
 };
 use tauri::{Emitter, Manager};

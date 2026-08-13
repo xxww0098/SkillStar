@@ -1,41 +1,18 @@
-//! Remote transport for SkillStar: S3 cloud sync + SSH remote skills.
+//! Remote transport for SkillStar: SSH remote skills.
 //!
-//! Wave 2B merged former `skillstar-ssh` into this crate as [`ssh`].
-//!
-//! Layout:
-//! - private `types` / `store` / `client` / `manifest` / `local_pack` / `sync` — S3
-//! - private `progress` — S3 progress sink
-//! - [`ssh`] — SSH hosts, SFTP, remote skill push/list/delete (Tauri-agnostic)
+//! Wave 2B merged former `skillstar-ssh` into this crate. The former S3 cloud
+//! sync (client/store/manifest/local_pack/sync/types) was removed — shared
+//! channels on GitHub are the collaboration path, SSH remains the
+//! per-machine deployment path (see docs/decisions.md).
 
-mod client;
-mod local_pack;
-mod manifest;
-mod progress;
 pub mod ssh;
-mod store;
-mod sync;
-mod types;
-
-pub use client::{build_client, test_connection, test_connection_quiet};
-pub use progress::{
-    NoopSink, Phase, ProgressSink, S3ProgressEvent, Status, event, event_with_detail,
-};
-pub use store::{KeyringSecretStore, SecretStore, TargetsStore, load_targets};
-
-#[cfg(test)]
-pub use store::MemSecretStore;
-pub use sync::{pull_manifest, push_all, resolve_client, resolve_target, restore_entries};
-pub use types::{
-    ConnectionTestResult, InstallOutcome, InstallSummary, Manifest, ManifestEntry,
-    ManifestEntryView, PushSummary, S3TargetDef,
-};
 
 #[cfg(test)]
 pub(crate) mod test_support {
     //! Tests across this crate mutate `SKILLSTAR_DATA_DIR` (to point the
-    //! target/device stores at a temp dir). Those env mutations race when
-    //! tests run in parallel, so every such test must hold this lock for its
-    //! whole body — mirroring `skillstar_core::config::test_env_lock`.
+    //! host stores at a temp dir). Those env mutations race when tests run
+    //! in parallel, so every such test must hold this lock for its whole
+    //! body — mirroring `skillstar_core::config::test_env_lock`.
     use std::sync::{Mutex, OnceLock};
 
     pub fn env_lock() -> &'static Mutex<()> {

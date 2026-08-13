@@ -38,9 +38,10 @@ pub fn is_native_official_provider(provider: &ProviderEntryFlat) -> bool {
 pub fn ensure_official_providers(store: &mut FlatProvidersStore) -> bool {
     let mut changed = false;
     for preset_id in [CLAUDE_OFFICIAL_ID, CODEX_OFFICIAL_ID] {
-        let exists = store.providers.iter().any(|p| {
-            p.id == preset_id || p.preset_id.as_deref() == Some(preset_id)
-        });
+        let exists = store
+            .providers
+            .iter()
+            .any(|p| p.id == preset_id || p.preset_id.as_deref() == Some(preset_id));
         if exists {
             continue;
         }
@@ -48,7 +49,12 @@ pub fn ensure_official_providers(store: &mut FlatProvidersStore) -> bool {
             continue;
         };
         // Assign sort_index at the front-ish of the list without reshuffling.
-        let max_sort = store.providers.iter().map(|p| p.sort_index).max().unwrap_or(0);
+        let max_sort = store
+            .providers
+            .iter()
+            .map(|p| p.sort_index)
+            .max()
+            .unwrap_or(0);
         entry.sort_index = if store.providers.is_empty() {
             0
         } else {

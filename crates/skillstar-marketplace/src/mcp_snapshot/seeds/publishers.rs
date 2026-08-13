@@ -448,11 +448,15 @@ pub(super) fn x_curated_servers() -> Vec<McpRegistryServer> {
             identifier: "@xdevplatform/xurl".to_string(),
             version: None,
             required_env: vec!["CLIENT_ID".to_string(), "CLIENT_SECRET".to_string()],
+            registry_type: Some("npm".to_string()),
+            runtime_hint: Some("npx".to_string()),
+            ..Default::default()
         }],
         remotes: Vec::new(),
         raw_server_json: xapi_raw.to_string(),
         recommended: false,
         source: Some(source.to_string()),
+        ..Default::default()
     };
 
     let docs_desc =
@@ -486,10 +490,13 @@ pub(super) fn x_curated_servers() -> Vec<McpRegistryServer> {
             transport: "http".to_string(),
             url: "https://docs.x.com/mcp".to_string(),
             required_headers: Vec::new(),
+            transport_type: Some("streamable-http".to_string()),
+            ..Default::default()
         }],
         raw_server_json: docs_raw.to_string(),
         recommended: false,
         source: Some(source.to_string()),
+        ..Default::default()
     };
 
     vec![xapi, docs]

@@ -145,6 +145,141 @@
 - 扩展：成员撤销不维护 SkillStar 成员表，也不尝试修改 GitHub 的 Team、组织 membership 或 base permission。owner 端删除 direct collaborator 后必须以 effective permission 复查结果作为结论；subscriber 端把明确失权持久化为远程状态并 fail closed，停止后续内容 mutation，但本地已下载内容继续归用户控制。暂时网络/代理/API 错误只保留上次已知状态；权限恢复必须先通过新的仓库身份与读取权限验证。
 - 扩展：订阅远程状态采用五态投影而不是一个 revoked 布尔值：明确删除/失权为 `revoked`，网络/代理为 `offline`，未登录/限流/暂时协议错误为 `recoverable_failure`，stable ID 或组织漂移、未知 schema、tag/commit/path/hash 解绑为 `integrity_error`，全链验证通过才为 `active`。所有非 active 状态都冻结远端 mutation 并保留本地内容与最后快照；恢复探测不能跳过任何完整性校验。仓库同组织改名只按数字 repository ID 刷新本地路由，跨组织转移绝不自动跟随。
 
+## D-016：移除 S3 云同步，保留 SSH 与 GitHub 共享频道
+
+- 日期：2026-07-10
+- 状态：accepted
+- 背景：S3（跨设备技能同步）与 GitHub 共享频道（组织协作）功能重叠；维护三个传输后端（SSH/S3/GitHub）成本高于收益，产品定位同时覆盖个人与团队。
+- 决策：删除 `skillstar-sync` 的 S3 全部代码（client/store/manifest/local_pack/sync/types、`s3_sync.rs` 命令、`src/features/s3/`、IPC 契约与 i18n）。跨设备/团队共享统一走 GitHub 共享频道；SSH 保留为个人服务器部署路径。
+- 后果：个人多设备同步依赖 GitHub 仓库/组织（无 GitHub 场景失去该能力）；S3 兼容 endpoint（MinIO/R2/OSS）不再可用；`skillstar-sync` 成为 SSH-only crate。不再新增 S3 类对象存储后端。
+- 证据：crates/skillstar-sync/src/（仅 ssh）、docs/features/sync/README.md、commit 待定。
+
+## D-017：OMP（Oh My Pi）注册为独立内置 Agent，仅 Skills 分发
+
+- 日期：2026-08-10
+- 状态：accepted
+- 背景：OMP（`@oh-my-pi/pi-coding-agent`，命令 `omp`）与 Pi（`@earendil-works/pi-coding-agent`，命令 `pi`）是同源但独立的产品：配置根 `~/.omp` 与 `~/.pi` 互不读取，OMP 的模型配置是 `~/.omp/agent/config.yml`（modelRoles）+ 自有 models.db 目录，不读 `~/.pi/agent/models.json`/`settings.json`，技能位置是 `~/.omp/agent/skills`（全局）与 `.omp/skills`（项目）。此前 SkillStar 只注册 Pi，OMP 用户的技能发现、链接与部署全部失效。
+- 决策：在 `skillstar-agents::builtin` 的 extension 区（与 `grok` 并列，不在 vercel-labs 上游 id 内）注册 `omp`（显示名 Oh My Pi）：全局 `~/.omp/agent/skills`，项目 `.omp/skills`；`skillstar-skills::discovery` 优先级目录加入 `.omp/skills`。`~/.omp/agent/managed-skills`（OMP Auto-Learn 自动生成）不纳入发现与部署。轴②（Models 工具同步）暂不接入——OMP 的 provider 注入 schema（config.yml modelRoles / models.db）与 Pi 不同，待调研后另行设计。
+- 后果：OMP 用户可手动激活并在 Settings / Projects / My Skills 中链接技能；OMP 不进模型绑定矩阵（`ProviderToolId` / AGENT_SPECS）；与 `grok` 同为 SkillStar extension，同步上游注册表时不受影响。
+- 证据：`crates/skillstar-agents/src/builtin.rs`、`crates/skillstar-skills/src/discovery.rs`、`src/components/ui/icons/agentIcons.ts` 及覆盖测试；本机 `~/.omp/agent/`（config.yml、models.db、managed-skills）与 `~/.pi/agent/` 布局实证。
+
+## D-018：OMP 模型绑定采用 models.yml providers 块 + config.yml modelRoles 指针
+
+- 日期：2026-08-10
+- 状态：accepted
+- 背景：D-017 暂缓了 OMP 的轴②（Models 工具同步）。调研 OMP 源码（`@oh-my-pi/pi-coding-agent`）确认其自定义 provider 注入机制：`~/.omp/agent/models.yml`（YAML；models.yaml/models.json 为兼容回退）的 `providers.<key>` 块支持 `baseUrl` / `api` / `apiKey` / `models[]`，schema 与 Pi 的 models.json 同构；活动指针是 `~/.omp/agent/config.yml` 的 `modelRoles.default`（`provider/model` 串，可带 `:thinking` 后缀）。OMP 的 API key 解析（`resolveConfigValue`）支持 `!cmd` / env 名 / 字面量三种来源。tool-sync 现有 JSON/TOML 骨架无法覆盖 YAML。
+- 决策：在 `skillstar-models::tool_sync` 注册 `omp`（kind Multi、RequiredUrl::Openai），新增 YAML 文件规格（`format: "yaml"`，编辑器校验与格式化走 serde_yaml，保序），写 `~/.omp/agent/models.yml` 的 `providers.skillstar_*` 块（`api: "openai-completions"`、明文 `apiKey`、最小 `{ id }` 模型条目）与 `config.yml` 的 `modelRoles.default` 指针；停用只清理托管块与托管 default 指针，`slow`/`smol` 角色和用户其余设置保留。与 Pi 绑定互不影响（不同配置根）。
+- 后果：OMP 用户可在 Models 工作台绑定第三方 Provider；models.yml 由 SkillStar 以 YAML 写入（OMP 原生偏好，与用户手写格式一致）；YAML 注释不保留（与 OMP 自身写入行为一致）。
+- 证据：`crates/skillstar-models/src/tool_sync/{agents.rs,multi_provider.rs,paths_files.rs}`、`src/features/models/lib/agentRegistry.ts`、`matrixColumns.ts`、`tool_sync/tests/part4.rs` OMP 测试、`docs/features/models/README.md`。
+
+## D-019：Skill 安装/打包/采用采用 frontmatter 质量门禁
+
+- 日期：2026-08-10
+- 状态：accepted
+- 背景：open Agent Skills 生态（agentskills.io 规范、`npx skills`、Anthropic skill-creator）以 `name` + `description` 为 SKILL.md 必填字段，`description` 驱动 agent 决定何时触发技能；SkillStar 此前接受无 description 的 SKILL.md，产生空描述卡片和无法触发的安装项。同时本地目录采用路径只复制 SKILL.md，静默丢失 scripts/references/assets（数据丢失 bug）。
+- 决策：新增 `skillstar-skills::validation` 单一 frontmatter 解析/校验实现（discovery 复用同一解析器）。阻塞级问题：description 缺失/非字符串/超 1024 字符/含尖括号、name 超 64 字符、frontmatter 缺失或 YAML 损坏 —— 在 repo-scan 安装（`scan_install`，覆盖 GUI/CLI/marketplace/频道/卡组）、pack 安装、bundle 导出/导入、本地目录采用（`adopt_folder`，改为完整目录复制）处 fail-closed，错误列出全部失败技能与可行动原因。咨询级问题（name 缺失回退目录名、非 kebab-case）不阻塞，经 `DiscoveredSkill.frontmatter_issues` 传入前端展示。本地创作/分歧副本（`local_skill::create`/`create_from_snapshot`）不做门禁，避免阻止用户对已损坏内容的保存流程。CLI 本地目录安装删除重复实现，改用 `adopt_folder` facade。
+- 后果：新装/打包/采用技能保证可触发、有描述；批量安装中单个无效技能按项失败且不阻断其余；GUI 扫描预览对无效技能显示警告标记。既有已安装的无描述技能不受影响（门禁只作用于写入路径）。adoption 现在保留完整技能目录而非仅 SKILL.md。
+- 证据：`crates/skillstar-skills/src/{validation,plugin_manifest,discovery,scan_install.rs,skill_pack.rs,skill_bundle.rs,local_skill.rs}.rs`、`crates/skillstar-app/src/cli/install.rs`、`src/features/my-skills/components/import-modal/SelectSkillsPhase.tsx` 及覆盖测试。
+
+## D-020：更新检测采用 GitHub API 快速路径，凭据不出 Git session
+
+- 日期：2026-08-10
+- 状态：accepted
+- 背景：patrol/批量刷新每小时对每个唯一 repo 执行 `git fetch`，只为判断是否有技能内容变化（fetch 后还需本地 rev-parse 对比 subtree hash）。`npx skills` 用 GitHub Trees API 的目录 tree SHA 直接做远程对比，避免包传输。SkillStar 的 Git 认证纪律（D-014）要求 token 只在 askpass 子进程环境内存在。
+- 决策：新增 `skillstar-skills::update_api`：对 `github.com` 来源且能本地解析远端 ref（pinned ref 或 `origin/HEAD` symbolic ref）的 repo，每个 cycle 至多 40 个 repo、并发 4、超时 10s，以**匿名** `GET /repos/{o}/{r}/git/trees/{ref}?recursive=1` 获取递归树；目录条目 sha 即本地对比所需的 subtree hash。成功 → 该 repo 跳过 prefetch fetch，`check_update_local_with_api` 对比本地 HEAD subtree hash 与 API hash（缺失目录 → None 保留徽标）。任何失败（私有仓库 404、限流 403、网络、truncated）→ 回退既有 git fetch 路径；匿名 API 不携带凭据，凭据纪律不变。`prefetch_unique_repos_in_session_skipping` 与 `check_update_local_with_api_entry` 保持既有 None/Some 契约与 revision 裁决。
+- 后果：github.com 公共来源的更新检测从网络 fetch 降为一个轻量 API 调用；私有/非 github 来源继续走 git fetch。API 故障只影响速度不影响正确性。匿名限流（60/h/IP）由每 cycle 40 repo 上限与 403 回退共同兜底。
+- 证据：`crates/skillstar-skills/src/{update_api.rs,update_checker.rs,installed_skill.rs}` 及 `api_remote_hashes_drive_update_detection_without_fetching` 等测试。
+
+## D-021：仓库发现对齐生态容器目录深度与 Claude Code 插件清单
+
+- 日期：2026-08-10
+- 状态：accepted
+- 背景：SkillStar 的 priority 容器目录只扫描一层直接子目录，`skills/<category>/<name>/SKILL.md` 这类 catalog 布局在已有扁平技能时被漏掉（`npx skills` 走 3 层且浅层技能遮蔽嵌套）；Claude Code 插件生态（anthropics/skills、daymade、Sylph 官方仓库）用 `.claude-plugin/marketplace.json`/`plugin.json` 声明技能路径，SkillStar 完全不读。
+- 决策：`discovery::scan_priority_skill_dirs` 改为对每个容器目录最多走 3 层，含 SKILL.md 的目录遮蔽其下内容；仓库根保持 1 层。新增 `skillstar-skills::plugin_manifest`：读取 `.claude-plugin/marketplace.json`（`pluginRoot` + 本地 `./` 前缀 `source`/`skills[]`，跳过远程 source）与 `plugin.json`，在路径包含性与 `./` 前缀校验后，把声明的技能父目录以 depth-1 加入扫描。
+- 后果：catalog 布局仓库在 root-first 模式即完整发现；Claude Code 插件市场仓库的声明技能可被扫描、预览与安装。manifest 只读取技能位置，不执行插件安装逻辑；越界/非 `./` 路径被拒绝。
+- 证据：`crates/skillstar-skills/src/{discovery.rs,plugin_manifest.rs}`、`depth_and_plugin_tests` 与 `plugin_manifest` 测试。
+
+## D-022：门禁补齐、死代码清理与单一名称解析（编排审查轮）
+
+- 日期：2026-08-10
+- 状态：accepted
+- 背景：三名只读审查 agent（安装路径/死代码/解耦）确认 D-019 门禁在 scan_install/bundle/pack/adopt_folder/频道安装处生效，但发现三个可绕过入口：`install_skill` 的直接 clone 回退把门禁失败当 Ok(None) 后整库克隆且不校验；share_install embedded 走未门禁的 `local_skill::create`；projects/import 直接调 `adopt_existing_dir_locked` 不校验。同时：CLI 的 `find_target_skill_preview` 与域版存在已证实的语义漂移（显式 name 不匹配时预览误报 would-be-installed），`derive_name_hint` 双实现，`src-tauri/Cargo.toml` 把 4 个无条件 import 的内部 crate 声明成 macOS-only 目标依赖（Linux/Windows CI 提交后必红）。
+- 决策：① 三个绕过入口全部接入 `validation::ensure_installable`：直接 clone 后校验、失败删克隆并返回可行动错误；embedded 创建后校验、失败回滚删除；项目导入逐技能校验、失败跳过并告警。② 删除经全仓 grep 证实的死代码：`adopt_existing_dir`/`validate_agent_ids`/`card_window_labels`/patrol 两个 sessionless wrapper/`normalize_repo_url` shim/S3 路径 helper/`TutorialLoadResult` 别名/`SkillCandidate.skill_md_path` 死字段/`shared.rs` 与 `src-tauri/src/core/path_env.rs` 两个一行垫片/根 re-export 裁剪（仅留 `Skill`/`SkillContent`/`discover_skills`）。③ 名称解析单一化：`source_resolver::derive_skill_name_hint`（Source-aware）成为唯一实现，域安装与 CLI 共用；`find_target_skill` 提升为 pub，CLI 删除内联副本。④ 4 个内部 crate 依赖移入通用 `[dependencies]`。
+- 后果：门禁对任何安装入口都 fail-closed；预览与实装不再出现结论分歧；非 macOS 平台构建不再缺 crate；`skillstar-skills` 对外根路径只剩 3 个 re-export。死代码删除均为全仓零调用验证，不影响行为；`AgentProfile.installed`、`skillstar-git` sessionless wrappers、repo_history 写路径、ACP full-access 分支按审查结论保留待后续确认。
+- 证据：`crates/skillstar-skills/src/{skill_install,share_install,validation,source_resolver,discovery,local_skill}.rs`、`crates/skillstar-skills/src/projects/import.rs`、`crates/skillstar-app/src/cli/`、`crates/skillstar-channels/src/patrol/`、`src-tauri/Cargo.toml`、`direct_clone_gate_tests` 等测试；编排 run `run_3c969aa725f6`（REVIEW-A2/B/C2）。
+
+## D-023：拉取多源化：Git mirror 候选链 + Marketplace host 链 + 内容寻址增量
+
+- 日期：2026-08-10
+- 状态：accepted
+- 背景：对抗审查场景下任何单一远端都是单点故障：`skills.sh` 或 `github.com` 被 DNS 污染/SNI 阻断后，商店拉取与技能安装/更新整条链路不可用；已有 `github_mirror` 只支持一个 mirror，失败仅回退直连。同时快照同步每次全量 delete+reinsert，无法判断"远程内容是否变化"，也没有来源记录可供审计。
+- 决策：① Git mirror 从单值扩展为候选链：`candidate_mirror_urls()` 返回"custom → 选中 preset → 其余 presets（去重、规范化）"，`skillstar-git` 的 transport/ops 对每个候选逐个尝试，全部失败才回退直连 GitHub；带凭据操作仍禁止走 mirror。② Marketplace 拉取增加 host 链：`remote::marketplace_hosts()` 以 `https://skills.sh` 为首，按 `config/marketplace_mirror.json` 追加镜像；`fetch_with_failover` 按序尝试、失败降级，并返回 `FetchMeta{payload_sha256, source_host, etag}`。③ sync_state schema v11 新增 `source_host`/`payload_sha256`/`etag` 列；快照同步与 MCP registry 同步接入内容寻址增量写：payload 未变化（304 或 sha256 相同）时只更新时间戳、保留旧数据与指纹，跳过全量重写。
+- 后果：任何单个 mirror/host 失效都能自动降级到下一个候选，技能安装/更新与商店拉取在审查环境下可恢复；快照写放大显著下降且可审计数据来源。副作用：同步语义从"总是重写"变为"内容寻址增量"，依赖指纹正确性（sha256 冲突风险可忽略）；host 链按序尝试增加了失败时的延迟。
+- 证据：`crates/skillstar-core/src/config/github_mirror.rs`、`crates/skillstar-git/src/{transport,ops}.rs`、`crates/skillstar-marketplace/src/remote/mod.rs`、`crates/skillstar-marketplace/src/snapshot/{sync,sync_state,migrations}.rs`、`v11_migration_adds_content_addressing_columns` 等测试。
+
+## D-024：共享 skills 目录塌缩为部署目标，归属改由链接指向 hub 推导
+
+- 日期：2026-08-12
+- 状态：accepted（决策已定，落地未开始；本条只记录选择与约束）
+- 背景：`BUILTIN_AGENT_DEFS` 的 74 个内置 Agent 中，多组解析到**同一个物理目录**：Global 侧 `~/.agents/skills`（cline/dexto/kimi-code-cli/loaf/warp/zed）、`<config>/agents/skills`（amp/replit/universal）、`~/.zencoder/skills`（zencoder/zenflow）；Project 侧 `.agents/skills` 被 18 个 Agent 共用，另有 `.qoder/skills`、`.trae/skills`、`.zencoder/skills` 各 2 个。D-007 已为 Project 侧选择"manifest 单一 owner + 按路径去重"，但只读取证证明该模型两侧都未兑现，且失败形状同源：**磁盘上不存在"这条 entry 是谁装的"这一信息，代码在需要它时一律退化为"看起来像技能就删"**。Global 侧更彻底——`deployment/` 下没有任何归属记录，`unlink_skill_from_agent`(`deployment/mod.rs:305-336`) 直接删共享目录里的条目，其余 5 个仍启用的 Agent 静默失去该技能；Project 侧 `remove_skill_from_all_projects`(`projects/sync.rs:132-157`) 与 `clear_project_symlinks`(`projects/helpers.rs:36-39`) 会删掉从未登记进 `skills-list.json` 的目录，与 `sync.rs:103-106` 自己的注释直接矛盾。根本困难在于 per-agent 归属是产品虚构：`~/.agents/skills` 是生态共享约定，zed 事实上就能加载 cline 部署的技能，任何试图记录归属的方案在存量磁盘上都没有正确的起手（已有部署无归属记录，记为无主/归给全部/归给第一个三种起手都错）。
+- 决策：① **目录即部署单元**：把 canonical 目录键提升为一等"部署目标"，N 个解析到同一目录的 Agent 在部署模型与 UI 上塌缩为 1 项并列出成员 Agent；不记录 per-agent 归属，因为它在物理上不存在。Agent 的**启用开关仍是 per-agent 的**（D-009 不变），只塌缩部署目标，不塌缩激活状态。② **归属零状态推导**：一条 entry 属于 SkillStar，当且仅当其链接目标落在 `hub_skills_dir()` 之下——已验证 5 个全局写入点（`deployment/mod.rs:165/406/532/536/631`）的 src 全是 hub 绝对路径，且 `read_link_resolved`(`fs_ops.rs:174-184`) 确定只解一跳，hub→repo cache 的两跳链返回中间的 hub 路径。③ **容器判定复用 `repo_link::is_inside`**(`repo_link.rs:65-77` 及其 `normalize`:79-93) 的形态（双侧 canonicalize with fallback + 分隔符归一 + Windows 小写折叠），提升为可复用实现，并把 `local_skill.rs:174`、`git/gh_manager.rs:432`、`storage_maintenance.rs:183` 三处裸 `starts_with` 一并收敛；`repo_link.rs:4-9` 已记录过"两份实现分叉导致 Windows junction 误判"的同类事故，不制造第四份。④ **目录身份键**用 `canonicalize_with_missing_tail`(`skill_update/mod.rs:390-412`) 提升到 `skillstar_core::infra::paths`（处理"目录尚不存在"），与 ③ 的容器判定是两个不同问题，不合并。键只在每次 `list_profiles()` 快照内重算，**不持久化**——openclaw(`builtin.rs:487-494`) 与 5 个 env 驱动 Agent(`builtin.rs:102/115/152/237/294`)、`XDG_CONFIG_HOME`(`builtin.rs:473-478`) 的目录会随环境与磁盘状态漂移。⑤ **copy 形态用 sibling marker**（无链接可读），判定顺序是先试 link 谓词、`is_link` 为假才查 marker。⑥ **拒绝 project root 等于或包含任一 agent global 目录**：`ensure_project_root_exists`(`projects/types.rs:74-85`) 与 `cli/install.rs:132` 今天只检查 `is_dir()`，HOME 可被注册成 project 从而让 project 部署写进 global 共享目录，此时两个 surface 的 src 同为 hub、谓词无法区分。⑦ 归属判定**不复用** `acquire_skill_mutation_lease`：它是不可重入的进程级 `Mutex`(`skill_update/transaction.rs:4-7`)，三个 resync 入口已在其内，deployment 层再 acquire 会自死锁；改为按目录键的独立同步，并覆盖今天完全无锁的 5 个 Tauri 命令（`commands/skills.rs:91`、`commands/agents.rs:28/44/64/76`）。
+- 后果：获得——存量**零迁移**（磁盘即真相，不需要任何归属回填或"收养"决策）；崩溃后重扫即一致（不引入第二份可与磁盘分叉的状态）；4 处计数串台（`installed_skill.rs:532-548`、`registry.rs:131-153`、`deployment/mod.rs:280-302`、`global_deploy.rs:23-38`）结构性消失而非逐个打补丁；CLI 已有的 `seen_dirs` 去重(`deployment/mod.rs:476,491`)从特例**泛化**为全局不变量。承担——Settings 里共享目录的多行塌缩为一行是**可见的 UX 退让**，需文案说明"这是这些 Agent 自己的生态约定，非 SkillStar 决定"；`AgentProfile` 是冻结的 8 字段 IPC（`registry.rs:16-18`、本文件 D-008），塞不进第 9 个字段，必须新开 `list_deploy_targets` IPC 而非扩展它；unlink 语义从"从某个 Agent 移除"变为"从某个目录移除（影响其全部成员 Agent）"，这是**如实陈述**而非降级——旧语义在磁盘上从未成立。本条扩展 D-007：D-007 的"按路径去重"方向正确但只在 `build_path_plans`(`projects/sync.rs:57-98`) 与 `add_skills_to_project_with_mode`(`sync.rs:419-465`) 两处兑现，scan/rebuild/cleanup 三处未兑现，本条把该不变量的适用范围扩展到 Global 侧并要求两侧同源实现。落地必须先于模型改动修掉三条既有 bug：`swap_in_fresh_deploy` 与 unlink 之间的 lost update（`mod.rs:635-640` + `mod.rs:102`，用户看到"已取消部署"但 rename 把技能复活）、`toggle_skill_for_agent` enable 分支先删后建不回滚（`mod.rs:154-173`，应复用 `mod.rs:619-654` 的先建后换）、以及 ⑦ 的无锁命令同步。
+- 证据：只读取证编排 run `run_f21c372c2a96`（Global 取证 / Project 取证 / lease 与碰撞面 / 候选模型对抗评估 / provenance 验证，5 个 Task）。代码依据见 `crates/skillstar-agents/src/builtin.rs`、`crates/skillstar-skills/src/deployment/mod.rs`、`crates/skillstar-skills/src/projects/{sync,helpers,rebuild,scan}.rs`、`crates/skillstar-skills/src/repo_link.rs`、`crates/skillstar-core/src/infra/fs_ops.rs`。可复发根因与自检见 [errors.md](./errors.md) 同日条目。
+
+## D-025：OMP 模型角色存在 binding 级设置袋，未分配角色不写盘
+
+- 日期：2026-08-13
+- 状态：accepted
+- 背景：D-018 只写了 `modelRoles.default`，而 OMP 的核心差异化能力恰恰是按任务意图路由的多角色系统（`default` 正常编码 / `smol` 廉价子代理 fan-out / `slow` 深度推理 / `plan` 规划模式，命令行对应 `--model` / `--smol` / `--slow` / `--plan`，另有 vision/designer/commit/tiny/task/advisor 六个）。用户要在 SkillStar 内完成这层配置，就必须能为**不同角色指定不同 provider**（典型配置是 default 用便宜的快模型、slow 用推理模型、smol 用最便宜的），因此角色不能挂在任何单个 provider 条目上。既有扩展点 `ToolActivation.settings` 是 per-entry（per-provider）的：`activate_tool` 在重新激活同一 provider 时按 provider 继承它（`crud.rs:331-342`），active 指针一变角色就会跟着漂。对 OMP v17.2.15 源码与二进制的实证确认：`modelRoles` 是**无 schema 校验**的开放 string map（`settings-schema.ts:569` 的 `type: "record"`，config.yml 整体不过 arktype），值语法为 `provider/model[:thinkingLevel]`，`@role` 是角色别名前缀，`smol`/`slow`/`designer` 未配置时由 OMP 自己回落到 `default`（`shouldInheritDefaultBeforePriority`）。
+- 决策：在 `ToolBinding` 上新增**binding 级** `settings: Option<Value>`，作为 `ToolActivation.settings` 的工具级兄弟，首个消费者是 `OmpSettings { roles: BTreeMap<String, OmpRoleTarget> }`（`OmpRoleTarget { provider_id, model, thinking }`，存 SkillStar provider id 而非磁盘上的 `skillstar_*` 键，键在写入时由 `skillstar_managed_key` 现算，避免两处规则分叉）。写入命令 `update_tool_binding_settings` 与既有 `update_tool_settings` 对称。落盘策略与 models.yml 托管块的 retain 一致：**先删除全部指向 `skillstar_*` 的角色，再写当前集合**，因此 UI 取消分配等价于磁盘删除；指向用户自有 provider 的角色永不触碰。**未分配的角色不写**（OMP 自身的回落机制比我们写一个冗余指针更正确），`default` 缺失时由 active 条目兜底以保持 D-018 行为。悬空防护：角色指向未绑定 / 无 OpenAI base URL / 未选模型的 provider 一律跳过；角色名含 `/`、空白或以 `@` 开头（撞 OMP 别名语法）一律跳过。解绑与删除 provider 连带清除其角色分配（`prune_binding_roles_for_provider` 只操作 `roles` 键，保留设置袋内其他键）。
+- 后果：获得——用户在 Models 矩阵内即可完成 OMP 的全部角色路由，无需手写 YAML；binding 级设置袋对未来其他"跨 entry 配置"（OpenCode 的 `small_model`、Claude 的层级模型）是现成接缝。承担——`ToolBinding` 新增字段需要前端手写类型 `src/types/models.ts` 同步（该文件不在 `types:gen` 覆盖范围内，是既有分歧，本条未修复）；不代写 OMP 的 `cycleOrder`，因此用户配置的 `plan` 角色不会进 Ctrl+P 循环（默认只循环 smol/default/slow），这是 OMP 侧行为，由 UI 文案说明而非替用户改设置。
+- 证据：`crates/skillstar-models/src/tool_sync/{types.rs,omp_provider.rs}`、`crates/skillstar-models/src/providers/{types.rs,crud.rs}`、`src-tauri/src/commands/models_commands/tools.rs`、`src/features/models/lib/{ompRoles.ts,toolBinding.ts}`、`tool_sync/tests/part4.rs` 与 `providers/tests/part5.rs` 覆盖测试；schema 依据为 OMP v17.2.15 包内源码（`src/config/{model-roles,settings-schema,model-resolver,models-config-schema-bundle}.ts`）；落盘结果经真实 `omp` 二进制验证（`omp models --json` 零告警、`omp -p --model @slow/@smol/@plan` 均正常解析，未配置角色对照组报 `Model not found`）。
+
+## D-026：官方 MCP Registry 为一等主源，GitHub registry 降级为增强镜像
+
+- 日期：2026-08-13
+- 状态：accepted
+- 背景：MCP catalog 此前只有一个源 `api.mcp.github.com`，实测已从 `/v0` 返回 `Deprecation: true`，且其条款没有任何公开的再分发说明——我们却把它整表镜像进本地 SQLite 快照并长期保留。同期官方 registry `registry.modelcontextprotocol.io/v0.1` 已可用，实测 21338 条（`version=latest`），而 GitHub 侧只有 218 条；官方 registry 的 Terms of Service 明确把数据置于 **CC0 1.0**，是当前唯一在许可上允许长期本地镜像的源。两者字段互补：GitHub 侧额外带 stars / license / readme，官方侧没有。
+- 决策：官方 registry 成为 `priority: 0` 的一等主源且 `mirrorable: true`；GitHub registry 降为 `priority: 10` 的**展示增强镜像**（`mirrorable: false`），只在合并时补 stars/license/readme 这类官方源不携带的字段，不再定义"有哪些 server"。`priority` 语义被明确为**权威性**而非偏好：用户自定义源起始 `priority: 50`，永远输给内置源，但可以补充无人收录的 server。分页熔断按源设置而非全局——主源被截断会让 catalog 永久性不完整（`max_pages: 400`），而受 `x-ratelimit-limit: 10` 限制的镜像宁可截断也不该被反复敲打（`max_pages: 50`）。
+- 后果：获得——catalog 从 218 条扩到 21363 条（跨源合并 189、deprecated 243）；镜像行为落在明确许可的源上；单源故障不再等于 catalog 归零。承担——本地快照体量与同步耗时上一个数量级，因此**全量未分页读取不再是可用的浏览路径**（见 D-027 的分页要求）；聚合 fingerprint 必须改为按 `id=hash` 排序哈希，否则新增/移除一个源或某源答 304 都会产生假"已变更"。
+- 证据：`crates/skillstar-marketplace/src/mcp_remote/{sources.rs,fetch.rs,merge.rs}`、`crates/skillstar-marketplace/src/mcp_snapshot/mod.rs`；调研与实测端点见 `docs/others/mcp-modern-design-research.md` §3.1/§3.7/§4.1（抓取 2026-08-13）。
+
+## D-027：跨源合并主键是 `server.json` 的 `name`，不是各源的 id
+
+- 日期：2026-08-13
+- 状态：accepted
+- 背景：接入第二个源之后必须回答"两行是不是同一个 server"。每个 registry 都发自己的 id，同一个 server 在官方源和 GitHub 源下 id 不同；用 id 做主键会把同一个 server 重复上架两次，用户看到两张卡片、装出两份配置。`server.json` 的 `name` 是反向域名全名（如 `io.github.netdata/mcp-server`），schema 要求发布者证明命名空间所有权，是唯一跨源稳定的身份。
+- 决策：合并以 `name` 为主键；同名多版本按 registry 的 `isLatest` 收敛。安装时记录到 `McpServerEntry::registry_name` 的也是这个 `name`，与写进工具配置的 sanitized key 明确区分——后者是配置键，会因为字符清洗而丢失身份信息。
+- 后果：获得——跨源去重正确，"已安装"判定与更新检测可以摆脱 server 名字字符串的模糊匹配。承担——`name` 缺失或畸形的源行会被合并逻辑跳过；这是刻意的，一个连身份都没有的条目也无法被安全地安装或更新。
+- 证据：`crates/skillstar-marketplace/src/mcp_remote/merge.rs`、`crates/skillstar-marketplace/src/mcp_models/mod.rs` 的 `namespace` 字段文档、`crates/skillstar-app/src/mcp/draft.rs` 的来源指纹映射。
+
+## D-028：不接入 PulseMCP 与 mcp.so
+
+- 日期：2026-08-13
+- 状态：accepted
+- 背景：调研阶段评估了六个第三方 MCP 目录作为潜在补充源。两个必须明确拒绝，否则日后会被反复重新提出。
+- 决策：**不接入 PulseMCP**——其 API 公告 2026-09 全量日落，且在此之前已强制 API key；接一个已宣布死期的源，是在为一次确定的返工付费。**不接入 mcp.so**——其 `robots.txt` 明确禁止 `/api/`，抓取它等于无视站点的明示意愿，与我们对自己数据源的要求不一致。
+- 后果：获得——避免重复调研，避免把工程投入押在确定会消失的端点上。承担——放弃这两家独有的收录条目。Smithery（`useCount` 热度、预抓取 `tools[]`）与 Glama（`spdxLicense`）未被拒绝，但只可能作为**运行时代理查询**的展示补充，不做长期镜像：两家都没有公开的再分发条款，与 D-026 的镜像许可要求冲突。
+- 证据：`docs/others/mcp-modern-design-research.md` §4.3/§4.5/§4.8/§7 P2-7（端点与 robots.txt 抓取于 2026-08-13）。
+
+## D-029：MCP 运行时形态优先 remote，且以本机实际可用运行时为准
+
+- 日期：2026-08-13
+- 状态：accepted
+- 背景：一个 `server.json` 可以同时给出 `remotes[]` 与 `packages[]`。此前的选择逻辑是"有 packages 就取 `packages[0]`，否则取 `remotes[0]`"——由数组顺序决定在用户机器上执行什么，既不是安全判断也不是可用性判断。
+- 决策：优先级为 `remotes[streamable-http]` > `remotes[sse]`（可用但传输已弃用，必须标注） > `packages[oci]`（容器隔离，最安全的本地形态） > `packages[mcpb]` > `packages[npm/pypi/nuget/cargo]`。remote 优先的理由是它零工具链依赖、零本地代码执行，且规范把 OAuth 授权明确限定为 HTTP 传输的能力。**rank 不是最终答案**：`runtimeHint` 只是提示，每个 stdio 候选都要对真实 `PATH` 探测一次（复用与真正启动进程相同的 resolver），不可用的候选排在所有可用候选之后——没装 Docker 的机器上 npm 包胜过 OCI 包。选择器返回**全部候选 + 推荐项**而非单一结果，用户可以覆盖。
+- 后果：获得——默认选择同时是安全排序和可用性排序；"为什么推荐这个"可以在 UI 上解释（rank + 可用性 + 阻塞原因）。承担——`mcpb` 候选被列出但标为不可安装（SkillStar 没有"下载并校验 `fileSha256`"这一步，而 registry 明确不做校验），无 `runtimeHint` 的 `cargo` 候选同样不可安装（`cargo install` 是持久安装而非一次性运行器）；这两条是如实陈述能力边界，旧行为在这两种形态上本来也跑不起来，只是失败得更晚更难懂。
+- 证据：`crates/skillstar-app/src/mcp/runtime.rs` 与 `crates/skillstar-app/src/mcp/tests.rs`（注入式 `PATH` 探测，排序规则逐条 pin）；依据见 `docs/others/mcp-modern-design-research.md` §6.4。
+
+## D-030：Deck 自持 Agent 链接，不从成员 Skill 推导
+
+- 日期：2026-08-13
+- 状态：accepted
+- 背景：Deck 卡片底部的 Agent rail 原本是纯派生量——卡组内已安装 Skill 全部链接到某 Agent 就点亮。自从 GUI 安装会把新装 Skill 部署到全部已启用 Agent（见 `crates/skillstar-app/src/global_deploy.rs`），任何新建卡组一出生就全亮，rail 不再表达任何用户意图，"取消链接"成了唯一可用操作。
+- 决策：`SkillGroup` 增加 `agent_links: Option<Vec<String>>`，语义是**用户为这个卡组显式认领的 Agent**。新建卡组为空集，rail 全灰；点亮才批量链接成员 Skill。派生量降级为漂移指示：已认领但成员并非全部实际链接时显示 mixed，未认领一律不点亮。`None` 表示该卡组早于此字段，由 `skillstar-app::skill_group_links` 按旧派生规则一次性回填并落盘，避免升级瞬间抹掉用户既有的 rail。
+- 后果：获得——新建卡组的默认状态回到"什么都没做"，rail 重新可读为意图；卡组与 Skill 两级链接语义分离，安装期全局部署不再污染卡组视图。承担——两级状态可能漂移，必须靠 mixed 显式暴露，不能静默取整；回填规则是一次性近似（以回填当刻的磁盘状态为准），此后不再重算。
+- 证据：`crates/skillstar-skills/src/skill_group.rs` 与 `crates/skillstar-app/src/skill_group_links.rs` 的测试；行为见 `docs/features/skills/README.md`。
+
 ## 新增记录格式
 
 ```text

@@ -20,38 +20,56 @@ pub fn remove_pack(name: &str) -> Result<Vec<String>> {
 
     let pack = &store.packs[pack_idx];
     for skill in &pack.skills {
-        crate::shared_channels::ensure_generic_skill_mutation_allowed(&skill.name)?;
+        crate::skill_mutation::policy().ensure_skill_mutation_allowed(&skill.name)?;
     }
     let hub = skillstar_core::infra::paths::hub_skills_dir();
     let mut removed = Vec::new();
 
-    for skill in &pack.skills {
-        let skill_path = hub.join(&skill.name);
-        if skillstar_core::infra::fs_ops::is_link(&skill_path) || skill_path.exists() {
-            if skillstar_core::infra::fs_ops::is_link(&skill_path) {
-                match skillstar_core::infra::fs_ops::remove_symlink(&skill_path) {
-                    Ok(()) => removed.push(skill.name.clone()),
-                    Err(e) => {
-                        tracing::warn!("Failed to remove skill symlink '{}': {}", skill.name, e);
-                    }
-                }
-            } else {
-                match std::fs::remove_dir_all(&skill_path) {
-                    Ok(()) => removed.push(skill.name.clone()),
-                    Err(e) => {
-                        tracing::warn!("Failed to remove skill dir '{}': {}", skill.name, e);
-                    }
-                }
-            }
-        }
-    }
-
-    // Remove from lockfile
+    // Load the lockfile once, before touching anything: a real directory under
+    // a pack skill's name is only deleted when the lockfile proves SkillStar
+    // installed it. A user-owned directory that merely shares the name must
+    // not be destroyed by removing a pack.
     let _lock2 = crate::lockfile::get_mutex()
         .lock()
         .map_err(|_| anyhow!("Lockfile mutex poisoned"))?;
     let lf_path = crate::lockfile::lockfile_path();
     let mut lf = crate::lockfile::Lockfile::load(&lf_path)?;
+
+    for skill in &pack.skills {
+        let skill_path = hub.join(&skill.name);
+        if !skillstar_core::infra::fs_ops::is_link(&skill_path) && !skill_path.exists() {
+            continue;
+        }
+        if skillstar_core::infra::fs_ops::is_link(&skill_path) {
+            match skillstar_core::infra::fs_ops::remove_symlink(&skill_path) {
+                Ok(()) => removed.push(skill.name.clone()),
+                Err(e) => {
+                    tracing::warn!("Failed to remove skill symlink '{}': {}", skill.name, e);
+                }
+            }
+            continue;
+        }
+        // Real directory: only remove it when the lockfile tracks this skill
+        // (i.e. SkillStar installed it). Refuse otherwise — it may be a
+        // user-owned directory that happens to share the name.
+        if !lf.skills.iter().any(|entry| entry.name == skill.name) {
+            tracing::warn!(
+                "Skipping '{}': directory exists but is not tracked as an installed Skill; refusing to delete a possibly user-owned directory",
+                skill.name
+            );
+            continue;
+        }
+        // remove_link_or_copy also verifies the directory looks like a managed
+        // skill copy (contains SKILL.md) before deleting it.
+        match skillstar_core::infra::fs_ops::remove_link_or_copy(&skill_path) {
+            Ok(()) => removed.push(skill.name.clone()),
+            Err(e) => {
+                tracing::warn!("Failed to remove skill directory '{}': {e:#}", skill.name);
+            }
+        }
+    }
+
+    // Remove from lockfile
     for skill in &pack.skills {
         lf.remove(&skill.name);
     }

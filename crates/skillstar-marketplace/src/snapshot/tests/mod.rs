@@ -7,6 +7,10 @@ use std::sync::{Mutex, OnceLock};
 mod part1;
 mod part2;
 mod part3;
+mod part4;
+mod part5;
+mod part6;
+mod part7;
 
 fn test_env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();

@@ -9,9 +9,10 @@ use anyhow::{Context, Result};
 use skillstar_core::infra::{fs_ops, paths as fs_paths};
 use std::collections::HashMap;
 use std::path::Path;
+use tracing::warn;
 
 use super::{ImportResult, ImportTarget, load_skills_list, register_project, save_skills_list};
-use crate::agents;
+use skillstar_agents as agents;
 use crate::local_skill;
 
 /// Import discovered skills into local storage and update the project's skills-list.
@@ -22,7 +23,7 @@ pub fn import_scanned_skills(
 ) -> Result<ImportResult> {
     let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()?;
     for target in targets {
-        crate::shared_channels::ensure_generic_skill_mutation_allowed(&target.name)?;
+        crate::skill_mutation::policy().ensure_skill_mutation_allowed(&target.name)?;
     }
     let entry = register_project(project_path)?;
     let canonical_project_name = entry.name;
@@ -82,6 +83,18 @@ pub fn import_scanned_skills(
         }
 
         if !source_dir.join("SKILL.md").exists() {
+            continue;
+        }
+
+        // Frontmatter quality gate (shared with the repo-install path): a
+        // project skill without a usable description is not adoptable.
+        if let Err(reason) = crate::validation::ensure_installable(&source_dir) {
+            warn!(
+                target: "projects_import",
+                skill = %target.name,
+                error = %reason,
+                "skipping project skill rejected by frontmatter gate"
+            );
             continue;
         }
 
@@ -161,7 +174,7 @@ mod tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(
             skill_dir.join("SKILL.md"),
-            format!("---\nname: {name}\n---\n# {name}\n"),
+            format!("---\nname: {name}\ndescription: {name} project skill\n---\n# {name}\n"),
         )
         .unwrap();
     }

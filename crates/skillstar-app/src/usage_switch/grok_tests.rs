@@ -78,20 +78,23 @@ struct MemorySessions {
 }
 
 impl GrokSessionStore for MemorySessions {
-    fn load(&self, subscription_id: &str) -> Result<Option<Value>, String> {
+    fn load(&self, subscription_id: &str) -> Result<Option<Value>, GrokIoError> {
         Ok(self.entries.get(subscription_id).cloned())
     }
 
-    fn save(&mut self, subscription_id: &str, entry: &Value) -> Result<(), String> {
+    fn save(&mut self, subscription_id: &str, entry: &Value) -> Result<(), GrokIoError> {
         if self.fail_save {
-            return Err("snapshot store unavailable".into());
+            return Err(GrokIoError::Replace {
+                file: GrokFile::SessionStore,
+                source: std::io::Error::other("snapshot store unavailable"),
+            });
         }
         self.entries
             .insert(subscription_id.to_string(), entry.clone());
         Ok(())
     }
 
-    fn remove(&mut self, subscription_id: &str) -> Result<(), String> {
+    fn remove(&mut self, subscription_id: &str) -> Result<(), GrokIoError> {
         self.entries.remove(subscription_id);
         Ok(())
     }
@@ -128,7 +131,7 @@ impl GrokAuthFile for MemoryAuthFile {
         &self.path
     }
 
-    fn load(&self) -> Result<LoadedAuth, String> {
+    fn load(&self) -> Result<LoadedAuth, GrokIoError> {
         Ok(LoadedAuth {
             root: self.root.borrow().clone(),
             revision: self.raw_revision(),
@@ -150,7 +153,7 @@ impl GrokAuthFile for MemoryAuthFile {
         }
         if self.raw_revision() != loaded.revision {
             return Err(AuthCommitError {
-                message: "Grok auth.json 在切换期间被其他进程修改".into(),
+                reason: AuthCommitReason::ConcurrentModification,
                 target_installed: false,
             });
         }
@@ -158,7 +161,10 @@ impl GrokAuthFile for MemoryAuthFile {
         self.commits.set(self.commits.get() + 1);
         if self.fail_after_commit.get() {
             return Err(AuthCommitError {
-                message: "Grok auth.json 已替换，但权限核验失败".into(),
+                reason: AuthCommitReason::Io(GrokIoError::UnexpectedMode {
+                    path: self.path.clone(),
+                    mode: 0o644,
+                }),
                 target_installed: true,
             });
         }
@@ -170,7 +176,7 @@ impl GrokAuthFile for MemoryAuthFile {
         }
         if self.root.borrow().get(scope) != Some(expected_entry) {
             return Err(AuthCommitError {
-                message: "Grok auth.json 写入后被覆盖".into(),
+                reason: AuthCommitReason::OverwrittenAfterCommit,
                 target_installed: false,
             });
         }
@@ -535,7 +541,7 @@ fn disk_adapter_fails_closed_on_malformed_json() {
 
     let error = auth.load().unwrap_err();
 
-    assert!(error.contains("不是有效 JSON"));
+    assert!(error.to_string().contains("不是有效 JSON"));
     assert_eq!(fs::read(path).unwrap(), b"{not-json");
 }
 

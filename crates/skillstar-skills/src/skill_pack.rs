@@ -324,7 +324,7 @@ pub(crate) fn install_pack_locked(
     source: &str,
     repo_url: &str,
 ) -> Result<Vec<String>> {
-    crate::shared_channels::ensure_generic_repository_mutation_allowed(repo_url)?;
+    crate::skill_mutation::policy().ensure_repository_mutation_allowed(repo_url)?;
     let manifest =
         detect_pack(repo_dir)?.ok_or_else(|| anyhow::anyhow!("No skillpack.toml found in repo"))?;
 
@@ -348,7 +348,7 @@ pub(crate) fn install_pack_locked(
     // A generic pack install must never replace content owned by a shared
     // channel, regardless of that subscription's current remote state.
     for skill in &manifest.skills {
-        crate::shared_channels::ensure_generic_skill_mutation_allowed(&skill.name)?;
+        crate::skill_mutation::policy().ensure_skill_mutation_allowed(&skill.name)?;
     }
 
     // Validate complete baselines before any hub entry is replaced. A snapshot
@@ -358,6 +358,11 @@ pub(crate) fn install_pack_locked(
         .iter()
         .map(|skill| {
             let source = resolve_pack_skill_source(repo_dir, &skill.path)?;
+            // Frontmatter quality gate (shared with the repo-install path):
+            // a pack may only install valid skills.
+            crate::validation::ensure_installable(&source).map_err(|reason| {
+                anyhow::anyhow!("Skill '{}' is not installable: {reason}", skill.name)
+            })?;
             let hash = crate::content::snapshot_path(&skill.name, &source)
                 .with_context(|| {
                     format!("Failed to capture content baseline for '{}'", skill.name)
@@ -642,18 +647,25 @@ fn post_install_interpreter(ext: &str) -> PostInstallInterpreter {
     }
 }
 
-/// Execute a post-install script with timeout.
-/// Returns the exit code (0 = success).
+/// Execute a post-install script with a hard timeout.
+/// Returns the exit code (0 = success; -1 = spawn/interpreter failure; -2 =
+/// killed after `timeout_secs` elapsed).
 ///
-/// On Unix the script is run with `sh -c` (the historical behaviour, so
-/// existing `post_install` bash scripts keep working). On Windows there is no
-/// `sh` on PATH by default, so the interpreter is selected by the script file
-/// extension: `.ps1` → PowerShell, `.bat`/`.cmd` → `cmd /C`, anything else
-/// (including extensionless `.sh`) falls back to `sh -c` so a Git Bash
-/// install can still run bash-style scripts. A missing interpreter now yields
-/// a readable non-zero exit code instead of a bare `-1`.
-fn execute_post_install(script: &Path, working_dir: &Path, _timeout_secs: u64) -> i32 {
+/// On Unix the script is run by `sh <path>` (never `sh -c`, so the script
+/// *path* can never be interpreted as shell code — the path has already been
+/// validated as repository-relative, but shell metacharacters are legal in
+/// paths). On Windows the interpreter is selected by the script file
+/// extension: `.ps1` → PowerShell, `.bat`/`.cmd` → `cmd /C "<path>"`, anything
+/// else (including extensionless `.sh`) falls back to `sh <path>` so a Git
+/// Bash install can still run bash-style scripts.
+///
+/// The child is killed once `timeout_secs` elapses: a hung `while true` pack
+/// script must not stall the install forever — the caller holds the global
+/// update transaction lock while this runs, so an unbounded wait would block
+/// every skill mutation in the app.
+fn execute_post_install(script: &Path, working_dir: &Path, timeout_secs: u64) -> i32 {
     use skillstar_core::infra::path_env::command_with_path;
+    use std::time::{Duration, Instant};
 
     let ext = script.extension().and_then(|e| e.to_str()).unwrap_or("");
     let script_str = script.to_string_lossy();
@@ -662,7 +674,7 @@ fn execute_post_install(script: &Path, working_dir: &Path, _timeout_secs: u64) -
     let mut cmd = command_with_path(interpreter.program());
     match interpreter {
         PostInstallInterpreter::Sh => {
-            cmd.arg("-c").arg(script_str.as_ref());
+            cmd.arg(script_str.as_ref());
         }
         PostInstallInterpreter::PowerShell => {
             cmd.args([
@@ -675,13 +687,16 @@ fn execute_post_install(script: &Path, working_dir: &Path, _timeout_secs: u64) -
             ]);
         }
         PostInstallInterpreter::Cmd => {
-            cmd.args(["/C", script_str.as_ref()]);
+            // Quote the path: cmd treats `&`/`|` as separators outside quotes.
+            // The script path is repository-relative and never contains `"`.
+            cmd.arg("/C").arg(format!("\"{script_str}\""));
         }
     }
 
     cmd.current_dir(working_dir);
-    match cmd.output() {
-        Ok(out) => out.status.code().unwrap_or(-1),
+
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
         Err(e) => {
             tracing::warn!(
                 "post_install script {:?} could not be executed via {} (not on PATH? {})",
@@ -691,7 +706,30 @@ fn execute_post_install(script: &Path, working_dir: &Path, _timeout_secs: u64) -
             );
             // Distinct sentinel so the caller's "exited with code -1" message
             // stays accurate while the cause is logged above.
-            -1
+            return -1;
+        }
+    };
+
+    let deadline = Instant::now() + Duration::from_secs(timeout_secs.max(1));
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.code().unwrap_or(-1),
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    tracing::warn!(
+                        "post_install script {:?} killed after exceeding its {timeout_secs}s timeout",
+                        script
+                    );
+                    return -2;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => {
+                tracing::warn!("post_install script {:?} wait failed: {e}", script);
+                return -1;
+            }
         }
     }
 }

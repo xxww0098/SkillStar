@@ -1,241 +1,89 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, ArrowUp, Boxes, ExternalLink, Search } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { motion } from "framer-motion";
+import { ArrowLeft, Boxes, ExternalLink } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { PageToolbar } from "../components/layout/PageToolbar";
-import { DrawerShell } from "../components/shared/DrawerShell";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
-import { EmptyState } from "../components/ui/EmptyState";
 import { ExternalAnchor } from "../components/ui/ExternalAnchor";
-import { Input } from "../components/ui/input";
-import { LoadingLogo } from "../components/ui/LoadingLogo";
-import { mcpKeys } from "../features/mcp/api/keys";
-import { McpMarketBrowser } from "../features/mcp/components/McpMarketBrowser";
-import { McpServerForm, type McpServerFormValue } from "../features/mcp/components/McpServerForm";
+import { McpMarketPage } from "../features/mcp/components/McpMarketPage";
 import { PUBLISHER_BRAND_ICON, hasPublisherBrandIcon } from "../features/mcp/components/McpPublishers";
 import { PublisherAvatar } from "../components/shared/PublisherAvatar";
-import { useMcpServers } from "../features/mcp/hooks/useMcpServers";
-import { failedMcpSyncCount } from "../features/mcp/lib/syncResults";
-import { tauriInvoke } from "../lib/ipc";
-import { toast } from "../lib/toast";
-import type { LocalFirstResult, McpMarketEntry, McpPublisherSummary, McpServerEntry, ViewMode } from "../types";
-
-const MCP_REGISTRY_SCOPE = "mcp_registry";
+import type { McpPublisherSummary } from "../types";
 
 interface McpPublisherDetailProps {
   publisher: McpPublisherSummary;
   onBack: () => void;
 }
 
-function draftToDefaults(draft: McpServerEntry): Partial<McpServerFormValue> {
-  return {
-    name: draft.name,
-    transport: draft.transport,
-    command: draft.command ?? undefined,
-    args: draft.args,
-    env: draft.env,
-    url: draft.url ?? undefined,
-    headers: draft.headers,
-    description: draft.description ?? undefined,
-    homepage: draft.homepage ?? undefined,
-    enabled: {},
-  };
-}
-
+/**
+ * One publisher's slice of the MCP catalog.
+ *
+ * The page is now a thin hero over the same paginated browse the MCP page uses,
+ * scoped with `publisherId`. It used to load the publisher's whole bucket
+ * unpaginated and filter it in memory over three fields — which for the
+ * `github` bucket means the entire remote registry — while the snapshot's FTS
+ * index, its filters and its sort orders all went unused, and the refresh
+ * button was wired to an empty function (audit D.2, D.3-1/2/3).
+ *
+ * The hero is a fixed header rather than part of the scroll, because the
+ * scroller now belongs to `McpMarketPage`. The old back-to-top button went with
+ * it: a page is at most one `limit` of cards, and a button bound to a container
+ * that no longer scrolls is worse than no button.
+ */
 export function McpPublisherDetail({ publisher, onBack }: McpPublisherDetailProps) {
   const { t } = useTranslation();
-  const queryClient = useQueryClient();
-  const { servers: mcpServers, createServer: createMcpServer } = useMcpServers();
-  const [searchQuery, setSearchQuery] = useState("");
-  const [showBackToTop, setShowBackToTop] = useState(false);
-  const [mcpInstallDrawer, setMcpInstallDrawer] = useState<{
-    sourceName: string;
-    defaults: Partial<McpServerFormValue>;
-  } | null>(null);
-  const [mcpSaving, setMcpSaving] = useState(false);
-  const [viewMode] = useState<ViewMode>("grid");
-  const scrollRef = useRef<HTMLDivElement>(null);
-  // One-shot-per-publisher guard: only the first stale snapshot for a given
-  // publisher triggers a background sync. Re-arms when the publisher changes.
-  const staleRefreshTriggeredFor = useRef<string | null>(null);
-
-  const isGithub = publisher.id === "github";
   const hasBrandIcon = hasPublisherBrandIcon(publisher.id);
-  const mcpInstalledNames = useMemo(() => new Set(mcpServers.map((server) => server.name)), [mcpServers]);
-
-  // Reset transient state when the publisher changes.
-  useEffect(() => {
-    setSearchQuery("");
-    setShowBackToTop(false);
-  }, [publisher.id]);
-
-  // Local-first load scoped to one publisher.
-  const entriesQuery = useQuery<LocalFirstResult<McpMarketEntry[]>>({
-    queryKey: mcpKeys.marketByPublisher(publisher.id),
-    queryFn: () =>
-      tauriInvoke("list_mcp_servers_by_publisher_local", {
-        publisherId: publisher.id,
-      }),
-  });
-
-  useEffect(() => {
-    if (!entriesQuery.isError) return;
-    if (import.meta.env.DEV) console.error("Failed to load MCP publisher servers:", entriesQuery.error);
-  }, [entriesQuery.isError, entriesQuery.error]);
-
-  const result = entriesQuery.data;
-  const entries = result?.data ?? [];
-  const status = result?.snapshot_status;
-
-  const syncMutation = useMutation({
-    mutationFn: () => tauriInvoke("sync_mcp_market_scope", { scope: MCP_REGISTRY_SCOPE }),
-    onSuccess: () =>
-      queryClient.invalidateQueries({
-        queryKey: mcpKeys.marketByPublisher(publisher.id),
-      }),
-  });
-
-  // Only the GitHub publisher benefits from a remote registry refresh, and
-  // only once per publisher while its snapshot remains stale.
-  useEffect(() => {
-    if (
-      isGithub &&
-      status === "stale" &&
-      staleRefreshTriggeredFor.current !== publisher.id &&
-      !syncMutation.isPending
-    ) {
-      staleRefreshTriggeredFor.current = publisher.id;
-      syncMutation.mutate();
-    }
-  }, [isGithub, status, publisher.id, syncMutation]);
-
-  const loading = entriesQuery.isLoading;
-  const refreshing = syncMutation.isPending;
-
-  // Client-side filter (the registry FTS is shared; here we keep it simple).
-  const visibleEntries = useMemo(() => {
-    if (!searchQuery.trim()) return entries;
-    const q = searchQuery.toLowerCase();
-    return entries.filter(
-      (entry) =>
-        entry.name.toLowerCase().includes(q) ||
-        entry.namespace.toLowerCase().includes(q) ||
-        entry.description.toLowerCase().includes(q),
-    );
-  }, [entries, searchQuery]);
-
-  const handleMcpInstall = useCallback(
-    async (id: string) => {
-      try {
-        const draft = (await tauriInvoke("mcp_market_entry_to_draft", { id })) as McpServerEntry;
-        setMcpInstallDrawer({ sourceName: draft.name, defaults: draftToDefaults(draft) });
-      } catch (e) {
-        if (import.meta.env.DEV) console.error("[McpPublisherDetail] open install draft failed:", e);
-        toast.error(t("mcp.installFailed", { defaultValue: "Failed to start install" }));
-      }
-    },
-    [t],
-  );
-
-  const handleMcpSubmit = useCallback(
-    async (value: McpServerFormValue) => {
-      setMcpSaving(true);
-      try {
-        const entry: Partial<McpServerEntry> = { ...value, timeoutMs: value.timeoutMs ?? undefined };
-        const result = await createMcpServer(entry);
-        const failedCount = failedMcpSyncCount(result.syncResults);
-        if (failedCount > 0) {
-          toast.warning(t("mcp.syncPartial", { count: failedCount }));
-        } else {
-          toast.success(t("mcp.added"));
-        }
-        setMcpInstallDrawer(null);
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : String(err));
-      } finally {
-        setMcpSaving(false);
-      }
-    },
-    [createMcpServer, t],
-  );
 
   return (
-    <div className="flex-1 min-w-0 flex overflow-hidden relative">
-      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+    <div className="relative flex min-w-0 flex-1 overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <PageToolbar
           title={
-            <div className="flex items-center gap-2 min-w-0">
+            <div className="flex min-w-0 items-center gap-2">
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={onBack}
-                className="gap-1.5 text-muted-foreground hover:text-foreground -ml-2"
+                className="-ml-2 gap-1.5 text-muted-foreground hover:text-foreground"
               >
-                <ArrowLeft className="w-4 h-4" />
+                <ArrowLeft className="h-4 w-4" />
                 {t("publisherDetail.back")}
               </Button>
-              <div className="w-px h-5 bg-border mx-1" />
-              <span className="text-sm font-semibold whitespace-nowrap truncate">{publisher.name}</span>
-            </div>
-          }
-          actions={
-            <div className="flex items-center gap-2">
-              <div className="relative w-56">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                <Input
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder={t("mcp.searchPlaceholder", {
-                    defaultValue: "Search MCP servers...",
-                  })}
-                  className="pl-8 h-8 text-xs"
-                />
-              </div>
-              {refreshing && (
-                <span className="text-xs text-muted-foreground whitespace-nowrap">
-                  {t("marketplace.refreshingSnapshot", { defaultValue: "Refreshing snapshot..." })}
-                </span>
-              )}
+              <div className="mx-1 h-5 w-px bg-border" />
+              <span className="truncate whitespace-nowrap text-sm font-semibold">{publisher.name}</span>
             </div>
           }
         />
 
-        <motion.main
-          ref={scrollRef}
+        <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.2 }}
-          className="ss-page-scroll"
-          onScroll={(e) => {
-            setShowBackToTop(e.currentTarget.scrollTop > 300);
-          }}
+          className="flex min-h-0 flex-1 flex-col overflow-hidden"
         >
-          {/* Hero banner */}
-          <div className="px-6 pt-6 pb-5 border-b border-border bg-gradient-to-b from-primary/5 to-transparent">
-            <div className="flex items-start gap-5 max-w-4xl">
+          <div className="shrink-0 border-b border-border bg-gradient-to-b from-primary/5 to-transparent px-6 pb-5 pt-6">
+            <div className="flex max-w-4xl items-start gap-5">
               {hasBrandIcon ? (
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary/15 to-primary/5 border border-primary/10 flex items-center justify-center shrink-0">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-primary/10 bg-gradient-to-br from-primary/15 to-primary/5">
                   {PUBLISHER_BRAND_ICON[publisher.id]}
                 </div>
               ) : (
                 <PublisherAvatar name={publisher.id} size="lg" />
               )}
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2.5 mb-1">
-                  <h2 className="text-heading-lg truncate">{publisher.name}</h2>
+                <div className="mb-1 flex items-center gap-2.5">
+                  <h2 className="truncate text-heading-lg">{publisher.name}</h2>
                   <Badge
                     variant="outline"
-                    className="text-micro px-2 py-0.5 h-5 font-medium text-primary bg-primary/8 border-primary/20 shrink-0"
+                    className="h-5 shrink-0 border-primary/20 bg-primary/8 px-2 py-0.5 text-micro font-medium text-primary"
                   >
                     {t("publisherDetail.official")}
                   </Badge>
                 </div>
 
-                <div className="flex items-center gap-4 mt-2 flex-wrap">
-                  <span className="text-sm text-muted-foreground flex items-center gap-1.5">
-                    <Boxes className="w-3.5 h-3.5" />
+                <div className="mt-2 flex flex-wrap items-center gap-4">
+                  <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                    <Boxes className="h-3.5 w-3.5" />
                     {t("publisherDetail.mcpServers", {
                       count: publisher.serverCount,
                       defaultValue: "{{count}} servers",
@@ -243,9 +91,9 @@ export function McpPublisherDetail({ publisher, onBack }: McpPublisherDetailProp
                   </span>
                   <ExternalAnchor
                     href={publisher.url}
-                    className="text-sm text-primary/70 hover:text-primary flex items-center gap-1.5 transition-colors ml-auto"
+                    className="ml-auto flex items-center gap-1.5 text-sm text-primary/70 transition-colors hover:text-primary"
                   >
-                    <ExternalLink className="w-3.5 h-3.5" />
+                    <ExternalLink className="h-3.5 w-3.5" />
                     {t("publisherDetail.viewOnSkillsSh", { defaultValue: "Open" })}
                   </ExternalAnchor>
                 </div>
@@ -253,78 +101,9 @@ export function McpPublisherDetail({ publisher, onBack }: McpPublisherDetailProp
             </div>
           </div>
 
-          {/* Servers */}
-          {loading ? (
-            <div className="flex items-center justify-center py-20">
-              <LoadingLogo size="lg" label={t("mcp.marketLoading", { defaultValue: "Loading..." })} />
-            </div>
-          ) : visibleEntries.length === 0 ? (
-            <EmptyState
-              icon={<Boxes className="w-6 h-6 text-muted-foreground" />}
-              title={t("mcp.marketEmptyTitle", { defaultValue: "No MCP servers" })}
-              description={
-                searchQuery.trim()
-                  ? t("mcp.marketNoMatchesDescription", { defaultValue: "Try a different keyword." })
-                  : t("mcp.marketEmptyDescription", { defaultValue: "Nothing here yet." })
-              }
-              size="lg"
-            />
-          ) : (
-            <McpMarketBrowser
-              installedNames={mcpInstalledNames}
-              entries={visibleEntries}
-              status={status}
-              isLoading={false}
-              query={searchQuery}
-              refreshing={refreshing}
-              viewMode={viewMode}
-              onRefresh={() => {}}
-              onInstall={(id) => void handleMcpInstall(id)}
-            />
-          )}
-        </motion.main>
-
-        <AnimatePresence>
-          {showBackToTop && (
-            <motion.button
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.8 }}
-              transition={{ duration: 0.15 }}
-              onClick={() => scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" })}
-              className="absolute bottom-8 right-8 z-40 w-10 h-10 rounded-full bg-background/80 hover:bg-background border border-border/50 text-foreground/80 hover:text-foreground shadow-sm hover:shadow-md backdrop-blur-md flex items-center justify-center transition duration-200 cursor-pointer group"
-              title={t("publisherDetail.backToTop")}
-            >
-              <ArrowUp className="w-4 h-4 transition-transform duration-200 group-hover:-translate-y-0.5" />
-            </motion.button>
-          )}
-        </AnimatePresence>
+          <McpMarketPage key={publisher.id} publisherId={publisher.id} />
+        </motion.div>
       </div>
-
-      {/* Install form drawer (market entry → create server) */}
-      <DrawerShell
-        open={mcpInstallDrawer != null}
-        onOpenChange={(open) => {
-          if (!open) setMcpInstallDrawer(null);
-        }}
-        title={
-          <span className="flex items-center gap-2 text-foreground">
-            <Boxes className="h-4 w-4 text-primary" />
-            {mcpInstallDrawer?.sourceName ?? t("mcp.addServer")}
-          </span>
-        }
-        subtitle={t("mcp.drawerPresetSubtitle")}
-      >
-        {mcpInstallDrawer ? (
-          <McpServerForm
-            key={mcpInstallDrawer.sourceName}
-            defaults={mcpInstallDrawer.defaults}
-            submitLabel={t("common.add")}
-            onSubmit={handleMcpSubmit}
-            submitting={mcpSaving}
-          />
-        ) : null}
-      </DrawerShell>
     </div>
   );
 }

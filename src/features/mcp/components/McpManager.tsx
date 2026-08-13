@@ -1,7 +1,6 @@
 import { Boxes, Download, PackageSearch, Plug, RefreshCw, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 import { PageToolbar } from "../../../components/layout/PageToolbar";
 import { DrawerShell } from "../../../components/shared/DrawerShell";
 import { Button } from "../../../components/ui/button";
@@ -11,13 +10,19 @@ import { SearchInput } from "../../../components/ui/SearchInput";
 import { AgentFilterPill } from "../../../components/ui/AgentFilterPill";
 import { useAgentProfiles } from "../../../hooks/useAgentProfiles";
 import { cn } from "../../../lib/utils";
-import type { McpPreset, McpServerEntry, McpServerWithSync, McpToolId } from "../../../types";
+import { toast } from "../../../lib/toast";
+import type { McpPreset, McpServerEntry, McpServerWithSync, McpSyncResult, McpToolId } from "../../../types";
+import { useMcpCatalogUpdates } from "../hooks/useMcpCatalogUpdates";
+import { useMcpProbe } from "../hooks/useMcpProbe";
 import { useMcpServers } from "../hooks/useMcpServers";
 import { useMcpPresets } from "../hooks/useMcpPresets";
+import { useMcpToolStatuses } from "../hooks/useMcpToolStatuses";
 import { resolveMcpToolFilter, selectMcpAgentTargets } from "../lib/agentTargets";
-import { failedMcpSyncCount } from "../lib/syncResults";
+import { failedMcpSyncCount, mergeMcpSyncResults, summarizeMcpSyncResults } from "../lib/syncResults";
+import { McpProbePanel } from "./McpProbePanel";
 import { McpServerCard } from "./McpServerCard";
 import { McpServerForm, type McpServerFormValue } from "./McpServerForm";
+import { McpSyncResultsPanel } from "./McpSyncResultsPanel";
 
 /** Map a recommended preset into create-form seed values. */
 function presetToDefaults(preset: McpPreset): Partial<McpServerFormValue> {
@@ -35,6 +40,13 @@ function presetToDefaults(preset: McpPreset): Partial<McpServerFormValue> {
 }
 
 type DrawerMode = { type: "closed" } | { type: "create" } | { type: "edit"; id: string };
+
+/** The last sync batch, kept so its per-target detail stays inspectable. */
+interface SyncBatch {
+  title: string;
+  serverId: string | null;
+  results: McpSyncResult[];
+}
 
 interface McpManagerProps {
   /** Navigate to the unified Marketplace MCP tab. */
@@ -67,13 +79,19 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
     deleteServer,
     toggleTool,
     syncAll,
+    syncServer,
     importFromTools,
     syncing,
+    retrySyncing,
     importing,
   } = useMcpServers();
   const { presets } = useMcpPresets();
+  const { statuses } = useMcpToolStatuses();
+  const updates = useMcpCatalogUpdates(servers);
+  const probe = useMcpProbe();
   const [drawer, setDrawer] = useState<DrawerMode>({ type: "closed" });
   const [saving, setSaving] = useState(false);
+  const [batch, setBatch] = useState<SyncBatch | null>(null);
   // Seed values + a nonce key so picking a preset re-mounts the create form
   // (the form only reads `defaults` on mount).
   const [createSeed, setCreateSeed] = useState<{ key: number; defaults?: Partial<McpServerFormValue> }>({ key: 0 });
@@ -83,6 +101,11 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
   const [toolFilter, setToolFilter] = useState<string | null>(null);
   const agentTargets = useMemo(() => selectMcpAgentTargets(profiles), [profiles]);
   const activeToolFilter = resolveMcpToolFilter(toolFilter, agentTargets);
+
+  const noteForTool = useMemo(() => {
+    const byId = new Map(statuses.map((status) => [status.toolId, status]));
+    return (toolId: McpToolId) => (byId.get(toolId)?.installed === false ? t("mcp.notDetectedSuffix") : null);
+  }, [statuses, t]);
 
   const filteredServers = useMemo(
     () =>
@@ -112,6 +135,7 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
   );
 
   const editing = drawer.type === "edit" ? (servers.find((s) => s.id === drawer.id) ?? null) : null;
+  const batchReport = useMemo(() => (batch ? summarizeMcpSyncResults(batch.results) : null), [batch]);
 
   const openCreate = () => {
     setCreateSeed((prev) => ({ key: prev.key + 1, defaults: undefined }));
@@ -120,6 +144,17 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
 
   const pickPreset = (preset: McpPreset) => {
     setCreateSeed((prev) => ({ key: prev.key + 1, defaults: presetToDefaults(preset) }));
+  };
+
+  /**
+   * Record a batch and toast its headline. The detail panel below the list is
+   * the actual answer — the toast only says whether to go look at it.
+   */
+  const recordBatch = (title: string, serverId: string | null, results: McpSyncResult[]) => {
+    const failed = failedMcpSyncCount(results);
+    const report = summarizeMcpSyncResults(results);
+    setBatch(report.consistency.consistent && failed === 0 ? null : { title, serverId, results });
+    return failed;
   };
 
   const handleToggle = async (id: string, toolId: McpToolId, enabled: boolean) => {
@@ -132,6 +167,7 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
             error: result.error ?? t("common.unknown", { defaultValue: "Unknown" }),
           }),
         );
+        setBatch({ title: t("mcp.syncBatchToggle"), serverId: id, results: [result] });
       } else if (result.skipped) {
         toast.info(t("mcp.syncToolSkipped", { toolId }));
       }
@@ -151,7 +187,7 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
         const entry: Partial<McpServerEntry> = { ...value, timeoutMs: value.timeoutMs ?? undefined };
         result = await createServer(entry);
       }
-      const failedCount = failedMcpSyncCount(result.syncResults);
+      const failedCount = recordBatch(t("mcp.syncBatchSave"), result.server.id, result.syncResults);
       if (failedCount > 0) {
         toast.warning(t("mcp.syncPartial", { count: failedCount }));
       } else {
@@ -169,7 +205,7 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
     if (drawer.type !== "edit") return;
     try {
       const results = await deleteServer(drawer.id);
-      const failedCount = failedMcpSyncCount(results);
+      const failedCount = recordBatch(t("mcp.syncBatchDelete"), null, results);
       if (failedCount > 0) {
         toast.warning(t("mcp.syncPartial", { count: failedCount }));
       } else {
@@ -193,12 +229,38 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
   const handleSyncAll = async () => {
     try {
       const results = await syncAll(false);
-      const failedCount = failedMcpSyncCount(results);
+      const failedCount = recordBatch(t("mcp.syncBatchAll"), null, results);
       if (failedCount > 0) {
         toast.warning(t("mcp.syncPartial", { count: failedCount }));
       } else {
         toast.success(t("mcp.syncSuccess"));
       }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  /** Re-project the whole server; `force` so a rolled-back tool is rewritten. */
+  const handleRetryAll = async () => {
+    if (!batch?.serverId) return;
+    try {
+      const results = await syncServer(batch.serverId, true);
+      const merged = mergeMcpSyncResults(batch.results, results);
+      const failedCount = recordBatch(batch.title, batch.serverId, merged);
+      if (failedCount === 0) toast.success(t("mcp.syncSuccess"));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  /** Retry exactly one target by re-asserting its enable flag. */
+  const handleRetryTool = async (toolId: McpToolId) => {
+    if (!batch?.serverId) return;
+    try {
+      const result = await toggleTool(batch.serverId, toolId, true);
+      const merged = mergeMcpSyncResults(batch.results, [result]);
+      const failedCount = recordBatch(batch.title, batch.serverId, merged);
+      if (failedCount === 0) toast.success(t("mcp.syncSuccess"));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     }
@@ -218,6 +280,12 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
           <span className="text-muted-foreground/70">/ {servers.length}</span>
         ) : null}
       </div>
+
+      {updates.updateCount > 0 ? (
+        <div className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-sky-500/30 bg-sky-500/8 px-3 text-xs font-medium tabular-nums text-sky-600 shadow-sm dark:text-sky-400">
+          {t("mcp.updatesAvailable", { count: updates.updateCount })}
+        </div>
+      ) : null}
     </>
   );
 
@@ -276,11 +344,39 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
             </div>
           ) : null}
 
+          {batch && batchReport ? (
+            <section className="space-y-2">
+              <div className="flex items-center gap-2 px-1">
+                <h2 className="text-sm font-semibold text-foreground">{batch.title}</h2>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto h-7 px-2 text-[11px] text-muted-foreground"
+                  onClick={() => setBatch(null)}
+                >
+                  {t("mcp.dismissPanel")}
+                </Button>
+              </div>
+              <McpSyncResultsPanel
+                report={batchReport}
+                retrying={retrySyncing}
+                onRetryAll={batch.serverId ? () => void handleRetryAll() : undefined}
+                onRetryTool={batch.serverId ? (toolId) => void handleRetryTool(toolId) : undefined}
+              />
+            </section>
+          ) : null}
+
           <section className="space-y-3">
             <div className="flex items-center gap-2 px-1">
               <Boxes className="h-3.5 w-3.5 text-primary" />
               <h2 className="text-sm font-semibold text-foreground">{t("mcp.installedSection")}</h2>
               <span className="text-xs text-muted-foreground">({filteredServers.length})</span>
+              {updates.uncheckedCount > 0 ? (
+                <span className="text-[11px] text-muted-foreground/80">
+                  {t("mcp.updatesUnchecked", { count: updates.uncheckedCount })}
+                </span>
+              ) : null}
             </div>
 
             {isLoading ? (
@@ -289,15 +385,19 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
               </div>
             ) : showServers ? (
               <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
-                {filteredServers.map((server) => (
-                  <McpServerCard
-                    key={server.id}
-                    server={server}
-                    agentTargets={agentTargets}
-                    onOpen={() => setDrawer({ type: "edit", id: server.id })}
-                    onToggleTool={(toolId, enabled) => void handleToggle(server.id, toolId, enabled)}
-                  />
-                ))}
+                {filteredServers.map((server) => {
+                  const info = updates.byServerId.get(server.id);
+                  return (
+                    <McpServerCard
+                      key={server.id}
+                      server={server}
+                      agentTargets={agentTargets}
+                      updateVersion={info?.hasUpdate ? info.latestVersion : null}
+                      onOpen={() => setDrawer({ type: "edit", id: server.id })}
+                      onToggleTool={(toolId, enabled) => void handleToggle(server.id, toolId, enabled)}
+                    />
+                  );
+                })}
               </div>
             ) : (
               <EmptyState
@@ -371,16 +471,21 @@ export function McpManager({ onOpenMarket }: McpManagerProps) {
               defaults={createSeed.defaults}
               onSubmit={handleSubmit}
               submitting={saving}
+              noteForTool={noteForTool}
             />
           </div>
         ) : drawer.type === "edit" && editing ? (
-          <McpServerForm
-            key={editing.id}
-            initial={editing}
-            onSubmit={handleSubmit}
-            onDelete={handleDelete}
-            submitting={saving}
-          />
+          <div className="space-y-4">
+            <McpProbePanel entry={probe.entryFor(editing.id)} onProbe={() => void probe.probe(editing.id)} />
+            <McpServerForm
+              key={editing.id}
+              initial={editing}
+              onSubmit={handleSubmit}
+              onDelete={handleDelete}
+              submitting={saving}
+              noteForTool={noteForTool}
+            />
+          </div>
         ) : drawer.type === "edit" ? (
           <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">{t("mcp.notFound")}</div>
         ) : null}

@@ -45,7 +45,7 @@ pub async fn install_skill(
         let skill = facade.install_skill(url, name)?;
         // Match the CLI: after a successful hub install, deploy the skill to
         // every Agent the user has enabled in Settings.
-        skillstar_app::global_deploy::deploy_to_enabled_global_agents(&[skill.name.clone()])
+        skillstar_app::global_deploy::deploy_to_enabled_global_agents(std::slice::from_ref(&skill.name))
             .map_err(|error| {
                 tracing::warn!(
                     target: "cmd",

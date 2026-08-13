@@ -4,9 +4,11 @@
  * in ./skillsData.ts; AGENTS comes from the app-shell fragment.
  */
 
+import type { LocalDivergenceResolution } from "../../../types";
 import { AGENTS } from "./appShell";
 import { type DevMockHandlers, getAcpConfigState, iso } from "./shared";
-import { DECKS, DEMO_TUTORIAL_HTML, PROJECTS, SAMPLE_SKILLS } from "./skillsData";
+import { DECKS, DEMO_TUTORIAL_HTML, PROJECTS } from "./skillsData";
+import { devListSkills, devResolveSkillUpdate, devSkillUpdateStates, devUpdateSkills } from "./skillsUpdateStore";
 
 function demoSkillTutorial(args: Record<string, unknown>) {
   const skillName = String(args.name ?? "pdf-tools");
@@ -29,56 +31,12 @@ function demoSkillTutorial(args: Record<string, unknown>) {
   };
 }
 
-/** Mirror the backend's one-update-per-repository collapse. */
-function demoUpdateReport(names: string[]) {
-  const seenRepo = new Set<string>();
-  const updated: unknown[] = [];
-  const skipped: string[] = [];
-
-  for (const name of names) {
-    const skill = SAMPLE_SKILLS.find((candidate) => candidate.name === name);
-    const repo = skill?.git_url || `standalone:${name}`;
-    if (seenRepo.has(repo)) {
-      skipped.push(name);
-      continue;
-    }
-    seenRepo.add(repo);
-    updated.push({
-      skill: { ...(skill ?? SAMPLE_SKILLS[0]), name, update_available: false },
-      siblings_cleared: [],
-      agent_link_failures: [],
-    });
-  }
-
-  return { updated, blocked: [], failed: [], skipped };
-}
-
 export const SKILLS_HANDLERS: DevMockHandlers = {
-  list_skills: () => SAMPLE_SKILLS,
-  update_skills: (args) => demoUpdateReport((args?.names as string[]) ?? []),
-  resolve_skill_update: (args) => ({
-    update: demoUpdateReport([String(args?.name ?? "pdf-tools")]).updated[0],
-    local_copy:
-      (args?.resolution as { kind?: string; local_name?: string } | undefined)?.kind === "preserve"
-        ? {
-            ...SAMPLE_SKILLS[0],
-            name: String(
-              (args?.resolution as { local_name?: string } | undefined)?.local_name ??
-                `${String(args?.name ?? "pdf-tools")}.local`,
-            ),
-            skill_type: "local",
-            git_url: "",
-            tree_hash: null,
-            source: undefined,
-          }
-        : null,
-    remaining_blocked: [],
-  }),
-  refresh_skill_updates: () =>
-    SAMPLE_SKILLS.filter((s) => s.update_available).map((s) => ({
-      name: s.name,
-      update_available: true,
-    })),
+  list_skills: () => devListSkills(),
+  update_skills: (args) => devUpdateSkills((args?.names as string[]) ?? []),
+  resolve_skill_update: (args) =>
+    devResolveSkillUpdate(String(args?.name ?? ""), args?.resolution as LocalDivergenceResolution),
+  refresh_skill_updates: () => devSkillUpdateStates(),
   check_new_repo_skills: () => [],
   get_dismissed_new_skills: () => [],
   read_skill_content: (args) => ({

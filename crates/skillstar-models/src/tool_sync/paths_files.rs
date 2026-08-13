@@ -14,7 +14,7 @@ pub fn resolve_tool_config_path(tool_id: &str) -> Result<PathBuf> {
     match agent_spec(tool_id) {
         Some(spec) => (spec.files[0].resolve)(),
         None => bail!(
-            "Unknown tool_id: '{}'. Supported: claude-code, claude-desktop, codex, opencode, pi.",
+            "Unknown tool_id: '{}'. Supported: claude-code, claude-desktop, codex, opencode, pi, omp.",
             tool_id
         ),
     }
@@ -58,6 +58,23 @@ pub fn resolve_pi_models_path() -> Result<PathBuf> {
 pub fn resolve_pi_settings_path() -> Result<PathBuf> {
     let home = sync_home_dir()?;
     Ok(home.join(".pi").join("agent").join("settings.json"))
+}
+
+/// `~/.omp/agent/models.yml` — Oh My Pi's custom provider/model config
+/// (`providers.<key>` blocks with `baseUrl` / `api` / `apiKey` / `models`).
+/// OMP prefers YAML (`models.yml` → `models.yaml` → `models.json` fallback);
+/// SkillStar always writes the canonical `models.yml` name.
+pub fn resolve_omp_models_path() -> Result<PathBuf> {
+    let home = sync_home_dir()?;
+    Ok(home.join(".omp").join("agent").join("models.yml"))
+}
+
+/// `~/.omp/agent/config.yml` — Oh My Pi's runtime settings; carries the
+/// `modelRoles` map (`default` / `slow` / `smol` role → `provider/model`).
+/// SkillStar manages only the `default` pointer when it targets a managed key.
+pub fn resolve_omp_config_path() -> Result<PathBuf> {
+    let home = sync_home_dir()?;
+    Ok(home.join(".omp").join("agent").join("config.yml"))
 }
 
 /// `~/.grok/auth.json` — the xAI Grok Build CLI's OAuth credential store.
@@ -157,6 +174,9 @@ fn write_tool_config_file_inner(
     } else if info.format == "toml" {
         let _: toml::Table =
             toml::from_str(content).context("Invalid TOML — fix syntax before saving")?;
+    } else if info.format == "yaml" {
+        let _: serde_yaml::Value =
+            serde_yaml::from_str(content).context("Invalid YAML — fix syntax before saving")?;
     }
 
     if let Some(parent) = path.parent() {
@@ -178,6 +198,10 @@ fn write_tool_config_file_inner(
         "toml" => {
             let table: toml::Table = toml::from_str(content)?;
             toml::to_string_pretty(&table).context("Failed to format TOML")?
+        }
+        "yaml" => {
+            let value: serde_yaml::Value = serde_yaml::from_str(content)?;
+            serde_yaml::to_string(&value).context("Failed to format YAML")?
         }
         // Unknown future text formats are preserved as-is.
         _ => content.to_string(),
@@ -203,6 +227,11 @@ pub fn format_tool_config_file(tool_id: &str, file_id: &str) -> Result<String> {
         "toml" => {
             let table: toml::Table = toml::from_str(&content).context("Invalid TOML")?;
             Ok(toml::to_string_pretty(&table)?)
+        }
+        "yaml" => {
+            let value: serde_yaml::Value =
+                serde_yaml::from_str(&content).context("Invalid YAML")?;
+            Ok(serde_yaml::to_string(&value)?)
         }
         _ => Ok(content),
     }
@@ -313,6 +342,24 @@ pub(crate) fn detect_pi_provider(path: &Path) -> Result<Option<String>> {
         && let Some(url) = providers
             .iter()
             .find(|(k, _)| is_skillstar_managed_key(k))
+            .and_then(|(_, v)| v.get("baseUrl"))
+            .and_then(|v| v.as_str())
+    {
+        return Ok(Some(url.to_string()));
+    }
+    Ok(None)
+}
+
+/// Oh My Pi: report the base URL of any skillstar* managed block in
+/// `~/.omp/agent/models.yml` (YAML mirror of the Pi layout).
+pub(crate) fn detect_omp_provider(path: &Path) -> Result<Option<String>> {
+    let content = std::fs::read_to_string(path)?;
+    let value: serde_yaml::Value = serde_yaml::from_str(&content)
+        .with_context(|| format!("Failed to parse {}", path.display()))?;
+    if let Some(providers) = value.get("providers").and_then(|p| p.as_mapping())
+        && let Some(url) = providers
+            .iter()
+            .find(|(k, _)| k.as_str().is_some_and(is_skillstar_managed_key))
             .and_then(|(_, v)| v.get("baseUrl"))
             .and_then(|v| v.as_str())
     {

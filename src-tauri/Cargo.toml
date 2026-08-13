@@ -64,6 +64,10 @@ skillstar-core = { version = "0.1.0", path = "../crates/skillstar-core" }
 skillstar-app = { version = "0.1.0", path = "../crates/skillstar-app" }
 skillstar-usage = { version = "0.1.0", path = "../crates/skillstar-usage" }
 skillstar-sync = { version = "0.1.0", path = "../crates/skillstar-sync" }
+skillstar-git = { version = "0.1.0", path = "../crates/skillstar-git" }
+skillstar-agents = { version = "0.1.0", path = "../crates/skillstar-agents" }
+skillstar-github-auth = { version = "0.1.0", path = "../crates/skillstar-github-auth" }
+skillstar-channels = { version = "0.1.0", path = "../crates/skillstar-channels" }
 sha2 = { workspace = true }
 ts-rs.workspace = true
 

@@ -1,4 +1,4 @@
-use crate::agents::{self as agent_profile, AgentProfile};
+use skillstar_agents::{self as agent_profile, AgentProfile};
 use crate::git::ops as git_ops;
 use crate::lockfile::LockEntry;
 pub use crate::update_state::SkillUpdateState;
@@ -17,6 +17,7 @@ use std::sync::LazyLock;
 use std::sync::{Arc, RwLock};
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
+use tracing::warn;
 
 static SKILL_CACHE: LazyLock<RwLock<Option<Vec<Skill>>>> = LazyLock::new(|| RwLock::new(None));
 
@@ -86,7 +87,7 @@ fn apply_cached_update_states(mut skills: Vec<Skill>) -> Vec<Skill> {
     update_state::apply_to(&mut skills);
     for skill in &mut skills {
         if !matches!(
-            crate::shared_channels::managed_repository_for_skill(&skill.name),
+            crate::skill_mutation::policy().managed_repository_for_skill(&skill.name),
             Ok(None)
         ) {
             skill.update_available = false;
@@ -176,7 +177,7 @@ pub async fn refresh_skill_updates_in_session(
         .into_iter()
         .filter_map(|path| {
             let name = skill_name_from_path(&path)?;
-            match crate::shared_channels::generic_installed_skill_is_mutable(&name, &path) {
+            match crate::skill_mutation::policy().installed_skill_is_mutable(&name, &path) {
                 Ok(true) => Some(Ok(path)),
                 Ok(false) => None,
                 Err(error) => Some(Err(anyhow!(
@@ -190,14 +191,26 @@ pub async fn refresh_skill_updates_in_session(
         return Ok(Vec::new());
     }
 
+    // GitHub API fast path: one unauthenticated Trees API call per unique
+    // github.com repo replaces the per-repo git fetch for update *detection*.
+    // Any failure (private repo, rate limit, network, non-github source)
+    // falls back to the git fetch path below, so correctness never depends
+    // on the API.
+    let api_remote: Arc<std::collections::HashMap<std::path::PathBuf, crate::update_api::ApiRemoteTree>> =
+        Arc::new(api_prefetch_remote_trees(&skill_dirs).await);
+    let api_ok_roots: std::collections::HashSet<std::path::PathBuf> =
+        api_remote.keys().cloned().collect();
+
     // Pre-fetch: deduplicate repo-cached skills by repo root and fetch each
-    // repo once. This avoids N redundant `git fetch` calls when N skills
-    // share the same repository.
+    // repo once (skipping repos already answered by the GitHub API). This
+    // avoids N redundant `git fetch` calls when N skills share the same
+    // repository.
     // Returns the set of repo roots where fetch failed (e.g. shallow file
     // race). Skills in failed repos will preserve their existing update state.
     let failed_fetch_roots: Arc<std::collections::HashSet<std::path::PathBuf>> = {
         let dirs = skill_dirs.clone();
         let session = session.clone();
+        let skip = api_ok_roots.clone();
         let result = tokio::task::spawn_blocking(move || {
             let _guard = crate::skill_update::acquire_update_transaction_lock()?;
             let safe_dirs = dirs
@@ -205,15 +218,15 @@ pub async fn refresh_skill_updates_in_session(
                 .filter(|path| {
                     skill_name_from_path(path).is_some_and(|name| {
                         matches!(
-                            crate::shared_channels::generic_installed_skill_is_mutable(&name, path),
+                            crate::skill_mutation::policy().installed_skill_is_mutable(&name, path),
                             Ok(true)
                         )
                     })
                 })
                 .collect::<Vec<_>>();
-            Ok::<_, anyhow::Error>(update_checker::prefetch_unique_repos_in_session(
-                &safe_dirs, &session,
-            ))
+            Ok::<_, anyhow::Error>(
+                update_checker::prefetch_unique_repos_in_session_skipping(&safe_dirs, &session, &skip),
+            )
         })
         .await
         .unwrap_or_else(|_| Ok(Default::default()))
@@ -242,6 +255,7 @@ pub async fn refresh_skill_updates_in_session(
             .context("Failed to acquire update-check permit")?;
 
         let failed_roots = Arc::clone(&failed_fetch_roots);
+        let api_trees = Arc::clone(&api_remote);
         let session = session.clone();
         tasks.spawn_blocking(move || {
             let _permit = permit;
@@ -249,12 +263,12 @@ pub async fn refresh_skill_updates_in_session(
                 return (name, None);
             };
             if !matches!(
-                crate::shared_channels::generic_installed_skill_is_mutable(&name, &path),
+                crate::skill_mutation::policy().installed_skill_is_mutable(&name, &path),
                 Ok(true)
             ) {
                 return (name, None);
             }
-            let update_available = refresh_single_skill_update(&path, &failed_roots, &session);
+            let update_available = refresh_single_skill_update(&path, &failed_roots, &api_trees, &session);
             (name, update_available)
         });
     }
@@ -320,6 +334,11 @@ fn collect_skill_dirs(skills_dir: &Path, names: Option<&HashSet<String>>) -> Res
         let Some(name) = skill_name_from_path(&path) else {
             continue;
         };
+        // Staging residue resolves through to a real directory, so `is_dir()`
+        // alone would list it as an installed Skill.
+        if !crate::hub_entry::is_managed_hub_entry(&name) {
+            continue;
+        }
         if names.is_some_and(|values| !values.contains(&name)) {
             continue;
         }
@@ -401,16 +420,122 @@ fn build_installed_skill(
 fn refresh_single_skill_update(
     path: &Path,
     failed_fetch_roots: &std::collections::HashSet<std::path::PathBuf>,
+    api_remote: &std::collections::HashMap<std::path::PathBuf, crate::update_api::ApiRemoteTree>,
     session: &crate::git::transport::GitOperationSession,
 ) -> Option<bool> {
     // For repo-cached skills, the repo has already been fetched by
-    // prefetch_unique_repos; only compare local HEAD vs origin/HEAD.
-    // Returns None when the prefetch failed for this skill's repo.
+    // prefetch_unique_repos (or answered by the GitHub API fast path); only
+    // compare local HEAD vs the remote. Returns None when the prefetch failed
+    // for this skill's repo.
     if repo_link::is_repo_cached(path) {
+        let api = repo_link::repo_root_of(path).and_then(|root| api_remote.get(&root));
+        if let Some(api) = api {
+            return update_checker::check_update_local_with_api_entry(
+                path,
+                failed_fetch_roots,
+                Some(api),
+            );
+        }
         return update_checker::check_update_local(path, failed_fetch_roots);
     }
     let _ = git_ops::ensure_worktree_checked_out_in_session(path, session);
-    Some(git_ops::check_update_in_session(path, session).unwrap_or(false))
+    // `Err` means the check itself failed (offline, broken .git, git missing) —
+    // that is "unknown", not "up to date". Returning `Some(false)` here would
+    // let one offline scan overwrite a real badge with `false` and persist it,
+    // which is exactly what the repo-cached path above refuses to do.
+    git_ops::check_update_in_session(path, session).ok()
+}
+
+/// One unauthenticated GitHub Trees API call per unique github.com repo,
+/// replacing the per-repo `git fetch` for update *detection*. Repos that
+/// cannot use the API (non-github host, no lock entry, no resolvable remote
+/// ref) are simply absent from the result and fall back to the fetch path.
+async fn api_prefetch_remote_trees(
+    skill_dirs: &[PathBuf],
+) -> std::collections::HashMap<std::path::PathBuf, crate::update_api::ApiRemoteTree> {
+    use crate::update_api::{ApiRemoteTree, MAX_API_REPOS_PER_CYCLE};
+
+    // A missing or unreadable lockfile simply disables the fast path.
+    let Ok(lock) = crate::lockfile::Lockfile::load(&crate::lockfile::lockfile_path()) else {
+        return std::collections::HashMap::new();
+    };
+
+    let mut candidates: Vec<(PathBuf, String, String, String)> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for path in skill_dirs {
+        let Some(root) = crate::repo_link::repo_root_of(path) else {
+            continue;
+        };
+        if !seen.insert(root.clone()) {
+            continue;
+        }
+        let Some(name) = skill_name_from_path(path) else {
+            continue;
+        };
+        let Some(entry) = lock.skills.iter().find(|entry| entry.name == name) else {
+            continue;
+        };
+        let Some((owner, repo)) =
+            crate::update_api::owner_repo_from_git_url(&entry.git_url)
+        else {
+            continue;
+        };
+        let pinned = entry.git_ref.as_deref().filter(|git_ref| !git_ref.is_empty());
+        let Some(git_ref) = crate::update_api::remote_ref_for(&root, pinned) else {
+            continue;
+        };
+        candidates.push((root, owner, repo, git_ref));
+    }
+
+    // Stay well under the unauthenticated API budget; the rest fall back to
+    // the git fetch path.
+    if candidates.len() > MAX_API_REPOS_PER_CYCLE {
+        candidates.truncate(MAX_API_REPOS_PER_CYCLE);
+    }
+    if candidates.is_empty() {
+        return std::collections::HashMap::new();
+    }
+
+    let semaphore = Arc::new(Semaphore::new(crate::update_api::API_CONCURRENCY));
+    let mut tasks = JoinSet::new();
+    for (root, owner, repo, git_ref) in candidates {
+        let permit = semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("semaphore permits are never released elsewhere");
+        tasks.spawn(async move {
+            let _permit = permit;
+            let result =
+                crate::update_api::fetch_remote_subtree_hashes(&owner, &repo, &git_ref).await;
+            (root, result)
+        });
+    }
+
+    let mut out: std::collections::HashMap<PathBuf, ApiRemoteTree> =
+        std::collections::HashMap::new();
+    while let Some(joined) = tasks.join_next().await {
+        match joined {
+            Ok((root, Ok(tree))) => {
+                out.insert(root, tree);
+            }
+            Ok((_root, Err(error))) => {
+                warn!(
+                    target: "update_checker",
+                    error = %error,
+                    "GitHub API update-check fast path failed — falling back to git fetch"
+                );
+            }
+            Err(error) => {
+                warn!(
+                    target: "update_checker",
+                    error = %error,
+                    "GitHub API update-check task failed — falling back to git fetch"
+                );
+            }
+        }
+    }
+    out
 }
 
 fn detect_agent_links(skill_name: &str, profiles: &[AgentProfile]) -> Vec<String> {

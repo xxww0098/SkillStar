@@ -5,7 +5,7 @@ use skillstar_skills::skill_group::{self, SkillGroup};
 
 #[tauri::command]
 pub async fn list_skill_groups() -> Result<Vec<SkillGroup>, AppError> {
-    Ok(skill_group::list_groups())
+    Ok(skillstar_app::skill_group_links::list_groups_with_agent_links())
 }
 
 #[tauri::command]
@@ -34,9 +34,18 @@ pub async fn update_skill_group(
     icon: Option<String>,
     skills: Option<Vec<String>>,
     skill_sources: Option<HashMap<String, String>>,
+    agent_links: Option<Vec<String>>,
 ) -> Result<SkillGroup, AppError> {
-    skill_group::update_group(id, name, description, icon, skills, skill_sources)
-        .map_err(AppError::Anyhow)
+    skill_group::update_group(
+        id,
+        name,
+        description,
+        icon,
+        skills,
+        skill_sources,
+        agent_links,
+    )
+    .map_err(AppError::Anyhow)
 }
 
 #[tauri::command]

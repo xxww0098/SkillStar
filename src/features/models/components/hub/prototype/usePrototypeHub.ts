@@ -27,20 +27,16 @@ export function usePrototypeHub(nav: ModelsNavBridge): PrototypeHubData {
     isLoading,
     activateTool,
     deactivateTool,
+    removeBindingEntry,
     createProvider,
   } = useProvidersFlat();
   const { selectedProviderId, setSelectedProviderId, modelsDrawerRequest, clearModelsDrawerRequest } = nav;
   const [selectedAgentId, setSelectedAgentId] = useState<ProviderToolId>("claude-code");
-  const [visibleColumnIds, setVisibleColumnIds] = useState<MatrixColumnId[]>(() => [
-    ...DEFAULT_VISIBLE_COLUMN_IDS,
-  ]);
+  const [visibleColumnIds, setVisibleColumnIds] = useState<MatrixColumnId[]>(() => [...DEFAULT_VISIBLE_COLUMN_IDS]);
   const [overlay, setOverlayState] = useState<PrototypeOverlay>({ type: "none" });
 
   // Prefer store Official seeds; inject only when ensure/mock omitted them.
-  const providers = useMemo(
-    () => withEnsuredOfficialProviders(storeProviders),
-    [storeProviders],
-  );
+  const providers = useMemo(() => withEnsuredOfficialProviders(storeProviders), [storeProviders]);
 
   const toggleVisibleColumn = useCallback((id: MatrixColumnId) => {
     setVisibleColumnIds((prev) => {
@@ -117,9 +113,7 @@ export function usePrototypeHub(nav: ModelsNavBridge): PrototypeHubData {
         .map((p) => p.id),
       toolsOnOfficial: (["claude-code", "claude-desktop", "codex"] as const).filter((toolId) => {
         const entry = activeEntry(toolActivations[toolId]);
-        return Boolean(
-          entry && (entry.provider_id === CLAUDE_OFFICIAL_ID || entry.provider_id === CODEX_OFFICIAL_ID),
-        );
+        return Boolean(entry && (entry.provider_id === CLAUDE_OFFICIAL_ID || entry.provider_id === CODEX_OFFICIAL_ID));
       }),
       selectedAgentId,
       visibleColumnIds,
@@ -157,6 +151,7 @@ export function usePrototypeHub(nav: ModelsNavBridge): PrototypeHubData {
     stub,
     activateTool,
     deactivateTool,
+    removeBindingEntry,
     createProvider,
   };
 }

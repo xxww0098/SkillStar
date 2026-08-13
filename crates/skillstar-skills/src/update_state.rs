@@ -63,7 +63,7 @@ pub fn set(name: &str, available: bool) {
     set_stamped(name, available);
 }
 
-pub(crate) fn set_stamped(name: &str, available: bool) -> u64 {
+pub fn set_stamped(name: &str, available: bool) -> u64 {
     let (revision, snapshot) = with_store_mut(|store| {
         store.revision += 1;
         let revision = store.revision;
@@ -80,11 +80,11 @@ pub(crate) fn set_stamped(name: &str, available: bool) -> u64 {
     revision
 }
 
-pub(crate) fn get(name: &str) -> Option<bool> {
+pub fn get(name: &str) -> Option<bool> {
     with_store(|store| store.states.get(name).map(|stored| stored.available))
 }
 
-pub(crate) fn restore_if_revision(name: &str, expected_revision: u64, available: Option<bool>) {
+pub fn restore_if_revision(name: &str, expected_revision: u64, available: Option<bool>) {
     let snapshot = with_store_mut(|store| {
         if store.states.get(name).map(|stored| stored.revision) != Some(expected_revision) {
             return None;
@@ -236,8 +236,7 @@ fn with_store_mut<T>(write: impl FnOnce(&mut Store) -> T) -> T {
     write(&mut store)
 }
 
-#[cfg(test)]
-pub(crate) fn reset_for_test() {
+pub fn reset_for_test() {
     let mut store = STORE
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -304,8 +303,8 @@ mod tests {
         // The refresh now reports what it measured before the pull.
         let effective = commit_scan(scan_started, &[state("alpha", true)]);
 
-        assert_eq!(
-            effective[0].update_available, false,
+        assert!(
+            !effective[0].update_available,
             "a stale scan must not re-assert the badge the update just cleared"
         );
     }
@@ -317,7 +316,7 @@ mod tests {
         let scan_started = stamp();
         let effective = commit_scan(scan_started, &[state("alpha", true)]);
 
-        assert_eq!(effective[0].update_available, true);
+        assert!(effective[0].update_available);
 
         let mut skills = [skill("alpha")];
         apply_to(&mut skills);
@@ -347,9 +346,9 @@ mod tests {
 
         let effective = commit_scan(scan_started, &[state("alpha", true), state("beta", true)]);
 
-        assert_eq!(effective[0].update_available, false, "alpha was overtaken");
-        assert_eq!(
-            effective[1].update_available, true,
+        assert!(!effective[0].update_available, "alpha was overtaken");
+        assert!(
+            effective[1].update_available,
             "beta was not, and must still be applied"
         );
     }

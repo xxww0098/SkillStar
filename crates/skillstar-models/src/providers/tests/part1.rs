@@ -394,14 +394,8 @@ fn test_ensure_official_providers_idempotent() {
 fn test_activate_claude_official_skips_url_gate() {
     let mut store = FlatProvidersStore::default();
     assert!(ensure_official_providers(&mut store));
-    let activation = activate_tool(
-        &mut store,
-        CLAUDE_OFFICIAL_ID,
-        "claude-code",
-        None,
-        None,
-    )
-    .unwrap();
+    let activation =
+        activate_tool(&mut store, CLAUDE_OFFICIAL_ID, "claude-code", None, None).unwrap();
     assert_eq!(activation.provider_id, CLAUDE_OFFICIAL_ID);
 }
 

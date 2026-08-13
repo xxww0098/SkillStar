@@ -5,6 +5,21 @@
  */
 export type McpSyncResult = { toolId: string, serverId: string, success: boolean, 
 /**
- * True when the action was a no-op because the tool is not installed.
+ * True when the action was a deliberate no-op: the tool is not installed,
+ * or a legacy cleanup tombstone was subsumed by the live target that now
+ * owns the same config key.
  */
-skipped: boolean, configPath?: string | null, backupPath?: string | null, error?: string | null, };
+skipped: boolean, configPath?: string | null, backupPath?: string | null, error?: string | null, 
+/**
+ * A failed write was undone: this tool's config is byte-for-byte back to
+ * its pre-attempt state (restored from `backup_path`, or the file this
+ * attempt created was deleted). Only ever set alongside `success: false`.
+ */
+rolledBack: boolean, 
+/**
+ * Set when `success` is false **and** the undo itself failed — the one
+ * state where this tool's config may have drifted. Surfaced separately
+ * from `error` because it demands a different remedy: restore the backup
+ * by hand rather than retry.
+ */
+rollbackError?: string | null, };

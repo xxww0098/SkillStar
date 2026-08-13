@@ -29,6 +29,7 @@ export { default as CodexColor } from "@lobehub/icons/es/Codex/components/Color"
 export { default as CursorMono } from "@lobehub/icons/es/Cursor/components/Mono";
 export { default as DeepSeekColor } from "@lobehub/icons/es/DeepSeek/components/Color";
 export { default as DevinColor } from "@lobehub/icons/es/Devin/components/Color";
+export { default as GeminiCLIColor } from "@lobehub/icons/es/GeminiCLI/components/Color";
 export { default as GithubCopilotMono } from "@lobehub/icons/es/GithubCopilot/components/Mono";
 export { default as GooseMono } from "@lobehub/icons/es/Goose/components/Mono";
 export { default as GrokMono } from "@lobehub/icons/es/Grok/components/Mono";
@@ -61,4 +62,5 @@ export { default as TraeColor } from "@lobehub/icons/es/Trae/components/Color";
 export { default as WindsurfMono } from "@lobehub/icons/es/Windsurf/components/Mono";
 export { default as XiaomiMiMoMono } from "@lobehub/icons/es/XiaomiMiMo/components/Mono";
 export { default as ZhipuColor } from "@lobehub/icons/es/Zhipu/components/Color";
+export { default as ZAIMono } from "@lobehub/icons/es/ZAI/components/Mono";
 export { default as ZencoderColor } from "@lobehub/icons/es/Zencoder/components/Color";

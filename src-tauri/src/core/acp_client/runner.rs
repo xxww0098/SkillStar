@@ -10,7 +10,7 @@ use std::time::Duration;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tracing::{error, info};
 
-use crate::core::path_env;
+use skillstar_core::infra::path_env;
 use skillstar_core::infra::paths;
 
 use super::client::{AcpAccessPolicy, AcpSetupResult, SkillStarClient};

@@ -110,6 +110,21 @@ pub fn install_from_share_code(skills: Vec<ShareCodeSkill>) -> ShareCodeInstallS
             match decode_embedded(encoded) {
                 Ok(content) => match local_skill::create(&name, Some(&content)) {
                     Ok(_) => {
+                        // Frontmatter gate: embedded content must be a valid
+                        // skill too. Roll back the just-created local skill
+                        // when it is not, and report the actionable reason.
+                        let created_dir =
+                            skillstar_core::infra::paths::local_skills_dir().join(&name);
+                        if let Err(reason) = crate::validation::ensure_installable(&created_dir) {
+                            let _ = local_skill::delete(&name);
+                            warn!(
+                                target: "share_install",
+                                skill = %name,
+                                error = %reason,
+                                "embedded content rejected by frontmatter gate"
+                            );
+                            return None;
+                        }
                         installed_skill::invalidate_cache();
                         if seen_embedded.insert(key.clone()) {
                             embedded_names.push(name.clone());

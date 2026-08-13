@@ -2,6 +2,134 @@
 
 状态：active
 
+## 2026-08-12 - 共享 skills 目录：没有归属记录时，清理一律退化成"看起来像技能就删"
+
+- Symptom: 多个 Agent 解析到同一个物理 skills 目录时，一方的移除会静默删掉另一方仍在使用的技能，两侧各有独立表现。Global 侧：cline 与 zed 共用 `~/.agents/skills`，在 SkillCard 或 Settings 里对 cline 取消部署某技能，zed/warp/loaf/dexto/kimi-code-cli 五个仍启用的 Agent 一并失去它（`deployment/mod.rs:305-336`，全程无共享检查，且用的是 `require_global_profile` 而非 enabled 版本，对已禁用 Agent 也照删）。Project 侧：卸载 hub 技能时 `remove_skill_from_all_projects`(`projects/sync.rs:132-157`) 对**全部** profile（含从未启用的、含 openclaw 的项目根 `skills`）拼路径，只要 `is_link || is_dir` 就删，用户手写的 `.agents/skills/foo` 被静默删除；一次 `full_sync` 的 `clear_project_symlinks`(`projects/helpers.rs:36-39`) 更是按目录清空而非按 manifest 清空，共享目录里所有未登记技能一次 Apply 后消失。UI 侧的伴生症状是计数串台：6 个共用 `~/.agents/skills` 的 Agent 各自显示同一个总数（`registry.rs:131-153`），任一 Agent 装了技能则 6 个图标一起亮（`installed_skill.rs:532-548`）。
+- Root cause: 一个共同的形状——**磁盘上不存在"这条 entry 是谁装的"这一信息，而代码在需要它时退化成了启发式**。Global 侧 `deployment/` 下根本没有任何归属记录（Project 侧至少有 `skills-list.json`），于是删除判据只剩 `fs_ops.rs:265-274` 的"是 link，或者是含 `SKILL.md` 的目录"——这个判据对"是不是一个技能"回答正确，对"该不该由我删"完全失明。Project 侧有 manifest 却在三条路径上不查它（cleanup、clear、rebuild），等价于退回同一个启发式。更深一层：**per-agent 归属在物理世界从未存在过**。`~/.agents/skills` 是 open agent skills 生态的共享约定，zed 进程 `ls` 一下就能加载 cline 部署的技能；系统曾试图用 manifest 维护一个磁盘无法兑现的隔离承诺，于是任何"存量已有部署但无归属记录"的起手都没有正确答案。这类缺陷在**单所有者场景下永远测不出来**——一个目录一个 Agent 时，"看起来像技能就删"和"是我装的才删"给出完全相同的结果。
+- Fix: 决策见 [decisions.md](./decisions.md) D-024（**已定，落地未开始**）：目录塌缩为一等部署单元 + 归属零状态推导（entry 属于 SkillStar ⟺ 其链接目标落在 `hub_skills_dir()` 下，已验证 5 个全局写入点 src 全是 hub 绝对路径且 `read_link_resolved` 只解一跳）。容器判定**必须复用** `repo_link::is_inside`(`repo_link.rs:65-93`)，不要新写 `starts_with`。
+- Files: `crates/skillstar-skills/src/deployment/mod.rs`、`crates/skillstar-skills/src/projects/{sync,helpers,rebuild,scan}.rs`、`crates/skillstar-skills/src/{installed_skill,repo_link}.rs`、`crates/skillstar-agents/src/{builtin,registry,custom}.rs`、`crates/skillstar-core/src/infra/fs_ops.rs`。
+- Self-check:
+  - 通用判据：**当一个物理资源可被多个逻辑所有者共享时，"删除"必须由归属回答，不能由"这东西长得像不像我管的类型"回答**。后者在单所有者下与前者等价，因此不会被现有测试发现；任何按 `read_dir` 遍历后逐项判断"像不像技能"的清理循环都是这个反模式的实例。
+  - 通用判据：**归属信息如果在物理世界不存在，就不要用状态去发明它**。存量数据没有正确的回填起手（记为无主/归给全部/归给第一个都错），且清单与磁盘是两次写、崩溃必然分叉。优先找一个能从磁盘零状态推导的谓词。
+  - 通用判据：**同一个容器判定不允许有第二份实现**。`repo_link.rs:4-9` 已记录过 Windows junction 因两份实现分叉而误判的事故；今天 `local_skill.rs:174`、`git/gh_manager.rs:432`、`storage_maintenance.rs:183` 三处裸 `resolved.starts_with(&dir)` 缺 canonicalize 与大小写折叠，是同一事故的复发预备队。
+  - 回归判据：任何新增的"清理/取消部署/清空目录"路径，必须先回答"这个目录还有没有别的已启用 Agent 解析到它"。用 `crates/skillstar-agents/src/builtin.rs` 的 `BUILTIN_AGENT_DEFS` 按 `resolve_global_dir` 与 `project_skills_rel` 分组即可枚举出全部共享组；今天共 3 组 global 与 4 组 project 共享目录。
+  - 反例警告：不要把 `deploy_modes` 当遗留字段。`docs/features/skills/README.md` 曾声称它"只为兼容旧 manifest"，实际 `projects/sync.rs:78-84,227,461-463` 正在读写它决定 symlink/copy。
+
+## 2026-08-12 - tool-sync 单元测试并行必挂：所有测试共用同一个 sandbox HOME
+
+- Symptom: `cargo test --workspace`（默认并行）随机挂 1–2 个 skillstar-models 测试，`--test-threads=1` 必过。典型是 `tool_sync::tests::part1::test_codex_official_sync_oauth_preserves_auth_json` 断言 `access_token` 拿到别的测试写的值，以及 `tool_sync::agents::tests::registry_paths_match_legacy_resolvers` 比较两个 home 解析结果时左右不一致（一个是 `skillstar-toolsync-test-<pid>` 回退目录，一个是 sandbox TempDir）。
+- Root cause: `tool_sync/tests/mod.rs` 的 `use_sandbox_home()` 用一个 `LazyLock<TempDir>` + `std::env::set_var(SKILLSTAR_TOOL_SYNC_HOME, ...)`，所有测试共享**同一个** sandbox HOME，于是共享同一个 `~/.codex/auth.json` 并互相覆盖；而 `set_var` 是进程级的，在 `LazyLock` 首次初始化的那一刻翻转，正在并行跑的其它测试会在同一个测试体内前后读到两个不同的 home。“设了临时目录”不等于“隔离”。
+- Fix: 不再改进程级环境变量。`tool_sync/mod.rs` 增加 `#[cfg(test)]` 的 thread-local `TEST_HOME_OVERRIDE`，`sandbox_home()` 优先读它；`use_sandbox_home()` 返回一个 RAII guard，为每个测试新建独立 TempDir 并在 Drop 时还原。libtest 一个测试一个线程，因此 thread-local 天然给出 per-test 隔离，且完全不需要 `unsafe set_var` / 互斥锁 / 串行化。
+- Files: `crates/skillstar-models/src/tool_sync/mod.rs`、`crates/skillstar-models/src/tool_sync/tests/mod.rs`。
+- Self-check:
+  - 通用判据：**进程级环境变量不能用来做并行测试隔离**。测试隔离的作用域必须和测试的并发单位一致——libtest 的并发单位是线程，那么覆盖点就得是 thread-local，而不是进程全局。
+  - 连续跑 5 次 `cargo test -p skillstar-models --locked`（默认并行）必须全绿；出现 `--test-threads=1` 才过的现象即为回归。
+  - 新增任何会解析 home 的 tool-sync 测试，必须 `let _sandbox = use_sandbox_home();` 并**持有** guard（`SandboxHome` 带 `#[must_use]`，写成裸调用会告警）。
+  - AGENTS.md「tool-sync 测试必须设置 `SKILLSTAR_TOOL_SYNC_HOME` 到临时目录」的意图是**每个测试各自隔离**，不是共用一个目录。
+
+## 2026-08-12 - degraded 收尾：同步状态行自相矛盾、降级判据只问了一个 scope、绕过快照的读路径不报降级
+
+- Symptom: 三个都不会立刻可见，都会让上面几条已经修好的契约在边角上重新破洞。(1) 配了 `config/marketplace_mirror.json` 且镜像与主站内容分叉时，新鲜度会莫名滞后：带着上一份载荷的 ETag 去问新 host，本该 200 的请求被答成 304。(2) 只逛过 hot / trending、从没同步过 all 的用户，搜索会把 hot 的降级兜底行报成 `Fresh`。(3) 本地 SQLite 读失败改走远端直取时，即使远端返回的也是降级载荷，用户只看到「不是来自快照」，看不到「这批数据不完整」。
+- Root cause: 一个共同的形状——**降级/一致性信息在某一条路径上被丢掉了，而那条路径恰好没人问过它**。
+  1. `mark_scope_success_with_meta_in_tx` 的 `etag = COALESCE(excluded.etag, 旧值)` 是为「同字节 200 轮换 validator」写的，却同时作用在**完整重写**路径上。`source_host` / `payload_sha256` 都有 `CASE WHEN fetched_unchanged` 保护，只有 `etag` 没有，于是一次不带 `ETag` 头的 200 会让同一行里 `etag` 描述上一份载荷、另外两列描述这一份。
+  2. `search_local` / `ai_search_local` 只问 `scope_is_degraded(leaderboard_all)`，但 `hot` / `trending` 的兜底行经由同一个 `upsert_skill_in_tx` 写进同一张 `marketplace_skill`。判据的范围比数据的范围窄。
+  3. 七处 `ErrorFallback` 分支调用的是 `remote::get_*`（丢掉 `FetchMeta` 的 `.0` 包装），而 `ErrorFallback` 是唯一完全不读 `marketplace_sync_state` 的读路径——远端的 `degraded` 一旦在包装层丢掉，下游再也无从得知。
+- Fix: (1) 拆开两条路径：`etag = CASE WHEN fetched_unchanged THEN COALESCE(新,旧) ELSE excluded.etag END`。完整重写时 etag 跟随本次载荷，没有就置 NULL。不变式写在函数文档里：**同一行的 `etag` / `payload_sha256` / `source_host` 必须描述同一份载荷**；no-change 路径采纳轮换后的 validator 不违反它（字节相同即同一份载荷）。(2) 新增 `shared_skill_table_is_degraded(conn)`，一次 `EXISTS` 查完 all / hot / trending 三个 scope（搜索每次按键都会走，不能做成逐 scope 查询）；scope 列表由 `leaderboard_scope()` 派生，不手抄。(3) 七处 `ErrorFallback` 改走 `remote::*_with_meta(..., None)`，统一经由新的 `error_fallback(data, local_err, meta)` 构造；`meta.degraded` 为真时把原因追加到 `error` 字段（状态枚举与健康路径共用，塞不下第二根轴）。
+- Files: `crates/skillstar-marketplace/src/snapshot/{sync_state.rs,local_first.rs}`、`crates/skillstar-marketplace/src/snapshot/tests/part6.rs`。
+- Self-check:
+  - 通用判据：**同一行里描述同一个对象的几列，必须由同一条写路径同时写入**。只要有一列走了 `COALESCE` 而邻居走了 `CASE`，这一行迟早自相矛盾，而且没有任何下游能发现。
+  - 通用判据：**判据的范围必须覆盖数据的范围**。多个 scope 往同一张共享表写行时，只问其中一个 scope 的质量标记，等于对其余几个失明。
+  - 通用判据：绕过状态存储的旁路（直取远端、缓存穿透、应急通道）也必须携带质量信息，否则「降级数据永不冒充完整数据」只在主路径上成立。
+  - `sqlite3 ~/.skillstar/db/marketplace.db "SELECT scope,source_host,substr(payload_sha256,1,8),etag FROM marketplace_sync_state;"` —— 只在配了镜像时有意义：`source_host` 刚变过而 `etag` 没跟着变（也没被清空）即为回归。
+  - `cargo test -p skillstar-marketplace part6`、`cargo test -p skillstar-marketplace degraded`。
+
+## 2026-08-12 - Marketplace 默认 all tab 只看"表里有没有行"，永远报 Fresh
+
+- Symptom: 最常用的 all tab 永远显示"已是最新"：TTL 过期不刷新、降级兜底数据不带任何提示、前端的自动 stale 刷新 / 重试额度 / 重试按钮在这个视图上从不触发。hot / trending 却一切正常。
+- Root cause: `list_skills_local()`（`list_marketplace_skills_local` 命令，`Marketplace.tsx` 默认 tab）只查 `marketplace_skill` 有没有行，非空即 `Fresh`，完全不读 `marketplace_sync_state`。于是一次搜索 seed 留下的一行、或 degraded 兜底写入的 200 行，都会让它报 Fresh；`Stale` 在这条命令上根本不可达，前端所有 stale 自愈逻辑成为死代码。同一文件里 `get_leaderboard_local` / `get_publishers_local` 等读路径都是按 scope 判新鲜度的——只有它例外。
+- Fix: `list_skills_local()` 的数据仍读全表，但新鲜度、seed 状态、`updated_at` 一律来自 `leaderboard_all` scope——正是前端刷新（`sync_marketplace_scope("leaderboard_all")`）和 `schedule_startup_refreshes` 重试的同一个 scope。状态集与 hot/trending 对齐：Fresh / Stale / Miss / Seeding / ErrorFallback / RemoteError。同时本地 SQLite 读失败不再伪装成 `RemoteError`（前端会显示"检查网络或代理"却附一句 `database is locked`），改为与其它读路径一致的"先试远端 → ErrorFallback，双双失败才 RemoteError"。
+- Files: `crates/skillstar-marketplace/src/snapshot/local_first.rs`。
+- Self-check:
+  - 通用判据：**读路径的新鲜度判据必须和写路径的 scope 是同一个键**。任何"有行 = 新鲜"的判断都等于把 TTL 和降级标记全部作废。
+  - `sqlite3 ~/.skillstar/db/marketplace.db "SELECT scope,last_success_at,next_refresh_at,degraded_reason FROM marketplace_sync_state WHERE scope='leaderboard_all';"` —— `next_refresh_at` 为空或过期时，all tab 必须显示 stale。
+  - `cargo test -p skillstar-marketplace the_all_tab`。
+
+## 2026-08-12 - Marketplace degraded 快照自锁：兜底数据写进去就再也刷不出来
+
+- Symptom: 上游榜单 HTML 改版后，用户看到 200 行兜底数据 + 一条永久错误条 + 一个点几次都必然失败的重试按钮。既没有接受降级数据的出口，也没有停止报错的出口。
+- Root cause: 两条守卫互相打架。空库时允许写入 degraded 兜底并把 `next_refresh_at` 清空（立刻 stale）；但另一条守卫只要「本次 degraded 且本地有行」就直接失败返回。第一次兜底 seed 成功之后本地就有行了，于是之后每一次刷新都确定性失败，永远失败。根因是**"本地有没有行"回答不了"本地这批行是好数据还是兜底数据"**——降级状态只有进入语义、没有退出语义，也没有持久化标记。
+- Fix: 给 `marketplace_sync_state` 加 `degraded_reason` 列（schema v12，幂等 ALTER），由 `mark_scope_success_with_meta_in_tx` 在**写数据的同一事务内**维护：degraded 载荷 → 不给 TTL + 写 `degraded_reason`，且 `last_error` 保持 NULL（同步确实成功了，`last_success_at` 与 `last_error` 同时非空会被所有诊断消费方读成失败）；完整载荷 → 清 `degraded_reason` + 恢复 TTL，这是唯一的退出；304 / 同字节 → 行没变，质量也不变，保留原 `degraded_reason`（否则一次 304 就能给兜底数据发一个完整 6 小时 TTL）。判定收敛到纯函数 `plan_refresh(meta, previous_sha256, has_local_rows, stored_is_degraded)`：拒绝用降级数据覆盖**完整**快照，但允许降级数据替换**同样降级**的快照。
+- Files: `crates/skillstar-marketplace/src/snapshot/{sync.rs,sync_state.rs,migrations.rs,mod.rs}`。
+- Self-check:
+  - 通用判据：任何"拒绝写入"的守卫都必须能回答"被保护的到底是什么"。用行数代替质量标记，第一次降级写入就会把守卫变成自锁。凡是可能确定性重复失败的路径，必须明确写出退出条件。
+  - `sqlite3 ~/.skillstar/db/marketplace.db "SELECT scope,last_success_at,last_error,next_refresh_at,degraded_reason FROM marketplace_sync_state;"` —— `degraded_reason` 非空时 `next_refresh_at` 必须为空。数据可不可信只看 `degraded_reason`，判据见下一条故障的自检（`last_success_at` 与 `last_error` 同时非空是正常可达状态，不是回归）。
+  - `cargo test -p skillstar-marketplace plan_refresh`、`cargo test -p skillstar-marketplace degraded`。
+
+## 2026-08-12 - degraded 机制在它唯一要防的场景里不生效，进去了还出不来
+
+- Symptom: 上一条修好的「自锁」并没有让机制真正工作。skills.sh SSR 改版后，用户拿到的仍然是 200 条模糊匹配冒充完整榜单、完整 6 小时 TTL、"已是最新"；而一旦真的进入 degraded（空库首次兜底 seed），又会被内容寻址永久钉死在兜底数据上，前端每次会话 3 次自动刷新全部 `SkipRewrite`，看起来成功、数据不变、无出口。
+- Root cause: 三个各自独立、方向相同的错误。
+  1. **判定点在合并之后**：`meta.degraded = true` 的前提是 `skills.is_empty()`，但在它之前 `fetch_all_skills_via_api()` 已经把同一个兜底端点的 ≤200 条追加进 `skills`。真实主场景（HTML 解析 0 条 → API 补充 200 条）于是产出 `len()==200 && degraded==false`。degraded 只在「同一个 URL 第一次失败、紧接着第二次成功」这条不存在的抖动路径上可达——整套 v12 列 / `plan_refresh` 分支 / TTL 抑制 / 前端 stale 标签全部空转。
+  2. **出口被内容寻址挡住**：`plan_refresh` 的真值表漏了 `(stored_is_degraded=true, meta.degraded=false, payload_unchanged=true)`。degraded 时存下的 `payload_sha256` 是那份**当时解析不了**的载荷的指纹；解析器修好后重新解析同一份字节正是主要恢复路径，却恰好被跳写命中。
+  3. **拿不到 body 就无从判断**：`conditional_etag` 只看行数不看质量，degraded scope 照发 `If-None-Match`，上游字节没变就一直 304，永远没有载荷可重新解析。
+- Fix: (1) 降级判定移到合并之前，抽成纯函数 `combine_leaderboard(html_skills, api_skills) -> (skills, degraded)`：`degraded` 由「HTML 有没有解析出榜单」决定；两半都空则返回 Err（没有载荷 ≠ 降级载荷，不允许用空榜单覆盖快照）。(2) `plan_refresh` 增加「stored degraded 且本次完整且**有真实 body**」强制 `Rewrite`（304 无 body，仍走 `SkipRewrite` 以保留标记而不是把 scope 重写成空）。(3) `conditional_etag(previous_etag, has_local_rows, stored_is_degraded)`：degraded 时不发 ETag。(4) `commit_unchanged` 路径改为 `etag = COALESCE(excluded.etag, 旧值)`——同字节响应也可能轮换 validator，留着旧的等于以后再也拿不到 304。
+- Files: `crates/skillstar-marketplace/src/remote/{leaderboard.rs,tests.rs}`、`crates/skillstar-marketplace/src/snapshot/{sync.rs,sync_state.rs,local_first.rs}`、`crates/skillstar-marketplace/src/snapshot/tests/part4.rs`。
+- Self-check:
+  - 通用判据：**降级/拒绝类判定必须放在「还分得清好数据和兜底数据」的那一刻**。任何在合并、追加、去重之后再问「结果是不是空的」的判定，都会在真实降级场景里恒假。
+  - 通用判据：跳写（内容寻址、`If-None-Match`、缓存）与**质量升级**是两条正交的轴。只要「本次载荷和上次一样」能压过「上次那份是坏的」，坏状态就没有出口——凡是有降级态的地方都要显式写出 exit 优先级。
+  - 通用判据：`last_success_at` 与 `last_error` 同时非空是**正常可达状态**（任何一次成功之后的刷新失败都会产生），它不表示「没有数据」。数据可不可信只由 `degraded_reason` 回答。
+  - `sqlite3 ~/.skillstar/db/marketplace.db "SELECT scope,next_refresh_at,degraded_reason,etag FROM marketplace_sync_state WHERE scope LIKE 'leaderboard%';"` —— 榜单行数骤降到 ~200 而 `degraded_reason` 为 NULL 即为回归。
+  - `cargo test -p skillstar-marketplace degraded`、`cargo test -p skillstar-marketplace leaderboard`。
+
+## 2026-08-12 - 测试失明（第二轮）：迁移只测了函数自己，接线和持久化读回零覆盖
+
+- Symptom: 上一轮 degraded 修复带着新增测试合并，75 个测试全绿；红队把两处关键代码变异回缺陷版本，**仍然全绿**。
+- Root cause: 两种同型错误，都属于「测了函数自己，没测它被接进哪里」。
+  1. `stored_scope_state` 的 `degraded: state.degraded_reason.is_some()` 变异成 `degraded: false`（精确复活自锁）不转红：所有 degraded 测试都直接调 `mark_scope_success_with_meta_in_tx` 然后读列，从不经过「读回持久化状态 → 喂给 `plan_refresh`」这条线；`plan_refresh` 的真值表测试根本不碰 SQLite。
+  2. `migrate_schema` 的 `if version < 12` 变异成 `< 11` 不转红：v12 的测试先调 `create_connection()`（整条链已经跑完、列已经在了）再直接调两次 `migrate_v11_to_v12`，测的是函数自身幂等，不是迁移有没有接进版本链。而升级路径是唯一会坏的路径——全新库从 version 0 走基础建表，永远看不到这个缺陷。
+- Fix: (1) 把决定收敛到 `plan_scope_refresh(scope, meta)`——五个 `sync_scope_*` 都经过它，它内部完成「读回状态 → 判定」，测试直接断言它的返回值。(2) 新增手工种 `user_version = 11` 真实老库、走完整 `create_connection()` 的用例，并断言真正的症状（`scope_sync_state` / `get_marketplace_sync_states` 可读），不只断言列存在。(3) `stored_scope_state` / `scope_has_local_rows` 的读失败不再静默——加 warn 日志，因为读失败与上述变异等价。
+- Files: `crates/skillstar-marketplace/src/snapshot/sync.rs`、`crates/skillstar-marketplace/src/snapshot/tests/part4.rs`。
+- Self-check:
+  - 通用判据：**迁移测试必须从「上一版本的真实数据库」开始，走完整启动路径**。从 `create_connection()` 开始的迁移测试只能证明幂等，不能证明接线；这类缺陷对全新安装完全不可见。
+  - 通用判据：凡是「持久化状态 → 决策」的链路，测试必须**跨过持久化边界**。分别断言「列写对了」和「纯函数判对了」，中间那一段读回逻辑仍是零覆盖。
+  - 变异复核清单（改完必须逐条确认转红）：`stored_scope_state` 的 `degraded` 恒 false；`migrate_schema` 的 `version < 12`；`combine_leaderboard` 的 `degraded` 恒 false；`plan_refresh` 的 stored-degraded 强制重写分支。
+
+## 2026-08-12 - 测试失明：断言"中间量"和"两个 helper 各自"都不算测过
+
+- Symptom: 上面两条 URL 拼接和跳写校验的修复，各自带着新增测试合并，但把修复代码变异回缺陷版本后 66 个测试**全绿**——测试名承诺的行为其实没有被测试。
+- Root cause: 两种同型错误。(1) `join_url` 两端都做了防御，只喂给它规范化过的 host 就永远拼对，测的是它自己而不是真实请求路径；真实路径 `fetch_with_failover` 的 URL 构造零覆盖。(2) 测试分别断言 `payload_unchanged(...)` 和 `scope_has_local_rows(...)` 两个 helper，从没把它们**组合**起来跑过任何判定，所以删掉五处 `has_local_rows &&` 守卫全绿。
+- Fix: 把两处判定各自抽成可测的纯函数并直接断言判定结果——`failover_targets_for(hosts, path)`（把 host 列表作为参数传入，才能覆盖"host 丢了尾斜杠"这个真正的缺陷形状）和 `plan_refresh(...)`。判定必须只有这一个落点，`sync_scope_*` 只做分派。
+- Files: `crates/skillstar-marketplace/src/remote/{mod.rs,tests.rs}`、`crates/skillstar-marketplace/src/snapshot/sync.rs`、`crates/skillstar-marketplace/src/snapshot/tests/part4.rs`。
+- Self-check:
+  - 通用判据：新增测试后，**把修复代码手工变异回缺陷版本，确认测试确实变红**。测不红的测试等于没写。断言中间量（host 列表、单个 helper 的返回值）永远不构成对判定的覆盖。
+  - 隔离副本做法：`rsync -a --exclude target --exclude node_modules --exclude .git ./ /tmp/mut/` 后在副本里改代码跑 `CARGO_TARGET_DIR=/tmp/muttarget cargo test -p skillstar-marketplace --lib`，不要在仓库里做变异。
+
+## 2026-08-12 - Marketplace URL 拼接丢斜杠：所有远端请求打到 `https://skills.shhot`
+
+- Symptom: 市场每个 tab 都红字 "Marketplace request failed" + 空列表，只有 Popular/All 榜单有数据；搜索永远失败且不自愈；配了 mirror 的用户完全正常。全套 58 个单测绿。
+- Root cause: 主 host 常量 `https://skills.sh` 没有尾斜杠（mirror host 走 `normalize_host` 有），而 `fetch_with_failover` 用 `format!("{host}{}", path.trim_start_matches('/'))` 又把 path 的前导斜杠删掉 —— 两端都不负责分隔符。于是 `/hot` → `https://skills.shhot`（NXDOMAIN，curl code=000），只有 path 为 `"/"` 的 Popular/All 恰好拼对。测试只断言 host 列表、从不断言最终 URL，还把"主 host 无尾斜杠、mirror 有"这个自相矛盾的状态写成了期望值，所以全绿。
+- Fix: `join_url()` 两端都防御 —— `format!("{}/{}", host.trim_end_matches('/'), path.trim_start_matches('/'))`；`marketplace_hosts()` 的主 host 也过 `normalize_host`。测试改为直接断言最终 URL。
+- Files: `crates/skillstar-marketplace/src/remote/{mod.rs,tests.rs}`。
+- Self-check:
+  - `sqlite3 ~/.skillstar/db/marketplace.db "SELECT scope,last_success_at,last_error,source_host FROM marketplace_sync_state;"` —— 有 `last_attempt_at` 但 `last_success_at` 恒为 NULL，就是远端从来没通。
+  - 通用判据：只要「host 是否带尾斜杠」和「path 是否带前导斜杠」由两处代码各自决定，就必然有一种组合拼错。断言中间量（host 列表）不算测过，必须断言最终 URL。
+
+## 2026-08-12 - 首次同步失败把用户永久钉死在空市场，且看起来像"已同步"
+
+- Symptom: 第一次打开应用时正好断网/被墙 → 首次报错，之后网络恢复也永远是空列表、无报错、重启无效；诊断面板显示该 scope 无任何错误。
+- Root cause（三段叠加，每一段单独看都"合理"）：
+  1. `sync_scope_*` 在发起网络请求**之前**先 `mark_scope_attempt` 插行，而 `sync_seed_state` 只按「这一行在不在」判定 `Synced` → 第一次失败后永远是 `Synced` → local-first 直接返回 `Miss`，不再重试远端。
+  2. `is_scope_stale` 要求 `last_success_at` 非空 → 从未成功过的 scope 永远排不进启动刷新，兜底路径也失效。
+  3. 远端 fetch 失败用 `?` 直接返回，从不调 `mark_scope_error`，而 `mark_scope_attempt_in_tx` 每次尝试开头又把 `last_error` 置 NULL → 库里 `last_error` 恒为 NULL，排查时看起来"没有错误"。
+  另有同源的第四段：内容寻址只比对 `payload_sha256`，不看本地行是否还在 —— 本地数据丢失后只要上游字节没变就永远跳过重写，却报告成功 + Fresh。被墙网络恰恰最容易返回字节稳定的挑战页。
+- Fix: `sync_seed_state` 改按 `last_success_at.is_some()` 判定；`is_scope_stale` 对「有行但从未成功」返回 true，让启动刷新重试；五个 `sync_scope_*` 的远端失败显式 `mark_scope_error` 后再返回 Err；跳写前增加本地行数校验，行数为 0 时连 ETag 都不发（否则 304 空 body 无法重建数据）。
+- Files: `crates/skillstar-marketplace/src/snapshot/{sync_state.rs,sync.rs,local_first.rs}`。
+- Self-check:
+  - `SELECT scope, last_success_at, last_error, payload_sha256 FROM marketplace_sync_state;` —— 有行且 `last_success_at IS NULL` 就是本故障；`last_error` 必须能看到真实原因，恒为 NULL 说明失败路径又不写错误了。
+  - 有 `last_success_at` + `payload_sha256`，但 `marketplace_listing` 是空的 ⇒ 跳写校验失效。
+  - `cargo test -p skillstar-marketplace part4`。
+  - 通用判据：「尝试过」不等于「成功过」。任何用行存在与否代表成功的状态机，都会被"失败前先插行"的写法反噬。
+
 ## 2026-08-05 - 已有仓库扫描把稀疏工作树误当完整远端树，并跟随 Skill symlink
 
 - Symptom: 已有私有仓库的注册预览可能漏掉 Skill 目录外的嵌套文件、漏掉根 Skill 之外的嵌套 Skill，且恶意仓库可用 symlink 让发现器读取 checkout 外的 `SKILL.md`。
@@ -339,3 +467,24 @@
 - Root cause: `PageToolbar` 的 filters 容器 `<div ref={filtersRef} onWheel={...}>` 用滚轮量驱动横向滚动。来源下拉是 Radix `Popover.Content`，通过 `Popover.Portal` 渲染到 `document.body`，DOM 上不在 filters 内部；但 React synthetic event 沿 **React 组件树** 冒泡，会跨 portal 传播回这个仍是其 React 祖先的 `onWheel` handler。handler 只判断 `scrollWidth > clientWidth`，没有校验事件是否真的源自 filters 的 DOM 子树，于是把下拉里的滚动也当成 filters 滚动执行。
 - Fix: 在 `onWheel` 开头加 `if (!el.contains(e.target as Node)) return;` DOM 归属守卫。portal 出去的下拉内容不是 `el` 的 DOM 后代会被直接跳过；真正的 filter pills 是 `el` 后代，横向滚动照常。用真实 DOM 关系而非 React 树关系判断事件归属。
 - Self-check: 窗口窄到 filters 溢出时，鼠标在真正的 filter pills 上滚动仍应横向滚动 topbar；打开来源（或任何 portal 下拉）后在其内容上滚动，topbar 必须保持不动。任何经 portal 渲染、但 React 树上是 filters 后代的浮层，都不应再触发 topbar 滚动。
+
+## 2026-08-13 - MCP 写入路径宽松解析：畸形配置被静默清空，畸形 store 让全部 MCP 永久丢失
+
+- Symptom: 用户 `~/.claude.json`（或 codex/opencode/zcode 配置）有语法错误、临时不可读时，点一次 MCP 开关就把整个文件替换成只含 `mcpServers` 的新 JSON，Claude Code 的其它设置全部消失；`~/.skillstar/config/mcp_servers.json` 解析失败时 MCP 页面显示为空，随后任意一次写入把用户全部 MCP server 永久覆盖。
+- Root cause: 写入路径的读函数把「文件不存在」和「存在但读/解析失败」混为一谈，都回退成空 Map / `McpStore::default()`；而写入是整文件 `write` 或 `tmp+rename` 替换。宽松解析在只读场景（计数、探测）无害，在「读-改-写」场景等于把解析失败翻译成"用户没有配置"。store 侧还没有写前备份，覆盖后无从恢复。
+- Fix: 读函数区分三态——不存在/空文件视为空配置并继续；读失败、解析失败、根对象或目标键类型不对一律返回错误，原文件不动。四条 upsert 与对应 remove 路径（claude-code/kiro/cursor 的 `mcpServers`、opencode 的 `mcp`、codex/grok 的 `mcp_servers` TOML、zcode 的 `mcp.servers`）统一走同一对 strict reader，legacy Desktop Chat 的 `_strict` 变体退化为别名。store 解析失败额外把原文件另存为 `.corrupt.<epoch_ms>`（同内容复用同一份，避免每次进页面堆一份）并把错误传播到命令层；`write_mcp_store` 覆盖已存在文件前复用 `tool_sync::create_rolling_backup`。
+- Self-check: 对每条写入路径写一个「畸形文件存在 → 调用返回 Err → 文件字节完全不变」的测试；store 侧另外验证 `.corrupt.<ts>` 副本内容等于原文、重复读只留一份副本、二次写入留下内容等于旧版本的 `.bak.<ts>`。同时保留正向用例：缺失文件仍会被创建、既有的无关键（如 `theme`）不被改动。
+
+## 2026-08-13 - 装第二个技能会永久锁死整个仓库；崩溃残留的 staging 会伪装成"无 lock entry 的已装技能"
+
+- Symptom: 从同一个仓库安装第二个技能后，该仓库的所有安装、扫描和更新都失败并报 `Skill 'A' has local changes; preserve them as a local copy or explicitly discard them`，而用户从未编辑过 A；`refresh_skill_updates` 同时显示"无更新"，与错误自相矛盾。另一种形态是错误里点名 `.skillstar-remove-writer-1234` 这类用户看不见也无从处理的隐藏路径，同样锁死整个仓库。
+- Root cause: 两个独立缺陷叠加在同一道门禁上。① `repo_scanner::cache` 在任何 scan/install 前无条件 `git fetch` + `reset --hard`，但 `scan_install` 只为本次 target 写 lock entry，同 checkout 的其它已装技能磁盘内容被推进、baseline 却停在旧 commit，于是被算成"本地分歧"。② 每条写入路径都用点开头的 staging 名（`.skillstar-remove-*`、`.skillstar-install-*`、`.importing-*`）做 rename 换入，进程被杀会留下残留；对 repo-cache 技能这个残留就是一个指向该 cache 的符号链接，而 `ensure_installed_checkout_is_clean`、`collect_skill_dirs`、patrol 的 hub 遍历都不过滤点开头条目，于是把它当成已装技能并要求它有 lock entry。卸载 staging 名里还带 `std::process::id()`，使得已有的自愈分支只能匹配当前进程的残留，跨进程崩溃留下的永远清不掉。
+- Fix: `hub_entry::is_managed_hub_entry` 成为所有 hub 遍历共用的唯一判定（`cache.rs`、`installed_skill::collect_skill_dirs`、`patrol::collect_hub_skills`、`divergence`），点开头条目一律不算已装技能；`hub_entry::sweep_stale_staging` 在持有 update transaction lock 的安装与卸载入口清扫残留，且不走 `fs_ops::remove_link_or_copy`（那个函数对没有 SKILL.md 的目录会拒绝删除，而半写状态恰恰没有 SKILL.md）；卸载 staging 名去掉 pid，使自愈跨进程生效——安全前提是它的三个调用方都持有 transaction lock。`skill_update::refresh_baselines_after_checkout_reset` 在两处 reset 成功后为同 checkout 的全部已装技能刷新 baseline，只在门禁已证明 worktree 干净之后调用，因此内容变化必然来自上游而不是用户；内容在 reset 后消失的技能保留旧 baseline，那是更新路径识别"来源已删除"的依据。
+- Self-check: 造一个含点开头 staging 残留（符号链接、无 SKILL.md 的半写目录、完整目录三种形态）的 hub，清扫后只有 staging 消失、真实技能与无关 dotfile 保留、被指向的 repo cache 内容不受影响；同一仓库连装两个技能后，第一个技能不得出现 local divergence，且该仓库的后续安装/扫描/更新都必须继续可用。
+
+## 2026-08-13 - 检查失败被当成"没有更新"，一次离线巡检就把真实徽标擦成最新
+
+- Symptom: 断网或 `.git` 损坏时跑一轮 patrol 或刷新，非 repo-cache 技能的更新徽标全部消失并落盘；恢复网络后界面显示"全部最新"，直到下一次成功检查才恢复。
+- Root cause: repo-cache 路径的契约是"检查失败返回 `None` → 调用方跳过 → 保留上一次结果"，`installed_skill.rs` 与 `patrol.rs` 的跳过逻辑也都实现好了；但非 repo-cache 的回退路径写成 `Some(check_update_in_session(..).unwrap_or(false))`，patrol 侧写成 `Err => Some(false)`，任务 join 失败也写成 `Some(false)`。三处都把"不知道"断言成"没有更新"，而这个 `false` 会被 `commit_scan` 持久化。
+- Fix: 三处统一改成返回 `None`（`.ok()`），交给既有的跳过逻辑。判定语义与 `docs/features/skills/README.md` 已经声明的"失败保留徽标"对齐。
+- Self-check: 让检查返回 `Err`，`update_state` 中该技能的既有 `true` 必须原样保留而不是被写成 `false`；这条同样适用于 patrol 的任务 panic/取消路径。

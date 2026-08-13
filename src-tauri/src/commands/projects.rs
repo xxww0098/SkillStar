@@ -145,7 +145,10 @@ mod tests {
             let source_skill_dir = project_path.join(".claude/skills/legacy-skill");
 
             std::fs::create_dir_all(&source_skill_dir)?;
-            std::fs::write(source_skill_dir.join("SKILL.md"), "description: legacy")?;
+            std::fs::write(
+                source_skill_dir.join("SKILL.md"),
+                "---\nname: legacy\ndescription: legacy project skill\n---\n",
+            )?;
 
             let targets = vec![ImportTarget {
                 name: "legacy-skill".to_string(),
@@ -329,7 +332,10 @@ mod tests {
             let source_skill_dir = project_path.join(".agents/skills/shared-skill");
 
             std::fs::create_dir_all(&source_skill_dir)?;
-            std::fs::write(source_skill_dir.join("SKILL.md"), "description: shared")?;
+            std::fs::write(
+                source_skill_dir.join("SKILL.md"),
+                "---\nname: shared\ndescription: shared project skill\n---\n",
+            )?;
 
             let entry = register_project(&project_path_str)?;
             let existing = SkillsList {

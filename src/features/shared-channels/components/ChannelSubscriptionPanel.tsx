@@ -1,5 +1,6 @@
 import { CheckCircle2, GitCommitHorizontal, Loader2, PackageCheck, ShieldAlert } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import type {
   ChannelSubscription,
@@ -18,6 +19,7 @@ import { RemoteSubscriptionStatusPanel } from "./RemoteSubscriptionStatusPanel";
 import { RevokedSubscriptionPanel } from "./RevokedSubscriptionPanel";
 
 export function ChannelSubscriptionPanel({ channel }: { channel: SharedChannelDescriptor }) {
+  const { t } = useTranslation();
   const [review, setReview] = useState<ChannelSubscriptionReview | null>(null);
   const [subscription, setSubscription] = useState<ChannelSubscriptionView | ChannelSubscription | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -117,9 +119,9 @@ export function ChannelSubscriptionPanel({ channel }: { channel: SharedChannelDe
 
   if (loading) {
     return (
-      <section className="rounded-xl border border-border p-4" aria-label="Channel release review">
+      <section className="rounded-xl border border-border p-4" aria-label={t("sharedChannels.releaseReviewAria")}>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" /> Loading latest published release…
+          <Loader2 className="size-4 animate-spin" /> {t("sharedChannels.loadingRelease")}
         </div>
       </section>
     );
@@ -128,18 +130,16 @@ export function ChannelSubscriptionPanel({ channel }: { channel: SharedChannelDe
   if (!review) {
     return (
       <div className="space-y-5">
-        <section className="rounded-xl border border-border p-4" aria-label="Channel release review">
-          <p className="text-sm font-medium">No installable release</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {error || "Ask a publisher to create the first channel release."}
-          </p>
+        <section className="rounded-xl border border-border p-4" aria-label={t("sharedChannels.releaseReviewAria")}>
+          <p className="text-sm font-medium">{t("sharedChannels.noInstallableRelease")}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{error || t("sharedChannels.askPublisher")}</p>
           {alreadySubscribed && (
             <p className="mt-2 text-xs text-emerald-600">
-              The local subscription is still available with {subscribedSkillCount} selected Skills.
+              {t("sharedChannels.subscriptionAvailableCount", { count: subscribedSkillCount })}
             </p>
           )}
           <Button size="sm" variant="outline" className="mt-3" onClick={() => void refresh()}>
-            Retry release review
+            {t("sharedChannels.retryReleaseReview")}
           </Button>
         </section>
         {alreadySubscribed && !readOnly && revoked && subscription && (
@@ -163,10 +163,13 @@ export function ChannelSubscriptionPanel({ channel }: { channel: SharedChannelDe
   }
 
   return (
-    <section className="space-y-4 rounded-xl border border-border p-4" aria-label="Channel release review">
+    <section
+      className="space-y-4 rounded-xl border border-border p-4"
+      aria-label={t("sharedChannels.releaseReviewAria")}
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold">Review published release</p>
+          <p className="text-sm font-semibold">{t("sharedChannels.reviewPublished")}</p>
           <a
             href={review.channel.html_url}
             target="_blank"
@@ -176,7 +179,11 @@ export function ChannelSubscriptionPanel({ channel }: { channel: SharedChannelDe
             {review.channel.owner}/{review.channel.name}
           </a>
           <p className="mt-1 text-xs text-muted-foreground">
-            Revision {review.target.revision} · {review.target.tag_name} · published by @{review.publisher.login} ·{" "}
+            {t("sharedChannels.revisionLine", {
+              revision: review.target.revision,
+              tag: review.target.tag_name,
+              login: review.publisher.login,
+            })}{" "}
             <time dateTime={review.published_at}>{formatPublishedAt(review.published_at)}</time>
           </p>
         </div>
@@ -187,29 +194,28 @@ export function ChannelSubscriptionPanel({ channel }: { channel: SharedChannelDe
 
       <div>
         <p className="text-sm font-medium">{review.title}</p>
-        <p className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">{review.notes || "No release notes."}</p>
+        <p className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">
+          {review.notes || t("sharedChannels.noReleaseNotes")}
+        </p>
       </div>
 
       <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-3">
         <div className="flex items-center gap-2 text-xs font-medium">
-          <ShieldAlert className="size-4 text-amber-500" /> Repository exposure
+          <ShieldAlert className="size-4 text-amber-500" /> {t("sharedChannels.exposureWarningTitle")}
         </div>
-        <p className="mt-1 text-[11px] text-muted-foreground">
-          This is a private organization repository. Your GitHub access can read its complete contents and full Git
-          history, not only the Skills listed below.
-        </p>
+        <p className="mt-1 text-[11px] text-muted-foreground">{t("sharedChannels.exposureWarningDetail")}</p>
       </div>
 
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-3">
-          <p className="text-xs font-medium">Skills in this release</p>
+          <p className="text-xs font-medium">{t("sharedChannels.skillsInRelease")}</p>
           <p className="text-[11px] text-muted-foreground">
-            {selectedCount} of {review.skills.length} selected
+            {t("sharedChannels.selectedCount", { selected: selectedCount, total: review.skills.length })}
           </p>
         </div>
         {review.skills.length === 0 ? (
           <p className="rounded-lg border border-dashed border-border p-3 text-xs text-muted-foreground">
-            This release contains no current Skills. You can still subscribe with an empty selection.
+            {t("sharedChannels.noSkillsInRelease")}
           </p>
         ) : (
           review.skills.map((skill) => (
@@ -241,27 +247,25 @@ export function ChannelSubscriptionPanel({ channel }: { channel: SharedChannelDe
 
       {error && <p className="text-xs text-destructive">{error}</p>}
       {readOnly ? (
-        <p className="text-xs text-amber-600">
-          This subscription was created by a newer SkillStar schema. It is visible here but cannot be changed.
-        </p>
+        <p className="text-xs text-amber-600">{t("sharedChannels.readOnlySubscription")}</p>
       ) : alreadySubscribed ? (
         <div className="flex items-center gap-2 text-xs text-emerald-600">
-          <CheckCircle2 className="size-4" /> Subscribed to revision{" "}
-          {subscription?.target?.revision ?? review.target.revision} with {subscribedSkillCount} selected Skills.
+          <CheckCircle2 className="size-4" />{" "}
+          {t("sharedChannels.subscribedToRevision", {
+            revision: subscription?.target?.revision ?? review.target.revision,
+            count: subscribedSkillCount,
+          })}
         </div>
       ) : (
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-[11px] text-muted-foreground">
-            Accepting repository access and installing Skills are separate choices. Future new Skills will not be added
-            automatically.
-          </p>
+          <p className="text-[11px] text-muted-foreground">{t("sharedChannels.subscribeHint")}</p>
           <Button size="sm" onClick={() => void install()} disabled={installing}>
             {installing ? (
               <Loader2 className="mr-1.5 size-4 animate-spin" />
             ) : (
               <PackageCheck className="mr-1.5 size-4" />
             )}
-            Install selected & subscribe
+            {t("sharedChannels.installAndSubscribe")}
           </Button>
         </div>
       )}

@@ -8,7 +8,7 @@ unsafe extern "system" {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if skillstar_skills::git::transport::handle_internal_askpass(&args) {
+    if skillstar_git::transport::handle_internal_askpass(&args) {
         return;
     }
 

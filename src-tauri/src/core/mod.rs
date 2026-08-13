@@ -8,7 +8,6 @@ pub mod channel_auto_update;
 pub mod dock_menu;
 pub mod github_auth;
 pub mod marketplace_snapshot;
-pub mod path_env;
 pub mod patrol;
 pub mod skill_tutorial;
 

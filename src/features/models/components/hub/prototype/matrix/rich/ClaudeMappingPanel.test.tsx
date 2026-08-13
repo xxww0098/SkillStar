@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ProviderEntryFlat } from "../../../../../../../types";
-import {
-  emptyClaudeMap,
-  oneClickClaudeMap,
-  seedClaudeMap,
-  type ClaudeMapState,
-} from "./ClaudeMappingPanel";
+import { emptyClaudeMap, oneClickClaudeMap, seedClaudeMap, type ClaudeMapState } from "./ClaudeMappingPanel";
 
 function provider(partial: Partial<ProviderEntryFlat> = {}): ProviderEntryFlat {
   return {

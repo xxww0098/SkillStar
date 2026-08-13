@@ -70,8 +70,6 @@ pub struct TutorialArtifact {
     pub stale_reason: Option<TutorialStaleReason>,
 }
 
-pub type TutorialLoadResult = TutorialArtifact;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidatedTutorialHtml(String);
 
@@ -89,7 +87,7 @@ pub fn load(
     snapshot: &SkillSnapshot,
     prompt_version: &str,
     schema_version: &str,
-) -> Result<TutorialLoadResult, AppError> {
+) -> Result<TutorialArtifact, AppError> {
     let directory = artifact_directory(&snapshot.name);
     let root = directory.parent().ok_or_else(|| {
         AppError::Other(format!(

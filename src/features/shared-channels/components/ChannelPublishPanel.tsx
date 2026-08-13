@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { CheckCircle2, ExternalLink, GitCommitHorizontal, Loader2, Rocket, ScanSearch, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import type { ChannelPublishPreview, ChannelPublishResult, SharedChannelDescriptor } from "../../../types";
 import type { GitOperationProgress } from "../../../types/github";
@@ -11,6 +12,7 @@ interface Props {
 }
 
 export function ChannelPublishPanel({ channel }: Props) {
+  const { t } = useTranslation();
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
   const [preview, setPreview] = useState<ChannelPublishPreview | null>(null);
@@ -123,13 +125,13 @@ export function ChannelPublishPanel({ channel }: Props) {
       <section className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-5">
         <div className="flex items-center gap-2 text-sm font-semibold">
           <CheckCircle2 className="size-5 text-emerald-500" />
-          Published {result.manifest.tag_name}
+          {t("sharedChannels.publishedTag", { tag: result.manifest.tag_name })}
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
-          {result.manifest.skills.length} Skills in the immutable manifest
+          {t("sharedChannels.publishedSkillsCount", { count: result.manifest.skills.length })}
         </p>
         <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">
-          Commit {result.manifest.commit_sha}
+          {t("sharedChannels.commitSha", { sha: result.manifest.commit_sha })}
         </p>
         <div className="mt-4 flex gap-2">
           <a
@@ -138,14 +140,14 @@ export function ChannelPublishPanel({ channel }: Props) {
             rel="noreferrer"
             className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
           >
-            Open GitHub Release <ExternalLink className="size-3" />
+            {t("sharedChannels.openRelease")} <ExternalLink className="size-3" />
           </a>
           <button
             type="button"
             className="text-xs text-muted-foreground hover:text-foreground"
             onClick={() => setResult(null)}
           >
-            Publish another version
+            {t("sharedChannels.publishAnother")}
           </button>
         </div>
       </section>
@@ -155,10 +157,8 @@ export function ChannelPublishPanel({ channel }: Props) {
   return (
     <section className="space-y-4 rounded-xl border border-border p-5">
       <div>
-        <h3 className="text-sm font-semibold">Publish immutable channel version</h3>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Normal repository commits remain drafts. Scan and explicitly publish one exact commit as a GitHub Release.
-        </p>
+        <h3 className="text-sm font-semibold">{t("sharedChannels.publishTitle")}</h3>
+        <p className="mt-1 text-xs text-muted-foreground">{t("sharedChannels.publishHint")}</p>
       </div>
 
       {error && (
@@ -169,24 +169,24 @@ export function ChannelPublishPanel({ channel }: Props) {
 
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block space-y-1.5 text-xs font-medium">
-          <span>Release title</span>
+          <span>{t("sharedChannels.releaseTitle")}</span>
           <input
             value={title}
             onChange={(event) => setTitle(event.target.value)}
             maxLength={120}
             className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
-            placeholder="What is in this version?"
+            placeholder={t("sharedChannels.releaseTitlePlaceholder")}
           />
         </label>
         <label className="block space-y-1.5 text-xs font-medium sm:row-span-2">
-          <span>Release notes</span>
+          <span>{t("sharedChannels.releaseNotes")}</span>
           <textarea
             value={notes}
             onChange={(event) => setNotes(event.target.value)}
             maxLength={20_000}
             rows={4}
             className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-            placeholder="Optional context for subscribers"
+            placeholder={t("sharedChannels.releaseNotesPlaceholder")}
           />
         </label>
       </div>
@@ -199,13 +199,15 @@ export function ChannelPublishPanel({ channel }: Props) {
               {preview.tag_name}
             </div>
             <div className="flex gap-2 text-[11px] text-muted-foreground">
-              <span>{counts.added} added</span>
-              <span>{counts.updated} updated</span>
-              <span>{counts.removed} removed</span>
-              <span>{counts.unchanged} unchanged</span>
+              <span>{t("sharedChannels.countsAdded", { count: counts.added })}</span>
+              <span>{t("sharedChannels.countsUpdated", { count: counts.updated })}</span>
+              <span>{t("sharedChannels.countsRemoved", { count: counts.removed })}</span>
+              <span>{t("sharedChannels.countsUnchanged", { count: counts.unchanged })}</span>
             </div>
           </div>
-          <p className="break-all font-mono text-[11px] text-muted-foreground">Commit {preview.commit_sha}</p>
+          <p className="break-all font-mono text-[11px] text-muted-foreground">
+            {t("sharedChannels.commitSha", { sha: preview.commit_sha })}
+          </p>
           <ul className="max-h-44 space-y-1 overflow-y-auto font-mono text-[11px]">
             {preview.changes.map((skill) => (
               <li key={skill.id} className="flex items-center justify-between gap-3">
@@ -222,20 +224,24 @@ export function ChannelPublishPanel({ channel }: Props) {
       <div className="flex flex-wrap items-center gap-2">
         <Button variant={preview ? "outline" : "default"} onClick={scan} disabled={scanning || publishing}>
           {scanning ? <Loader2 className="mr-1.5 size-4 animate-spin" /> : <ScanSearch className="mr-1.5 size-4" />}
-          {preview ? "Rescan exact commit" : "Preview publication"}
+          {preview ? t("sharedChannels.rescanExactCommit") : t("sharedChannels.previewPublication")}
         </Button>
         {scanning && (
           <Button variant="outline" size="sm" onClick={() => void cancelSession()}>
-            <X className="mr-1 size-3.5" /> Cancel scan
+            <X className="mr-1 size-3.5" /> {t("sharedChannels.cancelScan")}
           </Button>
         )}
         {preview && (
           <Button onClick={publish} disabled={publishing || !title.trim()}>
             {publishing ? <Loader2 className="mr-1.5 size-4 animate-spin" /> : <Rocket className="mr-1.5 size-4" />}
-            Publish {preview.tag_name}
+            {t("sharedChannels.publishTag", { tag: preview.tag_name })}
           </Button>
         )}
-        {progress && <span className="text-xs capitalize text-muted-foreground">Scan: {progress}</span>}
+        {progress && (
+          <span className="text-xs capitalize text-muted-foreground">
+            {t("sharedChannels.scanProgress", { progress })}
+          </span>
+        )}
       </div>
     </section>
   );

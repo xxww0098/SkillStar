@@ -56,10 +56,12 @@ describe("officialProviders", () => {
 
   it("injects missing Official seeds without duplicating", () => {
     const once = withEnsuredOfficialProviders([thirdParty("deepseek")]);
-    expect(once.filter((p) => isNativeOfficialProvider(p)).map((p) => p.id).sort()).toEqual([
-      CLAUDE_OFFICIAL_ID,
-      CODEX_OFFICIAL_ID,
-    ]);
+    expect(
+      once
+        .filter((p) => isNativeOfficialProvider(p))
+        .map((p) => p.id)
+        .sort(),
+    ).toEqual([CLAUDE_OFFICIAL_ID, CODEX_OFFICIAL_ID]);
     const again = withEnsuredOfficialProviders(once);
     expect(again.filter((p) => p.id === CLAUDE_OFFICIAL_ID)).toHaveLength(1);
   });

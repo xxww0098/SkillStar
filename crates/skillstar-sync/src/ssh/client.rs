@@ -331,21 +331,6 @@ async fn authenticate<S: SecretStore>(
     Ok(())
 }
 
-/// Convenience: dial → authenticate, used by [`test_connection`] (which
-/// authenticates against unverified hosts on purpose, to validate credentials
-/// the user just typed). **Never use this for the production [`connect`] path**
-/// — production connections must verify the host key between dial and auth.
-async fn dial_and_authenticate<S: SecretStore>(
-    host: &SshHostDef,
-    secrets: &S,
-    session_id: &str,
-    sink: &impl ProgressSink,
-) -> Result<(Handle<SshHandler>, String)> {
-    let (mut handle, fingerprint) = dial(host, secrets, session_id, sink).await?;
-    authenticate(host, secrets, session_id, sink, &mut handle).await?;
-    Ok((handle, fingerprint))
-}
-
 /// Load a private key, expanding `~` and passing an optional passphrase.
 fn load_private_key(path: &str, passphrase: Option<&str>) -> Result<keys::PrivateKey> {
     let expanded = expand_tilde(path);
@@ -450,9 +435,14 @@ pub async fn connect<S: SecretStore>(
     Ok(handle)
 }
 
-/// Probe a host: connect, authenticate, run `whoami` + `uname -a`, report
-/// latency. Does **not** enforce known-hosts (so the UI can test before the
-/// user accepts a key) but reports the [`HostKeyState`] alongside the result.
+/// Probe a host: dial, verify the host key, and only then authenticate and
+/// run `whoami` + `uname -a` (reporting latency).
+///
+/// **Credentials are withheld until the host key is verified.** An
+/// unverified or mismatched host gets a transport-level probe (latency +
+/// fingerprint) but never the password / private key, so a first-time probe
+/// or a man-in-the-middle cannot harvest credentials. The UI shows the
+/// [`HostKeyState`] and prompts the user to accept the key before retrying.
 pub async fn test_connection<S: SecretStore>(
     host: &SshHostDef,
     secrets: &S,
@@ -460,7 +450,7 @@ pub async fn test_connection<S: SecretStore>(
     sink: &impl ProgressSink,
 ) -> Result<(ConnectionTestResult, HostKeyState)> {
     let started = Instant::now();
-    let (mut handle, fingerprint) = dial_and_authenticate(host, secrets, session_id, sink).await?;
+    let (mut handle, fingerprint) = dial(host, secrets, session_id, sink).await?;
     let state = resolve_host_key_state(&host.id, &fingerprint);
     match &state {
         HostKeyState::Verified => {
@@ -491,16 +481,31 @@ pub async fn test_connection<S: SecretStore>(
         }
     }
 
-    let remote_user = exec_capture(&mut handle, "whoami")
-        .await
-        .unwrap_or_default()
-        .trim()
-        .to_string();
-    let system = exec_capture(&mut handle, "uname -srm")
-        .await
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
+    let (remote_user, system) = match &state {
+        HostKeyState::Verified => {
+            authenticate(host, secrets, session_id, sink, &mut handle).await?;
+            let remote_user = exec_capture(&mut handle, "whoami")
+                .await
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            let system = exec_capture(&mut handle, "uname -srm")
+                .await
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            (remote_user, system)
+        }
+        HostKeyState::Unverified { .. } | HostKeyState::Mismatch { .. } => {
+            sink.emit(event(
+                session_id,
+                Phase::Auth,
+                Status::Warn,
+                "host key not verified — credentials withheld; accept the key and retry",
+            ));
+            (String::new(), None)
+        }
+    };
 
     let _ = handle
         .disconnect(Disconnect::ByApplication, "test complete", "en")

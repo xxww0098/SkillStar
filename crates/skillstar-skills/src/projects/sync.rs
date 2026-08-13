@@ -11,7 +11,7 @@ use super::types::{
     ProjectDeployMode, SkillsList, deploy_skill_with_mode, ensure_project_root_exists,
     prune_deploy_modes_for_agents,
 };
-use crate::agents as agent_profile;
+use skillstar_agents as agent_profile;
 use skillstar_core::infra::{fs_ops, paths as fs_paths};
 
 fn normalize_project_agents(agents: HashMap<String, Vec<String>>) -> HashMap<String, Vec<String>> {

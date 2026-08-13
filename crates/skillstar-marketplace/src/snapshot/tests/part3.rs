@@ -570,3 +570,136 @@ fn detail_snapshot_reads_cached_payload() {
         assert_eq!(detail.github_stars, Some(12));
     });
 }
+
+#[test]
+fn v11_migration_adds_content_addressing_columns() {
+    with_temp_data_root(|temp_root| {
+        // Seed a v10 schema (sync_state without the new columns) by creating
+        // the v10-era table manually, then let the full migration run.
+        let path = temp_root.join("marketplace.db");
+        let conn = open_raw_conn(&path);
+        conn.execute_batch(
+            "CREATE TABLE marketplace_skill (
+                skill_key TEXT PRIMARY KEY,
+                source TEXT NOT NULL,
+                name TEXT NOT NULL,
+                git_url TEXT NOT NULL DEFAULT '',
+                author TEXT,
+                publisher_name TEXT,
+                repo_name TEXT,
+                description TEXT NOT NULL DEFAULT '',
+                installs INTEGER NOT NULL DEFAULT 0,
+                last_seen_remote_at TEXT,
+                last_list_sync_at TEXT
+            );
+            CREATE TABLE marketplace_sync_state (
+                scope TEXT PRIMARY KEY,
+                last_success_at TEXT,
+                last_attempt_at TEXT,
+                last_error TEXT,
+                next_refresh_at TEXT,
+                schema_version INTEGER NOT NULL DEFAULT 1
+            );
+            PRAGMA user_version = 10;",
+        )
+        .expect("seed v10 schema marker");
+        drop(conn);
+
+        let conn = create_connection().expect("create migrated marketplace connection");
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .expect("read user_version");
+        assert_eq!(version, SNAPSHOT_SCHEMA_VERSION);
+
+        // New columns exist and are nullable.
+        let columns: Vec<String> = conn
+            .prepare("PRAGMA table_info(marketplace_sync_state)")
+            .expect("pragma")
+            .query_map([], |row| row.get(1))
+            .expect("column names")
+            .collect::<Result<_, _>>()
+            .expect("collect columns");
+        for expected in ["source_host", "payload_sha256", "etag"] {
+            assert!(columns.iter().any(|c| c == expected), "missing {expected}");
+        }
+    });
+}
+
+#[test]
+fn mark_scope_success_with_meta_records_and_preserves_fingerprint() {
+    with_temp_data_root(|_| {
+        let conn = create_connection().expect("create marketplace connection");
+        let tx = conn.unchecked_transaction().expect("open tx");
+
+        let meta = crate::remote::FetchMeta {
+            payload_sha256: "a".repeat(64),
+            source_host: "https://mirror.example/".into(),
+            etag: Some("\"v1\"".into()),
+            degraded: false,
+        };
+        mark_scope_success_with_meta_in_tx(&tx, "leaderboard_all", &meta, false)
+            .expect("record changed fingerprint");
+        tx.commit().expect("commit");
+
+        let state = scope_sync_state(&conn, "leaderboard_all")
+            .expect("read state")
+            .expect("state exists");
+        assert_eq!(
+            state.payload_sha256.as_deref(),
+            Some("a".repeat(64).as_str())
+        );
+        assert_eq!(
+            state.source_host.as_deref(),
+            Some("https://mirror.example/")
+        );
+        assert_eq!(state.etag.as_deref(), Some("\"v1\""));
+
+        // No-change refresh preserves the stored fingerprint.
+        let tx2 = conn.unchecked_transaction().expect("open tx2");
+        let unchanged_meta = crate::remote::FetchMeta {
+            payload_sha256: String::new(),
+            source_host: "https://skills.sh".into(),
+            etag: None,
+            degraded: false,
+        };
+        mark_scope_success_with_meta_in_tx(&tx2, "leaderboard_all", &unchanged_meta, true)
+            .expect("record unchanged");
+        tx2.commit().expect("commit tx2");
+
+        let state2 = scope_sync_state(&conn, "leaderboard_all")
+            .expect("read state2")
+            .expect("state2 exists");
+        assert_eq!(
+            state2.payload_sha256.as_deref(),
+            Some("a".repeat(64).as_str()),
+            "unchanged refresh must keep the old fingerprint"
+        );
+        assert_eq!(
+            state2.source_host.as_deref(),
+            Some("https://mirror.example/"),
+            "unchanged refresh must keep the old source host"
+        );
+    });
+}
+
+#[test]
+fn payload_unchanged_detects_identical_and_304_fetches() {
+    let meta_changed = crate::remote::FetchMeta {
+        payload_sha256: "b".repeat(64),
+        source_host: "https://skills.sh".into(),
+        etag: None,
+        degraded: false,
+    };
+    assert!(!payload_unchanged(&meta_changed, &Some("a".repeat(64))));
+    assert!(payload_unchanged(&meta_changed, &Some("b".repeat(64))));
+
+    // Empty sha256 = 304 Not Modified.
+    let meta_304 = crate::remote::FetchMeta {
+        payload_sha256: String::new(),
+        source_host: "https://skills.sh".into(),
+        etag: None,
+        degraded: false,
+    };
+    assert!(payload_unchanged(&meta_304, &None));
+    assert!(payload_unchanged(&meta_304, &Some("b".repeat(64))));
+}

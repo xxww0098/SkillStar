@@ -80,6 +80,10 @@ pub fn export_bundle(skill_name: &str, output_path: Option<&str>) -> Result<Path
         skill_dir.clone()
     };
 
+    // Frontmatter quality gate: only valid skills may be exported as bundles
+    // (mirrors Anthropic's package-before-validate flow).
+    crate::validation::ensure_installable(&effective_dir).map_err(anyhow::Error::msg)?;
+
     // Collect files (exclude .git)
     let mut files: Vec<String> = Vec::new();
     collect_files(&effective_dir, &effective_dir, &mut files);
@@ -184,7 +188,7 @@ pub fn import_bundle(file_path: &str, force: bool) -> Result<ImportBundleResult>
     crate::content::validate_skill_name(&manifest.name)
         .map_err(|error| anyhow::anyhow!("Invalid Skill name in bundle manifest: {error}"))?;
     let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()?;
-    crate::shared_channels::ensure_generic_skill_mutation_allowed(&manifest.name)?;
+    crate::skill_mutation::policy().ensure_skill_mutation_allowed(&manifest.name)?;
 
     if manifest.format_version > FORMAT_VERSION {
         anyhow::bail!(
@@ -253,6 +257,11 @@ pub fn import_bundle(file_path: &str, force: bool) -> Result<ImportBundleResult>
             &actual_checksum[..12]
         );
     }
+
+    // Frontmatter quality gate: only valid skills may be imported.
+    crate::validation::ensure_installable(&temp_dir).map_err(|reason| {
+        anyhow::anyhow!("Bundle contains an invalid skill: {reason}")
+    })?;
 
     // Replace existing if needed
     if target_dir.exists() {
@@ -328,6 +337,9 @@ pub fn export_multi_bundle(skill_names: &[String], output_path: &str) -> Result<
         } else {
             skill_dir.clone()
         };
+
+        // Frontmatter quality gate: only valid skills may be exported.
+        crate::validation::ensure_installable(&effective_dir).map_err(anyhow::Error::msg)?;
 
         let mut files: Vec<String> = Vec::new();
         collect_files(&effective_dir, &effective_dir, &mut files);
@@ -450,7 +462,7 @@ pub fn import_multi_bundle(file_path: &str, force: bool) -> Result<ImportMultiBu
     }
     let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()?;
     for skill in &manifest.skills {
-        crate::shared_channels::ensure_generic_skill_mutation_allowed(&skill.name)?;
+        crate::skill_mutation::policy().ensure_skill_mutation_allowed(&skill.name)?;
     }
 
     let hub = skillstar_core::infra::paths::hub_skills_dir();
@@ -518,6 +530,12 @@ pub fn import_multi_bundle(file_path: &str, force: bool) -> Result<ImportMultiBu
             std::fs::write(&dest, content)?;
         }
 
+        // Frontmatter quality gate (per skill, fail-closed before replacing
+        // the existing hub entry).
+        crate::validation::ensure_installable(&temp_dir).map_err(|reason| {
+            anyhow::anyhow!("Bundle skill '{name}' is not installable: {reason}")
+        })?;
+
         // Replace existing if needed
         if target_dir.exists() {
             std::fs::remove_dir_all(&target_dir)?;
@@ -579,6 +597,14 @@ fn collect_files(root: &Path, dir: &Path, files: &mut Vec<String>) {
         // Skip hidden files/dirs and .git
         if name_str.starts_with('.') {
             continue;
+        }
+
+        // Never follow symlinks when collecting export content: the target may
+        // live outside the skill root (e.g. ~/.ssh/id_rsa) and must not be
+        // bundled. Mirrors content::snapshot's record-don't-follow behaviour.
+        match entry.file_type() {
+            Ok(ty) if ty.is_symlink() => continue,
+            _ => {}
         }
 
         if path.is_dir() {

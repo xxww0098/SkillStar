@@ -43,11 +43,15 @@ pub(super) fn make_stdio_curated(
             identifier: npm_identifier.to_string(),
             version: None,
             required_env: required_env.iter().map(|s| s.to_string()).collect(),
+            registry_type: Some("npm".to_string()),
+            runtime_hint: Some("npx".to_string()),
+            ..Default::default()
         }],
         remotes: Vec::new(),
         raw_server_json: raw.to_string(),
         recommended: false,
         source: Some(source.to_string()),
+        ..Default::default()
     }
 }
 
@@ -84,10 +88,13 @@ pub(super) fn make_remote_curated(
             transport: "http".to_string(),
             url: url.to_string(),
             required_headers: vec![auth_header.to_string()],
+            transport_type: Some("streamable-http".to_string()),
+            ..Default::default()
         }],
         raw_server_json: raw.to_string(),
         recommended: false,
         source: Some(source.to_string()),
+        ..Default::default()
     }
 }
 

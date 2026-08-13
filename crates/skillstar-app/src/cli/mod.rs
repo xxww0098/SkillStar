@@ -172,6 +172,9 @@ pub struct CliHandlers {
 }
 
 pub fn run(args: Vec<String>, handlers: CliHandlers) {
+    // Channel-aware mutation gate must be active before any skill mutation path runs
+    skillstar_channels::policy::install_global_policy();
+
     // Migration (only runs once at startup)
     (handlers.migrate_and_run)();
 

@@ -4,6 +4,7 @@
  */
 
 import type { DevMockHandlers } from "./shared";
+import { devAssertRepoSourceClean, devRepoSourceSkills } from "./skillsUpdateStore";
 
 export const GITHUB_HANDLERS: DevMockHandlers = {
   github_auth_status: () => ({
@@ -56,4 +57,36 @@ export const GITHUB_HANDLERS: DevMockHandlers = {
     const url = `https://github.com/dev-user/${repoName}`;
     return { url, git_url: `${url}.git`, source_folder: folderName };
   },
+
+  // Repo rescan + reinstall. Backed by the shared skills store so "reinstall
+  // every Skill from this source" behaves like the real thing: the scan lists
+  // what the source already carries, and a checkout with unresolved local
+  // edits fails closed instead of overwriting them.
+  scan_github_repo: (args) => {
+    const url = String((args?.url as string) ?? "");
+    const source = sourceOfRepoUrl(url);
+    return {
+      source,
+      source_url: url,
+      skills: devRepoSourceSkills(source).map((skill) => ({
+        id: skill.name,
+        folder_path: skill.name,
+        description: skill.description,
+        already_installed: true,
+      })),
+    };
+  },
+  install_from_scan: (args) => {
+    const source = String((args?.source as string) ?? sourceOfRepoUrl(String((args?.repoUrl as string) ?? "")));
+    devAssertRepoSourceClean(source);
+    return ((args?.skills as Array<{ id: string }>) ?? []).map((skill) => skill.id);
+  },
 };
+
+/** "https://github.com/anthropics/skills(.git)" → "anthropics/skills". */
+function sourceOfRepoUrl(url: string): string {
+  return url
+    .replace(/^https?:\/\/[^/]+\//, "")
+    .replace(/\.git$/, "")
+    .replace(/\/$/, "");
+}

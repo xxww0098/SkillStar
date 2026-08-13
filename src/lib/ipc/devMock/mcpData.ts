@@ -1,8 +1,8 @@
 /**
  * Dev-mock sample data: MCP — the managed server store, per-tool sync
- * statuses, install presets, and the MCP marketplace (GitHub MCP Registry)
- * entries/details plus the install-form draft builder. Consumed by
- * ./mcp.ts.
+ * statuses, install presets, the catalog sources and their per-source sync
+ * state, and the MCP marketplace entries/details plus the runtime-candidate,
+ * install-plan, probe and draft builders. Consumed by ./mcp.ts.
  */
 
 import { iso } from "./shared";
@@ -56,6 +56,13 @@ export const MCP_TOOL_STATUSES = [
     serverCount: 2,
   },
   {
+    toolId: "claude-desktop-chat",
+    label: "Claude Desktop",
+    configPath: "~/Library/Application Support/Claude/claude_desktop_config.json",
+    installed: true,
+    serverCount: 1,
+  },
+  {
     toolId: "codex",
     label: "Codex",
     configPath: "~/.codex/config.toml",
@@ -97,6 +104,41 @@ export const MCP_TOOL_STATUSES = [
     installed: true,
     serverCount: 0,
   },
+  {
+    toolId: "vscode",
+    label: "VS Code",
+    configPath: "~/.copilot/mcp-config.json",
+    installed: false,
+    serverCount: 0,
+  },
+  {
+    toolId: "windsurf",
+    label: "Windsurf",
+    configPath: "~/.codeium/windsurf/mcp_config.json",
+    installed: false,
+    serverCount: 0,
+  },
+  {
+    toolId: "cline",
+    label: "Cline",
+    configPath: "~/.cline/mcp.json",
+    installed: false,
+    serverCount: 0,
+  },
+  {
+    toolId: "gemini-cli",
+    label: "Gemini CLI",
+    configPath: "~/.gemini/settings.json",
+    installed: true,
+    serverCount: 0,
+  },
+  {
+    toolId: "zed",
+    label: "Zed",
+    configPath: "~/.config/zed/settings.json",
+    installed: false,
+    serverCount: 0,
+  },
 ];
 
 export const MCP_PRESETS = [
@@ -134,7 +176,108 @@ export const MCP_PRESETS = [
   },
 ];
 
-// MCP marketplace (GitHub MCP Registry) sample data for browser dev mode.
+// ---------------------------------------------------------------------------
+// Catalog sources
+// ---------------------------------------------------------------------------
+
+/** `McpSourceDescriptor[]` — built-ins plus one user-added source. */
+export const MCP_SOURCES = [
+  {
+    id: "official",
+    displayName: "Official MCP Registry",
+    baseUrl: "https://registry.modelcontextprotocol.io/v0.1/servers",
+    kind: "registry",
+    cursorStyle: "camel",
+    listQuery: "version=latest",
+    requiresKey: false,
+    license: "cc0",
+    mirrorable: true,
+    enabled: true,
+    builtin: true,
+    priority: 0,
+    maxPages: 400,
+  },
+  {
+    id: "github",
+    displayName: "GitHub MCP Registry",
+    baseUrl: "https://api.mcp.github.com/v0.1/servers",
+    kind: "registry",
+    cursorStyle: "snake",
+    listQuery: null,
+    requiresKey: false,
+    license: "unspecified",
+    mirrorable: false,
+    enabled: true,
+    builtin: true,
+    priority: 10,
+    maxPages: 50,
+  },
+  {
+    id: "custom:acme",
+    displayName: "Acme internal registry",
+    baseUrl: "https://mcp.acme.internal/v0.1/servers",
+    kind: "registry",
+    cursorStyle: "camel",
+    listQuery: null,
+    requiresKey: false,
+    license: "userProvided",
+    mirrorable: true,
+    enabled: true,
+    builtin: false,
+    priority: 50,
+    maxPages: 50,
+  },
+];
+
+/**
+ * `SyncStateEntry[]`, one per source. `custom:acme` is deliberately failing and
+ * `github` deliberately degraded, so the "this sync was incomplete, because X"
+ * UI has something to render in browser dev.
+ */
+export const MCP_SOURCE_SYNC_STATES = [
+  {
+    scope: "mcp_registry:official",
+    last_success_at: iso(0),
+    last_attempt_at: iso(0),
+    last_error: null,
+    next_refresh_at: iso(-0.5),
+    schema_version: 13,
+    source_host: "registry.modelcontextprotocol.io",
+    payload_sha256: "0f1e2d3c",
+    etag: 'W/"official-1"',
+    degraded_reason: null,
+  },
+  {
+    scope: "mcp_registry:github",
+    last_success_at: iso(0.2),
+    last_attempt_at: iso(0),
+    last_error: null,
+    next_refresh_at: iso(-0.5),
+    schema_version: 13,
+    source_host: "api.mcp.github.com",
+    payload_sha256: "9a8b7c6d",
+    etag: 'W/"github-1"',
+    degraded_reason: "github stopped after 50 pages (rate limit); the mirror's contribution is partial",
+  },
+  {
+    scope: "mcp_registry:custom:acme",
+    last_success_at: iso(3),
+    last_attempt_at: iso(0),
+    last_error: "connect ECONNREFUSED mcp.acme.internal:443",
+    next_refresh_at: iso(2.5),
+    schema_version: 13,
+    source_host: "mcp.acme.internal",
+    payload_sha256: null,
+    etag: null,
+    degraded_reason: null,
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Marketplace catalog
+// ---------------------------------------------------------------------------
+
+// MCP marketplace sample data for browser dev mode.
 export const MCP_MARKET = [
   {
     id: "adspower-local-api",
@@ -150,6 +293,9 @@ export const MCP_MARKET = [
     updatedAt: iso(0),
     recommended: true,
     source: "skillstar-curated",
+    status: "active",
+    isLatest: true,
+    registrySource: null,
   },
   {
     id: "mkt-filesystem",
@@ -163,6 +309,9 @@ export const MCP_MARKET = [
     kind: "stdio",
     runtimes: ["npx"],
     updatedAt: iso(2),
+    status: "active",
+    isLatest: true,
+    registrySource: "official",
   },
   {
     id: "mkt-github",
@@ -176,6 +325,9 @@ export const MCP_MARKET = [
     kind: "remote",
     runtimes: [],
     updatedAt: iso(1),
+    status: "active",
+    isLatest: true,
+    registrySource: "official",
   },
   {
     id: "mkt-markitdown",
@@ -189,8 +341,19 @@ export const MCP_MARKET = [
     kind: "stdio",
     runtimes: ["uvx"],
     updatedAt: iso(5),
+    status: "deprecated",
+    isLatest: false,
+    registrySource: "github",
   },
 ];
+
+/** A secret `Input`, as `server.json` `2025-12-11` shapes it. */
+const secretInput = (description: string) => ({
+  description,
+  isRequired: true,
+  isSecret: true,
+  format: "string",
+});
 
 export const MCP_MARKET_DETAILS: Record<string, Record<string, unknown>> = {
   "adspower-local-api": {
@@ -201,6 +364,11 @@ export const MCP_MARKET_DETAILS: Record<string, Record<string, unknown>> = {
         identifier: "local-api-mcp-typescript",
         version: null,
         requiredEnv: ["API_KEY"],
+        registryType: "npm",
+        environmentVariables: [
+          { name: "PORT", description: "Local API port", format: "number", default: "50325" },
+          { name: "API_KEY", ...secretInput("AdsPower Local API key") },
+        ],
       },
     ],
     remotes: [],
@@ -209,10 +377,27 @@ export const MCP_MARKET_DETAILS: Record<string, Record<string, unknown>> = {
     readme: "# server-filesystem\n\nGives the agent scoped read/write access to a local directory.",
     packages: [
       {
+        runtime: "docker",
+        identifier: "mcp/filesystem",
+        version: "1.2.0",
+        requiredEnv: [],
+        registryType: "oci",
+        environmentVariables: [],
+      },
+      {
         runtime: "npx",
         identifier: "@modelcontextprotocol/server-filesystem",
         version: "1.2.0",
         requiredEnv: [],
+        registryType: "npm",
+        environmentVariables: [
+          {
+            name: "ROOT",
+            description: "Directory the agent may read and write",
+            format: "filepath",
+            default: "/Users/dev",
+          },
+        ],
       },
     ],
     remotes: [],
@@ -223,8 +408,19 @@ export const MCP_MARKET_DETAILS: Record<string, Record<string, unknown>> = {
     remotes: [
       {
         transport: "http",
+        transportType: "streamable-http",
         url: "https://api.githubcopilot.com/mcp/",
         requiredHeaders: ["Authorization"],
+        headers: [{ name: "Authorization", value: "Bearer {TOKEN}", ...secretInput("GitHub token") }],
+        variables: [],
+      },
+      {
+        transport: "sse",
+        transportType: "sse",
+        url: "https://api.githubcopilot.com/mcp/sse",
+        requiredHeaders: ["Authorization"],
+        headers: [{ name: "Authorization", value: "Bearer {TOKEN}", ...secretInput("GitHub token") }],
+        variables: [],
       },
     ],
   },
@@ -236,6 +432,8 @@ export const MCP_MARKET_DETAILS: Record<string, Record<string, unknown>> = {
         identifier: "markitdown-mcp",
         version: "0.0.1a4",
         requiredEnv: [],
+        registryType: "pypi",
+        environmentVariables: [],
       },
     ],
     remotes: [],
@@ -283,4 +481,196 @@ export function mcpMarketDraft(id: string): Record<string, unknown> {
     };
   }
   return base;
+}
+
+// ---------------------------------------------------------------------------
+// Runtime candidates / install plan / probe
+// ---------------------------------------------------------------------------
+
+const SHAPE_BY_REGISTRY_TYPE: Record<string, { shape: string; rank: number }> = {
+  oci: { shape: "packageOci", rank: 2 },
+  mcpb: { shape: "packageMcpb", rank: 3 },
+};
+
+type MockRecord = Record<string, unknown>;
+
+const details = (id: string) => MCP_MARKET_DETAILS[id] ?? {};
+const packagesOf = (id: string) => (details(id).packages as MockRecord[] | undefined) ?? [];
+const remotesOf = (id: string) => (details(id).remotes as MockRecord[] | undefined) ?? [];
+
+/**
+ * `McpRuntimeSelection` — remotes ranked above packages, streamable-http above
+ * sse, oci above plain packages. The mock pretends every launcher is installed;
+ * the real selector checks `PATH`.
+ */
+export function mcpRuntimeSelection(id: string): MockRecord {
+  const candidates: MockRecord[] = [];
+  remotesOf(id).forEach((remote, index) => {
+    const sse = remote.transport === "sse";
+    candidates.push({
+      id: `remote:${index}`,
+      shape: sse ? "remoteSse" : "remoteStreamableHttp",
+      transport: sse ? "sse" : "http",
+      url: remote.url,
+      rank: sse ? 1 : 0,
+      installable: true,
+      warnings: sse
+        ? ["The SSE transport is deprecated. Prefer a streamable-http endpoint when the publisher offers one."]
+        : [],
+    });
+  });
+  packagesOf(id).forEach((pkg, index) => {
+    const registryType = String(pkg.registryType ?? "");
+    const known = SHAPE_BY_REGISTRY_TYPE[registryType] ?? { shape: "packagePlain", rank: 4 };
+    candidates.push({
+      id: `package:${index}`,
+      shape: known.shape,
+      transport: "stdio",
+      registryType,
+      identifier: pkg.identifier,
+      version: pkg.version,
+      runtimeCommand: pkg.runtime,
+      runtimeAvailable: true,
+      rank: known.rank,
+      installable: known.shape !== "packageMcpb",
+      blockedReason:
+        known.shape === "packageMcpb"
+          ? "MCPB bundles must be downloaded and checked against fileSha256 before they can run; SkillStar has no bundle installer yet."
+          : null,
+      warnings: [],
+    });
+  });
+  candidates.sort(
+    (a, b) => Number(a.installable === false) - Number(b.installable === false) || Number(a.rank) - Number(b.rank),
+  );
+  return {
+    serverId: id,
+    candidates,
+    recommendedId: candidates.find((c) => c.installable)?.id ?? null,
+  };
+}
+
+/** `McpInstallPlan` — the pre-install confirmation payload. */
+export function mcpInstallPlan(id: string, runtimeId?: string): MockRecord {
+  const selection = mcpRuntimeSelection(id);
+  const candidates = selection.candidates as MockRecord[];
+  const selected = candidates.find((c) => c.id === runtimeId) ?? candidates.find((c) => c.installable) ?? null;
+  const entry = MCP_MARKET.find((m) => m.id === id);
+  const draft = mcpMarketDraft(id);
+
+  const packageIndex = typeof selected?.id === "string" ? Number(String(selected.id).split(":")[1]) : 0;
+  const isPackage = typeof selected?.id === "string" && String(selected.id).startsWith("package:");
+  const remote = isPackage ? undefined : remotesOf(id)[packageIndex];
+  const pkg = isPackage ? packagesOf(id)[packageIndex] : undefined;
+
+  const inputs: MockRecord[] = [];
+  for (const env of (pkg?.environmentVariables as MockRecord[] | undefined) ?? []) {
+    inputs.push({
+      key: env.name,
+      scope: "environment",
+      input: env,
+      prefilled: env.isSecret || env.isRequired ? "" : String(env.default ?? ""),
+      mustAsk: Boolean(env.isSecret || env.isRequired),
+    });
+  }
+  for (const header of (remote?.headers as MockRecord[] | undefined) ?? []) {
+    inputs.push({
+      key: header.name,
+      scope: "header",
+      input: header,
+      prefilled: String(header.value ?? ""),
+      mustAsk: Boolean((header.isSecret || header.isRequired) && header.value === undefined),
+    });
+  }
+
+  const command = draft.command as string | undefined;
+  const args = (draft.args as string[] | undefined) ?? [];
+  const secretKeys = inputs.filter((i) => (i.input as MockRecord).isSecret).map((i) => String(i.key));
+
+  return {
+    serverId: id,
+    serverName: entry?.name ?? "mcp-server",
+    namespace: entry?.namespace ?? "",
+    selection,
+    selectedRuntimeId: selected?.id ?? null,
+    transport: draft.transport,
+    command: command ?? null,
+    args,
+    resolvedCommandPath: command ? `/usr/local/bin/${command}` : null,
+    commandPreview: command ? [command, ...args].join(" ") : null,
+    usesShell: false,
+    url: draft.url ?? null,
+    inputs,
+    secretPolicy: {
+      storage: "userLevelConfig",
+      secretKeys,
+      writesProjectScopedConfig: false,
+      note: secretKeys.length
+        ? "Secret values are stored in SkillStar's user-level MCP store and written into each enabled tool's user-level config file (under your home directory). SkillStar writes no project-scoped MCP config, so no secret reaches a version-controlled file."
+        : "This server declares no secret inputs.",
+    },
+    warnings: [
+      ...((selected?.warnings as string[] | undefined) ?? []),
+      ...(entry?.status && entry.status !== "active" ? [`The registry marks this server '${entry.status}'.`] : []),
+      ...(entry && entry.isLatest === false ? ["The registry knows of a newer version of this server."] : []),
+    ],
+    draft,
+  };
+}
+
+/** `McpProbeReport` for an installed server. */
+export function mcpProbeReport(id: string): MockRecord {
+  const server = MCP_STORE.servers.find((s) => s.id === id);
+  const remote = server?.transport !== "stdio";
+  return {
+    serverId: id,
+    serverName: server?.name ?? id,
+    // `McpProbeStatus` is kebab-case on the wire (`#[serde(rename_all =
+    // "kebab-case")]`); the camelCase spelling renders as an unknown status.
+    status: remote ? "authorization-required" : "healthy",
+    epoch: remote ? null : "modern",
+    protocolVersion: remote ? null : "2026-07-28",
+    tools: remote ? [] : ["read_file", "write_file", "list_directory"],
+    instructions: remote ? null : "Read and write files under the configured root.",
+    cacheTtlMs: remote ? null : 60_000,
+    cachePrivate: false,
+    authChallenge: remote
+      ? 'Bearer resource_metadata="https://api.githubcopilot.com/.well-known/oauth-protected-resource"'
+      : null,
+    error: null,
+    checkedAt: Date.now(),
+  };
+}
+
+/** `McpServerPage` — filtered / sorted / paginated cards with a total. */
+export function mcpMarketPage(query: MockRecord): MockRecord {
+  const search = String(query.search ?? "").toLowerCase();
+  const publisherId = String(query.publisherId ?? "").toLowerCase();
+  const runtimes = (query.runtimes as string[] | undefined) ?? [];
+  const statuses = (query.statuses as string[] | undefined) ?? [];
+
+  let items = MCP_MARKET.filter((m) => {
+    if (search && !`${m.name} ${m.namespace} ${m.description}`.toLowerCase().includes(search)) return false;
+    if (publisherId && publisherId !== "github" && (m.source ?? "").toLowerCase() !== publisherId) return false;
+    if (runtimes.length && !m.runtimes.some((r) => runtimes.includes(r))) return false;
+    if (statuses.length && !statuses.includes(m.status)) return false;
+    if (query.recommendedOnly && !("recommended" in m && m.recommended)) return false;
+    if (query.latestOnly && m.isLatest === false) return false;
+    if (typeof query.minStars === "number" && m.stars < query.minStars) return false;
+    if (typeof query.maxStars === "number" && m.stars > query.maxStars) return false;
+    return true;
+  });
+
+  if (query.sort === "stars") items = [...items].sort((a, b) => b.stars - a.stars);
+  if (query.sort === "name") items = [...items].sort((a, b) => a.name.localeCompare(b.name));
+
+  const total = items.length;
+  const offset = Number(query.offset ?? 0);
+  const limit = typeof query.limit === "number" ? query.limit : null;
+  return {
+    items: limit === null ? items.slice(offset) : items.slice(offset, offset + limit),
+    total,
+    offset,
+    limit,
+  };
 }

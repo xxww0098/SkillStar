@@ -9,6 +9,7 @@ import type {
   ProviderUpdateFlatResult,
   EndpointLatencyResult,
   ProviderPresetFlat,
+  ToolBindingSettings,
   ToolConfigTarget,
   ToolConfigFileInfo,
   ToolSyncResult,
@@ -67,6 +68,15 @@ export interface ModelsCommands {
   deactivate_tool: { args: { toolId: string }; result: void };
   update_tool_settings: {
     args: { toolId: string; settings: Record<string, unknown> };
+    result: ToolSyncResult;
+  };
+  /**
+   * Binding-level settings (OMP model roles), as opposed to per-entry settings.
+   * Typed as the bag itself rather than a loose record — a caller holding a
+   * well-formed `OmpSettings` should reach the command without a cast.
+   */
+  update_tool_binding_settings: {
+    args: { toolId: string; settings: ToolBindingSettings };
     result: ToolSyncResult;
   };
   set_active_binding: {

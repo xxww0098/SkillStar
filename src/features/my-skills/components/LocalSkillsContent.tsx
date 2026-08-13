@@ -12,17 +12,15 @@ import { selectTargetableAgentProfiles, supportsGlobalDeploy, supportsProjectDep
 import { tauriInvoke } from "../../../lib/ipc";
 import { toast } from "../../../lib/toast";
 import { navigateToSettingsSection } from "../../../lib/utils";
-import type { RepoNewSkill, Skill, SkillUpdateBlocked, SkillUpdateReport, SortOption } from "../../../types";
+import type { RepoNewSkill, Skill, SkillUpdateRunReport, SortOption } from "../../../types";
 import { useSkillCards } from "../hooks/useSkillCards";
 import { useSkills } from "../hooks/useSkills";
-import { reconcileBlockedUpdates } from "../lib/localDivergenceQueue";
 import { AiPickSkillsModal } from "./AiPickSkillsModal";
 import { CreateGroupModal } from "./CreateGroupModal";
 import { DeployToProjectModal } from "./DeployToProjectModal";
 import { ExportShareCodeModal } from "./ExportShareCodeModal";
 import { ImportBundleModal } from "./ImportBundleModal";
 import { ImportModal } from "./ImportModal";
-import { LocalDivergenceDialog } from "./LocalDivergenceDialog";
 import { PublishSkillModal } from "./PublishSkillModal";
 import { ScopeDetailDrawer } from "./ScopeDetailDrawer";
 import { SkillGrid } from "./SkillGrid";
@@ -60,9 +58,9 @@ export function LocalSkillsContent({
     loading,
     refresh,
     installSkill,
+    reinstallRepoSkills,
     uninstallSkill,
-    updateSkills,
-    resolveSkillUpdate,
+    runSkillUpdate,
     pendingUpdateNames,
     toggleSkillForAgent,
     pendingAgentToggleKeys,
@@ -79,7 +77,6 @@ export function LocalSkillsContent({
 
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("updated");
-  const [showUpdateOnly, setShowUpdateOnly] = useState(false);
   const [viewMode, setViewMode] = useViewMode("grid");
   const [agentFilter, setAgentFilter] = useState<string | null>(null);
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
@@ -102,11 +99,9 @@ export function LocalSkillsContent({
   const [repoFilter, setRepoFilter] = useState<string | null>(null);
   const [shareCardSkills, setShareCardSkills] = useState<string[] | null>(null);
   const [isUpdatingAll, setIsUpdatingAll] = useState(false);
+  const [reinstallingRepoSource, setReinstallingRepoSource] = useState<string | null>(null);
   const [batchLoading, setBatchLoading] = useState(false);
   const [linkMenuOpen, setLinkMenuOpen] = useState(false);
-  const [blockedUpdates, setBlockedUpdates] = useState<SkillUpdateBlocked[]>([]);
-  const [resolvingDivergence, setResolvingDivergence] = useState(false);
-  const [divergenceError, setDivergenceError] = useState<string | null>(null);
 
   useEffect(() => {
     setSelectedSkill((current) => {
@@ -228,11 +223,6 @@ export function LocalSkillsContent({
       visibleSkills = visibleSkills.filter((skill) => skill.skill_type === "local");
     }
 
-    if (showUpdateOnly) {
-      visibleSkills = visibleSkills.filter((skill) => skill.update_available);
-    }
-
-    // Repo source filter
     if (repoFilter) {
       visibleSkills = visibleSkills.filter((skill) => skill.source === repoFilter);
     }
@@ -251,7 +241,7 @@ export function LocalSkillsContent({
     });
 
     return visibleSkills;
-  }, [skills, searchQuery, sortBy, agentFilter, profiles, showUpdateOnly, sourceFilter, repoFilter]);
+  }, [skills, searchQuery, sortBy, agentFilter, profiles, sourceFilter, repoFilter]);
 
   // Stable Settings-backed target list for filters, cards, selection actions,
   // and project deployment. Persisted `enabled` alone is insufficient because
@@ -281,14 +271,17 @@ export function LocalSkillsContent({
   const handleUpdate = useCallback(
     async (name: string) => {
       try {
-        const report = await updateSkills([name]);
-        if (report.blocked.length > 0) {
-          setBlockedUpdates(report.blocked);
-          setDivergenceError(null);
+        const report = await runSkillUpdate([name]);
+        const failure = report.failed.find((entry) => entry.name === name) ?? report.failed[0];
+        if (failure) {
+          toast.error(failure.error ? `${t("mySkills.updateFailed")}: ${failure.error}` : t("mySkills.updateFailed"));
           return;
         }
-        const failure = report.failed.find((entry) => entry.name === name);
-        if (failure) throw new Error(failure.error);
+        if (report.uninstalled.includes(name)) {
+          toast.success(t("mySkills.droppedSkillRemoved", { name }));
+          setSelectedSkill((prev) => (prev?.name === name ? null : prev));
+          return;
+        }
         const updated = report.updated.find((entry) => entry.skill.name === name)?.skill;
         if (updated) setSelectedSkill((prev) => (prev?.name === name ? updated : prev));
       } catch (e) {
@@ -296,7 +289,7 @@ export function LocalSkillsContent({
         toast.error(reason ? `${t("mySkills.updateFailed")}: ${reason}` : t("mySkills.updateFailed"));
       }
     },
-    [updateSkills, t],
+    [runSkillUpdate, t],
   );
 
   const handleSkillClick = useCallback(
@@ -372,6 +365,32 @@ export function LocalSkillsContent({
     [openUninstallDialog, repoFilter, skills],
   );
 
+  /** Reinstall every Skill found in exactly one GitHub repository source. */
+  const handleReinstallRepoSource = useCallback(
+    async (source: string) => {
+      const repoUrl = skills.find((skill) => skill.source === source && skill.skill_type === "hub")?.git_url;
+      if (!repoUrl) {
+        toast.error(t("mySkills.reinstallRepoSourceMissing", { source }));
+        return;
+      }
+
+      setReinstallingRepoSource(source);
+      try {
+        const installed = await reinstallRepoSkills(repoUrl);
+        toast.success(t("mySkills.reinstallRepoSuccess", { count: installed.length }));
+      } catch (e) {
+        // A repository with unresolved local edits fails closed on purpose.
+        // Point at the update flow, which is where that choice is offered.
+        const reason = e instanceof Error ? e.message : String(e);
+        const headline = t("mySkills.reinstallRepoFailed", { source });
+        toast.error(reason ? `${headline}\n${reason}` : headline);
+      } finally {
+        setReinstallingRepoSource(null);
+      }
+    },
+    [reinstallRepoSkills, skills, t],
+  );
+
   const confirmUninstall = useCallback(async () => {
     if (pendingUninstallNames.length === 0) return;
 
@@ -419,11 +438,32 @@ export function LocalSkillsContent({
     t,
   ]);
 
-  /** Summarise a batch update. The backend already collapsed names sharing a
-   *  repository, so `skipped` counts as updated: that content moved too. */
+  /** Summarise a finished batch update — the report is already final, so every
+   *  Skill is counted exactly once. `skipped` counts as updated: the backend
+   *  collapsed those names into a sibling's pull and their content moved too.
+   *  `blocked` here means the user closed the divergence dialog. */
   const reportBatchUpdate = useCallback(
-    (report: SkillUpdateReport) => {
+    (report: SkillUpdateRunReport) => {
       const successCount = report.updated.length + report.skipped.length;
+
+      if (report.uninstalled.length > 0) {
+        toast.success(t("mySkills.droppedSkillsRemoved", { count: report.uninstalled.length }));
+      }
+
+      if (report.failed.length > 0) {
+        const reason = report.failed[0]?.error;
+        if (successCount > 0) {
+          toast.warning(
+            t("mySkills.batchUpdatePartial", {
+              success: successCount,
+              failed: report.failed.length,
+              defaultValue: `${successCount} updated, ${report.failed.length} failed`,
+            }),
+          );
+        } else {
+          toast.error(reason ? `${t("mySkills.updateFailed")}: ${reason}` : t("mySkills.updateFailed"));
+        }
+      }
 
       if (report.blocked.length > 0) {
         toast.warning(
@@ -434,27 +474,10 @@ export function LocalSkillsContent({
         );
       }
 
-      if (report.failed.length === 0 && report.blocked.length === 0) {
+      if (successCount > 0 && report.failed.length === 0) {
         toast.success(
           t("mySkills.batchUpdateSuccess", { count: successCount, defaultValue: `${successCount} skill(s) updated` }),
         );
-        return;
-      }
-
-      if (successCount > 0 && report.failed.length > 0) {
-        toast.warning(
-          t("mySkills.batchUpdatePartial", {
-            success: successCount,
-            failed: report.failed.length,
-            defaultValue: `${successCount} updated, ${report.failed.length} failed`,
-          }),
-        );
-        return;
-      }
-
-      if (report.failed.length > 0) {
-        const reason = report.failed[0]?.error;
-        toast.error(reason ? `${t("mySkills.updateFailed")}: ${reason}` : t("mySkills.updateFailed"));
       }
     },
     [t],
@@ -479,11 +502,7 @@ export function LocalSkillsContent({
 
       setBusy(true);
       try {
-        const report = await updateSkills(names);
-        if (report.blocked.length > 0) {
-          setBlockedUpdates(report.blocked);
-          setDivergenceError(null);
-        }
+        const report = await runSkillUpdate(names);
         const refreshed = report.updated.find((result) => result.skill.name === selectedSkill?.name);
         if (refreshed) {
           setSelectedSkill(refreshed.skill);
@@ -498,7 +517,7 @@ export function LocalSkillsContent({
         setBusy(false);
       }
     },
-    [reportBatchUpdate, selectedSkill?.name, t, updateSkills],
+    [reportBatchUpdate, runSkillUpdate, selectedSkill?.name, t],
   );
 
   const handleBatchUpdate = useCallback(async () => {
@@ -510,28 +529,6 @@ export function LocalSkillsContent({
   const handleUpdateAll = useCallback(
     () => runBatchUpdate(updatableNamesAmong(skills.map((skill) => skill.name)), setIsUpdatingAll),
     [runBatchUpdate, skills, updatableNamesAmong],
-  );
-
-  const resolveCurrentDivergence = useCallback(
-    async (resolution: { kind: "preserve"; local_name: string } | { kind: "discard" }) => {
-      const blocked = blockedUpdates[0];
-      if (!blocked) return;
-      setResolvingDivergence(true);
-      setDivergenceError(null);
-      try {
-        const result = await resolveSkillUpdate(blocked.name, resolution);
-        const update = result.update;
-        if (update) {
-          setSelectedSkill((current) => (current?.name === update.skill.name ? update.skill : current));
-        }
-        setBlockedUpdates((current) => reconcileBlockedUpdates(current, blocked.name, result));
-      } catch (error) {
-        setDivergenceError(error instanceof Error ? error.message : String(error));
-      } finally {
-        setResolvingDivergence(false);
-      }
-    },
-    [blockedUpdates, resolveSkillUpdate],
   );
 
   const handleBatchLink = useCallback(
@@ -610,7 +607,6 @@ export function LocalSkillsContent({
 
   const getEmptyMessage = () => {
     if (skills.length === 0) return t("emptyState.mySkillsDesc");
-    if (showUpdateOnly) return t("mySkills.noUpdates");
     return t("mySkills.noMatching");
   };
 
@@ -674,9 +670,9 @@ export function LocalSkillsContent({
           isUpdatingAll={isUpdatingAll}
           repoSources={repoSources}
           repoFilter={repoFilter}
+          onReinstallRepoSource={handleReinstallRepoSource}
+          reinstallingRepoSource={reinstallingRepoSource}
           onRemoveRepoSource={handleRemoveRepoSource}
-          showUpdateOnly={showUpdateOnly}
-          onToggleUpdateOnly={() => setShowUpdateOnly((prev) => !prev)}
           pendingUpdateCount={pendingUpdateCount}
         />
 
@@ -770,9 +766,7 @@ export function LocalSkillsContent({
               pendingUpdateNames={pendingUpdateNames}
               pendingAgentToggleKeys={pendingAgentToggleKeys}
               ghostSkills={
-                !showUpdateOnly && !searchQuery && !agentFilter && sourceFilter === "all" && !repoFilter
-                  ? ghostSkills
-                  : undefined
+                !searchQuery && !agentFilter && sourceFilter === "all" && !repoFilter ? ghostSkills : undefined
               }
               onInstallGhost={installGhostSkill}
               onDismissGhost={dismissGhostSkill}
@@ -827,23 +821,6 @@ export function LocalSkillsContent({
         error={uninstallError}
         onClose={closeUninstallDialog}
         onConfirm={confirmUninstall}
-      />
-
-      <LocalDivergenceDialog
-        blocked={blockedUpdates[0] ?? null}
-        busy={resolvingDivergence}
-        error={divergenceError}
-        onClose={() => {
-          if (resolvingDivergence) return;
-          setBlockedUpdates([]);
-          setDivergenceError(null);
-        }}
-        onPreserve={(localName) => {
-          void resolveCurrentDivergence({ kind: "preserve", local_name: localName });
-        }}
-        onDiscard={() => {
-          void resolveCurrentDivergence({ kind: "discard" });
-        }}
       />
 
       <ImportModal

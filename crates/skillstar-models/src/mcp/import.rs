@@ -7,18 +7,100 @@ use uuid::Uuid;
 
 use super::*;
 
+/// Read side of [`specs::JsonDialect`] — how one client's JSON spells the
+/// transport, so a round-trip through that client's config does not silently
+/// change what the entry means.
+///
+/// Kept separate from the writer enum because the reader must be *permissive*
+/// (users hand-edit these files and paste configs between clients) while the
+/// writer must be exact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum JsonReadDialect {
+    /// `type` decides; endpoint under `url`. Claude Code, Cursor, Kiro, ZCode,
+    /// VS Code.
+    Typed,
+    /// Cline's camelCase `streamableHttp`; endpoint under `url`.
+    ClineCamel,
+    /// No `type`; endpoint under `serverUrl` (falling back to `url`, which
+    /// Windsurf also accepts).
+    ServerUrlNoType,
+    /// No `type`; `httpUrl` means Streamable HTTP, `url` means SSE.
+    GeminiUrlKeys,
+    /// No `type`; a `url` means remote, otherwise stdio. Zed.
+    PlainNoType,
+}
+
+impl JsonReadDialect {
+    /// Decide `(transport, url)` from a raw spec object.
+    ///
+    /// Returns `None` for the transport only when the object carries no usable
+    /// endpoint *and* no command — the caller then rejects the entry.
+    fn transport_and_url(self, obj: &Map<String, Value>) -> (String, Option<String>) {
+        let at = |key: &str| {
+            obj.get(key)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+        };
+        let declared = obj.get("type").and_then(Value::as_str);
+        match self {
+            Self::Typed => {
+                let transport = match declared {
+                    // Claude Code accepts `streamable-http` as an alias of
+                    // `http`; normalize so the store keeps one vocabulary.
+                    Some("http") | Some("streamable-http") | Some("streamableHttp") => "http",
+                    Some("sse") => "sse",
+                    _ => "stdio",
+                };
+                (transport.to_string(), at("url"))
+            }
+            Self::ClineCamel => {
+                let transport = match declared {
+                    Some("streamableHttp") | Some("streamable-http") | Some("http") => "http",
+                    Some("sse") => "sse",
+                    _ => "stdio",
+                };
+                (transport.to_string(), at("url"))
+            }
+            Self::ServerUrlNoType => {
+                let url = at("serverUrl").or_else(|| at("url"));
+                let transport = if url.is_some() { "http" } else { "stdio" };
+                (transport.to_string(), url)
+            }
+            Self::GeminiUrlKeys => match at("httpUrl") {
+                Some(url) => ("http".to_string(), Some(url)),
+                None => match at("url") {
+                    // `url` without `httpUrl` is Gemini's SSE spelling.
+                    Some(url) => ("sse".to_string(), Some(url)),
+                    None => ("stdio".to_string(), None),
+                },
+            },
+            Self::PlainNoType => match at("url") {
+                Some(url) => ("http".to_string(), Some(url)),
+                None => ("stdio".to_string(), None),
+            },
+        }
+    }
+}
+
 /// Parse a community `mcpServers` JSON spec into store fields.
 pub(crate) fn entry_from_json_spec(name: &str, spec: &Value) -> Option<McpServerEntry> {
+    entry_from_json_spec_dialect(name, spec, JsonReadDialect::Typed)
+}
+
+/// Parse a JSON server spec written in `dialect` into store fields.
+pub(crate) fn entry_from_json_spec_dialect(
+    name: &str,
+    spec: &Value,
+    dialect: JsonReadDialect,
+) -> Option<McpServerEntry> {
     let obj = spec.as_object()?;
-    let transport = obj
-        .get("type")
-        .and_then(|v| v.as_str())
-        .unwrap_or("stdio")
-        .to_string();
+    let (transport, url) = dialect.transport_and_url(obj);
     let mut entry = blank_entry(name, &transport);
     match transport.as_str() {
         "http" | "sse" => {
-            entry.url = obj.get("url").and_then(|v| v.as_str()).map(String::from);
+            entry.url = url;
             entry.headers = obj
                 .get("headers")
                 .and_then(|v| v.as_object())
@@ -100,6 +182,12 @@ pub(crate) fn blank_entry(name: &str, transport: &str) -> McpServerEntry {
         description: None,
         homepage: None,
         tags: Vec::new(),
+        source_id: None,
+        registry_name: None,
+        installed_version: None,
+        // Read back out of a tool's own config, so by definition not installed
+        // from a registry runtime shape SkillStar chose.
+        runtime_kind: Some(McpRuntimeKind::Manual.as_str().to_string()),
         enabled: BTreeMap::new(),
         auto_approve_all: false,
         auto_approve_tools: Vec::new(),
@@ -186,18 +274,58 @@ pub(crate) fn read_zcode_cli_entries(content: &str) -> Result<Vec<McpServerEntry
     Ok(out)
 }
 
-/// Top-level `mcpServers` JSON map (Claude Code, Kiro, Cursor).
-pub(crate) fn read_json_mcpservers_entries(content: &str) -> Result<Vec<McpServerEntry>> {
+/// Read a top-level JSON server map under `root_key`, parsing each value in
+/// `dialect`. Shared by every JSON-format target.
+fn read_json_named_map_entries(
+    content: &str,
+    root_key: &str,
+    dialect: JsonReadDialect,
+) -> Result<Vec<McpServerEntry>> {
     let root: Value = serde_json::from_str(content)?;
     let mut out = Vec::new();
-    if let Some(map) = root.get("mcpServers").and_then(|v| v.as_object()) {
+    if let Some(map) = root.get(root_key).and_then(|v| v.as_object()) {
         for (name, val) in map {
-            if let Some(e) = entry_from_json_spec(name, val) {
+            if let Some(e) = entry_from_json_spec_dialect(name, val, dialect) {
                 out.push(e);
             }
         }
     }
     Ok(out)
+}
+
+/// Top-level `mcpServers` JSON map (Claude Code, Kiro, Cursor).
+pub(crate) fn read_json_mcpservers_entries(content: &str) -> Result<Vec<McpServerEntry>> {
+    read_json_named_map_entries(content, MCP_SERVERS_KEY, JsonReadDialect::Typed)
+}
+
+/// Claude Desktop Chat's `mcpServers` map (no `type`: a `url` means remote).
+pub(crate) fn read_claude_desktop_chat_entries(content: &str) -> Result<Vec<McpServerEntry>> {
+    read_json_named_map_entries(content, MCP_SERVERS_KEY, JsonReadDialect::PlainNoType)
+}
+
+/// VS Code's top-level `servers` map.
+pub(crate) fn read_vscode_entries(content: &str) -> Result<Vec<McpServerEntry>> {
+    read_json_named_map_entries(content, VSCODE_SERVERS_KEY, JsonReadDialect::Typed)
+}
+
+/// Windsurf's `mcpServers` map (`serverUrl`, no `type`).
+pub(crate) fn read_windsurf_entries(content: &str) -> Result<Vec<McpServerEntry>> {
+    read_json_named_map_entries(content, MCP_SERVERS_KEY, JsonReadDialect::ServerUrlNoType)
+}
+
+/// Cline's `mcpServers` map (camelCase `streamableHttp`).
+pub(crate) fn read_cline_entries(content: &str) -> Result<Vec<McpServerEntry>> {
+    read_json_named_map_entries(content, MCP_SERVERS_KEY, JsonReadDialect::ClineCamel)
+}
+
+/// Gemini CLI's `mcpServers` map (`url` = SSE, `httpUrl` = Streamable HTTP).
+pub(crate) fn read_gemini_cli_entries(content: &str) -> Result<Vec<McpServerEntry>> {
+    read_json_named_map_entries(content, MCP_SERVERS_KEY, JsonReadDialect::GeminiUrlKeys)
+}
+
+/// Zed's top-level `context_servers` map.
+pub(crate) fn read_zed_entries(content: &str) -> Result<Vec<McpServerEntry>> {
+    read_json_named_map_entries(content, ZED_SERVERS_KEY, JsonReadDialect::PlainNoType)
 }
 
 fn entry_from_codex_table(name: &str, tbl: &toml::Table) -> Option<McpServerEntry> {

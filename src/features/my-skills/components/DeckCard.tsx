@@ -69,6 +69,10 @@ export function DeckCard({
   const missingCount = totalCount - installedCount;
   const isInstallingThis = installingMissing === group.id;
   const maxSkillsToShow = viewMode === "grid" ? 5 : 999;
+  // The rail reflects the deck's own Agent links, not the links its Skills
+  // happen to have: a new deck starts dark even though installing a Skill
+  // already deploys it to every enabled Agent.
+  const deckAgentLinks = new Set(group.agent_links ?? []);
 
   return (
     <motion.div
@@ -259,16 +263,19 @@ export function DeckCard({
               {/* Link to Agent icons */}
               <AgentTargetCarousel
                 items={enabledProfiles.map((profile) => {
+                  const claimed = deckAgentLinks.has(profile.id);
                   const linkedCount = groupInstalledSkillNames.filter((name) =>
                     skillByName.get(name)?.agent_links?.includes(profile.display_name),
                   ).length;
+                  // Only a claimed Agent can light up. Claimed but not fully
+                  // linked on disk (a Skill was added or unlinked since) shows
+                  // as mixed, so drift stays visible instead of reading as done.
                   const allLinked =
-                    groupInstalledSkillNames.length > 0 && linkedCount === groupInstalledSkillNames.length;
-                  const partialLinked = linkedCount > 0 && linkedCount < groupInstalledSkillNames.length;
+                    claimed && groupInstalledSkillNames.length > 0 && linkedCount === groupInstalledSkillNames.length;
                   return {
                     id: profile.id,
                     profile,
-                    selected: allLinked ? true : partialLinked ? ("mixed" as const) : false,
+                    selected: allLinked ? true : claimed ? ("mixed" as const) : false,
                     pending: linkState[`${group.id}::${profile.id}`] === "linking",
                     disabled: groupInstalledSkillNames.length === 0,
                     title: allLinked

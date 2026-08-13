@@ -4,6 +4,7 @@
 //! `auth.json` schema or the per-subscription session snapshot store.  The
 //! parent module exposes the small activation/resync interface used by Tauri.
 
+mod error;
 mod io;
 
 use std::collections::HashSet;
@@ -15,9 +16,11 @@ use skillstar_usage::oauth::token_refresh;
 use skillstar_usage::subscription::Subscription;
 use skillstar_usage::{UsageError, UsageResult, crypto, storage};
 
+use self::error::{AuthCommitError, GrokIoError};
+#[cfg(test)]
+use self::error::{AuthCommitReason, GrokFile};
 use self::io::{
-    AuthCommitError, AuthFileLease, DiskGrokAuthFile, DiskGrokSessionStore, GrokAuthFile,
-    GrokSessionStore,
+    AuthFileLease, DiskGrokAuthFile, DiskGrokSessionStore, GrokAuthFile, GrokSessionStore,
 };
 #[cfg(test)]
 use self::io::{LoadedAuth, StoredSessions, revision};
@@ -37,17 +40,17 @@ struct GrokSwitchError {
 }
 
 impl GrokSwitchError {
-    fn operational(message: impl Into<String>) -> Self {
+    fn operational(message: impl std::fmt::Display) -> Self {
         Self {
-            message: message.into(),
+            message: message.to_string(),
             requires_reauth: false,
             target_installed: false,
         }
     }
 
-    fn reauth(message: impl Into<String>) -> Self {
+    fn reauth(message: impl std::fmt::Display) -> Self {
         Self {
-            message: message.into(),
+            message: message.to_string(),
             requires_reauth: true,
             target_installed: false,
         }
@@ -55,11 +58,17 @@ impl GrokSwitchError {
 
     fn commit(error: AuthCommitError) -> Self {
         Self {
-            message: error.message,
+            message: error.reason.to_string(),
             requires_reauth: false,
             target_installed: error.target_installed,
         }
     }
+}
+
+/// Disk failures inside `io` stay typed until they reach this boundary, where
+/// `UsageError` only carries a rendered message.
+fn usage_error(error: GrokIoError) -> UsageError {
+    UsageError::Other(error.to_string())
 }
 
 struct InstallAttempt {
@@ -82,11 +91,11 @@ async fn acquire_auth_lease(auth: &DiskGrokAuthFile) -> UsageResult<AuthFileLeas
     tokio::task::spawn_blocking(move || DiskGrokAuthFile { path }.lock_transaction())
         .await
         .map_err(|error| UsageError::Other(format!("Grok auth lock task failed: {error}")))?
-        .map_err(UsageError::Other)
+        .map_err(usage_error)
 }
 
 pub(super) async fn acquire_refresh_lease() -> UsageResult<GrokRefreshLease> {
-    let auth = DiskGrokAuthFile::resolved().map_err(UsageError::Other)?;
+    let auth = DiskGrokAuthFile::resolved().map_err(usage_error)?;
     acquire_auth_lease(&auth)
         .await
         .map(|auth| GrokRefreshLease { _auth: auth })
@@ -112,10 +121,10 @@ pub(super) async fn activate(subscription_id: &str) -> UsageResult<(Subscription
         )));
     }
 
-    let auth = DiskGrokAuthFile::resolved().map_err(UsageError::Other)?;
+    let auth = DiskGrokAuthFile::resolved().map_err(usage_error)?;
     let _auth_lease = acquire_auth_lease(&auth).await?;
-    let preflight = auth.load().map_err(UsageError::Other)?;
-    let mut sessions = DiskGrokSessionStore::open_default().map_err(UsageError::Other)?;
+    let preflight = auth.load().map_err(usage_error)?;
+    let mut sessions = DiskGrokSessionStore::open_default().map_err(usage_error)?;
     let previous_id = storage::get_active_subscription("xai")?;
     capture_disk_owner(&preflight.root, &mut sessions, previous_id.as_deref())?;
     // Capture may have copied a CLI-side token rotation back to this target.
@@ -143,10 +152,10 @@ pub(super) async fn resync(subscription_id: &str) -> UsageResult<SwitchOutcome> 
             target.catalog_id
         )));
     }
-    let auth = DiskGrokAuthFile::resolved().map_err(UsageError::Other)?;
+    let auth = DiskGrokAuthFile::resolved().map_err(usage_error)?;
     let _auth_lease = acquire_auth_lease(&auth).await?;
-    let preflight = auth.load().map_err(UsageError::Other)?;
-    let mut sessions = DiskGrokSessionStore::open_default().map_err(UsageError::Other)?;
+    let preflight = auth.load().map_err(usage_error)?;
+    let mut sessions = DiskGrokSessionStore::open_default().map_err(usage_error)?;
     capture_disk_owner(&preflight.root, &mut sessions, Some(&target.id))?;
     target = storage::get_subscription(subscription_id)?;
     if let Err(outcome) = prepare_target(&auth, &mut target).await {
@@ -156,8 +165,8 @@ pub(super) async fn resync(subscription_id: &str) -> UsageResult<SwitchOutcome> 
 }
 
 pub(super) fn forget(subscription_id: &str) -> UsageResult<()> {
-    let mut sessions = DiskGrokSessionStore::open_default().map_err(UsageError::Other)?;
-    sessions.remove(subscription_id).map_err(UsageError::Other)
+    let mut sessions = DiskGrokSessionStore::open_default().map_err(usage_error)?;
+    sessions.remove(subscription_id).map_err(usage_error)
 }
 
 pub(super) fn sync_refreshed_active(
@@ -170,9 +179,9 @@ pub(super) fn sync_refreshed_active(
             target.id
         )));
     }
-    let auth = DiskGrokAuthFile::resolved().map_err(UsageError::Other)?;
-    let preflight = auth.load().map_err(UsageError::Other)?;
-    let mut sessions = DiskGrokSessionStore::open_default().map_err(UsageError::Other)?;
+    let auth = DiskGrokAuthFile::resolved().map_err(usage_error)?;
+    let preflight = auth.load().map_err(usage_error)?;
+    let mut sessions = DiskGrokSessionStore::open_default().map_err(usage_error)?;
     capture_disk_owner(&preflight.root, &mut sessions, Some(&target.id))?;
     *target = storage::get_subscription(&target.id)?;
     Ok(install_prepared(&auth, &mut sessions, target).outcome)
@@ -188,9 +197,9 @@ pub(super) fn adopt_active_before_refresh(
     // Grok may have rotated R1→R2 since the last Usage refresh. Once the
     // official auth lock is held, adopt that sibling generation before making
     // any token request so SkillStar never double-spends stale R1.
-    let auth = DiskGrokAuthFile::resolved().map_err(UsageError::Other)?;
-    let loaded = auth.load().map_err(UsageError::Other)?;
-    let mut sessions = DiskGrokSessionStore::open_default().map_err(UsageError::Other)?;
+    let auth = DiskGrokAuthFile::resolved().map_err(usage_error)?;
+    let loaded = auth.load().map_err(usage_error)?;
+    let mut sessions = DiskGrokSessionStore::open_default().map_err(usage_error)?;
     capture_disk_owner(&loaded.root, &mut sessions, Some(&target.id))?;
     *target = storage::get_subscription(&target.id)?;
     Ok(())
@@ -292,9 +301,7 @@ fn capture_disk_owner<S: GrokSessionStore>(
             "Grok 当前磁盘会话无法安全保存，已中止切换以避免覆盖；请先在 Grok 中重新登录".into(),
         ));
     };
-    sessions
-        .save(&owner.id, &snapshot)
-        .map_err(UsageError::Other)?;
+    sessions.save(&owner.id, &snapshot).map_err(usage_error)?;
     if disk_is_fresh {
         let mut owner = owner.clone();
         sync_subscription_from_entry(&mut owner, &snapshot);

@@ -5,19 +5,34 @@ use anyhow::{Result, anyhow};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
+use ts_rs::TS;
 
 use super::*;
 use crate::Skill;
 
 // ── Skill Detail Page Fetching ─────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// One security-audit row from the skill's skills.sh page.
+///
+/// Exported to TypeScript via ts-rs (`src/types/generated/SecurityAudit.ts`)
+/// together with its only container, [`MarketplaceSkillDetails`].
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "SecurityAudit.ts")]
 pub struct SecurityAudit {
     pub name: String,
     pub result: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Rich detail for a single marketplace skill.
+///
+/// Exported to TypeScript via ts-rs
+/// (`src/types/generated/MarketplaceSkillDetails.ts`) so the frontend contract
+/// cannot drift from this struct. It already had: `security_audits` was added
+/// here and never reached the hand-written TS mirror, so the UI could not see
+/// the audit results at all — the same failure shape as the `LocalFirstResult`
+/// `error` field (see `docs/errors.md`).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "MarketplaceSkillDetails.ts")]
 pub struct MarketplaceSkillDetails {
     /// Full Summary in Markdown (converted from HTML)
     pub summary: Option<String>,
@@ -33,49 +48,46 @@ pub struct MarketplaceSkillDetails {
     pub security_audits: Vec<SecurityAudit>,
 }
 
-/// Fetch rich detail data for a single skill from its skills.sh page.
+/// Fetch rich detail data for a single skill from its skills.sh page, with
+/// content-addressing metadata.
 ///
 /// URL format: `https://skills.sh/{source}/{name}`
 /// where source = "org/repo" and name = skill name.
 ///
 /// Returns `None`-filled fields on partial failure; the caller should
 /// gracefully fall back to the original truncated description.
-pub async fn fetch_marketplace_skill_details(
+///
+/// No `.0` convenience wrapper by design — see
+/// [`get_skills_sh_leaderboard_with_meta`](super::get_skills_sh_leaderboard_with_meta).
+pub async fn fetch_marketplace_skill_details_with_meta(
     source: &str,
     name: &str,
-) -> Result<MarketplaceSkillDetails> {
-    let url = format!("https://skills.sh/{}/{}", source, name);
-    debug!(target: "skills_sh", url = %url, "fetching skill details");
+    etag: Option<&str>,
+) -> Result<(MarketplaceSkillDetails, FetchMeta)> {
+    let path = format!("/{}/{}", source, name);
+    debug!(target: "skills_sh", path = %path, "fetching skill details");
 
-    let client = marketplace_client()?;
-
-    let response = client
-        .get(&url)
-        .header(
-            "User-Agent",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-        )
-        .header("Accept", "text/html,application/xhtml+xml")
-        .send()
-        .await
-        .context("Failed to fetch skill detail page")?;
-
-    let status = response.status();
-    if !status.is_success() {
-        anyhow::bail!("skills.sh returned HTTP {}", status.as_u16());
+    let (html, meta) = fetch_with_failover(&path, etag).await?;
+    if meta.payload_sha256.is_empty() {
+        return Ok((
+            MarketplaceSkillDetails {
+                summary: None,
+                readme: None,
+                weekly_installs: None,
+                github_stars: None,
+                first_seen: None,
+                security_audits: Vec::new(),
+            },
+            meta,
+        ));
     }
-
-    let html = response
-        .text()
-        .await
-        .context("Failed to read response body")?;
 
     // Check for Next.js error page
     if html.contains("__next_error__") {
         anyhow::bail!("Skill page not found (Next.js error page)");
     }
 
-    Ok(parse_skill_detail_html(&html))
+    Ok((parse_skill_detail_html(&html), meta))
 }
 
 fn parse_skill_detail_html(html: &str) -> MarketplaceSkillDetails {

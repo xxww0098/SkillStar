@@ -1,4 +1,4 @@
-import { Globe, Terminal, Zap } from "lucide-react";
+import { ArrowUpCircle, Globe, Terminal, Zap } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { AgentTargetCarousel } from "../../../components/shared/AgentTargetCarousel";
 import { CardDescription, CardTitle } from "../../../components/ui/card";
@@ -10,11 +10,13 @@ import type { McpAgentTarget } from "../lib/agentTargets";
 interface McpServerCardProps {
   server: McpServerEntry;
   agentTargets: readonly McpAgentTarget[];
+  /** Catalog version this entry is behind, when the catalog knows a newer one. */
+  updateVersion?: string | null;
   onOpen: () => void;
   onToggleTool: (toolId: McpToolId, enabled: boolean) => void;
 }
 
-export function McpServerCard({ server, agentTargets, onOpen, onToggleTool }: McpServerCardProps) {
+export function McpServerCard({ server, agentTargets, updateVersion, onOpen, onToggleTool }: McpServerCardProps) {
   const { t } = useTranslation();
   const isRemote = server.transport === "http" || server.transport === "sse";
   const summary = isRemote ? server.url : [server.command, ...(server.args ?? [])].filter(Boolean).join(" ");
@@ -26,6 +28,18 @@ export function McpServerCard({ server, agentTargets, onOpen, onToggleTool }: Mc
       onClick={onOpen}
       topRightSlot={
         <span className="flex items-center gap-1">
+          {updateVersion ? (
+            <span
+              title={t("mcp.updateAvailableHint", {
+                installed: server.installedVersion ?? "?",
+                latest: updateVersion,
+              })}
+              className="inline-flex items-center gap-0.5 rounded-md bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-400"
+            >
+              <ArrowUpCircle className="h-2.5 w-2.5" />
+              {t("mcp.badgeUpdateAvailable")}
+            </span>
+          ) : null}
           {server.autoApproveAll ? (
             <span
               title={t("mcp.autoApproveAllHint")}

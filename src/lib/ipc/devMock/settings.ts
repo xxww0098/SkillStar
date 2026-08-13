@@ -89,6 +89,15 @@ export const SETTINGS_HANDLERS: DevMockHandlers = {
       supports_clone: true,
     },
   ],
+  get_marketplace_mirror_config: () => ({
+    enabled: false,
+    hosts: [],
+  }),
+  save_marketplace_mirror_config: (args) => {
+    const config = args.config as { enabled: boolean; hosts: string[] };
+    void config;
+    return undefined;
+  },
   get_acp_config: () => ({ ...getAcpConfigState() }),
   save_acp_config: (args) => {
     const config = args.config as AcpConfigState;

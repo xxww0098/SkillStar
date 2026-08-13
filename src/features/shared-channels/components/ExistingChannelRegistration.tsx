@@ -180,7 +180,10 @@ export function ExistingChannelRegistration({ organizations, onRegistered }: Pro
               {preview.repository.owner}/{preview.repository.name}
             </h3>
             <p className="mt-1 text-xs text-muted-foreground">
-              Repository ID {preview.repository.repository_id} · {preview.total_files} files scanned
+              {t("sharedChannels.filesScanned", {
+                id: preview.repository.repository_id,
+                count: preview.total_files,
+              })}
             </p>
           </div>
           <a
@@ -196,34 +199,29 @@ export function ExistingChannelRegistration({ organizations, onRegistered }: Pro
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
           <div className="flex items-center gap-2 text-sm font-semibold text-amber-700 dark:text-amber-300">
             <AlertTriangle className="size-4" />
-            {t("sharedChannels.exposureTitle", { defaultValue: "Complete repository exposure" })}
+            {t("sharedChannels.exposureTitle")}
           </div>
-          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-            {t("sharedChannels.exposureWarning", {
-              defaultValue:
-                "Everyone who joins this channel can read every repository file and the complete Git history — not only the Skills listed below.",
-            })}
-          </p>
+          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{t("sharedChannels.exposureWarning")}</p>
         </div>
 
         <InventorySection
-          title={t("sharedChannels.detectedSkills", { defaultValue: "Detected Skills" })}
-          empty={t("sharedChannels.noDetectedSkills", { defaultValue: "No Skills detected" })}
+          title={t("sharedChannels.detectedSkills")}
+          empty={t("sharedChannels.noDetectedSkills")}
           items={preview.skills.map((skill) => `${skill.id} · ${skill.folder_path || "/"}`)}
         />
         <InventorySection
-          title={t("sharedChannels.nonSkillFiles", { defaultValue: "Files outside Skills" })}
-          empty={t("sharedChannels.noNonSkillFiles", { defaultValue: "No files outside Skills" })}
+          title={t("sharedChannels.nonSkillFiles")}
+          empty={t("sharedChannels.noNonSkillFiles")}
           items={preview.non_skill_files}
         />
 
         <div className="flex flex-wrap gap-2">
           <Button onClick={confirm} disabled={confirming}>
             {confirming && <Loader2 className="mr-1.5 size-4 animate-spin" />}
-            {t("sharedChannels.confirmExisting", { defaultValue: "Confirm complete exposure and register" })}
+            {t("sharedChannels.confirmExisting")}
           </Button>
           <Button variant="outline" onClick={() => void cancelSession(true)} disabled={confirming}>
-            {t("common.cancel", { defaultValue: "Cancel" })}
+            {t("common.cancel")}
           </Button>
         </div>
       </div>
@@ -233,13 +231,9 @@ export function ExistingChannelRegistration({ organizations, onRegistered }: Pro
   return (
     <div className="space-y-4">
       {error && <ErrorBanner message={error} />}
-      <p className="text-sm text-muted-foreground">
-        {t("sharedChannels.existingHint", {
-          defaultValue: "Choose an organization-private repository already selected for the SkillStar GitHub App.",
-        })}
-      </p>
+      <p className="text-sm text-muted-foreground">{t("sharedChannels.existingHint")}</p>
       <label className="block space-y-1.5 text-xs font-medium">
-        <span>{t("sharedChannels.organization", { defaultValue: "GitHub organization" })}</span>
+        <span>{t("sharedChannels.organization")}</span>
         <select
           value={organizationId ?? ""}
           onChange={(event) => setOrganizationId(Number(event.target.value))}
@@ -253,7 +247,7 @@ export function ExistingChannelRegistration({ organizations, onRegistered }: Pro
         </select>
       </label>
       <label className="block space-y-1.5 text-xs font-medium">
-        <span>{t("sharedChannels.repository", { defaultValue: "Selected private repository" })}</span>
+        <span>{t("sharedChannels.repository")}</span>
         <select
           value={repositoryId ?? ""}
           onChange={(event) => setRepositoryId(Number(event.target.value))}
@@ -267,7 +261,7 @@ export function ExistingChannelRegistration({ organizations, onRegistered }: Pro
               disabled={repository.already_registered}
             >
               {repository.owner}/{repository.name}
-              {repository.already_registered ? " · already registered" : ""}
+              {repository.already_registered ? t("sharedChannels.alreadyRegistered") : ""}
             </option>
           ))}
         </select>
@@ -275,7 +269,7 @@ export function ExistingChannelRegistration({ organizations, onRegistered }: Pro
 
       {repositories.length === 0 && !loadingRepositories && (
         <div className="rounded-lg border border-dashed border-border p-4 text-xs text-muted-foreground">
-          No eligible private repositories are selected for the App.
+          {t("sharedChannels.noEligibleRepositories")}
           {selectedOrganization && (
             <a
               href={`https://github.com/organizations/${encodeURIComponent(selectedOrganization.login)}/settings/installations`}
@@ -283,7 +277,7 @@ export function ExistingChannelRegistration({ organizations, onRegistered }: Pro
               rel="noreferrer"
               className="ml-1 inline-flex items-center gap-1 text-primary hover:underline"
             >
-              Open GitHub App settings <ExternalLink className="size-3" />
+              {t("sharedChannels.openInstallation")} <ExternalLink className="size-3" />
             </a>
           )}
         </div>
@@ -292,11 +286,11 @@ export function ExistingChannelRegistration({ organizations, onRegistered }: Pro
       <div className="flex flex-wrap items-center gap-3">
         <Button onClick={startScan} disabled={scanning || loadingRepositories || repositoryId === null}>
           {scanning ? <Loader2 className="mr-1.5 size-4 animate-spin" /> : <ScanSearch className="mr-1.5 size-4" />}
-          {t("sharedChannels.scanExposure", { defaultValue: "Scan exposure" })}
+          {t("sharedChannels.scanExposure")}
         </Button>
         {scanning && (
           <Button variant="outline" size="sm" onClick={() => void cancelSession(false)}>
-            <X className="mr-1 size-3.5" /> Cancel scan
+            <X className="mr-1 size-3.5" /> {t("sharedChannels.cancelScan")}
           </Button>
         )}
         {progress && (

@@ -24,7 +24,6 @@ import { GITHUB_HANDLERS } from "./github";
 import { MARKETPLACE_HANDLERS } from "./marketplace";
 import { MCP_HANDLERS } from "./mcp";
 import { MODELS_HANDLERS } from "./models";
-import { S3_HANDLERS } from "./s3";
 import { SHARED_CHANNEL_HANDLERS } from "./sharedChannels";
 import { SETTINGS_HANDLERS } from "./settings";
 import { mergeHandlerFragments } from "./shared";
@@ -42,7 +41,6 @@ const HANDLERS = mergeHandlerFragments([
   GITHUB_HANDLERS,
   USAGE_HANDLERS,
   SSH_HANDLERS,
-  S3_HANDLERS,
   SHARED_CHANNEL_HANDLERS,
 ]);
 

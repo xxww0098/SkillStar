@@ -2,6 +2,7 @@ import { memo } from "react";
 import {
   ClaudeColor,
   CodexColor,
+  LobeHubMono,
   OpenCodeMono,
   PiMono,
   type LobeIconComponent,
@@ -33,6 +34,7 @@ const GLYPH_BY_TOOL_ID: Record<AgentToolIconId, LobeIconComponent> = {
   codex: CodexColor,
   opencode: OpenCodeMono,
   pi: PiMono,
+  omp: LobeHubMono,
 };
 
 function AgentToolIconInner({ toolId, size = "sm", className }: AgentToolIconProps) {

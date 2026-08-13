@@ -42,7 +42,7 @@ pub fn detect_new_skills_in_cached_repos() -> Vec<RepoNewSkill> {
 
     for (source, repo_url) in repo_groups.values() {
         if !matches!(
-            crate::shared_channels::managed_repository_for_url(repo_url),
+            crate::skill_mutation::policy().managed_repository_for_url(repo_url),
             Ok(None)
         ) {
             continue;

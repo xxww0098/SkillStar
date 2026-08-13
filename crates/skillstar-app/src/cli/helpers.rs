@@ -8,35 +8,16 @@ use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 
 use skillstar_core::infra::paths::{hub_skills_dir, lockfile_path};
-use skillstar_skills::agents::list_profiles;
+use skillstar_agents::list_profiles;
 use skillstar_skills::lockfile::Lockfile;
 use skillstar_skills::source_resolver::same_remote_url;
 
 // ── Name resolution helpers ─────────────────────────────────────────────
 
-/// Derive a skill name hint from a Git URL.
+/// Derive a skill name hint from a Git URL (single implementation in
+/// `skillstar-skills::source_resolver`, shared with the domain install path).
 pub fn derive_name_hint(url: &str, explicit_name: Option<&str>) -> String {
-    explicit_name.map(str::to_string).unwrap_or_else(|| {
-        if let Ok(source) = skillstar_skills::source_resolver::Source::parse(url) {
-            if let Some(skill) = source.skill_filter {
-                return skill;
-            }
-            if let Some(subpath) = source.subpath
-                && let Some(name) = subpath.rsplit('/').next()
-            {
-                return name.to_string();
-            }
-            if let Some(name) = source.short.rsplit('/').next() {
-                return name.to_string();
-            }
-        }
-
-        url.rsplit('/')
-            .next()
-            .unwrap_or("skill")
-            .trim_end_matches(".git")
-            .to_string()
-    })
+    skillstar_skills::source_resolver::derive_skill_name_hint(url, explicit_name)
 }
 
 /// Resolve the installed skill name for a given URL.
@@ -197,10 +178,6 @@ pub fn prompt_for_agent_selection_for_scope(
 }
 
 /// Validate agent IDs against supported project agents.
-pub fn validate_agent_ids(agent_ids: &[String]) -> Result<Vec<String>, String> {
-    validate_agent_ids_for_scope(agent_ids, false)
-}
-
 pub fn validate_agent_ids_for_scope(
     agent_ids: &[String],
     global: bool,

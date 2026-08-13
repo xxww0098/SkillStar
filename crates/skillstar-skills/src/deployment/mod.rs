@@ -11,7 +11,7 @@ use std::sync::{OnceLock, RwLock};
 use std::time::{Duration, Instant};
 use tracing::warn;
 
-use crate::agents as agent_profile;
+use skillstar_agents as agent_profile;
 
 const PROFILE_CACHE_TTL: Duration = Duration::from_secs(2);
 
@@ -67,6 +67,24 @@ fn require_global_profile<'a>(
     Ok(profile)
 }
 
+/// Resolve a GUI deployment target and require the user to have activated it.
+///
+/// The CLI has a separate explicit-target path (`batch_deploy_skills_to_agents`):
+/// `--agent` / `--all` is itself authorization to deploy. Tauri's card and
+/// batch actions, however, must fail closed when a stale UI or IPC request
+/// names an inactive profile, otherwise merely handling that request can
+/// provision a new `~/.agent/skills`-style directory.
+fn require_enabled_global_profile<'a>(
+    profiles: &'a [agent_profile::AgentProfile],
+    agent_id: &str,
+) -> Result<&'a agent_profile::AgentProfile> {
+    let profile = require_global_profile(profiles, agent_id)?;
+    if !profile.enabled {
+        anyhow::bail!("Agent '{}' is not enabled", agent_id);
+    }
+    Ok(profile)
+}
+
 fn remove_managed_entry_for_overwrite(path: &Path) -> Result<bool> {
     let is_link = skillstar_core::infra::fs_ops::is_link(path);
     let is_copy = path.is_dir() && path.join("SKILL.md").exists();
@@ -110,7 +128,12 @@ pub fn toggle_skill_for_agent(skill_name: &str, agent_id: &str, enable: bool) ->
     }
 
     let profiles = cached_profiles();
-    let profile = require_global_profile(&profiles, agent_id)?;
+    let profile = if enable {
+        require_enabled_global_profile(&profiles, agent_id)?
+    } else {
+        // Cleanup remains available after a profile is disabled.
+        require_global_profile(&profiles, agent_id)?
+    };
     let target = profile.global_skills_dir.join(skill_name);
 
     tracing::info!(
@@ -325,7 +348,7 @@ pub fn batch_link_skills_to_agent(skill_names: &[String], agent_id: &str) -> Res
 
     let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
     let profiles = cached_profiles();
-    let profile = require_global_profile(&profiles, agent_id)?;
+    let profile = require_enabled_global_profile(&profiles, agent_id)?;
     let target_dir = &profile.global_skills_dir;
 
     let mut linked = 0u32;
@@ -412,6 +435,14 @@ pub fn batch_link_skills_to_agent(skill_names: &[String], agent_id: &str) -> Res
             }
         }
     }
+
+    // `agent_links` is part of the cached installed-skill snapshot, so every
+    // exit that may have changed a link must drop the cache — including the
+    // failure exit, where links created before the failure stay in place.
+    // Callers used to do this themselves and new call sites kept forgetting;
+    // the cache has no TTL, so a miss leaves the UI showing stale link counts
+    // until an unrelated mutation happens to clear it.
+    crate::installed_skill::invalidate_cache();
 
     if !failures.is_empty() {
         if linked == 0 && created_target_dir {
@@ -522,6 +553,10 @@ pub fn batch_deploy_skills_to_agents(
             }
         }
     }
+
+    // Same contract as `batch_link_skills_to_agent`: deployments made before a
+    // failure stay on disk, so both exits must drop the cached `agent_links`.
+    crate::installed_skill::invalidate_cache();
 
     if !failures.is_empty() {
         anyhow::bail!(
@@ -728,7 +763,8 @@ mod tests {
     }
 
     #[test]
-    fn batch_link_skips_missing_skills_without_creating_agent_dir() -> Result<()> {
+    fn batch_link_requires_enabled_agent_and_skips_missing_skills_without_creating_agent_dir()
+    -> Result<()> {
         let _guard = crate::lock_test_env();
         invalidate_profile_cache();
 
@@ -738,8 +774,10 @@ mod tests {
 
         let previous_home = std::env::var_os("HOME");
         let previous_data_dir = std::env::var_os("SKILLSTAR_DATA_DIR");
+        let previous_claude_config_dir = std::env::var_os("CLAUDE_CONFIG_DIR");
         set_env("HOME", &home);
         set_env("SKILLSTAR_DATA_DIR", home.join(".skillstar"));
+        remove_env("CLAUDE_CONFIG_DIR");
         #[cfg(windows)]
         let previous_userprofile = std::env::var_os("USERPROFILE");
         #[cfg(windows)]
@@ -747,6 +785,22 @@ mod tests {
 
         let result = (|| -> Result<()> {
             let missing = vec!["missing-skill".to_string()];
+
+            let error = batch_link_skills_to_agent(&missing, "claude").unwrap_err();
+            assert!(error.to_string().contains("is not enabled"));
+
+            let hub_skill = skillstar_core::infra::paths::hub_skills_dir().join("demo-skill");
+            fs::create_dir_all(&hub_skill)?;
+            fs::write(hub_skill.join("SKILL.md"), "# demo\n")?;
+            let error = toggle_skill_for_agent("demo-skill", "claude", true).unwrap_err();
+            assert!(error.to_string().contains("is not enabled"));
+            assert!(
+                !home.join(".claude").exists(),
+                "inactive single or batch requests must not provision the Agent config root"
+            );
+
+            assert!(skillstar_agents::toggle_profile("claude")?);
+            invalidate_profile_cache();
             let linked = batch_link_skills_to_agent(&missing, "claude")?;
             assert_eq!(linked, 0);
             assert!(
@@ -763,6 +817,10 @@ mod tests {
         match previous_data_dir {
             Some(value) => set_env("SKILLSTAR_DATA_DIR", value),
             None => remove_env("SKILLSTAR_DATA_DIR"),
+        }
+        match previous_claude_config_dir {
+            Some(value) => set_env("CLAUDE_CONFIG_DIR", value),
+            None => remove_env("CLAUDE_CONFIG_DIR"),
         }
         #[cfg(windows)]
         match previous_userprofile {

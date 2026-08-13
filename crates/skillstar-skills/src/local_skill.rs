@@ -76,19 +76,33 @@ pub fn adopt_folder(
         } else {
             canonical.join(&skill.folder_path)
         };
-        let skill_md = source_dir.join("SKILL.md");
-        let content = match std::fs::read_to_string(&skill_md) {
-            Ok(content) => content,
-            Err(error) => {
-                skipped.push(SkippedLocalSkill {
-                    name: skill.id.clone(),
-                    reason: format!("read_failed: {error}"),
-                });
-                continue;
-            }
-        };
 
-        match create(&skill.id, Some(&content)) {
+        // Frontmatter quality gate (shared with the repo-install path): a
+        // skill without a usable description is not adoptable.
+        if let Err(reason) = crate::validation::ensure_installable(&source_dir) {
+            skipped.push(SkippedLocalSkill {
+                name: skill.id.clone(),
+                reason,
+            });
+            continue;
+        }
+
+        // The hub entry must not already exist — a local skill is owned by
+        // the hub, so adopting over another install would clobber it.
+        let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
+        let hub_path = hub_dir.join(&skill.id);
+        let local_path = skillstar_core::infra::paths::local_skills_dir().join(&skill.id);
+        if hub_path.symlink_metadata().is_ok() || local_path.symlink_metadata().is_ok() {
+            skipped.push(SkippedLocalSkill {
+                name: skill.id.clone(),
+                reason: "already exists".to_string(),
+            });
+            continue;
+        }
+
+        // Adopt the complete skill directory (SKILL.md + scripts/references/
+        // assets), not just the manifest, so adopted skills keep working.
+        match copy_adopted_skill(&skill.id, &source_dir) {
             Ok(created) => adopted.push(AdoptedSkill {
                 name: created.name,
                 folder_path: skill.folder_path.clone(),
@@ -105,6 +119,42 @@ pub fn adopt_folder(
         crate::installed_skill::invalidate_cache();
     }
     Ok(AdoptLocalFolderResult { adopted, skipped })
+}
+
+/// Copy a complete skill directory into `skills-local/` and expose it via a
+/// hub symlink, rolling back the copy if the symlink cannot be created.
+///
+/// Unlike [`create`] (which writes only `SKILL.md`), adoption preserves the
+/// full skill: scripts, references, templates, assets and Unix executable
+/// state all keep working after the source folder is gone.
+fn copy_adopted_skill(name: &str, source_dir: &Path) -> Result<Skill> {
+    let local_path = skillstar_core::infra::paths::local_skills_dir().join(name);
+    let hub_path = skillstar_core::infra::paths::hub_skills_dir().join(name);
+    if let Some(parent) = local_path.parent() {
+        std::fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "Failed to create skills-local directory: {}",
+                parent.display()
+            )
+        })?;
+    }
+    if let Some(parent) = hub_path.parent() {
+        std::fs::create_dir_all(parent).with_context(|| {
+            format!("Failed to create hub skills directory: {}", parent.display())
+        })?;
+    }
+
+    skillstar_core::infra::fs_ops::create_copy_deploy(source_dir, &local_path).with_context(
+        || format!("Failed to copy adopted skill '{name}' into skills-local"),
+    )?;
+    if let Err(error) = skillstar_core::infra::fs_ops::create_symlink(&local_path, &hub_path) {
+        let _ = skillstar_core::infra::fs_ops::remove_dir_all_retry(&local_path);
+        return Err(error)
+            .with_context(|| format!("Failed to create hub symlink for '{name}'"));
+    }
+
+    let description = skillstar_core::types::extract_skill_description(&local_path);
+    installed_local_skill(name, description)
 }
 
 /// Check if a skill in the hub is a local skill (symlink pointing into `skills-local/`).
@@ -127,7 +177,7 @@ pub fn is_local_skill(name: &str) -> bool {
 fn prepare_new_local_skill_paths(name: &str) -> Result<(PathBuf, PathBuf)> {
     crate::content::validate_skill_name(name)
         .map_err(|error| anyhow::anyhow!("Invalid local Skill name: {error}"))?;
-    crate::shared_channels::ensure_generic_skill_mutation_allowed(name)?;
+    crate::skill_mutation::policy().ensure_skill_mutation_allowed(name)?;
 
     let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
     let local_dir = skillstar_core::infra::paths::local_skills_dir();
@@ -238,7 +288,7 @@ pub(crate) fn create_from_snapshot(
     installed_local_skill(name, description)
 }
 
-pub(crate) fn preserve_installed_copy(name: &str, local_name: &str) -> Result<Skill> {
+pub fn preserve_installed_copy(name: &str, local_name: &str) -> Result<Skill> {
     let snapshot = crate::content::snapshot(name)
         .with_context(|| format!("failed to capture local divergence for '{name}'"))?;
     let local_copy = create_from_snapshot(local_name, &snapshot)?;
@@ -273,11 +323,6 @@ fn installed_local_skill(name: &str, description: String) -> Result<Skill> {
 /// This is used when SkillStar discovers a new unmanaged skill inside a
 /// project-level agent folder and needs to normalize it into local-skill
 /// storage without leaving a real directory behind in the hub.
-pub fn adopt_existing_dir(name: &str, source_dir: &Path) -> Result<PathBuf> {
-    let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()?;
-    adopt_existing_dir_locked(name, source_dir)
-}
-
 pub(crate) fn adopt_existing_dir_locked(name: &str, source_dir: &Path) -> Result<PathBuf> {
     if !source_dir.is_dir() {
         anyhow::bail!(
@@ -353,7 +398,7 @@ pub fn reconcile_hub_symlinks() {
             continue;
         }
 
-        match crate::shared_channels::managed_repository_for_skill(&name) {
+        match crate::skill_mutation::policy().managed_repository_for_skill(&name) {
             Ok(None) => {}
             Ok(Some(_)) => {
                 warn!(
@@ -367,7 +412,7 @@ pub fn reconcile_hub_symlinks() {
                 warn!(
                     target: "local_skill",
                     skill = %name,
-                    error = %error.message,
+                    error = %error,
                     "skipping local symlink reconciliation because channel ownership is unknown"
                 );
                 continue;
@@ -392,7 +437,7 @@ pub fn reconcile_hub_symlinks() {
 /// 2. Remove hub symlink (`skills/<name>`)
 /// 3. Delete `skills-local/<name>/` directory
 pub fn delete(name: &str) -> Result<()> {
-    crate::shared_channels::ensure_generic_skill_mutation_allowed(name)?;
+    crate::skill_mutation::policy().ensure_skill_mutation_allowed(name)?;
     // Remove symlinks from all agents
     let _ = deployment::remove_skill_from_all_agents(name);
     let _ = projects::remove_skill_from_all_projects(name);
@@ -504,7 +549,7 @@ pub fn migrate_existing() -> Result<u32> {
             continue;
         };
 
-        if let Err(error) = crate::shared_channels::ensure_generic_skill_mutation_allowed(&name) {
+        if let Err(error) = crate::skill_mutation::policy().ensure_skill_mutation_allowed(&name) {
             warn!(
                 target: "local_skill",
                 skill = %name,
@@ -608,4 +653,106 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod adopt_folder_tests {
+    use super::*;
+    use std::ffi::OsString;
+
+    struct Sandbox {
+        previous: Vec<(&'static str, Option<OsString>)>,
+        _temp: tempfile::TempDir,
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl Sandbox {
+        fn new() -> Self {
+            let _guard = crate::lock_test_env();
+            let temp = tempfile::tempdir().unwrap();
+            let overrides = [
+                ("SKILLSTAR_HUB_DIR", temp.path().join("hub")),
+                ("SKILLSTAR_DATA_DIR", temp.path().join("data")),
+                ("SKILLSTAR_TOOL_SYNC_HOME", temp.path().join("tool-home")),
+                ("HOME", temp.path().join("home")),
+                ("USERPROFILE", temp.path().join("home")),
+            ];
+            let previous = overrides
+                .iter()
+                .map(|(key, _)| (*key, std::env::var_os(key)))
+                .collect();
+            unsafe {
+                for (key, value) in overrides {
+                    std::env::set_var(key, value);
+                }
+            }
+            Self {
+                previous,
+                _temp: temp,
+                _guard,
+            }
+        }
+    }
+
+    impl Drop for Sandbox {
+        fn drop(&mut self) {
+            unsafe {
+                for (key, previous) in self.previous.drain(..).rev() {
+                    match previous {
+                        Some(value) => std::env::set_var(key, value),
+                        None => std::env::remove_var(key),
+                    }
+                }
+            }
+        }
+    }
+
+    fn valid_skill(root: &Path, name: &str) {
+        let dir = root.join(format!("skills/{name}"));
+        std::fs::create_dir_all(dir.join("scripts")).unwrap();
+        std::fs::write(
+            dir.join("SKILL.md"),
+            format!("---\nname: {name}\ndescription: {name} does things\n---\n\n# {name}\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join("scripts/run.sh"), "echo hi\n").unwrap();
+    }
+
+    #[test]
+    fn adopt_folder_copies_the_full_skill_directory() {
+        let _sandbox = Sandbox::new();
+        let source = tempfile::tempdir().unwrap();
+        valid_skill(source.path(), "demo");
+
+        let result = adopt_folder(source.path().to_str().unwrap(), None).unwrap();
+        assert_eq!(result.adopted.len(), 1);
+        assert_eq!(result.adopted[0].name, "demo");
+
+        // The whole directory (scripts included) is preserved in skills-local.
+        let local = skillstar_core::infra::paths::local_skills_dir().join("demo");
+        assert!(local.join("SKILL.md").exists());
+        assert!(local.join("scripts/run.sh").exists());
+        // And exposed through the hub link.
+        assert!(is_local_skill("demo"));
+        // The source folder is untouched (adoption copies, it does not move).
+        assert!(source.path().join("skills/demo/SKILL.md").exists());
+    }
+
+    #[test]
+    fn adopt_folder_skips_skills_with_invalid_frontmatter() {
+        let _sandbox = Sandbox::new();
+        let source = tempfile::tempdir().unwrap();
+        valid_skill(source.path(), "good");
+        let bare_dir = source.path().join("skills/bare");
+        std::fs::create_dir_all(&bare_dir).unwrap();
+        std::fs::write(bare_dir.join("SKILL.md"), "# No frontmatter\n").unwrap();
+
+        let result = adopt_folder(source.path().to_str().unwrap(), None).unwrap();
+        assert_eq!(result.adopted.len(), 1);
+        assert_eq!(result.adopted[0].name, "good");
+        assert_eq!(result.skipped.len(), 1);
+        assert_eq!(result.skipped[0].name, "bare");
+        assert!(result.skipped[0].reason.contains("description"), "{}", result.skipped[0].reason);
+        assert!(!is_local_skill("bare"));
+    }
 }

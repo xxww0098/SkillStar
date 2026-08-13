@@ -140,13 +140,6 @@ pub(crate) fn any_skill_rows(conn: &Connection) -> Result<bool> {
     Ok(count > 0)
 }
 
-pub(crate) fn skill_row_count(conn: &Connection) -> Result<i64> {
-    conn.query_row("SELECT COUNT(1) FROM marketplace_skill", [], |row| {
-        row.get(0)
-    })
-    .context("Failed to count marketplace skills")
-}
-
 pub(crate) fn load_search_snapshot(
     conn: &Connection,
     query: &str,

@@ -7,6 +7,7 @@ fn discovered(id: &str) -> DiscoveredSkill {
         folder_path: format!("skills/{id}"),
         description: String::new(),
         already_installed: false,
+        frontmatter_issues: Vec::new(),
     }
 }
 
@@ -51,4 +52,136 @@ fn requested_skill_not_found_error_names_missing_identity_and_possible_cause() {
     let error = requested_skill_not_found_error(&["removed-skill".to_string()]);
     assert!(error.contains("removed-skill"));
     assert!(error.contains("deleted or renamed"));
+}
+
+#[cfg(test)]
+mod direct_clone_gate_tests {
+    use super::super::install_skill;
+    use std::ffi::OsString;
+    use std::process::Command;
+
+    struct Sandbox {
+        previous: Vec<(&'static str, Option<OsString>)>,
+        _temp: tempfile::TempDir,
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl Sandbox {
+        fn new() -> Self {
+            let _guard = crate::lock_test_env();
+            let temp = tempfile::tempdir().unwrap();
+            let overrides = [
+                ("SKILLSTAR_HUB_DIR", temp.path().join("hub")),
+                ("SKILLSTAR_DATA_DIR", temp.path().join("data")),
+                ("SKILLSTAR_TOOL_SYNC_HOME", temp.path().join("tool-home")),
+                ("HOME", temp.path().join("home")),
+                ("USERPROFILE", temp.path().join("home")),
+            ];
+            let previous = overrides
+                .iter()
+                .map(|(key, _)| (*key, std::env::var_os(key)))
+                .collect();
+            unsafe {
+                for (key, value) in overrides {
+                    std::env::set_var(key, value);
+                }
+            }
+            Self {
+                previous,
+                _temp: temp,
+                _guard,
+            }
+        }
+    }
+
+    impl Drop for Sandbox {
+        fn drop(&mut self) {
+            unsafe {
+                for (key, previous) in self.previous.drain(..).rev() {
+                    match previous {
+                        Some(value) => std::env::set_var(key, value),
+                        None => std::env::remove_var(key),
+                    }
+                }
+            }
+        }
+    }
+
+    fn init_repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        for args in [
+            vec!["init", "--initial-branch=main"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "SkillStar Tests"],
+        ] {
+            let status = Command::new("git")
+                .current_dir(dir.path())
+                .args(&args)
+                .status()
+                .unwrap();
+            assert!(status.success());
+        }
+        dir
+    }
+
+    /// The legacy whole-repo fallback (scan path failed) must not reopen the
+    /// frontmatter gate: a repo without a valid root SKILL.md is rejected and
+    /// the clone is cleaned up.
+    #[test]
+    fn direct_clone_fallback_rejects_invalid_root_skill() {
+        let _sandbox = Sandbox::new();
+        let repo = init_repo();
+        std::fs::write(repo.path().join("SKILL.md"), "# No frontmatter\n").unwrap();
+        let status = Command::new("git")
+            .current_dir(repo.path())
+            .args(["add", "."])
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let status = Command::new("git")
+            .current_dir(repo.path())
+            .args(["commit", "-m", "init"])
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        // A plain filesystem path defeats the repo-cache scan, forcing the
+        // direct-clone fallback path.
+        let error = install_skill(repo.path().to_string_lossy().to_string(), Some("demo".into()))
+            .unwrap_err();
+        assert!(error.contains("not installable"), "{error}");
+        assert!(error.contains("description"), "{error}");
+        let hub = skillstar_core::infra::paths::hub_skills_dir();
+        assert!(
+            !hub.join("demo").symlink_metadata().is_ok(),
+            "rejected clone must be cleaned up"
+        );
+    }
+
+    #[test]
+    fn direct_clone_fallback_accepts_valid_root_skill() {
+        let _sandbox = Sandbox::new();
+        let repo = init_repo();
+        std::fs::write(
+            repo.path().join("SKILL.md"),
+            "---\nname: demo\ndescription: A valid root skill\n---\n\n# Demo\n",
+        )
+        .unwrap();
+        let status = Command::new("git")
+            .current_dir(repo.path())
+            .args(["add", "."])
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let status = Command::new("git")
+            .current_dir(repo.path())
+            .args(["commit", "-m", "init"])
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let skill = install_skill(repo.path().to_string_lossy().to_string(), Some("demo".into()))
+            .expect("valid root skill installs via the fallback path");
+        assert_eq!(skill.name, "demo");
+    }
 }

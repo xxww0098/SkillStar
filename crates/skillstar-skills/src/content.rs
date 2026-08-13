@@ -14,7 +14,7 @@ use crate::git::ops as git_ops;
 use crate::{installed_skill, local_skill, lockfile};
 
 const SNAPSHOT_HASH_DOMAIN: &[u8] = b"skillstar.skill-snapshot.v2\0";
-pub(crate) const SNAPSHOT_HASH_VERSION: u32 = 2;
+pub const SNAPSHOT_HASH_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SnapshotLimits {
@@ -180,7 +180,7 @@ pub fn snapshot_with_limits(name: &str, limits: SnapshotLimits) -> Result<SkillS
 }
 
 /// Capture an already-resolved managed source before an install mutates hub links.
-pub(crate) fn snapshot_path(name: &str, root: &Path) -> Result<SkillSnapshot, AppError> {
+pub fn snapshot_path(name: &str, root: &Path) -> Result<SkillSnapshot, AppError> {
     validate_skill_name(name)?;
     let root = std::fs::canonicalize(root).map_err(|error| {
         AppError::Other(format!(
@@ -217,7 +217,7 @@ fn snapshot_resolved_root(
     })
 }
 
-pub(crate) fn validate_skill_name(name: &str) -> Result<(), AppError> {
+pub fn validate_skill_name(name: &str) -> Result<(), AppError> {
     if name.is_empty()
         || name.contains(['/', '\\', '\0'])
         || name.contains(['<', '>', ':', '"', '|', '?', '*'])
@@ -603,7 +603,7 @@ pub fn delete_local(name: &str) -> Result<(), AppError> {
         crate::skill_update::acquire_update_transaction_lock().map_err(|error| {
             AppError::Other(format!("Unable to lock local Skill deletion: {error}"))
         })?;
-    crate::shared_channels::ensure_generic_skill_mutation_allowed(name)
+    crate::skill_mutation::policy().ensure_skill_mutation_allowed(name)
         .map_err(|error| AppError::Other(error.to_string()))?;
     if !local_skill::is_local_skill(name) {
         return Err(AppError::Other(format!(
@@ -657,7 +657,7 @@ pub fn update(name: &str, content: &str) -> Result<(), AppError> {
         crate::skill_update::acquire_update_transaction_lock().map_err(|error| {
             AppError::Other(format!("Unable to lock Skill content update: {error}"))
         })?;
-    crate::shared_channels::ensure_generic_skill_mutation_allowed(name)
+    crate::skill_mutation::policy().ensure_skill_mutation_allowed(name)
         .map_err(|error| AppError::Other(error.to_string()))?;
     let skill_dir = skillstar_core::infra::paths::hub_skills_dir().join(name);
     if !skill_dir.exists() {

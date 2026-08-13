@@ -2,9 +2,9 @@
 
 use skillstar_core::infra::error::AppError;
 use skillstar_core::infra::{fs_ops, paths};
-use skillstar_skills::agents as agent_profile;
+use skillstar_agents as agent_profile;
 use skillstar_skills::deployment;
-use skillstar_skills::git::repo_history;
+use skillstar_git::repo_history;
 use skillstar_skills::lockfile;
 use skillstar_skills::repo_scanner;
 use std::collections::HashSet;

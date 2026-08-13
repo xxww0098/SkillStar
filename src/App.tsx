@@ -9,7 +9,9 @@ import { useSkills } from "./features/my-skills/hooks/useSkills";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useNavigation } from "./hooks/useNavigation";
 import { useTauriSetup } from "./hooks/useTauriSetup";
+import { useTauriEvent } from "./hooks/useTauriEvent";
 import { useUpdater } from "./hooks/useUpdater";
+import { deepLinkNavTarget } from "./lib/deepLink";
 import { looksLikeShareCode } from "./lib/shareCode";
 import type { McpPublisherSummary, NavPage, OfficialPublisher } from "./types";
 
@@ -73,6 +75,14 @@ function AppContent() {
     onNavigate: nav.navigate,
     onSetAppMode: nav.setAppMode,
     onToggleCommandPalette: toggleCommandPalette,
+  });
+
+  // ── OS deep links (skillstar:// scheme, emitted by the backend) ──
+  // Routes the link to the matching page; unknown targets are ignored.
+  useTauriEvent<{ host?: string | null; path?: string }>("skillstar://deep-link", (payload) => {
+    const target = deepLinkNavTarget(payload.host ?? null, payload.path ?? "");
+    if (target === "models") nav.setAppMode("models");
+    else if (target) nav.navigate(target);
   });
 
   // ── Sidebar collapsed ──────────────────────────────────────────

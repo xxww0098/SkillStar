@@ -231,12 +231,21 @@ pub struct ToolActivation {
 /// `model_provider`, OpenCode top-level `model`). For single-provider agents the
 /// list never exceeds one entry, so `active_index` is always 0. An empty
 /// `entries` means the tool is not bound to anything (the v2 `None` state).
+///
+/// `settings` is the **tool-level** settings bag, the sibling of
+/// [`ToolActivation::settings`] (which is per-entry, i.e. per-provider). Config
+/// that spans several entries at once belongs here — OMP's `modelRoles` map is
+/// the first consumer, because one role can point at a different provider than
+/// the active one (`smol` on a cheap provider, `slow` on a reasoning provider).
+/// See `tool_sync::OmpSettings` for the typed view.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct ToolBinding {
     #[serde(default)]
     pub entries: Vec<ToolActivation>,
     #[serde(default)]
     pub active_index: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<serde_json::Value>,
 }
 
 impl ToolBinding {
@@ -245,6 +254,7 @@ impl ToolBinding {
         Self {
             entries: vec![entry],
             active_index: 0,
+            settings: None,
         }
     }
 

@@ -23,12 +23,43 @@ pub fn resolve_claude_json_path() -> Result<PathBuf> {
     Ok(home.join(".claude.json"))
 }
 
-/// Legacy Desktop Chat config. This is not a public Agent target; the resolver
-/// only exists so entries managed by older SkillStar releases remain cleanable.
+/// Claude Desktop Chat's config file:
+/// - macOS `~/Library/Application Support/Claude/claude_desktop_config.json`
+/// - Windows `%APPDATA%\Claude\claude_desktop_config.json`
+/// - Linux `~/.config/Claude/claude_desktop_config.json`
+///
+/// Anchored on [`sync_config_dir`] rather than [`sync_home_dir`] because those
+/// three paths are exactly what an OS config dir resolves to — hand-rolling the
+/// per-OS split here would be a second, divergent copy of that logic.
+/// `sync_config_dir` funnels through the same `SKILLSTAR_TOOL_SYNC_HOME`
+/// sandbox check as `sync_home_dir`, so tests never touch the real one.
 pub(crate) fn resolve_legacy_claude_desktop_config_path() -> Result<PathBuf> {
     Ok(sync_config_dir()?
         .join("Claude")
         .join("claude_desktop_config.json"))
+}
+
+/// Public Claude Desktop Chat target (`mcpServers.<name>`).
+///
+/// Same file as [`resolve_legacy_claude_desktop_config_path`] by design: the
+/// legacy id removes an old projection, the public
+/// [`CLAUDE_DESKTOP_CHAT_TOOL_ID`] maintains a live one. See
+/// [`LEGACY_CLAUDE_DESKTOP_TOOL_ID`] for how the two are kept from fighting.
+pub fn resolve_claude_desktop_chat_config_path() -> Result<PathBuf> {
+    resolve_legacy_claude_desktop_config_path()
+}
+
+/// Claude Desktop Chat install probe (registry `installed` column).
+///
+/// The config *directory* is what the app creates on first launch, so it is
+/// the reliable signal; the desktop-app probe additionally catches an install
+/// that has never been run. `home` is unused because this target's config lives
+/// under the OS config dir, not the home dir.
+pub(crate) fn installed_claude_desktop_chat(_home: &Path) -> bool {
+    sync_config_dir()
+        .map(|dir| dir.join("Claude").exists())
+        .unwrap_or(false)
+        || skillstar_core::infra::path_env::desktop_app_installed("Claude")
 }
 
 /// Legacy Gemini CLI MCP config (`~/.gemini/settings.json`). Cleanup-only —
@@ -54,6 +85,61 @@ pub fn resolve_kiro_config_path() -> Result<PathBuf> {
 pub fn resolve_cursor_config_path() -> Result<PathBuf> {
     let home = sync_home_dir()?;
     Ok(home.join(".cursor").join("mcp.json"))
+}
+
+/// `~/.copilot/mcp-config.json` — the home-anchored, portable VS Code / Copilot
+/// MCP config (top-level **`servers`**, not `mcpServers`).
+///
+/// VS Code reads MCP servers from several places; this is the only one that is
+/// user-scope and platform-independent, which is what a projection target needs.
+/// The workspace `.vscode/mcp.json` and the per-profile file behind
+/// `MCP: Open User Configuration` are deliberately not written: the first is
+/// per-project (SkillStar has no project context here) and the second lives
+/// under a profile directory whose location SkillStar has no verified resolver
+/// for.
+pub fn resolve_vscode_config_path() -> Result<PathBuf> {
+    let home = sync_home_dir()?;
+    Ok(home.join(".copilot").join("mcp-config.json"))
+}
+
+/// `~/.codeium/windsurf/mcp_config.json` — Windsurf's MCP config
+/// (top-level `mcpServers`, remote endpoints under `serverUrl`).
+pub fn resolve_windsurf_config_path() -> Result<PathBuf> {
+    let home = sync_home_dir()?;
+    Ok(home
+        .join(".codeium")
+        .join("windsurf")
+        .join("mcp_config.json"))
+}
+
+/// `~/.cline/mcp.json` — Cline CLI's MCP config (top-level `mcpServers`).
+///
+/// The VS Code extension keeps its own `cline_mcp_settings.json` under the
+/// editor's globalStorage; that path is extension-id and profile dependent, so
+/// only the CLI config is targeted.
+pub fn resolve_cline_config_path() -> Result<PathBuf> {
+    let home = sync_home_dir()?;
+    Ok(home.join(".cline").join("mcp.json"))
+}
+
+/// `~/.gemini/settings.json` — Gemini CLI's settings file (top-level
+/// `mcpServers`).
+///
+/// Same file as [`resolve_legacy_gemini_settings_path`] by design: the legacy
+/// id removes an old projection, the public `gemini-cli` id maintains a live
+/// one. See [`LEGACY_GEMINI_TOOL_ID`] for how the two are kept from fighting.
+pub fn resolve_gemini_cli_config_path() -> Result<PathBuf> {
+    resolve_legacy_gemini_settings_path()
+}
+
+/// `~/.config/zed/settings.json` — Zed's settings file (top-level
+/// **`context_servers`**).
+///
+/// Zed uses `~/.config` on every platform, so this is a home-relative join
+/// rather than an OS config-dir lookup.
+pub fn resolve_zed_config_path() -> Result<PathBuf> {
+    let home = sync_home_dir()?;
+    Ok(home.join(".config").join("zed").join("settings.json"))
 }
 
 /// Resolve the live MCP config file for a tool.
@@ -119,17 +205,28 @@ pub(crate) fn claude_code_installed_from_signals(
 // Per-format live-server counters (registry `count_live` column)
 // ---------------------------------------------------------------------------
 
-/// Count entries in a top-level `mcpServers` JSON map (Claude Code, Kiro,
-/// Cursor).
-pub(crate) fn count_json_mcpservers(content: &str) -> usize {
+/// Count entries in a top-level JSON map under `root_key`.
+pub(crate) fn count_json_named_map(content: &str, root_key: &str) -> usize {
     serde_json::from_str::<Value>(content)
         .ok()
-        .and_then(|v| {
-            v.get("mcpServers")
-                .and_then(|m| m.as_object())
-                .map(|m| m.len())
-        })
+        .and_then(|v| v.get(root_key).and_then(|m| m.as_object()).map(|m| m.len()))
         .unwrap_or(0)
+}
+
+/// Count entries in a top-level `mcpServers` JSON map (Claude Code, Kiro,
+/// Cursor, Windsurf, Cline, Gemini CLI).
+pub(crate) fn count_json_mcpservers(content: &str) -> usize {
+    count_json_named_map(content, MCP_SERVERS_KEY)
+}
+
+/// Count entries in VS Code's top-level `servers` map.
+pub(crate) fn count_vscode_servers(content: &str) -> usize {
+    count_json_named_map(content, VSCODE_SERVERS_KEY)
+}
+
+/// Count entries in Zed's top-level `context_servers` map.
+pub(crate) fn count_zed_context_servers(content: &str) -> usize {
+    count_json_named_map(content, ZED_SERVERS_KEY)
 }
 
 /// Count entries in a TOML `mcp_servers` table (Codex, Grok).
@@ -212,6 +309,48 @@ pub(crate) fn backup_if_exists(path: &Path) -> Result<Option<PathBuf>> {
     }
 }
 
+/// Undo a failed write to `path` using the backup taken just before it.
+///
+/// The two cases are not symmetric, which is why this is one function rather
+/// than a bare copy:
+///
+/// - `backup = Some(..)` — the file existed. Copy the backup back, restoring
+///   the exact bytes the user had (including everything in the file that has
+///   nothing to do with MCP).
+/// - `backup = None` — there was no file. Anything at `path` now was created by
+///   the attempt being undone, so removing it is what "back to before" means.
+///   A file the writer never got as far as creating is already correct.
+///
+/// Returning `Ok(())` means the config is byte-for-byte back to its
+/// pre-attempt state. An `Err` is the one case a caller must escalate: the
+/// write failed *and* the undo failed, so the file may be half-written.
+pub(crate) fn restore_from_backup(path: &Path, backup: Option<&Path>) -> Result<()> {
+    match backup {
+        Some(backup) => {
+            std::fs::copy(backup, path).with_context(|| {
+                format!(
+                    "Failed to restore {} from its backup {}",
+                    path.display(),
+                    backup.display()
+                )
+            })?;
+            Ok(())
+        }
+        None => {
+            if !path.exists() {
+                return Ok(());
+            }
+            std::fs::remove_file(path).with_context(|| {
+                format!(
+                    "Failed to remove the partially written {} left by a failed sync",
+                    path.display()
+                )
+            })?;
+            Ok(())
+        }
+    }
+}
+
 fn ensure_parent(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
@@ -220,66 +359,138 @@ fn ensure_parent(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Read a JSON file as an object map, tolerating absence/garbage.
-fn read_json_object(path: &Path) -> Map<String, Value> {
+/// Read a JSON config file as an object map — **fail-closed**.
+///
+/// A missing (or empty) file is legitimate: there is nothing to merge into, so
+/// an empty map is returned and the caller writes a fresh config. Anything else
+/// — unreadable bytes, invalid JSON, or a non-object root — is an error.
+///
+/// This distinction is the whole point of the helper. Every writer below
+/// re-serializes the *entire* file, and these files carry far more than
+/// SkillStar's MCP block (`~/.claude.json` holds most of Claude Code's user
+/// settings). Falling back to an empty map on a parse failure would replace the
+/// user's whole config with `{"mcpServers": …}` on the next toggle.
+fn read_json_object_strict(path: &Path) -> Result<Map<String, Value>> {
     if !path.exists() {
-        return Map::new();
+        return Ok(Map::new());
     }
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|c| serde_json::from_str::<Value>(&c).ok())
-        .and_then(|v| v.as_object().cloned())
-        .unwrap_or_default()
+    let content = std::fs::read_to_string(path).with_context(|| {
+        format!(
+            "Failed to read {}. Refusing to rewrite it — check the file's permissions, then retry.",
+            path.display()
+        )
+    })?;
+    let content = content.trim_start_matches('\u{FEFF}');
+    if content.trim().is_empty() {
+        return Ok(Map::new());
+    }
+    let value: Value = serde_json::from_str(content).with_context(|| {
+        format!(
+            "Invalid JSON in {}. Refusing to overwrite it — fix or move the file, then retry.",
+            path.display()
+        )
+    })?;
+    value.as_object().cloned().with_context(|| {
+        format!(
+            "Expected a JSON object at the root of {}. Refusing to overwrite the existing value.",
+            path.display()
+        )
+    })
+}
+
+/// Read a TOML config file as a table — **fail-closed**, mirroring
+/// [`read_json_object_strict`].
+fn read_toml_table_strict(path: &Path) -> Result<toml::Table> {
+    if !path.exists() {
+        return Ok(toml::Table::new());
+    }
+    let content = std::fs::read_to_string(path).with_context(|| {
+        format!(
+            "Failed to read {}. Refusing to rewrite it — check the file's permissions, then retry.",
+            path.display()
+        )
+    })?;
+    let content = content.trim_start_matches('\u{FEFF}');
+    toml::from_str::<toml::Table>(content).with_context(|| {
+        format!(
+            "Invalid TOML in {}. Refusing to overwrite it — fix or move the file, then retry.",
+            path.display()
+        )
+    })
+}
+
+/// Top-level key holding the server map in the community JSON format.
+pub(crate) const MCP_SERVERS_KEY: &str = "mcpServers";
+/// VS Code's top-level key — `servers`, not `mcpServers` (research §5.3 #11).
+pub(crate) const VSCODE_SERVERS_KEY: &str = "servers";
+/// Zed's top-level key — `context_servers` (research §5.3 #9).
+pub(crate) const ZED_SERVERS_KEY: &str = "context_servers";
+
+/// Upsert `<root_key>.<name>` in a JSON config file.
+///
+/// The root key is a parameter because the community format's `mcpServers` is
+/// not universal: VS Code uses `servers` and Zed uses `context_servers`, and
+/// writing the wrong one produces a syntactically valid file the client
+/// silently ignores.
+pub(crate) fn json_named_map_upsert(
+    path: &Path,
+    root_key: &str,
+    name: &str,
+    spec: Value,
+) -> Result<()> {
+    let mut root = read_json_object_strict(path)?;
+    let servers = root
+        .entry(root_key.to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    // Only ever create the key when it is missing. A hand-written non-object
+    // server map is refused rather than silently replaced — same rule as
+    // `ensure_mcp_servers_map` applies to ZCode's `mcp` key.
+    let map = servers.as_object_mut().with_context(|| {
+        format!(
+            "Expected `{root_key}` to be a JSON object in {}. Refusing to overwrite the existing value.",
+            path.display()
+        )
+    })?;
+    map.insert(name.to_string(), spec);
+    write_json_pretty(path, &Value::Object(root))
+}
+
+/// Remove `<root_key>.<name>` from a JSON config file.
+///
+/// Fail-closed: a file that exists but cannot be read or parsed is left
+/// byte-for-byte intact instead of being replaced by a freshly serialized `{}`.
+pub(crate) fn json_named_map_remove(path: &Path, root_key: &str, name: &str) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let mut root = read_json_object_strict(path)?;
+    if let Some(servers) = root.get_mut(root_key) {
+        let servers = servers.as_object_mut().with_context(|| {
+            format!(
+                "Expected `{root_key}` to be a JSON object in {}. Refusing to overwrite the existing value.",
+                path.display()
+            )
+        })?;
+        servers.remove(name);
+    }
+    write_json_pretty(path, &Value::Object(root))
 }
 
 /// Upsert `mcpServers.<name>` in a JSON config file.
 pub(crate) fn json_mcpservers_upsert(path: &Path, name: &str, spec: Value) -> Result<()> {
-    let mut root = read_json_object(path);
-    let servers = root
-        .entry("mcpServers".to_string())
-        .or_insert_with(|| Value::Object(Map::new()));
-    if let Some(map) = servers.as_object_mut() {
-        map.insert(name.to_string(), spec);
-    } else {
-        let mut map = Map::new();
-        map.insert(name.to_string(), spec);
-        root.insert("mcpServers".to_string(), Value::Object(map));
-    }
-    write_json_pretty(path, &Value::Object(root))
+    json_named_map_upsert(path, MCP_SERVERS_KEY, name, spec)
 }
 
 /// Remove `mcpServers.<name>` from a JSON config file.
 pub(crate) fn json_mcpservers_remove(path: &Path, name: &str) -> Result<()> {
-    if !path.exists() {
-        return Ok(());
-    }
-    let mut root = read_json_object(path);
-    if let Some(map) = root.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
-        map.remove(name);
-    }
-    write_json_pretty(path, &Value::Object(root))
+    json_named_map_remove(path, MCP_SERVERS_KEY, name)
 }
 
-/// Strict removal for the legacy Desktop Chat cleanup path. Existing malformed
-/// or non-object JSON must remain untouched instead of being replaced by `{}`.
+/// Legacy Desktop Chat cleanup entry point. Removal is now uniformly
+/// fail-closed, so this is exactly [`json_mcpservers_remove`]; the name is kept
+/// so the tombstone call sites still read as "never touch a broken file".
 pub(crate) fn json_mcpservers_remove_strict(path: &Path, name: &str) -> Result<()> {
-    if !path.exists() {
-        return Ok(());
-    }
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("Failed to read {}", path.display()))?;
-    let mut root: Value = serde_json::from_str(&content)
-        .with_context(|| format!("Invalid JSON in {}", path.display()))?;
-    let object = root
-        .as_object_mut()
-        .with_context(|| format!("Expected a JSON object in {}", path.display()))?;
-    if let Some(servers) = object.get_mut("mcpServers") {
-        let servers = servers.as_object_mut().with_context(|| {
-            format!("Expected mcpServers to be an object in {}", path.display())
-        })?;
-        servers.remove(name);
-    }
-    write_json_pretty(path, &root)
+    json_mcpservers_remove(path, name)
 }
 
 fn write_json_pretty(path: &Path, value: &Value) -> Result<()> {
@@ -291,15 +502,19 @@ fn write_json_pretty(path: &Path, value: &Value) -> Result<()> {
 
 /// Upsert `mcp.<name>` in opencode.json (preserves `$schema`).
 pub(crate) fn opencode_upsert(path: &Path, name: &str, spec: Value) -> Result<()> {
-    let mut root = read_json_object(path);
+    let mut root = read_json_object_strict(path)?;
     root.entry("$schema".to_string())
         .or_insert_with(|| json!("https://opencode.ai/config.json"));
     let mcp = root
         .entry("mcp".to_string())
         .or_insert_with(|| Value::Object(Map::new()));
-    if let Some(map) = mcp.as_object_mut() {
-        map.insert(name.to_string(), spec);
-    }
+    let map = mcp.as_object_mut().with_context(|| {
+        format!(
+            "Expected `mcp` to be a JSON object in {}. Refusing to overwrite the existing value.",
+            path.display()
+        )
+    })?;
+    map.insert(name.to_string(), spec);
     write_json_pretty(path, &Value::Object(root))
 }
 
@@ -307,8 +522,14 @@ pub(crate) fn opencode_remove(path: &Path, name: &str) -> Result<()> {
     if !path.exists() {
         return Ok(());
     }
-    let mut root = read_json_object(path);
-    if let Some(map) = root.get_mut("mcp").and_then(|v| v.as_object_mut()) {
+    let mut root = read_json_object_strict(path)?;
+    if let Some(mcp) = root.get_mut("mcp") {
+        let map = mcp.as_object_mut().with_context(|| {
+            format!(
+                "Expected `mcp` to be a JSON object in {}. Refusing to overwrite the existing value.",
+                path.display()
+            )
+        })?;
         map.remove(name);
     }
     write_json_pretty(path, &Value::Object(root))
@@ -316,20 +537,17 @@ pub(crate) fn opencode_remove(path: &Path, name: &str) -> Result<()> {
 
 /// Upsert `[mcp_servers.<name>]` in Codex config.toml.
 pub(crate) fn codex_upsert(path: &Path, name: &str, table: toml::Table) -> Result<()> {
-    let mut root: toml::Table = if path.exists() {
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|c| toml::from_str(&c).ok())
-            .unwrap_or_default()
-    } else {
-        toml::Table::new()
-    };
+    let mut root = read_toml_table_strict(path)?;
     let mcp_servers = root
         .entry("mcp_servers".to_string())
         .or_insert_with(|| toml::Value::Table(toml::Table::new()));
-    if let Some(map) = mcp_servers.as_table_mut() {
-        map.insert(name.to_string(), toml::Value::Table(table));
-    }
+    let map = mcp_servers.as_table_mut().with_context(|| {
+        format!(
+            "Expected `mcp_servers` to be a TOML table in {}. Refusing to overwrite the existing value.",
+            path.display()
+        )
+    })?;
+    map.insert(name.to_string(), toml::Value::Table(table));
     write_toml_pretty(path, &root)
 }
 
@@ -337,14 +555,14 @@ pub(crate) fn codex_remove(path: &Path, name: &str) -> Result<()> {
     if !path.exists() {
         return Ok(());
     }
-    let mut root: toml::Table = match std::fs::read_to_string(path)
-        .ok()
-        .and_then(|c| toml::from_str(&c).ok())
-    {
-        Some(t) => t,
-        None => return Ok(()),
-    };
-    if let Some(map) = root.get_mut("mcp_servers").and_then(|v| v.as_table_mut()) {
+    let mut root = read_toml_table_strict(path)?;
+    if let Some(mcp_servers) = root.get_mut("mcp_servers") {
+        let map = mcp_servers.as_table_mut().with_context(|| {
+            format!(
+                "Expected `mcp_servers` to be a TOML table in {}. Refusing to overwrite the existing value.",
+                path.display()
+            )
+        })?;
         map.remove(name);
         if map.is_empty() {
             root.remove("mcp_servers");
@@ -388,7 +606,7 @@ fn write_mcp_servers_map(root: &mut Map<String, Value>, servers: Map<String, Val
 
 /// Upsert `mcp.servers.<name>` in `~/.zcode/cli/config.json`.
 pub(crate) fn zcode_cli_upsert(path: &Path, name: &str, spec: Value) -> Result<()> {
-    let mut root = read_json_object(path);
+    let mut root = read_json_object_strict(path)?;
     let mut servers = ensure_mcp_servers_map(&mut root)?;
     servers.insert(name.to_string(), spec);
     write_mcp_servers_map(&mut root, servers);
@@ -399,11 +617,23 @@ pub(crate) fn zcode_cli_remove(path: &Path, name: &str) -> Result<()> {
     if !path.exists() {
         return Ok(());
     }
-    let mut root = read_json_object(path);
-    if let Some(mcp) = root.get_mut("mcp").and_then(|v| v.as_object_mut())
-        && let Some(servers) = mcp.get_mut("servers").and_then(|v| v.as_object_mut())
-    {
-        servers.remove(name);
+    let mut root = read_json_object_strict(path)?;
+    if let Some(mcp) = root.get_mut("mcp") {
+        let mcp = mcp.as_object_mut().with_context(|| {
+            format!(
+                "Expected `mcp` to be a JSON object in {}. Refusing to overwrite the existing value.",
+                path.display()
+            )
+        })?;
+        if let Some(servers) = mcp.get_mut("servers") {
+            let servers = servers.as_object_mut().with_context(|| {
+                format!(
+                    "Expected `mcp.servers` to be a JSON object in {}. Refusing to overwrite the existing value.",
+                    path.display()
+                )
+            })?;
+            servers.remove(name);
+        }
     }
     write_json_pretty(path, &Value::Object(root))
 }

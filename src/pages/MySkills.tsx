@@ -6,7 +6,6 @@ import {
   useMySkillsRemoteHosts,
   useMySkillsScope,
 } from "../features/my-skills";
-import { CloudSkillsContent } from "../features/s3";
 import { SharedChannelsContent } from "../features/shared-channels";
 import { SshHostForm } from "../features/ssh";
 
@@ -68,8 +67,6 @@ export function MySkills({
             />
           }
         />
-      ) : scope === "cloud" ? (
-        <CloudSkillsContent scopeSwitch={scopeSwitch} />
       ) : (
         <SharedChannelsContent scopeSwitch={scopeSwitch} />
       )}

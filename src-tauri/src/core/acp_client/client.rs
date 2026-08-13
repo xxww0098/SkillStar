@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
 
-use crate::core::path_env;
+use skillstar_core::infra::path_env;
 
 /// Capabilities and permission behavior exposed to an ACP agent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -12,15 +12,21 @@ import { tauriInvoke } from "../../../lib/ipc";
 import { cn } from "../../../lib/utils";
 import type { LocalFirstResult, McpMarketEntry, McpMarketServerDetail, SnapshotStatus, ViewMode } from "../../../types";
 import { mcpKeys } from "../api/keys";
+import { type McpInstalledIndex, resolveMcpEntryStatus } from "../lib/installState";
 import { McpMarketCard } from "./McpMarketCard";
+import { McpEntryBadges } from "./McpStateBadges";
 
 const GRID_GAP_PX = 16;
 const MCP_MIN_COLUMN_WIDTH = 320;
 
 interface McpMarketBrowserProps {
-  /** Names of already-installed MCP servers, for the "已安装" badge. */
-  installedNames: Set<string>;
-  /** Open the create form prefilled from this marketplace entry id. */
+  /**
+   * Installed servers, indexed by source fingerprint. Replaces the old
+   * `Set<string>` of config keys, which could not tell two servers with the
+   * same sanitized name apart and had no version to compare against.
+   */
+  installedIndex: McpInstalledIndex;
+  /** Open the install wizard for this marketplace entry id. */
   onInstall: (id: string) => void;
   entries: McpMarketEntry[];
   status?: SnapshotStatus;
@@ -32,7 +38,7 @@ interface McpMarketBrowserProps {
 }
 
 export function McpMarketBrowser({
-  installedNames,
+  installedIndex,
   onInstall,
   entries,
   status,
@@ -125,7 +131,7 @@ export function McpMarketBrowser({
             <div key={entry.id} className="h-full">
               <McpMarketCard
                 entry={entry}
-                installed={installedNames.has(entry.name)}
+                status={resolveMcpEntryStatus(entry, installedIndex)}
                 compact={viewMode === "list"}
                 onInstall={() => onInstall(entry.id)}
                 onOpenDetail={() => setDetailId(entry.id)}
@@ -149,6 +155,9 @@ export function McpMarketBrowser({
           </div>
         ) : detail ? (
           <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <McpEntryBadges status={resolveMcpEntryStatus(detail, installedIndex)} />
+            </div>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
               {detail.stars > 0 ? (
                 <span className="inline-flex items-center gap-1">
@@ -174,11 +183,13 @@ export function McpMarketBrowser({
                 setDetailId(null);
                 onInstall(id);
               }}
-              disabled={installedNames.has(detail.name)}
+              disabled={resolveMcpEntryStatus(detail, installedIndex).state === "installed"}
               className="w-full gap-1.5"
             >
               <Download className="h-4 w-4" />
-              {installedNames.has(detail.name) ? t("mcp.presetAdded") : t("mcp.installToTools")}
+              {resolveMcpEntryStatus(detail, installedIndex).state === "installed"
+                ? t("mcp.presetAdded")
+                : t("mcp.installToTools")}
             </Button>
 
             {detail.packages.length > 0 ? (

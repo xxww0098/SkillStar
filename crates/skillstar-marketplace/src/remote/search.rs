@@ -61,26 +61,39 @@ impl From<SkillsShSkill> for Skill {
 }
 
 /// Search skills.sh registry via official API
-/// API endpoint: GET https://skills.sh/api/search?q={query}&limit={limit}
+/// API endpoint: GET /api/search?q={query}&limit={limit}
 /// Note: empty query returns 400 — a query is always required
 pub async fn search_skills_sh(query: &str, limit: u32) -> Result<MarketplaceResult> {
-    let client = marketplace_client()?;
-    let url = format!(
-        "https://skills.sh/api/search?q={}&limit={}",
+    Ok(search_skills_sh_with_meta(query, limit, None).await?.0)
+}
+
+/// Search fetch with content-addressing metadata.
+pub async fn search_skills_sh_with_meta(
+    query: &str,
+    limit: u32,
+    etag: Option<&str>,
+) -> Result<(MarketplaceResult, FetchMeta)> {
+    let path = format!(
+        "/api/search?q={}&limit={}",
         url_encode_query_component(query),
         limit
     );
 
-    let response: SkillsShSearchResponse = client
-        .get(&url)
-        .header("User-Agent", USER_AGENT)
-        .header("Accept", "application/json")
-        .send()
-        .await
-        .context("Failed to call skills.sh search API")?
-        .json()
-        .await
-        .context("Failed to parse skills.sh response")?;
+    let (body, meta) = fetch_with_failover(&path, etag).await?;
+    if meta.payload_sha256.is_empty() {
+        return Ok((
+            MarketplaceResult {
+                skills: Vec::new(),
+                total_count: 0,
+                page: 1,
+                has_more: false,
+            },
+            meta,
+        ));
+    }
+
+    let response: SkillsShSearchResponse =
+        serde_json::from_str(&body).context("Failed to parse skills.sh response")?;
 
     let mut skills: Vec<Skill> = response.skills.into_iter().map(Skill::from).collect();
     // Sort by installs descending and assign ranks
@@ -90,12 +103,15 @@ pub async fn search_skills_sh(query: &str, limit: u32) -> Result<MarketplaceResu
     }
     let total_count = skills.len() as u32;
 
-    Ok(MarketplaceResult {
-        skills,
-        total_count,
-        page: 1,
-        has_more: false,
-    })
+    Ok((
+        MarketplaceResult {
+            skills,
+            total_count,
+            page: 1,
+            has_more: false,
+        },
+        meta,
+    ))
 }
 
 fn url_encode_query_component(raw_query: &str) -> String {

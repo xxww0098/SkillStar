@@ -13,6 +13,30 @@ pub(crate) fn table_exists(conn: &Connection, table_name: &str) -> Result<bool> 
     Ok(exists)
 }
 
+/// Does `table_name` already have `column_name`? Used by migrations to make
+/// `ALTER TABLE ADD COLUMN` steps repeatable — SQLite rejects a duplicate add
+/// with `duplicate column name`, which would otherwise turn a partially
+/// applied migration into a permanent startup failure.
+pub(crate) fn column_exists(
+    conn: &Connection,
+    table_name: &str,
+    column_name: &str,
+) -> Result<bool> {
+    let mut stmt = conn
+        .prepare(&format!("PRAGMA table_info({table_name})"))
+        .with_context(|| format!("Failed to inspect columns of {table_name}"))?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .with_context(|| format!("Failed to read columns of {table_name}"))?;
+    for name in rows {
+        if name.with_context(|| format!("Failed to decode column of {table_name}"))? == column_name
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 pub(crate) fn normalize_source(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {

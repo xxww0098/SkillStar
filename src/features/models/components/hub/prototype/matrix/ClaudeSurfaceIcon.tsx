@@ -45,9 +45,7 @@ export function ClaudeSurfaceIcon({ surface, size = 20, className, muted }: Clau
       <span
         className={cn(
           "absolute right-0 bottom-0 z-[1] flex h-3 w-3 items-center justify-center rounded-[3px] border shadow-sm",
-          muted
-            ? "border-border/60 bg-muted text-muted-foreground"
-            : "border-border bg-background text-foreground",
+          muted ? "border-border/60 bg-muted text-muted-foreground" : "border-border bg-background text-foreground",
         )}
         aria-hidden
       >

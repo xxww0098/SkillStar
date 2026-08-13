@@ -2,6 +2,7 @@ import { ExternalLink, GitBranch, Inbox, Loader2, LockKeyhole, Plus, ShieldCheck
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
+import { openGithubAccountMenu } from "../../../lib/utils";
 import type { GitHubOrganization, SharedChannelDescriptor } from "../../../types";
 import {
   createSharedChannel,
@@ -28,6 +29,7 @@ export function SharedChannelsContent({ scopeSwitch }: Props) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [signInRequired, setSignInRequired] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [showInbox, setShowInbox] = useState(false);
   const [createKind, setCreateKind] = useState<"new" | "existing">("new");
@@ -38,6 +40,7 @@ export function SharedChannelsContent({ scopeSwitch }: Props) {
   const refresh = useCallback(async () => {
     setLoading(true);
     setError("");
+    setSignInRequired(false);
     const [organizationResult, channelResult] = await Promise.allSettled([
       listSharedChannelOrganizations(),
       listSharedChannels(),
@@ -59,7 +62,10 @@ export function SharedChannelsContent({ scopeSwitch }: Props) {
         : channelResult.status === "rejected"
           ? channelResult.reason
           : null;
-    if (failure) setError(sharedChannelError(failure));
+    if (failure) {
+      setSignInRequired(errorCode(failure) === "not_authenticated");
+      setError(sharedChannelError(failure));
+    }
     setLoading(false);
   }, []);
 
@@ -136,9 +142,7 @@ export function SharedChannelsContent({ scopeSwitch }: Props) {
       <div className="flex items-center justify-between border-b border-border px-4 py-2">
         <div className="flex items-center gap-2">
           <UsersRound className="size-4 text-muted-foreground" />
-          <h1 className="text-sm font-semibold text-foreground">
-            {t("sharedChannels.title", { defaultValue: "Shared channels" })}
-          </h1>
+          <h1 className="text-sm font-semibold text-foreground">{t("sharedChannels.title")}</h1>
         </div>
         {scopeSwitch}
       </div>
@@ -160,7 +164,7 @@ export function SharedChannelsContent({ scopeSwitch }: Props) {
               }}
             >
               <Plus className="mr-1.5 size-4" />
-              {t("sharedChannels.create", { defaultValue: "Create channel" })}
+              {t("sharedChannels.create")}
             </Button>
             <Button
               className="mb-3 w-full"
@@ -172,7 +176,7 @@ export function SharedChannelsContent({ scopeSwitch }: Props) {
               }}
             >
               <Inbox className="mr-1.5 size-4" />
-              Invitation inbox
+              {t("sharedChannels.invitationInbox")}
             </Button>
             <div className="space-y-1">
               {channels.map((channel) => (
@@ -195,12 +199,10 @@ export function SharedChannelsContent({ scopeSwitch }: Props) {
                   </span>
                   <span className="mt-0.5 block text-[10px]">
                     {channel.status === "active"
-                      ? t("sharedChannels.active", { defaultValue: "Active" })
+                      ? t("sharedChannels.active")
                       : channel.status === "awaiting_invitation_acceptance"
-                        ? "Accepted invitation import pending"
-                        : t("sharedChannels.awaitingApp", {
-                            defaultValue: "App authorization required",
-                          })}
+                        ? t("sharedChannels.invitationImportPending")
+                        : t("sharedChannels.awaitingApp")}
                   </span>
                 </button>
               ))}
@@ -208,10 +210,25 @@ export function SharedChannelsContent({ scopeSwitch }: Props) {
           </aside>
 
           <main className="min-w-0 flex-1 overflow-y-auto p-6">
-            {error && (
-              <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
-                {error}
+            {signInRequired ? (
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-muted/20 p-4">
+                <div className="flex min-w-0 items-start gap-3">
+                  <ShieldCheck className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-foreground">{t("sharedChannels.signInTitle")}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{t("sharedChannels.signInHint")}</p>
+                  </div>
+                </div>
+                <Button size="sm" onClick={() => openGithubAccountMenu()}>
+                  {t("sharedChannels.signInButton")}
+                </Button>
               </div>
+            ) : (
+              error && (
+                <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
+                  {error}
+                </div>
+              )
             )}
             {showInbox ? (
               <ChannelInvitationInbox
@@ -238,9 +255,7 @@ export function SharedChannelsContent({ scopeSwitch }: Props) {
                       createKind === "new" ? "bg-background font-medium shadow-sm" : "text-muted-foreground"
                     }`}
                   >
-                    {t("sharedChannels.newRepository", {
-                      defaultValue: "New repository",
-                    })}
+                    {t("sharedChannels.newRepository")}
                   </button>
                   <button
                     type="button"
@@ -251,9 +266,7 @@ export function SharedChannelsContent({ scopeSwitch }: Props) {
                       createKind === "existing" ? "bg-background font-medium shadow-sm" : "text-muted-foreground"
                     }`}
                   >
-                    {t("sharedChannels.existingRepository", {
-                      defaultValue: "Existing repository",
-                    })}
+                    {t("sharedChannels.existingRepository")}
                   </button>
                 </div>
                 {createKind === "new" ? (
@@ -281,9 +294,7 @@ export function SharedChannelsContent({ scopeSwitch }: Props) {
               />
             ) : (
               <div className="flex min-h-64 items-center justify-center text-sm text-muted-foreground">
-                {t("sharedChannels.empty", {
-                  defaultValue: "Create an organization-private channel to get started.",
-                })}
+                {t("sharedChannels.empty")}
               </div>
             )}
           </main>
@@ -319,29 +330,19 @@ function CreateChannelForm({
   return (
     <div className="mx-auto max-w-xl space-y-5">
       <div>
-        <h2 className="text-lg font-semibold">
-          {t("sharedChannels.createTitle", {
-            defaultValue: "Create a private shared channel",
-          })}
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t("sharedChannels.createHint", {
-            defaultValue: "SkillStar creates a dedicated private repository in your GitHub organization.",
-          })}
-        </p>
+        <h2 className="text-lg font-semibold">{t("sharedChannels.createTitle")}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{t("sharedChannels.createHint")}</p>
       </div>
 
       <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-4">
         <div className="flex items-center gap-2 text-sm font-medium">
           <ShieldCheck className="size-4 text-amber-500" />
-          {t("sharedChannels.permissionTitle", {
-            defaultValue: "Authorization boundary",
-          })}
+          {t("sharedChannels.permissionTitle")}
         </div>
         <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
-          <li>• Administration: write — manage direct channel membership.</li>
-          <li>• Contents: write — publish immutable channel versions.</li>
-          <li>• The GitHub App receives access to the complete selected repository.</li>
+          <li>{t("sharedChannels.permissions.adminWrite")}</li>
+          <li>{t("sharedChannels.permissions.contentsWrite")}</li>
+          <li>{t("sharedChannels.permissions.fullRepo")}</li>
         </ul>
         {organization && (
           <a
@@ -350,9 +351,7 @@ function CreateChannelForm({
             rel="noreferrer"
             className="mt-3 inline-flex items-center gap-1 text-xs text-primary hover:underline"
           >
-            {t("sharedChannels.reviewInstallation", {
-              defaultValue: "Review GitHub App installation",
-            })}
+            {t("sharedChannels.reviewInstallation")}
             <ExternalLink className="size-3" />
           </a>
         )}
@@ -360,18 +359,12 @@ function CreateChannelForm({
 
       {adminOrganizations.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border p-5 text-sm text-muted-foreground">
-          {t("sharedChannels.noOrganizations", {
-            defaultValue: "No organization with owner access is available for this GitHub identity.",
-          })}
+          {t("sharedChannels.noOrganizations")}
         </div>
       ) : (
         <div className="space-y-4">
           <label className="block space-y-1.5 text-xs font-medium">
-            <span>
-              {t("sharedChannels.organization", {
-                defaultValue: "GitHub organization",
-              })}
-            </span>
+            <span>{t("sharedChannels.organization")}</span>
             <select
               value={organization}
               onChange={(event) => setOrganization(event.target.value)}
@@ -385,11 +378,7 @@ function CreateChannelForm({
             </select>
           </label>
           <label className="block space-y-1.5 text-xs font-medium">
-            <span>
-              {t("sharedChannels.repositoryName", {
-                defaultValue: "Repository name",
-              })}
-            </span>
+            <span>{t("sharedChannels.repositoryName")}</span>
             <input
               value={repositoryName}
               onChange={(event) => setRepositoryName(event.target.value)}
@@ -397,7 +386,7 @@ function CreateChannelForm({
             />
           </label>
           <label className="block space-y-1.5 text-xs font-medium">
-            <span>{t("sharedChannels.description", { defaultValue: "Description" })}</span>
+            <span>{t("sharedChannels.description")}</span>
             <input
               value={description}
               onChange={(event) => setDescription(event.target.value)}
@@ -406,9 +395,7 @@ function CreateChannelForm({
           </label>
           <Button onClick={onCreate} disabled={saving || !organization || !repositoryName.trim()}>
             {saving ? <Loader2 className="mr-1.5 size-4 animate-spin" /> : <LockKeyhole className="mr-1.5 size-4" />}
-            {t("sharedChannels.createPrivateRepository", {
-              defaultValue: "Create private repository",
-            })}
+            {t("sharedChannels.createPrivateRepository")}
           </Button>
         </div>
       )}
@@ -439,7 +426,10 @@ function ChannelDetail({
             </h2>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            Repository ID {channel.repository_id} · descriptor v{channel.descriptor_version}
+            {t("sharedChannels.repositoryIdDescriptor", {
+              repositoryId: channel.repository_id,
+              descriptorVersion: channel.descriptor_version,
+            })}
           </p>
         </div>
         <a
@@ -453,25 +443,18 @@ function ChannelDetail({
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <InfoCard label={t("sharedChannels.role", { defaultValue: "Your role" })} value={channel.role} />
-        <InfoCard
-          label={t("sharedChannels.visibility", { defaultValue: "Visibility" })}
-          value="Private organization repository"
-        />
-        <InfoCard label="Administration" value={channel.authorization.administration} />
-        <InfoCard label="Contents" value={channel.authorization.contents} />
+        <InfoCard label={t("sharedChannels.role")} value={channel.role} />
+        <InfoCard label={t("sharedChannels.visibility")} value={t("sharedChannels.privateOrgRepository")} />
+        <InfoCard label={t("sharedChannels.administration")} value={channel.authorization.administration} />
+        <InfoCard label={t("sharedChannels.contents")} value={channel.authorization.contents} />
       </div>
 
       {channel.status === "active" ? (
         <>
           <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-5 text-center">
             <ShieldCheck className="mx-auto size-7 text-emerald-500" />
-            <p className="mt-2 text-sm font-medium">
-              {t("sharedChannels.emptyActive", {
-                defaultValue: "Channel ready — normal commits remain drafts.",
-              })}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">GitHub App scope: selected repository only.</p>
+            <p className="mt-2 text-sm font-medium">{t("sharedChannels.emptyActive")}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{t("sharedChannels.appScopeNote")}</p>
           </div>
           {(channel.role === "owner" || channel.role === "publisher") && <ChannelPublishPanel channel={channel} />}
           {channel.role === "owner" && (
@@ -483,26 +466,17 @@ function ChannelDetail({
         </>
       ) : channel.status === "awaiting_invitation_acceptance" ? (
         <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-5">
-          <p className="text-sm font-medium">GitHub accepted this invitation</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            SkillStar saved a recovery marker but could not finish the local import. Retry without asking the owner to
-            invite you again.
-          </p>
+          <p className="text-sm font-medium">{t("sharedChannels.invitationAccepted")}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t("sharedChannels.invitationAcceptedHint")}</p>
           <Button size="sm" className="mt-4" onClick={() => onResumeAccepted(channel.repository_id)} disabled={saving}>
             {saving && <Loader2 className="mr-1.5 size-4 animate-spin" />}
-            Retry accepted invitation import
+            {t("sharedChannels.retryAcceptedImport")}
           </Button>
         </div>
       ) : (
         <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-5">
-          <p className="text-sm font-medium">
-            {t("sharedChannels.authorizationPending", {
-              defaultValue: "GitHub App authorization is incomplete",
-            })}
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Install the SkillStar GitHub App for this organization, select this repository, then retry.
-          </p>
+          <p className="text-sm font-medium">{t("sharedChannels.authorizationPending")}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t("sharedChannels.authorizationPendingHint")}</p>
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <a
               href={githubAppSettingsUrl(channel.owner)}
@@ -510,16 +484,12 @@ function ChannelDetail({
               rel="noreferrer"
               className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
             >
-              {t("sharedChannels.openInstallation", {
-                defaultValue: "Open GitHub App settings",
-              })}
+              {t("sharedChannels.openInstallation")}
               <ExternalLink className="size-3" />
             </a>
             <Button size="sm" onClick={() => onResume(channel.repository_id)} disabled={saving}>
               {saving && <Loader2 className="mr-1.5 size-4 animate-spin" />}
-              {t("sharedChannels.retryAuthorization", {
-                defaultValue: "Retry authorization",
-              })}
+              {t("sharedChannels.retryAuthorization")}
             </Button>
           </div>
         </div>
@@ -542,6 +512,13 @@ function sharedChannelError(error: unknown): string {
     return String((error as { message: unknown }).message);
   }
   return String(error);
+}
+
+function errorCode(error: unknown): string {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    return String((error as { code: unknown }).code);
+  }
+  return "";
 }
 
 function githubAppSettingsUrl(organization: string): string {

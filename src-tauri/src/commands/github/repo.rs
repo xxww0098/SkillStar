@@ -3,8 +3,8 @@
 //! and `skillstar_skills::repo_scanner`.
 
 use skillstar_core::infra::error::AppError;
-use skillstar_skills::deployment;
 use skillstar_git::{dismissed_skills, repo_history};
+use skillstar_skills::deployment;
 use skillstar_skills::git::gh_manager;
 use skillstar_skills::local_skill;
 use skillstar_skills::lockfile;

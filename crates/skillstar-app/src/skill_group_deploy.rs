@@ -6,6 +6,26 @@ use skillstar_core::infra::error::AppError;
 use skillstar_skills::{projects, skill_group, skill_install};
 use tracing::{error, warn};
 
+#[derive(Debug, PartialEq, Eq)]
+struct MissingSkillInstallFailure {
+    names: Vec<String>,
+    reason: String,
+}
+
+fn summarize_install_failures(failures: &[MissingSkillInstallFailure]) -> Option<String> {
+    if failures.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "Unable to install missing Skills: {}",
+        failures
+            .iter()
+            .map(|failure| format!("{}: {}", failure.names.join(", "), failure.reason))
+            .collect::<Vec<_>>()
+            .join("; ")
+    ))
+}
+
 pub async fn deploy(
     group_id: String,
     project_path: String,
@@ -57,16 +77,48 @@ pub async fn deploy(
         }
     }
 
-    let mut install_tasks = tokio::task::JoinSet::new();
-    for (url, names) in batch_by_url {
-        install_tasks.spawn_blocking(move || {
-            let _ = skill_install::install_skills_batch(&url, &names);
+    let unresolved_names = group
+        .skills
+        .iter()
+        .filter(|name| !skills_dir.join(name).exists() && !sources.contains_key(*name))
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut install_failures = Vec::new();
+    if !unresolved_names.is_empty() {
+        install_failures.push(MissingSkillInstallFailure {
+            names: unresolved_names,
+            reason: "no install source could be resolved".to_string(),
         });
     }
-    while let Some(result) = install_tasks.join_next().await {
-        if let Err(error) = result {
-            error!(target: "deploy_skill_group", "install task join error: {error}");
+
+    // Spawn every URL batch before awaiting any handle, preserving cross-URL concurrency
+    // while keeping each batch's Skill names available even if its task fails to join.
+    let install_tasks = batch_by_url
+        .into_iter()
+        .map(|(url, names)| {
+            let task_names = names.clone();
+            let handle = tokio::task::spawn_blocking(move || {
+                skill_install::install_skills_batch(&url, &names)
+            });
+            (task_names, handle)
+        })
+        .collect::<Vec<_>>();
+    for (names, task) in install_tasks {
+        match task.await {
+            Ok(Ok(_)) => {}
+            Ok(Err(reason)) => {
+                install_failures.push(MissingSkillInstallFailure { names, reason });
+            }
+            Err(error) => {
+                install_failures.push(MissingSkillInstallFailure {
+                    names,
+                    reason: format!("install task failed: {error}"),
+                });
+            }
         }
+    }
+    if let Some(message) = summarize_install_failures(&install_failures) {
+        return Err(AppError::Other(message));
     }
 
     let agents = agent_types
@@ -81,4 +133,28 @@ pub async fn deploy(
     let (_, count) = projects::save_and_sync(&project_path, agents, deploy_modes)
         .map_err(|error| AppError::Project(error.to_string()))?;
     Ok(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MissingSkillInstallFailure, summarize_install_failures};
+
+    #[test]
+    fn install_failure_summary_keeps_skill_names_and_underlying_reasons() {
+        let summary = summarize_install_failures(&[
+            MissingSkillInstallFailure {
+                names: vec!["old-matt-skill".to_string(), "renamed-skill".to_string()],
+                reason: "not found; source may have deleted or renamed them".to_string(),
+            },
+            MissingSkillInstallFailure {
+                names: vec!["network-skill".to_string()],
+                reason: "network unavailable".to_string(),
+            },
+        ])
+        .expect("failures should produce a summary");
+
+        assert!(summary.contains("old-matt-skill, renamed-skill"));
+        assert!(summary.contains("source may have deleted or renamed them"));
+        assert!(summary.contains("network-skill: network unavailable"));
+    }
 }

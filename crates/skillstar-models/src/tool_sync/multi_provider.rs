@@ -60,7 +60,7 @@ pub fn is_skillstar_managed_key(key: &str) -> bool {
 /// the active provider's id.
 ///
 /// Returns `None` when no usable entry remains (the tool should be unsynced).
-fn resolve_entries<'a>(
+pub(crate) fn resolve_entries<'a>(
     binding: &'a ToolBinding,
     providers: &'a [ProviderEntryFlat],
 ) -> Option<(
@@ -494,7 +494,6 @@ pub(crate) fn sync_pi_binding_inner(
 
     Ok(backup_path)
 }
-
 // ---------------------------------------------------------------------------
 // Unified dispatch
 // ---------------------------------------------------------------------------

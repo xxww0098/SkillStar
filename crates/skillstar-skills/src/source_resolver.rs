@@ -308,16 +308,33 @@ fn sanitize_subpath(input: &str) -> Result<String> {
 
 // ── URL Normalization ───────────────────────────────────────────────
 
-/// Normalize a repository URL or owner/repo shorthand.
+/// Derive the install name hint for a source: explicit name, then `@skill`
+/// filter, then subpath tail, then repo short tail, then the raw URL tail.
 ///
-/// Returns `(repo_url, short)` where:
-/// - `repo_url` is the full `.git`-suffixed clone URL
-/// - `short` is the `owner/repo` identifier
-///
-/// This function is a compatibility shim that delegates to `Source::parse`.
-pub fn normalize_repo_url(input: &str) -> Result<(String, String)> {
-    let source = Source::parse(input)?;
-    Ok((source.repo_url, source.short))
+/// Single implementation shared by the domain install path and the CLI, so a
+/// preview and a real install can never derive different hints.
+pub fn derive_skill_name_hint(input: &str, explicit_name: Option<&str>) -> String {
+    explicit_name.map(str::to_string).unwrap_or_else(|| {
+        if let Ok(source) = Source::parse(input) {
+            if let Some(skill) = source.skill_filter {
+                return skill;
+            }
+            if let Some(subpath) = source.subpath
+                && let Some(name) = subpath.rsplit('/').next()
+            {
+                return name.to_string();
+            }
+            if let Some(name) = source.short.rsplit('/').next() {
+                return name.to_string();
+            }
+        }
+        input
+            .rsplit('/')
+            .next()
+            .unwrap_or("skill")
+            .trim_end_matches(".git")
+            .to_string()
+    })
 }
 
 pub fn cache_dir_name(source: &str) -> String {
@@ -355,34 +372,6 @@ pub fn normalize_remote_url(url: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn normalize_owner_repo() {
-        let (url, source) = normalize_repo_url("vercel-labs/skills").unwrap();
-        assert_eq!(url, "https://github.com/vercel-labs/skills.git");
-        assert_eq!(source, "vercel-labs/skills");
-    }
-
-    #[test]
-    fn normalize_full_url() {
-        let (url, source) = normalize_repo_url("https://github.com/vercel-labs/skills").unwrap();
-        assert_eq!(url, "https://github.com/vercel-labs/skills.git");
-        assert_eq!(source, "vercel-labs/skills");
-    }
-
-    #[test]
-    fn normalize_full_url_with_git_suffix() {
-        let (url, source) =
-            normalize_repo_url("https://github.com/vercel-labs/skills.git").unwrap();
-        assert_eq!(url, "https://github.com/vercel-labs/skills.git");
-        assert_eq!(source, "vercel-labs/skills");
-    }
-
-    #[test]
-    fn normalize_empty_input_fails() {
-        assert!(normalize_repo_url("").is_err());
-        assert!(normalize_repo_url("  ").is_err());
-    }
 
     #[test]
     fn same_remote_url_matches() {

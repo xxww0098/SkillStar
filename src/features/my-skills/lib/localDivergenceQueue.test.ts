@@ -33,6 +33,7 @@ describe("reconcileBlockedUpdates", () => {
         agent_link_failures: [],
       },
       local_copy: null,
+      uninstalled: [],
       remaining_blocked: [],
     };
 
@@ -43,6 +44,7 @@ describe("reconcileBlockedUpdates", () => {
     const result: ResolveSkillUpdateResult = {
       update: null,
       local_copy: null,
+      uninstalled: [],
       remaining_blocked: [blocked("beta")],
     };
 

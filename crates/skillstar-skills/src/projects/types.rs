@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use crate::agents as agent_profile;
+use skillstar_agents as agent_profile;
 
 /// How skills are deployed into a project-level agent directory (`project_skills_rel`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

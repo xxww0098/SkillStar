@@ -12,27 +12,35 @@ use super::*;
 use std::collections::HashMap;
 use tempfile::TempDir;
 
-/// A throwaway HOME sandbox shared by every test that invokes a
-/// home-resolving sync path (`resync_active_tools`, `sync_to_*`, …).
+/// A throwaway HOME sandbox owned by **one** test, alive while the guard is.
 ///
-/// Initialised exactly once under `LazyLock`, whose synchronization sets
-/// [`TOOL_SYNC_HOME_ENV`] before any test observes it — so the real
-/// `~/.claude`, `~/.codex`, `~/.config/opencode`, … are NEVER touched by the suite.
-/// Any future test that drives a real sync MUST call [`use_sandbox_home`]
-/// first, or it will write to the developer's live tool configs.
-static TOOL_SYNC_SANDBOX: std::sync::LazyLock<TempDir> = std::sync::LazyLock::new(|| {
-    let dir = TempDir::new().expect("create tool-sync sandbox home");
-    // SAFETY: runs exactly once under LazyLock's one-time synchronization,
-    // establishing happens-before with every later read of the env var; no
-    // concurrent `set_var` occurs because the value is set only here.
-    unsafe { std::env::set_var(TOOL_SYNC_HOME_ENV, dir.path()) };
-    dir
-});
+/// Every test gets its own temp dir, so the real `~/.claude`, `~/.codex`,
+/// `~/.config/opencode`, … are NEVER touched by the suite *and* two parallel
+/// tests can no longer clobber each other's `~/.codex/auth.json` (they used to
+/// share a single process-wide sandbox, which made this suite flaky).
+///
+/// The override is thread-local, not the process-global [`TOOL_SYNC_HOME_ENV`]:
+/// libtest runs one test per thread, while `set_var` is process-wide and would
+/// simply move the race. Any test that drives a home-resolving sync MUST hold a
+/// guard from [`use_sandbox_home`] for its whole body.
+#[must_use = "the sandbox is only installed while the guard is alive"]
+struct SandboxHome {
+    _dir: TempDir,
+    prev: Option<std::path::PathBuf>,
+}
 
-/// Force the sandbox HOME override into effect. Call at the top of any test
-/// that exercises a home-resolving sync function.
-fn use_sandbox_home() {
-    let _ = TOOL_SYNC_SANDBOX.path();
+impl Drop for SandboxHome {
+    fn drop(&mut self) {
+        set_test_home_override(self.prev.take());
+    }
+}
+
+/// Give the current test its own sandbox HOME. Call at the top of any test that
+/// exercises a home-resolving sync function, binding the returned guard.
+fn use_sandbox_home() -> SandboxHome {
+    let dir = TempDir::new().expect("create tool-sync sandbox home");
+    let prev = set_test_home_override(Some(dir.path().to_path_buf()));
+    SandboxHome { _dir: dir, prev }
 }
 
 fn make_test_provider_flat() -> ProviderEntryFlat {

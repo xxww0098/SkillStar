@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MCP_TOOL_IDS, isMcpToolId, type AgentProfile } from "../../../types";
-import { resolveMcpToolFilter, selectMcpAgentTargets } from "./agentTargets";
+import { mcpToolIdsWithoutAgentProfile, resolveMcpToolFilter, selectMcpAgentTargets } from "./agentTargets";
 
 function profile(id: string, installed = true, enabled = true): AgentProfile {
   return {
@@ -52,10 +52,66 @@ describe("selectMcpAgentTargets", () => {
     expect(resolveMcpToolFilter(null, targets)).toBeNull();
   });
 
-  it("exposes exactly one public Claude Code MCP target", () => {
-    expect(MCP_TOOL_IDS.filter((toolId) => toolId.startsWith("claude"))).toEqual(["claude-code"]);
+  it("exposes one public MCP target per Claude surface, and neither is a tombstone id", () => {
+    // Code (`~/.claude.json`, CLI + Desktop Code) and Chat
+    // (`claude_desktop_config.json`) are different files in different wire
+    // formats. `claude-desktop` and `gemini` stay non-ids: a once-only cleanup
+    // tombstone must never share an id with a standing enable flag.
+    expect(MCP_TOOL_IDS.filter((toolId) => toolId.startsWith("claude"))).toEqual([
+      "claude-code",
+      "claude-desktop-chat",
+    ]);
     expect(isMcpToolId("claude-code")).toBe(true);
+    expect(isMcpToolId("claude-desktop-chat")).toBe(true);
     expect(isMcpToolId("claude-desktop")).toBe(false);
     expect(isMcpToolId("gemini")).toBe(false);
+  });
+
+  it("maps the four newly reachable targets to their own Agent profiles", () => {
+    const targets = selectMcpAgentTargets([
+      profile("windsurf"),
+      profile("cline"),
+      profile("zed"),
+      profile("github-copilot"),
+    ]);
+
+    expect(targets.map(({ toolId }) => toolId)).toEqual(["windsurf", "cline", "zed", "vscode"]);
+  });
+
+  it("routes the vscode target through the github-copilot profile", () => {
+    // The `vscode` MCP target writes ~/.copilot/mcp-config.json, the same config
+    // root the `github-copilot` Agent profile owns. There is no `vscode` profile
+    // to map instead, and inventing one in the frontend would put a second
+    // Agent registry next to the Rust one.
+    expect(selectMcpAgentTargets([profile("vscode")])).toEqual([]);
+    expect(selectMcpAgentTargets([profile("github-copilot")]).map(({ toolId }) => toolId)).toEqual(["vscode"]);
+  });
+
+  it("routes the gemini-cli target through its own profile, never Antigravity's", () => {
+    // Both are rooted at ~/.gemini, but Antigravity is a different product and
+    // must not stand in for Gemini CLI. The `gemini-cli` Agent profile
+    // (crates/skillstar-agents/src/builtin.rs) is what owns this target.
+    expect(selectMcpAgentTargets([profile("antigravity"), profile("antigravity-cli")])).toEqual([]);
+    expect(selectMcpAgentTargets([profile("gemini-cli")]).map(({ toolId }) => toolId)).toEqual(["gemini-cli"]);
+  });
+
+  it("keeps claude-desktop-chat reachable without inventing an Agent profile for it", () => {
+    // Claude Desktop is a chat app with no verified skills directory, so it
+    // gets no Agent profile and therefore no Agent-rail toggle. It must still
+    // be listed as an unreachable-by-profile target rather than vanish — the
+    // tool view and the target picker enumerate MCP_TOOL_IDS directly.
+    expect(selectMcpAgentTargets([profile("claude-desktop-chat")])).toEqual([]);
+    expect(mcpToolIdsWithoutAgentProfile(MCP_TOOL_IDS, [profile("claude")])).toContain("claude-desktop-chat");
+  });
+
+  it("lists the tool ids no enabled profile can reach", () => {
+    const enabled = [profile("claude"), profile("codex")];
+    const unreachable = mcpToolIdsWithoutAgentProfile(MCP_TOOL_IDS, enabled);
+
+    expect(unreachable).not.toContain("claude-code");
+    expect(unreachable).not.toContain("codex");
+    expect(unreachable).toContain("claude-desktop-chat");
+    expect(unreachable).toContain("zed");
+    expect(unreachable.length).toBe(MCP_TOOL_IDS.length - 2);
   });
 });

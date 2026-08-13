@@ -38,7 +38,7 @@ pub fn developer_mode_available() -> bool {
 
 /// Return the deploy status for `skill_name` under every enabled agent profile.
 pub fn get_skill_deploy_status(skill_name: &str) -> Vec<AgentDeployStatus> {
-    let profiles = crate::agents::list_profiles();
+    let profiles = skillstar_agents::list_profiles();
     let mut rows: Vec<AgentDeployStatus> = Vec::with_capacity(profiles.len());
 
     for profile in profiles {

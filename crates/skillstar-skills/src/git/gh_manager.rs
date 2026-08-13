@@ -399,9 +399,9 @@ pub fn publish_skill(
     crate::content::validate_skill_name(folder_name).map_err(anyhow::Error::from)?;
     let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()
         .context("Unable to lock Skill publication")?;
-    crate::shared_channels::ensure_generic_skill_mutation_allowed(skill_name)?;
+    crate::skill_mutation::policy().ensure_skill_mutation_allowed(skill_name)?;
     if let Some(repository_url) = existing_repo_url {
-        crate::shared_channels::ensure_generic_repository_mutation_allowed(repository_url)?;
+        crate::skill_mutation::policy().ensure_repository_mutation_allowed(repository_url)?;
     }
     // Validate persisted state before any remote commit/push. Reload again for
     // the final write so a concurrent install is not overwritten.
@@ -551,7 +551,7 @@ pub fn publish_skill(
     // new provenance atomically with the checkout replacement.
     if lockfile_mode.should_commit() {
         use crate::lockfile::{LockEntry, Lockfile};
-        let tree_hash = super::ops::compute_tree_hash(&skill_source_resolved).unwrap_or_default();
+        let tree_hash = skillstar_git::ops::compute_tree_hash(&skill_source_resolved).unwrap_or_default();
         let _lock = crate::lockfile::get_mutex()
             .lock()
             .map_err(|_| anyhow::anyhow!("Lockfile mutex poisoned"))?;
@@ -633,6 +633,18 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
             || file_name == "Thumbs.db"
             || file_name == "desktop.ini"
         {
+            continue;
+        }
+
+        // Never follow symlinks when publishing: the target may live outside
+        // the skill root (e.g. ~/.ssh/id_rsa) and must not be pushed to a
+        // (possibly public) repository. Mirrors content::snapshot.
+        if ty.is_symlink() {
+            tracing::warn!(
+                target: "gh_manager",
+                path = %src_path.display(),
+                "skipping symlink during publish — its target may live outside the skill root"
+            );
             continue;
         }
 

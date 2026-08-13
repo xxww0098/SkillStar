@@ -4,7 +4,7 @@ use skillstar_core::infra::error::AppError;
 use skillstar_sync::ssh::SshHostDef;
 use skillstar_sync::ssh::client::HostKeyState;
 use skillstar_sync::ssh::progress::ProgressSink;
-use skillstar_sync::ssh::store::{KeyringSecretStore, accept_host_key};
+use skillstar_sync::ssh::store::{KeyringSecretStore, accept_host_key, load_hosts};
 use tauri::AppHandle;
 
 use super::{ConnectionTestResult, TauriProgressSink, new_session_id, to_ssh_err};
@@ -28,6 +28,35 @@ pub async fn test_ssh_connection(
     def: SshHostDef,
     app: AppHandle,
 ) -> Result<TestConnectionOutput, AppError> {
+    // Anti-credential-exfiltration guard: when `def.id` refers to a stored
+    // host, the connection target MUST match the saved definition. The keyring
+    // secret for that id is only sent to the host the user actually saved —
+    // a compromised renderer cannot redirect stored credentials to an
+    // attacker-controlled server by passing its own host/port/username.
+    if let Some(stored) = load_hosts().into_iter().find(|h| h.id == def.id) {
+        let same_target = stored.host == def.host
+            && stored.port == def.port
+            && stored.username == def.username
+            && match (&stored.auth_method, &def.auth_method) {
+                (
+                    skillstar_sync::ssh::AuthMethod::Key {
+                        key_path: stored_path,
+                    },
+                    skillstar_sync::ssh::AuthMethod::Key { key_path: def_path },
+                ) => stored_path == def_path,
+                (
+                    skillstar_sync::ssh::AuthMethod::Password,
+                    skillstar_sync::ssh::AuthMethod::Password,
+                ) => true,
+                _ => false,
+            };
+        if !same_target {
+            return Err(AppError::Ssh(
+                "connection target does not match the saved host definition; save the host first"
+                    .to_string(),
+            ));
+        }
+    }
     let secrets = KeyringSecretStore;
     let session_id = new_session_id();
     let sink = TauriProgressSink { app };

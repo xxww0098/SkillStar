@@ -13,6 +13,15 @@ pub struct SkillGroup {
     pub skill_sources: std::collections::HashMap<String, String>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub default_agent: String,
+    /// Agent ids this deck is explicitly linked to, owned by the deck itself.
+    ///
+    /// A fresh deck starts empty: creating a deck never claims an Agent, even
+    /// when its Skills are already linked there by the install-time global
+    /// deploy. `None` marks a deck written before decks owned this state; the
+    /// `skillstar-app::skill_group_links` backfill resolves it once from the
+    /// on-disk Agent state so existing decks keep the rail they had.
+    #[serde(default)]
+    pub agent_links: Option<Vec<String>>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -73,6 +82,8 @@ pub fn create_group(
         skills,
         skill_sources,
         default_agent: String::new(),
+        // A new deck claims no Agent until the user lights one up on the rail.
+        agent_links: Some(Vec::new()),
         created_at: now.clone(),
         updated_at: now,
     };
@@ -90,6 +101,7 @@ pub fn update_group(
     icon: Option<String>,
     skills: Option<Vec<String>>,
     skill_sources: Option<std::collections::HashMap<String, String>>,
+    agent_links: Option<Vec<String>>,
 ) -> Result<SkillGroup> {
     let mut store = load_store();
     if let Some(ref new_name) = name
@@ -121,6 +133,9 @@ pub fn update_group(
     }
     if let Some(v) = skill_sources {
         group.skill_sources = v;
+    }
+    if let Some(v) = agent_links {
+        group.agent_links = Some(dedupe_agent_links(v));
     }
     group.updated_at = chrono::Utc::now().to_rfc3339();
 
@@ -166,15 +181,180 @@ pub fn duplicate_group(id: &str) -> Result<SkillGroup> {
         new_name = format!("{} (Copy{})", base_name, counter);
     }
 
-    create_group(
+    // A copy holds the same Skills, so it is on the same Agents as its source.
+    let source_links = source.agent_links.clone();
+    let copy = create_group(
         new_name,
         source.description.clone(),
         source.icon.clone(),
         source.skills.clone(),
         source.skill_sources.clone(),
-    )
+    )?;
+
+    match source_links {
+        Some(links) if !links.is_empty() => update_group(
+            copy.id.clone(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(links),
+        ),
+        // `None` means the source is still awaiting backfill; leaving the copy
+        // empty would freeze it as "on no Agent". Inherit the unresolved state
+        // so the next backfill pass resolves both from the same disk truth.
+        Some(_) => Ok(copy),
+        None => clear_agent_links(&copy.id).map(|_| copy),
+    }
+}
+
+/// Reset a deck to the unresolved (pre-backfill) state.
+fn clear_agent_links(id: &str) -> Result<()> {
+    let mut store = load_store();
+    let Some(group) = store.groups.iter_mut().find(|g| g.id == id) else {
+        return Ok(());
+    };
+    group.agent_links = None;
+    save_store(&store)
+}
+
+/// Resolve `None` Agent links for decks the backfill has just computed.
+///
+/// Writes the whole store once and leaves `updated_at` alone — this is a
+/// storage migration, not a user edit.
+pub fn backfill_agent_links(resolved: &[(String, Vec<String>)]) -> Result<()> {
+    if resolved.is_empty() {
+        return Ok(());
+    }
+    let mut store = load_store();
+    let mut changed = false;
+    for (id, links) in resolved {
+        if let Some(group) = store
+            .groups
+            .iter_mut()
+            .find(|g| &g.id == id && g.agent_links.is_none())
+        {
+            group.agent_links = Some(dedupe_agent_links(links.clone()));
+            changed = true;
+        }
+    }
+    if changed { save_store(&store) } else { Ok(()) }
+}
+
+fn dedupe_agent_links(links: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    links
+        .into_iter()
+        .filter(|id| !id.trim().is_empty())
+        .filter(|id| seen.insert(id.clone()))
+        .collect()
 }
 
 fn uuid_v4() -> String {
     uuid::Uuid::new_v4().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Sandbox the group store so tests never touch the real state dir.
+    fn sandbox() -> (std::sync::MutexGuard<'static, ()>, tempfile::TempDir) {
+        let guard = crate::lock_test_env();
+        let temp = tempfile::tempdir().unwrap();
+        // SAFETY: `lock_test_env` is held for as long as the override is live.
+        unsafe {
+            std::env::set_var("SKILLSTAR_DATA_DIR", temp.path());
+        }
+        (guard, temp)
+    }
+
+    fn new_deck(name: &str) -> SkillGroup {
+        create_group(
+            name.to_string(),
+            String::new(),
+            "💻".to_string(),
+            vec!["git-flow".to_string()],
+            Default::default(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn new_deck_claims_no_agent() {
+        let _sandbox = sandbox();
+        assert_eq!(new_deck("fresh").agent_links, Some(Vec::new()));
+    }
+
+    #[test]
+    fn update_replaces_and_dedupes_links() {
+        let _sandbox = sandbox();
+        let deck = new_deck("editable");
+        let updated = update_group(
+            deck.id,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(vec![
+                "claude".to_string(),
+                "claude".to_string(),
+                "  ".to_string(),
+                "codex".to_string(),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(
+            updated.agent_links,
+            Some(vec!["claude".to_string(), "codex".to_string()])
+        );
+    }
+
+    #[test]
+    fn duplicate_inherits_source_links() {
+        let _sandbox = sandbox();
+        let deck = new_deck("original");
+        update_group(
+            deck.id.clone(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(vec!["claude".to_string()]),
+        )
+        .unwrap();
+
+        let copy = duplicate_group(&deck.id).unwrap();
+        assert_eq!(copy.agent_links, Some(vec!["claude".to_string()]));
+    }
+
+    #[test]
+    fn backfill_only_resolves_unresolved_decks() {
+        let _sandbox = sandbox();
+        let legacy = new_deck("legacy");
+        let explicit = new_deck("explicit");
+        clear_agent_links(&legacy.id).unwrap();
+
+        backfill_agent_links(&[
+            (legacy.id.clone(), vec!["claude".to_string()]),
+            // Already resolved to "no Agent" by the user — must not be revived.
+            (explicit.id.clone(), vec!["codex".to_string()]),
+        ])
+        .unwrap();
+
+        let groups = list_groups();
+        let by_id = |id: &str| {
+            groups
+                .iter()
+                .find(|g| g.id == id)
+                .unwrap()
+                .agent_links
+                .clone()
+        };
+        assert_eq!(by_id(&legacy.id), Some(vec!["claude".to_string()]));
+        assert_eq!(by_id(&explicit.id), Some(Vec::new()));
+    }
 }

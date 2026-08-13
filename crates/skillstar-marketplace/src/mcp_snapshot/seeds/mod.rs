@@ -85,11 +85,15 @@ pub(super) fn default_curated_mcp_servers() -> Vec<CuratedMcpSeed> {
                 identifier: "local-api-mcp-typescript".to_string(),
                 version: None,
                 required_env: vec!["API_KEY".to_string()],
+                registry_type: Some("npm".to_string()),
+                runtime_hint: Some("npx".to_string()),
+                ..Default::default()
             }],
             remotes: Vec::new(),
             raw_server_json: adspower_raw,
             recommended: true,
             source: Some("adspower".to_string()),
+            ..Default::default()
         },
     });
 

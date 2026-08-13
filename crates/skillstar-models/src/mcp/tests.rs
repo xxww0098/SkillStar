@@ -2,7 +2,10 @@
 
 use super::*;
 
-static LEGACY_DESKTOP_CONFIG_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Every test below that resolves a real config path shares one sandbox home
+/// with the rest of the test process, so they all take the same lock — see
+/// `tests_targets::SANDBOX_HOME_TEST_LOCK`.
+use super::tests_targets::SANDBOX_HOME_TEST_LOCK as LEGACY_DESKTOP_CONFIG_TEST_LOCK;
 
 fn reset_legacy_desktop_config() -> std::path::PathBuf {
     let path = resolve_legacy_claude_desktop_config_path().unwrap();
@@ -41,17 +44,32 @@ fn canonical_stdio_has_type_command_args_env() {
     assert_eq!(v["env"]["HOME"], "/Users/test");
 }
 
+/// Claude has exactly two public targets, one per *surface*, and the legacy
+/// tombstone ids are neither of them.
+///
+/// The Code surface (`~/.claude.json`, served by `claude-code` for both the
+/// CLI and Desktop Code) and the Chat surface (`claude_desktop_config.json`)
+/// read different files in different wire formats, so one target cannot cover
+/// both. `claude-desktop` stays absent because a public target and a
+/// once-only cleanup tombstone must never share an id.
 #[test]
-fn supported_tool_ids_have_one_claude_code_target() {
+fn supported_tool_ids_have_one_target_per_claude_surface() {
     assert!(MCP_TOOL_IDS.contains(&"claude-code"));
-    assert!(!MCP_TOOL_IDS.contains(&"claude-desktop"));
-    assert!(!MCP_TOOL_IDS.contains(&"gemini"));
+    assert!(MCP_TOOL_IDS.contains(&CLAUDE_DESKTOP_CHAT_TOOL_ID));
+    assert!(!MCP_TOOL_IDS.contains(&LEGACY_CLAUDE_DESKTOP_TOOL_ID));
+    assert!(!MCP_TOOL_IDS.contains(&LEGACY_GEMINI_TOOL_ID));
     assert_eq!(
         MCP_TOOL_IDS
             .iter()
             .filter(|tool_id| tool_id.starts_with("claude"))
-            .count(),
-        1
+            .copied()
+            .collect::<Vec<_>>(),
+        vec!["claude-code", CLAUDE_DESKTOP_CHAT_TOOL_ID]
+    );
+    // Two ids, two files — the Chat target must not be aimed at Code's config.
+    assert_ne!(
+        resolve_mcp_config_path("claude-code").unwrap(),
+        resolve_mcp_config_path(CLAUDE_DESKTOP_CHAT_TOOL_ID).unwrap()
     );
 }
 
@@ -320,9 +338,18 @@ fn legacy_cleanup_refuses_to_overwrite_malformed_desktop_chat_config() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+/// Renaming an entry that still carries the Desktop Chat tombstone drops the
+/// old key, consumes the tombstone, and leaves every key SkillStar does not
+/// manage alone.
+///
+/// The renamed key itself is *absent* afterwards, because this entry leaves
+/// [`CLAUDE_DESKTOP_CHAT_TOOL_ID`] off and "off" means "remove this name from
+/// that target" for every public target — the file is no longer cleanup-only.
 #[test]
 fn update_helper_renames_and_consumes_pending_desktop_chat_cleanup() {
-    let _guard = LEGACY_DESKTOP_CONFIG_TEST_LOCK.lock().unwrap();
+    let _guard = LEGACY_DESKTOP_CONFIG_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let path = reset_legacy_desktop_config();
     std::fs::write(
         &path,
@@ -330,7 +357,6 @@ fn update_helper_renames_and_consumes_pending_desktop_chat_cleanup() {
   "theme": "dark",
   "mcpServers": {
     "old-name": { "command": "old" },
-    "new-name": { "command": "user-new" },
     "user-owned": { "command": "keep" }
   }
 }"#,
@@ -370,14 +396,68 @@ fn update_helper_renames_and_consumes_pending_desktop_chat_cleanup() {
     let value: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert!(value["mcpServers"].get("old-name").is_none());
-    assert_eq!(value["mcpServers"]["new-name"]["command"], "user-new");
+    assert!(value["mcpServers"].get("new-name").is_none());
+    assert_eq!(value["mcpServers"]["user-owned"]["command"], "keep");
+    assert_eq!(value["theme"], "dark");
+    std::fs::remove_file(path).ok();
+}
+
+/// The same rename with the Chat target switched **on** projects the new name
+/// instead of removing it, and still consumes the tombstone — subsumption, so
+/// the cleanup pass does not undo the write the public pass just made.
+#[test]
+fn update_helper_keeps_the_renamed_key_when_the_chat_target_is_on() {
+    let _guard = LEGACY_DESKTOP_CONFIG_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let path = reset_legacy_desktop_config();
+    std::fs::write(
+        &path,
+        r#"{"mcpServers":{"old-name":{"command":"old"},"user-owned":{"command":"keep"}}}"#,
+    )
+    .unwrap();
+
+    let mut entry = stdio("old-name");
+    entry.id = "rename-id".into();
+    entry
+        .enabled
+        .insert(LEGACY_CLAUDE_DESKTOP_TOOL_ID.into(), true);
+    entry
+        .enabled
+        .insert(CLAUDE_DESKTOP_CHAT_TOOL_ID.into(), true);
+    let mut store = McpStore {
+        version: 1,
+        servers: vec![entry],
+    };
+    let (updated, _) = update_server_and_sync(
+        &mut store,
+        "rename-id",
+        McpServerPatch {
+            name: Some("new-name".into()),
+            ..McpServerPatch::default()
+        },
+        true,
+    )
+    .unwrap();
+
+    assert_eq!(
+        updated.enabled.get(LEGACY_CLAUDE_DESKTOP_TOOL_ID),
+        Some(&false)
+    );
+    let value: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert!(value["mcpServers"].get("old-name").is_none());
+    assert_eq!(value["mcpServers"]["new-name"]["command"], "npx");
+    assert!(value["mcpServers"]["new-name"].get("type").is_none());
     assert_eq!(value["mcpServers"]["user-owned"]["command"], "keep");
     std::fs::remove_file(path).ok();
 }
 
 #[test]
 fn malformed_desktop_chat_config_keeps_update_and_delete_store_evidence() {
-    let _guard = LEGACY_DESKTOP_CONFIG_TEST_LOCK.lock().unwrap();
+    let _guard = LEGACY_DESKTOP_CONFIG_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let path = reset_legacy_desktop_config();
     let malformed = "{ definitely-not-json";
     std::fs::write(&path, malformed).unwrap();
@@ -508,6 +588,9 @@ fn sync_to_unknown_tool_errors_instead_of_silently_passing() {
 fn sync_all_returns_one_result_per_known_tool() {
     // sync_server_all_tools iterates MCP_TOOL_IDS (one per supported tool), so
     // the result vector length is a stable contract the UI depends on.
+    let _guard = LEGACY_DESKTOP_CONFIG_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let mut entry = stdio("fs");
     let results = sync_server_all_tools(&mut entry, false);
     assert_eq!(
@@ -527,7 +610,9 @@ fn sync_all_returns_one_result_per_known_tool() {
 
 #[test]
 fn sync_all_keeps_legacy_cleanup_internal_and_only_for_existing_entries() {
-    let _guard = LEGACY_DESKTOP_CONFIG_TEST_LOCK.lock().unwrap();
+    let _guard = LEGACY_DESKTOP_CONFIG_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let path = reset_legacy_desktop_config();
     let mut public = stdio("public-only");
     let public_results = sync_server_all_tools(&mut public, false);

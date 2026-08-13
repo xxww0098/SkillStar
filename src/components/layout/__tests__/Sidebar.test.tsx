@@ -69,6 +69,11 @@ vi.mock("../UsageNav", () => ({
   UsageNav: () => <div data-testid="usage-nav">UsageNav</div>,
 }));
 
+// Mock the GitHub account entry — its own suite covers the auth states
+vi.mock("@/features/settings", () => ({
+  GitHubAccountMenu: () => <div data-testid="github-account-menu">GitHubAccountMenu</div>,
+}));
+
 // Mock ModeSwitcher
 vi.mock("../ModeSwitcher", () => ({
   ModeSwitcher: ({ currentMode }: { currentMode: string }) => (

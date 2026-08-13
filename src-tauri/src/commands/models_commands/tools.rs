@@ -185,6 +185,34 @@ pub async fn update_tool_settings(
     Ok(sync_result)
 }
 
+/// Update a tool's binding-level settings without changing provider or model.
+///
+/// The tool-wide sibling of [`update_tool_settings`]: used for config that spans
+/// several bound providers at once, currently OMP's model roles (`default` /
+/// `smol` / `slow` / `plan` …), each of which may point at a different provider.
+/// Automatically re-syncs the tool's config file.
+#[tauri::command]
+pub async fn update_tool_binding_settings(
+    lock: State<'_, ProvidersWriteLock>,
+    tool_id: String,
+    settings: serde_json::Value,
+) -> Result<ToolSyncResultFlat, AppError> {
+    let _guard = lock.0.lock().await;
+    let path = providers::flat_store_path();
+    let mut store = providers::migrate_store_if_needed(&path)?;
+
+    // 1. Update the binding-level settings bag
+    providers::update_tool_binding_settings(&mut store, &tool_id, settings)?;
+
+    // 2. Persist the updated store
+    providers::write_flat_store(&store, &path)?;
+
+    // 3. Re-sync the tool's config file (roles land in the agent's config)
+    let sync_result = tool_sync::sync_tool_binding(&store, &tool_id);
+
+    Ok(sync_result)
+}
+
 // ---------------------------------------------------------------------------
 // Tool Installation Detection
 // ---------------------------------------------------------------------------

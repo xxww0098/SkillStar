@@ -8,7 +8,7 @@
  */
 
 /** Tools that bind a provider (model sync). */
-export type ProviderToolId = "claude-code" | "claude-desktop" | "codex" | "opencode" | "pi";
+export type ProviderToolId = "claude-code" | "claude-desktop" | "codex" | "opencode" | "pi" | "omp";
 
 /** All tools with on-disk config files the app can read/write. */
 export type AgentToolId = ProviderToolId;
@@ -94,6 +94,16 @@ export const PROVIDER_AGENTS: AgentDescriptor[] = [
     taglineKey: "models.card.taglines.pi",
     configPathDisplay: "~/.pi/agent/models.json · ~/.pi/agent/settings.json",
   },
+  {
+    toolId: "omp",
+    displayName: "Oh My Pi",
+    iconId: "omp",
+    requiredUrlField: "openai",
+    kind: "multi",
+    installDocsUrl: "https://github.com/can1357/oh-my-pi",
+    taglineKey: "models.card.taglines.omp",
+    configPathDisplay: "~/.omp/agent/models.yml · ~/.omp/agent/config.yml",
+  },
 ];
 
 export function getAgent(toolId: string): AgentDescriptor | undefined {
@@ -122,4 +132,5 @@ export const CONFIG_FILE_TOOLS: { toolId: AgentToolId; label: string }[] = [
   { toolId: "codex", label: "Codex" },
   { toolId: "opencode", label: "OpenCode" },
   { toolId: "pi", label: "Pi" },
+  { toolId: "omp", label: "Oh My Pi" },
 ];

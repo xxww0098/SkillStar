@@ -267,7 +267,7 @@ fn test_resync_active_tools_syncs_correct_tools() {
     use crate::providers::{FlatProvidersStore, ToolActivation, ToolBinding};
 
     // Sandbox: resync writes real config files; keep them off the dev's home.
-    use_sandbox_home();
+    let _sandbox = use_sandbox_home();
     let provider = make_test_provider_flat();
     let store = FlatProvidersStore {
         version: 2,
@@ -325,7 +325,7 @@ fn test_resync_active_tools_skips_other_providers() {
     use crate::providers::{FlatProvidersStore, ToolActivation, ToolBinding};
 
     // Sandbox: resync writes real config files; keep them off the dev's home.
-    use_sandbox_home();
+    let _sandbox = use_sandbox_home();
     let provider = make_test_provider_flat();
     let store = FlatProvidersStore {
         version: 2,

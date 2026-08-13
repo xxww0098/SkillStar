@@ -1,5 +1,5 @@
+use skillstar_agents as agent_profile;
 use skillstar_core::infra::error::AppError;
-use skillstar_skills::agents as agent_profile;
 use skillstar_skills::deployment;
 use skillstar_skills::installed_skill;
 

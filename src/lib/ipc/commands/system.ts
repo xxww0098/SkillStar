@@ -1,4 +1,10 @@
-import type { GitHubMirrorConfig, GitHubMirrorPreset, ProxyConfig, SkillTutorialStyle } from "../../../types";
+import type {
+  GitHubMirrorConfig,
+  GitHubMirrorPreset,
+  MarketplaceMirrorConfig,
+  ProxyConfig,
+  SkillTutorialStyle,
+} from "../../../types";
 
 interface PatrolStatus {
   enabled: boolean;
@@ -41,8 +47,6 @@ export interface ShellRcWriteResult {
  */
 export interface SystemCommands {
   // Files / shell
-  write_text_file: { args: { path: string; content: string }; result: void };
-  read_text_file: { args: { path: string }; result: string };
   open_folder: { args: { path: string }; result: void };
   open_external_url: { args: { url: string }; result: void };
 
@@ -67,6 +71,10 @@ export interface SystemCommands {
   save_github_mirror_config: { args: { config: GitHubMirrorConfig }; result: void };
   get_github_mirror_presets: { args: Record<string, never>; result: GitHubMirrorPreset[] };
   test_github_mirror: { args: { url: string }; result: number };
+
+  // Marketplace mirror (skills.sh accelerators)
+  get_marketplace_mirror_config: { args: Record<string, never>; result: MarketplaceMirrorConfig };
+  save_marketplace_mirror_config: { args: { config: MarketplaceMirrorConfig }; result: void };
 
   // Shell rc (Codex third_party auth env export)
   write_codex_env_to_zshrc: { args: { envKey: string; value: string }; result: ShellRcWriteResult };

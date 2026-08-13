@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Check, Download, GitBranch, Package, RotateCcw, ScanSearch } from "lucide-react";
+import { Check, Download, GitBranch, Package, RotateCcw, ScanSearch, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../../components/ui/button";
@@ -110,6 +110,7 @@ export function SelectSkillsPhase({
           {filteredSkills.map((skill) => {
             const isInstalled = skill.already_installed;
             const isSelected = selectedSkills.has(skill.id);
+            const hasFrontmatterIssues = (skill.frontmatter_issues ?? []).length > 0;
             const uniqueKey = skill.folder_path || skill.id;
 
             return (
@@ -173,6 +174,15 @@ export function SelectSkillsPhase({
                       {isSelected && isInstalled && (
                         <span className="text-micro px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 font-medium shrink-0">
                           {t("detailPanel.reinstall")}
+                        </span>
+                      )}
+                      {hasFrontmatterIssues && (
+                        <span
+                          className="text-micro px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-600 font-medium shrink-0 flex items-center gap-1"
+                          title={`${t("githubImportModal.invalidSkill")}: ${t("githubImportModal.invalidSkillHint")}`}
+                        >
+                          <TriangleAlert className="w-2.5 h-2.5" />
+                          {t("githubImportModal.invalidSkill")}
                         </span>
                       )}
                     </div>

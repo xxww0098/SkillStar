@@ -1,4 +1,15 @@
-import { Boxes, Check, Download, ExternalLink, Globe, Info, Sparkles, Star, Terminal } from "lucide-react";
+import {
+  ArrowUpCircle,
+  Boxes,
+  Check,
+  Download,
+  ExternalLink,
+  Globe,
+  Info,
+  Sparkles,
+  Star,
+  Terminal,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { CardDescription, CardTitle } from "../../../components/ui/card";
@@ -8,6 +19,8 @@ import { ZhipuColor } from "../../../components/ui/icons/lobe";
 import { LobeIcon } from "../../../components/ui/icons/LobeIcon";
 import { cn, formatInstalls } from "../../../lib/utils";
 import type { McpMarketEntry, McpServerKind } from "../../../types";
+import type { McpEntryStatus } from "../lib/installState";
+import { McpDeprecatedBadge, McpSupersededBadge } from "./McpStateBadges";
 
 function kindBadge(kind: McpServerKind): { icon: typeof Terminal; label: string } | null {
   switch (kind) {
@@ -24,31 +37,43 @@ function kindBadge(kind: McpServerKind): { icon: typeof Terminal; label: string 
 
 interface McpMarketCardProps {
   entry: McpMarketEntry;
-  installed: boolean;
+  /**
+   * Installed / behind / deprecated, resolved by fingerprint rather than by the
+   * old `installedNames.has(entry.name)` string guess.
+   */
+  status: McpEntryStatus;
   onInstall: () => void;
   onOpenDetail: () => void;
   compact?: boolean;
 }
 
-export function McpMarketCard({ entry, installed, onInstall, onOpenDetail, compact }: McpMarketCardProps) {
+export function McpMarketCard({ entry, status, onInstall, onOpenDetail, compact }: McpMarketCardProps) {
   const { t } = useTranslation();
   const badge = kindBadge(entry.kind);
 
+  // An update is an action, so the button stays live for it. Plain "installed"
+  // is not, and a deprecated row keeps its button — installing one is a
+  // legitimate choice, just one that has to pass the wizard's warnings first.
   const statusAction = (
     <Button
       size="sm"
-      variant={installed ? "outline" : "default"}
-      disabled={installed}
+      variant={status.state === "installed" ? "outline" : "default"}
+      disabled={status.state === "installed"}
       onClick={(e) => {
         e.stopPropagation();
         onInstall();
       }}
       className="h-7 px-2.5 text-xs font-medium"
     >
-      {installed ? (
+      {status.state === "installed" ? (
         <>
           <Check className="h-3.5 w-3.5" />
           {t("mcp.presetAdded")}
+        </>
+      ) : status.state === "updateAvailable" ? (
+        <>
+          <ArrowUpCircle className="h-3.5 w-3.5" />
+          {t("mcp.updateAction")}
         </>
       ) : (
         <>
@@ -61,7 +86,7 @@ export function McpMarketCard({ entry, installed, onInstall, onOpenDetail, compa
 
   return (
     <CardTemplate
-      className={cn("group cursor-pointer", compact && "p-2")}
+      className={cn("group cursor-pointer", compact && "p-2", status.deprecated && "opacity-80")}
       onClick={onOpenDetail}
       topRightSlot={statusAction}
       headerClassName="pr-24"
@@ -97,6 +122,8 @@ export function McpMarketCard({ entry, installed, onInstall, onOpenDetail, compa
       footer={
         <>
           <div className="flex min-w-0 items-center gap-2">
+            <McpDeprecatedBadge deprecated={status.deprecated} />
+            <McpSupersededBadge superseded={status.superseded} />
             {entry.recommended ? (
               <span className="inline-flex h-4 items-center gap-1 rounded bg-primary/12 px-1.5 text-micro font-medium text-primary ring-1 ring-inset ring-primary/20">
                 <Sparkles className="h-3 w-3" />
@@ -121,6 +148,11 @@ export function McpMarketCard({ entry, installed, onInstall, onOpenDetail, compa
               </span>
             ))}
             {entry.version ? <span className="text-micro text-muted-foreground/70">v{entry.version}</span> : null}
+            {status.state === "updateAvailable" && status.installedVersion ? (
+              <span className="text-micro text-sky-600 dark:text-sky-400">
+                {t("mcp.updateFromVersion", { version: status.installedVersion })}
+              </span>
+            ) : null}
           </div>
 
           <div className="relative z-10 flex shrink-0 items-center gap-2">

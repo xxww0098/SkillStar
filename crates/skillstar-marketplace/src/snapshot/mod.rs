@@ -7,7 +7,8 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::{Arc, LazyLock, Mutex, RwLock};
-use tracing::{error, warn};
+use tracing::{debug, error, warn};
+use ts_rs::TS;
 
 use crate::db;
 use crate::models::{
@@ -20,31 +21,57 @@ use crate::models::{
     MarketplaceTagUpsert, MarketplaceUpdateNotification, MarketplaceUpdateNotificationUpsert,
 };
 use crate::remote::{
-    self, AiKeywordSearchResult, MarketplaceResult, MarketplaceSkillDetails, PublisherRepo,
-    SecurityAudit,
+    self, AiKeywordSearchResult, FetchMeta, MarketplaceResult, MarketplaceSkillDetails,
+    PublisherRepo, SecurityAudit,
 };
 use crate::{OfficialPublisher, Skill, SkillType, extract_github_source_from_url};
 
-const SNAPSHOT_SCHEMA_VERSION: i64 = 10;
+const SNAPSHOT_SCHEMA_VERSION: i64 = 13;
 const LEADERBOARD_TTL_HOURS: i64 = 6;
 const PUBLISHER_TTL_HOURS: i64 = 24;
 const DETAIL_TTL_HOURS: i64 = 48;
 const SEARCH_SEED_LIMIT: u32 = 50;
 const STALE_SKILL_RETENTION_DAYS: i64 = 30;
 const AI_SEARCH_REMOTE_SEED_MIN_HITS: usize = 3;
-const AI_SEARCH_LOW_COVERAGE_ROWS: i64 = 500;
+/// How long a recorded `search_seed:<query>` answer counts as "we already
+/// asked the remote about this query".
+///
+/// This is what makes the AI-search seed decision *per keyword* instead of a
+/// guess derived from the size of the whole snapshot. The previous criterion
+/// ("seed when the table holds fewer than 500 rows") could never fire: the
+/// leaderboard SSR page yields ~600 rows and the API top-up adds at most 200
+/// more, so after the very first sync the row count sits at 600–800 forever
+/// and the whole remote-seed branch was dead code.
+const SEARCH_SEED_TTL_HOURS: i64 = 24;
 const RESOLVE_SOURCE_REMOTE_LIMIT: u32 = 20;
 const DEFAULT_CURATED_REGISTRY_ID: &str = "skills_sh";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Envelope every local-first read returns: the payload plus the provenance
+/// the UI needs to decide whether to show a staleness banner.
+///
+/// Exported to TypeScript via ts-rs (`src/types/generated/LocalFirstResult.ts`)
+/// so the frontend contract cannot drift from this struct — a hand-written TS
+/// copy once declared an `error` field the Rust side did not have, which is
+/// how every degraded path ended up showing the generic "Marketplace request
+/// failed" copy.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "LocalFirstResult.ts")]
 pub struct LocalFirstResult<T> {
     pub data: T,
     pub snapshot_status: SnapshotStatus,
     pub snapshot_updated_at: Option<String>,
+    /// Why the request degraded, for the `error_fallback` / `remote_error`
+    /// statuses; `None` on the healthy paths.
+    ///
+    /// Always serialized (never skipped): the UI reads the field to decide
+    /// between the real cause and its own generic copy, so an absent key would
+    /// send it straight back to "Marketplace request failed".
+    pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "SnapshotStatus.ts")]
 pub enum SnapshotStatus {
     Fresh,
     Stale,
@@ -54,14 +81,41 @@ pub enum SnapshotStatus {
     RemoteError,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Per-scope sync bookkeeping surfaced to the settings UI.
+///
+/// Exported to TypeScript via ts-rs (`src/types/generated/SyncStateEntry.ts`):
+/// the fields below have grown repeatedly (`source_host`, `payload_sha256`,
+/// `etag`, `degraded_reason`) and a hand-maintained TS mirror kept falling
+/// behind.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "SyncStateEntry.ts")]
 pub struct SyncStateEntry {
     pub scope: String,
     pub last_success_at: Option<String>,
     pub last_attempt_at: Option<String>,
     pub last_error: Option<String>,
     pub next_refresh_at: Option<String>,
+    // ts-rs maps i64 -> bigint by default (technically correct), but this
+    // value crosses the wire as JSON through serde_json + Tauri IPC +
+    // `JSON.parse`, which all produce a plain JS `number`. A schema version is
+    // a small counter, nowhere near 2^53.
+    #[ts(type = "number")]
     pub schema_version: i64,
+    /// Host that actually served the last successful fetch (primary or mirror).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_host: Option<String>,
+    /// SHA-256 of the last successfully fetched payload (empty when the scope
+    /// is fresh from a 304 or was seeded locally).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload_sha256: Option<String>,
+    /// ETag from the last successful fetch, when the server sent one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub etag: Option<String>,
+    /// Set while the stored rows come from a knowingly lossy payload. The scope
+    /// still has a `last_success_at` (there *is* data), but it never reports
+    /// fresh and the next equal-or-better payload is allowed to replace it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub degraded_reason: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -361,7 +415,7 @@ pub async fn refresh_startup_scopes_if_needed() -> Result<()> {
 mod helpers;
 mod loaders;
 mod local_first;
-mod migrations;
+pub(crate) mod migrations;
 mod registries;
 mod resolve;
 mod skills;

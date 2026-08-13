@@ -55,7 +55,7 @@ fn deployment_failure_is_reported_without_destroying_the_old_copy() {
     )
     .unwrap();
     std::fs::write(deployed.join("scripts/run.sh"), "echo deployed-v1\n").unwrap();
-    crate::agents::add_custom_profile(crate::agents::CustomProfileDef {
+    skillstar_agents::add_custom_profile(skillstar_agents::CustomProfileDef {
         id: "update-failure-agent".to_string(),
         display_name: "Update Failure Agent".to_string(),
         global_skills_dir: agent_dir.to_string_lossy().into_owned(),
@@ -63,7 +63,7 @@ fn deployment_failure_is_reported_without_destroying_the_old_copy() {
         icon_data_uri: None,
     })
     .unwrap();
-    assert!(crate::agents::toggle_profile("update-failure-agent").unwrap());
+    assert!(skillstar_agents::toggle_profile("update-failure-agent").unwrap());
     crate::deployment::invalidate_profile_cache();
 
     std::fs::write(remote.path().join("scripts/run.sh"), "echo remote-v2\n").unwrap();

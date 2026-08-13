@@ -1,5 +1,6 @@
 import { ArchiveRestore, Loader2, RefreshCw, ShieldOff, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import type { ChannelSubscription, ChannelSubscriptionView } from "../../../types";
 import {
@@ -16,6 +17,7 @@ export function RevokedSubscriptionPanel({
   subscription: ChannelSubscription | ChannelSubscriptionView;
   onSubscriptionChanged: (subscription: ChannelSubscription | ChannelSubscriptionView) => void;
 }) {
+  const { t } = useTranslation();
   const initialIds =
     "skills" in subscription ? subscription.skills.map((skill) => skill.id) : subscription.selected_skill_ids;
   const [skillIds, setSkillIds] = useState(initialIds);
@@ -77,32 +79,27 @@ export function RevokedSubscriptionPanel({
   return (
     <section
       className="space-y-4 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4"
-      aria-label="Revoked channel"
+      aria-label={t("sharedChannels.revokedAria")}
     >
       <div className="flex items-start gap-2">
         <ShieldOff className="mt-0.5 size-4 text-amber-600" />
         <div>
-          <p className="text-sm font-semibold">Remote access revoked; installed Skills are preserved.</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            SkillStar will not download updates or historical releases. Existing Hub content and deployments remain on
-            this device; GitHub revocation cannot erase copies already downloaded.
-          </p>
+          <p className="text-sm font-semibold">{t("sharedChannels.revokedTitle")}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t("sharedChannels.revokedPreservedHint")}</p>
         </div>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-[11px] text-muted-foreground">
-          If repository access was restored, recheck it before remote updates resume.
-        </p>
+        <p className="text-[11px] text-muted-foreground">{t("sharedChannels.recheckHint")}</p>
         <Button
           size="sm"
           variant="outline"
-          aria-label="Check restored GitHub access"
+          aria-label={t("sharedChannels.checkAccessAria")}
           disabled={checkingAccess || Boolean(busy)}
           onClick={() => void checkAccess()}
         >
           {checkingAccess ? <Loader2 className="mr-1 size-3 animate-spin" /> : <RefreshCw className="mr-1 size-3" />}
-          Check access
+          {t("sharedChannels.checkAccess")}
         </Button>
       </div>
 
@@ -112,9 +109,9 @@ export function RevokedSubscriptionPanel({
             <p className="text-xs font-medium">{skillId}</p>
             <div className="mt-2 flex flex-wrap items-end gap-2">
               <label className="min-w-44 flex-1 space-y-1 text-[11px]">
-                <span>Local copy name</span>
+                <span>{t("sharedChannels.localCopyName")}</span>
                 <input
-                  aria-label={`Local copy name for ${skillId}`}
+                  aria-label={t("sharedChannels.localCopyNameAria", { skillId })}
                   value={localNames[skillId] ?? `${skillId}.local`}
                   onChange={(event) => setLocalNames((current) => ({ ...current, [skillId]: event.target.value }))}
                   className="h-8 w-full rounded-md border border-border bg-background px-2 font-mono text-xs"
@@ -124,7 +121,7 @@ export function RevokedSubscriptionPanel({
               <Button
                 size="sm"
                 variant="outline"
-                aria-label={`Keep ${skillId} as local copy`}
+                aria-label={t("sharedChannels.keepAsLocalAria", { skillId })}
                 disabled={checkingAccess || Boolean(busy)}
                 onClick={() => void resolve(skillId, "convert")}
               >
@@ -133,21 +130,21 @@ export function RevokedSubscriptionPanel({
                 ) : (
                   <ArchiveRestore className="mr-1 size-3" />
                 )}
-                Keep as local
+                {t("sharedChannels.keepAsLocal")}
               </Button>
               <Button
                 size="sm"
                 variant="ghost"
-                aria-label={`Uninstall ${skillId}`}
+                aria-label={t("sharedChannels.uninstallAria", { skillId })}
                 disabled={checkingAccess || Boolean(busy)}
                 onClick={() => void resolve(skillId, "uninstall")}
               >
-                <Trash2 className="mr-1 size-3" /> Uninstall
+                <Trash2 className="mr-1 size-3" /> {t("sharedChannels.uninstall")}
               </Button>
             </div>
           </div>
         ))}
-        {skillIds.length === 0 && <p className="text-xs text-muted-foreground">No channel Skills remain tracked.</p>}
+        {skillIds.length === 0 && <p className="text-xs text-muted-foreground">{t("sharedChannels.noSkillsRemain")}</p>}
       </div>
       {error && <p className="text-xs text-destructive">{error}</p>}
     </section>

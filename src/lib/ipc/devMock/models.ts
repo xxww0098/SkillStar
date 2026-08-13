@@ -23,18 +23,18 @@ interface MockEntry {
 interface MockBinding {
   entries: MockEntry[];
   active_index: number;
+  /** Binding-level bag (OMP model roles). */
+  settings?: unknown;
 }
 /** Tools whose config natively holds several providers (mirrors agentRegistry). */
-const MULTI_PROVIDER_TOOLS = new Set(["codex", "opencode"]);
+const MULTI_PROVIDER_TOOLS = new Set(["codex", "opencode", "pi", "omp"]);
 
 const NATIVE_OFFICIAL_IDS = new Set(["claude-official", "codex-official"]);
 
 /** Mirror backend `ensure_official_providers` so the D1 hub can prefer store rows. */
 function ensureOfficialInMockStore() {
   for (const id of ["claude-official", "codex-official"] as const) {
-    const exists = FLAT_PROVIDERS.providers.some(
-      (p) => p.id === id || (p as { preset_id?: string }).preset_id === id,
-    );
+    const exists = FLAT_PROVIDERS.providers.some((p) => p.id === id || (p as { preset_id?: string }).preset_id === id);
     if (exists) continue;
     FLAT_PROVIDERS.providers.push({
       id,
@@ -118,12 +118,10 @@ export const MODELS_HANDLERS: DevMockHandlers = {
     const provider = FLAT_PROVIDERS.providers.find((p) => p.id === providerId);
     const acts = FLAT_PROVIDERS.tool_activations as Record<string, MockBinding | null>;
     const presetId = (provider as { preset_id?: string } | undefined)?.preset_id;
-    const isCodexOfficial =
-      providerId === "codex-official" || presetId === "codex-official";
+    const isCodexOfficial = providerId === "codex-official" || presetId === "codex-official";
     let settings = (args?.settings ?? null) as unknown;
     if (isCodexOfficial) {
-      const prev =
-        settings && typeof settings === "object" ? (settings as Record<string, unknown>) : {};
+      const prev = settings && typeof settings === "object" ? (settings as Record<string, unknown>) : {};
       settings = { ...prev, auth_mode: "oauth" };
     }
     const entry = {
@@ -163,6 +161,15 @@ export const MODELS_HANDLERS: DevMockHandlers = {
     const binding = acts[toolId];
     const active = binding?.entries[Math.min(binding.active_index, binding.entries.length - 1)];
     if (active) active.settings = args?.settings ?? null;
+    return { tool_id: toolId, success: true };
+  },
+  update_tool_binding_settings: (args) => {
+    const toolId = String(args?.toolId ?? "");
+    const acts = FLAT_PROVIDERS.tool_activations as Record<string, MockBinding | null>;
+    const binding = acts[toolId];
+    // Binding-level, not per-entry: an OMP role may target a provider other
+    // than the active one, so it hangs off the binding itself.
+    if (binding) binding.settings = args?.settings ?? null;
     return { tool_id: toolId, success: true };
   },
   set_active_binding: (args) => {

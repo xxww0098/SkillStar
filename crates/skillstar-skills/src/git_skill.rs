@@ -5,7 +5,7 @@
 
 use crate::git::transport::GitOperationSession;
 use crate::git::transport::NoopGitProgressSink;
-use crate::github_auth::{
+use skillstar_github_auth::{
     GitHubAuthFacade, KeyringCredentialStore, ProductionGitHubGateway, SystemClock,
 };
 use crate::installed_skill::{self, SkillUpdateState};
@@ -73,7 +73,7 @@ impl GitSkillFacade {
         skill_install::fetch_repo_scanned_in_session(input, full_depth, &self.session)
     }
 
-    pub(crate) fn fetch_repo_scanned_detailed(
+    pub fn fetch_repo_scanned_detailed(
         &self,
         input: &str,
         full_depth: bool,
@@ -101,8 +101,8 @@ impl GitSkillFacade {
         target: &SkillInstallTarget,
     ) -> anyhow::Result<()> {
         let _guard = crate::skill_update::acquire_update_transaction_lock()?;
-        crate::shared_channels::ensure_generic_skill_mutation_allowed(skill_name)?;
-        crate::shared_channels::ensure_generic_repository_mutation_allowed(repo_url)?;
+        crate::skill_mutation::policy().ensure_skill_mutation_allowed(skill_name)?;
+        crate::skill_mutation::policy().ensure_repository_mutation_allowed(repo_url)?;
         let snapshot = crate::content::snapshot(skill_name)?;
         let previous_lock_entry = load_skill_lock_entry(skill_name)?;
         local_skill::graduate(skill_name)?;
@@ -148,7 +148,7 @@ impl GitSkillFacade {
     /// Apply the ordinary staged repository installer to an already fetched,
     /// immutable checkout. Both sides of the transaction verify HEAD so a
     /// caller cannot record a requested commit that was not actually installed.
-    pub(crate) fn install_verified_checkout(
+    pub fn install_verified_checkout(
         &self,
         repo_dir: &Path,
         repo_url: &str,
@@ -178,7 +178,7 @@ impl GitSkillFacade {
         Ok(installed)
     }
 
-    pub(crate) fn replace_verified_channel_checkout(
+    pub fn replace_verified_channel_checkout(
         &self,
         repo_dir: &Path,
         repo_url: &str,
@@ -283,7 +283,7 @@ fn skill_lock_names_equal(left: &str, right: &str) -> bool {
 
 fn ensure_generic_input_repository_mutable(input: &str) -> anyhow::Result<()> {
     let source = crate::source_resolver::Source::parse(input)?;
-    crate::shared_channels::ensure_generic_repository_mutation_allowed(&source.repo_url)
+    crate::skill_mutation::policy().ensure_repository_mutation_allowed(&source.repo_url)
 }
 
 #[cfg(test)]

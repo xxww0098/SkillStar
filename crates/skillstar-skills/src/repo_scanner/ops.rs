@@ -11,7 +11,7 @@ use super::cache::{discover_skill_dirs_from_tree, is_sparse_checkout};
 ///
 /// When the skill declares a `folder_path`, the hash covers only that subtree,
 /// so siblings sharing the repo keep their own hashes.
-pub(crate) fn pull_repo_skill_update_in_session(
+pub fn pull_repo_skill_update_in_session(
     skill_path: &Path,
     folder_path: Option<&str>,
     session: &crate::git::transport::GitOperationSession,
@@ -23,6 +23,13 @@ pub(crate) fn pull_repo_skill_update_in_session(
 
     update_checker::fetch_tracked_ref_in_session(&repo_root, session)
         .context("Failed to fetch repo-cached update")?;
+
+    // The fetch is a network operation lasting up to seconds; a user edit
+    // landing in that window must not be destroyed by the reset below.
+    // Fail closed instead — the update caller preserves the worktree.
+    if !git_ops::worktree_is_clean(&repo_root)? {
+        return Err(git_ops::WorktreeDirty.into());
+    }
 
     let reset_target = if update_checker::configured_git_ref(&repo_root).is_some() {
         "FETCH_HEAD"

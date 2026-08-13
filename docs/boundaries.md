@@ -26,12 +26,16 @@ SkillStar/
 │   └── src/main.rs              # 可执行入口
 ├── crates/
 │   ├── skillstar-core/          # 共享契约、配置和基础设施
+│   ├── skillstar-git/           # Git transport/ops/tree/history 叶子
+│   ├── skillstar-agents/        # Agent 注册表与 profile 叶子
+│   ├── skillstar-github-auth/   # GitHub App 设备授权与凭据叶子
 │   ├── skillstar-providers/     # Provider 元数据叶子
-│   ├── skillstar-skills/        # 技能、项目、Agent、部署和 patrol
+│   ├── skillstar-skills/        # 技能、项目、部署、gh_manager
+│   ├── skillstar-channels/      # 共享频道与 patrol
 │   ├── skillstar-marketplace/   # 本地市场快照、FTS 与 MCP catalog
 │   ├── skillstar-models/        # Provider store、AI、MCP store、tool sync
 │   ├── skillstar-usage/         # 订阅、OAuth 和配额
-│   ├── skillstar-sync/          # S3 与 SSH 远程传输
+│   ├── skillstar-sync/          # SSH 远端技能传输
 │   └── skillstar-app/           # 跨域 use case 与共享 CLI 解析
 ├── docs/                        # 宪章、功能活文档和冻结历史
 ├── scripts/internal/            # CI 棘轮和一致性检查
@@ -46,12 +50,16 @@ SkillStar/
 | Crate | 拥有 | 不拥有 |
 | --- | --- | --- |
 | `skillstar-core` | 路径、文件操作、DB pool/migration、共享错误和配置、HTTP client、共享 `Skill` 契约 | 任一产品域的业务流程 |
+| `skillstar-git` | Git 子进程 transport（认证材料、代理、取消、进度、脱敏）、tree-hash、repo history、dismissed skills、操作级 Git 辅助 | 依赖 content/lockfile/channels 的 GitHub 仓库管理（`gh_manager` 留在 `skillstar-skills::git`） |
+| `skillstar-agents` | Agent spec、registry、custom profile 与 profile storage | 项目 manifest、部署或 patrol |
+| `skillstar-channels` | 组织共享频道（GitHub REST 编排、权限投影、descriptor、registry、成员/邀请、registration、release manifest/publish、subscription store、精确发布安装、逐 Skill 升级事务、自动升级策略）与 patrol；`policy::ChannelAwarePolicy` 实现 skills 的 mutation gate | 技能安装/更新核心实现、Marketplace、Usage、Models |
+| `skillstar-github-auth` | GitHub App 设备授权、token 生命周期、系统凭据存储、网关 | 技能安装、Git 子进程或共享频道编排 |
 | `skillstar-providers` | Provider identity、鉴权和余额端点元数据 | Provider 持久化、Usage 抓取或 UI preset |
-| `skillstar-skills` | 安装、更新、bundle、本地创作、repo scan、lockfile、repo-link 判定、update 状态、GitHub App 用户认证、操作级 Git 传输与统一 `GitSkillFacade`、组织私有共享频道及其本地 registry、Agent registry、项目 manifest、deployment、patrol | Marketplace 搜索、Usage 或 Models |
-| `skillstar-marketplace` | SQLite 快照、FTS、技能市场和 MCP registry/curated 数据 | 技能安装实现、MCP 本地配置 |
-| `skillstar-models` | Provider store/preset、tool sync、AI 推理、MCP store | Usage 订阅或 Marketplace 快照 |
+| `skillstar-skills` | 安装、更新、bundle、本地创作、repo scan、lockfile、repo-link 判定、update 状态、统一 `GitSkillFacade`、GitHub 仓库管理（`git::gh_manager`）、项目 manifest、deployment；SKILL.md frontmatter 质量校验（`validation`）、`.claude-plugin` 清单发现（`plugin_manifest`）、GitHub API 更新检测快速路径（`update_api`）；`skill_mutation` 定义注入式 mutation-gate 策略接缝 | Marketplace 搜索、Usage、Models，或拆出叶子的业务编排 |
+| `skillstar-marketplace` | SQLite 快照、FTS、技能市场；MCP 多源 catalog（源注册表、用户自定义源持久化、跨源抓取合并、`server.json` 解析、参数化卡片查询）与 curated 数据 | 技能安装实现、MCP 本地配置、registry→store 的映射 |
+| `skillstar-models` | Provider store/preset、tool sync、AI 推理、MCP store 与 per-tool 投影、双纪元健康探测 | Usage 订阅、Marketplace 快照或 catalog 形态选择 |
 | `skillstar-usage` | catalog、OAuth/API-key fetcher、加密 token、请求构建器 | Models provider store、CLI 凭证文件编排 |
-| `skillstar-sync` | SSH/SFTP、S3、远程 manifest、传输凭证引用 | 本地技能域规则 |
+| `skillstar-sync` | SSH/SFTP、远端 hub、传输凭证引用（S3 云同步已移除，见 decisions.md） | 本地技能域规则 |
 | `skillstar-app` | 需要多个域协作的 use case、CLI 解析和模式识别 | Tauri command 宏或窗口对象 |
 
 ## 允许的依赖方向
@@ -62,7 +70,11 @@ SkillStar/
 flowchart LR
   providers["skillstar-providers"]
   core["skillstar-core"]
+  git["skillstar-git"]
+  agents["skillstar-agents"]
+  auth["skillstar-github-auth"]
   skills["skillstar-skills"]
+  channels["skillstar-channels"]
   market["skillstar-marketplace"]
   models["skillstar-models"]
   usage["skillstar-usage"]
@@ -74,18 +86,36 @@ flowchart LR
   models --> core
   models --> providers
   skills --> core
+  skills --> git
+  skills --> agents
+  skills --> auth
+  channels --> core
+  channels --> git
+  channels --> skills
+  channels --> auth
+  auth --> git
+  auth --> core
+  git --> core
+  agents --> core
   usage --> core
   usage --> providers
   sync --> core
   sync --> skills
   app --> core
   app --> skills
+  app --> git
+  app --> agents
+  app --> channels
   app --> market
   app --> models
   app --> usage
   tauri --> app
   tauri --> core
   tauri --> skills
+  tauri --> git
+  tauri --> agents
+  tauri --> auth
+  tauri --> channels
   tauri --> market
   tauri --> models
   tauri --> usage
@@ -109,9 +139,10 @@ Cargo 只使用仓库根 `Cargo.lock`；workspace member 下出现嵌套 lockfil
 - SSH feature 只公开主机管理、连接进度和远程操作接口；My Skills 的远程卡片、筛选、详情与批量迁移 UI 位于 `src/features/my-skills/remote/`，以单向 `my-skills → ssh` 依赖消费公开入口。
 - 无产品语义的 UI primitive 放 `src/components/ui/`；跨域展示组件放 `src/components/shared/`；纯工具放 `src/lib/`。
 - Settings 可以组合各域的公开设置入口，但不复制域逻辑。
-- Settings 内的 `github/` 子模块拥有 GitHub 登录 hook 与展示；它只消费 typed IPC，设备授权、凭据和网络状态机仍由 `skillstar-skills::github_auth` 拥有。
-- `skillstar-skills::git_skill` 是扫描、安装、更新检查和升级的展示无关入口；`skillstar-skills::git::transport` 独占远程 Git 子进程的认证、代理、取消、进度和脱敏策略，私有 `git::tree` 对 tracked tree 元数据执行有界读取。`src-tauri::core::github_auth` 只管理 facade/session 生命周期并把结构化进度适配为事件，commands 与 CLI 不得另起带网络的 Git 命令。
-- `skillstar-skills::shared_channels` 独占共享频道 GitHub REST 编排、权限投影、版本化 descriptor、本地登记、成员/邀请 facade、已有仓库 registration session、不可变 release manifest/publish session，以及版本化 subscription store、精确发布安装、逐 Skill 频道升级事务和按频道自动升级到期/暂停策略；仓库库存、发布快照和订阅内容扫描只能经注入的操作级 Git scanner/installer/updater 接缝，生产 REST gateway 必须使用 `probe_http_client`。成员与 invitation 不得另建持久 ACL，订阅选择、自动升级偏好和升级结果不得写入 GitHub；Tauri 远程命令只适配当前认证 state，本地只读状态与偏好命令直接访问 subscription registry，不得被登录状态阻断。应用进程内的周期唤醒与事件发送属于 `src-tauri/src/core/` 胶水，不得复制到前端计时器或 command wrapper。`src/features/shared-channels/` 是独立前端 feature，只通过 typed IPC 暴露给 My Skills 组合。
+- Settings 内的 `github/` 子模块拥有 GitHub 登录 hook 与展示；它只消费 typed IPC，设备授权、凭据和网络状态机仍由 `skillstar-github-auth` 拥有。账户入口 `GitHubAccountMenu` 经 `src/features/settings/index.ts` 公开给侧边栏，是该 feature 目前唯一的公开出口。
+- `skillstar-skills::git_skill` 是扫描、安装、更新检查和升级的展示无关入口；`skillstar-git::transport` 独占远程 Git 子进程的认证、代理、取消、进度和脱敏策略，私有 `skillstar-git::tree` 对 tracked tree 元数据执行有界读取。`skillstar-skills::git::gh_manager` 因耦合 content/lockfile/shared_channels 留在 skills，`skills::git` 对 `skillstar-git` 仅 re-export。`src-tauri::core::github_auth` 只管理 facade/session 生命周期并把结构化进度适配为事件，commands 与 CLI 不得另起带网络的 Git 命令。
+- `skillstar-channels::shared_channels` 独占共享频道 GitHub REST 编排、权限投影、版本化 descriptor、本地登记、成员/邀请 facade、已有仓库 registration session、不可变 release manifest/publish session，以及版本化 subscription store、精确发布安装、逐 Skill 频道升级事务和按频道自动升级到期/暂停策略；仓库库存、发布快照和订阅内容扫描只能经注入的操作级 Git scanner/installer/updater 接缝，生产 REST gateway 必须使用 `probe_http_client`。成员与 invitation 不得另建持久 ACL，订阅选择、自动升级偏好和升级结果不得写入 GitHub；Tauri 远程命令只适配当前认证 state，本地只读状态与偏好命令直接访问 subscription registry，不得被登录状态阻断。应用进程内的周期唤醒与事件发送属于 `src-tauri/src/core/` 胶水，不得复制到前端计时器或 command wrapper。`src/features/shared-channels/` 是独立前端 feature，只通过 typed IPC 暴露给 My Skills 组合。
+- 通用技能 mutation gate 是依赖倒置接缝：`skillstar-skills::skill_mutation::SkillMutationPolicy` 定义查询接口（默认 allow-all），`skillstar-channels::policy::ChannelAwarePolicy` 查订阅注册表实现它；组合根（Tauri setup、CLI 入口）必须调用 `install_global_policy`，任何新的可执行入口都要注册后才能执行技能写路径。
 - `scripts/internal/check_feature_imports.sh` 允许通过目标 feature 根 `index.ts` 的显式依赖，对新跨 feature 深层导入直接失败；既有基线只能缩减。
 
 ## 关键接缝
@@ -122,11 +153,52 @@ Cargo 只使用仓库根 `Cargo.lock`；workspace member 下出现嵌套 lockfil
 | Tauri → 域 | command 做参数/State/事件适配后调用 facade | `src-tauri/src/commands/` |
 | Skill → ACP 教程 | `skillstar-skills::content` 提供只读快照，`skillstar-skills::tutorial` 校验并持久化 artifact；`src-tauri::core` 只限定 ACP 会话与临时 staging；command 不直接读写文件 | `crates/skillstar-skills/src/{content,tutorial}.rs`、`src-tauri/src/core/skill_tutorial.rs` |
 | 跨域事务 | 放入 `skillstar-app`，由窄 facade 组合 | `crates/skillstar-app/src/` |
+| MCP catalog → store | 运行时形态选择、draft 映射、安装前确认负载、preset 映射全部在 `skillstar-app::mcp`；两个域 crate 互不知晓，命令层不做映射 | `crates/skillstar-app/src/mcp/` |
 | 网络 | 经统一 HTTP client，读取 proxy 配置 | `crates/skillstar-core/src/infra/http_client.rs` |
 | 生成类型 | Rust struct → ts-rs → `src/types/generated/` | `package.json` 的 `types:gen` |
 | 本地技能与远端传输 | `skillstar-sync` 消费 `skillstar-skills` 的公开契约 | `crates/skillstar-sync/Cargo.toml` |
 
 `scripts/internal/check_command_boundaries.sh` 对 command 层新增的直接文件系统/path ownership 与任何 HTTP 构造（`reqwest`/`probe_http_client`）失败；存量按文件计数棘轮，只能下降。
+
+## MCP 模块布局
+
+MCP 是唯一横跨两个域 crate 的功能域，模块边界因此单列。三层各自拥有什么：
+
+```text
+crates/skillstar-marketplace/src/
+├── mcp_models/          # server.json `2025-12-11` 模型与解析
+│   ├── mod.rs           #   快照/卡片/详情记录
+│   ├── inputs.rs        #   Input 语义（env / header / CLI argument）
+│   ├── spec.rs          #   packages / remotes / icons / status
+│   ├── parse.rs         #   wire → snapshot，所有源共用
+│   └── raw.rs           #   camelCase / snake_case 容错读取
+├── mcp_remote/          # 多源抓取
+│   ├── sources.rs       #   源注册表（内置 + 用户覆盖）
+│   ├── config.rs        #   `<config_dir>/mcp_sources.json` 持久化
+│   ├── fetch.rs         #   逐源分页、重试、限流、ETag
+│   └── merge.rs         #   版本去重与跨源字段合并
+└── mcp_snapshot/        # 本地快照
+    ├── schema.rs        #   表定义与 v13 列清单
+    ├── seeding.rs       #   curated seed upsert
+    ├── filters.rs       #   参数化卡片查询形状
+    ├── query/           #   `&Connection` SQL 读写核心（纯函数、可测）
+    ├── seeds/           #   curated 种子数据
+    └── tests/
+
+crates/skillstar-app/src/mcp/     # 跨域 use case（本域唯一编排层）
+├── runtime.rs           #   运行时形态候选与排序
+├── draft.rs             #   registry server → McpServerEntry 草稿（含来源指纹）
+├── install.rs           #   安装前确认负载（完整命令 + Input 表单 + secret 策略）
+└── presets.rs           #   curated 行 → preset 芯片
+
+crates/skillstar-models/src/mcp/  # 本地 store 与投影
+└── probe/               #   双纪元健康探测（modern / legacy）
+
+src-tauri/src/commands/mcp_commands.rs      # 只有命令注册 / DTO / State / 错误
+src-tauri/src/commands/mcp_marketplace.rs   # 同上
+```
+
+已删除的单文件（旧布局，不要再引用）：`mcp_models.rs`、`mcp_remote.rs`、`mcp_snapshot/query.rs`。
 
 ## 新代码放置决策
 

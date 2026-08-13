@@ -36,9 +36,7 @@ const OFFICIAL_META: Record<
 };
 
 /** Tools that can switch to Native Official via the column header. */
-export function toolSupportsOfficial(
-  toolId: string,
-): toolId is "claude-code" | "claude-desktop" | "codex" {
+export function toolSupportsOfficial(toolId: string): toolId is "claude-code" | "claude-desktop" | "codex" {
   return toolId === "claude-code" || toolId === "claude-desktop" || toolId === "codex";
 }
 
@@ -48,10 +46,7 @@ export function officialProviderIdForTool(toolId: string): OfficialProviderId | 
   return null;
 }
 
-export function isNativeOfficialProvider(provider: {
-  id?: string | null;
-  preset_id?: string | null;
-}): boolean {
+export function isNativeOfficialProvider(provider: { id?: string | null; preset_id?: string | null }): boolean {
   const id = provider.id?.trim() ?? "";
   const preset = provider.preset_id?.trim() ?? "";
   return (
@@ -61,10 +56,7 @@ export function isNativeOfficialProvider(provider: {
 }
 
 /** Which agent an Official seed binds; null if not Official. */
-export function officialBindToolId(provider: {
-  id?: string | null;
-  preset_id?: string | null;
-}): ProviderToolId | null {
+export function officialBindToolId(provider: { id?: string | null; preset_id?: string | null }): ProviderToolId | null {
   const key = (provider.preset_id?.trim() || provider.id?.trim() || "") as OfficialProviderId;
   return OFFICIAL_META[key]?.bindToolId ?? null;
 }
@@ -112,7 +104,9 @@ export function makeOfficialProviderSeed(id: OfficialProviderId, sortIndex: numb
     sort_index: sortIndex,
     preset_id: id,
     icon_color: meta.iconColor,
-    notes: "原生登录 · Official",
+    // Persisted onto the provider record, so it must not depend on the active
+    // locale — a translated value would be frozen into the user's store.
+    notes: "Native login · Official",
     codex_auth_mode: id === CODEX_OFFICIAL_ID ? "oauth" : undefined,
   };
 }
@@ -123,9 +117,7 @@ export function makeOfficialProviderSeed(id: OfficialProviderId, sortIndex: numb
  */
 export function withEnsuredOfficialProviders(providers: ProviderEntryFlat[]): ProviderEntryFlat[] {
   const byId = new Map(providers.map((p) => [p.id, p]));
-  const byPreset = new Map(
-    providers.filter((p) => p.preset_id).map((p) => [p.preset_id!, p] as const),
-  );
+  const byPreset = new Map(providers.filter((p) => p.preset_id).map((p) => [p.preset_id!, p] as const));
 
   const injected: ProviderEntryFlat[] = [];
   for (const id of OFFICIAL_PROVIDER_IDS) {

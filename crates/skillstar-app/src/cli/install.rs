@@ -10,7 +10,6 @@ use super::{
 
 use skillstar_skills::deployment;
 use skillstar_skills::git_skill::GitSkillFacade;
-use skillstar_skills::local_skill;
 use skillstar_skills::repo_scanner;
 use skillstar_skills::skill_bundle;
 use std::io::{self, IsTerminal, Write};
@@ -90,7 +89,7 @@ fn resolve_install_destination(opts: &InstallOpts<'_>) -> Result<InstallDestinat
     } else if opts.yes || opts.all || !io::stdin().is_terminal() {
         skillstar_skills::projects::ProjectDeployMode::Symlink
     } else {
-        let profiles = skillstar_skills::agents::list_profiles();
+        let profiles = skillstar_agents::list_profiles();
         let unique_targets = agent_ids
             .iter()
             .filter_map(|id| profiles.iter().find(|profile| &profile.id == id))
@@ -336,28 +335,19 @@ fn install_local_dir(path: &Path, opts: &InstallOpts<'_>) -> Vec<String> {
         std::process::exit(1);
     }
 
-    // Filter by --skill / --name / --all if provided.
-    let selected: Vec<&skillstar_skills::DiscoveredSkill> = if opts.all
+    // Delegate to the Skills domain use case: discovery, frontmatter quality
+    // gate, full-directory copy and per-skill outcome reporting all live in
+    // one place (the CLI must not reimplement adoption).
+    let names: Option<Vec<String>> = if opts.all
         || opts.skill.iter().any(|name| name == "*")
         || (opts.yes && opts.name.is_none() && opts.skill.is_empty())
+        || skills.len() == 1
     {
-        skills.iter().collect()
+        None
     } else if !opts.skill.is_empty() {
-        skills
-            .iter()
-            .filter(|s| {
-                opts.skill
-                    .iter()
-                    .any(|want| want.eq_ignore_ascii_case(&s.id))
-            })
-            .collect()
+        Some(opts.skill.iter().map(|name| name.to_string()).collect())
     } else if let Some(name) = opts.name {
-        skills
-            .iter()
-            .filter(|s| s.id.eq_ignore_ascii_case(name))
-            .collect()
-    } else if skills.len() == 1 {
-        skills.iter().collect()
+        Some(vec![name.to_string()])
     } else {
         let selected_names = match prompt_for_skill_selection(&skills) {
             Ok(names) => names,
@@ -366,53 +356,32 @@ fn install_local_dir(path: &Path, opts: &InstallOpts<'_>) -> Vec<String> {
                 std::process::exit(2);
             }
         };
-        skills
-            .iter()
-            .filter(|skill| selected_names.contains(&skill.id))
-            .collect()
+        Some(selected_names)
     };
 
-    if selected.is_empty() {
-        eprintln!("✗ None of the requested skills were found in the directory.");
-        std::process::exit(1);
-    }
-
-    let mut adopted: Vec<String> = Vec::new();
-    for skill in selected {
-        let source_dir = if skill.folder_path.is_empty() {
-            canonical.clone()
-        } else {
-            canonical.join(&skill.folder_path)
-        };
-        let skill_md = source_dir.join("SKILL.md");
-        let content = match std::fs::read_to_string(&skill_md) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("✗ Failed to read {}: {}", skill_md.display(), e);
-                continue;
+    match skillstar_skills::local_skill::adopt_folder(&canonical.to_string_lossy(), names) {
+        Ok(result) => {
+            for adopted in &result.adopted {
+                println!("  ✓ Adopted '{}'", adopted.name);
             }
-        };
-        match local_skill::create(&skill.id, Some(&content)) {
-            Ok(_) => {
-                println!("  ✓ Adopted '{}'", skill.id);
-                adopted.push(skill.id.clone());
+            for skipped in &result.skipped {
+                eprintln!("  ✗ Failed to adopt '{}': {}", skipped.name, skipped.reason);
             }
-            Err(err) => {
-                eprintln!("  ✗ Failed to adopt '{}': {}", skill.id, err);
+            if result.adopted.is_empty() {
+                eprintln!("✗ Nothing was adopted.");
+                std::process::exit(1);
             }
+            println!(
+                "✓ Adopted {} skill(s) into ~/.skillstar/hub/local.",
+                result.adopted.len()
+            );
+            result.adopted.into_iter().map(|adopted| adopted.name).collect()
+        }
+        Err(err) => {
+            eprintln!("✗ Adoption failed: {err}");
+            std::process::exit(1);
         }
     }
-
-    if adopted.is_empty() {
-        eprintln!("✗ Nothing was adopted.");
-        std::process::exit(1);
-    }
-
-    println!(
-        "✓ Adopted {} skill(s) into ~/.skillstar/hub/local.",
-        adopted.len()
-    );
-    adopted
 }
 
 /// Sole entry point that decides between batch-install (multi-skill), single-skill,
@@ -655,7 +624,7 @@ fn preview_install(url: &str, explicit_name: Option<&str>, skill_filter: &[Strin
         };
 
         for name in skill_filter {
-            let target = find_target_skill_preview(&skills_found, Some(name), name);
+            let target = skillstar_skills::skill_install::find_target_skill(&skills_found, Some(name), name);
             let already_installed = target
                 .map(|s| skills_dir.join(&s.id).exists())
                 .unwrap_or(false);
@@ -693,7 +662,7 @@ fn preview_install(url: &str, explicit_name: Option<&str>, skill_filter: &[Strin
             return;
         };
 
-        let target = find_target_skill_preview(&skills_found, explicit_name, &name_hint);
+        let target = skillstar_skills::skill_install::find_target_skill(&skills_found, explicit_name, &name_hint);
         if let Some(skill) = target {
             println!("  • {} (skill found in repo, would be installed)", skill.id);
         } else {
@@ -706,21 +675,6 @@ fn preview_install(url: &str, explicit_name: Option<&str>, skill_filter: &[Strin
 }
 
 /// Inline targeting logic matching skill_install::find_target_skill.
-fn find_target_skill_preview<'a>(
-    skills_found: &'a [repo_scanner::DiscoveredSkill],
-    requested_name: Option<&str>,
-    name_hint: &str,
-) -> Option<&'a repo_scanner::DiscoveredSkill> {
-    if skills_found.len() == 1 {
-        return skills_found.first();
-    }
-    let search_key = requested_name.unwrap_or(name_hint);
-    let search_key_lower = search_key.to_lowercase();
-    skills_found
-        .iter()
-        .find(|s| s.id == search_key || s.id.to_lowercase() == search_key_lower)
-}
-
 pub fn cmd_install(opts: InstallOpts<'_>) {
     if opts.list {
         match classify_add_input(opts.url) {
@@ -804,7 +758,7 @@ pub fn cmd_install(opts: InstallOpts<'_>) {
             }
         }
         InstallScope::Global => {
-            let profiles = skillstar_skills::agents::list_profiles();
+            let profiles = skillstar_agents::list_profiles();
             let mut printed_dirs = std::collections::HashSet::new();
             for agent_id in &destination.agent_ids {
                 let Some(profile) = profiles.iter().find(|profile| &profile.id == agent_id) else {

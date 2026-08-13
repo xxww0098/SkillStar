@@ -30,26 +30,22 @@ export function useGitHubAuth() {
   const [lastFailure, setLastFailure] = useState<"load" | "start" | "poll" | "refresh" | "logout" | null>(null);
   const attemptRef = useRef(0);
 
-  const loadStatus = useCallback(async () => {
+  const loadStatus = useCallback(async (): Promise<GitHubConnectionStatus | null> => {
     setLoading(true);
     setError(null);
     try {
-      setStatus(await tauriInvoke("github_auth_status"));
+      const next = await tauriInvoke("github_auth_status");
+      setStatus(next);
       setLastFailure(null);
+      return next;
     } catch (cause) {
       setError(normalizeError(cause));
       setLastFailure("load");
+      return null;
     } finally {
       setLoading(false);
     }
   }, []);
-
-  useEffect(() => {
-    void loadStatus();
-    return () => {
-      attemptRef.current += 1;
-    };
-  }, [loadStatus]);
 
   const start = useCallback(async () => {
     const attempt = attemptRef.current + 1;
@@ -116,19 +112,39 @@ export function useGitHubAuth() {
     await tauriInvoke("github_auth_cancel").catch(() => false);
   }, []);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options?: { silent?: boolean }) => {
+    const attempt = attemptRef.current;
+    const silent = Boolean(options?.silent);
     setBusy(true);
-    setError(null);
+    if (!silent) setError(null);
     try {
-      setStatus(await tauriInvoke("github_auth_refresh"));
-      setLastFailure(null);
+      const next = await tauriInvoke("github_auth_refresh");
+      if (attemptRef.current === attempt) {
+        setStatus(next);
+        setLastFailure(null);
+      }
     } catch (cause) {
-      setError(normalizeError(cause));
-      setLastFailure("refresh");
+      // A silent recovery attempt keeps the last known state; the expired
+      // section still offers explicit refresh/sign-in actions.
+      if (attemptRef.current === attempt && !silent) {
+        setError(normalizeError(cause));
+        setLastFailure("refresh");
+      }
     } finally {
-      setBusy(false);
+      if (attemptRef.current === attempt) setBusy(false);
     }
   }, []);
+
+  // Recover an expired session once at mount when a refresh token may still
+  // be valid, instead of forcing the user to notice and click refresh.
+  useEffect(() => {
+    void loadStatus().then((status) => {
+      if (status?.state === "expired") void refresh({ silent: true });
+    });
+    return () => {
+      attemptRef.current += 1;
+    };
+  }, [loadStatus, refresh]);
 
   const logout = useCallback(async () => {
     setBusy(true);

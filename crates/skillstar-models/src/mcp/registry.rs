@@ -10,7 +10,8 @@
 //! This is a wider, independent domain table from `tool_sync::agents`
 //! (`AgentSpec`): MCP additionally targets grok / zcode / kiro / cursor,
 //! and the hidden legacy `claude-desktop` / `gemini` cleanup ids deliberately
-//! stay outside it (not public targets).
+//! stay outside it (not public targets — their live successors are the
+//! distinct ids `claude-desktop-chat` and `gemini-cli`).
 
 use anyhow::Result;
 use std::path::{Path, PathBuf};
@@ -48,6 +49,18 @@ static MCP_TOOL_SPECS: &[McpToolSpec] = &[
         count_live: count_json_mcpservers,
         read_servers: read_json_mcpservers_entries,
         upsert: |path, entry| json_mcpservers_upsert(path, &entry.name, claude_code_spec(entry)),
+        remove: json_mcpservers_remove,
+    },
+    McpToolSpec {
+        id: CLAUDE_DESKTOP_CHAT_TOOL_ID,
+        label: "Claude Desktop",
+        resolve_config_path: resolve_claude_desktop_chat_config_path,
+        installed: installed_claude_desktop_chat,
+        count_live: count_json_mcpservers,
+        read_servers: read_claude_desktop_chat_entries,
+        upsert: |path, entry| {
+            json_mcpservers_upsert(path, &entry.name, claude_desktop_chat_spec(entry))
+        },
         remove: json_mcpservers_remove,
     },
     McpToolSpec {
@@ -120,6 +133,60 @@ static MCP_TOOL_SPECS: &[McpToolSpec] = &[
         upsert: |path, entry| json_mcpservers_upsert(path, &entry.name, cursor_spec(entry)),
         remove: json_mcpservers_remove,
     },
+    McpToolSpec {
+        id: "vscode",
+        label: "VS Code",
+        resolve_config_path: resolve_vscode_config_path,
+        installed: |home| home.join(".copilot").exists(),
+        count_live: count_vscode_servers,
+        read_servers: read_vscode_entries,
+        upsert: |path, entry| {
+            json_named_map_upsert(path, VSCODE_SERVERS_KEY, &entry.name, vscode_spec(entry))
+        },
+        remove: |path, name| json_named_map_remove(path, VSCODE_SERVERS_KEY, name),
+    },
+    McpToolSpec {
+        id: "windsurf",
+        label: "Windsurf",
+        resolve_config_path: resolve_windsurf_config_path,
+        installed: |home| home.join(".codeium").join("windsurf").exists(),
+        count_live: count_json_mcpservers,
+        read_servers: read_windsurf_entries,
+        upsert: |path, entry| json_mcpservers_upsert(path, &entry.name, windsurf_spec(entry)),
+        remove: json_mcpservers_remove,
+    },
+    McpToolSpec {
+        id: "cline",
+        label: "Cline",
+        resolve_config_path: resolve_cline_config_path,
+        installed: |home| home.join(".cline").exists(),
+        count_live: count_json_mcpservers,
+        read_servers: read_cline_entries,
+        upsert: |path, entry| json_mcpservers_upsert(path, &entry.name, cline_spec(entry)),
+        remove: json_mcpservers_remove,
+    },
+    McpToolSpec {
+        id: GEMINI_CLI_TOOL_ID,
+        label: "Gemini CLI",
+        resolve_config_path: resolve_gemini_cli_config_path,
+        installed: |home| home.join(".gemini").exists(),
+        count_live: count_json_mcpservers,
+        read_servers: read_gemini_cli_entries,
+        upsert: |path, entry| json_mcpservers_upsert(path, &entry.name, gemini_cli_spec(entry)),
+        remove: json_mcpservers_remove,
+    },
+    McpToolSpec {
+        id: "zed",
+        label: "Zed",
+        resolve_config_path: resolve_zed_config_path,
+        installed: |home| home.join(".config").join("zed").exists(),
+        count_live: count_zed_context_servers,
+        read_servers: read_zed_entries,
+        upsert: |path, entry| {
+            json_named_map_upsert(path, ZED_SERVERS_KEY, &entry.name, zed_spec(entry))
+        },
+        remove: |path, name| json_named_map_remove(path, ZED_SERVERS_KEY, name),
+    },
 ];
 
 /// All registered MCP tools, in canonical display order.
@@ -156,10 +223,40 @@ mod tests {
         }
     }
 
+    /// Each cleanup tombstone stays out of the registry while its public
+    /// successor is in it, under a *different* id.
+    ///
+    /// The invariant is the id split, not the absence of the product: a
+    /// tombstone authorizes exactly one removal, a registry row is a standing
+    /// enable flag, and collapsing them onto one id would let a stale `true`
+    /// in an old store keep deleting what the live target writes.
     #[test]
-    fn legacy_cleanup_ids_stay_out_of_the_registry() {
-        assert!(mcp_tool_spec(LEGACY_CLAUDE_DESKTOP_TOOL_ID).is_none());
-        assert!(mcp_tool_spec(LEGACY_GEMINI_TOOL_ID).is_none());
+    fn cleanup_tombstones_and_their_public_successors_use_distinct_ids() {
+        for (tombstone, successor) in [
+            (LEGACY_CLAUDE_DESKTOP_TOOL_ID, CLAUDE_DESKTOP_CHAT_TOOL_ID),
+            (LEGACY_GEMINI_TOOL_ID, GEMINI_CLI_TOOL_ID),
+        ] {
+            assert_ne!(tombstone, successor);
+            assert!(
+                mcp_tool_spec(tombstone).is_none(),
+                "tombstone '{tombstone}' must not be a registry row"
+            );
+            assert!(
+                !MCP_TOOL_IDS.contains(&tombstone),
+                "tombstone '{tombstone}' must not be a public target"
+            );
+            assert!(
+                mcp_tool_spec(successor).is_some(),
+                "public successor '{successor}' must be a registry row"
+            );
+            // Same file, different id — that is what makes subsumption
+            // (`sync::cleanup_legacy_*`) necessary rather than optional.
+            assert_eq!(
+                resolve_mcp_config_path(tombstone).unwrap(),
+                resolve_mcp_config_path(successor).unwrap(),
+                "'{tombstone}' and '{successor}' must resolve to the same file"
+            );
+        }
         assert!(mcp_tool_spec("unknown").is_none());
     }
 

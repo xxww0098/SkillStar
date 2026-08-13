@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use regex::Regex;
 use tracing::{debug, warn};
 
@@ -38,10 +38,18 @@ fn re_nextjs_skill_data() -> &'static Regex {
     })
 }
 
-/// Get skills.sh leaderboard via HTML scraping
-pub async fn get_skills_sh_leaderboard(category: &str) -> Result<Vec<Skill>> {
-    let client = marketplace_client()?;
-
+/// Get skills.sh leaderboard via HTML scraping, with content-addressing
+/// metadata (source host, payload SHA-256, ETag) for the snapshot's
+/// incremental write path.
+///
+/// There is deliberately no `.0` convenience wrapper: `FetchMeta` carries
+/// `degraded`, and every caller that dropped it — the `ErrorFallback` branches
+/// in particular — silently turned a knowingly lossy payload into one the UI
+/// presented as complete.
+pub async fn get_skills_sh_leaderboard_with_meta(
+    category: &str,
+    etag: Option<&str>,
+) -> Result<(Vec<Skill>, FetchMeta)> {
     // Map category to URL path
     let url_path = match category {
         "hot" => "/hot",
@@ -50,27 +58,55 @@ pub async fn get_skills_sh_leaderboard(category: &str) -> Result<Vec<Skill>> {
         _ => "/",
     };
 
-    let url = format!("https://skills.sh{}", url_path);
-    debug!(target: "skills_sh", url = %url, "fetching leaderboard");
+    let (html, mut meta) = fetch_with_failover(url_path, etag).await?;
+    debug!(target: "skills_sh", host = %meta.source_host, "fetching leaderboard");
 
-    let html = client
-        .get(&url)
-        .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        .header("Accept", "text/html,application/xhtml+xml")
-        .send()
-        .await
-        .context("Failed to fetch skills.sh")?
-        .text()
-        .await
-        .context("Failed to read HTML")?;
+    // 304 Not Modified: the snapshot layer keeps its previous write.
+    if meta.payload_sha256.is_empty() {
+        return Ok((Vec::new(), meta));
+    }
 
-    let mut skills = parse_skills_sh_html(&html);
-    debug!(target: "skills_sh", count = skills.len(), "parsed skills from HTML");
+    let html_skills = parse_skills_sh_html(&html);
+    debug!(target: "skills_sh", count = html_skills.len(), "parsed skills from HTML");
 
-    // Supplement with search API to get ALL skills beyond the SSR payload.
-    // The SSR payload only contains ~500-600 top skills; the search API
-    // can return the full registry (~50K+).
-    let api_skills = fetch_all_skills_via_api(&client).await;
+    // Supplement with the search API. The SSR payload carries the ~500-600 top
+    // skills; the search API adds at most `SEARCH_API_HARD_LIMIT` fuzzy matches
+    // on top of it — it is a supplement, never a full registry dump.
+    let (skills, degraded) = combine_leaderboard(html_skills, fetch_all_skills_via_api().await)?;
+    meta.degraded = degraded;
+
+    Ok((skills, meta))
+}
+
+/// Merge the SSR leaderboard with the search-API supplement, and answer whether
+/// the result is a real leaderboard.
+///
+/// The degradation is decided on `html_skills` — before the append — because
+/// that is the only moment the two are still distinguishable. The search API is
+/// a supplement; when the SSR payload stops parsing (skills.sh redesign, a WAF
+/// challenge page, a mirror serving something else) that supplement silently
+/// becomes the *whole* answer: ≤`SEARCH_API_HARD_LIMIT` fuzzy matches for the
+/// literal word "skill", ordered by stars, carrying none of skills.sh's
+/// ranking. Asking `skills.is_empty()` one line later — after the append made
+/// it non-empty — is what left the entire degraded mechanism unreachable in the
+/// exact scenario it was built for: 200 fallback rows replacing ~600 real ones,
+/// with a full 6-hour TTL and a "fresh" label. See `docs/errors.md`.
+///
+/// Both halves failing is not a degraded payload but no payload: it errors,
+/// rather than committing an empty leaderboard over a populated one.
+pub(crate) fn combine_leaderboard(
+    html_skills: Vec<Skill>,
+    api_skills: Result<Vec<Skill>>,
+) -> Result<(Vec<Skill>, bool)> {
+    let mut skills = html_skills;
+    let degraded = skills.is_empty();
+    if degraded {
+        warn!(
+            target: "skills_sh",
+            "leaderboard HTML parsing produced nothing; the capped search API is standing in for the whole leaderboard"
+        );
+    }
+
     match api_skills {
         Ok(mut extra) => {
             let existing: HashSet<String> = skills.iter().map(|s| s.name.clone()).collect();
@@ -94,49 +130,94 @@ pub async fn get_skills_sh_leaderboard(category: &str) -> Result<Vec<Skill>> {
         }
         Err(err) => {
             warn!(target: "skills_sh", error = %err, "API supplement failed, using SSR-only data");
+            if skills.is_empty() {
+                // A second call to the very same endpoint (what this used to
+                // do) goes through the same failover and the same serde parse,
+                // so it fails for the same reason.
+                return Err(err.context(
+                    "Leaderboard HTML parsed to nothing and the search API fallback failed",
+                ));
+            }
         }
     }
 
     if skills.is_empty() {
-        warn!(target: "skills_sh", "HTML parsing failed, using search API fallback");
-        let fallback_url = "https://skills.sh/api/search?q=skill&limit=100000";
-        let response: SkillsShSearchResponse = client
-            .get(fallback_url)
-            .header("User-Agent", USER_AGENT)
-            .send()
-            .await
-            .context("Fallback failed")?
-            .json()
-            .await
-            .context("Fallback parse failed")?;
-        let mut result: Vec<Skill> = response.skills.into_iter().map(Skill::from).collect();
-        result.sort_by_key(|s| std::cmp::Reverse(s.stars));
-        for (i, skill) in result.iter_mut().enumerate() {
-            skill.rank = Some((i + 1) as u32);
-        }
-        return Ok(result);
+        return Err(anyhow!("Leaderboard payload contained no skills"));
     }
 
-    Ok(skills)
+    Ok((skills, degraded))
 }
 
-/// Fetch the full skills.sh registry via the search API.
-async fn fetch_all_skills_via_api(client: &reqwest::Client) -> Result<Vec<Skill>> {
-    let url = "https://skills.sh/api/search?q=skill&limit=100000";
-    debug!(target: "skills_sh", "fetching full registry via search API");
-    let response: SkillsShSearchResponse = client
-        .get(url)
-        .header("User-Agent", USER_AGENT)
-        .header("Accept", "application/json")
-        .send()
-        .await
-        .context("Failed to fetch full skill registry")?
-        .json()
-        .await
-        .context("Failed to parse full registry response")?;
+/// Fuzzy term the supplement searches for. Not a wildcard — `/api/search`
+/// rejects a query shorter than 2 characters (`{"error":"Query must be at
+/// least 2 characters"}`) and has no "match everything" syntax, so this is a
+/// literal substring match against skill names, nothing more.
+const SEARCH_SUPPLEMENT_QUERY: &str = "skill";
+
+/// Hard server-side cap on `/api/search`, probed against `https://skills.sh`
+/// on 2026-08-12:
+///
+/// * `limit` *is* honoured, but only below the cap — `limit=199` returns 199
+///   rows, `limit=200` returns 200, and `limit=201`, `limit=500`,
+///   `limit=100000` all return exactly 200. Omitting `limit` returns 100.
+/// * There is no pagination of any kind. `offset`, `page`, `p`, `cursor`,
+///   `after`, `skip`, `start`, `from` and `pageSize` are all *silently
+///   ignored*: every one of them came back with the default first page (same
+///   leading row, same 100 entries). The body carries only
+///   `{query, searchType, skills, count, duration_ms}` and the response headers
+///   carry no `Link`/`X-Total-Count`, so there is no cursor to follow either.
+/// * No sibling endpoint exposes the full registry: `/api/skills`,
+///   `/api/leaderboard`, `/api/all`, `/api/registry` and `/api/stats` are 404.
+/// * Rows are `{id, skillId, name, installs, source}` — no `description`, no
+///   `repoUrl`.
+///
+/// So this call can never be a full registry dump, and asking for a huge
+/// `limit` does not make it one. It stays what its name says: a supplement of
+/// at most 200 fuzzy matches appended after the SSR leaderboard. Re-probe
+/// before treating any larger number as reachable.
+pub(crate) const SEARCH_API_HARD_LIMIT: usize = 200;
+
+/// Request path for the supplement: ask for exactly the cap, since anything
+/// above it is discarded server-side anyway.
+pub(crate) fn search_supplement_path() -> String {
+    format!("/api/search?q={SEARCH_SUPPLEMENT_QUERY}&limit={SEARCH_API_HARD_LIMIT}")
+}
+
+/// Parsed `/api/search` supplement plus whether the server cap swallowed rows.
+pub(crate) struct SearchSupplement {
+    pub(crate) skills: Vec<Skill>,
+    /// The response filled the cap, so the registry holds more matches than
+    /// these — and, with no pagination parameter to follow, they are
+    /// unreachable through this endpoint.
+    pub(crate) truncated: bool,
+}
+
+/// Parse a `/api/search` body into the supplement (no network).
+pub(crate) fn parse_search_supplement(body: &str) -> Result<SearchSupplement> {
+    let response: SkillsShSearchResponse =
+        serde_json::from_str(body).context("Failed to parse search supplement response")?;
     let skills: Vec<Skill> = response.skills.into_iter().map(Skill::from).collect();
-    debug!(target: "skills_sh", count = skills.len(), "fetched full registry");
-    Ok(skills)
+    let truncated = skills.len() >= SEARCH_API_HARD_LIMIT;
+    Ok(SearchSupplement { skills, truncated })
+}
+
+/// Fetch supplemental skills via the search API.
+///
+/// One request, by design: see [`SEARCH_API_HARD_LIMIT`] — the endpoint has no
+/// offset/cursor, so a second request would return the same first page.
+async fn fetch_all_skills_via_api() -> Result<Vec<Skill>> {
+    debug!(target: "skills_sh", "fetching supplemental skills via search API");
+    let (body, _) = fetch_with_failover(&search_supplement_path(), None).await?;
+    let supplement = parse_search_supplement(&body)?;
+    if supplement.truncated {
+        debug!(
+            target: "skills_sh",
+            count = supplement.skills.len(),
+            cap = SEARCH_API_HARD_LIMIT,
+            "search supplement hit the server-side cap; the rest is unreachable (no pagination)"
+        );
+    }
+    Ok(supplement.skills)
 }
 
 /// Extract skills from the escaped Next.js SSR payload.
@@ -148,13 +229,16 @@ async fn fetch_all_skills_via_api(client: &reqwest::Client) -> Result<Vec<Skill>
 /// Standard regex with `[^{}]` and unescaped `"` delimiters fails to match
 /// these objects. This function uses a regex targeting escaped quotes and then
 /// unescapes each match before serde parsing.
-fn extract_skills_from_escaped_payload(html: &str) -> Vec<Skill> {
+pub(crate) fn extract_skills_from_escaped_payload(html: &str) -> Vec<Skill> {
     fn re_escaped_skill_object() -> &'static Regex {
         static RE: OnceLock<Regex> = OnceLock::new();
         RE.get_or_init(|| {
             // Match flat JSON objects containing \"skillId\" (escaped quotes).
-            // [^}]* is safe because these skill objects never have nested braces.
-            Regex::new(r#"\{[^}]*\\"skillId\\"[^}]*\}"#).expect("escaped skill object regex")
+            // `[^{}]` (not `[^}]`) on both sides is required: the skill array is
+            // itself wrapped in `{\"initialSkills\":[{...`, so a class that
+            // allows `{` lets the leftmost match start at the *outer* brace and
+            // swallow the rank-1 entry into unbalanced JSON that serde drops.
+            Regex::new(r#"\{[^{}]*\\"skillId\\"[^{}]*\}"#).expect("escaped skill object regex")
         })
     }
 

@@ -1,5 +1,6 @@
 import { Loader2, RefreshCw, RotateCw, Trash2, UserPlus, UsersRound, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import type {
   ChannelInvitationAction,
@@ -21,6 +22,7 @@ interface Props {
 }
 
 export function ChannelMembershipPanel({ channel }: Props) {
+  const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<ChannelMembershipSnapshot | null>(null);
   const [username, setUsername] = useState("");
   const [role, setRole] = useState<ChannelInviteRole>("subscriber");
@@ -118,21 +120,19 @@ export function ChannelMembershipPanel({ channel }: Props) {
   if (denied || (loading && snapshot === null && !error)) return null;
 
   return (
-    <section className="rounded-xl border border-border p-4" aria-label="Channel members">
+    <section className="rounded-xl border border-border p-4" aria-label={t("sharedChannels.membersAria")}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2 text-sm font-semibold">
             <UsersRound className="size-4" />
-            Members and invitations
+            {t("sharedChannels.membersTitle")}
           </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            GitHub is the source of truth, including team and organization access.
-          </p>
+          <p className="mt-1 text-xs text-muted-foreground">{t("sharedChannels.membersHint")}</p>
         </div>
         <Button
           size="icon"
           variant="ghost"
-          aria-label="Refresh members"
+          aria-label={t("sharedChannels.refreshMembersAria")}
           onClick={() => void refresh()}
           disabled={loading || mutating}
         >
@@ -142,9 +142,9 @@ export function ChannelMembershipPanel({ channel }: Props) {
 
       <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_9rem_auto]">
         <label className="space-y-1 text-xs font-medium">
-          <span>GitHub username</span>
+          <span>{t("sharedChannels.username")}</span>
           <input
-            aria-label="GitHub username"
+            aria-label={t("sharedChannels.username")}
             value={username}
             onChange={(event) => setUsername(event.target.value)}
             className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
@@ -153,39 +153,41 @@ export function ChannelMembershipPanel({ channel }: Props) {
           />
         </label>
         <label className="space-y-1 text-xs font-medium">
-          <span>Channel role</span>
+          <span>{t("sharedChannels.channelRole")}</span>
           <select
-            aria-label="Channel role"
+            aria-label={t("sharedChannels.channelRole")}
             value={role}
             onChange={(event) => setRole(event.target.value as ChannelInviteRole)}
             className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
             disabled={mutating}
           >
-            <option value="subscriber">Subscriber</option>
-            <option value="publisher">Publisher</option>
+            <option value="subscriber">{t("sharedChannels.roleSubscriber")}</option>
+            <option value="publisher">{t("sharedChannels.rolePublisher")}</option>
           </select>
         </label>
         <Button className="self-end" onClick={() => void invite()} disabled={mutating || !username.trim()}>
           {saving ? <Loader2 className="mr-1.5 size-4 animate-spin" /> : <UserPlus className="mr-1.5 size-4" />}
-          Invite
+          {t("sharedChannels.invite")}
         </Button>
       </div>
 
       {lastAction && (
         <p className={`mt-3 text-xs ${lastAction.status === "failed" ? "text-destructive" : "text-muted-foreground"}`}>
-          {lastAction.username || "Invitation"}: {lastAction.status}
+          {lastAction.username || t("sharedChannels.invitation")}: {lastAction.status}
         </p>
       )}
       {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
       {revocation && (
         <div className="mt-3 rounded-lg border border-border bg-muted/25 p-3 text-xs">
           {revocation.status === "revoked" ? (
-            <p>@{revocation.username} no longer has effective GitHub access.</p>
+            <p>{t("sharedChannels.revokedHint", { username: revocation.username })}</p>
           ) : (
             <div className="space-y-1.5">
               <p>
-                @{revocation.username} still has effective {revocation.effective_role} access through GitHub. The direct
-                grant is absent; inherited access may remain, or GitHub permission propagation may still be settling.
+                {t("sharedChannels.revokedInheritedHint", {
+                  username: revocation.username,
+                  role: revocation.effective_role,
+                })}
               </p>
               <a
                 href={`${channel.html_url}/settings/access`}
@@ -193,7 +195,7 @@ export function ChannelMembershipPanel({ channel }: Props) {
                 rel="noreferrer"
                 className="font-medium text-primary hover:underline"
               >
-                Review effective access on GitHub
+                {t("sharedChannels.reviewAccessOnGitHub")}
               </a>
             </div>
           )}
@@ -203,7 +205,7 @@ export function ChannelMembershipPanel({ channel }: Props) {
       {!loading && snapshot && (
         <div className="mt-4 space-y-4">
           <div>
-            <h3 className="text-xs font-semibold">Accepted access</h3>
+            <h3 className="text-xs font-semibold">{t("sharedChannels.acceptedAccess")}</h3>
             <div className="mt-2 space-y-1.5">
               {snapshot.members.map((member) => (
                 <div
@@ -213,12 +215,15 @@ export function ChannelMembershipPanel({ channel }: Props) {
                   <span className="font-medium">@{member.user.login}</span>
                   <span className="flex items-center gap-2">
                     <span className="text-muted-foreground">
-                      {member.role} · GitHub {member.github_role_name}
+                      {t("sharedChannels.gitHubRole", {
+                        role: member.role,
+                        githubRole: member.github_role_name,
+                      })}
                     </span>
                     <Button
                       size="sm"
                       variant="ghost"
-                      aria-label={`Remove direct access for @${member.user.login}`}
+                      aria-label={t("sharedChannels.removeAccessAria", { username: member.user.login })}
                       disabled={mutating}
                       onClick={() => void revoke(member.user.login)}
                     >
@@ -232,13 +237,13 @@ export function ChannelMembershipPanel({ channel }: Props) {
                 </div>
               ))}
               {snapshot.members.length === 0 && (
-                <p className="text-xs text-muted-foreground">No visible collaborators.</p>
+                <p className="text-xs text-muted-foreground">{t("sharedChannels.noCollaborators")}</p>
               )}
             </div>
           </div>
 
           <div>
-            <h3 className="text-xs font-semibold">Pending invitations</h3>
+            <h3 className="text-xs font-semibold">{t("sharedChannels.pendingInvitations")}</h3>
             <div className="mt-2 space-y-1.5">
               {snapshot.invitations.map((invitation) => (
                 <div
@@ -247,7 +252,9 @@ export function ChannelMembershipPanel({ channel }: Props) {
                 >
                   <span>
                     <span className="font-medium">@{invitation.invitee?.login ?? "unknown"}</span>
-                    <span className="ml-2 text-muted-foreground">{invitation.effective_role} · pending</span>
+                    <span className="ml-2 text-muted-foreground">
+                      {invitation.effective_role} · {t("sharedChannels.pending")}
+                    </span>
                   </span>
                   <span className="flex items-center gap-1">
                     {invitation.effective_role !== "owner" && (
@@ -259,7 +266,7 @@ export function ChannelMembershipPanel({ channel }: Props) {
                           void run(() => resendSharedChannelInvitation(channel.repository_id, invitation.id))
                         }
                       >
-                        <RotateCw className="mr-1 size-3" /> Re-invite
+                        <RotateCw className="mr-1 size-3" /> {t("sharedChannels.reinvite")}
                       </Button>
                     )}
                     <Button
@@ -270,19 +277,17 @@ export function ChannelMembershipPanel({ channel }: Props) {
                         void run(() => cancelSharedChannelInvitation(channel.repository_id, invitation.id))
                       }
                     >
-                      <X className="mr-1 size-3" /> Cancel
+                      <X className="mr-1 size-3" /> {t("common.cancel")}
                     </Button>
                   </span>
                 </div>
               ))}
               {snapshot.invitations.length === 0 && (
-                <p className="text-xs text-muted-foreground">No pending invitations.</p>
+                <p className="text-xs text-muted-foreground">{t("sharedChannels.noPendingInvitations")}</p>
               )}
             </div>
           </div>
-          <p className="text-[11px] text-muted-foreground">
-            Re-invite cancels the current GitHub invitation before creating a new one; the two steps are not atomic.
-          </p>
+          <p className="text-[11px] text-muted-foreground">{t("sharedChannels.reinviteNote")}</p>
         </div>
       )}
     </section>

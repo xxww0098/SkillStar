@@ -688,10 +688,6 @@
 
 /* ========== Keyframes ========== */
 
-.animate-ping-limited {
-  animation: ping 1s cubic-bezier(0, 0, 0.2, 1) 3;
-}
-
 /* Drag indicator bounce-in — subtle scale-in for drop position lines */
 @keyframes drag-indicator-in {
   0% {
@@ -855,10 +851,6 @@
   }
 
   .animate-logo-spin {
-    animation: none !important;
-  }
-
-  .animate-ping-limited {
     animation: none !important;
   }
 

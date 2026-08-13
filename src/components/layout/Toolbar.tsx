@@ -45,10 +45,6 @@ interface ToolbarProps {
   isRefreshing?: boolean;
   /** Optional count label shown in toolbar (e.g. "12 cards") */
   countText?: React.ReactNode;
-  /** Show only cards with update available */
-  showUpdateOnly?: boolean;
-  /** Toggle update-only filter */
-  onToggleUpdateOnly?: () => void;
   /** Number of cards with available updates */
   pendingUpdateCount?: number;
   /** Hide the "Stars" sort option */
@@ -93,6 +89,10 @@ interface ToolbarProps {
   onRepoFilterChange?: (source: string | null) => void;
   /** Remove all skills from a repo source (shown as a trash button on each source row) */
   onRemoveRepoSource?: (source: string) => void;
+  /** Reinstall every skill discovered from a repo source. */
+  onReinstallRepoSource?: (source: string) => void;
+  /** Source currently being reinstalled, if any. */
+  reinstallingRepoSource?: string | null;
 }
 
 export function Toolbar({
@@ -109,8 +109,6 @@ export function Toolbar({
   onRefresh,
   isRefreshing,
   countText,
-  showUpdateOnly,
-  onToggleUpdateOnly,
   pendingUpdateCount,
   hideStarsSort,
   onAiPick,
@@ -133,6 +131,8 @@ export function Toolbar({
   repoFilter,
   onRepoFilterChange,
   onRemoveRepoSource,
+  onReinstallRepoSource,
+  reinstallingRepoSource,
 }: ToolbarProps) {
   const { t } = useTranslation();
   const [spotlightOpen, setSpotlightOpen] = useState(false);
@@ -140,9 +140,6 @@ export function Toolbar({
 
   const enabledProfiles = agentProfiles?.filter((p) => p.enabled) ?? [];
   const hasPendingUpdates = (pendingUpdateCount ?? 0) > 0;
-  const hasUpdateOnlySelector = Boolean(onToggleUpdateOnly);
-  const isUpdateOnlyActive = hasUpdateOnlySelector && Boolean(showUpdateOnly);
-  const shouldAnimateUpdateOnly = hasPendingUpdates && !isUpdateOnlyActive;
 
   const [cooldown, setCooldown] = useState(false);
   const [refreshState, setRefreshState] = useState<"idle" | "requested" | "refreshing">("idle");
@@ -455,6 +452,29 @@ export function Toolbar({
                           <span className="truncate">{source}</span>
                           {isActive && <Check className="w-3.5 h-3.5 ml-auto shrink-0 text-primary" />}
                         </button>
+                        {onReinstallRepoSource ? (
+                          <button
+                            type="button"
+                            disabled={Boolean(reinstallingRepoSource)}
+                            className={cn(
+                              "mr-0.5 p-1 rounded-md shrink-0 cursor-pointer transition-colors",
+                              "text-muted-foreground/50 hover:text-primary hover:bg-primary/10",
+                              "focus-ring disabled:cursor-not-allowed disabled:opacity-50",
+                            )}
+                            title={t("toolbar.reinstallSource", { source })}
+                            aria-label={t("toolbar.reinstallSource", { source })}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onReinstallRepoSource(source);
+                            }}
+                          >
+                            {reinstallingRepoSource === source ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <RefreshCw className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        ) : null}
                         {onRemoveRepoSource ? (
                           <button
                             type="button"
@@ -537,14 +557,11 @@ export function Toolbar({
       {sortOptions.length > 0 && (
         <div className="flex items-center gap-0.5 border border-border rounded-lg overflow-hidden h-8 p-0.5 bg-sidebar/30 shadow-sm shrink-0">
           {sortOptions.map((opt) => {
-            const isActive = hasUpdateOnlySelector ? !isUpdateOnlyActive && sortBy === opt.value : sortBy === opt.value;
+            const isActive = sortBy === opt.value;
             return (
               <button
                 key={opt.value}
                 onClick={() => {
-                  if (isUpdateOnlyActive) {
-                    onToggleUpdateOnly?.();
-                  }
                   onSortChange(opt.value);
                 }}
                 aria-pressed={isActive}
@@ -568,44 +585,7 @@ export function Toolbar({
         </div>
       )}
 
-      {/* Update-only filter (filter-only; batch action is a separate primary CTA) */}
-      {onToggleUpdateOnly && (
-        <button
-          type="button"
-          onClick={onToggleUpdateOnly}
-          aria-pressed={isUpdateOnlyActive}
-          className={cn(
-            "flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium cursor-pointer whitespace-nowrap shrink-0 transition-all duration-200 focus-ring",
-            isUpdateOnlyActive
-              ? "border-accent/50 bg-accent text-accent-foreground"
-              : hasPendingUpdates
-                ? "border-warning/40 bg-warning/8 text-warning-foreground hover:bg-warning/15"
-                : "border-border bg-sidebar/30 text-muted-foreground hover:text-foreground hover:bg-sidebar-hover",
-          )}
-        >
-          {shouldAnimateUpdateOnly && (
-            <span className="relative flex h-2 w-2 shrink-0">
-              <span className="animate-ping-limited absolute inline-flex h-full w-full rounded-full bg-warning opacity-75" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-warning" />
-            </span>
-          )}
-          {t("toolbar.updateOnly")}
-          {hasPendingUpdates && (
-            <span
-              className={cn(
-                "min-w-[1.2rem] h-[1.1rem] px-1 rounded-full text-[10px] leading-[1.1rem] text-center tabular-nums",
-                shouldAnimateUpdateOnly && !isUpdateOnlyActive
-                  ? "bg-warning/20 text-warning-foreground"
-                  : "bg-muted text-muted-foreground",
-              )}
-            >
-              {pendingUpdateCount}
-            </span>
-          )}
-        </button>
-      )}
-
-      {/* Independent primary: update all pending hub skills (click-time snapshot) */}
+      {/* Update all pending hub skills (click-time snapshot), with pending-count badge */}
       {onUpdateAll && hasPendingUpdates && (
         <button
           type="button"
@@ -616,15 +596,13 @@ export function Toolbar({
             isUpdatingAll && "opacity-60 cursor-not-allowed",
           )}
         >
-          {isUpdatingAll ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <ArrowUpCircle className="w-3.5 h-3.5" />
-          )}
-          {t("toolbar.updateAllCount", {
-            count: pendingUpdateCount,
-            defaultValue: `Update ${pendingUpdateCount}`,
-          })}
+          {isUpdatingAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ArrowUpCircle className="w-3.5 h-3.5" />}
+          {isUpdatingAll
+            ? t("common.updating", { defaultValue: "Updating..." })
+            : t("toolbar.updateAllCount", {
+                count: pendingUpdateCount,
+                defaultValue: `Update ${pendingUpdateCount}`,
+              })}
         </button>
       )}
 

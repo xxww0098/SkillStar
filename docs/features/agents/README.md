@@ -11,9 +11,14 @@ SkillStar 里"支持一个 Agent"其实是 **三条互相独立的轴**，按需
 分发注册表以 `vercel-labs/skills/src/agents.ts` 为兼容基线；同步上游时必须同时核对
 Agent id、显示名和全局/项目技能目录。SkillStar 自有目标可以作为扩展保留，
 但不能改变同名上游 Agent 的目录语义。
-**刻意不支持**：`gemini-cli` / `gemini`（Skills 分发、Models 工具同步、MCP 写入均已移除）；
-Antigravity 仍可使用 `~/.gemini/` 路径；Usage/Cloud Code 中的 Gemini **模型名**与
-Marketplace 的 google-gemini 技能仓库不受影响。旧 v1 provider store 的 `gemini`
+**Gemini 的三轴状态各不相同**，不要当成一句话的「支持 / 不支持」：`gemini-cli` 已重新接入
+轴①（`BUILTIN_AGENT_DEFS` 的 extension 区，全局目录 `~/.gemini/skills`）与 MCP 写入
+（公开 target `gemini-cli` → `~/.gemini/settings.json`）；轴②Models 工具同步**仍未接入**。
+裸 id `gemini` 只是 MCP 的 cleanup 墓碑，永远不是 target（见
+[MCP 的墓碑与公开后继规则](../mcp/README.md#墓碑与它的公开后继distinct-id--subsumption)）。
+Antigravity 与 Antigravity CLI 同样落在 `~/.gemini/` 下，但它们是 Google Antigravity，
+与 Gemini CLI 是不同产品，三者的 profile 互不顶替。Usage/Cloud Code 中的 Gemini **模型名**
+与 Marketplace 的 google-gemini 技能仓库不受影响。旧 v1 provider store 的 `gemini`
 字段仅用于迁移读取。
 
 | 轴 | 作用 | 必做？ |
@@ -27,8 +32,8 @@ Marketplace 的 google-gemini 技能仓库不受影响。旧 v1 provider store �
 ## 第 0 步：先想清楚要不要写代码
 
 **用户级自定义 Agent 是零代码路径。** 运行时即可添加：Settings → Agent 连接 →
-添加自定义 Agent（后端入口 `add_custom_agent_profile`，定义在
-`crates/skillstar-skills/src/agents/custom.rs` 的 `CustomProfileDef`，
+添加自定义 Agent（后端入口 `add_custom_profile`，定义在
+`crates/skillstar-agents/src/custom.rs` 的 `CustomProfileDef`，
 持久化在 `~/.skillstar/config/profiles.toml`）。自定义 Agent 支持自定义全局技能目录、
 项目级相对路径和 base64 图标，但不能覆盖内置 Agent 的 id。
 
@@ -41,7 +46,7 @@ Marketplace 的 google-gemini 技能仓库不受影响。旧 v1 provider store �
 
 ### 1. 在内置数据表加一行
 
-`crates/skillstar-skills/src/agents/builtin.rs` 的 `BUILTIN_AGENT_DEFS`：
+`crates/skillstar-agents/src/builtin.rs` 的 `BUILTIN_AGENT_DEFS`：
 
 ```rust
 (
@@ -59,7 +64,8 @@ Marketplace 的 google-gemini 技能仓库不受影响。旧 v1 provider store �
 - 上游没有全局技能目录的 Agent 使用 `unsupported()`（非 `none`），`has_global_skills()` /
   `supports_global()` 会把它从全局选择和部署中排除；**builtin 的项目路径仍须按上游填写且非空**
   （见 `builtin_agent_fields_are_well_formed`）。
-- 两个 Agent 可以共享 home 根目录（如 Antigravity 与 Antigravity CLI 共用 `~/.gemini/`）；注册表只表达各自真实技能目标，不从共享根推断安装状态。
+- 两个 Agent 可以共享 home 根目录（如 Antigravity、Antigravity CLI 与 Gemini CLI 都落在 `~/.gemini/` 下）；注册表只表达各自真实技能目标，不从共享根推断安装状态，更不能因为共享前缀就让一个 profile 顶替另一个产品。
+- 加一行 builtin 时还要同步前端的图标镜像：`src/components/ui/icons/agentIcons.ts` 的 `AGENT_ICON_BY_ID` 与 `agentIcons.test.ts` 里的 `BUILTIN_AGENT_IDS`。漏掉不会报错，只会让该 Agent 静默退回 LobeHub 通用字形。
 - 路径一律正斜杠；Windows 反斜杠输入由后端归一化。
 
 其余全部自动生效：默认关闭与手动启用/禁用持久化（`profile_storage.rs`）、
@@ -91,9 +97,9 @@ Lobe Icons 有对应品牌时使用品牌 `Color`/`Mono` 组件；没有时使�
 ### 4. 测试与文档
 
 - 若 Agent 有特殊性质（无全局目录 / 共享 home 根 / 非 universal 项目路径），在
-  `crates/skillstar-skills/src/agents/mod.rs` 或 `builtin.rs` 测试区加一条守卫测试
+  `crates/skillstar-agents/src/builtin.rs` 测试区加一条守卫测试
   （参考 `project_only_agents_have_no_global_path` 与共享/专属路径测试）。
-- 跑 `cargo test -p skillstar-skills`（`validate_project_skills_rel_rules` 与
+- 跑 `cargo test -p skillstar-agents -p skillstar-skills`（`validate_project_skills_rel_rules` 与
   builtin 字段守卫会自动校验新行）。
 - 若用户可见能力变化，更新根 README 的描述，但不要复制完整 Agent 清单或数量；
   特殊行为写入本文件或 [Skills 行为文档](../skills/README.md)。
@@ -104,6 +110,27 @@ Lobe Icons 有对应品牌时使用品牌 `Color`/`Mono` 组件；没有时使�
 （`registry.rs`，前端镜像在 `src/types/project.ts`），跨 Tauri IPC 序列化 ——
 新增 Agent 永远不需要改它。兼容字段 `installed` 只镜像手动 `enabled`，不得重新接入安装探测；
 私有 `AgentSpec` trait 只描述路径与能力，可以随域实现演进。
+
+### OMP（Oh My Pi）注册说明
+
+OMP（`@oh-my-pi/pi-coding-agent`，命令 `omp`）与 Pi（`@earendil-works/pi-coding-agent`，
+命令 `pi`）是同源但独立的产品：配置根互不读取（`~/.omp` vs `~/.pi/agent`），OMP 自带
+`~/.omp/agent/config.yml`（modelRoles）、自有 models.db 目录、会话与认证状态，本机可并存。
+
+- 注册在 `BUILTIN_AGENT_DEFS` 的 extension 区（与 `grok` 并列，不在
+  vercel-labs 上游 id 内）：全局技能目录 `~/.omp/agent/skills`，项目级 `.omp/skills`；
+  `skillstar-skills::discovery` 的优先级目录包含 `.omp/skills`。
+- `~/.omp/agent/managed-skills` 是 OMP Auto-Learn 的自动生成目录（`manage_skill`
+  工具写入），**不纳入** SkillStar 的发现、部署与卸载——工具生成内容不当作
+  用户技能，避免噪音与误清理。
+- 目前轴①（Skills 分发）与轴②（Models 工具同步）都已接入：OMP 的 provider 注入走
+  `~/.omp/agent/models.yml`（YAML `providers.skillstar_*` 块，schema 与 Pi 同构）+
+  `~/.omp/agent/config.yml` 的 `modelRoles` 角色指针；tool-sync 以
+  `format: "yaml"` 文件规格读写（见 decisions.md D-018、D-025）。OMP 不读
+  `~/.pi/agent/models.json` / `settings.json`，与 Pi 的绑定互不影响。
+- OMP 是唯一带**模型角色**的 Agent：同一次绑定可以把 `default` / `smol` / `slow` /
+  `plan` 等角色分别指到不同 Provider。角色行为、写盘与清理规则见
+  [models/README.md](../models/README.md#omp-模型角色)，不在此重复。
 
 ---
 
@@ -187,9 +214,9 @@ Provider（Base URL / API Key / 模型）时才做。现有目标：`claude-code
 轴①（必做）
   [ ] builtin.rs 数据表 +1 行
   [ ] agentIcons.ts + lobe.ts 的 @lobehub/icons 映射
-  [ ] cargo test -p skillstar-skills 全绿
+  [ ] cargo test -p skillstar-agents -p skillstar-skills 全绿
   [ ] README.md 用户能力描述 / i18n 枚举文案（如涉及）
-  [ ] 特殊性质 → mod.rs 守卫测试 + Agents/Skills 功能文档
+  [ ] 特殊性质 → builtin.rs 守卫测试 + Agents/Skills 功能文档
 
 轴②（可选）
   [ ] agents.rs AGENT_SPECS +1 AgentSpec（含 sync_binding / unsync，勿加 match）

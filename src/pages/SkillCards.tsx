@@ -129,6 +129,18 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
           );
         }
 
+        // Record the deck's own claim on this Agent. Skipped when every Skill
+        // failed — nothing moved on disk, so the rail must not change either.
+        if (failed < installedSkillNames.length) {
+          const current = group.agent_links ?? [];
+          const nextLinks = allLinked ? current.filter((id) => id !== agentId) : [...new Set([...current, agentId])];
+          try {
+            await updateGroup(group.id, { agentLinks: nextLinks });
+          } catch (e) {
+            if (import.meta.env.DEV) console.error("Failed to persist deck agent links:", e);
+          }
+        }
+
         window.dispatchEvent(new Event("skillstar:refresh-skills"));
       } finally {
         setLinkState((prev) => {
@@ -138,7 +150,7 @@ export function SkillCards({ onNavigateToProjects, preSelectedSkills, onClearPre
         });
       }
     },
-    [linkState, toggleSkillForAgent],
+    [linkState, toggleSkillForAgent, updateGroup, t],
   );
 
   const handleDelete = async (id: string) => {

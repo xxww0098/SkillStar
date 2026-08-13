@@ -48,7 +48,15 @@ export interface SkillUpdateFailure {
   error: string;
 }
 
-export type LocalDivergenceReason = "content_changed" | "baseline_missing" | "snapshot_failed";
+/** Why an update stopped. `source_removed` and `source_missing` mean the Skill
+ *  is no longer shipped by its source, so there is no upstream state to go back
+ *  to — only `source_removed` still has content left to keep. */
+export type LocalDivergenceReason =
+  | "content_changed"
+  | "baseline_missing"
+  | "snapshot_failed"
+  | "source_removed"
+  | "source_missing";
 
 export interface SkillUpdateBlocked {
   name: string;
@@ -57,12 +65,23 @@ export interface SkillUpdateBlocked {
   error: string | null;
 }
 
-export type LocalDivergenceResolution = { kind: "preserve"; local_name: string } | { kind: "discard" };
+export type LocalDivergenceResolution =
+  | { kind: "preserve"; local_name: string }
+  | { kind: "discard" }
+  | { kind: "uninstall" };
 
 export interface ResolveSkillUpdateResult {
   update: UpdateResult | null;
   local_copy: Skill | null;
+  /** Skills removed because their source dropped them — they are not coming back. */
+  uninstalled: string[];
   remaining_blocked: SkillUpdateBlocked[];
+}
+
+/** A stop whose Skill no longer exists at its source: it can be kept as a local
+ *  copy (content permitting) or removed, but never discarded back to upstream. */
+export function isSourceGone(reason: LocalDivergenceReason): boolean {
+  return reason === "source_removed" || reason === "source_missing";
 }
 
 /** Return type of the `update_skills` batch command. `skipped` names were not
@@ -76,6 +95,13 @@ export interface SkillUpdateReport {
   skipped: string[];
 }
 
+/** A complete update run, including whatever the blocked-update dialog resolved
+ *  along the way. `uninstalled` Skills were removed because their source no
+ *  longer ships them — they are gone from the library, not merely unchanged. */
+export interface SkillUpdateRunReport extends SkillUpdateReport {
+  uninstalled: string[];
+}
+
 /** A new skill found in a cached repo that the user hasn't installed yet. */
 
 export interface SkillCardDeck {
@@ -85,6 +111,10 @@ export interface SkillCardDeck {
   icon: string;
   skills: string[];
   skill_sources: Record<string, string>;
+  /** Agent ids this deck is explicitly linked to. A new deck starts empty —
+   *  it never inherits the links its Skills already have. `null` only reaches
+   *  the UI if the backend backfill could not resolve a pre-existing deck. */
+  agent_links: string[] | null;
   created_at: string;
   updated_at: string;
 }

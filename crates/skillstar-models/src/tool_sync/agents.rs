@@ -195,6 +195,33 @@ static AGENT_SPECS: &[AgentSpec] = &[
         unsync: unsync_pi_all,
         detect_provider: detect_pi_provider,
     },
+    AgentSpec {
+        id: "omp",
+        display_name: "Oh My Pi",
+        binary_name: "omp",
+        config_dir_probes: &[".omp"],
+        kind: AgentKind::Multi,
+        required_url: RequiredUrl::Openai,
+        files: &[
+            AgentConfigFileSpec {
+                file_id: "models",
+                label: "models.yml",
+                format: "yaml",
+                resolve: resolve_omp_models_path,
+                default_content: "providers: {}\n",
+            },
+            AgentConfigFileSpec {
+                file_id: "config",
+                label: "config.yml",
+                format: "yaml",
+                resolve: resolve_omp_config_path,
+                default_content: "modelRoles: {}\n",
+            },
+        ],
+        sync_binding: sync_omp_binding,
+        unsync: unsync_omp_all,
+        detect_provider: detect_omp_provider,
+    },
 ];
 
 /// All registered agents, in canonical presentation order.
@@ -225,7 +252,14 @@ mod tests {
         // Same literal set the frontend agentRegistry test pins.
         assert_eq!(
             ids,
-            ["claude-code", "claude-desktop", "codex", "opencode", "pi"]
+            [
+                "claude-code",
+                "claude-desktop",
+                "codex",
+                "opencode",
+                "pi",
+                "omp"
+            ]
         );
     }
 
@@ -247,7 +281,7 @@ mod tests {
                     spec.id,
                     file.file_id
                 );
-                assert!(matches!(file.format, "json" | "toml" | "env"));
+                assert!(matches!(file.format, "json" | "toml" | "env" | "yaml"));
                 assert!(!file.default_content.is_empty());
             }
         }
@@ -338,10 +372,7 @@ mod tests {
     fn required_url_pins_activation_validation_rules() {
         // Mirrors the match in providers::crud::activate_tool.
         for id in ["claude-code", "claude-desktop"] {
-            assert_eq!(
-                agent_spec(id).unwrap().required_url,
-                RequiredUrl::Anthropic
-            );
+            assert_eq!(agent_spec(id).unwrap().required_url, RequiredUrl::Anthropic);
         }
         for id in ["codex", "opencode", "pi"] {
             assert_eq!(agent_spec(id).unwrap().required_url, RequiredUrl::Openai);

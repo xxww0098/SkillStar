@@ -1,8 +1,10 @@
+mod divergence;
 mod plan;
+mod resolve;
 mod transaction;
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use skillstar_core::types::{
     Skill, SkillCategory, SkillType, extract_github_source_from_url, extract_skill_description,
 };
@@ -15,8 +17,18 @@ use crate::lockfile::LockEntry;
 use crate::{
     content, deployment, installed_skill, local_skill, lockfile, projects, repo_link, repo_scanner,
 };
+use divergence::SourceRemovedStop;
 use plan::{SiblingState, UpdatePlan};
-pub(crate) use transaction::acquire_update_transaction_lock;
+pub use transaction::acquire_update_transaction_lock;
+
+#[cfg(test)]
+use divergence::same_physical_path;
+pub use divergence::{LocalDivergenceReason, LocalDivergenceResolution, SkillUpdateBlocked};
+pub use divergence::{inspect_skill_local_divergence, suggested_local_name};
+pub use resolve::resolve_skill_local_divergence_locked;
+pub use resolve::{
+    ResolveSkillUpdateResult, resolve_skill_update, resolve_skill_update_in_session,
+};
 
 /// Hold the process/file mutation lease while an application-level maintenance
 /// operation changes Hub content, lock metadata, or repository caches.
@@ -47,36 +59,6 @@ pub struct UpdateResult {
 pub struct SkillUpdateFailure {
     pub name: String,
     pub error: String,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum LocalDivergenceReason {
-    ContentChanged,
-    BaselineMissing,
-    SnapshotFailed,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct SkillUpdateBlocked {
-    pub name: String,
-    pub reason: LocalDivergenceReason,
-    pub suggested_local_name: String,
-    pub error: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum LocalDivergenceResolution {
-    Preserve { local_name: String },
-    Discard,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ResolveSkillUpdateResult {
-    pub update: Option<UpdateResult>,
-    pub local_copy: Option<Skill>,
-    pub remaining_blocked: Vec<SkillUpdateBlocked>,
 }
 
 /// Outcome of a batch update.
@@ -148,7 +130,7 @@ pub fn update_skills_in_session(
 
     let mut runnable = Vec::new();
     for group in groups {
-        let blocked = local_divergences_for_group(&entries, &group);
+        let blocked = divergence::local_divergences_for_group(&entries, &group);
         if blocked.is_empty() {
             runnable.push(group);
         } else {
@@ -162,154 +144,29 @@ pub fn update_skills_in_session(
                 report.updated.push(result);
                 report.skipped.extend(group.covered);
             }
-            Err(err) => {
-                let error = format!("{err:#}");
-                report.failed.push(SkillUpdateFailure {
-                    name: group.representative,
-                    error: error.clone(),
-                });
-                // The rest of the repository did not move either.
-                for name in group.covered {
+            // The pull found the source no longer ships these Skills and rolled
+            // the checkout back, so this is a decision to put to the user — not
+            // a failure to report.
+            Err(err) => match take_source_removed_stop(err) {
+                Ok(blocked) => report.blocked.extend(blocked),
+                Err(err) => {
+                    let error = format!("{err:#}");
                     report.failed.push(SkillUpdateFailure {
-                        name,
+                        name: group.representative,
                         error: error.clone(),
                     });
+                    // The rest of the repository did not move either.
+                    for name in group.covered {
+                        report.failed.push(SkillUpdateFailure {
+                            name,
+                            error: error.clone(),
+                        });
+                    }
                 }
-            }
+            },
         }
     }
     report
-}
-
-fn local_divergences_for_group(
-    entries: &[LockEntry],
-    group: &plan::RepoGroup,
-) -> Vec<SkillUpdateBlocked> {
-    let hub = skillstar_core::infra::paths::hub_skills_dir();
-    let representative_path = hub.join(&group.representative);
-    let representative = entries
-        .iter()
-        .find(|entry| entry.name == group.representative);
-    let shared_root = repo_link::repo_root_of(&representative_path);
-
-    let candidates: Vec<&LockEntry> = match shared_root {
-        Some(_) => entries
-            .iter()
-            .filter(|candidate| {
-                let path = hub.join(&candidate.name);
-                repo_link::repo_root_of(&path) == shared_root
-            })
-            .collect(),
-        None => representative.into_iter().collect(),
-    };
-
-    let mut blocked: Vec<_> = candidates
-        .into_iter()
-        .filter(|entry| {
-            let path = skillstar_core::infra::paths::hub_skills_dir().join(&entry.name);
-            path.symlink_metadata().is_ok()
-        })
-        .filter_map(|entry| match content::snapshot(&entry.name) {
-            Ok(snapshot)
-                if entry.content_hash_version == Some(content::SNAPSHOT_HASH_VERSION)
-                    && entry.content_hash.as_deref() == Some(&snapshot.content_hash) =>
-            {
-                None
-            }
-            Ok(_) => Some(SkillUpdateBlocked {
-                name: entry.name.clone(),
-                reason: if entry.content_hash.is_some()
-                    && entry.content_hash_version == Some(content::SNAPSHOT_HASH_VERSION)
-                {
-                    LocalDivergenceReason::ContentChanged
-                } else {
-                    LocalDivergenceReason::BaselineMissing
-                },
-                suggested_local_name: suggested_local_name(&entry.name),
-                error: None,
-            }),
-            Err(error) => Some(SkillUpdateBlocked {
-                name: entry.name.clone(),
-                reason: LocalDivergenceReason::SnapshotFailed,
-                suggested_local_name: suggested_local_name(&entry.name),
-                error: Some(error.to_string()),
-            }),
-        })
-        .collect();
-
-    if let Some(shared_root) = shared_root
-        && let Ok(installed) = std::fs::read_dir(&hub)
-    {
-        for installed in installed.flatten() {
-            let Some(name) = installed.file_name().to_str().map(str::to_string) else {
-                continue;
-            };
-            if name.starts_with('.') {
-                continue;
-            }
-            if entries.iter().any(|entry| entry.name == name) {
-                continue;
-            }
-            let valid_skill_target =
-                skillstar_core::infra::fs_ops::read_link_resolved(&installed.path())
-                    .is_ok_and(|target| target.join("SKILL.md").is_file());
-            if valid_skill_target
-                && repo_link::repo_root_of(&installed.path()).as_deref()
-                    == Some(shared_root.as_path())
-            {
-                blocked.push(missing_baseline(&name));
-            }
-        }
-    }
-    if representative.is_none() && representative_path.symlink_metadata().is_ok() {
-        blocked.push(missing_baseline(&group.representative));
-    }
-
-    blocked.sort_by(|left, right| {
-        is_checkout_root_skill(&left.name)
-            .cmp(&is_checkout_root_skill(&right.name))
-            .then_with(|| left.name.cmp(&right.name))
-    });
-    blocked.dedup_by(|left, right| left.name == right.name);
-    blocked
-}
-
-pub(crate) fn inspect_skill_local_divergence(name: &str) -> Result<Option<SkillUpdateBlocked>> {
-    content::validate_skill_name(name).map_err(anyhow::Error::from)?;
-    let entries = lockfile::Lockfile::load(&lockfile::lockfile_path())
-        .context("failed to load the Skill lockfile before inspecting divergence")?
-        .skills;
-    let group = plan::RepoGroup {
-        representative: name.to_string(),
-        covered: Vec::new(),
-    };
-    Ok(local_divergences_for_group(&entries, &group)
-        .into_iter()
-        .find(|blocked| blocked.name == name))
-}
-
-fn is_checkout_root_skill(name: &str) -> bool {
-    let path = skillstar_core::infra::paths::hub_skills_dir().join(name);
-    let Some(repo_root) = repo_link::repo_root_of(&path) else {
-        return false;
-    };
-    skillstar_core::infra::fs_ops::read_link_resolved(&path)
-        .is_ok_and(|target| same_physical_path(&target, &repo_root))
-}
-
-fn same_physical_path(left: &Path, right: &Path) -> bool {
-    let left = std::fs::canonicalize(left).unwrap_or_else(|_| left.to_path_buf());
-    let right = std::fs::canonicalize(right).unwrap_or_else(|_| right.to_path_buf());
-    left == right
-}
-
-fn missing_baseline(name: &str) -> SkillUpdateBlocked {
-    SkillUpdateBlocked {
-        name: name.to_string(),
-        reason: LocalDivergenceReason::BaselineMissing,
-        suggested_local_name: suggested_local_name(name),
-        error: Some("No lockfile entry exists for this managed Skill".to_string()),
-    }
 }
 
 fn checkout_key(entry: &LockEntry) -> Option<String> {
@@ -317,7 +174,7 @@ fn checkout_key(entry: &LockEntry) -> Option<String> {
     repo_link::repo_root_of(&path).map(|root| root.to_string_lossy().into_owned())
 }
 
-pub(crate) fn reconstruct_lock_entry(name: &str) -> Result<LockEntry> {
+pub fn reconstruct_lock_entry(name: &str) -> Result<LockEntry> {
     let skill_path = skillstar_core::infra::paths::hub_skills_dir().join(name);
     let cached_root = repo_link::repo_root_of(&skill_path);
     let repo_root = cached_root
@@ -345,25 +202,6 @@ pub(crate) fn reconstruct_lock_entry(name: &str) -> Result<LockEntry> {
         installed_at: chrono::Utc::now().to_rfc3339(),
         source_folder,
     })
-}
-
-pub(crate) fn suggested_local_name(name: &str) -> String {
-    let hub = skillstar_core::infra::paths::hub_skills_dir();
-    let local = skillstar_core::infra::paths::local_skills_dir();
-    let base = format!("{name}.local");
-    for suffix in 1u32.. {
-        let candidate = if suffix == 1 {
-            base.clone()
-        } else {
-            format!("{base}.{suffix}")
-        };
-        if hub.join(&candidate).symlink_metadata().is_err()
-            && local.join(&candidate).symlink_metadata().is_err()
-        {
-            return candidate;
-        }
-    }
-    unreachable!("the local-copy name space cannot be exhausted")
 }
 
 /// Run one update per repository, a few at a time, and restore request order.
@@ -457,10 +295,17 @@ pub fn update_skill_in_session(
         representative: name.to_string(),
         covered: Vec::new(),
     };
-    if let Some(blocked) = local_divergences_for_group(&entries, &group)
+    if let Some(blocked) = divergence::local_divergences_for_group(&entries, &group)
         .into_iter()
         .next()
     {
+        if blocked.reason.is_source_gone() {
+            anyhow::bail!(
+                "Skill '{}' is no longer shipped by its source; keep it as '{}' or remove it before updating",
+                blocked.name,
+                blocked.suggested_local_name
+            );
+        }
         anyhow::bail!(
             "Skill '{}' has local divergence; preserve it as '{}' or explicitly discard it before updating",
             blocked.name,
@@ -470,156 +315,22 @@ pub fn update_skill_in_session(
     update_skill_unchecked_locked(name, session)
 }
 
-/// Resolve a previously reported local divergence and continue through the
-/// same update transaction. Preservation finishes before the source tree is
-/// allowed to move.
-pub fn resolve_skill_update(
-    name: &str,
-    resolution: LocalDivergenceResolution,
-) -> Result<ResolveSkillUpdateResult> {
-    resolve_skill_update_in_session(
-        name,
-        resolution,
-        &crate::git::transport::GitOperationSession::public(),
-    )
-}
-
-pub fn resolve_skill_update_in_session(
-    name: &str,
-    resolution: LocalDivergenceResolution,
-    session: &crate::git::transport::GitOperationSession,
-) -> Result<ResolveSkillUpdateResult> {
-    let _transaction_guard = acquire_update_transaction_lock()?;
-    resolve_skill_local_divergence_locked_inner(name, resolution, session, true)
-}
-
-/// Resolve local divergence while the caller owns the cross-process update
-/// transaction. Channel subscriptions use this without continuing through the
-/// ordinary branch/ref updater; their next write must come from the reviewed,
-/// immutable channel release commit.
-pub(crate) fn resolve_skill_local_divergence_locked(
-    name: &str,
-    resolution: LocalDivergenceResolution,
-    session: &crate::git::transport::GitOperationSession,
-) -> Result<ResolveSkillUpdateResult> {
-    resolve_skill_local_divergence_locked_inner(name, resolution, session, false)
-}
-
-fn resolve_skill_local_divergence_locked_inner(
-    name: &str,
-    resolution: LocalDivergenceResolution,
-    session: &crate::git::transport::GitOperationSession,
-    continue_with_ordinary_update: bool,
-) -> Result<ResolveSkillUpdateResult> {
-    content::validate_skill_name(name).map_err(anyhow::Error::from)?;
-    if continue_with_ordinary_update {
-        ensure_ordinary_update_allowed(name)?;
+/// Take a "source removed" stop out of a failed update, or hand the error back.
+///
+/// The update already rolled its checkout back, so the Skills named in the stop
+/// still have their content on disk. Callers turn them into a decision for the
+/// user instead of reporting a failure.
+pub(crate) fn take_source_removed_stop(
+    error: anyhow::Error,
+) -> std::result::Result<Vec<SkillUpdateBlocked>, anyhow::Error> {
+    match error.downcast_ref::<SourceRemovedStop>() {
+        Some(stop) => Ok(divergence::blocked_for_dropped_source(&stop.names)),
+        None => Err(error),
     }
-    let lock_path = lockfile::lockfile_path();
-    let entry = lockfile::Lockfile::load(&lock_path)
-        .context("failed to load the Skill lockfile before resolving divergence")?
-        .skills
-        .into_iter()
-        .find(|entry| entry.name == name)
-        .map(Ok)
-        .unwrap_or_else(|| reconstruct_lock_entry(name))?;
-
-    let skill_path = skillstar_core::infra::paths::hub_skills_dir().join(name);
-    let repo_location = repo_link::repo_root_of(&skill_path)
-        .map(|repo_root| {
-            actual_repo_pathspec(&skill_path, &repo_root).map(|pathspec| (repo_root, pathspec))
-        })
-        .transpose()?;
-    if repo_location
-        .as_ref()
-        .is_some_and(|(_, pathspec)| pathspec.is_none())
-    {
-        let entries = lockfile::Lockfile::load(&lock_path)?.skills;
-        let group = plan::RepoGroup {
-            representative: name.to_string(),
-            covered: Vec::new(),
-        };
-        let unresolved_nested: Vec<_> = local_divergences_for_group(&entries, &group)
-            .into_iter()
-            .filter(|blocked| blocked.name != name)
-            .map(|blocked| blocked.name)
-            .collect();
-        if !unresolved_nested.is_empty() {
-            anyhow::bail!(
-                "Resolve nested Skill changes before the checkout-root Skill '{}': {}",
-                name,
-                unresolved_nested.join(", ")
-            );
-        }
-    }
-
-    let local_copy = match resolution {
-        LocalDivergenceResolution::Preserve { local_name } => {
-            Some(local_skill::preserve_installed_copy(name, &local_name)?)
-        }
-        LocalDivergenceResolution::Discard => None,
-    };
-
-    let (repo_root, pathspec) = match repo_location {
-        Some((repo_root, pathspec)) => (repo_root, pathspec),
-        None => (
-            git_ops::find_repo_root(&skill_path)
-                .with_context(|| format!("Cannot find the managed Git checkout for '{name}'"))?,
-            None,
-        ),
-    };
-    git_ops::restore_worktree_to_head_in_session(&repo_root, pathspec.as_deref(), session)
-        .with_context(|| format!("failed to discard local divergence for '{name}'"))?;
-
-    {
-        let _lock = lockfile::get_mutex()
-            .lock()
-            .map_err(|_| anyhow::anyhow!("Lockfile mutex poisoned"))?;
-        let mut lockfile = lockfile::Lockfile::load(&lock_path)?;
-        let baseline = content::snapshot(name)
-            .with_context(|| format!("failed to capture clean baseline for '{name}'"))?;
-        if let Some(current) = lockfile
-            .skills
-            .iter_mut()
-            .find(|candidate| candidate.name == name)
-        {
-            current.content_hash = Some(baseline.content_hash);
-            current.content_hash_version = Some(content::SNAPSHOT_HASH_VERSION);
-        } else {
-            let mut reconstructed = entry.clone();
-            reconstructed.content_hash = Some(baseline.content_hash);
-            reconstructed.content_hash_version = Some(content::SNAPSHOT_HASH_VERSION);
-            lockfile.upsert(reconstructed);
-        }
-        lockfile.save(&lock_path)?;
-    }
-
-    let entries = lockfile::Lockfile::load(&lock_path)?.skills;
-    let group = plan::RepoGroup {
-        representative: name.to_string(),
-        covered: Vec::new(),
-    };
-    let mut remaining_blocked = local_divergences_for_group(&entries, &group);
-    if !continue_with_ordinary_update && pathspec.is_some() {
-        remaining_blocked.retain(|blocked| blocked.name == name);
-    }
-    if !remaining_blocked.is_empty() || !continue_with_ordinary_update {
-        return Ok(ResolveSkillUpdateResult {
-            update: None,
-            local_copy,
-            remaining_blocked,
-        });
-    }
-
-    Ok(ResolveSkillUpdateResult {
-        update: Some(update_skill_unchecked_locked(name, session)?),
-        local_copy,
-        remaining_blocked: Vec::new(),
-    })
 }
 
 fn ensure_ordinary_update_allowed(name: &str) -> Result<()> {
-    crate::shared_channels::ensure_generic_skill_mutation_allowed(name)?;
+    crate::skill_mutation::policy().ensure_skill_mutation_allowed(name)?;
     let entries = lockfile::Lockfile::load(&lockfile::lockfile_path())
         .context("failed to load the Skill lockfile before checking shared-channel ownership")?
         .skills;
@@ -630,8 +341,8 @@ fn ensure_ordinary_update_allowed(name: &str) -> Result<()> {
             repo_link::repo_root_of(&hub.join(&entry.name)).as_ref() == Some(root)
         });
         if entry.name.eq_ignore_ascii_case(name) || same_checkout {
-            crate::shared_channels::ensure_generic_skill_mutation_allowed(&entry.name)?;
-            crate::shared_channels::ensure_generic_repository_mutation_allowed(&entry.git_url)?;
+            crate::skill_mutation::policy().ensure_skill_mutation_allowed(&entry.name)?;
+            crate::skill_mutation::policy().ensure_repository_mutation_allowed(&entry.git_url)?;
         }
     }
     Ok(())
@@ -773,6 +484,80 @@ fn apply_hash_writes(lockfile: &mut lockfile::Lockfile, writes: &[(String, Strin
     }
 }
 
+/// Re-baseline every installed Skill backed by `repo_dir` after that checkout
+/// was moved under them.
+///
+/// A repo cache is shared by every Skill installed from the same repository,
+/// but only the Skill being installed or updated gets a fresh `content_hash`.
+/// Installing a second Skill from a repository therefore used to advance the
+/// first one's files via `reset --hard` while leaving its baseline on the old
+/// commit, and the resulting phantom divergence was unrecoverable: further
+/// installs and scans failed in `ensure_installed_checkout_is_clean`, updates
+/// failed in `local_divergences_for_group`, and both told the user to preserve
+/// or discard edits they never made.
+///
+/// Only call this immediately after a successful reset whose caller already
+/// proved the worktree was clean — then any content change is upstream's, not
+/// the user's. Skills whose content is absent after the reset are left
+/// untouched so the update path can still report a dropped source.
+///
+/// Returns the names whose baseline moved.
+pub fn refresh_baselines_after_checkout_reset(repo_dir: &Path) -> Result<Vec<String>> {
+    let canonical_repo = std::fs::canonicalize(repo_dir)
+        .with_context(|| format!("failed to resolve repo cache '{}'", repo_dir.display()))?;
+    let skills_dir = skillstar_core::infra::paths::hub_skills_dir();
+
+    let _lock = lockfile::get_mutex()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("lockfile mutex poisoned"))?;
+    let lock_path = lockfile::lockfile_path();
+    let mut lf = lockfile::Lockfile::load(&lock_path)
+        .with_context(|| format!("failed to load lockfile '{}'", lock_path.display()))?;
+
+    let cotenants = lf
+        .skills
+        .iter()
+        .filter(|entry| {
+            repo_link::repo_root_of(&skills_dir.join(&entry.name))
+                .and_then(|root| std::fs::canonicalize(root).ok())
+                .is_some_and(|root| root == canonical_repo)
+        })
+        .map(|entry| entry.name.clone())
+        .collect::<Vec<_>>();
+
+    let mut refreshed = Vec::new();
+    for name in cotenants {
+        // A Skill the reset removed from the checkout keeps its old baseline:
+        // that mismatch is how the update path recognises a dropped source.
+        let Ok(snapshot) = content::snapshot(&name) else {
+            continue;
+        };
+        let Some(entry) = lf.skills.iter_mut().find(|entry| entry.name == name) else {
+            continue;
+        };
+        let unchanged = entry.content_hash.as_deref() == Some(snapshot.content_hash.as_str())
+            && entry.content_hash_version == Some(content::SNAPSHOT_HASH_VERSION);
+        if unchanged {
+            continue;
+        }
+        entry.content_hash = Some(snapshot.content_hash);
+        entry.content_hash_version = Some(content::SNAPSHOT_HASH_VERSION);
+        refreshed.push(name);
+    }
+
+    if !refreshed.is_empty() {
+        lf.save(&lock_path)
+            .with_context(|| format!("failed to save lockfile '{}'", lock_path.display()))?;
+        tracing::info!(
+            target: "skills",
+            repo = %repo_dir.display(),
+            skills = ?refreshed,
+            "Refreshed content baselines for Skills sharing a checkout that was reset"
+        );
+    }
+    Ok(refreshed)
+}
+
 fn refresh_content_baselines(lockfile: &mut lockfile::Lockfile, names: &[String]) -> Result<()> {
     for name in names {
         let snapshot = content::snapshot(name)
@@ -785,30 +570,39 @@ fn refresh_content_baselines(lockfile: &mut lockfile::Lockfile, names: &[String]
     Ok(())
 }
 
-fn capture_checkout_for_rollback(
+/// Every installed Skill this checkout backs, whether or not its content is
+/// currently on disk.
+///
+/// The missing ones matter: after the pull they are the proof that the source
+/// dropped a Skill, so they cannot be filtered out here.
+fn installed_names_in_checkout(
     skills_dir: &Path,
     target_repo_root: Option<&Path>,
     name: &str,
     entries: &[LockEntry],
-) -> Result<Vec<content::SkillSnapshot>> {
-    let names = if let Some(target_repo_root) = target_repo_root {
-        entries
-            .iter()
-            .filter_map(|entry| {
-                let path = skills_dir.join(&entry.name);
-                (path.exists()
-                    && repo_link::repo_root_of(&path).as_deref() == Some(target_repo_root))
-                .then(|| entry.name.clone())
-            })
-            .collect::<Vec<_>>()
-    } else {
-        vec![name.to_string()]
+) -> Vec<String> {
+    let Some(target_repo_root) = target_repo_root else {
+        return vec![name.to_string()];
     };
+    entries
+        .iter()
+        .filter(|entry| {
+            repo_link::repo_root_of(&skills_dir.join(&entry.name)).as_deref()
+                == Some(target_repo_root)
+        })
+        .map(|entry| entry.name.clone())
+        .collect()
+}
 
-    let mut snapshots = names
-        .into_iter()
+fn capture_checkout_for_rollback(
+    skills_dir: &Path,
+    installed_names: &[String],
+) -> Result<Vec<content::SkillSnapshot>> {
+    let mut snapshots = installed_names
+        .iter()
+        .filter(|skill_name| skills_dir.join(skill_name).exists())
         .map(|skill_name| {
-            content::snapshot(&skill_name).with_context(|| {
+            content::snapshot(skill_name).with_context(|| {
                 format!("failed to capture '{skill_name}' before updating its checkout")
             })
         })
@@ -843,9 +637,10 @@ fn apply_update_locked(
         representative: name.to_string(),
         covered: Vec::new(),
     };
-    if let Some(blocked) = local_divergences_for_group(&pre_update_lockfile.skills, &group)
-        .into_iter()
-        .next()
+    if let Some(blocked) =
+        divergence::local_divergences_for_group(&pre_update_lockfile.skills, &group)
+            .into_iter()
+            .next()
     {
         anyhow::bail!(
             "Skill '{}' changed while waiting to update; retry to preserve it as '{}' or explicitly discard it",
@@ -865,12 +660,13 @@ fn apply_update_locked(
     let previous_sparse_paths = is_repo_skill
         .then(|| git_ops::sparse_checkout_paths(checkout_root))
         .flatten();
-    let rollback_snapshots = capture_checkout_for_rollback(
+    let installed_names = installed_names_in_checkout(
         &skills_dir,
         target_repo_root.as_deref(),
         name,
         &pre_update_lockfile.skills,
-    )?;
+    );
+    let rollback_snapshots = capture_checkout_for_rollback(&skills_dir, &installed_names)?;
 
     let transaction = (|| -> Result<(String, UpdatePlan)> {
         let tree_hash = if is_repo_skill {
@@ -886,6 +682,15 @@ fn apply_update_locked(
             git_ops::compute_tree_hash(&path).context("failed to compute updated tree hash")?
         };
 
+        // The pull is the only thing that can prove the source dropped an
+        // installed Skill. Stop here so the rollback below puts its content
+        // back, and the user decides what to keep — deleting first and asking
+        // afterwards would leave nothing to decide about.
+        let dropped = divergence::skills_dropped_by_source(&installed_names);
+        if !dropped.is_empty() {
+            return Err(anyhow::Error::new(SourceRemovedStop { names: dropped }));
+        }
+
         let plan = {
             let _lock = lockfile::get_mutex()
                 .lock()
@@ -897,6 +702,16 @@ fn apply_update_locked(
                 plan::plan_update(&lockfile.skills, name, &tree_hash, is_repo_skill, |entry| {
                     sibling_state_on_disk(&skills_dir, target_repo_root.as_deref(), entry)
                 });
+
+            // Post-pull integrity re-check: the pull just reset the checkout
+            // to the new revision, so a dirty worktree NOW means local edits
+            // landed during the network window (fetch → lock). Refreshing
+            // content baselines from a dirty worktree would silently canonize
+            // those edits as the new "official" content. Fail closed instead —
+            // the caller preserves the worktree (see WorktreeDirty handling).
+            if !git_ops::worktree_is_clean(checkout_root)? {
+                return Err(git_ops::WorktreeDirty.into());
+            }
 
             apply_hash_writes(&mut lockfile, &plan.hash_writes);
             refresh_content_baselines(&mut lockfile, &plan.affected)?;
@@ -911,6 +726,13 @@ fn apply_update_locked(
     let (tree_hash, plan) = match transaction {
         Ok(result) => result,
         Err(error) => {
+            // Local edits landed during the update and were preserved — do
+            // NOT roll back, or the reset/snapshot-restore would destroy
+            // them. The lockfile was not updated, so the next attempt
+            // surfaces a normal divergence decision for the user.
+            if error.downcast_ref::<git_ops::WorktreeDirty>().is_some() {
+                return Err(error);
+            }
             let recovery_session = session.recovery_view();
             git_ops::reset_to_revision_in_session(
                 checkout_root,

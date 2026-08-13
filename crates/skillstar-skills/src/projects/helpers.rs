@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use crate::agents as agent_profile;
+use skillstar_agents as agent_profile;
 use skillstar_core::infra::fs_ops;
 
 pub fn clear_project_symlinks(project: &Path, profile: &agent_profile::AgentProfile) -> Result<()> {

@@ -38,6 +38,9 @@ pub use sync::*;
 mod multi_provider;
 pub use multi_provider::*;
 
+mod omp_provider;
+pub use omp_provider::*;
+
 // ---------------------------------------------------------------------------
 // Sandboxed home resolution (single source of truth for tool-config paths)
 // ---------------------------------------------------------------------------
@@ -52,13 +55,18 @@ pub use multi_provider::*;
 /// `~/.claude/settings.json`). It also lets advanced users sandbox sync.
 pub const TOOL_SYNC_HOME_ENV: &str = "SKILLSTAR_TOOL_SYNC_HOME";
 
-/// The sandbox root: [`TOOL_SYNC_HOME_ENV`] if set, otherwise — in this crate's
+/// The sandbox root: a per-test override if one is installed (unit tests only),
+/// else [`TOOL_SYNC_HOME_ENV`] if set, otherwise — in this crate's
 /// own unit tests only — a per-process throwaway temp dir. The `cfg(test)`
 /// fallback is a hard safety net: it guarantees a unit test can NEVER resolve
 /// the developer's real `~/.codex`/`~/.claude` even if it forgot to set the
 /// override (a recurring footgun). Integration tests compile this lib in
 /// non-test mode, so they must set [`TOOL_SYNC_HOME_ENV`] explicitly.
 fn sandbox_home() -> Option<PathBuf> {
+    #[cfg(test)]
+    if let Some(dir) = test_home_override() {
+        return Some(dir);
+    }
     if let Some(v) = std::env::var_os(TOOL_SYNC_HOME_ENV)
         && !v.is_empty()
     {
@@ -70,6 +78,29 @@ fn sandbox_home() -> Option<PathBuf> {
     }
     #[cfg(not(test))]
     None
+}
+
+// Per-*test* sandbox home, taking precedence over `TOOL_SYNC_HOME_ENV`.
+//
+// libtest runs each test on its own thread, so a thread-local override hands
+// every test a private home *without* mutating the process-global env var —
+// which parallel tests would stomp on each other. Sharing one sandbox is what
+// made `~/.codex/auth.json` tests race (see `tests::use_sandbox_home`).
+#[cfg(test)]
+thread_local! {
+    static TEST_HOME_OVERRIDE: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Install (or clear) this thread's sandbox home, returning the previous value.
+#[cfg(test)]
+fn set_test_home_override(dir: Option<PathBuf>) -> Option<PathBuf> {
+    TEST_HOME_OVERRIDE.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), dir))
+}
+
+#[cfg(test)]
+fn test_home_override() -> Option<PathBuf> {
+    TEST_HOME_OVERRIDE.with(|slot| slot.borrow().clone())
 }
 
 /// Per-process throwaway home used as the unit-test default (see [`sandbox_home`]).

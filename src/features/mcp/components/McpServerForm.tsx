@@ -1,19 +1,13 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
 import { cn } from "../../../lib/utils";
-import { MCP_TOOL_IDS, type McpServerEntry, type McpToolId } from "../../../types";
-
-const TOOL_LABELS: Record<McpToolId, string> = {
-  "claude-code": "Claude Code",
-  codex: "Codex",
-  grok: "Grok",
-  opencode: "OpenCode",
-  zcode: "ZCode",
-  kiro: "Kiro",
-  cursor: "Cursor",
-};
+import type { McpServerEntry, McpToolId } from "../../../types";
+import { kvToText, parseKv, parseList } from "../lib/kv";
+import { enabledMcpToolIds } from "../lib/toolRegistry";
+import { McpServerAdvancedFields } from "./McpServerAdvancedFields";
+import { McpToolTargetPicker } from "./McpToolTargetPicker";
 
 export interface McpServerFormValue {
   name: string;
@@ -43,40 +37,8 @@ interface McpServerFormProps {
   submitting?: boolean;
   /** Override the submit button label (defaults to Save/Add). */
   submitLabel?: string;
-}
-
-/** Parse a "KEY=VALUE per line" block into a record. */
-function parseKv(text: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const raw of text.split("\n")) {
-    const line = raw.trim();
-    if (!line) continue;
-    const eq = line.indexOf("=");
-    if (eq <= 0) continue;
-    out[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
-  }
-  return out;
-}
-
-function kvToText(rec?: Record<string, string>): string {
-  if (!rec) return "";
-  return Object.entries(rec)
-    .map(([k, v]) => `${k}=${v}`)
-    .join("\n");
-}
-
-/** Parse a comma/newline-separated list into a trimmed, de-duped string array. */
-function parseList(text: string): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const raw of text.split(/[\n,]/)) {
-    const item = raw.trim();
-    if (item && !seen.has(item)) {
-      seen.add(item);
-      out.push(item);
-    }
-  }
-  return out;
+  /** Per-tool note for the target picker, e.g. "not installed". */
+  noteForTool?: (toolId: McpToolId) => string | null;
 }
 
 const textareaCls =
@@ -91,7 +53,27 @@ function FieldLabel({ children, hint }: { children: React.ReactNode; hint?: stri
   );
 }
 
-export function McpServerForm({ initial, defaults, onSubmit, onDelete, submitting, submitLabel }: McpServerFormProps) {
+/**
+ * Hand-edit form for one MCP server.
+ *
+ * Two things moved out of here and are worth knowing about:
+ * - `KEY=VALUE` parsing lives in `../lib/kv`, which no longer trims the *value*
+ *   unconditionally. The old parser silently rewrote any credential with edge
+ *   whitespace, which the server then rejects for reasons nothing in the UI
+ *   explains.
+ * - The approval / exposure / timeout block lives in
+ *   `./McpServerAdvancedFields`, which says per selected target whether the
+ *   field will actually be written.
+ */
+export function McpServerForm({
+  initial,
+  defaults,
+  onSubmit,
+  onDelete,
+  submitting,
+  submitLabel,
+  noteForTool,
+}: McpServerFormProps) {
   const { t } = useTranslation();
   const [name, setName] = useState(initial?.name ?? defaults?.name ?? "");
   const [transport, setTransport] = useState(initial?.transport ?? defaults?.transport ?? "stdio");
@@ -121,6 +103,7 @@ export function McpServerForm({ initial, defaults, onSubmit, onDelete, submittin
   const [error, setError] = useState<string | null>(null);
 
   const isRemote = transport === "http" || transport === "sse";
+  const enabledToolIds = useMemo(() => enabledMcpToolIds(enabled), [enabled]);
 
   const handleSubmit = async () => {
     setError(null);
@@ -177,22 +160,27 @@ export function McpServerForm({ initial, defaults, onSubmit, onDelete, submittin
       <div>
         <FieldLabel>{t("mcp.fieldTransport")}</FieldLabel>
         <div className="flex gap-2">
-          {(["stdio", "http", "sse"] as const).map((t) => (
+          {(["stdio", "http", "sse"] as const).map((option) => (
             <button
-              key={t}
+              key={option}
               type="button"
-              onClick={() => setTransport(t)}
+              onClick={() => setTransport(option)}
               className={cn(
                 "flex-1 rounded-lg border px-3 py-1.5 text-xs font-medium transition",
-                transport === t
+                transport === option
                   ? "border-primary/60 bg-primary/10 text-primary"
                   : "border-border bg-background/40 text-muted-foreground hover:bg-muted/40",
               )}
             >
-              {t}
+              {option}
             </button>
           ))}
         </div>
+        {transport === "sse" ? (
+          <p className="mt-1.5 text-[11px] leading-relaxed text-amber-600 dark:text-amber-400">
+            {t("mcp.sseDeprecatedHint")}
+          </p>
+        ) : null}
       </div>
 
       {isRemote ? (
@@ -215,6 +203,7 @@ export function McpServerForm({ initial, defaults, onSubmit, onDelete, submittin
               placeholder={"Authorization=Bearer xxx"}
               className={textareaCls}
             />
+            <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/80">{t("mcp.kvQuotingHint")}</p>
           </div>
         </>
       ) : (
@@ -247,6 +236,7 @@ export function McpServerForm({ initial, defaults, onSubmit, onDelete, submittin
               placeholder={"API_KEY=sk-xxx"}
               className={textareaCls}
             />
+            <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/80">{t("mcp.kvQuotingHint")}</p>
           </div>
           <div>
             <FieldLabel hint={t("common.optional")}>{t("mcp.fieldCwd")}</FieldLabel>
@@ -276,96 +266,25 @@ export function McpServerForm({ initial, defaults, onSubmit, onDelete, submittin
         </div>
       </div>
 
-      <div className="space-y-3 rounded-xl border border-border/60 bg-background/30 p-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-xs font-medium text-foreground">{t("mcp.autoApproveAll")}</p>
-            <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">{t("mcp.autoApproveAllHint")}</p>
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={autoApproveAll}
-            onClick={() => setAutoApproveAll((v) => !v)}
-            className={cn(
-              "relative h-5 w-9 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-              autoApproveAll ? "bg-primary" : "bg-muted-foreground/30",
-            )}
-          >
-            <span
-              className={cn(
-                "absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform",
-                autoApproveAll ? "translate-x-4" : "translate-x-0.5",
-              )}
-            />
-          </button>
-        </div>
-
-        {autoApproveAll ? (
-          <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-600 dark:text-amber-400">
-            {t("mcp.yoloWarning")}
-          </p>
-        ) : (
-          <div>
-            <FieldLabel hint={t("mcp.toolListHint")}>{t("mcp.autoApproveTools")}</FieldLabel>
-            <textarea
-              value={autoApproveText}
-              onChange={(e) => setAutoApproveText(e.target.value)}
-              rows={2}
-              placeholder={"read_file\nlist_dir"}
-              className={textareaCls}
-            />
-          </div>
-        )}
-
-        <div>
-          <FieldLabel hint={t("mcp.toolListHint")}>{t("mcp.disabledTools")}</FieldLabel>
-          <textarea
-            value={disabledToolsText}
-            onChange={(e) => setDisabledToolsText(e.target.value)}
-            rows={2}
-            placeholder={"delete_file\nexecute_command"}
-            className={textareaCls}
-          />
-        </div>
-
-        <div>
-          <FieldLabel hint={t("mcp.timeoutHint")}>{t("mcp.timeout")}</FieldLabel>
-          <Input
-            value={timeoutText}
-            onChange={(e) => setTimeoutText(e.target.value.replace(/[^0-9]/g, ""))}
-            inputMode="numeric"
-            placeholder="30000"
-            className="h-9 font-mono"
-          />
-        </div>
-
-        <p className="text-[11px] leading-relaxed text-muted-foreground/80">{t("mcp.approvalSupportNote")}</p>
-      </div>
+      <McpServerAdvancedFields
+        enabledToolIds={enabledToolIds}
+        autoApproveAll={autoApproveAll}
+        onAutoApproveAllChange={setAutoApproveAll}
+        autoApproveText={autoApproveText}
+        onAutoApproveTextChange={setAutoApproveText}
+        disabledToolsText={disabledToolsText}
+        onDisabledToolsTextChange={setDisabledToolsText}
+        timeoutText={timeoutText}
+        onTimeoutTextChange={setTimeoutText}
+      />
 
       <div>
         <FieldLabel hint={t("mcp.fieldEnabledToolsHint")}>{t("mcp.fieldEnabledTools")}</FieldLabel>
-        <div className="grid grid-cols-2 gap-2">
-          {MCP_TOOL_IDS.map((toolId) => {
-            const on = enabled[toolId] ?? false;
-            return (
-              <button
-                key={toolId}
-                type="button"
-                onClick={() => setEnabled((prev) => ({ ...prev, [toolId]: !on }))}
-                className={cn(
-                  "flex items-center justify-between rounded-lg border px-3 py-2 text-xs transition",
-                  on
-                    ? "border-primary/50 bg-primary/10 text-foreground"
-                    : "border-border bg-background/40 text-muted-foreground hover:bg-muted/40",
-                )}
-              >
-                <span>{TOOL_LABELS[toolId]}</span>
-                <span className={cn("h-2 w-2 rounded-full", on ? "bg-primary" : "bg-muted-foreground/30")} />
-              </button>
-            );
-          })}
-        </div>
+        <McpToolTargetPicker
+          enabled={enabled}
+          onToggle={(toolId, next) => setEnabled((prev) => ({ ...prev, [toolId]: next }))}
+          noteFor={noteForTool}
+        />
       </div>
 
       {error ? <p className="text-xs text-destructive">{error}</p> : null}

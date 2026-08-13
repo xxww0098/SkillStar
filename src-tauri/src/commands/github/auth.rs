@@ -1,6 +1,6 @@
 //! Thin IPC adapters for GitHub App device authentication.
 
-use skillstar_skills::github_auth::{
+use skillstar_github_auth::{
     DeviceAuthorization, DeviceFlowPoll, GitHubAuthError, GitHubConnectionStatus,
 };
 use tauri::State;

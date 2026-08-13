@@ -5,9 +5,11 @@
  * the marketplace fragment's MARKET_SKILLS.
  */
 
+import type { Skill } from "../../../types";
 import { iso } from "./shared";
 
-export const SAMPLE_SKILLS = [
+/** Immutable template. The mutable per-session copy lives in ./skillsUpdateStore.ts. */
+export const SAMPLE_SKILLS: Skill[] = [
   {
     name: "pdf-tools",
     description: "Read, merge, split, and OCR PDF files with a single command.",
@@ -102,6 +104,7 @@ export const DECKS = [
     icon: "🌐",
     skills: ["git-flow", "sql-explain", "deep-research"],
     skill_sources: {},
+    agent_links: [],
     created_at: iso(20),
     updated_at: iso(3),
   },
@@ -112,6 +115,7 @@ export const DECKS = [
     icon: "📄",
     skills: ["pdf-tools", "xlsx"],
     skill_sources: {},
+    agent_links: [],
     created_at: iso(15),
     updated_at: iso(5),
   },

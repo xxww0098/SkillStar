@@ -13,7 +13,6 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 skillstar-core = { version = "0.1.0", path = "../skillstar-core" }
-gix = { workspace = true }
 serde_yaml = { workspace = true }
 dirs = { workspace = true }
 flate2 = { workspace = true }
@@ -23,11 +22,10 @@ toml = { workspace = true }
 tokio = { workspace = true, features = ["sync", "rt"] }
 base64.workspace = true
 scraper = "0.27.0"
-async-trait.workspace = true
-keyring.workspace = true
-reqwest = { workspace = true, features = ["form"] }
-url.workspace = true
 tempfile.workspace = true
+skillstar-git = { version = "0.1.0", path = "../skillstar-git" }
+skillstar-agents = { version = "0.1.0", path = "../skillstar-agents" }
+skillstar-github-auth = { version = "0.1.0", path = "../skillstar-github-auth" }
 
 [target."cfg(windows)".dependencies]
 junction = { workspace = true }

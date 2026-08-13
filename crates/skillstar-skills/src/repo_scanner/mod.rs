@@ -9,16 +9,16 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 pub use crate::discovery::DiscoveredSkill;
-pub use crate::source_resolver::normalize_repo_url;
 
-pub(crate) use cache::{
+
+pub use cache::{
     cache_dir_name, clone_or_fetch_repo_at_in_session, clone_or_fetch_repo_in_session,
 };
 pub use detect::detect_new_skills_in_cached_repos;
 pub use maintenance::{RepoCacheInfo, clean_unused_cache, get_cache_info};
-pub(crate) use ops::pull_repo_skill_update_in_session;
+pub use ops::pull_repo_skill_update_in_session;
 pub use scan::{scan_skills_in_repo, scan_skills_in_repo_at};
-pub(crate) use scan_install::{install_from_repo_at, install_from_repo_in_session};
+pub use scan_install::{install_from_repo_at, install_from_repo_in_session, install_from_repo_at_with_source_migrations};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanResult {
@@ -47,9 +47,11 @@ pub(crate) fn scan_repo_with_mode_in_session(
     full_depth: bool,
     session: &crate::git::transport::GitOperationSession,
 ) -> anyhow::Result<ScanResult> {
-    let (repo_url, source) =
-        crate::source_resolver::normalize_repo_url(input).context("Invalid repository URL")?;
-    crate::shared_channels::ensure_generic_repository_mutation_allowed(&repo_url)?;
+    let parsed = crate::source_resolver::Source::parse(input)
+        .context("Invalid repository URL")?;
+    let repo_url = parsed.repo_url;
+    let source = parsed.short;
+    crate::skill_mutation::policy().ensure_repository_mutation_allowed(&repo_url)?;
     let repo_dir = clone_or_fetch_repo_in_session(&repo_url, &source, session)?;
     let skills = scan_skills_in_repo(&repo_dir, &repo_url, full_depth);
     Ok(ScanResult {

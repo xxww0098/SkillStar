@@ -77,6 +77,118 @@ impl Default for CodexSettings {
 }
 
 // ---------------------------------------------------------------------------
+// OMP model roles
+// ---------------------------------------------------------------------------
+
+/// OMP's built-in model roles, in the order its own selector presents them.
+///
+/// Mirrors `MODEL_ROLE_IDS` in `@oh-my-pi/pi-coding-agent`
+/// (`src/config/model-roles.ts`). OMP routes each request to the model bound to
+/// the role that fits the task: `default` for normal turns, `smol` for cheap
+/// sub-agent fan-out, `slow` for deep reasoning, `plan` for planning mode, and
+/// so on. `modelRoles` on disk is an open string map, so users may add their own
+/// roles too — this list only pins the ones we surface in the UI.
+pub const OMP_MODEL_ROLES: &[&str] = &[
+    "default", "smol", "slow", "plan", "vision", "designer", "commit", "tiny", "task", "advisor",
+];
+
+/// Thinking levels OMP accepts as the `:suffix` on a role value
+/// (`provider/model:xhigh`), matching its `--thinking` flag and
+/// `ThinkingLevel` in `@oh-my-pi/pi-agent-core`.
+///
+/// `inherit` defers to the global `defaultThinkingLevel`, which is also what
+/// omitting the suffix entirely does; `auto` lets OMP pick per turn. Note that
+/// OMP resolves a literal model id ending in `:max` *before* reading `:max` as a
+/// thinking level, so a suffix never shadows a real model.
+pub const OMP_THINKING_LEVELS: &[&str] = &[
+    "inherit", "off", "minimal", "low", "medium", "high", "xhigh", "max", "auto",
+];
+
+/// One role → provider+model assignment.
+///
+/// `provider_id` is a SkillStar provider id, *not* the on-disk `skillstar_*`
+/// key — the key is derived at write time so it always tracks
+/// `skillstar_managed_key`. A role may point at any bound provider, which is why
+/// this lives on [`ToolBinding::settings`] rather than a single entry's.
+///
+/// [`ToolBinding::settings`]: crate::providers::ToolBinding::settings
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct OmpRoleTarget {
+    pub provider_id: String,
+    pub model: String,
+    /// Optional thinking level appended as `:level`. Must be one of
+    /// [`OMP_THINKING_LEVELS`]; anything else is dropped at write time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<String>,
+}
+
+impl OmpRoleTarget {
+    /// Render the on-disk `modelRoles` value: `<managed_key>/<model>[:thinking]`.
+    ///
+    /// Returns `None` when the target is incomplete (no model) — an incomplete
+    /// role must not overwrite whatever the user already has on disk.
+    pub fn to_role_value(&self, managed_key: &str) -> Option<String> {
+        let model = self.model.trim();
+        if model.is_empty() {
+            return None;
+        }
+        let mut value = format!("{managed_key}/{model}");
+        if let Some(level) = self.thinking.as_deref().map(str::trim)
+            && OMP_THINKING_LEVELS.contains(&level)
+        {
+            value.push(':');
+            value.push_str(level);
+        }
+        Some(value)
+    }
+}
+
+/// Typed accessor for OMP-specific tool-level settings stored in
+/// `ToolBinding.settings`.
+///
+/// Only `roles` lives here today. Roles the user has not assigned are simply
+/// absent from the map, and absent roles are never written to `config.yml` —
+/// OMP falls back to `default` on its own, and untouched roles stay under the
+/// user's control.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct OmpSettings {
+    #[serde(default)]
+    pub roles: std::collections::BTreeMap<String, OmpRoleTarget>,
+}
+
+impl OmpSettings {
+    /// Parse from a generic `Value`, falling back to empty on any mismatch
+    /// (mirrors [`CodexSettings::from_value`]).
+    pub fn from_value(value: &serde_json::Value) -> Self {
+        serde_json::from_value(value.clone()).unwrap_or_default()
+    }
+
+    /// Read the roles out of a binding's tool-level settings bag.
+    pub fn from_binding(binding: &crate::providers::ToolBinding) -> Self {
+        binding
+            .settings
+            .as_ref()
+            .map(Self::from_value)
+            .unwrap_or_default()
+    }
+}
+
+/// Whether a role name is safe to write into `modelRoles`.
+///
+/// OMP's schema is an open string map, so custom roles are allowed, but a name
+/// containing `/` or whitespace would corrupt the `provider/model` grammar that
+/// role *values* use, and an `@`-prefixed name collides with OMP's role-alias
+/// syntax (`@smol`).
+pub fn is_valid_omp_role_name(role: &str) -> bool {
+    !role.is_empty()
+        && role.len() <= 64
+        && !role.starts_with('@')
+        && role
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+// ---------------------------------------------------------------------------
 // Typed Codex `[model_providers.*]` table
 // ---------------------------------------------------------------------------
 

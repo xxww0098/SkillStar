@@ -1,5 +1,6 @@
 import { KeyRound } from "lucide-react";
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { ProviderBrandIcon } from "../../../../../../../components/shared/ProviderBrandIcon";
 import { cn } from "../../../../../../../lib/utils";
 import type { ProviderEntryFlat } from "../../../../../../../types";
@@ -52,11 +53,7 @@ type RichMatrixShellProps = {
   providerCol?: "full" | "compact";
   /** Optional column hint under the agent name (e.g. Claude → "mapping"). */
   columnHint?: (column: MatrixColumn) => string | null;
-  renderCell: (args: {
-    provider: ProviderEntryFlat;
-    column: MatrixColumn;
-    agent: AgentDescriptor;
-  }) => ReactNode;
+  renderCell: (args: { provider: ProviderEntryFlat; column: MatrixColumn; agent: AgentDescriptor }) => ReactNode;
 };
 
 /**
@@ -72,6 +69,7 @@ export function RichMatrixShell({
   columnHint,
   renderCell,
 }: RichMatrixShellProps) {
+  const { t } = useTranslation();
   if (data.overlay.type === "create" || data.overlay.type === "app-ai" || data.overlay.type === "agent-settings") {
     return <EditorPage data={data} detailStyle={editorStyle} />;
   }
@@ -81,116 +79,103 @@ export function RichMatrixShell({
   const rows = matrixProviders(data.providers);
 
   return (
-    <>
-      <MatrixChrome data={data} title="Provider × Agent" subtitle={subtitle} toolbar={legend}>
-        {/*
+    <MatrixChrome data={data} title="Provider × Agent" subtitle={subtitle} toolbar={legend}>
+      {/*
           Sticky Provider col + Agent cols. Table is w-full so leftover width
           is a bordered filler column (grid lines, not blank). Extra agents
           still force horizontal scroll via min-w on agent cols.
         */}
-        <div className="overflow-x-auto overscroll-x-contain rounded-2xl border border-border/55 bg-card/50 [-webkit-overflow-scrolling:touch]">
-          <table className="w-full min-w-max border-collapse text-left text-xs">
-            <colgroup>
-              <col className="w-[200px]" />
-              {columns.map((column) => (
-                <col
-                  key={column.columnId}
-                  className={column.claudeSurface ? "w-[168px]" : "w-[152px]"}
-                />
-              ))}
-              {/* Absorbs remaining width so row/column borders fill the frame */}
-              <col />
-            </colgroup>
-            <thead>
-              <tr className="border-b border-border/50">
-                <th
-                  className={cn(
-                    "sticky left-0 z-30 w-[200px] min-w-[200px] max-w-[200px] px-4 py-3 text-center",
-                    "border-r border-border/70 bg-muted font-semibold text-muted-foreground",
-                    "shadow-[4px_0_12px_-6px_rgba(0,0,0,0.35)]",
-                  )}
-                >
-                  Provider
-                </th>
-                {columns.map((column) => {
-                  const hint = columnHint?.(column);
-                  const wide = Boolean(column.claudeSurface);
-                  return (
-                    <th
-                      key={column.columnId}
+      <div className="overflow-x-auto overscroll-x-contain rounded-2xl border border-border/55 bg-card/50 [-webkit-overflow-scrolling:touch]">
+        <table className="w-full min-w-max border-collapse text-left text-xs">
+          <colgroup>
+            <col className="w-[200px]" />
+            {columns.map((column) => (
+              <col key={column.columnId} className={column.claudeSurface ? "w-[168px]" : "w-[152px]"} />
+            ))}
+            {/* Absorbs remaining width so row/column borders fill the frame */}
+            <col />
+          </colgroup>
+          <thead>
+            <tr className="border-b border-border/50">
+              <th
+                className={cn(
+                  "sticky left-0 z-30 w-[200px] min-w-[200px] max-w-[200px] px-4 py-3 text-center",
+                  "border-r border-border/70 bg-muted font-semibold text-muted-foreground",
+                  "shadow-[4px_0_12px_-6px_rgba(0,0,0,0.35)]",
+                )}
+              >
+                Provider
+              </th>
+              {columns.map((column) => {
+                const hint = columnHint?.(column);
+                const wide = Boolean(column.claudeSurface);
+                return (
+                  <th
+                    key={column.columnId}
+                    className={cn(
+                      "border-r border-border/35 bg-muted/40 px-2 py-3 text-center font-semibold",
+                      wide ? "w-[168px] min-w-[168px] max-w-[168px]" : "w-[152px] min-w-[152px] max-w-[152px]",
+                    )}
+                  >
+                    <ColumnHeader data={data} column={column} hint={hint} />
+                  </th>
+                );
+              })}
+              <th className="min-w-[48px] bg-muted/40" aria-hidden />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={columns.length + 2} className="px-4 py-10 text-center text-[12px] text-muted-foreground">
+                  {t("models.matrix.noThirdPartyProviders")}
+                </td>
+              </tr>
+            ) : (
+              rows.map((provider) => {
+                const ready = providerReady(provider);
+                const rowActive = data.selectedProviderId === provider.id;
+                return (
+                  <tr key={provider.id} className="border-b border-border/35 last:border-0">
+                    <td
                       className={cn(
-                        "border-r border-border/35 bg-muted/40 px-2 py-3 text-center font-semibold",
-                        wide ? "w-[168px] min-w-[168px] max-w-[168px]" : "w-[152px] min-w-[152px] max-w-[152px]",
+                        "sticky left-0 z-20 w-[200px] min-w-[200px] max-w-[200px] px-4 py-3",
+                        "border-r border-border/70 shadow-[4px_0_12px_-6px_rgba(0,0,0,0.35)]",
+                        rowActive ? "bg-primary/[0.04]" : "bg-card",
                       )}
                     >
-                      <ColumnHeader data={data} column={column} hint={hint} />
-                    </th>
-                  );
-                })}
-                <th className="min-w-[48px] bg-muted/40" aria-hidden />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={columns.length + 2}
-                    className="px-4 py-10 text-center text-[12px] text-muted-foreground"
-                  >
-                    暂无第三方 Provider。从侧栏「添加 Provider」创建，或在支持的表头切回官方。
-                  </td>
-                </tr>
-              ) : (
-                rows.map((provider) => {
-                  const ready = providerReady(provider);
-                  const rowActive = data.selectedProviderId === provider.id;
-                  return (
-                    <tr key={provider.id} className="border-b border-border/35 last:border-0">
-                      <td
-                        className={cn(
-                          "sticky left-0 z-20 w-[200px] min-w-[200px] max-w-[200px] px-4 py-3",
-                          "border-r border-border/70 shadow-[4px_0_12px_-6px_rgba(0,0,0,0.35)]",
-                          rowActive ? "bg-primary/[0.04]" : "bg-card",
-                        )}
-                      >
-                        <ProviderCol
-                          provider={provider}
-                          ready={ready}
-                          density={providerCol}
-                          onEdit={() => data.setOverlay({ type: "edit", providerId: provider.id })}
-                        />
-                      </td>
-                      {columns.map((column) => {
-                        const wide = Boolean(column.claudeSurface);
-                        const agent = bindAgentForColumn(column);
-                        return (
-                          <td
-                            key={column.columnId}
-                            className={cn(
-                              "border-r border-border/35 px-2 py-2 align-middle",
-                              wide
-                                ? "w-[168px] min-w-[168px] max-w-[168px]"
-                                : "w-[152px] min-w-[152px] max-w-[152px]",
-                              rowActive && "bg-primary/[0.03]",
-                            )}
-                          >
-                            {renderCell({ provider, column, agent })}
-                          </td>
-                        );
-                      })}
-                      <td
-                        className={cn("min-w-[48px]", rowActive && "bg-primary/[0.03]")}
-                        aria-hidden
+                      <ProviderCol
+                        provider={provider}
+                        ready={ready}
+                        density={providerCol}
+                        onEdit={() => data.setOverlay({ type: "edit", providerId: provider.id })}
                       />
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </MatrixChrome>
-    </>
+                    </td>
+                    {columns.map((column) => {
+                      const wide = Boolean(column.claudeSurface);
+                      const agent = bindAgentForColumn(column);
+                      return (
+                        <td
+                          key={column.columnId}
+                          className={cn(
+                            "border-r border-border/35 px-2 py-2 align-middle",
+                            wide ? "w-[168px] min-w-[168px] max-w-[168px]" : "w-[152px] min-w-[152px] max-w-[152px]",
+                            rowActive && "bg-primary/[0.03]",
+                          )}
+                        >
+                          {renderCell({ provider, column, agent })}
+                        </td>
+                      );
+                    })}
+                    <td className={cn("min-w-[48px]", rowActive && "bg-primary/[0.03]")} aria-hidden />
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    </MatrixChrome>
   );
 }
 
@@ -204,10 +189,9 @@ function ColumnHeader({
   column: MatrixColumn;
   hint: string | null | undefined;
 }) {
+  const { t } = useTranslation();
   const supportsOfficial = toolSupportsOfficial(column.bindToolId);
-  const onOfficial =
-    supportsOfficial &&
-    isToolOnOfficial(data.providers, data.toolActivations, column.bindToolId);
+  const onOfficial = supportsOfficial && isToolOnOfficial(data.providers, data.toolActivations, column.bindToolId);
 
   const toggleOfficial = () => {
     if (!supportsOfficial) return;
@@ -248,7 +232,7 @@ function ColumnHeader({
         {supportsOfficial ? (
           <button
             type="button"
-            title={onOfficial ? "当前官方 · 点击取消" : "切换到官方（原生登录）"}
+            title={onOfficial ? t("models.matrix.officialOnClickToCancel") : t("models.matrix.switchToOfficial")}
             aria-pressed={onOfficial}
             onClick={toggleOfficial}
             className={cn(
@@ -269,12 +253,10 @@ function ColumnHeader({
           onClick={toggleOfficial}
           className={cn(
             "rounded px-1.5 py-0.5 text-[9px] font-medium transition-colors",
-            onOfficial
-              ? "bg-sky-500/15 text-sky-400"
-              : "text-muted-foreground hover:bg-sky-500/10 hover:text-sky-400",
+            onOfficial ? "bg-sky-500/15 text-sky-400" : "text-muted-foreground hover:bg-sky-500/10 hover:text-sky-400",
           )}
         >
-          {onOfficial ? "官方 · 已启用" : "切回官方"}
+          {onOfficial ? t("models.matrix.officialEnabled") : t("models.matrix.backToOfficial")}
         </button>
       ) : (
         <span className="text-[9px] font-normal text-muted-foreground">{fallbackHint}</span>

@@ -9,27 +9,21 @@ use std::path::{Path, PathBuf};
 use tracing::warn;
 
 fn derive_name_hint(url: &str, name: Option<&str>) -> String {
-    name.map(str::to_string).unwrap_or_else(|| {
-        url.rsplit('/')
-            .next()
-            .unwrap_or("skill")
-            .trim_end_matches(".git")
-            .to_string()
-    })
+    crate::source_resolver::derive_skill_name_hint(url, name)
 }
 
-fn find_target_skill<'a>(
+pub fn find_target_skill<'a>(
     skills_found: &'a [repo_scanner::DiscoveredSkill],
     requested_name: Option<&str>,
     name_hint: &str,
 ) -> Option<&'a repo_scanner::DiscoveredSkill> {
-    // Single-skill repo: return it directly without name matching.
-    if skills_found.len() == 1 {
+    // An explicit identity must always match, even when the repository now
+    // exposes exactly one differently named Skill. The single-Skill fallback is
+    // retained only for callers that did not request an identity.
+    if requested_name.is_none() && skills_found.len() == 1 {
         return skills_found.first();
     }
 
-    // Single-pass: match exact first, then case-insensitive fallback.
-    // Avoids double iteration of skills_found.
     let search_key = requested_name.unwrap_or(name_hint);
     let search_key_lower = search_key.to_lowercase();
 
@@ -62,7 +56,7 @@ pub fn fetch_repo_scanned_in_session(
         .map_err(|error| format!("{error:#}"))
 }
 
-pub(crate) fn fetch_repo_scanned_detailed_in_session(
+pub fn fetch_repo_scanned_detailed_in_session(
     url: &str,
     full_depth: bool,
     session: &crate::git::transport::GitOperationSession,
@@ -166,7 +160,7 @@ fn finalize_repo_cache_installs(
     repo_url: &str,
     installed: &[String],
 ) -> Result<Vec<Skill>, String> {
-    let result: Result<Vec<Skill>, String> = (|| {
+    let result: Result<Vec<Skill>, String> = {
         let skills = installed
             .iter()
             .map(|name| {
@@ -180,12 +174,26 @@ fn finalize_repo_cache_installs(
             })
             .collect::<Vec<_>>();
         Ok(skills)
-    })();
+    };
 
     if result.is_err() {
         rollback_repo_cache_installs(skills_dir, installed);
     }
     result
+}
+
+fn requested_skill_not_found_error(names: &[String]) -> String {
+    format!(
+        "Requested Skill{} '{}' not found in the scanned repository; the source may no longer provide {} or {} may have been deleted or renamed",
+        if names.len() == 1 { "" } else { "s" },
+        names.join(", "),
+        if names.len() == 1 {
+            "this Skill"
+        } else {
+            "these Skills"
+        },
+        if names.len() == 1 { "it" } else { "they" },
+    )
 }
 
 fn try_install_from_repo_cache(
@@ -217,12 +225,11 @@ fn try_install_from_repo_cache(
     }
 
     let Some(skill) = target else {
-        warn!(
-            target: "install_skill",
-            hint = %name_hint,
-            found = ?skills_found.iter().map(|s| &s.id).collect::<Vec<_>>(),
-            "skill not found in repo, falling back to direct clone"
-        );
+        if let Some(requested_name) = requested_name {
+            return Err(requested_skill_not_found_error(&[
+                requested_name.to_string()
+            ]));
+        }
         return Ok(None);
     };
 
@@ -283,10 +290,14 @@ fn install_skill_in_session_locked(
     session: &crate::git::transport::GitOperationSession,
 ) -> Result<Skill, String> {
     let skills_dir = paths::hub_skills_dir();
+    // Safe here because the caller holds the update transaction lock, so no
+    // other install or removal owns a live staging entry. Clearing residue up
+    // front keeps a crashed transaction from accumulating in the hub.
+    crate::hub_entry::sweep_stale_staging(&skills_dir);
     let name_hint = derive_name_hint(&url, name.as_deref());
     crate::content::validate_skill_name(&name_hint)
         .map_err(|error| format!("Invalid Skill name: {error}"))?;
-    crate::shared_channels::ensure_generic_skill_mutation_allowed(&name_hint)
+    crate::skill_mutation::policy().ensure_skill_mutation_allowed(&name_hint)
         .map_err(|error| error.to_string())?;
     ensure_generic_repository_input_mutable(&url)?;
 
@@ -315,6 +326,18 @@ fn install_skill_in_session_locked(
         let _ = fs_ops::remove_dir_all_retry(&dest);
         return Err(error.to_string());
     }
+
+    // The direct-clone fallback is the legacy whole-repo install path. It
+    // must not reopen the door the scan path closed: an invalid SKILL.md is
+    // just as un-installable here. Fail closed with the same actionable
+    // reason and clean up the clone.
+    if let Err(reason) = crate::validation::ensure_installable(&dest) {
+        let _ = fs_ops::remove_dir_all_retry(&dest);
+        return Err(format!(
+            "Repository is not installable as a single Skill: {reason}"
+        ));
+    }
+
     let result = (|| -> Result<Skill, String> {
         let tree_hash = git_ops::compute_tree_hash(&dest).map_err(|e| e.to_string())?;
         let content_hash = crate::content::snapshot(&name_hint)
@@ -379,13 +402,13 @@ pub fn install_skills_batch_in_session(
     }
 
     for name in names {
-        crate::shared_channels::ensure_generic_skill_mutation_allowed(name)
+        crate::skill_mutation::policy().ensure_skill_mutation_allowed(name)
             .map_err(|error| error.to_string())?;
     }
 
     let parsed =
         crate::source_resolver::Source::parse(url).map_err(|e| format!("Invalid source: {e}"))?;
-    crate::shared_channels::ensure_generic_repository_mutation_allowed(&parsed.repo_url)
+    crate::skill_mutation::policy().ensure_repository_mutation_allowed(&parsed.repo_url)
         .map_err(|error| error.to_string())?;
     let skills_dir = paths::hub_skills_dir();
     let (repo_url, _source, repo_dir, skills_found) =
@@ -433,10 +456,7 @@ pub fn install_skills_batch_in_session(
     }
 
     if !missing_names.is_empty() {
-        return Err(format!(
-            "Requested skills not found in scanned repository: {}",
-            missing_names.join(", ")
-        ));
+        return Err(requested_skill_not_found_error(&missing_names));
     }
 
     let mut installed_skills = Vec::new();
@@ -508,7 +528,7 @@ pub fn install_skill_pack_in_session(
         .map_err(|error| format!("Unable to lock Skill pack installation: {error}"))?;
     let parsed = crate::source_resolver::Source::parse(&url)
         .map_err(|error| format!("Invalid source: {error}"))?;
-    crate::shared_channels::ensure_generic_repository_mutation_allowed(&parsed.repo_url)
+    crate::skill_mutation::policy().ensure_repository_mutation_allowed(&parsed.repo_url)
         .map_err(|error| error.to_string())?;
     let (_repo_url, source, repo_dir, _) =
         fetch_repo_scanned_detailed_in_session(&url, false, session)
@@ -529,7 +549,7 @@ pub fn uninstall_skill(name: &str) -> Result<(), String> {
         .map_err(|error| format!("Invalid Skill name: {error}"))?;
     let _transaction_guard = crate::skill_update::acquire_update_transaction_lock()
         .map_err(|error| format!("Unable to lock Skill removal: {error}"))?;
-    crate::shared_channels::ensure_generic_skill_mutation_allowed(name)
+    crate::skill_mutation::policy().ensure_skill_mutation_allowed(name)
         .map_err(|error| error.to_string())?;
     uninstall_skill_locked_unchecked(name)
 }
@@ -539,7 +559,7 @@ pub fn uninstall_skill(name: &str) -> Result<(), String> {
 /// Shared-channel install compensation uses this only for Skills it staged in
 /// the current transaction. Generic entry points must use [`uninstall_skill`]
 /// so ownership is checked before content is removed.
-pub(crate) fn uninstall_skill_locked_unchecked(name: &str) -> Result<(), String> {
+pub fn uninstall_skill_locked_unchecked(name: &str) -> Result<(), String> {
     if local_skill::is_local_skill(name) {
         local_skill::delete(name).map_err(|e| e.to_string())?;
         installed_skill::invalidate_cache();
@@ -552,7 +572,7 @@ pub(crate) fn uninstall_skill_locked_unchecked(name: &str) -> Result<(), String>
 
 fn ensure_generic_repository_input_mutable(input: &str) -> Result<(), String> {
     if let Ok(source) = crate::source_resolver::Source::parse(input) {
-        return crate::shared_channels::ensure_generic_repository_mutation_allowed(
+        return crate::skill_mutation::policy().ensure_repository_mutation_allowed(
             &source.repo_url,
         )
         .map_err(|error| error.to_string());
@@ -562,7 +582,7 @@ fn ensure_generic_repository_input_mutable(input: &str) -> Result<(), String> {
         return Ok(());
     }
     if let Ok(remote) = crate::git::ops::remote_origin_url(path) {
-        crate::shared_channels::ensure_generic_repository_mutation_allowed(&remote)
+        crate::skill_mutation::policy().ensure_repository_mutation_allowed(&remote)
             .map_err(|error| error.to_string())?;
     }
     let canonical = std::fs::canonicalize(path).map_err(|error| error.to_string())?;
@@ -574,7 +594,7 @@ fn ensure_generic_repository_input_mutable(input: &str) -> Result<(), String> {
             .and_then(|root| std::fs::canonicalize(root).ok())
             .is_some_and(|root| root == canonical);
         if same_checkout {
-            crate::shared_channels::ensure_generic_skill_mutation_allowed(&entry.name)
+            crate::skill_mutation::policy().ensure_skill_mutation_allowed(&entry.name)
                 .map_err(|error| error.to_string())?;
         }
     }
@@ -582,13 +602,13 @@ fn ensure_generic_repository_input_mutable(input: &str) -> Result<(), String> {
 }
 
 #[derive(Debug)]
-pub(crate) struct UninstallSkillFailure {
+pub struct UninstallSkillFailure {
     pub message: String,
     pub committed: bool,
     pub rollback_complete: bool,
 }
 
-pub(crate) fn uninstall_hub_skill_with_commit<E>(
+pub fn uninstall_hub_skill_with_commit<E>(
     name: &str,
     commit: impl FnOnce() -> Result<(), E>,
 ) -> Result<(), UninstallSkillFailure>
@@ -628,11 +648,17 @@ where
         .iter()
         .find(|entry| entry.name.eq_ignore_ascii_case(name))
         .cloned();
-    let staging = skills_dir.join(format!(".skillstar-remove-{name}-{}", std::process::id()));
+    // Deliberately pid-free. Every caller of this function holds the update
+    // transaction lock (an in-process mutex plus a cross-process file lock), so
+    // no second removal can be live at the same time — while a pid in the name
+    // meant the self-heal below only ever matched residue from the *current*
+    // process, leaving anything a crash or power loss left behind forever.
+    crate::hub_entry::sweep_stale_staging(&skills_dir);
+    let staging = skills_dir.join(format!(".skillstar-remove-{name}"));
     if staging.symlink_metadata().is_ok() {
-        // A leftover staging path means a previous removal crashed mid-flight
-        // (the same process cannot hold two live transactions). Clean it up
-        // instead of permanently blocking future uninstalls of this Skill.
+        // A leftover staging path means a previous removal crashed mid-flight.
+        // Clean it up instead of permanently blocking future uninstalls of
+        // this Skill.
         if let Err(error) = fs_ops::remove_link_or_copy(&staging) {
             return Err(UninstallSkillFailure {
                 message: format!(

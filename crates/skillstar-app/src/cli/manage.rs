@@ -128,6 +128,9 @@ pub fn cmd_update(name: Option<&str>) {
                 if let Some(local_copy) = result.local_copy {
                     println!("✓ Preserved local copy as '{}'", local_copy.name);
                 }
+                for removed in &result.uninstalled {
+                    println!("✓ Removed '{removed}' — its source no longer ships it");
+                }
                 if let Some(update) = result.update {
                     record_update_result(&update, &mut moved);
                 } else {
@@ -168,6 +171,9 @@ fn record_update_result(result: &skill_update::UpdateResult, moved: &mut BTreeSe
 fn prompt_divergence_resolution(
     blocked: &skill_update::SkillUpdateBlocked,
 ) -> Option<skill_update::LocalDivergenceResolution> {
+    if blocked.reason.is_source_gone() {
+        return prompt_removed_source_resolution(blocked);
+    }
     println!("'{}' has local changes; update is paused.", blocked.name);
     if let Some(error) = &blocked.error {
         println!("Cause: {error}");
@@ -203,6 +209,57 @@ fn prompt_divergence_resolution(
     }
 }
 
+/// A Skill its source dropped has no clean upstream state to go back to, so
+/// "discard" is not on offer here — only keeping a copy of what is left, or
+/// removing it.
+fn prompt_removed_source_resolution(
+    blocked: &skill_update::SkillUpdateBlocked,
+) -> Option<skill_update::LocalDivergenceResolution> {
+    let content_gone = blocked.reason == skill_update::LocalDivergenceReason::SourceMissing;
+    println!(
+        "'{}' is no longer shipped by its source; update is paused.",
+        blocked.name
+    );
+    if content_gone {
+        println!("Its content is already gone, so it can only be removed.");
+    }
+    if let Some(error) = &blocked.error {
+        println!("Cause: {error}");
+    }
+    loop {
+        if content_gone {
+            print!("Remove it, or cancel? [r/c] ");
+        } else {
+            print!("Keep as local copy, remove it, or cancel? [k/r/c] ");
+        }
+        let _ = io::stdout().flush();
+        let mut choice = String::new();
+        if io::stdin().read_line(&mut choice).ok()? == 0 {
+            return None;
+        }
+        match choice.trim().to_ascii_lowercase().as_str() {
+            "k" | "keep" if !content_gone => {
+                print!("Local copy name [{}]: ", blocked.suggested_local_name);
+                let _ = io::stdout().flush();
+                let mut name = String::new();
+                io::stdin().read_line(&mut name).ok()?;
+                let name = name.trim();
+                return Some(skill_update::LocalDivergenceResolution::Preserve {
+                    local_name: if name.is_empty() {
+                        blocked.suggested_local_name.clone()
+                    } else {
+                        name.to_string()
+                    },
+                });
+            }
+            "r" | "remove" => return Some(skill_update::LocalDivergenceResolution::Uninstall),
+            "c" | "cancel" => return None,
+            _ if content_gone => println!("Enter r or c."),
+            _ => println!("Enter k, r, or c."),
+        }
+    }
+}
+
 pub fn cmd_remove(opts: RemoveOpts<'_>) {
     let targets: Vec<String> = if opts.all {
         let lock_path = lockfile::lockfile_path();
@@ -220,11 +277,10 @@ pub fn cmd_remove(opts: RemoveOpts<'_>) {
         }
         if let Ok(dir_entries) = std::fs::read_dir(&hub_dir) {
             for entry in dir_entries.flatten() {
-                if let Some(name) = entry.file_name().to_str() {
-                    if is_user_hub_entry(name) {
+                if let Some(name) = entry.file_name().to_str()
+                    && is_user_hub_entry(name) {
                         names.insert(name.to_string());
                     }
-                }
             }
         }
         names.into_iter().collect()

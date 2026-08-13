@@ -110,13 +110,57 @@ export interface ToolActivation {
 }
 
 /**
+ * OMP thinking levels usable as the `:suffix` on a model role value.
+ * Mirrors `OMP_THINKING_LEVELS` in `crates/skillstar-models/src/tool_sync/types.rs`.
+ */
+export const OMP_THINKING_LEVELS = [
+  "inherit",
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "auto",
+] as const;
+export type OmpThinkingLevel = (typeof OMP_THINKING_LEVELS)[number];
+
+/**
+ * One OMP model role → provider+model assignment. `provider_id` is a SkillStar
+ * provider id; the on-disk `skillstar_*` key is derived at write time.
+ */
+export interface OmpRoleTarget {
+  provider_id: string;
+  model: string;
+  thinking?: OmpThinkingLevel | null;
+}
+
+/**
+ * OMP-specific binding-level settings. Mirrors the backend `OmpSettings`.
+ * Keys of `roles` are OMP role names (`default`, `smol`, `slow`, `plan`, …).
+ */
+export interface OmpSettings {
+  roles: Record<string, OmpRoleTarget>;
+}
+
+/** Binding-level settings bag. Only OMP populates it today. */
+export type ToolBindingSettings = OmpSettings;
+
+/**
  * All provider+model bindings for one Agent tool, plus which one is active.
  * `entries` is the ordered list; `active_index` points at the entry that owns
  * the agent's active pointer on disk. Empty `entries` = not bound.
+ *
+ * `settings` is the tool-level bag, the sibling of `ToolActivation.settings`
+ * (which is per-provider). Config spanning several entries lives here — OMP's
+ * model roles, where one role may target a different provider than the active
+ * one.
  */
 export interface ToolBinding {
   entries: ToolActivation[];
   active_index: number;
+  settings?: ToolBindingSettings | null;
 }
 
 export type ToolActivationsMap = Record<string, ToolBinding>;

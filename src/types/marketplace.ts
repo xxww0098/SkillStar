@@ -1,8 +1,25 @@
 //! marketplace domain types. Split out of the old monolithic index for
 //! navigability; all re-exported by `index.ts`.
+//!
+//! The local-first snapshot contract (`LocalFirstResult`, `SnapshotStatus`,
+//! `SyncStateEntry`) and the skill-detail payload (`MarketplaceSkillDetails`,
+//! `SecurityAudit`) are generated via ts-rs from
+//! `skillstar_marketplace::{snapshot, remote}` — see `src/types/generated/` and
+//! `bun run types:gen`. Those shapes have a single SSOT in Rust; do not
+//! hand-write a copy here. The remaining interfaces below are still
+//! hand-maintained mirrors of `skillstar_marketplace::remote`, and each one is
+//! a place the two sides can silently drift: the hand-written
+//! `MarketplaceSkillDetails` below had been missing `security_audits` since the
+//! field was added on the Rust side.
 
 import type { McpPublisherSummary } from "./mcp";
 import type { Skill } from "./skill";
+
+export type { LocalFirstResult } from "./generated/LocalFirstResult";
+export type { MarketplaceSkillDetails } from "./generated/MarketplaceSkillDetails";
+export type { SecurityAudit } from "./generated/SecurityAudit";
+export type { SnapshotStatus } from "./generated/SnapshotStatus";
+export type { SyncStateEntry } from "./generated/SyncStateEntry";
 
 export interface RepoNewSkill {
   repo_source: string;
@@ -17,23 +34,6 @@ export interface MarketplaceResult {
   total_count: number;
   page: number;
   has_more: boolean;
-}
-
-export type SnapshotStatus = "fresh" | "stale" | "seeding" | "miss" | "error_fallback" | "remote_error";
-
-export interface LocalFirstResult<T> {
-  data: T;
-  snapshot_status: SnapshotStatus;
-  snapshot_updated_at: string | null;
-  error?: string | null;
-}
-
-export interface MarketplaceSkillDetails {
-  summary: string | null;
-  readme: string | null;
-  weekly_installs: string | null;
-  github_stars: number | null;
-  first_seen: string | null;
 }
 
 export interface OfficialPublisher {
@@ -57,15 +57,6 @@ export interface PublisherRepo {
   installs: number;
   url: string;
   skills: PublisherRepoSkill[];
-}
-
-export interface SyncStateEntry {
-  scope: string;
-  last_success_at: string | null;
-  last_attempt_at: string | null;
-  last_error: string | null;
-  next_refresh_at: string | null;
-  schema_version: number;
 }
 
 export type SortOption = "stars-desc" | "updated" | "name";
@@ -92,6 +83,8 @@ export interface DiscoveredSkill {
   folder_path: string;
   description: string;
   already_installed: boolean;
+  /** Frontmatter quality issue codes (e.g. "missing_description"); empty = valid */
+  frontmatter_issues: string[];
 }
 
 export interface ScanResult {

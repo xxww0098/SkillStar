@@ -2,6 +2,7 @@
 
 pub mod acp;
 pub mod github_mirror;
+pub mod marketplace_mirror;
 pub mod proxy;
 
 #[cfg(test)]

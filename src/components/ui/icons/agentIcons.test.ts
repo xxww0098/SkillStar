@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AGENT_ICON_BY_ID, getAgentIcon } from "./agentIcons";
-import { DevinColor, KiroColor, LobeHubMono, PiMono } from "./lobe";
+import { DevinColor, KiroColor, LobeHubMono, PiMono, ZAIMono } from "./lobe";
 
 const BUILTIN_AGENT_IDS = [
   "aider-desk",
@@ -25,12 +25,14 @@ const BUILTIN_AGENT_IDS = [
   "crush",
   "cursor",
   "deepagents",
+  "deepseek",
   "devin",
   "dexto",
   "droid",
   "eve",
   "firebender",
   "forgecode",
+  "gemini-cli",
   "github-copilot",
   "goose",
   "hermes",
@@ -49,6 +51,7 @@ const BUILTIN_AGENT_IDS = [
   "moxby",
   "mux",
   "neovate",
+  "omp",
   "opencode",
   "openhands",
   "ona",
@@ -96,6 +99,8 @@ describe("Agent icon registry", () => {
     expect(getAgentIcon("kiro")).toBe(KiroColor);
     expect(getAgentIcon("devin")).toBe(DevinColor);
     expect(getAgentIcon("pi")).toBe(PiMono);
+    expect(getAgentIcon("zcode")).toBe(ZAIMono);
     expect(getAgentIcon("pi")).not.toBe(LobeHubMono);
+    expect(getAgentIcon("zcode")).not.toBe(LobeHubMono);
   });
 });

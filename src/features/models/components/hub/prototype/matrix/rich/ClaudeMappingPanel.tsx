@@ -47,7 +47,11 @@ export function seedClaudeMap(provider: ProviderEntryFlat, catalog?: string[]): 
     sonnet: { displayName: "", requestModel: pick(0), support1M: false },
     opus: { displayName: "", requestModel: pick(1) || pick(0), support1M: false },
     fable: { displayName: "", requestModel: pick(2) || pick(0), support1M: false },
-    haiku: { displayName: "", requestModel: pick(Math.min(3, Math.max(models.length - 1, 0))) || pick(0), support1M: false },
+    haiku: {
+      displayName: "",
+      requestModel: pick(Math.min(3, Math.max(models.length - 1, 0))) || pick(0),
+      support1M: false,
+    },
     subagent: { displayName: "", requestModel: pick(0), support1M: false },
   };
 }
@@ -112,9 +116,12 @@ export function ClaudeMappingPanel({
   onUnbind,
   onStub,
   chrome = "popover",
-  diskHint = "写入 ~/.claude/settings.json",
+  diskHint,
 }: ClaudeMappingPanelProps) {
   const { t } = useTranslation();
+  // Defaulted here rather than in the parameter list: `t` only exists once the
+  // hook has run, and the fallback copy has to be translatable too.
+  const diskHintText = diskHint ?? t("models.claudeMapping.diskHint");
   const { updateProvider } = useProvidersFlat();
   const { fetchModelCatalog, isLoading: isFetchingModels } = useModelFetch();
   const [extraModels, setExtraModels] = useState<string[]>([]);
@@ -124,9 +131,7 @@ export function ClaudeMappingPanel({
     [provider, extraModels],
   );
   const canOneClick = Boolean(
-    CLAUDE_MAP_ROLES.some((r) => value[r.id].requestModel.trim()) ||
-      provider.default_model.trim() ||
-      models.length > 0,
+    CLAUDE_MAP_ROLES.some((r) => value[r.id].requestModel.trim()) || provider.default_model.trim() || models.length > 0,
   );
   const canFetch = Boolean(provider.models_url?.trim() && provider.api_key?.trim());
   const { filled, total } = mappingFillCount(value);
@@ -189,9 +194,7 @@ export function ClaudeMappingPanel({
       <div className="flex items-start justify-between gap-3 border-b border-border/40 px-4 py-3">
         <div className="min-w-0">
           <h3 className="text-sm font-semibold">{t("models.claudeMapping.title")}</h3>
-          <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-            {t("models.claudeMapping.subtitle")}
-          </p>
+          <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{t("models.claudeMapping.subtitle")}</p>
           <p className="mt-1 font-mono text-[10px] text-muted-foreground">
             {provider.name} · {filled}/{total} {t("models.claudeMapping.filledSuffix")}
           </p>
@@ -302,7 +305,7 @@ export function ClaudeMappingPanel({
 
       {(onUnbind || chrome === "page") && (
         <div className="flex items-center justify-between gap-2 border-t border-border/40 px-4 py-2.5">
-          <p className="text-[10px] text-muted-foreground">{diskHint}</p>
+          <p className="text-[10px] text-muted-foreground">{diskHintText}</p>
           <div className="flex gap-1.5">
             {onUnbind ? (
               <Button size="xs" variant="ghost" className="text-destructive" onClick={onUnbind}>
