@@ -385,7 +385,6 @@ fn execute_anonymous_with_mirror_fallback(
     // falling back to a direct GitHub connection. A mirror can turn a valid
     // public repository into a 404 or another auth-looking response, so the
     // direct attempt is the final authority, not just the last resort.
-    let mut last_error: Option<GitTransportError> = None;
     for mirror in &candidates {
         match execute_remote_git_once(repo_path, args, remote, session, Some(mirror)) {
             Ok(output) => return Ok(output),
@@ -397,14 +396,17 @@ fn execute_anonymous_with_mirror_fallback(
             {
                 return Err(error);
             }
-            Err(error) => last_error = Some(error),
+            // A mirror's failure is evidence about the mirror, not about
+            // GitHub, so it is never reported. Returning it here would mask
+            // the direct attempt's `not_authenticated` behind a mirror
+            // `network` error, and `execute_remote_git` only retries with
+            // credentials for auth-class codes — which is why a signed-in
+            // user with mirrors enabled could never reach a private repo.
+            Err(_) => {}
         }
     }
 
-    match execute_remote_git_once(repo_path, args, remote, session, None) {
-        Ok(output) => Ok(output),
-        Err(error) => Err(last_error.unwrap_or(error)),
-    }
+    execute_remote_git_once(repo_path, args, remote, session, None)
 }
 
 fn execute_remote_git_once(

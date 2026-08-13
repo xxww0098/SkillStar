@@ -452,7 +452,9 @@
     "scopeLabel": "Skill 库范围",
     "scopeLocal": "本地",
     "scopeRemote": "远端 (SSH)",
-    "remoteHostPicker": "远程服务器"
+    "remoteHostPicker": "远程服务器",
+    "updateChannelManaged": "「{{name}}」由共享频道管理，请在共享频道视图中更新。",
+    "batchUpdateChannelManaged": "{{count}} 个技能由共享频道管理，已跳过；请在共享频道视图中更新。"
   },
   "toolbar": {
     "searchPlaceholder": "搜索技能...",

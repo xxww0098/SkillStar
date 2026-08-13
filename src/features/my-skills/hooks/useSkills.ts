@@ -319,7 +319,7 @@ function useSkillsState() {
     async (names: string[]): Promise<SkillUpdateReport> => {
       const toUpdate = names.filter((name) => !pendingUpdateRef.current.has(name));
       if (toUpdate.length === 0) {
-        return { updated: [], blocked: [], failed: [], skipped: [] };
+        return { updated: [], blocked: [], failed: [], skipped: [], channel_managed: [] };
       }
 
       for (const name of toUpdate) {
@@ -446,6 +446,7 @@ function useSkillsState() {
         blocked: outcome.unresolved,
         failed: [...report.failed, ...outcome.failed],
         skipped: report.skipped,
+        channel_managed: report.channel_managed,
         uninstalled: outcome.uninstalled,
       };
     },

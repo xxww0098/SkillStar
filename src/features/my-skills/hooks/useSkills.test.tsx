@@ -130,6 +130,7 @@ describe("useSkills", () => {
             blocked: [],
             failed: [],
             skipped: INITIAL_SKILLS.slice(1).map((skill) => skill.name),
+            channel_managed: [],
           };
           return report;
         }

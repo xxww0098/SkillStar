@@ -10,6 +10,36 @@ use skillstar_skills::repo_scanner;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+/// Whether a shared channel owns `name`.
+///
+/// Fails closed: routine maintenance treats an unreadable ownership registry
+/// as "owned" so a transient read error can never turn into a deletion.
+fn is_channel_managed(name: &str) -> bool {
+    match skillstar_skills::skill_mutation::skill_is_channel_managed(name) {
+        Ok(managed) => managed,
+        Err(error) => {
+            tracing::warn!(
+                target: "storage",
+                skill = %name,
+                error = %error,
+                "treating Skill as channel-owned because ownership could not be read"
+            );
+            true
+        }
+    }
+}
+
+/// Immediate child names of the hub skills directory.
+fn hub_entry_names(hub_dir: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(hub_dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
+        .collect()
+}
+
 /// Aggregated storage usage info for the Settings page.
 #[derive(serde::Serialize)]
 pub struct StorageOverview {
@@ -135,6 +165,13 @@ pub async fn force_delete_installed_skills() -> Result<usize, AppError> {
         let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
         let removed_count = count_children(&hub_dir);
 
+        // An explicit reset may delete channel-owned Skills, but the channel
+        // registry has to learn about it — otherwise it keeps claiming names
+        // with nothing behind them, and those names can never be reinstalled
+        // or deleted again. Report first: a registry that cannot be updated
+        // aborts the reset instead of being orphaned by it.
+        skillstar_skills::skill_mutation::notify_bulk_skill_removal(&hub_entry_names(&hub_dir))?;
+
         // Remove all global skill symlinks from known agents to avoid dangling links.
         for profile in agent_profile::list_profiles() {
             let _ = deployment::unlink_all_skills_from_agent(&profile.id);
@@ -170,7 +207,9 @@ pub async fn force_delete_repo_caches() -> Result<usize, AppError> {
         let hub_dir = skillstar_core::infra::paths::hub_skills_dir();
         let mut removed_skill_names: HashSet<String> = HashSet::new();
 
-        // Drop hub symlinks that point into repo cache before deleting cache dirs.
+        // Collect the hub symlinks that point into the repo cache first: the
+        // channel registry must be told which Skills are about to disappear
+        // before any of them do, so an unwritable registry aborts the reset.
         if let Ok(entries) = std::fs::read_dir(&hub_dir) {
             for entry in entries.flatten() {
                 let skill_path = entry.path();
@@ -180,13 +219,18 @@ pub async fn force_delete_repo_caches() -> Result<usize, AppError> {
                 let Some(target) = fs_ops::read_link_resolved(&skill_path).ok() else {
                     continue;
                 };
-                if target.starts_with(&cache_dir) {
-                    if let Some(name) = entry.file_name().to_str() {
-                        removed_skill_names.insert(name.to_string());
-                    }
-                    let _ = fs_ops::remove_symlink(&skill_path);
+                if target.starts_with(&cache_dir)
+                    && let Some(name) = entry.file_name().to_str()
+                {
+                    removed_skill_names.insert(name.to_string());
                 }
             }
+        }
+        let removed_skill_list = removed_skill_names.iter().cloned().collect::<Vec<_>>();
+        skillstar_skills::skill_mutation::notify_bulk_skill_removal(&removed_skill_list)?;
+
+        for name in &removed_skill_names {
+            let _ = fs_ops::remove_symlink(&hub_dir.join(name));
         }
 
         // Remove linked references from agent skill dirs.
@@ -219,10 +263,21 @@ pub async fn force_delete_repo_caches() -> Result<usize, AppError> {
 
 /// Force-delete app config files.
 ///
+/// Preserves the files that record ownership of *installed* content (the
+/// shared-channel registry and subscription store). They are provenance, not
+/// preferences — the lockfile's channel-side counterpart, and like the
+/// lockfile they outlive a settings reset. Deleting them while their Skills
+/// are still in the hub would strand those Skills: they would stop being
+/// recognised as channel-owned, so the ordinary update path would start
+/// fetching a private channel repository anonymously and fail forever.
+///
 /// Returns the number of config files removed.
 pub async fn force_delete_app_config() -> Result<usize, AppError> {
     Ok(tokio::task::spawn_blocking(|| {
         let mut removed = 0usize;
+        let preserved: HashSet<PathBuf> = skillstar_skills::skill_mutation::provenance_paths()
+            .into_iter()
+            .collect();
 
         // Delete config dir contents
         let config_dir = paths::config_dir();
@@ -231,6 +286,9 @@ pub async fn force_delete_app_config() -> Result<usize, AppError> {
         {
             for entry in entries.flatten() {
                 let path = entry.path();
+                if preserved.contains(&path) {
+                    continue;
+                }
                 if path.is_file() && std::fs::remove_file(&path).is_ok() {
                     removed += 1;
                 }
@@ -257,6 +315,13 @@ pub async fn force_delete_app_config() -> Result<usize, AppError> {
 
 /// Remove broken symlinks from the hub and prune orphaned lockfile entries.
 ///
+/// Channel-owned Skills are skipped entirely. This is routine housekeeping,
+/// not a reset: a channel Skill whose checkout vanished is repaired through
+/// the channel controls, and deleting its hub entry or lock entry here would
+/// silently desynchronise the subscription from disk. Ownership that cannot be
+/// determined counts as owned, so a registry read failure never escalates into
+/// deletion.
+///
 /// Returns the number of issues fixed.
 pub async fn clean_broken_skills() -> Result<usize, AppError> {
     tokio::task::spawn_blocking(|| -> Result<usize, AppError> {
@@ -274,10 +339,14 @@ pub async fn clean_broken_skills() -> Result<usize, AppError> {
                 }
                 if fs_ops::is_link(&path) && !path.exists() {
                     // Broken symlink — target is gone
+                    let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+                        continue;
+                    };
+                    if is_channel_managed(&name) {
+                        continue;
+                    }
                     if fs_ops::remove_symlink(&path).is_ok() {
-                        if let Some(name) = entry.file_name().to_str() {
-                            removed_names.insert(name.to_string());
-                        }
+                        removed_names.insert(name);
                         fixed += 1;
                     }
                 }
@@ -298,9 +367,12 @@ pub async fn clean_broken_skills() -> Result<usize, AppError> {
         let before = lf.skills.len();
         lf.skills.retain(|entry| {
             let skill_path = hub_dir.join(&entry.name);
-            // Keep entries that have a valid directory or valid symlink
-            skill_path.symlink_metadata().is_ok()
-                && (!fs_ops::is_link(&skill_path) || skill_path.exists())
+            // Keep entries that have a valid directory or valid symlink, plus
+            // every channel-owned entry: its subscription still tracks it, so
+            // dropping the lock entry here would orphan that record.
+            (skill_path.symlink_metadata().is_ok()
+                && (!fs_ops::is_link(&skill_path) || skill_path.exists()))
+                || is_channel_managed(&entry.name)
         });
         let orphans_removed = before - lf.skills.len();
         if orphans_removed > 0 {

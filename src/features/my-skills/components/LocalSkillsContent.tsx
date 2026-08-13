@@ -277,6 +277,12 @@ export function LocalSkillsContent({
           toast.error(failure.error ? `${t("mySkills.updateFailed")}: ${failure.error}` : t("mySkills.updateFailed"));
           return;
         }
+        // Declined by design rather than failed. Without this the button would
+        // simply do nothing, which reads as a bug.
+        if (report.channel_managed.some((entry) => entry.name === name)) {
+          toast.info(t("mySkills.updateChannelManaged", { name }));
+          return;
+        }
         if (report.uninstalled.includes(name)) {
           toast.success(t("mySkills.droppedSkillRemoved", { name }));
           setSelectedSkill((prev) => (prev?.name === name ? null : prev));
@@ -472,6 +478,10 @@ export function LocalSkillsContent({
             defaultValue: `${report.blocked.length} update(s) paused for local changes`,
           }),
         );
+      }
+
+      if (report.channel_managed.length > 0) {
+        toast.info(t("mySkills.batchUpdateChannelManaged", { count: report.channel_managed.length }));
       }
 
       if (successCount > 0 && report.failed.length === 0) {

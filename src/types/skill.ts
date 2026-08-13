@@ -84,15 +84,24 @@ export function isSourceGone(reason: LocalDivergenceReason): boolean {
   return reason === "source_removed" || reason === "source_missing";
 }
 
+/** A Skill a shared channel owns, which the generic update path declines by
+ *  design rather than fails on. */
+export interface SkillUpdateChannelManaged {
+  name: string;
+  repository_id: number;
+}
+
 /** Return type of the `update_skills` batch command. `skipped` names were not
  *  pulled because a skill sharing their repository was — their content moved
  *  anyway. A failed update reports every name it would have covered, so
- *  nothing is quietly counted as done. */
+ *  nothing is quietly counted as done. `channel_managed` is declined-by-design,
+ *  not a failure: those Skills update through the shared channel flow. */
 export interface SkillUpdateReport {
   updated: UpdateResult[];
   blocked: SkillUpdateBlocked[];
   failed: SkillUpdateFailure[];
   skipped: string[];
+  channel_managed: SkillUpdateChannelManaged[];
 }
 
 /** A complete update run, including whatever the blocked-update dialog resolved

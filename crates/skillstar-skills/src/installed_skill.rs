@@ -85,13 +85,34 @@ pub fn installed_snapshot_markers() -> HashSet<String> {
 
 fn apply_cached_update_states(mut skills: Vec<Skill>) -> Vec<Skill> {
     update_state::apply_to(&mut skills);
+    let policy = crate::skill_mutation::policy();
+    let mut lookup_failures = 0usize;
+    let mut first_failure: Option<String> = None;
     for skill in &mut skills {
-        if !matches!(
-            crate::skill_mutation::policy().managed_repository_for_skill(&skill.name),
-            Ok(None)
-        ) {
-            skill.update_available = false;
+        match policy.managed_repository_for_skill(&skill.name) {
+            // A shared channel owns it: its updates come from the channel flow,
+            // never from the generic update badge.
+            Ok(Some(_)) => skill.update_available = false,
+            Ok(None) => {}
+            // Ownership is unknown — typically a corrupt or future-versioned
+            // subscription registry. This used to be folded in with the line
+            // above, so one unreadable file silently zeroed the update badge of
+            // every Skill on the machine, channel-managed or not, with nothing
+            // logged. The badge is display-only and every write path re-checks
+            // the gate itself, so leaving it as computed cannot cause a wrong
+            // mutation; losing every badge with no explanation can and did.
+            Err(error) => {
+                lookup_failures += 1;
+                first_failure.get_or_insert_with(|| format!("{error:#}"));
+            }
         }
+    }
+    if let Some(error) = first_failure {
+        warn!(
+            target: "skills",
+            failures = lookup_failures,
+            "Could not read shared-channel ownership while listing Skills; update badges are left as computed: {error}"
+        );
     }
     skills
 }
@@ -173,19 +194,35 @@ pub async fn refresh_skill_updates_in_session(
     // lands while this scan runs are dropped when it commits.
     let scan_started = update_state::stamp();
 
+    // Ownership lookups that fail skip their own Skill instead of aborting the
+    // whole scan. The sibling folding bug in `apply_cached_update_states` had a
+    // mirror image here: one unreadable subscription registry turned every
+    // refresh into an error, so the user got neither update badges nor a reason.
+    let policy = crate::skill_mutation::policy();
+    let mut ownership_failures = 0usize;
+    let mut first_ownership_failure: Option<String> = None;
     let skill_dirs = collect_skill_dirs(&skillstar_core::infra::paths::hub_skills_dir(), None)?
         .into_iter()
         .filter_map(|path| {
             let name = skill_name_from_path(&path)?;
-            match crate::skill_mutation::policy().installed_skill_is_mutable(&name, &path) {
-                Ok(true) => Some(Ok(path)),
+            match policy.installed_skill_is_mutable(&name, &path) {
+                Ok(true) => Some(path),
                 Ok(false) => None,
-                Err(error) => Some(Err(anyhow!(
-                    "failed to inspect shared-channel ownership before checking updates: {error:#}"
-                ))),
+                Err(error) => {
+                    ownership_failures += 1;
+                    first_ownership_failure.get_or_insert_with(|| format!("{error:#}"));
+                    None
+                }
             }
         })
-        .collect::<Result<Vec<_>>>()?;
+        .collect::<Vec<_>>();
+    if let Some(error) = first_ownership_failure {
+        warn!(
+            target: "skills",
+            failures = ownership_failures,
+            "Could not read shared-channel ownership while checking for updates; those Skills were skipped: {error}"
+        );
+    }
 
     if skill_dirs.is_empty() {
         return Ok(Vec::new());

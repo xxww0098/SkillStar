@@ -119,7 +119,13 @@ export function devSkillUpdateStates(): SkillUpdateState[] {
 }
 
 export function devUpdateSkills(names: string[]): SkillUpdateReport {
-  const report: SkillUpdateReport = { updated: [], blocked: [], failed: [], skipped: [] };
+  const report: SkillUpdateReport = {
+    updated: [],
+    blocked: [],
+    failed: [],
+    skipped: [],
+    channel_managed: [],
+  };
 
   const requestedByCheckout = new Map<string, string[]>();
   for (const name of names) {

@@ -61,17 +61,31 @@ pub struct SkillUpdateFailure {
     pub error: String,
 }
 
+/// A Skill a shared channel owns, which the generic update path declines by
+/// design rather than fails on.
+#[derive(Debug, Clone, Serialize)]
+pub struct SkillUpdateChannelManaged {
+    pub name: String,
+    pub repository_id: u64,
+}
+
 /// Outcome of a batch update.
 ///
 /// `skipped` names were not updated because a skill sharing their repository
 /// was — their content moved anyway. A failed update reports every name it
 /// would have covered, so nothing is quietly counted as done.
+///
+/// `channel_managed` is a declined-by-design bucket, not a failure: a shared
+/// channel owns those Skills and updates them through its own flow. They used
+/// to land in `failed`, which made `skillstar update` print errors and exit
+/// nonzero on any machine that had ever subscribed to a channel.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct SkillUpdateReport {
     pub updated: Vec<UpdateResult>,
     pub blocked: Vec<SkillUpdateBlocked>,
     pub failed: Vec<SkillUpdateFailure>,
     pub skipped: Vec<String>,
+    pub channel_managed: Vec<SkillUpdateChannelManaged>,
 }
 
 /// Update several skills, pulling each repository at most once.
@@ -93,11 +107,22 @@ pub fn update_skills_in_session(
         .filter_map(|name| match content::validate_skill_name(name) {
             Ok(()) => match ensure_ordinary_update_allowed(name) {
                 Ok(()) => Some(name.clone()),
+                // The gate stays the authority on *whether* to proceed; the
+                // ownership query below only explains why. If it cannot
+                // positively name an owning channel, this remains a failure.
                 Err(error) => {
-                    report.failed.push(SkillUpdateFailure {
-                        name: name.clone(),
-                        error: error.to_string(),
-                    });
+                    match channel_owner_for_ordinary_update(name) {
+                        Ok(Some(repository_id)) => {
+                            report.channel_managed.push(SkillUpdateChannelManaged {
+                                name: name.clone(),
+                                repository_id,
+                            });
+                        }
+                        _ => report.failed.push(SkillUpdateFailure {
+                            name: name.clone(),
+                            error: error.to_string(),
+                        }),
+                    }
                     None
                 }
             },
@@ -327,6 +352,34 @@ pub(crate) fn take_source_removed_stop(
         Some(stop) => Ok(divergence::blocked_for_dropped_source(&stop.names)),
         None => Err(error),
     }
+}
+
+/// Channel that owns `name` for the purposes of the generic update path, if
+/// any — the Skill itself, a sibling sharing its checkout, or that sibling's
+/// repository. Mirrors [`ensure_ordinary_update_allowed`]'s reach so a refusal
+/// can be reported as "a channel owns this" instead of as an error.
+fn channel_owner_for_ordinary_update(name: &str) -> Result<Option<u64>> {
+    let policy = crate::skill_mutation::policy();
+    if let Some(repository_id) = policy.managed_repository_for_skill(name)? {
+        return Ok(Some(repository_id));
+    }
+    let entries = lockfile::Lockfile::load(&lockfile::lockfile_path())?.skills;
+    let hub = skillstar_core::infra::paths::hub_skills_dir();
+    let requested_root = repo_link::repo_root_of(&hub.join(name));
+    for entry in &entries {
+        let same_checkout = requested_root.as_ref().is_some_and(|root| {
+            repo_link::repo_root_of(&hub.join(&entry.name)).as_ref() == Some(root)
+        });
+        if entry.name.eq_ignore_ascii_case(name) || same_checkout {
+            if let Some(repository_id) = policy.managed_repository_for_skill(&entry.name)? {
+                return Ok(Some(repository_id));
+            }
+            if let Some(repository_id) = policy.managed_repository_for_url(&entry.git_url)? {
+                return Ok(Some(repository_id));
+            }
+        }
+    }
+    Ok(None)
 }
 
 fn ensure_ordinary_update_allowed(name: &str) -> Result<()> {

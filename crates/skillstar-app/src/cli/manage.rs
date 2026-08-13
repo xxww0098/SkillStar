@@ -76,6 +76,15 @@ pub fn cmd_update(name: Option<&str>) {
     for failure in &report.failed {
         eprintln!("✗ Failed to update '{}': {}", failure.name, failure.error);
     }
+    // Declined by design, so it goes to stdout and never affects the exit code:
+    // `skillstar update` with no name sweeps every hub entry, which includes
+    // every Skill a shared channel owns.
+    for managed in &report.channel_managed {
+        println!(
+            "- Skipped '{}': a shared channel manages it (repository {}); update it from the shared channel view.",
+            managed.name, managed.repository_id
+        );
+    }
 
     if report.blocked.is_empty() {
         if had_failure {

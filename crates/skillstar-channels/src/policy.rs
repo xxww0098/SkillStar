@@ -7,7 +7,7 @@
 //! manages. Application composition roots (Tauri setup, CLI entry) call
 //! [`install_global_policy`] once; until then the allow-all default applies.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use skillstar_skills::skill_mutation::SkillMutationPolicy;
@@ -40,6 +40,16 @@ impl SkillMutationPolicy for ChannelAwarePolicy {
     fn managed_repository_for_url(&self, repository_url: &str) -> anyhow::Result<Option<u64>> {
         crate::shared_channels::managed_repository_for_url(repository_url)
             .map_err(anyhow::Error::from)
+    }
+
+    fn on_bulk_skill_removal(&self, skill_ids: &[String]) -> anyhow::Result<()> {
+        crate::shared_channels::prune_removed_skills(skill_ids)
+            .map(|_| ())
+            .map_err(anyhow::Error::from)
+    }
+
+    fn provenance_paths(&self) -> Vec<PathBuf> {
+        crate::shared_channels::subscription_provenance_paths()
     }
 }
 

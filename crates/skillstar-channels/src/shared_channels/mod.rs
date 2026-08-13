@@ -23,6 +23,7 @@ mod release_scanner;
 mod store;
 mod subscription;
 mod subscription_installer;
+mod subscription_pruning;
 mod subscription_remote;
 mod subscription_store;
 mod subscription_validation;
@@ -100,6 +101,9 @@ pub use subscription::{
     ChannelSubscriptionView, SubscribeChannelRequest,
 };
 pub use subscription_installer::GitChannelSubscriptionInstaller;
+pub(crate) use subscription_pruning::{
+    provenance_paths as subscription_provenance_paths, prune_removed_skills,
+};
 pub use subscription_store::DiskChannelSubscriptionRegistry;
 pub(crate) use subscription_store::{managed_repository_for_skill, managed_repository_for_url};
 

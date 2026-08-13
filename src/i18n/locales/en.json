@@ -452,7 +452,9 @@
     "scopeLabel": "Skill library scope",
     "scopeLocal": "Local",
     "scopeRemote": "Remote (SSH)",
-    "remoteHostPicker": "Remote server"
+    "remoteHostPicker": "Remote server",
+    "updateChannelManaged": "A shared channel manages “{{name}}”. Update it from the shared channel view.",
+    "batchUpdateChannelManaged": "Skipped {{count}} skill(s) that a shared channel manages. Update them from the shared channel view."
   },
   "toolbar": {
     "searchPlaceholder": "Search cards...",
