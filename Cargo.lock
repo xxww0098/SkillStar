@@ -7391,6 +7391,7 @@ dependencies = [
  "flate2",
  "junction",
  "regex",
+ "reqwest 0.13.3",
  "scraper",
  "serde",
  "serde_json",

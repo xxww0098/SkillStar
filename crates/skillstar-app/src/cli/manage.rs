@@ -370,11 +370,15 @@ pub fn cmd_publish() {
     let status = gh_manager::check_status();
     match status {
         gh_manager::GhStatus::NotInstalled => {
-            eprintln!("✗ GitHub CLI (gh) is required. Install from: https://cli.github.com/");
+            eprintln!("✗ Git is required to publish. Install from: https://git-scm.com/downloads");
             std::process::exit(1);
         }
         gh_manager::GhStatus::NotAuthenticated => {
-            eprintln!("✗ GitHub CLI is not authenticated. Run: gh auth login");
+            // Publishing uses the SkillStar GitHub App identity, not a global
+            // `gh` login; the device flow lives in the desktop app.
+            eprintln!(
+                "✗ SkillStar is not signed in to GitHub. Sign in from the SkillStar app (Settings → GitHub), then retry."
+            );
             std::process::exit(1);
         }
         gh_manager::GhStatus::Ready { .. } => {}

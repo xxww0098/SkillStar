@@ -26,7 +26,7 @@
 - 登录状态按 GitHub 返回的 `expires_in` / `refresh_token_expires_in` 元数据计算，不硬编码 token 寿命。显式刷新会轮换钥匙串凭据并重新读取当前用户；过期且无法刷新的状态要求重新登录。
 - Settings 展示登录指导、等待授权、成功身份、过期/拒绝/代理失败和登出。取消或过期会清除进程内待处理设备授权；登出还会清除钥匙串凭据和缓存身份。
 - GitHub App 由仓库所有者安装到明确选择的仓库。界面说明后续共享频道需要 `Administration: write`（直接成员邀请/移除）和 `Contents: write`（发布不可变频道版本），不请求 `Workflows: write`；有效操作权限仍受当前 GitHub 用户权限限制。
-- 已登录身份也是私有 `github.com` 仓库扫描、安装、更新检查和升级的唯一 Git 认证来源；这些动作不依赖全局 `gh` 登录、Git credential helper 或预先改写过的 remote。
+- 已登录身份也是私有 `github.com` 仓库扫描、安装、更新检查、升级和**技能发布**的唯一 Git 认证来源；这些动作不依赖全局 `gh` 登录、Git credential helper 或预先改写过的 remote。发布不再调用 `gh` CLI：仓库列举、`skills/` 目录探查和建仓走 App 凭据的 GitHub REST（统一经 `probe_http_client`），clone/pull/push 走同一 operation session。`gh` 只剩 Settings 的环境检查一处用途。
 - 每次远程 Git 操作创建独立 session。access token 只通过该子进程继承的临时 askpass 环境提供，操作结束即不可见；token 不得进入 remote URL、持久 Git config、命令参数、普通配置、IPC DTO、进度事件、错误或日志。所有 Git 子进程强制非交互，取消时终止当前子进程，进度只公开 session、阶段和无敏感信息的仓库标识。
 - 私有认证只发送给规范化后的 `https://github.com/` 远端。带认证的操作不经过 GitHub 镜像，避免向第三方转发凭据；仍读取 SkillStar 当前代理设置并通过进程环境临时应用。公开仓库沿用无凭据路径，并同样不得弹出终端或系统凭据提示。
 - 公开仓库的匿名拉取按 mirror 候选链执行：`candidate_mirror_urls()` 返回"custom → 选中 preset → 其余内置 preset（去重、规范化）"，transport/ops 对每个候选逐个尝试（每次独立 git 子进程），全部候选失败才回退直连 GitHub；非 GitHub/https 远端与带凭据操作不应用 mirror 重写。
@@ -135,6 +135,9 @@
 
 - 本地创作位于 `~/.skillstar/hub/local/<name>`，通过 hub link 暴露。
 - 从项目 Agent 目录导入的技能必须先采用到 local，再进入 hub；发布到 GitHub 后可以毕业为 repo-backed install，但只有 staged 安装与最终校验成功才提交新的 Git lock provenance，失败时同时恢复本地内容与发布前 lock 状态。
+- 发布前置检查的三态含义是「发布所需的 `git` 是否可用 → SkillStar 是否有可用 GitHub App 身份 → 该身份的 login」，不再是 `gh` 的安装与登录状态。凭据有效但网络/限流导致读不到 login 时仍视为可发布，只是身份标签未知，不把连通性问题报成未登录。
+- 发布目标仓库列举使用 `affiliation=owner,collaborator,organization_member` 分页拉取，因此组织仓库和被邀请为协作者的仓库都可以作为发布目标；此前的 `gh repo list <login>` 只能看到个人仓库。新建仓库以 `auto_init=false` 建在当前 GitHub 用户名下，首个 commit 由本地缓存推上去。
+- 发布失败不留半成品：clone 失败删除半克隆缓存，新建仓库后的任何一步失败都删除该缓存目录（远端空仓库保留，由用户在 GitHub 处理）。发布 commit 始终携带 `SkillStar <skillstar@local>` committer 身份，不依赖机器上的全局 Git 配置。
 - `.ags`/`.agd` 是带 manifest 和 checksum 的 tar.gz。
 - Share code 安装由后端 `install_from_share_code` 统一执行“已安装 / git / embedded / skip”决策，前端 modal 不复制循环。
 - 本地目录采用由 `adopt_local_folder` 和标准 discovery pipeline 处理，采用时复制完整技能目录（SKILL.md + scripts/references/assets），不只有 manifest；采用前同样经过 frontmatter 质量门禁，无效技能按项跳过并报告原因。CLI 本地目录安装复用同一 facade，不复制采用循环。

@@ -26,6 +26,7 @@ tempfile.workspace = true
 skillstar-git = { version = "0.1.0", path = "../skillstar-git" }
 skillstar-agents = { version = "0.1.0", path = "../skillstar-agents" }
 skillstar-github-auth = { version = "0.1.0", path = "../skillstar-github-auth" }
+reqwest.workspace = true
 
 [target."cfg(windows)".dependencies]
 junction = { workspace = true }

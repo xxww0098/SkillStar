@@ -1,23 +1,72 @@
+//! Skill publishing: local repository preparation plus the GitHub side of it.
+//!
+//! Everything remote goes through one identity and one policy: REST through
+//! [`super::gh_rest`] with the SkillStar GitHub App credential (D-013), and
+//! Git through an operation session so the token only ever reaches an askpass
+//! child process (D-014). The `gh` CLI is no longer part of this path — it
+//! authenticated as the machine's global GitHub login and inherited the
+//! launcher's proxy environment, which is a second identity and a second proxy
+//! behaviour inside the same app.
+//!
+//! Local-only Git (`init`, `add`, `commit`, `remote add`) stays on a plain
+//! subprocess: it touches no remote, so an operation session would add policy
+//! without a boundary to enforce.
+
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::Arc;
 
 use skillstar_core::infra::path_env::command_with_path;
 
+use crate::git::transport::{
+    GitAuthMaterial, GitOperationSession, NoopGitProgressSink, execute_remote_command,
+};
+use skillstar_github_auth::{
+    GitHubAuthFacade, KeyringCredentialStore, ProductionGitHubGateway, SystemClock,
+};
+
+use super::gh_rest::{GhRestClient, GhRestErrorCode};
+
+/// Committer identity for publish commits.
+///
+/// A machine with no global Git identity would otherwise fail the commit, and
+/// publishing must not depend on how the user configured Git outside SkillStar.
+const COMMITTER_ARGS: [&str; 4] = [
+    "-c",
+    "user.name=SkillStar",
+    "-c",
+    "user.email=skillstar@local",
+];
+
+/// Shown when the credential is valid but GitHub could not be asked for the
+/// login (network or rate limit). Publishing still works; only the label is
+/// unknown.
+const UNKNOWN_LOGIN: &str = "unknown";
+
 // ── Status ──────────────────────────────────────────────────────────
 
+/// Whether the publish flow can run, in the three states the UI branches on.
+///
+/// The publish path no longer needs the `gh` CLI, but it still needs `git` for
+/// the local repository work, so the states now describe git plus the SkillStar
+/// GitHub identity.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "status")]
 pub enum GhStatus {
-    /// gh CLI is not installed
+    /// `git` — required for the local publish repository — is not installed
     NotInstalled,
-    /// gh CLI is installed but the user is not authenticated
+    /// `git` is installed but SkillStar has no usable GitHub identity
     NotAuthenticated,
-    /// gh CLI is installed and authenticated; `username` is the logged-in user
+    /// Ready to publish; `username` is the signed-in GitHub App user
     Ready { username: String },
 }
 
-/// Check if GitHub CLI (gh) is installed
+/// Check if GitHub CLI (gh) is installed.
+///
+/// Kept for the Settings environment check only — no publish step depends on
+/// it any more.
 pub fn is_gh_installed() -> bool {
     command_with_path("gh")
         .arg("--version")
@@ -147,41 +196,73 @@ fn git_install_info() -> (String, Vec<GitInstallInstruction>, String) {
     }
 }
 
-/// Check if gh is authenticated
-pub fn is_gh_authenticated() -> Result<bool> {
-    let output = command_with_path("gh")
-        .args(["auth", "status"])
-        .output()
-        .context("Failed to run gh auth status")?;
-    Ok(output.status.success())
+/// Is `git` — the only external binary publishing still needs — available?
+fn is_git_installed() -> bool {
+    matches!(check_git_status(), GitStatus::Installed { .. })
 }
 
-/// Get the authenticated GitHub username
-fn get_gh_username() -> Option<String> {
-    let output = command_with_path("gh")
-        .args(["api", "user", "--jq", ".login"])
-        .output()
-        .ok()?;
-    if output.status.success() {
-        let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if name.is_empty() { None } else { Some(name) }
-    } else {
-        None
+/// Who SkillStar would publish as.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum PublishIdentity {
+    /// No stored credential, or GitHub rejected the one we have.
+    SignedOut,
+    SignedIn { login: String },
+}
+
+/// Resolve the publishing identity from the stored GitHub App credential.
+fn publish_identity() -> PublishIdentity {
+    let Ok(client) = GhRestClient::from_keyring() else {
+        return PublishIdentity::SignedOut;
+    };
+    match client.current_login() {
+        Ok(login) => PublishIdentity::SignedIn { login },
+        // A stored credential GitHub refuses is not an identity the user can
+        // publish with; they have to sign in again.
+        Err(error)
+            if matches!(
+                error.code,
+                GhRestErrorCode::NotAuthenticated | GhRestErrorCode::Unauthorized
+            ) =>
+        {
+            PublishIdentity::SignedOut
+        }
+        // Network or rate-limit failures say nothing about the credential.
+        // Reporting "not signed in" here would send a signed-in user to the
+        // login screen for what is really a connectivity problem.
+        Err(_) => PublishIdentity::SignedIn {
+            login: UNKNOWN_LOGIN.to_string(),
+        },
     }
 }
 
-/// Combined status check: installed → authenticated → username
-pub fn check_status() -> GhStatus {
-    if !is_gh_installed() {
+pub(super) fn map_publish_status(git_installed: bool, identity: PublishIdentity) -> GhStatus {
+    if !git_installed {
         return GhStatus::NotInstalled;
     }
-    match is_gh_authenticated() {
-        Ok(true) => {
-            let username = get_gh_username().unwrap_or_else(|| "unknown".to_string());
-            GhStatus::Ready { username }
-        }
-        _ => GhStatus::NotAuthenticated,
+    match identity {
+        PublishIdentity::SignedOut => GhStatus::NotAuthenticated,
+        PublishIdentity::SignedIn { login } => GhStatus::Ready { username: login },
     }
+}
+
+/// Combined publish readiness: git present → SkillStar signed in → login.
+pub fn check_status() -> GhStatus {
+    map_publish_status(is_git_installed(), publish_identity())
+}
+
+/// One operation session for every remote Git command in a publish.
+fn publish_session() -> GitOperationSession {
+    let auth = GitHubAuthFacade::new(
+        ProductionGitHubGateway::from_environment(),
+        KeyringCredentialStore,
+        SystemClock,
+    );
+    GitOperationSession::new(
+        uuid::Uuid::new_v4().to_string(),
+        auth.git_auth_material()
+            .unwrap_or_else(|error| GitAuthMaterial::unavailable(error.to_string())),
+        Arc::new(NoopGitProgressSink),
+    )
 }
 
 // ── List User Repos ─────────────────────────────────────────────────
@@ -200,64 +281,24 @@ pub struct UserRepo {
     pub folders: Vec<String>,
 }
 
-/// List user's GitHub repositories that could serve as skill monorepos.
-/// Fetches repos owned by the authenticated user and inspects their top-level dirs.
+/// List GitHub repositories that could serve as skill monorepos.
+///
+/// Covers personal, collaborator and organization-member repositories, so an
+/// organization repository can finally be chosen as a publish target — the
+/// previous `gh repo list <login>` call could only ever see personal ones.
 pub fn list_user_repos(limit: u32) -> Result<Vec<UserRepo>> {
-    let owner = get_gh_username();
-    let mut cmd = command_with_path("gh");
-    cmd.arg("repo").arg("list");
-
-    // `gh repo list` expects owner as a positional argument.
-    if let Some(ref owner_name) = owner {
-        cmd.arg(owner_name);
-    }
-
-    cmd.args([
-        "--json",
-        "nameWithOwner,url,description,isPrivate",
-        "--limit",
-        &limit.to_string(),
-    ]);
-
-    let output = cmd.output().context("Failed to run gh repo list")?;
-
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!(
-            "gh repo list failed{}: {}",
-            owner
-                .as_ref()
-                .map(|o| format!(" for owner '{}'", o))
-                .unwrap_or_default(),
-            err.trim()
-        );
-    }
-
-    #[derive(Deserialize)]
-    struct GhRepoItem {
-        #[serde(rename = "nameWithOwner")]
-        name_with_owner: String,
-        url: String,
-        description: Option<String>,
-        #[serde(rename = "isPrivate")]
-        is_private: bool,
-    }
-
-    let repo_entries: Vec<GhRepoItem> =
-        serde_json::from_slice(&output.stdout).context("Failed to parse gh repo list output")?;
-
-    let repos = repo_entries
+    let client = GhRestClient::from_keyring()?;
+    Ok(client
+        .list_repositories(limit)?
         .into_iter()
-        .map(|item| UserRepo {
-            full_name: item.name_with_owner,
-            url: item.url,
-            description: item.description.unwrap_or_default(),
-            is_public: !item.is_private,
-            folders: Vec::new(), // Filled lazily by inspect_repo
+        .map(|repo| UserRepo {
+            full_name: repo.full_name,
+            url: repo.html_url,
+            description: repo.description,
+            is_public: !repo.private,
+            folders: Vec::new(), // Filled lazily by inspect_repo_folders
         })
-        .collect();
-
-    Ok(repos)
+        .collect())
 }
 
 /// Inspect the skill folders inside a repo's top-level `skills/` directory.
@@ -265,29 +306,8 @@ pub fn list_user_repos(limit: u32) -> Result<Vec<UserRepo>> {
 /// picks a repo. Skills always publish under `skills/<name>`, so we list that
 /// directory rather than the repo root.
 pub fn inspect_repo_folders(repo_full_name: &str) -> Result<Vec<String>> {
-    // List directory entries inside the repo's `skills/` folder.
-    let output = command_with_path("gh")
-        .args([
-            "api",
-            &format!("repos/{}/contents/skills", repo_full_name),
-            "--jq",
-            r#"[.[] | select(.type == "dir") | .name] | sort | .[]"#,
-        ])
-        .output()
-        .context("Failed to inspect repo contents")?;
-
-    if !output.status.success() {
-        // Could be empty repo — return empty list
-        return Ok(Vec::new());
-    }
-
-    let folders = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty() && !s.starts_with('.'))
-        .collect();
-
-    Ok(folders)
+    let client = GhRestClient::from_keyring()?;
+    Ok(client.list_skill_folders(repo_full_name)?)
 }
 
 // ── Git Init ────────────────────────────────────────────────────────
@@ -326,18 +346,9 @@ fn stage_and_commit(path: &Path, message: &str) -> Result<()> {
         .context("Failed to check git status")?;
 
     if !status.status.success() {
-        run_git_in(
-            path,
-            &[
-                "-c",
-                "user.name=SkillStar",
-                "-c",
-                "user.email=skillstar@local",
-                "commit",
-                "-m",
-                message,
-            ],
-        )?;
+        let mut args = COMMITTER_ARGS.to_vec();
+        args.extend_from_slice(&["commit", "-m", message]);
+        run_git_in(path, &args)?;
     }
 
     Ok(())
@@ -443,8 +454,13 @@ pub fn publish_skill(
         .with_context(|| format!("Failed to capture content baseline for '{skill_name}'"))?
         .content_hash;
 
+    // Every remote step below — clone, pull, push — runs inside this session,
+    // so the token reaches Git only through the askpass child and SkillStar's
+    // proxy setting is the one that applies.
+    let session = publish_session();
+
     // Determine repo URL: either use existing or create new
-    let (repo_url, cache_dir) = if let Some(url) = existing_repo_url {
+    let (repo_url, remote_url, cache_dir, created_new) = if let Some(url) = existing_repo_url {
         // Clone/fetch the existing repo
         let sanitized = url
             .rsplit('/')
@@ -454,20 +470,31 @@ pub fn publish_skill(
         let cache = get_publish_cache_dir(sanitized);
 
         if cache.join(".git").exists() {
-            // Already cloned — pull latest
-            let _ = run_git_in(&cache, &["pull", "--rebase"]);
+            // Already cloned — pull latest. A stale cache must not block the
+            // publish; the push below is the authority on whether the local
+            // copy can move the remote forward.
+            let mut args = COMMITTER_ARGS.to_vec();
+            args.extend_from_slice(&["pull", "--rebase"]);
+            let _ = run_remote_git(&cache, &args, url, &session);
         } else {
             // Clone fresh
-            std::fs::create_dir_all(cache.parent().unwrap_or(Path::new(".")))?;
-            run_git_in(
-                cache.parent().unwrap_or(Path::new(".")),
-                &["clone", url, &cache.to_string_lossy()],
-            )?;
+            let parent = cache.parent().unwrap_or(Path::new(".")).to_path_buf();
+            std::fs::create_dir_all(&parent)?;
+            let destination = cache.to_string_lossy().into_owned();
+            if let Err(error) =
+                run_remote_git(&parent, &["clone", url, &destination], url, &session)
+            {
+                // A half-written clone would look like a usable cache to the
+                // next attempt, which would then publish into it.
+                let _ = std::fs::remove_dir_all(&cache);
+                return Err(error);
+            }
         }
 
-        (url.to_string(), cache)
+        (url.to_string(), url.to_string(), cache, false)
     } else {
         // Create a new repo
+        let client = GhRestClient::from_keyring()?;
         let cache = get_publish_cache_dir(repo_name);
         std::fs::create_dir_all(&cache)?;
 
@@ -483,60 +510,60 @@ pub fn publish_skill(
 
         ensure_git_repo(&cache)?;
 
-        let visibility = if is_public { "--public" } else { "--private" };
-        let output = command_with_path("gh")
-            .current_dir(&cache)
-            .args([
-                "repo",
-                "create",
-                repo_name,
-                "--source",
-                ".",
-                "--push",
-                visibility,
-                "--description",
-                description,
-            ])
-            .output()
-            .context("Failed to run gh repo create")?;
-
-        if !output.status.success() {
-            let err = String::from_utf8_lossy(&output.stderr);
-            let _ = std::fs::remove_dir_all(&cache);
-            anyhow::bail!("gh repo create failed: {}", err.trim());
-        }
-
-        let created_url = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let url = if created_url.is_empty() {
-            run_git_in(&cache, &["remote", "get-url", "origin"])
-                .unwrap_or_default()
-                .trim()
-                .to_string()
-        } else {
-            created_url
+        let created = match client.create_repository(repo_name, description, !is_public) {
+            Ok(created) => created,
+            Err(error) => {
+                let _ = std::fs::remove_dir_all(&cache);
+                return Err(error.into());
+            }
         };
 
-        (url, cache)
-    };
+        // The remote is attached locally; the push that fills it happens in the
+        // shared tail below, together with the Skill commit.
+        if let Err(error) = run_git_in(&cache, &["remote", "add", "origin", &created.clone_url]) {
+            let _ = std::fs::remove_dir_all(&cache);
+            return Err(error);
+        }
 
-    // Ensure .gitignore exists (covers existing repos that were cloned without one)
-    ensure_gitignore(&cache_dir)?;
+        (created.html_url, created.clone_url, cache, true)
+    };
 
     // Skills always live under a top-level `skills/` directory in the repo, so
     // the scanner's priority-dir discovery picks them up on re-import.
     let repo_rel_path = format!("skills/{}", folder_name);
 
-    // Copy skill into the repo under skills/<folder_name>
-    let dest = cache_dir.join("skills").join(folder_name);
-    if dest.exists() {
-        std::fs::remove_dir_all(&dest)?;
-    }
-    copy_dir_recursive(&skill_source_resolved, &dest)?;
+    let staged = (|| -> Result<()> {
+        // Ensure .gitignore exists (covers existing repos that were cloned without one)
+        ensure_gitignore(&cache_dir)?;
 
-    // Commit and push
-    let commit_msg = format!("publish: {}", repo_rel_path);
-    stage_and_commit(&cache_dir, &commit_msg)?;
-    run_git_in(&cache_dir, &["push", "-u", "origin", "HEAD"])?;
+        // Copy skill into the repo under skills/<folder_name>
+        let dest = cache_dir.join("skills").join(folder_name);
+        if dest.exists() {
+            std::fs::remove_dir_all(&dest)?;
+        }
+        copy_dir_recursive(&skill_source_resolved, &dest)?;
+
+        // Commit and push
+        let commit_msg = format!("publish: {}", repo_rel_path);
+        stage_and_commit(&cache_dir, &commit_msg)?;
+        run_remote_git(
+            &cache_dir,
+            &["push", "-u", "origin", "HEAD"],
+            &remote_url,
+            &session,
+        )?;
+        Ok(())
+    })();
+
+    if let Err(error) = staged {
+        // A repository created moments ago has no other content worth keeping,
+        // and leaving its cache behind would make the retry try to create the
+        // same repository again.
+        if created_new {
+            let _ = std::fs::remove_dir_all(&cache_dir);
+        }
+        return Err(error);
+    }
 
     // Normalize URL
     let clean_url = repo_url.trim_end_matches('/').to_string();
@@ -603,6 +630,36 @@ desktop.ini
     Ok(())
 }
 
+/// Run one *remote* Git command under the operation session.
+///
+/// The session owns authentication, proxy, cancellation and output redaction.
+/// A bare `git` subprocess here would instead inherit the launcher's proxy and
+/// whatever credential helper the machine has configured.
+fn run_remote_git(
+    cwd: &Path,
+    args: &[&str],
+    remote: &str,
+    session: &GitOperationSession,
+) -> Result<String> {
+    let mut command = command_with_path("git");
+    run_remote_git_command(&mut command, cwd, args, remote, session)
+}
+
+/// Test seam: production injects `git`; a test can inject a stub that reports
+/// what it received and prove the token reaches neither argv nor output.
+pub(super) fn run_remote_git_command(
+    command: &mut Command,
+    cwd: &Path,
+    args: &[&str],
+    remote: &str,
+    session: &GitOperationSession,
+) -> Result<String> {
+    let output = execute_remote_command(command, Some(cwd), args, remote, session)
+        .with_context(|| format!("git {} failed", args.join(" ")))?;
+    Ok(output.stdout.trim().to_string())
+}
+
+/// Run one *local* Git command. Nothing here touches a remote.
 fn run_git_in(cwd: &Path, args: &[&str]) -> Result<String> {
     let output = command_with_path("git")
         .current_dir(cwd)

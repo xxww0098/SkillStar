@@ -280,6 +280,15 @@
 - 后果：获得——新建卡组的默认状态回到"什么都没做"，rail 重新可读为意图；卡组与 Skill 两级链接语义分离，安装期全局部署不再污染卡组视图。承担——两级状态可能漂移，必须靠 mixed 显式暴露，不能静默取整；回填规则是一次性近似（以回填当刻的磁盘状态为准），此后不再重算。
 - 证据：`crates/skillstar-skills/src/skill_group.rs` 与 `crates/skillstar-app/src/skill_group_links.rs` 的测试；行为见 `docs/features/skills/README.md`。
 
+## D-031：技能发布链路并入单一 GitHub App 身份，`gh` CLI 退出远程路径
+
+- 日期：2026-08-14
+- 状态：accepted
+- 背景：`skillstar-skills::git::gh_manager` 是全仓最后一处绕过 SkillStar 身份与代理策略的远程链路。它用 `gh auth status`/`gh api user`/`gh repo list`/`gh api contents`/`gh repo create --push` 完成 REST，用裸 `git` 完成 clone/pull/push。后果有三：发布用的是机器上的全局 `gh` 登录而不是 D-013 的 App 身份；裸 Git 继承启动进程的 `HTTP_PROXY`，而 D-014 的 transport 路径是显式清空再按 SkillStar 配置重设，同一个应用出现两套代理行为；`gh repo list <login>` 只能列个人仓库，组织仓库根本无法作为发布目标。
+- 决策：发布链路全部改用 App 凭据。REST 移入新的 `skillstar-skills::git::gh_rest`：`GET /user`、`GET /user/repos?affiliation=owner,collaborator,organization_member`（分页）、`GET /repos/{owner}/{name}/contents/skills`、`POST /user/repos`，凭据取自 `GitHubAuthFacade::api_credential()`，客户端一律由 `probe_http_client` 构造并对齐 `Accept: application/vnd.github+json` 与 `X-GitHub-Api-Version: 2022-11-28`。发布入口是同步的（Tauri `spawn_blocking`、CLI 主线程），因此在同步上下文内自建 current-thread runtime 驱动 async 客户端，而不是引入 `reqwest::blocking` 绕开统一 client。远程 Git（clone / pull --rebase / push）改走 `skillstar_git::transport::execute_remote_command` 与一次性 operation session；本地 Git（init/add/commit/remote add/rev-parse）保持裸子进程，因为它们不接触远端。`GhStatus` 形状不变但语义重映射为「发布所需的 `git` 未安装 / SkillStar 未登录或凭据过期 / 就绪且带 App login」，前端三个分支零改动继续有效。`gh` 只保留 Settings 的 `check_gh_installed` 环境探测。
+- 后果：获得——发布与扫描/安装/更新使用同一身份、同一代理和同一脱敏边界，token 不进 argv、git config、remote URL 或日志；组织仓库首次成为可选发布目标；401/403/404/422/429 有可行动分类而不是 `gh` stderr 裸串。承担——发布现在要求用户在 SkillStar 内登录 GitHub，光有全局 `gh` 登录不再够用；新建仓库只能建在当前用户名下（组织建仓属于共享频道路径，见 D-015）；`~/.agents/.publish-repos/` 下的既有缓存 remote 仍是历史 `gh` 写入的 URL，靠 session push 时重新认证而不是重写 remote。
+- 证据：`crates/skillstar-skills/src/git/{gh_rest.rs,gh_manager.rs}` 与 `gh_publish_tests.rs`（三态重映射、分页与 affiliation、凭据只出现在 Authorization header、stub git 的 argv/输出无 token）。
+
 ## 新增记录格式
 
 ```text
