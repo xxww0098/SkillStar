@@ -193,6 +193,17 @@ cargo test --workspace --locked
 
 Windows CI 使用 npm，因此依赖变化还要更新 `package-lock.json`。
 
+### 清理构建缓存
+
+长期开发后 `target/` 会涨到几十 GB（本机实测 77 GB / 389,311 个文件，其中 `incremental/` 39 GB、`deps/` 38 GB），拖慢文件系统操作。清理用 `cargo-sweep` 按时间淘汰旧产物：
+
+```bash
+cargo install cargo-sweep   # 首次
+cargo sweep --time 15       # 删掉 15 天没被访问过的构建产物
+```
+
+**不要用 `cargo clean`**：它会连同增量编译缓存一起删光，下一次构建退化成完整冷构建，而 `cargo sweep` 保留仍在用的那部分。
+
 ## 架构与贡献
 
 - Agent 即时规则：[AGENTS.md](./AGENTS.md)

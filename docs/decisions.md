@@ -289,6 +289,15 @@
 - 后果：获得——发布与扫描/安装/更新使用同一身份、同一代理和同一脱敏边界，token 不进 argv、git config、remote URL 或日志；组织仓库首次成为可选发布目标；401/403/404/422/429 有可行动分类而不是 `gh` stderr 裸串。承担——发布现在要求用户在 SkillStar 内登录 GitHub，光有全局 `gh` 登录不再够用；新建仓库只能建在当前用户名下（组织建仓属于共享频道路径，见 D-015）；`~/.agents/.publish-repos/` 下的既有缓存 remote 仍是历史 `gh` 写入的 URL，靠 session push 时重新认证而不是重写 remote。
 - 证据：`crates/skillstar-skills/src/git/{gh_rest.rs,gh_manager.rs}` 与 `gh_publish_tests.rs`（三态重映射、分页与 affiliation、凭据只出现在 Authorization header、stub git 的 argv/输出无 token）。
 
+## D-032：dev 构建不加 `[profile.dev]` / `build-override` / package 热路径清单，`target/` 也不搬内置盘
+
+- 日期：2026-08-14
+- 状态：accepted
+- 背景：通用 Rust 构建指南普遍要求给 dev profile 加一套模板——`[profile.dev.build-override] opt-level = 3` 让 proc-macro 与 build script 按 -O3 编译，再配一份 20–40 个热路径包的 `[profile.dev.package.<name>] opt-level = 3`，并把 `target/` 放到内置 SSD。该建议在样本仓库上实测有 3.4× 提速，因此每隔一段时间就会有人提议照抄进本仓库根 `Cargo.toml`。本仓库此前从未加过这些覆盖（根 `Cargo.toml` 只有 `[profile.release]`），需要一个实测结论来判断这个"缺失"是疏漏还是正确状态。
+- 决策：**不加 `[profile.dev]`，不加 `[profile.dev.build-override]`，不加 package 热路径清单，也不把 `target/` 搬到内置卷。**实测（12 核 Apple Silicon，每组全新 `CARGO_TARGET_DIR`，用 `cargo --config` 注入而非改 manifest，相邻背靠背配对以排除机器漂移）：照抄模板后冷 `cargo check --workspace` 从 54–62 s 劣化到 140–168 s（2.4–2.8×）；冷 `cargo build --workspace` 从 95.83 s 到 187.37 s（1.96×）；再叠加 41 个热路径包覆盖到 255.16 s（4.08×）。`build-override` 的 `opt-level` 0/1/2/3 分别为 58 / 104 / 127 / 140–168 s，**单调递增、无甜点**，因此不存在"取中间档"的折中方案。`target/` 位置同样实测无差异：冷 `build` 写 8.3 G 时外置卷 71.68 s，夹在两次内置卷 69.66 / 78.73 s 之间。
+- 后果：获得——dev 迭代保持当前速度，且这条"不做"有了实测依据，不必每次重新辩论；`target/` 可以继续留在外置卷，省掉一次没有收益的搬迁。承担——放弃了该模板在其它仓库确实兑现过的收益，若本仓库的 derive 密度将来大幅上升，这条结论需要重测而不是继续引用。根因决定了何时该重测：**收益与 derive 点数量成正比，成本几乎固定**——`syn`×2 / `serde_derive` / `ts-rs-macros` / `tauri-codegen` / `tauri-build` / `tauri-utils` 按 -O3 编一遍的代价与仓库大小无关，而本仓库只有 756 个 serde + ts-rs derive 点，是样本仓库（4090 个）的 18%，摊不薄这笔固定成本。`--timings` 逐单元差分给出的直接证据是成本 +980 unit-seconds、收益仅 137 unit-seconds。另有一个只在 `cargo check` 主导的迭代循环里出现的陷阱：`package.<name>.opt-level` 会经 `OPT_LEVEL` 环境变量传给该包的 `build.rs`，`cc` 会照着它编捆绑的 C——`libsqlite3-sys`（bundled SQLite）3.67 s → 71.72 s、`aws-lc-sys` 67.62 s → 109.47 s，而这两个包在 `cargo check` 下根本不产出被检查的代码，是纯成本。
+- 证据：根 `Cargo.toml`（保持只有 `[profile.release]`，无 `[profile.dev]`）；2026-08-14 构建速度审计的 A/B/C/D/BO1/BO2 对照组与 `--timings` 逐单元差分；derive 普查以 `#\[derive\((.*?)\)\]` 全仓扫描交叉验证（Serialize 332 / Deserialize 376 / TS 48）。
+
 ## 新增记录格式
 
 ```text

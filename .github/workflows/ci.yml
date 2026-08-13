@@ -40,7 +40,9 @@ name: CI
 #
 # 5. cargo-deny is continue-on-error until pre-existing findings are triaged
 #    (see the step comment below). A gate that is red on day one just teaches
-#    everyone to ignore red.
+#    everyone to ignore red. As of 2026-08-14 advisories/bans/sources all pass
+#    and only the html2md GPL-3.0+ licence call is left — do not flip the step
+#    to blocking before that one is resolved, or main goes red immediately.
 on:
   push:
     branches: [main]
@@ -58,9 +60,9 @@ jobs:
       - uses: actions/checkout@v4
 
       # Tauri's Linux build links against system webkit2gtk/gtk/appindicator;
-      # `cargo check`/`cargo test --workspace` compiles the `skillstar`
-      # (src-tauri) crate, so these are needed even though this job never
-      # produces a bundle. Same package list as release.yml's ubuntu step.
+      # `cargo test --workspace` compiles the `skillstar` (src-tauri) crate,
+      # so these are needed even though this job never produces a bundle.
+      # Same package list as release.yml's ubuntu step.
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
@@ -102,9 +104,15 @@ jobs:
       - name: Workspace dependency and lockfile guard
         run: scripts/internal/check_workspace_deps.sh
 
-      - name: Rust compile check (workspace)
-        run: cargo check --workspace --locked
-
+      # There is deliberately NO separate `cargo check --workspace` step before
+      # this one — do not re-add it. Measured back-to-back on one machine with
+      # cold target dirs: `check` (85.07 s) followed by `test --no-run`
+      # (115.20 s) = 200.27 s, versus 124.80 s for `test --no-run` alone. The
+      # check step buys the later test compile only 9.60 s, so it burns ~75 s
+      # of wall clock per leg on every PR. `cargo test --workspace` reports the
+      # same compile errors and strictly more of them (it also builds `tests/`
+      # and `#[cfg(test)]` code), and on this job the clippy ratchet below runs
+      # `--all-targets`, type-checking every target a second time anyway.
       - name: Rust tests (workspace)
         run: cargo test --workspace --locked
 
@@ -129,25 +137,38 @@ jobs:
       - name: Clippy ratchet
         run: scripts/internal/check_clippy_ratchet.sh
 
-      # NOTE (found while wiring this up, not fixed here — see repo history /
-      # PR description): deny.toml exists but had never been wired into any
-      # workflow before, so this step currently FAILS for real, pre-existing
-      # reasons: ~15 workspace crates have no `license` field in Cargo.toml
-      # (LICENSE at repo root is Apache-2.0, which is already in the allow
-      # list below, so this is a metadata sync gap); a few third-party deps
-      # carry licenses not on the allow list (html2md = GPL-3.0+, wreq-util =
-      # LGPL-3.0 need an explicit accept/reject call; tiny-keccak = CC0-1.0
-      # and webpki-root-certs/webpki-roots = CDLA-Permissive-2.0 are low-risk
-      # permissive licenses); and `cargo deny check advisories` currently
-      # reports 7 real vulnerabilities (incl. an RSA timing side-channel), 1
-      # unsoundness, 22 unmaintained warnings, and 1 yanked crate. None of
-      # this is something a CI-wiring change should silently paper over by
-      # editing deny.toml's ignore/allow lists — that is a licensing/security
-      # call for whoever owns this repo, not for whoever wires up the runner.
-      # continue-on-error until the pre-existing findings above are triaged
-      # (license metadata + advisory calls belong to the repo owner) — a gate
-      # that is red on day one just teaches everyone to ignore red. Remove
-      # this line once deny.toml triage lands so the gate actually blocks.
+      # Triage status as of 2026-08-14 (cargo-deny 0.20.2). Three of the four
+      # categories now pass for real:
+      #   advisories  ok      — anyhow (unsound), quick-xml (2 vulns, via a
+      #                         plist 1.8->1.10 bump) and a yanked
+      #                         crypto-bigint were fixed by upgrading; the
+      #                         remaining 20 are allowlisted in deny.toml,
+      #                         each with its own reason and re-evaluation
+      #                         trigger. 19 are `unmaintained` (Tauri's
+      #                         archived Linux GTK3 stack, async-openai's
+      #                         backoff, tauri-utils' parsing helpers); the
+      #                         single live vulnerability is RUSTSEC-2023-0071
+      #                         (rsa Marvin attack) reached via russh, which
+      #                         has no fixed version upstream at all.
+      #   bans        ok
+      #   sources     ok
+      #   licenses    FAILS on exactly one finding — html2md is GPL-3.0+ and
+      #                         SkillStar ships an Apache-2.0 statically
+      #                         linked binary. The ~15 crates missing a
+      #                         `license` field WERE fixed (license now comes
+      #                         from [workspace.package]); the wreq-util
+      #                         LGPL-3.0 note is obsolete (that dep is gone,
+      #                         see docs/decisions.md D-011); tiny-keccak
+      #                         CC0-1.0 and webpki-roots CDLA-Permissive-2.0
+      #                         are now explicitly allowed as low-risk
+      #                         permissive licences.
+      #
+      # So this stays continue-on-error for ONE reason only: the html2md
+      # copyleft call. That is a licensing decision for whoever owns this
+      # repo, not something CI wiring should paper over by editing
+      # deny.toml's allow list. deny.toml documents the three options
+      # (including verified permissively licensed replacements). Remove this
+      # line the moment that call is made — everything else already blocks.
       - name: cargo-deny (advisories / licenses / sources)
         continue-on-error: true
         uses: EmbarkStudios/cargo-deny-action@v2
@@ -185,9 +206,10 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: Rust compile check (workspace)
-        run: cargo check --workspace --locked
-
+      # No separate `cargo check --workspace` step here either — same reasoning
+      # and same measurements as test-linux above. Note the difference: this
+      # leg has no clippy run, so `cargo test --workspace` is the ONLY thing
+      # that compiles Rust on macOS. It must stay.
       - name: Rust tests (workspace)
         run: cargo test --workspace --locked
       # Ratchet gates + clippy + cargo-deny intentionally do not re-run here —
